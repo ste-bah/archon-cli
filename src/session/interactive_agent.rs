@@ -180,7 +180,8 @@ pub(super) async fn build(
 
     let coding_pipeline: Arc<archon_pipeline::coding::facade::CodingFacade> = Arc::new(
         archon_pipeline::coding::facade::CodingFacade::new()
-            .with_models(config.models.anthropic.clone()),
+            .with_models(config.models.anthropic.clone())
+            .with_context(config.context.clone()),
     );
     let research_pipeline: Arc<archon_pipeline::research::facade::ResearchFacade> = Arc::new(
         archon_pipeline::research::facade::ResearchFacade::new(
@@ -189,7 +190,8 @@ pub(super) async fn build(
             working_dir.display().to_string(),
             None,
         )
-        .with_models(config.models.anthropic.clone()),
+        .with_models(config.models.anthropic.clone())
+        .with_context(config.context.clone()),
     );
     let llm_adapter: Arc<dyn archon_pipeline::runner::LlmClient> = Arc::new(
         archon_pipeline::llm_adapter::ProviderLlmAdapter::new(Arc::clone(&provider))

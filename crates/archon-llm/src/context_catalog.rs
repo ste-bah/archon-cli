@@ -24,6 +24,23 @@ impl ContextCatalog {
         Self::from_toml_str(BUNDLED_CONTEXT_CATALOG).unwrap_or_default()
     }
 
+    pub fn user_overrides(work_dir: Option<&Path>) -> Self {
+        let mut merged = empty_table();
+        for path in discover_context_catalog_paths(work_dir) {
+            let Ok(content) = fs::read_to_string(&path) else {
+                continue;
+            };
+            match parse_toml_value(&content) {
+                Ok(value) => merged = deep_merge_toml(merged, value),
+                Err(err) => tracing::warn!(
+                    path = %path.display(),
+                    "skipping context catalog due to parse error: {err}"
+                ),
+            }
+        }
+        Self::from_value(merged).unwrap_or_default()
+    }
+
     pub fn load(work_dir: Option<&Path>) -> Self {
         let mut merged =
             parse_toml_value(BUNDLED_CONTEXT_CATALOG).unwrap_or_else(|_| empty_table());
@@ -242,7 +259,7 @@ mod tests {
             )
             .expect("sonnet beta entry");
 
-        assert_eq!(base.context_window, 500_000);
+        assert_eq!(base.context_window, 1_000_000);
         assert_eq!(beta.context_window, 1_000_000);
     }
 
@@ -257,7 +274,7 @@ mod tests {
             .lookup("anthropic", "claude-opus-4-7", &[], Some("spoof"))
             .expect("opus claude code entry");
 
-        assert_eq!(base.context_window, 500_000);
+        assert_eq!(base.context_window, 1_000_000);
         assert_eq!(claude_code.context_window, 1_000_000);
     }
 
@@ -283,5 +300,28 @@ source = "test"
 
         assert_eq!(entry.context_window, 123_456);
         assert_eq!(entry.source.as_deref(), Some("test"));
+    }
+
+    #[test]
+    fn user_overrides_load_without_bundled_entries() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let archon_dir = dir.path().join(".archon");
+        fs::create_dir_all(&archon_dir).expect("archon dir");
+        fs::write(
+            archon_dir.join("context.toml"),
+            r#"
+[providers.local.models."private-model"]
+context_window = 777777
+source = "test"
+"#,
+        )
+        .expect("write context catalog");
+
+        let user = ContextCatalog::user_overrides(Some(dir.path()));
+        assert!(user.lookup("openai-codex", "gpt-5.5", &[], None).is_none());
+        let entry = user
+            .lookup("local", "private-model", &[], None)
+            .expect("user entry");
+        assert_eq!(entry.context_window, 777_777);
     }
 }

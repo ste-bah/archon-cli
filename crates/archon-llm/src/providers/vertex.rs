@@ -445,6 +445,11 @@ fn parse_usage(usage_val: Option<&serde_json::Value>) -> Usage {
 // ---------------------------------------------------------------------------
 
 fn map_http_error(status: u16, body: String) -> LlmError {
+    if let Some(err) =
+        crate::context_window::classify_context_window_body(status, &body, Some("vertex"), None)
+    {
+        return err;
+    }
     match status {
         401 | 403 => LlmError::Auth(body),
         429 => LlmError::RateLimited {
@@ -542,5 +547,19 @@ impl LlmProvider for VertexProvider {
 
     fn data_flow_classification(&self) -> DataFlowClassification {
         DataFlowClassification::Cloud
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vertex_token_overflow_maps_to_context_window() {
+        let body = r#"{"error":{"status":"INVALID_ARGUMENT","message":"maximum context tokens exceeded"}}"#;
+        assert!(matches!(
+            map_http_error(400, body.to_string()),
+            LlmError::ContextWindowExceeded { .. }
+        ));
     }
 }

@@ -26,12 +26,12 @@ pub struct QualityBreakdown {
 pub fn phase_threshold(phase: u32) -> f64 {
     match phase {
         1 => 0.75,
-        2 => 0.80,
+        2 => 0.8,
         3 => 0.82,
         4 => 0.85,
         5 => 0.88,
         6 => 0.95,
-        _ => 0.80,
+        _ => 0.8,
     }
 }
 
@@ -525,7 +525,7 @@ mod tests {
 "#;
         let b = calc().score(code);
         // 3 TODOs -> completeness penalized by 0.24
-        assert!(b.completeness <= 0.80, "completeness={}", b.completeness);
+        assert!(b.completeness <= 0.8, "completeness={}", b.completeness);
         assert!(
             b.completeness >= 0.50,
             "completeness too low={}",
@@ -787,12 +787,12 @@ pub mod extras {
     #[test]
     fn test_phase_thresholds() {
         assert_eq!(phase_threshold(1), 0.75);
-        assert_eq!(phase_threshold(2), 0.80);
+        assert_eq!(phase_threshold(2), 0.8);
         assert_eq!(phase_threshold(3), 0.82);
         assert_eq!(phase_threshold(4), 0.85);
         assert_eq!(phase_threshold(5), 0.88);
         assert_eq!(phase_threshold(6), 0.95);
-        assert_eq!(phase_threshold(99), 0.80);
+        assert_eq!(phase_threshold(99), 0.8);
     }
 
     // ── meets_threshold ─────────────────────────────────────────────

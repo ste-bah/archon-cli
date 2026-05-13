@@ -682,10 +682,16 @@ impl Default for PermissionsConfig {
 #[serde(default)]
 pub struct ContextConfig {
     pub compact_threshold: f32,
+    pub preflight_safety_margin: f32,
     pub max_tokens: Option<u32>,
+    pub context_window_override: Option<u64>,
+    pub output_reserve_tokens: u64,
     pub preserve_recent_turns: u32,
     /// Whether to use prompt caching (cache_control breakpoints on static blocks).
     pub prompt_cache: bool,
+    pub prompt_cache_mode: String,
+    pub prompt_cache_ttl: String,
+    pub prompt_cache_conversation: bool,
     /// Maximum characters for hierarchical ARCHON.md content.
     #[serde(alias = "claudemd_max_tokens")]
     pub archonmd_max_tokens: u32,
@@ -695,9 +701,15 @@ impl Default for ContextConfig {
     fn default() -> Self {
         Self {
             compact_threshold: 0.80,
+            preflight_safety_margin: 0.05,
             max_tokens: None,
+            context_window_override: None,
+            output_reserve_tokens: 8192,
             preserve_recent_turns: 3,
             prompt_cache: true,
+            prompt_cache_mode: "explicit".into(),
+            prompt_cache_ttl: "5m".into(),
+            prompt_cache_conversation: false,
             archonmd_max_tokens: 8192,
         }
     }

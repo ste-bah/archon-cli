@@ -84,6 +84,8 @@ fn priority_classifies_state_transitions_as_state() {
         priority(&AgentEvent::TurnComplete {
             input_tokens: 1,
             output_tokens: 2,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
         }),
         Priority::State
     );

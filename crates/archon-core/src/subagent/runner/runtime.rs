@@ -28,6 +28,7 @@ impl SubagentRunner {
         let deadline = started + Duration::from_secs(self.timeout_secs);
         let mut auto_compact = crate::agent::AutoCompactState::default();
         let mut local_input_tokens = crate::agent::autocompact::estimate_messages_tokens(&messages);
+        let mut reactive_overflow_retried = false;
 
         for turn in 0..self.max_turns {
             // Check timeout. The error message reports BOTH wall-clock
@@ -110,33 +111,49 @@ impl SubagentRunner {
 
             let window = archon_llm::context_window::resolve_context_window_for_work_dir(
                 &self.model,
-                self.agent_config.context.max_tokens.map(u64::from),
+                self.agent_config
+                    .context
+                    .context_window_override
+                    .or_else(|| self.agent_config.context.max_tokens.map(u64::from)),
                 Some(self.provider.as_ref()),
                 Some(&self.agent_config.working_dir),
             )
             .context_window;
+            let effective_window =
+                window.saturating_sub(self.agent_config.context.output_reserve_tokens);
+            let threshold = (self.agent_config.context.compact_threshold
+                - self.agent_config.context.preflight_safety_margin)
+                .max(0.0);
             if let Some(action) = crate::agent::evaluate_compaction(
                 local_input_tokens.max(crate::agent::autocompact::estimate_messages_tokens(
                     &messages,
                 )),
-                window,
+                effective_window,
                 &auto_compact,
-                self.agent_config.context.compact_threshold,
+                threshold,
             ) {
                 auto_compact.compact_in_flight = true;
-                match crate::agent::autocompact::compact_json_messages(&messages, action, false) {
-                    Ok(crate::agent::autocompact::CompactionOutcome::Compacted {
-                        after_tokens,
-                        ..
-                    }) => {
-                        messages = crate::agent::autocompact::compact_json_messages_apply(
-                            &messages, action,
-                        )
-                        .map_err(|e| anyhow::anyhow!("subagent compaction failed: {e}"))?;
-                        local_input_tokens = after_tokens;
-                        auto_compact.on_success(after_tokens);
+                match crate::agent::autocompact::compact_json_messages_with_provider(
+                    self.provider.as_ref(),
+                    &self.model,
+                    &messages,
+                    action,
+                    false,
+                )
+                .await
+                {
+                    Ok((
+                        crate::agent::autocompact::CompactionOutcome::Compacted {
+                            after_estimated_tokens,
+                            ..
+                        },
+                        compacted,
+                    )) => {
+                        messages = compacted;
+                        local_input_tokens = after_estimated_tokens;
+                        auto_compact.on_success(after_estimated_tokens);
                     }
-                    Ok(crate::agent::autocompact::CompactionOutcome::Skipped { .. }) => {
+                    Ok((crate::agent::autocompact::CompactionOutcome::Skipped { .. }, _)) => {
                         auto_compact.on_cancel();
                     }
                     Err(e) => {
@@ -163,14 +180,30 @@ impl SubagentRunner {
             // Stream the response
             let mut rx = match self.provider.stream(request.clone()).await {
                 Ok(rx) => rx,
-                Err(e) if e.is_context_window_exceeded() => {
-                    messages = crate::agent::autocompact::compact_json_messages_apply(
-                        &messages,
-                        crate::agent::CompactAction::Full,
-                    )
-                    .map_err(|err| anyhow::anyhow!("reactive subagent compaction failed: {err}"))?;
-                    local_input_tokens =
-                        crate::agent::autocompact::estimate_messages_tokens(&messages);
+                Err(e) if e.is_context_window_exceeded() && !reactive_overflow_retried => {
+                    reactive_overflow_retried = true;
+                    let (outcome, compacted) =
+                        crate::agent::autocompact::compact_json_messages_with_provider(
+                            self.provider.as_ref(),
+                            &self.model,
+                            &messages,
+                            crate::agent::CompactAction::Full,
+                            true,
+                        )
+                        .await
+                        .map_err(|err| {
+                            anyhow::anyhow!("reactive subagent compaction failed: {err}")
+                        })?;
+                    messages = compacted;
+                    local_input_tokens = match outcome {
+                        crate::agent::autocompact::CompactionOutcome::Compacted {
+                            after_estimated_tokens,
+                            ..
+                        } => after_estimated_tokens,
+                        crate::agent::autocompact::CompactionOutcome::Skipped { .. } => {
+                            crate::agent::autocompact::estimate_messages_tokens(&messages)
+                        }
+                    };
                     auto_compact.on_success(local_input_tokens);
                     self.provider
                         .stream(LlmRequest {
@@ -243,16 +276,30 @@ impl SubagentRunner {
                             &error_type,
                             &message,
                         );
-                        if err.is_context_window_exceeded() {
-                            messages = crate::agent::autocompact::compact_json_messages_apply(
-                                &messages,
-                                crate::agent::CompactAction::Full,
-                            )
-                            .map_err(|e| {
-                                anyhow::anyhow!("reactive subagent compaction failed: {e}")
-                            })?;
-                            local_input_tokens =
-                                crate::agent::autocompact::estimate_messages_tokens(&messages);
+                        if err.is_context_window_exceeded() && !reactive_overflow_retried {
+                            reactive_overflow_retried = true;
+                            let (outcome, compacted) =
+                                crate::agent::autocompact::compact_json_messages_with_provider(
+                                    self.provider.as_ref(),
+                                    &self.model,
+                                    &messages,
+                                    crate::agent::CompactAction::Full,
+                                    true,
+                                )
+                                .await
+                                .map_err(|e| {
+                                    anyhow::anyhow!("reactive subagent compaction failed: {e}")
+                                })?;
+                            messages = compacted;
+                            local_input_tokens = match outcome {
+                                crate::agent::autocompact::CompactionOutcome::Compacted {
+                                    after_estimated_tokens,
+                                    ..
+                                } => after_estimated_tokens,
+                                crate::agent::autocompact::CompactionOutcome::Skipped {
+                                    ..
+                                } => crate::agent::autocompact::estimate_messages_tokens(&messages),
+                            };
                             auto_compact.on_success(local_input_tokens);
                             retry_after_compact = true;
                             break;
@@ -283,13 +330,14 @@ impl SubagentRunner {
                             g.last_update = chrono::Utc::now();
                         }
                     }
-                    _ => {} // ThinkingDelta, SignatureDelta, MessageDelta{usage:None}, MessageStop, Ping, etc.
+                    _ => {} // SignatureDelta, MessageDelta{usage:None}, MessageStop, Ping, etc.
                 }
             }
-            local_input_tokens += usage_acc.context_input_tokens;
             if retry_after_compact {
                 continue;
             }
+            reactive_overflow_retried = false;
+            local_input_tokens += usage_acc.context_input_tokens;
 
             // If no tool calls, subagent is done — return accumulated text
             if pending_tools.is_empty() {

@@ -111,7 +111,7 @@ impl DeductiveEngine {
                                 "Modus tollens: Given '{}' and 'not {}', conclude 'not {}'",
                                 p.text, consequent, antecedent
                             ),
-                            confidence: 0.80,
+                            confidence: 0.8,
                             premises_used: vec![p.text.clone(), other.text.clone()],
                         });
                     }

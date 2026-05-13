@@ -327,6 +327,19 @@ pub trait PipelineFacade: Send + Sync {
         Vec<serde_json::Value>,
     )>;
 
+    async fn build_prompt_for_attempt(
+        &self,
+        session: &PipelineSession,
+        agent: &AgentInfo,
+        _attempt: u8,
+    ) -> Result<(
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+    )> {
+        self.build_prompt(session, agent).await
+    }
+
     /// Score the quality of an agent's output after execution.
     async fn score_quality(
         &self,
@@ -496,14 +509,16 @@ async fn run_pipeline_inner(
                     attempt += 1;
 
                     // Build a fresh prompt — context isolation.
-                    let (messages, mut system, tools) =
-                        match facade.build_prompt(session, &agent).await {
-                            Ok(prompt) => prompt,
-                            Err(error) => {
-                                fail_audit(&mut audit, &error.to_string())?;
-                                return Err(error);
-                            }
-                        };
+                    let (messages, mut system, tools) = match facade
+                        .build_prompt_for_attempt(session, &agent, attempt as u8)
+                        .await
+                    {
+                        Ok(prompt) => prompt,
+                        Err(error) => {
+                            fail_audit(&mut audit, &error.to_string())?;
+                            return Err(error);
+                        }
+                    };
 
                     // Inject learning context on first attempt.
                     if attempt == 1 {
@@ -551,6 +566,13 @@ async fn run_pipeline_inner(
                     {
                         Ok(response) => response,
                         Err(error) => {
+                            if is_context_window_error(&error) && attempt == 1 {
+                                tracing::warn!(
+                                    agent_key = %agent.key,
+                                    "pipeline prompt exceeded context; rebuilding with retry budget"
+                                );
+                                continue;
+                            }
                             if let Some(audit) = audit.as_ref() {
                                 audit.record_attempt_failed(
                                     ordinal,
@@ -737,6 +759,21 @@ async fn run_pipeline_inner(
         audit.complete(&result.final_output)?;
     }
     Ok(result)
+}
+
+fn is_context_window_error(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<archon_llm::provider::LlmError>()
+        .is_some_and(|err| err.is_context_window_exceeded())
+        || archon_llm::context_window::classify_context_window_error(
+            None,
+            None,
+            None,
+            &error.to_string(),
+            Some("pipeline"),
+            None,
+        )
+        .is_some()
 }
 
 fn fail_audit(audit: &mut Option<PipelineAuditRun>, error: &str) -> Result<()> {

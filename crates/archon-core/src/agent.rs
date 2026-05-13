@@ -38,6 +38,7 @@ mod message_delivery;
 mod payloads;
 mod permission_gate;
 mod runtime_hooks;
+mod summary_text;
 mod support;
 #[cfg(test)]
 mod tests;
@@ -184,7 +185,8 @@ impl Agent {
         }
 
         let mut agentic_iterations: u32 = 0;
-        loop {
+        let mut reactive_overflow_retried = false;
+        'agent_loop: loop {
             self.fire_before_prompt_build_hook(agentic_iterations).await;
             // GAP 7: Inject recalled memories into system prompt
             let mut system_with_memories = self.inject_memories();
@@ -249,6 +251,7 @@ impl Agent {
             let mut rx = match self.client.stream(request.clone()).await {
                 Ok(rx) => rx,
                 Err(e) if e.is_context_window_exceeded() => {
+                    reactive_overflow_retried = true;
                     self.force_reactive_compact().await?;
                     let retry_request = LlmRequest {
                         messages: self.state.messages.clone(),
@@ -272,25 +275,18 @@ impl Agent {
                 }
             };
 
-            // Process the stream
             let mut text_content = String::new();
             let mut thinking_content = String::new();
             let mut thinking_signature = String::new();
             let mut pending_tools: Vec<PendingToolCall> = Vec::new();
             let mut _current_tool_index: Option<u32> = None;
             let mut _stop_reason: Option<String> = None;
-            let mut turn_input_tokens: u64 = 0;
-            let mut turn_output_tokens: u64 = 0;
-            let mut turn_cache_creation: u64 = 0;
-            let mut turn_cache_read: u64 = 0;
+            let mut usage_acc = archon_llm::usage::UsageAccumulator::default();
 
             while let Some(event) = rx.recv().await {
+                usage_acc.record_event(&event);
                 match event {
-                    StreamEvent::MessageStart { usage, .. } => {
-                        turn_input_tokens += usage.input_tokens;
-                        turn_cache_creation += usage.cache_creation_input_tokens;
-                        turn_cache_read += usage.cache_read_input_tokens;
-                    }
+                    StreamEvent::MessageStart { .. } => {}
 
                     StreamEvent::ContentBlockStart {
                         index,
@@ -341,9 +337,7 @@ impl Agent {
                         usage,
                     } => {
                         _stop_reason = sr;
-                        if let Some(u) = usage {
-                            turn_output_tokens += u.output_tokens;
-                        }
+                        let _ = usage;
                     }
 
                     StreamEvent::MessageStop => {}
@@ -362,8 +356,10 @@ impl Agent {
                             &error_type,
                             &message,
                         );
-                        if classified.is_context_window_exceeded() {
+                        if classified.is_context_window_exceeded() && !reactive_overflow_retried {
+                            reactive_overflow_retried = true;
                             self.force_reactive_compact().await?;
+                            continue 'agent_loop;
                         }
                         // CRIT-06: Fire Notification hook on API errors
                         self.fire_hook(
@@ -391,13 +387,15 @@ impl Agent {
                     }
                 }
             }
+            reactive_overflow_retried = false;
 
-            // Update token totals
-            self.state.total_input_tokens +=
-                turn_input_tokens + turn_cache_creation + turn_cache_read;
+            let turn_input_tokens = usage_acc.billable_input_tokens;
+            let turn_cache_creation = usage_acc.cache_creation_input_tokens;
+            let turn_cache_read = usage_acc.cache_read_input_tokens;
+            let turn_output_tokens = usage_acc.output_tokens;
+            self.state.total_input_tokens += usage_acc.context_input_tokens;
             self.state.total_output_tokens += turn_output_tokens;
 
-            // Build the assistant message content blocks
             let mut assistant_content: Vec<serde_json::Value> = Vec::new();
 
             if !thinking_content.is_empty() {

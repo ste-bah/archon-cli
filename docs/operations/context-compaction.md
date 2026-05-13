@@ -4,22 +4,26 @@ archon-cli compresses older turns when context fills up so long sessions stay pr
 
 ## Automatic compaction
 
-When context fill ratio exceeds the threshold, archon-cli runs the compaction agent in the background:
+When context fill ratio approaches the threshold, archon-cli asks the active provider for a structured text-only summary of older turns, then replaces those older turns with the summary before the next request:
 
 ```toml
 [context]
 compact_threshold = 0.8             # Trigger when 80% full
+preflight_safety_margin = 0.05      # Start before the hard threshold
+output_reserve_tokens = 8192        # Leave space for the next answer
 preserve_recent_turns = 3           # Always keep the last N turns verbatim
 prompt_cache = true                 # Anthropic prompt cache on static blocks
+prompt_cache_mode = "explicit"
+prompt_cache_ttl = "5m"
 ```
 
-The compaction agent reads the older turns, produces a condensed summary preserving:
+The provider-backed summary preserves:
 - Decisions and their reasoning
 - File modifications and their context
 - Tool call outputs that informed decisions
 - Active rules / corrections
 
-It then replaces the original turns with the summary in the session journal. The recent N turns are preserved verbatim so the model has fresh context.
+Archon then replaces the original turns with the summary in the session journal. The recent N turns are preserved verbatim so the model has fresh context. If the summary request itself exceeds the provider context window, Archon retries with older API-round groups removed before failing structurally.
 
 ## Manual compaction
 
@@ -74,9 +78,9 @@ archon --no-compact                 # if implemented; check --help
 
 ## Prompt cache
 
-When `prompt_cache = true`, archon-cli sets the Anthropic prompt-cache-control flag on static blocks (system prompt, tool catalog, memory briefing). Anthropic caches these blocks server-side for ~5 minutes and bills cache-hit tokens at a fraction of input cost.
+When `prompt_cache = true`, archon-cli applies provider-aware prompt-cache hints to stable Anthropic-shape system blocks. Unsupported providers receive no `cache_control` keys. `prompt_cache_ttl = "1h"` opts into longer-lived cache entries where the provider supports them.
 
-Cache hits are visible in `/usage` and `/extra-usage` reports. A high cache-hit ratio over a long session significantly reduces cost.
+Cache creation/read tokens are visible in `/usage`, `/extra-usage`, `/context`, and the TUI status bar once cache tokens are observed.
 
 ## Inspecting context state
 
@@ -86,9 +90,10 @@ Cache hits are visible in `/usage` and `/extra-usage` reports. A high cache-hit 
 
 Shows:
 - Total tokens used vs model limit
+- The context-window source (`config-override`, `user-catalog`, `bundled-catalog`, `provider`, or `fallback`)
 - Breakdown by component (system, tools, memory, history)
 - Last compaction timestamp + size delta
-- Cache hit ratio
+- Cache creation/read token counts
 
 ## See also
 

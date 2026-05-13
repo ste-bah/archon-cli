@@ -92,6 +92,7 @@ pub async fn run_print_mode(
             if let AgentEvent::TurnComplete {
                 input_tokens,
                 output_tokens,
+                ..
             } = &event
             {
                 turn_count_for_events.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

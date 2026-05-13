@@ -90,6 +90,8 @@ pub(crate) struct ContextSnapshot {
     /// Cumulative output tokens observed across every turn in this
     /// session, copied from `SessionStats::output_tokens`.
     pub(crate) output_tokens: u64,
+    pub(crate) cache_creation_tokens: u64,
+    pub(crate) cache_read_tokens: u64,
     /// Conversation turn counter, copied from
     /// `SessionStats::turn_count`.
     pub(crate) turn_count: u64,
@@ -103,6 +105,8 @@ pub(crate) struct ContextSnapshot {
     pub(crate) tool_defs_chars: usize,
     /// Resolved context window for the active startup model. Zero means unknown.
     pub(crate) context_window: u64,
+    /// Resolution source shown to the user (config-override/catalog/provider/etc.).
+    pub(crate) context_source: String,
 }
 
 /// Build a [`ContextSnapshot`] by awaiting a single
@@ -121,6 +125,8 @@ pub(crate) async fn build_context_snapshot(slash_ctx: &SlashCommandContext) -> C
     ContextSnapshot {
         input_tokens: stats.input_tokens,
         output_tokens: stats.output_tokens,
+        cache_creation_tokens: stats.cache_stats.cache_creation_tokens,
+        cache_read_tokens: stats.cache_stats.cache_read_tokens,
         turn_count: stats.turn_count,
         // `system_prompt_chars` and `tool_defs_chars` are `Copy`
         // usize fields on SlashCommandContext (no lock needed), but
@@ -129,6 +135,7 @@ pub(crate) async fn build_context_snapshot(slash_ctx: &SlashCommandContext) -> C
         system_prompt_chars: slash_ctx.system_prompt_chars,
         tool_defs_chars: slash_ctx.tool_defs_chars,
         context_window: slash_ctx.context_window,
+        context_source: slash_ctx.context_source.clone(),
     }
 }
 
@@ -214,16 +221,21 @@ impl CommandHandler for ContextHandler {
              Tool definitions: ~{tools} tokens\n\
              Conversation:     ~{conv} tokens\n\
              Total context:    ~{total} / {limit} tokens\n\
+             Source:           {source}\n\
              \n\
              API usage this session:\n\
              Input:  {input_k:.1}k tokens\n\
              Output: {output_k:.1}k tokens\n\
+             Cache:  create {cache_create} / read {cache_read} tokens\n\
              Turns:  {turns}\n",
             sys = fmt_tok(sys_prompt_tokens),
             tools = fmt_tok(tool_def_tokens),
             conv = fmt_tok(conversation_tokens),
             total = fmt_tok(total_context),
             limit = limit_label,
+            source = snap.context_source,
+            cache_create = snap.cache_creation_tokens,
+            cache_read = snap.cache_read_tokens,
             turns = snap.turn_count,
         );
 
@@ -298,10 +310,13 @@ mod tests {
         let snap = ContextSnapshot {
             input_tokens: 1_000,
             output_tokens: 500,
+            cache_creation_tokens: 10,
+            cache_read_tokens: 20,
             turn_count: 3,
             system_prompt_chars: 4_000,
             tool_defs_chars: 2_000,
             context_window: 1_000_000,
+            context_source: "catalog".into(),
         };
         let (mut ctx, mut rx) = make_ctx(Some(snap));
         ContextHandler
@@ -327,6 +342,14 @@ mod tests {
                 assert!(
                     s.contains("Total context:"),
                     "text must include total line; got: {s}"
+                );
+                assert!(
+                    s.contains("Source:           catalog"),
+                    "text must include context source; got: {s}"
+                );
+                assert!(
+                    s.contains("Cache:  create 10 / read 20 tokens"),
+                    "text must include cache stats; got: {s}"
                 );
                 assert!(
                     s.contains("Turns:"),
@@ -368,18 +391,24 @@ mod tests {
         let snap = ContextSnapshot {
             input_tokens: 100,
             output_tokens: 50,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
             turn_count: 1,
             system_prompt_chars: 100,
             tool_defs_chars: 50,
             context_window: 500_000,
+            context_source: "provider".into(),
         };
         let cloned = snap.clone();
         assert_eq!(cloned.input_tokens, 100);
         assert_eq!(cloned.output_tokens, 50);
+        assert_eq!(cloned.cache_creation_tokens, 0);
+        assert_eq!(cloned.cache_read_tokens, 0);
         assert_eq!(cloned.turn_count, 1);
         assert_eq!(cloned.system_prompt_chars, 100);
         assert_eq!(cloned.tool_defs_chars, 50);
         assert_eq!(cloned.context_window, 500_000);
+        assert_eq!(cloned.context_source, "provider");
         // Debug impl must not panic.
         let _ = format!("{snap:?}");
     }

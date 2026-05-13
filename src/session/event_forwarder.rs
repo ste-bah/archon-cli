@@ -84,10 +84,14 @@ pub(super) fn spawn_agent_event_forwarder(
                     AgentEvent::TurnComplete {
                         input_tokens,
                         output_tokens,
+                        cache_creation_tokens,
+                        cache_read_tokens,
                     } => {
                         handle_turn_complete(
                             input_tokens,
                             output_tokens,
+                            cache_creation_tokens,
+                            cache_read_tokens,
                             &session_stats,
                             &cost_config,
                             &mut cost_alert_state,
@@ -164,6 +168,8 @@ pub(super) fn spawn_agent_event_forwarder(
 async fn handle_turn_complete(
     input_tokens: u64,
     output_tokens: u64,
+    cache_creation_tokens: u64,
+    cache_read_tokens: u64,
     session_stats: &Arc<tokio::sync::Mutex<SessionStats>>,
     cost_config: &archon_core::config::CostConfig,
     cost_alert_state: &mut CostAlertState,
@@ -210,6 +216,8 @@ async fn handle_turn_complete(
     TuiEvent::TurnComplete {
         input_tokens,
         output_tokens,
+        cache_creation_tokens,
+        cache_read_tokens,
     }
 }
 

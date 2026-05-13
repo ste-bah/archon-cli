@@ -2,7 +2,7 @@
 //! pipeline with 11-layer prompt augmentation.
 //!
 //! Layers L1-L10 are assembled per-agent, then L11 (prompt_cap) enforces the
-//! token budget via [`truncate_prompt`]. Layers 5-9 gracefully degrade to empty
+//! token budget via `PromptBudget`. Layers 5-9 gracefully degrade to empty
 //! strings when learning systems are not active.
 
 use std::collections::HashMap;
@@ -18,12 +18,12 @@ use crate::coding::algorithm::select_algorithm;
 use crate::coding::quality::{CodingQualityCalculator, phase_threshold};
 use crate::coding::rlm::RlmStore;
 use crate::learning::integration::LearningIntegration;
-use crate::prompt_cap::{PromptLayer, TruncationPriority, truncate_prompt};
+use crate::prompt_cap::{PromptBudget, PromptLayer, TruncationPriority, truncate_prompt_to_budget};
 use crate::runner::{
     AgentInfo, AgentResult, NextAgent, PipelineFacade, PipelineResult, PipelineSession,
     PipelineType, QualityScore, ToolAccessLevel,
 };
-use archon_core::config::AnthropicModelsConfig;
+use archon_core::config::{AnthropicModelsConfig, ContextConfig};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,6 +96,7 @@ pub struct CodingFacade {
     /// that have an active `ArchonConfig` should pass `config.models.anthropic`
     /// via `with_models(..)` so operator overrides apply.
     models: AnthropicModelsConfig,
+    context: ContextConfig,
 }
 
 impl CodingFacade {
@@ -107,6 +108,7 @@ impl CodingFacade {
             learning: None,
             tui_sender: Mutex::new(None),
             models: AnthropicModelsConfig::default(),
+            context: ContextConfig::default(),
         }
     }
 
@@ -121,6 +123,7 @@ impl CodingFacade {
             learning: Some(Mutex::new(learning)),
             tui_sender: Mutex::new(None),
             models: AnthropicModelsConfig::default(),
+            context: ContextConfig::default(),
         }
     }
 
@@ -137,6 +140,11 @@ impl CodingFacade {
     /// from the active `ArchonConfig` to honour operator overrides.
     pub fn with_models(mut self, models: AnthropicModelsConfig) -> Self {
         self.models = models;
+        self
+    }
+
+    pub fn with_context(mut self, context: ContextConfig) -> Self {
+        self.context = context;
         self
     }
 
@@ -371,15 +379,34 @@ impl PipelineFacade for CodingFacade {
         Vec<serde_json::Value>,
         Vec<serde_json::Value>,
     )> {
+        self.build_prompt_for_attempt(session, agent, 1).await
+    }
+
+    async fn build_prompt_for_attempt(
+        &self,
+        session: &PipelineSession,
+        agent: &AgentInfo,
+        attempt: u8,
+    ) -> Result<(
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+    )> {
         // Build layers L1-L10
         let layers = self.build_layers(session, agent)?;
 
         // L11: apply prompt_cap truncation
-        let context_window =
-            archon_llm::context_window::resolve_context_window(&agent.model, None, None)
-                .context_window as usize;
-        let truncated =
-            truncate_prompt(layers, context_window).context("prompt truncation failed")?;
+        let context_window = archon_llm::context_window::resolve_context_window(
+            &agent.model,
+            self.context
+                .context_window_override
+                .or_else(|| self.context.max_tokens.map(u64::from)),
+            None,
+        )
+        .context_window as usize;
+        let budget = PromptBudget::from_context_config(context_window, &self.context, attempt);
+        let truncated = truncate_prompt_to_budget(layers, budget.max_prompt_tokens)
+            .context("prompt truncation failed")?;
 
         // Assemble the final prompt from surviving layers
         let assembled: String = truncated

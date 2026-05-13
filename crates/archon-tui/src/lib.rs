@@ -9,6 +9,7 @@ pub mod agent_activity;
 // backend-injection seam for headless tests.
 pub use app::{run, run_with_backend};
 pub mod commands;
+pub mod context_status;
 pub mod input;
 pub mod markdown;
 pub mod output;

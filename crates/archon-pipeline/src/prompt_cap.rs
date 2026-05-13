@@ -1,8 +1,6 @@
 //! Token-aware prompt truncation.
 //!
-//! Truncates assembled prompt layers to fit within 80% of the model context
-//! window, removing lowest-priority layers first and partially truncating
-//! when full removal would overshoot.
+//! Truncates assembled prompt layers to fit within an explicit prompt budget.
 
 use anyhow::Result;
 
@@ -88,6 +86,34 @@ pub struct TruncatedPrompt {
     pub truncated_layers: Vec<(String, usize, usize)>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PromptBudget {
+    pub context_window: usize,
+    pub max_prompt_tokens: usize,
+}
+
+impl PromptBudget {
+    pub fn from_context_config(
+        context_window: usize,
+        config: &archon_core::config::ContextConfig,
+        attempt: u8,
+    ) -> Self {
+        if context_window == 0 {
+            return Self {
+                context_window,
+                max_prompt_tokens: 0,
+            };
+        }
+        let usable = context_window.saturating_sub(config.output_reserve_tokens as usize);
+        let fraction = (config.compact_threshold - config.preflight_safety_margin).clamp(0.0, 1.0);
+        let retry_factor = if attempt > 1 { 4.0 / 5.0 } else { 1.0 };
+        Self {
+            context_window,
+            max_prompt_tokens: (usable as f32 * fraction * retry_factor) as usize,
+        }
+    }
+}
+
 /// Count tokens using a character-based heuristic: ceil(len / 4).
 pub fn count_tokens(text: &str) -> usize {
     let len = text.len();
@@ -108,25 +134,25 @@ fn truncate_content(content: &str, target_tokens: usize) -> String {
     }
 }
 
-/// Truncate layers to fit within 80% of `model_context_window`.
+/// Truncate layers to fit within a conservative default model-window budget.
 ///
 /// A `model_context_window` of zero means the provider/catalog did not expose a
 /// reliable limit. In that case the function preserves the prompt unchanged;
 /// reactive provider-side compaction still handles hard context-window errors.
 ///
-/// Algorithm:
-/// 1. Calculate target = model_context_window * 4 / 5
-/// 2. If total tokens fit, return unchanged.
-/// 3. Sort non-required layers by priority ascending (lowest removed first).
-/// 4. Remove/truncate layers until budget is met.
-/// 5. If still over budget after removing all non-required layers, truncate
-///    the `task_context` required layer (or last required layer).
 pub fn truncate_prompt(
     layers: Vec<PromptLayer>,
     model_context_window: usize,
 ) -> Result<TruncatedPrompt> {
+    truncate_prompt_to_budget(layers, model_context_window * 4 / 5)
+}
+
+pub fn truncate_prompt_to_budget(
+    layers: Vec<PromptLayer>,
+    target: usize,
+) -> Result<TruncatedPrompt> {
     let total: usize = layers.iter().map(|l| count_tokens(&l.content)).sum();
-    if model_context_window == 0 {
+    if target == 0 {
         return Ok(TruncatedPrompt {
             layers,
             total_tokens: total,
@@ -134,9 +160,6 @@ pub fn truncate_prompt(
             truncated_layers: Vec::new(),
         });
     }
-    let target = model_context_window * 4 / 5;
-
-    // Calculate initial total.
     if total <= target {
         return Ok(TruncatedPrompt {
             layers,
@@ -270,4 +293,36 @@ pub fn truncate_prompt(
         removed_layers,
         truncated_layers,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prompt_budget_uses_context_config_fields() {
+        let config = archon_core::config::ContextConfig {
+            compact_threshold: 0.75,
+            preflight_safety_margin: 0.05,
+            output_reserve_tokens: 100,
+            ..Default::default()
+        };
+
+        let budget = PromptBudget::from_context_config(1_100, &config, 1);
+        assert_eq!(budget.max_prompt_tokens, 700);
+    }
+
+    #[test]
+    fn retry_budget_is_tighter_than_first_attempt() {
+        let config = archon_core::config::ContextConfig {
+            compact_threshold: 0.75,
+            preflight_safety_margin: 0.05,
+            output_reserve_tokens: 100,
+            ..Default::default()
+        };
+
+        let first = PromptBudget::from_context_config(1_100, &config, 1);
+        let retry = PromptBudget::from_context_config(1_100, &config, 2);
+        assert!(retry.max_prompt_tokens < first.max_prompt_tokens);
+    }
 }

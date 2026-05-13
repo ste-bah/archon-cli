@@ -30,6 +30,7 @@ pub(super) async fn record_event(
         AgentEvent::TurnComplete {
             input_tokens,
             output_tokens,
+            ..
         } => crate::runtime::agent_ledger_events::record_agent_turn_completed(
             db,
             context,

@@ -166,9 +166,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v1.2.7** ([release notes](docs/release-notes/v1.2.7.md))
+- Current version: **v1.2.8** ([release notes](docs/release-notes/v1.2.8.md))
 - Stable release for local world-model advisory learning, first-class reasoning-quality events, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
-- v1.2.7 repairs older resumed sessions with split `tool_result` user messages, keeps new tool results batched atomically, and moves model context-window limits into an overridable `context.toml` catalog for Claude, Codex, third-party, and local models.
+- v1.2.8 completes the auto-compaction PRD: provider-backed summaries, per-provider context windows, prompt budgeting, context warning/source UI, and provider-aware prompt-cache policy.
 
 ## Contributing
 

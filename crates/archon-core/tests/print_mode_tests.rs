@@ -253,6 +253,8 @@ fn format_agent_event_turn_complete_stream_json() {
     let event = AgentEvent::TurnComplete {
         input_tokens: 500,
         output_tokens: 200,
+        cache_creation_tokens: 0,
+        cache_read_tokens: 0,
     };
     let result = format_agent_event(&event, &OutputFormat::StreamJson);
     assert!(result.is_some());

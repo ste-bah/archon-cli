@@ -1,3 +1,27 @@
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ContextWarning {
+    #[default]
+    Ok,
+    Warning,
+    Critical,
+}
+
+impl ContextWarning {
+    pub fn for_usage(tokens_used: u64, window: u64, compact_threshold: f32) -> Self {
+        if window == 0 || tokens_used == 0 {
+            return Self::Ok;
+        }
+        let fill = tokens_used as f32 / window as f32;
+        if fill >= 0.95 {
+            Self::Critical
+        } else if fill >= (compact_threshold - 0.10).max(0.0) {
+            Self::Warning
+        } else {
+            Self::Ok
+        }
+    }
+}
+
 /// Status bar data for the TUI bottom bar.
 #[derive(Debug, Clone)]
 pub struct StatusBar {
@@ -14,6 +38,12 @@ pub struct StatusBar {
     pub agent_color: Option<String>,
     pub context_tokens_used: u64,
     pub context_window: u64,
+    pub context_name: Option<String>,
+    pub resolution_source: Option<String>,
+    pub cache_creation_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub warning_state: ContextWarning,
+    pub compact_threshold: f32,
 }
 
 impl Default for StatusBar {
@@ -29,11 +59,25 @@ impl Default for StatusBar {
             agent_color: None,
             context_tokens_used: 0,
             context_window: 0,
+            context_name: None,
+            resolution_source: None,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            warning_state: ContextWarning::Ok,
+            compact_threshold: 0.80,
         }
     }
 }
 
 impl StatusBar {
+    pub fn update_context_warning(&mut self) {
+        self.warning_state = ContextWarning::for_usage(
+            self.context_tokens_used,
+            self.context_window,
+            self.compact_threshold,
+        );
+    }
+
     /// Format the status bar text.
     pub fn format(&self) -> String {
         let mut parts = Vec::new();
@@ -51,14 +95,31 @@ impl StatusBar {
             if self.context_window > 0 {
                 let pct = (self.context_tokens_used as f64 / self.context_window as f64 * 100.0)
                     .min(100.0);
+                let name = self
+                    .context_name
+                    .as_deref()
+                    .map(|n| format!("{n} "))
+                    .unwrap_or_default();
+                let source = self
+                    .resolution_source
+                    .as_deref()
+                    .map(|s| format!(" {s}"))
+                    .unwrap_or_default();
                 parts.push(format!(
-                    "ctx {}k/{}k ({pct:.0}%)",
+                    "ctx {name}{}k/{}k ({pct:.0}%{source})",
                     self.context_tokens_used / 1000,
                     self.context_window / 1000
                 ));
             } else {
                 parts.push(format!("ctx {}k/?", self.context_tokens_used / 1000));
             }
+        }
+        if self.cache_creation_tokens > 0 || self.cache_read_tokens > 0 {
+            parts.push(format!(
+                "cache {}/{}k",
+                self.cache_creation_tokens / 1000,
+                self.cache_read_tokens / 1000
+            ));
         }
 
         if let Some(ref branch) = self.git_branch {
@@ -114,5 +175,31 @@ mod tests {
         let bar = StatusBar::default();
         let text = bar.format();
         assert!(!text.contains('[') || text.contains("[brief]"));
+    }
+
+    #[test]
+    fn context_warning_thresholds() {
+        assert_eq!(
+            ContextWarning::for_usage(699, 1000, 0.80),
+            ContextWarning::Ok
+        );
+        assert_eq!(
+            ContextWarning::for_usage(700, 1000, 0.80),
+            ContextWarning::Warning
+        );
+        assert_eq!(
+            ContextWarning::for_usage(950, 1000, 0.80),
+            ContextWarning::Critical
+        );
+    }
+
+    #[test]
+    fn format_shows_cache_usage_when_present() {
+        let bar = StatusBar {
+            cache_creation_tokens: 1_000,
+            cache_read_tokens: 2_000,
+            ..Default::default()
+        };
+        assert!(bar.format().contains("cache 1/2k"));
     }
 }

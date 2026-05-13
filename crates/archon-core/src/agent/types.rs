@@ -60,6 +60,8 @@ pub enum AgentEvent {
     TurnComplete {
         input_tokens: u64,
         output_tokens: u64,
+        cache_creation_tokens: u64,
+        cache_read_tokens: u64,
     },
     Error(String),
     CompactionTriggered,

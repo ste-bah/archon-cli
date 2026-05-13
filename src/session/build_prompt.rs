@@ -5,6 +5,36 @@ use archon_core::reasoning::build_environment_section;
 use archon_llm::identity::IdentityProvider;
 use archon_memory::MemoryTrait;
 
+fn apply_prompt_cache_policy(
+    blocks: &mut [serde_json::Value],
+    config: &archon_core::config::ContextConfig,
+    provider: &str,
+) {
+    let supports_cache = matches!(provider, "anthropic" | "bedrock" | "vertex");
+    let explicit_mode = matches!(config.prompt_cache_mode.as_str(), "explicit" | "hybrid");
+    let enabled = config.prompt_cache && supports_cache && explicit_mode;
+    strip_cache_control_if_disabled(blocks, enabled);
+    if !enabled {
+        return;
+    }
+    let mut breakpoints = 0usize;
+    for block in blocks {
+        let Some(obj) = block.as_object_mut() else {
+            continue;
+        };
+        if obj.contains_key("cache_control") {
+            breakpoints += 1;
+            if breakpoints > 4 {
+                obj.remove("cache_control");
+            } else if config.prompt_cache_ttl == "1h"
+                && let Some(cache) = obj.get_mut("cache_control").and_then(|v| v.as_object_mut())
+            {
+                cache.insert("ttl".into(), serde_json::json!("1h"));
+            }
+        }
+    }
+}
+
 pub(super) fn build_system_prompt(
     config: &archon_core::config::ArchonConfig,
     resolved_flags: &archon_core::cli_flags::ResolvedFlags,
@@ -26,7 +56,7 @@ pub(super) fn build_system_prompt(
     let git_branch = git_info.as_ref().map(|g| g.branch.as_str());
     let env_section = build_environment_section(working_dir, git_branch);
     let mut identity_blocks = identity.system_prompt_blocks("", &archon_md, &env_section);
-    strip_cache_control_if_disabled(&mut identity_blocks, config.context.prompt_cache);
+    apply_prompt_cache_policy(&mut identity_blocks, &config.context, &config.llm.provider);
 
     let mut prompt = if let Some(def) = agent_def {
         vec![serde_json::json!({
@@ -137,13 +167,19 @@ pub(super) fn build_interactive_system_prompt(
                 "text": section.content,
             });
             if config.context.prompt_cache
+                && config.context.prompt_cache_mode != "automatic"
                 && let Some(ref cc) = section.cache_control
             {
-                block["cache_control"] = serde_json::json!({ "type": cc });
+                let mut cache = serde_json::json!({ "type": cc });
+                if config.context.prompt_cache_ttl == "1h" {
+                    cache["ttl"] = serde_json::json!("1h");
+                }
+                block["cache_control"] = cache;
             }
             block
         })
         .collect();
+    apply_prompt_cache_policy(&mut blocks, &config.context, &config.llm.provider);
     if let Some(ref append_text) = resolved_flags.system_prompt_append {
         blocks.push(serde_json::json!({ "type": "text", "text": append_text }));
     }
@@ -218,5 +254,60 @@ fn output_style_prompt(cli: &Cli, config: &archon_core::config::ArchonConfig) ->
         reg.get_or_default(name).prompt.clone()
     } else {
         reg.forced_plugin_style().and_then(|s| s.prompt.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn cache_block(text: &str) -> serde_json::Value {
+        json!({
+            "type": "text",
+            "text": text,
+            "cache_control": {"type": "ephemeral"}
+        })
+    }
+
+    #[test]
+    fn prompt_cache_policy_strips_non_cache_provider() {
+        let config = archon_core::config::ContextConfig::default();
+        let mut blocks = vec![cache_block("a")];
+
+        apply_prompt_cache_policy(&mut blocks, &config, "openai-codex");
+
+        assert!(blocks[0].get("cache_control").is_none());
+    }
+
+    #[test]
+    fn prompt_cache_policy_automatic_strips_explicit_hints() {
+        let config = archon_core::config::ContextConfig {
+            prompt_cache_mode: "automatic".into(),
+            ..Default::default()
+        };
+        let mut blocks = vec![cache_block("a")];
+
+        apply_prompt_cache_policy(&mut blocks, &config, "anthropic");
+
+        assert!(blocks[0].get("cache_control").is_none());
+    }
+
+    #[test]
+    fn prompt_cache_policy_caps_breakpoints_and_applies_ttl() {
+        let config = archon_core::config::ContextConfig {
+            prompt_cache_ttl: "1h".into(),
+            ..Default::default()
+        };
+        let mut blocks = (0..5)
+            .map(|index| cache_block(&format!("block {index}")))
+            .collect::<Vec<_>>();
+
+        apply_prompt_cache_policy(&mut blocks, &config, "anthropic");
+
+        for block in blocks.iter().take(4) {
+            assert_eq!(block["cache_control"]["ttl"], "1h");
+        }
+        assert!(blocks[4].get("cache_control").is_none());
     }
 }

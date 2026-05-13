@@ -37,6 +37,8 @@ pub(super) async fn handle_tui_event(
         TuiEvent::TurnComplete {
             input_tokens,
             output_tokens,
+            cache_creation_tokens,
+            cache_read_tokens,
         } => {
             app.on_turn_complete();
             // Anthropic pricing: $3/MTok input, $15/MTok output
@@ -44,6 +46,15 @@ pub(super) async fn handle_tui_event(
                 (input_tokens as f64 * 3.0 + output_tokens as f64 * 15.0) / 1_000_000.0;
             app.status.context_tokens_used =
                 app.status.context_tokens_used.saturating_add(input_tokens);
+            app.status.cache_creation_tokens = app
+                .status
+                .cache_creation_tokens
+                .saturating_add(cache_creation_tokens);
+            app.status.cache_read_tokens = app
+                .status
+                .cache_read_tokens
+                .saturating_add(cache_read_tokens);
+            app.status.update_context_warning();
             flush_pending_input_after_turn(app, input_tx);
         }
         TuiEvent::Error(msg) => app.on_error(&msg),
@@ -145,6 +156,22 @@ pub(super) async fn handle_tui_event(
         }
         TuiEvent::ActivityStream(update) => {
             app.on_activity_stream_update(update);
+        }
+        TuiEvent::ContextPressureUpdated {
+            tokens_used,
+            context_window,
+            cache_creation_tokens,
+            cache_read_tokens,
+            context_name,
+            resolution_source,
+        } => {
+            app.status.context_tokens_used = tokens_used;
+            app.status.context_window = context_window;
+            app.status.cache_creation_tokens = cache_creation_tokens;
+            app.status.cache_read_tokens = cache_read_tokens;
+            app.status.context_name = context_name;
+            app.status.resolution_source = resolution_source;
+            app.status.update_context_warning();
         }
         TuiEvent::SetVimMode(enabled) => {
             if enabled {
@@ -261,6 +288,8 @@ mod tests {
             TuiEvent::TurnComplete {
                 input_tokens: 1,
                 output_tokens: 1,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 0,
             },
             &tx,
         )
@@ -287,6 +316,8 @@ mod tests {
                 TuiEvent::TurnComplete {
                     input_tokens: 1,
                     output_tokens: 1,
+                    cache_creation_tokens: 0,
+                    cache_read_tokens: 0,
                 },
                 &tx,
             ),

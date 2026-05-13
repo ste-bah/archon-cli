@@ -1,7 +1,6 @@
 //! Canonical TUI event enum and layer-0 payload types.
 
 /// A session entry for the /resume picker.
-///
 /// Defined here (layer 0) so that `TuiEvent::ShowSessionPicker` can reference
 /// it without events.rs having to import from crate::app. Re-exported from
 /// `crate::app` for external/public-API stability.
@@ -14,14 +13,6 @@ pub struct SessionPickerEntry {
     pub last_active: String,
 }
 
-/// Identifies an overlay view the TUI can open in response to a
-/// slash-command-originated `TuiEvent::OpenView`.
-///
-/// Defined at layer 0 (events.rs) so variants of `TuiEvent` can
-/// reference it without the file taking on a `crate::app` dependency.
-/// Re-exported from `crate::app` for external-API stability
-/// (matches `SessionPickerEntry` / `McpServerEntry` pattern).
-///
 /// TASK-AGS-822: seeded with the 6 variants named by body-migrate
 /// tickets AGS-806..819. Future view-opening slash commands extend
 /// this enum per-ticket; the compile error on any missing arm is the
@@ -360,6 +351,8 @@ pub enum TuiEvent {
     TurnComplete {
         input_tokens: u64,
         output_tokens: u64,
+        cache_creation_tokens: u64,
+        cache_read_tokens: u64,
     },
     Error(String),
     /// Emitted by main.rs right before agent.process_message().
@@ -430,6 +423,14 @@ pub enum TuiEvent {
     AgentActivity(AgentActivityUpdate),
     /// Append/update the foreground activity stream buffer.
     ActivityStream(ActivityStreamUpdate),
+    ContextPressureUpdated {
+        tokens_used: u64,
+        context_window: u64,
+        cache_creation_tokens: u64,
+        cache_read_tokens: u64,
+        context_name: Option<String>,
+        resolution_source: Option<String>,
+    },
     SetVimMode(bool),
     VimToggle,
     VoiceText(String),
@@ -479,6 +480,7 @@ impl TuiEvent {
             Self::OpenViewRows { .. } => "OpenViewRows",
             Self::AgentActivity(_) => "AgentActivity",
             Self::ActivityStream(_) => "ActivityStream",
+            Self::ContextPressureUpdated { .. } => "ContextPressureUpdated",
             Self::SetVimMode(_) => "SetVimMode",
             Self::VimToggle => "VimToggle",
             Self::VoiceText(_) => "VoiceText",

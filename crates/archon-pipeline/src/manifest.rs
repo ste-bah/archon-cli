@@ -164,7 +164,7 @@ name = "coding"
 version = "1.0"
 description = "50-agent coding pipeline"
 default_model = "sonnet"
-context_window = 200000
+context_window = 123456
 
 [defaults]
 algorithm = "ReAct"
@@ -209,7 +209,7 @@ critical = true
             Some("50-agent coding pipeline")
         );
         assert_eq!(manifest.pipeline.default_model.as_deref(), Some("sonnet"));
-        assert_eq!(manifest.pipeline.context_window, Some(200_000));
+        assert_eq!(manifest.pipeline.context_window, Some(123_456));
 
         // Defaults
         assert_eq!(manifest.defaults.algorithm.as_deref(), Some("ReAct"));

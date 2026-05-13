@@ -65,7 +65,8 @@ pub(crate) async fn handle_resume(
                     auto_trainer,
                 );
                 let facade = archon_pipeline::coding::facade::CodingFacade::with_learning(learning)
-                    .with_models(config.models.anthropic.clone());
+                    .with_models(config.models.anthropic.clone())
+                    .with_context(config.context.clone());
                 let leann = init_leann(cwd).await;
                 println!("Resuming audited coding pipeline...");
                 let result = archon_pipeline::runner::resume_pipeline_audited(
@@ -100,7 +101,8 @@ pub(crate) async fn handle_resume(
                     None,
                     phd_learning,
                 )
-                .with_models(config.models.anthropic.clone());
+                .with_models(config.models.anthropic.clone())
+                .with_context(config.context.clone());
                 println!("Resuming audited research pipeline...");
                 let result = archon_pipeline::runner::resume_pipeline_audited(
                     &facade, &adapter, session_id, cwd, None, None, None,
@@ -311,7 +313,7 @@ async fn handle_legacy_resume(
             let adapter = build_pipeline_adapter(config, env_vars, "pipeline_resume").await?;
             match format!("{:?}", &session.pipeline_type).as_str() {
                 "Coding" => legacy_resume_coding(cwd, config, &adapter, &session.task).await?,
-                "Research" => legacy_resume_research(cwd, &adapter, &session.task).await?,
+                "Research" => legacy_resume_research(cwd, config, &adapter, &session.task).await?,
                 other => {
                     eprintln!("Unknown pipeline type: {other}");
                     std::process::exit(1);
@@ -339,7 +341,8 @@ async fn legacy_resume_coding(
         Default::default(),
         auto_trainer,
     );
-    let facade = archon_pipeline::coding::facade::CodingFacade::with_learning(learning);
+    let facade = archon_pipeline::coding::facade::CodingFacade::with_learning(learning)
+        .with_context(config.context.clone());
     println!("Resuming coding pipeline...");
     let result =
         archon_pipeline::runner::run_pipeline(&facade, adapter, task, None, None, None).await?;
@@ -349,6 +352,7 @@ async fn legacy_resume_coding(
 
 async fn legacy_resume_research(
     cwd: &Path,
+    config: &ArchonConfig,
     adapter: &archon_pipeline::llm_adapter::ProviderLlmAdapter,
     task: &str,
 ) -> Result<()> {
@@ -362,7 +366,8 @@ async fn legacy_resume_research(
         cwd.display().to_string(),
         None,
         phd_learning,
-    );
+    )
+    .with_context(config.context.clone());
     println!("Resuming research pipeline...");
     let result =
         archon_pipeline::runner::run_pipeline(&facade, adapter, task, None, None, None).await?;

@@ -259,6 +259,7 @@ pub fn event_to_notification(session_id: &str, event: &AgentEvent) -> Option<JRp
         AgentEvent::TurnComplete {
             input_tokens,
             output_tokens,
+            ..
         } => (
             "archon/turnComplete",
             serde_json::to_value(IdeTurnComplete {

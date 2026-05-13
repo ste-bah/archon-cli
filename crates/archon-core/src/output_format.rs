@@ -114,11 +114,15 @@ fn format_agent_event_stream_json(event: &AgentEvent) -> Option<String> {
         AgentEvent::TurnComplete {
             input_tokens,
             output_tokens,
+            cache_creation_tokens,
+            cache_read_tokens,
         } => Some(format_stream_event(
             "turn_complete",
             &serde_json::json!({
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
+                "cache_creation_input_tokens": cache_creation_tokens,
+                "cache_read_input_tokens": cache_read_tokens,
             }),
         )),
 

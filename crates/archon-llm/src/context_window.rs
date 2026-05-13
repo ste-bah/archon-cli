@@ -9,11 +9,22 @@ pub const FALLBACK_CONTEXT_WINDOW: u64 = 0;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContextWindowSource {
     ConfigOverride,
-    Catalog,
+    UserCatalog,
+    BundledCatalog,
     ProviderMetadata,
-    KnownModel,
     Fallback,
-    Unknown,
+}
+
+impl ContextWindowSource {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::ConfigOverride => "config-override",
+            Self::UserCatalog => "user-catalog",
+            Self::BundledCatalog => "bundled-catalog",
+            Self::ProviderMetadata => "provider",
+            Self::Fallback => "fallback",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +64,7 @@ pub fn classify_context_window_error(
         "prompt is too long",
         "prompt too long",
         "too many tokens",
+        "too many input tokens",
         "token limit",
         "input is too long",
         "request too large",
@@ -135,24 +147,35 @@ pub fn resolve_context_window_for_work_dir(
         })
         .unwrap_or_else(|| active_model.to_string());
 
-    let catalog = ContextCatalog::load(work_dir);
     let active_betas = active_provider_betas(provider);
     let active_identity = active_provider_identity(provider);
-    let catalog_entry = provider
-        .and_then(|p| {
-            catalog.lookup(
-                p.name(),
-                &resolved_model,
-                &active_betas,
-                active_identity.as_deref(),
-            )
-        })
-        .or_else(|| catalog.lookup_any(&resolved_model, &active_betas, active_identity.as_deref()));
-    if let Some(entry) = catalog_entry {
+    let user_catalog = ContextCatalog::user_overrides(work_dir);
+    if let Some(entry) = lookup_catalog(
+        &user_catalog,
+        provider,
+        &resolved_model,
+        &active_betas,
+        &active_identity,
+    ) {
         return ContextWindowResolution {
             model: resolved_model,
             context_window: entry.context_window,
-            source: ContextWindowSource::Catalog,
+            source: ContextWindowSource::UserCatalog,
+        };
+    }
+
+    let bundled_catalog = ContextCatalog::bundled();
+    if let Some(entry) = lookup_catalog(
+        &bundled_catalog,
+        provider,
+        &resolved_model,
+        &active_betas,
+        &active_identity,
+    ) {
+        return ContextWindowResolution {
+            model: resolved_model,
+            context_window: entry.context_window,
+            source: ContextWindowSource::BundledCatalog,
         };
     }
 
@@ -169,9 +192,21 @@ pub fn resolve_context_window_for_work_dir(
 
     ContextWindowResolution {
         model: resolved_model,
-        context_window: 0,
-        source: ContextWindowSource::Unknown,
+        context_window: FALLBACK_CONTEXT_WINDOW,
+        source: ContextWindowSource::Fallback,
     }
+}
+
+fn lookup_catalog(
+    catalog: &ContextCatalog,
+    provider: Option<&dyn LlmProvider>,
+    model: &str,
+    active_betas: &[String],
+    active_identity: &Option<String>,
+) -> Option<crate::context_catalog::ContextWindowEntry> {
+    provider
+        .and_then(|p| catalog.lookup(p.name(), model, active_betas, active_identity.as_deref()))
+        .or_else(|| catalog.lookup_any(model, active_betas, active_identity.as_deref()))
 }
 
 fn active_provider_betas(provider: Option<&dyn LlmProvider>) -> Vec<String> {
@@ -219,5 +254,21 @@ mod tests {
     #[test]
     fn ordinary_bad_request_does_not_classify() {
         assert!(classify_context_window_body(400, "bad api key shape", None, None).is_none());
+    }
+
+    #[test]
+    fn config_override_source_has_stable_label() {
+        let resolved = resolve_context_window("anything", Some(123), None);
+        assert_eq!(resolved.context_window, 123);
+        assert_eq!(resolved.source, ContextWindowSource::ConfigOverride);
+        assert_eq!(resolved.source.label(), "config-override");
+    }
+
+    #[test]
+    fn unknown_model_uses_fallback_source() {
+        let resolved = resolve_context_window("not-in-catalog", None, None);
+        assert_eq!(resolved.context_window, FALLBACK_CONTEXT_WINDOW);
+        assert_eq!(resolved.source, ContextWindowSource::Fallback);
+        assert_eq!(resolved.source.label(), "fallback");
     }
 }

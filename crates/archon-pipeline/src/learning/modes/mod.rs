@@ -253,7 +253,7 @@ mod tests {
             vec![
                 "current latency is 200ms",
                 "database queries dominate",
-                "cache hit rate would be 80%",
+                "cache hit rate would be 80 percent",
             ],
         );
         let output = engine.reason(&req).unwrap();

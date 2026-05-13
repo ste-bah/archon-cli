@@ -37,16 +37,14 @@ pub type InputSender = tokio::sync::mpsc::Sender<String>;
 /// Configuration for launching the TUI session.
 /// Passed from main.rs to app::run().
 pub struct AppConfig {
-    /// Bounded receiver for agent/session events flowing into the TUI.
-    ///
-    /// Producers keep a synchronous `send()` API, but the queue has a hard cap
-    /// and sheds progress events if the renderer falls behind.
     pub event_rx: crate::event_channel::TuiEventReceiver,
     pub input_tx: InputSender,
     pub splash: Option<SplashConfig>,
     pub btw_tx: Option<tokio::sync::mpsc::Sender<String>>,
     pub permission_tx: Option<tokio::sync::mpsc::Sender<bool>>,
     pub context_window: u64,
+    pub context_source: Option<String>,
+    pub context_threshold: f32,
     /// Command catalog injected from the bin crate's registry so autocomplete
     /// stays locked to `Registry::primaries_with_descriptions()`.
     pub command_catalog: Vec<crate::commands::CommandInfo>,
@@ -393,6 +391,7 @@ impl App {
 
     pub fn on_agent_activity(&mut self, update: AgentActivityUpdate) {
         self.record_activity_update(&update);
+        crate::context_status::update_actor_context_name(&mut self.status, &update);
         crate::agent_activity::apply_update(&mut self.agent_activity, update);
     }
 

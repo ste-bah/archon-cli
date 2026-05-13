@@ -38,6 +38,8 @@ impl Agent {
         self.send_event(AgentEvent::TurnComplete {
             input_tokens: turn_input_tokens,
             output_tokens: turn_output_tokens,
+            cache_creation_tokens: turn_cache_creation,
+            cache_read_tokens: turn_cache_read,
         })
         .await;
 

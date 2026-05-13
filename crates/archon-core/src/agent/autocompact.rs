@@ -43,23 +43,40 @@ impl AutoCompactState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CompactionOutcome {
     Compacted {
         before_tokens: u64,
-        after_tokens: u64,
+        #[serde(alias = "after_tokens")]
+        after_estimated_tokens: u64,
         messages_before: usize,
         messages_after: usize,
     },
     Skipped {
-        reason: String,
+        reason: SkipReason,
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkipReason {
+    BelowThreshold,
+    NoSafeBoundary,
+    Disabled,
+    InFlight,
+}
+
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum CompactionError {
     #[error("no safe compaction boundary")]
     NoSafeBoundary,
+    #[error("provider summary failed: {0}")]
+    Provider(#[from] archon_llm::provider::LlmError),
+    #[error("compaction summary was cancelled")]
+    Cancelled,
+    #[error("invalid compaction summary: {0}")]
+    InvalidSummary(String),
 }
 
 pub fn evaluate_compaction(
@@ -109,7 +126,10 @@ impl Agent {
     pub(super) fn context_window_for(&self, active_model: &str) -> u64 {
         archon_llm::context_window::resolve_context_window_for_work_dir(
             active_model,
-            self.config.context.max_tokens.map(u64::from),
+            self.config
+                .context
+                .context_window_override
+                .or_else(|| self.config.context.max_tokens.map(u64::from)),
             Some(self.client.as_ref()),
             Some(&self.config.working_dir),
         )
@@ -125,11 +145,15 @@ impl Agent {
             .state
             .total_input_tokens
             .max(estimate_messages_tokens(&self.state.messages));
+        let effective_window = window.saturating_sub(self.config.context.output_reserve_tokens);
+        let threshold = (self.config.context.compact_threshold
+            - self.config.context.preflight_safety_margin)
+            .max(0.0);
         let Some(action) = evaluate_compaction(
             tokens,
-            window,
+            effective_window,
             &self.state.auto_compact,
-            self.config.context.compact_threshold,
+            threshold,
         ) else {
             return Ok(());
         };
@@ -146,20 +170,38 @@ impl Agent {
         force: bool,
     ) -> Result<(), AgentLoopError> {
         self.state.auto_compact.compact_in_flight = true;
-        let result = compact_json_messages(&self.state.messages, action, force);
+        let active_model = {
+            let override_model = self.config.model_override.lock().await;
+            if override_model.is_empty() {
+                self.config.model.clone()
+            } else {
+                override_model.clone()
+            }
+        };
+        let result = compact_json_messages_with_provider(
+            self.client.as_ref(),
+            &active_model,
+            &self.state.messages,
+            action,
+            force,
+        )
+        .await;
         match result {
-            Ok(CompactionOutcome::Compacted { after_tokens, .. }) => {
-                self.state.messages = compact_json_messages_apply(&self.state.messages, action)
-                    .map_err(|err| {
-                        AgentLoopError::ApiError(format!("auto-compaction failed: {err}"))
-                    })?;
-                self.state.total_input_tokens = after_tokens;
+            Ok((
+                CompactionOutcome::Compacted {
+                    after_estimated_tokens,
+                    ..
+                },
+                compacted,
+            )) => {
+                self.state.messages = compacted;
+                self.state.total_input_tokens = after_estimated_tokens;
                 self.memory_injector.invalidate_cache();
-                self.state.auto_compact.on_success(after_tokens);
+                self.state.auto_compact.on_success(after_estimated_tokens);
                 self.send_event(AgentEvent::CompactionTriggered).await;
                 Ok(())
             }
-            Ok(CompactionOutcome::Skipped { .. }) => {
+            Ok((CompactionOutcome::Skipped { .. }, _)) => {
                 self.state.auto_compact.on_cancel();
                 Ok(())
             }
@@ -178,42 +220,165 @@ pub fn compact_json_messages(
     action: CompactAction,
     force: bool,
 ) -> Result<CompactionOutcome, CompactionError> {
-    let compacted = compact_json_messages_apply(messages, action)?;
+    let compacted = compact_json_messages_apply_with_summary(messages, action, "")?;
     let before = estimate_messages_tokens(messages);
     let after = estimate_messages_tokens(&compacted);
     if compacted.len() == messages.len() && !force {
         return Ok(CompactionOutcome::Skipped {
-            reason: "no safe boundary".into(),
+            reason: SkipReason::NoSafeBoundary,
         });
     }
     Ok(CompactionOutcome::Compacted {
         before_tokens: before,
-        after_tokens: after,
+        after_estimated_tokens: after,
         messages_before: messages.len(),
         messages_after: compacted.len(),
     })
 }
 
-pub fn compact_json_messages_apply(
+pub async fn compact_json_messages_with_provider(
+    provider: &dyn archon_llm::provider::LlmProvider,
+    model: &str,
     messages: &[serde_json::Value],
     action: CompactAction,
+    force: bool,
+) -> Result<(CompactionOutcome, Vec<serde_json::Value>), CompactionError> {
+    let summary = generate_compaction_summary_structured(provider, model, messages).await?;
+    let compacted = compact_json_messages_apply_with_summary(messages, action, &summary)?;
+    let before = estimate_messages_tokens(messages);
+    let after = estimate_messages_tokens(&compacted);
+    if compacted.len() == messages.len() && !force {
+        return Ok((
+            CompactionOutcome::Skipped {
+                reason: SkipReason::NoSafeBoundary,
+            },
+            messages.to_vec(),
+        ));
+    }
+    Ok((
+        CompactionOutcome::Compacted {
+            before_tokens: before,
+            after_estimated_tokens: after,
+            messages_before: messages.len(),
+            messages_after: compacted.len(),
+        },
+        compacted,
+    ))
+}
+
+pub async fn generate_compaction_summary_structured(
+    provider: &dyn archon_llm::provider::LlmProvider,
+    model: &str,
+    messages: &[serde_json::Value],
+) -> Result<String, CompactionError> {
+    use crate::commands::build_compact_summary_request;
+
+    let mut context_messages = super::summary_text::to_summary_context_messages(messages);
+    for attempt in 0..3 {
+        let summary_messages = build_compact_summary_request(&context_messages);
+        let request_messages: Vec<serde_json::Value> = summary_messages
+            .iter()
+            .map(|m| serde_json::json!({ "role": m.role, "content": m.content }))
+            .collect();
+        let request = archon_llm::provider::LlmRequest {
+            model: model.to_string(),
+            max_tokens: 2048,
+            system: vec![serde_json::json!({
+                "type": "text",
+                "text": archon_context::compact::SUMMARY_PROMPT,
+            })],
+            messages: request_messages,
+            tools: Vec::new(),
+            thinking: None,
+            speed: Some("fast".to_string()),
+            effort: Some("low".to_string()),
+            extra: serde_json::Value::Null,
+            request_origin: Some("compaction_summary".into()),
+            reasoning_encrypted: None,
+        };
+
+        let mut rx = match provider.stream(request).await {
+            Ok(rx) => rx,
+            Err(archon_llm::provider::LlmError::Aborted) => return Err(CompactionError::Cancelled),
+            Err(err)
+                if err.is_context_window_exceeded()
+                    && super::summary_text::trim_oldest_safe_api_round(
+                        &mut context_messages,
+                        attempt,
+                    ) =>
+            {
+                continue;
+            }
+            Err(err) => return Err(CompactionError::Provider(err)),
+        };
+        let mut response = String::new();
+        while let Some(event) = rx.recv().await {
+            match event {
+                archon_llm::streaming::StreamEvent::TextDelta { text, .. } => {
+                    response.push_str(&text);
+                }
+                archon_llm::streaming::StreamEvent::Error {
+                    error_type,
+                    message,
+                } => {
+                    if is_cancelled_stream_error(&error_type, &message) {
+                        return Err(CompactionError::Cancelled);
+                    }
+                    let err = classify_stream_error(provider.name(), &error_type, &message);
+                    if err.is_context_window_exceeded()
+                        && super::summary_text::trim_oldest_safe_api_round(
+                            &mut context_messages,
+                            attempt,
+                        )
+                    {
+                        response.clear();
+                        break;
+                    }
+                    return Err(CompactionError::Provider(err));
+                }
+                _ => {}
+            }
+        }
+        let summary = response.trim();
+        if !summary.is_empty() {
+            return Ok(summary.to_string());
+        }
+    }
+    Err(CompactionError::InvalidSummary(
+        "provider returned empty summary".into(),
+    ))
+}
+
+fn is_cancelled_stream_error(error_type: &str, message: &str) -> bool {
+    let haystack = format!("{error_type} {message}").to_ascii_lowercase();
+    haystack.contains("cancel") || haystack.contains("abort")
+}
+
+pub fn compact_json_messages_apply_with_summary(
+    messages: &[serde_json::Value],
+    action: CompactAction,
+    summary: &str,
 ) -> Result<Vec<serde_json::Value>, CompactionError> {
     let context_messages = to_context_messages(messages);
     if context_messages.len() < 5 {
         return Err(CompactionError::NoSafeBoundary);
     }
-    let summary = synthetic_summary(&context_messages);
+    let summary = if summary.trim().is_empty() {
+        "Context Summary: older conversation messages were compacted."
+    } else {
+        summary
+    };
     let compacted = match action {
         CompactAction::Micro => {
             let (msgs, _) = archon_context::microcompact::microcompact_messages(
                 &context_messages,
-                &summary,
+                summary,
                 archon_context::compact::DEFAULT_PRESERVE_RECENT_TURNS,
             );
             msgs
         }
         CompactAction::Full => {
-            archon_context::compact::compact_messages_default(&context_messages, &summary)
+            archon_context::compact::compact_messages_default(&context_messages, summary)
         }
     };
     Ok(from_context_messages(&compacted))
@@ -252,19 +417,6 @@ fn from_context_messages(
         .collect()
 }
 
-fn synthetic_summary(messages: &[archon_context::messages::ContextMessage]) -> String {
-    let first_user = messages
-        .iter()
-        .find(|m| m.role == "user")
-        .map(|m| m.content.to_string())
-        .unwrap_or_default();
-    format!(
-        "Earlier context was auto-compacted. Preserved task seed: {}. Compacted {} earlier messages.",
-        first_user.chars().take(500).collect::<String>(),
-        messages.len()
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -291,9 +443,22 @@ mod tests {
             (0..5).map(|i| serde_json::json!({"role": "user", "content": format!("recent {i}")})),
         );
 
-        let compacted = compact_json_messages_apply(&messages, CompactAction::Full).unwrap();
+        let compacted =
+            compact_json_messages_apply_with_summary(&messages, CompactAction::Full, "summary")
+                .unwrap();
         assert!(compacted.iter().all(|m| m["role"] != "system"));
         assert_eq!(compacted[1]["content"][1]["id"], "tool-1");
         assert_eq!(compacted[2]["content"][0]["tool_use_id"], "tool-1");
+    }
+
+    #[test]
+    fn successful_compact_resets_failure_counter() {
+        let mut state = AutoCompactState::default();
+        state.on_real_failure();
+        assert_eq!(state.consecutive_failures, 1);
+        state.on_success(123);
+        state.on_real_failure();
+        assert_eq!(state.consecutive_failures, 1);
+        assert!(!state.disabled);
     }
 }

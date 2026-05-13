@@ -84,6 +84,8 @@ async fn app_run_drives_session_end_to_end() {
         btw_tx: None,
         permission_tx: None,
         context_window: 0,
+        context_source: None,
+        context_threshold: 0.80,
         command_catalog: Vec::new(),
     };
 
@@ -119,6 +121,8 @@ async fn app_run_drives_session_end_to_end() {
         let _ = event_tx.send(TuiEvent::TurnComplete {
             input_tokens: 0,
             output_tokens: 0,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
         });
         // Give the loop >= one full poll cycle (250ms) to draw the
         // post-TurnComplete frame before shutting down.

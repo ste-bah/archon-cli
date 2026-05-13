@@ -198,6 +198,8 @@ where
         btw_tx,
         permission_tx,
         context_window,
+        context_source,
+        context_threshold,
         command_catalog,
     } = config;
 
@@ -205,6 +207,9 @@ where
 
     let mut app = App::new();
     app.status.context_window = context_window;
+    app.status.context_name = Some("main".to_string());
+    app.status.resolution_source = context_source;
+    app.status.compact_threshold = context_threshold;
     match splash {
         Some(cfg) => {
             app.splash_model = cfg.model;

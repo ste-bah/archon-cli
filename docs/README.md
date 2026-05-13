@@ -102,6 +102,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Cost, effort, fast mode](operations/cost-effort.md) — token tracking, model selection, latency tuning
 - [Context compaction](operations/context-compaction.md) — automatic and manual compression
 - [Cron & scheduling](operations/cron-scheduling.md) — recurring tasks, one-shot delays
+- [One-shot context handling](operations/one-shot-context.md) — why bounded calls use classification, not compaction
 - [Remote control](operations/remote-control.md) — WebSocket server, SSH, headless mode, and web launch
 - [Troubleshooting](operations/troubleshooting.md) — known issues, recovery procedures
 - [Data locations](operations/data-locations.md) — where logs, configs, memory, snapshots live
@@ -121,6 +122,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v1.2.8](release-notes/v1.2.8.md) — Complete auto-compaction PRD closure: structured summaries, prompt budgets, context UI, and prompt-cache policy
 - [v1.2.7](release-notes/v1.2.7.md) — Resume-state split tool-result repair and configurable context-window catalog
 - [v1.2.6](release-notes/v1.2.6.md) — Symmetric tool-pair repair for Anthropic-shape and Codex Responses providers
 - [v1.2.5](release-notes/v1.2.5.md) — Provider tier alias resolution + Anthropic message sanitizer + pair-safe compaction

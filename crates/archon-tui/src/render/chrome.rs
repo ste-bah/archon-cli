@@ -11,6 +11,7 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::status::ContextWarning;
 use crate::ultrathink;
 
 /// Render the status bar (bottom row, full width).
@@ -18,6 +19,15 @@ pub fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let t = &app.theme;
     let status_bg = t.border;
     let status_text = app.status.format();
+    let status_fg = match app.status.warning_state {
+        ContextWarning::Ok => t.fg,
+        ContextWarning::Warning => Color::Yellow,
+        ContextWarning::Critical => Color::Red,
+    };
+    let status_style = Style::default()
+        .fg(status_fg)
+        .bg(status_bg)
+        .add_modifier(Modifier::BOLD);
 
     let status_line = if app.input.ultrathink.active {
         let mut spans: Vec<ratatui::text::Span<'_>> = Vec::new();
@@ -38,22 +48,10 @@ pub fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .bg(status_bg)
                 .add_modifier(Modifier::BOLD),
         ));
-        spans.push(ratatui::text::Span::styled(
-            status_text,
-            Style::default()
-                .fg(t.fg)
-                .bg(status_bg)
-                .add_modifier(Modifier::BOLD),
-        ));
+        spans.push(ratatui::text::Span::styled(status_text, status_style));
         Line::from(spans)
     } else {
-        Line::from(ratatui::text::Span::styled(
-            status_text,
-            Style::default()
-                .fg(t.fg)
-                .bg(status_bg)
-                .add_modifier(Modifier::BOLD),
-        ))
+        Line::from(ratatui::text::Span::styled(status_text, status_style))
     };
 
     let widget = Paragraph::new(status_line);

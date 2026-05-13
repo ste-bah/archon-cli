@@ -21,6 +21,7 @@ use async_trait::async_trait;
 use archon_memory::{MemoryTrait, MemoryType, SearchFilter};
 
 use crate::leann_searcher::LeannSearcher;
+use crate::prompt_cap::{PromptBudget, PromptLayer, TruncationPriority, truncate_prompt_to_budget};
 use crate::runner::{
     AgentInfo, AgentResult, NextAgent, PipelineFacade, PipelineResult, PipelineSession,
     PipelineType, QualityScore, ToolAccessLevel,
@@ -65,6 +66,7 @@ pub struct ResearchFacade {
     /// that have an active `ArchonConfig` should pass `config.models.anthropic`
     /// via `with_models(..)` so operator overrides apply.
     models: archon_core::config::AnthropicModelsConfig,
+    context: archon_core::config::ContextConfig,
 }
 
 impl ResearchFacade {
@@ -85,6 +87,7 @@ impl ResearchFacade {
             learning: None,
             tui_sender: Mutex::new(None),
             models: archon_core::config::AnthropicModelsConfig::default(),
+            context: archon_core::config::ContextConfig::default(),
         }
     }
 
@@ -106,6 +109,7 @@ impl ResearchFacade {
             learning: Some(Mutex::new(learning)),
             tui_sender: Mutex::new(None),
             models: archon_core::config::AnthropicModelsConfig::default(),
+            context: archon_core::config::ContextConfig::default(),
         }
     }
 
@@ -118,6 +122,11 @@ impl ResearchFacade {
     /// Attach an operator-configured Anthropic model alias map (builder pattern).
     pub fn with_models(mut self, models: archon_core::config::AnthropicModelsConfig) -> Self {
         self.models = models;
+        self
+    }
+
+    pub fn with_context(mut self, context: archon_core::config::ContextConfig) -> Self {
+        self.context = context;
         self
     }
 
@@ -248,6 +257,19 @@ impl PipelineFacade for ResearchFacade {
         Vec<serde_json::Value>,
         Vec<serde_json::Value>,
     )> {
+        self.build_prompt_for_attempt(session, agent, 1).await
+    }
+
+    async fn build_prompt_for_attempt(
+        &self,
+        session: &PipelineSession,
+        agent: &AgentInfo,
+        attempt: u8,
+    ) -> Result<(
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+    )> {
         let research_agent = get_agent_by_key(&agent.key)
             .with_context(|| format!("Unknown research agent key: {}", agent.key))?;
 
@@ -263,6 +285,31 @@ impl PipelineFacade for ResearchFacade {
             &prior_context,
             style,
         );
+        let context_window = archon_llm::context_window::resolve_context_window(
+            &agent.model,
+            self.context
+                .context_window_override
+                .or_else(|| self.context.max_tokens.map(u64::from)),
+            None,
+        )
+        .context_window as usize;
+        let budget = PromptBudget::from_context_config(context_window, &self.context, attempt);
+        let truncated = truncate_prompt_to_budget(
+            vec![PromptLayer {
+                name: "research_prompt".to_string(),
+                content: prompt_text,
+                priority: TruncationPriority::Required,
+                required: true,
+            }],
+            budget.max_prompt_tokens,
+        )
+        .context("research prompt truncation failed")?;
+        let prompt_text = truncated
+            .layers
+            .into_iter()
+            .map(|layer| layer.content)
+            .collect::<Vec<_>>()
+            .join("\n\n");
 
         let messages = vec![serde_json::json!({
             "role": "user",
@@ -564,7 +611,7 @@ mod tests {
         );
         let result_a = make_agent_result("Foundation analysis: AI impacts healthcare deeply.");
         let quality = QualityScore {
-            overall: 0.80,
+            overall: 0.8,
             dimensions: HashMap::new(),
         };
         facade

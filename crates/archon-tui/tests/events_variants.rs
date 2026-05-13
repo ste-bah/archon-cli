@@ -33,6 +33,8 @@ fn turn_complete_variant() {
     let _e = TuiEvent::TurnComplete {
         input_tokens: 100,
         output_tokens: 200,
+        cache_creation_tokens: 0,
+        cache_read_tokens: 0,
     };
 }
 

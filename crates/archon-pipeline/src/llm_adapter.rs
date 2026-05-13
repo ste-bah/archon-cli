@@ -1,6 +1,6 @@
 //! LLM client adapters for the pipeline's [`LlmClient`] trait.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -72,7 +72,6 @@ pub struct ProviderLlmAdapter {
     provider: Arc<dyn LlmProvider>,
     max_tokens: u32,
     request_origin: Option<String>,
-    compact_state: Mutex<archon_core::agent::AutoCompactState>,
 }
 
 impl ProviderLlmAdapter {
@@ -81,7 +80,6 @@ impl ProviderLlmAdapter {
             provider,
             max_tokens: 8192,
             request_origin: Some("pipeline".into()),
-            compact_state: Mutex::new(archon_core::agent::AutoCompactState::default()),
         }
     }
 
@@ -117,72 +115,6 @@ impl ProviderLlmAdapter {
         // passes through.
         requested.to_string()
     }
-
-    fn compact_for_request(
-        &self,
-        messages: Vec<serde_json::Value>,
-        model: &str,
-        force: bool,
-    ) -> Result<Vec<serde_json::Value>> {
-        let window =
-            archon_llm::context_window::resolve_context_window(model, None, Some(&*self.provider))
-                .context_window;
-        let tokens = archon_core::agent::autocompact::estimate_messages_tokens(&messages);
-        let action = if force {
-            Some(archon_core::agent::CompactAction::Full)
-        } else {
-            let state = self
-                .compact_state
-                .lock()
-                .map_err(|_| anyhow::anyhow!("pipeline compaction state lock poisoned"))?;
-            archon_core::agent::evaluate_compaction(tokens, window, &state, 0.80)
-        };
-        let Some(action) = action else {
-            return Ok(messages);
-        };
-
-        {
-            let mut state = self
-                .compact_state
-                .lock()
-                .map_err(|_| anyhow::anyhow!("pipeline compaction state lock poisoned"))?;
-            if !force && !state.should_attempt() {
-                return Ok(messages);
-            }
-            state.compact_in_flight = true;
-        }
-
-        match archon_core::agent::autocompact::compact_json_messages_apply(&messages, action) {
-            Ok(compacted) => {
-                let after = archon_core::agent::autocompact::estimate_messages_tokens(&compacted);
-                self.compact_state
-                    .lock()
-                    .map_err(|_| anyhow::anyhow!("pipeline compaction state lock poisoned"))?
-                    .on_success(after);
-                tracing::info!(
-                    before_tokens = tokens,
-                    after_tokens = after,
-                    force,
-                    "pipeline prompt compacted"
-                );
-                Ok(compacted)
-            }
-            Err(err) => {
-                self.compact_state
-                    .lock()
-                    .map_err(|_| anyhow::anyhow!("pipeline compaction state lock poisoned"))?
-                    .on_real_failure();
-                if force {
-                    Err(anyhow::anyhow!(
-                        "pipeline reactive compaction failed: {err}"
-                    ))
-                } else {
-                    tracing::warn!(error = %err, "pipeline prompt compaction skipped");
-                    Ok(messages)
-                }
-            }
-        }
-    }
 }
 
 #[async_trait]
@@ -195,12 +127,11 @@ impl LlmClient for ProviderLlmAdapter {
         model: &str,
     ) -> Result<LlmResponse> {
         let effective_model = self.model_for_provider(model);
-        let compacted_messages = self.compact_for_request(messages, &effective_model, false)?;
         let request = LlmRequest {
             model: effective_model.clone(),
             max_tokens: self.max_tokens,
             system,
-            messages: compacted_messages,
+            messages,
             tools,
             request_origin: self.request_origin.clone(),
             ..LlmRequest::default()
@@ -208,17 +139,7 @@ impl LlmClient for ProviderLlmAdapter {
 
         let rx = match self.provider.stream(request.clone()).await {
             Ok(rx) => rx,
-            Err(e) if e.is_context_window_exceeded() => {
-                let retry_messages =
-                    self.compact_for_request(request.messages.clone(), &effective_model, true)?;
-                self.provider
-                    .stream(LlmRequest {
-                        messages: retry_messages,
-                        ..request
-                    })
-                    .await
-                    .map_err(anyhow::Error::new)?
-            }
+            Err(e) if e.is_context_window_exceeded() => return Err(anyhow::Error::new(e)),
             Err(e) => return Err(anyhow::anyhow!("LLM API error: {e}")),
         };
 
@@ -401,7 +322,7 @@ mod tests {
         let provider = Arc::new(FakeProvider {
             name: "openai-codex",
             model: "gpt-5.4",
-            context_window: 200_000,
+            context_window: 123_456,
             seen_model: std::sync::Mutex::new(None),
             seen_messages: std::sync::Mutex::new(Vec::new()),
         });
@@ -421,7 +342,7 @@ mod tests {
         let provider = Arc::new(FakeProvider {
             name: "openai-codex",
             model: "gpt-5.4",
-            context_window: 200_000,
+            context_window: 123_456,
             seen_model: std::sync::Mutex::new(None),
             seen_messages: std::sync::Mutex::new(Vec::new()),
         });
@@ -442,7 +363,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn provider_adapter_compacts_prompt_with_shared_lifecycle() {
+    async fn provider_adapter_keeps_prompt_budgeting_out_of_adapter() {
         let provider = Arc::new(FakeProvider {
             name: "openai-codex",
             model: "gpt-5.4",
@@ -457,7 +378,7 @@ mod tests {
             .collect();
 
         let _ = adapter
-            .send_message(messages, Vec::new(), Vec::new(), "gpt-5.4")
+            .send_message(messages.clone(), Vec::new(), Vec::new(), "gpt-5.4")
             .await
             .expect("fake provider response");
 
@@ -466,13 +387,6 @@ mod tests {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
-        assert!(sent.len() < 10);
-        assert!(
-            sent.first()
-                .and_then(|msg| msg.get("content"))
-                .and_then(|content| content.as_str())
-                .unwrap_or_default()
-                .contains("Context Summary")
-        );
+        assert_eq!(sent.len(), messages.len());
     }
 }

@@ -369,15 +369,26 @@ Context-window management.
 ```toml
 [context]
 compact_threshold = 0.8
+preflight_safety_margin = 0.05
+output_reserve_tokens = 8192
 preserve_recent_turns = 3
 prompt_cache = true
+prompt_cache_mode = "explicit"
+prompt_cache_ttl = "5m"
+prompt_cache_conversation = false
 ```
 
 | Field | Default | What / Why |
 |---|---|---|
 | `compact_threshold` | `0.8` | Trigger automatic compaction when context fill ratio crosses 80%. Lower = compact earlier (loses old detail sooner but stays responsive); higher = keep raw turns longer (more cost, smaller context budget for new turns). |
+| `preflight_safety_margin` | `0.05` | Starts proactive compaction before the exact threshold to absorb estimator/provider tokenizer drift. |
+| `context_window_override` | unset | Emergency per-session context-window override. Prefer `context.toml` for provider/model facts. |
+| `output_reserve_tokens` | `8192` | Reserved headroom for the next assistant response; prompt budgeting subtracts this before applying the threshold. |
 | `preserve_recent_turns` | `3` | Always keep the last N turns verbatim across compaction. Keeps the immediate working context intact while older turns get summarized. |
 | `prompt_cache` | `true` | Set Anthropic's `cache_control` flag on static blocks (system prompt, tool catalog, memory briefing). Cache hits are billed at a fraction of input cost; reduces session cost dramatically over long conversations. Disable only if you're hitting cache-correctness bugs. |
+| `prompt_cache_mode` | `"explicit"` | `"explicit"` uses cache breakpoints on stable prompt blocks; `"automatic"` strips explicit hints; `"hybrid"` keeps explicit hints and leaves room for provider-specific automatic caching where supported. |
+| `prompt_cache_ttl` | `"5m"` | Cache lifetime hint for providers that support TTLs. Set `"1h"` only when you accept the higher cache-write cost. |
+| `prompt_cache_conversation` | `false` | Reserved for provider-supported conversation caching. Unsupported providers ignore Anthropic cache hints. |
 
 Model context-window limits live in a separate catalog, not in provider code.
 Archon ships a bundled `context.toml` for Claude, Codex auth, and common
@@ -414,24 +425,28 @@ source = "operator"
 ```
 
 Conditional variants can raise the limit only when a provider identity or beta
-header is active. The bundled catalog uses this for Claude Code's 1M-token
-Sonnet 4.6 and Opus 4.7 limits:
+header is active. Paid-plan Claude Sonnet 4.6 and Opus 4.7 base entries are
+1M-token entries; Claude Code identity variants are kept explicit too:
 
 ```toml
 [providers.anthropic.models."claude-opus-4-7"]
-context_window = 500_000
+context_window = 1_000_000
 
 [providers.anthropic.models."claude-opus-4-7".variants.claude_code]
 context_window = 1_000_000
 requires_identity = "spoof"
 ```
 
-Unknown models resolve to an unknown limit, shown in the TUI as `ctx used/?`.
+Unknown models resolve through the `fallback` source to an unknown limit, shown in the TUI as `ctx used/?`.
 Archon skips proactive threshold compaction when the limit is unknown, but still
 reacts to provider context-window errors.
 
 Use `[context].max_tokens` only as an emergency per-session override; prefer
 `context.toml` when the limit belongs to a provider/model.
+
+Resolution precedence is: `context_window_override`, user/project
+`context.toml`, bundled catalog, provider metadata, then unknown fallback. The
+TUI and `/context` command show the active source label.
 
 ---
 

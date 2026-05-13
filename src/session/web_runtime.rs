@@ -228,6 +228,16 @@ pub(crate) async fn spawn_web_session(
         )));
     let cancel_handle: Arc<std::sync::Mutex<Option<Arc<crate::agent_handle::AgentHandle>>>> =
         Arc::new(std::sync::Mutex::new(None));
+    let context_override = config
+        .context
+        .context_window_override
+        .or_else(|| config.context.max_tokens.map(u64::from));
+    let context_resolution = archon_llm::context_window::resolve_context_window_for_work_dir(
+        &active_model,
+        context_override,
+        Some(provider.as_ref()),
+        Some(&working_dir),
+    );
 
     let cmd_ctx =
         super::slash_context_builder::build(super::slash_context_builder::SlashContextBuildInput {
@@ -235,13 +245,8 @@ pub(crate) async fn spawn_web_session(
             effort_level_shared,
             model_override_shared,
             default_model: active_model.clone(),
-            context_window: archon_llm::context_window::resolve_context_window_for_work_dir(
-                &active_model,
-                config.context.max_tokens.map(u64::from),
-                Some(provider.as_ref()),
-                Some(&working_dir),
-            )
-            .context_window,
+            context_window: context_resolution.context_window,
+            context_source: context_resolution.source.label().to_string(),
             show_thinking,
             session_stats: session_stats_shared,
             permission_mode: permission_mode_shared,

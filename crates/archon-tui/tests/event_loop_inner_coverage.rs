@@ -61,6 +61,8 @@ async fn run_with_backend_walks_wide_event_surface() {
         btw_tx: None,
         permission_tx: None,
         context_window: 0,
+        context_source: None,
+        context_threshold: 0.80,
         command_catalog: Vec::new(),
     };
 
@@ -105,6 +107,8 @@ async fn run_with_backend_walks_wide_event_surface() {
         let _ = event_tx.send(TuiEvent::TurnComplete {
             input_tokens: 50,
             output_tokens: 120,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
         });
         // Theme + accent color + vim + voice + agent info
         let _ = event_tx.send(TuiEvent::SetAccentColor(ratatui::style::Color::Cyan));

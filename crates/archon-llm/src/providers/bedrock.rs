@@ -486,6 +486,11 @@ pub fn parse_bedrock_event(event: &serde_json::Value) -> Vec<StreamEvent> {
 // ---------------------------------------------------------------------------
 
 fn map_http_error(status: u16, body: String) -> LlmError {
+    if let Some(err) =
+        crate::context_window::classify_context_window_body(status, &body, Some("bedrock"), None)
+    {
+        return err;
+    }
     match status {
         400 => LlmError::Server {
             status,
@@ -589,5 +594,19 @@ impl LlmProvider for BedrockProvider {
 
     fn data_flow_classification(&self) -> DataFlowClassification {
         DataFlowClassification::Cloud
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bedrock_token_overflow_maps_to_context_window() {
+        let body = r#"{"__type":"ValidationException","message":"too many input tokens"}"#;
+        assert!(matches!(
+            map_http_error(400, body.to_string()),
+            LlmError::ContextWindowExceeded { .. }
+        ));
     }
 }
