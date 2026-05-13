@@ -14,6 +14,7 @@ serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
+toml.workspace = true
 thiserror.workspace = true
 oauth2.workspace = true
 sha2.workspace = true
@@ -55,8 +56,6 @@ reqwest = { workspace = true, features = ["blocking"] }
 serial_test.workspace = true
 # TASK-AGS-703: wiremock HTTP mock server for OpenAiCompatProvider integration tests.
 wiremock = { workspace = true }
-# TASK-AGS-706: TOML round-trip tests for LlmConfig.
-toml = { workspace = true }
 # TASK-AGS-708: paused-time testing for RetryProvider backoff progression.
 # `features=["full"]` does NOT include `test-util`; add it here.
 tokio = { workspace = true, features = ["test-util"] }

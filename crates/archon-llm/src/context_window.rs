@@ -1,13 +1,19 @@
+use std::path::Path;
+
+use crate::context_catalog::ContextCatalog;
+use crate::identity::IdentityMode;
 use crate::provider::{LlmError, LlmProvider, LlmRequest};
 
-pub const FALLBACK_CONTEXT_WINDOW: u64 = 200_000;
+pub const FALLBACK_CONTEXT_WINDOW: u64 = 0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContextWindowSource {
     ConfigOverride,
+    Catalog,
     ProviderMetadata,
     KnownModel,
     Fallback,
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +106,16 @@ pub fn resolve_context_window(
     override_window: Option<u64>,
     provider: Option<&dyn LlmProvider>,
 ) -> ContextWindowResolution {
+    let cwd = std::env::current_dir().ok();
+    resolve_context_window_for_work_dir(active_model, override_window, provider, cwd.as_deref())
+}
+
+pub fn resolve_context_window_for_work_dir(
+    active_model: &str,
+    override_window: Option<u64>,
+    provider: Option<&dyn LlmProvider>,
+    work_dir: Option<&Path>,
+) -> ContextWindowResolution {
     if let Some(window) = override_window.filter(|w| *w > 0) {
         return ContextWindowResolution {
             model: active_model.to_string(),
@@ -119,6 +135,27 @@ pub fn resolve_context_window(
         })
         .unwrap_or_else(|| active_model.to_string());
 
+    let catalog = ContextCatalog::load(work_dir);
+    let active_betas = active_provider_betas(provider);
+    let active_identity = active_provider_identity(provider);
+    let catalog_entry = provider
+        .and_then(|p| {
+            catalog.lookup(
+                p.name(),
+                &resolved_model,
+                &active_betas,
+                active_identity.as_deref(),
+            )
+        })
+        .or_else(|| catalog.lookup_any(&resolved_model, &active_betas, active_identity.as_deref()));
+    if let Some(entry) = catalog_entry {
+        return ContextWindowResolution {
+            model: resolved_model,
+            context_window: entry.context_window,
+            source: ContextWindowSource::Catalog,
+        };
+    }
+
     if let Some(info) = provider
         .and_then(|p| p.models().into_iter().find(|m| m.id == resolved_model))
         .filter(|m| m.context_window > 0)
@@ -130,32 +167,43 @@ pub fn resolve_context_window(
         };
     }
 
-    if let Some(window) = known_context_window(&resolved_model) {
-        return ContextWindowResolution {
-            model: resolved_model,
-            context_window: window,
-            source: ContextWindowSource::KnownModel,
-        };
-    }
-
     ContextWindowResolution {
         model: resolved_model,
-        context_window: FALLBACK_CONTEXT_WINDOW,
-        source: ContextWindowSource::Fallback,
+        context_window: 0,
+        source: ContextWindowSource::Unknown,
     }
 }
 
-fn known_context_window(model: &str) -> Option<u64> {
-    let m = model.to_ascii_lowercase();
-    if m.contains("claude") || m.contains("gpt-5") {
-        Some(200_000)
-    } else if m.contains("gpt-4o") || m.contains("gpt-4-turbo") {
-        Some(128_000)
-    } else if m.contains("llama") || m.contains("mistral") || m.contains("qwen") {
-        Some(128_000)
-    } else {
-        None
-    }
+fn active_provider_betas(provider: Option<&dyn LlmProvider>) -> Vec<String> {
+    provider
+        .and_then(|p| p.as_anthropic())
+        .and_then(|client| {
+            client
+                .identity()
+                .request_headers("context-window-resolution")
+                .get("anthropic-beta")
+                .cloned()
+        })
+        .map(|header| {
+            header
+                .split(',')
+                .map(str::trim)
+                .filter(|beta| !beta.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn active_provider_identity(provider: Option<&dyn LlmProvider>) -> Option<String> {
+    provider.and_then(|p| {
+        p.as_anthropic()
+            .map(|client| match &client.identity().mode {
+                IdentityMode::Spoof { .. } => "spoof".to_string(),
+                IdentityMode::Clean => "clean".to_string(),
+                IdentityMode::Custom { .. } => "custom".to_string(),
+            })
+    })
 }
 
 #[cfg(test)]

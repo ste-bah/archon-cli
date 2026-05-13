@@ -110,6 +110,10 @@ fn truncate_content(content: &str, target_tokens: usize) -> String {
 
 /// Truncate layers to fit within 80% of `model_context_window`.
 ///
+/// A `model_context_window` of zero means the provider/catalog did not expose a
+/// reliable limit. In that case the function preserves the prompt unchanged;
+/// reactive provider-side compaction still handles hard context-window errors.
+///
 /// Algorithm:
 /// 1. Calculate target = model_context_window * 4 / 5
 /// 2. If total tokens fit, return unchanged.
@@ -121,11 +125,18 @@ pub fn truncate_prompt(
     layers: Vec<PromptLayer>,
     model_context_window: usize,
 ) -> Result<TruncatedPrompt> {
+    let total: usize = layers.iter().map(|l| count_tokens(&l.content)).sum();
+    if model_context_window == 0 {
+        return Ok(TruncatedPrompt {
+            layers,
+            total_tokens: total,
+            removed_layers: Vec::new(),
+            truncated_layers: Vec::new(),
+        });
+    }
     let target = model_context_window * 4 / 5;
 
     // Calculate initial total.
-    let total: usize = layers.iter().map(|l| count_tokens(&l.content)).sum();
-
     if total <= target {
         return Ok(TruncatedPrompt {
             layers,

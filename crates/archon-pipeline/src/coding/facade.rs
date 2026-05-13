@@ -26,13 +26,6 @@ use crate::runner::{
 use archon_core::config::AnthropicModelsConfig;
 
 // ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/// Claude's context window size in tokens.
-const MODEL_CONTEXT_WINDOW: usize = 200_000;
-
-// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -382,8 +375,11 @@ impl PipelineFacade for CodingFacade {
         let layers = self.build_layers(session, agent)?;
 
         // L11: apply prompt_cap truncation
+        let context_window =
+            archon_llm::context_window::resolve_context_window(&agent.model, None, None)
+                .context_window as usize;
         let truncated =
-            truncate_prompt(layers, MODEL_CONTEXT_WINDOW).context("prompt truncation failed")?;
+            truncate_prompt(layers, context_window).context("prompt truncation failed")?;
 
         // Assemble the final prompt from surviving layers
         let assembled: String = truncated

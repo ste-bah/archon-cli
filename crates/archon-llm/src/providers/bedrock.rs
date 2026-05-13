@@ -518,7 +518,7 @@ impl LlmProvider for BedrockProvider {
         vec![ModelInfo {
             id: self.model_id.clone(),
             display_name: self.model_id.clone(),
-            context_window: 200_000,
+            context_window: 0,
         }]
     }
 

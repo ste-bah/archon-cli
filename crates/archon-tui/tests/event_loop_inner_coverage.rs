@@ -60,6 +60,7 @@ async fn run_with_backend_walks_wide_event_surface() {
         splash: None,
         btw_tx: None,
         permission_tx: None,
+        context_window: 0,
         command_catalog: Vec::new(),
     };
 

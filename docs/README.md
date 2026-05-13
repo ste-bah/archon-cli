@@ -121,6 +121,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v1.2.7](release-notes/v1.2.7.md) — Resume-state split tool-result repair and configurable context-window catalog
 - [v1.2.6](release-notes/v1.2.6.md) — Symmetric tool-pair repair for Anthropic-shape and Codex Responses providers
 - [v1.2.5](release-notes/v1.2.5.md) — Provider tier alias resolution + Anthropic message sanitizer + pair-safe compaction
 - [v1.2.4](release-notes/v1.2.4.md) — Metrics provider event tail + ledger activity panel

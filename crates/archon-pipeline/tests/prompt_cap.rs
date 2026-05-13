@@ -79,6 +79,26 @@ fn test_no_truncation_when_under_limit() {
     assert!(result.total_tokens <= (window * 80) / 100);
 }
 
+#[test]
+fn test_unknown_context_window_preserves_prompt() {
+    let layers = vec![
+        make_layer("base_prompt", 10_000, TruncationPriority::Required, true),
+        make_layer(
+            "desc_episodes",
+            5_000,
+            TruncationPriority::DescEpisodes,
+            false,
+        ),
+    ];
+
+    let result = truncate_prompt(layers, 0).expect("zero window should preserve prompt");
+
+    assert_eq!(result.layers.len(), 2);
+    assert!(result.removed_layers.is_empty());
+    assert!(result.truncated_layers.is_empty());
+    assert_eq!(result.total_tokens, 15_000);
+}
+
 // ---------------------------------------------------------------------------
 // 4. Truncation removes lowest-priority layers first
 // ---------------------------------------------------------------------------

@@ -83,6 +83,7 @@ async fn app_run_drives_session_end_to_end() {
         splash: None,
         btw_tx: None,
         permission_tx: None,
+        context_window: 0,
         command_catalog: Vec::new(),
     };
 

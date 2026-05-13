@@ -409,27 +409,27 @@ impl LlmProvider for OpenAiProvider {
             ModelInfo {
                 id: "gpt-4o".to_string(),
                 display_name: "GPT-4o".to_string(),
-                context_window: 128_000,
+                context_window: 0,
             },
             ModelInfo {
                 id: "gpt-4o-mini".to_string(),
                 display_name: "GPT-4o mini".to_string(),
-                context_window: 128_000,
+                context_window: 0,
             },
             ModelInfo {
                 id: "gpt-4-turbo".to_string(),
                 display_name: "GPT-4 Turbo".to_string(),
-                context_window: 128_000,
+                context_window: 0,
             },
             ModelInfo {
                 id: "o1".to_string(),
                 display_name: "o1".to_string(),
-                context_window: 200_000,
+                context_window: 0,
             },
             ModelInfo {
                 id: "o3-mini".to_string(),
                 display_name: "o3-mini".to_string(),
-                context_window: 200_000,
+                context_window: 0,
             },
         ]
     }

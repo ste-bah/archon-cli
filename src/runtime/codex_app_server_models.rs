@@ -3,7 +3,6 @@
 use std::sync::{Arc, RwLock};
 
 use archon_core::config::CodexProviderConfig;
-use archon_llm::context_window::FALLBACK_CONTEXT_WINDOW;
 use archon_llm::provider::ModelInfo;
 
 use super::codex_app_server_rpc::CodexAppServerRpcClient;
@@ -57,14 +56,22 @@ fn parse_model_list(response: &serde_json::Value) -> Vec<ModelInfo> {
 fn parse_model(item: &serde_json::Value) -> Option<ModelInfo> {
     let id = read_string(item, "id").or_else(|| read_string(item, "model"))?;
     let display = read_string(item, "displayName").unwrap_or(id);
-    Some(model_info(id, display))
+    Some(ModelInfo {
+        id: id.to_string(),
+        display_name: display.to_string(),
+        context_window: read_u32(item, "contextWindow")
+            .or_else(|| read_u32(item, "context_window"))
+            .or_else(|| read_u32(item, "maxContextWindow"))
+            .or_else(|| read_u32(item, "max_context_window"))
+            .unwrap_or(0),
+    })
 }
 
 fn model_info(id: &str, display_name: &str) -> ModelInfo {
     ModelInfo {
         id: id.to_string(),
         display_name: display_name.to_string(),
-        context_window: FALLBACK_CONTEXT_WINDOW as u32,
+        context_window: 0,
     }
 }
 
@@ -73,6 +80,13 @@ fn read_string<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
         .get(key)
         .and_then(serde_json::Value::as_str)
         .filter(|text| !text.trim().is_empty())
+}
+
+fn read_u32(value: &serde_json::Value, key: &str) -> Option<u32> {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|n| u32::try_from(n).ok())
 }
 
 #[cfg(test)]

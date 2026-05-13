@@ -95,6 +95,13 @@ pub(super) async fn run(
             effort_level_shared,
             model_override_shared,
             default_model: active_model.clone(),
+            context_window: archon_llm::context_window::resolve_context_window_for_work_dir(
+                &active_model,
+                config.context.max_tokens.map(u64::from),
+                Some(provider.as_ref()),
+                Some(&working_dir),
+            )
+            .context_window,
             show_thinking,
             session_stats: session_stats_shared,
             permission_mode: permission_mode_shared,
@@ -204,7 +211,7 @@ pub(super) async fn run(
         btw_rx,
         tui_event_tx.clone(),
         Arc::clone(&provider),
-        active_model,
+        active_model.clone(),
         config.api.thinking_budget,
         btw_system_prompt,
     );
@@ -228,6 +235,13 @@ pub(super) async fn run(
         splash: splash_opt,
         btw_tx: Some(btw_tx),
         permission_tx: Some(perm_prompt_tx),
+        context_window: archon_llm::context_window::resolve_context_window_for_work_dir(
+            &active_model,
+            config.context.max_tokens.map(u64::from),
+            Some(provider.as_ref()),
+            Some(&working_dir),
+        )
+        .context_window,
         command_catalog,
     })
     .await?;
