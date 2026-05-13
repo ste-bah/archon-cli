@@ -121,6 +121,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v1.2.5](release-notes/v1.2.5.md) — Provider tier alias resolution + Anthropic message sanitizer + pair-safe compaction
 - [v1.2.4](release-notes/v1.2.4.md) — Metrics provider event tail + ledger activity panel
 - [v1.2.3](release-notes/v1.2.3.md) — Browser web workbench for local Archon inspection and operations
 - [v1.2.2](release-notes/v1.2.2.md) — Provider-aware auto-compaction

@@ -310,8 +310,7 @@ impl LlmProvider for CodexProvider {
     fn resolve_alias(&self, alias: &str) -> Option<String> {
         // Map Anthropic-style tier aliases into Codex's namespace using the
         // operator-configurable alias map. Values come from
-        // `[models.openai-codex]` in config.toml at provider construction
-        // time; defaults are in `CodexAliasMap::default()`.
+        // `[models.openai-codex]` in config.toml at provider construction time.
         match alias.trim().to_lowercase().as_str() {
             "opus" => Some(self.aliases.opus.clone()),
             "sonnet" | "default" => Some(self.aliases.sonnet.clone()),
@@ -323,8 +322,9 @@ impl LlmProvider for CodexProvider {
 
     async fn stream(
         &self,
-        request: LlmRequest,
+        mut request: LlmRequest,
     ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
+        self.resolve_request_model(&mut request);
         self.ensure_preflight().await?;
         let body = self.build_request_body(&request)?;
         let response = self.send_with_retry(&body).await?;

@@ -143,7 +143,9 @@ impl LlmProvider for AnthropicProvider {
         }
     }
 
-    async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
+    async fn stream(&self, mut request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
+        self.resolve_request_model(&mut request);
+        request.messages = sanitize_anthropic_messages(request.messages);
         let msg_request = request.into();
         self.client
             .stream_message(msg_request)
@@ -222,5 +224,171 @@ impl LlmProvider for AnthropicProvider {
 
     fn data_flow_classification(&self) -> DataFlowClassification {
         classify_data_flow_endpoint(self.client.api_url())
+    }
+}
+
+fn sanitize_anthropic_messages(messages: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    let mut sanitized = Vec::with_capacity(messages.len());
+    for mut message in messages {
+        normalize_message_role(&mut message);
+        if has_tool_result(&message)
+            && !previous_assistant_has_tool_uses(sanitized.last(), &message)
+        {
+            message = orphan_tool_result_as_text(&message);
+        }
+        sanitized.push(message);
+    }
+    sanitized
+}
+
+fn normalize_message_role(message: &mut serde_json::Value) {
+    let role = message
+        .get("role")
+        .and_then(|v| v.as_str())
+        .unwrap_or("user");
+    if !matches!(role, "user" | "assistant") {
+        message["role"] = serde_json::Value::String("user".into());
+    }
+}
+
+fn has_tool_result(message: &serde_json::Value) -> bool {
+    message
+        .get("content")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .any(|block| block.get("type").and_then(|v| v.as_str()) == Some("tool_result"))
+}
+
+fn previous_assistant_has_tool_uses(
+    previous: Option<&serde_json::Value>,
+    result_message: &serde_json::Value,
+) -> bool {
+    let Some(previous) = previous else {
+        return false;
+    };
+    if previous.get("role").and_then(|v| v.as_str()) != Some("assistant") {
+        return false;
+    }
+    let result_ids = tool_result_ids(result_message);
+    !result_ids.is_empty()
+        && result_ids
+            .iter()
+            .all(|id| assistant_has_tool_use(previous, id))
+}
+
+fn tool_result_ids(message: &serde_json::Value) -> Vec<&str> {
+    message
+        .get("content")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter(|block| block.get("type").and_then(|v| v.as_str()) == Some("tool_result"))
+        .filter_map(|block| block.get("tool_use_id").and_then(|v| v.as_str()))
+        .collect()
+}
+
+fn assistant_has_tool_use(message: &serde_json::Value, id: &str) -> bool {
+    message
+        .get("content")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .any(|block| {
+            block.get("type").and_then(|v| v.as_str()) == Some("tool_use")
+                && block.get("id").and_then(|v| v.as_str()) == Some(id)
+        })
+}
+
+fn orphan_tool_result_as_text(message: &serde_json::Value) -> serde_json::Value {
+    let text = message
+        .get("content")
+        .and_then(|v| v.as_array())
+        .map(|blocks| {
+            blocks
+                .iter()
+                .map(tool_result_block_text)
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_else(|| {
+            message
+                .get("content")
+                .cloned()
+                .unwrap_or_default()
+                .to_string()
+        });
+    serde_json::json!({ "role": "user", "content": text })
+}
+
+fn tool_result_block_text(block: &serde_json::Value) -> String {
+    if block.get("type").and_then(|v| v.as_str()) == Some("tool_result") {
+        let id = block
+            .get("tool_use_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let content = block
+            .get("content")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                block
+                    .get("content")
+                    .cloned()
+                    .unwrap_or_default()
+                    .to_string()
+            });
+        return format!("[Tool result {id}] {content}");
+    }
+    block
+        .get("text")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| block.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitizer_converts_system_messages_to_user() {
+        let messages = sanitize_anthropic_messages(vec![serde_json::json!({
+            "role": "system",
+            "content": "boundary"
+        })]);
+
+        assert_eq!(messages[0]["role"], "user");
+    }
+
+    #[test]
+    fn sanitizer_textifies_orphan_tool_result() {
+        let messages = sanitize_anthropic_messages(vec![serde_json::json!({
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": "tool-1",
+                "content": "failed"
+            }]
+        })]);
+
+        assert_eq!(messages[0]["role"], "user");
+        assert!(messages[0]["content"].as_str().unwrap().contains("tool-1"));
+    }
+
+    #[test]
+    fn sanitizer_preserves_valid_tool_pair() {
+        let messages = sanitize_anthropic_messages(vec![
+            serde_json::json!({
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "tool-1", "name": "Read", "input": {}}]
+            }),
+            serde_json::json!({
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "tool-1", "content": "ok"}]
+            }),
+        ]);
+
+        assert_eq!(messages[1]["content"][0]["type"], "tool_result");
     }
 }

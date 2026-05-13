@@ -1,4 +1,4 @@
-use crate::provider::{LlmError, LlmProvider};
+use crate::provider::{LlmError, LlmProvider, LlmRequest};
 
 pub const FALLBACK_CONTEXT_WINDOW: u64 = 200_000;
 
@@ -109,7 +109,14 @@ pub fn resolve_context_window(
     }
 
     let resolved_model = provider
-        .and_then(|p| p.resolve_alias(active_model))
+        .map(|p| {
+            let mut request = LlmRequest {
+                model: active_model.to_string(),
+                ..LlmRequest::default()
+            };
+            p.resolve_request_model(&mut request);
+            request.model
+        })
         .unwrap_or_else(|| active_model.to_string());
 
     if let Some(info) = provider
