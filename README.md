@@ -166,8 +166,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v1.2.8** ([release notes](docs/release-notes/v1.2.8.md))
+- Current version: **v1.2.9** ([release notes](docs/release-notes/v1.2.9.md))
 - Stable release for local world-model advisory learning, first-class reasoning-quality events, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
+- v1.2.9 corrects the autocompaction trigger to use the current message-list estimate (not cumulative token usage) and converts proactive compaction failures to a soft-fail that falls through to the same turn's normal provider call. Reactive compaction remains fatal.
 - v1.2.8 completes the auto-compaction PRD: provider-backed summaries, per-provider context windows, prompt budgeting, context warning/source UI, and provider-aware prompt-cache policy.
 
 ## Contributing

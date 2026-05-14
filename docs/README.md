@@ -122,6 +122,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v1.2.9](release-notes/v1.2.9.md) — Autocompaction trigger correctness + proactive soft-fail with fall-through; reactive remains fatal
 - [v1.2.8](release-notes/v1.2.8.md) — Complete auto-compaction PRD closure: structured summaries, prompt budgets, context UI, and prompt-cache policy
 - [v1.2.7](release-notes/v1.2.7.md) — Resume-state split tool-result repair and configurable context-window catalog
 - [v1.2.6](release-notes/v1.2.6.md) — Symmetric tool-pair repair for Anthropic-shape and Codex Responses providers
