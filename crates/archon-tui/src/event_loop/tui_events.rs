@@ -44,8 +44,14 @@ pub(super) async fn handle_tui_event(
             // Anthropic pricing: $3/MTok input, $15/MTok output
             app.status.cost +=
                 (input_tokens as f64 * 3.0 + output_tokens as f64 * 15.0) / 1_000_000.0;
-            app.status.context_tokens_used =
-                app.status.context_tokens_used.saturating_add(input_tokens);
+            // Absolute assignment: show current-turn context pressure, not
+            // cumulative session total. Full context = billable input +
+            // cache_creation + cache_read — matches context_input_tokens from
+            // the Anthropic usage response (same value used by the compaction
+            // trigger via last_known_context_tokens in ConversationState).
+            app.status.context_tokens_used = input_tokens
+                .saturating_add(cache_creation_tokens)
+                .saturating_add(cache_read_tokens);
             app.status.cache_creation_tokens = app
                 .status
                 .cache_creation_tokens
