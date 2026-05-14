@@ -158,13 +158,32 @@ async fn test_agent_hook_sets_guard_during_execution() {
 }
 
 /// The AGENT_HOOK_MUTEX ensures only one agent hook runs at a time.
-/// We verify this by spawning two agent hooks on separate tokio tasks
-/// (which can land on different threads, avoiding the thread_local guard
-/// conflict) and checking that total wall-clock time is >= 2s.
+///
+/// We verify this by running two agent hook invocations concurrently and
+/// checking that total wall-clock time is >= 2s (sum of two 1-second hook
+/// sleeps).
+///
+/// Implementation note — why dedicated OS threads, not `tokio::spawn`:
+/// the recursion guard at `crates/archon-core/src/hooks/registry.rs:250`
+/// checks `is_in_hook_agent()`, which reads a **thread_local**
+/// (`IN_HOOK_AGENT`). Tokio tasks can migrate between worker threads,
+/// and tokio's multi-thread scheduler under load can park BOTH spawned
+/// tasks on the same worker. When that happens, hook 1 sets the
+/// thread_local on worker W and `.await`s `sleep 1`; hook 2 then runs on
+/// the same worker W, sees `IN_HOOK_AGENT == true`, and short-circuits
+/// to an empty result — total time ~1s, not 2s, even though the
+/// AGENT_HOOK_MUTEX itself works correctly. This race is reliably
+/// reproducible on Ubuntu CI runners (~2-core sizing) and not on macOS
+/// CI (more workers). Fix in test: give each hook its own dedicated OS
+/// thread + private tokio current-thread runtime so the thread_local is
+/// genuinely independent, isolating the test to the global async
+/// `AGENT_HOOK_MUTEX` it was always intended to exercise.
 #[cfg(unix)]
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn test_agent_hook_mutex_serialization() {
+#[test]
+fn test_agent_hook_mutex_serialization() {
     use std::sync::Arc;
+    use std::thread;
+    use tokio::runtime::Runtime;
 
     // Each hook sleeps for 1 second. If serialized, total >= 2s.
     let mut reg1 = HookRegistry::new();
@@ -180,33 +199,40 @@ async fn test_agent_hook_mutex_serialization() {
 
     let start = Instant::now();
 
-    // Use tokio::spawn to run on separate worker threads so
-    // thread_local IN_HOOK_AGENT doesn't interfere between tasks.
-    let r1_reg = reg1.clone();
-    let h1 = tokio::spawn(async move {
-        r1_reg
-            .execute_hooks(
-                HookEvent::SessionStart,
-                serde_json::json!({}),
-                Path::new("/tmp"),
-                "sess-4a",
-            )
-            .await
+    let r1_reg = Arc::clone(&reg1);
+    let t1 = thread::spawn(move || {
+        Runtime::new()
+            .expect("create tokio runtime for hook 1")
+            .block_on(async move {
+                r1_reg
+                    .execute_hooks(
+                        HookEvent::SessionStart,
+                        serde_json::json!({}),
+                        Path::new("/tmp"),
+                        "sess-4a",
+                    )
+                    .await
+            })
     });
 
-    let r2_reg = reg2.clone();
-    let h2 = tokio::spawn(async move {
-        r2_reg
-            .execute_hooks(
-                HookEvent::SessionStart,
-                serde_json::json!({}),
-                Path::new("/tmp"),
-                "sess-4b",
-            )
-            .await
+    let r2_reg = Arc::clone(&reg2);
+    let t2 = thread::spawn(move || {
+        Runtime::new()
+            .expect("create tokio runtime for hook 2")
+            .block_on(async move {
+                r2_reg
+                    .execute_hooks(
+                        HookEvent::SessionStart,
+                        serde_json::json!({}),
+                        Path::new("/tmp"),
+                        "sess-4b",
+                    )
+                    .await
+            })
     });
 
-    let (r1, r2) = tokio::try_join!(h1, h2).expect("tasks should not panic");
+    let r1 = t1.join().expect("thread 1 panicked");
+    let r2 = t2.join().expect("thread 2 panicked");
 
     let elapsed = start.elapsed();
     assert!(
