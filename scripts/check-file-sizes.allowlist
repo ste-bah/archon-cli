@@ -235,3 +235,14 @@ crates/archon-tui/tests/render_coverage.rs
 # logic is tightly coupled to the provider client/adapter and lives here.
 crates/archon-llm/src/providers/codex/client.rs
 crates/archon-pipeline/src/llm_adapter.rs
+
+# --- v1.3.0 autocompact-trigger + subagent-executor refinements ---
+# runtime.rs (502): grew past 500 from the v1.3.0 trigger-correctness +
+# soft-fail patches plus the API-reported context_input_tokens trigger
+# source (d6d674c, 0ccebfb). Each function still under 50 LoC; the
+# turn-loop is tightly coupled and a structural split is a follow-up.
+crates/archon-core/src/subagent/runner/runtime.rs
+# run.rs (509): grew past 500 from f1e59fd (clear manager entry by
+# manager_id on completion). Cleanup logic lives with the executor's
+# spawn/teardown to keep the lifecycle atomic; split is a follow-up.
+crates/archon-core/src/subagent_executor/run.rs

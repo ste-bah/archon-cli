@@ -103,8 +103,7 @@ fn maybe_auto_compact_uses_last_known_context_tokens_over_estimate() {
     // B) messages-estimate path would be far below threshold → no compaction
     let action_low = evaluate_compaction(50_000, 950_000, &state, 0.80);
     assert_eq!(
-        action_low,
-        None,
+        action_low, None,
         "messages-only estimate below threshold should not trigger"
     );
 
