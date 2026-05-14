@@ -2,6 +2,7 @@ use super::*;
 
 const MICRO_COMPACT_FRACTION: f32 = 0.65;
 const MAX_COMPACT_FAILURES: u32 = 3;
+const COMPACTION_INPUT_BUDGET_BYTES: usize = 320_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactAction {
@@ -299,7 +300,21 @@ pub async fn generate_compaction_summary_structured(
 ) -> Result<String, CompactionError> {
     use crate::commands::build_compact_summary_request;
 
-    let mut context_messages = super::summary_text::to_summary_context_messages(messages);
+    let mut working_messages = messages.to_vec();
+    let dropped = super::summary_text::trim_raw_to_compaction_budget(
+        &mut working_messages,
+        COMPACTION_INPUT_BUDGET_BYTES,
+    );
+    if dropped > 0 {
+        tracing::info!(
+            dropped_messages = dropped,
+            remaining = working_messages.len(),
+            budget_bytes = COMPACTION_INPUT_BUDGET_BYTES,
+            "compaction.pre_trim: bounded summary input"
+        );
+    }
+
+    let mut context_messages = super::summary_text::to_summary_context_messages(&working_messages);
     for attempt in 0..3 {
         let summary_messages = build_compact_summary_request(&context_messages);
         let request_messages: Vec<serde_json::Value> = summary_messages

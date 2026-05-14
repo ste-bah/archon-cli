@@ -5,7 +5,7 @@ use archon_llm::provider::{
     LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature,
 };
 use archon_llm::streaming::StreamEvent;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[test]
 fn json_compaction_does_not_emit_system_role_or_orphan_tool_result() {
@@ -146,6 +146,75 @@ impl LlmProvider for RateLimitedProvider {
     }
 }
 
+struct CapturingSummaryProvider {
+    captured: Arc<Mutex<Option<LlmRequest>>>,
+    summary: String,
+}
+
+impl CapturingSummaryProvider {
+    fn new(captured: Arc<Mutex<Option<LlmRequest>>>, summary: &str) -> Self {
+        Self {
+            captured,
+            summary: summary.to_string(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl LlmProvider for CapturingSummaryProvider {
+    fn name(&self) -> &str {
+        "capturing-summary"
+    }
+
+    fn models(&self) -> Vec<ModelInfo> {
+        vec![]
+    }
+
+    async fn stream(
+        &self,
+        request: LlmRequest,
+    ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
+        *self.captured.lock().expect("capture lock") = Some(request);
+        let (tx, rx) = tokio::sync::mpsc::channel(2);
+        tx.send(StreamEvent::TextDelta {
+            index: 0,
+            text: self.summary.clone(),
+        })
+        .await
+        .expect("send summary text");
+        tx.send(StreamEvent::MessageStop)
+            .await
+            .expect("send message stop");
+        Ok(rx)
+    }
+
+    async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
+        unreachable!("compaction summaries use streaming")
+    }
+
+    fn supports_feature(&self, _feature: ProviderFeature) -> bool {
+        false
+    }
+}
+
+fn serialized_request_len(request: &LlmRequest) -> usize {
+    serde_json::to_vec(&serde_json::json!({
+        "model": &request.model,
+        "max_tokens": request.max_tokens,
+        "system": &request.system,
+        "messages": &request.messages,
+        "tools": &request.tools,
+        "thinking": &request.thinking,
+        "speed": &request.speed,
+        "effort": &request.effort,
+        "extra": &request.extra,
+        "request_origin": &request.request_origin,
+        "reasoning_encrypted": &request.reasoning_encrypted,
+    }))
+    .expect("serialize request envelope")
+    .len()
+}
+
 fn test_agent() -> Agent {
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     Agent::new(
@@ -157,6 +226,37 @@ fn test_agent() -> Agent {
             &std::env::temp_dir(),
         ))),
     )
+}
+
+#[tokio::test]
+async fn generate_compaction_summary_pre_trims_huge_history_bounds_body() {
+    let captured: Arc<Mutex<Option<LlmRequest>>> = Arc::new(Mutex::new(None));
+    let provider = CapturingSummaryProvider::new(Arc::clone(&captured), "Synthesised summary.");
+    let messages: Vec<serde_json::Value> = (0..200)
+        .map(|i| {
+            serde_json::json!({
+                "role": if i % 2 == 0 { "user" } else { "assistant" },
+                "content": "x".repeat(10_000),
+            })
+        })
+        .collect();
+
+    let summary = generate_compaction_summary_structured(&provider, "claude-opus-4-7", &messages)
+        .await
+        .expect("summary should succeed");
+
+    assert_eq!(summary, "Synthesised summary.");
+    let request = captured
+        .lock()
+        .expect("capture lock")
+        .clone()
+        .expect("provider should capture request");
+    let body_len = serialized_request_len(&request);
+    assert!(
+        body_len <= 2 * COMPACTION_INPUT_BUDGET_BYTES,
+        "captured compaction body should be bounded near {COMPACTION_INPUT_BUDGET_BYTES}; got {}",
+        body_len
+    );
 }
 
 #[tokio::test]

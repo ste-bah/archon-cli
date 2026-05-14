@@ -21,6 +21,58 @@ pub(super) fn to_summary_context_messages(messages: &[Value]) -> Vec<ContextMess
         .collect()
 }
 
+pub(super) fn estimate_raw_message_bytes(message: &Value) -> usize {
+    let content = message.get("content").unwrap_or(&Value::Null);
+    textualize_content(content).len()
+}
+
+pub(super) fn trim_raw_to_compaction_budget(
+    messages: &mut Vec<Value>,
+    budget_bytes: usize,
+) -> usize {
+    if messages.len() <= 5 {
+        return 0;
+    }
+    let estimated: Vec<usize> = messages.iter().map(estimate_raw_message_bytes).collect();
+    let total: usize = estimated.iter().sum();
+    if total <= budget_bytes {
+        return 0;
+    }
+
+    let max_drop = messages.len().saturating_sub(5);
+    if max_drop == 0 {
+        return 0;
+    }
+    let overage = total - budget_bytes;
+    let mut accumulated = 0usize;
+    let mut requested = 0usize;
+    for bytes in estimated {
+        accumulated += bytes;
+        requested += 1;
+        if accumulated >= overage || requested >= max_drop {
+            break;
+        }
+    }
+
+    let requested = requested.min(max_drop).max(1);
+    let Some(drop_count) = raw_safe_api_round_drop_count(messages, requested, max_drop) else {
+        return 0;
+    };
+    messages.drain(0..drop_count);
+
+    let remaining_bytes: usize = messages.iter().map(estimate_raw_message_bytes).sum();
+    if remaining_bytes > budget_bytes {
+        tracing::warn!(
+            remaining_bytes,
+            budget_bytes,
+            dropped = drop_count,
+            messages_remaining = messages.len(),
+            "compaction.pre_trim: budget exceeded - last-5-message floor binds"
+        );
+    }
+    drop_count
+}
+
 pub(super) fn trim_oldest_safe_api_round(
     messages: &mut Vec<ContextMessage>,
     attempt: usize,
@@ -45,6 +97,26 @@ fn safe_api_round_drop_count(
     (requested..=max_drop)
         .chain((1..requested).rev())
         .find(|&candidate| candidate > 0 && !starts_with_tool_result(messages, candidate))
+}
+
+fn raw_safe_api_round_drop_count(
+    messages: &[Value],
+    requested: usize,
+    max_drop: usize,
+) -> Option<usize> {
+    (requested..=max_drop)
+        .chain((1..requested).rev())
+        .find(|&candidate| candidate > 0 && !raw_starts_with_tool_result(messages, candidate))
+}
+
+fn raw_starts_with_tool_result(messages: &[Value], index: usize) -> bool {
+    let Some(message) = messages.get(index) else {
+        return false;
+    };
+    if message.get("role").and_then(Value::as_str) != Some("user") {
+        return false;
+    }
+    message.get("content").is_some_and(content_has_tool_result)
 }
 
 fn starts_with_tool_result(messages: &[ContextMessage], index: usize) -> bool {
@@ -194,5 +266,72 @@ mod tests {
 
         assert!(trim_oldest_safe_api_round(&mut messages, 0));
         assert!(!starts_with_tool_result(&messages, 0));
+    }
+
+    #[test]
+    fn trim_raw_to_compaction_budget_caps_total_below_budget() {
+        let mut messages: Vec<Value> = (0..10)
+            .map(|i| {
+                serde_json::json!({
+                    "role": if i % 2 == 0 { "user" } else { "assistant" },
+                    "content": "x".repeat(10_000),
+                })
+            })
+            .collect();
+
+        let dropped = trim_raw_to_compaction_budget(&mut messages, 50_000);
+
+        assert_eq!(dropped, 5);
+        let remaining: usize = messages.iter().map(estimate_raw_message_bytes).sum();
+        assert!(remaining <= 50_000, "remaining bytes: {remaining}");
+        assert_eq!(messages.len(), 5);
+    }
+
+    #[test]
+    fn trim_raw_to_compaction_budget_noops_when_within_budget() {
+        let mut messages: Vec<Value> = (0..5)
+            .map(|_| serde_json::json!({"role": "user", "content": "small"}))
+            .collect();
+
+        let dropped = trim_raw_to_compaction_budget(&mut messages, 100_000);
+
+        assert_eq!(dropped, 0);
+        assert_eq!(messages.len(), 5);
+    }
+
+    #[test]
+    fn trim_raw_to_compaction_budget_respects_short_conversation_floor() {
+        let mut messages: Vec<Value> = (0..3)
+            .map(|_| serde_json::json!({"role": "user", "content": "x".repeat(1_000_000)}))
+            .collect();
+
+        let dropped = trim_raw_to_compaction_budget(&mut messages, 1_000);
+
+        assert_eq!(dropped, 0);
+        assert_eq!(messages.len(), 3);
+    }
+
+    #[test]
+    fn trim_raw_to_compaction_budget_skips_real_tool_result_boundary() {
+        let mut messages: Vec<Value> = vec![
+            serde_json::json!({"role": "user", "content": "x".repeat(50_000)}),
+            serde_json::json!({"role": "assistant", "content": "x".repeat(50_000)}),
+            serde_json::json!({"role": "user", "content": "x".repeat(50_000)}),
+            serde_json::json!({
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "call_1", "content": "result"}
+                ]
+            }),
+            serde_json::json!({"role": "assistant", "content": "x".repeat(50_000)}),
+            serde_json::json!({"role": "user", "content": "x".repeat(50_000)}),
+            serde_json::json!({"role": "assistant", "content": "x".repeat(50_000)}),
+            serde_json::json!({"role": "user", "content": "x".repeat(50_000)}),
+        ];
+
+        let dropped = trim_raw_to_compaction_budget(&mut messages, 225_000);
+
+        assert_eq!(dropped, 2);
+        assert!(!raw_starts_with_tool_result(&messages, 0));
     }
 }
