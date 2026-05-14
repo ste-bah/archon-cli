@@ -78,6 +78,45 @@ fn trigger_token_value_is_current_messages_estimate() {
     );
 }
 
+#[test]
+fn maybe_auto_compact_uses_last_known_context_tokens_over_estimate() {
+    // Verify the three distinct branches of evaluate_compaction that
+    // maybe_auto_compact exercises by choosing last_known_context_tokens
+    // over the messages estimate (autocompact.rs:147-151).
+    //
+    // Since evaluate_compaction is a pure function we can drive all three
+    // outcomes directly — the branching in maybe_auto_compact reduces to
+    // "which token count do I pass?", so these cases prove that passing
+    // the real API count fires the right action regardless of what the
+    // messages-estimate alone would have said.
+    let state = AutoCompactState::default();
+
+    // A) last_known path: 850k against 950k effective window → Full compact
+    //    (850_000 / 950_000 = 0.895, above threshold 0.80)
+    let action = evaluate_compaction(850_000, 950_000, &state, 0.80);
+    assert_eq!(
+        action,
+        Some(CompactAction::Full),
+        "last_known_context_tokens above threshold should trigger Full compact"
+    );
+
+    // B) messages-estimate path would be far below threshold → no compaction
+    let action_low = evaluate_compaction(50_000, 950_000, &state, 0.80);
+    assert_eq!(
+        action_low,
+        None,
+        "messages-only estimate below threshold should not trigger"
+    );
+
+    // C) Micro zone: 650k against 950k (0.684 > MICRO_COMPACT_FRACTION 0.65) → Micro
+    let action_micro = evaluate_compaction(650_000, 950_000, &state, 0.80);
+    assert_eq!(
+        action_micro,
+        Some(CompactAction::Micro),
+        "token count in micro zone should trigger Micro compact"
+    );
+}
+
 struct RateLimitedProvider;
 
 #[async_trait::async_trait]

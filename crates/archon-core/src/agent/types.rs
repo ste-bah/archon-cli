@@ -228,9 +228,17 @@ pub struct ConversationState {
     pub messages: Vec<serde_json::Value>,
     pub mode: AgentMode,
     /// Cumulative provider input tokens for billing/telemetry only.
-    /// Auto-compaction triggers use the current messages estimate instead.
+    /// Auto-compaction triggers use last_known_context_tokens instead.
     pub total_input_tokens: u64,
     pub total_output_tokens: u64,
+    /// Last API-reported full context size for this turn.
+    /// Equals `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`
+    /// from the Anthropic usage response — includes system prompt, tool schemas,
+    /// memory injections, and messages. Used as the authoritative compaction trigger
+    /// source. Falls back to `trigger_tokens(messages)` estimate when zero — on
+    /// turn 1, after `/clear`, or transiently after a successful compaction (until
+    /// the next API response repopulates it).
+    pub last_known_context_tokens: u64,
     pub auto_compact: crate::agent::AutoCompactState,
 }
 
@@ -241,6 +249,7 @@ impl Default for ConversationState {
             mode: AgentMode::Normal,
             total_input_tokens: 0,
             total_output_tokens: 0,
+            last_known_context_tokens: 0,
             auto_compact: crate::agent::AutoCompactState::default(),
         }
     }

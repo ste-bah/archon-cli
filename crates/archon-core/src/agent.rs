@@ -394,8 +394,9 @@ impl Agent {
             let turn_cache_creation = usage_acc.cache_creation_input_tokens;
             let turn_cache_read = usage_acc.cache_read_input_tokens;
             let turn_output_tokens = usage_acc.output_tokens;
-            // Billing-only accumulator; compaction triggers on current messages.
+            // Billing-only accumulator. last_known_context_tokens carries the authoritative trigger value.
             self.state.total_input_tokens += usage_acc.context_input_tokens;
+            self.state.last_known_context_tokens = usage_acc.context_input_tokens;
             self.state.total_output_tokens += turn_output_tokens;
 
             let mut assistant_content: Vec<serde_json::Value> = Vec::new();

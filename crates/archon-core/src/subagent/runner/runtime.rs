@@ -28,6 +28,7 @@ impl SubagentRunner {
         let deadline = started + Duration::from_secs(self.timeout_secs);
         let mut auto_compact = crate::agent::AutoCompactState::default();
         let mut cumulative_billable_tokens = 0_u64;
+        let mut last_known_context_tokens = 0_u64;
         let mut reactive_overflow_retried = false;
 
         for turn in 0..self.max_turns {
@@ -117,7 +118,11 @@ impl SubagentRunner {
                 - self.agent_config.context.preflight_safety_margin)
                 .max(0.0);
             if let Some(action) = crate::agent::evaluate_compaction(
-                crate::agent::autocompact::trigger_tokens(&messages),
+                if last_known_context_tokens > 0 {
+                    last_known_context_tokens
+                } else {
+                    crate::agent::autocompact::trigger_tokens(&messages)
+                },
                 effective_window,
                 &auto_compact,
                 threshold,
@@ -140,6 +145,7 @@ impl SubagentRunner {
                         compacted,
                     )) => {
                         messages = compacted;
+                        last_known_context_tokens = 0;
                         auto_compact.on_success(after_estimated_tokens);
                     }
                     Ok((crate::agent::autocompact::CompactionOutcome::Skipped { .. }, _)) => {
@@ -206,6 +212,7 @@ impl SubagentRunner {
                             crate::agent::autocompact::estimate_messages_tokens(&messages)
                         }
                     };
+                    last_known_context_tokens = 0;
                     auto_compact.on_success(after_current_tokens);
                     self.provider
                         .stream(LlmRequest {
@@ -302,6 +309,7 @@ impl SubagentRunner {
                                     ..
                                 } => crate::agent::autocompact::estimate_messages_tokens(&messages),
                             };
+                            last_known_context_tokens = 0;
                             auto_compact.on_success(after_current_tokens);
                             retry_after_compact = true;
                             break;
@@ -340,6 +348,7 @@ impl SubagentRunner {
             }
             reactive_overflow_retried = false;
             cumulative_billable_tokens += usage_acc.context_input_tokens;
+            last_known_context_tokens = usage_acc.context_input_tokens;
             tracing::trace!(cumulative_billable_tokens, "subagent billable input tokens");
 
             // If no tool calls, subagent is done — return accumulated text

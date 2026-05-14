@@ -6,6 +6,7 @@ impl Agent {
         self.state.messages.clear();
         self.state.total_input_tokens = 0;
         self.state.total_output_tokens = 0;
+        self.state.last_known_context_tokens = 0;
         self.turn_number = 0;
         self.memory_injector.invalidate_cache();
         // Reset shared session stats so /status and /cost reflect the cleared state
@@ -32,6 +33,7 @@ impl Agent {
         self.state.messages.clear();
         self.state.total_input_tokens = 0;
         self.state.total_output_tokens = 0;
+        self.state.last_known_context_tokens = 0;
         self.turn_number = 0;
         self.memory_injector.invalidate_cache();
         let stats = self.session_stats.clone();
@@ -91,7 +93,11 @@ impl Agent {
         }
 
         let message_count = context_msgs.len();
-        let before_tokens: u64 = context_msgs.iter().map(|m| m.estimated_tokens).sum();
+        let before_tokens: u64 = if self.state.last_known_context_tokens > 0 {
+            self.state.last_known_context_tokens
+        } else {
+            context_msgs.iter().map(|m| m.estimated_tokens).sum()
+        };
 
         // Resolve the effective strategy.
         // "auto" (or no subcommand) uses select_strategy based on context usage ratio.
@@ -221,6 +227,9 @@ impl Agent {
                 })
             })
             .collect();
+        // Reset stale API context telemetry — matches the fix in autocompact.rs:202.
+        // The next API response will repopulate last_known_context_tokens authoritatively.
+        self.state.last_known_context_tokens = 0;
         // Invalidate memory cache since context changed
         self.memory_injector.invalidate_cache();
 

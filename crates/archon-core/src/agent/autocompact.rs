@@ -144,7 +144,11 @@ impl Agent {
         active_model: &str,
     ) -> Result<(), AgentLoopError> {
         let window = self.context_window_for(active_model);
-        let tokens = trigger_tokens(&self.state.messages);
+        let tokens = if self.state.last_known_context_tokens > 0 {
+            self.state.last_known_context_tokens
+        } else {
+            trigger_tokens(&self.state.messages)
+        };
         let effective_window = window.saturating_sub(self.config.context.output_reserve_tokens);
         let threshold = (self.config.context.compact_threshold
             - self.config.context.preflight_safety_margin)
@@ -195,6 +199,7 @@ impl Agent {
                 compacted,
             )) => {
                 self.state.messages = compacted;
+                self.state.last_known_context_tokens = 0;
                 self.memory_injector.invalidate_cache();
                 self.state.auto_compact.on_success(after_estimated_tokens);
                 self.send_event(AgentEvent::CompactionTriggered).await;
