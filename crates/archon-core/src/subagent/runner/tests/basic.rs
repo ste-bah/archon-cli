@@ -50,6 +50,67 @@ async fn api_error_propagated() {
     assert!(err.to_string().contains("internal failure"));
 }
 
+#[derive(Default)]
+struct CompactionFailsProvider {
+    origins: std::sync::Mutex<Vec<String>>,
+}
+
+#[async_trait::async_trait]
+impl LlmProvider for CompactionFailsProvider {
+    fn name(&self) -> &str {
+        "compaction-fails"
+    }
+    fn models(&self) -> Vec<ModelInfo> {
+        vec![]
+    }
+    fn supports_feature(&self, _: ProviderFeature) -> bool {
+        false
+    }
+
+    async fn stream(
+        &self,
+        request: LlmRequest,
+    ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, archon_llm::provider::LlmError> {
+        let origin = request.request_origin.unwrap_or_else(|| "unknown".into());
+        self.origins.lock().unwrap().push(origin.clone());
+        if origin == "compaction_summary" {
+            return Err(archon_llm::provider::LlmError::RateLimited {
+                retry_after_secs: 30,
+            });
+        }
+        let events = text_response("survived");
+        let (tx, rx) = mpsc::channel(events.len() + 1);
+        for event in events {
+            let _ = tx.send(event).await;
+        }
+        Ok(rx)
+    }
+
+    async fn complete(
+        &self,
+        _request: LlmRequest,
+    ) -> Result<LlmResponse, archon_llm::provider::LlmError> {
+        unimplemented!()
+    }
+}
+
+#[tokio::test]
+async fn proactive_compaction_failure_falls_through_same_turn() {
+    let provider = Arc::new(CompactionFailsProvider::default());
+    let mut config = AgentConfig::default();
+    config.context.context_window_override = Some(100);
+    config.context.output_reserve_tokens = 0;
+    config.context.compact_threshold = 0.01;
+    config.context.preflight_safety_margin = 0.0;
+    let runner = make_runner_with_config(provider.clone(), 5, config);
+
+    let result = runner.run("trigger compact, then answer").await.unwrap();
+
+    assert_eq!(result, "survived");
+    let origins = provider.origins.lock().unwrap().clone();
+    assert_eq!(origins, vec!["compaction_summary", "subagent"]);
+}
+
 #[tokio::test]
 async fn isolated_messages() {
     // Verify that each run starts with fresh messages

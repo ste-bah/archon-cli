@@ -105,6 +105,10 @@ pub fn estimate_messages_tokens(messages: &[serde_json::Value]) -> u64 {
     messages.iter().map(estimate_message_tokens).sum()
 }
 
+pub(crate) fn trigger_tokens(messages: &[serde_json::Value]) -> u64 {
+    estimate_messages_tokens(messages)
+}
+
 pub fn classify_stream_error(
     provider: &str,
     error_type: &str,
@@ -140,10 +144,7 @@ impl Agent {
         active_model: &str,
     ) -> Result<(), AgentLoopError> {
         let window = self.context_window_for(active_model);
-        let tokens = self
-            .state
-            .total_input_tokens
-            .max(estimate_messages_tokens(&self.state.messages));
+        let tokens = trigger_tokens(&self.state.messages);
         let effective_window = window.saturating_sub(self.config.context.output_reserve_tokens);
         let threshold = (self.config.context.compact_threshold
             - self.config.context.preflight_safety_margin)
@@ -194,7 +195,6 @@ impl Agent {
                 compacted,
             )) => {
                 self.state.messages = compacted;
-                self.state.total_input_tokens = after_estimated_tokens;
                 self.memory_injector.invalidate_cache();
                 self.state.auto_compact.on_success(after_estimated_tokens);
                 self.send_event(AgentEvent::CompactionTriggered).await;
@@ -202,6 +202,28 @@ impl Agent {
             }
             Ok((CompactionOutcome::Skipped { .. }, _)) => {
                 self.state.auto_compact.on_cancel();
+                Ok(())
+            }
+            Err(CompactionError::Cancelled) if !force => {
+                self.state.auto_compact.on_cancel();
+                tracing::debug!(
+                    compaction.outcome = "cancelled",
+                    actor = "main",
+                    "proactive auto-compaction cancelled; continuing turn"
+                );
+                Ok(())
+            }
+            Err(err) if !force => {
+                self.state.auto_compact.on_real_failure();
+                let consecutive_failures = self.state.auto_compact.consecutive_failures;
+                tracing::warn!(
+                    compaction.outcome = "auto_failed",
+                    actor = "main",
+                    consecutive_failures,
+                    breaker_tripped = self.state.auto_compact.disabled,
+                    error = %err,
+                    "proactive auto-compaction failed; continuing turn"
+                );
                 Ok(())
             }
             Err(err) => {
@@ -438,57 +460,5 @@ fn from_context_messages(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn json_compaction_does_not_emit_system_role_or_orphan_tool_result() {
-        let mut messages: Vec<serde_json::Value> = (0..4)
-            .map(|i| serde_json::json!({"role": "user", "content": format!("old {i}")}))
-            .collect();
-        messages.push(serde_json::json!({
-            "role": "assistant",
-            "content": [
-                {"type": "text", "text": "calling"},
-                {"type": "tool_use", "id": "tool-1", "name": "Bash", "input": {}}
-            ]
-        }));
-        messages.push(serde_json::json!({
-            "role": "user",
-            "content": [
-                {"type": "tool_result", "tool_use_id": "tool-1", "content": "ok"}
-            ]
-        }));
-        messages.extend(
-            (0..5).map(|i| serde_json::json!({"role": "user", "content": format!("recent {i}")})),
-        );
-
-        let compacted =
-            compact_json_messages_apply_with_summary(&messages, CompactAction::Full, "summary")
-                .unwrap();
-        assert!(compacted.iter().all(|m| m["role"] != "system"));
-        assert_eq!(compacted[1]["content"][1]["id"], "tool-1");
-        assert_eq!(compacted[2]["content"][0]["tool_use_id"], "tool-1");
-    }
-
-    #[test]
-    fn successful_compact_resets_failure_counter() {
-        let mut state = AutoCompactState::default();
-        state.on_real_failure();
-        assert_eq!(state.consecutive_failures, 1);
-        state.on_success(123);
-        state.on_real_failure();
-        assert_eq!(state.consecutive_failures, 1);
-        assert!(!state.disabled);
-    }
-
-    #[test]
-    fn cancelled_stream_classification_is_specific() {
-        assert!(is_cancelled_stream_error("request_cancelled", ""));
-        assert!(is_cancelled_stream_error("", "operation cancelled by user"));
-        assert!(!is_cancelled_stream_error(
-            "http_error",
-            "request aborted by upstream proxy"
-        ));
-    }
-}
+#[path = "autocompact_tests.rs"]
+mod tests;

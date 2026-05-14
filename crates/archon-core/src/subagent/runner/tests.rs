@@ -141,6 +141,14 @@ fn tool_use_response(tool_id: &str, tool_name: &str, input_json: &str) -> Vec<St
 }
 
 fn make_runner(provider: Arc<dyn LlmProvider>, max_turns: u32) -> SubagentRunner {
+    make_runner_with_config(provider, max_turns, AgentConfig::default())
+}
+
+fn make_runner_with_config(
+    provider: Arc<dyn LlmProvider>,
+    max_turns: u32,
+    agent_config: AgentConfig,
+) -> SubagentRunner {
     let registry = Arc::new(crate::dispatch::create_default_registry(
         std::env::current_dir().unwrap_or_default(),
         None,
@@ -162,7 +170,7 @@ fn make_runner(provider: Arc<dyn LlmProvider>, max_turns: u32) -> SubagentRunner
         "mock-model".into(),
         max_turns,
         300,
-        Arc::new(AgentConfig::default()),
+        Arc::new(agent_config),
         Arc::new(IdentityProvider::new(
             IdentityMode::Clean,
             "test".into(),

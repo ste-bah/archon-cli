@@ -227,6 +227,8 @@ impl Default for AgentConfig {
 pub struct ConversationState {
     pub messages: Vec<serde_json::Value>,
     pub mode: AgentMode,
+    /// Cumulative provider input tokens for billing/telemetry only.
+    /// Auto-compaction triggers use the current messages estimate instead.
     pub total_input_tokens: u64,
     pub total_output_tokens: u64,
     pub auto_compact: crate::agent::AutoCompactState,

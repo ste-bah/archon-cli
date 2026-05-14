@@ -319,7 +319,9 @@ mod tests {
             &self,
             _request: LlmRequest,
         ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
-            Err(LlmError::Http("summary provider down".into()))
+            Err(LlmError::RateLimited {
+                retry_after_secs: 30,
+            })
         }
 
         async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
@@ -354,6 +356,7 @@ mod tests {
         let status = agent.compact(Some("micro")).await;
 
         assert!(status.contains("Compaction failed: provider summary failed"));
+        assert!(status.contains("rate limited: retry after 30s"));
         assert!(!status.contains("Compacted conversation"));
         assert_eq!(agent.state.messages.len(), 6);
     }

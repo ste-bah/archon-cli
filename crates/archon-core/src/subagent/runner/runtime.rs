@@ -27,7 +27,7 @@ impl SubagentRunner {
         let started = Instant::now();
         let deadline = started + Duration::from_secs(self.timeout_secs);
         let mut auto_compact = crate::agent::AutoCompactState::default();
-        let mut local_input_tokens = crate::agent::autocompact::estimate_messages_tokens(&messages);
+        let mut cumulative_billable_tokens = 0_u64;
         let mut reactive_overflow_retried = false;
 
         for turn in 0..self.max_turns {
@@ -57,9 +57,6 @@ impl SubagentRunner {
                 return Ok("[Agent shutdown requested]".to_string());
             }
 
-            // Assemble system blocks: billing header (spoof mode) →
-            // agent body → critical system reminder (AGT-022).
-            // Order matters for prompt-cache breakpoints (v0.1.19).
             let first_user_message = messages
                 .first()
                 .and_then(|m| m.get("content"))
@@ -68,11 +65,6 @@ impl SubagentRunner {
 
             let mut system: Vec<serde_json::Value> = Vec::new();
 
-            // Billing header prepend aligns subagent with parent when
-            // IdentityMode::Spoof is active — without this, Anthropic
-            // 429s the request (project-zero billing-marker check).
-            // IdentityMode::Clean returns None from billing_header(),
-            // so the block is only pushed in spoof mode.
             if let Some(billing) = self.identity.billing_header(first_user_message) {
                 system.push(serde_json::json!({
                     "type": "text",
@@ -125,9 +117,7 @@ impl SubagentRunner {
                 - self.agent_config.context.preflight_safety_margin)
                 .max(0.0);
             if let Some(action) = crate::agent::evaluate_compaction(
-                local_input_tokens.max(crate::agent::autocompact::estimate_messages_tokens(
-                    &messages,
-                )),
+                crate::agent::autocompact::trigger_tokens(&messages),
                 effective_window,
                 &auto_compact,
                 threshold,
@@ -150,15 +140,27 @@ impl SubagentRunner {
                         compacted,
                     )) => {
                         messages = compacted;
-                        local_input_tokens = after_estimated_tokens;
                         auto_compact.on_success(after_estimated_tokens);
                     }
                     Ok((crate::agent::autocompact::CompactionOutcome::Skipped { .. }, _)) => {
                         auto_compact.on_cancel();
                     }
+                    Err(crate::agent::autocompact::CompactionError::Cancelled) => {
+                        auto_compact.on_cancel();
+                        tracing::debug!(
+                            compaction.outcome = "cancelled", actor = %self.activity_actor_id
+                                .as_deref().unwrap_or("subagent"), "proactive subagent compaction cancelled"
+                        );
+                    }
                     Err(e) => {
                         auto_compact.on_real_failure();
-                        anyhow::bail!("subagent compaction failed: {e}");
+                        tracing::warn!(
+                            compaction.outcome = "auto_failed", actor = %self.activity_actor_id
+                                .as_deref().unwrap_or("subagent"), consecutive_failures =
+                                auto_compact.consecutive_failures, breaker_tripped =
+                                auto_compact.disabled, error = %e,
+                            "proactive subagent compaction failed; continuing turn",
+                        );
                     }
                 }
             }
@@ -195,7 +197,7 @@ impl SubagentRunner {
                             anyhow::anyhow!("reactive subagent compaction failed: {err}")
                         })?;
                     messages = compacted;
-                    local_input_tokens = match outcome {
+                    let after_current_tokens = match outcome {
                         crate::agent::autocompact::CompactionOutcome::Compacted {
                             after_estimated_tokens,
                             ..
@@ -204,7 +206,7 @@ impl SubagentRunner {
                             crate::agent::autocompact::estimate_messages_tokens(&messages)
                         }
                     };
-                    auto_compact.on_success(local_input_tokens);
+                    auto_compact.on_success(after_current_tokens);
                     self.provider
                         .stream(LlmRequest {
                             messages: messages.clone(),
@@ -291,7 +293,7 @@ impl SubagentRunner {
                                     anyhow::anyhow!("reactive subagent compaction failed: {e}")
                                 })?;
                             messages = compacted;
-                            local_input_tokens = match outcome {
+                            let after_current_tokens = match outcome {
                                 crate::agent::autocompact::CompactionOutcome::Compacted {
                                     after_estimated_tokens,
                                     ..
@@ -300,7 +302,7 @@ impl SubagentRunner {
                                     ..
                                 } => crate::agent::autocompact::estimate_messages_tokens(&messages),
                             };
-                            auto_compact.on_success(local_input_tokens);
+                            auto_compact.on_success(after_current_tokens);
                             retry_after_compact = true;
                             break;
                         }
@@ -337,7 +339,8 @@ impl SubagentRunner {
                 continue;
             }
             reactive_overflow_retried = false;
-            local_input_tokens += usage_acc.context_input_tokens;
+            cumulative_billable_tokens += usage_acc.context_input_tokens;
+            tracing::trace!(cumulative_billable_tokens, "subagent billable input tokens");
 
             // If no tool calls, subagent is done — return accumulated text
             if pending_tools.is_empty() {

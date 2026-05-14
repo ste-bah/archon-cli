@@ -175,6 +175,60 @@ fn spoof_request_body_injects_billing_identity_and_metadata() {
 }
 
 #[test]
+fn compaction_summary_request_uses_same_spoof_envelope_as_subagent() {
+    const FIXED_FIRST_USER_MESSAGE: &str = "fixed first user message";
+    const SUMMARY_PROMPT: &str = "Summarize this conversation.";
+
+    let identity = spoof_identity();
+    let headers = identity.request_headers("request-fixed");
+    let client = AnthropicClient::new(api_key_auth(), identity, None);
+    let messages = vec![serde_json::json!({
+        "role": "user",
+        "content": FIXED_FIRST_USER_MESSAGE,
+    })];
+    let compaction_body = client
+        .build_request_body(&MessageRequest {
+            max_tokens: 2048,
+            system: vec![serde_json::json!({"type": "text", "text": SUMMARY_PROMPT})],
+            messages: messages.clone(),
+            request_origin: Some("compaction_summary".into()),
+            ..MessageRequest::default()
+        })
+        .expect("compaction summary body should serialize");
+    let subagent_body = client
+        .build_request_body(&MessageRequest {
+            system: vec![serde_json::json!({"type": "text", "text": "subagent prompt"})],
+            messages,
+            request_origin: Some("subagent".into()),
+            ..MessageRequest::default()
+        })
+        .expect("subagent body should serialize");
+    let compaction: serde_json::Value =
+        serde_json::from_str(&compaction_body).expect("compaction body should be JSON");
+    let subagent: serde_json::Value =
+        serde_json::from_str(&subagent_body).expect("subagent body should be JSON");
+    let compaction_system = compaction["system"].as_array().unwrap();
+    let subagent_system = subagent["system"].as_array().unwrap();
+
+    let billing = compaction_system[0]["text"].as_str().unwrap_or_default();
+    assert!(billing.starts_with("x-anthropic-billing-header:"));
+    assert!(billing.contains("cc_version="));
+    assert!(billing.contains("cc_entrypoint="));
+    assert_eq!(
+        compaction_system[1]["text"],
+        "You are Claude Code, Anthropic's official CLI for Claude."
+    );
+    assert_eq!(compaction_system[2]["text"], SUMMARY_PROMPT);
+    assert_eq!(compaction_system[0], subagent_system[0]);
+    assert_eq!(compaction_system[1], subagent_system[1]);
+    assert_eq!(headers.get("x-app").map(String::as_str), Some("cli"));
+    let beta_header = headers.get("anthropic-beta").expect("beta header");
+    for beta in DEFAULT_BETAS {
+        assert!(beta_header.split(',').any(|observed| observed == *beta));
+    }
+}
+
+#[test]
 fn clean_request_body_does_not_inject_spoof_identity() {
     let client = AnthropicClient::new(api_key_auth(), clean_identity(), None);
     let body = client
