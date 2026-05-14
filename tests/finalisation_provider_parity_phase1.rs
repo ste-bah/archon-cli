@@ -195,7 +195,15 @@ fn activity_events_and_tui_rows_carry_provider_metadata() {
     let events = read("crates/archon-tui/src/events.rs");
     let rail = read("crates/archon-tui/src/agent_activity.rs");
 
-    assert!(agent.contains("with_provider_model(self.provider.clone(), self.model.clone())"));
+    // v1.3.0: ProviderModelActivitySink::emit now fills provider/model only
+    // when the inner event has them unset (preserves subagent metadata,
+    // e.g. Opus subagent stays Opus instead of being overwritten by the
+    // parent Sonnet). Verify the fill-if-missing pattern, not the old
+    // unconditional with_provider_model(...) overwrite.
+    assert!(agent.contains("if event.provider.is_none()"));
+    assert!(agent.contains("event.provider = Some(self.provider.clone())"));
+    assert!(agent.contains("if event.model.is_none()"));
+    assert!(agent.contains("event.model = Some(self.model.clone())"));
     assert!(agent.contains("struct ProviderModelActivitySink"));
     assert!(agent.contains("activity_sink: self.provider_model_activity_sink(active_model)"));
     assert!(events.contains("pub provider: Option<String>"));
