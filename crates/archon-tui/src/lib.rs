@@ -2,6 +2,7 @@ pub mod app;
 pub mod app_modals;
 pub use app::should_process_key_event;
 pub mod activity_stream;
+mod activity_stream_layout;
 pub mod agent_activity;
 // TUI-327: re-export public TUI entry points so integration tests and
 // downstream callers can pick the right one without reaching into `app::`.

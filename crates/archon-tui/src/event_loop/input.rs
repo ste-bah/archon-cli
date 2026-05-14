@@ -40,12 +40,14 @@ pub(super) async fn handle_key_event(
 ) {
     match event {
         Event::Mouse(mouse) => match mouse.kind {
-            MouseEventKind::ScrollUp => {
-                app.output.scroll_up(3);
+            MouseEventKind::ScrollUp if app.activity_stream.is_foreground() => {
+                app.activity_stream.scroll_up();
             }
-            MouseEventKind::ScrollDown => {
-                app.output.scroll_down(3);
+            MouseEventKind::ScrollDown if app.activity_stream.is_foreground() => {
+                app.activity_stream.scroll_down();
             }
+            MouseEventKind::ScrollUp => app.output.scroll_up(3),
+            MouseEventKind::ScrollDown => app.output.scroll_down(3),
             _ => {}
         },
         Event::Key(key) => {

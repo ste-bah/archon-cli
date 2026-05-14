@@ -4,6 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
+use crate::activity_stream_layout::{inset, overlay_area};
 use crate::app::App;
 use crate::events::{
     ActivityStreamLineKind, ActivityStreamUpdate, AgentActivityRole, AgentActivityStatus,
@@ -19,6 +20,7 @@ pub struct ActivityStreamState {
     selected: usize,
     foreground: bool,
     scroll: u16,
+    follow_latest: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -48,7 +50,8 @@ impl ActivityStreamState {
 
     pub fn open(&mut self) {
         self.foreground = true;
-        self.selected = self.selected.min(self.actors.len().saturating_sub(1));
+        self.follow_latest = true;
+        self.selected = 0;
     }
 
     pub fn background(&mut self) {
@@ -56,27 +59,32 @@ impl ActivityStreamState {
     }
 
     pub fn scroll_up(&mut self) {
+        self.follow_latest = false;
         self.scroll = self.scroll.saturating_sub(5);
     }
 
     pub fn scroll_down(&mut self) {
+        self.follow_latest = false;
         self.scroll = self.scroll.saturating_add(5);
     }
 
     pub fn scroll_top(&mut self) {
+        self.follow_latest = false;
         self.scroll = 0;
     }
 
     pub fn scroll_bottom(&mut self) {
-        self.scroll = u16::MAX / 2;
+        self.follow_latest = true;
     }
 
     pub fn select_prev(&mut self) {
+        self.follow_latest = false;
         self.selected = self.selected.saturating_sub(1);
         self.scroll = 0;
     }
 
     pub fn select_next(&mut self) {
+        self.follow_latest = false;
         if !self.actors.is_empty() {
             self.selected = (self.selected + 1).min(self.actors.len() - 1);
             self.scroll = 0;
@@ -84,6 +92,10 @@ impl ActivityStreamState {
     }
 
     pub fn apply_update(&mut self, update: ActivityStreamUpdate) {
+        let updated_id = update.id.clone();
+        let selected_id = (!self.follow_latest)
+            .then(|| self.actors.get(self.selected).map(|actor| actor.id.clone()))
+            .flatten();
         let next_seq = self.next_seq();
         let actor = self.upsert_actor(&update, next_seq);
         actor.status = update.status;
@@ -107,6 +119,15 @@ impl ActivityStreamState {
             }
         }
         self.sort_actors();
+        if self.follow_latest {
+            if let Some(index) = self.actors.iter().position(|actor| actor.id == updated_id) {
+                self.selected = index;
+            }
+        } else if let Some(index) =
+            selected_id.and_then(|id| self.actors.iter().position(|actor| actor.id == id))
+        {
+            self.selected = index;
+        }
     }
 
     pub fn push_parent(
@@ -268,7 +289,7 @@ pub fn draw_activity_overlay(frame: &mut Frame, app: &App) {
     let area = overlay_area(frame.area());
     frame.render_widget(Clear, area);
     let block = Block::default()
-        .title(" Agent Activity  Ctrl+B background ")
+        .title(" Agent Activity  PgUp/PgDn scroll  Ctrl+End follow  Ctrl+B background ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border_active));
     frame.render_widget(block, area);
@@ -339,8 +360,17 @@ fn render_stream(frame: &mut Frame, app: &App, area: Rect) {
     for item in &actor.lines {
         lines.extend(line_rows(item, &app.theme));
     }
+    let max_scroll = lines
+        .len()
+        .saturating_sub(area.height as usize)
+        .min(u16::MAX as usize) as u16;
+    let scroll = if state.follow_latest {
+        max_scroll
+    } else {
+        state.scroll.min(max_scroll)
+    };
     let widget = Paragraph::new(Text::from(lines))
-        .scroll((state.scroll, 0))
+        .scroll((scroll, 0))
         .wrap(Wrap { trim: false });
     frame.render_widget(widget, area);
 }
@@ -450,26 +480,6 @@ fn summarize(output: &str) -> String {
     let mut summary: String = trimmed.chars().take(500).collect();
     summary.push_str("...");
     summary
-}
-
-fn overlay_area(area: Rect) -> Rect {
-    let width = area.width.saturating_mul(9) / 10;
-    let height = area.height.saturating_mul(4) / 5;
-    Rect::new(
-        area.x + area.width.saturating_sub(width) / 2,
-        area.y + area.height.saturating_sub(height) / 2,
-        width.max(40).min(area.width),
-        height.max(12).min(area.height),
-    )
-}
-
-fn inset(area: Rect, x: u16, y: u16) -> Rect {
-    Rect::new(
-        area.x.saturating_add(x),
-        area.y.saturating_add(y),
-        area.width.saturating_sub(x.saturating_mul(2)),
-        area.height.saturating_sub(y.saturating_mul(2)),
-    )
 }
 
 #[cfg(test)]
