@@ -95,6 +95,23 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # macOS-runner workaround: GitHub's macOS image pre-ships
+      # `/usr/local/bin/cargo` as a rustup-init shim, which takes precedence
+      # over `$HOME/.cargo/bin/cargo` that `dtolnay/rust-toolchain@stable`
+      # installs. The next `cargo build` step then invokes the shim and
+      # fails with `error: unexpected argument 'build' found` (the shim is
+      # the rustup-init installer, not real cargo). This step prepends
+      # `$HOME/.cargo/bin` to GITHUB_PATH so the rustup-installed cargo is
+      # found first, then asserts cargo is functional before any build step
+      # runs.
+      - name: Ensure rustup-installed cargo is on PATH (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          "$HOME/.cargo/bin/rustup" default stable
+          "$HOME/.cargo/bin/cargo" --version
+
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
         run: |
