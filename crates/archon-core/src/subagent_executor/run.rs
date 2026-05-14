@@ -482,6 +482,25 @@ impl AgentSubagentExecutor {
         self.on_inner_complete(cache_id.clone(), inner_result.clone())
             .await;
 
+        // Authoritative manager cleanup using manager_id. on_inner_complete
+        // above uses cache_id which misses the manager's agents HashMap (the
+        // manager allocates its own UUID at register time). Without this block
+        // the entry stays Running forever and exhausts the max_concurrent cap.
+        // Both ids are in scope here so this is the correct cleanup site.
+        // TODO(post-105) in completion.rs is resolved by this block.
+        {
+            let mut mgr = self.subagent_manager.lock().await;
+            match &inner_result {
+                Ok(text) => {
+                    let _ = mgr.complete(&manager_id, text.clone());
+                }
+                Err(reason) => {
+                    let _ = mgr.mark_failed(&manager_id, reason.clone());
+                }
+            }
+            mgr.cleanup_agent(&manager_id);
+        }
+
         match inner_result {
             Ok(text) => Ok(text),
             Err(err) => Err(ExecutorError::Internal(err)),
