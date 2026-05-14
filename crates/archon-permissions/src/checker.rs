@@ -6,6 +6,14 @@ const PLAN_MODE_WHITELIST: &[&str] = &[
     "Read",
     "Glob",
     "Grep",
+    "DocList",
+    "DocGet",
+    "DocStatus",
+    "DocSearch",
+    "DocAnswer",
+    "DocProvenance",
+    "DocInspect",
+    "DocModelStatus",
     "AskUserQuestion",
     "EnterPlanMode",
     "ToolSearch",
@@ -60,6 +68,15 @@ const DEFAULT_SAFE_TOOLS: &[&str] = &[
     "GameTheoryStatus",
     "GameTheoryListAgents",
     "GameTheoryInspect",
+    // ----- Read-only document evidence inspection -----
+    "DocList",
+    "DocGet",
+    "DocStatus",
+    "DocSearch",
+    "DocAnswer",
+    "DocProvenance",
+    "DocInspect",
+    "DocModelStatus",
     // ----- LEANN semantic code search (read-only) -----
     "LeannSearch",
     "LeannFindSimilar",
@@ -261,6 +278,43 @@ mod tests {
         ));
         assert!(matches!(
             checker.check("Edit", "edit file", ""),
+            PermissionDecision::NeedsPermission(_)
+        ));
+    }
+
+    #[test]
+    fn read_only_docs_tools_are_safe_in_default_auto_and_plan_modes() {
+        let docs_tools = [
+            "DocList",
+            "DocGet",
+            "DocStatus",
+            "DocSearch",
+            "DocAnswer",
+            "DocProvenance",
+            "DocInspect",
+            "DocModelStatus",
+        ];
+        for mode in [
+            PermissionMode::Default,
+            PermissionMode::Auto,
+            PermissionMode::Plan,
+        ] {
+            let checker = PermissionChecker::new(mode, RuleSet::empty());
+            for tool in docs_tools {
+                assert_eq!(
+                    checker.check(tool, "read docs", "{}"),
+                    PermissionDecision::Allow,
+                    "{tool} should be read-only in {mode}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn doc_ingest_still_requires_permission_in_default_mode() {
+        let checker = PermissionChecker::new(PermissionMode::Default, RuleSet::empty());
+        assert!(matches!(
+            checker.check("DocIngest", "ingest docs", "{}"),
             PermissionDecision::NeedsPermission(_)
         ));
     }

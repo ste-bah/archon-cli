@@ -20,6 +20,14 @@ const ALL_NEWLY_SAFE: &[&str] = &[
     "GameTheoryStatus",
     "GameTheoryListAgents",
     "GameTheoryInspect",
+    "DocList",
+    "DocGet",
+    "DocStatus",
+    "DocSearch",
+    "DocAnswer",
+    "DocProvenance",
+    "DocInspect",
+    "DocModelStatus",
     "LeannSearch",
     "LeannFindSimilar",
     "TaskGet",
@@ -72,6 +80,7 @@ fn dangerous_tools_still_gated_in_default() {
         "GameTheoryClassify",
         "GameTheoryCallSpecialist",
         "GameTheorySpecimens",
+        "DocIngest",
     ] {
         let decision = checker.check(tool, "test", r#"{"command":"ls"}"#);
         assert!(
