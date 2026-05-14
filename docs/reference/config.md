@@ -25,6 +25,7 @@ This page explains every section. Each table tells you **what** the field does, 
 - [`[personality]`](#personality) — agent personality profile
 - [`[consciousness]`](#consciousness) — inner voice and rule engine
 - [`[tools]`](#tools) — tool execution defaults
+- [Subagent turn limits](#subagent-turn-limits) — operator-only subagent turn caps
 - [`[permissions]`](#permissions) — tool gating
 - [`[sandbox]`](#sandbox) — Bash isolation backends
 - [`[context]`](#context) — compaction and prompt cache
@@ -253,6 +254,10 @@ max_concurrency = 4
 | `bash_timeout` | `120` (seconds) | Hard timeout for `Bash` tool invocations. Long-running tasks (compiles, tests) need higher; raise to 600 if your project's build is slow. Tools wrapping long ops should use streaming via `Monitor` instead of bumping this for everything. |
 | `bash_max_output` | `102400` (bytes, ~100KB) | Maximum bytes of stdout captured per Bash call. Output beyond this is truncated. Raise if you're parsing large logs; lower to keep token spend down. |
 | `max_concurrency` | `4` | Maximum concurrent tool invocations the parent agent runs in parallel via `join_all`. Higher = faster multi-tool turns, more memory pressure. WSL2 tolerates 2-4; native machines can go higher. |
+
+### Subagent Turn Limits
+
+`max_turns` is not exposed to the model via the `Agent` / `TaskCreate` tool schemas. Subagents default to `DEFAULT_MAX_TURNS = 100_000`, which is effectively unlimited for normal work. Operators can still set a cap explicitly per custom agent in `meta.json`, through built-in definitions such as the bounded `fork` agent, or with the CLI `--max-turns` flag in headless mode. The LLM cannot bound a subagent by adding `max_turns` to its own tool input.
 
 ---
 

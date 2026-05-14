@@ -45,6 +45,7 @@ fn permission_safe_for_get_risky_for_set() {
 }
 
 #[tokio::test]
+#[serial_test::serial(config_overlay)]
 async fn get_returns_default_when_no_overlay() {
     clear_overlay();
     let tool = ConfigTool;
@@ -60,6 +61,7 @@ async fn get_returns_default_when_no_overlay() {
 }
 
 #[tokio::test]
+#[serial_test::serial(config_overlay)]
 async fn set_then_get_returns_overlay_value() {
     clear_overlay();
     let tool = ConfigTool;
@@ -82,6 +84,7 @@ async fn set_then_get_returns_overlay_value() {
 }
 
 #[tokio::test]
+#[serial_test::serial(config_overlay)]
 async fn set_numeric_rejects_non_numeric() {
     clear_overlay();
     let tool = ConfigTool;
@@ -144,6 +147,7 @@ async fn set_without_value_returns_error() {
 }
 
 #[test]
+#[serial_test::serial(config_overlay)]
 fn get_config_value_helper() {
     clear_overlay();
     assert_eq!(

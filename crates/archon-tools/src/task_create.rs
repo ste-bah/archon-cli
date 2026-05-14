@@ -50,10 +50,6 @@ impl Tool for TaskCreateTool {
                     "items": { "type": "string" },
                     "description": "Tools the subagent is allowed to use"
                 },
-                "max_turns": {
-                    "type": "integer",
-                    "description": "Omit to use the effectively unlimited default (100000 hard cap); set only if you want to bound a runaway subagent."
-                },
                 "subagent_type": {
                     "type": "string",
                     "description": "Optional agent type name for the spawned subagent"
@@ -118,7 +114,14 @@ impl Tool for TaskCreateTool {
                     SubagentRequest::MAX_TURNS_HARD_CAP
                 ));
             }
-            Some(n) => n as u32,
+            Some(n) => {
+                tracing::warn!(
+                    value = n,
+                    tool = "TaskCreate",
+                    "max_turns emitted by model despite schema removal -- investigate"
+                );
+                n as u32
+            }
             None => SubagentRequest::DEFAULT_MAX_TURNS,
         };
 
@@ -296,12 +299,17 @@ mod tests {
         assert!(props.contains_key("subagent_type"));
         assert!(props.contains_key("run_in_background"));
         assert!(props.contains_key("cwd"));
-        let description = props["max_turns"]["description"]
-            .as_str()
-            .expect("max_turns description");
-        assert!(description.contains("Omit to use"));
-        assert!(description.contains("100000 hard cap"));
-        assert!(!description.contains("default 10"));
+    }
+
+    #[tokio::test]
+    async fn task_create_schema_does_not_expose_max_turns() {
+        let tool = TaskCreateTool;
+        let schema = tool.input_schema();
+        let props = schema["properties"].as_object().expect("schema properties");
+        assert!(
+            !props.contains_key("max_turns"),
+            "TaskCreate schema must not advertise max_turns"
+        );
     }
 
     // TASK-AGS-105 Section 8 test rewrite: the old tests asserted

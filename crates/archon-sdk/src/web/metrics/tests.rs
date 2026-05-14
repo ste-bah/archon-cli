@@ -107,6 +107,20 @@ fn missing_ledger_is_reported_as_missing_not_quiet() {
     assert_eq!(value.status, "missing");
 }
 
+#[test]
+fn absent_ledger_under_existing_store_is_quiet() {
+    let root = unique_temp_root();
+    fs::create_dir_all(root.join("web")).unwrap();
+    let value = ledger(
+        "web action audit ledger",
+        root.join("web/actions.audit.jsonl"),
+    );
+    assert_eq!(value.value, "0");
+    assert_eq!(value.unit, "rows");
+    assert_eq!(value.status, "quiet");
+    let _ = fs::remove_dir_all(root);
+}
+
 fn unique_temp_root() -> PathBuf {
     std::env::temp_dir().join(format!("archon-web-metrics-{}", uuid::Uuid::new_v4()))
 }

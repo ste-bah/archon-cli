@@ -198,12 +198,12 @@ fn ledger(label: &str, path: PathBuf) -> MetricValue {
         label,
         lines.to_string(),
         "rows",
-        if !exists {
-            "missing"
-        } else if lines > 0 {
+        if exists && lines > 0 {
             "active"
-        } else {
+        } else if exists || path.parent().is_some_and(Path::exists) {
             "quiet"
+        } else {
+            "missing"
         },
     )
 }

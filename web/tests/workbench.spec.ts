@@ -92,9 +92,17 @@ test("memory, world, corpus, and settings buttons perform visible actions", asyn
   const assertNoErrors = watchBrowserErrors(page);
 
   await page.goto("./#/memory");
-  for (const filter of ["memory", "learning_event", "proposal", "trust", "all"]) {
+  const previewTitles = {
+    memory: "Memory rows",
+    learning_event: "Learning events",
+    proposal: "Behaviour proposals",
+    trust: "Trust deltas",
+    all: "All learning rows",
+  };
+  for (const filter of ["memory", "learning_event", "proposal", "trust", "all"] as const) {
     await page.getByRole("button", { name: filter, exact: true }).click();
     await expect(page.getByRole("button", { name: filter, exact: true })).toHaveClass(/active/);
+    await expect(page.locator(".memory-filter-preview")).toContainText(previewTitles[filter]);
   }
   await page.getByRole("button", { name: "proposal", exact: true }).click();
   await page.getByRole("button", { name: "Preview approval" }).click();

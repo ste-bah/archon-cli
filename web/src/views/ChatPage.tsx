@@ -15,7 +15,7 @@ type ChatMessage = {
   attachments?: WebChatAttachment[];
 };
 
-type PendingAttachment = WebChatAttachment & { id: string };
+type PendingAttachment = WebChatAttachment & { id: string; file: File };
 
 export function ChatPage({ uploadPolicy }: ChatPageProps) {
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -56,12 +56,13 @@ export function ChatPage({ uploadPolicy }: ChatPageProps) {
         });
         const item: PendingAttachment = {
           id: `${file.name}:${file.size}:${crypto.randomUUID()}`,
+          file,
           fileName: file.name,
           sizeBytes: file.size,
           mimeType,
           accepted: result.accepted,
           policyReason: result.decision.policyReason,
-          dataBase64: result.accepted ? await fileToBase64(file) : null,
+          dataBase64: null,
           storedPath: null,
         };
         if (result.accepted) {
@@ -85,10 +86,16 @@ export function ChatPage({ uploadPolicy }: ChatPageProps) {
     }
     setPending(true);
     const text = draft.trim();
-    const outgoing = attachments.map(({ id: _id, ...attachment }) => attachment);
     try {
+      const outgoing = await Promise.all(
+        attachments.map(async ({ id: _id, file, ...attachment }) => ({
+          ...attachment,
+          dataBase64: attachment.accepted ? await fileToBase64(file) : null,
+        })),
+      );
       const response = await apiClient.submitChat({ message: text, attachments: outgoing });
       if (response.accepted) {
+        const assistantText = response.reply.trim();
         const displayedAttachments = outgoing.map(({ dataBase64: _dataBase64, ...attachment }) => ({
           ...attachment,
           dataBase64: null,
@@ -106,7 +113,7 @@ export function ChatPage({ uploadPolicy }: ChatPageProps) {
             id: `${response.messageId}:assistant`,
             role: "assistant",
             title: "Archon",
-            body: response.reply || response.policyReason,
+            body: assistantText || "Live session completed without assistant text.",
           },
         ]);
         setDraft("");

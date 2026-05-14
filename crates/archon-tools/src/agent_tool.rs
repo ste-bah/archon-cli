@@ -228,6 +228,11 @@ impl AgentTool {
                         "max_turns must be between 1 and {cap}"
                     )))
                 } else {
+                    warn!(
+                        value = n,
+                        tool = "Agent",
+                        "max_turns emitted by model despite schema removal -- investigate"
+                    );
                     Ok(n as u32)
                 }
             })
@@ -303,10 +308,6 @@ impl Tool for AgentTool {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "List of tool names the subagent is allowed to use"
-                },
-                "max_turns": {
-                    "type": "integer",
-                    "description": "Omit to use the effectively unlimited default (100000 hard cap); set only if you want to bound a runaway subagent."
                 },
                 "subagent_type": {
                     "type": "string",
@@ -770,6 +771,15 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn model_omitting_max_turns_uses_default() {
+        let tool = AgentTool::new();
+        let request = tool
+            .validate_and_build(&json!({"prompt": "x"}))
+            .expect("default applies");
+        assert_eq!(request.max_turns, SubagentRequest::DEFAULT_MAX_TURNS);
+    }
+
+    #[tokio::test]
     async fn allowed_tools_parsed_from_array() {
         let tool = AgentTool::new();
         let input = json!({
@@ -874,16 +884,14 @@ mod tests {
     }
 
     #[test]
-    fn schema_describes_unlimited_max_turns_default() {
+    fn agent_tool_schema_does_not_expose_max_turns() {
         let tool = AgentTool::new();
         let schema = tool.input_schema();
-        let description = schema["properties"]["max_turns"]["description"]
-            .as_str()
-            .expect("max_turns description");
-        assert!(description.contains("Omit to use"));
-        assert!(description.contains("100000 hard cap"));
-        assert!(!description.contains("default 10"));
-        assert!(!description.contains("max 100"));
+        let props = schema["properties"].as_object().expect("properties");
+        assert!(
+            !props.contains_key("max_turns"),
+            "AgentTool schema must not advertise max_turns"
+        );
     }
 
     #[tokio::test]

@@ -9,9 +9,14 @@ struct ProviderModelActivitySink {
 }
 
 impl AgentActivitySink for ProviderModelActivitySink {
-    fn emit(&self, event: AgentActivityEvent) {
-        self.inner
-            .emit(event.with_provider_model(self.provider.clone(), self.model.clone()));
+    fn emit(&self, mut event: AgentActivityEvent) {
+        if event.provider.is_none() {
+            event.provider = Some(self.provider.clone());
+        }
+        if event.model.is_none() {
+            event.model = Some(self.model.clone());
+        }
+        self.inner.emit(event);
     }
 }
 
@@ -206,4 +211,56 @@ fn hash_text(text: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(text.as_bytes());
     hex::encode(hasher.finalize())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_model_sink_preserves_subagent_metadata() {
+        let inner = Arc::new(archon_observability::InMemoryActivitySink::new());
+        let trait_inner: Arc<dyn AgentActivitySink> = inner.clone();
+        let sink = ProviderModelActivitySink {
+            inner: trait_inner,
+            provider: "anthropic".into(),
+            model: "claude-sonnet-4-6".into(),
+        };
+
+        sink.emit(
+            AgentActivityEvent::new(
+                "session-1",
+                AgentActivityKind::AgentRunning,
+                AgentActivityStatus::Running,
+                "subagent activity",
+            )
+            .with_provider_model("anthropic", "opus"),
+        );
+
+        let events = inner.events();
+        assert_eq!(events[0].provider.as_deref(), Some("anthropic"));
+        assert_eq!(events[0].model.as_deref(), Some("opus"));
+    }
+
+    #[test]
+    fn provider_model_sink_fills_missing_metadata() {
+        let inner = Arc::new(archon_observability::InMemoryActivitySink::new());
+        let trait_inner: Arc<dyn AgentActivitySink> = inner.clone();
+        let sink = ProviderModelActivitySink {
+            inner: trait_inner,
+            provider: "anthropic".into(),
+            model: "claude-sonnet-4-6".into(),
+        };
+
+        sink.emit(AgentActivityEvent::new(
+            "session-1",
+            AgentActivityKind::ToolCompleted,
+            AgentActivityStatus::Completed,
+            "tool done",
+        ));
+
+        let events = inner.events();
+        assert_eq!(events[0].provider.as_deref(), Some("anthropic"));
+        assert_eq!(events[0].model.as_deref(), Some("claude-sonnet-4-6"));
+    }
 }

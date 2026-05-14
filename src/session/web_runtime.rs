@@ -15,6 +15,7 @@ pub(crate) struct WebSessionHandle {
     input_tx: tokio::sync::mpsc::Sender<String>,
     permission_tx: tokio::sync::mpsc::Sender<bool>,
     event_rx: tokio::sync::Mutex<TuiEventReceiver>,
+    last_assistant_response: Arc<tokio::sync::Mutex<String>>,
 }
 
 impl WebSessionHandle {
@@ -36,7 +37,8 @@ impl WebSessionHandle {
                         anyhow::bail!("web session event channel closed");
                     };
                     if self.handle_event(event, &mut reply).await? {
-                        return Ok(reply.trim().to_string());
+                        let fallback = self.last_assistant_response.lock().await;
+                        return Ok(finish_reply(&reply, &fallback));
                     }
                 }
                 _ = &mut timeout => {
@@ -262,7 +264,7 @@ pub(crate) async fn spawn_web_session(
             env_vars: env_vars.clone(),
             cli_settings: cli.settings.clone(),
             layer_filter,
-            last_assistant_response: last_assistant_response_shared,
+            last_assistant_response: Arc::clone(&last_assistant_response_shared),
             system_prompt_chars,
             tool_defs_chars,
             allow_bypass_permissions: cli.allow_dangerously_skip_permissions
@@ -344,7 +346,17 @@ pub(crate) async fn spawn_web_session(
         input_tx: user_input_tx,
         permission_tx: perm_prompt_tx,
         event_rx: tokio::sync::Mutex::new(tui_event_rx),
+        last_assistant_response: last_assistant_response_shared,
     }))
+}
+
+fn finish_reply(streamed: &str, fallback: &str) -> String {
+    let streamed = streamed.trim();
+    if streamed.is_empty() {
+        fallback.trim().to_string()
+    } else {
+        streamed.to_string()
+    }
 }
 
 fn auth_label(env_vars: &ArchonEnvVars) -> String {
@@ -359,5 +371,20 @@ fn auth_label(env_vars: &ArchonEnvVars) -> String {
         Ok(AuthProvider::ApiKey(_)) => "API key".into(),
         Ok(AuthProvider::BearerToken(_)) => "Bearer token".into(),
         Err(_) => "none".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::finish_reply;
+
+    #[test]
+    fn finish_reply_prefers_streamed_text() {
+        assert_eq!(finish_reply(" live reply ", "stale"), "live reply");
+    }
+
+    #[test]
+    fn finish_reply_uses_last_assistant_response_when_stream_empty() {
+        assert_eq!(finish_reply("   ", " buffered reply "), "buffered reply");
     }
 }

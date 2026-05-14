@@ -91,28 +91,26 @@ impl StatusBar {
         parts.push(self.identity_mode.clone());
         parts.push(self.permission_mode.clone());
         parts.push(format!("${:.2}", self.cost));
-        if self.context_tokens_used > 0 {
-            if self.context_window > 0 {
-                let pct = (self.context_tokens_used as f64 / self.context_window as f64 * 100.0)
-                    .min(100.0);
-                let name = self
-                    .context_name
-                    .as_deref()
-                    .map(|n| format!("{n} "))
-                    .unwrap_or_default();
-                let source = self
-                    .resolution_source
-                    .as_deref()
-                    .map(|s| format!(" {s}"))
-                    .unwrap_or_default();
-                parts.push(format!(
-                    "ctx {name}{}k/{}k ({pct:.0}%{source})",
-                    self.context_tokens_used / 1000,
-                    self.context_window / 1000
-                ));
-            } else {
-                parts.push(format!("ctx {}k/?", self.context_tokens_used / 1000));
-            }
+        if self.context_window > 0 {
+            let pct =
+                (self.context_tokens_used as f64 / self.context_window as f64 * 100.0).min(100.0);
+            let name = self
+                .context_name
+                .as_deref()
+                .map(|n| format!("{n} "))
+                .unwrap_or_default();
+            let source = self
+                .resolution_source
+                .as_deref()
+                .map(|s| format!(" {s}"))
+                .unwrap_or_default();
+            parts.push(format!(
+                "ctx {name}{}k/{}k ({pct:.0}%{source})",
+                self.context_tokens_used / 1000,
+                self.context_window / 1000
+            ));
+        } else if self.context_tokens_used > 0 {
+            parts.push(format!("ctx {}k/?", self.context_tokens_used / 1000));
         }
         if self.cache_creation_tokens > 0 || self.cache_read_tokens > 0 {
             parts.push(format!(
@@ -191,6 +189,18 @@ mod tests {
             ContextWarning::for_usage(950, 1000, 0.80),
             ContextWarning::Critical
         );
+    }
+
+    #[test]
+    fn format_shows_context_window_before_usage() {
+        let bar = StatusBar {
+            context_tokens_used: 0,
+            context_window: 1_000_000,
+            context_name: Some("main".into()),
+            resolution_source: Some("config".into()),
+            ..Default::default()
+        };
+        assert!(bar.format().contains("ctx main 0k/1000k (0% config)"));
     }
 
     #[test]

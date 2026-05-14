@@ -122,6 +122,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v1.3.0](release-notes/v1.3.0.md) — Remove model-facing subagent `max_turns`, preserve subagent activity model labels, and show startup context-window status
 - [v1.2.9](release-notes/v1.2.9.md) — Autocompaction trigger correctness + proactive soft-fail with fall-through; reactive remains fatal
 - [v1.2.8](release-notes/v1.2.8.md) — Complete auto-compaction PRD closure: structured summaries, prompt budgets, context UI, and prompt-cache policy
 - [v1.2.7](release-notes/v1.2.7.md) — Resume-state split tool-result repair and configurable context-window catalog

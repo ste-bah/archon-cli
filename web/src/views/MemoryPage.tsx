@@ -12,6 +12,7 @@ export function MemoryPage({ learning }: MemoryPageProps) {
   const [filter, setFilter] = useState("all");
   const [actionPreview, setActionPreview] = useState<string | null>(null);
   const filterOptions = ["all", "memory", "learning_event", "proposal", "trust"];
+  const filteredRows = rowsForFilter(learning, filter);
 
   async function previewProposal(row: LearningRowPreview) {
     const response = await apiClient.evaluateAction({
@@ -52,6 +53,36 @@ export function MemoryPage({ learning }: MemoryPageProps) {
               {option}
             </button>
           ))}
+        </div>
+        <div className="memory-filter-preview" aria-live="polite">
+          <div className="memory-filter-preview__heading">
+            <strong>{filterTitle(filter)}</strong>
+            <StatusPill>{filteredRows.length} rows</StatusPill>
+          </div>
+          <div className="memory-list memory-list--compact">
+            {filteredRows.length === 0 ? (
+              <div className="memory-row memory-row--empty">
+                <div>
+                  <strong>No rows match this filter.</strong>
+                  <span>read-only learning surface</span>
+                </div>
+              </div>
+            ) : (
+              filteredRows.slice(0, 5).map((row) => (
+                <div key={`${row.kind}:${row.path}:${row.label}:preview`} className="memory-row">
+                  <div>
+                    <strong>{row.label}</strong>
+                    <span>{row.detail}</span>
+                  </div>
+                  <span className="memory-row__actions">
+                    <StatusPill tone={row.status === "missing" ? "warn" : "muted"}>
+                      {row.kind}
+                    </StatusPill>
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
         </div>
         {actionPreview && (
           <div className="memory-action-preview" role="status">
@@ -196,4 +227,32 @@ function rowCount(learning?: LearningSummary) {
     learning.proposals.length +
     learning.trustDeltas.length
   );
+}
+
+function rowsForFilter(learning: LearningSummary | undefined, filter: string) {
+  if (!learning) {
+    return [];
+  }
+  const rows = [
+    ...learning.memories,
+    ...learning.learningEvents,
+    ...learning.proposals,
+    ...learning.trustDeltas,
+  ];
+  return filter === "all" ? rows : rows.filter((row) => row.kind === filter);
+}
+
+function filterTitle(filter: string) {
+  switch (filter) {
+    case "memory":
+      return "Memory rows";
+    case "learning_event":
+      return "Learning events";
+    case "proposal":
+      return "Behaviour proposals";
+    case "trust":
+      return "Trust deltas";
+    default:
+      return "All learning rows";
+  }
 }

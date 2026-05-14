@@ -260,6 +260,11 @@ export async function mockApi(page: Page) {
       await json(route, themeProfile(request.profile));
       return;
     }
+    if (url.pathname === "/api/chat/submit") {
+      const request = route.request().postDataJSON();
+      await json(route, chatSubmitResponse(request));
+      return;
+    }
     if (url.pathname === "/api/corpus/source") {
       await json(route, corpusPreview(url.searchParams.get("path") ?? ""));
       return;
@@ -297,6 +302,30 @@ function actionResponse(request: { actionId: string; actionKind: string; dryRun:
       policyReason,
       createdAtMs: 1770000001,
     },
+  };
+}
+
+function chatSubmitResponse(request: {
+  attachments?: Array<{ dataBase64?: string | null; fileName?: string }>;
+}) {
+  const missingBytes = request.attachments?.some((attachment) => !attachment.dataBase64) ?? false;
+  if (missingBytes) {
+    return {
+      messageId: "webmsg_blocked",
+      accepted: false,
+      createdAtMs: 1770000000,
+      policyReason: "chat submit denied: attachment bytes were not provided",
+      storedPath: "~/.archon/web/chat.messages.jsonl",
+      reply: "",
+    };
+  }
+  return {
+    messageId: "webmsg_test",
+    accepted: true,
+    createdAtMs: 1770000000,
+    policyReason: "chat message accepted and recorded by the web workbench",
+    storedPath: "~/.archon/web/chat.messages.jsonl",
+    reply: "Mock Archon reply from live session",
   };
 }
 
