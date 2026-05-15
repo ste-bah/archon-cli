@@ -88,7 +88,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Research pipeline (`/archon-research`)](cookbook/archon-research-pipeline.md) — 46-agent PhD research workflow end-to-end inside the TUI
 - [Game-theory pipeline (`/gametheory`)](cookbook/gametheory-pipeline.md) — Tier 1 classify → route → specialists → report end-to-end inside the TUI
 - [Trading and asset analysis with `/gametheory`](cookbook/trading-with-gametheory.md) — applying the game-theory pipeline to pre-trade assessment, post-event decomposition, counterparty analysis, strategy-viability tests, and macro reaction-function modelling
-- [World-model dynamic training](cookbook/world-model-dynamic-training.md) — backfill, cold-start gates, idle-aware trainer, backend selection
+- [World-model and JEPA training](cookbook/world-model-dynamic-training.md) — fresh setup, readiness checks, training, eval, promotion, and idle-aware trainer behavior
 - [Proactive session briefing](cookbook/proactive-session-briefing.md) — preview and configure memory, reasoning-quality, proposal, and world-model briefing sections
 - [Custom agent workflows](cookbook/custom-agent-workflows.md) — `/create-agent`, `/run-agent`, `/evolve-agent`
 - [PRD-driven development](cookbook/prd-driven-development.md) — `/to-prd` → `/prd-to-spec` → `/spec-to-tasks` → `/archon-code`
