@@ -224,10 +224,9 @@ impl SubagentRunner {
                 reasoning_encrypted: None,
             };
             let mut request_body_bytes = crate::agent::autocompact::request_body_bytes(&request);
-            let large_retry_body_bytes =
-                crate::agent::autocompact::large_request_retry_body_bytes(
-                    &self.agent_config.context,
-                );
+            let large_retry_body_bytes = crate::agent::autocompact::large_request_retry_body_bytes(
+                &self.agent_config.context,
+            );
             let trigger_tokens = if last_known_context_tokens > 0 {
                 last_known_context_tokens
             } else {

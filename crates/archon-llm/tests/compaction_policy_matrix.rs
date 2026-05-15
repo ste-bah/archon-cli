@@ -1,8 +1,7 @@
 use std::collections::HashSet;
 
 use archon_llm::compaction_policy::{
-    COMPACTION_POLICIES, CompactionBackend, ProviderFamily, WireShape,
-    compaction_policy_for_family,
+    COMPACTION_POLICIES, CompactionBackend, ProviderFamily, WireShape, compaction_policy_for_family,
 };
 
 #[test]

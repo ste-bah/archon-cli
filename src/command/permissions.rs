@@ -584,8 +584,9 @@ mod tests {
         h.execute(&mut ctx, &["bypassPermissions".to_string()])
             .expect("execute");
 
-        let events = archon_learning::permission_runtime_events::list_permission_runtime_events(&db)
-            .expect("permission events");
+        let events =
+            archon_learning::permission_runtime_events::list_permission_runtime_events(&db)
+                .expect("permission events");
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].tool_name, "PermissionMode");
         assert_eq!(events[0].decision, "mode_change_denied");

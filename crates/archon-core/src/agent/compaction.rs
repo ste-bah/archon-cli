@@ -9,9 +9,15 @@ pub enum ManualCompactOutcome {
         before_tokens: u64,
         after_tokens: u64,
     },
-    BelowThreshold { status: String },
-    Skipped { status: String },
-    Failed { status: String },
+    BelowThreshold {
+        status: String,
+    },
+    Skipped {
+        status: String,
+    },
+    Failed {
+        status: String,
+    },
 }
 
 impl ManualCompactOutcome {
@@ -140,11 +146,12 @@ impl Agent {
         let effective_strategy = match subcommand {
             Some("micro") => Some(archon_context::boundary::CompactionStrategy::Micro),
             Some("snip") => Some(archon_context::boundary::CompactionStrategy::Snip),
-            Some("force") => Some(match self.config.context.manual_compact_force_strategy.as_str()
-            {
-                "snip" => archon_context::boundary::CompactionStrategy::Snip,
-                _ => archon_context::boundary::CompactionStrategy::Micro,
-            }),
+            Some("force") => Some(
+                match self.config.context.manual_compact_force_strategy.as_str() {
+                    "snip" => archon_context::boundary::CompactionStrategy::Snip,
+                    _ => archon_context::boundary::CompactionStrategy::Micro,
+                },
+            ),
             Some("auto") | None => {
                 let active_model = self.active_model_for_compaction().await;
                 let context_window = self.context_window_for(&active_model);

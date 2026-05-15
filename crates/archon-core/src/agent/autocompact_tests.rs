@@ -365,7 +365,10 @@ impl LlmProvider for RateLimitThenSuccessProvider {
         vec![]
     }
 
-    async fn stream(&self, request: LlmRequest) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
+    async fn stream(
+        &self,
+        request: LlmRequest,
+    ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
         if request.request_origin.as_deref() == Some("compaction_summary") {
             self.compaction_calls.fetch_add(1, Ordering::SeqCst);
             return Ok(stream_from_events(vec![

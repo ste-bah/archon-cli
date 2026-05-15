@@ -4,8 +4,8 @@ use archon_llm::identity::IdentityMode;
 use archon_llm::provider::{LlmError, LlmResponse, ModelInfo, ProviderFeature};
 use archon_llm::types::Usage;
 use archon_tools::tool::{PermissionLevel, Tool};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::sync::mpsc;
 
 /// Mock provider that returns pre-configured responses.

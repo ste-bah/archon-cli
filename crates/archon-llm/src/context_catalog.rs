@@ -133,7 +133,9 @@ fn lookup_model(
         {
             best = Some(ContextWindowEntry {
                 context_window: window,
-                runtime_context_budget: variant.runtime_context_budget.or(raw.runtime_context_budget),
+                runtime_context_budget: variant
+                    .runtime_context_budget
+                    .or(raw.runtime_context_budget),
                 max_output_tokens: variant.max_output_tokens.or(raw.max_output_tokens),
                 source: variant.source.clone().or_else(|| raw.source.clone()),
             });

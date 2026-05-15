@@ -759,7 +759,10 @@ impl SessionStore {
             "total_tokens".to_string(),
             DataValue::from(session.total_tokens as i64),
         );
-        params.insert("total_cost".to_string(), DataValue::from(session.total_cost));
+        params.insert(
+            "total_cost".to_string(),
+            DataValue::from(session.total_cost),
+        );
         params.insert(
             "schema_version".to_string(),
             DataValue::from(session.schema_version as i64),
@@ -1096,7 +1099,9 @@ mod truncate_tests {
             .create_session("/tmp/replace", None, "test-model")
             .expect("create session");
         for i in 0..20u64 {
-            store.save_message(&meta.id, i, &format!("old-{i}")).unwrap();
+            store
+                .save_message(&meta.id, i, &format!("old-{i}"))
+                .unwrap();
         }
 
         let replacement: Vec<String> = (0..5).map(|i| format!("new-{i}")).collect();
@@ -1157,7 +1162,9 @@ mod truncate_tests {
             .create_session("/tmp/resume-tail", None, "test-model")
             .expect("create session");
         for i in 0..10u64 {
-            store.save_message(&meta.id, i, &format!("old-{i}")).unwrap();
+            store
+                .save_message(&meta.id, i, &format!("old-{i}"))
+                .unwrap();
         }
         let compacted: Vec<String> = (0..4).map(|i| format!("compact-{i}")).collect();
         store.replace_messages(&meta.id, &compacted).unwrap();

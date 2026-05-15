@@ -364,9 +364,9 @@ pub(super) fn register_agent_listing(
     registry.register(Box::new(
         archon_tools::agent_tool::AgentTool::with_agent_listing(&common_agents),
     ));
-    registry.register(Box::new(
-        archon_tools::agent_tool::AgentCatalogTool::new(agents),
-    ));
+    registry.register(Box::new(archon_tools::agent_tool::AgentCatalogTool::new(
+        agents,
+    )));
 }
 
 pub(super) fn resolve_agent_definition(
