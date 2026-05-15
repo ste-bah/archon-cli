@@ -31,6 +31,10 @@ World-model state lives under `~/.archon/world-model/`:
 | `ledgers/world-bundle-attachments.jsonl` | audited pipeline bundle attachments |
 | `ledgers/embedding-policy-events.jsonl` | external embedding policy audit events |
 | `candidates/` | candidate checkpoints |
+| `jepa/candidates/` | JEPA representation candidate manifests and checkpoints |
+| `jepa/evals/` | JEPA-specific promotion gate reports |
+| `jepa/representation-comparisons/` | JEPA versus baseline representation comparison reports |
+| `jepa/training-runs/` | JEPA component-loss training ledgers |
 | `active/model.json` | active advisory model pointer |
 
 The JSONL ledger rotates at 500 MB by default and raw ledgers are retained for 90 days. Cozo summaries are retained indefinitely.
@@ -42,6 +46,14 @@ The advisor is fail-open. When the corpus is cold, the store is unavailable, tra
 Runtime hooks exist for shell and TUI coding/research pipelines, memory reindex, governed agent evolution, and observed provider-runtime calls. Coding/research pipelines also record pre-run counterfactual and shadow advice for alternatives such as verify-first, resume-existing, memory-surfacing, and provider fallback. Completed audited pipelines link outcomes back to persisted predictions and bundle attachment ledgers when a prediction exists.
 
 The implementation is advisory-only. Any future behavior-changing use is gated by policy, shadow evaluation, and user approval.
+
+## JEPA Representation Layer
+
+`model_kind = "jepa_transition"` enables the JEPA representation path. JEPA is a local trace-representation learner layered under the existing advisory transition model. It consumes structured trace windows, action metadata, graph context, scalar features, and deterministic lexical hashes. It does not require FastEmbed, OpenAI, or any third-party embedding provider for its own encoder path.
+
+Training uses masked trace windows and future latent prediction. The target encoder is EMA-updated and marked stop-gradient; the predictor is a training objective only and is not invoked by runtime inference. Runtime JEPA predictions use context/action encoders plus the persisted transition model trained over JEPA latents.
+
+JEPA promotion fails closed. A candidate must pass corpus sufficiency, collapse, multi-horizon, checkpoint-size, tensor-safety, and fixed FastEmbed-baseline comparison gates. If a JEPA checkpoint is missing, invalid, mismatched, slow, or cannot encode, the runtime advisor records a typed unavailable reason and foreground work continues.
 
 ## Labeling
 
@@ -58,9 +70,14 @@ archon world status
 archon world ingest <session-id>
 archon world ingest --backfill
 archon world train --candidate
+archon world train-jepa --candidate
 archon world trainer-tick
 archon world eval <candidate-id>
+archon world eval-jepa <candidate-id>
+archon world inspect-jepa <candidate-id>
+archon world compare-representations --baseline fastembed --candidate <candidate-id>
 archon world promote <model-id>
+archon world promote-jepa <candidate-id>
 archon world predict-next --session-id <id> --action-ref <ref> --summary "run tests"
 archon world score-actions --task "finish feature" --actions actions.json
 archon world explain <prediction-id>

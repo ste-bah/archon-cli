@@ -419,6 +419,19 @@ pub(super) fn render_trainer_tick(
     battery_percent: Option<u8>,
     unplugged: bool,
 ) -> Result<String> {
+    if config.learning.world_model.jepa.enabled
+        || config.learning.world_model.model_kind == JEPA_MODEL_KIND
+    {
+        return render_jepa_trainer_tick(
+            config,
+            root,
+            last_activity_age_ms,
+            last_training_age_ms,
+            battery_percent,
+            unplugged,
+        );
+    }
+
     let backend = selected_training_backend(config);
     let auto = &config.learning.world_model.auto_trainer;
     let policy = archon_world_model::trainer::DynamicTrainerPolicy {
@@ -495,6 +508,122 @@ pub(super) fn render_trainer_tick(
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "none".into())
     ))
+}
+
+fn render_jepa_trainer_tick(
+    config: &archon_core::config::ArchonConfig,
+    root: &Path,
+    last_activity_age_ms: Option<u64>,
+    last_training_age_ms: Option<u64>,
+    battery_percent: Option<u8>,
+    unplugged: bool,
+) -> Result<String> {
+    let auto = &config.learning.world_model.auto_trainer;
+    let policy = archon_world_model::trainer::DynamicTrainerPolicy {
+        min_throttle_ms: auto.min_throttle_ms,
+        idle_required_ms: auto.idle_required_ms,
+        battery_suspend_below_percent: auto.battery_suspend_below_percent,
+        max_runtime_ms: config.learning.world_model.jepa.max_runtime_ms,
+    };
+    let trigger_policy = archon_world_model::trainer::DynamicTrainerTriggerPolicy {
+        trigger_new_rows: auto.trigger_new_rows,
+        trigger_surprises: auto.trigger_surprises,
+        trigger_corrections: auto.trigger_corrections,
+        trigger_elapsed_ms: auto.trigger_elapsed_ms,
+        first_run_threshold: auto.first_run_threshold,
+    };
+    let runtime = archon_world_model::trainer::TrainerRuntimeSnapshot {
+        last_activity_age_ms: last_activity_age_ms.unwrap_or(auto.idle_required_ms),
+        last_training_age_ms,
+        battery_percent,
+        unplugged,
+    };
+    let mut decision = archon_world_model::trainer::evaluate_dynamic_trainer(policy, runtime);
+    let stats = WorldModelStore::open(root)?.cold_start_stats()?;
+    let trigger = archon_world_model::trainer::evaluate_trainer_trigger(
+        trigger_policy,
+        archon_world_model::trainer::DynamicTrainerTriggerSnapshot {
+            total_rows: stats.rows,
+            candidate_count: jepa_candidate_count(root) as u64,
+            new_rows_since_training: stats.rows,
+            surprises_since_training: 0,
+            corrections_since_training: 0,
+            elapsed_since_training_ms: last_training_age_ms,
+        },
+    );
+    if decision.should_train && trigger.is_none() {
+        decision.should_train = false;
+        decision.reason = archon_world_model::trainer::TrainerDecisionReason::NoTrigger;
+    }
+
+    let mut rows_loaded = 0usize;
+    let mut examples = 0u64;
+    let mut candidate_id: Option<String> = None;
+    let mut loss_total: Option<f32> = None;
+    let mut checkpoint_path: Option<std::path::PathBuf> = None;
+    if decision.should_train {
+        let rows = WorldModelStore::open(root)?.load_rows()?;
+        rows_loaded = rows.len();
+        let jepa_config = jepa_training_config(config)?;
+        let started = std::time::Instant::now();
+        let (model, outcome) = archon_world_model::jepa::train_jepa_candidate(&rows, &jepa_config)?;
+        if started.elapsed().as_millis() > u128::from(policy.max_runtime_ms) {
+            bail!("jepa world-model training exceeded max_runtime_ms");
+        }
+        let registry = ModelRegistry::open(root)?;
+        let _ = registry.write_jepa_candidate(&model, &outcome)?;
+        examples = model.metadata.example_count;
+        candidate_id = Some(model.metadata.model_id.clone());
+        loss_total = Some(outcome.losses.loss_total);
+        checkpoint_path = Some(
+            registry
+                .load_jepa_candidate(&model.metadata.model_id)?
+                .checkpoint
+                .path,
+        );
+    }
+
+    Ok(format!(
+        "World Model JEPA Trainer Tick\n\
+         =============================\n\
+         Decision: {:?}\n\
+         Should train: {}\n\
+         Trigger: {}\n\
+         Rows loaded: {}\n\
+         Examples: {}\n\
+         Candidate: {}\n\
+         Loss total: {}\n\
+         Checkpoint: {}",
+        decision.reason,
+        decision.should_train,
+        trigger
+            .as_ref()
+            .map(|trigger| format!("{trigger:?}"))
+            .unwrap_or_else(|| "none".into()),
+        rows_loaded,
+        examples,
+        candidate_id.as_deref().unwrap_or("none"),
+        loss_total
+            .map(|value| format!("{value:.4}"))
+            .unwrap_or_else(|| "none".into()),
+        checkpoint_path
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "none".into())
+    ))
+}
+
+fn jepa_candidate_count(root: &Path) -> usize {
+    let dir = root.join("jepa").join("candidates");
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry.path().extension().and_then(|ext| ext.to_str()) == Some("json")
+        })
+        .count()
 }
 
 pub(super) fn render_promote(root: &Path, model_id: &str) -> Result<String> {

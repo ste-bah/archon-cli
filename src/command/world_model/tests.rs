@@ -88,6 +88,7 @@ fn status_reports_cold_start_defaults() {
     assert!(rendered.contains("Corpus rows:        0"));
     assert!(rendered.contains("cold_start"));
     assert!(rendered.contains("Active model:       none"));
+    assert!(rendered.contains("JEPA status:        disabled"));
     assert!(rendered.contains("Selected backend:   cpu"));
     assert!(rendered.contains("Advisor status:     fail-open"));
     assert!(rendered.contains("cosine >= 0.95"));
@@ -272,6 +273,24 @@ fn trainer_tick_writes_candidate_when_idle_and_triggered() {
         rendered.contains("Candidate: world-model-candidate-"),
         "trainer did not produce a candidate; full output:\n{rendered}"
     );
+}
+
+#[test]
+fn jepa_trainer_tick_respects_recent_activity_gate() {
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let mut config = test_config();
+    config.learning.world_model.jepa.enabled = true;
+    config.learning.world_model.state_dim = 8;
+    config.learning.world_model.jepa.latent_dim = 8;
+
+    let rendered =
+        candidate::render_trainer_tick(&config, temp.path(), Some(10_000), None, Some(90), false)
+            .unwrap();
+
+    assert!(rendered.contains("World Model JEPA Trainer Tick"));
+    assert!(rendered.contains("Should train: false"));
+    assert!(rendered.contains("Decision: RecentActivity"));
 }
 
 #[test]
