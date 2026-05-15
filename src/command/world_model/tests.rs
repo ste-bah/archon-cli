@@ -428,6 +428,67 @@ fn promote_jepa_requires_passing_eval_report() {
 }
 
 #[test]
+fn predict_next_uses_active_jepa_model_when_configured() {
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let mut config = test_config();
+    config.learning.world_model.model_kind = "jepa_transition".into();
+    config.learning.world_model.state_dim = 8;
+    config.learning.world_model.jepa.latent_dim = 8;
+    config.learning.world_model.jepa.context_window_rows = 2;
+    config.learning.world_model.jepa.target_window_rows = 1;
+    config.learning.world_model.jepa.prediction_horizons = vec![1];
+    let trained = candidate::render_train_jepa(&config, temp.path(), true, None).unwrap();
+    let candidate_id = candidate_id_from(&trained);
+    let registry = archon_world_model::registry::ModelRegistry::open(temp.path()).unwrap();
+    registry
+        .promote_model_kind(&candidate_id, "jepa_transition")
+        .unwrap();
+
+    let rendered = render_predict_next_with_state(
+        &config,
+        temp.path(),
+        archon_world_model::ColdStartStats {
+            rows: 1_000,
+            sessions: 50,
+            observed_days: 7,
+        },
+        Some(candidate_id.clone()),
+        "s1",
+        "a1",
+        "run tests",
+    );
+
+    assert!(rendered.contains(&format!("Model: {candidate_id}")));
+    assert!(rendered.contains("Model kind: jepa_transition"));
+    assert!(rendered.contains("Representation: archon-jepa:"));
+}
+
+#[test]
+fn predict_next_fails_open_when_jepa_pointer_missing() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut config = test_config();
+    config.learning.world_model.model_kind = "jepa_transition".into();
+
+    let rendered = render_predict_next_with_state(
+        &config,
+        temp.path(),
+        archon_world_model::ColdStartStats {
+            rows: 1_000,
+            sessions: 50,
+            observed_days: 7,
+        },
+        Some("missing-jepa".into()),
+        "s1",
+        "a1",
+        "run tests",
+    );
+
+    assert!(rendered.contains("Unavailable: JepaCheckpointMissing"));
+    assert!(rendered.contains("Behavior: fail-open"));
+}
+
+#[test]
 fn eval_writes_report_and_keeps_unmet_gates_visible() {
     let temp = tempfile::tempdir().unwrap();
     seed_training_rows(temp.path());

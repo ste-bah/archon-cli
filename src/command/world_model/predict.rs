@@ -1,10 +1,14 @@
 use std::path::Path;
+use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use archon_world_model::embedding::{EmbeddingRequest, WorldEmbeddingAdapter};
-use archon_world_model::registry::ModelRegistry;
+use archon_world_model::jepa::JEPA_MODEL_KIND;
+use archon_world_model::registry::{LATENT_TRANSITION_MODEL_KIND, ModelRegistry};
+use archon_world_model::representation::{TraceAction, TraceWindowBuilder, WorldRepresentationAdapter};
+use archon_world_model::schema::{WorldActionKind, WorldTraceRow};
 
 use super::embedding_runtime::build_embedding_adapter;
 
@@ -12,6 +16,10 @@ use super::embedding_runtime::build_embedding_adapter;
 pub(super) struct PersistedPrediction {
     pub prediction_id: String,
     pub model_id: String,
+    #[serde(default = "default_prediction_model_kind")]
+    pub model_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub representation_source: Option<String>,
     pub session_id: String,
     pub action_ref: String,
     pub action_summary: String,
@@ -34,6 +42,12 @@ pub(super) struct PersistedPrediction {
 struct PredictionInference {
     summary: String,
     vector: Vec<f32>,
+    model_kind: String,
+    representation_source: String,
+}
+
+fn default_prediction_model_kind() -> String {
+    LATENT_TRANSITION_MODEL_KIND.into()
 }
 
 pub(super) fn render_active_checkpoint_prediction(
@@ -61,19 +75,26 @@ pub(super) fn render_active_checkpoint_prediction(
              Session: {session_id}\n\
              Action ref: {action_ref}\n\
              Model: {}\n\
+             Model kind: {}\n\
+             Representation: {}\n\
              Inference: active_checkpoint\n\
              Prediction: {}\n\
              Prediction record: {}",
             prediction.prediction_id,
             prediction.model_id,
+            prediction.model_kind,
+            prediction
+                .representation_source
+                .as_deref()
+                .unwrap_or("generic_embedding"),
             prediction.predicted_next_state_summary,
             prediction_path.display()
         )),
         Ok(None) => None,
-        Err(_) => Some(super::render_unavailable_prediction(
+        Err(error) => Some(super::render_unavailable_prediction(
             session_id,
             action_ref,
-            "StoreUnavailable",
+            unavailable_reason_from_error(&error),
         )),
     }
 }
@@ -107,10 +128,12 @@ pub(super) fn persist_active_checkpoint_prediction(
         return Ok(None);
     }
 
-    let inference = predict_with_checkpoint(config, root, &model_id, summary)?;
+    let inference = predict_with_checkpoint(config, root, &model_id, session_id, action_ref, summary)?;
     let prediction = PersistedPrediction {
         prediction_id: format!("world-prediction-{}", uuid::Uuid::new_v4()),
         model_id,
+        model_kind: inference.model_kind,
+        representation_source: Some(inference.representation_source),
         session_id: session_id.to_string(),
         action_ref: action_ref.to_string(),
         action_summary: summary.to_string(),
@@ -156,12 +179,16 @@ pub(super) fn record_outcome_for_prediction(
 ) -> anyhow::Result<(PersistedPrediction, std::path::PathBuf)> {
     let mut prediction = load_prediction(root, prediction_id)?
         .ok_or_else(|| anyhow::anyhow!("prediction not found: {prediction_id}"))?;
-    let adapter = build_embedding_adapter(config)?;
-    let actual_next_state = embed(
-        adapter.as_ref(),
-        &format!("{prediction_id}-actual"),
-        actual_summary,
-    )?;
+    let actual_next_state = if prediction.model_kind == JEPA_MODEL_KIND {
+        encode_jepa_actual_outcome(config, root, &prediction, actual_summary)?
+    } else {
+        let adapter = build_embedding_adapter(config)?;
+        embed(
+            adapter.as_ref(),
+            &format!("{prediction_id}-actual"),
+            actual_summary,
+        )?
+    };
     if prediction.predicted_next_state.len() != actual_next_state.len() {
         anyhow::bail!(
             "prediction vector dimension mismatch: expected {}, got {}",
@@ -210,9 +237,23 @@ fn predict_with_checkpoint(
     config: &archon_core::config::ArchonConfig,
     root: &Path,
     model_id: &str,
+    session_id: &str,
+    action_ref: &str,
     summary: &str,
 ) -> anyhow::Result<PredictionInference> {
     let registry = ModelRegistry::open(root)?;
+    let active_kind = registry
+        .active_model_kind()?
+        .unwrap_or_else(|| LATENT_TRANSITION_MODEL_KIND.into());
+    if config.learning.world_model.model_kind == JEPA_MODEL_KIND {
+        if active_kind != JEPA_MODEL_KIND {
+            anyhow::bail!("JepaCheckpointMissing: active model is not a JEPA checkpoint");
+        }
+        return predict_with_jepa_checkpoint(
+            config, &registry, model_id, session_id, action_ref, summary,
+        );
+    }
+
     let candidate = registry.load_cpu_candidate(model_id)?;
     let adapter = build_embedding_adapter(config)?;
     let state = embed(adapter.as_ref(), model_id, summary)?;
@@ -230,7 +271,132 @@ fn predict_with_checkpoint(
             vector_norm(&next)
         ),
         vector: next,
+        model_kind: LATENT_TRANSITION_MODEL_KIND.into(),
+        representation_source: format!("{}:{}", adapter.provider_name(), adapter.model_name()),
     })
+}
+
+fn predict_with_jepa_checkpoint(
+    config: &archon_core::config::ArchonConfig,
+    registry: &ModelRegistry,
+    model_id: &str,
+    session_id: &str,
+    action_ref: &str,
+    summary: &str,
+) -> anyhow::Result<PredictionInference> {
+    let started = Instant::now();
+    let candidate = registry
+        .load_jepa_candidate(model_id)
+        .map_err(|error| anyhow::anyhow!("JepaCheckpointMissing: {error}"))?;
+    candidate
+        .model
+        .validate_finite()
+        .map_err(|error| anyhow::anyhow!("JepaCheckpointInvalid: {error}"))?;
+    if candidate.model.metadata.latent_dim != config.learning.world_model.state_dim {
+        anyhow::bail!(
+            "JepaDimensionMismatch: expected {}, got {}",
+            config.learning.world_model.state_dim,
+            candidate.model.metadata.latent_dim
+        );
+    }
+    let transition = candidate
+        .model
+        .transition_model
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("JepaCheckpointMissing: transition model missing"))?;
+    let (window, action) = synthetic_runtime_window(session_id, action_ref, summary)?;
+    let state = candidate
+        .model
+        .encode_state(&window)
+        .map_err(|error| anyhow::anyhow!("JepaEncoderFailed: {error}"))?;
+    let action = candidate
+        .model
+        .encode_action(&action)
+        .map_err(|error| anyhow::anyhow!("JepaEncoderFailed: {error}"))?;
+    let next = archon_world_model::backend::predict_next_with_backend(
+        transition,
+        &state,
+        &action,
+        transition.metadata.backend,
+    )?;
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    if elapsed_ms > config.learning.world_model.jepa.max_prediction_latency_ms {
+        anyhow::bail!(
+            "JepaLatencyExceeded: prediction took {elapsed_ms}ms, cap={}ms",
+            config.learning.world_model.jepa.max_prediction_latency_ms
+        );
+    }
+    Ok(PredictionInference {
+        summary: format!(
+            "next-state dim={} norm={:.4}",
+            next.len(),
+            vector_norm(&next)
+        ),
+        vector: next,
+        model_kind: JEPA_MODEL_KIND.into(),
+        representation_source: format!("archon-jepa:{}", candidate.model.metadata.model_id),
+    })
+}
+
+fn encode_jepa_actual_outcome(
+    config: &archon_core::config::ArchonConfig,
+    root: &Path,
+    prediction: &PersistedPrediction,
+    actual_summary: &str,
+) -> anyhow::Result<Vec<f32>> {
+    let registry = ModelRegistry::open(root)?;
+    let candidate = registry
+        .load_jepa_candidate(&prediction.model_id)
+        .map_err(|error| anyhow::anyhow!("JepaCheckpointMissing: {error}"))?;
+    if candidate.model.metadata.latent_dim != config.learning.world_model.state_dim {
+        anyhow::bail!(
+            "JepaDimensionMismatch: expected {}, got {}",
+            config.learning.world_model.state_dim,
+            candidate.model.metadata.latent_dim
+        );
+    }
+    let (window, _) = synthetic_runtime_window(
+        &prediction.session_id,
+        &format!("{}-actual", prediction.action_ref),
+        actual_summary,
+    )?;
+    candidate
+        .model
+        .encode_target(&window)
+        .map_err(|error| anyhow::anyhow!("JepaEncoderFailed: {error}"))
+}
+
+fn synthetic_runtime_window(
+    session_id: &str,
+    action_ref: &str,
+    summary: &str,
+) -> anyhow::Result<(archon_world_model::TraceWindow, TraceAction)> {
+    let mut row =
+        WorldTraceRow::new(session_id, WorldActionKind::AgentAttempt).with_row_id(action_ref);
+    row.redacted_excerpt = Some(summary.to_string());
+    row.created_at = Utc::now();
+    let action = TraceAction::from_row(&row);
+    let builder = TraceWindowBuilder::new(&[row]);
+    let window = builder
+        .context_window(action_ref, 1)
+        .map_err(|error| anyhow::anyhow!("JepaEncoderFailed: {error}"))?;
+    Ok((window, action))
+}
+
+fn unavailable_reason_from_error(error: &anyhow::Error) -> &'static str {
+    let message = error.to_string();
+    for reason in [
+        "JepaCheckpointMissing",
+        "JepaCheckpointInvalid",
+        "JepaEncoderFailed",
+        "JepaDimensionMismatch",
+        "JepaLatencyExceeded",
+    ] {
+        if message.contains(reason) {
+            return reason;
+        }
+    }
+    "StoreUnavailable"
 }
 
 fn embed(

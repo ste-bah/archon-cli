@@ -17,6 +17,7 @@ use safetensors::tensor::{Dtype, TensorView, serialize_to_file};
 use serde::{Deserialize, Serialize};
 
 use crate::backend::BackendKind;
+use crate::model::{CpuLatentTransitionModel, LatentTransitionExample};
 use crate::representation::{
     TraceAction, TraceTransition, TraceWindow, TraceWindowBuilder, WorldRepresentationAdapter,
 };
@@ -384,6 +385,7 @@ pub struct JepaTraceModel {
     pub target_encoder: JepaTraceEncoder,
     pub predictor: JepaPredictor,
     pub auxiliary_heads: Vec<JepaAuxiliaryHead>,
+    pub transition_model: Option<CpuLatentTransitionModel>,
 }
 
 impl JepaTraceModel {
@@ -422,6 +424,7 @@ impl JepaTraceModel {
             || !self.target_encoder.finite()
             || !self.predictor.finite()
             || !self.auxiliary_heads.iter().all(JepaAuxiliaryHead::finite)
+            || !self.transition_model.as_ref().is_none_or(transition_model_finite)
         {
             bail!("jepa checkpoint contains non-finite values");
         }
@@ -438,6 +441,11 @@ impl JepaTraceModel {
                 .iter()
                 .map(JepaAuxiliaryHead::parameter_count)
                 .sum::<u64>()
+            + self
+                .transition_model
+                .as_ref()
+                .map(|model| model.metadata.parameter_count)
+                .unwrap_or_default()
     }
 }
 
@@ -777,10 +785,13 @@ pub fn train_jepa_candidate(
         target_encoder: target_encoder.clone(),
         predictor: JepaPredictor::baseline(config.latent_dim),
         auxiliary_heads: fit_auxiliary_heads(config.latent_dim, &encoded),
+        transition_model: None,
     };
     let initial_losses = training_losses(&initial_model, &encoded, config)?;
     let predictor = JepaPredictor::fit(config.latent_dim, &encoded)?;
     let auxiliary_heads = fit_auxiliary_heads(config.latent_dim, &encoded);
+    let transition_examples = encoded_transition_examples(&encoded);
+    let transition_model = CpuLatentTransitionModel::fit(config.latent_dim, &transition_examples)?;
     let mut metadata =
         JepaTraceModelMetadata::candidate(config, rows.len() as u64, examples.len() as u64);
     let mut model = JepaTraceModel {
@@ -790,6 +801,7 @@ pub fn train_jepa_candidate(
         target_encoder,
         predictor,
         auxiliary_heads,
+        transition_model: Some(transition_model),
     };
     metadata.parameter_count = model.parameter_count();
     model.metadata = metadata;
@@ -1020,6 +1032,32 @@ fn encode_examples(
             })
         })
         .collect()
+}
+
+fn encoded_transition_examples(
+    examples: &[EncodedJepaTrainingExample],
+) -> Vec<LatentTransitionExample> {
+    examples
+        .iter()
+        .map(|example| LatentTransitionExample {
+            state: example.context_latent.clone(),
+            action: example.action_latent.clone(),
+            next_state: example.target_latent.clone(),
+            labels: example.labels.clone(),
+        })
+        .collect()
+}
+
+fn transition_model_finite(model: &CpuLatentTransitionModel) -> bool {
+    model.state_weights.iter().all(|value| value.is_finite())
+        && model.action_weights.iter().all(|value| value.is_finite())
+        && model.transition_bias.iter().all(|value| value.is_finite())
+        && model.mean_delta.iter().all(|value| value.is_finite())
+        && model.auxiliary_heads.iter().all(|head| {
+            head.bias.is_finite()
+                && head.state_weights.iter().all(|value| value.is_finite())
+                && head.action_weights.iter().all(|value| value.is_finite())
+        })
 }
 
 fn training_losses(
@@ -1788,6 +1826,7 @@ mod tests {
         assert!(outcome.losses.loss_total.is_finite());
         assert!(outcome.metadata.target_stop_gradient);
         assert_eq!(outcome.masking.mask_ratio, 0.30);
+        assert!(model.transition_model.is_some());
         assert_eq!(model.provider_name(), "archon-jepa");
     }
 

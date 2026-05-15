@@ -34,6 +34,11 @@ pub enum WorldAdvisorUnavailableReason {
     TrainingInProgress,
     MissingEmbedding,
     MetalBackendFailed,
+    JepaCheckpointMissing,
+    JepaCheckpointInvalid,
+    JepaEncoderFailed,
+    JepaDimensionMismatch,
+    JepaLatencyExceeded,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

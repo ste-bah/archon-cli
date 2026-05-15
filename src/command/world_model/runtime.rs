@@ -117,7 +117,7 @@ fn runtime_advisory_record(
     let root = super::world_model_root()?;
     let stats = super::load_world_model_stats()?;
     let active_model_id = super::active_model_id()?;
-    if let Some((prediction, _)) = super::predict::persist_active_checkpoint_prediction(
+    match super::predict::persist_active_checkpoint_prediction(
         config,
         &root,
         stats,
@@ -125,23 +125,35 @@ fn runtime_advisory_record(
         session_id,
         action_ref,
         summary,
-    )? {
-        return Ok(archon_world_model::integration::WorldAdvisorSurfaceRecord {
-            surface,
-            prediction: Some(archon_world_model::WorldPrediction {
-                prediction_id: prediction.prediction_id,
-                model_id: prediction.model_id,
-                predicted_next_state_summary: prediction.predicted_next_state_summary,
-                evidence_refs: prediction.evidence_refs,
-                created_at: prediction.created_at,
-            }),
-            unavailable: None,
-            session_id: Some(session_id.to_string()),
-            action_ref: Some(action_ref.to_string()),
-            action_summary: Some(summary.to_string()),
-            continue_foreground_flow: true,
-            created_at: chrono::Utc::now(),
-        });
+    ) {
+        Ok(Some((prediction, _))) => {
+            return Ok(archon_world_model::integration::WorldAdvisorSurfaceRecord {
+                surface,
+                prediction: Some(archon_world_model::WorldPrediction {
+                    prediction_id: prediction.prediction_id,
+                    model_id: prediction.model_id,
+                    predicted_next_state_summary: prediction.predicted_next_state_summary,
+                    evidence_refs: prediction.evidence_refs,
+                    created_at: prediction.created_at,
+                }),
+                unavailable: None,
+                session_id: Some(session_id.to_string()),
+                action_ref: Some(action_ref.to_string()),
+                action_summary: Some(summary.to_string()),
+                continue_foreground_flow: true,
+                created_at: chrono::Utc::now(),
+            });
+        }
+        Ok(None) => {}
+        Err(error) => {
+            return Ok(
+                archon_world_model::integration::WorldAdvisorSurfaceRecord::unavailable(
+                    surface,
+                    runtime_unavailable_reason_from_error(&error),
+                )
+                .with_context(session_id, action_ref, summary),
+            );
+        }
     }
     let advisor = archon_world_model::WorldAdvisor::new(
         archon_world_model::WorldAdvisorConfig {
@@ -162,6 +174,25 @@ fn runtime_advisory_record(
         )
         .with_context(session_id, action_ref, summary),
     )
+}
+
+fn runtime_unavailable_reason_from_error(
+    error: &anyhow::Error,
+) -> archon_world_model::WorldAdvisorUnavailableReason {
+    let message = error.to_string();
+    if message.contains("JepaCheckpointMissing") {
+        archon_world_model::WorldAdvisorUnavailableReason::JepaCheckpointMissing
+    } else if message.contains("JepaCheckpointInvalid") {
+        archon_world_model::WorldAdvisorUnavailableReason::JepaCheckpointInvalid
+    } else if message.contains("JepaEncoderFailed") {
+        archon_world_model::WorldAdvisorUnavailableReason::JepaEncoderFailed
+    } else if message.contains("JepaDimensionMismatch") {
+        archon_world_model::WorldAdvisorUnavailableReason::JepaDimensionMismatch
+    } else if message.contains("JepaLatencyExceeded") {
+        archon_world_model::WorldAdvisorUnavailableReason::JepaLatencyExceeded
+    } else {
+        archon_world_model::WorldAdvisorUnavailableReason::StoreUnavailable
+    }
 }
 
 pub(crate) fn record_provider_runtime_advisory(session_id: &str, action_ref: &str, summary: &str) {
