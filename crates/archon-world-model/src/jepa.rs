@@ -724,25 +724,36 @@ pub fn evaluate_representation_collapse(
     if latents.iter().any(|latent| latent.len() != dim) {
         bail!("collapse evaluation latent dimensions must match");
     }
-    let mut stds = vec![0.0; dim];
+    if latents
+        .iter()
+        .flat_map(|latent| latent.iter())
+        .any(|value| !value.is_finite())
+    {
+        bail!("collapse evaluation latents must be finite");
+    }
+    let mut means = vec![0.0_f64; dim];
+    for latent in latents {
+        for (idx, value) in latent.iter().enumerate() {
+            means[idx] += f64::from(*value);
+        }
+    }
+    for mean in &mut means {
+        *mean /= latents.len() as f64;
+    }
+    let mut stds = vec![0.0_f64; dim];
     for idx in 0..dim {
-        let mean = latents.iter().map(|latent| latent[idx]).sum::<f32>() / latents.len() as f32;
         let variance = latents
             .iter()
-            .map(|latent| (latent[idx] - mean).powi(2))
-            .sum::<f32>()
-            / latents.len() as f32;
+            .map(|latent| {
+                let centered = f64::from(latent[idx]) - means[idx];
+                centered * centered
+            })
+            .sum::<f64>()
+            / latents.len() as f64;
         stds[idx] = variance.sqrt();
     }
-    let mean_latent_std = stds.iter().sum::<f32>() / dim as f32;
-    let std_sum = stds.iter().sum::<f32>();
-    let std_sq_sum = stds.iter().map(|value| value * value).sum::<f32>();
-    let effective_rank = if std_sq_sum <= f32::EPSILON {
-        0.0
-    } else {
-        (std_sum * std_sum) / std_sq_sum
-    };
-    let effective_rank_ratio = (effective_rank / dim as f32).clamp(0.0, 1.0);
+    let mean_latent_std = (stds.iter().sum::<f64>() / dim as f64) as f32;
+    let effective_rank_ratio = singular_value_effective_rank_ratio(latents, &means)?;
     let passes =
         mean_latent_std >= min_latent_std && effective_rank_ratio >= min_effective_rank_ratio;
     Ok(JepaCollapseReport {
@@ -752,6 +763,142 @@ pub fn evaluate_representation_collapse(
         min_effective_rank_ratio,
         passes,
     })
+}
+
+fn singular_value_effective_rank_ratio(latents: &[Vec<f32>], means: &[f64]) -> Result<f32> {
+    let sample_count = latents.len();
+    let dim = means.len();
+    if sample_count == 0 || dim == 0 {
+        bail!("collapse evaluation requires at least one latent");
+    }
+
+    let gram = mean_centered_gram_matrix(latents, means);
+    let eigenvalues = jacobi_symmetric_eigenvalues(gram);
+    let mut sigma_sum = 0.0_f64;
+    let mut sigma_sq_sum = 0.0_f64;
+    for eigenvalue in eigenvalues {
+        if !eigenvalue.is_finite() {
+            bail!("collapse evaluation eigenvalues must be finite");
+        }
+        let singular_value = eigenvalue.max(0.0).sqrt();
+        sigma_sum += singular_value;
+        sigma_sq_sum += singular_value * singular_value;
+    }
+    if sigma_sq_sum <= f64::EPSILON || !sigma_sum.is_finite() || !sigma_sq_sum.is_finite() {
+        return Ok(0.0);
+    }
+
+    let effective_rank = (sigma_sum * sigma_sum) / sigma_sq_sum;
+    Ok((effective_rank / dim as f64).clamp(0.0, 1.0) as f32)
+}
+
+fn mean_centered_gram_matrix(latents: &[Vec<f32>], means: &[f64]) -> Vec<Vec<f64>> {
+    let sample_count = latents.len();
+    let dim = means.len();
+    if sample_count <= dim {
+        let mut matrix = vec![vec![0.0_f64; sample_count]; sample_count];
+        for row_idx in 0..sample_count {
+            for other_idx in row_idx..sample_count {
+                let mut dot = 0.0_f64;
+                for feature_idx in 0..dim {
+                    dot += centered_latent(latents, means, row_idx, feature_idx)
+                        * centered_latent(latents, means, other_idx, feature_idx);
+                }
+                matrix[row_idx][other_idx] = dot;
+                matrix[other_idx][row_idx] = dot;
+            }
+        }
+        matrix
+    } else {
+        let mut matrix = vec![vec![0.0_f64; dim]; dim];
+        for left_idx in 0..dim {
+            for right_idx in left_idx..dim {
+                let mut dot = 0.0_f64;
+                for row_idx in 0..sample_count {
+                    dot += centered_latent(latents, means, row_idx, left_idx)
+                        * centered_latent(latents, means, row_idx, right_idx);
+                }
+                matrix[left_idx][right_idx] = dot;
+                matrix[right_idx][left_idx] = dot;
+            }
+        }
+        matrix
+    }
+}
+
+fn centered_latent(latents: &[Vec<f32>], means: &[f64], row_idx: usize, feature_idx: usize) -> f64 {
+    f64::from(latents[row_idx][feature_idx]) - means[feature_idx]
+}
+
+fn jacobi_symmetric_eigenvalues(mut matrix: Vec<Vec<f64>>) -> Vec<f64> {
+    let size = matrix.len();
+    if size == 0 {
+        return Vec::new();
+    }
+    if size == 1 {
+        return vec![matrix[0][0]];
+    }
+
+    let scale = matrix
+        .iter()
+        .enumerate()
+        .map(|(idx, row)| row[idx].abs())
+        .fold(1.0_f64, f64::max);
+    let tolerance = (1e-10_f64 * scale).max(1e-12);
+    for _ in 0..64 {
+        let mut changed = false;
+        for pivot in 0..size - 1 {
+            for other in pivot + 1..size {
+                let off_diag = matrix[pivot][other];
+                if off_diag.abs() <= tolerance {
+                    continue;
+                }
+                changed = true;
+                let pivot_diag = matrix[pivot][pivot];
+                let other_diag = matrix[other][other];
+                let tau = (other_diag - pivot_diag) / (2.0 * off_diag);
+                let turn = if tau >= 0.0 {
+                    1.0 / (tau + (1.0 + tau * tau).sqrt())
+                } else {
+                    -1.0 / (-tau + (1.0 + tau * tau).sqrt())
+                };
+                let cosine = 1.0 / (1.0 + turn * turn).sqrt();
+                let sine = turn * cosine;
+
+                for idx in 0..size {
+                    if idx == pivot || idx == other {
+                        continue;
+                    }
+                    let left = matrix[idx][pivot];
+                    let right = matrix[idx][other];
+                    let rotated_left = cosine * left - sine * right;
+                    let rotated_right = sine * left + cosine * right;
+                    matrix[idx][pivot] = rotated_left;
+                    matrix[pivot][idx] = rotated_left;
+                    matrix[idx][other] = rotated_right;
+                    matrix[other][idx] = rotated_right;
+                }
+
+                matrix[pivot][pivot] = cosine * cosine * pivot_diag
+                    - 2.0 * sine * cosine * off_diag
+                    + sine * sine * other_diag;
+                matrix[other][other] = sine * sine * pivot_diag
+                    + 2.0 * sine * cosine * off_diag
+                    + cosine * cosine * other_diag;
+                matrix[pivot][other] = 0.0;
+                matrix[other][pivot] = 0.0;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    matrix
+        .into_iter()
+        .enumerate()
+        .map(|(idx, row)| row[idx])
+        .collect()
 }
 
 pub fn train_jepa_candidate(
@@ -1718,6 +1865,15 @@ fn tensor_f32(tensors: &safetensors::SafeTensors<'_>, name: &str) -> Result<Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    use crate::embedding::{
+        EmbeddingBackendKind, EmbeddingRequest, EmbeddingVector,
+        WorldEmbeddingAdapter as WorldEmbeddingAdapterTrait,
+    };
     use crate::schema::{WorldActionKind, WorldTraceRow};
 
     fn rows() -> Vec<WorldTraceRow> {
@@ -1755,6 +1911,40 @@ mod tests {
                 row
             })
             .collect()
+    }
+
+    struct CountingEmbeddingAdapter {
+        calls: Arc<AtomicUsize>,
+        dimensions: usize,
+    }
+
+    impl WorldEmbeddingAdapterTrait for CountingEmbeddingAdapter {
+        fn backend_kind(&self) -> EmbeddingBackendKind {
+            EmbeddingBackendKind::Local
+        }
+
+        fn dimensions(&self) -> usize {
+            self.dimensions
+        }
+
+        fn provider_name(&self) -> &str {
+            "counting-test"
+        }
+
+        fn model_name(&self) -> &str {
+            "counting-test-v1"
+        }
+
+        fn embed(&self, request: &EmbeddingRequest) -> Result<EmbeddingVector> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(EmbeddingVector {
+                values: vec![0.0; self.dimensions],
+                provider: self.provider_name().into(),
+                model: self.model_name().into(),
+                source_hash: request.source_hash.clone(),
+                redaction_policy: request.redaction_policy.clone(),
+            })
+        }
     }
 
     #[test]
@@ -1850,6 +2040,52 @@ mod tests {
         assert!(!report.passes);
         assert_eq!(report.mean_latent_std, 0.0);
         assert_eq!(report.effective_rank_ratio, 0.0);
+    }
+
+    #[test]
+    fn collapse_gate_rejects_rank_one_latents_with_nonzero_std() {
+        let direction = [1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0];
+        let latents = [-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0]
+            .into_iter()
+            .map(|scale| {
+                direction
+                    .iter()
+                    .map(|component| scale * component)
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+
+        let report = evaluate_representation_collapse(&latents, 0.05, 0.50).unwrap();
+
+        assert!(report.mean_latent_std >= 0.05);
+        assert!(report.effective_rank_ratio < 0.50);
+        assert!(!report.passes);
+    }
+
+    #[test]
+    fn jepa_encoder_path_does_not_call_world_embedding_adapter() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counting_adapter = CountingEmbeddingAdapter {
+            calls: Arc::clone(&calls),
+            dimensions: 8,
+        };
+        let config = JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 2,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..JepaTrainingConfig::default()
+        };
+        let (model, _) = train_jepa_candidate(&rows(), &config).unwrap();
+        let examples = build_jepa_training_examples(&rows(), &config).unwrap();
+
+        assert_eq!(counting_adapter.dimensions(), 8);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        let _ = model.encode_state(&examples[0].context).unwrap();
+        let _ = model.encode_action(&examples[0].action).unwrap();
+        let _ = model.encode_target(&examples[0].target).unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     #[test]
