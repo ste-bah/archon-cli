@@ -36,8 +36,9 @@ pub use advisor::{
 pub use backend::{BackendKind, BackendStatus};
 pub use eval::{EvalConfig, PromotionGateReport};
 pub use jepa::{
-    JepaTraceModel, JepaTrainingConfig, JepaTrainingExample, JepaTrainingLosses,
-    JepaTrainingOutcome, JEPA_MODEL_KIND,
+    JepaEvalRecord, JepaPromotionGateReport, JepaRepresentationComparisonReport, JepaTraceModel,
+    JepaTrainingConfig, JepaTrainingExample, JepaTrainingLosses, JepaTrainingOutcome,
+    JEPA_MODEL_KIND,
 };
 pub use representation::{
     GenericEmbeddingRepresentationAdapter, TraceAction, TraceTransition, TraceWindow,

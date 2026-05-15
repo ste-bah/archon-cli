@@ -532,6 +532,95 @@ pub struct JepaHorizonReport {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JepaRepresentationComparisonReport {
+    pub candidate_id: String,
+    pub baseline_backend: String,
+    pub baseline_available: bool,
+    pub failure_reason: Option<String>,
+    pub heldout_examples: usize,
+    pub min_heldout_examples: usize,
+    pub jepa_next_state_cosine_similarity: f32,
+    pub baseline_next_state_cosine_similarity: f32,
+    pub relative_improvement: f32,
+    pub min_baseline_improvement: f32,
+    pub brier_regressed: bool,
+    pub passed: bool,
+}
+
+impl JepaRepresentationComparisonReport {
+    pub fn fail_closed(
+        candidate_id: impl Into<String>,
+        baseline_backend: impl Into<String>,
+        failure_reason: impl Into<String>,
+        min_heldout_examples: usize,
+        min_baseline_improvement: f32,
+    ) -> Self {
+        Self {
+            candidate_id: candidate_id.into(),
+            baseline_backend: baseline_backend.into(),
+            baseline_available: false,
+            failure_reason: Some(failure_reason.into()),
+            heldout_examples: 0,
+            min_heldout_examples,
+            jepa_next_state_cosine_similarity: 0.0,
+            baseline_next_state_cosine_similarity: 0.0,
+            relative_improvement: 0.0,
+            min_baseline_improvement,
+            brier_regressed: true,
+            passed: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JepaPromotionGateReport {
+    pub corpus_sufficient: bool,
+    pub representation_baseline: bool,
+    pub representation_collapse: bool,
+    pub multi_horizon_consistency: bool,
+    pub checkpoint_size: bool,
+    pub tensor_safety: bool,
+    pub passed: bool,
+}
+
+impl JepaPromotionGateReport {
+    pub fn from_parts(
+        corpus_sufficient: bool,
+        representation_baseline: bool,
+        representation_collapse: bool,
+        multi_horizon_consistency: bool,
+        checkpoint_size: bool,
+        tensor_safety: bool,
+    ) -> Self {
+        let passed = corpus_sufficient
+            && representation_baseline
+            && representation_collapse
+            && multi_horizon_consistency
+            && checkpoint_size
+            && tensor_safety;
+        Self {
+            corpus_sufficient,
+            representation_baseline,
+            representation_collapse,
+            multi_horizon_consistency,
+            checkpoint_size,
+            tensor_safety,
+            passed,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JepaEvalRecord {
+    pub candidate_id: String,
+    pub comparison: JepaRepresentationComparisonReport,
+    pub collapse: JepaCollapseReport,
+    pub horizon: JepaHorizonReport,
+    pub gates: JepaPromotionGateReport,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct JepaTrainingOutcome {
     pub status: TrainingStatus,
     pub metadata: JepaTraceModelMetadata,

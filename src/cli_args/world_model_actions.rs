@@ -86,9 +86,33 @@ pub enum WorldAction {
         /// Candidate model id to inspect
         candidate_id: Option<String>,
     },
+    /// Evaluate a JEPA candidate against JEPA-specific promotion gates
+    EvalJepa {
+        /// Candidate model id to inspect
+        candidate_id: String,
+    },
+    /// Inspect a JEPA candidate manifest and gate state
+    InspectJepa {
+        /// Candidate model id to inspect
+        candidate_id: String,
+    },
+    /// Compare JEPA representations against an exploratory baseline
+    CompareRepresentations {
+        /// Exploratory baseline backend. Promotion gating always uses fastembed.
+        #[arg(long, default_value = "fastembed")]
+        baseline: String,
+        /// JEPA candidate model id to compare
+        #[arg(long)]
+        candidate: String,
+    },
     /// Promote a candidate checkpoint as advisory active
     Promote {
         /// Candidate model id to promote
+        model_id: String,
+    },
+    /// Promote a JEPA candidate after JEPA-specific gates pass
+    PromoteJepa {
+        /// JEPA candidate model id to promote
         model_id: String,
     },
     /// Roll back the active advisory pointer to a prior model

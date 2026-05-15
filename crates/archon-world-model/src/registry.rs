@@ -8,7 +8,10 @@ use std::io::Write;
 use crate::eval::{
     BrierImprovementReport, NextStateCosineGateReport, PromotionGateReport, SurpriseKsReport,
 };
-use crate::jepa::{JepaCheckpointRecord, JepaTraceModel, JepaTrainingOutcome};
+use crate::jepa::{
+    JepaCheckpointRecord, JepaEvalRecord, JepaRepresentationComparisonReport, JepaTraceModel,
+    JepaTrainingOutcome,
+};
 use crate::model::CpuLatentTransitionModel;
 use crate::train::TrainingOutcome;
 
@@ -213,6 +216,32 @@ impl ModelRegistry {
         serde_json::from_str(&content).map_err(Into::into)
     }
 
+    pub fn write_jepa_eval_report(&self, record: &JepaEvalRecord) -> Result<PathBuf> {
+        self.ensure_jepa_dirs()?;
+        let path = self.jepa_eval_record_path(&record.candidate_id);
+        std::fs::write(&path, serde_json::to_vec_pretty(record)?)?;
+        Ok(path)
+    }
+
+    pub fn load_jepa_eval_report(&self, model_id: &str) -> Result<Option<JepaEvalRecord>> {
+        let path = self.jepa_eval_record_path(model_id);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let content = std::fs::read_to_string(path)?;
+        serde_json::from_str(&content).map(Some).map_err(Into::into)
+    }
+
+    pub fn write_jepa_representation_comparison(
+        &self,
+        record: &JepaRepresentationComparisonReport,
+    ) -> Result<PathBuf> {
+        self.ensure_jepa_dirs()?;
+        let path = self.jepa_representation_comparison_path(&record.candidate_id);
+        std::fs::write(&path, serde_json::to_vec_pretty(record)?)?;
+        Ok(path)
+    }
+
     pub fn write_eval_report(&self, record: &CandidateEvalRecord) -> Result<PathBuf> {
         let path = self.eval_record_path(&record.candidate_id);
         std::fs::write(&path, serde_json::to_vec_pretty(record)?)?;
@@ -315,6 +344,22 @@ impl ModelRegistry {
             .root
             .join("jepa")
             .join("candidates")
+            .join(format!("{model_id}.json"))
+    }
+
+    pub fn jepa_eval_record_path(&self, model_id: &str) -> PathBuf {
+        self.paths
+            .root
+            .join("jepa")
+            .join("evals")
+            .join(format!("{model_id}.json"))
+    }
+
+    pub fn jepa_representation_comparison_path(&self, model_id: &str) -> PathBuf {
+        self.paths
+            .root
+            .join("jepa")
+            .join("representation-comparisons")
             .join(format!("{model_id}.json"))
     }
 

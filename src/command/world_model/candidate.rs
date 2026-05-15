@@ -7,8 +7,14 @@ use archon_world_model::eval::{
     BrierImprovementReport, PromotionGateReport, evaluate_auxiliary_label_brier,
     evaluate_brier_improvement, evaluate_next_state_cosine_gate, evaluate_surprise_ks_gate,
 };
+use archon_world_model::embedding::{DeterministicHashEmbeddingAdapter, MemoryEmbeddingAdapter};
+use archon_world_model::jepa::{
+    JEPA_MODEL_KIND, JepaEvalRecord, JepaPromotionGateReport,
+    JepaRepresentationComparisonReport,
+};
 use archon_world_model::model::{CpuLatentTransitionModel, LatentTransitionExample};
-use archon_world_model::registry::{CandidateEvalRecord, ModelRegistry};
+use archon_world_model::representation::GenericEmbeddingRepresentationAdapter;
+use archon_world_model::registry::{CandidateEvalRecord, JepaCandidateRecord, ModelRegistry};
 use archon_world_model::schema::WorldLabelSet;
 use archon_world_model::storage::WorldModelStore;
 
@@ -248,6 +254,163 @@ pub(super) fn render_eval(
     ))
 }
 
+pub(super) fn render_eval_jepa(
+    config: &archon_core::config::ArchonConfig,
+    root: &Path,
+    candidate_id: &str,
+) -> Result<String> {
+    let registry = ModelRegistry::open(root)?;
+    let candidate = registry.load_jepa_candidate(candidate_id)?;
+    let rows = WorldModelStore::open(root)?.load_rows()?;
+    let comparison =
+        compare_jepa_representations(config, &candidate.model, &rows, "fastembed", true);
+    let comparison_path = registry.write_jepa_representation_comparison(&comparison)?;
+    let checkpoint_size_passed = checkpoint_under_jepa_cap(config, &candidate)?;
+    let tensor_safety = candidate.model.validate_finite().is_ok();
+    let corpus_sufficient = candidate.model.metadata.example_count as usize
+        >= config.learning.world_model.jepa.min_training_examples;
+    let gates = JepaPromotionGateReport::from_parts(
+        corpus_sufficient,
+        comparison.passed,
+        candidate.outcome.collapse.passes,
+        candidate.outcome.horizon.passes,
+        checkpoint_size_passed,
+        tensor_safety,
+    );
+    let record = JepaEvalRecord {
+        candidate_id: candidate_id.to_string(),
+        comparison,
+        collapse: candidate.outcome.collapse.clone(),
+        horizon: candidate.outcome.horizon.clone(),
+        gates,
+        created_at: Utc::now(),
+    };
+    let eval_path = registry.write_jepa_eval_report(&record)?;
+
+    Ok(format!(
+        "World Model JEPA Eval\n\
+         =====================\n\
+         Candidate: {candidate_id}\n\
+         Model kind: {}\n\
+         Examples: {}\n\
+         Heldout: {}\n\
+         Baseline: {}\n\
+         Baseline available: {}\n\
+         Relative improvement: {:.2}%\n\
+         Brier regressed: {}\n\
+         Corpus sufficient: {}\n\
+         Collapse gate: {}\n\
+         Horizon gate: {}\n\
+         Checkpoint size gate: {}\n\
+         Tensor safety gate: {}\n\
+         Primary gates pass: {}\n\
+         Eval report: {}\n\
+         Comparison report: {}",
+        candidate.model.metadata.model_kind,
+        candidate.model.metadata.example_count,
+        record.comparison.heldout_examples,
+        record.comparison.baseline_backend,
+        record.comparison.baseline_available,
+        record.comparison.relative_improvement * 100.0,
+        record.comparison.brier_regressed,
+        record.gates.corpus_sufficient,
+        record.gates.representation_collapse,
+        record.gates.multi_horizon_consistency,
+        record.gates.checkpoint_size,
+        record.gates.tensor_safety,
+        record.gates.passed,
+        eval_path.display(),
+        comparison_path.display()
+    ))
+}
+
+pub(super) fn render_inspect_jepa(root: &Path, candidate_id: &str) -> Result<String> {
+    let registry = ModelRegistry::open(root)?;
+    let candidate = registry.load_jepa_candidate(candidate_id)?;
+    let eval = registry.load_jepa_eval_report(candidate_id)?;
+
+    Ok(format!(
+        "World Model JEPA Inspect\n\
+         ========================\n\
+         Candidate: {candidate_id}\n\
+         Model kind: {}\n\
+         Latent dim: {}\n\
+         Windows: context={} target={}\n\
+         Horizons: {:?}\n\
+         Mask ratio: {:.2}\n\
+         EMA decay: {:.3}\n\
+         Stop gradient: {}\n\
+         Rows: {}\n\
+         Examples: {}\n\
+         Parameters: {}\n\
+         Loss total: {:.4}\n\
+         Loss improved: {}\n\
+         Collapse gate: {} (std={:.4}, rank_ratio={:.4})\n\
+         Horizon gate: {}\n\
+         Last eval gates pass: {}\n\
+         Checkpoint: {}\n\
+         Training run: {}",
+        candidate.model.metadata.model_kind,
+        candidate.model.metadata.latent_dim,
+        candidate.model.metadata.context_window_rows,
+        candidate.model.metadata.target_window_rows,
+        candidate.model.metadata.prediction_horizons,
+        candidate.model.metadata.mask_ratio,
+        candidate.model.metadata.ema_decay,
+        candidate.model.metadata.target_stop_gradient,
+        candidate.model.metadata.row_count,
+        candidate.model.metadata.example_count,
+        candidate.model.metadata.parameter_count,
+        candidate.outcome.losses.loss_total,
+        candidate.outcome.progress.improved,
+        candidate.outcome.collapse.passes,
+        candidate.outcome.collapse.mean_latent_std,
+        candidate.outcome.collapse.effective_rank_ratio,
+        candidate.outcome.horizon.passes,
+        eval.as_ref().map(|record| record.gates.passed).unwrap_or(false),
+        candidate.checkpoint.path.display(),
+        candidate.training_run.display()
+    ))
+}
+
+pub(super) fn render_compare_representations(
+    config: &archon_core::config::ArchonConfig,
+    root: &Path,
+    baseline: &str,
+    candidate_id: &str,
+) -> Result<String> {
+    let registry = ModelRegistry::open(root)?;
+    let candidate = registry.load_jepa_candidate(candidate_id)?;
+    let rows = WorldModelStore::open(root)?.load_rows()?;
+    let report = compare_jepa_representations(config, &candidate.model, &rows, baseline, false);
+    let path = registry.write_jepa_representation_comparison(&report)?;
+
+    Ok(format!(
+        "World Model Representation Comparison\n\
+         =====================================\n\
+         Candidate: {candidate_id}\n\
+         Baseline: {}\n\
+         Baseline available: {}\n\
+         Heldout: {}\n\
+         JEPA cosine similarity: {:.4}\n\
+         Baseline cosine similarity: {:.4}\n\
+         Relative improvement: {:.2}%\n\
+         Brier regressed: {}\n\
+         Passed: {}\n\
+         Promotion baseline fixed: fastembed\n\
+         Report: {}",
+        report.baseline_backend,
+        report.baseline_available,
+        report.heldout_examples,
+        report.jepa_next_state_cosine_similarity,
+        report.baseline_next_state_cosine_similarity,
+        report.relative_improvement * 100.0,
+        report.brier_regressed,
+        report.passed,
+        path.display()
+    ))
+}
+
 pub(super) fn render_trainer_tick(
     config: &archon_core::config::ArchonConfig,
     root: &Path,
@@ -353,6 +516,26 @@ pub(super) fn render_promote(root: &Path, model_id: &str) -> Result<String> {
          Validation metadata: {}",
         path.display(),
         validation_path.display()
+    ))
+}
+
+pub(super) fn render_promote_jepa(root: &Path, model_id: &str) -> Result<String> {
+    let registry = ModelRegistry::open(root)?;
+    let eval = registry
+        .load_jepa_eval_report(model_id)?
+        .ok_or_else(|| anyhow::anyhow!("jepa candidate {model_id} has no eval report"))?;
+    if !eval.gates.passed {
+        bail!("jepa candidate {model_id} has not passed all mandatory promotion gates");
+    }
+
+    let path = registry.promote_model_kind(model_id, JEPA_MODEL_KIND)?;
+    Ok(format!(
+        "World Model JEPA Promote\n\
+         ========================\n\
+         Active model: {model_id}\n\
+         Model kind: {JEPA_MODEL_KIND}\n\
+         Pointer: {}",
+        path.display()
     ))
 }
 
@@ -468,6 +651,139 @@ fn jepa_training_config(
     Ok(training)
 }
 
+fn compare_jepa_representations(
+    config: &archon_core::config::ArchonConfig,
+    candidate: &archon_world_model::jepa::JepaTraceModel,
+    rows: &[archon_world_model::WorldTraceRow],
+    baseline: &str,
+    promotion_gating: bool,
+) -> JepaRepresentationComparisonReport {
+    match compare_jepa_representations_inner(config, candidate, rows, baseline, promotion_gating) {
+        Ok(report) => report,
+        Err(error) => JepaRepresentationComparisonReport::fail_closed(
+            candidate.metadata.model_id.clone(),
+            if promotion_gating { "fastembed" } else { baseline }.to_string(),
+            error.to_string(),
+            config.learning.world_model.jepa.min_heldout_examples,
+            config.learning.world_model.jepa.min_baseline_improvement,
+        ),
+    }
+}
+
+fn compare_jepa_representations_inner(
+    config: &archon_core::config::ArchonConfig,
+    candidate: &archon_world_model::jepa::JepaTraceModel,
+    rows: &[archon_world_model::WorldTraceRow],
+    baseline: &str,
+    promotion_gating: bool,
+) -> Result<JepaRepresentationComparisonReport> {
+    let baseline_backend = if promotion_gating { "fastembed" } else { baseline };
+    let state_dim = config.learning.world_model.state_dim;
+    let jepa_examples =
+        archon_world_model::train::examples_from_rows_with_representation_adapter(rows, candidate)?;
+    let baseline_adapter = baseline_representation_adapter(baseline_backend, state_dim)?;
+    let baseline_examples = archon_world_model::train::examples_from_rows_with_representation_adapter(
+        rows,
+        baseline_adapter.as_ref(),
+    )?;
+    if jepa_examples.len() != baseline_examples.len() {
+        bail!("jepa and baseline example counts differ");
+    }
+    let (jepa_train, jepa_heldout) = split_for_eval(&jepa_examples)?;
+    let (baseline_train, baseline_heldout) = split_for_eval(&baseline_examples)?;
+    if promotion_gating && jepa_heldout.len() < config.learning.world_model.jepa.min_heldout_examples {
+        bail!(
+            "heldout example count {} is below min_heldout_examples={}",
+            jepa_heldout.len(),
+            config.learning.world_model.jepa.min_heldout_examples
+        );
+    }
+
+    let jepa_transition = CpuLatentTransitionModel::fit(state_dim, jepa_train)?;
+    let baseline_transition = CpuLatentTransitionModel::fit(state_dim, baseline_train)?;
+    let jepa_error = jepa_transition.mean_cosine_error(jepa_heldout)?;
+    let baseline_error = baseline_transition.mean_cosine_error(baseline_heldout)?;
+    let jepa_similarity = 1.0 - jepa_error;
+    let baseline_similarity = 1.0 - baseline_error;
+    let relative_improvement = if baseline_similarity.abs() <= f32::EPSILON {
+        0.0
+    } else {
+        (jepa_similarity - baseline_similarity) / baseline_similarity.abs()
+    };
+    let jepa_brier = mean_auxiliary_brier(&jepa_transition, jepa_heldout)?;
+    let baseline_brier = mean_auxiliary_brier(&baseline_transition, baseline_heldout)?;
+    let brier_regressed = jepa_brier > baseline_brier + 0.0001;
+    let passed = jepa_heldout.len() >= config.learning.world_model.jepa.min_heldout_examples
+        && relative_improvement >= config.learning.world_model.jepa.min_baseline_improvement
+        && !brier_regressed;
+
+    Ok(JepaRepresentationComparisonReport {
+        candidate_id: candidate.metadata.model_id.clone(),
+        baseline_backend: baseline_backend.to_string(),
+        baseline_available: true,
+        failure_reason: None,
+        heldout_examples: jepa_heldout.len(),
+        min_heldout_examples: config.learning.world_model.jepa.min_heldout_examples,
+        jepa_next_state_cosine_similarity: jepa_similarity,
+        baseline_next_state_cosine_similarity: baseline_similarity,
+        relative_improvement,
+        min_baseline_improvement: config.learning.world_model.jepa.min_baseline_improvement,
+        brier_regressed,
+        passed,
+    })
+}
+
+fn baseline_representation_adapter(
+    baseline: &str,
+    state_dim: usize,
+) -> Result<Box<dyn archon_world_model::WorldRepresentationAdapter>> {
+    match baseline {
+        "fastembed" => Ok(Box::new(GenericEmbeddingRepresentationAdapter::new(Box::new(
+            MemoryEmbeddingAdapter::local_fastembed(state_dim)?,
+        )))),
+        "deterministic-hash" => Ok(Box::new(GenericEmbeddingRepresentationAdapter::new(Box::new(
+            DeterministicHashEmbeddingAdapter::new(state_dim)?,
+        )))),
+        _ => bail!("unsupported representation baseline: {baseline}"),
+    }
+}
+
+fn mean_auxiliary_brier(
+    model: &CpuLatentTransitionModel,
+    examples: &[LatentTransitionExample],
+) -> Result<f32> {
+    let mut total = 0.0;
+    let mut count = 0.0;
+    for example in examples {
+        for prediction in model.predict_auxiliary(&example.state, &example.action)? {
+            let actual = if label_value(&example.labels, &prediction.label) {
+                1.0
+            } else {
+                0.0
+            };
+            total += (prediction.probability - actual).powi(2);
+            count += 1.0;
+        }
+    }
+    Ok(if count == 0.0 { 1.0 } else { total / count })
+}
+
+fn checkpoint_under_jepa_cap(
+    config: &archon_core::config::ArchonConfig,
+    candidate: &JepaCandidateRecord,
+) -> Result<bool> {
+    let max_bytes = config
+        .learning
+        .world_model
+        .jepa
+        .max_checkpoint_mb
+        .saturating_mul(1024 * 1024);
+    let bytes = std::fs::metadata(&candidate.checkpoint.path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(u64::MAX);
+    Ok(bytes <= max_bytes)
+}
+
 fn model_cosine_distances(
     model: &CpuLatentTransitionModel,
     examples: &[LatentTransitionExample],
@@ -564,6 +880,20 @@ fn counterfactual_gate_from_heldout(examples: &[LatentTransitionExample], min_nd
         })
         .collect::<Vec<_>>();
     archon_world_model::shadow::ndcg_at_k(&scores, &relevance, 5) >= min_ndcg
+}
+
+fn label_value(labels: &WorldLabelSet, label: &str) -> bool {
+    match label {
+        "failure" => labels.failure,
+        "retry" => labels.retry,
+        "provider_incident" => labels.provider_incident,
+        "verification_needed" => labels.verification_needed,
+        "user_correction" => labels.user_correction,
+        "plan_drift" => labels.plan_drift,
+        "high_cost" => labels.high_cost,
+        "slow_run" => labels.slow_run,
+        _ => false,
+    }
 }
 
 fn label_success(labels: &WorldLabelSet) -> f32 {

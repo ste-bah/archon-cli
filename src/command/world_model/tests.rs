@@ -23,6 +23,44 @@ fn candidate_id_from(rendered: &str) -> String {
         .to_string()
 }
 
+fn passing_jepa_eval_record(candidate_id: &str) -> archon_world_model::jepa::JepaEvalRecord {
+    archon_world_model::jepa::JepaEvalRecord {
+        candidate_id: candidate_id.into(),
+        comparison: archon_world_model::jepa::JepaRepresentationComparisonReport {
+            candidate_id: candidate_id.into(),
+            baseline_backend: "fastembed".into(),
+            baseline_available: true,
+            failure_reason: None,
+            heldout_examples: 200,
+            min_heldout_examples: 200,
+            jepa_next_state_cosine_similarity: 0.90,
+            baseline_next_state_cosine_similarity: 0.80,
+            relative_improvement: 0.125,
+            min_baseline_improvement: 0.05,
+            brier_regressed: false,
+            passed: true,
+        },
+        collapse: archon_world_model::jepa::JepaCollapseReport {
+            mean_latent_std: 0.06,
+            effective_rank_ratio: 0.60,
+            min_latent_std: 0.05,
+            min_effective_rank_ratio: 0.50,
+            passes: true,
+        },
+        horizon: archon_world_model::jepa::JepaHorizonReport {
+            e_1: Some(0.10),
+            e_3: Some(0.12),
+            e_5: Some(0.15),
+            tolerance: 0.02,
+            passes: true,
+        },
+        gates: archon_world_model::jepa::JepaPromotionGateReport::from_parts(
+            true, true, true, true, true, true,
+        ),
+        created_at: chrono::Utc::now(),
+    }
+}
+
 fn prediction_id_from(rendered: &str) -> String {
     rendered
         .lines()
@@ -299,6 +337,94 @@ fn train_jepa_rejects_latent_dim_state_dim_mismatch() {
     let error = candidate::render_train_jepa(&config, temp.path(), true, None).unwrap_err();
 
     assert!(error.to_string().contains("must equal active transition state_dim"));
+}
+
+#[test]
+fn inspect_jepa_reports_candidate_manifest() {
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let mut config = test_config();
+    config.learning.world_model.state_dim = 8;
+    config.learning.world_model.jepa.latent_dim = 8;
+    config.learning.world_model.jepa.context_window_rows = 2;
+    config.learning.world_model.jepa.target_window_rows = 1;
+    config.learning.world_model.jepa.prediction_horizons = vec![1];
+    let trained = candidate::render_train_jepa(&config, temp.path(), true, None).unwrap();
+    let candidate_id = candidate_id_from(&trained);
+
+    let rendered = candidate::render_inspect_jepa(temp.path(), &candidate_id).unwrap();
+
+    assert!(rendered.contains("World Model JEPA Inspect"));
+    assert!(rendered.contains("Model kind: jepa_transition"));
+    assert!(rendered.contains("Stop gradient: true"));
+}
+
+#[test]
+fn compare_representations_persists_exploratory_report() {
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let mut config = test_config();
+    config.learning.world_model.state_dim = 8;
+    config.learning.world_model.jepa.latent_dim = 8;
+    config.learning.world_model.jepa.context_window_rows = 2;
+    config.learning.world_model.jepa.target_window_rows = 1;
+    config.learning.world_model.jepa.prediction_horizons = vec![1];
+    let trained = candidate::render_train_jepa(&config, temp.path(), true, None).unwrap();
+    let candidate_id = candidate_id_from(&trained);
+
+    let rendered = candidate::render_compare_representations(
+        &config,
+        temp.path(),
+        "deterministic-hash",
+        &candidate_id,
+    )
+    .unwrap();
+
+    assert!(rendered.contains("World Model Representation Comparison"));
+    assert!(rendered.contains("Promotion baseline fixed: fastembed"));
+    assert!(
+        temp.path()
+            .join("jepa")
+            .join("representation-comparisons")
+            .join(format!("{candidate_id}.json"))
+            .exists()
+    );
+}
+
+#[test]
+fn promote_jepa_requires_passing_eval_report() {
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let mut config = test_config();
+    config.learning.world_model.state_dim = 8;
+    config.learning.world_model.jepa.latent_dim = 8;
+    config.learning.world_model.jepa.context_window_rows = 2;
+    config.learning.world_model.jepa.target_window_rows = 1;
+    config.learning.world_model.jepa.prediction_horizons = vec![1];
+    let trained = candidate::render_train_jepa(&config, temp.path(), true, None).unwrap();
+    let candidate_id = candidate_id_from(&trained);
+
+    let missing = candidate::render_promote_jepa(temp.path(), &candidate_id).unwrap_err();
+    assert!(missing.to_string().contains("has no eval report"));
+
+    let registry = archon_world_model::registry::ModelRegistry::open(temp.path()).unwrap();
+    let mut failing = passing_jepa_eval_record(&candidate_id);
+    failing.gates.representation_baseline = false;
+    failing.gates.passed = false;
+    registry.write_jepa_eval_report(&failing).unwrap();
+    let failed_gate = candidate::render_promote_jepa(temp.path(), &candidate_id).unwrap_err();
+    assert!(failed_gate.to_string().contains("has not passed"));
+
+    registry
+        .write_jepa_eval_report(&passing_jepa_eval_record(&candidate_id))
+        .unwrap();
+    let promoted = candidate::render_promote_jepa(temp.path(), &candidate_id).unwrap();
+
+    assert!(promoted.contains("Model kind: jepa_transition"));
+    assert_eq!(
+        registry.active_model_kind().unwrap().as_deref(),
+        Some("jepa_transition")
+    );
 }
 
 #[test]

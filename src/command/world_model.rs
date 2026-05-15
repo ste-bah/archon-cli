@@ -138,10 +138,46 @@ pub(crate) async fn handle_world_command(
             );
             Ok(())
         }
+        WorldAction::EvalJepa { candidate_id } => {
+            println!(
+                "{}",
+                candidate::render_eval_jepa(config, &world_model_root()?, candidate_id)?
+            );
+            Ok(())
+        }
+        WorldAction::InspectJepa { candidate_id } => {
+            println!(
+                "{}",
+                candidate::render_inspect_jepa(&world_model_root()?, candidate_id)?
+            );
+            Ok(())
+        }
+        WorldAction::CompareRepresentations {
+            baseline,
+            candidate,
+        } => {
+            println!(
+                "{}",
+                candidate::render_compare_representations(
+                    config,
+                    &world_model_root()?,
+                    baseline,
+                    candidate
+                )?
+            );
+            Ok(())
+        }
         WorldAction::Promote { model_id } => {
             println!(
                 "{}",
                 candidate::render_promote(&world_model_root()?, model_id)?
+            );
+            Ok(())
+        }
+        WorldAction::PromoteJepa { model_id } => {
+            println!(
+                "{}",
+                candidate::render_promote_jepa(&world_model_root()?, model_id)?
             );
             Ok(())
         }
