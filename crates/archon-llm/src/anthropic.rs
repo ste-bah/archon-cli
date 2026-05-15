@@ -455,21 +455,22 @@ fn warn_dropped_knob(model: &str, field: &str, value: &str) {
 }
 
 fn cached_tool_blocks(tools: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    // Anthropic counts every block carrying `cache_control` as a separate
+    // cache breakpoint and hard-caps the request at 4 (HTTP 400 otherwise).
+    // `cache_control` is a PREFIX marker: tagging only the final tool caches
+    // the entire preceding tools array as a single breakpoint. Tagging every
+    // tool both blows the 4-breakpoint budget and is semantically redundant.
+    let mut tools: Vec<serde_json::Value> = tools.to_vec();
+    if let Some(last) = tools.last_mut()
+        && let Some(obj) = last.as_object_mut()
+        && !obj.contains_key("cache_control")
+    {
+        obj.insert(
+            "cache_control".into(),
+            serde_json::json!({ "type": "ephemeral" }),
+        );
+    }
     tools
-        .iter()
-        .cloned()
-        .map(|mut tool| {
-            if let Some(obj) = tool.as_object_mut()
-                && !obj.contains_key("cache_control")
-            {
-                obj.insert(
-                    "cache_control".into(),
-                    serde_json::json!({ "type": "ephemeral" }),
-                );
-            }
-            tool
-        })
-        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -736,19 +737,66 @@ mod tests {
         let client = AnthropicClient::new(make_auth(), make_identity(), None);
         let request = MessageRequest {
             messages: vec![serde_json::json!({"role": "user", "content": "hi"})],
-            tools: vec![serde_json::json!({
-                "name": "Agent",
-                "description": "spawn",
-                "input_schema": {"type": "object"}
-            })],
+            tools: vec![
+                serde_json::json!({
+                    "name": "Agent",
+                    "description": "spawn",
+                    "input_schema": {"type": "object"}
+                }),
+                serde_json::json!({
+                    "name": "Read",
+                    "description": "read",
+                    "input_schema": {"type": "object"}
+                }),
+            ],
             ..MessageRequest::default()
         };
 
         let body = client.build_request_body(&request).unwrap();
         let body_json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        // `cache_control` is a prefix breakpoint: only the FINAL tool carries
+        // it, which caches the entire tools array as a single breakpoint.
+        // Non-final tools must NOT each carry one (4-breakpoint budget).
+        assert!(
+            body_json["tools"][0].get("cache_control").is_none(),
+            "non-final tools must not each carry cache_control"
+        );
         assert_eq!(
-            body_json["tools"][0]["cache_control"],
+            body_json["tools"][1]["cache_control"],
             serde_json::json!({"type": "ephemeral"})
+        );
+    }
+
+    #[test]
+    fn cache_control_blocks_stay_within_anthropic_budget() {
+        // Anthropic rejects requests with >4 cache_control blocks (HTTP 400
+        // "A maximum of 4 blocks with cache_control may be provided").
+        // Identity-spoof system blocks already consume up to 3; the tools
+        // array must add at most 1 (a single prefix breakpoint on the final
+        // tool), never one per tool. Regression guard for the 72-breakpoint
+        // production incident.
+        let client = AnthropicClient::new(make_auth(), make_identity(), None);
+        let tools: Vec<serde_json::Value> = (0..40)
+            .map(|i| {
+                serde_json::json!({
+                    "name": format!("tool_{i}"),
+                    "description": "x",
+                    "input_schema": {"type": "object"}
+                })
+            })
+            .collect();
+        let request = MessageRequest {
+            messages: vec![serde_json::json!({"role": "user", "content": "hi"})],
+            tools,
+            ..MessageRequest::default()
+        };
+
+        let body = client.build_request_body(&request).unwrap();
+        let count = body.matches("\"cache_control\"").count();
+        assert!(
+            count <= 4,
+            "serialized request carries {count} cache_control blocks; \
+             Anthropic caps at 4. body={body}"
         );
     }
 }
