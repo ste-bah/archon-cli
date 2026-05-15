@@ -275,6 +275,16 @@ pub trait LlmProvider: Send + Sync {
         DataFlowClassification::UserOperated
     }
 
+    /// Provider family used by the compaction policy matrix.
+    fn compaction_provider_family(&self) -> crate::compaction_policy::ProviderFamily {
+        crate::compaction_policy::ProviderFamily::from_provider_id(self.name())
+    }
+
+    /// Explicit compaction policy for this provider.
+    fn compaction_policy(&self) -> crate::compaction_policy::CompactionPolicy {
+        crate::compaction_policy::compaction_policy_for_family(self.compaction_provider_family())
+    }
+
     /// Resolve a tier alias (`"sonnet"`, `"opus"`, `"haiku"`) into this
     /// provider's concrete model identifier.
     ///

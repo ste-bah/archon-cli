@@ -225,4 +225,15 @@ impl LlmProvider for AnthropicProvider {
     fn data_flow_classification(&self) -> DataFlowClassification {
         classify_data_flow_endpoint(self.client.api_url())
     }
+
+    fn compaction_provider_family(&self) -> crate::compaction_policy::ProviderFamily {
+        match &self.client.identity().mode {
+            crate::identity::IdentityMode::Spoof { .. } => {
+                crate::compaction_policy::ProviderFamily::AnthropicOAuth
+            }
+            crate::identity::IdentityMode::Clean | crate::identity::IdentityMode::Custom { .. } => {
+                crate::compaction_policy::ProviderFamily::AnthropicApi
+            }
+        }
+    }
 }

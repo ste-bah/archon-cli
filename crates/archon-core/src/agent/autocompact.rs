@@ -130,7 +130,54 @@ pub fn classify_stream_error(
     .unwrap_or_else(|| archon_llm::provider::LlmError::Http(format!("{error_type}: {message}")))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CompactionTelemetry {
+    pub provider_family: &'static str,
+    pub wire_shape: &'static str,
+    pub native_context_window: u64,
+    pub runtime_context_budget: u64,
+    pub context_source: &'static str,
+    pub compaction_backend: &'static str,
+}
+
+pub(crate) fn compaction_telemetry(
+    provider: &dyn archon_llm::provider::LlmProvider,
+    model: &str,
+    override_window: Option<u64>,
+    work_dir: &std::path::Path,
+) -> CompactionTelemetry {
+    let resolution = archon_llm::context_window::resolve_context_window_for_work_dir(
+        model,
+        override_window,
+        Some(provider),
+        Some(work_dir),
+    );
+    let policy = provider.compaction_policy();
+    CompactionTelemetry {
+        provider_family: policy.provider_family.label(),
+        wire_shape: policy.wire_shape.label(),
+        native_context_window: resolution.context_window,
+        runtime_context_budget: resolution
+            .runtime_context_budget
+            .unwrap_or(resolution.context_window),
+        context_source: resolution.source.label(),
+        compaction_backend: policy.backend.label(),
+    }
+}
+
 impl Agent {
+    pub(super) fn compaction_telemetry_for(&self, active_model: &str) -> CompactionTelemetry {
+        compaction_telemetry(
+            self.client.as_ref(),
+            active_model,
+            self.config
+                .context
+                .context_window_override
+                .or_else(|| self.config.context.max_tokens.map(u64::from)),
+            &self.config.working_dir,
+        )
+    }
+
     pub(super) fn context_window_for(&self, active_model: &str) -> u64 {
         let resolved = archon_llm::context_window::resolve_context_window_for_work_dir(
             active_model,
@@ -189,6 +236,20 @@ impl Agent {
                 override_model.clone()
             }
         };
+        let telemetry = self.compaction_telemetry_for(&active_model);
+        tracing::info!(
+            compaction.reason = "context_window_threshold",
+            provider_family = telemetry.provider_family,
+            wire_shape = telemetry.wire_shape,
+            native_context_window = telemetry.native_context_window,
+            runtime_context_budget = telemetry.runtime_context_budget,
+            context_source = telemetry.context_source,
+            compaction_backend = telemetry.compaction_backend,
+            scope = "main_session",
+            force,
+            consecutive_failures = self.state.auto_compact.consecutive_failures,
+            "auto-compaction attempt started"
+        );
         let result = compact_json_messages_with_provider(
             self.client.as_ref(),
             &active_model,
@@ -220,6 +281,12 @@ impl Agent {
                 self.state.auto_compact.on_cancel();
                 tracing::debug!(
                     compaction.outcome = "cancelled",
+                    provider_family = telemetry.provider_family,
+                    wire_shape = telemetry.wire_shape,
+                    native_context_window = telemetry.native_context_window,
+                    runtime_context_budget = telemetry.runtime_context_budget,
+                    context_source = telemetry.context_source,
+                    compaction_backend = telemetry.compaction_backend,
                     actor = "main",
                     "proactive auto-compaction cancelled; continuing turn"
                 );
@@ -230,6 +297,12 @@ impl Agent {
                 let consecutive_failures = self.state.auto_compact.consecutive_failures;
                 tracing::warn!(
                     compaction.outcome = "auto_failed",
+                    provider_family = telemetry.provider_family,
+                    wire_shape = telemetry.wire_shape,
+                    native_context_window = telemetry.native_context_window,
+                    runtime_context_budget = telemetry.runtime_context_budget,
+                    context_source = telemetry.context_source,
+                    compaction_backend = telemetry.compaction_backend,
                     actor = "main",
                     consecutive_failures,
                     breaker_tripped = self.state.auto_compact.disabled,

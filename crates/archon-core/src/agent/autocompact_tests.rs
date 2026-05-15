@@ -79,6 +79,24 @@ fn trigger_token_value_is_current_messages_estimate() {
 }
 
 #[test]
+fn compaction_telemetry_exposes_required_fields() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let telemetry = compaction_telemetry(
+        &RateLimitedProvider,
+        "private-compatible-model",
+        None,
+        dir.path(),
+    );
+
+    assert_eq!(telemetry.provider_family, "openai_compatible");
+    assert_eq!(telemetry.wire_shape, "openai_chat_completions");
+    assert_eq!(telemetry.native_context_window, 0);
+    assert_eq!(telemetry.runtime_context_budget, 0);
+    assert_eq!(telemetry.context_source, "fallback");
+    assert_eq!(telemetry.compaction_backend, "generic");
+}
+
+#[test]
 fn maybe_auto_compact_uses_last_known_context_tokens_over_estimate() {
     // Verify the three distinct branches of evaluate_compaction that
     // maybe_auto_compact exercises by choosing last_known_context_tokens

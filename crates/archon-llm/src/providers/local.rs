@@ -239,6 +239,10 @@ impl LlmProvider for LocalProvider {
         "local"
     }
 
+    fn compaction_provider_family(&self) -> crate::compaction_policy::ProviderFamily {
+        crate::compaction_policy::ProviderFamily::Local
+    }
+
     fn models(&self) -> Vec<ModelInfo> {
         // Return the configured model as a static list.
         // Live model discovery happens via fetch_ollama_models (async).

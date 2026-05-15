@@ -212,6 +212,10 @@ impl LlmProvider for ActiveProvider {
         self.current().data_flow_classification()
     }
 
+    fn compaction_provider_family(&self) -> crate::compaction_policy::ProviderFamily {
+        self.current().compaction_provider_family()
+    }
+
     fn as_anthropic(&self) -> Option<&AnthropicClient> {
         // `as_anthropic` hands back a borrowed reference tied to
         // `&self`. We cannot safely do that through an ArcSwap load

@@ -404,6 +404,10 @@ impl LlmProvider for OpenAiProvider {
         "openai"
     }
 
+    fn compaction_provider_family(&self) -> crate::compaction_policy::ProviderFamily {
+        crate::compaction_policy::ProviderFamily::OpenAiNative
+    }
+
     fn models(&self) -> Vec<ModelInfo> {
         vec![
             ModelInfo {

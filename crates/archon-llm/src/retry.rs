@@ -163,6 +163,10 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
         self.inner.data_flow_classification()
     }
 
+    fn compaction_provider_family(&self) -> crate::compaction_policy::ProviderFamily {
+        self.inner.compaction_provider_family()
+    }
+
     fn as_anthropic(&self) -> Option<&AnthropicClient> {
         self.inner.as_anthropic()
     }

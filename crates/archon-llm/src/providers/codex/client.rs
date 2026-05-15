@@ -282,6 +282,10 @@ impl LlmProvider for CodexProvider {
         "openai-codex"
     }
 
+    fn compaction_provider_family(&self) -> crate::compaction_policy::ProviderFamily {
+        crate::compaction_policy::ProviderFamily::CodexOAuth
+    }
+
     fn models(&self) -> Vec<ModelInfo> {
         vec![
             ModelInfo {

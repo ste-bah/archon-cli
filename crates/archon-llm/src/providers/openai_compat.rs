@@ -346,6 +346,10 @@ impl LlmProvider for OpenAiCompatProvider {
         &self.descriptor.display_name
     }
 
+    fn compaction_provider_family(&self) -> crate::compaction_policy::ProviderFamily {
+        crate::compaction_policy::ProviderFamily::OpenAiCompatible
+    }
+
     fn models(&self) -> Vec<ModelInfo> {
         vec![ModelInfo {
             id: self.descriptor.default_model.clone(),

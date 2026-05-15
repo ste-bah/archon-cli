@@ -170,11 +170,18 @@ impl Agent {
             (false, true) => "request_pressure_bytes",
             (false, false) => unreachable!(),
         };
+        let telemetry = self.compaction_telemetry_for(active_model);
         tracing::info!(
             compaction.reason = reason,
             trigger_tokens,
             trigger_body_bytes,
             context_window,
+            provider_family = telemetry.provider_family,
+            wire_shape = telemetry.wire_shape,
+            native_context_window = telemetry.native_context_window,
+            runtime_context_budget = telemetry.runtime_context_budget,
+            context_source = telemetry.context_source,
+            compaction_backend = telemetry.compaction_backend,
             scope = "main_session",
             force = false,
             consecutive_failures = self.state.auto_compact.consecutive_failures,
@@ -222,6 +229,12 @@ impl Agent {
                     trigger_tokens,
                     trigger_body_bytes,
                     context_window,
+                    provider_family = telemetry.provider_family,
+                    wire_shape = telemetry.wire_shape,
+                    native_context_window = telemetry.native_context_window,
+                    runtime_context_budget = telemetry.runtime_context_budget,
+                    context_source = telemetry.context_source,
+                    compaction_backend = telemetry.compaction_backend,
                     scope = "main_session",
                     force = false,
                     consecutive_failures = self.state.auto_compact.consecutive_failures,
@@ -386,10 +399,17 @@ impl Agent {
                         && request_body_bytes >= large_retry_body_bytes =>
                 {
                     reactive_rate_limit_retried = true;
+                    let telemetry = self.compaction_telemetry_for(&active_model);
                     tracing::warn!(
                         compaction.reason = "rate_limit_large_request",
                         trigger_body_bytes = request_body_bytes,
                         threshold_body_bytes = large_retry_body_bytes,
+                        provider_family = telemetry.provider_family,
+                        wire_shape = telemetry.wire_shape,
+                        native_context_window = telemetry.native_context_window,
+                        runtime_context_budget = telemetry.runtime_context_budget,
+                        context_source = telemetry.context_source,
+                        compaction_backend = telemetry.compaction_backend,
                         scope = "main_session",
                         force = true,
                         "rate-limited main request is large; compacting before one retry"
@@ -508,10 +528,17 @@ impl Agent {
                             && request_body_bytes >= large_retry_body_bytes
                         {
                             reactive_rate_limit_retried = true;
+                            let telemetry = self.compaction_telemetry_for(&active_model);
                             tracing::warn!(
                                 compaction.reason = "rate_limit_large_request_stream",
                                 trigger_body_bytes = request_body_bytes,
                                 threshold_body_bytes = large_retry_body_bytes,
+                                provider_family = telemetry.provider_family,
+                                wire_shape = telemetry.wire_shape,
+                                native_context_window = telemetry.native_context_window,
+                                runtime_context_budget = telemetry.runtime_context_budget,
+                                context_source = telemetry.context_source,
+                                compaction_backend = telemetry.compaction_backend,
                                 scope = "main_session",
                                 force = true,
                                 "rate-limited stream error on large request; compacting before one retry"

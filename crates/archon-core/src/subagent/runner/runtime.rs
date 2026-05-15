@@ -116,6 +116,14 @@ impl SubagentRunner {
             let window = resolved_window
                 .runtime_context_budget
                 .unwrap_or(resolved_window.context_window);
+            let telemetry = crate::agent::autocompact::CompactionTelemetry {
+                provider_family: self.provider.compaction_policy().provider_family.label(),
+                wire_shape: self.provider.compaction_policy().wire_shape.label(),
+                native_context_window: resolved_window.context_window,
+                runtime_context_budget: window,
+                context_source: resolved_window.source.label(),
+                compaction_backend: self.provider.compaction_policy().backend.label(),
+            };
             let effective_window =
                 window.saturating_sub(self.agent_config.context.output_reserve_tokens);
             let threshold = (self.agent_config.context.compact_threshold
@@ -131,6 +139,19 @@ impl SubagentRunner {
                 &auto_compact,
                 threshold,
             ) {
+                tracing::info!(
+                    compaction.reason = "context_window_threshold",
+                    provider_family = telemetry.provider_family,
+                    wire_shape = telemetry.wire_shape,
+                    native_context_window = telemetry.native_context_window,
+                    runtime_context_budget = telemetry.runtime_context_budget,
+                    context_source = telemetry.context_source,
+                    compaction_backend = telemetry.compaction_backend,
+                    scope = "subagent",
+                    force = false,
+                    consecutive_failures = auto_compact.consecutive_failures,
+                    "subagent auto-compaction attempt started"
+                );
                 auto_compact.compact_in_flight = true;
                 match crate::agent::autocompact::compact_json_messages_with_provider(
                     self.provider.as_ref(),
@@ -158,14 +179,28 @@ impl SubagentRunner {
                     Err(crate::agent::autocompact::CompactionError::Cancelled) => {
                         auto_compact.on_cancel();
                         tracing::debug!(
-                            compaction.outcome = "cancelled", actor = %self.activity_actor_id
+                            compaction.outcome = "cancelled",
+                            provider_family = telemetry.provider_family,
+                            wire_shape = telemetry.wire_shape,
+                            native_context_window = telemetry.native_context_window,
+                            runtime_context_budget = telemetry.runtime_context_budget,
+                            context_source = telemetry.context_source,
+                            compaction_backend = telemetry.compaction_backend,
+                            actor = %self.activity_actor_id
                                 .as_deref().unwrap_or("subagent"), "proactive subagent compaction cancelled"
                         );
                     }
                     Err(e) => {
                         auto_compact.on_real_failure();
                         tracing::warn!(
-                            compaction.outcome = "auto_failed", actor = %self.activity_actor_id
+                            compaction.outcome = "auto_failed",
+                            provider_family = telemetry.provider_family,
+                            wire_shape = telemetry.wire_shape,
+                            native_context_window = telemetry.native_context_window,
+                            runtime_context_budget = telemetry.runtime_context_budget,
+                            context_source = telemetry.context_source,
+                            compaction_backend = telemetry.compaction_backend,
+                            actor = %self.activity_actor_id
                                 .as_deref().unwrap_or("subagent"), consecutive_failures =
                                 auto_compact.consecutive_failures, breaker_tripped =
                                 auto_compact.disabled, error = %e,
@@ -224,6 +259,12 @@ impl SubagentRunner {
                     trigger_tokens,
                     trigger_body_bytes = request_body_bytes,
                     context_window = window,
+                    provider_family = telemetry.provider_family,
+                    wire_shape = telemetry.wire_shape,
+                    native_context_window = telemetry.native_context_window,
+                    runtime_context_budget = telemetry.runtime_context_budget,
+                    context_source = telemetry.context_source,
+                    compaction_backend = telemetry.compaction_backend,
                     scope = "subagent",
                     force = false,
                     consecutive_failures = auto_compact.consecutive_failures,
@@ -266,6 +307,12 @@ impl SubagentRunner {
                             trigger_tokens,
                             trigger_body_bytes = request_body_bytes,
                             context_window = window,
+                            provider_family = telemetry.provider_family,
+                            wire_shape = telemetry.wire_shape,
+                            native_context_window = telemetry.native_context_window,
+                            runtime_context_budget = telemetry.runtime_context_budget,
+                            context_source = telemetry.context_source,
+                            compaction_backend = telemetry.compaction_backend,
                             scope = "subagent",
                             force = false,
                             consecutive_failures = auto_compact.consecutive_failures,
@@ -324,6 +371,12 @@ impl SubagentRunner {
                         compaction.reason = "rate_limit_large_request",
                         trigger_body_bytes = request_body_bytes,
                         threshold_body_bytes = large_retry_body_bytes,
+                        provider_family = telemetry.provider_family,
+                        wire_shape = telemetry.wire_shape,
+                        native_context_window = telemetry.native_context_window,
+                        runtime_context_budget = telemetry.runtime_context_budget,
+                        context_source = telemetry.context_source,
+                        compaction_backend = telemetry.compaction_backend,
                         scope = "subagent",
                         force = true,
                         "rate-limited subagent request is large; compacting before one retry"
@@ -461,6 +514,12 @@ impl SubagentRunner {
                                 compaction.reason = "rate_limit_large_request_stream",
                                 trigger_body_bytes = request_body_bytes,
                                 threshold_body_bytes = large_retry_body_bytes,
+                                provider_family = telemetry.provider_family,
+                                wire_shape = telemetry.wire_shape,
+                                native_context_window = telemetry.native_context_window,
+                                runtime_context_budget = telemetry.runtime_context_budget,
+                                context_source = telemetry.context_source,
+                                compaction_backend = telemetry.compaction_backend,
                                 scope = "subagent",
                                 force = true,
                                 "rate-limited subagent stream is large; compacting before one retry"

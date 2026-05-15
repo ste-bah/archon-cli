@@ -46,6 +46,10 @@ impl LlmProvider for CodexAppServerProvider {
         "openai-codex"
     }
 
+    fn compaction_provider_family(&self) -> archon_llm::compaction_policy::ProviderFamily {
+        archon_llm::compaction_policy::ProviderFamily::CodexAppServer
+    }
+
     fn models(&self) -> Vec<ModelInfo> {
         self.model_cache
             .read()
@@ -54,6 +58,7 @@ impl LlmProvider for CodexAppServerProvider {
     }
 
     async fn stream(&self, request: LlmRequest) -> Result<mpsc::Receiver<StreamEvent>, LlmError> {
+        log_compaction_fallback_if_needed(&request);
         if !request.tools.is_empty() {
             return Err(LlmError::Unsupported(
                 "Codex app-server mode cannot execute Archon-managed tool calls directly; use runtime=auto with direct_fallback=true or runtime=direct for governed tool use".into(),
@@ -135,6 +140,23 @@ impl LlmProvider for CodexAppServerProvider {
                 | ProviderFeature::SystemPrompt
         )
     }
+}
+
+fn log_compaction_fallback_if_needed(request: &LlmRequest) -> bool {
+    if request.request_origin.as_deref() != Some("compaction_summary") {
+        return false;
+    }
+    let policy = archon_llm::compaction_policy::compaction_policy_for_family(
+        archon_llm::compaction_policy::ProviderFamily::CodexAppServer,
+    );
+    tracing::info!(
+        provider_family = policy.provider_family.label(),
+        wire_shape = policy.wire_shape.label(),
+        compaction_backend = policy.backend.label(),
+        generic_fallback = policy.generic_fallback,
+        "codex native compaction unavailable, using generic"
+    );
+    true
 }
 
 async fn run_app_server_turn(
@@ -455,6 +477,34 @@ mod tests {
         let error = provider.stream(request).await.unwrap_err().to_string();
 
         assert!(error.contains("cannot execute Archon-managed tool calls directly"));
+    }
+
+    #[test]
+    fn compaction_summary_uses_logged_generic_fallback() {
+        let request = LlmRequest {
+            request_origin: Some("compaction_summary".into()),
+            ..LlmRequest::default()
+        };
+        let policy = archon_llm::compaction_policy::compaction_policy_for_family(
+            archon_llm::compaction_policy::ProviderFamily::CodexAppServer,
+        );
+
+        assert!(log_compaction_fallback_if_needed(&request));
+        assert_eq!(
+            policy.backend,
+            archon_llm::compaction_policy::CompactionBackend::Unsupported
+        );
+        assert!(policy.generic_fallback);
+    }
+
+    #[test]
+    fn non_compaction_turn_does_not_emit_fallback_notice() {
+        let request = LlmRequest {
+            request_origin: Some("main_session".into()),
+            ..LlmRequest::default()
+        };
+
+        assert!(!log_compaction_fallback_if_needed(&request));
     }
 
     #[tokio::test]
