@@ -112,6 +112,10 @@ pub(super) fn render_train_jepa(
          Loss aux: {:.4}\n\
          Loss horizon: {:.4}\n\
          Loss variance: {:.4}\n\
+         Loss improved: {}\n\
+         Masked fields: context={} action={}\n\
+         Collapse gate: {} (std={:.4}, rank_ratio={:.4})\n\
+         Horizon gate: {}\n\
          Max runtime ms: {}\n\
          Manifest: {}\n\
          Checkpoint: {}",
@@ -129,6 +133,13 @@ pub(super) fn render_train_jepa(
         outcome.losses.loss_aux,
         outcome.losses.loss_horizon,
         outcome.losses.loss_var,
+        outcome.progress.improved,
+        outcome.masking.masked_context_fields,
+        outcome.masking.masked_action_fields,
+        outcome.collapse.passes,
+        outcome.collapse.mean_latent_std,
+        outcome.collapse.effective_rank_ratio,
+        outcome.horizon.passes,
         max_runtime_ms,
         manifest_path.display(),
         checkpoint_path.display()
@@ -449,6 +460,9 @@ fn jepa_training_config(
         beta_aux: jepa.beta_aux,
         gamma_horizon: jepa.gamma_horizon,
         delta_var: jepa.delta_var,
+        min_latent_std: jepa.min_latent_std,
+        min_effective_rank_ratio: jepa.min_effective_rank_ratio,
+        horizon_consistency_tol: jepa.horizon_consistency_tol,
     };
     training.validate()?;
     Ok(training)

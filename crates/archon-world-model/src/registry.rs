@@ -71,6 +71,8 @@ pub struct JepaCandidateRecord {
     pub model: JepaTraceModel,
     pub outcome: JepaTrainingOutcome,
     pub checkpoint: JepaCheckpointRecord,
+    #[serde(default)]
+    pub training_run: PathBuf,
     pub created_at: DateTime<Utc>,
 }
 
@@ -190,10 +192,12 @@ impl ModelRegistry {
     ) -> Result<PathBuf> {
         self.ensure_jepa_dirs()?;
         let checkpoint = crate::jepa::write_jepa_safetensors_checkpoint(&self.paths.root, model)?;
+        let training_run = crate::jepa::append_jepa_training_run(&self.paths.root, outcome)?;
         let record = JepaCandidateRecord {
             model: model.clone(),
             outcome: outcome.clone(),
             checkpoint,
+            training_run,
             created_at: Utc::now(),
         };
         let path = self.jepa_candidate_record_path(&record.model.metadata.model_id);
@@ -507,6 +511,7 @@ mod tests {
         assert_eq!(loaded.model.metadata.model_kind, crate::jepa::JEPA_MODEL_KIND);
         assert_eq!(loaded.outcome.status, outcome.status);
         assert_eq!(loaded.checkpoint.format, "candle_safetensors");
+        assert!(loaded.training_run.exists());
     }
 
     #[test]

@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
@@ -39,6 +40,9 @@ pub struct JepaTrainingConfig {
     pub beta_aux: f32,
     pub gamma_horizon: f32,
     pub delta_var: f32,
+    pub min_latent_std: f32,
+    pub min_effective_rank_ratio: f32,
+    pub horizon_consistency_tol: f32,
 }
 
 impl Default for JepaTrainingConfig {
@@ -57,6 +61,9 @@ impl Default for JepaTrainingConfig {
             beta_aux: 0.50,
             gamma_horizon: 0.10,
             delta_var: 0.10,
+            min_latent_std: 0.05,
+            min_effective_rank_ratio: 0.50,
+            horizon_consistency_tol: 0.02,
         }
     }
 }
@@ -83,10 +90,19 @@ impl JepaTrainingConfig {
             ("beta_aux", self.beta_aux),
             ("gamma_horizon", self.gamma_horizon),
             ("delta_var", self.delta_var),
+            ("min_latent_std", self.min_latent_std),
+            (
+                "min_effective_rank_ratio",
+                self.min_effective_rank_ratio,
+            ),
+            ("horizon_consistency_tol", self.horizon_consistency_tol),
         ] {
             if !value.is_finite() || value < 0.0 {
                 bail!("jepa {name} must be finite and non-negative");
             }
+        }
+        if self.mask_ratio > 1.0 || self.ema_decay > 1.0 {
+            bail!("jepa mask_ratio and ema_decay must be <= 1.0");
         }
         Ok(())
     }
@@ -100,6 +116,9 @@ pub struct JepaTraceModelMetadata {
     pub context_window_rows: usize,
     pub target_window_rows: usize,
     pub prediction_horizons: Vec<usize>,
+    pub mask_ratio: f32,
+    pub ema_decay: f32,
+    pub target_stop_gradient: bool,
     pub backend: BackendKind,
     pub row_count: u64,
     pub example_count: u64,
@@ -116,6 +135,9 @@ impl JepaTraceModelMetadata {
             context_window_rows: config.context_window_rows,
             target_window_rows: config.target_window_rows,
             prediction_horizons: config.prediction_horizons.clone(),
+            mask_ratio: config.mask_ratio,
+            ema_decay: config.ema_decay,
+            target_stop_gradient: true,
             backend: BackendKind::Cpu,
             row_count,
             example_count,
@@ -152,6 +174,17 @@ impl JepaTraceEncoder {
             output_bias,
             residual_weight: 0.20,
         }
+    }
+
+    pub fn ema_target_from(context: &Self, decay: f32) -> Self {
+        let mut target = Self::new("target", context.latent_dim);
+        target.input_weights = ema_values(&target.input_weights, &context.input_weights, decay);
+        target.hidden_bias = ema_values(&target.hidden_bias, &context.hidden_bias, decay);
+        target.output_weights = ema_values(&target.output_weights, &context.output_weights, decay);
+        target.output_bias = ema_values(&target.output_bias, &context.output_bias, decay);
+        target.residual_weight =
+            decay * target.residual_weight + (1.0 - decay) * context.residual_weight;
+        target
     }
 
     pub fn encode_window(&self, window: &TraceWindow) -> Result<Vec<f32>> {
@@ -206,6 +239,16 @@ pub struct JepaPredictor {
 }
 
 impl JepaPredictor {
+    fn baseline(latent_dim: usize) -> Self {
+        Self {
+            latent_dim,
+            context_weights: vec![1.0; latent_dim],
+            action_weights: vec![0.0; latent_dim],
+            horizon_weights: vec![0.0; latent_dim],
+            bias: vec![0.0; latent_dim],
+        }
+    }
+
     fn fit(latent_dim: usize, examples: &[EncodedJepaTrainingExample]) -> Result<Self> {
         if examples.is_empty() {
             bail!("at least one JEPA example is required");
@@ -456,10 +499,48 @@ pub struct JepaTrainingLosses {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JepaTrainingProgress {
+    pub initial_loss_total: f32,
+    pub final_loss_total: f32,
+    pub improved: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JepaMaskingReport {
+    pub mask_ratio: f32,
+    pub masked_context_fields: usize,
+    pub masked_action_fields: usize,
+    pub reconstructs_raw_text: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JepaCollapseReport {
+    pub mean_latent_std: f32,
+    pub effective_rank_ratio: f32,
+    pub min_latent_std: f32,
+    pub min_effective_rank_ratio: f32,
+    pub passes: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JepaHorizonReport {
+    pub e_1: Option<f32>,
+    pub e_3: Option<f32>,
+    pub e_5: Option<f32>,
+    pub tolerance: f32,
+    pub passes: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct JepaTrainingOutcome {
     pub status: TrainingStatus,
     pub metadata: JepaTraceModelMetadata,
+    pub initial_losses: JepaTrainingLosses,
     pub losses: JepaTrainingLosses,
+    pub progress: JepaTrainingProgress,
+    pub masking: JepaMaskingReport,
+    pub collapse: JepaCollapseReport,
+    pub horizon: JepaHorizonReport,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -516,6 +597,66 @@ pub fn build_jepa_training_examples(
     Ok(examples)
 }
 
+pub fn mask_jepa_training_examples(
+    examples: &[JepaTrainingExample],
+    mask_ratio: f32,
+) -> (Vec<JepaTrainingExample>, JepaMaskingReport) {
+    let mask_ratio = mask_ratio.clamp(0.0, 1.0);
+    let mut report = JepaMaskingReport {
+        mask_ratio,
+        masked_context_fields: 0,
+        masked_action_fields: 0,
+        reconstructs_raw_text: false,
+    };
+    let masked = examples
+        .iter()
+        .map(|example| mask_jepa_training_example(example, mask_ratio, &mut report))
+        .collect();
+    (masked, report)
+}
+
+pub fn evaluate_representation_collapse(
+    latents: &[Vec<f32>],
+    min_latent_std: f32,
+    min_effective_rank_ratio: f32,
+) -> Result<JepaCollapseReport> {
+    if latents.is_empty() || latents[0].is_empty() {
+        bail!("collapse evaluation requires at least one non-empty latent");
+    }
+    let dim = latents[0].len();
+    if latents.iter().any(|latent| latent.len() != dim) {
+        bail!("collapse evaluation latent dimensions must match");
+    }
+    let mut stds = vec![0.0; dim];
+    for idx in 0..dim {
+        let mean = latents.iter().map(|latent| latent[idx]).sum::<f32>() / latents.len() as f32;
+        let variance = latents
+            .iter()
+            .map(|latent| (latent[idx] - mean).powi(2))
+            .sum::<f32>()
+            / latents.len() as f32;
+        stds[idx] = variance.sqrt();
+    }
+    let mean_latent_std = stds.iter().sum::<f32>() / dim as f32;
+    let std_sum = stds.iter().sum::<f32>();
+    let std_sq_sum = stds.iter().map(|value| value * value).sum::<f32>();
+    let effective_rank = if std_sq_sum <= f32::EPSILON {
+        0.0
+    } else {
+        (std_sum * std_sum) / std_sq_sum
+    };
+    let effective_rank_ratio = (effective_rank / dim as f32).clamp(0.0, 1.0);
+    let passes =
+        mean_latent_std >= min_latent_std && effective_rank_ratio >= min_effective_rank_ratio;
+    Ok(JepaCollapseReport {
+        mean_latent_std,
+        effective_rank_ratio,
+        min_latent_std,
+        min_effective_rank_ratio,
+        passes,
+    })
+}
+
 pub fn train_jepa_candidate(
     rows: &[WorldTraceRow],
     config: &JepaTrainingConfig,
@@ -525,11 +666,30 @@ pub fn train_jepa_candidate(
     if examples.is_empty() {
         bail!("not enough rows to train JEPA: need future rows in the same session");
     }
+    let (masked_examples, masking) = mask_jepa_training_examples(&examples, config.mask_ratio);
 
     let context_encoder = JepaTraceEncoder::new("context", config.latent_dim);
     let action_encoder = JepaTraceEncoder::new("action", config.latent_dim);
-    let target_encoder = JepaTraceEncoder::new("target", config.latent_dim);
-    let encoded = encode_examples(&context_encoder, &action_encoder, &target_encoder, &examples)?;
+    let target_encoder = JepaTraceEncoder::ema_target_from(&context_encoder, config.ema_decay);
+    let encoded = encode_examples(
+        &context_encoder,
+        &action_encoder,
+        &target_encoder,
+        &masked_examples,
+    )?;
+    let initial_model = JepaTraceModel {
+        metadata: JepaTraceModelMetadata::candidate(
+            config,
+            rows.len() as u64,
+            examples.len() as u64,
+        ),
+        context_encoder: context_encoder.clone(),
+        action_encoder: action_encoder.clone(),
+        target_encoder: target_encoder.clone(),
+        predictor: JepaPredictor::baseline(config.latent_dim),
+        auxiliary_heads: fit_auxiliary_heads(config.latent_dim, &encoded),
+    };
+    let initial_losses = training_losses(&initial_model, &encoded, config)?;
     let predictor = JepaPredictor::fit(config.latent_dim, &encoded)?;
     let auxiliary_heads = fit_auxiliary_heads(config.latent_dim, &encoded);
     let mut metadata =
@@ -546,12 +706,55 @@ pub fn train_jepa_candidate(
     model.metadata = metadata;
     model.validate_finite()?;
     let losses = training_losses(&model, &encoded, config)?;
+    let progress = JepaTrainingProgress {
+        initial_loss_total: initial_losses.loss_total,
+        final_loss_total: losses.loss_total,
+        improved: losses.loss_total <= initial_losses.loss_total,
+    };
+    let collapse = evaluate_representation_collapse(
+        &heldout_context_latents(&encoded),
+        config.min_latent_std,
+        config.min_effective_rank_ratio,
+    )?;
+    let horizon = horizon_report_for_model(&model, &encoded, config.horizon_consistency_tol)?;
     let outcome = JepaTrainingOutcome {
         status: TrainingStatus::CandidateWritten,
         metadata: model.metadata.clone(),
+        initial_losses,
         losses,
+        progress,
+        masking,
+        collapse,
+        horizon,
     };
     Ok((model, outcome))
+}
+
+pub fn append_jepa_training_run(root: &Path, outcome: &JepaTrainingOutcome) -> Result<PathBuf> {
+    let dir = root.join("jepa").join("training-runs");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join("training-runs.jsonl");
+    let mut line = serde_json::to_vec(&serde_json::json!({
+        "model_id": outcome.metadata.model_id.clone(),
+        "model_kind": outcome.metadata.model_kind.clone(),
+        "created_at": Utc::now(),
+        "row_count": outcome.metadata.row_count,
+        "example_count": outcome.metadata.example_count,
+        "horizons": outcome.metadata.prediction_horizons.clone(),
+        "masking": outcome.masking.clone(),
+        "initial_losses": outcome.initial_losses.clone(),
+        "losses": outcome.losses.clone(),
+        "progress": outcome.progress.clone(),
+        "collapse": outcome.collapse.clone(),
+        "horizon": outcome.horizon.clone()
+    }))?;
+    line.push(b'\n');
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)?
+        .write_all(&line)?;
+    Ok(path)
 }
 
 pub fn write_jepa_safetensors_checkpoint(
@@ -634,6 +837,82 @@ pub fn read_jepa_safetensors_checkpoint(path: &Path) -> Result<JepaCheckpointTen
     })
 }
 
+fn mask_jepa_training_example(
+    example: &JepaTrainingExample,
+    mask_ratio: f32,
+    report: &mut JepaMaskingReport,
+) -> JepaTrainingExample {
+    let mut masked = example.clone();
+    for row in &mut masked.context.rows {
+        let prefix = format!("{}:{}:{}", row.session_id, row.row_id, example.horizon);
+        if should_mask(&prefix, "excerpt", mask_ratio) {
+            row.redacted_excerpt = Some("[MASKED_EXCERPT]".into());
+            report.masked_context_fields += 1;
+        }
+        if should_mask(&prefix, "action_kind", mask_ratio) {
+            row.action_kind = crate::schema::WorldActionKind::Unknown;
+            report.masked_context_fields += 1;
+        }
+        if should_mask(&prefix, "provider", mask_ratio) {
+            row.provider = Some("[MASKED_PROVIDER]".into());
+            report.masked_context_fields += 1;
+        }
+        if should_mask(&prefix, "model", mask_ratio) {
+            row.model = Some("[MASKED_MODEL]".into());
+            report.masked_context_fields += 1;
+        }
+        if should_mask(&prefix, "agent", mask_ratio) {
+            row.agent = Some("[MASKED_AGENT]".into());
+            report.masked_context_fields += 1;
+        }
+        if should_mask(&prefix, "scalar", mask_ratio) {
+            row.scalar_features = ScalarFeatures::default();
+            report.masked_context_fields += 1;
+        }
+    }
+
+    let prefix = format!("action:{}:{}", masked.action.action_ref, example.horizon);
+    if should_mask(&prefix, "summary", mask_ratio) {
+        masked.action.summary = "[MASKED_EXCERPT]".into();
+        report.masked_action_fields += 1;
+    }
+    if should_mask(&prefix, "action_kind", mask_ratio) {
+        masked.action.action_kind = crate::schema::WorldActionKind::Unknown;
+        report.masked_action_fields += 1;
+    }
+    if should_mask(&prefix, "provider", mask_ratio) {
+        masked.action.provider = Some("[MASKED_PROVIDER]".into());
+        report.masked_action_fields += 1;
+    }
+    if should_mask(&prefix, "model", mask_ratio) {
+        masked.action.model = Some("[MASKED_MODEL]".into());
+        report.masked_action_fields += 1;
+    }
+    if should_mask(&prefix, "agent", mask_ratio) {
+        masked.action.agent = Some("[MASKED_AGENT]".into());
+        report.masked_action_fields += 1;
+    }
+    if should_mask(&prefix, "scalar", mask_ratio) {
+        masked.action.scalar_features = ScalarFeatures::default();
+        report.masked_action_fields += 1;
+    }
+    masked
+}
+
+fn should_mask(prefix: &str, field: &str, mask_ratio: f32) -> bool {
+    if mask_ratio <= 0.0 {
+        return false;
+    }
+    if mask_ratio >= 1.0 {
+        return true;
+    }
+    let mut hasher = DefaultHasher::new();
+    prefix.hash(&mut hasher);
+    field.hash(&mut hasher);
+    let unit = (hasher.finish() % 10_000) as f32 / 10_000.0;
+    unit < mask_ratio
+}
+
 fn encode_examples(
     context_encoder: &JepaTraceEncoder,
     action_encoder: &JepaTraceEncoder,
@@ -701,6 +980,73 @@ fn training_losses(
         loss_var,
         loss_total,
     })
+}
+
+fn horizon_report_for_model(
+    model: &JepaTraceModel,
+    examples: &[EncodedJepaTrainingExample],
+    tolerance: f32,
+) -> Result<JepaHorizonReport> {
+    let mut horizon_errors: BTreeMap<usize, (f32, usize)> = BTreeMap::new();
+    for example in examples {
+        let predicted = model.predict_training_target(
+            &example.context_latent,
+            &example.action_latent,
+            example.horizon,
+        )?;
+        let cosine = cosine_error(&predicted, &example.target_latent)?;
+        let entry = horizon_errors.entry(example.horizon).or_default();
+        entry.0 += cosine;
+        entry.1 += 1;
+    }
+    Ok(horizon_report_from_errors(&horizon_errors, tolerance))
+}
+
+fn horizon_report_from_errors(
+    errors: &BTreeMap<usize, (f32, usize)>,
+    tolerance: f32,
+) -> JepaHorizonReport {
+    let mean = |horizon: usize| {
+        errors.get(&horizon).and_then(|(sum, count)| {
+            if *count == 0 {
+                None
+            } else {
+                Some(*sum / *count as f32)
+            }
+        })
+    };
+    let e_1 = mean(1);
+    let e_3 = mean(3);
+    let e_5 = mean(5);
+    let passes = match (e_1, e_3, e_5) {
+        (Some(e1), Some(e3), Some(e5)) => {
+            [e1, e3, e5, tolerance]
+                .into_iter()
+                .all(|value| value.is_finite())
+                && e1 <= e3 + tolerance
+                && e3 <= e5 + tolerance
+        }
+        _ => false,
+    };
+    JepaHorizonReport {
+        e_1,
+        e_3,
+        e_5,
+        tolerance,
+        passes,
+    }
+}
+
+fn heldout_context_latents(examples: &[EncodedJepaTrainingExample]) -> Vec<Vec<f32>> {
+    if examples.is_empty() {
+        return Vec::new();
+    }
+    let split = ((examples.len() as f32) * 0.8).floor() as usize;
+    let split = split.min(examples.len().saturating_sub(1));
+    examples[split..]
+        .iter()
+        .map(|example| example.context_latent.clone())
+        .collect()
 }
 
 fn window_features(window: &TraceWindow, dimensions: usize, role: &str) -> Result<Vec<f32>> {
@@ -909,6 +1255,14 @@ fn deterministic_vector(
             let unit = (hasher.finish() % 10_000) as f32 / 10_000.0;
             min_value + unit * (max_value - min_value)
         })
+        .collect()
+}
+
+fn ema_values(previous_target: &[f32], online: &[f32], decay: f32) -> Vec<f32> {
+    previous_target
+        .iter()
+        .zip(online)
+        .map(|(target, online)| decay * target + (1.0 - decay) * online)
         .collect()
 }
 
@@ -1256,6 +1610,26 @@ mod tests {
         vec![first, second, third, fourth]
     }
 
+    fn long_rows() -> Vec<WorldTraceRow> {
+        (0..8)
+            .map(|idx| {
+                let kind = match idx % 4 {
+                    0 => WorldActionKind::PlanUpdate,
+                    1 => WorldActionKind::ToolCall,
+                    2 => WorldActionKind::Verification,
+                    _ => WorldActionKind::Retry,
+                };
+                let mut row = WorldTraceRow::new("s1", kind).with_row_id(format!("r{idx}"));
+                row.provider = Some("local".into());
+                row.agent = Some(format!("agent-{}", idx % 2));
+                row.redacted_excerpt = Some(format!("trace event {idx}"));
+                row.labels.retry = idx % 3 == 0;
+                row.labels.verification_needed = idx % 2 == 0;
+                row
+            })
+            .collect()
+    }
+
     #[test]
     fn jepa_examples_follow_configured_horizons() {
         let config = JepaTrainingConfig {
@@ -1270,6 +1644,35 @@ mod tests {
 
         assert!(examples.iter().any(|example| example.horizon == 1));
         assert!(examples.iter().any(|example| example.horizon == 3));
+    }
+
+    #[test]
+    fn masking_uses_typed_sentinels_without_touching_target() {
+        let config = JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 2,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            mask_ratio: 1.0,
+            ..JepaTrainingConfig::default()
+        };
+        let examples = build_jepa_training_examples(&rows(), &config).unwrap();
+
+        let (masked, report) = mask_jepa_training_examples(&examples, config.mask_ratio);
+
+        assert!(report.masked_context_fields > 0);
+        assert!(report.masked_action_fields > 0);
+        assert_eq!(masked[0].context.session_id, examples[0].context.session_id);
+        assert_eq!(
+            masked[0].context.rows[0].redacted_excerpt.as_deref(),
+            Some("[MASKED_EXCERPT]")
+        );
+        assert_eq!(masked[0].action.summary, "[MASKED_EXCERPT]");
+        assert_eq!(
+            masked[0].target.rows[0].redacted_excerpt,
+            examples[0].target.rows[0].redacted_excerpt
+        );
+        assert!(!report.reconstructs_raw_text);
     }
 
     #[test]
@@ -1294,7 +1697,85 @@ mod tests {
         assert_eq!(action.len(), 8);
         assert_eq!(target.len(), 8);
         assert!(outcome.losses.loss_total.is_finite());
+        assert!(outcome.metadata.target_stop_gradient);
+        assert_eq!(outcome.masking.mask_ratio, 0.30);
         assert_eq!(model.provider_name(), "archon-jepa");
+    }
+
+    #[test]
+    fn target_encoder_is_ema_of_context_encoder() {
+        let context = JepaTraceEncoder::new("context", 8);
+        let initialized_target = JepaTraceEncoder::new("target", 8);
+        let target = JepaTraceEncoder::ema_target_from(&context, 0.5);
+
+        assert_eq!(target.role, "target");
+        let expected = 0.5 * initialized_target.input_weights[0] + 0.5 * context.input_weights[0];
+        assert!((target.input_weights[0] - expected).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn collapse_gate_rejects_constant_latents() {
+        let latents = vec![vec![0.5; 8]; 4];
+
+        let report = evaluate_representation_collapse(&latents, 0.05, 0.50).unwrap();
+
+        assert!(!report.passes);
+        assert_eq!(report.mean_latent_std, 0.0);
+        assert_eq!(report.effective_rank_ratio, 0.0);
+    }
+
+    #[test]
+    fn horizon_report_requires_monotonic_multi_horizon_errors() {
+        let config = JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 2,
+            target_window_rows: 1,
+            prediction_horizons: vec![1, 3, 5],
+            ..JepaTrainingConfig::default()
+        };
+
+        let (_, outcome) = train_jepa_candidate(&long_rows(), &config).unwrap();
+
+        assert!(outcome.horizon.e_1.is_some());
+        assert!(outcome.horizon.e_3.is_some());
+        assert!(outcome.horizon.e_5.is_some());
+    }
+
+    #[test]
+    fn nan_guard_fails_closed() {
+        let config = JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 2,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..JepaTrainingConfig::default()
+        };
+        let (mut model, _) = train_jepa_candidate(&rows(), &config).unwrap();
+        model.predictor.bias[0] = f32::NAN;
+
+        let error = model.validate_finite().unwrap_err();
+
+        assert!(error.to_string().contains("non-finite"));
+    }
+
+    #[test]
+    fn training_run_ledger_records_component_losses() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 2,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..JepaTrainingConfig::default()
+        };
+        let (_, outcome) = train_jepa_candidate(&rows(), &config).unwrap();
+
+        let path = append_jepa_training_run(temp.path(), &outcome).unwrap();
+        let content = std::fs::read_to_string(path).unwrap();
+
+        assert!(content.contains("\"loss_jepa\""));
+        assert!(content.contains("\"loss_var\""));
+        assert!(content.contains("\"collapse\""));
     }
 
     #[test]
