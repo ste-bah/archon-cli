@@ -8,8 +8,11 @@ use std::io::Write;
 use crate::eval::{
     BrierImprovementReport, NextStateCosineGateReport, PromotionGateReport, SurpriseKsReport,
 };
+use crate::jepa::{JepaCheckpointRecord, JepaTraceModel, JepaTrainingOutcome};
 use crate::model::CpuLatentTransitionModel;
 use crate::train::TrainingOutcome;
+
+pub const LATENT_TRANSITION_MODEL_KIND: &str = "latent_transition";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelRegistryPaths {
@@ -34,6 +37,11 @@ impl ModelRegistryPaths {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActiveModelPointer {
     pub model_id: String,
+    #[serde(
+        default = "default_model_kind",
+        skip_serializing_if = "is_default_model_kind"
+    )]
+    pub model_kind: String,
     pub previous_model_id: Option<String>,
     pub updated_at: DateTime<Utc>,
 }
@@ -41,6 +49,11 @@ pub struct ActiveModelPointer {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelActivationRecord {
     pub model_id: String,
+    #[serde(
+        default = "default_model_kind",
+        skip_serializing_if = "is_default_model_kind"
+    )]
+    pub model_kind: String,
     pub previous_model_id: Option<String>,
     pub action: String,
     pub created_at: DateTime<Utc>,
@@ -50,6 +63,14 @@ pub struct ModelActivationRecord {
 pub struct CpuCandidateRecord {
     pub model: CpuLatentTransitionModel,
     pub outcome: TrainingOutcome,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JepaCandidateRecord {
+    pub model: JepaTraceModel,
+    pub outcome: JepaTrainingOutcome,
+    pub checkpoint: JepaCheckpointRecord,
     pub created_at: DateTime<Utc>,
 }
 
@@ -93,9 +114,28 @@ impl ModelRegistry {
     }
 
     pub fn promote(&self, model_id: impl Into<String>) -> Result<PathBuf> {
+        self.promote_model_kind(model_id, LATENT_TRANSITION_MODEL_KIND)
+    }
+
+    pub fn active_model_kind(&self) -> Result<Option<String>> {
+        let path = self.active_pointer_path();
+        if !path.exists() {
+            return Ok(None);
+        }
+        let content = std::fs::read_to_string(path)?;
+        let pointer: ActiveModelPointer = serde_json::from_str(&content)?;
+        Ok(Some(pointer.model_kind))
+    }
+
+    pub fn promote_model_kind(
+        &self,
+        model_id: impl Into<String>,
+        model_kind: impl Into<String>,
+    ) -> Result<PathBuf> {
         let previous_model_id = self.active_model_id()?;
         let pointer = ActiveModelPointer {
             model_id: model_id.into(),
+            model_kind: model_kind.into(),
             previous_model_id,
             updated_at: Utc::now(),
         };
@@ -143,6 +183,32 @@ impl ModelRegistry {
         serde_json::from_str(&content).map_err(Into::into)
     }
 
+    pub fn write_jepa_candidate(
+        &self,
+        model: &JepaTraceModel,
+        outcome: &JepaTrainingOutcome,
+    ) -> Result<PathBuf> {
+        self.ensure_jepa_dirs()?;
+        let checkpoint = crate::jepa::write_jepa_safetensors_checkpoint(&self.paths.root, model)?;
+        let record = JepaCandidateRecord {
+            model: model.clone(),
+            outcome: outcome.clone(),
+            checkpoint,
+            created_at: Utc::now(),
+        };
+        let path = self.jepa_candidate_record_path(&record.model.metadata.model_id);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, serde_json::to_vec_pretty(&record)?)?;
+        Ok(path)
+    }
+
+    pub fn load_jepa_candidate(&self, model_id: &str) -> Result<JepaCandidateRecord> {
+        let content = std::fs::read_to_string(self.jepa_candidate_record_path(model_id))?;
+        serde_json::from_str(&content).map_err(Into::into)
+    }
+
     pub fn write_eval_report(&self, record: &CandidateEvalRecord) -> Result<PathBuf> {
         let path = self.eval_record_path(&record.candidate_id);
         std::fs::write(&path, serde_json::to_vec_pretty(record)?)?;
@@ -159,9 +225,18 @@ impl ModelRegistry {
     }
 
     pub fn rollback(&self, model_id: impl Into<String>) -> Result<PathBuf> {
+        self.rollback_model_kind(model_id, LATENT_TRANSITION_MODEL_KIND)
+    }
+
+    pub fn rollback_model_kind(
+        &self,
+        model_id: impl Into<String>,
+        model_kind: impl Into<String>,
+    ) -> Result<PathBuf> {
         let previous_model_id = self.active_model_id()?;
         let pointer = ActiveModelPointer {
             model_id: model_id.into(),
+            model_kind: model_kind.into(),
             previous_model_id,
             updated_at: Utc::now(),
         };
@@ -231,9 +306,18 @@ impl ModelRegistry {
             .join(format!("{model_id}.eval.json"))
     }
 
+    pub fn jepa_candidate_record_path(&self, model_id: &str) -> PathBuf {
+        self.paths
+            .root
+            .join("jepa")
+            .join("candidates")
+            .join(format!("{model_id}.json"))
+    }
+
     fn append_activation(&self, pointer: &ActiveModelPointer, action: &str) -> Result<()> {
         let record = ModelActivationRecord {
             model_id: pointer.model_id.clone(),
+            model_kind: pointer.model_kind.clone(),
             previous_model_id: pointer.previous_model_id.clone(),
             action: action.to_string(),
             created_at: pointer.updated_at,
@@ -248,6 +332,27 @@ impl ModelRegistry {
             .write_all(&line)?;
         Ok(())
     }
+
+    fn ensure_jepa_dirs(&self) -> Result<()> {
+        std::fs::create_dir_all(self.paths.root.join("jepa").join("candidates"))?;
+        std::fs::create_dir_all(self.paths.root.join("jepa").join("evals"))?;
+        std::fs::create_dir_all(self.paths.root.join("jepa").join("training-runs"))?;
+        std::fs::create_dir_all(
+            self.paths
+                .root
+                .join("jepa")
+                .join("representation-comparisons"),
+        )?;
+        Ok(())
+    }
+}
+
+fn default_model_kind() -> String {
+    LATENT_TRANSITION_MODEL_KIND.into()
+}
+
+fn is_default_model_kind(model_kind: &String) -> bool {
+    model_kind == LATENT_TRANSITION_MODEL_KIND
 }
 
 #[cfg(test)]
@@ -271,6 +376,52 @@ mod tests {
                 .join("ledgers")
                 .join("model-activations.jsonl")
                 .exists()
+        );
+        assert_eq!(
+            registry.active_model_kind().unwrap().as_deref(),
+            Some(LATENT_TRANSITION_MODEL_KIND)
+        );
+    }
+
+    #[test]
+    fn registry_pointer_roundtrips_model_kind() {
+        let temp = tempfile::tempdir().unwrap();
+        let registry = ModelRegistry::open(temp.path()).unwrap();
+
+        registry
+            .promote_model_kind("jepa-candidate-1", crate::jepa::JEPA_MODEL_KIND)
+            .unwrap();
+
+        assert_eq!(
+            registry.active_model_id().unwrap().as_deref(),
+            Some("jepa-candidate-1")
+        );
+        assert_eq!(
+            registry.active_model_kind().unwrap().as_deref(),
+            Some(crate::jepa::JEPA_MODEL_KIND)
+        );
+        let content = std::fs::read_to_string(registry.active_pointer_path()).unwrap();
+        assert!(content.contains("\"model_kind\": \"jepa_transition\""));
+    }
+
+    #[test]
+    fn registry_legacy_pointer_defaults_to_latent_transition_kind() {
+        let temp = tempfile::tempdir().unwrap();
+        let registry = ModelRegistry::open(temp.path()).unwrap();
+        std::fs::write(
+            registry.active_pointer_path(),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "model_id": "legacy-candidate",
+                "previous_model_id": null,
+                "updated_at": Utc::now()
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            registry.active_model_kind().unwrap().as_deref(),
+            Some(LATENT_TRANSITION_MODEL_KIND)
         );
     }
 
@@ -317,6 +468,45 @@ mod tests {
         );
         assert_eq!(loaded.model.transition_bias, model.transition_bias);
         assert_eq!(loaded.outcome.status, outcome.status);
+    }
+
+    #[test]
+    fn registry_writes_and_loads_jepa_candidate() {
+        let temp = tempfile::tempdir().unwrap();
+        let registry = ModelRegistry::open(temp.path()).unwrap();
+        let mut first =
+            crate::schema::WorldTraceRow::new("s1", crate::schema::WorldActionKind::ToolCall)
+                .with_row_id("r1");
+        first.redacted_excerpt = Some("run tests".into());
+        let mut second =
+            crate::schema::WorldTraceRow::new("s1", crate::schema::WorldActionKind::Verification)
+                .with_row_id("r2");
+        second.redacted_excerpt = Some("tests passed".into());
+        let config = crate::jepa::JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 1,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..crate::jepa::JepaTrainingConfig::default()
+        };
+        let (model, outcome) = crate::jepa::train_jepa_candidate(&[first, second], &config).unwrap();
+
+        let path = registry.write_jepa_candidate(&model, &outcome).unwrap();
+        let loaded = registry
+            .load_jepa_candidate(&model.metadata.model_id)
+            .unwrap();
+
+        assert!(path.exists());
+        assert!(
+            temp.path()
+                .join("jepa")
+                .join("candidates")
+                .join(format!("{}.safetensors", model.metadata.model_id))
+                .exists()
+        );
+        assert_eq!(loaded.model.metadata.model_kind, crate::jepa::JEPA_MODEL_KIND);
+        assert_eq!(loaded.outcome.status, outcome.status);
+        assert_eq!(loaded.checkpoint.format, "candle_safetensors");
     }
 
     #[test]

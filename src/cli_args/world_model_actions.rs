@@ -57,6 +57,15 @@ pub enum WorldAction {
         #[arg(long)]
         max_runtime_ms: Option<u64>,
     },
+    /// Train a JEPA representation candidate from the stored world-model corpus
+    TrainJepa {
+        /// Write a candidate checkpoint instead of touching the active model
+        #[arg(long, default_value_t = true)]
+        candidate: bool,
+        /// Override max runtime for this training invocation
+        #[arg(long)]
+        max_runtime_ms: Option<u64>,
+    },
     /// Run one idle-aware dynamic trainer tick
     TrainerTick {
         /// Age of the latest foreground activity in milliseconds

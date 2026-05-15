@@ -1135,6 +1135,7 @@ pub struct WorldModelConfig {
     pub embeddings: WorldModelEmbeddingsConfig,
     pub labeler: WorldModelLabelerConfig,
     pub training: WorldModelTrainingConfig,
+    pub jepa: WorldModelJepaConfig,
     pub eval: WorldModelEvalConfig,
     pub cold_start: WorldModelColdStartConfig,
     pub auto_trainer: WorldModelAutoTrainerConfig,
@@ -1158,6 +1159,7 @@ impl Default for WorldModelConfig {
             embeddings: WorldModelEmbeddingsConfig::default(),
             labeler: WorldModelLabelerConfig::default(),
             training: WorldModelTrainingConfig::default(),
+            jepa: WorldModelJepaConfig::default(),
             eval: WorldModelEvalConfig::default(),
             cold_start: WorldModelColdStartConfig::default(),
             auto_trainer: WorldModelAutoTrainerConfig::default(),
@@ -1248,6 +1250,68 @@ impl Default for WorldModelTrainingConfig {
             validation_split: 0.2,
             promotion_min_delta: 0.02,
             max_runtime_ms: 300_000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorldModelJepaConfig {
+    pub enabled: bool,
+    pub latent_dim: usize,
+    pub context_window_rows: usize,
+    pub target_window_rows: usize,
+    pub prediction_horizons: Vec<usize>,
+    pub mask_ratio: f32,
+    pub ema_decay: f32,
+    pub latent_var_floor: f32,
+    pub min_latent_std: f32,
+    pub min_effective_rank_ratio: f32,
+    pub batch_size: usize,
+    pub max_epochs: usize,
+    pub learning_rate: f32,
+    pub alpha_mse: f32,
+    pub beta_aux: f32,
+    pub gamma_horizon: f32,
+    pub delta_var: f32,
+    pub allow_generic_fallback: bool,
+    pub max_runtime_ms: u64,
+    pub max_prediction_latency_ms: u64,
+    pub max_checkpoint_mb: u64,
+    pub horizon_consistency_tol: f32,
+    pub min_baseline_improvement: f32,
+    pub min_heldout_examples: usize,
+    pub min_training_examples: usize,
+}
+
+impl Default for WorldModelJepaConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            latent_dim: 384,
+            context_window_rows: 8,
+            target_window_rows: 3,
+            prediction_horizons: vec![1, 3, 5],
+            mask_ratio: 0.30,
+            ema_decay: 0.996,
+            latent_var_floor: 0.05,
+            min_latent_std: 0.05,
+            min_effective_rank_ratio: 0.50,
+            batch_size: 32,
+            max_epochs: 10,
+            learning_rate: 0.001,
+            alpha_mse: 0.25,
+            beta_aux: 0.50,
+            gamma_horizon: 0.10,
+            delta_var: 0.10,
+            allow_generic_fallback: true,
+            max_runtime_ms: 300_000,
+            max_prediction_latency_ms: 50,
+            max_checkpoint_mb: 64,
+            horizon_consistency_tol: 0.02,
+            min_baseline_improvement: 0.05,
+            min_heldout_examples: 200,
+            min_training_examples: 2_000,
         }
     }
 }

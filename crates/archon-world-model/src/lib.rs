@@ -16,10 +16,12 @@ pub mod evolution;
 pub mod features;
 pub mod ingest;
 pub mod integration;
+pub mod jepa;
 pub mod labeler;
 pub mod labels;
 pub mod model;
 pub mod registry;
+pub mod representation;
 pub mod schema;
 pub mod shadow;
 pub mod storage;
@@ -33,5 +35,13 @@ pub use advisor::{
 };
 pub use backend::{BackendKind, BackendStatus};
 pub use eval::{EvalConfig, PromotionGateReport};
+pub use jepa::{
+    JepaTraceModel, JepaTrainingConfig, JepaTrainingExample, JepaTrainingLosses,
+    JepaTrainingOutcome, JEPA_MODEL_KIND,
+};
+pub use representation::{
+    GenericEmbeddingRepresentationAdapter, TraceAction, TraceTransition, TraceWindow,
+    TraceWindowBuilder, WorldRepresentationAdapter,
+};
 pub use schema::{EvidenceRef, WorldLabelSet, WorldTraceRow};
 pub use trace::{ColdStartStats, ColdStartStatus, ColdStartThresholds};

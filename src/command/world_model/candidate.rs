@@ -68,6 +68,73 @@ pub(super) fn render_train(
     ))
 }
 
+pub(super) fn render_train_jepa(
+    config: &archon_core::config::ArchonConfig,
+    root: &Path,
+    candidate_flag: bool,
+    max_runtime_ms: Option<u64>,
+) -> Result<String> {
+    let rows = WorldModelStore::open(root)?.load_rows()?;
+    let jepa_config = jepa_training_config(config)?;
+    let state_dim = config.learning.world_model.state_dim;
+    if jepa_config.latent_dim != state_dim {
+        bail!(
+            "jepa latent_dim ({}) must equal active transition state_dim ({state_dim})",
+            jepa_config.latent_dim
+        );
+    }
+
+    let (model, outcome) = archon_world_model::jepa::train_jepa_candidate(&rows, &jepa_config)?;
+    enforce_jepa_checkpoint_cap(config, &model)?;
+    let registry = ModelRegistry::open(root)?;
+    let manifest_path = registry.write_jepa_candidate(&model, &outcome)?;
+    let checkpoint_path = registry
+        .load_jepa_candidate(&model.metadata.model_id)?
+        .checkpoint
+        .path;
+    let max_runtime_ms = max_runtime_ms.unwrap_or(config.learning.world_model.jepa.max_runtime_ms);
+
+    Ok(format!(
+        "World Model JEPA Train\n\
+         =======================\n\
+         Candidate mode: forced{}\n\
+         Candidate: {}\n\
+         Model kind: {}\n\
+         Backend: cpu\n\
+         Latent dim: {}\n\
+         Rows loaded: {}\n\
+         Examples: {}\n\
+         Horizons: {:?}\n\
+         Parameters: {}\n\
+         Loss total: {:.4}\n\
+         Loss JEPA: {:.4}\n\
+         Loss MSE: {:.4}\n\
+         Loss aux: {:.4}\n\
+         Loss horizon: {:.4}\n\
+         Loss variance: {:.4}\n\
+         Max runtime ms: {}\n\
+         Manifest: {}\n\
+         Checkpoint: {}",
+        if candidate_flag { " (--candidate)" } else { "" },
+        model.metadata.model_id,
+        model.metadata.model_kind,
+        model.metadata.latent_dim,
+        rows.len(),
+        model.metadata.example_count,
+        model.metadata.prediction_horizons,
+        model.metadata.parameter_count,
+        outcome.losses.loss_total,
+        outcome.losses.loss_jepa,
+        outcome.losses.loss_mse,
+        outcome.losses.loss_aux,
+        outcome.losses.loss_horizon,
+        outcome.losses.loss_var,
+        max_runtime_ms,
+        manifest_path.display(),
+        checkpoint_path.display()
+    ))
+}
+
 pub(super) fn render_eval(
     config: &archon_core::config::ArchonConfig,
     root: &Path,
@@ -344,6 +411,47 @@ fn enforce_accelerator_cap(
         );
     }
     Ok(())
+}
+
+fn enforce_jepa_checkpoint_cap(
+    config: &archon_core::config::ArchonConfig,
+    model: &archon_world_model::jepa::JepaTraceModel,
+) -> Result<()> {
+    let estimated_mb = model
+        .metadata
+        .parameter_count
+        .saturating_mul(4)
+        .div_ceil(1024 * 1024);
+    if estimated_mb > config.learning.world_model.jepa.max_checkpoint_mb {
+        bail!(
+            "jepa checkpoint estimate {estimated_mb}MB exceeds max_checkpoint_mb={}",
+            config.learning.world_model.jepa.max_checkpoint_mb
+        );
+    }
+    Ok(())
+}
+
+fn jepa_training_config(
+    config: &archon_core::config::ArchonConfig,
+) -> Result<archon_world_model::jepa::JepaTrainingConfig> {
+    let jepa = &config.learning.world_model.jepa;
+    let training = archon_world_model::jepa::JepaTrainingConfig {
+        latent_dim: jepa.latent_dim,
+        context_window_rows: jepa.context_window_rows,
+        target_window_rows: jepa.target_window_rows,
+        prediction_horizons: jepa.prediction_horizons.clone(),
+        mask_ratio: jepa.mask_ratio,
+        ema_decay: jepa.ema_decay,
+        latent_var_floor: jepa.latent_var_floor,
+        max_epochs: jepa.max_epochs,
+        learning_rate: jepa.learning_rate,
+        alpha_mse: jepa.alpha_mse,
+        beta_aux: jepa.beta_aux,
+        gamma_horizon: jepa.gamma_horizon,
+        delta_var: jepa.delta_var,
+    };
+    training.validate()?;
+    Ok(training)
 }
 
 fn model_cosine_distances(

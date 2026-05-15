@@ -255,6 +255,53 @@ fn train_writes_candidate_manifest_from_stored_rows() {
 }
 
 #[test]
+fn train_jepa_writes_candidate_manifest_from_stored_rows() {
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let mut config = test_config();
+    config.learning.world_model.state_dim = 8;
+    config.learning.world_model.jepa.latent_dim = 8;
+    config.learning.world_model.jepa.context_window_rows = 2;
+    config.learning.world_model.jepa.target_window_rows = 1;
+    config.learning.world_model.jepa.prediction_horizons = vec![1];
+
+    let rendered = candidate::render_train_jepa(&config, temp.path(), true, Some(1_000)).unwrap();
+
+    let candidate_id = candidate_id_from(&rendered);
+    assert!(rendered.contains("World Model JEPA Train"));
+    assert!(rendered.contains("Model kind: jepa_transition"));
+    assert!(rendered.contains("Latent dim: 8"));
+    assert!(rendered.contains("Examples: 2"));
+    assert!(
+        temp.path()
+            .join("jepa")
+            .join("candidates")
+            .join(format!("{candidate_id}.json"))
+            .exists()
+    );
+    assert!(
+        temp.path()
+            .join("jepa")
+            .join("candidates")
+            .join(format!("{candidate_id}.safetensors"))
+            .exists()
+    );
+}
+
+#[test]
+fn train_jepa_rejects_latent_dim_state_dim_mismatch() {
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let mut config = test_config();
+    config.learning.world_model.state_dim = 16;
+    config.learning.world_model.jepa.latent_dim = 8;
+
+    let error = candidate::render_train_jepa(&config, temp.path(), true, None).unwrap_err();
+
+    assert!(error.to_string().contains("must equal active transition state_dim"));
+}
+
+#[test]
 fn eval_writes_report_and_keeps_unmet_gates_visible() {
     let temp = tempfile::tempdir().unwrap();
     seed_training_rows(temp.path());

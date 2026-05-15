@@ -467,6 +467,33 @@ validation_split = 0.2
 promotion_min_delta = 0.02
 max_runtime_ms = 300000
 
+[learning.world_model.jepa]
+enabled = false
+latent_dim = 384
+context_window_rows = 8
+target_window_rows = 3
+prediction_horizons = [1, 3, 5]
+mask_ratio = 0.30
+ema_decay = 0.996
+latent_var_floor = 0.05
+min_latent_std = 0.05
+min_effective_rank_ratio = 0.50
+batch_size = 32
+max_epochs = 10
+learning_rate = 0.001
+alpha_mse = 0.25
+beta_aux = 0.50
+gamma_horizon = 0.10
+delta_var = 0.10
+allow_generic_fallback = true
+max_runtime_ms = 300000
+max_prediction_latency_ms = 50
+max_checkpoint_mb = 64
+horizon_consistency_tol = 0.02
+min_baseline_improvement = 0.05
+min_heldout_examples = 200
+min_training_examples = 2000
+
 [learning.world_model.eval]
 bootstrap_iterations = 1000
 confidence_level = 0.95

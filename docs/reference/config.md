@@ -753,6 +753,33 @@ validation_split = 0.2
 promotion_min_delta = 0.02
 max_runtime_ms = 300000
 
+[learning.world_model.jepa]
+enabled = false
+latent_dim = 384
+context_window_rows = 8
+target_window_rows = 3
+prediction_horizons = [1, 3, 5]
+mask_ratio = 0.30
+ema_decay = 0.996
+latent_var_floor = 0.05
+min_latent_std = 0.05
+min_effective_rank_ratio = 0.50
+batch_size = 32
+max_epochs = 10
+learning_rate = 0.001
+alpha_mse = 0.25
+beta_aux = 0.50
+gamma_horizon = 0.10
+delta_var = 0.10
+allow_generic_fallback = true
+max_runtime_ms = 300000
+max_prediction_latency_ms = 50
+max_checkpoint_mb = 64
+horizon_consistency_tol = 0.02
+min_baseline_improvement = 0.05
+min_heldout_examples = 200
+min_training_examples = 2000
+
 [learning.world_model.eval]
 bootstrap_iterations = 1000
 confidence_level = 0.95
@@ -799,6 +826,9 @@ retain_checkpoint_count = 5
 | `embeddings.redact_before_embedding` | `true` | Redacts common email, token, API-key, and long secret shapes before local or external embedding calls. |
 | `labeler.analyzer` | `"hybrid"` | `"heuristic"`, `"llm"`, or `"hybrid"`. LLM mode is provider-neutral and requires policy. |
 | `training.backend` | `"auto"` | Selects an accelerator only after its tensor self-test probe passes, otherwise CPU if fallback is allowed. |
+| `jepa.enabled` | `false` | Keeps JEPA candidate training opt-in while `latent_transition` stays the default model kind. |
+| `jepa.latent_dim` | `384` | JEPA vector size. Training rejects a value that differs from `state_dim`. |
+| `jepa.prediction_horizons` | `[1, 3, 5]` | Future trace horizons used for JEPA candidate examples and horizon-loss accounting. |
 | `auto_trainer.idle_required_ms` | `300000` | Suspends training while foreground work is active. |
 | `retention.jsonl_rotate_mb` | `500` | Rotates raw JSONL ledgers. |
 | `retention.raw_retention_days` | `90` | Deletes old raw ledgers, while Cozo summaries remain. |

@@ -4,6 +4,7 @@ use crate::embedding::{
 };
 use crate::features::graph_context_for_row;
 use crate::model::{CpuLatentTransitionModel, LatentTransitionExample, LatentWorldModelMetadata};
+use crate::representation::{TraceWindowBuilder, WorldRepresentationAdapter};
 use crate::schema::WorldTraceRow;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -162,6 +163,25 @@ pub fn examples_from_rows_with_adapter(
     Ok(examples)
 }
 
+pub fn examples_from_rows_with_representation_adapter(
+    rows: &[WorldTraceRow],
+    adapter: &dyn WorldRepresentationAdapter,
+) -> Result<Vec<LatentTransitionExample>> {
+    let builder = TraceWindowBuilder::new(rows);
+    let transitions = builder.adjacent_transitions(1, 1, 1)?;
+    transitions
+        .into_iter()
+        .map(|transition| {
+            Ok(LatentTransitionExample {
+                state: adapter.encode_state(&transition.context)?,
+                action: adapter.encode_action(&transition.action)?,
+                next_state: adapter.encode_target(&transition.target)?,
+                labels: transition.labels,
+            })
+        })
+        .collect()
+}
+
 fn embed_row(
     adapter: &dyn WorldEmbeddingAdapter,
     rows: &[WorldTraceRow],
@@ -192,6 +212,7 @@ fn row_embedding_text(rows: &[WorldTraceRow], row: &WorldTraceRow, role: &str) -
 #[cfg(test)]
 mod tests {
     use crate::model::LatentTransitionExample;
+    use crate::representation::GenericEmbeddingRepresentationAdapter;
     use crate::schema::{WorldActionKind, WorldTraceRow};
 
     use super::*;
@@ -265,5 +286,26 @@ mod tests {
         let examples = examples_from_rows_with_adapter(&[first, second], &adapter).unwrap();
 
         assert_eq!(examples[0].state.len(), 4);
+    }
+
+    #[test]
+    fn examples_from_rows_accepts_representation_adapter() {
+        let mut first =
+            WorldTraceRow::new("session-1", WorldActionKind::ToolCall).with_row_id("r1");
+        first.redacted_excerpt = Some("run tests".into());
+        let mut second =
+            WorldTraceRow::new("session-1", WorldActionKind::Verification).with_row_id("r2");
+        second.redacted_excerpt = Some("tests passed".into());
+        let adapter = GenericEmbeddingRepresentationAdapter::new(Box::new(
+            DeterministicHashEmbeddingAdapter::new(4).unwrap(),
+        ));
+
+        let examples =
+            examples_from_rows_with_representation_adapter(&[second, first], &adapter).unwrap();
+
+        assert_eq!(examples.len(), 1);
+        assert_eq!(examples[0].state.len(), 4);
+        assert_eq!(examples[0].action.len(), 4);
+        assert_eq!(examples[0].next_state.len(), 4);
     }
 }

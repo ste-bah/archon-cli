@@ -97,6 +97,21 @@ pub(crate) async fn handle_world_command(
             );
             Ok(())
         }
+        WorldAction::TrainJepa {
+            candidate,
+            max_runtime_ms,
+        } => {
+            println!(
+                "{}",
+                candidate::render_train_jepa(
+                    config,
+                    &world_model_root()?,
+                    *candidate,
+                    *max_runtime_ms
+                )?
+            );
+            Ok(())
+        }
         WorldAction::TrainerTick {
             last_activity_age_ms,
             last_training_age_ms,
