@@ -35,21 +35,25 @@ source = "bundled"
 
 [providers.openai-codex.models."gpt-5.5"]
 context_window = 1_050_000
+runtime_context_budget = 272_000
 max_output_tokens = 128_000
 source = "bundled"
 
 [providers.openai-codex.models."gpt-5.4"]
 context_window = 1_050_000
+runtime_context_budget = 272_000
 max_output_tokens = 128_000
 source = "bundled"
 
 [providers.openai-codex.models."gpt-5.4-mini"]
 context_window = 400_000
+runtime_context_budget = 272_000
 max_output_tokens = 128_000
 source = "bundled"
 
 [providers.openai-codex.models."gpt-5.3-codex"]
 context_window = 400_000
+runtime_context_budget = 272_000
 max_output_tokens = 128_000
 source = "bundled"
 

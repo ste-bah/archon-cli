@@ -1,5 +1,9 @@
 use super::*;
 
+#[path = "request_pressure.rs"]
+mod request_pressure;
+pub(crate) use request_pressure::*;
+
 const MICRO_COMPACT_FRACTION: f32 = 0.65;
 const MAX_COMPACT_FAILURES: u32 = 3;
 const COMPACTION_INPUT_BUDGET_BYTES: usize = 320_000;
@@ -128,7 +132,7 @@ pub fn classify_stream_error(
 
 impl Agent {
     pub(super) fn context_window_for(&self, active_model: &str) -> u64 {
-        archon_llm::context_window::resolve_context_window_for_work_dir(
+        let resolved = archon_llm::context_window::resolve_context_window_for_work_dir(
             active_model,
             self.config
                 .context
@@ -136,8 +140,10 @@ impl Agent {
                 .or_else(|| self.config.context.max_tokens.map(u64::from)),
             Some(self.client.as_ref()),
             Some(&self.config.working_dir),
-        )
-        .context_window
+        );
+        resolved
+            .runtime_context_budget
+            .unwrap_or(resolved.context_window)
     }
 
     pub(super) async fn maybe_auto_compact(
@@ -331,8 +337,8 @@ pub async fn generate_compaction_summary_structured(
             messages: request_messages,
             tools: Vec::new(),
             thinking: None,
-            speed: Some("fast".to_string()),
-            effort: Some("low".to_string()),
+            speed: None,
+            effort: None,
             extra: serde_json::Value::Null,
             request_origin: Some("compaction_summary".into()),
             reasoning_encrypted: None,

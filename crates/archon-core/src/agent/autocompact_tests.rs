@@ -251,6 +251,8 @@ async fn generate_compaction_summary_pre_trims_huge_history_bounds_body() {
         .expect("capture lock")
         .clone()
         .expect("provider should capture request");
+    assert_eq!(request.speed, None);
+    assert_eq!(request.effort, None);
     let body_len = serialized_request_len(&request);
     assert!(
         body_len <= 2 * COMPACTION_INPUT_BUDGET_BYTES,

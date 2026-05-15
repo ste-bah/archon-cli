@@ -1,5 +1,39 @@
 use super::*;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ManualCompactOutcome {
+    Compacted {
+        status: String,
+        messages_before: usize,
+        messages_after: usize,
+        before_tokens: u64,
+        after_tokens: u64,
+    },
+    BelowThreshold { status: String },
+    Skipped { status: String },
+    Failed { status: String },
+}
+
+impl ManualCompactOutcome {
+    pub fn status(&self) -> &str {
+        match self {
+            Self::Compacted { status, .. }
+            | Self::BelowThreshold { status }
+            | Self::Skipped { status }
+            | Self::Failed { status } => status,
+        }
+    }
+
+    pub fn into_status(self) -> String {
+        match self {
+            Self::Compacted { status, .. }
+            | Self::BelowThreshold { status }
+            | Self::Skipped { status }
+            | Self::Failed { status } => status,
+        }
+    }
+}
+
 impl Agent {
     /// Clear conversation history, keeping config and subsystems intact.
     pub async fn clear_conversation(&mut self) {
@@ -53,7 +87,7 @@ impl Agent {
     /// - `None` or `Some("auto")` — pick strategy automatically via `select_strategy`
     /// - `Some("micro")` — microcompact (summarize oldest 30 %)
     /// - `Some("snip")` — snip oldest turns without summarization
-    pub async fn compact(&mut self, subcommand: Option<&str>) -> String {
+    pub async fn compact(&mut self, subcommand: Option<&str>) -> ManualCompactOutcome {
         use crate::commands::handle_compact;
         use archon_context::compact::select_strategy;
         use archon_context::messages::ContextMessage;
@@ -89,7 +123,9 @@ impl Agent {
             .collect();
 
         if context_msgs.len() < 5 {
-            return "Nothing to compact (fewer than 5 messages).".into();
+            return ManualCompactOutcome::Skipped {
+                status: "Nothing to compact (fewer than 5 messages).".into(),
+            };
         }
 
         let message_count = context_msgs.len();
@@ -104,6 +140,11 @@ impl Agent {
         let effective_strategy = match subcommand {
             Some("micro") => Some(archon_context::boundary::CompactionStrategy::Micro),
             Some("snip") => Some(archon_context::boundary::CompactionStrategy::Snip),
+            Some("force") => Some(match self.config.context.manual_compact_force_strategy.as_str()
+            {
+                "snip" => archon_context::boundary::CompactionStrategy::Snip,
+                _ => archon_context::boundary::CompactionStrategy::Micro,
+            }),
             Some("auto") | None => {
                 let active_model = self.active_model_for_compaction().await;
                 let context_window = self.context_window_for(&active_model);
@@ -111,9 +152,11 @@ impl Agent {
                 select_strategy(usage_ratio)
             }
             Some(other) => {
-                return format!(
-                    "Unknown /compact subcommand: '{other}'. Use auto, micro, or snip."
-                );
+                return ManualCompactOutcome::Failed {
+                    status: format!(
+                        "Unknown /compact subcommand: '{other}'. Use auto, force, micro, or snip."
+                    ),
+                };
             }
         };
 
@@ -121,7 +164,9 @@ impl Agent {
         let effective_strategy = match effective_strategy {
             Some(s) => s,
             None => {
-                return "Context usage is below 60 %; no compaction needed.".into();
+                return ManualCompactOutcome::BelowThreshold {
+                    status: "Context usage is below 60 %; no compaction needed.".into(),
+                };
             }
         };
 
@@ -149,7 +194,9 @@ impl Agent {
                 // Snip: remove oldest turns without LLM summarization.
                 let total_turns = archon_context::snip::count_turns(&context_msgs);
                 if total_turns < 3 {
-                    return "Too few turns to snip.".into();
+                    return ManualCompactOutcome::Skipped {
+                        status: "Too few turns to snip.".into(),
+                    };
                 }
                 // Snip the oldest ~50 % of turns (at least 1).
                 let snip_end = (total_turns / 2).max(1);
@@ -162,7 +209,11 @@ impl Agent {
                         );
                         (msgs, label, status)
                     }
-                    Err(e) => return format!("Snip failed: {e}"),
+                    Err(e) => {
+                        return ManualCompactOutcome::Failed {
+                            status: format!("Snip failed: {e}"),
+                        };
+                    }
                 }
             }
 
@@ -179,7 +230,11 @@ impl Agent {
                     .await
                     {
                         Ok(summary) => summary,
-                        Err(err) => return format!("Compaction failed: {err}"),
+                        Err(err) => {
+                            return ManualCompactOutcome::Failed {
+                                status: format!("Compaction failed: {err}"),
+                            };
+                        }
                     };
 
                 // Wire 4: Inject active plan context into compaction summary.
@@ -210,7 +265,9 @@ impl Agent {
                         if output.mutated {
                             (output.messages, label, status)
                         } else {
-                            return output.message;
+                            return ManualCompactOutcome::Skipped {
+                                status: output.message,
+                            };
                         }
                     }
                 }
@@ -292,9 +349,15 @@ impl Agent {
         let before_k = before_tokens as f64 / 1000.0;
         let after_k = after_tokens as f64 / 1000.0;
         let removed_k = tokens_removed as f64 / 1000.0;
-        format!(
-            "Compacted conversation ({strategy_label}): {before_k:.1}k → {after_k:.1}k tokens ({removed_k:.1}k removed, {message_count} messages)"
-        )
+        ManualCompactOutcome::Compacted {
+            status: format!(
+                "Compacted conversation ({strategy_label}): {before_k:.1}k → {after_k:.1}k tokens ({removed_k:.1}k removed, {message_count} messages)"
+            ),
+            messages_before: message_count,
+            messages_after: result_messages.len(),
+            before_tokens,
+            after_tokens,
+        }
     }
 
     async fn active_model_for_compaction(&self) -> String {
@@ -308,161 +371,5 @@ impl Agent {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use archon_llm::provider::{LlmError, LlmResponse, ModelInfo, ProviderFeature};
-    use std::sync::Mutex;
-
-    struct FailingSummaryProvider;
-
-    #[async_trait::async_trait]
-    impl LlmProvider for FailingSummaryProvider {
-        fn name(&self) -> &str {
-            "failing-summary"
-        }
-
-        fn models(&self) -> Vec<ModelInfo> {
-            vec![]
-        }
-
-        async fn stream(
-            &self,
-            _request: LlmRequest,
-        ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
-            Err(LlmError::RateLimited {
-                retry_after_secs: 30,
-            })
-        }
-
-        async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
-            unreachable!("manual compaction uses streaming summaries")
-        }
-
-        fn supports_feature(&self, _feature: ProviderFeature) -> bool {
-            false
-        }
-    }
-
-    struct CapturingSummaryProvider {
-        captured: Arc<Mutex<Option<LlmRequest>>>,
-    }
-
-    #[async_trait::async_trait]
-    impl LlmProvider for CapturingSummaryProvider {
-        fn name(&self) -> &str {
-            "capturing-summary"
-        }
-
-        fn models(&self) -> Vec<ModelInfo> {
-            vec![]
-        }
-
-        async fn stream(
-            &self,
-            request: LlmRequest,
-        ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
-            *self.captured.lock().expect("capture lock") = Some(request);
-            let (tx, rx) = tokio::sync::mpsc::channel(2);
-            tx.send(StreamEvent::TextDelta {
-                index: 0,
-                text: "Manual path summary.".into(),
-            })
-            .await
-            .expect("send summary text");
-            tx.send(StreamEvent::MessageStop)
-                .await
-                .expect("send message stop");
-            Ok(rx)
-        }
-
-        async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
-            unreachable!("manual compaction uses streaming summaries")
-        }
-
-        fn supports_feature(&self, _feature: ProviderFeature) -> bool {
-            false
-        }
-    }
-
-    fn test_agent_with_provider(provider: Arc<dyn LlmProvider>) -> Agent {
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        Agent::new(
-            provider,
-            ToolRegistry::new(),
-            AgentConfig::default(),
-            tx,
-            Arc::new(std::sync::RwLock::new(AgentRegistry::load(
-                &std::env::temp_dir(),
-            ))),
-        )
-    }
-
-    fn serialized_request_len(request: &LlmRequest) -> usize {
-        serde_json::to_vec(&serde_json::json!({
-            "model": &request.model,
-            "max_tokens": request.max_tokens,
-            "system": &request.system,
-            "messages": &request.messages,
-            "tools": &request.tools,
-            "thinking": &request.thinking,
-            "speed": &request.speed,
-            "effort": &request.effort,
-            "extra": &request.extra,
-            "request_origin": &request.request_origin,
-            "reasoning_encrypted": &request.reasoning_encrypted,
-        }))
-        .expect("serialize request envelope")
-        .len()
-    }
-
-    fn test_agent() -> Agent {
-        test_agent_with_provider(Arc::new(FailingSummaryProvider))
-    }
-
-    #[tokio::test]
-    async fn manual_compact_reports_summary_failure_without_synthetic_fallback() {
-        let mut agent = test_agent();
-        agent.state.messages = (0..6)
-            .map(|i| serde_json::json!({"role": "user", "content": format!("message {i}")}))
-            .collect();
-
-        let status = agent.compact(Some("micro")).await;
-
-        assert!(status.contains("Compaction failed: provider summary failed"));
-        assert!(status.contains("rate limited: retry after 30s"));
-        assert!(!status.contains("Compacted conversation"));
-        assert_eq!(agent.state.messages.len(), 6);
-    }
-
-    #[tokio::test]
-    async fn manual_compact_path_pre_trims_huge_history() {
-        let captured = Arc::new(Mutex::new(None));
-        let provider = CapturingSummaryProvider {
-            captured: Arc::clone(&captured),
-        };
-        let mut agent = test_agent_with_provider(Arc::new(provider));
-        agent.state.messages = (0..200)
-            .map(|i| {
-                serde_json::json!({
-                    "role": if i % 2 == 0 { "user" } else { "assistant" },
-                    "content": "x".repeat(10_000),
-                })
-            })
-            .collect();
-
-        let status = agent.compact(Some("micro")).await;
-
-        assert!(status.contains("Compacted conversation"));
-        let request = captured
-            .lock()
-            .expect("capture lock")
-            .clone()
-            .expect("manual compact should call provider");
-        let body_len = serialized_request_len(&request);
-        assert!(
-            body_len <= 640_000,
-            "manual compact body should be bounded; got {}",
-            body_len
-        );
-    }
-}
+#[path = "compaction_tests.rs"]
+mod tests;

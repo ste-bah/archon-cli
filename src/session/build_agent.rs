@@ -27,6 +27,9 @@ use archon_llm::identity::{
 };
 use archon_observability::ChannelMetricSink;
 
+#[path = "build_agent_catalog.rs"]
+mod agent_catalog;
+
 pub(super) async fn build_session_agent(
     config: &archon_core::config::ArchonConfig,
     session_id: &str,
@@ -357,8 +360,12 @@ pub(super) fn register_agent_listing(
         .iter()
         .map(|a| (a.agent_type.clone(), a.description.clone()))
         .collect();
+    let common_agents = agent_catalog::common_inline_agents(&agents);
     registry.register(Box::new(
-        archon_tools::agent_tool::AgentTool::with_agent_listing(&agents),
+        archon_tools::agent_tool::AgentTool::with_agent_listing(&common_agents),
+    ));
+    registry.register(Box::new(
+        archon_tools::agent_tool::AgentCatalogTool::new(agents),
     ));
 }
 

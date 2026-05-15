@@ -219,6 +219,7 @@ pub(crate) fn build_command_context<'a>(
             // rustdoc for the full SIDECAR-SLOT rationale.
             pending_export: Some(Arc::clone(&slash_ctx.pending_export_shared)),
             cozo_db: slash_ctx.cozo_db.clone(),
+            governed_learning_db: slash_ctx.governed_learning_db.clone(),
             // Reference: archon-pipeline/src/learning/gnn/auto_trainer.rs.
             // /learning-status reads .status() from this Arc to display
             // live loop state (training_count, memories_since_last_train, etc.)
@@ -470,7 +471,7 @@ pub(crate) fn apply_effect<'a>(
                     previous
                 };
                 crate::runtime::permission_events::record_permission_mode_event(
-                    slash_ctx.cozo_db.as_ref(),
+                    slash_ctx.governed_learning_db.as_ref(),
                     Some(&slash_ctx.session_id),
                     Some(&previous_mode),
                     &resolved,

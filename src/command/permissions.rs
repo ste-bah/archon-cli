@@ -301,7 +301,7 @@ impl CommandHandler for PermissionsHandler {
 
                 if resolved == "bypassPermissions" && !snap.allow_bypass_permissions {
                     crate::runtime::permission_events::record_permission_mode_event(
-                        ctx.cozo_db.as_ref(),
+                        ctx.governed_learning_db.as_ref(),
                         ctx.session_id.as_deref(),
                         Some(&snap.current_mode),
                         &resolved,
@@ -563,6 +563,35 @@ mod tests {
         assert!(
             !has_delta,
             "bypass-blocked branch must emit NO TuiEvent::TextDelta; got: {events:?}"
+        );
+    }
+
+    #[test]
+    fn permissions_bypass_denial_records_to_governed_learning_db() {
+        let db = cozo::DbInstance::new("mem", "", "").expect("db");
+        archon_learning::schema::ensure_learning_schema(&db).expect("schema");
+        let db = std::sync::Arc::new(db);
+        let snap = PermissionsSnapshot {
+            current_mode: "default".to_string(),
+            allow_bypass_permissions: false,
+        };
+        let (mut ctx, _rx) = crate::command::test_support::CtxBuilder::new()
+            .with_permissions_snapshot_opt(Some(snap))
+            .with_governed_learning_db(std::sync::Arc::clone(&db))
+            .build();
+        let h = PermissionsHandler;
+
+        h.execute(&mut ctx, &["bypassPermissions".to_string()])
+            .expect("execute");
+
+        let events = archon_learning::permission_runtime_events::list_permission_runtime_events(&db)
+            .expect("permission events");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].tool_name, "PermissionMode");
+        assert_eq!(events[0].decision, "mode_change_denied");
+        assert_eq!(
+            events[0].reason_code.as_deref(),
+            Some("dangerous_bypass_guard")
         );
     }
 

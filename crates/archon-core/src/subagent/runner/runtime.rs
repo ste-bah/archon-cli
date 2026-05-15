@@ -30,6 +30,8 @@ impl SubagentRunner {
         let mut cumulative_billable_tokens = 0_u64;
         let mut last_known_context_tokens = 0_u64;
         let mut reactive_overflow_retried = false;
+        let mut reactive_rate_limit_retried = false;
+        let mut proactive_pressure_attempted = false;
 
         for turn in 0..self.max_turns {
             // Check timeout. The error message reports BOTH wall-clock
@@ -102,7 +104,7 @@ impl SubagentRunner {
             let (max_tokens, thinking, speed) =
                 self.agent_config.build_base_request_fields(&self.model);
 
-            let window = archon_llm::context_window::resolve_context_window_for_work_dir(
+            let resolved_window = archon_llm::context_window::resolve_context_window_for_work_dir(
                 &self.model,
                 self.agent_config
                     .context
@@ -110,8 +112,10 @@ impl SubagentRunner {
                     .or_else(|| self.agent_config.context.max_tokens.map(u64::from)),
                 Some(self.provider.as_ref()),
                 Some(&self.agent_config.working_dir),
-            )
-            .context_window;
+            );
+            let window = resolved_window
+                .runtime_context_budget
+                .unwrap_or(resolved_window.context_window);
             let effective_window =
                 window.saturating_sub(self.agent_config.context.output_reserve_tokens);
             let threshold = (self.agent_config.context.compact_threshold
@@ -171,7 +175,7 @@ impl SubagentRunner {
                 }
             }
 
-            let request = LlmRequest {
+            let mut request = LlmRequest {
                 model: self.model.clone(),
                 max_tokens,
                 system,
@@ -184,6 +188,94 @@ impl SubagentRunner {
                 request_origin: Some("subagent".into()),
                 reasoning_encrypted: None,
             };
+            let mut request_body_bytes = crate::agent::autocompact::request_body_bytes(&request);
+            let large_retry_body_bytes =
+                crate::agent::autocompact::large_request_retry_body_bytes(
+                    &self.agent_config.context,
+                );
+            let trigger_tokens = if last_known_context_tokens > 0 {
+                last_known_context_tokens
+            } else {
+                crate::agent::autocompact::trigger_tokens(&messages)
+            };
+            let token_pressure = self
+                .agent_config
+                .context
+                .rate_limit_pressure_tokens
+                .is_some_and(|threshold| trigger_tokens >= threshold);
+            let body_pressure = self
+                .agent_config
+                .context
+                .rate_limit_pressure_body_bytes
+                .is_some_and(|threshold| request_body_bytes as u64 >= threshold);
+            if !proactive_pressure_attempted
+                && (token_pressure || body_pressure)
+                && auto_compact.should_attempt()
+            {
+                proactive_pressure_attempted = true;
+                let reason = match (token_pressure, body_pressure) {
+                    (true, true) => "request_pressure_tokens_and_bytes",
+                    (true, false) => "request_pressure_tokens",
+                    (false, true) => "request_pressure_bytes",
+                    (false, false) => unreachable!(),
+                };
+                tracing::info!(
+                    compaction.reason = reason,
+                    trigger_tokens,
+                    trigger_body_bytes = request_body_bytes,
+                    context_window = window,
+                    scope = "subagent",
+                    force = false,
+                    consecutive_failures = auto_compact.consecutive_failures,
+                    "subagent request pressure threshold reached; attempting proactive compaction"
+                );
+                auto_compact.compact_in_flight = true;
+                match crate::agent::autocompact::compact_json_messages_with_provider(
+                    self.provider.as_ref(),
+                    &self.model,
+                    &messages,
+                    crate::agent::CompactAction::Full,
+                    false,
+                )
+                .await
+                {
+                    Ok((
+                        crate::agent::autocompact::CompactionOutcome::Compacted {
+                            after_estimated_tokens,
+                            ..
+                        },
+                        compacted,
+                    )) => {
+                        messages = compacted;
+                        request.messages = messages.clone();
+                        request_body_bytes =
+                            crate::agent::autocompact::request_body_bytes(&request);
+                        last_known_context_tokens = 0;
+                        auto_compact.on_success(after_estimated_tokens);
+                    }
+                    Ok((crate::agent::autocompact::CompactionOutcome::Skipped { .. }, _)) => {
+                        auto_compact.on_cancel();
+                    }
+                    Err(crate::agent::autocompact::CompactionError::Cancelled) => {
+                        auto_compact.on_cancel();
+                    }
+                    Err(e) => {
+                        auto_compact.on_real_failure();
+                        tracing::warn!(
+                            compaction.reason = reason,
+                            trigger_tokens,
+                            trigger_body_bytes = request_body_bytes,
+                            context_window = window,
+                            scope = "subagent",
+                            force = false,
+                            consecutive_failures = auto_compact.consecutive_failures,
+                            breaker_tripped = auto_compact.disabled,
+                            error = %e,
+                            "subagent request-pressure compaction failed; continuing turn",
+                        );
+                    }
+                }
+            }
 
             // Stream the response
             let mut rx = match self.provider.stream(request.clone()).await {
@@ -201,6 +293,52 @@ impl SubagentRunner {
                         .await
                         .map_err(|err| {
                             anyhow::anyhow!("reactive subagent compaction failed: {err}")
+                        })?;
+                    messages = compacted;
+                    let after_current_tokens = match outcome {
+                        crate::agent::autocompact::CompactionOutcome::Compacted {
+                            after_estimated_tokens,
+                            ..
+                        } => after_estimated_tokens,
+                        crate::agent::autocompact::CompactionOutcome::Skipped { .. } => {
+                            crate::agent::autocompact::estimate_messages_tokens(&messages)
+                        }
+                    };
+                    last_known_context_tokens = 0;
+                    auto_compact.on_success(after_current_tokens);
+                    self.provider
+                        .stream(LlmRequest {
+                            messages: messages.clone(),
+                            ..request
+                        })
+                        .await
+                        .map_err(anyhow::Error::new)?
+                }
+                Err(e)
+                    if crate::agent::autocompact::is_rate_limited_error(&e)
+                        && !reactive_rate_limit_retried
+                        && request_body_bytes >= large_retry_body_bytes =>
+                {
+                    reactive_rate_limit_retried = true;
+                    tracing::warn!(
+                        compaction.reason = "rate_limit_large_request",
+                        trigger_body_bytes = request_body_bytes,
+                        threshold_body_bytes = large_retry_body_bytes,
+                        scope = "subagent",
+                        force = true,
+                        "rate-limited subagent request is large; compacting before one retry"
+                    );
+                    let (outcome, compacted) =
+                        crate::agent::autocompact::compact_json_messages_with_provider(
+                            self.provider.as_ref(),
+                            &self.model,
+                            &messages,
+                            crate::agent::CompactAction::Full,
+                            true,
+                        )
+                        .await
+                        .map_err(|err| {
+                            anyhow::anyhow!("rate-limit subagent compaction failed: {err}")
                         })?;
                     messages = compacted;
                     let after_current_tokens = match outcome {
@@ -314,6 +452,46 @@ impl SubagentRunner {
                             retry_after_compact = true;
                             break;
                         }
+                        if crate::agent::autocompact::is_rate_limited_error(&err)
+                            && !reactive_rate_limit_retried
+                            && request_body_bytes >= large_retry_body_bytes
+                        {
+                            reactive_rate_limit_retried = true;
+                            tracing::warn!(
+                                compaction.reason = "rate_limit_large_request_stream",
+                                trigger_body_bytes = request_body_bytes,
+                                threshold_body_bytes = large_retry_body_bytes,
+                                scope = "subagent",
+                                force = true,
+                                "rate-limited subagent stream is large; compacting before one retry"
+                            );
+                            let (outcome, compacted) =
+                                crate::agent::autocompact::compact_json_messages_with_provider(
+                                    self.provider.as_ref(),
+                                    &self.model,
+                                    &messages,
+                                    crate::agent::CompactAction::Full,
+                                    true,
+                                )
+                                .await
+                                .map_err(|e| {
+                                    anyhow::anyhow!("rate-limit subagent compaction failed: {e}")
+                                })?;
+                            messages = compacted;
+                            let after_current_tokens = match outcome {
+                                crate::agent::autocompact::CompactionOutcome::Compacted {
+                                    after_estimated_tokens,
+                                    ..
+                                } => after_estimated_tokens,
+                                crate::agent::autocompact::CompactionOutcome::Skipped {
+                                    ..
+                                } => crate::agent::autocompact::estimate_messages_tokens(&messages),
+                            };
+                            last_known_context_tokens = 0;
+                            auto_compact.on_success(after_current_tokens);
+                            retry_after_compact = true;
+                            break;
+                        }
                         self.emit_activity_stream("error", message, None, true);
                         return Err(anyhow::Error::new(err));
                     }
@@ -347,6 +525,7 @@ impl SubagentRunner {
                 continue;
             }
             reactive_overflow_retried = false;
+            reactive_rate_limit_retried = false;
             cumulative_billable_tokens += usage_acc.context_input_tokens;
             last_known_context_tokens = usage_acc.context_input_tokens;
             tracing::trace!(cumulative_billable_tokens, "subagent billable input tokens");

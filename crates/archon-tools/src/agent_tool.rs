@@ -13,6 +13,10 @@ use crate::background_agents::{
 use crate::subagent_executor::{SubagentClassification, SubagentOutcome, get_subagent_executor};
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
+const INLINE_AGENT_LIMIT: usize = 20;
+const AGENT_DESCRIPTION_LIMIT_BYTES: usize = 4096;
+const CATALOG_PAGE_LIMIT: usize = 25;
+
 // ---------------------------------------------------------------------------
 // Subagent request — returned as JSON for the caller (agent loop) to handle
 // ---------------------------------------------------------------------------
@@ -165,13 +169,15 @@ impl AgentTool {
         let mut desc =
             "Spawn a subagent to handle a complex task autonomously. Returns a SubagentRequest \
             for the agent loop to execute. The subagent runs with its own conversation and \
-            tool set."
+            tool set. Use known subagent_type names directly. Use AgentCatalog to list, search, \
+            or inspect less-common agents before launching them."
                 .to_string();
 
         if !agents.is_empty() {
-            desc.push_str("\n\nAvailable agents: ");
+            desc.push_str("\n\nCommon agents: ");
             let entries: Vec<String> = agents
                 .iter()
+                .take(INLINE_AGENT_LIMIT)
                 .map(|(name, summary)| {
                     if summary.is_empty() {
                         name.clone()
@@ -183,7 +189,156 @@ impl AgentTool {
             desc.push_str(&entries.join(", "));
         }
 
+        if desc.len() > AGENT_DESCRIPTION_LIMIT_BYTES {
+            desc.truncate(AGENT_DESCRIPTION_LIMIT_BYTES);
+        }
+
         Self { description: desc }
+    }
+}
+
+pub struct AgentCatalogTool {
+    agents: Vec<(String, String)>,
+}
+
+impl AgentCatalogTool {
+    pub fn new(mut agents: Vec<(String, String)>) -> Self {
+        agents.sort_by(|a, b| a.0.cmp(&b.0));
+        Self { agents }
+    }
+
+    fn capped_limit(input: &serde_json::Value) -> usize {
+        input
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .map(|n| n.clamp(1, CATALOG_PAGE_LIMIT as u64) as usize)
+            .unwrap_or(10)
+    }
+
+    fn entry_json((name, summary): &(String, String)) -> serde_json::Value {
+        json!({
+            "name": name,
+            "description": summary,
+        })
+    }
+
+    fn list(&self, input: &serde_json::Value) -> serde_json::Value {
+        let limit = Self::capped_limit(input);
+        let page = input.get("page").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let start = page.saturating_mul(limit);
+        let agents: Vec<_> = self
+            .agents
+            .iter()
+            .skip(start)
+            .take(limit)
+            .map(Self::entry_json)
+            .collect();
+        json!({
+            "action": "list",
+            "page": page,
+            "limit": limit,
+            "total": self.agents.len(),
+            "agents": agents,
+        })
+    }
+
+    fn search(&self, input: &serde_json::Value) -> serde_json::Value {
+        let limit = Self::capped_limit(input);
+        let query = input
+            .get("query")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let agents: Vec<_> = self
+            .agents
+            .iter()
+            .filter(|(name, summary)| {
+                let name = name.to_ascii_lowercase();
+                let summary = summary.to_ascii_lowercase();
+                query.is_empty() || name.contains(&query) || summary.contains(&query)
+            })
+            .take(limit)
+            .map(Self::entry_json)
+            .collect();
+        json!({ "action": "search", "query": query, "limit": limit, "agents": agents })
+    }
+
+    fn info(&self, input: &serde_json::Value) -> Result<serde_json::Value, AgentToolError> {
+        let name = input
+            .get("name")
+            .or_else(|| input.get("subagent_type"))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .ok_or(AgentToolError::MissingField("name"))?;
+        let Some(entry) = self.agents.iter().find(|(agent, _)| agent == name) else {
+            return Err(AgentToolError::InvalidInput(format!(
+                "unknown agent '{name}'"
+            )));
+        };
+        Ok(json!({ "action": "info", "agent": Self::entry_json(entry) }))
+    }
+}
+
+#[async_trait::async_trait]
+impl Tool for AgentCatalogTool {
+    fn name(&self) -> &str {
+        "AgentCatalog"
+    }
+
+    fn description(&self) -> &str {
+        "List, search, and inspect available subagent types. Use this for agent discovery; use the Agent tool to launch a known subagent_type."
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "search", "info"],
+                    "description": "Catalog action to run."
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Search text for action=search."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Agent type name for action=info."
+                },
+                "page": {
+                    "type": "integer",
+                    "description": "Zero-based page for action=list."
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum rows to return, capped by Archon."
+                }
+            }
+        })
+    }
+
+    async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
+        let action = input
+            .get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("list");
+        let result = match action {
+            "list" => Ok(self.list(&input)),
+            "search" => Ok(self.search(&input)),
+            "info" => self.info(&input),
+            other => Err(AgentToolError::InvalidInput(format!(
+                "unknown AgentCatalog action '{other}'"
+            ))),
+        };
+        match result {
+            Ok(value) => ToolResult::success(value.to_string()),
+            Err(err) => ToolResult::error(err.to_string()),
+        }
+    }
+
+    fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
+        PermissionLevel::Safe
     }
 }
 
@@ -1048,6 +1203,46 @@ mod tests {
         assert_eq!(props["run_in_background"]["type"], "boolean");
         assert!(props.contains_key("cwd"));
         assert_eq!(props["cwd"]["type"], "string");
+    }
+
+    #[test]
+    fn agent_listing_is_capped_and_description_bounded() {
+        let agents: Vec<_> = (0..30)
+            .map(|idx| {
+                (
+                    format!("agent-{idx:02}"),
+                    "long description that should not leak the whole catalog".repeat(20),
+                )
+            })
+            .collect();
+
+        let tool = AgentTool::with_agent_listing(&agents);
+
+        assert!(tool.description().len() <= AGENT_DESCRIPTION_LIMIT_BYTES);
+        assert!(tool.description().contains("agent-00"));
+        assert!(tool.description().contains("AgentCatalog"));
+        assert!(!tool.description().contains("agent-29"));
+    }
+
+    #[test]
+    fn agent_catalog_lists_searches_and_infos_sorted_agents() {
+        let tool = AgentCatalogTool::new(vec![
+            ("zeta".into(), "last".into()),
+            ("sherlock-holmes".into(), "forensic reviewer".into()),
+            ("builder".into(), "implementation agent".into()),
+        ]);
+
+        let listed = tool.list(&json!({"action": "list", "limit": 2}));
+        let listed_agents = listed["agents"].as_array().unwrap();
+        assert_eq!(listed["total"], 3);
+        assert_eq!(listed_agents[0]["name"], "builder");
+        assert_eq!(listed_agents[1]["name"], "sherlock-holmes");
+
+        let searched = tool.search(&json!({"action": "search", "query": "forensic"}));
+        assert_eq!(searched["agents"][0]["name"], "sherlock-holmes");
+
+        let info = tool.info(&json!({"name": "zeta"})).unwrap();
+        assert_eq!(info["agent"]["description"], "last");
     }
 
     #[test]

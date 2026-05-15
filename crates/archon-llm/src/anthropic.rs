@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+use std::sync::{Mutex as StdMutex, OnceLock};
 use std::time::Duration;
 
 use crate::auth::AuthProvider;
@@ -74,12 +76,11 @@ impl AnthropicClient {
             let request_id = uuid::Uuid::new_v4().to_string();
             let mut headers = self.identity.request_headers(&request_id);
 
-            // Inject fast mode / effort beta headers if needed
             let mut extra_betas: Vec<&str> = Vec::new();
-            if request.speed.is_some() {
+            if effective_speed(&request).is_some() {
                 extra_betas.push("fast-mode-2026-02-01");
             }
-            if request.effort.is_some() {
+            if effective_effort(&request).is_some() {
                 extra_betas.push("effort-2025-11-24");
             }
             if !extra_betas.is_empty() {
@@ -146,6 +147,13 @@ impl AnthropicClient {
             match &err {
                 // 429: wait for retry-after then retry
                 ApiError::RateLimited { retry_after_secs } => {
+                    if body.len() >= 1_000_000 {
+                        tracing::warn!(
+                            body_len = body.len(),
+                            "large Anthropic request was rate limited; skipping identical provider retry"
+                        );
+                        return Err(err);
+                    }
                     if attempt < MAX_RETRIES {
                         let delay = *retry_after_secs;
                         tracing::warn!(
@@ -374,20 +382,18 @@ impl AnthropicClient {
         }
 
         if !request.tools.is_empty() {
-            body["tools"] = serde_json::json!(request.tools);
+            body["tools"] = serde_json::json!(cached_tool_blocks(&request.tools));
         }
 
         if let Some(ref thinking) = request.thinking {
             body["thinking"] = serde_json::json!(thinking);
         }
 
-        // GAP 3: Inject speed parameter when fast mode is active
-        if let Some(ref speed) = request.speed {
+        if let Some(speed) = effective_speed(request) {
             body["speed"] = serde_json::json!(speed);
         }
 
-        // GAP 4: Inject output_config.effort when not default (High)
-        if let Some(ref effort) = request.effort {
+        if let Some(effort) = effective_effort(request) {
             body["output_config"] = serde_json::json!({ "effort": effort });
         }
 
@@ -402,6 +408,68 @@ impl AnthropicClient {
 
         serde_json::to_string(&body).map_err(|e| ApiError::SerializeError(format!("{e}")))
     }
+}
+
+fn effective_speed(request: &MessageRequest) -> Option<&str> {
+    let value = request.speed.as_deref()?;
+    if supports_speed(&request.model) {
+        return Some(value);
+    }
+    warn_dropped_knob(&request.model, "speed", value);
+    None
+}
+
+fn effective_effort(request: &MessageRequest) -> Option<&str> {
+    let value = request.effort.as_deref()?;
+    if supports_output_effort(&request.model) {
+        return Some(value);
+    }
+    warn_dropped_knob(&request.model, "output_config.effort", value);
+    None
+}
+
+fn supports_speed(_model: &str) -> bool {
+    false
+}
+
+fn supports_output_effort(_model: &str) -> bool {
+    false
+}
+
+fn warn_dropped_knob(model: &str, field: &str, value: &str) {
+    static WARNED: OnceLock<StdMutex<HashSet<String>>> = OnceLock::new();
+    let key = format!("{model}:{field}");
+    let warned = WARNED.get_or_init(|| StdMutex::new(HashSet::new()));
+    let Ok(mut guard) = warned.lock() else {
+        return;
+    };
+    if guard.insert(key) {
+        tracing::warn!(
+            provider = "anthropic",
+            model,
+            field,
+            value,
+            "dropping unsupported Anthropic request knob"
+        );
+    }
+}
+
+fn cached_tool_blocks(tools: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    tools
+        .iter()
+        .cloned()
+        .map(|mut tool| {
+            if let Some(obj) = tool.as_object_mut()
+                && !obj.contains_key("cache_control")
+            {
+                obj.insert(
+                    "cache_control".into(),
+                    serde_json::json!({ "type": "ephemeral" }),
+                );
+            }
+            tool
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -629,5 +697,58 @@ mod tests {
         // Confirm it is NOT using the hardcoded constant
         assert_ne!(client.api_url, API_URL);
         assert_eq!(client.api_url, custom_url);
+    }
+
+    #[test]
+    fn unsupported_speed_and_effort_are_dropped_from_wire_body() {
+        let client = AnthropicClient::new(make_auth(), make_identity(), None);
+        let request = MessageRequest {
+            model: "claude-sonnet-4-6".to_string(),
+            messages: vec![serde_json::json!({
+                "role": "user",
+                "content": "summarize this"
+            })],
+            speed: Some("fast".to_string()),
+            effort: Some("low".to_string()),
+            ..MessageRequest::default()
+        };
+
+        let body = client
+            .build_request_body(&request)
+            .expect("request body serializes");
+        let body_json: serde_json::Value =
+            serde_json::from_str(&body).expect("request body parses as JSON");
+
+        assert_eq!(body_json.get("speed"), None);
+        assert_eq!(body_json.get("output_config"), None);
+        assert!(
+            !body.contains("\"speed\""),
+            "unsupported speed knob must not reach Anthropic wire body: {body}"
+        );
+        assert!(
+            !body.contains("\"output_config\""),
+            "unsupported effort knob must not reach Anthropic wire body: {body}"
+        );
+    }
+
+    #[test]
+    fn tool_definitions_get_anthropic_cache_control() {
+        let client = AnthropicClient::new(make_auth(), make_identity(), None);
+        let request = MessageRequest {
+            messages: vec![serde_json::json!({"role": "user", "content": "hi"})],
+            tools: vec![serde_json::json!({
+                "name": "Agent",
+                "description": "spawn",
+                "input_schema": {"type": "object"}
+            })],
+            ..MessageRequest::default()
+        };
+
+        let body = client.build_request_body(&request).unwrap();
+        let body_json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            body_json["tools"][0]["cache_control"],
+            serde_json::json!({"type": "ephemeral"})
+        );
     }
 }

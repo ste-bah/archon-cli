@@ -425,6 +425,7 @@ pub(crate) async fn run_interactive_session(
         sandbox_flag,
         hook_registry,
         learning_cozo_db,
+        governed_learning_db,
         auto_trainer,
         leann_init_cancel,
         agent_event_tx_for_dispatcher,

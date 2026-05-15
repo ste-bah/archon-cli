@@ -19,6 +19,12 @@ pub enum SessionError {
 
     #[error("session not found: {0}")]
     NotFound(String),
+
+    #[error("refusing to replace session messages with an empty list")]
+    EmptyReplaceRefused,
+
+    #[error("message index {index} would skip current logical count {message_count}")]
+    MessageIndexGap { index: u64, message_count: u64 },
 }
 
 // ---------------------------------------------------------------------------
@@ -353,6 +359,14 @@ impl SessionStore {
         message_index: u64,
         content: &str,
     ) -> Result<(), SessionError> {
+        let session = self.get_session(session_id)?;
+        if message_index > session.message_count {
+            return Err(SessionError::MessageIndexGap {
+                index: message_index,
+                message_count: session.message_count,
+            });
+        }
+
         let mut params = BTreeMap::new();
         params.insert("session_id".to_string(), DataValue::from(session_id));
         params.insert(
@@ -370,59 +384,54 @@ impl SessionStore {
             )
             .map_err(db_err)?;
 
-        // Update session metadata
-        let now = Utc::now().to_rfc3339();
-        let session = self.get_session(session_id)?;
+        let next_count = session.message_count.max(message_index + 1);
+        self.set_message_count(session_id, next_count)?;
 
-        let mut params = BTreeMap::new();
-        params.insert("id".to_string(), DataValue::from(session_id));
-        params.insert(
-            "created_at".to_string(),
-            DataValue::from(session.created_at),
-        );
-        params.insert("last_active".to_string(), DataValue::from(now.as_str()));
-        params.insert(
-            "working_directory".to_string(),
-            DataValue::from(session.working_directory),
-        );
-        params.insert(
-            "git_branch".to_string(),
-            DataValue::from(session.git_branch.unwrap_or_default()),
-        );
-        params.insert("model".to_string(), DataValue::from(session.model));
-        params.insert(
-            "message_count".to_string(),
-            DataValue::from((message_index + 1) as i64),
-        );
-        params.insert(
-            "total_tokens".to_string(),
-            DataValue::from(session.total_tokens as i64),
-        );
-        params.insert(
-            "total_cost".to_string(),
-            DataValue::from(session.total_cost),
-        );
-        params.insert(
-            "schema_version".to_string(),
-            DataValue::from(session.schema_version as i64),
-        );
+        Ok(())
+    }
 
-        self.db
-            .run_script(
-                "?[id, created_at, last_active, working_directory, git_branch,
-                  model, message_count, total_tokens, total_cost, schema_version] <- [[
-                    $id, $created_at, $last_active, $working_directory, $git_branch,
-                    $model, $message_count, $total_tokens, $total_cost, $schema_version
-                ]]
-                :put sessions {
-                    id => created_at, last_active, working_directory, git_branch,
-                    model, message_count, total_tokens, total_cost, schema_version
-                }",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
+    /// Replace the full persisted message list for a session. This is the
+    /// correct primitive for post-turn persistence and compaction because it
+    /// writes an exact logical length before removing any stale physical tail.
+    pub fn replace_messages(
+        &self,
+        session_id: &str,
+        messages: &[String],
+    ) -> Result<(), SessionError> {
+        if messages.is_empty() {
+            return Err(SessionError::EmptyReplaceRefused);
+        }
+        self.get_session(session_id)?;
 
+        for (idx, content) in messages.iter().enumerate() {
+            let mut params = BTreeMap::new();
+            params.insert("session_id".to_string(), DataValue::from(session_id));
+            params.insert("message_index".to_string(), DataValue::from(idx as i64));
+            params.insert("content".to_string(), DataValue::from(content.as_str()));
+            self.db
+                .run_script(
+                    "?[session_id, message_index, content] <- [[$session_id, $message_index, $content]]
+                     :put messages {session_id, message_index => content}",
+                    params,
+                    ScriptMutability::Mutable,
+                )
+                .map_err(db_err)?;
+        }
+
+        let logical_count = messages.len() as u64;
+        self.set_message_count(session_id, logical_count)?;
+        self.delete_messages_from(session_id, logical_count)?;
+
+        Ok(())
+    }
+
+    /// Deliberately delete every message for a session and set the logical
+    /// message count to zero. This is intentionally separate from
+    /// `replace_messages` so accidental empty replacement cannot wipe a session.
+    pub fn delete_all_messages(&self, session_id: &str) -> Result<(), SessionError> {
+        self.get_session(session_id)?;
+        self.delete_messages_from(session_id, 0)?;
+        self.set_message_count(session_id, 0)?;
         Ok(())
     }
 
@@ -453,6 +462,8 @@ impl SessionStore {
                 ScriptMutability::Mutable,
             )
             .map_err(db_err)?;
+
+        self.set_message_count(session_id, keep_up_to + 1)?;
 
         Ok(())
     }
@@ -667,15 +678,21 @@ impl SessionStore {
 
     /// Load all messages for a session, ordered by index.
     pub fn load_messages(&self, session_id: &str) -> Result<Vec<String>, SessionError> {
+        let session = self.get_session(session_id)?;
         let mut params = BTreeMap::new();
         params.insert("sid".to_string(), DataValue::from(session_id));
+        params.insert(
+            "message_count".to_string(),
+            DataValue::from(session.message_count as i64),
+        );
 
         let result = self
             .db
             .run_script(
                 "?[message_index, content] :=
                     *messages{session_id, message_index, content},
-                    session_id = $sid
+                    session_id = $sid,
+                    message_index < $message_count
                 :sort message_index",
                 params,
                 ScriptMutability::Immutable,
@@ -688,6 +705,79 @@ impl SessionStore {
         }
 
         Ok(messages)
+    }
+
+    fn delete_messages_from(&self, session_id: &str, start: u64) -> Result<(), SessionError> {
+        let mut params = BTreeMap::new();
+        params.insert("sid".to_string(), DataValue::from(session_id));
+        params.insert("start".to_string(), DataValue::from(start as i64));
+
+        self.db
+            .run_script(
+                "?[session_id, message_index] :=
+                    *messages{session_id, message_index},
+                    session_id = $sid,
+                    message_index >= $start
+                 :rm messages {session_id, message_index}",
+                params,
+                ScriptMutability::Mutable,
+            )
+            .map_err(db_err)?;
+
+        Ok(())
+    }
+
+    fn set_message_count(&self, session_id: &str, message_count: u64) -> Result<(), SessionError> {
+        let session = self.get_session(session_id)?;
+        let now = Utc::now().to_rfc3339();
+
+        let mut params = BTreeMap::new();
+        params.insert("id".to_string(), DataValue::from(session_id));
+        params.insert(
+            "created_at".to_string(),
+            DataValue::from(session.created_at),
+        );
+        params.insert("last_active".to_string(), DataValue::from(now));
+        params.insert(
+            "working_directory".to_string(),
+            DataValue::from(session.working_directory),
+        );
+        params.insert(
+            "git_branch".to_string(),
+            DataValue::from(session.git_branch.unwrap_or_default()),
+        );
+        params.insert("model".to_string(), DataValue::from(session.model));
+        params.insert(
+            "message_count".to_string(),
+            DataValue::from(message_count as i64),
+        );
+        params.insert(
+            "total_tokens".to_string(),
+            DataValue::from(session.total_tokens as i64),
+        );
+        params.insert("total_cost".to_string(), DataValue::from(session.total_cost));
+        params.insert(
+            "schema_version".to_string(),
+            DataValue::from(session.schema_version as i64),
+        );
+
+        self.db
+            .run_script(
+                "?[id, created_at, last_active, working_directory, git_branch,
+                  model, message_count, total_tokens, total_cost, schema_version] <- [[
+                    $id, $created_at, $last_active, $working_directory, $git_branch,
+                    $model, $message_count, $total_tokens, $total_cost, $schema_version
+                ]]
+                :put sessions {
+                    id => created_at, last_active, working_directory, git_branch,
+                    model, message_count, total_tokens, total_cost, schema_version
+                }",
+                params,
+                ScriptMutability::Mutable,
+            )
+            .map_err(db_err)?;
+
+        Ok(())
     }
 
     /// Delete a session and all its messages and tags.
@@ -993,5 +1083,74 @@ mod truncate_tests {
             .expect("truncate 2");
         let after = store.load_messages(&meta.id).expect("load");
         assert_eq!(after.len(), 1, "only index 0 should remain");
+    }
+
+    #[test]
+    fn replace_messages_shortens_and_updates_logical_count() {
+        let (_dir, store) = temp_store();
+        let meta = store
+            .create_session("/tmp/replace", None, "test-model")
+            .expect("create session");
+        for i in 0..20u64 {
+            store.save_message(&meta.id, i, &format!("old-{i}")).unwrap();
+        }
+
+        let replacement: Vec<String> = (0..5).map(|i| format!("new-{i}")).collect();
+        store
+            .replace_messages(&meta.id, &replacement)
+            .expect("replace messages");
+
+        assert_eq!(store.load_messages(&meta.id).unwrap(), replacement);
+        assert_eq!(store.get_session(&meta.id).unwrap().message_count, 5);
+    }
+
+    #[test]
+    fn replace_messages_rejects_empty_and_delete_all_is_explicit() {
+        let (_dir, store) = temp_store();
+        let meta = store
+            .create_session("/tmp/empty", None, "test-model")
+            .expect("create session");
+        store.save_message(&meta.id, 0, "one").unwrap();
+
+        let err = store.replace_messages(&meta.id, &[]).unwrap_err();
+        assert!(matches!(err, SessionError::EmptyReplaceRefused));
+        assert_eq!(store.load_messages(&meta.id).unwrap(), vec!["one"]);
+
+        store.delete_all_messages(&meta.id).expect("delete all");
+        assert!(store.load_messages(&meta.id).unwrap().is_empty());
+        assert_eq!(store.get_session(&meta.id).unwrap().message_count, 0);
+    }
+
+    #[test]
+    fn load_messages_clamps_physical_rows_above_logical_count() {
+        let (_dir, store) = temp_store();
+        let meta = store
+            .create_session("/tmp/clamp", None, "test-model")
+            .expect("create session");
+        for i in 0..5u64 {
+            store.save_message(&meta.id, i, &format!("m-{i}")).unwrap();
+        }
+        store.set_message_count(&meta.id, 2).unwrap();
+
+        assert_eq!(store.load_messages(&meta.id).unwrap(), vec!["m-0", "m-1"]);
+    }
+
+    #[test]
+    fn post_resume_replacement_does_not_resurrect_stale_tail() {
+        let (_dir, store) = temp_store();
+        let meta = store
+            .create_session("/tmp/resume-tail", None, "test-model")
+            .expect("create session");
+        for i in 0..10u64 {
+            store.save_message(&meta.id, i, &format!("old-{i}")).unwrap();
+        }
+        let compacted: Vec<String> = (0..4).map(|i| format!("compact-{i}")).collect();
+        store.replace_messages(&meta.id, &compacted).unwrap();
+
+        let resumed = store.load_messages(&meta.id).unwrap();
+        store.replace_messages(&meta.id, &resumed).unwrap();
+
+        assert_eq!(store.load_messages(&meta.id).unwrap(), compacted);
+        assert_eq!(store.get_session(&meta.id).unwrap().message_count, 4);
     }
 }

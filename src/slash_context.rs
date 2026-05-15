@@ -72,6 +72,14 @@ pub(crate) struct SlashCommandContext {
     /// CozoDB instance for learning subsystem persistence (GNN weights,
     /// trajectories, Adam state, training runs). Created at bootstrap.
     pub(crate) cozo_db: Option<Arc<cozo::DbInstance>>,
+    /// Governed learning CozoDB for permission/runtime evidence relations
+    /// created by `archon_learning::schema::ensure_learning_schema`.
+    ///
+    /// Governed writer census: permission events, permission-denial ledger
+    /// signals, agent performance ledger, provider incident ledger, sandbox
+    /// audit/runtime events, and reasoning-quality runtime rows must use this
+    /// handle rather than the project `.archon/learning.db` handle above.
+    pub(crate) governed_learning_db: Option<Arc<cozo::DbInstance>>,
     /// GNN auto-trainer Arc — Some when the background loop is running.
     /// `/learning-status` reads live state from this; None means the trainer
     /// is disabled in config OR the learning CozoDB failed to open.

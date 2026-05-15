@@ -54,6 +54,7 @@ pub(super) async fn run(
     sandbox_flag: Arc<AtomicBool>,
     hook_registry: Arc<archon_core::hooks::HookRegistry>,
     learning_cozo_db: Option<Arc<cozo::DbInstance>>,
+    governed_learning_db: Option<Arc<cozo::DbInstance>>,
     auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
     leann_init_cancel: Arc<AtomicBool>,
     agent_event_tx_for_dispatcher: tokio::sync::mpsc::UnboundedSender<
@@ -139,6 +140,7 @@ pub(super) async fn run(
             cancel_handle: Arc::clone(&cancel_handle_slot),
             agent_dispatcher: Arc::clone(&agent_dispatcher_shared),
             cozo_db: learning_cozo_db,
+            governed_learning_db,
             auto_trainer: auto_trainer.clone(),
         });
 

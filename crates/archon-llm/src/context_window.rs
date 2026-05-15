@@ -31,6 +31,7 @@ impl ContextWindowSource {
 pub struct ContextWindowResolution {
     pub model: String,
     pub context_window: u64,
+    pub runtime_context_budget: Option<u64>,
     pub source: ContextWindowSource,
 }
 
@@ -132,6 +133,7 @@ pub fn resolve_context_window_for_work_dir(
         return ContextWindowResolution {
             model: active_model.to_string(),
             context_window: window,
+            runtime_context_budget: None,
             source: ContextWindowSource::ConfigOverride,
         };
     }
@@ -160,6 +162,7 @@ pub fn resolve_context_window_for_work_dir(
         return ContextWindowResolution {
             model: resolved_model,
             context_window: entry.context_window,
+            runtime_context_budget: entry.runtime_context_budget,
             source: ContextWindowSource::UserCatalog,
         };
     }
@@ -175,6 +178,7 @@ pub fn resolve_context_window_for_work_dir(
         return ContextWindowResolution {
             model: resolved_model,
             context_window: entry.context_window,
+            runtime_context_budget: entry.runtime_context_budget,
             source: ContextWindowSource::BundledCatalog,
         };
     }
@@ -186,6 +190,7 @@ pub fn resolve_context_window_for_work_dir(
         return ContextWindowResolution {
             model: info.id,
             context_window: info.context_window as u64,
+            runtime_context_budget: None,
             source: ContextWindowSource::ProviderMetadata,
         };
     }
@@ -193,6 +198,7 @@ pub fn resolve_context_window_for_work_dir(
     ContextWindowResolution {
         model: resolved_model,
         context_window: FALLBACK_CONTEXT_WINDOW,
+        runtime_context_budget: None,
         source: ContextWindowSource::Fallback,
     }
 }

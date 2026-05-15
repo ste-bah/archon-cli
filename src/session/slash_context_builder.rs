@@ -44,6 +44,7 @@ pub(super) struct SlashContextBuildInput {
     pub cancel_handle: Arc<std::sync::Mutex<Option<Arc<crate::agent_handle::AgentHandle>>>>,
     pub agent_dispatcher: Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>,
     pub cozo_db: Option<Arc<cozo::DbInstance>>,
+    pub governed_learning_db: Option<Arc<cozo::DbInstance>>,
     pub auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
 }
 
@@ -101,6 +102,7 @@ pub(super) fn build(input: SlashContextBuildInput) -> SlashCommandContext {
         cancel_handle: input.cancel_handle,
         agent_dispatcher: input.agent_dispatcher,
         cozo_db: input.cozo_db,
+        governed_learning_db: input.governed_learning_db,
         auto_trainer: input.auto_trainer,
     }
 }

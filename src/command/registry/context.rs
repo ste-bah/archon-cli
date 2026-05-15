@@ -423,6 +423,8 @@ pub struct CommandContext {
     /// trajectories, Adam state, training runs). Cloned from
     /// `SlashCommandContext::cozo_db` at dispatch time via DIRECT pattern.
     pub(crate) cozo_db: Option<Arc<cozo::DbInstance>>,
+    /// Governed learning DB for permission/runtime evidence relations.
+    pub(crate) governed_learning_db: Option<Arc<cozo::DbInstance>>,
     /// GNN auto-trainer Arc cloned from `SlashCommandContext::auto_trainer`
     /// at dispatch time. Used by `/learning-status` to display live loop state.
     /// Reference: `archon-pipeline/src/learning/gnn/auto_trainer.rs`.

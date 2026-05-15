@@ -10,6 +10,7 @@ const BUNDLED_CONTEXT_CATALOG: &str = include_str!("../resources/context.toml");
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextWindowEntry {
     pub context_window: u64,
+    pub runtime_context_budget: Option<u64>,
     pub max_output_tokens: Option<u64>,
     pub source: Option<String>,
 }
@@ -114,6 +115,7 @@ fn lookup_model(
         .filter(|window| *window > 0)
         .map(|window| ContextWindowEntry {
             context_window: window,
+            runtime_context_budget: raw.runtime_context_budget,
             max_output_tokens: raw.max_output_tokens,
             source: raw.source.clone(),
         });
@@ -131,6 +133,7 @@ fn lookup_model(
         {
             best = Some(ContextWindowEntry {
                 context_window: window,
+                runtime_context_budget: variant.runtime_context_budget.or(raw.runtime_context_budget),
                 max_output_tokens: variant.max_output_tokens.or(raw.max_output_tokens),
                 source: variant.source.clone().or_else(|| raw.source.clone()),
             });
@@ -209,6 +212,7 @@ struct RawProvider {
 #[derive(Debug, Clone, Default, Deserialize)]
 struct RawModel {
     context_window: Option<u64>,
+    runtime_context_budget: Option<u64>,
     max_output_tokens: Option<u64>,
     source: Option<String>,
     #[serde(default)]
@@ -218,6 +222,7 @@ struct RawModel {
 #[derive(Debug, Clone, Default, Deserialize)]
 struct RawVariant {
     context_window: Option<u64>,
+    runtime_context_budget: Option<u64>,
     max_output_tokens: Option<u64>,
     source: Option<String>,
     requires_beta: Option<String>,
@@ -240,7 +245,9 @@ mod tests {
             .expect("gpt-5.3-codex entry");
 
         assert_eq!(sonnet.context_window, 1_050_000);
+        assert_eq!(sonnet.runtime_context_budget, Some(272_000));
         assert_eq!(codex.context_window, 400_000);
+        assert_eq!(codex.runtime_context_budget, Some(272_000));
     }
 
     #[test]

@@ -281,6 +281,7 @@ pub(crate) async fn spawn_web_session(
             cancel_handle: Arc::clone(&cancel_handle),
             agent_dispatcher: Arc::clone(&dispatcher),
             cozo_db: learning_cozo_db,
+            governed_learning_db,
             auto_trainer: auto_trainer.clone(),
         });
 

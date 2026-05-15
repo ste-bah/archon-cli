@@ -158,19 +158,17 @@ pub(crate) fn run_session_loop(
                         match post_turn_queue.pop_front() {
                             Some(PostTurnAction::PersistSession) => {
                                 let guard = agent.lock().await;
-                                for (idx, msg) in
-                                    guard.conversation_state().messages.iter().enumerate()
+                                let messages: Vec<String> = guard
+                                    .conversation_state()
+                                    .messages
+                                    .iter()
+                                    .filter_map(|msg| serde_json::to_string(msg).ok())
+                                    .collect();
+                                if !messages.is_empty()
+                                    && let Err(e) = session_store_for_input
+                                        .replace_messages(&session_id_for_input, &messages)
                                 {
-                                    if let Ok(json_str) = serde_json::to_string(msg)
-                                        && let Err(e) = session_store_for_input
-                                            .save_message(
-                                                &session_id_for_input,
-                                                idx as u64,
-                                                &json_str,
-                                            )
-                                        {
-                                            tracing::warn!("save_message idx {idx}: {e}");
-                                        }
+                                    tracing::warn!("replace_messages post-turn failed: {e}");
                                 }
                             }
                             Some(PostTurnAction::SkillComplete { reload_registry_for }) => {
@@ -505,13 +503,39 @@ pub(crate) fn run_session_loop(
                     } else {
                         Some(subcommand)
                     };
-                    let msg = {
+                    let (outcome, compacted_messages) = {
                         let mut guard = agent.lock().await;
                         let fut: std::pin::Pin<
-                            Box<dyn std::future::Future<Output = String> + Send + '_>,
+                            Box<
+                                dyn std::future::Future<
+                                        Output = archon_core::agent::ManualCompactOutcome,
+                                    > + Send
+                                    + '_,
+                            >,
                         > = Box::pin(guard.compact(subcommand));
-                        fut.await
+                        let outcome = fut.await;
+                        let messages = if matches!(
+                            outcome,
+                            archon_core::agent::ManualCompactOutcome::Compacted { .. }
+                        ) {
+                            guard
+                                .conversation_state()
+                                .messages
+                                .iter()
+                                .filter_map(|msg| serde_json::to_string(msg).ok())
+                                .collect()
+                        } else {
+                            Vec::new()
+                        };
+                        (outcome, messages)
                     };
+                    if !compacted_messages.is_empty()
+                        && let Err(e) = session_store_for_input
+                            .replace_messages(&session_id_for_input, &compacted_messages)
+                    {
+                        tracing::warn!("replace_messages after /compact failed: {e}");
+                    }
+                    let msg = outcome.into_status();
                     let _ = input_tui_tx.send(TuiEvent::TextDelta(format!("\n{msg}\n")));
                     let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
                     continue;
@@ -523,6 +547,8 @@ pub(crate) fn run_session_loop(
                         &agent,
                         &cmd_ctx,
                         &input_tui_tx,
+                        &session_store_for_input,
+                        &session_id_for_input,
                         persist_personality,
                         personality_history_limit,
                         session_start_confidence,

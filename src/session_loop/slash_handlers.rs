@@ -27,6 +27,8 @@ pub(super) async fn handle_clear_command(
     agent: &Arc<tokio::sync::Mutex<Agent>>,
     cmd_ctx: &SlashCommandContext,
     input_tui_tx: &archon_tui::event_channel::TuiEventSender,
+    session_store: &Arc<archon_session::storage::SessionStore>,
+    session_id: &str,
     persist_personality: bool,
     personality_history_limit: u32,
     session_start_confidence: f32,
@@ -61,6 +63,9 @@ pub(super) async fn handle_clear_command(
         guard.clear_conversation_detached()
     }
     .await;
+    if let Err(e) = session_store.delete_all_messages(session_id) {
+        tracing::warn!("delete_all_messages after /clear failed: {e}");
+    }
     // Reset session stats
     {
         let mut stats = cmd_ctx.session_stats.lock().await;

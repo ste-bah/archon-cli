@@ -67,9 +67,11 @@ impl ToolRegistry {
 
     /// Get tool definitions for API request (JSON schemas).
     pub fn tool_definitions(&self) -> Vec<serde_json::Value> {
-        self.tools
-            .values()
-            .map(|tool| {
+        let mut tools: Vec<_> = self.tools.iter().collect();
+        tools.sort_by(|(left, _), (right, _)| left.cmp(right));
+        tools
+            .into_iter()
+            .map(|(_, tool)| {
                 serde_json::json!({
                     "name": tool.name(),
                     "description": tool.description(),

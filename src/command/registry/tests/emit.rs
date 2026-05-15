@@ -34,6 +34,7 @@ fn make_emit_test_ctx(tui_tx: archon_tui::event_channel::TuiEventSender) -> Comm
         pending_effort_set: None,
         pending_export: None,
         cozo_db: None,
+        governed_learning_db: None,
         // Reference: archon-pipeline/src/learning/gnn/auto_trainer.rs.
         // Test fixture — emit() doesn't touch this field.
         auto_trainer: None,

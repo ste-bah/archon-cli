@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use archon_llm::auth::CodexCredentials;
-use archon_llm::provider::LlmError;
+use archon_llm::provider::{LlmError, LlmRequest};
 use archon_llm::providers::codex::client::{
-    build_codex_headers, build_reasoning_config, clamp_reasoning_effort, validate_spoof_headers,
+    CodexProvider, build_codex_headers, build_reasoning_config, clamp_reasoning_effort,
+    validate_spoof_headers,
 };
 use archon_llm::providers::codex::spoof_default::SpoofConfig;
 use archon_llm::providers::{CompatKind, get_native};
@@ -77,6 +79,36 @@ fn reasoning_config_is_omitted_without_effort() {
     let cfg = build_reasoning_config("gpt-5.3-codex-mini", Some("low")).expect("config");
     assert_eq!(cfg.effort.as_deref(), Some("medium"));
     assert_eq!(cfg.summary.as_deref(), Some("auto"));
+}
+
+#[test]
+fn codex_request_body_stays_responses_shaped_without_anthropic_cache_control() {
+    let provider = CodexProvider::new(
+        PathBuf::from("/tmp/archon-test-codex-auth.json"),
+        SpoofConfig::default(),
+        reqwest::Client::new(),
+    )
+    .expect("provider");
+    let request = LlmRequest {
+        model: "gpt-5.3-codex".into(),
+        messages: vec![serde_json::json!({
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": "call_1", "name": "Read", "input": {}}],
+        })],
+        tools: vec![serde_json::json!({
+            "name": "Read",
+            "description": "Read a file",
+            "input_schema": {"type": "object", "properties": {}},
+        })],
+        ..LlmRequest::default()
+    };
+
+    let body = provider.build_request_body(&request).expect("body");
+    let wire = serde_json::to_value(&body).expect("json");
+
+    assert!(wire.get("input").is_some());
+    assert!(wire.get("messages").is_none());
+    assert!(!wire.to_string().contains("cache_control"));
 }
 
 #[test]

@@ -52,6 +52,7 @@ mod turn_completion;
 mod types;
 
 pub use autocompact::{AutoCompactState, CompactAction, evaluate_compaction};
+pub use compaction::ManualCompactOutcome;
 pub use payloads::{
     ReasoningEvidenceEventPayload, ReasoningTurnEventPayload, UserCorrectionEventPayload,
 };
@@ -142,6 +143,97 @@ pub struct Agent {
 }
 
 impl Agent {
+    async fn maybe_request_pressure_compact(
+        &mut self,
+        active_model: &str,
+        trigger_tokens: u64,
+        trigger_body_bytes: usize,
+        context_window: u64,
+    ) -> Result<bool, AgentLoopError> {
+        let token_pressure = self
+            .config
+            .context
+            .rate_limit_pressure_tokens
+            .is_some_and(|threshold| trigger_tokens >= threshold);
+        let body_pressure = self
+            .config
+            .context
+            .rate_limit_pressure_body_bytes
+            .is_some_and(|threshold| trigger_body_bytes as u64 >= threshold);
+        if (!token_pressure && !body_pressure) || !self.state.auto_compact.should_attempt() {
+            return Ok(false);
+        }
+
+        let reason = match (token_pressure, body_pressure) {
+            (true, true) => "request_pressure_tokens_and_bytes",
+            (true, false) => "request_pressure_tokens",
+            (false, true) => "request_pressure_bytes",
+            (false, false) => unreachable!(),
+        };
+        tracing::info!(
+            compaction.reason = reason,
+            trigger_tokens,
+            trigger_body_bytes,
+            context_window,
+            scope = "main_session",
+            force = false,
+            consecutive_failures = self.state.auto_compact.consecutive_failures,
+            "request pressure threshold reached; attempting proactive compaction"
+        );
+
+        let before = self.state.messages.clone();
+        self.state.auto_compact.compact_in_flight = true;
+        let result = autocompact::compact_json_messages_with_provider(
+            self.client.as_ref(),
+            active_model,
+            &self.state.messages,
+            CompactAction::Full,
+            false,
+        )
+        .await;
+
+        match result {
+            Ok((
+                autocompact::CompactionOutcome::Compacted {
+                    after_estimated_tokens,
+                    ..
+                },
+                compacted,
+            )) => {
+                self.state.messages = compacted;
+                self.state.last_known_context_tokens = 0;
+                self.memory_injector.invalidate_cache();
+                self.state.auto_compact.on_success(after_estimated_tokens);
+                self.send_event(AgentEvent::CompactionTriggered).await;
+                Ok(self.state.messages != before)
+            }
+            Ok((autocompact::CompactionOutcome::Skipped { .. }, _)) => {
+                self.state.auto_compact.on_cancel();
+                Ok(false)
+            }
+            Err(autocompact::CompactionError::Cancelled) => {
+                self.state.auto_compact.on_cancel();
+                Ok(false)
+            }
+            Err(err) => {
+                self.state.auto_compact.on_real_failure();
+                tracing::warn!(
+                    compaction.reason = reason,
+                    trigger_tokens,
+                    trigger_body_bytes,
+                    context_window,
+                    scope = "main_session",
+                    force = false,
+                    consecutive_failures = self.state.auto_compact.consecutive_failures,
+                    breaker_tripped = self.state.auto_compact.disabled,
+                    error = %err,
+                    "request-pressure compaction failed; continuing turn"
+                );
+                Ok(false)
+            }
+        }
+    }
+
     /// Process a single user message through the full agent loop.
     /// Returns when the LLM produces a final text response (no more tool calls).
     pub async fn process_message(&mut self, user_input: &str) -> Result<(), AgentLoopError> {
@@ -187,6 +279,8 @@ impl Agent {
 
         let mut agentic_iterations: u32 = 0;
         let mut reactive_overflow_retried = false;
+        let mut reactive_rate_limit_retried = false;
+        let mut proactive_pressure_attempted = false;
         'agent_loop: loop {
             self.fire_before_prompt_build_hook(agentic_iterations).await;
             // GAP 7: Inject recalled memories into system prompt
@@ -242,6 +336,28 @@ impl Agent {
             };
             self.fire_after_prompt_build_hook(&request, agentic_iterations)
                 .await;
+            let request_body_bytes = autocompact::request_body_bytes(&request);
+            let large_retry_body_bytes =
+                autocompact::large_request_retry_body_bytes(&self.config.context);
+            let trigger_tokens = if self.state.last_known_context_tokens > 0 {
+                self.state.last_known_context_tokens
+            } else {
+                autocompact::trigger_tokens(&self.state.messages)
+            };
+            let context_window = self.context_window_for(&active_model);
+            if !proactive_pressure_attempted
+                && self
+                    .maybe_request_pressure_compact(
+                        &active_model,
+                        trigger_tokens,
+                        request_body_bytes,
+                        context_window,
+                    )
+                    .await?
+            {
+                proactive_pressure_attempted = true;
+                continue 'agent_loop;
+            }
 
             self.send_event(AgentEvent::ApiCallStarted {
                 model: active_model.clone(),
@@ -261,6 +377,31 @@ impl Agent {
                     self.client.stream(retry_request).await.map_err(|retry| {
                         AgentLoopError::ApiError(format!(
                             "reactive compaction retry failed: {retry}"
+                        ))
+                    })?
+                }
+                Err(e)
+                    if autocompact::is_rate_limited_error(&e)
+                        && !reactive_rate_limit_retried
+                        && request_body_bytes >= large_retry_body_bytes =>
+                {
+                    reactive_rate_limit_retried = true;
+                    tracing::warn!(
+                        compaction.reason = "rate_limit_large_request",
+                        trigger_body_bytes = request_body_bytes,
+                        threshold_body_bytes = large_retry_body_bytes,
+                        scope = "main_session",
+                        force = true,
+                        "rate-limited main request is large; compacting before one retry"
+                    );
+                    self.force_reactive_compact().await?;
+                    let retry_request = LlmRequest {
+                        messages: self.state.messages.clone(),
+                        ..request
+                    };
+                    self.client.stream(retry_request).await.map_err(|retry| {
+                        AgentLoopError::ApiError(format!(
+                            "rate-limit compaction retry failed: {retry}"
                         ))
                     })?
                 }
@@ -362,6 +503,22 @@ impl Agent {
                             self.force_reactive_compact().await?;
                             continue 'agent_loop;
                         }
+                        if autocompact::is_rate_limited_error(&classified)
+                            && !reactive_rate_limit_retried
+                            && request_body_bytes >= large_retry_body_bytes
+                        {
+                            reactive_rate_limit_retried = true;
+                            tracing::warn!(
+                                compaction.reason = "rate_limit_large_request_stream",
+                                trigger_body_bytes = request_body_bytes,
+                                threshold_body_bytes = large_retry_body_bytes,
+                                scope = "main_session",
+                                force = true,
+                                "rate-limited stream error on large request; compacting before one retry"
+                            );
+                            self.force_reactive_compact().await?;
+                            continue 'agent_loop;
+                        }
                         // CRIT-06: Fire Notification hook on API errors
                         self.fire_hook(
                             crate::hooks::HookEvent::Notification,
@@ -389,6 +546,7 @@ impl Agent {
                 }
             }
             reactive_overflow_retried = false;
+            reactive_rate_limit_retried = false;
 
             let turn_input_tokens = usage_acc.billable_input_tokens;
             let turn_cache_creation = usage_acc.cache_creation_input_tokens;

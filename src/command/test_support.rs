@@ -80,6 +80,7 @@ pub struct CtxBuilder {
     // TASK-#211 SLASH-AGENT: agent registry handle for /agent.
     agent_registry: Option<Arc<std::sync::RwLock<archon_core::agents::AgentRegistry>>>,
     cozo_db: Option<Arc<cozo::DbInstance>>,
+    governed_learning_db: Option<Arc<cozo::DbInstance>>,
     // GHOST-006: sandbox flag for /sandbox handler tests.
     sandbox_flag: Option<Arc<AtomicBool>>,
     // GHOST-007: cancel handle + dispatcher for /cancel handler tests.
@@ -121,6 +122,7 @@ impl CtxBuilder {
             pending_export: None,
             agent_registry: None,
             cozo_db: None,
+            governed_learning_db: None,
             sandbox_flag: None,
             cancel_handle: None,
             agent_dispatcher: None,
@@ -391,6 +393,11 @@ impl CtxBuilder {
         self
     }
 
+    pub fn with_governed_learning_db(mut self, db: Arc<cozo::DbInstance>) -> Self {
+        self.governed_learning_db = Some(db);
+        self
+    }
+
     /// Consume the builder and return `(CommandContext, Receiver)`.
     pub fn build(self) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         (
@@ -426,6 +433,7 @@ impl CtxBuilder {
                 llm_adapter: None,
                 leann: None,
                 cozo_db: self.cozo_db.clone(),
+                governed_learning_db: self.governed_learning_db.clone(),
                 sandbox_flag: self.sandbox_flag,
                 hook_registry: None,
                 plugin_enable_state: None,
