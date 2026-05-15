@@ -1865,15 +1865,6 @@ fn tensor_f32(tensors: &safetensors::SafeTensors<'_>, name: &str) -> Result<Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
-
-    use crate::embedding::{
-        EmbeddingBackendKind, EmbeddingRequest, EmbeddingVector,
-        WorldEmbeddingAdapter as WorldEmbeddingAdapterTrait,
-    };
     use crate::schema::{WorldActionKind, WorldTraceRow};
 
     fn rows() -> Vec<WorldTraceRow> {
@@ -1911,40 +1902,6 @@ mod tests {
                 row
             })
             .collect()
-    }
-
-    struct CountingEmbeddingAdapter {
-        calls: Arc<AtomicUsize>,
-        dimensions: usize,
-    }
-
-    impl WorldEmbeddingAdapterTrait for CountingEmbeddingAdapter {
-        fn backend_kind(&self) -> EmbeddingBackendKind {
-            EmbeddingBackendKind::Local
-        }
-
-        fn dimensions(&self) -> usize {
-            self.dimensions
-        }
-
-        fn provider_name(&self) -> &str {
-            "counting-test"
-        }
-
-        fn model_name(&self) -> &str {
-            "counting-test-v1"
-        }
-
-        fn embed(&self, request: &EmbeddingRequest) -> Result<EmbeddingVector> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(EmbeddingVector {
-                values: vec![0.0; self.dimensions],
-                provider: self.provider_name().into(),
-                model: self.model_name().into(),
-                source_hash: request.source_hash.clone(),
-                redaction_policy: request.redaction_policy.clone(),
-            })
-        }
     }
 
     #[test]
@@ -2063,29 +2020,47 @@ mod tests {
     }
 
     #[test]
-    fn jepa_encoder_path_does_not_call_world_embedding_adapter() {
-        let calls = Arc::new(AtomicUsize::new(0));
-        let counting_adapter = CountingEmbeddingAdapter {
-            calls: Arc::clone(&calls),
-            dimensions: 8,
-        };
-        let config = JepaTrainingConfig {
-            latent_dim: 8,
-            context_window_rows: 2,
-            target_window_rows: 1,
-            prediction_horizons: vec![1],
-            ..JepaTrainingConfig::default()
-        };
-        let (model, _) = train_jepa_candidate(&rows(), &config).unwrap();
-        let examples = build_jepa_training_examples(&rows(), &config).unwrap();
+    fn collapse_gate_accepts_full_rank_latents() {
+        let mut latents = Vec::new();
+        for idx in 0..8 {
+            let mut positive = vec![0.0; 8];
+            positive[idx] = 3.0;
+            latents.push(positive);
 
-        assert_eq!(counting_adapter.dimensions(), 8);
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        let _ = model.encode_state(&examples[0].context).unwrap();
-        let _ = model.encode_action(&examples[0].action).unwrap();
-        let _ = model.encode_target(&examples[0].target).unwrap();
+            let mut negative = vec![0.0; 8];
+            negative[idx] = -3.0;
+            latents.push(negative);
+        }
 
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        let report = evaluate_representation_collapse(&latents, 0.05, 0.50).unwrap();
+
+        assert!(report.mean_latent_std >= 0.05);
+        assert!(report.effective_rank_ratio >= 0.99);
+        assert!(report.passes);
+    }
+
+    #[test]
+    fn jepa_module_keeps_encoder_path_free_of_embedding_adapters() {
+        let source = include_str!("jepa.rs");
+        let forbidden_fragments = [
+            ("Memory", "EmbeddingAdapter"),
+            ("World", "EmbeddingAdapter"),
+            ("Embedding", "Request"),
+            ("Embedding", "Vector"),
+            ("DeterministicHash", "EmbeddingAdapter"),
+            ("local_", "fastembed"),
+            ("OpenAI", "Embedding"),
+            ("Fast", "Embed"),
+            (".", "embed("),
+        ];
+
+        for (left, right) in forbidden_fragments {
+            let forbidden = format!("{left}{right}");
+            assert!(
+                !source.contains(&forbidden),
+                "JEPA module must not reference embedding adapter path: {forbidden}"
+            );
+        }
     }
 
     #[test]
