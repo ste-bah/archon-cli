@@ -86,6 +86,20 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # macOS-runner workaround (same root cause as ci.yml): the GH macOS
+      # image ships `/usr/local/bin/cargo` as a rustup-init shim that
+      # intercepts `cargo build` with `unexpected argument 'build' found`.
+      # Delete it so PATH deterministically resolves to the dtolnay-installed
+      # `$HOME/.cargo/bin/cargo`. Safe on ephemeral GH runners.
+      - name: Neutralize macOS rustup-init cargo shim
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          sudo rm -f /usr/local/bin/cargo /usr/local/bin/rustc /usr/local/bin/rustup
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          "$HOME/.cargo/bin/rustup" default stable
+          cargo --version
+
       - name: Install Linux build deps
         if: runner.os == 'Linux' && !matrix.cross
         run: |
