@@ -1634,7 +1634,7 @@ fn layer_norm(values: &mut [f32]) {
         .sum::<f32>()
         / values.len() as f32;
     let denom = (variance + 1e-6).sqrt();
-    for value in values {
+    for value in &mut *values {
         *value = (*value - mean) / denom;
     }
     normalize(values);
