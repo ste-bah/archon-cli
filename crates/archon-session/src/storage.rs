@@ -678,7 +678,11 @@ impl SessionStore {
 
     /// Load all messages for a session, ordered by index.
     pub fn load_messages(&self, session_id: &str) -> Result<Vec<String>, SessionError> {
-        let session = self.get_session(session_id)?;
+        let session = match self.get_session(session_id) {
+            Ok(session) => session,
+            Err(SessionError::NotFound(_)) => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
         let mut params = BTreeMap::new();
         params.insert("sid".to_string(), DataValue::from(session_id));
         params.insert(
@@ -1133,6 +1137,17 @@ mod truncate_tests {
         store.set_message_count(&meta.id, 2).unwrap();
 
         assert_eq!(store.load_messages(&meta.id).unwrap(), vec!["m-0", "m-1"]);
+    }
+
+    #[test]
+    fn load_messages_on_missing_session_returns_empty() {
+        let (_dir, store) = temp_store();
+
+        let messages = store
+            .load_messages("00000000-0000-0000-0000-000000000000")
+            .expect("missing session load should be tolerated");
+
+        assert!(messages.is_empty());
     }
 
     #[test]
