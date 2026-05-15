@@ -5,6 +5,7 @@ use archon_llm::provider::{
     LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature,
 };
 use archon_llm::streaming::StreamEvent;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 #[test]
@@ -233,10 +234,10 @@ fn serialized_request_len(request: &LlmRequest) -> usize {
     .len()
 }
 
-fn test_agent() -> Agent {
+fn test_agent_with_provider(provider: Arc<dyn LlmProvider>) -> Agent {
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     Agent::new(
-        Arc::new(RateLimitedProvider),
+        provider,
         ToolRegistry::new(),
         AgentConfig::default(),
         tx,
@@ -244,6 +245,10 @@ fn test_agent() -> Agent {
             &std::env::temp_dir(),
         ))),
     )
+}
+
+fn test_agent() -> Agent {
+    test_agent_with_provider(Arc::new(RateLimitedProvider))
 }
 
 #[tokio::test]
@@ -309,4 +314,166 @@ async fn reactive_compaction_provider_error_remains_fatal() {
 
     assert!(err.to_string().contains("auto-compaction failed"));
     assert_eq!(agent.state.auto_compact.consecutive_failures, 1);
+}
+
+#[derive(Clone, Copy)]
+enum RateLimitFailureMode {
+    PreStream,
+    MidStream,
+}
+
+struct RateLimitThenSuccessProvider {
+    mode: RateLimitFailureMode,
+    real_calls: AtomicU32,
+    compaction_calls: AtomicU32,
+    real_body_bytes: Mutex<Vec<usize>>,
+}
+
+impl RateLimitThenSuccessProvider {
+    fn new(mode: RateLimitFailureMode) -> Self {
+        Self {
+            mode,
+            real_calls: AtomicU32::new(0),
+            compaction_calls: AtomicU32::new(0),
+            real_body_bytes: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn real_call_count(&self) -> u32 {
+        self.real_calls.load(Ordering::SeqCst)
+    }
+
+    fn compaction_call_count(&self) -> u32 {
+        self.compaction_calls.load(Ordering::SeqCst)
+    }
+
+    fn real_body_bytes(&self) -> Vec<usize> {
+        self.real_body_bytes
+            .lock()
+            .expect("body bytes lock")
+            .clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl LlmProvider for RateLimitThenSuccessProvider {
+    fn name(&self) -> &str {
+        "rate-limit-then-success"
+    }
+
+    fn models(&self) -> Vec<ModelInfo> {
+        vec![]
+    }
+
+    async fn stream(&self, request: LlmRequest) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
+        if request.request_origin.as_deref() == Some("compaction_summary") {
+            self.compaction_calls.fetch_add(1, Ordering::SeqCst);
+            return Ok(stream_from_events(vec![
+                StreamEvent::TextDelta {
+                    index: 0,
+                    text: "Compacted history summary.".into(),
+                },
+                StreamEvent::MessageStop,
+            ])
+            .await);
+        }
+
+        let call = self.real_calls.fetch_add(1, Ordering::SeqCst);
+        self.real_body_bytes
+            .lock()
+            .expect("body bytes lock")
+            .push(request_body_bytes(&request));
+
+        match (self.mode, call) {
+            (RateLimitFailureMode::PreStream, 0) => Err(LlmError::RateLimited {
+                retry_after_secs: 30,
+            }),
+            (RateLimitFailureMode::MidStream, 0) => Ok(stream_from_events(vec![
+                StreamEvent::Error {
+                    error_type: "rate_limited".into(),
+                    message: "rate limit exceeded; retry after 30s".into(),
+                },
+                StreamEvent::MessageStop,
+            ])
+            .await),
+            _ => Ok(stream_from_events(vec![
+                StreamEvent::TextDelta {
+                    index: 0,
+                    text: "done".into(),
+                },
+                StreamEvent::MessageStop,
+            ])
+            .await),
+        }
+    }
+
+    async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
+        unreachable!("tests use streaming")
+    }
+
+    fn supports_feature(&self, _feature: ProviderFeature) -> bool {
+        false
+    }
+}
+
+async fn stream_from_events(events: Vec<StreamEvent>) -> tokio::sync::mpsc::Receiver<StreamEvent> {
+    let (tx, rx) = tokio::sync::mpsc::channel(events.len() + 1);
+    for event in events {
+        tx.send(event).await.expect("send stream event");
+    }
+    rx
+}
+
+fn compaction_ready_messages(prefix: &str) -> Vec<serde_json::Value> {
+    (0..8)
+        .map(|i| {
+            let role = if i % 2 == 0 { "user" } else { "assistant" };
+            serde_json::json!({
+                "role": role,
+                "content": format!("{prefix} history message {i}: {}", "x".repeat(512)),
+            })
+        })
+        .collect()
+}
+
+async fn assert_main_rate_limit_compacts_before_one_retry(mode: RateLimitFailureMode) {
+    let provider = Arc::new(RateLimitThenSuccessProvider::new(mode));
+    let mut agent = test_agent_with_provider(provider.clone());
+    agent.config.context.large_request_retry_body_bytes = Some(1);
+    agent.config.context.context_window_override = Some(1_000_000);
+    agent.state.messages = compaction_ready_messages("main");
+
+    agent
+        .process_message("trigger rate-limit retry")
+        .await
+        .expect("main session should compact and retry once");
+
+    assert_eq!(provider.real_call_count(), 2, "initial call plus one retry");
+    assert_eq!(
+        provider.compaction_call_count(),
+        1,
+        "exactly one scoped compaction summary should be requested"
+    );
+    let bodies = provider.real_body_bytes();
+    assert_eq!(bodies.len(), 2);
+    assert!(
+        bodies[1] < bodies[0],
+        "retry body should be smaller after compaction: before={}, after={}",
+        bodies[0],
+        bodies[1]
+    );
+    assert_eq!(agent.state.auto_compact.compaction_count, 1);
+    assert_eq!(agent.state.auto_compact.consecutive_failures, 0);
+    assert!(!agent.state.auto_compact.disabled);
+    assert!(!agent.state.auto_compact.compact_in_flight);
+}
+
+#[tokio::test]
+async fn main_pre_stream_rate_limit_compacts_before_one_retry() {
+    assert_main_rate_limit_compacts_before_one_retry(RateLimitFailureMode::PreStream).await;
+}
+
+#[tokio::test]
+async fn main_mid_stream_rate_limit_compacts_before_one_retry() {
+    assert_main_rate_limit_compacts_before_one_retry(RateLimitFailureMode::MidStream).await;
 }
