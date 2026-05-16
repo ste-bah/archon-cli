@@ -10,6 +10,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Instant;
 
 use anyhow::{Result, bail};
@@ -217,6 +218,36 @@ impl JepaBackendExecutionReport {
         )
     }
 
+    pub fn native(
+        status: &BackendStatus,
+        validation_example_count: usize,
+        native_runtime_prediction: bool,
+    ) -> Self {
+        Self {
+            requested_backend: status.requested,
+            selected_backend: status.selected,
+            framework: status.framework.clone(),
+            device_name: status
+                .device_name
+                .clone()
+                .or_else(|| default_backend_device_name(status.selected)),
+            commit_sha: build_commit_sha(),
+            feature_compiled: true,
+            tensor_self_test_passed: true,
+            hardware_validation_captured_at: Some(Utc::now()),
+            validation_example_count,
+            native_encode: true,
+            native_predictor_fit: true,
+            native_auxiliary_fit: true,
+            native_transition_fit: true,
+            native_loss_eval: true,
+            native_runtime_prediction: Some(native_runtime_prediction),
+            host_fallback_count: 0,
+            allowed_host_stage_count: 0,
+            fallback_reason: None,
+        }
+    }
+
     pub fn native_stage_proof_passes(&self) -> bool {
         self.feature_compiled
             && self.tensor_self_test_passed
@@ -239,8 +270,31 @@ fn build_commit_sha() -> String {
     option_env!("VERGEN_GIT_SHA")
         .or(option_env!("GIT_COMMIT"))
         .or(option_env!("SOURCE_VERSION"))
-        .unwrap_or("unknown")
-        .to_string()
+        .map(str::to_string)
+        .or_else(runtime_git_sha)
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn runtime_git_sha() -> Option<String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let sha = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    if sha.is_empty() { None } else { Some(sha) }
+}
+
+fn default_backend_device_name(backend: BackendKind) -> Option<String> {
+    match backend {
+        BackendKind::Cpu => Some("cpu".into()),
+        BackendKind::Cuda => Some("cuda:0".into()),
+        BackendKind::Metal => Some("metal:0".into()),
+        BackendKind::Auto => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1031,8 +1085,16 @@ impl JepaTensorBackend for CandleCudaJepaBackend {
         encoders: &JepaEncoderSet,
         batch: &JepaFeatureBatch,
     ) -> Result<JepaEncodedBatch> {
-        let _ = (encoders, batch);
-        native_jepa_backend_unavailable(BackendKind::Cuda)
+        #[cfg(feature = "cuda")]
+        {
+            let device = cuda_jepa_device()?;
+            candle_encode_batch_on_device(encoders, batch, &device)
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            let _ = (encoders, batch);
+            native_jepa_backend_unavailable(BackendKind::Cuda)
+        }
     }
 
     fn fit_predictor(
@@ -1040,8 +1102,16 @@ impl JepaTensorBackend for CandleCudaJepaBackend {
         latent_dim: usize,
         encoded: &JepaEncodedBatch,
     ) -> Result<JepaPredictor> {
-        let _ = (latent_dim, encoded);
-        native_jepa_backend_unavailable(BackendKind::Cuda)
+        #[cfg(feature = "cuda")]
+        {
+            let device = cuda_jepa_device()?;
+            candle_fit_predictor_on_device(latent_dim, encoded, &device)
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            let _ = (latent_dim, encoded);
+            native_jepa_backend_unavailable(BackendKind::Cuda)
+        }
     }
 
     fn fit_auxiliary_heads(
@@ -1049,8 +1119,16 @@ impl JepaTensorBackend for CandleCudaJepaBackend {
         latent_dim: usize,
         encoded: &JepaEncodedBatch,
     ) -> Result<Vec<JepaAuxiliaryHead>> {
-        let _ = (latent_dim, encoded);
-        native_jepa_backend_unavailable(BackendKind::Cuda)
+        #[cfg(feature = "cuda")]
+        {
+            let device = cuda_jepa_device()?;
+            candle_fit_auxiliary_heads_on_device(latent_dim, encoded, &device)
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            let _ = (latent_dim, encoded);
+            native_jepa_backend_unavailable(BackendKind::Cuda)
+        }
     }
 
     fn fit_transition(
@@ -1058,8 +1136,18 @@ impl JepaTensorBackend for CandleCudaJepaBackend {
         latent_dim: usize,
         encoded: &JepaEncodedBatch,
     ) -> Result<CpuLatentTransitionModel> {
-        let _ = (latent_dim, encoded);
-        native_jepa_backend_unavailable(BackendKind::Cuda)
+        #[cfg(feature = "cuda")]
+        {
+            crate::backend::candle::candle_cuda_fit_transition_model(
+                latent_dim,
+                &encoded_transition_examples(encoded),
+            )
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            let _ = (latent_dim, encoded);
+            native_jepa_backend_unavailable(BackendKind::Cuda)
+        }
     }
 
     fn training_losses(
@@ -1068,8 +1156,16 @@ impl JepaTensorBackend for CandleCudaJepaBackend {
         encoded: &JepaEncodedBatch,
         config: &JepaTrainingConfig,
     ) -> Result<JepaTrainingLosses> {
-        let _ = (model, encoded, config);
-        native_jepa_backend_unavailable(BackendKind::Cuda)
+        #[cfg(feature = "cuda")]
+        {
+            let device = cuda_jepa_device()?;
+            candle_training_losses_on_device(model, encoded, config, &device)
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            let _ = (model, encoded, config);
+            native_jepa_backend_unavailable(BackendKind::Cuda)
+        }
     }
 
     fn collapse_report(
@@ -1077,8 +1173,11 @@ impl JepaTensorBackend for CandleCudaJepaBackend {
         encoded: &JepaEncodedBatch,
         config: &JepaTrainingConfig,
     ) -> Result<JepaCollapseReport> {
-        let _ = (encoded, config);
-        native_jepa_backend_unavailable(BackendKind::Cuda)
+        evaluate_representation_collapse(
+            &heldout_context_latents(encoded),
+            config.min_latent_std,
+            config.min_effective_rank_ratio,
+        )
     }
 
     fn predict_runtime(
@@ -1346,6 +1445,440 @@ fn candle_predict_auxiliary_scores(
         .collect()
 }
 
+#[cfg(feature = "candle")]
+#[allow(dead_code)]
+fn candle_encode_batch_on_device(
+    encoders: &JepaEncoderSet,
+    batch: &JepaFeatureBatch,
+    device: &candle_core::Device,
+) -> Result<JepaEncodedBatch> {
+    batch
+        .iter()
+        .map(|example| {
+            Ok(EncodedJepaTrainingExample {
+                context_latent: candle_encode_window_tensor(
+                    &encoders.context_encoder,
+                    &example.context,
+                    device,
+                )?
+                .to_vec1::<f32>()?,
+                action_latent: candle_encode_action_tensor(
+                    &encoders.action_encoder,
+                    &example.action,
+                    device,
+                )?
+                .to_vec1::<f32>()?,
+                target_latent: candle_encode_window_tensor(
+                    &encoders.target_encoder,
+                    &example.target,
+                    device,
+                )?
+                .to_vec1::<f32>()?,
+                horizon: example.horizon,
+                labels: example.labels.clone(),
+            })
+        })
+        .collect()
+}
+
+#[cfg(feature = "candle")]
+#[allow(dead_code)]
+fn candle_fit_predictor_on_device(
+    latent_dim: usize,
+    encoded: &JepaEncodedBatch,
+    device: &candle_core::Device,
+) -> Result<JepaPredictor> {
+    if encoded.is_empty() {
+        bail!("at least one JEPA example is required");
+    }
+    let contexts = candle_encoded_matrix(encoded, latent_dim, EncodedLatentRole::Context, device)?;
+    let actions = candle_encoded_matrix(encoded, latent_dim, EncodedLatentRole::Action, device)?;
+    let targets = candle_encoded_matrix(encoded, latent_dim, EncodedLatentRole::Target, device)?;
+    let horizons = candle_horizon_column(encoded, device)?;
+
+    let context_mean = contexts.mean(0)?;
+    let action_mean = actions.mean(0)?;
+    let target_mean = targets.mean(0)?;
+    let horizon_mean = horizons.mean_all()?;
+    let centered_contexts = contexts.broadcast_sub(&context_mean)?;
+    let centered_actions = actions.broadcast_sub(&action_mean)?;
+    let centered_targets = targets.broadcast_sub(&target_mean)?;
+    let centered_horizons = horizons.broadcast_sub(&horizon_mean)?;
+    let context_var = (centered_contexts.sqr()?.mean(0)? + 1e-6f64)?;
+    let action_var = (centered_actions.sqr()?.mean(0)? + 1e-6f64)?;
+    let horizon_var = (centered_horizons.sqr()?.mean_all()? + 1e-6f64)?;
+    let context_weights = (centered_contexts
+        .broadcast_mul(&centered_targets)?
+        .mean(0)?
+        / context_var)?
+        .clamp(-2.0f64, 2.0f64)?;
+    let action_weights = (centered_actions.broadcast_mul(&centered_targets)?.mean(0)?
+        / action_var)?
+        .clamp(-2.0f64, 2.0f64)?;
+    let horizon_weights = centered_horizons
+        .broadcast_mul(&centered_targets)?
+        .mean(0)?
+        .broadcast_div(&horizon_var)?
+        .clamp(-2.0f64, 2.0f64)?;
+    let bias = target_mean
+        .broadcast_sub(&context_weights.broadcast_mul(&context_mean)?)?
+        .broadcast_sub(&action_weights.broadcast_mul(&action_mean)?)?
+        .broadcast_sub(&horizon_weights.broadcast_mul(&horizon_mean)?)?;
+
+    Ok(JepaPredictor {
+        latent_dim,
+        context_weights: context_weights.to_vec1::<f32>()?,
+        action_weights: action_weights.to_vec1::<f32>()?,
+        horizon_weights: horizon_weights.to_vec1::<f32>()?,
+        bias: bias.to_vec1::<f32>()?,
+    })
+}
+
+#[cfg(feature = "candle")]
+#[allow(dead_code)]
+fn candle_fit_auxiliary_heads_on_device(
+    latent_dim: usize,
+    encoded: &JepaEncodedBatch,
+    device: &candle_core::Device,
+) -> Result<Vec<JepaAuxiliaryHead>> {
+    if encoded.is_empty() {
+        return Ok(fit_auxiliary_heads(latent_dim, encoded));
+    }
+    let contexts = candle_encoded_matrix(encoded, latent_dim, EncodedLatentRole::Context, device)?;
+    let actions = candle_encoded_matrix(encoded, latent_dim, EncodedLatentRole::Action, device)?;
+    auxiliary_labels()
+        .into_iter()
+        .map(|label| {
+            candle_fit_auxiliary_head_on_device(
+                label, latent_dim, encoded, &contexts, &actions, device,
+            )
+        })
+        .collect()
+}
+
+#[cfg(feature = "candle")]
+#[allow(dead_code)]
+fn candle_fit_auxiliary_head_on_device(
+    label: &'static str,
+    latent_dim: usize,
+    encoded: &JepaEncodedBatch,
+    contexts: &candle_core::Tensor,
+    actions: &candle_core::Tensor,
+    device: &candle_core::Device,
+) -> Result<JepaAuxiliaryHead> {
+    let positives = encoded
+        .iter()
+        .filter(|example| label_value(&example.labels, label))
+        .count();
+    let negatives = encoded.len().saturating_sub(positives);
+    let prevalence = ((positives as f32 + 1.0) / (encoded.len() as f32 + 2.0)).clamp(0.01, 0.99);
+    let mask_values = encoded
+        .iter()
+        .map(|example| {
+            if label_value(&example.labels, label) {
+                1.0
+            } else {
+                0.0
+            }
+        })
+        .collect::<Vec<_>>();
+    let pos_mask = candle_core::Tensor::from_vec(mask_values.clone(), (encoded.len(), 1), device)?;
+    let neg_mask = candle_core::Tensor::from_vec(
+        mask_values
+            .into_iter()
+            .map(|value| 1.0 - value)
+            .collect::<Vec<_>>(),
+        (encoded.len(), 1),
+        device,
+    )?;
+    let pos_context = candle_masked_mean(contexts, &pos_mask, positives, latent_dim)?;
+    let neg_context = candle_masked_mean(contexts, &neg_mask, negatives, latent_dim)?;
+    let pos_action = candle_masked_mean(actions, &pos_mask, positives, latent_dim)?;
+    let neg_action = candle_masked_mean(actions, &neg_mask, negatives, latent_dim)?;
+    let latent_weights = pos_context
+        .broadcast_sub(&neg_context)?
+        .clamp(-1.0f64, 1.0f64)?
+        .affine(0.25, 0.0)?;
+    let action_weights = pos_action
+        .broadcast_sub(&neg_action)?
+        .clamp(-1.0f64, 1.0f64)?
+        .affine(0.25, 0.0)?;
+    Ok(JepaAuxiliaryHead {
+        label: label.to_string(),
+        bias: (prevalence / (1.0 - prevalence)).ln(),
+        latent_weights: latent_weights.to_vec1::<f32>()?,
+        action_weights: action_weights.to_vec1::<f32>()?,
+    })
+}
+
+#[cfg(feature = "candle")]
+#[allow(dead_code)]
+fn candle_training_losses_on_device(
+    model: &JepaTraceModel,
+    encoded: &JepaEncodedBatch,
+    config: &JepaTrainingConfig,
+    device: &candle_core::Device,
+) -> Result<JepaTrainingLosses> {
+    if encoded.is_empty() {
+        bail!("at least one JEPA example is required");
+    }
+    let contexts = candle_encoded_matrix(
+        encoded,
+        model.metadata.latent_dim,
+        EncodedLatentRole::Context,
+        device,
+    )?;
+    let actions = candle_encoded_matrix(
+        encoded,
+        model.metadata.latent_dim,
+        EncodedLatentRole::Action,
+        device,
+    )?;
+    let targets = candle_encoded_matrix(
+        encoded,
+        model.metadata.latent_dim,
+        EncodedLatentRole::Target,
+        device,
+    )?;
+    let predicted = candle_predict_training_targets_on_device(
+        &model.predictor,
+        &contexts,
+        &actions,
+        encoded,
+        device,
+    )?;
+    let cosine_errors = candle_cosine_errors_on_device(&predicted, &targets)?;
+    let loss_jepa = cosine_errors.iter().sum::<f32>() / cosine_errors.len().max(1) as f32;
+    let loss_mse = predicted
+        .broadcast_sub(&targets)?
+        .sqr()?
+        .mean_all()?
+        .to_scalar::<f32>()?;
+    let loss_aux = candle_auxiliary_brier_on_device(
+        &model.auxiliary_heads,
+        encoded,
+        &contexts,
+        &actions,
+        device,
+    )?;
+    let mut horizon_errors: BTreeMap<usize, (f32, usize)> = BTreeMap::new();
+    for (example, error) in encoded.iter().zip(&cosine_errors) {
+        let entry = horizon_errors.entry(example.horizon).or_default();
+        entry.0 += *error;
+        entry.1 += 1;
+    }
+    let loss_horizon = horizon_consistency_loss(&horizon_errors);
+    let loss_var = candle_latent_variance_loss_on_device(&contexts, config.latent_var_floor)?
+        .to_scalar::<f32>()?;
+    let loss_total = loss_jepa
+        + config.alpha_mse * loss_mse
+        + config.beta_aux * loss_aux
+        + config.gamma_horizon * loss_horizon
+        + config.delta_var * loss_var;
+    Ok(JepaTrainingLosses {
+        loss_jepa,
+        loss_mse,
+        loss_aux,
+        loss_horizon,
+        loss_var,
+        loss_total,
+    })
+}
+
+#[cfg(feature = "candle")]
+#[allow(dead_code)]
+fn candle_predict_training_targets_on_device(
+    predictor: &JepaPredictor,
+    contexts: &candle_core::Tensor,
+    actions: &candle_core::Tensor,
+    encoded: &JepaEncodedBatch,
+    device: &candle_core::Device,
+) -> Result<candle_core::Tensor> {
+    let dim = predictor.latent_dim;
+    let context_weights = candle_core::Tensor::from_slice(&predictor.context_weights, dim, device)?
+        .reshape((1, dim))?;
+    let action_weights = candle_core::Tensor::from_slice(&predictor.action_weights, dim, device)?
+        .reshape((1, dim))?;
+    let horizon_weights = candle_core::Tensor::from_slice(&predictor.horizon_weights, dim, device)?
+        .reshape((1, dim))?;
+    let bias = candle_core::Tensor::from_slice(&predictor.bias, dim, device)?.reshape((1, dim))?;
+    let horizons = candle_horizon_column(encoded, device)?;
+    let raw = contexts
+        .broadcast_mul(&context_weights)?
+        .broadcast_add(&actions.broadcast_mul(&action_weights)?)?
+        .broadcast_add(&horizons.broadcast_mul(&horizon_weights)?)?
+        .broadcast_add(&bias)?
+        .tanh()?;
+    candle_layer_norm_rows_and_l2_normalize(raw)
+}
+
+#[cfg(feature = "candle")]
+#[allow(dead_code)]
+fn candle_layer_norm_rows_and_l2_normalize(
+    tensor: candle_core::Tensor,
+) -> Result<candle_core::Tensor> {
+    let mean = tensor.mean_keepdim(1)?;
+    let centered = tensor.broadcast_sub(&mean)?;
+    let variance = centered.sqr()?.mean_keepdim(1)?;
+    let normalized = centered.broadcast_div(&(variance + 1e-6f64)?.sqrt()?)?;
+    let l2 = (normalized.sqr()?.sum_keepdim(1)? + 1e-12f64)?.sqrt()?;
+    Ok(normalized.broadcast_div(&l2)?)
+}
+
+#[cfg(feature = "candle")]
+#[allow(dead_code)]
+fn candle_cosine_errors_on_device(
+    predicted: &candle_core::Tensor,
+    targets: &candle_core::Tensor,
+) -> Result<Vec<f32>> {
+    let dot = predicted.broadcast_mul(targets)?.sum_keepdim(1)?;
+    let predicted_norm = predicted.sqr()?.sum_keepdim(1)?.sqrt()?;
+    let target_norm = targets.sqr()?.sum_keepdim(1)?.sqrt()?;
+    let denom = (predicted_norm.broadcast_mul(&target_norm)? + 1e-12f64)?;
+    let cosine = dot.broadcast_div(&denom)?;
+    Ok(cosine
+        .affine(-1.0, 1.0)?
+        .to_vec2::<f32>()?
+        .into_iter()
+        .map(|row| row.first().copied().unwrap_or_default())
+        .collect())
+}
+
+#[cfg(feature = "candle")]
+#[allow(dead_code)]
+fn candle_auxiliary_brier_on_device(
+    heads: &[JepaAuxiliaryHead],
+    encoded: &JepaEncodedBatch,
+    contexts: &candle_core::Tensor,
+    actions: &candle_core::Tensor,
+    device: &candle_core::Device,
+) -> Result<f32> {
+    if heads.is_empty() {
+        return Ok(0.0);
+    }
+    let rows = encoded.len();
+    let dim = contexts.dim(1)?;
+    let mut total = 0.0;
+    for head in heads {
+        let latent_weights = candle_core::Tensor::from_slice(&head.latent_weights, dim, device)?
+            .reshape((1, dim))?;
+        let action_weights = candle_core::Tensor::from_slice(&head.action_weights, dim, device)?
+            .reshape((1, dim))?;
+        let latent_score = contexts.broadcast_mul(&latent_weights)?.sum_keepdim(1)?;
+        let action_score = actions.broadcast_mul(&action_weights)?.sum_keepdim(1)?;
+        let scores = latent_score.broadcast_add(&action_score)?.broadcast_add(
+            &candle_core::Tensor::from_vec(vec![head.bias; rows], (rows, 1), device)?,
+        )?;
+        let probabilities = (scores.neg()?.exp()? + 1.0f64)?.recip()?;
+        let targets = candle_core::Tensor::from_vec(
+            encoded
+                .iter()
+                .map(|example| {
+                    if label_value(&example.labels, &head.label) {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                })
+                .collect::<Vec<_>>(),
+            (rows, 1),
+            device,
+        )?;
+        total += probabilities
+            .broadcast_sub(&targets)?
+            .sqr()?
+            .mean_all()?
+            .to_scalar::<f32>()?;
+    }
+    Ok(total / heads.len() as f32)
+}
+
+#[cfg(feature = "candle")]
+#[allow(dead_code)]
+fn candle_latent_variance_loss_on_device(
+    contexts: &candle_core::Tensor,
+    floor: f32,
+) -> Result<candle_core::Tensor> {
+    let mean = contexts.mean(0)?;
+    let std = contexts.broadcast_sub(&mean)?.sqr()?.mean(0)?.sqrt()?;
+    Ok(std
+        .affine(-1.0, f64::from(floor))?
+        .clamp(0.0f64, f64::MAX)?
+        .mean_all()?)
+}
+
+#[cfg(feature = "candle")]
+#[allow(dead_code)]
+fn candle_masked_mean(
+    values: &candle_core::Tensor,
+    mask: &candle_core::Tensor,
+    count: usize,
+    latent_dim: usize,
+) -> Result<candle_core::Tensor> {
+    if count == 0 {
+        return candle_core::Tensor::from_vec(vec![0.0; latent_dim], latent_dim, values.device())
+            .map_err(Into::into);
+    }
+    Ok(values
+        .broadcast_mul(mask)?
+        .sum(0)?
+        .affine(1.0 / count as f64, 0.0)?)
+}
+
+#[cfg(feature = "candle")]
+#[derive(Debug, Clone, Copy)]
+enum EncodedLatentRole {
+    Context,
+    Action,
+    Target,
+}
+
+#[cfg(feature = "candle")]
+#[allow(dead_code)]
+fn candle_encoded_matrix(
+    encoded: &JepaEncodedBatch,
+    latent_dim: usize,
+    role: EncodedLatentRole,
+    device: &candle_core::Device,
+) -> Result<candle_core::Tensor> {
+    if encoded.is_empty() {
+        bail!("at least one JEPA example is required");
+    }
+    let rows = encoded.len();
+    let values = encoded
+        .iter()
+        .flat_map(|example| {
+            let latent = match role {
+                EncodedLatentRole::Context => &example.context_latent,
+                EncodedLatentRole::Action => &example.action_latent,
+                EncodedLatentRole::Target => &example.target_latent,
+            };
+            (0..latent_dim).map(move |idx| latent.get(idx).copied().unwrap_or_default())
+        })
+        .collect::<Vec<_>>();
+    Ok(candle_core::Tensor::from_vec(
+        values,
+        (rows, latent_dim),
+        device,
+    )?)
+}
+
+#[cfg(feature = "candle")]
+#[allow(dead_code)]
+fn candle_horizon_column(
+    encoded: &JepaEncodedBatch,
+    device: &candle_core::Device,
+) -> Result<candle_core::Tensor> {
+    Ok(candle_core::Tensor::from_vec(
+        encoded
+            .iter()
+            .map(|example| normalized_horizon(example.horizon))
+            .collect::<Vec<_>>(),
+        (encoded.len(), 1),
+        device,
+    )?)
+}
+
 pub fn build_jepa_training_examples(
     rows: &[WorldTraceRow],
     config: &JepaTrainingConfig,
@@ -1598,6 +2131,43 @@ fn train_jepa_candidate_with_backend_status(
         return train_jepa_candidate_cpu(rows, config, status);
     }
 
+    if status.selected == BackendKind::Cuda {
+        #[cfg(feature = "cuda")]
+        {
+            match train_jepa_candidate_with_tensor_backend(
+                rows,
+                config,
+                status.clone(),
+                CandleCudaJepaBackend,
+            ) {
+                Ok(candidate) => return Ok(candidate),
+                Err(error) if allow_cpu_fallback => {
+                    let fallback = BackendStatus::cpu_fallback(
+                        status.requested,
+                        format!("jepa_native_backend_failed:{}:{error}", status.selected),
+                    );
+                    return train_jepa_candidate_cpu(rows, config, fallback);
+                }
+                Err(error) => {
+                    bail!(
+                        "native JEPA backend for {} failed; refusing to write an accelerator-labelled candidate: {error}",
+                        status.selected
+                    );
+                }
+            }
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            if allow_cpu_fallback {
+                let fallback = BackendStatus::cpu_fallback(
+                    status.requested,
+                    "jepa_native_backend_not_compiled:cuda",
+                );
+                return train_jepa_candidate_cpu(rows, config, fallback);
+            }
+        }
+    }
+
     if allow_cpu_fallback {
         let fallback = BackendStatus::cpu_fallback(
             status.requested,
@@ -1617,6 +2187,15 @@ fn train_jepa_candidate_cpu(
     config: &JepaTrainingConfig,
     backend_status: BackendStatus,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
+    train_jepa_candidate_with_tensor_backend(rows, config, backend_status, CpuJepaBackend)
+}
+
+fn train_jepa_candidate_with_tensor_backend<B: JepaTensorBackend>(
+    rows: &[WorldTraceRow],
+    config: &JepaTrainingConfig,
+    backend_status: BackendStatus,
+    backend: B,
+) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     config.validate()?;
     let examples = build_jepa_training_examples(rows, config)?;
     if examples.is_empty() {
@@ -1627,7 +2206,6 @@ fn train_jepa_candidate_cpu(
     let context_encoder = JepaTraceEncoder::new("context", config.latent_dim);
     let action_encoder = JepaTraceEncoder::new("action", config.latent_dim);
     let target_encoder = JepaTraceEncoder::ema_target_from(&context_encoder, config.ema_decay);
-    let backend = CpuJepaBackend;
     let encoders = JepaEncoderSet {
         context_encoder: context_encoder.clone(),
         action_encoder: action_encoder.clone(),
@@ -1653,9 +2231,12 @@ fn train_jepa_candidate_cpu(
     let transition_model = backend.fit_transition(config.latent_dim, &encoded)?;
     let mut metadata =
         JepaTraceModelMetadata::candidate(config, rows.len() as u64, examples.len() as u64);
-    metadata.backend = BackendKind::Cpu;
-    metadata.backend_execution =
-        JepaBackendExecutionReport::from_cpu_status(&backend_status, examples.len());
+    metadata.backend = backend_status.selected;
+    metadata.backend_execution = if backend_status.selected == BackendKind::Cpu {
+        JepaBackendExecutionReport::from_cpu_status(&backend_status, examples.len())
+    } else {
+        JepaBackendExecutionReport::native(&backend_status, examples.len(), true)
+    };
     let mut model = JepaTraceModel {
         metadata: metadata.clone(),
         context_encoder,
@@ -2879,6 +3460,7 @@ mod tests {
 
         assert_eq!(cuda.probe_jepa().status.requested, BackendKind::Cuda);
         assert_eq!(metal.probe_jepa().status.requested, BackendKind::Metal);
+        #[cfg(not(feature = "cuda"))]
         assert!(
             cuda.fit_predictor(8, &encoded)
                 .unwrap_err()
@@ -2968,6 +3550,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(feature = "cuda"))]
     #[test]
     fn selected_accelerator_without_native_jepa_fails_or_relabels_cpu() {
         let config = JepaTrainingConfig {
@@ -3004,8 +3587,62 @@ mod tests {
                 .backend_execution
                 .fallback_reason
                 .as_deref(),
-            Some("jepa_native_backend_not_implemented:cuda")
+            Some("jepa_native_backend_not_compiled:cuda")
         );
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn cuda_jepa_training_writes_native_execution_proof_when_available() {
+        if !crate::backend::cuda_runtime_available() {
+            return;
+        }
+        let config = JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 2,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..JepaTrainingConfig::default()
+        };
+        let status = BackendStatus {
+            requested: BackendKind::Cuda,
+            selected: BackendKind::Cuda,
+            framework: "candle".into(),
+            device_name: Some("cuda:0".into()),
+            experimental: false,
+            fallback_reason: None,
+        };
+
+        let (model, outcome) =
+            train_jepa_candidate_with_backend_status(&rows(), &config, status, false).unwrap();
+
+        assert_eq!(model.metadata.backend, BackendKind::Cuda);
+        assert_eq!(
+            outcome.metadata.backend_execution.selected_backend,
+            BackendKind::Cuda
+        );
+        assert_eq!(outcome.metadata.backend_execution.host_fallback_count, 0);
+        assert!(outcome.metadata.backend_execution.native_encode);
+        assert!(outcome.metadata.backend_execution.native_predictor_fit);
+        assert!(outcome.metadata.backend_execution.native_auxiliary_fit);
+        assert!(outcome.metadata.backend_execution.native_transition_fit);
+        assert!(outcome.metadata.backend_execution.native_loss_eval);
+        assert_eq!(
+            outcome.metadata.backend_execution.native_runtime_prediction,
+            Some(true)
+        );
+        assert!(
+            outcome
+                .metadata
+                .backend_execution
+                .hardware_validation_captured_at
+                .is_some()
+        );
+        assert_eq!(
+            model.transition_model.as_ref().unwrap().metadata.backend,
+            BackendKind::Cuda
+        );
+        validate_jepa_backend_execution(&model.metadata).unwrap();
     }
 
     #[test]
