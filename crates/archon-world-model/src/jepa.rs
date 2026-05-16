@@ -1211,7 +1211,11 @@ impl JepaTensorBackend for MlxMetalJepaBackend {
         JepaBackendProbeReport::from_probe(
             BackendKind::Metal,
             crate::backend::probe_backend(BackendKind::Metal),
-            false,
+            cfg!(all(
+                feature = "mlx-metal",
+                target_os = "macos",
+                target_arch = "aarch64"
+            )),
         )
     }
 
@@ -1220,8 +1224,15 @@ impl JepaTensorBackend for MlxMetalJepaBackend {
         encoders: &JepaEncoderSet,
         batch: &JepaFeatureBatch,
     ) -> Result<JepaEncodedBatch> {
-        let _ = (encoders, batch);
-        native_jepa_backend_unavailable(BackendKind::Metal)
+        #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+        {
+            mlx_encode_batch_on_device(encoders, batch)
+        }
+        #[cfg(not(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64")))]
+        {
+            let _ = (encoders, batch);
+            native_jepa_backend_unavailable(BackendKind::Metal)
+        }
     }
 
     fn fit_predictor(
@@ -1229,8 +1240,15 @@ impl JepaTensorBackend for MlxMetalJepaBackend {
         latent_dim: usize,
         encoded: &JepaEncodedBatch,
     ) -> Result<JepaPredictor> {
-        let _ = (latent_dim, encoded);
-        native_jepa_backend_unavailable(BackendKind::Metal)
+        #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+        {
+            mlx_fit_predictor_on_device(latent_dim, encoded)
+        }
+        #[cfg(not(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64")))]
+        {
+            let _ = (latent_dim, encoded);
+            native_jepa_backend_unavailable(BackendKind::Metal)
+        }
     }
 
     fn fit_auxiliary_heads(
@@ -1238,8 +1256,15 @@ impl JepaTensorBackend for MlxMetalJepaBackend {
         latent_dim: usize,
         encoded: &JepaEncodedBatch,
     ) -> Result<Vec<JepaAuxiliaryHead>> {
-        let _ = (latent_dim, encoded);
-        native_jepa_backend_unavailable(BackendKind::Metal)
+        #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+        {
+            mlx_fit_auxiliary_heads_on_device(latent_dim, encoded)
+        }
+        #[cfg(not(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64")))]
+        {
+            let _ = (latent_dim, encoded);
+            native_jepa_backend_unavailable(BackendKind::Metal)
+        }
     }
 
     fn fit_transition(
@@ -1247,8 +1272,18 @@ impl JepaTensorBackend for MlxMetalJepaBackend {
         latent_dim: usize,
         encoded: &JepaEncodedBatch,
     ) -> Result<CpuLatentTransitionModel> {
-        let _ = (latent_dim, encoded);
-        native_jepa_backend_unavailable(BackendKind::Metal)
+        #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+        {
+            crate::backend::mlx::mlx_metal_fit_transition_model(
+                latent_dim,
+                &encoded_transition_examples(encoded),
+            )
+        }
+        #[cfg(not(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64")))]
+        {
+            let _ = (latent_dim, encoded);
+            native_jepa_backend_unavailable(BackendKind::Metal)
+        }
     }
 
     fn training_losses(
@@ -1257,8 +1292,15 @@ impl JepaTensorBackend for MlxMetalJepaBackend {
         encoded: &JepaEncodedBatch,
         config: &JepaTrainingConfig,
     ) -> Result<JepaTrainingLosses> {
-        let _ = (model, encoded, config);
-        native_jepa_backend_unavailable(BackendKind::Metal)
+        #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+        {
+            mlx_training_losses_on_device(model, encoded, config)
+        }
+        #[cfg(not(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64")))]
+        {
+            let _ = (model, encoded, config);
+            native_jepa_backend_unavailable(BackendKind::Metal)
+        }
     }
 
     fn collapse_report(
@@ -1266,8 +1308,11 @@ impl JepaTensorBackend for MlxMetalJepaBackend {
         encoded: &JepaEncodedBatch,
         config: &JepaTrainingConfig,
     ) -> Result<JepaCollapseReport> {
-        let _ = (encoded, config);
-        native_jepa_backend_unavailable(BackendKind::Metal)
+        evaluate_representation_collapse(
+            &heldout_context_latents(encoded),
+            config.min_latent_std,
+            config.min_effective_rank_ratio,
+        )
     }
 
     fn predict_runtime(
@@ -1276,8 +1321,15 @@ impl JepaTensorBackend for MlxMetalJepaBackend {
         window: &TraceWindow,
         action: &TraceAction,
     ) -> Result<JepaRuntimePrediction> {
-        let _ = (model, window, action);
-        native_jepa_backend_unavailable(BackendKind::Metal)
+        #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+        {
+            mlx_jepa_predict_runtime_on_device(model, window, action)
+        }
+        #[cfg(not(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64")))]
+        {
+            let _ = (model, window, action);
+            native_jepa_backend_unavailable(BackendKind::Metal)
+        }
     }
 }
 
@@ -1825,7 +1877,7 @@ fn candle_masked_mean(
         .affine(1.0 / count as f64, 0.0)?)
 }
 
-#[cfg(feature = "candle")]
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 enum EncodedLatentRole {
     Context,
@@ -1877,6 +1929,599 @@ fn candle_horizon_column(
         (encoded.len(), 1),
         device,
     )?)
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_jepa_predict_runtime_on_device(
+    model: &JepaTraceModel,
+    window: &TraceWindow,
+    action: &TraceAction,
+) -> Result<JepaRuntimePrediction> {
+    let started = Instant::now();
+    let transition = model
+        .transition_model
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("JepaCheckpointMissing: transition model missing"))?;
+    let state = mlx_encode_window_array(&model.context_encoder, window)?;
+    let action = mlx_encode_action_array(&model.action_encoder, action)?;
+    let predicted_next_state = mlx_predict_transition_array(transition, &state, &action)?;
+    let auxiliary_scores = mlx_predict_auxiliary_scores(&model.auxiliary_heads, &state, &action)?;
+    Ok(JepaRuntimePrediction {
+        backend: BackendKind::Metal,
+        predicted_next_state,
+        auxiliary_scores,
+        latency_ms: started.elapsed().as_millis() as u64,
+    })
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_encode_batch_on_device(
+    encoders: &JepaEncoderSet,
+    batch: &JepaFeatureBatch,
+) -> Result<JepaEncodedBatch> {
+    use mlx_rs::Device;
+
+    Device::set_default(&Device::gpu());
+    batch
+        .iter()
+        .map(|example| {
+            Ok(EncodedJepaTrainingExample {
+                context_latent: mlx_encode_window_array(
+                    &encoders.context_encoder,
+                    &example.context,
+                )?,
+                action_latent: mlx_encode_action_array(&encoders.action_encoder, &example.action)?,
+                target_latent: mlx_encode_window_array(&encoders.target_encoder, &example.target)?,
+                horizon: example.horizon,
+                labels: example.labels.clone(),
+            })
+        })
+        .collect()
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_encode_window_array(encoder: &JepaTraceEncoder, window: &TraceWindow) -> Result<Vec<f32>> {
+    mlx_project_encoder(
+        encoder,
+        &window_features(window, encoder.latent_dim, &encoder.role)?,
+    )
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_encode_action_array(encoder: &JepaTraceEncoder, action: &TraceAction) -> Result<Vec<f32>> {
+    mlx_project_encoder(
+        encoder,
+        &action_features(action, encoder.latent_dim, &encoder.role)?,
+    )
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_project_encoder(encoder: &JepaTraceEncoder, features: &[f32]) -> Result<Vec<f32>> {
+    use mlx_rs::nn::gelu_approximate;
+    use mlx_rs::{Array, Device};
+
+    if features.len() != encoder.latent_dim {
+        bail!("jepa feature dimension mismatch");
+    }
+    Device::set_default(&Device::gpu());
+    let dim = encoder.latent_dim as i32;
+    let features = Array::from_slice(features, &[dim]);
+    let input_weights = Array::from_slice(&encoder.input_weights, &[dim]);
+    let hidden_bias = Array::from_slice(&encoder.hidden_bias, &[dim]);
+    let output_weights = Array::from_slice(&encoder.output_weights, &[dim]);
+    let output_bias = Array::from_slice(&encoder.output_bias, &[dim]);
+    let residual = Array::from_slice(&vec![encoder.residual_weight; encoder.latent_dim], &[dim]);
+    let hidden_scale = Array::from_slice(
+        &vec![1.0 - encoder.residual_weight; encoder.latent_dim],
+        &[dim],
+    );
+    let hidden = gelu_approximate(features.multiply(&input_weights)?.add(&hidden_bias)?)?;
+    let projected = hidden.multiply(&output_weights)?.add(&output_bias)?;
+    let output = features
+        .multiply(&residual)?
+        .add(&projected.multiply(&hidden_scale)?)?;
+    let output = mlx_layer_norm_and_l2_normalize(output)?;
+    output.eval()?;
+    Ok(output.try_as_slice::<f32>()?.to_vec())
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_layer_norm_and_l2_normalize(tensor: mlx_rs::Array) -> Result<mlx_rs::Array> {
+    use mlx_rs::Array;
+
+    let mean = tensor.mean(None)?;
+    let centered = tensor.subtract(&mean)?;
+    let variance = centered.square()?.mean(None)?;
+    let normalized = centered.divide(&variance.add(&Array::from_f32(1e-6))?.sqrt()?)?;
+    let l2 = normalized
+        .square()?
+        .sum(None)?
+        .add(&Array::from_f32(1e-12))?
+        .sqrt()?;
+    normalized.divide(&l2)
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_layer_norm_rows_and_l2_normalize(tensor: mlx_rs::Array) -> Result<mlx_rs::Array> {
+    use mlx_rs::Array;
+
+    let mean = tensor.mean_axis(1, Some(true))?;
+    let centered = tensor.subtract(&mean)?;
+    let variance = centered.square()?.mean_axis(1, Some(true))?;
+    let normalized = centered.divide(&variance.add(&Array::from_f32(1e-6))?.sqrt()?)?;
+    let l2 = normalized
+        .square()?
+        .sum_axis(1, Some(true))?
+        .add(&Array::from_f32(1e-12))?
+        .sqrt()?;
+    normalized.divide(&l2)
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_fit_predictor_on_device(
+    latent_dim: usize,
+    encoded: &JepaEncodedBatch,
+) -> Result<JepaPredictor> {
+    use mlx_rs::{Array, Device};
+
+    if encoded.is_empty() {
+        bail!("at least one JEPA example is required");
+    }
+    Device::set_default(&Device::gpu());
+    let contexts = mlx_encoded_matrix(encoded, latent_dim, EncodedLatentRole::Context)?;
+    let actions = mlx_encoded_matrix(encoded, latent_dim, EncodedLatentRole::Action)?;
+    let targets = mlx_encoded_matrix(encoded, latent_dim, EncodedLatentRole::Target)?;
+    let horizons = mlx_horizon_column(encoded);
+    let context_mean = contexts.mean_axis(0, None)?;
+    let action_mean = actions.mean_axis(0, None)?;
+    let target_mean = targets.mean_axis(0, None)?;
+    let horizon_mean = horizons.mean(None)?;
+    let centered_contexts = contexts.subtract(&context_mean)?;
+    let centered_actions = actions.subtract(&action_mean)?;
+    let centered_targets = targets.subtract(&target_mean)?;
+    let centered_horizons = horizons.subtract(&horizon_mean)?;
+    let context_var = centered_contexts
+        .square()?
+        .mean_axis(0, None)?
+        .add(&Array::from_f32(1e-6))?;
+    let action_var = centered_actions
+        .square()?
+        .mean_axis(0, None)?
+        .add(&Array::from_f32(1e-6))?;
+    let horizon_var = centered_horizons
+        .square()?
+        .mean(None)?
+        .add(&Array::from_f32(1e-6))?;
+    let context_weights = mlx_clamp(
+        &centered_contexts
+            .multiply(&centered_targets)?
+            .mean_axis(0, None)?
+            .divide(&context_var)?,
+        -2.0,
+        2.0,
+    )?;
+    let action_weights = mlx_clamp(
+        &centered_actions
+            .multiply(&centered_targets)?
+            .mean_axis(0, None)?
+            .divide(&action_var)?,
+        -2.0,
+        2.0,
+    )?;
+    let horizon_weights = mlx_clamp(
+        &centered_horizons
+            .multiply(&centered_targets)?
+            .mean_axis(0, None)?
+            .divide(&horizon_var)?,
+        -2.0,
+        2.0,
+    )?;
+    let bias = target_mean
+        .subtract(&context_weights.multiply(&context_mean)?)?
+        .subtract(&action_weights.multiply(&action_mean)?)?
+        .subtract(&horizon_weights.multiply(&horizon_mean)?)?;
+    Ok(JepaPredictor {
+        latent_dim,
+        context_weights: mlx_to_vec(&context_weights)?,
+        action_weights: mlx_to_vec(&action_weights)?,
+        horizon_weights: mlx_to_vec(&horizon_weights)?,
+        bias: mlx_to_vec(&bias)?,
+    })
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_fit_auxiliary_heads_on_device(
+    latent_dim: usize,
+    encoded: &JepaEncodedBatch,
+) -> Result<Vec<JepaAuxiliaryHead>> {
+    use mlx_rs::Device;
+
+    if encoded.is_empty() {
+        return Ok(fit_auxiliary_heads(latent_dim, encoded));
+    }
+    Device::set_default(&Device::gpu());
+    let contexts = mlx_encoded_matrix(encoded, latent_dim, EncodedLatentRole::Context)?;
+    let actions = mlx_encoded_matrix(encoded, latent_dim, EncodedLatentRole::Action)?;
+    auxiliary_labels()
+        .into_iter()
+        .map(|label| {
+            mlx_fit_auxiliary_head_on_device(label, latent_dim, encoded, &contexts, &actions)
+        })
+        .collect()
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_fit_auxiliary_head_on_device(
+    label: &'static str,
+    latent_dim: usize,
+    encoded: &JepaEncodedBatch,
+    contexts: &mlx_rs::Array,
+    actions: &mlx_rs::Array,
+) -> Result<JepaAuxiliaryHead> {
+    use mlx_rs::Array;
+
+    let positives = encoded
+        .iter()
+        .filter(|example| label_value(&example.labels, label))
+        .count();
+    let negatives = encoded.len().saturating_sub(positives);
+    let prevalence = ((positives as f32 + 1.0) / (encoded.len() as f32 + 2.0)).clamp(0.01, 0.99);
+    let mask_values = encoded
+        .iter()
+        .map(|example| {
+            if label_value(&example.labels, label) {
+                1.0
+            } else {
+                0.0
+            }
+        })
+        .collect::<Vec<_>>();
+    let pos_mask = Array::from_slice(&mask_values, &[encoded.len() as i32, 1]);
+    let neg_mask = Array::from_slice(
+        &mask_values
+            .into_iter()
+            .map(|value| 1.0 - value)
+            .collect::<Vec<_>>(),
+        &[encoded.len() as i32, 1],
+    );
+    let pos_context = mlx_masked_mean(contexts, &pos_mask, positives, latent_dim)?;
+    let neg_context = mlx_masked_mean(contexts, &neg_mask, negatives, latent_dim)?;
+    let pos_action = mlx_masked_mean(actions, &pos_mask, positives, latent_dim)?;
+    let neg_action = mlx_masked_mean(actions, &neg_mask, negatives, latent_dim)?;
+    let latent_weights = mlx_affine(
+        &mlx_clamp(&pos_context.subtract(&neg_context)?, -1.0, 1.0)?,
+        0.25,
+        0.0,
+    )?;
+    let action_weights = mlx_affine(
+        &mlx_clamp(&pos_action.subtract(&neg_action)?, -1.0, 1.0)?,
+        0.25,
+        0.0,
+    )?;
+    Ok(JepaAuxiliaryHead {
+        label: label.to_string(),
+        bias: (prevalence / (1.0 - prevalence)).ln(),
+        latent_weights: mlx_to_vec(&latent_weights)?,
+        action_weights: mlx_to_vec(&action_weights)?,
+    })
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_training_losses_on_device(
+    model: &JepaTraceModel,
+    encoded: &JepaEncodedBatch,
+    config: &JepaTrainingConfig,
+) -> Result<JepaTrainingLosses> {
+    use mlx_rs::Device;
+
+    if encoded.is_empty() {
+        bail!("at least one JEPA example is required");
+    }
+    Device::set_default(&Device::gpu());
+    let contexts = mlx_encoded_matrix(
+        encoded,
+        model.metadata.latent_dim,
+        EncodedLatentRole::Context,
+    )?;
+    let actions = mlx_encoded_matrix(
+        encoded,
+        model.metadata.latent_dim,
+        EncodedLatentRole::Action,
+    )?;
+    let targets = mlx_encoded_matrix(
+        encoded,
+        model.metadata.latent_dim,
+        EncodedLatentRole::Target,
+    )?;
+    let predicted =
+        mlx_predict_training_targets_on_device(&model.predictor, &contexts, &actions, encoded)?;
+    let cosine_errors = mlx_cosine_errors_on_device(&predicted, &targets)?;
+    let loss_jepa = cosine_errors.iter().sum::<f32>() / cosine_errors.len().max(1) as f32;
+    let loss_mse = predicted
+        .subtract(&targets)?
+        .square()?
+        .mean(None)?
+        .item::<f32>();
+    let loss_aux =
+        mlx_auxiliary_brier_on_device(&model.auxiliary_heads, encoded, &contexts, &actions)?;
+    let mut horizon_errors: BTreeMap<usize, (f32, usize)> = BTreeMap::new();
+    for (example, error) in encoded.iter().zip(&cosine_errors) {
+        let entry = horizon_errors.entry(example.horizon).or_default();
+        entry.0 += *error;
+        entry.1 += 1;
+    }
+    let loss_horizon = horizon_consistency_loss(&horizon_errors);
+    let loss_var =
+        mlx_latent_variance_loss_on_device(&contexts, config.latent_var_floor)?.item::<f32>();
+    let loss_total = loss_jepa
+        + config.alpha_mse * loss_mse
+        + config.beta_aux * loss_aux
+        + config.gamma_horizon * loss_horizon
+        + config.delta_var * loss_var;
+    Ok(JepaTrainingLosses {
+        loss_jepa,
+        loss_mse,
+        loss_aux,
+        loss_horizon,
+        loss_var,
+        loss_total,
+    })
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_predict_training_targets_on_device(
+    predictor: &JepaPredictor,
+    contexts: &mlx_rs::Array,
+    actions: &mlx_rs::Array,
+    encoded: &JepaEncodedBatch,
+) -> Result<mlx_rs::Array> {
+    use mlx_rs::Array;
+    use mlx_rs::ops::tanh;
+
+    let dim = predictor.latent_dim as i32;
+    let context_weights = Array::from_slice(&predictor.context_weights, &[1, dim]);
+    let action_weights = Array::from_slice(&predictor.action_weights, &[1, dim]);
+    let horizon_weights = Array::from_slice(&predictor.horizon_weights, &[1, dim]);
+    let bias = Array::from_slice(&predictor.bias, &[1, dim]);
+    let horizons = mlx_horizon_column(encoded);
+    let raw = contexts
+        .multiply(&context_weights)?
+        .add(&actions.multiply(&action_weights)?)?
+        .add(&horizons.multiply(&horizon_weights)?)?
+        .add(&bias)?;
+    mlx_layer_norm_rows_and_l2_normalize(tanh(&raw)?)
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_predict_transition_array(
+    transition: &CpuLatentTransitionModel,
+    state: &[f32],
+    action: &[f32],
+) -> Result<Vec<f32>> {
+    crate::backend::mlx::mlx_metal_predict_next(transition, state, action)
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_predict_auxiliary_scores(
+    heads: &[JepaAuxiliaryHead],
+    state: &[f32],
+    action: &[f32],
+) -> Result<Vec<(String, f32)>> {
+    use mlx_rs::Array;
+    use mlx_rs::ops::sigmoid;
+
+    let dim = state.len() as i32;
+    let state = Array::from_slice(state, &[1, dim]);
+    let action = Array::from_slice(action, &[1, dim]);
+    heads
+        .iter()
+        .map(|head| {
+            let latent_weights = Array::from_slice(&head.latent_weights, &[1, dim]);
+            let action_weights = Array::from_slice(&head.action_weights, &[1, dim]);
+            let score = state
+                .multiply(&latent_weights)?
+                .sum(None)?
+                .add(&action.multiply(&action_weights)?.sum(None)?)?
+                .add(&Array::from_f32(head.bias))?;
+            let probability = sigmoid(&score)?;
+            Ok((head.label.clone(), probability.item::<f32>()))
+        })
+        .collect()
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_cosine_errors_on_device(
+    predicted: &mlx_rs::Array,
+    targets: &mlx_rs::Array,
+) -> Result<Vec<f32>> {
+    use mlx_rs::Array;
+
+    let dot = predicted.multiply(targets)?.sum_axis(1, Some(true))?;
+    let predicted_norm = predicted
+        .square()?
+        .sum_axis(1, Some(true))?
+        .add(&Array::from_f32(1e-12))?
+        .sqrt()?;
+    let target_norm = targets
+        .square()?
+        .sum_axis(1, Some(true))?
+        .add(&Array::from_f32(1e-12))?
+        .sqrt()?;
+    let cosine = dot.divide(&predicted_norm.multiply(&target_norm)?)?;
+    Ok(mlx_to_vec(&mlx_affine(&cosine, -1.0, 1.0)?)?)
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_auxiliary_brier_on_device(
+    heads: &[JepaAuxiliaryHead],
+    encoded: &JepaEncodedBatch,
+    contexts: &mlx_rs::Array,
+    actions: &mlx_rs::Array,
+) -> Result<f32> {
+    use mlx_rs::Array;
+    use mlx_rs::ops::sigmoid;
+
+    if heads.is_empty() {
+        return Ok(0.0);
+    }
+    let rows = encoded.len() as i32;
+    let dim = contexts.dim(1);
+    let mut total = 0.0;
+    for head in heads {
+        let latent_weights = Array::from_slice(&head.latent_weights, &[1, dim]);
+        let action_weights = Array::from_slice(&head.action_weights, &[1, dim]);
+        let scores = contexts
+            .multiply(&latent_weights)?
+            .sum_axis(1, Some(true))?
+            .add(&actions.multiply(&action_weights)?.sum_axis(1, Some(true))?)?
+            .add(&Array::from_slice(
+                &vec![head.bias; rows as usize],
+                &[rows, 1],
+            ))?;
+        let probabilities = sigmoid(&scores)?;
+        let targets = Array::from_slice(
+            &encoded
+                .iter()
+                .map(|example| {
+                    if label_value(&example.labels, &head.label) {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                })
+                .collect::<Vec<_>>(),
+            &[rows, 1],
+        );
+        total += probabilities
+            .subtract(&targets)?
+            .square()?
+            .mean(None)?
+            .item::<f32>();
+    }
+    Ok(total / heads.len() as f32)
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_latent_variance_loss_on_device(
+    contexts: &mlx_rs::Array,
+    floor: f32,
+) -> Result<mlx_rs::Array> {
+    let mean = contexts.mean_axis(0, None)?;
+    let std = contexts
+        .subtract(&mean)?
+        .square()?
+        .mean_axis(0, None)?
+        .sqrt()?;
+    mlx_clamp(&mlx_affine(&std, -1.0, floor)?, 0.0, f32::MAX)?.mean(None)
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_masked_mean(
+    values: &mlx_rs::Array,
+    mask: &mlx_rs::Array,
+    count: usize,
+    latent_dim: usize,
+) -> Result<mlx_rs::Array> {
+    use mlx_rs::Array;
+
+    if count == 0 {
+        return Ok(Array::from_slice(
+            &vec![0.0; latent_dim],
+            &[latent_dim as i32],
+        ));
+    }
+    values
+        .multiply(mask)?
+        .sum_axis(0, None)?
+        .divide(&Array::from_f32(count as f32))
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_encoded_matrix(
+    encoded: &JepaEncodedBatch,
+    latent_dim: usize,
+    role: EncodedLatentRole,
+) -> Result<mlx_rs::Array> {
+    use mlx_rs::Array;
+
+    if encoded.is_empty() {
+        bail!("at least one JEPA example is required");
+    }
+    let values = encoded
+        .iter()
+        .flat_map(|example| {
+            let latent = match role {
+                EncodedLatentRole::Context => &example.context_latent,
+                EncodedLatentRole::Action => &example.action_latent,
+                EncodedLatentRole::Target => &example.target_latent,
+            };
+            (0..latent_dim).map(move |idx| latent.get(idx).copied().unwrap_or_default())
+        })
+        .collect::<Vec<_>>();
+    Ok(Array::from_slice(
+        &values,
+        &[encoded.len() as i32, latent_dim as i32],
+    ))
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_horizon_column(encoded: &JepaEncodedBatch) -> mlx_rs::Array {
+    mlx_rs::Array::from_slice(
+        &encoded
+            .iter()
+            .map(|example| normalized_horizon(example.horizon))
+            .collect::<Vec<_>>(),
+        &[encoded.len() as i32, 1],
+    )
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_affine(array: &mlx_rs::Array, mul: f32, add: f32) -> Result<mlx_rs::Array> {
+    use mlx_rs::Array;
+
+    array
+        .multiply(&Array::from_f32(mul))?
+        .add(&Array::from_f32(add))
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_clamp(array: &mlx_rs::Array, min: f32, max: f32) -> Result<mlx_rs::Array> {
+    use mlx_rs::Array;
+    use mlx_rs::ops::{maximum, minimum};
+
+    minimum(
+        &maximum(array, &Array::from_f32(min))?,
+        &Array::from_f32(max),
+    )
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[allow(dead_code)]
+fn mlx_to_vec(array: &mlx_rs::Array) -> Result<Vec<f32>> {
+    array.eval()?;
+    Ok(array.try_as_slice::<f32>()?.to_vec())
 }
 
 pub fn build_jepa_training_examples(
@@ -2162,6 +2807,43 @@ fn train_jepa_candidate_with_backend_status(
                 let fallback = BackendStatus::cpu_fallback(
                     status.requested,
                     "jepa_native_backend_not_compiled:cuda",
+                );
+                return train_jepa_candidate_cpu(rows, config, fallback);
+            }
+        }
+    }
+
+    if status.selected == BackendKind::Metal {
+        #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+        {
+            match train_jepa_candidate_with_tensor_backend(
+                rows,
+                config,
+                status.clone(),
+                MlxMetalJepaBackend,
+            ) {
+                Ok(candidate) => return Ok(candidate),
+                Err(error) if allow_cpu_fallback => {
+                    let fallback = BackendStatus::cpu_fallback(
+                        status.requested,
+                        format!("jepa_native_backend_failed:{}:{error}", status.selected),
+                    );
+                    return train_jepa_candidate_cpu(rows, config, fallback);
+                }
+                Err(error) => {
+                    bail!(
+                        "native JEPA backend for {} failed; refusing to write an accelerator-labelled candidate: {error}",
+                        status.selected
+                    );
+                }
+            }
+        }
+        #[cfg(not(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64")))]
+        {
+            if allow_cpu_fallback {
+                let fallback = BackendStatus::cpu_fallback(
+                    status.requested,
+                    "jepa_native_backend_not_compiled:metal",
                 );
                 return train_jepa_candidate_cpu(rows, config, fallback);
             }
@@ -3591,6 +4273,47 @@ mod tests {
         );
     }
 
+    #[cfg(not(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64")))]
+    #[test]
+    fn selected_metal_without_native_target_fails_or_relabels_cpu() {
+        let config = JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 2,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..JepaTrainingConfig::default()
+        };
+        let status = BackendStatus {
+            requested: BackendKind::Metal,
+            selected: BackendKind::Metal,
+            framework: "mlx-rs".into(),
+            device_name: Some("metal:0".into()),
+            experimental: true,
+            fallback_reason: None,
+        };
+
+        let error =
+            train_jepa_candidate_with_backend_status(&rows(), &config, status.clone(), false)
+                .unwrap_err();
+        assert!(error.to_string().contains("native JEPA backend"));
+
+        let (model, outcome) =
+            train_jepa_candidate_with_backend_status(&rows(), &config, status, true).unwrap();
+        assert_eq!(model.metadata.backend, BackendKind::Cpu);
+        assert_eq!(
+            outcome.metadata.backend_execution.selected_backend,
+            BackendKind::Cpu
+        );
+        assert_eq!(
+            outcome
+                .metadata
+                .backend_execution
+                .fallback_reason
+                .as_deref(),
+            Some("jepa_native_backend_not_compiled:metal")
+        );
+    }
+
     #[cfg(feature = "cuda")]
     #[test]
     fn cuda_jepa_training_writes_native_execution_proof_when_available() {
@@ -3641,6 +4364,60 @@ mod tests {
         assert_eq!(
             model.transition_model.as_ref().unwrap().metadata.backend,
             BackendKind::Cuda
+        );
+        validate_jepa_backend_execution(&model.metadata).unwrap();
+    }
+
+    #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn mlx_jepa_training_writes_native_execution_proof_when_available() {
+        if !crate::backend::metal_runtime_available() {
+            return;
+        }
+        let config = JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 2,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..JepaTrainingConfig::default()
+        };
+        let status = BackendStatus {
+            requested: BackendKind::Metal,
+            selected: BackendKind::Metal,
+            framework: "mlx-rs".into(),
+            device_name: Some("metal:0".into()),
+            experimental: true,
+            fallback_reason: None,
+        };
+
+        let (model, outcome) =
+            train_jepa_candidate_with_backend_status(&rows(), &config, status, false).unwrap();
+
+        assert_eq!(model.metadata.backend, BackendKind::Metal);
+        assert_eq!(
+            outcome.metadata.backend_execution.selected_backend,
+            BackendKind::Metal
+        );
+        assert_eq!(outcome.metadata.backend_execution.host_fallback_count, 0);
+        assert!(outcome.metadata.backend_execution.native_encode);
+        assert!(outcome.metadata.backend_execution.native_predictor_fit);
+        assert!(outcome.metadata.backend_execution.native_auxiliary_fit);
+        assert!(outcome.metadata.backend_execution.native_transition_fit);
+        assert!(outcome.metadata.backend_execution.native_loss_eval);
+        assert_eq!(
+            outcome.metadata.backend_execution.native_runtime_prediction,
+            Some(true)
+        );
+        assert!(
+            outcome
+                .metadata
+                .backend_execution
+                .hardware_validation_captured_at
+                .is_some()
+        );
+        assert_eq!(
+            model.transition_model.as_ref().unwrap().metadata.backend,
+            BackendKind::Metal
         );
         validate_jepa_backend_execution(&model.metadata).unwrap();
     }
