@@ -131,8 +131,10 @@ pub fn mlx_metal_fit_transition_model(
 ) -> Result<CpuLatentTransitionModel> {
     use mlx_rs::{Array, Device};
 
+    if examples.is_empty() {
+        anyhow::bail!("at least one transition example is required");
+    }
     Device::set_default(&Device::gpu());
-    let mut model = CpuLatentTransitionModel::fit(state_dim, examples)?;
     let rows = examples.len();
     let shape = &[rows as i32, state_dim as i32];
     let states = Array::from_slice(
@@ -172,12 +174,18 @@ pub fn mlx_metal_fit_transition_model(
     let transition_bias = next_means
         .subtract(&state_weights.multiply(&state_means)?)?
         .subtract(&action_weights.multiply(&action_means)?)?;
+    let mean_delta = next_means.subtract(&state_means)?;
 
-    model.metadata.backend = BackendKind::Metal;
-    model.state_weights = state_weights.try_as_slice::<f32>()?.to_vec();
-    model.action_weights = action_weights.try_as_slice::<f32>()?.to_vec();
-    model.transition_bias = transition_bias.try_as_slice::<f32>()?.to_vec();
-    Ok(model)
+    CpuLatentTransitionModel::from_fitted_transition_parts(
+        state_dim,
+        BackendKind::Metal,
+        rows as u64,
+        state_weights.try_as_slice::<f32>()?.to_vec(),
+        action_weights.try_as_slice::<f32>()?.to_vec(),
+        transition_bias.try_as_slice::<f32>()?.to_vec(),
+        mean_delta.try_as_slice::<f32>()?.to_vec(),
+        examples,
+    )
 }
 
 #[cfg(not(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64")))]

@@ -227,7 +227,9 @@ fn candle_fit_transition_model_on_device(
     backend: BackendKind,
     device: &candle_core::Device,
 ) -> Result<CpuLatentTransitionModel> {
-    let mut model = CpuLatentTransitionModel::fit(state_dim, examples)?;
+    if examples.is_empty() {
+        anyhow::bail!("at least one transition example is required");
+    }
     let rows = examples.len();
     let states = candle_core::Tensor::from_vec(
         flatten_examples(examples, state_dim, |example| &example.state),
@@ -260,12 +262,18 @@ fn candle_fit_transition_model_on_device(
     let transition_bias = next_means
         .broadcast_sub(&weighted_state)?
         .broadcast_sub(&weighted_action)?;
+    let mean_delta = next_means.broadcast_sub(&state_means)?;
 
-    model.metadata.backend = backend;
-    model.state_weights = state_weights.to_vec1::<f32>()?;
-    model.action_weights = action_weights.to_vec1::<f32>()?;
-    model.transition_bias = transition_bias.to_vec1::<f32>()?;
-    Ok(model)
+    CpuLatentTransitionModel::from_fitted_transition_parts(
+        state_dim,
+        backend,
+        rows as u64,
+        state_weights.to_vec1::<f32>()?,
+        action_weights.to_vec1::<f32>()?,
+        transition_bias.to_vec1::<f32>()?,
+        mean_delta.to_vec1::<f32>()?,
+        examples,
+    )
 }
 
 #[cfg(feature = "candle")]

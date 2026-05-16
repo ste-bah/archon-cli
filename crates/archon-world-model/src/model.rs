@@ -115,6 +115,49 @@ impl CpuLatentTransitionModel {
                     - action_weights[idx] * action_means[idx]
             })
             .collect::<Vec<_>>();
+        Self::from_fitted_transition_parts(
+            state_dim,
+            BackendKind::Cpu,
+            examples.len() as u64,
+            state_weights,
+            action_weights,
+            transition_bias,
+            mean_delta,
+            examples,
+        )
+    }
+
+    pub(crate) fn from_fitted_transition_parts(
+        state_dim: usize,
+        backend: BackendKind,
+        row_count: u64,
+        state_weights: Vec<f32>,
+        action_weights: Vec<f32>,
+        transition_bias: Vec<f32>,
+        mean_delta: Vec<f32>,
+        examples: &[LatentTransitionExample],
+    ) -> Result<Self> {
+        if examples.is_empty() {
+            bail!("at least one transition example is required");
+        }
+        if state_weights.len() != state_dim
+            || action_weights.len() != state_dim
+            || transition_bias.len() != state_dim
+            || mean_delta.len() != state_dim
+        {
+            bail!("transition model parameter dimensions must match state_dim");
+        }
+        if state_weights.iter().any(|value| !value.is_finite())
+            || action_weights.iter().any(|value| !value.is_finite())
+            || transition_bias.iter().any(|value| !value.is_finite())
+            || mean_delta.iter().any(|value| !value.is_finite())
+        {
+            bail!("transition model parameters must be finite");
+        }
+        for example in examples {
+            validate_example(state_dim, example)?;
+        }
+
         let auxiliary_heads = fit_auxiliary_heads(state_dim, examples);
         let parameter_count = (state_weights.len()
             + action_weights.len()
@@ -123,8 +166,7 @@ impl CpuLatentTransitionModel {
                 .iter()
                 .map(|head| 1 + head.state_weights.len() + head.action_weights.len())
                 .sum::<usize>()) as u64;
-        let mut metadata =
-            LatentWorldModelMetadata::candidate(state_dim, BackendKind::Cpu, examples.len() as u64);
+        let mut metadata = LatentWorldModelMetadata::candidate(state_dim, backend, row_count);
         metadata.parameter_count = parameter_count;
 
         Ok(Self {

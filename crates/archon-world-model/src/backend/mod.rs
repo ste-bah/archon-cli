@@ -317,4 +317,30 @@ mod tests {
                 .contains("self_test_failed")
         );
     }
+
+    #[test]
+    fn accelerator_transition_fit_paths_do_not_cpu_fit_first() {
+        let candle = include_str!("candle.rs");
+        let candle_body = function_source(candle, "fn candle_fit_transition_model_on_device");
+        assert!(
+            !candle_body.contains("CpuLatentTransitionModel::fit"),
+            "Candle accelerator transition fitting must not call CPU fit first"
+        );
+
+        let mlx = include_str!("mlx.rs");
+        let mlx_body = function_source(mlx, "pub fn mlx_metal_fit_transition_model");
+        assert!(
+            !mlx_body.contains("CpuLatentTransitionModel::fit"),
+            "MLX accelerator transition fitting must not call CPU fit first"
+        );
+    }
+
+    fn function_source<'a>(source: &'a str, marker: &str) -> &'a str {
+        let start = source
+            .find(marker)
+            .expect("backend source should contain marker");
+        let rest = &source[start..];
+        let end = rest.find("\n#[cfg").unwrap_or(rest.len());
+        &rest[..end]
+    }
 }
