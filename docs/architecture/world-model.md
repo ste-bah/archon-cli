@@ -29,6 +29,10 @@ World-model state lives under `~/.archon/world-model/`:
 | `ledgers/world-advisor-events.jsonl` | fail-open runtime advisor events |
 | `ledgers/world-runtime-outcomes.jsonl` | runtime outcomes linked to predictions |
 | `ledgers/world-bundle-attachments.jsonl` | audited pipeline bundle attachments |
+| `ledgers/world-guardrail-actions.jsonl` | guarded interactive, tool-run, and pipeline-step actions |
+| `ledgers/world-guardrail-decisions.jsonl` | guardrail policy decisions and required actions |
+| `ledgers/world-guardrail-verifications.jsonl` | verification outcomes, including command exit status, manual overrides, and inconclusive results |
+| `ledgers/world-guardrail-outcomes.jsonl` | final guarded-action outcomes and structured learning labels |
 | `ledgers/embedding-policy-events.jsonl` | external embedding policy audit events |
 | `candidates/` | candidate checkpoints |
 | `jepa/candidates/` | JEPA representation candidate manifests and checkpoints |
@@ -45,7 +49,9 @@ The advisor is fail-open. When the corpus is cold, the store is unavailable, tra
 
 Runtime hooks exist for shell and TUI coding/research pipelines, memory reindex, governed agent evolution, and observed provider-runtime calls. Coding/research pipelines also record pre-run counterfactual and shadow advice for alternatives such as verify-first, resume-existing, memory-surfacing, and provider fallback. Completed audited pipelines link outcomes back to persisted predictions and bundle attachment ledgers when a prediction exists.
 
-The implementation is advisory-only. Any future behavior-changing use is gated by policy, shadow evaluation, and user approval.
+Runtime guardrails add a policy layer for interactive sessions, coding tasks, tool runs, verification runs, and pipeline steps. Advisory mode records risk without blocking. Guarded and strict modes gate completion records, not streamed text: required verification must pass, be explicitly skipped by a manual override, or the action remains blocked. Real command/tool verification uses structured execution signals such as exit codes; LLM quality scores do not count as passed tests or builds.
+
+Guardrail prediction remains fail-open. If prediction or guardrail storage is unavailable, Archon records the unavailable state and continues foreground work. Promotion and model selection gates remain fail-closed.
 
 ## JEPA Representation Layer
 
@@ -83,6 +89,14 @@ archon world score-actions --task "finish feature" --actions actions.json
 archon world explain <prediction-id>
 archon world record-outcome <prediction-id> --actual-summary "tests passed"
 archon world rollback <model-id>
+archon world guard status
+archon world guard inspect <action-id>
+archon world guard list [--session <id>] [--surface <surface>] [--status all|blocked|open|complete]
+archon world guard replay-outcomes [--session <id>]
+archon world guard approve <action-id> --reason "operator verified manually"
+archon world guard skip-verification <action-id> --reason "not applicable"
+archon world guard policy show
+archon world guard policy set --interactive-mode guarded --pipeline-mode strict
 ```
 
 ## Hardware Backends

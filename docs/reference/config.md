@@ -780,6 +780,26 @@ min_baseline_improvement = 0.05
 min_heldout_examples = 200
 min_training_examples = 2000
 
+[learning.world_model.guardrails]
+enabled = true
+interactive_mode = "advisory"
+pipeline_mode = "guarded"
+tool_run_mode = "learn_only"
+verification_run_mode = "learn_only"
+high_risk_threshold = 0.70
+medium_risk_threshold = 0.45
+critical_risk_threshold = 0.85
+require_tests_for_coding_high_risk = true
+require_build_for_coding_high_risk = true
+require_lint_for_coding_high_risk = false
+require_typecheck_for_coding_high_risk = false
+require_plan_review_for_plan_drift = true
+require_source_check_for_research_high_risk = true
+require_manual_approval_for_critical = false
+max_guardrail_overhead_ms = 40 # policy/decision overhead cap after prediction returns
+record_outcomes_without_prediction = true
+max_guardrail_events_per_session = 500
+
 [learning.world_model.eval]
 bootstrap_iterations = 1000
 confidence_level = 0.95
@@ -829,6 +849,24 @@ retain_checkpoint_count = 5
 | `jepa.enabled` | `false` | Keeps JEPA candidate training opt-in while `latent_transition` stays the default model kind. |
 | `jepa.latent_dim` | `384` | JEPA vector size. Training rejects a value that differs from `state_dim`. |
 | `jepa.prediction_horizons` | `[1, 3, 5]` | Future trace horizons used for JEPA candidate examples and horizon-loss accounting. |
+| `guardrails.enabled` | `true` | Enables runtime guardrail ledgers and policy decisions. |
+| `guardrails.interactive_mode` | `"advisory"` | Normal session mode: `off`, `learn_only`, `advisory`, `guarded`, or `strict`. |
+| `guardrails.pipeline_mode` | `"guarded"` | Pipeline and pipeline-step mode. High-risk pipeline completion requires verification unless overridden. |
+| `guardrails.tool_run_mode` | `"learn_only"` | Tool-run surface mode. |
+| `guardrails.verification_run_mode` | `"learn_only"` | Verification command surface mode. |
+| `guardrails.high_risk_threshold` | `0.70` | Inclusive score threshold for high risk. |
+| `guardrails.medium_risk_threshold` | `0.45` | Inclusive score threshold for medium risk. |
+| `guardrails.critical_risk_threshold` | `0.85` | Inclusive score threshold for critical risk. |
+| `guardrails.require_tests_for_coding_high_risk` | `true` | Adds a test requirement for high-risk coding/debug/refactor work. |
+| `guardrails.require_build_for_coding_high_risk` | `true` | Adds a build/check requirement for high-risk coding/debug/refactor work. |
+| `guardrails.require_lint_for_coding_high_risk` | `false` | Adds a lint requirement for high-risk coding/debug/refactor work when enabled. |
+| `guardrails.require_typecheck_for_coding_high_risk` | `false` | Adds a typecheck requirement for high-risk coding/debug/refactor work when enabled. |
+| `guardrails.require_plan_review_for_plan_drift` | `true` | Requires a plan-vs-goal review when predicted plan drift is high. |
+| `guardrails.require_source_check_for_research_high_risk` | `true` | Requires source evidence checks for high-risk research answers. |
+| `guardrails.require_manual_approval_for_critical` | `false` | Requires explicit approval for critical-risk actions when enabled. |
+| `guardrails.max_guardrail_overhead_ms` | `40` | Runtime cap for guardrail policy/decision overhead after prediction returns. Prediction latency is governed separately by `max_prediction_latency_ms` and `jepa.max_prediction_latency_ms`; exceeding this overhead cap fails open and records `guardrail_overhead_exceeded`. |
+| `guardrails.record_outcomes_without_prediction` | `true` | Records structured guardrail outcomes even when the advisor failed open without a prediction. |
+| `guardrails.max_guardrail_events_per_session` | `500` | Reserved cap for guardrail event volume per session. |
 | `auto_trainer.idle_required_ms` | `300000` | Suspends training while foreground work is active. |
 | `retention.jsonl_rotate_mb` | `500` | Rotates raw JSONL ledgers. |
 | `retention.raw_retention_days` | `90` | Deletes old raw ledgers, while Cozo summaries remain. |

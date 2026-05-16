@@ -138,6 +138,7 @@ pub enum GuardrailReasonCode {
     VerificationFailed,
     ManualApprovalRequired,
     AdvisorUnavailable,
+    GuardrailOverheadExceeded,
     LowRiskAllowed,
 }
 
@@ -866,6 +867,36 @@ pub fn guardrail_budget_allows_prediction_latency(
         && guardrail_overhead_ms <= max_guardrail_overhead_ms
 }
 
+pub fn enforce_guardrail_overhead_budget(
+    mut decision: WorldGuardrailDecision,
+    guardrail_overhead_ms: u64,
+    max_guardrail_overhead_ms: u64,
+) -> WorldGuardrailDecision {
+    if guardrail_overhead_ms <= max_guardrail_overhead_ms {
+        return decision;
+    }
+
+    decision.required_actions.clear();
+    decision.allowed_to_continue = true;
+    decision.allowed_to_finalize = true;
+    decision
+        .reason_codes
+        .retain(|reason| *reason != GuardrailReasonCode::LowRiskAllowed);
+    if !decision
+        .reason_codes
+        .contains(&GuardrailReasonCode::GuardrailOverheadExceeded)
+    {
+        decision
+            .reason_codes
+            .push(GuardrailReasonCode::GuardrailOverheadExceeded);
+    }
+    decision
+        .reason_codes
+        .sort_by_key(|reason| format!("{reason:?}"));
+    decision.reason_codes.dedup();
+    decision
+}
+
 pub fn labels_from_guardrail_outcome(outcome: &WorldGuardrailOutcome) -> WorldLabelSet {
     let mut labels = WorldLabelSet::default();
     let verification_failed = outcome
@@ -913,28 +944,28 @@ pub fn labels_from_guardrail_outcome(outcome: &WorldGuardrailOutcome) -> WorldLa
 }
 
 pub fn append_guarded_action(root: &Path, record: &WorldGuardedAction) -> anyhow::Result<PathBuf> {
-    append_jsonl(root, ACTIONS_LEDGER, record)
+    append_jsonl_idempotent(root, ACTIONS_LEDGER, record)
 }
 
 pub fn append_guardrail_decision(
     root: &Path,
     record: &WorldGuardrailDecision,
 ) -> anyhow::Result<PathBuf> {
-    append_jsonl(root, DECISIONS_LEDGER, record)
+    append_jsonl_idempotent(root, DECISIONS_LEDGER, record)
 }
 
 pub fn append_verification_outcome(
     root: &Path,
     record: &VerificationOutcome,
 ) -> anyhow::Result<PathBuf> {
-    append_jsonl(root, VERIFICATIONS_LEDGER, record)
+    append_jsonl_idempotent(root, VERIFICATIONS_LEDGER, record)
 }
 
 pub fn append_guardrail_outcome(
     root: &Path,
     record: &WorldGuardrailOutcome,
 ) -> anyhow::Result<PathBuf> {
-    append_jsonl(root, OUTCOMES_LEDGER, record)
+    append_jsonl_idempotent(root, OUTCOMES_LEDGER, record)
 }
 
 pub fn load_guarded_actions(root: &Path) -> anyhow::Result<Vec<WorldGuardedAction>> {
@@ -993,9 +1024,13 @@ pub fn guardrail_status_counts(root: &Path) -> GuardrailStatusCounts {
         advisor_unavailable_decisions: decisions
             .iter()
             .filter(|decision| {
-                decision
-                    .reason_codes
-                    .contains(&GuardrailReasonCode::AdvisorUnavailable)
+                decision.reason_codes.iter().any(|reason| {
+                    matches!(
+                        *reason,
+                        GuardrailReasonCode::AdvisorUnavailable
+                            | GuardrailReasonCode::GuardrailOverheadExceeded
+                    )
+                })
             })
             .count(),
     }
@@ -1014,6 +1049,44 @@ fn append_jsonl<T: Serialize>(root: &Path, filename: &str, record: &T) -> anyhow
         .open(&path)?
         .write_all(&line)?;
     Ok(path)
+}
+
+fn append_jsonl_idempotent<T: Serialize>(
+    root: &Path,
+    filename: &str,
+    record: &T,
+) -> anyhow::Result<PathBuf> {
+    let path = root.join("ledgers").join(filename);
+    let value = serde_json::to_value(record)?;
+    let idempotency_key = value
+        .get("idempotency_key")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty());
+
+    if let Some(idempotency_key) = idempotency_key
+        && path.exists()
+    {
+        let file =
+            std::fs::File::open(&path).with_context(|| format!("open {}", path.display()))?;
+        for line in std::io::BufReader::new(file).lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let Ok(existing) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            if existing
+                .get("idempotency_key")
+                .and_then(|value| value.as_str())
+                == Some(idempotency_key)
+            {
+                return Ok(path);
+            }
+        }
+    }
+
+    append_jsonl(root, filename, record)
 }
 
 fn load_jsonl<T>(root: &Path, filename: &str) -> anyhow::Result<Vec<T>>
@@ -1335,12 +1408,54 @@ mod tests {
     }
 
     #[test]
-    fn warm_prediction_at_world_budget_does_not_fail_open_guardrail() {
+    fn guardrail_budget_helper_keeps_prediction_and_overhead_budgets_separate() {
         assert!(guardrail_budget_allows_prediction_latency(100, 100, 40, 40));
         assert!(!guardrail_budget_allows_prediction_latency(101, 100, 1, 40));
         assert!(!guardrail_budget_allows_prediction_latency(
             100, 100, 41, 40
         ));
+    }
+
+    #[test]
+    fn guardrail_overhead_budget_fails_open_without_double_decision() {
+        let policy = WorldGuardrailPolicyConfig::default();
+        let action = WorldGuardedAction::new(
+            "s1",
+            WorldAdvisorSurface::CodingTask,
+            GuardedActionKind::UserRequest,
+            "build app",
+            "build a Python app",
+        );
+        let context = WorldGuardrailPredictionContext::from_scores(
+            RuntimeTaskClass::CodingChange,
+            WorldGuardrailMode::Guarded,
+            GuardrailRiskScores {
+                predicted_verification_needed: Some(0.90),
+                ..GuardrailRiskScores::default()
+            },
+            &policy,
+        );
+        let decision = decide_guardrail(&action, None, context, &policy);
+        let decision_id = decision.decision_id.clone();
+        let idempotency_key = decision.idempotency_key.clone();
+
+        let fail_open = enforce_guardrail_overhead_budget(decision, 41, 40);
+
+        assert_eq!(fail_open.decision_id, decision_id);
+        assert_eq!(fail_open.idempotency_key, idempotency_key);
+        assert!(fail_open.allowed_to_continue);
+        assert!(fail_open.allowed_to_finalize);
+        assert!(fail_open.required_actions.is_empty());
+        assert!(
+            fail_open
+                .reason_codes
+                .contains(&GuardrailReasonCode::GuardrailOverheadExceeded)
+        );
+        assert!(
+            fail_open
+                .reason_codes
+                .contains(&GuardrailReasonCode::PredictedVerificationNeededHigh)
+        );
     }
 
     #[test]
@@ -1401,5 +1516,28 @@ mod tests {
         assert_eq!(counts.verifications, 1);
         assert_eq!(counts.outcomes, 1);
         assert_eq!(counts.advisor_unavailable_decisions, 1);
+    }
+
+    #[test]
+    fn guardrail_ledgers_skip_duplicate_idempotency_keys() {
+        let temp = tempfile::tempdir().unwrap();
+        let action = WorldGuardedAction::new(
+            "s1",
+            WorldAdvisorSurface::CodingTask,
+            GuardedActionKind::UserRequest,
+            "build",
+            "build",
+        );
+        let decision = WorldGuardrailDecision::unavailable(&action);
+
+        append_guarded_action(temp.path(), &action).unwrap();
+        append_guarded_action(temp.path(), &action).unwrap();
+        append_guardrail_decision(temp.path(), &decision).unwrap();
+        append_guardrail_decision(temp.path(), &decision).unwrap();
+
+        let counts = guardrail_status_counts(temp.path());
+
+        assert_eq!(counts.actions, 1);
+        assert_eq!(counts.decisions, 1);
     }
 }

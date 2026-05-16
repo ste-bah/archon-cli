@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 use anyhow::{Result, bail};
 
@@ -158,6 +159,7 @@ pub(crate) fn begin_guarded_action(
 
     let advisory =
         super::runtime::record_runtime_advisory(config, surface, session_id, action_ref, summary);
+    let guardrail_started_at = Instant::now();
     let decision = if advisory.prediction.is_some() {
         let scores = guardrail_scores_for_prediction(task_class, advisory.prediction.as_ref());
         let context = archon_world_model::WorldGuardrailPredictionContext::from_scores(
@@ -172,6 +174,12 @@ pub(crate) fn begin_guarded_action(
     } else {
         archon_world_model::WorldGuardrailDecision::unavailable(&action)
     };
+    let guardrail_overhead_ms = elapsed_ms_u64(guardrail_started_at);
+    let decision = archon_world_model::guardrail::enforce_guardrail_overhead_budget(
+        decision,
+        guardrail_overhead_ms,
+        policy.max_guardrail_overhead_ms,
+    );
     action.verification_plan = verification_plan_for_decision(&action.action_id, &decision);
     let _ = archon_world_model::guardrail::append_guarded_action(&root, &action);
     let _ = archon_world_model::guardrail::append_guardrail_decision(&root, &decision);
@@ -183,6 +191,11 @@ pub(crate) fn begin_guarded_action(
     };
     remember_active_guardrail(&record);
     Some(record)
+}
+
+fn elapsed_ms_u64(started_at: Instant) -> u64 {
+    let elapsed = started_at.elapsed().as_millis();
+    elapsed.min(u128::from(u64::MAX)) as u64
 }
 
 fn guardrail_scores_for_prediction(
@@ -515,72 +528,266 @@ fn pipeline_agent_verification(
     agent: &archon_pipeline::runner::AgentInfo,
     result: &archon_pipeline::runner::AgentResult,
 ) -> Option<archon_world_model::VerificationOutcome> {
-    let kind = pipeline_agent_verification_kind(parent, agent)?;
-    let quality = result.quality.as_ref()?;
-    let status = if quality.overall >= agent.quality_threshold {
-        archon_world_model::VerificationStatus::Passed
-    } else {
-        archon_world_model::VerificationStatus::Failed
-    };
-    Some(archon_world_model::VerificationOutcome {
+    if let Some(signal) = result
+        .tool_use_log
+        .iter()
+        .find_map(pipeline_tool_verification_signal)
+    {
+        return Some(pipeline_verification_outcome(
+            parent,
+            step_action_id,
+            agent,
+            signal,
+        ));
+    }
+
+    if !pipeline_agent_has_verification_hint(agent) {
+        return None;
+    }
+    Some(pipeline_verification_outcome(
+        parent,
+        step_action_id,
+        agent,
+        PipelineVerificationSignal {
+            kind: archon_world_model::VerificationKind::Custom("verifier".into()),
+            status: archon_world_model::VerificationStatus::Inconclusive,
+            command: Some(format!("pipeline-agent:{}", agent.key)),
+            exit_code: None,
+            summary: "no_execution_signal: agent looked verification-like, but no structured test/build/verifier execution result was surfaced".into(),
+            evidence_refs: vec![
+                "guardrail:no_execution_signal".into(),
+                format!("pipeline_agent_hint:{}", agent.key),
+            ],
+        },
+    ))
+}
+
+#[derive(Debug, Clone)]
+struct PipelineVerificationSignal {
+    kind: archon_world_model::VerificationKind,
+    status: archon_world_model::VerificationStatus,
+    command: Option<String>,
+    exit_code: Option<i32>,
+    summary: String,
+    evidence_refs: Vec<String>,
+}
+
+fn pipeline_verification_outcome(
+    parent: &RuntimeGuardrailRecord,
+    step_action_id: &str,
+    agent: &archon_pipeline::runner::AgentInfo,
+    signal: PipelineVerificationSignal,
+) -> archon_world_model::VerificationOutcome {
+    archon_world_model::VerificationOutcome {
         schema_version: archon_world_model::guardrail::CURRENT_SCHEMA_VERSION,
-        requirement_id: matching_requirement_id(&parent.action, &kind),
+        requirement_id: matching_requirement_id(&parent.action, &signal.kind),
         action_id: parent.action.action_id.clone(),
-        kind,
-        status,
-        command: Some(format!("pipeline-agent:{}", agent.key)),
-        exit_code: None,
-        summary: pipeline_step_outcome_summary(agent, result),
-        evidence_refs: vec![
-            format!("guardrail_pipeline_step:{step_action_id}"),
-            format!("pipeline_agent:{}", agent.key),
-        ],
+        kind: signal.kind,
+        status: signal.status,
+        command: signal.command,
+        exit_code: signal.exit_code,
+        summary: signal.summary,
+        evidence_refs: {
+            let mut refs = vec![
+                format!("guardrail_pipeline_step:{step_action_id}"),
+                format!("pipeline_agent:{}", agent.key),
+            ];
+            refs.extend(signal.evidence_refs);
+            refs.sort();
+            refs.dedup();
+            refs
+        },
         idempotency_key: format!(
             "world_guardrail:pipeline_verification:{}:{}",
             parent.action.action_id, step_action_id
         ),
         created_at: chrono::Utc::now(),
+    }
+}
+
+fn pipeline_tool_verification_signal(
+    entry: &archon_pipeline::runner::ToolUseEntry,
+) -> Option<PipelineVerificationSignal> {
+    let command = pipeline_tool_command(entry)?;
+    let (_, kind) = classify_tool_command(&command);
+    let kind = kind?;
+    let signal = execution_signal_from_tool_output(&entry.output);
+    let (status, exit_code, signal_summary, mut evidence_refs) = signal.unwrap_or_else(|| {
+        (
+            archon_world_model::VerificationStatus::Inconclusive,
+            None,
+            "no_execution_signal: verification command was planned, but no structured execution result was surfaced".into(),
+            vec!["guardrail:no_execution_signal".into()],
+        )
+    });
+    evidence_refs.push(format!("pipeline_tool:{}", entry.tool_name));
+    Some(PipelineVerificationSignal {
+        kind,
+        status,
+        command: Some(command),
+        exit_code,
+        summary: signal_summary,
+        evidence_refs,
     })
 }
 
-fn pipeline_agent_verification_kind(
-    parent: &RuntimeGuardrailRecord,
-    agent: &archon_pipeline::runner::AgentInfo,
-) -> Option<archon_world_model::VerificationKind> {
+fn pipeline_tool_command(entry: &archon_pipeline::runner::ToolUseEntry) -> Option<String> {
+    if let Some(command) = entry.input.as_str() {
+        return non_empty(command);
+    }
+    let object = entry.input.as_object()?;
+    for key in ["command", "cmd", "script", "shell_command"] {
+        if let Some(command) = object.get(key).and_then(|value| value.as_str()) {
+            return non_empty(command);
+        }
+    }
+    object
+        .get("args")
+        .and_then(|value| value.as_array())
+        .and_then(|args| {
+            let joined = args
+                .iter()
+                .filter_map(|value| value.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            non_empty(&joined)
+        })
+}
+
+fn non_empty(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn execution_signal_from_tool_output(
+    output: &serde_json::Value,
+) -> Option<(
+    archon_world_model::VerificationStatus,
+    Option<i32>,
+    String,
+    Vec<String>,
+)> {
+    if output.is_null() {
+        return None;
+    }
+    if let Some(exit_code) = find_i64_field(output, &["exit_code", "code", "status_code"]) {
+        let exit_code = exit_code as i32;
+        let status = if exit_code == 0 {
+            archon_world_model::VerificationStatus::Passed
+        } else {
+            archon_world_model::VerificationStatus::Failed
+        };
+        return Some((
+            status,
+            Some(exit_code),
+            execution_summary(output, &format!("exit_code={exit_code}")),
+            vec!["guardrail:execution_exit_code".into()],
+        ));
+    }
+    if let Some(success) = find_bool_field(output, &["success", "passed", "ok"]) {
+        let status = if success {
+            archon_world_model::VerificationStatus::Passed
+        } else {
+            archon_world_model::VerificationStatus::Failed
+        };
+        return Some((
+            status,
+            None,
+            execution_summary(output, &format!("success={success}")),
+            vec!["guardrail:execution_success_bool".into()],
+        ));
+    }
+    if let Some(is_error) = find_bool_field(output, &["is_error", "error"]) {
+        let status = if is_error {
+            archon_world_model::VerificationStatus::Failed
+        } else {
+            archon_world_model::VerificationStatus::Passed
+        };
+        return Some((
+            status,
+            None,
+            execution_summary(output, &format!("is_error={is_error}")),
+            vec!["guardrail:execution_error_bool".into()],
+        ));
+    }
+    if let Some(status) = find_string_field(output, &["status", "outcome", "conclusion"]) {
+        let normalized = status.to_ascii_lowercase();
+        let mapped = match normalized.as_str() {
+            "passed" | "pass" | "success" | "succeeded" | "ok" | "completed" => {
+                archon_world_model::VerificationStatus::Passed
+            }
+            "failed" | "fail" | "failure" | "error" | "errored" => {
+                archon_world_model::VerificationStatus::Failed
+            }
+            "inconclusive" | "unknown" | "skipped" | "not_run" => {
+                archon_world_model::VerificationStatus::Inconclusive
+            }
+            _ => return None,
+        };
+        return Some((
+            mapped,
+            None,
+            execution_summary(output, &format!("status={status}")),
+            vec!["guardrail:execution_status_string".into()],
+        ));
+    }
+    None
+}
+
+fn find_i64_field(value: &serde_json::Value, keys: &[&str]) -> Option<i64> {
+    let object = value.as_object()?;
+    for key in keys {
+        if let Some(value) = object.get(*key).and_then(|value| value.as_i64()) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn find_bool_field(value: &serde_json::Value, keys: &[&str]) -> Option<bool> {
+    let object = value.as_object()?;
+    for key in keys {
+        if let Some(value) = object.get(*key).and_then(|value| value.as_bool()) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn find_string_field(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    let object = value.as_object()?;
+    for key in keys {
+        if let Some(value) = object.get(*key).and_then(|value| value.as_str()) {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
+fn execution_summary(output: &serde_json::Value, fallback: &str) -> String {
+    if let Some(summary) = find_string_field(output, &["summary", "message", "stdout", "stderr"]) {
+        return summary.trim().chars().take(500).collect();
+    }
+    fallback.to_string()
+}
+
+fn pipeline_agent_has_verification_hint(agent: &archon_pipeline::runner::AgentInfo) -> bool {
     let name = format!("{} {}", agent.key, agent.display_name).to_ascii_lowercase();
-    let parent_requires_source = parent
-        .decision
-        .required_actions
-        .contains(&archon_world_model::GuardrailRequiredAction::CheckSourceEvidence);
-    if name.contains("security") || name.contains("static") {
-        Some(archon_world_model::VerificationKind::StaticAnalysis)
-    } else if name.contains("integration") {
-        Some(archon_world_model::VerificationKind::IntegrationTests)
-    } else if name.contains("test") || name.contains("qa") || name.contains("quality") {
-        Some(archon_world_model::VerificationKind::UnitTests)
-    } else if name.contains("build") || name.contains("compile") {
-        Some(archon_world_model::VerificationKind::Build)
-    } else if name.contains("lint") {
-        Some(archon_world_model::VerificationKind::Lint)
-    } else if name.contains("typecheck") || name.contains("type-check") {
-        Some(archon_world_model::VerificationKind::Typecheck)
-    } else if parent_requires_source
-        || name.contains("source")
-        || name.contains("citation")
-        || name.contains("fact")
-    {
-        Some(archon_world_model::VerificationKind::SourceEvidenceCheck)
-    } else if name.contains("verify")
+    name.contains("verify")
         || name.contains("verifier")
         || name.contains("review")
         || name.contains("approver")
-    {
-        Some(archon_world_model::VerificationKind::Custom(
-            "verifier".into(),
-        ))
-    } else {
-        None
-    }
+        || name.contains("test")
+        || name.contains("build")
+        || name.contains("compile")
+        || name.contains("lint")
+        || name.contains("typecheck")
+        || name.contains("type-check")
+        || name.contains("source")
+        || name.contains("citation")
+        || name.contains("fact")
+        || name.contains("security")
+        || name.contains("static")
 }
 
 pub(crate) fn record_guardrail_provider_incident_for_session(
@@ -934,7 +1141,7 @@ pub(crate) fn render_guard_status(
          Failed verifications:     {failed}\n\
          Missing verifications:    {missing}\n\
          Outcomes without pred:    {without_prediction}\n\
-         Advisor unavailable:      {unavailable_count}\n\
+         Unavailable decisions:    {unavailable_count}\n\
          Unavailable reasons:      {unavailable}\n\
          User overrides:           {overrides}\n\
          High-surprise outcomes:   {high_surprise}\n\
@@ -986,7 +1193,11 @@ fn guardrail_status_summary(root: &std::path::Path) -> GuardrailStatusSummary {
 
     for decision in &decisions {
         for reason in &decision.reason_codes {
-            if *reason == archon_world_model::GuardrailReasonCode::AdvisorUnavailable {
+            if matches!(
+                *reason,
+                archon_world_model::GuardrailReasonCode::AdvisorUnavailable
+                    | archon_world_model::GuardrailReasonCode::GuardrailOverheadExceeded
+            ) {
                 *summary
                     .unavailable_by_reason
                     .entry(format!("{reason:?}"))
@@ -1060,7 +1271,7 @@ pub(crate) fn render_guard_policy(config: &archon_core::config::ArchonConfig) ->
          require_plan_review_for_plan_drift = {require_plan_review}\n\
          require_source_check_for_research_high_risk = {require_source_check}\n\
          require_manual_approval_for_critical = {require_approval}\n\
-         max_guardrail_overhead_ms = {overhead_ms}\n\
+         max_guardrail_overhead_ms = {overhead_ms} # policy/decision overhead cap after prediction\n\
          record_outcomes_without_prediction = {record_without_prediction}\n\
          max_guardrail_events_per_session = {max_events}",
         enabled = policy.enabled,
@@ -1470,61 +1681,243 @@ mod tests {
     }
 
     #[test]
-    fn pipeline_agent_verification_maps_tester_to_parent_requirement() {
-        let parent = pipeline_parent_record(
-            archon_world_model::GuardrailRequiredAction::RunTests,
-            archon_world_model::VerificationKind::UnitTests,
+    fn learned_low_scores_change_guarded_coding_decision_from_block_to_allow() {
+        let policy = archon_world_model::WorldGuardrailPolicyConfig::default();
+        let action = archon_world_model::WorldGuardedAction::new(
+            "s1",
+            archon_world_model::integration::WorldAdvisorSurface::CodingTask,
+            archon_world_model::GuardedActionKind::UserRequest,
+            "implement feature",
+            "implement feature",
         );
-        let agent = pipeline_agent("integration-tester", "Integration Tester", false, 0.70);
-        let result = pipeline_agent_result(0.91);
+        let default_context = archon_world_model::WorldGuardrailPredictionContext::from_scores(
+            archon_world_model::RuntimeTaskClass::CodingChange,
+            archon_world_model::WorldGuardrailMode::Guarded,
+            guardrail_scores_for_prediction(
+                archon_world_model::RuntimeTaskClass::CodingChange,
+                None,
+            ),
+            &policy,
+        );
+        let default_decision = archon_world_model::guardrail::decide_guardrail(
+            &action,
+            None,
+            default_context,
+            &policy,
+        );
+        let mut prediction = archon_world_model::WorldPrediction::new("model-1", "low risk");
+        prediction.guardrail_scores = Some(archon_world_model::GuardrailRiskScores {
+            predicted_failure: Some(0.05),
+            predicted_verification_needed: Some(0.05),
+            predicted_user_correction: Some(0.05),
+            predicted_plan_drift: Some(0.05),
+            ..archon_world_model::GuardrailRiskScores::default()
+        });
+        let learned_context = archon_world_model::WorldGuardrailPredictionContext::from_scores(
+            archon_world_model::RuntimeTaskClass::CodingChange,
+            archon_world_model::WorldGuardrailMode::Guarded,
+            guardrail_scores_for_prediction(
+                archon_world_model::RuntimeTaskClass::CodingChange,
+                Some(&prediction),
+            ),
+            &policy,
+        );
+        let learned_decision = archon_world_model::guardrail::decide_guardrail(
+            &action,
+            Some(&prediction),
+            learned_context,
+            &policy,
+        );
 
-        let verification = pipeline_agent_verification(
-            &parent,
-            "parent:step:1:integration-tester",
-            &agent,
-            &result,
-        )
-        .expect("tester agent should produce verification");
-
-        assert_eq!(
-            verification.kind,
-            archon_world_model::VerificationKind::IntegrationTests
-        );
-        assert_eq!(
-            verification.status,
-            archon_world_model::VerificationStatus::Passed
-        );
-        assert_eq!(
-            verification.requirement_id,
-            "world-guard-req-parent-run-tests"
+        assert!(!default_decision.allowed_to_finalize);
+        assert!(learned_decision.allowed_to_finalize);
+        assert_ne!(
+            default_decision.allowed_to_finalize,
+            learned_decision.allowed_to_finalize
         );
     }
 
     #[test]
-    fn pipeline_agent_verification_records_failed_quality() {
-        let parent = pipeline_parent_record(
-            archon_world_model::GuardrailRequiredAction::RunVerifier,
-            archon_world_model::VerificationKind::Custom("verifier".into()),
+    fn learned_high_scores_change_pipeline_decision_from_allow_to_block() {
+        let policy = archon_world_model::WorldGuardrailPolicyConfig::default();
+        let action = archon_world_model::WorldGuardedAction::new(
+            "s1",
+            archon_world_model::integration::WorldAdvisorSurface::PipelineStep,
+            archon_world_model::GuardedActionKind::PipelineStep,
+            "run pipeline",
+            "pipeline batch",
         );
-        let agent = pipeline_agent("sign-off-reviewer", "Sign-off Reviewer", true, 0.80);
-        let result = pipeline_agent_result(0.40);
+        let default_context = archon_world_model::WorldGuardrailPredictionContext::from_scores(
+            archon_world_model::RuntimeTaskClass::PipelineExecution,
+            archon_world_model::WorldGuardrailMode::Guarded,
+            guardrail_scores_for_prediction(
+                archon_world_model::RuntimeTaskClass::PipelineExecution,
+                None,
+            ),
+            &policy,
+        );
+        let default_decision = archon_world_model::guardrail::decide_guardrail(
+            &action,
+            None,
+            default_context,
+            &policy,
+        );
+        let mut prediction = archon_world_model::WorldPrediction::new("model-1", "high risk");
+        prediction.guardrail_scores = Some(archon_world_model::GuardrailRiskScores {
+            predicted_failure: Some(0.91),
+            predicted_verification_needed: Some(0.91),
+            ..archon_world_model::GuardrailRiskScores::default()
+        });
+        let learned_context = archon_world_model::WorldGuardrailPredictionContext::from_scores(
+            archon_world_model::RuntimeTaskClass::PipelineExecution,
+            archon_world_model::WorldGuardrailMode::Guarded,
+            guardrail_scores_for_prediction(
+                archon_world_model::RuntimeTaskClass::PipelineExecution,
+                Some(&prediction),
+            ),
+            &policy,
+        );
+        let learned_decision = archon_world_model::guardrail::decide_guardrail(
+            &action,
+            Some(&prediction),
+            learned_context,
+            &policy,
+        );
+
+        assert!(default_decision.allowed_to_finalize);
+        assert!(!learned_decision.allowed_to_finalize);
+        assert_ne!(
+            default_decision.allowed_to_finalize,
+            learned_decision.allowed_to_finalize
+        );
+    }
+
+    #[test]
+    fn pipeline_agent_name_and_quality_do_not_satisfy_run_tests() {
+        let parent = pipeline_parent_record(
+            archon_world_model::GuardrailRequiredAction::RunTests,
+            archon_world_model::VerificationKind::UnitTests,
+        );
+        let agent = pipeline_agent("quality-test-writer", "Quality Test Writer", false, 0.70);
+        let result = pipeline_agent_result(0.99);
 
         let verification = pipeline_agent_verification(
             &parent,
-            "parent:step:2:sign-off-reviewer",
+            "parent:step:1:quality-test-writer",
+            &agent,
+            &result,
+        );
+        let verifications = verification.into_iter().collect::<Vec<_>>();
+
+        assert!(
+            verifications.iter().all(|verification| verification.status
+                != archon_world_model::VerificationStatus::Passed)
+        );
+        assert!(!archon_world_model::guardrail::finalization_allowed(
+            &parent.decision,
+            &verifications
+        ));
+    }
+
+    #[test]
+    fn pipeline_real_failed_verification_ignores_high_quality() {
+        let parent = pipeline_parent_record(
+            archon_world_model::GuardrailRequiredAction::RunTests,
+            archon_world_model::VerificationKind::UnitTests,
+        );
+        let agent = pipeline_agent("integration-verifier", "Integration Verifier", true, 0.70);
+        let result = pipeline_agent_result_with_tools(
+            0.99,
+            vec![pipeline_tool(
+                "Bash",
+                "cargo test",
+                serde_json::json!({"exit_code": 1}),
+            )],
+        );
+
+        let verification = pipeline_agent_verification(
+            &parent,
+            "parent:step:2:integration-verifier",
             &agent,
             &result,
         )
-        .expect("critical reviewer should produce verifier evidence");
+        .expect("real test command should produce verification evidence");
 
         assert_eq!(
             verification.kind,
-            archon_world_model::VerificationKind::Custom("verifier".into())
+            archon_world_model::VerificationKind::UnitTests
         );
         assert_eq!(
             verification.status,
             archon_world_model::VerificationStatus::Failed
         );
+        assert_eq!(verification.exit_code, Some(1));
+        assert!(!archon_world_model::guardrail::finalization_allowed(
+            &parent.decision,
+            &[verification]
+        ));
+    }
+
+    #[test]
+    fn pipeline_real_passed_verification_allows_requirement() {
+        let parent = pipeline_parent_record(
+            archon_world_model::GuardrailRequiredAction::RunBuild,
+            archon_world_model::VerificationKind::Build,
+        );
+        let agent = pipeline_agent("build-verifier", "Build Verifier", true, 0.70);
+        let result = pipeline_agent_result_with_tools(
+            0.20,
+            vec![pipeline_tool(
+                "Bash",
+                "cargo check",
+                serde_json::json!({"exit_code": 0, "summary": "cargo check passed"}),
+            )],
+        );
+
+        let verification =
+            pipeline_agent_verification(&parent, "parent:step:3:build-verifier", &agent, &result)
+                .expect("real build command should produce verification evidence");
+
+        assert_eq!(
+            verification.kind,
+            archon_world_model::VerificationKind::Build
+        );
+        assert_eq!(
+            verification.status,
+            archon_world_model::VerificationStatus::Passed
+        );
+        assert_eq!(verification.exit_code, Some(0));
+        assert!(archon_world_model::guardrail::finalization_allowed(
+            &parent.decision,
+            &[verification]
+        ));
+    }
+
+    #[test]
+    fn pipeline_verification_command_without_execution_signal_is_inconclusive() {
+        let parent = pipeline_parent_record(
+            archon_world_model::GuardrailRequiredAction::RunTests,
+            archon_world_model::VerificationKind::UnitTests,
+        );
+        let agent = pipeline_agent("test-runner", "Test Runner", true, 0.70);
+        let result = pipeline_agent_result_with_tools(
+            0.99,
+            vec![pipeline_tool("Bash", "cargo test", serde_json::Value::Null)],
+        );
+
+        let verification =
+            pipeline_agent_verification(&parent, "parent:step:4:test-runner", &agent, &result)
+                .expect("verification command should record an inconclusive outcome");
+
+        assert_eq!(
+            verification.status,
+            archon_world_model::VerificationStatus::Inconclusive
+        );
+        assert!(verification.summary.contains("no_execution_signal"));
+        assert!(!archon_world_model::guardrail::finalization_allowed(
+            &parent.decision,
+            &[verification]
+        ));
     }
 
     fn pipeline_parent_record(
@@ -1580,9 +1973,16 @@ mod tests {
     }
 
     fn pipeline_agent_result(overall: f64) -> archon_pipeline::runner::AgentResult {
+        pipeline_agent_result_with_tools(overall, Vec::new())
+    }
+
+    fn pipeline_agent_result_with_tools(
+        overall: f64,
+        tool_use_log: Vec<archon_pipeline::runner::ToolUseEntry>,
+    ) -> archon_pipeline::runner::AgentResult {
         archon_pipeline::runner::AgentResult {
             output: "checked".into(),
-            tool_use_log: Vec::new(),
+            tool_use_log,
             tokens_in: 10,
             tokens_out: 20,
             cost_usd: 0.0,
@@ -1591,6 +1991,18 @@ mod tests {
                 overall,
                 dimensions: std::collections::HashMap::new(),
             }),
+        }
+    }
+
+    fn pipeline_tool(
+        tool_name: &str,
+        command: &str,
+        output: serde_json::Value,
+    ) -> archon_pipeline::runner::ToolUseEntry {
+        archon_pipeline::runner::ToolUseEntry {
+            tool_name: tool_name.into(),
+            input: serde_json::json!({ "command": command }),
+            output,
         }
     }
 
