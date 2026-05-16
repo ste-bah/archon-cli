@@ -833,6 +833,28 @@ impl JepaBackendProbeReport {
             unavailable_reason,
         }
     }
+
+    pub fn from_probe(
+        requested_backend: BackendKind,
+        probe: crate::backend::BackendProbeReport,
+        native_runtime_prediction: bool,
+    ) -> Self {
+        let status = BackendStatus {
+            requested: requested_backend,
+            selected: requested_backend,
+            framework: probe.framework.clone(),
+            device_name: None,
+            experimental: requested_backend == BackendKind::Metal,
+            fallback_reason: probe.reason.clone(),
+        };
+        Self {
+            status,
+            feature_compiled: probe.compiled,
+            tensor_self_test_passed: probe.tensor_self_test_passed,
+            native_runtime_prediction: native_runtime_prediction && probe.available,
+            unavailable_reason: probe.reason,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -986,6 +1008,174 @@ impl JepaTensorBackend for CpuJepaBackend {
             latency_ms: started.elapsed().as_millis() as u64,
         })
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CandleCudaJepaBackend;
+
+impl JepaTensorBackend for CandleCudaJepaBackend {
+    fn status(&self) -> BackendStatus {
+        crate::backend::select_runtime_backend(BackendKind::Cuda, false)
+    }
+
+    fn probe_jepa(&self) -> JepaBackendProbeReport {
+        JepaBackendProbeReport::from_probe(
+            BackendKind::Cuda,
+            crate::backend::probe_backend(BackendKind::Cuda),
+            false,
+        )
+    }
+
+    fn encode_batch(
+        &self,
+        encoders: &JepaEncoderSet,
+        batch: &JepaFeatureBatch,
+    ) -> Result<JepaEncodedBatch> {
+        let _ = (encoders, batch);
+        native_jepa_backend_unavailable(BackendKind::Cuda)
+    }
+
+    fn fit_predictor(
+        &self,
+        latent_dim: usize,
+        encoded: &JepaEncodedBatch,
+    ) -> Result<JepaPredictor> {
+        let _ = (latent_dim, encoded);
+        native_jepa_backend_unavailable(BackendKind::Cuda)
+    }
+
+    fn fit_auxiliary_heads(
+        &self,
+        latent_dim: usize,
+        encoded: &JepaEncodedBatch,
+    ) -> Result<Vec<JepaAuxiliaryHead>> {
+        let _ = (latent_dim, encoded);
+        native_jepa_backend_unavailable(BackendKind::Cuda)
+    }
+
+    fn fit_transition(
+        &self,
+        latent_dim: usize,
+        encoded: &JepaEncodedBatch,
+    ) -> Result<CpuLatentTransitionModel> {
+        let _ = (latent_dim, encoded);
+        native_jepa_backend_unavailable(BackendKind::Cuda)
+    }
+
+    fn training_losses(
+        &self,
+        model: &JepaTraceModel,
+        encoded: &JepaEncodedBatch,
+        config: &JepaTrainingConfig,
+    ) -> Result<JepaTrainingLosses> {
+        let _ = (model, encoded, config);
+        native_jepa_backend_unavailable(BackendKind::Cuda)
+    }
+
+    fn collapse_report(
+        &self,
+        encoded: &JepaEncodedBatch,
+        config: &JepaTrainingConfig,
+    ) -> Result<JepaCollapseReport> {
+        let _ = (encoded, config);
+        native_jepa_backend_unavailable(BackendKind::Cuda)
+    }
+
+    fn predict_runtime(
+        &self,
+        model: &JepaTraceModel,
+        window: &TraceWindow,
+        action: &TraceAction,
+    ) -> Result<JepaRuntimePrediction> {
+        let _ = (model, window, action);
+        native_jepa_backend_unavailable(BackendKind::Cuda)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MlxMetalJepaBackend;
+
+impl JepaTensorBackend for MlxMetalJepaBackend {
+    fn status(&self) -> BackendStatus {
+        crate::backend::select_runtime_backend(BackendKind::Metal, false)
+    }
+
+    fn probe_jepa(&self) -> JepaBackendProbeReport {
+        JepaBackendProbeReport::from_probe(
+            BackendKind::Metal,
+            crate::backend::probe_backend(BackendKind::Metal),
+            false,
+        )
+    }
+
+    fn encode_batch(
+        &self,
+        encoders: &JepaEncoderSet,
+        batch: &JepaFeatureBatch,
+    ) -> Result<JepaEncodedBatch> {
+        let _ = (encoders, batch);
+        native_jepa_backend_unavailable(BackendKind::Metal)
+    }
+
+    fn fit_predictor(
+        &self,
+        latent_dim: usize,
+        encoded: &JepaEncodedBatch,
+    ) -> Result<JepaPredictor> {
+        let _ = (latent_dim, encoded);
+        native_jepa_backend_unavailable(BackendKind::Metal)
+    }
+
+    fn fit_auxiliary_heads(
+        &self,
+        latent_dim: usize,
+        encoded: &JepaEncodedBatch,
+    ) -> Result<Vec<JepaAuxiliaryHead>> {
+        let _ = (latent_dim, encoded);
+        native_jepa_backend_unavailable(BackendKind::Metal)
+    }
+
+    fn fit_transition(
+        &self,
+        latent_dim: usize,
+        encoded: &JepaEncodedBatch,
+    ) -> Result<CpuLatentTransitionModel> {
+        let _ = (latent_dim, encoded);
+        native_jepa_backend_unavailable(BackendKind::Metal)
+    }
+
+    fn training_losses(
+        &self,
+        model: &JepaTraceModel,
+        encoded: &JepaEncodedBatch,
+        config: &JepaTrainingConfig,
+    ) -> Result<JepaTrainingLosses> {
+        let _ = (model, encoded, config);
+        native_jepa_backend_unavailable(BackendKind::Metal)
+    }
+
+    fn collapse_report(
+        &self,
+        encoded: &JepaEncodedBatch,
+        config: &JepaTrainingConfig,
+    ) -> Result<JepaCollapseReport> {
+        let _ = (encoded, config);
+        native_jepa_backend_unavailable(BackendKind::Metal)
+    }
+
+    fn predict_runtime(
+        &self,
+        model: &JepaTraceModel,
+        window: &TraceWindow,
+        action: &TraceAction,
+    ) -> Result<JepaRuntimePrediction> {
+        let _ = (model, window, action);
+        native_jepa_backend_unavailable(BackendKind::Metal)
+    }
+}
+
+fn native_jepa_backend_unavailable<T>(backend: BackendKind) -> Result<T> {
+    bail!("native {backend} JEPA tensor backend is not implemented")
 }
 
 pub fn build_jepa_training_examples(
@@ -2484,6 +2674,29 @@ mod tests {
         assert_eq!(encoded.len(), examples.len());
         assert_eq!(predictor.latent_dim, config.latent_dim);
         assert_eq!(transition.metadata.backend, BackendKind::Cpu);
+    }
+
+    #[test]
+    fn accelerator_jepa_backend_stubs_compile_and_fail_closed() {
+        let cuda = CandleCudaJepaBackend;
+        let metal = MlxMetalJepaBackend;
+        let encoded = Vec::new();
+
+        assert_eq!(cuda.probe_jepa().status.requested, BackendKind::Cuda);
+        assert_eq!(metal.probe_jepa().status.requested, BackendKind::Metal);
+        assert!(
+            cuda.fit_predictor(8, &encoded)
+                .unwrap_err()
+                .to_string()
+                .contains("native cuda JEPA tensor backend is not implemented")
+        );
+        assert!(
+            metal
+                .fit_predictor(8, &encoded)
+                .unwrap_err()
+                .to_string()
+                .contains("native metal JEPA tensor backend is not implemented")
+        );
     }
 
     #[test]
