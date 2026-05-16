@@ -75,6 +75,18 @@ fn test_config() -> archon_core::config::ArchonConfig {
     config
 }
 
+fn jepa_test_config() -> archon_core::config::ArchonConfig {
+    let mut config = test_config();
+    config.learning.world_model.model_kind = "jepa_transition".into();
+    config.learning.world_model.state_dim = 8;
+    config.learning.world_model.jepa.latent_dim = 8;
+    config.learning.world_model.jepa.context_window_rows = 2;
+    config.learning.world_model.jepa.target_window_rows = 1;
+    config.learning.world_model.jepa.prediction_horizons = vec![1];
+    config.learning.world_model.training.backend = "cpu".into();
+    config
+}
+
 #[test]
 fn status_reports_cold_start_defaults() {
     let rendered = render_world_status_with_stats(
@@ -89,7 +101,15 @@ fn status_reports_cold_start_defaults() {
     assert!(rendered.contains("cold_start"));
     assert!(rendered.contains("Active model:       none"));
     assert!(rendered.contains("JEPA status:        disabled"));
-    assert!(rendered.contains("Selected backend:   cpu"));
+    let expected_backend = if cfg!(feature = "cuda")
+        && archon_world_model::backend::probe_backend(archon_world_model::BackendKind::Cuda)
+            .available
+    {
+        "cuda"
+    } else {
+        "cpu"
+    };
+    assert!(rendered.contains(&format!("Selected backend:   {expected_backend}")));
     assert!(rendered.contains("Advisor status:     fail-open"));
     assert!(rendered.contains("cosine >= 0.95"));
 }
@@ -331,13 +351,14 @@ fn train_jepa_writes_candidate_manifest_from_stored_rows() {
     config.learning.world_model.jepa.context_window_rows = 2;
     config.learning.world_model.jepa.target_window_rows = 1;
     config.learning.world_model.jepa.prediction_horizons = vec![1];
+    config.learning.world_model.training.backend = "cpu".into();
 
     let rendered = candidate::render_train_jepa(&config, temp.path(), true, Some(1_000)).unwrap();
 
     let candidate_id = candidate_id_from(&rendered);
     assert!(rendered.contains("World Model JEPA Train"));
     assert!(rendered.contains("Model kind: jepa_transition"));
-    assert!(rendered.contains("Requested backend: auto"));
+    assert!(rendered.contains("Requested backend: cpu"));
     assert!(rendered.contains("Selected backend: cpu"));
     assert!(rendered.contains("Native encode: true"));
     assert!(rendered.contains("Latent dim: 8"));
@@ -385,6 +406,7 @@ fn inspect_jepa_reports_candidate_manifest() {
     config.learning.world_model.jepa.context_window_rows = 2;
     config.learning.world_model.jepa.target_window_rows = 1;
     config.learning.world_model.jepa.prediction_horizons = vec![1];
+    config.learning.world_model.training.backend = "cpu".into();
     let trained = candidate::render_train_jepa(&config, temp.path(), true, None).unwrap();
     let candidate_id = candidate_id_from(&trained);
 
@@ -393,7 +415,7 @@ fn inspect_jepa_reports_candidate_manifest() {
     assert!(rendered.contains("World Model JEPA Inspect"));
     assert!(rendered.contains("Model kind: jepa_transition"));
     assert!(rendered.contains("Stop gradient: true"));
-    assert!(rendered.contains("Requested backend: auto"));
+    assert!(rendered.contains("Requested backend: cpu"));
     assert!(rendered.contains("Selected backend: cpu"));
     assert!(rendered.contains("Host fallback count: 0"));
 }
@@ -408,6 +430,7 @@ fn compare_representations_persists_exploratory_report() {
     config.learning.world_model.jepa.context_window_rows = 2;
     config.learning.world_model.jepa.target_window_rows = 1;
     config.learning.world_model.jepa.prediction_horizons = vec![1];
+    config.learning.world_model.training.backend = "cpu".into();
     let trained = candidate::render_train_jepa(&config, temp.path(), true, None).unwrap();
     let candidate_id = candidate_id_from(&trained);
 
@@ -470,13 +493,7 @@ fn promote_jepa_requires_passing_eval_report() {
 fn predict_next_uses_active_jepa_model_when_configured() {
     let temp = tempfile::tempdir().unwrap();
     seed_training_rows(temp.path());
-    let mut config = test_config();
-    config.learning.world_model.model_kind = "jepa_transition".into();
-    config.learning.world_model.state_dim = 8;
-    config.learning.world_model.jepa.latent_dim = 8;
-    config.learning.world_model.jepa.context_window_rows = 2;
-    config.learning.world_model.jepa.target_window_rows = 1;
-    config.learning.world_model.jepa.prediction_horizons = vec![1];
+    let config = jepa_test_config();
     let trained = candidate::render_train_jepa(&config, temp.path(), true, None).unwrap();
     let candidate_id = candidate_id_from(&trained);
     let registry = archon_world_model::registry::ModelRegistry::open(temp.path()).unwrap();
@@ -501,10 +518,20 @@ fn predict_next_uses_active_jepa_model_when_configured() {
     assert!(rendered.contains(&format!("Model: {candidate_id}")));
     assert!(rendered.contains("Model kind: jepa_transition"));
     assert!(rendered.contains("Representation: archon-jepa:"));
+    assert!(rendered.contains("Runtime backend: cpu"));
+    assert!(rendered.contains("Runtime native prediction: true"));
     let prediction_id = prediction_id_from(&rendered);
     let persisted = predict::load_prediction(temp.path(), &prediction_id)
         .unwrap()
         .expect("prediction should be persisted");
+    assert_eq!(
+        persisted
+            .jepa_runtime_backend_report
+            .as_ref()
+            .expect("jepa prediction should persist runtime backend proof")
+            .backend,
+        archon_world_model::BackendKind::Cpu
+    );
     assert!(
         persisted
             .guardrail_scores
@@ -512,6 +539,107 @@ fn predict_next_uses_active_jepa_model_when_configured() {
             .predicted_verification_needed
             .is_some()
     );
+}
+
+#[cfg(feature = "cuda")]
+#[test]
+#[ignore = "requires CUDA hardware"]
+fn predict_next_uses_active_jepa_cuda_model() {
+    let probe = archon_world_model::backend::probe_backend(archon_world_model::BackendKind::Cuda);
+    assert!(
+        probe.available,
+        "CUDA prediction validation requested but CUDA probe failed: {probe:?}"
+    );
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let mut config = jepa_test_config();
+    config.learning.world_model.training.backend = "cuda".into();
+    config.learning.world_model.training.allow_cpu_fallback = false;
+
+    let trained = candidate::render_train_jepa(&config, temp.path(), true, None).unwrap();
+    let candidate_id = candidate_id_from(&trained);
+    assert!(trained.contains("Requested backend: cuda"));
+    assert!(trained.contains("Selected backend: cuda"));
+    assert!(trained.contains("Native runtime prediction: true"));
+    archon_world_model::registry::ModelRegistry::open(temp.path())
+        .unwrap()
+        .promote_model_kind(&candidate_id, "jepa_transition")
+        .unwrap();
+
+    let rendered = render_predict_next_with_state(
+        &config,
+        temp.path(),
+        archon_world_model::ColdStartStats {
+            rows: 1_000,
+            sessions: 50,
+            observed_days: 7,
+        },
+        Some(candidate_id),
+        "s1",
+        "a1",
+        "run tests",
+    );
+
+    assert!(rendered.contains("Model kind: jepa_transition"));
+    assert!(rendered.contains("Runtime backend: cuda"));
+    assert!(rendered.contains("Runtime framework: candle"));
+    assert!(rendered.contains("Runtime native prediction: true"));
+    assert!(rendered.contains("Runtime host fallback count: 0"));
+    let prediction_id = prediction_id_from(&rendered);
+    let persisted = predict::load_prediction(temp.path(), &prediction_id)
+        .unwrap()
+        .expect("prediction should be persisted");
+    let report = persisted
+        .jepa_runtime_backend_report
+        .expect("jepa runtime backend proof should be persisted");
+    assert_eq!(report.backend, archon_world_model::BackendKind::Cuda);
+    assert_eq!(report.framework, "candle");
+    assert!(report.native_runtime_prediction);
+    assert_eq!(report.host_fallback_count, 0);
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[test]
+#[ignore = "requires Apple Silicon MLX Metal"]
+fn predict_next_uses_active_jepa_metal_model() {
+    let probe = archon_world_model::backend::probe_backend(archon_world_model::BackendKind::Metal);
+    assert!(
+        probe.available,
+        "MLX Metal prediction validation requested but Metal probe failed: {probe:?}"
+    );
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let mut config = jepa_test_config();
+    config.learning.world_model.training.backend = "metal".into();
+    config.learning.world_model.training.allow_cpu_fallback = false;
+
+    let trained = candidate::render_train_jepa(&config, temp.path(), true, None).unwrap();
+    let candidate_id = candidate_id_from(&trained);
+    assert!(trained.contains("Requested backend: metal"));
+    assert!(trained.contains("Selected backend: metal"));
+    archon_world_model::registry::ModelRegistry::open(temp.path())
+        .unwrap()
+        .promote_model_kind(&candidate_id, "jepa_transition")
+        .unwrap();
+
+    let rendered = render_predict_next_with_state(
+        &config,
+        temp.path(),
+        archon_world_model::ColdStartStats {
+            rows: 1_000,
+            sessions: 50,
+            observed_days: 7,
+        },
+        Some(candidate_id),
+        "s1",
+        "a1",
+        "run tests",
+    );
+
+    assert!(rendered.contains("Runtime backend: metal"));
+    assert!(rendered.contains("Runtime framework: mlx-rs"));
+    assert!(rendered.contains("Runtime native prediction: true"));
+    assert!(rendered.contains("Runtime host fallback count: 0"));
 }
 
 #[test]
@@ -551,7 +679,7 @@ fn predict_next_fails_open_for_accelerator_jepa_without_native_runtime() {
         native_auxiliary_fit: true,
         native_transition_fit: true,
         native_loss_eval: true,
-        native_runtime_prediction: Some(true),
+        native_runtime_prediction: Some(false),
         host_fallback_count: 0,
         allowed_host_stage_count: 0,
         fallback_reason: None,

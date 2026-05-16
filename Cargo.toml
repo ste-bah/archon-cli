@@ -194,6 +194,9 @@ tracing-test.workspace = true
 
 [features]
 test-support = []
+candle = ["archon-world-model/candle"]
+cuda = ["archon-world-model/cuda"]
+mlx-metal = ["archon-world-model/mlx-metal"]
 
 [profile.release]
 lto = true

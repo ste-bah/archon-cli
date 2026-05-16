@@ -54,7 +54,7 @@ Latest local verification:
 - `archon world_model::tests`, `archon-policy`, and single-threaded `agent_evolve` tests pass.
 - `cargo check --bin archon` passes with two existing warnings in provider status/LLM helpers.
 - README local-link audit and `git diff --check` pass.
-- CUDA feature compilation passes with `/usr/local/cuda-13.2`, and the full CUDA-feature world-model library suite passes locally on WSL after driver/toolkit compatibility was corrected. See `docs/development/world-model-cuda-validation.md`.
+- CUDA feature compilation and runtime validation pass with the driver-compatible `/usr/local/cuda-13.1` toolkit, and the full CUDA-feature world-model library suite passes locally on WSL. `/usr/local/cuda-13.2/bin/nvcc` is installed, but this driver rejects its generated PTX. See `docs/development/world-model-cuda-validation.md`.
 
 ## Notes For Continuation
 

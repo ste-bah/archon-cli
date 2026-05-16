@@ -121,7 +121,10 @@ pub(super) fn render_train_jepa(
          Native auxiliary fit: {}\n\
          Native transition fit: {}\n\
          Native loss eval: {}\n\
+         Native runtime prediction: {}\n\
          Host fallback count: {}\n\
+         Hardware validation captured: {}\n\
+         Validation examples: {}\n\
          Latent dim: {}\n\
          Rows loaded: {}\n\
          Examples: {}\n\
@@ -163,7 +166,18 @@ pub(super) fn render_train_jepa(
         outcome.metadata.backend_execution.native_auxiliary_fit,
         outcome.metadata.backend_execution.native_transition_fit,
         outcome.metadata.backend_execution.native_loss_eval,
+        outcome
+            .metadata
+            .backend_execution
+            .native_runtime_prediction
+            .unwrap_or(false),
         outcome.metadata.backend_execution.host_fallback_count,
+        outcome
+            .metadata
+            .backend_execution
+            .hardware_validation_captured_at
+            .is_some(),
+        outcome.metadata.backend_execution.validation_example_count,
         model.metadata.latent_dim,
         rows.len(),
         model.metadata.example_count,
@@ -441,7 +455,9 @@ pub(super) fn render_inspect_jepa(root: &Path, candidate_id: &str) -> Result<Str
          Native auxiliary fit: {}\n\
          Native transition fit: {}\n\
          Native loss eval: {}\n\
+         Native runtime prediction: {}\n\
          Host fallback count: {}\n\
+         Hardware validation captured: {}\n\
          Validation examples: {}\n\
          Rows: {}\n\
          Examples: {}\n\
@@ -499,7 +515,19 @@ pub(super) fn render_inspect_jepa(root: &Path, candidate_id: &str) -> Result<Str
             .model
             .metadata
             .backend_execution
+            .native_runtime_prediction
+            .unwrap_or(false),
+        candidate
+            .model
+            .metadata
+            .backend_execution
             .host_fallback_count,
+        candidate
+            .model
+            .metadata
+            .backend_execution
+            .hardware_validation_captured_at
+            .is_some(),
         candidate
             .model
             .metadata

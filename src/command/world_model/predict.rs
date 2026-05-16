@@ -39,6 +39,8 @@ pub(super) struct PersistedPrediction {
     pub evidence_refs: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guardrail_scores: Option<GuardrailRiskScores>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jepa_runtime_backend_report: Option<archon_world_model::JepaRuntimeBackendReport>,
     pub created_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome_recorded_at: Option<DateTime<Utc>>,
@@ -50,6 +52,7 @@ struct PredictionInference {
     model_kind: String,
     representation_source: String,
     guardrail_scores: Option<GuardrailRiskScores>,
+    jepa_runtime_backend_report: Option<archon_world_model::JepaRuntimeBackendReport>,
 }
 
 fn default_prediction_model_kind() -> String {
@@ -85,6 +88,7 @@ pub(super) fn render_active_checkpoint_prediction(
              Representation: {}\n\
              Inference: active_checkpoint\n\
              Prediction: {}\n\
+             {}\
              Prediction record: {}",
             prediction.prediction_id,
             prediction.model_id,
@@ -94,6 +98,7 @@ pub(super) fn render_active_checkpoint_prediction(
                 .as_deref()
                 .unwrap_or("generic_embedding"),
             prediction.predicted_next_state_summary,
+            jepa_runtime_backend_report_lines(&prediction),
             prediction_path.display()
         )),
         Ok(None) => None,
@@ -151,6 +156,7 @@ pub(super) fn persist_active_checkpoint_prediction(
         latent_surprise: None,
         evidence_refs: vec![format!("runtime_action:{action_ref}")],
         guardrail_scores: inference.guardrail_scores,
+        jepa_runtime_backend_report: inference.jepa_runtime_backend_report,
         created_at: Utc::now(),
         outcome_recorded_at: None,
     };
@@ -289,6 +295,7 @@ fn predict_with_checkpoint(
         model_kind: LATENT_TRANSITION_MODEL_KIND.into(),
         representation_source: format!("{}:{}", adapter.provider_name(), adapter.model_name()),
         guardrail_scores,
+        jepa_runtime_backend_report: None,
     })
 }
 
@@ -325,6 +332,7 @@ fn predict_with_jepa_checkpoint(
         candidate.model.metadata.backend,
     )?;
     let guardrail_scores = Some(runtime.guardrail_scores);
+    let runtime_backend_report = runtime.execution_report.clone();
     let elapsed_ms = started.elapsed().as_millis() as u64;
     let (measured_latency_ms, latency_cap_ms) = jepa_prediction_latency_budget(
         config,
@@ -347,6 +355,7 @@ fn predict_with_jepa_checkpoint(
         model_kind: JEPA_MODEL_KIND.into(),
         representation_source: format!("archon-jepa:{}", candidate.model.metadata.model_id),
         guardrail_scores,
+        jepa_runtime_backend_report: Some(runtime_backend_report),
     })
 }
 
@@ -484,6 +493,24 @@ fn guardrail_scores_from_auxiliary<'a>(
 
 fn finite_probability(probability: f32) -> Option<f32> {
     probability.is_finite().then(|| probability.clamp(0.0, 1.0))
+}
+
+fn jepa_runtime_backend_report_lines(prediction: &PersistedPrediction) -> String {
+    let Some(report) = &prediction.jepa_runtime_backend_report else {
+        return String::new();
+    };
+    format!(
+        "Runtime backend: {}\n\
+             Runtime framework: {}\n\
+             Runtime device: {}\n\
+             Runtime native prediction: {}\n\
+             Runtime host fallback count: {}\n",
+        report.backend,
+        report.framework,
+        report.device_name.as_deref().unwrap_or("unknown"),
+        report.native_runtime_prediction,
+        report.host_fallback_count
+    )
 }
 
 fn cosine_error(left: &[f32], right: &[f32]) -> f32 {

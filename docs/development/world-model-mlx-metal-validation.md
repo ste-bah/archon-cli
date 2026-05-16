@@ -23,6 +23,10 @@ cargo check -p archon-world-model --features mlx-metal --lib
 That check proves the unsupported-target path builds. It does not validate MLX
 Metal execution.
 
+The workspace root now exposes the same feature passthrough, so binary-level
+Apple Silicon validation can use `cargo test --bin archon --features mlx-metal`
+once it is run on macOS aarch64 hardware.
+
 ## Required Apple Silicon Validation
 
 Run on a real Apple Silicon Mac:
@@ -30,6 +34,8 @@ Run on a real Apple Silicon Mac:
 ```bash
 cargo check -p archon-world-model --features mlx-metal --lib
 cargo test -p archon-world-model --features mlx-metal --lib jepa -- --test-threads=2
+cargo test -p archon-world-model --features mlx-metal --lib jepa_mlx -- --ignored --nocapture --test-threads=1
+cargo test --bin archon --features mlx-metal world_model::tests::predict_next_uses_active_jepa_metal_model -- --ignored --nocapture --test-threads=1
 ```
 
 The hardware run must verify the MLX equivalents of the CUDA evidence:
