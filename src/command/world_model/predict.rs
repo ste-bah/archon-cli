@@ -324,12 +324,7 @@ fn predict_with_jepa_checkpoint(
         &action,
         candidate.model.metadata.backend,
     )?;
-    let guardrail_scores = Some(guardrail_scores_from_auxiliary(
-        runtime
-            .auxiliary_scores
-            .iter()
-            .map(|(label, probability)| (label.as_str(), *probability)),
-    ));
+    let guardrail_scores = Some(runtime.guardrail_scores);
     let elapsed_ms = started.elapsed().as_millis() as u64;
     let (measured_latency_ms, latency_cap_ms) = jepa_prediction_latency_budget(
         config,

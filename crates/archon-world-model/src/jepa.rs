@@ -19,6 +19,7 @@ use safetensors::tensor::{Dtype, TensorView, serialize_to_file};
 use serde::{Deserialize, Serialize};
 
 use crate::backend::{BackendKind, BackendStatus};
+use crate::guardrail::GuardrailRiskScores;
 use crate::model::{CpuLatentTransitionModel, LatentTransitionExample};
 use crate::representation::{
     TraceAction, TraceTransition, TraceWindow, TraceWindowBuilder, WorldRepresentationAdapter,
@@ -923,8 +924,41 @@ impl JepaBackendProbeReport {
 pub struct JepaRuntimePrediction {
     pub backend: BackendKind,
     pub predicted_next_state: Vec<f32>,
+    pub guardrail_scores: GuardrailRiskScores,
     pub auxiliary_scores: Vec<(String, f32)>,
     pub latency_ms: u64,
+    pub execution_report: JepaRuntimeBackendReport,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JepaRuntimeBackendReport {
+    pub backend: BackendKind,
+    pub framework: String,
+    pub device_name: Option<String>,
+    pub native_runtime_prediction: bool,
+    pub latency_ms: u64,
+    pub host_fallback_count: u64,
+    pub fallback_reason: Option<String>,
+}
+
+impl JepaRuntimeBackendReport {
+    fn new(
+        backend: BackendKind,
+        framework: impl Into<String>,
+        device_name: Option<String>,
+        native_runtime_prediction: bool,
+        latency_ms: u64,
+    ) -> Self {
+        Self {
+            backend,
+            framework: framework.into(),
+            device_name,
+            native_runtime_prediction,
+            latency_ms,
+            host_fallback_count: 0,
+            fallback_reason: None,
+        }
+    }
 }
 
 pub trait JepaTensorBackend: Send + Sync {
@@ -1063,11 +1097,20 @@ impl JepaTensorBackend for CpuJepaBackend {
             BackendKind::Cpu,
         )?;
         let auxiliary_scores = model.predict_auxiliary(&state, &action_latent)?;
+        let latency_ms = started.elapsed().as_millis() as u64;
         Ok(JepaRuntimePrediction {
             backend: BackendKind::Cpu,
             predicted_next_state,
+            guardrail_scores: jepa_guardrail_scores_from_auxiliary(&auxiliary_scores),
             auxiliary_scores,
-            latency_ms: started.elapsed().as_millis() as u64,
+            latency_ms,
+            execution_report: JepaRuntimeBackendReport::new(
+                BackendKind::Cpu,
+                "rust-vector",
+                Some("cpu".into()),
+                true,
+                latency_ms,
+            ),
         })
     }
 }
@@ -1375,11 +1418,20 @@ fn candle_jepa_predict_runtime_on_device(
         candle_predict_transition_tensor(transition, &state, &action, device)?.to_vec1::<f32>()?;
     let auxiliary_scores =
         candle_predict_auxiliary_scores(&model.auxiliary_heads, &state, &action, device)?;
+    let latency_ms = started.elapsed().as_millis() as u64;
     Ok(JepaRuntimePrediction {
         backend,
         predicted_next_state,
+        guardrail_scores: jepa_guardrail_scores_from_auxiliary(&auxiliary_scores),
         auxiliary_scores,
-        latency_ms: started.elapsed().as_millis() as u64,
+        latency_ms,
+        execution_report: JepaRuntimeBackendReport::new(
+            backend,
+            "candle",
+            default_backend_device_name(backend),
+            true,
+            latency_ms,
+        ),
     })
 }
 
@@ -1955,11 +2007,20 @@ fn mlx_jepa_predict_runtime_on_device(
     let action = mlx_encode_action_array(&model.action_encoder, action)?;
     let predicted_next_state = mlx_predict_transition_array(transition, &state, &action)?;
     let auxiliary_scores = mlx_predict_auxiliary_scores(&model.auxiliary_heads, &state, &action)?;
+    let latency_ms = started.elapsed().as_millis() as u64;
     Ok(JepaRuntimePrediction {
         backend: BackendKind::Metal,
         predicted_next_state,
+        guardrail_scores: jepa_guardrail_scores_from_auxiliary(&auxiliary_scores),
         auxiliary_scores,
-        latency_ms: started.elapsed().as_millis() as u64,
+        latency_ms,
+        execution_report: JepaRuntimeBackendReport::new(
+            BackendKind::Metal,
+            "mlx-rs",
+            default_backend_device_name(BackendKind::Metal),
+            true,
+            latency_ms,
+        ),
     })
 }
 
@@ -4012,6 +4073,25 @@ fn label_value(labels: &WorldLabelSet, label: &str) -> bool {
     }
 }
 
+fn jepa_guardrail_scores_from_auxiliary(scores: &[(String, f32)]) -> GuardrailRiskScores {
+    let mut guardrail_scores = GuardrailRiskScores::default();
+    for (label, probability) in scores {
+        let probability = probability.is_finite().then(|| probability.clamp(0.0, 1.0));
+        match label.as_str() {
+            "failure" => guardrail_scores.predicted_failure = probability,
+            "retry" => guardrail_scores.predicted_retry = probability,
+            "provider_incident" => guardrail_scores.predicted_provider_incident = probability,
+            "verification_needed" => guardrail_scores.predicted_verification_needed = probability,
+            "user_correction" => guardrail_scores.predicted_user_correction = probability,
+            "plan_drift" => guardrail_scores.predicted_plan_drift = probability,
+            "high_cost" => guardrail_scores.predicted_high_cost = probability,
+            "slow_run" => guardrail_scores.predicted_slow_run = probability,
+            _ => {}
+        }
+    }
+    guardrail_scores
+}
+
 fn f32_bytes(values: &[f32]) -> Vec<u8> {
     values
         .iter()
@@ -4261,6 +4341,17 @@ mod tests {
         .unwrap();
 
         assert_eq!(candle.backend, BackendKind::Cpu);
+        assert_eq!(cpu.execution_report.backend, BackendKind::Cpu);
+        assert_eq!(cpu.execution_report.framework, "rust-vector");
+        assert!(cpu.execution_report.native_runtime_prediction);
+        assert_eq!(cpu.execution_report.host_fallback_count, 0);
+        assert_eq!(cpu.execution_report.latency_ms, cpu.latency_ms);
+        assert_eq!(candle.execution_report.backend, BackendKind::Cpu);
+        assert_eq!(candle.execution_report.framework, "candle");
+        assert!(candle.execution_report.native_runtime_prediction);
+        assert_eq!(candle.execution_report.host_fallback_count, 0);
+        assert_eq!(candle.execution_report.latency_ms, candle.latency_ms);
+        assert_eq!(cpu.guardrail_scores, candle.guardrail_scores);
         assert!(
             cosine_error(&cpu.predicted_next_state, &candle.predicted_next_state).unwrap() < 0.001
         );
