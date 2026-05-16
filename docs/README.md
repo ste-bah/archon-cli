@@ -124,6 +124,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v1.3.1](release-notes/v1.3.1.md) — Add JEPA world-model training/runtime, normal-session and pipeline guardrails, CUDA/MLX accelerator support, and fresh-setup cookbook docs
 - [v1.3.0](release-notes/v1.3.0.md) — Remove model-facing subagent `max_turns`, harden compaction persistence/request-pressure recovery, add lazy agent catalog, and improve context/status signals
 - [v1.2.9](release-notes/v1.2.9.md) — Autocompaction trigger correctness + proactive soft-fail with fall-through; reactive remains fatal
 - [v1.2.8](release-notes/v1.2.8.md) — Complete auto-compaction PRD closure: structured summaries, prompt budgets, context UI, and prompt-cache policy
