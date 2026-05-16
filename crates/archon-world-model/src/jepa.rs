@@ -3017,6 +3017,34 @@ pub fn jepa_backend_promotion_gate(
     }
 }
 
+pub fn jepa_backend_forward_parity(
+    model: &JepaTraceModel,
+    window: &TraceWindow,
+    action: &TraceAction,
+) -> Result<f32> {
+    let cpu = CpuJepaBackend.predict_runtime(model, window, action)?;
+    let backend = match model.metadata.backend {
+        BackendKind::Cuda => CandleCudaJepaBackend.predict_runtime(model, window, action)?,
+        BackendKind::Metal => MlxMetalJepaBackend.predict_runtime(model, window, action)?,
+        BackendKind::Auto | BackendKind::Cpu => return Ok(1.0),
+    };
+    crate::backend::bridge::output_cosine_parity(
+        &cpu.predicted_next_state,
+        &backend.predicted_next_state,
+    )
+}
+
+pub fn jepa_backend_forward_parity_gate(
+    model: &JepaTraceModel,
+    window: &TraceWindow,
+    action: &TraceAction,
+    cosine_floor: f32,
+) -> bool {
+    jepa_backend_forward_parity(model, window, action)
+        .map(|cosine| cosine >= cosine_floor)
+        .unwrap_or(false)
+}
+
 pub fn predict_jepa_with_backend(
     model: &JepaTraceModel,
     window: &TraceWindow,
@@ -4413,6 +4441,13 @@ mod tests {
             BackendKind::Cuda
         );
         validate_jepa_backend_execution(&model.metadata).unwrap();
+        let examples = build_jepa_training_examples(&rows(), &config).unwrap();
+        assert!(jepa_backend_forward_parity_gate(
+            &model,
+            &examples[0].context,
+            &examples[0].action,
+            0.99
+        ));
     }
 
     #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
@@ -4467,6 +4502,13 @@ mod tests {
             BackendKind::Metal
         );
         validate_jepa_backend_execution(&model.metadata).unwrap();
+        let examples = build_jepa_training_examples(&rows(), &config).unwrap();
+        assert!(jepa_backend_forward_parity_gate(
+            &model,
+            &examples[0].context,
+            &examples[0].action,
+            0.99
+        ));
     }
 
     #[test]

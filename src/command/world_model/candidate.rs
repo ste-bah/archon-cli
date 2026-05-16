@@ -305,19 +305,20 @@ pub(super) fn render_eval_jepa(
     let tensor_safety = candidate.model.validate_finite().is_ok();
     let corpus_sufficient = candidate.model.metadata.example_count as usize
         >= config.learning.world_model.jepa.min_training_examples;
-    let backend_execution = archon_world_model::jepa::jepa_backend_promotion_gate(
-        &candidate.model.metadata,
-        config
-            .learning
-            .world_model
-            .jepa
-            .min_cuda_validation_examples,
-        config
-            .learning
-            .world_model
-            .jepa
-            .min_metal_validation_examples,
-    );
+    let backend_execution =
+        archon_world_model::jepa::jepa_backend_promotion_gate(
+            &candidate.model.metadata,
+            config
+                .learning
+                .world_model
+                .jepa
+                .min_cuda_validation_examples,
+            config
+                .learning
+                .world_model
+                .jepa
+                .min_metal_validation_examples,
+        ) && jepa_backend_forward_parity_passes(config, &candidate.model, &rows);
     let gates = JepaPromotionGateReport::from_parts_with_backend_execution(
         corpus_sufficient,
         comparison.passed,
@@ -374,6 +375,37 @@ pub(super) fn render_eval_jepa(
         eval_path.display(),
         comparison_path.display()
     ))
+}
+
+fn jepa_backend_forward_parity_passes(
+    config: &archon_core::config::ArchonConfig,
+    model: &archon_world_model::jepa::JepaTraceModel,
+    rows: &[archon_world_model::schema::WorldTraceRow],
+) -> bool {
+    if matches!(
+        model.metadata.backend,
+        archon_world_model::BackendKind::Auto | archon_world_model::BackendKind::Cpu
+    ) {
+        return true;
+    }
+    let jepa_config = match jepa_training_config(config) {
+        Ok(config) => config,
+        Err(_) => return false,
+    };
+    let examples = match archon_world_model::jepa::build_jepa_training_examples(rows, &jepa_config)
+    {
+        Ok(examples) => examples,
+        Err(_) => return false,
+    };
+    let Some(example) = examples.first() else {
+        return false;
+    };
+    archon_world_model::jepa::jepa_backend_forward_parity_gate(
+        model,
+        &example.context,
+        &example.action,
+        config.learning.world_model.jepa.backend_parity_cosine_floor,
+    )
 }
 
 pub(super) fn render_inspect_jepa(root: &Path, candidate_id: &str) -> Result<String> {
