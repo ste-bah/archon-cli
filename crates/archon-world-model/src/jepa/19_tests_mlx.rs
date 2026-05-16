@@ -1,9 +1,8 @@
     #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
     #[test]
-    fn mlx_jepa_training_writes_native_execution_proof_when_available() {
-        if !crate::backend::metal_runtime_available() {
-            return;
-        }
+    #[ignore = "requires Apple Silicon MLX Metal"]
+    fn jepa_mlx_training_writes_native_execution_proof_when_available() {
+        require_mlx_hardware();
         let config = JepaTrainingConfig {
             latent_dim: 8,
             context_window_rows: 2,
@@ -191,4 +190,3 @@
             0.99
         ));
     }
-

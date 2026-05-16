@@ -1,6 +1,12 @@
     use super::*;
     use crate::schema::{WorldActionKind, WorldTraceRow};
 
+    fn jepa_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn rows() -> Vec<WorldTraceRow> {
         let mut first = WorldTraceRow::new("s1", WorldActionKind::PlanUpdate).with_row_id("r1");
         first.agent = Some("planner".into());
@@ -68,4 +74,3 @@
             })
             .collect()
     }
-

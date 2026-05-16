@@ -41,11 +41,9 @@
     #[test]
     fn accelerator_jepa_backend_stubs_compile_and_fail_closed() {
         let cuda = CandleCudaJepaBackend;
-        let metal = MlxMetalJepaBackend;
         let encoded = Vec::new();
 
         assert_eq!(cuda.probe_jepa().status.requested, BackendKind::Cuda);
-        assert_eq!(metal.probe_jepa().status.requested, BackendKind::Metal);
         #[cfg(not(feature = "cuda"))]
         assert!(
             cuda.fit_predictor(8, &encoded)
@@ -53,13 +51,22 @@
                 .to_string()
                 .contains("native cuda JEPA tensor backend is not implemented")
         );
-        assert!(
-            metal
-                .fit_predictor(8, &encoded)
-                .unwrap_err()
-                .to_string()
-                .contains("native metal JEPA tensor backend is not implemented")
-        );
+        #[cfg(not(all(
+            feature = "mlx-metal",
+            target_os = "macos",
+            target_arch = "aarch64"
+        )))]
+        {
+            let metal = MlxMetalJepaBackend;
+            assert_eq!(metal.probe_jepa().status.requested, BackendKind::Metal);
+            assert!(
+                metal
+                    .fit_predictor(8, &encoded)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("native metal JEPA tensor backend is not implemented")
+            );
+        }
     }
 
     #[cfg(feature = "candle")]
@@ -290,4 +297,3 @@
             0.99
         ));
     }
-

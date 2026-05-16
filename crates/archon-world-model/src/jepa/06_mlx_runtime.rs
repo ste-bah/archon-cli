@@ -126,7 +126,7 @@ fn mlx_layer_norm_and_l2_normalize(tensor: mlx_rs::Array) -> Result<mlx_rs::Arra
         .sum(None)?
         .add(&Array::from_f32(1e-12))?
         .sqrt()?;
-    normalized.divide(&l2)
+    Ok(normalized.divide(&l2)?)
 }
 
 #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
@@ -143,6 +143,5 @@ fn mlx_layer_norm_rows_and_l2_normalize(tensor: mlx_rs::Array) -> Result<mlx_rs:
         .sum_axis(1, Some(true))?
         .add(&Array::from_f32(1e-12))?
         .sqrt()?;
-    normalized.divide(&l2)
+    Ok(normalized.divide(&l2)?)
 }
-

@@ -363,7 +363,7 @@ fn mlx_latent_variance_loss_on_device(
         .square()?
         .mean_axis(0, None)?
         .sqrt()?;
-    mlx_clamp(&mlx_affine(&std, -1.0, floor)?, 0.0, f32::MAX)?.mean(None)
+    Ok(mlx_clamp(&mlx_affine(&std, -1.0, floor)?, 0.0, f32::MAX)?.mean(None)?)
 }
 
 #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
@@ -382,10 +382,10 @@ fn mlx_masked_mean(
             &[latent_dim as i32],
         ));
     }
-    values
+    Ok(values
         .multiply(mask)?
         .sum_axis(0, None)?
-        .divide(&Array::from_f32(count as f32))
+        .divide(&Array::from_f32(count as f32))?)
 }
 
 #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
@@ -434,9 +434,9 @@ fn mlx_horizon_column(encoded: &JepaEncodedBatch) -> mlx_rs::Array {
 fn mlx_affine(array: &mlx_rs::Array, mul: f32, add: f32) -> Result<mlx_rs::Array> {
     use mlx_rs::Array;
 
-    array
+    Ok(array
         .multiply(&Array::from_f32(mul))?
-        .add(&Array::from_f32(add))
+        .add(&Array::from_f32(add))?)
 }
 
 #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
@@ -445,10 +445,10 @@ fn mlx_clamp(array: &mlx_rs::Array, min: f32, max: f32) -> Result<mlx_rs::Array>
     use mlx_rs::Array;
     use mlx_rs::ops::{maximum, minimum};
 
-    minimum(
+    Ok(minimum(
         &maximum(array, &Array::from_f32(min))?,
         &Array::from_f32(max),
-    )
+    )?)
 }
 
 #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]

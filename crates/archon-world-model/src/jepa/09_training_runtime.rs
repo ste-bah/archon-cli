@@ -15,12 +15,20 @@ pub fn train_jepa_candidate_with_backend(
     train_jepa_candidate_with_backend_status(rows, config, status, allow_cpu_fallback)
 }
 
+#[cfg(all(test, feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+static JEPA_TRAINING_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn train_jepa_candidate_with_backend_status(
     rows: &[WorldTraceRow],
     config: &JepaTrainingConfig,
     status: BackendStatus,
     allow_cpu_fallback: bool,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
+    #[cfg(all(test, feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+    let _jepa_training_test_lock = JEPA_TRAINING_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
     if status.selected == BackendKind::Cpu {
         return train_jepa_candidate_cpu(rows, config, status);
     }

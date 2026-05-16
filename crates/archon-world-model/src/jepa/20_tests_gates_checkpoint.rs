@@ -45,6 +45,7 @@
 
     #[test]
     fn accelerator_promotion_gate_requires_hardware_validation_report() {
+        let _guard = jepa_test_guard();
         let config = JepaTrainingConfig {
             latent_dim: 8,
             context_window_rows: 2,
@@ -96,6 +97,7 @@
 
     #[test]
     fn accelerator_execution_proof_requires_native_runtime_prediction() {
+        let _guard = jepa_test_guard();
         let config = JepaTrainingConfig {
             latent_dim: 8,
             context_window_rows: 2,
