@@ -847,6 +847,14 @@ pub struct JepaCheckpointTensors {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JepaMlxArrayCheckpoint {
+    pub model_id: String,
+    pub arrays: JepaCheckpointTensors,
+    pub memory_order: String,
+    pub dtype: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EncodedJepaTrainingExample {
     pub context_latent: Vec<f32>,
     pub action_latent: Vec<f32>,
@@ -3124,6 +3132,40 @@ pub fn write_jepa_safetensors_checkpoint(
     Ok(record)
 }
 
+pub fn write_jepa_checkpoint(root: &Path, model: &JepaTraceModel) -> Result<JepaCheckpointRecord> {
+    match model.metadata.backend {
+        BackendKind::Metal => write_jepa_mlx_array_checkpoint(root, model),
+        BackendKind::Auto | BackendKind::Cpu | BackendKind::Cuda => {
+            write_jepa_safetensors_checkpoint(root, model)
+        }
+    }
+}
+
+pub fn write_jepa_mlx_array_checkpoint(
+    root: &Path,
+    model: &JepaTraceModel,
+) -> Result<JepaCheckpointRecord> {
+    let record = JepaCheckpointRecord {
+        model_id: model.metadata.model_id.clone(),
+        format: "mlx_array".into(),
+        path: root
+            .join("jepa")
+            .join("candidates")
+            .join(format!("{}.mlx", model.metadata.model_id)),
+    };
+    if let Some(parent) = record.path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let checkpoint = JepaMlxArrayCheckpoint {
+        model_id: model.metadata.model_id.clone(),
+        arrays: jepa_checkpoint_tensors(model),
+        memory_order: "row_major".into(),
+        dtype: "f32".into(),
+    };
+    std::fs::write(&record.path, serde_json::to_vec_pretty(&checkpoint)?)?;
+    Ok(record)
+}
+
 pub fn read_jepa_safetensors_checkpoint(path: &Path) -> Result<JepaCheckpointTensors> {
     let bytes = std::fs::read(path)?;
     let tensors = safetensors::SafeTensors::deserialize(&bytes)?;
@@ -3148,6 +3190,11 @@ pub fn read_jepa_safetensors_checkpoint(path: &Path) -> Result<JepaCheckpointTen
         auxiliary_latent_weights: tensor_f32(&tensors, "auxiliary_latent_weights")?,
         auxiliary_action_weights: tensor_f32(&tensors, "auxiliary_action_weights")?,
     })
+}
+
+pub fn read_jepa_mlx_array_checkpoint(path: &Path) -> Result<JepaMlxArrayCheckpoint> {
+    let content = std::fs::read_to_string(path)?;
+    serde_json::from_str(&content).map_err(Into::into)
 }
 
 fn mask_jepa_training_example(
@@ -4647,5 +4694,32 @@ mod tests {
             loaded.predictor_bias, model.predictor.bias,
             "predictor bias should roundtrip through the checkpoint"
         );
+    }
+
+    #[test]
+    fn jepa_mlx_array_checkpoint_roundtrips_weights() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 2,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..JepaTrainingConfig::default()
+        };
+        let (mut model, _) = train_jepa_candidate(&rows(), &config).unwrap();
+        model.metadata.backend = BackendKind::Metal;
+
+        let record = write_jepa_mlx_array_checkpoint(temp.path(), &model).unwrap();
+        let loaded = read_jepa_mlx_array_checkpoint(&record.path).unwrap();
+
+        assert_eq!(record.format, "mlx_array");
+        assert!(
+            record
+                .path
+                .ends_with(format!("{}.mlx", model.metadata.model_id))
+        );
+        assert_eq!(loaded.dtype, "f32");
+        assert_eq!(loaded.memory_order, "row_major");
+        assert_eq!(loaded.arrays.predictor_bias, model.predictor.bias);
     }
 }

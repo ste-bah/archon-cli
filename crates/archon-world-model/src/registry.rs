@@ -196,7 +196,7 @@ impl ModelRegistry {
         self.ensure_jepa_dirs()?;
         crate::jepa::validate_jepa_backend_execution(&model.metadata)?;
         crate::jepa::validate_jepa_backend_execution(&outcome.metadata)?;
-        let checkpoint = crate::jepa::write_jepa_safetensors_checkpoint(&self.paths.root, model)?;
+        let checkpoint = crate::jepa::write_jepa_checkpoint(&self.paths.root, model)?;
         let training_run = crate::jepa::append_jepa_training_run(&self.paths.root, outcome)?;
         let record = JepaCandidateRecord {
             model: model.clone(),
@@ -563,6 +563,59 @@ mod tests {
         assert_eq!(loaded.outcome.status, outcome.status);
         assert_eq!(loaded.checkpoint.format, "candle_safetensors");
         assert!(loaded.training_run.exists());
+    }
+
+    #[test]
+    fn registry_writes_metal_jepa_candidate_with_mlx_checkpoint() {
+        let temp = tempfile::tempdir().unwrap();
+        let registry = ModelRegistry::open(temp.path()).unwrap();
+        let mut first =
+            crate::schema::WorldTraceRow::new("s1", crate::schema::WorldActionKind::ToolCall)
+                .with_row_id("r1");
+        first.redacted_excerpt = Some("run tests".into());
+        let mut second =
+            crate::schema::WorldTraceRow::new("s1", crate::schema::WorldActionKind::Verification)
+                .with_row_id("r2");
+        second.redacted_excerpt = Some("tests passed".into());
+        let config = crate::jepa::JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 1,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..crate::jepa::JepaTrainingConfig::default()
+        };
+        let (mut model, mut outcome) =
+            crate::jepa::train_jepa_candidate(&[first, second], &config).unwrap();
+        let status = crate::backend::BackendStatus {
+            requested: crate::backend::BackendKind::Metal,
+            selected: crate::backend::BackendKind::Metal,
+            framework: "mlx-rs".into(),
+            device_name: Some("metal:0".into()),
+            experimental: true,
+            fallback_reason: None,
+        };
+        model.metadata.backend = crate::backend::BackendKind::Metal;
+        model.metadata.backend_execution =
+            crate::jepa::JepaBackendExecutionReport::native(&status, 512, true);
+        if let Some(transition) = &mut model.transition_model {
+            transition.metadata.backend = crate::backend::BackendKind::Metal;
+        }
+        outcome.metadata = model.metadata.clone();
+
+        let path = registry.write_jepa_candidate(&model, &outcome).unwrap();
+        let loaded = registry
+            .load_jepa_candidate(&model.metadata.model_id)
+            .unwrap();
+
+        assert!(path.exists());
+        assert!(
+            temp.path()
+                .join("jepa")
+                .join("candidates")
+                .join(format!("{}.mlx", model.metadata.model_id))
+                .exists()
+        );
+        assert_eq!(loaded.checkpoint.format, "mlx_array");
     }
 
     #[test]
