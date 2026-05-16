@@ -28,8 +28,8 @@ impl Default for LabelerOptions {
         Self {
             mode: LabelerMode::Hybrid,
             model: "configured-provider-default".into(),
-            max_events_per_prompt: 120,
-            max_prompt_chars: 24_000,
+            max_events_per_prompt: 30,
+            max_prompt_chars: 128_000,
         }
     }
 }
@@ -62,7 +62,7 @@ pub async fn label_rows_with_provider(
     match options.mode {
         LabelerMode::Heuristic => Ok(heuristic_label_rows(rows)),
         LabelerMode::Llm => {
-            llm_label_rows(
+            llm_label_rows_chunked(
                 rows,
                 options,
                 provider.ok_or_else(|| {
@@ -74,11 +74,27 @@ pub async fn label_rows_with_provider(
         LabelerMode::Hybrid => {
             let mut labels = heuristic_label_rows(rows);
             if let Some(provider) = provider {
-                merge_llm_labels(&mut labels, llm_label_rows(rows, options, provider).await?);
+                merge_llm_labels(
+                    &mut labels,
+                    llm_label_rows_chunked(rows, options, provider).await?,
+                );
             }
             Ok(labels)
         }
     }
+}
+
+async fn llm_label_rows_chunked(
+    rows: &[WorldTraceRow],
+    options: &LabelerOptions,
+    provider: &dyn LlmProvider,
+) -> Result<Vec<RowLabelUpdate>> {
+    let chunk_size = options.max_events_per_prompt.max(1);
+    let mut labels = Vec::new();
+    for chunk in rows.chunks(chunk_size) {
+        labels.extend(llm_label_rows(chunk, options, provider).await?);
+    }
+    Ok(labels)
 }
 
 async fn llm_label_rows(
@@ -93,7 +109,7 @@ async fn llm_label_rows(
     let response = provider
         .complete(LlmRequest {
             model: options.model.clone(),
-            max_tokens: 2048,
+            max_tokens: 8192,
             system: vec![serde_json::json!({
                 "type": "text",
                 "text": "You label Archon trace rows. Return compact JSON only."
@@ -138,9 +154,37 @@ fn label_prompt(rows: &[WorldTraceRow], options: &LabelerOptions) -> Result<Stri
 }
 
 fn parse_label_response(text: &str) -> Result<Vec<RowLabelUpdate>> {
-    let response: LlmLabelResponse = serde_json::from_str(text.trim())
+    let trimmed = strip_json_fence(text.trim());
+    let response: LlmLabelResponse = serde_json::from_str(trimmed)
+        .or_else(|_| extract_json_object(trimmed).and_then(serde_json::from_str))
         .map_err(|error| anyhow::anyhow!("invalid world-model label JSON: {error}"))?;
     Ok(response.rows)
+}
+
+fn strip_json_fence(text: &str) -> &str {
+    let Some(stripped) = text.strip_prefix("```") else {
+        return text;
+    };
+    let after_language = stripped
+        .strip_prefix("json")
+        .or_else(|| stripped.strip_prefix("JSON"))
+        .unwrap_or(stripped)
+        .trim_start_matches('\n')
+        .trim();
+    after_language
+        .strip_suffix("```")
+        .unwrap_or(after_language)
+        .trim()
+}
+
+fn extract_json_object(text: &str) -> serde_json::Result<&str> {
+    let Some(start) = text.find('{') else {
+        return serde_json::from_str::<serde_json::Value>(text).map(|_| text);
+    };
+    let Some(end) = text.rfind('}') else {
+        return serde_json::from_str::<serde_json::Value>(text).map(|_| text);
+    };
+    Ok(&text[start..=end])
 }
 
 fn merge_llm_labels(base: &mut [RowLabelUpdate], llm: Vec<RowLabelUpdate>) {
@@ -171,6 +215,7 @@ mod tests {
     use crate::schema::{WorldActionKind, WorldTraceRow};
     use archon_llm::provider::{LlmError, LlmResponse, ModelInfo, ProviderFeature};
     use archon_llm::types::Usage;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct FakeProvider;
 
@@ -203,6 +248,63 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct ChunkingProvider {
+        calls: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for ChunkingProvider {
+        fn name(&self) -> &str {
+            "chunking"
+        }
+        fn models(&self) -> Vec<ModelInfo> {
+            Vec::new()
+        }
+        async fn stream(
+            &self,
+            _: LlmRequest,
+        ) -> Result<tokio::sync::mpsc::Receiver<archon_llm::streaming::StreamEvent>, LlmError>
+        {
+            Err(LlmError::Unsupported("stream".into()))
+        }
+        async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let prompt = request
+                .messages
+                .first()
+                .and_then(|message| message.get("content"))
+                .and_then(|content| content.as_str())
+                .expect("label prompt content");
+            let prompt_json: serde_json::Value =
+                serde_json::from_str(prompt).expect("label prompt json");
+            let rows = prompt_json
+                .get("rows")
+                .and_then(|rows| rows.as_array())
+                .expect("prompt rows");
+            let labels = rows
+                .iter()
+                .map(|row| {
+                    let row_id = row
+                        .get("row_id")
+                        .and_then(|value| value.as_str())
+                        .expect("row_id");
+                    serde_json::json!({"row_id": row_id, "labels": {"retry": true}})
+                })
+                .collect::<Vec<_>>();
+            Ok(LlmResponse {
+                content: vec![
+                    serde_json::json!({"text": serde_json::json!({"rows": labels}).to_string()}),
+                ],
+                usage: Usage::default(),
+                stop_reason: "stop".into(),
+            })
+        }
+        fn supports_feature(&self, _: ProviderFeature) -> bool {
+            true
+        }
+    }
+
     #[tokio::test]
     async fn hybrid_labeler_uses_provider_json_when_available() {
         let mut row = WorldTraceRow::new("s1", WorldActionKind::ToolCall).with_row_id("r1");
@@ -215,5 +317,56 @@ mod tests {
 
         assert!(labels[0].labels.failure);
         assert!(labels[0].labels.verification_needed);
+    }
+
+    #[tokio::test]
+    async fn llm_labeler_chunks_large_inputs() {
+        let provider = ChunkingProvider::default();
+        let rows = (0..3)
+            .map(|idx| {
+                WorldTraceRow::new("s1", WorldActionKind::ToolCall).with_row_id(format!("r{idx}"))
+            })
+            .collect::<Vec<_>>();
+        let options = LabelerOptions {
+            mode: LabelerMode::Llm,
+            max_events_per_prompt: 1,
+            ..LabelerOptions::default()
+        };
+
+        let labels = label_rows_with_provider(&rows, &options, Some(&provider))
+            .await
+            .unwrap();
+
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 3);
+        assert_eq!(labels.len(), 3);
+        assert_eq!(labels[0].row_id, "r0");
+        assert_eq!(labels[2].row_id, "r2");
+        assert!(labels.iter().all(|label| label.labels.retry));
+    }
+
+    #[test]
+    fn label_response_accepts_fenced_json() {
+        let labels = parse_label_response(
+            r#"```json
+{"rows":[{"row_id":"r1","labels":{"failure":true}}]}
+```"#,
+        )
+        .unwrap();
+
+        assert_eq!(labels[0].row_id, "r1");
+        assert!(labels[0].labels.failure);
+    }
+
+    #[test]
+    fn label_response_extracts_json_object_from_text() {
+        let labels = parse_label_response(
+            r#"Here are the labels:
+{"rows":[{"row_id":"r1","labels":{"retry":true}}]}
+Done."#,
+        )
+        .unwrap();
+
+        assert_eq!(labels[0].row_id, "r1");
+        assert!(labels[0].labels.retry);
     }
 }

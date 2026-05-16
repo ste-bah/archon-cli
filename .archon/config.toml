@@ -451,6 +451,122 @@ first_run_threshold = 100      # kickoff at startup if memory_count > this
 max_runtime_ms = 300000        # 5 minutes max per run
 tick_interval_ms = 60000       # background poll interval (1 minute)
 
+# --- Local World Model (latent next-state trace learning) ---
+[learning.world_model]
+enabled = true
+model_kind = "latent_transition"
+auto_promote_advisory = true
+require_approval_for_behavior_change = true
+state_dim = 384
+max_checkpoint_mb = 64
+max_prediction_latency_ms = 100
+max_counterfactual_actions = 5
+store_raw_text = false
+include_conversation_turns = true
+include_agent_outputs = true
+
+[learning.world_model.embeddings]
+source = "local"                   # "local" | "third_party" | "auto"
+provider = "fastembed"
+model = "bge-base-en-v1.5"
+dimensions = 768
+projection_dim = 384
+cache_enabled = true
+cache_max_mb = 1024
+redact_before_embedding = true
+allow_third_party = false
+external_base_url = ""
+external_api_key_env = ""
+
+[learning.world_model.labeler]
+analyzer = "hybrid"                # "heuristic" | "llm" | "hybrid"
+llm_enabled = true
+max_events_per_prompt = 30
+max_prompt_chars = 128000
+
+[learning.world_model.training]
+backend = "metal"                  # "auto" | "cpu" | "metal" | "cuda"
+allow_cpu_fallback = false
+prefer_accelerator = true
+precision = "fp32"
+max_accelerator_memory_mb = 4096
+batch_size = 32
+max_epochs = 10
+validation_split = 0.2
+promotion_min_delta = 0.02
+max_runtime_ms = 300000
+
+[learning.world_model.auto_trainer]
+enabled = true
+idle_required_ms = 300000
+battery_suspend_below_percent = 30
+trigger_new_rows = 100
+trigger_surprises = 5
+trigger_corrections = 3
+trigger_elapsed_ms = 21600000
+first_run_threshold = 300
+max_runtime_ms = 300000
+tick_interval_ms = 60000
+
+[learning.world_model.retention]
+jsonl_rotate_mb = 500
+raw_retention_days = 90
+retain_cozo_summaries = true
+retain_checkpoint_count = 5
+
+[learning.world_model.jepa]
+enabled = true
+latent_dim = 384
+context_window_rows = 8
+target_window_rows = 3
+prediction_horizons = [1, 3, 5]
+mask_ratio = 0.30
+ema_decay = 0.996
+latent_var_floor = 0.05
+min_latent_std = 0.05
+min_effective_rank_ratio = 0.50
+batch_size = 32
+max_epochs = 10
+learning_rate = 0.001
+alpha_mse = 0.25
+beta_aux = 0.50
+gamma_horizon = 0.10
+delta_var = 0.10
+allow_generic_fallback = true
+max_runtime_ms = 300000
+max_prediction_latency_ms = 50
+max_checkpoint_mb = 64
+horizon_consistency_tol = 0.02
+min_baseline_improvement = 0.05
+min_heldout_examples = 200
+min_training_examples = 2000
+require_native_accelerator_ops = true
+allow_accelerated_candidate_cpu_stage = false
+min_metal_validation_examples = 512
+backend_parity_cosine_floor = 0.99
+max_backend_prediction_latency_ms = 50
+max_backend_first_call_latency_ms = 5000
+
+[learning.world_model.guardrails]
+enabled = true
+interactive_mode = "guarded"
+pipeline_mode = "guarded"
+tool_run_mode = "learn_only"
+verification_run_mode = "learn_only"
+high_risk_threshold = 0.70
+medium_risk_threshold = 0.45
+critical_risk_threshold = 0.85
+require_tests_for_coding_high_risk = true
+require_build_for_coding_high_risk = true
+require_lint_for_coding_high_risk = false
+require_typecheck_for_coding_high_risk = false
+require_plan_review_for_plan_drift = true
+require_source_check_for_research_high_risk = true
+require_manual_approval_for_critical = false
+max_guardrail_overhead_ms = 40
+record_outcomes_without_prediction = true
+max_guardrail_events_per_session = 500
+
 # --- Reasoning Quality (visible claim/evidence learning signal) ---
 [learning.reasoning_quality]
 enabled = true
@@ -469,7 +585,7 @@ feed_retrospective = true
 
 [learning.reasoning_quality.critic]
 mode = "hybrid"
-allow_llm = false
+allow_llm = true
 provider = "default"
 model = ""
 max_tokens = 1200

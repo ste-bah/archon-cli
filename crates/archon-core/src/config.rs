@@ -1218,8 +1218,8 @@ impl Default for WorldModelLabelerConfig {
         Self {
             analyzer: "hybrid".into(),
             llm_enabled: true,
-            max_events_per_prompt: 120,
-            max_prompt_chars: 32_000,
+            max_events_per_prompt: 30,
+            max_prompt_chars: 128_000,
         }
     }
 }

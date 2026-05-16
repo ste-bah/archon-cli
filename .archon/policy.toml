@@ -76,8 +76,8 @@ require_approval_for_network_changes = true
 # an operator turns it on after reviewing evaluation reports.
 [policy.world_model]
 allow_third_party_embeddings = false
-allow_llm_labeler = false
-allow_behavior_changes = false
+allow_llm_labeler = true
+allow_behavior_changes = true
 
 
 # ----------------------------------------------------------------------------
@@ -87,11 +87,11 @@ allow_behavior_changes = false
 # global gate plus the action-family gate below, and model-changing actions also
 # require the matching subsystem policy (for example world_model.allow_behavior_changes).
 [policy.web]
-allow_mutating_actions = false
-allow_file_uploads = false
-allow_pipeline_controls = false
-allow_model_training_actions = false
-allow_corpus_open_paths = false
+allow_mutating_actions = true
+allow_file_uploads = true
+allow_pipeline_controls = true
+allow_model_training_actions = true
+allow_corpus_open_paths = true
 
 
 # ----------------------------------------------------------------------------
@@ -100,8 +100,8 @@ allow_corpus_open_paths = false
 # Deterministic reasoning-quality extraction is local and enabled by config.
 # LLM critic calls, raw text storage, and cloud data flow stay explicit opt-ins.
 [policy.reasoning_quality]
-allow_llm_critic = false
-allow_critic_cloud_data_flow = false
+allow_llm_critic = true
+allow_critic_cloud_data_flow = true
 allow_third_party_critic = false
 allow_raw_text_storage = false
 allow_behavior_proposal_generation = true

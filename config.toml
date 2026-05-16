@@ -452,8 +452,8 @@ external_api_key_env = ""
 [learning.world_model.labeler]
 analyzer = "hybrid"                # "heuristic" | "llm" | "hybrid"
 llm_enabled = true
-max_events_per_prompt = 120
-max_prompt_chars = 32000
+max_events_per_prompt = 30
+max_prompt_chars = 128000
 
 [learning.world_model.training]
 backend = "auto"                   # "auto" | "cpu" | "metal" | "cuda"

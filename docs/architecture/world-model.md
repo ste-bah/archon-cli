@@ -67,7 +67,10 @@ Rows get deterministic labels first. Hybrid mode keeps those labels and adds a
 provider-neutral semantic pass through the configured `LlmProvider`, so Anthropic,
 Codex OAuth, and compatible providers use the same labeler path. If config or
 policy denies LLM labeling, ingestion falls back to deterministic labels and
-records the warning without failing the run.
+records the warning without failing the run. Backfill sends LLM labeling work in
+bounded chunks (`max_events_per_prompt`, default `30`) and accepts fenced or
+lightly wrapped JSON responses so provider formatting does not abort an otherwise
+valid ingest.
 
 ## Commands
 
