@@ -331,10 +331,15 @@ fn predict_with_jepa_checkpoint(
             .map(|(label, probability)| (label.as_str(), *probability)),
     ));
     let elapsed_ms = started.elapsed().as_millis() as u64;
-    if elapsed_ms > config.learning.world_model.jepa.max_prediction_latency_ms {
+    let (measured_latency_ms, latency_cap_ms) = jepa_prediction_latency_budget(
+        config,
+        candidate.model.metadata.backend,
+        runtime.latency_ms,
+        elapsed_ms,
+    );
+    if measured_latency_ms > latency_cap_ms {
         anyhow::bail!(
-            "JepaLatencyExceeded: prediction took {elapsed_ms}ms, cap={}ms",
-            config.learning.world_model.jepa.max_prediction_latency_ms
+            "JepaLatencyExceeded: prediction took {measured_latency_ms}ms, cap={latency_cap_ms}ms"
         );
     }
     Ok(PredictionInference {
@@ -348,6 +353,32 @@ fn predict_with_jepa_checkpoint(
         representation_source: format!("archon-jepa:{}", candidate.model.metadata.model_id),
         guardrail_scores,
     })
+}
+
+pub(crate) fn jepa_prediction_latency_budget(
+    config: &archon_core::config::ArchonConfig,
+    backend: archon_world_model::BackendKind,
+    runtime_latency_ms: u64,
+    elapsed_ms: u64,
+) -> (u64, u64) {
+    if matches!(
+        backend,
+        archon_world_model::BackendKind::Cuda | archon_world_model::BackendKind::Metal
+    ) {
+        (
+            runtime_latency_ms,
+            config
+                .learning
+                .world_model
+                .jepa
+                .max_backend_prediction_latency_ms,
+        )
+    } else {
+        (
+            elapsed_ms,
+            config.learning.world_model.jepa.max_prediction_latency_ms,
+        )
+    }
 }
 
 fn encode_jepa_actual_outcome(

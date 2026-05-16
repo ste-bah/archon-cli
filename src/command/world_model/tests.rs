@@ -605,6 +605,37 @@ fn predict_next_fails_open_when_jepa_pointer_missing() {
 }
 
 #[test]
+fn jepa_accelerator_latency_uses_runtime_measurement_not_outer_elapsed() {
+    let mut config = test_config();
+    config.learning.world_model.jepa.max_prediction_latency_ms = 50;
+    config
+        .learning
+        .world_model
+        .jepa
+        .max_backend_prediction_latency_ms = 50;
+
+    let (measured, cap) = predict::jepa_prediction_latency_budget(
+        &config,
+        archon_world_model::BackendKind::Cuda,
+        12,
+        250,
+    );
+
+    assert_eq!(measured, 12);
+    assert_eq!(cap, 50);
+
+    let (measured, cap) = predict::jepa_prediction_latency_budget(
+        &config,
+        archon_world_model::BackendKind::Cpu,
+        12,
+        250,
+    );
+
+    assert_eq!(measured, 250);
+    assert_eq!(cap, 50);
+}
+
+#[test]
 fn eval_writes_report_and_keeps_unmet_gates_visible() {
     let temp = tempfile::tempdir().unwrap();
     seed_training_rows(temp.path());
