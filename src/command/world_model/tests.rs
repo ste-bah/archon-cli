@@ -515,6 +515,72 @@ fn predict_next_uses_active_jepa_model_when_configured() {
 }
 
 #[test]
+fn predict_next_fails_open_for_accelerator_jepa_without_native_runtime() {
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let mut config = test_config();
+    config.learning.world_model.model_kind = "jepa_transition".into();
+    config.learning.world_model.state_dim = 8;
+    config.learning.world_model.jepa.latent_dim = 8;
+    config.learning.world_model.jepa.context_window_rows = 2;
+    config.learning.world_model.jepa.target_window_rows = 1;
+    config.learning.world_model.jepa.prediction_horizons = vec![1];
+    let trained = candidate::render_train_jepa(&config, temp.path(), true, None).unwrap();
+    let candidate_id = candidate_id_from(&trained);
+    let registry = archon_world_model::registry::ModelRegistry::open(temp.path()).unwrap();
+    let path = temp
+        .path()
+        .join("jepa")
+        .join("candidates")
+        .join(format!("{candidate_id}.json"));
+    let mut record: archon_world_model::registry::JepaCandidateRecord =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    record.model.metadata.backend = archon_world_model::BackendKind::Cuda;
+    record.model.metadata.backend_execution = archon_world_model::JepaBackendExecutionReport {
+        requested_backend: archon_world_model::BackendKind::Cuda,
+        selected_backend: archon_world_model::BackendKind::Cuda,
+        framework: "candle".into(),
+        device_name: Some("cuda:0".into()),
+        commit_sha: "abc123".into(),
+        feature_compiled: true,
+        tensor_self_test_passed: true,
+        hardware_validation_captured_at: Some(chrono::Utc::now()),
+        validation_example_count: 512,
+        native_encode: true,
+        native_predictor_fit: true,
+        native_auxiliary_fit: true,
+        native_transition_fit: true,
+        native_loss_eval: true,
+        native_runtime_prediction: Some(true),
+        host_fallback_count: 0,
+        allowed_host_stage_count: 0,
+        fallback_reason: None,
+    };
+    record.outcome.metadata = record.model.metadata.clone();
+    std::fs::write(&path, serde_json::to_vec_pretty(&record).unwrap()).unwrap();
+    registry
+        .promote_model_kind(&candidate_id, "jepa_transition")
+        .unwrap();
+
+    let rendered = render_predict_next_with_state(
+        &config,
+        temp.path(),
+        archon_world_model::ColdStartStats {
+            rows: 1_000,
+            sessions: 50,
+            observed_days: 7,
+        },
+        Some(candidate_id),
+        "s1",
+        "a1",
+        "run tests",
+    );
+
+    assert!(rendered.contains("Unavailable: JepaBackendUnavailable"));
+    assert!(rendered.contains("Behavior: fail-open"));
+}
+
+#[test]
 fn predict_next_fails_open_when_jepa_pointer_missing() {
     let temp = tempfile::tempdir().unwrap();
     let mut config = test_config();

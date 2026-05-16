@@ -1578,6 +1578,33 @@ pub fn jepa_backend_promotion_gate(
     }
 }
 
+pub fn predict_jepa_with_backend(
+    model: &JepaTraceModel,
+    window: &TraceWindow,
+    action: &TraceAction,
+    backend: BackendKind,
+) -> Result<JepaRuntimePrediction> {
+    validate_jepa_backend_execution(&model.metadata)?;
+    if model.metadata.backend != BackendKind::Auto && model.metadata.backend != backend {
+        bail!(
+            "JepaBackendUnavailable: requested runtime backend {backend} does not match candidate backend {}",
+            model.metadata.backend
+        );
+    }
+
+    match backend {
+        BackendKind::Auto | BackendKind::Cpu => {
+            CpuJepaBackend.predict_runtime(model, window, action)
+        }
+        BackendKind::Cuda => CandleCudaJepaBackend
+            .predict_runtime(model, window, action)
+            .map_err(|error| anyhow::anyhow!("JepaBackendUnavailable: {error}")),
+        BackendKind::Metal => MlxMetalJepaBackend
+            .predict_runtime(model, window, action)
+            .map_err(|error| anyhow::anyhow!("JepaBackendUnavailable: {error}")),
+    }
+}
+
 pub fn append_jepa_training_run(root: &Path, outcome: &JepaTrainingOutcome) -> Result<PathBuf> {
     let dir = root.join("jepa").join("training-runs");
     std::fs::create_dir_all(&dir)?;

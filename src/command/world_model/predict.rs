@@ -317,30 +317,16 @@ fn predict_with_jepa_checkpoint(
             candidate.model.metadata.latent_dim
         );
     }
-    let transition = candidate
-        .model
-        .transition_model
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("JepaCheckpointMissing: transition model missing"))?;
     let (window, action) = synthetic_runtime_window(session_id, action_ref, summary)?;
-    let state = candidate
-        .model
-        .encode_state(&window)
-        .map_err(|error| anyhow::anyhow!("JepaEncoderFailed: {error}"))?;
-    let action = candidate
-        .model
-        .encode_action(&action)
-        .map_err(|error| anyhow::anyhow!("JepaEncoderFailed: {error}"))?;
-    let next = archon_world_model::backend::predict_next_with_backend(
-        transition,
-        &state,
+    let runtime = archon_world_model::jepa::predict_jepa_with_backend(
+        &candidate.model,
+        &window,
         &action,
         candidate.model.metadata.backend,
     )?;
     let guardrail_scores = Some(guardrail_scores_from_auxiliary(
-        candidate
-            .model
-            .predict_auxiliary(&state, &action)?
+        runtime
+            .auxiliary_scores
             .iter()
             .map(|(label, probability)| (label.as_str(), *probability)),
     ));
@@ -354,10 +340,10 @@ fn predict_with_jepa_checkpoint(
     Ok(PredictionInference {
         summary: format!(
             "next-state dim={} norm={:.4}",
-            next.len(),
-            vector_norm(&next)
+            runtime.predicted_next_state.len(),
+            vector_norm(&runtime.predicted_next_state)
         ),
-        vector: next,
+        vector: runtime.predicted_next_state,
         model_kind: JEPA_MODEL_KIND.into(),
         representation_source: format!("archon-jepa:{}", candidate.model.metadata.model_id),
         guardrail_scores,
