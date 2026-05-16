@@ -55,6 +55,67 @@ If a command exits with a gate failure, that is usually not an error. It means
 the model was written as a candidate, but Archon does not trust it enough to make
 it active yet.
 
+## Build The Binary You Need
+
+The default Archon binary uses the CPU world-model path:
+
+```bash
+cargo build --release --bin archon
+```
+
+That is the safest first build. CUDA and MLX Metal are optional accelerator
+builds. They are useful only when the machine has matching hardware and the
+candidate can record real backend execution evidence.
+
+For Linux or WSL with NVIDIA CUDA:
+
+```bash
+cargo build --release --bin archon --features cuda
+```
+
+On this WSL validation machine, the working CUDA environment was:
+
+```bash
+source ~/.profile || true
+export CUDA_HOME=/usr/local/cuda-13.1
+export CUDA_PATH=/usr/local/cuda-13.1
+export CUDA_ROOT=/usr/local/cuda-13.1
+export NVCC=/usr/local/cuda-13.1/bin/nvcc
+export PATH=/usr/local/cuda-13.1/bin:$PATH
+export LD_LIBRARY_PATH=/usr/local/cuda-13.1/targets/x86_64-linux/lib:/usr/lib/wsl/lib:${LD_LIBRARY_PATH:-}
+export CUDA_COMPUTE_CAP=89
+cargo build --release --bin archon --features cuda
+```
+
+Check `nvidia-smi` before choosing a toolkit. NVIDIA's CUDA minor-version
+compatibility rules allow some toolkit/runtime flexibility inside a major CUDA
+family, but there are caveats: applications using PTX can hit runtime failures
+on older drivers, and minor compatibility requires compiling for a concrete GPU
+architecture such as `sm_89`. If you see `CUDA_ERROR_UNSUPPORTED_PTX_VERSION`,
+use a toolkit compatible with the driver-supported CUDA version or upgrade the
+driver. The local validation notes are in
+[`docs/development/world-model-cuda-validation.md`](../development/world-model-cuda-validation.md);
+NVIDIA's compatibility reference is
+<https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html>.
+
+For Apple Silicon macOS with MLX Metal:
+
+```bash
+cargo build --release --bin archon --features mlx-metal
+```
+
+MLX Metal execution is only expected on Apple Silicon:
+
+```text
+target_os = "macos"
+target_arch = "aarch64"
+```
+
+On Linux or non-Apple-Silicon macOS, `--features mlx-metal` only exercises the
+unsupported-target path; it does not validate Metal execution. Before treating a
+Metal JEPA candidate as promotable, run the Apple Silicon validation checklist in
+[`docs/development/world-model-mlx-metal-validation.md`](../development/world-model-mlx-metal-validation.md).
+
 ## Fresh Setup Checklist
 
 Start with a normal installed Archon CLI and at least one project where you use
