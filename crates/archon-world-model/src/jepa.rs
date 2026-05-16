@@ -871,7 +871,104 @@ pub struct JepaEncoderSet {
     pub target_encoder: JepaTraceEncoder,
 }
 
-pub type JepaFeatureBatch = Vec<JepaTrainingExample>;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JepaFeatureBatch {
+    pub context_features: Vec<f32>,
+    pub action_features: Vec<f32>,
+    pub target_features: Vec<f32>,
+    pub labels: Vec<WorldLabelSet>,
+    pub horizons: Vec<usize>,
+    pub rows: usize,
+    pub feature_dim: usize,
+    pub latent_dim: usize,
+}
+
+impl JepaFeatureBatch {
+    pub fn from_examples(examples: &[JepaTrainingExample], latent_dim: usize) -> Result<Self> {
+        if latent_dim == 0 {
+            bail!("jepa feature batch latent_dim must be greater than zero");
+        }
+        let mut context_feature_values = Vec::with_capacity(examples.len() * latent_dim);
+        let mut action_feature_values = Vec::with_capacity(examples.len() * latent_dim);
+        let mut target_feature_values = Vec::with_capacity(examples.len() * latent_dim);
+        let mut labels = Vec::with_capacity(examples.len());
+        let mut horizons = Vec::with_capacity(examples.len());
+        for example in examples {
+            context_feature_values.extend(window_features(
+                &example.context,
+                latent_dim,
+                "context",
+            )?);
+            action_feature_values.extend(action_features(&example.action, latent_dim, "action")?);
+            target_feature_values.extend(window_features(&example.target, latent_dim, "target")?);
+            labels.push(example.labels.clone());
+            horizons.push(example.horizon);
+        }
+        Ok(Self {
+            context_features: context_feature_values,
+            action_features: action_feature_values,
+            target_features: target_feature_values,
+            labels,
+            horizons,
+            rows: examples.len(),
+            feature_dim: latent_dim,
+            latent_dim,
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.rows
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rows == 0
+    }
+
+    fn context_feature_row(&self, row: usize) -> Result<&[f32]> {
+        self.feature_row(&self.context_features, row)
+    }
+
+    fn action_feature_row(&self, row: usize) -> Result<&[f32]> {
+        self.feature_row(&self.action_features, row)
+    }
+
+    fn target_feature_row(&self, row: usize) -> Result<&[f32]> {
+        self.feature_row(&self.target_features, row)
+    }
+
+    fn feature_row<'a>(&self, features: &'a [f32], row: usize) -> Result<&'a [f32]> {
+        if row >= self.rows {
+            bail!("jepa feature batch row out of bounds");
+        }
+        let start = row
+            .checked_mul(self.feature_dim)
+            .ok_or_else(|| anyhow::anyhow!("jepa feature batch row overflow"))?;
+        let end = start + self.feature_dim;
+        features
+            .get(start..end)
+            .ok_or_else(|| anyhow::anyhow!("jepa feature batch shape mismatch"))
+    }
+
+    fn validate(&self) -> Result<()> {
+        if self.feature_dim == 0 || self.latent_dim == 0 {
+            bail!("jepa feature batch dimensions must be greater than zero");
+        }
+        if self.feature_dim != self.latent_dim {
+            bail!("jepa feature batch feature_dim must match latent_dim");
+        }
+        let expected = self.rows * self.feature_dim;
+        if self.context_features.len() != expected
+            || self.action_features.len() != expected
+            || self.target_features.len() != expected
+            || self.labels.len() != self.rows
+            || self.horizons.len() != self.rows
+        {
+            bail!("jepa feature batch shape mismatch");
+        }
+        Ok(())
+    }
+}
+
 pub type JepaEncodedBatch = Vec<EncodedJepaTrainingExample>;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1564,30 +1661,30 @@ fn candle_encode_batch_on_device(
     batch: &JepaFeatureBatch,
     device: &candle_core::Device,
 ) -> Result<JepaEncodedBatch> {
-    batch
-        .iter()
-        .map(|example| {
+    batch.validate()?;
+    (0..batch.rows)
+        .map(|row| {
             Ok(EncodedJepaTrainingExample {
-                context_latent: candle_encode_window_tensor(
+                context_latent: candle_project_encoder(
                     &encoders.context_encoder,
-                    &example.context,
+                    batch.context_feature_row(row)?,
                     device,
                 )?
                 .to_vec1::<f32>()?,
-                action_latent: candle_encode_action_tensor(
+                action_latent: candle_project_encoder(
                     &encoders.action_encoder,
-                    &example.action,
+                    batch.action_feature_row(row)?,
                     device,
                 )?
                 .to_vec1::<f32>()?,
-                target_latent: candle_encode_window_tensor(
+                target_latent: candle_project_encoder(
                     &encoders.target_encoder,
-                    &example.target,
+                    batch.target_feature_row(row)?,
                     device,
                 )?
                 .to_vec1::<f32>()?,
-                horizon: example.horizon,
-                labels: example.labels.clone(),
+                horizon: batch.horizons[row],
+                labels: batch.labels[row].clone(),
             })
         })
         .collect()
@@ -2033,18 +2130,24 @@ fn mlx_encode_batch_on_device(
     use mlx_rs::Device;
 
     Device::set_default(&Device::gpu());
-    batch
-        .iter()
-        .map(|example| {
+    batch.validate()?;
+    (0..batch.rows)
+        .map(|row| {
             Ok(EncodedJepaTrainingExample {
-                context_latent: mlx_encode_window_array(
+                context_latent: mlx_project_encoder(
                     &encoders.context_encoder,
-                    &example.context,
+                    batch.context_feature_row(row)?,
                 )?,
-                action_latent: mlx_encode_action_array(&encoders.action_encoder, &example.action)?,
-                target_latent: mlx_encode_window_array(&encoders.target_encoder, &example.target)?,
-                horizon: example.horizon,
-                labels: example.labels.clone(),
+                action_latent: mlx_project_encoder(
+                    &encoders.action_encoder,
+                    batch.action_feature_row(row)?,
+                )?,
+                target_latent: mlx_project_encoder(
+                    &encoders.target_encoder,
+                    batch.target_feature_row(row)?,
+                )?,
+                horizon: batch.horizons[row],
+                labels: batch.labels[row].clone(),
             })
         })
         .collect()
@@ -2953,6 +3056,7 @@ fn train_jepa_candidate_with_tensor_backend<B: JepaTensorBackend>(
         bail!("not enough rows to train JEPA: need future rows in the same session");
     }
     let (masked_examples, masking) = mask_jepa_training_examples(&examples, config.mask_ratio);
+    let feature_batch = JepaFeatureBatch::from_examples(&masked_examples, config.latent_dim)?;
 
     let context_encoder = JepaTraceEncoder::new("context", config.latent_dim);
     let action_encoder = JepaTraceEncoder::new("action", config.latent_dim);
@@ -2962,7 +3066,7 @@ fn train_jepa_candidate_with_tensor_backend<B: JepaTensorBackend>(
         action_encoder: action_encoder.clone(),
         target_encoder: target_encoder.clone(),
     };
-    let encoded = backend.encode_batch(&encoders, &masked_examples)?;
+    let encoded = backend.encode_batch(&encoders, &feature_batch)?;
     let initial_model = JepaTraceModel {
         metadata: JepaTraceModelMetadata::candidate(
             config,
@@ -3366,17 +3470,18 @@ fn encode_examples(
     context_encoder: &JepaTraceEncoder,
     action_encoder: &JepaTraceEncoder,
     target_encoder: &JepaTraceEncoder,
-    examples: &[JepaTrainingExample],
+    batch: &JepaFeatureBatch,
 ) -> Result<Vec<EncodedJepaTrainingExample>> {
-    examples
-        .iter()
-        .map(|example| {
+    batch.validate()?;
+    (0..batch.rows)
+        .map(|row| {
             Ok(EncodedJepaTrainingExample {
-                context_latent: context_encoder.encode_window(&example.context)?,
-                action_latent: action_encoder.encode_action(&example.action)?,
-                target_latent: target_encoder.encode_window(&example.target)?,
-                horizon: example.horizon,
-                labels: example.labels.clone(),
+                context_latent: context_encoder
+                    .project(batch.context_feature_row(row)?.to_vec())?,
+                action_latent: action_encoder.project(batch.action_feature_row(row)?.to_vec())?,
+                target_latent: target_encoder.project(batch.target_feature_row(row)?.to_vec())?,
+                horizon: batch.horizons[row],
+                labels: batch.labels[row].clone(),
             })
         })
         .collect()
@@ -4278,13 +4383,19 @@ mod tests {
             target_encoder,
         };
         let backend = CpuJepaBackend;
+        let feature_batch = JepaFeatureBatch::from_examples(&examples, config.latent_dim).unwrap();
 
-        let encoded = backend.encode_batch(&encoders, &examples).unwrap();
+        let encoded = backend.encode_batch(&encoders, &feature_batch).unwrap();
         let predictor = backend.fit_predictor(config.latent_dim, &encoded).unwrap();
         let transition = backend.fit_transition(config.latent_dim, &encoded).unwrap();
 
         assert_eq!(backend.status().selected, BackendKind::Cpu);
-        assert_eq!(encoded.len(), examples.len());
+        assert_eq!(feature_batch.rows, examples.len());
+        assert_eq!(
+            feature_batch.context_features.len(),
+            examples.len() * config.latent_dim
+        );
+        assert_eq!(encoded.len(), feature_batch.len());
         assert_eq!(predictor.latent_dim, config.latent_dim);
         assert_eq!(transition.metadata.backend, BackendKind::Cpu);
     }
