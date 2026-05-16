@@ -4296,6 +4296,37 @@ mod tests {
             .collect()
     }
 
+    #[cfg(feature = "cuda")]
+    fn validation_rows(count: usize) -> Vec<WorldTraceRow> {
+        (0..count)
+            .map(|idx| {
+                let kind = match idx % 5 {
+                    0 => WorldActionKind::PlanUpdate,
+                    1 => WorldActionKind::ToolCall,
+                    2 => WorldActionKind::Verification,
+                    3 => WorldActionKind::Retry,
+                    _ => WorldActionKind::AgentAttempt,
+                };
+                let mut row = WorldTraceRow::new("validation-session", kind)
+                    .with_row_id(format!("validation-row-{idx:04}"));
+                row.provider = Some("local".into());
+                row.model = Some("validation-model".into());
+                row.agent = Some(format!("agent-{}", idx % 4));
+                row.redacted_excerpt = Some(format!(
+                    "validation trace event {idx} provider={} retry={} verify={}",
+                    idx % 3,
+                    idx % 7 == 0,
+                    idx % 5 == 0
+                ));
+                row.labels.retry = idx % 7 == 0;
+                row.labels.verification_needed = idx % 5 == 0;
+                row.labels.plan_drift = idx % 11 == 0;
+                row.labels.user_correction = idx % 13 == 0;
+                row
+            })
+            .collect()
+    }
+
     #[test]
     fn jepa_examples_follow_configured_horizons() {
         let config = JepaTrainingConfig {
@@ -4691,6 +4722,38 @@ mod tests {
             &examples[0].action,
             0.99
         ));
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn cuda_jepa_training_can_meet_hardware_validation_floor_when_available() {
+        if !crate::backend::cuda_runtime_available() {
+            return;
+        }
+        let config = JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 2,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..JepaTrainingConfig::default()
+        };
+        let status = BackendStatus {
+            requested: BackendKind::Cuda,
+            selected: BackendKind::Cuda,
+            framework: "candle".into(),
+            device_name: Some("cuda:0".into()),
+            experimental: false,
+            fallback_reason: None,
+        };
+
+        let (model, outcome) =
+            train_jepa_candidate_with_backend_status(&validation_rows(520), &config, status, false)
+                .unwrap();
+
+        assert_eq!(model.metadata.backend, BackendKind::Cuda);
+        assert!(outcome.metadata.backend_execution.validation_example_count >= 512);
+        assert_eq!(outcome.metadata.backend_execution.host_fallback_count, 0);
+        assert!(jepa_backend_promotion_gate(&model.metadata, 512, 512));
     }
 
     #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
