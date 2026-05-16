@@ -154,6 +154,22 @@ pub enum WorldGuardAction {
         #[arg(long)]
         session: Option<String>,
     },
+    /// Approve a guarded action despite unresolved risk
+    Approve {
+        /// Guarded action id
+        action_id: String,
+        /// Required approval reason
+        #[arg(long)]
+        reason: String,
+    },
+    /// Mark one verification requirement as intentionally skipped
+    SkipVerification {
+        /// Verification requirement id
+        requirement_id: String,
+        /// Required skip reason
+        #[arg(long)]
+        reason: String,
+    },
     /// Show or update guardrail policy
     Policy {
         #[command(subcommand)]

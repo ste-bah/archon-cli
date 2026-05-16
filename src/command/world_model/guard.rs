@@ -16,9 +16,25 @@ pub(crate) struct RuntimeGuardrailRecord {
 
 static ACTIVE_GUARDRAILS: OnceLock<Mutex<HashMap<String, RuntimeGuardrailRecord>>> =
     OnceLock::new();
+static ACTIVE_OBSERVATIONS: OnceLock<Mutex<HashMap<String, GuardrailRuntimeObservations>>> =
+    OnceLock::new();
+
+#[derive(Debug, Clone, Default)]
+struct GuardrailRuntimeObservations {
+    provider_incident_observed: bool,
+    user_correction_observed: bool,
+    plan_drift_observed: bool,
+    reasoning_failure_observed: bool,
+    retry_count: u32,
+    evidence_refs: Vec<String>,
+}
 
 fn active_guardrails() -> &'static Mutex<HashMap<String, RuntimeGuardrailRecord>> {
     ACTIVE_GUARDRAILS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn active_observations() -> &'static Mutex<HashMap<String, GuardrailRuntimeObservations>> {
+    ACTIVE_OBSERVATIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 pub(crate) fn active_guardrail_for_session(session_id: &str) -> Option<RuntimeGuardrailRecord> {
@@ -34,6 +50,11 @@ fn remember_active_guardrail(record: &RuntimeGuardrailRecord) {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .insert(record.action.session_id.clone(), record.clone());
+    active_observations()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .entry(record.action.action_id.clone())
+        .or_default();
 }
 
 fn clear_active_guardrail(session_id: &str, action_id: &str) {
@@ -45,7 +66,20 @@ fn clear_active_guardrail(session_id: &str, action_id: &str) {
         .is_some_and(|record| record.action.action_id == action_id)
     {
         guard.remove(session_id);
+        active_observations()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(action_id);
     }
+}
+
+fn observations_for(action_id: &str) -> GuardrailRuntimeObservations {
+    active_observations()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(action_id)
+        .cloned()
+        .unwrap_or_default()
 }
 
 pub(crate) fn policy_from_config(
@@ -113,7 +147,6 @@ pub(crate) fn begin_guarded_action(
     );
     action.action_id = action_ref.to_string();
     action.idempotency_key = format!("world_guardrail:action:{session_id}:{action_ref}");
-    let _ = archon_world_model::guardrail::append_guarded_action(&root, &action);
 
     let advisory =
         super::runtime::record_runtime_advisory(config, surface, session_id, action_ref, summary);
@@ -131,6 +164,8 @@ pub(crate) fn begin_guarded_action(
     } else {
         archon_world_model::WorldGuardrailDecision::unavailable(&action)
     };
+    action.verification_plan = verification_plan_for_decision(&action.action_id, &decision);
+    let _ = archon_world_model::guardrail::append_guarded_action(&root, &action);
     let _ = archon_world_model::guardrail::append_guardrail_decision(&root, &decision);
     let record = RuntimeGuardrailRecord {
         action,
@@ -140,6 +175,77 @@ pub(crate) fn begin_guarded_action(
     };
     remember_active_guardrail(&record);
     Some(record)
+}
+
+fn verification_plan_for_decision(
+    action_id: &str,
+    decision: &archon_world_model::WorldGuardrailDecision,
+) -> Vec<archon_world_model::VerificationRequirement> {
+    decision
+        .required_actions
+        .iter()
+        .map(|required| verification_requirement_for(action_id, *required))
+        .collect()
+}
+
+fn verification_requirement_for(
+    action_id: &str,
+    required: archon_world_model::GuardrailRequiredAction,
+) -> archon_world_model::VerificationRequirement {
+    let (suffix, kind, command_hint) = match required {
+        archon_world_model::GuardrailRequiredAction::RunTests => (
+            "run-tests",
+            archon_world_model::VerificationKind::UnitTests,
+            Some("cargo test / pytest / npm test".to_string()),
+        ),
+        archon_world_model::GuardrailRequiredAction::RunBuild => (
+            "run-build",
+            archon_world_model::VerificationKind::Build,
+            Some("cargo check / cargo build / npm run build".to_string()),
+        ),
+        archon_world_model::GuardrailRequiredAction::RunLint => (
+            "run-lint",
+            archon_world_model::VerificationKind::Lint,
+            Some("cargo clippy / ruff check / npm run lint".to_string()),
+        ),
+        archon_world_model::GuardrailRequiredAction::RunTypecheck => (
+            "run-typecheck",
+            archon_world_model::VerificationKind::Typecheck,
+            Some("mypy / tsc / npm run typecheck".to_string()),
+        ),
+        archon_world_model::GuardrailRequiredAction::RunVerifier => (
+            "run-verifier",
+            archon_world_model::VerificationKind::Custom("verifier".into()),
+            Some("run the configured verifier for this task".to_string()),
+        ),
+        archon_world_model::GuardrailRequiredAction::ReviewPlanAgainstUserGoal => (
+            "review-plan",
+            archon_world_model::VerificationKind::Custom("plan_review".into()),
+            Some("compare the final plan/work against the original user request".to_string()),
+        ),
+        archon_world_model::GuardrailRequiredAction::CheckSourceEvidence => (
+            "check-source-evidence",
+            archon_world_model::VerificationKind::SourceEvidenceCheck,
+            Some("verify cited source evidence before finalizing".to_string()),
+        ),
+        archon_world_model::GuardrailRequiredAction::RecordManualOutcome => (
+            "record-manual-outcome",
+            archon_world_model::VerificationKind::Custom("manual_outcome".into()),
+            Some("record the operator-observed outcome".to_string()),
+        ),
+        archon_world_model::GuardrailRequiredAction::RequireUserApproval => (
+            "require-user-approval",
+            archon_world_model::VerificationKind::HumanApproval,
+            Some("obtain explicit user/operator approval".to_string()),
+        ),
+    };
+    archon_world_model::VerificationRequirement {
+        requirement_id: format!("world-guard-req-{action_id}-{suffix}"),
+        kind,
+        command_hint,
+        applies_to: vec![action_id.to_string()],
+        required_for_final: true,
+    }
 }
 
 pub(crate) fn record_guardrail_turn_outcome(
@@ -163,13 +269,23 @@ pub(crate) fn record_guardrail_completion_outcome(
         .into_iter()
         .filter(|outcome| outcome.action_id == record.action.action_id)
         .collect::<Vec<_>>();
+    let has_manual_override = verification_outcomes.iter().any(|outcome| {
+        outcome.status == archon_world_model::VerificationStatus::Skipped
+            || outcome
+                .evidence_refs
+                .iter()
+                .any(|evidence| evidence.starts_with("manual_override:"))
+    });
+    let observations = observations_for(&record.action.action_id);
     let final_status = if !completed {
         archon_world_model::GuardrailFinalStatus::Failed
     } else if archon_world_model::guardrail::finalization_allowed(
         &record.decision,
         &verification_outcomes,
     ) {
-        if record.decision.required_actions.is_empty() {
+        if has_manual_override {
+            archon_world_model::GuardrailFinalStatus::UserApprovedDespiteRisk
+        } else if record.decision.required_actions.is_empty() {
             archon_world_model::GuardrailFinalStatus::CompletedWithCaveat
         } else {
             archon_world_model::GuardrailFinalStatus::CompletedVerified
@@ -177,6 +293,7 @@ pub(crate) fn record_guardrail_completion_outcome(
     } else if verification_outcomes
         .iter()
         .any(|outcome| outcome.status == archon_world_model::VerificationStatus::Failed)
+        || (observations.reasoning_failure_observed && record.decision.mode.can_block())
     {
         archon_world_model::GuardrailFinalStatus::BlockedFailedVerification
     } else if !record.decision.allowed_to_finalize
@@ -194,6 +311,9 @@ pub(crate) fn record_guardrail_completion_outcome(
         archon_world_model::GuardrailFinalStatus::Failed => "interactive turn failed",
         archon_world_model::GuardrailFinalStatus::BlockedFailedVerification => {
             "interactive turn completed but required verification failed"
+        }
+        archon_world_model::GuardrailFinalStatus::UserApprovedDespiteRisk => {
+            "interactive turn completed after manual guardrail approval"
         }
         _ => "interactive turn completed",
     };
@@ -214,6 +334,11 @@ pub(crate) fn record_guardrail_completion_outcome(
         actual_summary,
     );
     outcome.verification_outcomes = verification_outcomes;
+    outcome.provider_incident_observed = observations.provider_incident_observed;
+    outcome.user_correction_observed = observations.user_correction_observed;
+    outcome.plan_drift_observed = observations.plan_drift_observed;
+    outcome.retry_count = observations.retry_count;
+    outcome.evidence_refs.extend(observations.evidence_refs);
     if matches!(
         final_status,
         archon_world_model::GuardrailFinalStatus::BlockedMissingVerification
@@ -237,6 +362,90 @@ pub(crate) fn record_guardrail_completion_outcome(
         clear_active_guardrail(&record.action.session_id, &record.action.action_id);
     }
     Some(outcome)
+}
+
+pub(crate) fn record_guardrail_provider_incident_for_session(
+    config: &archon_core::config::ArchonConfig,
+    session_id: &str,
+    provider_event_id: &str,
+    reason_code: &str,
+) -> bool {
+    if !config.learning.world_model.guardrails.enabled {
+        return false;
+    }
+    let Some(parent) = active_guardrail_for_session(session_id) else {
+        return false;
+    };
+    let mut observations = active_observations()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let entry = observations
+        .entry(parent.action.action_id.clone())
+        .or_default();
+    entry.provider_incident_observed = true;
+    if provider_reason_implies_retry(reason_code) {
+        entry.retry_count = entry.retry_count.saturating_add(1);
+    }
+    entry
+        .evidence_refs
+        .push(format!("provider_event:{provider_event_id}"));
+    entry
+        .evidence_refs
+        .push(format!("provider_reason:{reason_code}"));
+    entry.evidence_refs.sort();
+    entry.evidence_refs.dedup();
+    true
+}
+
+fn provider_reason_implies_retry(reason_code: &str) -> bool {
+    let reason = reason_code.to_ascii_lowercase();
+    reason.contains("rate")
+        || reason.contains("timeout")
+        || reason.contains("transient")
+        || reason.contains("overloaded")
+        || reason.contains("quota")
+}
+
+pub(crate) fn record_guardrail_reasoning_quality_event(
+    event: &archon_reasoning_quality::ReasoningQualityEvent,
+) -> bool {
+    let Some(parent) = active_guardrail_for_session(&event.session_id) else {
+        return false;
+    };
+    let mut observations = active_observations()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let entry = observations
+        .entry(parent.action.action_id.clone())
+        .or_default();
+    match event.event_kind {
+        archon_reasoning_quality::ReasoningEventKind::ClaimCorrectedByUser => {
+            entry.user_correction_observed = true;
+            entry.reasoning_failure_observed = true;
+        }
+        archon_reasoning_quality::ReasoningEventKind::ClaimContradictedBySource => {
+            entry.plan_drift_observed = true;
+            entry.reasoning_failure_observed = true;
+        }
+        archon_reasoning_quality::ReasoningEventKind::CompletionClaimWithoutEvidence
+        | archon_reasoning_quality::ReasoningEventKind::TestStatusClaimWithoutCommand
+        | archon_reasoning_quality::ReasoningEventKind::UnsupportedClaim => {
+            entry.reasoning_failure_observed = true;
+        }
+        archon_reasoning_quality::ReasoningEventKind::VerificationNeeded => {
+            entry.plan_drift_observed = true;
+        }
+        _ => {}
+    }
+    entry
+        .evidence_refs
+        .push(format!("reasoning_quality:{}", event.event_id));
+    entry
+        .evidence_refs
+        .push(format!("reasoning_kind:{:?}", event.event_kind));
+    entry.evidence_refs.sort();
+    entry.evidence_refs.dedup();
+    true
 }
 
 pub(crate) fn record_guardrail_tool_result_for_session(
@@ -286,7 +495,7 @@ pub(crate) fn record_guardrail_tool_result(
         };
         let mut verification = archon_world_model::VerificationOutcome {
             schema_version: archon_world_model::guardrail::CURRENT_SCHEMA_VERSION,
-            requirement_id: String::new(),
+            requirement_id: matching_requirement_id(&parent.action, &kind),
             action_id: parent.action.action_id.clone(),
             kind,
             status,
@@ -334,6 +543,18 @@ pub(crate) fn record_guardrail_tool_result(
         let _ = archon_world_model::guardrail::append_guardrail_outcome(&root, &outcome);
         None
     }
+}
+
+fn matching_requirement_id(
+    action: &archon_world_model::WorldGuardedAction,
+    kind: &archon_world_model::VerificationKind,
+) -> String {
+    action
+        .verification_plan
+        .iter()
+        .find(|requirement| requirement.kind == *kind)
+        .map(|requirement| requirement.requirement_id.clone())
+        .unwrap_or_default()
 }
 
 fn classify_tool_command(
@@ -597,6 +818,185 @@ pub(crate) fn render_guard_replay_outcomes(
     ))
 }
 
+pub(crate) fn render_guard_approve(
+    root: &std::path::Path,
+    action_id: &str,
+    reason: &str,
+) -> Result<String> {
+    let reason = required_reason(reason)?;
+    let action = load_guarded_action(root, action_id)?;
+    let decision = latest_decision_for_action(root, &action)?;
+    let task_class = decision
+        .prediction_context
+        .as_ref()
+        .map(|context| context.task_class)
+        .unwrap_or_else(|| {
+            archon_world_model::guardrail::classify_task(&action.action_summary, action.surface)
+        });
+
+    let required_actions = if decision.required_actions.is_empty() {
+        vec![archon_world_model::GuardrailRequiredAction::RequireUserApproval]
+    } else {
+        decision.required_actions.clone()
+    };
+    let mut verification_count = 0usize;
+    for required in required_actions {
+        let requirement = requirement_for_required_action(&action, required);
+        let status = if required == archon_world_model::GuardrailRequiredAction::RequireUserApproval
+        {
+            archon_world_model::VerificationStatus::Passed
+        } else {
+            archon_world_model::VerificationStatus::Skipped
+        };
+        append_manual_verification(root, action_id, &requirement, status, "approve", reason)?;
+        verification_count += 1;
+    }
+
+    let mut outcome = archon_world_model::WorldGuardrailOutcome::from_decision(
+        &decision,
+        task_class,
+        archon_world_model::GuardrailFinalStatus::UserApprovedDespiteRisk,
+        format!("manual approval despite unresolved risk: {reason}"),
+    );
+    outcome.verification_outcomes =
+        archon_world_model::guardrail::load_verification_outcomes(root)?
+            .into_iter()
+            .filter(|verification| verification.action_id == action_id)
+            .collect();
+    outcome.evidence_refs.push("manual_override:approve".into());
+    archon_world_model::guardrail::append_guardrail_outcome(root, &outcome)?;
+    clear_active_guardrail(&action.session_id, action_id);
+
+    Ok(format!(
+        "World Model Guardrail Approval\n\
+         ==============================\n\
+         Action: {action_id}\n\
+         Outcome: user_approved_despite_risk\n\
+         Manual verification records: {verification_count}\n\
+         Reason: {reason}"
+    ))
+}
+
+pub(crate) fn render_guard_skip_verification(
+    root: &std::path::Path,
+    requirement_id: &str,
+    reason: &str,
+) -> Result<String> {
+    let reason = required_reason(reason)?;
+    let (action, requirement) = load_requirement(root, requirement_id)?;
+    let verification = append_manual_verification(
+        root,
+        &action.action_id,
+        &requirement,
+        archon_world_model::VerificationStatus::Skipped,
+        "skip_verification",
+        reason,
+    )?;
+
+    Ok(format!(
+        "World Model Guardrail Verification Skip\n\
+         =====================================\n\
+         Requirement: {requirement_id}\n\
+         Action:      {action_id}\n\
+         Kind:        {kind:?}\n\
+         Status:      skipped\n\
+         Reason:      {reason}",
+        action_id = action.action_id,
+        kind = verification.kind,
+    ))
+}
+
+fn required_reason(reason: &str) -> Result<&str> {
+    let reason = reason.trim();
+    if reason.is_empty() {
+        bail!("manual guardrail override requires --reason");
+    }
+    Ok(reason)
+}
+
+fn load_guarded_action(
+    root: &std::path::Path,
+    action_id: &str,
+) -> Result<archon_world_model::WorldGuardedAction> {
+    archon_world_model::guardrail::load_guarded_actions(root)?
+        .into_iter()
+        .find(|action| action.action_id == action_id)
+        .ok_or_else(|| anyhow::anyhow!("guarded action not found: {action_id}"))
+}
+
+fn latest_decision_for_action(
+    root: &std::path::Path,
+    action: &archon_world_model::WorldGuardedAction,
+) -> Result<archon_world_model::WorldGuardrailDecision> {
+    Ok(
+        archon_world_model::guardrail::load_guardrail_decisions(root)?
+            .into_iter()
+            .filter(|decision| decision.action_id == action.action_id)
+            .max_by_key(|decision| decision.created_at)
+            .unwrap_or_else(|| archon_world_model::WorldGuardrailDecision::unavailable(action)),
+    )
+}
+
+fn load_requirement(
+    root: &std::path::Path,
+    requirement_id: &str,
+) -> Result<(
+    archon_world_model::WorldGuardedAction,
+    archon_world_model::VerificationRequirement,
+)> {
+    for action in archon_world_model::guardrail::load_guarded_actions(root)? {
+        if let Some(requirement) = action
+            .verification_plan
+            .iter()
+            .find(|requirement| requirement.requirement_id == requirement_id)
+        {
+            return Ok((action.clone(), requirement.clone()));
+        }
+    }
+    bail!("verification requirement not found: {requirement_id}")
+}
+
+fn requirement_for_required_action(
+    action: &archon_world_model::WorldGuardedAction,
+    required: archon_world_model::GuardrailRequiredAction,
+) -> archon_world_model::VerificationRequirement {
+    let fallback = verification_requirement_for(&action.action_id, required);
+    action
+        .verification_plan
+        .iter()
+        .find(|requirement| requirement.kind == fallback.kind)
+        .cloned()
+        .unwrap_or(fallback)
+}
+
+fn append_manual_verification(
+    root: &std::path::Path,
+    action_id: &str,
+    requirement: &archon_world_model::VerificationRequirement,
+    status: archon_world_model::VerificationStatus,
+    override_kind: &str,
+    reason: &str,
+) -> Result<archon_world_model::VerificationOutcome> {
+    let verification = archon_world_model::VerificationOutcome {
+        schema_version: archon_world_model::guardrail::CURRENT_SCHEMA_VERSION,
+        requirement_id: requirement.requirement_id.clone(),
+        action_id: action_id.to_string(),
+        kind: requirement.kind.clone(),
+        status,
+        command: None,
+        exit_code: None,
+        summary: format!("manual {override_kind}: {reason}"),
+        evidence_refs: vec![format!("manual_override:{override_kind}")],
+        idempotency_key: format!(
+            "world_guardrail:verification:{action_id}:manual:{override_kind}:{}",
+            uuid::Uuid::new_v4()
+        ),
+        created_at: chrono::Utc::now(),
+    };
+    archon_world_model::guardrail::append_verification_outcome(root, &verification)?;
+    Ok(verification)
+}
+
 fn parse_mode(value: &str) -> archon_world_model::WorldGuardrailMode {
     archon_world_model::WorldGuardrailMode::from_str(value)
         .unwrap_or(archon_world_model::WorldGuardrailMode::Advisory)
@@ -694,5 +1094,194 @@ mod tests {
         let (kind, verification) = classify_tool_command("python scripts/one_off.py");
         assert_eq!(kind, archon_world_model::GuardedActionKind::ShellCommand);
         assert_eq!(verification, None);
+    }
+
+    #[test]
+    fn verification_plan_uses_stable_requirement_ids() {
+        let mut decision = archon_world_model::WorldGuardrailDecision::default();
+        decision.required_actions = vec![
+            archon_world_model::GuardrailRequiredAction::RunTests,
+            archon_world_model::GuardrailRequiredAction::RunBuild,
+        ];
+
+        let plan = verification_plan_for_decision("action-123", &decision);
+
+        assert_eq!(plan.len(), 2);
+        assert!(
+            plan.iter()
+                .any(|req| req.requirement_id == "world-guard-req-action-123-run-tests")
+        );
+        assert!(
+            plan.iter()
+                .any(|req| req.requirement_id == "world-guard-req-action-123-run-build")
+        );
+    }
+
+    #[test]
+    fn approve_records_manual_override_and_skipped_requirements() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut action = archon_world_model::WorldGuardedAction::new(
+            "s1",
+            archon_world_model::integration::WorldAdvisorSurface::CodingTask,
+            archon_world_model::GuardedActionKind::UserRequest,
+            "build app",
+            "build app",
+        );
+        action.action_id = "manual-approve-action".into();
+        let mut decision = archon_world_model::WorldGuardrailDecision::default();
+        decision.action_id = action.action_id.clone();
+        decision.surface = action.surface;
+        decision.mode = archon_world_model::WorldGuardrailMode::Guarded;
+        decision.allowed_to_finalize = false;
+        decision.required_actions = vec![
+            archon_world_model::GuardrailRequiredAction::RunTests,
+            archon_world_model::GuardrailRequiredAction::RunBuild,
+        ];
+        action.verification_plan = verification_plan_for_decision(&action.action_id, &decision);
+        archon_world_model::guardrail::append_guarded_action(temp.path(), &action).unwrap();
+        archon_world_model::guardrail::append_guardrail_decision(temp.path(), &decision).unwrap();
+
+        let rendered =
+            render_guard_approve(temp.path(), &action.action_id, "operator accepts risk").unwrap();
+        let verifications =
+            archon_world_model::guardrail::load_verification_outcomes(temp.path()).unwrap();
+        let outcomes = archon_world_model::guardrail::load_guardrail_outcomes(temp.path()).unwrap();
+
+        assert!(rendered.contains("user_approved_despite_risk"));
+        assert_eq!(verifications.len(), 2);
+        assert!(
+            verifications.iter().all(|verification| verification.status
+                == archon_world_model::VerificationStatus::Skipped)
+        );
+        assert!(archon_world_model::guardrail::finalization_allowed(
+            &decision,
+            &verifications
+        ));
+        assert_eq!(
+            outcomes[0].final_status,
+            archon_world_model::GuardrailFinalStatus::UserApprovedDespiteRisk
+        );
+        assert_eq!(outcomes[0].verification_outcomes.len(), 2);
+    }
+
+    #[test]
+    fn skip_verification_records_skipped_outcome() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut action = archon_world_model::WorldGuardedAction::new(
+            "s1",
+            archon_world_model::integration::WorldAdvisorSurface::CodingTask,
+            archon_world_model::GuardedActionKind::UserRequest,
+            "build app",
+            "build app",
+        );
+        action.action_id = "manual-skip-action".into();
+        let mut decision = archon_world_model::WorldGuardrailDecision::default();
+        decision.action_id = action.action_id.clone();
+        decision.required_actions = vec![archon_world_model::GuardrailRequiredAction::RunTests];
+        action.verification_plan = verification_plan_for_decision(&action.action_id, &decision);
+        let requirement_id = action.verification_plan[0].requirement_id.clone();
+        archon_world_model::guardrail::append_guarded_action(temp.path(), &action).unwrap();
+
+        let rendered =
+            render_guard_skip_verification(temp.path(), &requirement_id, "test host unavailable")
+                .unwrap();
+        let verifications =
+            archon_world_model::guardrail::load_verification_outcomes(temp.path()).unwrap();
+
+        assert!(rendered.contains("Status:      skipped"));
+        assert_eq!(verifications.len(), 1);
+        assert_eq!(verifications[0].requirement_id, requirement_id);
+        assert_eq!(
+            verifications[0].status,
+            archon_world_model::VerificationStatus::Skipped
+        );
+        assert!(verifications[0].summary.contains("test host unavailable"));
+    }
+
+    #[test]
+    fn provider_incident_attaches_to_active_guardrail_observations() {
+        let session_id = format!("s-{}", uuid::Uuid::new_v4());
+        let mut action = archon_world_model::WorldGuardedAction::new(
+            &session_id,
+            archon_world_model::integration::WorldAdvisorSurface::CodingTask,
+            archon_world_model::GuardedActionKind::UserRequest,
+            "build app",
+            "build app",
+        );
+        action.action_id = format!("a-{}", uuid::Uuid::new_v4());
+        let mut decision = archon_world_model::WorldGuardrailDecision::default();
+        decision.action_id = action.action_id.clone();
+        let record = RuntimeGuardrailRecord {
+            action,
+            advisory: archon_world_model::integration::WorldAdvisorSurfaceRecord::unavailable(
+                archon_world_model::integration::WorldAdvisorSurface::CodingTask,
+                archon_world_model::WorldAdvisorUnavailableReason::ColdStart,
+            ),
+            decision,
+            task_class: archon_world_model::RuntimeTaskClass::CodingChange,
+        };
+        remember_active_guardrail(&record);
+
+        let attached = record_guardrail_provider_incident_for_session(
+            &archon_core::config::ArchonConfig::default(),
+            &session_id,
+            "provider-event-1",
+            "rate_limited",
+        );
+        let observations = observations_for(&record.action.action_id);
+
+        assert!(attached);
+        assert!(observations.provider_incident_observed);
+        assert_eq!(observations.retry_count, 1);
+        assert!(
+            observations
+                .evidence_refs
+                .contains(&"provider_event:provider-event-1".to_string())
+        );
+        clear_active_guardrail(&session_id, &record.action.action_id);
+    }
+
+    #[test]
+    fn reasoning_quality_event_attaches_to_active_guardrail_observations() {
+        let session_id = format!("s-{}", uuid::Uuid::new_v4());
+        let mut action = archon_world_model::WorldGuardedAction::new(
+            &session_id,
+            archon_world_model::integration::WorldAdvisorSurface::CodingTask,
+            archon_world_model::GuardedActionKind::UserRequest,
+            "build app",
+            "build app",
+        );
+        action.action_id = format!("a-{}", uuid::Uuid::new_v4());
+        let mut decision = archon_world_model::WorldGuardrailDecision::default();
+        decision.action_id = action.action_id.clone();
+        let record = RuntimeGuardrailRecord {
+            action,
+            advisory: archon_world_model::integration::WorldAdvisorSurfaceRecord::unavailable(
+                archon_world_model::integration::WorldAdvisorSurface::CodingTask,
+                archon_world_model::WorldAdvisorUnavailableReason::ColdStart,
+            ),
+            decision,
+            task_class: archon_world_model::RuntimeTaskClass::CodingChange,
+        };
+        remember_active_guardrail(&record);
+        let event = archon_reasoning_quality::ReasoningQualityEvent {
+            event_id: "rqevt-1".into(),
+            session_id: session_id.clone(),
+            event_kind: archon_reasoning_quality::ReasoningEventKind::ClaimCorrectedByUser,
+            ..archon_reasoning_quality::ReasoningQualityEvent::default()
+        };
+
+        let attached = record_guardrail_reasoning_quality_event(&event);
+        let observations = observations_for(&record.action.action_id);
+
+        assert!(attached);
+        assert!(observations.user_correction_observed);
+        assert!(observations.reasoning_failure_observed);
+        assert!(
+            observations
+                .evidence_refs
+                .contains(&"reasoning_quality:rqevt-1".to_string())
+        );
+        clear_active_guardrail(&session_id, &record.action.action_id);
     }
 }

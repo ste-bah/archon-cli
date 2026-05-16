@@ -16,6 +16,7 @@ pub(crate) fn bridge_reasoning_events(
     update_self_trust: bool,
 ) {
     for event in events {
+        let _ = crate::command::world_model::record_guardrail_reasoning_quality_event(event);
         if let Some(db) = learning_db
             && let Err(error) = bridge_learning_event(db, event)
         {

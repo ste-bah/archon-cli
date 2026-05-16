@@ -233,6 +233,22 @@ impl ObservedLlmProvider {
             .with_redacted_json(error_metadata(error));
         if let Some(event_id) = self.recorder.record(event) {
             self.record_agent_provider_incident(&event_id, request, error_kind);
+            if let Some(run_id) = request.run_id.as_deref()
+                && let Ok(config) = archon_core::config::load_config()
+            {
+                let attached =
+                    crate::command::world_model::record_guardrail_provider_incident_for_session(
+                        &config, run_id, &event_id, error_kind,
+                    );
+                if attached {
+                    tracing::debug!(
+                        run_id,
+                        provider_event_id = %event_id,
+                        reason_code = error_kind,
+                        "world_model.guardrail_provider_incident"
+                    );
+                }
+            }
         }
 
         if let Some(event_type) = limit_event_type(error) {

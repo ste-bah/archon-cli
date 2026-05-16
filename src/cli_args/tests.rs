@@ -153,6 +153,64 @@ mod world_guard_parse_tests {
             other => panic!("expected world guard policy set, got {other:?}"),
         }
     }
+
+    #[test]
+    fn world_guard_approve_parses_reason() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "world",
+            "guard",
+            "approve",
+            "world-guard-action-1",
+            "--reason",
+            "operator accepts the risk",
+        ])
+        .expect("world guard approve must parse");
+
+        match cli.command {
+            Some(Commands::World {
+                action:
+                    WorldAction::Guard {
+                        action: WorldGuardAction::Approve { action_id, reason },
+                    },
+            }) => {
+                assert_eq!(action_id, "world-guard-action-1");
+                assert_eq!(reason, "operator accepts the risk");
+            }
+            other => panic!("expected world guard approve, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn world_guard_skip_verification_parses_reason() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "world",
+            "guard",
+            "skip-verification",
+            "world-guard-req-1",
+            "--reason",
+            "test harness unavailable",
+        ])
+        .expect("world guard skip-verification must parse");
+
+        match cli.command {
+            Some(Commands::World {
+                action:
+                    WorldAction::Guard {
+                        action:
+                            WorldGuardAction::SkipVerification {
+                                requirement_id,
+                                reason,
+                            },
+                    },
+            }) => {
+                assert_eq!(requirement_id, "world-guard-req-1");
+                assert_eq!(reason, "test harness unavailable");
+            }
+            other => panic!("expected world guard skip-verification, got {other:?}"),
+        }
+    }
 }
 
 #[cfg(test)]

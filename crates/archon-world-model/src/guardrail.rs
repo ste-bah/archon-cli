@@ -807,9 +807,12 @@ fn required_action_passed(
     latest_by_kind: &BTreeMap<String, &VerificationOutcome>,
 ) -> bool {
     required_action_kind_keys(required).into_iter().any(|key| {
-        latest_by_kind
-            .get(*key)
-            .is_some_and(|outcome| outcome.status == VerificationStatus::Passed)
+        latest_by_kind.get(*key).is_some_and(|outcome| {
+            matches!(
+                outcome.status,
+                VerificationStatus::Passed | VerificationStatus::Skipped
+            )
+        })
     })
 }
 
@@ -820,6 +823,7 @@ fn required_action_kind_keys(required: GuardrailRequiredAction) -> &'static [&'s
         GuardrailRequiredAction::RunLint => &["lint"],
         GuardrailRequiredAction::RunTypecheck => &["typecheck"],
         GuardrailRequiredAction::RunVerifier => &[
+            "custom:verifier",
             "unit_tests",
             "integration_tests",
             "build",
@@ -1248,6 +1252,42 @@ mod tests {
             &[VerificationOutcome {
                 kind: VerificationKind::UnitTests,
                 status: VerificationStatus::Passed,
+                ..VerificationOutcome::default()
+            }]
+        ));
+    }
+
+    #[test]
+    fn finalization_allows_explicitly_skipped_verification() {
+        let mut decision = WorldGuardrailDecision::default();
+        decision.mode = WorldGuardrailMode::Guarded;
+        decision.allowed_to_finalize = false;
+        decision.required_actions = vec![GuardrailRequiredAction::RunTests];
+
+        assert!(finalization_allowed(
+            &decision,
+            &[VerificationOutcome {
+                kind: VerificationKind::UnitTests,
+                status: VerificationStatus::Skipped,
+                summary: "manual override: operator accepted the risk".into(),
+                ..VerificationOutcome::default()
+            }]
+        ));
+    }
+
+    #[test]
+    fn finalization_accepts_explicit_verifier_record() {
+        let mut decision = WorldGuardrailDecision::default();
+        decision.mode = WorldGuardrailMode::Guarded;
+        decision.allowed_to_finalize = false;
+        decision.required_actions = vec![GuardrailRequiredAction::RunVerifier];
+
+        assert!(finalization_allowed(
+            &decision,
+            &[VerificationOutcome {
+                kind: VerificationKind::Custom("verifier".into()),
+                status: VerificationStatus::Skipped,
+                summary: "manual verifier override".into(),
                 ..VerificationOutcome::default()
             }]
         ));

@@ -20,6 +20,7 @@ mod trainer_runtime;
 pub(crate) use guard::{
     RuntimeGuardrailRecord, active_guardrail_for_session, begin_guarded_action,
     forced_repair_prompt, record_guardrail_completion_outcome,
+    record_guardrail_provider_incident_for_session, record_guardrail_reasoning_quality_event,
     record_guardrail_tool_result_for_session, record_guardrail_turn_outcome,
 };
 pub(crate) use runtime::{
@@ -225,6 +226,13 @@ fn render_guard_command(
         crate::cli_args::WorldGuardAction::ReplayOutcomes { session } => {
             guard::render_guard_replay_outcomes(&world_model_root()?, session.as_deref())
         }
+        crate::cli_args::WorldGuardAction::Approve { action_id, reason } => {
+            guard::render_guard_approve(&world_model_root()?, action_id, reason)
+        }
+        crate::cli_args::WorldGuardAction::SkipVerification {
+            requirement_id,
+            reason,
+        } => guard::render_guard_skip_verification(&world_model_root()?, requirement_id, reason),
         crate::cli_args::WorldGuardAction::Policy { action } => match action {
             crate::cli_args::WorldGuardPolicyAction::Show => Ok(guard::render_guard_policy(config)),
             crate::cli_args::WorldGuardPolicyAction::Set {
