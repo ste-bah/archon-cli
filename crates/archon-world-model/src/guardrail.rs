@@ -808,13 +808,21 @@ fn required_action_passed(
     latest_by_kind: &BTreeMap<String, &VerificationOutcome>,
 ) -> bool {
     required_action_kind_keys(required).into_iter().any(|key| {
-        latest_by_kind.get(*key).is_some_and(|outcome| {
-            matches!(
-                outcome.status,
-                VerificationStatus::Passed | VerificationStatus::Skipped
-            )
-        })
+        latest_by_kind
+            .get(*key)
+            .is_some_and(|outcome| verification_satisfies_required_action(outcome))
     })
+}
+
+fn verification_satisfies_required_action(outcome: &VerificationOutcome) -> bool {
+    match outcome.status {
+        VerificationStatus::Passed => true,
+        VerificationStatus::Skipped => outcome
+            .evidence_refs
+            .iter()
+            .any(|evidence| evidence.starts_with("manual_override:")),
+        _ => false,
+    }
 }
 
 fn required_action_kind_keys(required: GuardrailRequiredAction) -> &'static [&'static str] {
@@ -855,16 +863,6 @@ fn verification_kind_key(kind: &VerificationKind) -> String {
         VerificationKind::HumanApproval => "human_approval".into(),
         VerificationKind::Custom(value) => format!("custom:{value}"),
     }
-}
-
-pub fn guardrail_budget_allows_prediction_latency(
-    prediction_elapsed_ms: u64,
-    prediction_budget_ms: u64,
-    guardrail_overhead_ms: u64,
-    max_guardrail_overhead_ms: u64,
-) -> bool {
-    prediction_elapsed_ms <= prediction_budget_ms
-        && guardrail_overhead_ms <= max_guardrail_overhead_ms
 }
 
 pub fn enforce_guardrail_overhead_budget(
@@ -1343,6 +1341,25 @@ mod tests {
                 kind: VerificationKind::UnitTests,
                 status: VerificationStatus::Skipped,
                 summary: "manual override: operator accepted the risk".into(),
+                evidence_refs: vec!["manual_override:skip_verification".into()],
+                ..VerificationOutcome::default()
+            }]
+        ));
+    }
+
+    #[test]
+    fn finalization_rejects_bare_skipped_verification() {
+        let mut decision = WorldGuardrailDecision::default();
+        decision.mode = WorldGuardrailMode::Guarded;
+        decision.allowed_to_finalize = false;
+        decision.required_actions = vec![GuardrailRequiredAction::RunTests];
+
+        assert!(!finalization_allowed(
+            &decision,
+            &[VerificationOutcome {
+                kind: VerificationKind::UnitTests,
+                status: VerificationStatus::Skipped,
+                summary: "skipped without explicit manual override".into(),
                 ..VerificationOutcome::default()
             }]
         ));
@@ -1361,6 +1378,7 @@ mod tests {
                 kind: VerificationKind::Custom("verifier".into()),
                 status: VerificationStatus::Skipped,
                 summary: "manual verifier override".into(),
+                evidence_refs: vec!["manual_override:approve".into()],
                 ..VerificationOutcome::default()
             }]
         ));
@@ -1404,15 +1422,6 @@ mod tests {
                     ..VerificationOutcome::default()
                 }
             ]
-        ));
-    }
-
-    #[test]
-    fn guardrail_budget_helper_keeps_prediction_and_overhead_budgets_separate() {
-        assert!(guardrail_budget_allows_prediction_latency(100, 100, 40, 40));
-        assert!(!guardrail_budget_allows_prediction_latency(101, 100, 1, 40));
-        assert!(!guardrail_budget_allows_prediction_latency(
-            100, 100, 41, 40
         ));
     }
 
