@@ -586,17 +586,27 @@ mod tests {
         };
         let (mut model, mut outcome) =
             crate::jepa::train_jepa_candidate(&[first, second], &config).unwrap();
-        let status = crate::backend::BackendStatus {
-            requested: crate::backend::BackendKind::Metal,
-            selected: crate::backend::BackendKind::Metal,
+        model.metadata.backend = crate::backend::BackendKind::Metal;
+        model.metadata.backend_execution = crate::jepa::JepaBackendExecutionReport {
+            requested_backend: crate::backend::BackendKind::Metal,
+            selected_backend: crate::backend::BackendKind::Metal,
             framework: "mlx-rs".into(),
             device_name: Some("metal:0".into()),
-            experimental: true,
+            commit_sha: "abc123".into(),
+            feature_compiled: true,
+            tensor_self_test_passed: true,
+            hardware_validation_captured_at: Some(chrono::Utc::now()),
+            validation_example_count: 512,
+            native_encode: true,
+            native_predictor_fit: true,
+            native_auxiliary_fit: true,
+            native_transition_fit: true,
+            native_loss_eval: true,
+            native_runtime_prediction: Some(true),
+            host_fallback_count: 0,
+            allowed_host_stage_count: 0,
             fallback_reason: None,
         };
-        model.metadata.backend = crate::backend::BackendKind::Metal;
-        model.metadata.backend_execution =
-            crate::jepa::JepaBackendExecutionReport::native(&status, 512, true);
         if let Some(transition) = &mut model.transition_model {
             transition.metadata.backend = crate::backend::BackendKind::Metal;
         }

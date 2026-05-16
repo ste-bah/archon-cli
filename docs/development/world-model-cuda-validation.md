@@ -60,9 +60,9 @@ cargo test --bin archon --features cuda world_model::tests::predict_next_uses_ac
 ## Results
 
 - `cargo check -p archon-world-model --features cuda --lib`: passed.
-- `cargo test -p archon-world-model --features cuda --lib jepa -- --test-threads=2`: 28 passed, 0 failed, 7 ignored hardware tests.
+- `cargo test -p archon-world-model --features cuda --lib jepa -- --test-threads=2`: 31 passed, 0 failed, 7 ignored hardware tests.
 - `cargo test -p archon-world-model --features cuda --lib jepa_cuda -- --ignored --nocapture --test-threads=1`: 7 passed, 0 failed.
-- `cargo test -p archon-world-model --features cuda --lib -- --test-threads=2`: 124 passed, 0 failed, 7 ignored hardware tests.
+- `cargo test -p archon-world-model --features cuda --lib -- --test-threads=2`: 127 passed, 0 failed, 7 ignored hardware tests.
 - `cargo test --bin archon --features cuda world_model::tests -- --test-threads=2`: 25 passed, 0 failed, 1 ignored hardware test.
 - `cargo test --bin archon --features cuda world_model::tests::predict_next_uses_active_jepa_cuda_model -- --ignored --nocapture --test-threads=1`: 1 passed, 0 failed.
 
@@ -71,6 +71,9 @@ The CUDA JEPA tests include:
 - `cuda_jepa_training_writes_native_execution_proof_when_available`
 - `cuda_jepa_training_can_meet_hardware_validation_floor_when_available`
 - `cuda_metadata_without_native_execution_proof_is_rejected`
+- `observed_stage_fallback_is_reflected_in_accelerator_proof`
+- `observed_all_native_cuda_stage_proof_passes_without_cuda_hardware`
+- `accelerator_proof_requires_observed_device_name`
 - `jepa_cuda_probe_passes_tensor_self_test`
 - `jepa_cuda_trains_encoder_predictor_aux_transition_native`
 - `jepa_cuda_runtime_prediction_uses_cuda`

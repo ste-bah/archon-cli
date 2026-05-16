@@ -181,6 +181,6 @@ Complete:
 - `git diff --check`: passed.
 - `cargo check -p archon-world-model --features cuda --lib`: passed with explicit `/usr/local/cuda-13.1` toolkit environment.
 - `cargo test -p archon-world-model --lib --features cuda candle_cuda_trains_and_predicts_when_available -- --nocapture`: passed locally on WSL after driver/toolkit compatibility was corrected.
-- `cargo test -p archon-world-model --lib --features cuda`: passed, 124 tests plus 7 ignored hardware tests.
+- `cargo test -p archon-world-model --lib --features cuda`: passed, 127 tests plus 7 ignored hardware tests.
 - `cargo test -p archon-world-model --features cuda --lib jepa_cuda -- --ignored --nocapture --test-threads=1`: passed, 7 hardware tests.
 - `cargo test --bin archon --features cuda world_model::tests::predict_next_uses_active_jepa_cuda_model -- --ignored --nocapture --test-threads=1`: passed, 1 hardware test.

@@ -219,31 +219,34 @@ impl JepaBackendExecutionReport {
         )
     }
 
-    pub fn native(
+    fn native(
         status: &BackendStatus,
         validation_example_count: usize,
-        native_runtime_prediction: bool,
+        evidence: JepaBackendExecutionEvidence,
     ) -> Self {
+        let feature_compiled = jepa_backend_feature_compiled(status.selected);
+        let tensor_self_test_passed = evidence.tensor_self_test_passed;
+        let hardware_validation_captured_at =
+            (feature_compiled && tensor_self_test_passed && evidence.device_name.is_some())
+                .then(Utc::now);
+        let host_fallback_count = evidence.host_fallback_count();
         Self {
             requested_backend: status.requested,
             selected_backend: status.selected,
             framework: status.framework.clone(),
-            device_name: status
-                .device_name
-                .clone()
-                .or_else(|| default_backend_device_name(status.selected)),
+            device_name: evidence.device_name,
             commit_sha: build_commit_sha(),
-            feature_compiled: true,
-            tensor_self_test_passed: true,
-            hardware_validation_captured_at: Some(Utc::now()),
+            feature_compiled,
+            tensor_self_test_passed,
+            hardware_validation_captured_at,
             validation_example_count,
-            native_encode: true,
-            native_predictor_fit: true,
-            native_auxiliary_fit: true,
-            native_transition_fit: true,
-            native_loss_eval: true,
-            native_runtime_prediction: Some(native_runtime_prediction),
-            host_fallback_count: 0,
+            native_encode: evidence.encode.native,
+            native_predictor_fit: evidence.predictor_fit.native,
+            native_auxiliary_fit: evidence.auxiliary_fit.native,
+            native_transition_fit: evidence.transition_fit.native,
+            native_loss_eval: evidence.loss_eval.native,
+            native_runtime_prediction: evidence.runtime_prediction.map(|stage| stage.native),
+            host_fallback_count,
             allowed_host_stage_count: 0,
             fallback_reason: None,
         }
@@ -265,6 +268,92 @@ impl JepaBackendExecutionReport {
             && self.native_loss_eval
             && self.native_runtime_prediction == Some(true)
             && self.host_fallback_count == 0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JepaStageExecution {
+    pub native: bool,
+    pub host_fallback_count: u64,
+}
+
+impl JepaStageExecution {
+    pub fn native() -> Self {
+        Self {
+            native: true,
+            host_fallback_count: 0,
+        }
+    }
+
+    pub fn host_fallback(count: u64) -> Self {
+        Self {
+            native: false,
+            host_fallback_count: count.max(1),
+        }
+    }
+
+    fn combine(self, other: Self) -> Self {
+        Self {
+            native: self.native && other.native,
+            host_fallback_count: self.host_fallback_count + other.host_fallback_count,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct JepaStageResult<T> {
+    pub value: T,
+    pub execution: JepaStageExecution,
+}
+
+impl<T> JepaStageResult<T> {
+    pub fn native(value: T) -> Self {
+        Self {
+            value,
+            execution: JepaStageExecution::native(),
+        }
+    }
+
+    pub fn new(value: T, execution: JepaStageExecution) -> Self {
+        Self { value, execution }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct JepaBackendExecutionEvidence {
+    device_name: Option<String>,
+    tensor_self_test_passed: bool,
+    encode: JepaStageExecution,
+    predictor_fit: JepaStageExecution,
+    auxiliary_fit: JepaStageExecution,
+    transition_fit: JepaStageExecution,
+    loss_eval: JepaStageExecution,
+    runtime_prediction: Option<JepaStageExecution>,
+}
+
+impl JepaBackendExecutionEvidence {
+    fn host_fallback_count(&self) -> u64 {
+        self.encode.host_fallback_count
+            + self.predictor_fit.host_fallback_count
+            + self.auxiliary_fit.host_fallback_count
+            + self.transition_fit.host_fallback_count
+            + self.loss_eval.host_fallback_count
+            + self
+                .runtime_prediction
+                .map(|stage| stage.host_fallback_count)
+                .unwrap_or_default()
+    }
+}
+
+fn jepa_backend_feature_compiled(backend: BackendKind) -> bool {
+    match backend {
+        BackendKind::Cpu | BackendKind::Auto => true,
+        BackendKind::Cuda => cfg!(feature = "cuda"),
+        BackendKind::Metal => cfg!(all(
+            feature = "mlx-metal",
+            target_os = "macos",
+            target_arch = "aarch64"
+        )),
     }
 }
 
@@ -290,11 +379,29 @@ fn runtime_git_sha() -> Option<String> {
     if sha.is_empty() { None } else { Some(sha) }
 }
 
-fn default_backend_device_name(backend: BackendKind) -> Option<String> {
+fn observed_backend_device_name(backend: BackendKind) -> Option<String> {
     match backend {
         BackendKind::Cpu => Some("cpu".into()),
-        BackendKind::Cuda => Some("cuda:0".into()),
-        BackendKind::Metal => Some("metal:0".into()),
+        BackendKind::Cuda => {
+            #[cfg(feature = "cuda")]
+            {
+                cuda_jepa_device().ok().map(|_| "cuda:0".to_string())
+            }
+            #[cfg(not(feature = "cuda"))]
+            {
+                None
+            }
+        }
+        BackendKind::Metal => {
+            #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+            {
+                crate::backend::metal_runtime_available().then(|| "metal:0".to_string())
+            }
+            #[cfg(not(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64")))]
+            {
+                None
+            }
+        }
         BackendKind::Auto => None,
     }
 }
@@ -1063,33 +1170,40 @@ pub trait JepaTensorBackend: Send + Sync {
     fn status(&self) -> BackendStatus;
     fn probe_jepa(&self) -> JepaBackendProbeReport;
 
+    fn observed_device_name(&self) -> Option<String> {
+        self.status().device_name
+    }
+
     fn encode_batch(
         &self,
         encoders: &JepaEncoderSet,
         batch: &JepaFeatureBatch,
-    ) -> Result<JepaEncodedBatch>;
+    ) -> Result<JepaStageResult<JepaEncodedBatch>>;
 
-    fn fit_predictor(&self, latent_dim: usize, encoded: &JepaEncodedBatch)
-    -> Result<JepaPredictor>;
+    fn fit_predictor(
+        &self,
+        latent_dim: usize,
+        encoded: &JepaEncodedBatch,
+    ) -> Result<JepaStageResult<JepaPredictor>>;
 
     fn fit_auxiliary_heads(
         &self,
         latent_dim: usize,
         encoded: &JepaEncodedBatch,
-    ) -> Result<Vec<JepaAuxiliaryHead>>;
+    ) -> Result<JepaStageResult<Vec<JepaAuxiliaryHead>>>;
 
     fn fit_transition(
         &self,
         latent_dim: usize,
         encoded: &JepaEncodedBatch,
-    ) -> Result<CpuLatentTransitionModel>;
+    ) -> Result<JepaStageResult<CpuLatentTransitionModel>>;
 
     fn training_losses(
         &self,
         model: &JepaTraceModel,
         encoded: &JepaEncodedBatch,
         config: &JepaTrainingConfig,
-    ) -> Result<JepaTrainingLosses>;
+    ) -> Result<JepaStageResult<JepaTrainingLosses>>;
 
     fn collapse_report(
         &self,
@@ -1102,7 +1216,7 @@ pub trait JepaTensorBackend: Send + Sync {
         model: &JepaTraceModel,
         window: &TraceWindow,
         action: &TraceAction,
-    ) -> Result<JepaRuntimePrediction>;
+    ) -> Result<JepaStageResult<JepaRuntimePrediction>>;
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1121,37 +1235,44 @@ impl JepaTensorBackend for CpuJepaBackend {
         &self,
         encoders: &JepaEncoderSet,
         batch: &JepaFeatureBatch,
-    ) -> Result<JepaEncodedBatch> {
-        encode_examples(
+    ) -> Result<JepaStageResult<JepaEncodedBatch>> {
+        Ok(JepaStageResult::native(encode_examples(
             &encoders.context_encoder,
             &encoders.action_encoder,
             &encoders.target_encoder,
             batch,
-        )
+        )?))
     }
 
     fn fit_predictor(
         &self,
         latent_dim: usize,
         encoded: &JepaEncodedBatch,
-    ) -> Result<JepaPredictor> {
-        JepaPredictor::fit(latent_dim, encoded)
+    ) -> Result<JepaStageResult<JepaPredictor>> {
+        Ok(JepaStageResult::native(JepaPredictor::fit(
+            latent_dim, encoded,
+        )?))
     }
 
     fn fit_auxiliary_heads(
         &self,
         latent_dim: usize,
         encoded: &JepaEncodedBatch,
-    ) -> Result<Vec<JepaAuxiliaryHead>> {
-        Ok(fit_auxiliary_heads(latent_dim, encoded))
+    ) -> Result<JepaStageResult<Vec<JepaAuxiliaryHead>>> {
+        Ok(JepaStageResult::native(fit_auxiliary_heads(
+            latent_dim, encoded,
+        )))
     }
 
     fn fit_transition(
         &self,
         latent_dim: usize,
         encoded: &JepaEncodedBatch,
-    ) -> Result<CpuLatentTransitionModel> {
-        CpuLatentTransitionModel::fit(latent_dim, &encoded_transition_examples(encoded))
+    ) -> Result<JepaStageResult<CpuLatentTransitionModel>> {
+        Ok(JepaStageResult::native(CpuLatentTransitionModel::fit(
+            latent_dim,
+            &encoded_transition_examples(encoded),
+        )?))
     }
 
     fn training_losses(
@@ -1159,8 +1280,10 @@ impl JepaTensorBackend for CpuJepaBackend {
         model: &JepaTraceModel,
         encoded: &JepaEncodedBatch,
         config: &JepaTrainingConfig,
-    ) -> Result<JepaTrainingLosses> {
-        training_losses(model, encoded, config)
+    ) -> Result<JepaStageResult<JepaTrainingLosses>> {
+        Ok(JepaStageResult::native(training_losses(
+            model, encoded, config,
+        )?))
     }
 
     fn collapse_report(
@@ -1180,7 +1303,7 @@ impl JepaTensorBackend for CpuJepaBackend {
         model: &JepaTraceModel,
         window: &TraceWindow,
         action: &TraceAction,
-    ) -> Result<JepaRuntimePrediction> {
+    ) -> Result<JepaStageResult<JepaRuntimePrediction>> {
         let started = Instant::now();
         let transition = model
             .transition_model
@@ -1196,7 +1319,7 @@ impl JepaTensorBackend for CpuJepaBackend {
         )?;
         let auxiliary_scores = model.predict_auxiliary(&state, &action_latent)?;
         let latency_ms = started.elapsed().as_millis() as u64;
-        Ok(JepaRuntimePrediction {
+        Ok(JepaStageResult::native(JepaRuntimePrediction {
             backend: BackendKind::Cpu,
             predicted_next_state,
             guardrail_scores: jepa_guardrail_scores_from_auxiliary(&auxiliary_scores),
@@ -1209,7 +1332,7 @@ impl JepaTensorBackend for CpuJepaBackend {
                 true,
                 latency_ms,
             ),
-        })
+        }))
     }
 }
 
@@ -1229,15 +1352,21 @@ impl JepaTensorBackend for CandleCudaJepaBackend {
         )
     }
 
+    fn observed_device_name(&self) -> Option<String> {
+        observed_backend_device_name(BackendKind::Cuda)
+    }
+
     fn encode_batch(
         &self,
         encoders: &JepaEncoderSet,
         batch: &JepaFeatureBatch,
-    ) -> Result<JepaEncodedBatch> {
+    ) -> Result<JepaStageResult<JepaEncodedBatch>> {
         #[cfg(feature = "cuda")]
         {
             let device = cuda_jepa_device()?;
-            candle_encode_batch_on_device(encoders, batch, &device)
+            Ok(JepaStageResult::native(candle_encode_batch_on_device(
+                encoders, batch, &device,
+            )?))
         }
         #[cfg(not(feature = "cuda"))]
         {
@@ -1250,11 +1379,13 @@ impl JepaTensorBackend for CandleCudaJepaBackend {
         &self,
         latent_dim: usize,
         encoded: &JepaEncodedBatch,
-    ) -> Result<JepaPredictor> {
+    ) -> Result<JepaStageResult<JepaPredictor>> {
         #[cfg(feature = "cuda")]
         {
             let device = cuda_jepa_device()?;
-            candle_fit_predictor_on_device(latent_dim, encoded, &device)
+            Ok(JepaStageResult::native(candle_fit_predictor_on_device(
+                latent_dim, encoded, &device,
+            )?))
         }
         #[cfg(not(feature = "cuda"))]
         {
@@ -1267,11 +1398,13 @@ impl JepaTensorBackend for CandleCudaJepaBackend {
         &self,
         latent_dim: usize,
         encoded: &JepaEncodedBatch,
-    ) -> Result<Vec<JepaAuxiliaryHead>> {
+    ) -> Result<JepaStageResult<Vec<JepaAuxiliaryHead>>> {
         #[cfg(feature = "cuda")]
         {
             let device = cuda_jepa_device()?;
-            candle_fit_auxiliary_heads_on_device(latent_dim, encoded, &device)
+            Ok(JepaStageResult::native(
+                candle_fit_auxiliary_heads_on_device(latent_dim, encoded, &device)?,
+            ))
         }
         #[cfg(not(feature = "cuda"))]
         {
@@ -1284,13 +1417,19 @@ impl JepaTensorBackend for CandleCudaJepaBackend {
         &self,
         latent_dim: usize,
         encoded: &JepaEncodedBatch,
-    ) -> Result<CpuLatentTransitionModel> {
+    ) -> Result<JepaStageResult<CpuLatentTransitionModel>> {
         #[cfg(feature = "cuda")]
         {
-            crate::backend::candle::candle_cuda_fit_transition_model(
+            let transition = crate::backend::candle::candle_cuda_fit_transition_model(
                 latent_dim,
                 &encoded_transition_examples(encoded),
-            )
+            )?;
+            let execution = if transition.metadata.backend == BackendKind::Cuda {
+                JepaStageExecution::native()
+            } else {
+                JepaStageExecution::host_fallback(1)
+            };
+            Ok(JepaStageResult::new(transition, execution))
         }
         #[cfg(not(feature = "cuda"))]
         {
@@ -1304,11 +1443,13 @@ impl JepaTensorBackend for CandleCudaJepaBackend {
         model: &JepaTraceModel,
         encoded: &JepaEncodedBatch,
         config: &JepaTrainingConfig,
-    ) -> Result<JepaTrainingLosses> {
+    ) -> Result<JepaStageResult<JepaTrainingLosses>> {
         #[cfg(feature = "cuda")]
         {
             let device = cuda_jepa_device()?;
-            candle_training_losses_on_device(model, encoded, config, &device)
+            Ok(JepaStageResult::native(candle_training_losses_on_device(
+                model, encoded, config, &device,
+            )?))
         }
         #[cfg(not(feature = "cuda"))]
         {
@@ -1334,11 +1475,22 @@ impl JepaTensorBackend for CandleCudaJepaBackend {
         model: &JepaTraceModel,
         window: &TraceWindow,
         action: &TraceAction,
-    ) -> Result<JepaRuntimePrediction> {
+    ) -> Result<JepaStageResult<JepaRuntimePrediction>> {
         #[cfg(feature = "cuda")]
         {
             let device = cuda_jepa_device()?;
-            candle_jepa_predict_runtime_on_device(model, window, action, BackendKind::Cuda, &device)
+            let prediction = candle_jepa_predict_runtime_on_device(
+                model,
+                window,
+                action,
+                BackendKind::Cuda,
+                &device,
+            )?;
+            let execution = JepaStageExecution {
+                native: prediction.execution_report.native_runtime_prediction,
+                host_fallback_count: prediction.execution_report.host_fallback_count,
+            };
+            Ok(JepaStageResult::new(prediction, execution))
         }
         #[cfg(not(feature = "cuda"))]
         {
@@ -1368,14 +1520,20 @@ impl JepaTensorBackend for MlxMetalJepaBackend {
         )
     }
 
+    fn observed_device_name(&self) -> Option<String> {
+        observed_backend_device_name(BackendKind::Metal)
+    }
+
     fn encode_batch(
         &self,
         encoders: &JepaEncoderSet,
         batch: &JepaFeatureBatch,
-    ) -> Result<JepaEncodedBatch> {
+    ) -> Result<JepaStageResult<JepaEncodedBatch>> {
         #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
         {
-            mlx_encode_batch_on_device(encoders, batch)
+            Ok(JepaStageResult::native(mlx_encode_batch_on_device(
+                encoders, batch,
+            )?))
         }
         #[cfg(not(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64")))]
         {
@@ -1388,10 +1546,12 @@ impl JepaTensorBackend for MlxMetalJepaBackend {
         &self,
         latent_dim: usize,
         encoded: &JepaEncodedBatch,
-    ) -> Result<JepaPredictor> {
+    ) -> Result<JepaStageResult<JepaPredictor>> {
         #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
         {
-            mlx_fit_predictor_on_device(latent_dim, encoded)
+            Ok(JepaStageResult::native(mlx_fit_predictor_on_device(
+                latent_dim, encoded,
+            )?))
         }
         #[cfg(not(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64")))]
         {
@@ -1404,10 +1564,12 @@ impl JepaTensorBackend for MlxMetalJepaBackend {
         &self,
         latent_dim: usize,
         encoded: &JepaEncodedBatch,
-    ) -> Result<Vec<JepaAuxiliaryHead>> {
+    ) -> Result<JepaStageResult<Vec<JepaAuxiliaryHead>>> {
         #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
         {
-            mlx_fit_auxiliary_heads_on_device(latent_dim, encoded)
+            Ok(JepaStageResult::native(mlx_fit_auxiliary_heads_on_device(
+                latent_dim, encoded,
+            )?))
         }
         #[cfg(not(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64")))]
         {
@@ -1420,13 +1582,19 @@ impl JepaTensorBackend for MlxMetalJepaBackend {
         &self,
         latent_dim: usize,
         encoded: &JepaEncodedBatch,
-    ) -> Result<CpuLatentTransitionModel> {
+    ) -> Result<JepaStageResult<CpuLatentTransitionModel>> {
         #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
         {
-            crate::backend::mlx::mlx_metal_fit_transition_model(
+            let transition = crate::backend::mlx::mlx_metal_fit_transition_model(
                 latent_dim,
                 &encoded_transition_examples(encoded),
-            )
+            )?;
+            let execution = if transition.metadata.backend == BackendKind::Metal {
+                JepaStageExecution::native()
+            } else {
+                JepaStageExecution::host_fallback(1)
+            };
+            Ok(JepaStageResult::new(transition, execution))
         }
         #[cfg(not(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64")))]
         {
@@ -1440,10 +1608,12 @@ impl JepaTensorBackend for MlxMetalJepaBackend {
         model: &JepaTraceModel,
         encoded: &JepaEncodedBatch,
         config: &JepaTrainingConfig,
-    ) -> Result<JepaTrainingLosses> {
+    ) -> Result<JepaStageResult<JepaTrainingLosses>> {
         #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
         {
-            mlx_training_losses_on_device(model, encoded, config)
+            Ok(JepaStageResult::native(mlx_training_losses_on_device(
+                model, encoded, config,
+            )?))
         }
         #[cfg(not(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64")))]
         {
@@ -1469,10 +1639,15 @@ impl JepaTensorBackend for MlxMetalJepaBackend {
         model: &JepaTraceModel,
         window: &TraceWindow,
         action: &TraceAction,
-    ) -> Result<JepaRuntimePrediction> {
+    ) -> Result<JepaStageResult<JepaRuntimePrediction>> {
         #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
         {
-            mlx_jepa_predict_runtime_on_device(model, window, action)
+            let prediction = mlx_jepa_predict_runtime_on_device(model, window, action)?;
+            let execution = JepaStageExecution {
+                native: prediction.execution_report.native_runtime_prediction,
+                host_fallback_count: prediction.execution_report.host_fallback_count,
+            };
+            Ok(JepaStageResult::new(prediction, execution))
         }
         #[cfg(not(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64")))]
         {
@@ -1526,7 +1701,7 @@ fn candle_jepa_predict_runtime_on_device(
         execution_report: JepaRuntimeBackendReport::new(
             backend,
             "candle",
-            default_backend_device_name(backend),
+            observed_backend_device_name(backend),
             true,
             latency_ms,
         ),
@@ -2119,7 +2294,7 @@ fn mlx_jepa_predict_runtime_on_device(
         execution_report: JepaRuntimeBackendReport::new(
             BackendKind::Metal,
             "mlx-rs",
-            default_backend_device_name(BackendKind::Metal),
+            observed_backend_device_name(BackendKind::Metal),
             true,
             latency_ms,
         ),
@@ -3080,7 +3255,11 @@ fn train_jepa_candidate_with_tensor_backend<B: JepaTensorBackend>(
         action_encoder: action_encoder.clone(),
         target_encoder: target_encoder.clone(),
     };
-    let encoded = backend.encode_batch(&encoders, &feature_batch)?;
+    let encoded_stage = backend.encode_batch(&encoders, &feature_batch)?;
+    let encoded_execution = encoded_stage.execution;
+    let encoded = encoded_stage.value;
+    let initial_auxiliary_heads_stage = backend.fit_auxiliary_heads(config.latent_dim, &encoded)?;
+    let initial_auxiliary_execution = initial_auxiliary_heads_stage.execution;
     let initial_model = JepaTraceModel {
         metadata: JepaTraceModelMetadata::candidate(
             config,
@@ -3091,36 +3270,66 @@ fn train_jepa_candidate_with_tensor_backend<B: JepaTensorBackend>(
         action_encoder: action_encoder.clone(),
         target_encoder: target_encoder.clone(),
         predictor: JepaPredictor::baseline(config.latent_dim),
-        auxiliary_heads: backend.fit_auxiliary_heads(config.latent_dim, &encoded)?,
+        auxiliary_heads: initial_auxiliary_heads_stage.value,
         transition_model: None,
     };
-    let initial_losses = backend.training_losses(&initial_model, &encoded, config)?;
-    let predictor = backend.fit_predictor(config.latent_dim, &encoded)?;
-    let auxiliary_heads = backend.fit_auxiliary_heads(config.latent_dim, &encoded)?;
-    let transition_model = backend.fit_transition(config.latent_dim, &encoded)?;
+    let initial_losses_stage = backend.training_losses(&initial_model, &encoded, config)?;
+    let initial_loss_execution = initial_losses_stage.execution;
+    let initial_losses = initial_losses_stage.value;
+    let predictor_stage = backend.fit_predictor(config.latent_dim, &encoded)?;
+    let predictor_execution = predictor_stage.execution;
+    let auxiliary_heads_stage = backend.fit_auxiliary_heads(config.latent_dim, &encoded)?;
+    let auxiliary_execution = initial_auxiliary_execution.combine(auxiliary_heads_stage.execution);
+    let transition_model_stage = backend.fit_transition(config.latent_dim, &encoded)?;
+    let transition_execution = transition_model_stage.execution;
     let mut metadata =
         JepaTraceModelMetadata::candidate(config, rows.len() as u64, examples.len() as u64);
     metadata.backend = backend_status.selected;
-    metadata.backend_execution = if backend_status.selected == BackendKind::Cpu {
-        JepaBackendExecutionReport::from_cpu_status(&backend_status, examples.len())
-    } else {
-        JepaBackendExecutionReport::native(&backend_status, examples.len(), true)
-    };
     let mut model = JepaTraceModel {
         metadata: metadata.clone(),
         context_encoder,
         action_encoder,
         target_encoder,
-        predictor,
-        auxiliary_heads,
-        transition_model: Some(transition_model),
+        predictor: predictor_stage.value,
+        auxiliary_heads: auxiliary_heads_stage.value,
+        transition_model: Some(transition_model_stage.value),
+    };
+    let losses_stage = backend.training_losses(&model, &encoded, config)?;
+    let loss_execution = initial_loss_execution.combine(losses_stage.execution);
+    let runtime_execution = if backend_status.selected == BackendKind::Cpu {
+        None
+    } else {
+        Some(
+            backend
+                .predict_runtime(&model, &examples[0].context, &examples[0].action)?
+                .execution,
+        )
     };
     metadata.parameter_count = model.parameter_count();
+    metadata.backend_execution = if backend_status.selected == BackendKind::Cpu {
+        JepaBackendExecutionReport::from_cpu_status(&backend_status, examples.len())
+    } else {
+        let probe = backend.probe_jepa();
+        JepaBackendExecutionReport::native(
+            &backend_status,
+            examples.len(),
+            JepaBackendExecutionEvidence {
+                device_name: backend.observed_device_name(),
+                tensor_self_test_passed: probe.tensor_self_test_passed,
+                encode: encoded_execution,
+                predictor_fit: predictor_execution,
+                auxiliary_fit: auxiliary_execution,
+                transition_fit: transition_execution,
+                loss_eval: loss_execution,
+                runtime_prediction: runtime_execution,
+            },
+        )
+    };
     metadata.backend_execution.validation_example_count = examples.len();
     model.metadata = metadata;
     validate_jepa_backend_execution(&model.metadata)?;
     model.validate_finite()?;
-    let losses = backend.training_losses(&model, &encoded, config)?;
+    let losses = losses_stage.value;
     let progress = JepaTrainingProgress {
         initial_loss_total: initial_losses.loss_total,
         final_loss_total: losses.loss_total,
@@ -3233,10 +3442,18 @@ pub fn jepa_backend_forward_parity(
     window: &TraceWindow,
     action: &TraceAction,
 ) -> Result<f32> {
-    let cpu = CpuJepaBackend.predict_runtime(model, window, action)?;
+    let cpu = CpuJepaBackend.predict_runtime(model, window, action)?.value;
     let backend = match model.metadata.backend {
-        BackendKind::Cuda => CandleCudaJepaBackend.predict_runtime(model, window, action)?,
-        BackendKind::Metal => MlxMetalJepaBackend.predict_runtime(model, window, action)?,
+        BackendKind::Cuda => {
+            CandleCudaJepaBackend
+                .predict_runtime(model, window, action)?
+                .value
+        }
+        BackendKind::Metal => {
+            MlxMetalJepaBackend
+                .predict_runtime(model, window, action)?
+                .value
+        }
         BackendKind::Auto | BackendKind::Cpu => return Ok(1.0),
     };
     crate::backend::bridge::output_cosine_parity(
@@ -3272,13 +3489,15 @@ pub fn predict_jepa_with_backend(
 
     match backend {
         BackendKind::Auto | BackendKind::Cpu => {
-            CpuJepaBackend.predict_runtime(model, window, action)
+            Ok(CpuJepaBackend.predict_runtime(model, window, action)?.value)
         }
         BackendKind::Cuda => CandleCudaJepaBackend
             .predict_runtime(model, window, action)
+            .map(|stage| stage.value)
             .map_err(|error| anyhow::anyhow!("JepaBackendUnavailable: {error}")),
         BackendKind::Metal => MlxMetalJepaBackend
             .predict_runtime(model, window, action)
+            .map(|stage| stage.value)
             .map_err(|error| anyhow::anyhow!("JepaBackendUnavailable: {error}")),
     }
 }
@@ -4441,6 +4660,265 @@ mod tests {
         assert_eq!(outcome.metadata.backend_execution.host_fallback_count, 0);
     }
 
+    #[derive(Clone)]
+    struct ObservedFakeJepaBackend {
+        selected: BackendKind,
+        device_name: Option<String>,
+        transition_execution: JepaStageExecution,
+        runtime_execution: JepaStageExecution,
+    }
+
+    impl ObservedFakeJepaBackend {
+        fn cuda(
+            device_name: Option<String>,
+            transition_execution: JepaStageExecution,
+            runtime_execution: JepaStageExecution,
+        ) -> Self {
+            Self {
+                selected: BackendKind::Cuda,
+                device_name,
+                transition_execution,
+                runtime_execution,
+            }
+        }
+    }
+
+    impl JepaTensorBackend for ObservedFakeJepaBackend {
+        fn status(&self) -> BackendStatus {
+            BackendStatus {
+                requested: self.selected,
+                selected: self.selected,
+                framework: "fake-accelerator".into(),
+                device_name: self.device_name.clone(),
+                experimental: false,
+                fallback_reason: None,
+            }
+        }
+
+        fn probe_jepa(&self) -> JepaBackendProbeReport {
+            JepaBackendProbeReport {
+                status: self.status(),
+                feature_compiled: jepa_backend_feature_compiled(self.selected),
+                tensor_self_test_passed: true,
+                native_runtime_prediction: self.runtime_execution.native,
+                unavailable_reason: None,
+            }
+        }
+
+        fn observed_device_name(&self) -> Option<String> {
+            self.device_name.clone()
+        }
+
+        fn encode_batch(
+            &self,
+            encoders: &JepaEncoderSet,
+            batch: &JepaFeatureBatch,
+        ) -> Result<JepaStageResult<JepaEncodedBatch>> {
+            CpuJepaBackend.encode_batch(encoders, batch)
+        }
+
+        fn fit_predictor(
+            &self,
+            latent_dim: usize,
+            encoded: &JepaEncodedBatch,
+        ) -> Result<JepaStageResult<JepaPredictor>> {
+            CpuJepaBackend.fit_predictor(latent_dim, encoded)
+        }
+
+        fn fit_auxiliary_heads(
+            &self,
+            latent_dim: usize,
+            encoded: &JepaEncodedBatch,
+        ) -> Result<JepaStageResult<Vec<JepaAuxiliaryHead>>> {
+            CpuJepaBackend.fit_auxiliary_heads(latent_dim, encoded)
+        }
+
+        fn fit_transition(
+            &self,
+            latent_dim: usize,
+            encoded: &JepaEncodedBatch,
+        ) -> Result<JepaStageResult<CpuLatentTransitionModel>> {
+            let transition =
+                CpuLatentTransitionModel::fit(latent_dim, &encoded_transition_examples(encoded))?;
+            Ok(JepaStageResult::new(transition, self.transition_execution))
+        }
+
+        fn training_losses(
+            &self,
+            model: &JepaTraceModel,
+            encoded: &JepaEncodedBatch,
+            config: &JepaTrainingConfig,
+        ) -> Result<JepaStageResult<JepaTrainingLosses>> {
+            CpuJepaBackend.training_losses(model, encoded, config)
+        }
+
+        fn collapse_report(
+            &self,
+            encoded: &JepaEncodedBatch,
+            config: &JepaTrainingConfig,
+        ) -> Result<JepaCollapseReport> {
+            CpuJepaBackend.collapse_report(encoded, config)
+        }
+
+        fn predict_runtime(
+            &self,
+            model: &JepaTraceModel,
+            window: &TraceWindow,
+            action: &TraceAction,
+        ) -> Result<JepaStageResult<JepaRuntimePrediction>> {
+            let cpu_stage = CpuJepaBackend.predict_runtime(model, window, action)?;
+            let mut prediction = cpu_stage.value;
+            prediction.backend = self.selected;
+            prediction.execution_report = JepaRuntimeBackendReport::new(
+                self.selected,
+                "fake-accelerator",
+                self.device_name.clone(),
+                self.runtime_execution.native,
+                prediction.latency_ms,
+            );
+            prediction.execution_report.host_fallback_count =
+                self.runtime_execution.host_fallback_count;
+            Ok(JepaStageResult::new(prediction, self.runtime_execution))
+        }
+    }
+
+    fn fake_observed_accelerator_report(
+        backend: &ObservedFakeJepaBackend,
+    ) -> JepaBackendExecutionReport {
+        let config = JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 2,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..JepaTrainingConfig::default()
+        };
+        let examples = build_jepa_training_examples(&rows(), &config).unwrap();
+        let feature_batch = JepaFeatureBatch::from_examples(&examples, config.latent_dim).unwrap();
+        let context_encoder = JepaTraceEncoder::new("context", config.latent_dim);
+        let action_encoder = JepaTraceEncoder::new("action", config.latent_dim);
+        let target_encoder = JepaTraceEncoder::ema_target_from(&context_encoder, config.ema_decay);
+        let encoders = JepaEncoderSet {
+            context_encoder: context_encoder.clone(),
+            action_encoder: action_encoder.clone(),
+            target_encoder: target_encoder.clone(),
+        };
+        let encoded_stage = backend.encode_batch(&encoders, &feature_batch).unwrap();
+        let encoded = encoded_stage.value;
+        let predictor_stage = backend.fit_predictor(config.latent_dim, &encoded).unwrap();
+        let auxiliary_stage = backend
+            .fit_auxiliary_heads(config.latent_dim, &encoded)
+            .unwrap();
+        let transition_stage = backend.fit_transition(config.latent_dim, &encoded).unwrap();
+        let mut metadata =
+            JepaTraceModelMetadata::candidate(&config, rows().len() as u64, examples.len() as u64);
+        metadata.backend = backend.selected;
+        let model = JepaTraceModel {
+            metadata,
+            context_encoder,
+            action_encoder,
+            target_encoder,
+            predictor: predictor_stage.value,
+            auxiliary_heads: auxiliary_stage.value,
+            transition_model: Some(transition_stage.value),
+        };
+        let loss_stage = backend.training_losses(&model, &encoded, &config).unwrap();
+        let runtime_stage = backend
+            .predict_runtime(&model, &examples[0].context, &examples[0].action)
+            .unwrap();
+        let probe = backend.probe_jepa();
+
+        JepaBackendExecutionReport::native(
+            &backend.status(),
+            examples.len(),
+            JepaBackendExecutionEvidence {
+                device_name: backend.observed_device_name(),
+                tensor_self_test_passed: probe.tensor_self_test_passed,
+                encode: encoded_stage.execution,
+                predictor_fit: predictor_stage.execution,
+                auxiliary_fit: auxiliary_stage.execution,
+                transition_fit: transition_stage.execution,
+                loss_eval: loss_stage.execution,
+                runtime_prediction: Some(runtime_stage.execution),
+            },
+        )
+    }
+
+    fn metadata_with_backend_report(
+        backend: BackendKind,
+        report: JepaBackendExecutionReport,
+    ) -> JepaTraceModelMetadata {
+        let config = JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 2,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..JepaTrainingConfig::default()
+        };
+        let mut metadata = JepaTraceModelMetadata::candidate(&config, 4, 1);
+        metadata.backend = backend;
+        metadata.backend_execution = report;
+        metadata
+    }
+
+    #[test]
+    fn observed_stage_fallback_is_reflected_in_accelerator_proof() {
+        let backend = ObservedFakeJepaBackend::cuda(
+            Some("fake-cuda:0".into()),
+            JepaStageExecution::host_fallback(1),
+            JepaStageExecution::native(),
+        );
+
+        let report = fake_observed_accelerator_report(&backend);
+
+        assert!(!report.native_transition_fit);
+        assert!(report.host_fallback_count >= 1);
+        assert!(!report.native_stage_proof_passes());
+        let metadata = metadata_with_backend_report(BackendKind::Cuda, report);
+        let error = validate_jepa_backend_execution(&metadata).unwrap_err();
+        assert!(error.to_string().contains("JepaBackendNativeStageFailed"));
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn observed_all_native_cuda_stage_proof_passes_without_cuda_hardware() {
+        let backend = ObservedFakeJepaBackend::cuda(
+            Some("fake-cuda:0".into()),
+            JepaStageExecution::native(),
+            JepaStageExecution::native(),
+        );
+
+        let report = fake_observed_accelerator_report(&backend);
+
+        assert!(report.native_encode);
+        assert!(report.native_predictor_fit);
+        assert!(report.native_auxiliary_fit);
+        assert!(report.native_transition_fit);
+        assert!(report.native_loss_eval);
+        assert_eq!(report.native_runtime_prediction, Some(true));
+        assert_eq!(report.host_fallback_count, 0);
+        assert!(report.native_stage_proof_passes());
+        let metadata = metadata_with_backend_report(BackendKind::Cuda, report);
+        validate_jepa_backend_execution(&metadata).unwrap();
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn accelerator_proof_requires_observed_device_name() {
+        let backend = ObservedFakeJepaBackend::cuda(
+            None,
+            JepaStageExecution::native(),
+            JepaStageExecution::native(),
+        );
+
+        let report = fake_observed_accelerator_report(&backend);
+
+        assert_eq!(report.device_name, None);
+        assert!(!report.native_stage_proof_passes());
+        let metadata = metadata_with_backend_report(BackendKind::Cuda, report);
+        let error = validate_jepa_backend_execution(&metadata).unwrap_err();
+        assert!(error.to_string().contains("JepaBackendNativeStageFailed"));
+    }
+
     #[test]
     fn cpu_jepa_backend_wraps_current_training_operations() {
         let config = JepaTrainingConfig {
@@ -4462,7 +4940,9 @@ mod tests {
         let backend = CpuJepaBackend;
         let feature_batch = JepaFeatureBatch::from_examples(&examples, config.latent_dim).unwrap();
 
-        let encoded = backend.encode_batch(&encoders, &feature_batch).unwrap();
+        let encoded_stage = backend.encode_batch(&encoders, &feature_batch).unwrap();
+        assert_eq!(encoded_stage.execution, JepaStageExecution::native());
+        let encoded = encoded_stage.value;
         let predictor = backend.fit_predictor(config.latent_dim, &encoded).unwrap();
         let transition = backend.fit_transition(config.latent_dim, &encoded).unwrap();
 
@@ -4473,8 +4953,10 @@ mod tests {
             examples.len() * config.latent_dim
         );
         assert_eq!(encoded.len(), feature_batch.len());
-        assert_eq!(predictor.latent_dim, config.latent_dim);
-        assert_eq!(transition.metadata.backend, BackendKind::Cpu);
+        assert_eq!(predictor.execution, JepaStageExecution::native());
+        assert_eq!(predictor.value.latent_dim, config.latent_dim);
+        assert_eq!(transition.execution, JepaStageExecution::native());
+        assert_eq!(transition.value.metadata.backend, BackendKind::Cpu);
     }
 
     #[test]
@@ -4518,7 +5000,8 @@ mod tests {
 
         let cpu = CpuJepaBackend
             .predict_runtime(&model, window, action)
-            .unwrap();
+            .unwrap()
+            .value;
         let candle = candle_jepa_predict_runtime_on_device(
             &model,
             window,
@@ -4806,9 +5289,11 @@ mod tests {
     fn jepa_cuda_runtime_prediction_uses_cuda() {
         let _guard = cuda_hardware_test_lock();
         let (model, _, examples) = jepa_cuda_hardware_fixture();
-        let runtime = CandleCudaJepaBackend
+        let runtime_stage = CandleCudaJepaBackend
             .predict_runtime(&model, &examples[0].context, &examples[0].action)
             .unwrap();
+        assert_eq!(runtime_stage.execution, JepaStageExecution::native());
+        let runtime = runtime_stage.value;
         assert_eq!(runtime.backend, BackendKind::Cuda);
         assert_eq!(runtime.execution_report.backend, BackendKind::Cuda);
         assert!(runtime.execution_report.native_runtime_prediction);
@@ -5034,9 +5519,11 @@ mod tests {
     #[ignore = "requires Apple Silicon MLX Metal"]
     fn jepa_mlx_runtime_prediction_uses_metal() {
         let (model, _, examples) = jepa_mlx_hardware_fixture();
-        let runtime = MlxMetalJepaBackend
+        let runtime_stage = MlxMetalJepaBackend
             .predict_runtime(&model, &examples[0].context, &examples[0].action)
             .unwrap();
+        assert_eq!(runtime_stage.execution, JepaStageExecution::native());
+        let runtime = runtime_stage.value;
         assert_eq!(runtime.backend, BackendKind::Metal);
         assert_eq!(runtime.execution_report.backend, BackendKind::Metal);
         assert!(runtime.execution_report.native_runtime_prediction);
