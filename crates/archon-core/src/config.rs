@@ -1569,6 +1569,10 @@ pub struct ConsciousnessConfig {
     pub inner_voice: bool,
     /// Energy decay rate applied each turn (multiplied by current energy).
     pub energy_decay_rate: f32,
+    /// Energy regenerated after successful tool use.
+    pub energy_regen_rate: f32,
+    /// Minimum active-session energy.
+    pub energy_floor: f32,
     /// Behavioral rules to seed into the memory graph on startup.
     /// If non-empty, these replace the built-in defaults.
     /// Idempotent: rules already present are not duplicated.
@@ -1585,6 +1589,8 @@ impl Default for ConsciousnessConfig {
         Self {
             inner_voice: true,
             energy_decay_rate: 0.98,
+            energy_regen_rate: 0.005,
+            energy_floor: 0.1,
             initial_rules: Vec::new(),
             persist_personality: true,
             personality_history_limit: 50,
@@ -1689,6 +1695,18 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
         return Err(ConfigError::ValidationError(format!(
             "consciousness.energy_decay_rate must be 0.0..=1.0, got {}",
             config.consciousness.energy_decay_rate
+        )));
+    }
+    if !(0.0..=1.0).contains(&config.consciousness.energy_regen_rate) {
+        return Err(ConfigError::ValidationError(format!(
+            "consciousness.energy_regen_rate must be 0.0..=1.0, got {}",
+            config.consciousness.energy_regen_rate
+        )));
+    }
+    if !(0.0..=1.0).contains(&config.consciousness.energy_floor) {
+        return Err(ConfigError::ValidationError(format!(
+            "consciousness.energy_floor must be 0.0..=1.0, got {}",
+            config.consciousness.energy_floor
         )));
     }
 

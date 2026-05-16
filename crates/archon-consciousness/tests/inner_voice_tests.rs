@@ -1,4 +1,4 @@
-use archon_consciousness::inner_voice::InnerVoice;
+use archon_consciousness::inner_voice::{InnerVoice, InnerVoiceSnapshot};
 
 #[test]
 fn new_defaults() {
@@ -17,6 +17,30 @@ fn tool_success_increases_confidence() {
     let mut iv = InnerVoice::new();
     iv.on_tool_success("Read");
     assert!(iv.confidence > 0.7);
+}
+
+#[test]
+fn tool_success_regenerates_energy() {
+    let mut iv = InnerVoice::new();
+    iv.energy = 0.5;
+    iv.on_tool_success("Read");
+    assert!((iv.energy - 0.505).abs() < 0.0001);
+}
+
+#[test]
+fn energy_regeneration_rate_is_configurable() {
+    let mut iv = InnerVoice::with_energy_policy(0.98, 0.2, 0.1);
+    iv.energy = 0.5;
+    iv.on_tool_success("Read");
+    assert!((iv.energy - 0.7).abs() < 0.0001);
+}
+
+#[test]
+fn tool_success_energy_capped_at_one() {
+    let mut iv = InnerVoice::with_energy_policy(0.98, 0.2, 0.1);
+    iv.energy = 0.95;
+    iv.on_tool_success("Read");
+    assert!((iv.energy - 1.0).abs() < f32::EPSILON);
 }
 
 #[test]
@@ -49,6 +73,16 @@ fn energy_decays_over_turns() {
         iv.on_turn_complete();
     }
     assert!(iv.energy < 1.0);
+    assert!(iv.energy >= 0.1);
+}
+
+#[test]
+fn energy_decay_respects_floor() {
+    let mut iv = InnerVoice::new();
+    for _ in 0..300 {
+        iv.on_turn_complete();
+    }
+    assert!((iv.energy - 0.1).abs() < 0.0001);
 }
 
 #[test]
@@ -125,12 +159,35 @@ fn snapshot_roundtrip() {
     let restored = InnerVoice::from_snapshot(snapshot);
 
     assert!((iv.confidence - restored.confidence).abs() < f32::EPSILON);
-    assert!((iv.energy - restored.energy).abs() < f32::EPSILON);
-    assert_eq!(iv.focus, restored.focus);
+    assert!((restored.energy - 1.0).abs() < f32::EPSILON);
+    assert!(restored.focus.is_empty());
     assert_eq!(iv.struggles, restored.struggles);
     assert_eq!(iv.successes, restored.successes);
     assert_eq!(iv.turn_count, restored.turn_count);
     assert_eq!(iv.corrections_received, restored.corrections_received);
+}
+
+#[test]
+fn snapshot_restore_resets_session_capacity_fields() {
+    let snapshot = InnerVoiceSnapshot {
+        confidence: 0.42,
+        energy: 0.05,
+        focus: "stale previous task".to_string(),
+        struggles: vec!["Bash".to_string()],
+        successes: vec!["Read".to_string()],
+        turn_count: 145,
+        corrections_received: 3,
+    };
+
+    let restored = InnerVoice::from_snapshot(snapshot);
+
+    assert!((restored.confidence - 0.42).abs() < f32::EPSILON);
+    assert!((restored.energy - 1.0).abs() < f32::EPSILON);
+    assert!(restored.focus.is_empty());
+    assert_eq!(restored.struggles, vec!["Bash".to_string()]);
+    assert_eq!(restored.successes, vec!["Read".to_string()]);
+    assert_eq!(restored.turn_count, 145);
+    assert_eq!(restored.corrections_received, 3);
 }
 
 #[test]

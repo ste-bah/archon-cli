@@ -8,6 +8,10 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+const DEFAULT_ENERGY_DECAY_RATE: f32 = 0.98;
+const DEFAULT_ENERGY_REGEN_RATE: f32 = 0.005;
+const DEFAULT_ENERGY_FLOOR: f32 = 0.1;
+
 // ---------------------------------------------------------------------------
 // Snapshot (serializable)
 // ---------------------------------------------------------------------------
@@ -33,7 +37,7 @@ pub struct InnerVoiceSnapshot {
 pub struct InnerVoice {
     /// Current confidence level (0.0–1.0, default 0.7).
     pub confidence: f32,
-    /// Current energy level (0.0–1.0, default 1.0). Decays each turn.
+    /// Current per-session energy level (0.0–1.0, default 1.0). Decays each turn.
     pub energy: f32,
     /// Current area of focus.
     pub focus: String,
@@ -49,6 +53,10 @@ pub struct InnerVoice {
     tool_failure_counts: HashMap<String, u32>,
     /// Energy decay multiplier applied each turn (default 0.98).
     energy_decay_rate: f32,
+    /// Energy recovered after successful tool use (default 0.005).
+    energy_regen_rate: f32,
+    /// Minimum energy floor for an active session (default 0.1).
+    energy_floor: f32,
 }
 
 impl InnerVoice {
@@ -63,25 +71,46 @@ impl InnerVoice {
             turn_count: 0,
             corrections_received: 0,
             tool_failure_counts: HashMap::new(),
-            energy_decay_rate: 0.98,
+            energy_decay_rate: DEFAULT_ENERGY_DECAY_RATE,
+            energy_regen_rate: DEFAULT_ENERGY_REGEN_RATE,
+            energy_floor: DEFAULT_ENERGY_FLOOR,
         }
     }
 
     /// Create a new `InnerVoice` with a custom energy decay rate.
     pub fn with_decay_rate(decay_rate: f32) -> Self {
+        Self::with_energy_policy(decay_rate, DEFAULT_ENERGY_REGEN_RATE, DEFAULT_ENERGY_FLOOR)
+    }
+
+    /// Create a new `InnerVoice` with custom energy decay, regeneration, and floor.
+    pub fn with_energy_policy(decay_rate: f32, regen_rate: f32, floor: f32) -> Self {
         let mut iv = Self::new();
-        iv.energy_decay_rate = decay_rate;
+        iv.set_energy_policy(decay_rate, regen_rate, floor);
         iv
+    }
+
+    /// Update the energy policy for an existing `InnerVoice`.
+    pub fn set_energy_policy(&mut self, decay_rate: f32, regen_rate: f32, floor: f32) {
+        self.energy_decay_rate = decay_rate.clamp(0.0, 1.0);
+        self.energy_regen_rate = regen_rate.max(0.0);
+        self.energy_floor = floor.clamp(0.0, 1.0);
+        self.energy = self.clamp_energy(self.energy);
+    }
+
+    fn clamp_energy(&self, energy: f32) -> f32 {
+        energy.clamp(self.energy_floor, 1.0)
     }
 
     /// Record a successful tool invocation.
     ///
     /// * Increases confidence by 0.02 (capped at 1.0).
+    /// * Regenerates a small amount of energy (capped at 1.0).
     /// * Adds the tool to `successes` if not already present.
     /// * Updates focus to the tool name.
     /// * Resets the failure counter for this tool.
     pub fn on_tool_success(&mut self, tool_name: &str) {
         self.confidence = (self.confidence + 0.02).clamp(0.0, 1.0);
+        self.energy = self.clamp_energy(self.energy + self.energy_regen_rate);
 
         if !self.successes.contains(&tool_name.to_string()) {
             self.successes.push(tool_name.to_string());
@@ -125,10 +154,10 @@ impl InnerVoice {
     /// Record the completion of a conversational turn.
     ///
     /// Increments the turn counter and applies energy decay (energy *= 0.98,
-    /// clamped to 0.0–1.0).
+    /// clamped to the configured floor and 1.0).
     pub fn on_turn_complete(&mut self) {
         self.turn_count += 1;
-        self.energy = (self.energy * self.energy_decay_rate).clamp(0.0, 1.0);
+        self.energy = self.clamp_energy(self.energy * self.energy_decay_rate);
     }
 
     /// Produce a serializable snapshot for compaction persistence.
@@ -145,17 +174,23 @@ impl InnerVoice {
     }
 
     /// Restore state from a previously persisted snapshot.
+    ///
+    /// Learned/trend fields persist across sessions, but energy and focus are
+    /// per-session signals. Restoring stale values would make the prompt block
+    /// report session age or the previous task instead of current capacity.
     pub fn from_snapshot(snapshot: InnerVoiceSnapshot) -> Self {
         Self {
             confidence: snapshot.confidence,
-            energy: snapshot.energy,
-            focus: snapshot.focus,
+            energy: 1.0,
+            focus: String::new(),
             struggles: snapshot.struggles,
             successes: snapshot.successes,
             turn_count: snapshot.turn_count,
             corrections_received: snapshot.corrections_received,
             tool_failure_counts: HashMap::new(),
-            energy_decay_rate: 0.98,
+            energy_decay_rate: DEFAULT_ENERGY_DECAY_RATE,
+            energy_regen_rate: DEFAULT_ENERGY_REGEN_RATE,
+            energy_floor: DEFAULT_ENERGY_FLOOR,
         }
     }
 

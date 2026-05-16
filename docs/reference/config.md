@@ -217,7 +217,9 @@ Background "inner voice", behavioral rules engine, and personality persistence.
 ```toml
 [consciousness]
 inner_voice = true
-energy_decay_rate = 0.02
+energy_decay_rate = 0.98
+energy_regen_rate = 0.005
+energy_floor = 0.1
 persist_personality = true
 personality_history_limit = 50
 initial_rules = [
@@ -229,7 +231,9 @@ initial_rules = [
 | Field | Default | What / Why |
 |---|---|---|
 | `inner_voice` | `true` | Run a brief background monologue before generating each response. Improves response coherence at the cost of a small extra token use per turn. Disable for cheapest/fastest operation. |
-| `energy_decay_rate` | `0.02` | Per-turn decay of the inner-voice "energy" state — controls how often it fires fully vs. minimally. Higher = quicker fade. Most users never touch this. |
+| `energy_decay_rate` | `0.98` | Per-turn energy multiplier. `0.98` means roughly 2% decay per turn. Lower values fade faster. |
+| `energy_regen_rate` | `0.005` | Energy recovered after successful tool use. |
+| `energy_floor` | `0.1` | Minimum active-session energy so long sessions do not collapse into a meaningless near-zero plateau. |
 | `persist_personality` | `true` | Save inner-voice + rule scores across sessions. Without this, every session starts cold. |
 | `personality_history_limit` | `50` | Max snapshots retained for trend tracking. After 50, oldest is rotated out. |
 | `initial_rules` | (3 starter rules) | Behavioral rules injected into the system prompt's `<rules>` block. Edit these to bake in project-specific guardrails. |

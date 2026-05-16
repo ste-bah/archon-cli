@@ -188,7 +188,11 @@ communication_style = "terse"
 [consciousness]
 inner_voice = true
 # Energy decay multiplier applied each turn (0.0..=1.0). 0.98 = 2% decay/turn.
-energy_decay_rate = 0.02
+energy_decay_rate = 0.98
+# Energy regenerated after successful tool use (0.0..=1.0).
+energy_regen_rate = 0.005
+# Minimum active-session energy floor (0.0..=1.0).
+energy_floor = 0.1
 # Core rules seeded into the memory graph on startup. Idempotent, max 50 rules.
 initial_rules = [
     "Always ask before modifying files",

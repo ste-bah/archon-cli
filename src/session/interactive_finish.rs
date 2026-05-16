@@ -39,8 +39,10 @@ pub(super) async fn finish(
 ) -> FinishState {
     if archon_consciousness::inner_voice::InnerVoice::is_enabled(config.consciousness.inner_voice) {
         let iv = Arc::new(tokio::sync::Mutex::new(
-            archon_consciousness::inner_voice::InnerVoice::with_decay_rate(
+            archon_consciousness::inner_voice::InnerVoice::with_energy_policy(
                 config.consciousness.energy_decay_rate,
+                config.consciousness.energy_regen_rate,
+                config.consciousness.energy_floor,
             ),
         ));
         agent.set_inner_voice(iv);
@@ -50,13 +52,21 @@ pub(super) async fn finish(
         match archon_consciousness::persistence::load_latest_snapshot(memory.as_ref()) {
             Ok(Some(snap)) => {
                 if let Some(iv_arc) = agent.inner_voice() {
-                    let restored = archon_consciousness::inner_voice::InnerVoice::from_snapshot(
+                    let mut restored = archon_consciousness::inner_voice::InnerVoice::from_snapshot(
                         snap.inner_voice.clone(),
                     );
+                    restored.set_energy_policy(
+                        config.consciousness.energy_decay_rate,
+                        config.consciousness.energy_regen_rate,
+                        config.consciousness.energy_floor,
+                    );
+                    let restored_confidence = restored.confidence;
+                    let restored_energy = restored.energy;
                     *iv_arc.lock().await = restored;
                     tracing::info!(
-                        confidence = snap.inner_voice.confidence,
-                        energy = snap.inner_voice.energy,
+                        confidence = restored_confidence,
+                        energy = restored_energy,
+                        snapshot_energy = snap.inner_voice.energy,
                         "personality: restored inner voice from previous session"
                     );
                 }
@@ -172,9 +182,14 @@ pub(super) async fn finish(
                 archon_consciousness::inner_voice::InnerVoiceSnapshot,
             >(&m.content)
         {
-            let iv = Arc::new(tokio::sync::Mutex::new(
-                archon_consciousness::inner_voice::InnerVoice::from_snapshot(snapshot),
-            ));
+            let mut restored =
+                archon_consciousness::inner_voice::InnerVoice::from_snapshot(snapshot);
+            restored.set_energy_policy(
+                config.consciousness.energy_decay_rate,
+                config.consciousness.energy_regen_rate,
+                config.consciousness.energy_floor,
+            );
+            let iv = Arc::new(tokio::sync::Mutex::new(restored));
             agent.set_inner_voice(iv);
             tracing::info!("inner voice state restored from snapshot");
         }
