@@ -55,3 +55,6 @@ src/command/gametheory_slash.rs  # expires 2026-06-30  # Phase 4 /gametheory sla
 # --- v0.1.40 Codex OAuth provider ---
 src/command/providers.rs                         # expires 2026-06-30  # Codex provider doctor/capability slash surface; split after provider command crate extraction
 crates/archon-llm/src/providers/codex/spoof.rs  # expires 2026-06-30  # Codex spoof manifest resolver: provider list, default model selection, header-set construction
+
+# --- v1.3.1 JEPA/guardrails/CUDA-MLX (PRD-006D/006E/006F) ---
+src/cli_args/tests.rs                            # expires 2026-06-30  # v1.3.1 006E guardrail CLI tests; world-model files split in 4f79dc0, this one pending split
