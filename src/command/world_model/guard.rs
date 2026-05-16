@@ -1,6 +1,6 @@
 //! `archon world guard` command rendering and policy helpers.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::{Mutex, OnceLock};
 
@@ -18,6 +18,7 @@ static ACTIVE_GUARDRAILS: OnceLock<Mutex<HashMap<String, RuntimeGuardrailRecord>
     OnceLock::new();
 static ACTIVE_OBSERVATIONS: OnceLock<Mutex<HashMap<String, GuardrailRuntimeObservations>>> =
     OnceLock::new();
+const HIGH_SURPRISE_STATUS_THRESHOLD: f32 = 0.30;
 
 #[derive(Debug, Clone, Default)]
 struct GuardrailRuntimeObservations {
@@ -637,6 +638,32 @@ pub(crate) fn render_guard_status(
 ) -> String {
     let policy = policy_from_config(config);
     let counts = archon_world_model::guardrail::guardrail_status_counts(root);
+    let summary = guardrail_status_summary(root);
+    let unavailable = if summary.unavailable_by_reason.is_empty() {
+        "none".to_string()
+    } else {
+        summary
+            .unavailable_by_reason
+            .iter()
+            .map(|(reason, count)| format!("{reason}={count}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let latest_actions = if summary.latest_actions.is_empty() {
+        "none".to_string()
+    } else {
+        summary
+            .latest_actions
+            .iter()
+            .map(|action| format!("{}:{:?}", action.action_id, action.surface))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let blocked_actions = if summary.blocked_actions.is_empty() {
+        "none".to_string()
+    } else {
+        summary.blocked_actions.join(", ")
+    };
     format!(
         "World Model Guardrails\n\
          ======================\n\
@@ -657,7 +684,13 @@ pub(crate) fn render_guard_status(
          Failed verifications:     {failed}\n\
          Missing verifications:    {missing}\n\
          Outcomes without pred:    {without_prediction}\n\
-         Advisor unavailable:      {unavailable}",
+         Advisor unavailable:      {unavailable_count}\n\
+         Unavailable reasons:      {unavailable}\n\
+         User overrides:           {overrides}\n\
+         High-surprise outcomes:   {high_surprise}\n\
+         Missing requirements:     {missing_requirements}\n\
+         Latest actions:           {latest_actions}\n\
+         Blocked actions:          {blocked_actions}",
         enabled = policy.enabled,
         interactive_mode = policy.interactive_mode,
         pipeline_mode = policy.pipeline_mode,
@@ -675,8 +708,86 @@ pub(crate) fn render_guard_status(
         failed = counts.failed_verifications,
         missing = counts.missing_verifications,
         without_prediction = counts.outcomes_without_prediction,
-        unavailable = counts.advisor_unavailable_decisions,
+        unavailable_count = counts.advisor_unavailable_decisions,
+        overrides = summary.user_overrides,
+        high_surprise = summary.high_surprise_outcomes,
+        missing_requirements = summary.missing_requirements,
     )
+}
+
+#[derive(Debug, Default)]
+struct GuardrailStatusSummary {
+    unavailable_by_reason: BTreeMap<String, usize>,
+    user_overrides: usize,
+    high_surprise_outcomes: usize,
+    missing_requirements: usize,
+    latest_actions: Vec<archon_world_model::WorldGuardedAction>,
+    blocked_actions: Vec<String>,
+}
+
+fn guardrail_status_summary(root: &std::path::Path) -> GuardrailStatusSummary {
+    let actions = archon_world_model::guardrail::load_guarded_actions(root).unwrap_or_default();
+    let decisions =
+        archon_world_model::guardrail::load_guardrail_decisions(root).unwrap_or_default();
+    let verifications =
+        archon_world_model::guardrail::load_verification_outcomes(root).unwrap_or_default();
+    let outcomes = archon_world_model::guardrail::load_guardrail_outcomes(root).unwrap_or_default();
+    let mut summary = GuardrailStatusSummary::default();
+
+    for decision in &decisions {
+        for reason in &decision.reason_codes {
+            if *reason == archon_world_model::GuardrailReasonCode::AdvisorUnavailable {
+                *summary
+                    .unavailable_by_reason
+                    .entry(format!("{reason:?}"))
+                    .or_default() += 1;
+            }
+        }
+        let action_verifications = verifications
+            .iter()
+            .filter(|verification| verification.action_id == decision.action_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        if !decision.allowed_to_finalize
+            && !archon_world_model::guardrail::finalization_allowed(decision, &action_verifications)
+        {
+            summary.missing_requirements += decision.required_actions.len();
+        }
+    }
+
+    let mut override_actions = HashSet::<String>::new();
+    for verification in &verifications {
+        if verification.status == archon_world_model::VerificationStatus::Skipped
+            || verification
+                .evidence_refs
+                .iter()
+                .any(|evidence| evidence.starts_with("manual_override:"))
+        {
+            override_actions.insert(verification.action_id.clone());
+        }
+    }
+    for outcome in &outcomes {
+        if outcome.final_status == archon_world_model::GuardrailFinalStatus::UserApprovedDespiteRisk
+        {
+            override_actions.insert(outcome.action_id.clone());
+        }
+        if outcome.latent_surprise.unwrap_or(0.0) >= HIGH_SURPRISE_STATUS_THRESHOLD {
+            summary.high_surprise_outcomes += 1;
+        }
+    }
+    summary.user_overrides = override_actions.len();
+
+    let mut latest_actions = actions.clone();
+    latest_actions.sort_by_key(|action| std::cmp::Reverse(action.created_at));
+    summary.latest_actions = latest_actions.into_iter().take(5).collect();
+    summary.blocked_actions = actions
+        .iter()
+        .filter(|action| {
+            action_guard_status(action, &decisions, &verifications, &outcomes) == "blocked"
+        })
+        .map(|action| action.action_id.clone())
+        .collect();
+    summary
 }
 
 pub(crate) fn render_guard_policy(config: &archon_core::config::ArchonConfig) -> String {
@@ -730,6 +841,9 @@ pub(crate) fn render_guard_list(
     status: Option<&str>,
 ) -> Result<String> {
     let mut actions = archon_world_model::guardrail::load_guarded_actions(root)?;
+    let decisions = archon_world_model::guardrail::load_guardrail_decisions(root)?;
+    let verifications = archon_world_model::guardrail::load_verification_outcomes(root)?;
+    let outcomes = archon_world_model::guardrail::load_guardrail_outcomes(root)?;
     if let Some(session) = session {
         actions.retain(|action| action.session_id == session);
     }
@@ -741,6 +855,13 @@ pub(crate) fn render_guard_list(
     {
         bail!("guard list --status must be all, blocked, open, or complete");
     }
+    if let Some(status) = status
+        && status != "all"
+    {
+        actions.retain(|action| {
+            action_guard_status(action, &decisions, &verifications, &outcomes) == status
+        });
+    }
     actions.sort_by_key(|action| std::cmp::Reverse(action.created_at));
     let mut lines = vec![
         "World Model Guardrail Actions".to_string(),
@@ -751,16 +872,61 @@ pub(crate) fn render_guard_list(
         return Ok(lines.join("\n"));
     }
     for action in actions.into_iter().take(50) {
+        let status = action_guard_status(&action, &decisions, &verifications, &outcomes);
         lines.push(format!(
-            "{} {} {:?} {:?} {}",
+            "{} {} [{}] {:?} {:?} {}",
             action.created_at.to_rfc3339(),
             action.action_id,
+            status,
             action.surface,
             action.action_kind,
             action.action_summary
         ));
     }
     Ok(lines.join("\n"))
+}
+
+fn action_guard_status(
+    action: &archon_world_model::WorldGuardedAction,
+    decisions: &[archon_world_model::WorldGuardrailDecision],
+    verifications: &[archon_world_model::VerificationOutcome],
+    outcomes: &[archon_world_model::WorldGuardrailOutcome],
+) -> &'static str {
+    if let Some(outcome) = outcomes
+        .iter()
+        .filter(|outcome| outcome.action_id == action.action_id)
+        .max_by_key(|outcome| outcome.created_at)
+    {
+        return if matches!(
+            outcome.final_status,
+            archon_world_model::GuardrailFinalStatus::BlockedMissingVerification
+                | archon_world_model::GuardrailFinalStatus::BlockedFailedVerification
+        ) {
+            "blocked"
+        } else {
+            "complete"
+        };
+    }
+    if let Some(decision) = decisions
+        .iter()
+        .filter(|decision| decision.action_id == action.action_id)
+        .max_by_key(|decision| decision.created_at)
+    {
+        let action_verifications = verifications
+            .iter()
+            .filter(|verification| verification.action_id == action.action_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        if decision.allowed_to_finalize
+            || archon_world_model::guardrail::finalization_allowed(decision, &action_verifications)
+        {
+            "complete"
+        } else {
+            "open"
+        }
+    } else {
+        "open"
+    }
 }
 
 pub(crate) fn render_guard_inspect(root: &std::path::Path, action_id: &str) -> Result<String> {
@@ -1043,6 +1209,114 @@ mod tests {
         assert!(rendered.contains("World Model Guardrails"));
         assert!(rendered.contains("Interactive mode:"));
         assert!(rendered.contains("Actions:                  1"));
+    }
+
+    #[test]
+    fn status_reports_override_surprise_and_unavailable_breakdown() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut action = archon_world_model::WorldGuardedAction::new(
+            "s1",
+            archon_world_model::integration::WorldAdvisorSurface::InteractiveSession,
+            archon_world_model::GuardedActionKind::UserRequest,
+            "goal",
+            "summary",
+        );
+        action.action_id = "status-action".into();
+        let decision = archon_world_model::WorldGuardrailDecision::unavailable(&action);
+        let mut outcome = archon_world_model::WorldGuardrailOutcome::from_decision(
+            &decision,
+            archon_world_model::RuntimeTaskClass::CodingChange,
+            archon_world_model::GuardrailFinalStatus::UserApprovedDespiteRisk,
+            "approved after manual check",
+        );
+        outcome.latent_surprise = Some(0.55);
+        archon_world_model::guardrail::append_guarded_action(temp.path(), &action).unwrap();
+        archon_world_model::guardrail::append_guardrail_decision(temp.path(), &decision).unwrap();
+        archon_world_model::guardrail::append_guardrail_outcome(temp.path(), &outcome).unwrap();
+
+        let rendered =
+            render_guard_status(&archon_core::config::ArchonConfig::default(), temp.path());
+
+        assert!(rendered.contains("Unavailable reasons:      AdvisorUnavailable=1"));
+        assert!(rendered.contains("User overrides:           1"));
+        assert!(rendered.contains("High-surprise outcomes:   1"));
+        assert!(rendered.contains("Latest actions:           status-action:InteractiveSession"));
+    }
+
+    #[test]
+    fn guard_list_filters_by_derived_status() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut blocked = archon_world_model::WorldGuardedAction::new(
+            "s1",
+            archon_world_model::integration::WorldAdvisorSurface::CodingTask,
+            archon_world_model::GuardedActionKind::UserRequest,
+            "blocked",
+            "blocked",
+        );
+        blocked.action_id = "blocked-action".into();
+        let blocked_decision = archon_world_model::WorldGuardrailDecision::unavailable(&blocked);
+        let blocked_outcome = archon_world_model::WorldGuardrailOutcome::from_decision(
+            &blocked_decision,
+            archon_world_model::RuntimeTaskClass::CodingChange,
+            archon_world_model::GuardrailFinalStatus::BlockedMissingVerification,
+            "missing tests",
+        );
+
+        let mut complete = archon_world_model::WorldGuardedAction::new(
+            "s1",
+            archon_world_model::integration::WorldAdvisorSurface::CodingTask,
+            archon_world_model::GuardedActionKind::UserRequest,
+            "complete",
+            "complete",
+        );
+        complete.action_id = "complete-action".into();
+        let complete_decision = archon_world_model::WorldGuardrailDecision::unavailable(&complete);
+        let complete_outcome = archon_world_model::WorldGuardrailOutcome::from_decision(
+            &complete_decision,
+            archon_world_model::RuntimeTaskClass::CodingChange,
+            archon_world_model::GuardrailFinalStatus::CompletedVerified,
+            "done",
+        );
+
+        let mut open = archon_world_model::WorldGuardedAction::new(
+            "s1",
+            archon_world_model::integration::WorldAdvisorSurface::CodingTask,
+            archon_world_model::GuardedActionKind::UserRequest,
+            "open",
+            "open",
+        );
+        open.action_id = "open-action".into();
+        let mut open_decision = archon_world_model::WorldGuardrailDecision::default();
+        open_decision.action_id = open.action_id.clone();
+        open_decision.mode = archon_world_model::WorldGuardrailMode::Guarded;
+        open_decision.allowed_to_finalize = false;
+        open_decision.required_actions =
+            vec![archon_world_model::GuardrailRequiredAction::RunTests];
+
+        for action in [&blocked, &complete, &open] {
+            archon_world_model::guardrail::append_guarded_action(temp.path(), action).unwrap();
+        }
+        archon_world_model::guardrail::append_guardrail_decision(temp.path(), &blocked_decision)
+            .unwrap();
+        archon_world_model::guardrail::append_guardrail_decision(temp.path(), &complete_decision)
+            .unwrap();
+        archon_world_model::guardrail::append_guardrail_decision(temp.path(), &open_decision)
+            .unwrap();
+        archon_world_model::guardrail::append_guardrail_outcome(temp.path(), &blocked_outcome)
+            .unwrap();
+        archon_world_model::guardrail::append_guardrail_outcome(temp.path(), &complete_outcome)
+            .unwrap();
+
+        let blocked_list = render_guard_list(temp.path(), None, None, Some("blocked")).unwrap();
+        let open_list = render_guard_list(temp.path(), None, None, Some("open")).unwrap();
+        let complete_list = render_guard_list(temp.path(), None, None, Some("complete")).unwrap();
+
+        assert!(blocked_list.contains("blocked-action [blocked]"));
+        assert!(!blocked_list.contains("open-action"));
+        assert!(open_list.contains("open-action [open]"));
+        assert!(!open_list.contains("complete-action"));
+        assert!(complete_list.contains("complete-action [complete]"));
+        assert!(!complete_list.contains("blocked-action"));
     }
 
     #[test]
