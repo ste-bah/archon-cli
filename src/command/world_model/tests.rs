@@ -337,6 +337,9 @@ fn train_jepa_writes_candidate_manifest_from_stored_rows() {
     let candidate_id = candidate_id_from(&rendered);
     assert!(rendered.contains("World Model JEPA Train"));
     assert!(rendered.contains("Model kind: jepa_transition"));
+    assert!(rendered.contains("Requested backend: auto"));
+    assert!(rendered.contains("Selected backend: cpu"));
+    assert!(rendered.contains("Native encode: true"));
     assert!(rendered.contains("Latent dim: 8"));
     assert!(rendered.contains("Examples: 2"));
     assert!(
@@ -390,6 +393,9 @@ fn inspect_jepa_reports_candidate_manifest() {
     assert!(rendered.contains("World Model JEPA Inspect"));
     assert!(rendered.contains("Model kind: jepa_transition"));
     assert!(rendered.contains("Stop gradient: true"));
+    assert!(rendered.contains("Requested backend: auto"));
+    assert!(rendered.contains("Selected backend: cpu"));
+    assert!(rendered.contains("Host fallback count: 0"));
 }
 
 #[test]

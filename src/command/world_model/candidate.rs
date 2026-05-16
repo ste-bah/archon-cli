@@ -89,7 +89,13 @@ pub(super) fn render_train_jepa(
         );
     }
 
-    let (model, outcome) = archon_world_model::jepa::train_jepa_candidate(&rows, &jepa_config)?;
+    let backend = selected_training_backend(config);
+    let (model, outcome) = archon_world_model::jepa::train_jepa_candidate_with_backend(
+        &rows,
+        &jepa_config,
+        backend.requested,
+        config.learning.world_model.training.allow_cpu_fallback,
+    )?;
     enforce_jepa_checkpoint_cap(config, &model)?;
     let registry = ModelRegistry::open(root)?;
     let manifest_path = registry.write_jepa_candidate(&model, &outcome)?;
@@ -105,7 +111,17 @@ pub(super) fn render_train_jepa(
          Candidate mode: forced{}\n\
          Candidate: {}\n\
          Model kind: {}\n\
-         Backend: cpu\n\
+         Requested backend: {}\n\
+         Selected backend: {}\n\
+         Framework: {}\n\
+         Device: {}\n\
+         Fallback reason: {}\n\
+         Native encode: {}\n\
+         Native predictor fit: {}\n\
+         Native auxiliary fit: {}\n\
+         Native transition fit: {}\n\
+         Native loss eval: {}\n\
+         Host fallback count: {}\n\
          Latent dim: {}\n\
          Rows loaded: {}\n\
          Examples: {}\n\
@@ -127,6 +143,27 @@ pub(super) fn render_train_jepa(
         if candidate_flag { " (--candidate)" } else { "" },
         model.metadata.model_id,
         model.metadata.model_kind,
+        outcome.metadata.backend_execution.requested_backend,
+        outcome.metadata.backend_execution.selected_backend,
+        outcome.metadata.backend_execution.framework,
+        outcome
+            .metadata
+            .backend_execution
+            .device_name
+            .as_deref()
+            .unwrap_or("unknown"),
+        outcome
+            .metadata
+            .backend_execution
+            .fallback_reason
+            .as_deref()
+            .unwrap_or("none"),
+        outcome.metadata.backend_execution.native_encode,
+        outcome.metadata.backend_execution.native_predictor_fit,
+        outcome.metadata.backend_execution.native_auxiliary_fit,
+        outcome.metadata.backend_execution.native_transition_fit,
+        outcome.metadata.backend_execution.native_loss_eval,
+        outcome.metadata.backend_execution.host_fallback_count,
         model.metadata.latent_dim,
         rows.len(),
         model.metadata.example_count,
@@ -268,13 +305,27 @@ pub(super) fn render_eval_jepa(
     let tensor_safety = candidate.model.validate_finite().is_ok();
     let corpus_sufficient = candidate.model.metadata.example_count as usize
         >= config.learning.world_model.jepa.min_training_examples;
-    let gates = JepaPromotionGateReport::from_parts(
+    let backend_execution = archon_world_model::jepa::jepa_backend_promotion_gate(
+        &candidate.model.metadata,
+        config
+            .learning
+            .world_model
+            .jepa
+            .min_cuda_validation_examples,
+        config
+            .learning
+            .world_model
+            .jepa
+            .min_metal_validation_examples,
+    );
+    let gates = JepaPromotionGateReport::from_parts_with_backend_execution(
         corpus_sufficient,
         comparison.passed,
         candidate.outcome.collapse.passes,
         candidate.outcome.horizon.passes,
         checkpoint_size_passed,
         tensor_safety,
+        backend_execution,
     );
     let record = JepaEvalRecord {
         candidate_id: candidate_id.to_string(),
@@ -302,6 +353,7 @@ pub(super) fn render_eval_jepa(
          Horizon gate: {}\n\
          Checkpoint size gate: {}\n\
          Tensor safety gate: {}\n\
+         Backend execution gate: {}\n\
          Primary gates pass: {}\n\
          Eval report: {}\n\
          Comparison report: {}",
@@ -317,6 +369,7 @@ pub(super) fn render_eval_jepa(
         record.gates.multi_horizon_consistency,
         record.gates.checkpoint_size,
         record.gates.tensor_safety,
+        record.gates.backend_execution,
         record.gates.passed,
         eval_path.display(),
         comparison_path.display()
@@ -339,6 +392,18 @@ pub(super) fn render_inspect_jepa(root: &Path, candidate_id: &str) -> Result<Str
          Mask ratio: {:.2}\n\
          EMA decay: {:.3}\n\
          Stop gradient: {}\n\
+         Requested backend: {}\n\
+         Selected backend: {}\n\
+         Framework: {}\n\
+         Device: {}\n\
+         Fallback reason: {}\n\
+         Native encode: {}\n\
+         Native predictor fit: {}\n\
+         Native auxiliary fit: {}\n\
+         Native transition fit: {}\n\
+         Native loss eval: {}\n\
+         Host fallback count: {}\n\
+         Validation examples: {}\n\
          Rows: {}\n\
          Examples: {}\n\
          Parameters: {}\n\
@@ -357,6 +422,50 @@ pub(super) fn render_inspect_jepa(root: &Path, candidate_id: &str) -> Result<Str
         candidate.model.metadata.mask_ratio,
         candidate.model.metadata.ema_decay,
         candidate.model.metadata.target_stop_gradient,
+        candidate.model.metadata.backend_execution.requested_backend,
+        candidate.model.metadata.backend_execution.selected_backend,
+        candidate.model.metadata.backend_execution.framework,
+        candidate
+            .model
+            .metadata
+            .backend_execution
+            .device_name
+            .as_deref()
+            .unwrap_or("unknown"),
+        candidate
+            .model
+            .metadata
+            .backend_execution
+            .fallback_reason
+            .as_deref()
+            .unwrap_or("none"),
+        candidate.model.metadata.backend_execution.native_encode,
+        candidate
+            .model
+            .metadata
+            .backend_execution
+            .native_predictor_fit,
+        candidate
+            .model
+            .metadata
+            .backend_execution
+            .native_auxiliary_fit,
+        candidate
+            .model
+            .metadata
+            .backend_execution
+            .native_transition_fit,
+        candidate.model.metadata.backend_execution.native_loss_eval,
+        candidate
+            .model
+            .metadata
+            .backend_execution
+            .host_fallback_count,
+        candidate
+            .model
+            .metadata
+            .backend_execution
+            .validation_example_count,
         candidate.model.metadata.row_count,
         candidate.model.metadata.example_count,
         candidate.model.metadata.parameter_count,
@@ -566,8 +675,14 @@ fn render_jepa_trainer_tick(
         let rows = WorldModelStore::open(root)?.load_rows()?;
         rows_loaded = rows.len();
         let jepa_config = jepa_training_config(config)?;
+        let backend = selected_training_backend(config);
         let started = std::time::Instant::now();
-        let (model, outcome) = archon_world_model::jepa::train_jepa_candidate(&rows, &jepa_config)?;
+        let (model, outcome) = archon_world_model::jepa::train_jepa_candidate_with_backend(
+            &rows,
+            &jepa_config,
+            backend.requested,
+            config.learning.world_model.training.allow_cpu_fallback,
+        )?;
         if started.elapsed().as_millis() > u128::from(policy.max_runtime_ms) {
             bail!("jepa world-model training exceeded max_runtime_ms");
         }
@@ -649,6 +764,8 @@ pub(super) fn render_promote(root: &Path, model_id: &str) -> Result<String> {
 
 pub(super) fn render_promote_jepa(root: &Path, model_id: &str) -> Result<String> {
     let registry = ModelRegistry::open(root)?;
+    let candidate = registry.load_jepa_candidate(model_id)?;
+    archon_world_model::jepa::validate_jepa_backend_execution(&candidate.model.metadata)?;
     let eval = registry
         .load_jepa_eval_report(model_id)?
         .ok_or_else(|| anyhow::anyhow!("jepa candidate {model_id} has no eval report"))?;

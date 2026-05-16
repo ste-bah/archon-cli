@@ -10,13 +10,14 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use safetensors::tensor::{Dtype, TensorView, serialize_to_file};
 use serde::{Deserialize, Serialize};
 
-use crate::backend::BackendKind;
+use crate::backend::{BackendKind, BackendStatus};
 use crate::model::{CpuLatentTransitionModel, LatentTransitionExample};
 use crate::representation::{
     TraceAction, TraceTransition, TraceWindow, TraceWindowBuilder, WorldRepresentationAdapter,
@@ -118,6 +119,8 @@ pub struct JepaTraceModelMetadata {
     pub ema_decay: f32,
     pub target_stop_gradient: bool,
     pub backend: BackendKind,
+    #[serde(default)]
+    pub backend_execution: JepaBackendExecutionReport,
     pub row_count: u64,
     pub example_count: u64,
     pub parameter_count: u64,
@@ -137,12 +140,107 @@ impl JepaTraceModelMetadata {
             ema_decay: config.ema_decay,
             target_stop_gradient: true,
             backend: BackendKind::Cpu,
+            backend_execution: JepaBackendExecutionReport::cpu(
+                BackendKind::Cpu,
+                None,
+                example_count as usize,
+            ),
             row_count,
             example_count,
             parameter_count: 0,
             created_at: Utc::now(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JepaBackendExecutionReport {
+    pub requested_backend: BackendKind,
+    pub selected_backend: BackendKind,
+    pub framework: String,
+    pub device_name: Option<String>,
+    pub commit_sha: String,
+    pub feature_compiled: bool,
+    pub tensor_self_test_passed: bool,
+    pub hardware_validation_captured_at: Option<DateTime<Utc>>,
+    pub validation_example_count: usize,
+    pub native_encode: bool,
+    pub native_predictor_fit: bool,
+    pub native_auxiliary_fit: bool,
+    pub native_transition_fit: bool,
+    pub native_loss_eval: bool,
+    pub native_runtime_prediction: Option<bool>,
+    pub host_fallback_count: u64,
+    pub allowed_host_stage_count: u64,
+    pub fallback_reason: Option<String>,
+}
+
+impl Default for JepaBackendExecutionReport {
+    fn default() -> Self {
+        Self::cpu(BackendKind::Cpu, None, 0)
+    }
+}
+
+impl JepaBackendExecutionReport {
+    pub fn cpu(
+        requested_backend: BackendKind,
+        fallback_reason: Option<String>,
+        validation_example_count: usize,
+    ) -> Self {
+        Self {
+            requested_backend,
+            selected_backend: BackendKind::Cpu,
+            framework: "rust-vector".into(),
+            device_name: Some("cpu".into()),
+            commit_sha: build_commit_sha(),
+            feature_compiled: true,
+            tensor_self_test_passed: true,
+            hardware_validation_captured_at: None,
+            validation_example_count,
+            native_encode: true,
+            native_predictor_fit: true,
+            native_auxiliary_fit: true,
+            native_transition_fit: true,
+            native_loss_eval: true,
+            native_runtime_prediction: None,
+            host_fallback_count: 0,
+            allowed_host_stage_count: 0,
+            fallback_reason,
+        }
+    }
+
+    pub fn from_cpu_status(status: &BackendStatus, validation_example_count: usize) -> Self {
+        Self::cpu(
+            status.requested,
+            status.fallback_reason.clone(),
+            validation_example_count,
+        )
+    }
+
+    pub fn native_stage_proof_passes(&self) -> bool {
+        self.feature_compiled
+            && self.tensor_self_test_passed
+            && self
+                .device_name
+                .as_ref()
+                .is_some_and(|name| !name.is_empty())
+            && !self.commit_sha.trim().is_empty()
+            && self.commit_sha.trim() != "unknown"
+            && self.native_encode
+            && self.native_predictor_fit
+            && self.native_auxiliary_fit
+            && self.native_transition_fit
+            && self.native_loss_eval
+            && self.host_fallback_count == 0
+    }
+}
+
+fn build_commit_sha() -> String {
+    option_env!("VERGEN_GIT_SHA")
+        .or(option_env!("GIT_COMMIT"))
+        .or(option_env!("SOURCE_VERSION"))
+        .unwrap_or("unknown")
+        .to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -584,6 +682,8 @@ pub struct JepaPromotionGateReport {
     pub multi_horizon_consistency: bool,
     pub checkpoint_size: bool,
     pub tensor_safety: bool,
+    #[serde(default = "default_true")]
+    pub backend_execution: bool,
     pub passed: bool,
 }
 
@@ -596,12 +696,33 @@ impl JepaPromotionGateReport {
         checkpoint_size: bool,
         tensor_safety: bool,
     ) -> Self {
+        Self::from_parts_with_backend_execution(
+            corpus_sufficient,
+            representation_baseline,
+            representation_collapse,
+            multi_horizon_consistency,
+            checkpoint_size,
+            tensor_safety,
+            true,
+        )
+    }
+
+    pub fn from_parts_with_backend_execution(
+        corpus_sufficient: bool,
+        representation_baseline: bool,
+        representation_collapse: bool,
+        multi_horizon_consistency: bool,
+        checkpoint_size: bool,
+        tensor_safety: bool,
+        backend_execution: bool,
+    ) -> Self {
         let passed = corpus_sufficient
             && representation_baseline
             && representation_collapse
             && multi_horizon_consistency
             && checkpoint_size
-            && tensor_safety;
+            && tensor_safety
+            && backend_execution;
         Self {
             corpus_sufficient,
             representation_baseline,
@@ -609,9 +730,14 @@ impl JepaPromotionGateReport {
             multi_horizon_consistency,
             checkpoint_size,
             tensor_safety,
+            backend_execution,
             passed,
         }
     }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -666,13 +792,200 @@ pub struct JepaCheckpointTensors {
     pub auxiliary_action_weights: Vec<f32>,
 }
 
-#[derive(Debug, Clone)]
-struct EncodedJepaTrainingExample {
-    context_latent: Vec<f32>,
-    action_latent: Vec<f32>,
-    target_latent: Vec<f32>,
-    horizon: usize,
-    labels: WorldLabelSet,
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EncodedJepaTrainingExample {
+    pub context_latent: Vec<f32>,
+    pub action_latent: Vec<f32>,
+    pub target_latent: Vec<f32>,
+    pub horizon: usize,
+    pub labels: WorldLabelSet,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JepaEncoderSet {
+    pub context_encoder: JepaTraceEncoder,
+    pub action_encoder: JepaTraceEncoder,
+    pub target_encoder: JepaTraceEncoder,
+}
+
+pub type JepaFeatureBatch = Vec<JepaTrainingExample>;
+pub type JepaEncodedBatch = Vec<EncodedJepaTrainingExample>;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JepaBackendProbeReport {
+    pub status: BackendStatus,
+    pub feature_compiled: bool,
+    pub tensor_self_test_passed: bool,
+    pub native_runtime_prediction: bool,
+    pub unavailable_reason: Option<String>,
+}
+
+impl JepaBackendProbeReport {
+    pub fn from_status(status: BackendStatus, native_runtime_prediction: bool) -> Self {
+        let unavailable_reason = status.fallback_reason.clone();
+        let feature_compiled =
+            status.selected == BackendKind::Cpu || status.framework != "unavailable";
+        Self {
+            status,
+            feature_compiled,
+            tensor_self_test_passed: true,
+            native_runtime_prediction,
+            unavailable_reason,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JepaRuntimePrediction {
+    pub backend: BackendKind,
+    pub predicted_next_state: Vec<f32>,
+    pub auxiliary_scores: Vec<(String, f32)>,
+    pub latency_ms: u64,
+}
+
+pub trait JepaTensorBackend: Send + Sync {
+    fn status(&self) -> BackendStatus;
+    fn probe_jepa(&self) -> JepaBackendProbeReport;
+
+    fn encode_batch(
+        &self,
+        encoders: &JepaEncoderSet,
+        batch: &JepaFeatureBatch,
+    ) -> Result<JepaEncodedBatch>;
+
+    fn fit_predictor(&self, latent_dim: usize, encoded: &JepaEncodedBatch)
+    -> Result<JepaPredictor>;
+
+    fn fit_auxiliary_heads(
+        &self,
+        latent_dim: usize,
+        encoded: &JepaEncodedBatch,
+    ) -> Result<Vec<JepaAuxiliaryHead>>;
+
+    fn fit_transition(
+        &self,
+        latent_dim: usize,
+        encoded: &JepaEncodedBatch,
+    ) -> Result<CpuLatentTransitionModel>;
+
+    fn training_losses(
+        &self,
+        model: &JepaTraceModel,
+        encoded: &JepaEncodedBatch,
+        config: &JepaTrainingConfig,
+    ) -> Result<JepaTrainingLosses>;
+
+    fn collapse_report(
+        &self,
+        encoded: &JepaEncodedBatch,
+        config: &JepaTrainingConfig,
+    ) -> Result<JepaCollapseReport>;
+
+    fn predict_runtime(
+        &self,
+        model: &JepaTraceModel,
+        window: &TraceWindow,
+        action: &TraceAction,
+    ) -> Result<JepaRuntimePrediction>;
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CpuJepaBackend;
+
+impl JepaTensorBackend for CpuJepaBackend {
+    fn status(&self) -> BackendStatus {
+        BackendStatus::cpu()
+    }
+
+    fn probe_jepa(&self) -> JepaBackendProbeReport {
+        JepaBackendProbeReport::from_status(self.status(), true)
+    }
+
+    fn encode_batch(
+        &self,
+        encoders: &JepaEncoderSet,
+        batch: &JepaFeatureBatch,
+    ) -> Result<JepaEncodedBatch> {
+        encode_examples(
+            &encoders.context_encoder,
+            &encoders.action_encoder,
+            &encoders.target_encoder,
+            batch,
+        )
+    }
+
+    fn fit_predictor(
+        &self,
+        latent_dim: usize,
+        encoded: &JepaEncodedBatch,
+    ) -> Result<JepaPredictor> {
+        JepaPredictor::fit(latent_dim, encoded)
+    }
+
+    fn fit_auxiliary_heads(
+        &self,
+        latent_dim: usize,
+        encoded: &JepaEncodedBatch,
+    ) -> Result<Vec<JepaAuxiliaryHead>> {
+        Ok(fit_auxiliary_heads(latent_dim, encoded))
+    }
+
+    fn fit_transition(
+        &self,
+        latent_dim: usize,
+        encoded: &JepaEncodedBatch,
+    ) -> Result<CpuLatentTransitionModel> {
+        CpuLatentTransitionModel::fit(latent_dim, &encoded_transition_examples(encoded))
+    }
+
+    fn training_losses(
+        &self,
+        model: &JepaTraceModel,
+        encoded: &JepaEncodedBatch,
+        config: &JepaTrainingConfig,
+    ) -> Result<JepaTrainingLosses> {
+        training_losses(model, encoded, config)
+    }
+
+    fn collapse_report(
+        &self,
+        encoded: &JepaEncodedBatch,
+        config: &JepaTrainingConfig,
+    ) -> Result<JepaCollapseReport> {
+        evaluate_representation_collapse(
+            &heldout_context_latents(encoded),
+            config.min_latent_std,
+            config.min_effective_rank_ratio,
+        )
+    }
+
+    fn predict_runtime(
+        &self,
+        model: &JepaTraceModel,
+        window: &TraceWindow,
+        action: &TraceAction,
+    ) -> Result<JepaRuntimePrediction> {
+        let started = Instant::now();
+        let transition = model
+            .transition_model
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("JepaCheckpointMissing: transition model missing"))?;
+        let state = model.encode_state(window)?;
+        let action_latent = model.encode_action(action)?;
+        let predicted_next_state = crate::backend::predict_next_with_backend(
+            transition,
+            &state,
+            &action_latent,
+            BackendKind::Cpu,
+        )?;
+        let auxiliary_scores = model.predict_auxiliary(&state, &action_latent)?;
+        Ok(JepaRuntimePrediction {
+            backend: BackendKind::Cpu,
+            predicted_next_state,
+            auxiliary_scores,
+            latency_ms: started.elapsed().as_millis() as u64,
+        })
+    }
 }
 
 pub fn build_jepa_training_examples(
@@ -904,6 +1217,48 @@ pub fn train_jepa_candidate(
     rows: &[WorldTraceRow],
     config: &JepaTrainingConfig,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
+    train_jepa_candidate_with_backend(rows, config, BackendKind::Cpu, true)
+}
+
+pub fn train_jepa_candidate_with_backend(
+    rows: &[WorldTraceRow],
+    config: &JepaTrainingConfig,
+    requested_backend: BackendKind,
+    allow_cpu_fallback: bool,
+) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
+    let status = crate::backend::select_runtime_backend(requested_backend, allow_cpu_fallback);
+    train_jepa_candidate_with_backend_status(rows, config, status, allow_cpu_fallback)
+}
+
+fn train_jepa_candidate_with_backend_status(
+    rows: &[WorldTraceRow],
+    config: &JepaTrainingConfig,
+    status: BackendStatus,
+    allow_cpu_fallback: bool,
+) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
+    if status.selected == BackendKind::Cpu {
+        return train_jepa_candidate_cpu(rows, config, status);
+    }
+
+    if allow_cpu_fallback {
+        let fallback = BackendStatus::cpu_fallback(
+            status.requested,
+            format!("jepa_native_backend_not_implemented:{}", status.selected),
+        );
+        return train_jepa_candidate_cpu(rows, config, fallback);
+    }
+
+    bail!(
+        "native JEPA backend for {} is not implemented; refusing to write an accelerator-labelled candidate",
+        status.selected
+    );
+}
+
+fn train_jepa_candidate_cpu(
+    rows: &[WorldTraceRow],
+    config: &JepaTrainingConfig,
+    backend_status: BackendStatus,
+) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     config.validate()?;
     let examples = build_jepa_training_examples(rows, config)?;
     if examples.is_empty() {
@@ -914,12 +1269,13 @@ pub fn train_jepa_candidate(
     let context_encoder = JepaTraceEncoder::new("context", config.latent_dim);
     let action_encoder = JepaTraceEncoder::new("action", config.latent_dim);
     let target_encoder = JepaTraceEncoder::ema_target_from(&context_encoder, config.ema_decay);
-    let encoded = encode_examples(
-        &context_encoder,
-        &action_encoder,
-        &target_encoder,
-        &masked_examples,
-    )?;
+    let backend = CpuJepaBackend;
+    let encoders = JepaEncoderSet {
+        context_encoder: context_encoder.clone(),
+        action_encoder: action_encoder.clone(),
+        target_encoder: target_encoder.clone(),
+    };
+    let encoded = backend.encode_batch(&encoders, &masked_examples)?;
     let initial_model = JepaTraceModel {
         metadata: JepaTraceModelMetadata::candidate(
             config,
@@ -930,16 +1286,18 @@ pub fn train_jepa_candidate(
         action_encoder: action_encoder.clone(),
         target_encoder: target_encoder.clone(),
         predictor: JepaPredictor::baseline(config.latent_dim),
-        auxiliary_heads: fit_auxiliary_heads(config.latent_dim, &encoded),
+        auxiliary_heads: backend.fit_auxiliary_heads(config.latent_dim, &encoded)?,
         transition_model: None,
     };
-    let initial_losses = training_losses(&initial_model, &encoded, config)?;
-    let predictor = JepaPredictor::fit(config.latent_dim, &encoded)?;
-    let auxiliary_heads = fit_auxiliary_heads(config.latent_dim, &encoded);
-    let transition_examples = encoded_transition_examples(&encoded);
-    let transition_model = CpuLatentTransitionModel::fit(config.latent_dim, &transition_examples)?;
+    let initial_losses = backend.training_losses(&initial_model, &encoded, config)?;
+    let predictor = backend.fit_predictor(config.latent_dim, &encoded)?;
+    let auxiliary_heads = backend.fit_auxiliary_heads(config.latent_dim, &encoded)?;
+    let transition_model = backend.fit_transition(config.latent_dim, &encoded)?;
     let mut metadata =
         JepaTraceModelMetadata::candidate(config, rows.len() as u64, examples.len() as u64);
+    metadata.backend = BackendKind::Cpu;
+    metadata.backend_execution =
+        JepaBackendExecutionReport::from_cpu_status(&backend_status, examples.len());
     let mut model = JepaTraceModel {
         metadata: metadata.clone(),
         context_encoder,
@@ -950,19 +1308,17 @@ pub fn train_jepa_candidate(
         transition_model: Some(transition_model),
     };
     metadata.parameter_count = model.parameter_count();
+    metadata.backend_execution.validation_example_count = examples.len();
     model.metadata = metadata;
+    validate_jepa_backend_execution(&model.metadata)?;
     model.validate_finite()?;
-    let losses = training_losses(&model, &encoded, config)?;
+    let losses = backend.training_losses(&model, &encoded, config)?;
     let progress = JepaTrainingProgress {
         initial_loss_total: initial_losses.loss_total,
         final_loss_total: losses.loss_total,
         improved: losses.loss_total <= initial_losses.loss_total,
     };
-    let collapse = evaluate_representation_collapse(
-        &heldout_context_latents(&encoded),
-        config.min_latent_std,
-        config.min_effective_rank_ratio,
-    )?;
+    let collapse = backend.collapse_report(&encoded, config)?;
     let horizon = horizon_report_for_model(&model, &encoded, config.horizon_consistency_tol)?;
     let outcome = JepaTrainingOutcome {
         status: TrainingStatus::CandidateWritten,
@@ -977,6 +1333,61 @@ pub fn train_jepa_candidate(
     Ok((model, outcome))
 }
 
+pub fn validate_jepa_backend_execution(metadata: &JepaTraceModelMetadata) -> Result<()> {
+    let report = &metadata.backend_execution;
+    if metadata.backend != report.selected_backend {
+        bail!(
+            "jepa metadata backend {:?} does not match execution report selected backend {:?}",
+            metadata.backend,
+            report.selected_backend
+        );
+    }
+
+    if matches!(metadata.backend, BackendKind::Cuda | BackendKind::Metal) {
+        if !report.native_stage_proof_passes() {
+            bail!(
+                "jepa {:?} candidate is missing native backend execution proof",
+                metadata.backend
+            );
+        }
+    }
+
+    if metadata.backend == BackendKind::Cpu
+        && matches!(
+            report.selected_backend,
+            BackendKind::Cuda | BackendKind::Metal
+        )
+    {
+        bail!("jepa CPU candidate cannot carry accelerator-selected execution metadata");
+    }
+
+    Ok(())
+}
+
+pub fn jepa_backend_promotion_gate(
+    metadata: &JepaTraceModelMetadata,
+    min_cuda_validation_examples: usize,
+    min_metal_validation_examples: usize,
+) -> bool {
+    if validate_jepa_backend_execution(metadata).is_err() {
+        return false;
+    }
+    let report = &metadata.backend_execution;
+    match metadata.backend {
+        BackendKind::Cuda => {
+            report.native_stage_proof_passes()
+                && report.hardware_validation_captured_at.is_some()
+                && report.validation_example_count >= min_cuda_validation_examples
+        }
+        BackendKind::Metal => {
+            report.native_stage_proof_passes()
+                && report.hardware_validation_captured_at.is_some()
+                && report.validation_example_count >= min_metal_validation_examples
+        }
+        BackendKind::Auto | BackendKind::Cpu => true,
+    }
+}
+
 pub fn append_jepa_training_run(root: &Path, outcome: &JepaTrainingOutcome) -> Result<PathBuf> {
     let dir = root.join("jepa").join("training-runs");
     std::fs::create_dir_all(&dir)?;
@@ -988,6 +1399,7 @@ pub fn append_jepa_training_run(root: &Path, outcome: &JepaTrainingOutcome) -> R
         "row_count": outcome.metadata.row_count,
         "example_count": outcome.metadata.example_count,
         "horizons": outcome.metadata.prediction_horizons.clone(),
+        "backend_execution": outcome.metadata.backend_execution.clone(),
         "masking": outcome.masking.clone(),
         "initial_losses": outcome.initial_losses.clone(),
         "losses": outcome.losses.clone(),
@@ -2009,6 +2421,210 @@ mod tests {
     }
 
     #[test]
+    fn jepa_cpu_training_records_backend_execution_proof() {
+        let config = JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 2,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..JepaTrainingConfig::default()
+        };
+
+        let (model, outcome) =
+            train_jepa_candidate_with_backend(&rows(), &config, BackendKind::Cpu, true).unwrap();
+
+        assert_eq!(model.metadata.backend, BackendKind::Cpu);
+        assert_eq!(
+            outcome.metadata.backend_execution.requested_backend,
+            BackendKind::Cpu
+        );
+        assert_eq!(
+            outcome.metadata.backend_execution.selected_backend,
+            BackendKind::Cpu
+        );
+        assert_eq!(
+            model.metadata.backend_execution,
+            outcome.metadata.backend_execution
+        );
+        assert!(outcome.metadata.backend_execution.feature_compiled);
+        assert!(outcome.metadata.backend_execution.tensor_self_test_passed);
+        assert!(outcome.metadata.backend_execution.native_encode);
+        assert!(outcome.metadata.backend_execution.native_predictor_fit);
+        assert!(outcome.metadata.backend_execution.native_auxiliary_fit);
+        assert!(outcome.metadata.backend_execution.native_transition_fit);
+        assert!(outcome.metadata.backend_execution.native_loss_eval);
+        assert_eq!(outcome.metadata.backend_execution.host_fallback_count, 0);
+    }
+
+    #[test]
+    fn cpu_jepa_backend_wraps_current_training_operations() {
+        let config = JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 2,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..JepaTrainingConfig::default()
+        };
+        let examples = build_jepa_training_examples(&rows(), &config).unwrap();
+        let context_encoder = JepaTraceEncoder::new("context", config.latent_dim);
+        let action_encoder = JepaTraceEncoder::new("action", config.latent_dim);
+        let target_encoder = JepaTraceEncoder::ema_target_from(&context_encoder, config.ema_decay);
+        let encoders = JepaEncoderSet {
+            context_encoder,
+            action_encoder,
+            target_encoder,
+        };
+        let backend = CpuJepaBackend;
+
+        let encoded = backend.encode_batch(&encoders, &examples).unwrap();
+        let predictor = backend.fit_predictor(config.latent_dim, &encoded).unwrap();
+        let transition = backend.fit_transition(config.latent_dim, &encoded).unwrap();
+
+        assert_eq!(backend.status().selected, BackendKind::Cpu);
+        assert_eq!(encoded.len(), examples.len());
+        assert_eq!(predictor.latent_dim, config.latent_dim);
+        assert_eq!(transition.metadata.backend, BackendKind::Cpu);
+    }
+
+    #[test]
+    fn requested_accelerator_with_fallback_writes_cpu_labelled_candidate() {
+        let config = JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 2,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..JepaTrainingConfig::default()
+        };
+        let status =
+            BackendStatus::cpu_fallback(BackendKind::Cuda, "cuda_probe_failed:not_compiled");
+
+        let (model, outcome) =
+            train_jepa_candidate_with_backend_status(&rows(), &config, status, true).unwrap();
+
+        assert_eq!(model.metadata.backend, BackendKind::Cpu);
+        assert_eq!(
+            outcome.metadata.backend_execution.requested_backend,
+            BackendKind::Cuda
+        );
+        assert_eq!(
+            outcome.metadata.backend_execution.selected_backend,
+            BackendKind::Cpu
+        );
+        assert_eq!(
+            outcome
+                .metadata
+                .backend_execution
+                .fallback_reason
+                .as_deref(),
+            Some("cuda_probe_failed:not_compiled")
+        );
+    }
+
+    #[test]
+    fn selected_accelerator_without_native_jepa_fails_or_relabels_cpu() {
+        let config = JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 2,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..JepaTrainingConfig::default()
+        };
+        let status = BackendStatus {
+            requested: BackendKind::Cuda,
+            selected: BackendKind::Cuda,
+            framework: "candle".into(),
+            device_name: Some("cuda:0".into()),
+            experimental: false,
+            fallback_reason: None,
+        };
+
+        let error =
+            train_jepa_candidate_with_backend_status(&rows(), &config, status.clone(), false)
+                .unwrap_err();
+        assert!(error.to_string().contains("native JEPA backend"));
+
+        let (model, outcome) =
+            train_jepa_candidate_with_backend_status(&rows(), &config, status, true).unwrap();
+        assert_eq!(model.metadata.backend, BackendKind::Cpu);
+        assert_eq!(
+            outcome.metadata.backend_execution.selected_backend,
+            BackendKind::Cpu
+        );
+        assert_eq!(
+            outcome
+                .metadata
+                .backend_execution
+                .fallback_reason
+                .as_deref(),
+            Some("jepa_native_backend_not_implemented:cuda")
+        );
+    }
+
+    #[test]
+    fn cuda_metadata_without_native_execution_proof_is_rejected() {
+        let config = JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 2,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..JepaTrainingConfig::default()
+        };
+        let (mut model, _) = train_jepa_candidate(&rows(), &config).unwrap();
+        model.metadata.backend = BackendKind::Cuda;
+
+        let error = validate_jepa_backend_execution(&model.metadata).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("does not match execution report")
+        );
+    }
+
+    #[test]
+    fn accelerator_promotion_gate_requires_hardware_validation_report() {
+        let config = JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 2,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..JepaTrainingConfig::default()
+        };
+        let (mut model, _) = train_jepa_candidate(&rows(), &config).unwrap();
+        model.metadata.backend = BackendKind::Cuda;
+        model.metadata.backend_execution = JepaBackendExecutionReport {
+            requested_backend: BackendKind::Cuda,
+            selected_backend: BackendKind::Cuda,
+            framework: "candle".into(),
+            device_name: Some("cuda:0".into()),
+            commit_sha: "abc123".into(),
+            feature_compiled: true,
+            tensor_self_test_passed: true,
+            hardware_validation_captured_at: None,
+            validation_example_count: 512,
+            native_encode: true,
+            native_predictor_fit: true,
+            native_auxiliary_fit: true,
+            native_transition_fit: true,
+            native_loss_eval: true,
+            native_runtime_prediction: Some(true),
+            host_fallback_count: 0,
+            allowed_host_stage_count: 0,
+            fallback_reason: None,
+        };
+
+        assert!(validate_jepa_backend_execution(&model.metadata).is_ok());
+        assert!(!jepa_backend_promotion_gate(&model.metadata, 512, 512));
+
+        model
+            .metadata
+            .backend_execution
+            .hardware_validation_captured_at = Some(Utc::now());
+
+        assert!(jepa_backend_promotion_gate(&model.metadata, 512, 512));
+    }
+
+    #[test]
     fn target_encoder_is_ema_of_context_encoder() {
         let context = JepaTraceEncoder::new("context", 8);
         let initialized_target = JepaTraceEncoder::new("target", 8);
@@ -2146,6 +2762,7 @@ mod tests {
         assert!(content.contains("\"loss_jepa\""));
         assert!(content.contains("\"loss_var\""));
         assert!(content.contains("\"collapse\""));
+        assert!(content.contains("\"backend_execution\""));
     }
 
     #[test]

@@ -194,6 +194,8 @@ impl ModelRegistry {
         outcome: &JepaTrainingOutcome,
     ) -> Result<PathBuf> {
         self.ensure_jepa_dirs()?;
+        crate::jepa::validate_jepa_backend_execution(&model.metadata)?;
+        crate::jepa::validate_jepa_backend_execution(&outcome.metadata)?;
         let checkpoint = crate::jepa::write_jepa_safetensors_checkpoint(&self.paths.root, model)?;
         let training_run = crate::jepa::append_jepa_training_run(&self.paths.root, outcome)?;
         let record = JepaCandidateRecord {
@@ -561,6 +563,39 @@ mod tests {
         assert_eq!(loaded.outcome.status, outcome.status);
         assert_eq!(loaded.checkpoint.format, "candle_safetensors");
         assert!(loaded.training_run.exists());
+    }
+
+    #[test]
+    fn registry_rejects_jepa_candidate_with_laundered_accelerator_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let registry = ModelRegistry::open(temp.path()).unwrap();
+        let mut first =
+            crate::schema::WorldTraceRow::new("s1", crate::schema::WorldActionKind::ToolCall)
+                .with_row_id("r1");
+        first.redacted_excerpt = Some("run tests".into());
+        let mut second =
+            crate::schema::WorldTraceRow::new("s1", crate::schema::WorldActionKind::Verification)
+                .with_row_id("r2");
+        second.redacted_excerpt = Some("tests passed".into());
+        let config = crate::jepa::JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 1,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..crate::jepa::JepaTrainingConfig::default()
+        };
+        let (mut model, mut outcome) =
+            crate::jepa::train_jepa_candidate(&[first, second], &config).unwrap();
+        model.metadata.backend = crate::backend::BackendKind::Cuda;
+        outcome.metadata = model.metadata.clone();
+
+        let error = registry.write_jepa_candidate(&model, &outcome).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("does not match execution report")
+        );
     }
 
     #[test]

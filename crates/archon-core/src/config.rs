@@ -1284,6 +1284,13 @@ pub struct WorldModelJepaConfig {
     pub min_baseline_improvement: f32,
     pub min_heldout_examples: usize,
     pub min_training_examples: usize,
+    pub require_native_accelerator_ops: bool,
+    pub allow_accelerated_candidate_cpu_stage: bool,
+    pub min_cuda_validation_examples: usize,
+    pub min_metal_validation_examples: usize,
+    pub backend_parity_cosine_floor: f32,
+    pub max_backend_prediction_latency_ms: u64,
+    pub max_backend_first_call_latency_ms: u64,
 }
 
 impl Default for WorldModelJepaConfig {
@@ -1314,6 +1321,13 @@ impl Default for WorldModelJepaConfig {
             min_baseline_improvement: 0.05,
             min_heldout_examples: 200,
             min_training_examples: 2_000,
+            require_native_accelerator_ops: true,
+            allow_accelerated_candidate_cpu_stage: false,
+            min_cuda_validation_examples: 512,
+            min_metal_validation_examples: 512,
+            backend_parity_cosine_floor: 0.99,
+            max_backend_prediction_latency_ms: 50,
+            max_backend_first_call_latency_ms: 5_000,
         }
     }
 }
@@ -1694,6 +1708,7 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
     }
 
     validate_world_model_guardrails(&config.learning.world_model.guardrails)?;
+    validate_world_model_jepa(&config.learning.world_model.jepa)?;
 
     // personality profile
     config
@@ -1701,6 +1716,31 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
         .validate()
         .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
 
+    Ok(())
+}
+
+fn validate_world_model_jepa(jepa: &WorldModelJepaConfig) -> Result<(), ConfigError> {
+    if jepa.min_cuda_validation_examples == 0 || jepa.min_metal_validation_examples == 0 {
+        return Err(ConfigError::ValidationError(
+            "learning.world_model.jepa min_*_validation_examples must be > 0".into(),
+        ));
+    }
+    if !(0.0..=1.0).contains(&jepa.backend_parity_cosine_floor) {
+        return Err(ConfigError::ValidationError(format!(
+            "learning.world_model.jepa.backend_parity_cosine_floor must be 0.0..=1.0, got {}",
+            jepa.backend_parity_cosine_floor
+        )));
+    }
+    if jepa.max_backend_prediction_latency_ms == 0 {
+        return Err(ConfigError::ValidationError(
+            "learning.world_model.jepa.max_backend_prediction_latency_ms must be > 0".into(),
+        ));
+    }
+    if jepa.max_backend_first_call_latency_ms == 0 {
+        return Err(ConfigError::ValidationError(
+            "learning.world_model.jepa.max_backend_first_call_latency_ms must be > 0".into(),
+        ));
+    }
     Ok(())
 }
 

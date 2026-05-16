@@ -44,8 +44,10 @@ pub use guardrail::{
     WorldGuardrailPredictionContext, WorldRiskTier,
 };
 pub use jepa::{
-    JEPA_MODEL_KIND, JepaEvalRecord, JepaPromotionGateReport, JepaRepresentationComparisonReport,
-    JepaTraceModel, JepaTrainingConfig, JepaTrainingExample, JepaTrainingLosses,
+    CpuJepaBackend, EncodedJepaTrainingExample, JEPA_MODEL_KIND, JepaBackendExecutionReport,
+    JepaBackendProbeReport, JepaEncodedBatch, JepaEncoderSet, JepaEvalRecord, JepaFeatureBatch,
+    JepaPromotionGateReport, JepaRepresentationComparisonReport, JepaRuntimePrediction,
+    JepaTensorBackend, JepaTraceModel, JepaTrainingConfig, JepaTrainingExample, JepaTrainingLosses,
     JepaTrainingOutcome,
 };
 pub use representation::{

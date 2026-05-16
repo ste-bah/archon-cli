@@ -59,7 +59,7 @@ Guardrail prediction remains fail-open. If prediction or guardrail storage is un
 
 Training uses masked trace windows and future latent prediction. The target encoder is EMA-updated and marked stop-gradient; the predictor is a training objective only and is not invoked by runtime inference. Runtime JEPA predictions use context/action encoders plus the persisted transition model trained over JEPA latents.
 
-JEPA promotion fails closed. A candidate must pass corpus sufficiency, collapse, multi-horizon, checkpoint-size, tensor-safety, and fixed FastEmbed-baseline comparison gates. If a JEPA checkpoint is missing, invalid, mismatched, slow, or cannot encode, the runtime advisor records a typed unavailable reason and foreground work continues.
+JEPA promotion fails closed. A candidate must pass corpus sufficiency, collapse, multi-horizon, checkpoint-size, tensor-safety, backend-execution, and fixed FastEmbed-baseline comparison gates. If a JEPA checkpoint is missing, invalid, mismatched, slow, or cannot encode, the runtime advisor records a typed unavailable reason and foreground work continues.
 
 ## Labeling
 
@@ -101,6 +101,6 @@ archon world guard policy set --interactive-mode guarded --pipeline-mode strict
 
 ## Hardware Backends
 
-Default execution is CPU. Training writes JSON candidate manifests and backend-specific checkpoints. CUDA uses Candle behind the `cuda` feature. Apple Silicon Metal uses `mlx-rs` behind the `mlx-metal` feature and remains experimental until validated on real hardware. Accelerator backends are selected only after a probe creates the device, runs a tiny tensor operation, and synchronizes the result back to the host.
+Default execution is CPU. Training writes JSON candidate manifests and backend-specific checkpoints. CUDA uses Candle behind the `cuda` feature. Apple Silicon Metal uses `mlx-rs` behind the `mlx-metal` feature and remains experimental until validated on real hardware. Accelerator backends are selected only after a probe creates the device, runs a tiny tensor operation, and synchronizes the result back to the host. JEPA CUDA/Metal candidates additionally require a `JepaBackendExecutionReport`; if native JEPA stages are unavailable, the candidate stays CPU-labelled with a fallback reason or the training command fails when CPU fallback is disabled.
 
 See [backend support](../reference/world-model-backends.md) and [embedding providers](../reference/world-model-embeddings.md).

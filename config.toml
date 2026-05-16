@@ -493,6 +493,13 @@ horizon_consistency_tol = 0.02
 min_baseline_improvement = 0.05
 min_heldout_examples = 200
 min_training_examples = 2000
+require_native_accelerator_ops = true
+allow_accelerated_candidate_cpu_stage = false
+min_cuda_validation_examples = 512
+min_metal_validation_examples = 512
+backend_parity_cosine_floor = 0.99
+max_backend_prediction_latency_ms = 50
+max_backend_first_call_latency_ms = 5000
 
 [learning.world_model.eval]
 bootstrap_iterations = 1000

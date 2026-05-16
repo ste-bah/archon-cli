@@ -779,6 +779,13 @@ horizon_consistency_tol = 0.02
 min_baseline_improvement = 0.05
 min_heldout_examples = 200
 min_training_examples = 2000
+require_native_accelerator_ops = true
+allow_accelerated_candidate_cpu_stage = false
+min_cuda_validation_examples = 512
+min_metal_validation_examples = 512
+backend_parity_cosine_floor = 0.99
+max_backend_prediction_latency_ms = 50
+max_backend_first_call_latency_ms = 5000
 
 [learning.world_model.guardrails]
 enabled = true
@@ -849,6 +856,13 @@ retain_checkpoint_count = 5
 | `jepa.enabled` | `false` | Keeps JEPA candidate training opt-in while `latent_transition` stays the default model kind. |
 | `jepa.latent_dim` | `384` | JEPA vector size. Training rejects a value that differs from `state_dim`. |
 | `jepa.prediction_horizons` | `[1, 3, 5]` | Future trace horizons used for JEPA candidate examples and horizon-loss accounting. |
+| `jepa.require_native_accelerator_ops` | `true` | CUDA/Metal JEPA candidates must carry native execution proof for required tensor-heavy stages. |
+| `jepa.allow_accelerated_candidate_cpu_stage` | `false` | Rejects CUDA/Metal-labelled candidates when required JEPA stages fall back to CPU. |
+| `jepa.min_cuda_validation_examples` | `512` | Minimum examples captured in CUDA training-time hardware execution evidence. |
+| `jepa.min_metal_validation_examples` | `512` | Minimum examples captured in MLX Metal training-time hardware execution evidence. |
+| `jepa.backend_parity_cosine_floor` | `0.99` | Frozen-weights CPU-vs-backend forward-pass cosine floor; not a full retrain parity gate. |
+| `jepa.max_backend_prediction_latency_ms` | `50` | Warm steady-state backend-native JEPA prediction cap. Cold device initialization is reported separately. |
+| `jepa.max_backend_first_call_latency_ms` | `5000` | Diagnostic budget for first-call device/context initialization. |
 | `guardrails.enabled` | `true` | Enables runtime guardrail ledgers and policy decisions. |
 | `guardrails.interactive_mode` | `"advisory"` | Normal session mode: `off`, `learn_only`, `advisory`, `guarded`, or `strict`. |
 | `guardrails.pipeline_mode` | `"guarded"` | Pipeline and pipeline-step mode. High-risk pipeline completion requires verification unless overridden. |

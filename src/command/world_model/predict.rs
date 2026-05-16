@@ -308,6 +308,8 @@ fn predict_with_jepa_checkpoint(
         .model
         .validate_finite()
         .map_err(|error| anyhow::anyhow!("JepaCheckpointInvalid: {error}"))?;
+    archon_world_model::jepa::validate_jepa_backend_execution(&candidate.model.metadata)
+        .map_err(|error| anyhow::anyhow!("JepaBackendUnavailable: {error}"))?;
     if candidate.model.metadata.latent_dim != config.learning.world_model.state_dim {
         anyhow::bail!(
             "JepaDimensionMismatch: expected {}, got {}",
@@ -333,7 +335,7 @@ fn predict_with_jepa_checkpoint(
         transition,
         &state,
         &action,
-        transition.metadata.backend,
+        candidate.model.metadata.backend,
     )?;
     let guardrail_scores = Some(guardrail_scores_from_auxiliary(
         candidate
@@ -415,6 +417,7 @@ fn unavailable_reason_from_error(error: &anyhow::Error) -> &'static str {
         "JepaEncoderFailed",
         "JepaDimensionMismatch",
         "JepaLatencyExceeded",
+        "JepaBackendUnavailable",
     ] {
         if message.contains(reason) {
             return reason;
