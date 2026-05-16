@@ -70,7 +70,9 @@ policy denies LLM labeling, ingestion falls back to deterministic labels and
 records the warning without failing the run. Backfill sends LLM labeling work in
 bounded chunks (`max_events_per_prompt`, default `30`) and accepts fenced or
 lightly wrapped JSON responses so provider formatting does not abort an otherwise
-valid ingest.
+valid ingest. Oversized transcript rows are truncated for the labeling prompt
+only, and batches split recursively until the prompt fits `max_prompt_chars`;
+the persisted world-model row still keeps the configured storage/retention form.
 
 ## Commands
 

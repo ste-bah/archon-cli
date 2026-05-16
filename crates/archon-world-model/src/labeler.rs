@@ -1,11 +1,15 @@
 //! Provider-neutral semantic labeler for world-model rows.
 
+use std::collections::VecDeque;
+
 use anyhow::{Result, bail};
 use archon_llm::provider::{LlmProvider, LlmRequest};
 use serde::{Deserialize, Serialize};
 
 use crate::labels::DeterministicLabelBuilder;
 use crate::schema::{WorldLabelSet, WorldTraceRow};
+
+const EXCERPT_PROMPT_LIMITS: [usize; 7] = [2048, 1024, 512, 256, 128, 64, 0];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -92,20 +96,18 @@ async fn llm_label_rows_chunked(
     let chunk_size = options.max_events_per_prompt.max(1);
     let mut labels = Vec::new();
     for chunk in rows.chunks(chunk_size) {
-        labels.extend(llm_label_rows(chunk, options, provider).await?);
+        for prompt in label_prompts(chunk, options)? {
+            labels.extend(llm_label_prompt(prompt, options, provider).await?);
+        }
     }
     Ok(labels)
 }
 
-async fn llm_label_rows(
-    rows: &[WorldTraceRow],
+async fn llm_label_prompt(
+    prompt: String,
     options: &LabelerOptions,
     provider: &dyn LlmProvider,
 ) -> Result<Vec<RowLabelUpdate>> {
-    if rows.is_empty() {
-        return Ok(Vec::new());
-    }
-    let prompt = label_prompt(rows, options)?;
     let response = provider
         .complete(LlmRequest {
             model: options.model.clone(),
@@ -126,9 +128,50 @@ async fn llm_label_rows(
     parse_label_response(&response.content_text())
 }
 
-fn label_prompt(rows: &[WorldTraceRow], options: &LabelerOptions) -> Result<String> {
+fn label_prompts(rows: &[WorldTraceRow], options: &LabelerOptions) -> Result<Vec<String>> {
+    let mut prompts = Vec::new();
+    let mut pending = VecDeque::from([rows]);
+    while let Some(chunk) = pending.pop_front() {
+        if chunk.is_empty() {
+            continue;
+        }
+        if let Some(prompt) = fitting_label_prompt(chunk, options) {
+            prompts.push(prompt);
+            continue;
+        }
+        if chunk.len() == 1 {
+            bail!(
+                "world-model label prompt exceeds max_prompt_chars even after excerpt truncation: row_id={}",
+                chunk[0].row_id
+            );
+        }
+        let mid = chunk.len() / 2;
+        let (left, right) = chunk.split_at(mid);
+        pending.push_front(right);
+        pending.push_front(left);
+    }
+    Ok(prompts)
+}
+
+fn fitting_label_prompt(rows: &[WorldTraceRow], options: &LabelerOptions) -> Option<String> {
+    EXCERPT_PROMPT_LIMITS
+        .iter()
+        .filter_map(|limit| {
+            let prompt = label_prompt_with_excerpt_limit(rows, options, *limit);
+            (prompt.len() <= options.max_prompt_chars).then_some(prompt)
+        })
+        .next()
+}
+
+fn label_prompt_with_excerpt_limit(
+    rows: &[WorldTraceRow],
+    options: &LabelerOptions,
+    excerpt_limit: usize,
+) -> String {
     let mut events = Vec::new();
     for row in rows.iter().take(options.max_events_per_prompt) {
+        let (excerpt, excerpt_truncated, excerpt_chars) =
+            prompt_excerpt(row.redacted_excerpt.as_deref(), excerpt_limit);
         events.push(serde_json::json!({
             "row_id": row.row_id,
             "source": row.source,
@@ -136,21 +179,34 @@ fn label_prompt(rows: &[WorldTraceRow], options: &LabelerOptions) -> Result<Stri
             "provider": row.provider,
             "model": row.model,
             "agent": row.agent,
-            "excerpt": row.redacted_excerpt,
+            "excerpt": excerpt,
+            "excerpt_truncated": excerpt_truncated,
+            "excerpt_chars": excerpt_chars,
             "labels": row.labels,
             "scalar": row.scalar_features,
         }));
     }
-    let prompt = serde_json::json!({
+    serde_json::json!({
         "task": "Return labels for each row. Preserve row_id. Use booleans for failure, retry, provider_incident, verification_needed, user_correction, plan_drift, high_cost, slow_run and optional success.",
         "schema": {"rows": [{"row_id": "string", "labels": {}}]},
         "rows": events,
     })
-    .to_string();
-    if prompt.len() > options.max_prompt_chars {
-        bail!("world-model label prompt exceeds max_prompt_chars");
+    .to_string()
+}
+
+fn prompt_excerpt(text: Option<&str>, excerpt_limit: usize) -> (Option<String>, bool, usize) {
+    let Some(text) = text else {
+        return (None, false, 0);
+    };
+    let char_count = text.chars().count();
+    if char_count <= excerpt_limit {
+        return (Some(text.to_string()), false, char_count);
     }
-    Ok(prompt)
+    (
+        Some(text.chars().take(excerpt_limit).collect()),
+        true,
+        char_count,
+    )
 }
 
 fn parse_label_response(text: &str) -> Result<Vec<RowLabelUpdate>> {
@@ -251,6 +307,8 @@ mod tests {
     #[derive(Default)]
     struct ChunkingProvider {
         calls: AtomicUsize,
+        max_prompt_len: AtomicUsize,
+        truncated_rows: AtomicUsize,
     }
 
     #[async_trait::async_trait]
@@ -276,12 +334,24 @@ mod tests {
                 .and_then(|message| message.get("content"))
                 .and_then(|content| content.as_str())
                 .expect("label prompt content");
+            self.max_prompt_len
+                .fetch_max(prompt.len(), Ordering::SeqCst);
             let prompt_json: serde_json::Value =
                 serde_json::from_str(prompt).expect("label prompt json");
             let rows = prompt_json
                 .get("rows")
                 .and_then(|rows| rows.as_array())
                 .expect("prompt rows");
+            self.truncated_rows.fetch_add(
+                rows.iter()
+                    .filter(|row| {
+                        row.get("excerpt_truncated")
+                            .and_then(|value| value.as_bool())
+                            == Some(true)
+                    })
+                    .count(),
+                Ordering::SeqCst,
+            );
             let labels = rows
                 .iter()
                 .map(|row| {
@@ -342,6 +412,55 @@ mod tests {
         assert_eq!(labels[0].row_id, "r0");
         assert_eq!(labels[2].row_id, "r2");
         assert!(labels.iter().all(|label| label.labels.retry));
+    }
+
+    #[tokio::test]
+    async fn llm_labeler_truncates_oversized_single_row() {
+        let provider = ChunkingProvider::default();
+        let mut row = WorldTraceRow::new("s1", WorldActionKind::ToolCall).with_row_id("huge");
+        row.redacted_excerpt = Some("x".repeat(200_000));
+        let options = LabelerOptions {
+            mode: LabelerMode::Llm,
+            max_prompt_chars: 4_000,
+            ..LabelerOptions::default()
+        };
+
+        let labels = label_rows_with_provider(&[row], &options, Some(&provider))
+            .await
+            .unwrap();
+
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(labels.len(), 1);
+        assert!(provider.max_prompt_len.load(Ordering::SeqCst) <= options.max_prompt_chars);
+        assert_eq!(provider.truncated_rows.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn llm_labeler_splits_batches_that_exceed_prompt_budget() {
+        let provider = ChunkingProvider::default();
+        let rows = (0..10)
+            .map(|idx| {
+                let mut row = WorldTraceRow::new("s1", WorldActionKind::ToolCall)
+                    .with_row_id(format!("r{idx}"));
+                row.redacted_excerpt = Some("x".repeat(10_000));
+                row
+            })
+            .collect::<Vec<_>>();
+        let options = LabelerOptions {
+            mode: LabelerMode::Llm,
+            max_prompt_chars: 4_000,
+            max_events_per_prompt: 30,
+            ..LabelerOptions::default()
+        };
+
+        let labels = label_rows_with_provider(&rows, &options, Some(&provider))
+            .await
+            .unwrap();
+
+        assert!(provider.calls.load(Ordering::SeqCst) > 1);
+        assert_eq!(labels.len(), rows.len());
+        assert!(provider.max_prompt_len.load(Ordering::SeqCst) <= options.max_prompt_chars);
+        assert_eq!(provider.truncated_rows.load(Ordering::SeqCst), rows.len());
     }
 
     #[test]

@@ -856,8 +856,8 @@ retain_checkpoint_count = 5
 | `embeddings.cache_max_mb` | `1024` | Prunes oldest cache rows after the cache exceeds this size. |
 | `embeddings.redact_before_embedding` | `true` | Redacts common email, token, API-key, and long secret shapes before local or external embedding calls. |
 | `labeler.analyzer` | `"hybrid"` | `"heuristic"`, `"llm"`, or `"hybrid"`. LLM mode is provider-neutral and requires policy. |
-| `labeler.max_events_per_prompt` | `30` | Caps each LLM labeling request. Backfill splits larger files into chunks so provider responses stay parseable. |
-| `labeler.max_prompt_chars` | `128000` | Upper bound for a single labeler prompt after redaction and row projection. |
+| `labeler.max_events_per_prompt` | `30` | Initial cap for each LLM labeling request. Backfill splits larger files into chunks so provider responses stay parseable. |
+| `labeler.max_prompt_chars` | `128000` | Upper bound for a single labeler prompt after redaction and row projection. The labeler adaptively shrinks excerpts and splits oversized batches before failing. |
 | `training.backend` | `"auto"` | Selects an accelerator only after its tensor self-test probe passes, otherwise CPU if fallback is allowed. |
 | `jepa.enabled` | `false` | Keeps JEPA candidate training opt-in while `latent_transition` stays the default model kind. |
 | `jepa.latent_dim` | `384` | JEPA vector size. Training rejects a value that differs from `state_dim`. |
