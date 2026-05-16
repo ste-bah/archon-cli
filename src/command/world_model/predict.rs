@@ -430,6 +430,11 @@ fn unavailable_reason_from_error(error: &anyhow::Error) -> &'static str {
         "JepaDimensionMismatch",
         "JepaLatencyExceeded",
         "JepaBackendUnavailable",
+        "JepaBackendProbeFailed",
+        "JepaBackendNativeStageFailed",
+        "JepaBackendHostFallbackRejected",
+        "JepaBackendParityFailed",
+        "JepaBackendHardwareValidationMissing",
     ] {
         if message.contains(reason) {
             return reason;

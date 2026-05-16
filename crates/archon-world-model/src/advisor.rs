@@ -43,6 +43,12 @@ pub enum WorldAdvisorUnavailableReason {
     JepaEncoderFailed,
     JepaDimensionMismatch,
     JepaLatencyExceeded,
+    JepaBackendUnavailable,
+    JepaBackendProbeFailed,
+    JepaBackendNativeStageFailed,
+    JepaBackendHostFallbackRejected,
+    JepaBackendParityFailed,
+    JepaBackendHardwareValidationMissing,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

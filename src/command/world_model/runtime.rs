@@ -267,6 +267,18 @@ fn runtime_unavailable_reason_from_error(
         archon_world_model::WorldAdvisorUnavailableReason::JepaDimensionMismatch
     } else if message.contains("JepaLatencyExceeded") {
         archon_world_model::WorldAdvisorUnavailableReason::JepaLatencyExceeded
+    } else if message.contains("JepaBackendProbeFailed") {
+        archon_world_model::WorldAdvisorUnavailableReason::JepaBackendProbeFailed
+    } else if message.contains("JepaBackendNativeStageFailed") {
+        archon_world_model::WorldAdvisorUnavailableReason::JepaBackendNativeStageFailed
+    } else if message.contains("JepaBackendHostFallbackRejected") {
+        archon_world_model::WorldAdvisorUnavailableReason::JepaBackendHostFallbackRejected
+    } else if message.contains("JepaBackendParityFailed") {
+        archon_world_model::WorldAdvisorUnavailableReason::JepaBackendParityFailed
+    } else if message.contains("JepaBackendHardwareValidationMissing") {
+        archon_world_model::WorldAdvisorUnavailableReason::JepaBackendHardwareValidationMissing
+    } else if message.contains("JepaBackendUnavailable") {
+        archon_world_model::WorldAdvisorUnavailableReason::JepaBackendUnavailable
     } else {
         archon_world_model::WorldAdvisorUnavailableReason::StoreUnavailable
     }

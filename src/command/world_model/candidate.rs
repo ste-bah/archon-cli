@@ -305,20 +305,25 @@ pub(super) fn render_eval_jepa(
     let tensor_safety = candidate.model.validate_finite().is_ok();
     let corpus_sufficient = candidate.model.metadata.example_count as usize
         >= config.learning.world_model.jepa.min_training_examples;
-    let backend_execution =
-        archon_world_model::jepa::jepa_backend_promotion_gate(
-            &candidate.model.metadata,
-            config
-                .learning
-                .world_model
-                .jepa
-                .min_cuda_validation_examples,
-            config
-                .learning
-                .world_model
-                .jepa
-                .min_metal_validation_examples,
-        ) && jepa_backend_forward_parity_passes(config, &candidate.model, &rows);
+    let backend_gate_failure = archon_world_model::jepa::jepa_backend_promotion_gate_failure(
+        &candidate.model.metadata,
+        config
+            .learning
+            .world_model
+            .jepa
+            .min_cuda_validation_examples,
+        config
+            .learning
+            .world_model
+            .jepa
+            .min_metal_validation_examples,
+    );
+    let parity_passed = backend_gate_failure.is_none()
+        && jepa_backend_forward_parity_passes(config, &candidate.model, &rows);
+    let backend_execution = backend_gate_failure.is_none() && parity_passed;
+    let backend_gate_reason = backend_gate_failure
+        .or_else(|| (!parity_passed).then_some("JepaBackendParityFailed"))
+        .unwrap_or("none");
     let gates = JepaPromotionGateReport::from_parts_with_backend_execution(
         corpus_sufficient,
         comparison.passed,
@@ -355,6 +360,7 @@ pub(super) fn render_eval_jepa(
          Checkpoint size gate: {}\n\
          Tensor safety gate: {}\n\
          Backend execution gate: {}\n\
+         Backend gate reason: {}\n\
          Primary gates pass: {}\n\
          Eval report: {}\n\
          Comparison report: {}",
@@ -371,6 +377,7 @@ pub(super) fn render_eval_jepa(
         record.gates.checkpoint_size,
         record.gates.tensor_safety,
         record.gates.backend_execution,
+        backend_gate_reason,
         record.gates.passed,
         eval_path.display(),
         comparison_path.display()

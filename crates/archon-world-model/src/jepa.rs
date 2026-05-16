@@ -1482,7 +1482,7 @@ impl JepaTensorBackend for MlxMetalJepaBackend {
 }
 
 fn native_jepa_backend_unavailable<T>(backend: BackendKind) -> Result<T> {
-    bail!("native {backend} JEPA tensor backend is not implemented")
+    bail!("JepaBackendUnavailable: native {backend} JEPA tensor backend is not implemented")
 }
 
 #[cfg(feature = "cuda")]
@@ -2948,6 +2948,15 @@ fn train_jepa_candidate_with_backend_status(
         return train_jepa_candidate_cpu(rows, config, status);
     }
 
+    if !allow_cpu_fallback {
+        if let Some(reason) = status.fallback_reason.as_deref() {
+            bail!(
+                "JepaBackendProbeFailed: requested JEPA backend {} unavailable: {reason}",
+                status.selected
+            );
+        }
+    }
+
     if status.selected == BackendKind::Cuda {
         #[cfg(feature = "cuda")]
         {
@@ -2967,7 +2976,7 @@ fn train_jepa_candidate_with_backend_status(
                 }
                 Err(error) => {
                     bail!(
-                        "native JEPA backend for {} failed; refusing to write an accelerator-labelled candidate: {error}",
+                        "JepaBackendNativeStageFailed: native JEPA backend for {} failed; refusing to write an accelerator-labelled candidate: {error}",
                         status.selected
                     );
                 }
@@ -3004,7 +3013,7 @@ fn train_jepa_candidate_with_backend_status(
                 }
                 Err(error) => {
                     bail!(
-                        "native JEPA backend for {} failed; refusing to write an accelerator-labelled candidate: {error}",
+                        "JepaBackendNativeStageFailed: native JEPA backend for {} failed; refusing to write an accelerator-labelled candidate: {error}",
                         status.selected
                     );
                 }
@@ -3031,7 +3040,7 @@ fn train_jepa_candidate_with_backend_status(
     }
 
     bail!(
-        "native JEPA backend for {} is not implemented; refusing to write an accelerator-labelled candidate",
+        "JepaBackendNativeStageFailed: native JEPA backend for {} is not implemented; refusing to write an accelerator-labelled candidate",
         status.selected
     );
 }
@@ -3131,7 +3140,7 @@ pub fn validate_jepa_backend_execution(metadata: &JepaTraceModelMetadata) -> Res
     let report = &metadata.backend_execution;
     if metadata.backend != report.selected_backend {
         bail!(
-            "jepa metadata backend {:?} does not match execution report selected backend {:?}",
+            "JepaBackendHostFallbackRejected: jepa metadata backend {:?} does not match execution report selected backend {:?}",
             metadata.backend,
             report.selected_backend
         );
@@ -3140,7 +3149,7 @@ pub fn validate_jepa_backend_execution(metadata: &JepaTraceModelMetadata) -> Res
     if matches!(metadata.backend, BackendKind::Cuda | BackendKind::Metal) {
         if !report.native_stage_proof_passes() {
             bail!(
-                "jepa {:?} candidate is missing native backend execution proof",
+                "JepaBackendNativeStageFailed: jepa {:?} candidate is missing native backend execution proof",
                 metadata.backend
             );
         }
@@ -3152,10 +3161,53 @@ pub fn validate_jepa_backend_execution(metadata: &JepaTraceModelMetadata) -> Res
             BackendKind::Cuda | BackendKind::Metal
         )
     {
-        bail!("jepa CPU candidate cannot carry accelerator-selected execution metadata");
+        bail!(
+            "JepaBackendHostFallbackRejected: jepa CPU candidate cannot carry accelerator-selected execution metadata"
+        );
     }
 
     Ok(())
+}
+
+pub fn jepa_backend_promotion_gate_failure(
+    metadata: &JepaTraceModelMetadata,
+    min_cuda_validation_examples: usize,
+    min_metal_validation_examples: usize,
+) -> Option<&'static str> {
+    if let Err(error) = validate_jepa_backend_execution(metadata) {
+        let message = error.to_string();
+        if message.contains("JepaBackendHostFallbackRejected") {
+            return Some("JepaBackendHostFallbackRejected");
+        }
+        return Some("JepaBackendNativeStageFailed");
+    }
+
+    let report = &metadata.backend_execution;
+    match metadata.backend {
+        BackendKind::Cuda => {
+            if !report.native_stage_proof_passes() {
+                Some("JepaBackendNativeStageFailed")
+            } else if report.hardware_validation_captured_at.is_none()
+                || report.validation_example_count < min_cuda_validation_examples
+            {
+                Some("JepaBackendHardwareValidationMissing")
+            } else {
+                None
+            }
+        }
+        BackendKind::Metal => {
+            if !report.native_stage_proof_passes() {
+                Some("JepaBackendNativeStageFailed")
+            } else if report.hardware_validation_captured_at.is_none()
+                || report.validation_example_count < min_metal_validation_examples
+            {
+                Some("JepaBackendHardwareValidationMissing")
+            } else {
+                None
+            }
+        }
+        BackendKind::Auto | BackendKind::Cpu => None,
+    }
 }
 
 pub fn jepa_backend_promotion_gate(
@@ -3163,23 +3215,12 @@ pub fn jepa_backend_promotion_gate(
     min_cuda_validation_examples: usize,
     min_metal_validation_examples: usize,
 ) -> bool {
-    if validate_jepa_backend_execution(metadata).is_err() {
-        return false;
-    }
-    let report = &metadata.backend_execution;
-    match metadata.backend {
-        BackendKind::Cuda => {
-            report.native_stage_proof_passes()
-                && report.hardware_validation_captured_at.is_some()
-                && report.validation_example_count >= min_cuda_validation_examples
-        }
-        BackendKind::Metal => {
-            report.native_stage_proof_passes()
-                && report.hardware_validation_captured_at.is_some()
-                && report.validation_example_count >= min_metal_validation_examples
-        }
-        BackendKind::Auto | BackendKind::Cpu => true,
-    }
+    jepa_backend_promotion_gate_failure(
+        metadata,
+        min_cuda_validation_examples,
+        min_metal_validation_examples,
+    )
+    .is_none()
 }
 
 pub fn jepa_backend_forward_parity(
@@ -4531,7 +4572,7 @@ mod tests {
         let error =
             train_jepa_candidate_with_backend_status(&rows(), &config, status.clone(), false)
                 .unwrap_err();
-        assert!(error.to_string().contains("native JEPA backend"));
+        assert!(error.to_string().contains("JepaBackendNativeStageFailed"));
 
         let (model, outcome) =
             train_jepa_candidate_with_backend_status(&rows(), &config, status, true).unwrap();
@@ -4572,7 +4613,7 @@ mod tests {
         let error =
             train_jepa_candidate_with_backend_status(&rows(), &config, status.clone(), false)
                 .unwrap_err();
-        assert!(error.to_string().contains("native JEPA backend"));
+        assert!(error.to_string().contains("JepaBackendNativeStageFailed"));
 
         let (model, outcome) =
             train_jepa_candidate_with_backend_status(&rows(), &config, status, true).unwrap();
@@ -4714,6 +4755,30 @@ mod tests {
     }
 
     #[test]
+    fn strict_probe_failure_uses_typed_jepa_reason() {
+        let config = JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 2,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..JepaTrainingConfig::default()
+        };
+        let status = BackendStatus {
+            requested: BackendKind::Cuda,
+            selected: BackendKind::Cuda,
+            framework: "unavailable".into(),
+            device_name: None,
+            experimental: false,
+            fallback_reason: Some("cuda_probe_failed:not_compiled".into()),
+        };
+
+        let error =
+            train_jepa_candidate_with_backend_status(&rows(), &config, status, false).unwrap_err();
+
+        assert!(error.to_string().contains("JepaBackendProbeFailed"));
+    }
+
+    #[test]
     fn cuda_metadata_without_native_execution_proof_is_rejected() {
         let config = JepaTrainingConfig {
             latent_dim: 8,
@@ -4730,7 +4795,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("does not match execution report")
+                .contains("JepaBackendHostFallbackRejected")
         );
     }
 
@@ -4768,6 +4833,10 @@ mod tests {
 
         assert!(validate_jepa_backend_execution(&model.metadata).is_ok());
         assert!(!jepa_backend_promotion_gate(&model.metadata, 512, 512));
+        assert_eq!(
+            jepa_backend_promotion_gate_failure(&model.metadata, 512, 512),
+            Some("JepaBackendHardwareValidationMissing")
+        );
 
         model
             .metadata
@@ -4775,6 +4844,10 @@ mod tests {
             .hardware_validation_captured_at = Some(Utc::now());
 
         assert!(jepa_backend_promotion_gate(&model.metadata, 512, 512));
+        assert_eq!(
+            jepa_backend_promotion_gate_failure(&model.metadata, 512, 512),
+            None
+        );
     }
 
     #[test]
