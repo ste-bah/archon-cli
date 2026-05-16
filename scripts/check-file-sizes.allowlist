@@ -246,3 +246,26 @@ crates/archon-core/src/subagent/runner/runtime.rs
 # manager_id on completion). Cleanup logic lives with the executor's
 # spawn/teardown to keep the lifecycle atomic; split is a follow-up.
 crates/archon-core/src/subagent_executor/run.rs
+
+# ============================================================================
+# Added during v1.3.1 JEPA world-model + runtime guardrails + CUDA/MLX
+# (merge a6ec9fe). Net-new audited implementation (PRD-006D/006E/006F):
+# JEPA representation learning, runtime guardrail policy engine, and
+# Candle-CUDA / MLX-Metal accelerator backends with execution-proof gates.
+# Structural splits deferred; guard stays forward-looking for NEW debt.
+# ============================================================================
+
+# --- archon-world-model ---
+crates/archon-world-model/src/jepa.rs
+crates/archon-world-model/src/guardrail.rs
+crates/archon-world-model/src/registry.rs
+
+# --- root src/command ---
+src/command/world_model.rs
+src/command/world_model/candidate.rs
+src/command/world_model/guard.rs
+src/command/world_model/predict.rs
+src/command/world_model/tests.rs
+
+# --- root src/cli_args ---
+src/cli_args/tests.rs
