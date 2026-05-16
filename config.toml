@@ -522,6 +522,26 @@ first_run_threshold = 300
 max_runtime_ms = 300000
 tick_interval_ms = 60000
 
+[learning.world_model.guardrails]
+enabled = true
+interactive_mode = "advisory"
+pipeline_mode = "guarded"
+tool_run_mode = "learn_only"
+verification_run_mode = "learn_only"
+high_risk_threshold = 0.70
+medium_risk_threshold = 0.45
+critical_risk_threshold = 0.85
+require_tests_for_coding_high_risk = true
+require_build_for_coding_high_risk = true
+require_lint_for_coding_high_risk = false
+require_typecheck_for_coding_high_risk = false
+require_plan_review_for_plan_drift = true
+require_source_check_for_research_high_risk = true
+require_manual_approval_for_critical = false
+max_guardrail_overhead_ms = 40     # guardrail logic only; prediction keeps its own max_prediction_latency_ms cap
+record_outcomes_without_prediction = true
+max_guardrail_events_per_session = 500
+
 [learning.world_model.retention]
 jsonl_rotate_mb = 500
 raw_retention_days = 90

@@ -321,6 +321,7 @@ pub(crate) async fn spawn_web_session(
         "web-session-loop",
         crate::session_loop::run_session_loop(
             agent,
+            config.clone(),
             agent_def,
             session_api_url,
             tui_event_tx,

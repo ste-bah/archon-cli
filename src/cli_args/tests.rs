@@ -1,4 +1,7 @@
-use super::{AgentAction, AgentEvolveAction, Cli, Commands, GametheoryAction, ProvidersAction};
+use super::{
+    AgentAction, AgentEvolveAction, Cli, Commands, GametheoryAction, ProvidersAction, WorldAction,
+    WorldGuardAction, WorldGuardPolicyAction,
+};
 
 #[cfg(test)]
 mod metrics_port_parse_tests {
@@ -91,6 +94,64 @@ mod remote_url_parse_tests {
     fn remote_url_absent_when_not_supplied() {
         let cli = Cli::try_parse_from(["archon"]).expect("archon with no flags must parse");
         assert!(cli.remote_url.is_none());
+    }
+}
+
+#[cfg(test)]
+mod world_guard_parse_tests {
+    use super::{Cli, Commands, WorldAction, WorldGuardAction, WorldGuardPolicyAction};
+    use clap::Parser;
+
+    #[test]
+    fn world_guard_status_parses() {
+        let cli = Cli::try_parse_from(["archon", "world", "guard", "status"])
+            .expect("world guard status must parse");
+
+        match cli.command {
+            Some(Commands::World {
+                action:
+                    WorldAction::Guard {
+                        action: WorldGuardAction::Status,
+                    },
+            }) => {}
+            other => panic!("expected world guard status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn world_guard_policy_set_parses_modes() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "world",
+            "guard",
+            "policy",
+            "set",
+            "--interactive-mode",
+            "guarded",
+            "--pipeline-mode",
+            "strict",
+        ])
+        .expect("world guard policy set must parse");
+
+        match cli.command {
+            Some(Commands::World {
+                action:
+                    WorldAction::Guard {
+                        action:
+                            WorldGuardAction::Policy {
+                                action:
+                                    WorldGuardPolicyAction::Set {
+                                        interactive_mode,
+                                        pipeline_mode,
+                                    },
+                            },
+                    },
+            }) => {
+                assert_eq!(interactive_mode.as_deref(), Some("guarded"));
+                assert_eq!(pipeline_mode.as_deref(), Some("strict"));
+            }
+            other => panic!("expected world guard policy set, got {other:?}"),
+        }
     }
 }
 

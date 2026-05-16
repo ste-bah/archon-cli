@@ -184,6 +184,7 @@ pub(super) async fn run(
         "session-loop",
         crate::session_loop::run_session_loop(
             agent,
+            config.clone(),
             agent_def,
             session_api_url,
             input_tui_tx,

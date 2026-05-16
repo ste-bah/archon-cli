@@ -55,6 +55,7 @@ use slash_handlers::{handle_clear_command, handle_refresh_identity_command};
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_session_loop(
     agent: Agent,
+    config: archon_core::config::ArchonConfig,
     agent_def: Option<archon_core::agents::CustomAgentDefinition>,
     api_url: Option<String>,
     input_tui_tx: archon_tui::event_channel::TuiEventSender,
@@ -116,8 +117,12 @@ pub(crate) fn run_session_loop(
         // per-spawn tail logic that used to live inside the deleted
         // `tokio::spawn(async move { process_message })` wrapper.
         enum PostTurnAction {
-            PersistSession,
-            SkillComplete { reload_registry_for: Option<String> },
+            PersistSession {
+                guardrail: Option<crate::command::world_model::RuntimeGuardrailRecord>,
+            },
+            SkillComplete {
+                reload_registry_for: Option<String>,
+            },
         }
         let mut post_turn_queue: std::collections::VecDeque<PostTurnAction> =
             std::collections::VecDeque::new();
@@ -156,7 +161,7 @@ pub(crate) fn run_session_loop(
                         // FIFO: pop the post-turn action for the dispatch
                         // that just completed and run it.
                         match post_turn_queue.pop_front() {
-                            Some(PostTurnAction::PersistSession) => {
+                            Some(PostTurnAction::PersistSession { guardrail }) => {
                                 let guard = agent.lock().await;
                                 let messages: Vec<String> = guard
                                     .conversation_state()
@@ -169,6 +174,53 @@ pub(crate) fn run_session_loop(
                                         .replace_messages(&session_id_for_input, &messages)
                                 {
                                     tracing::warn!("replace_messages post-turn failed: {e}");
+                                }
+                                drop(guard);
+                                if let Some(guardrail) = guardrail {
+                                    let completed = matches!(
+                                        outcome,
+                                        archon_tui::TurnOutcome::Completed
+                                    );
+                                    let guardrail_outcome = crate::command::world_model::record_guardrail_turn_outcome(
+                                        &config,
+                                        &guardrail,
+                                        completed,
+                                    );
+                                    if completed
+                                        && guardrail_outcome.as_ref().is_some_and(|outcome| {
+                                            matches!(
+                                                outcome.final_status,
+                                                archon_world_model::GuardrailFinalStatus::BlockedMissingVerification
+                                                    | archon_world_model::GuardrailFinalStatus::BlockedFailedVerification
+                                            )
+                                        })
+                                        && let Some(repair_prompt) =
+                                            crate::command::world_model::forced_repair_prompt(&guardrail)
+                                    {
+                                        let _ = input_tui_tx.send(TuiEvent::TextDelta(
+                                            "\nWorld model guardrail: required verification is missing; starting a repair turn before this can be marked complete.\n".into(),
+                                        ));
+                                        match agent_dispatcher.lock().unwrap().spawn_turn(
+                                            repair_prompt,
+                                            adapter.clone()
+                                                as std::sync::Arc<dyn archon_tui::TurnRunner>,
+                                        ) {
+                                            archon_tui::DispatchResult::Running { .. } => {
+                                                tracing::debug!("spawned guardrail repair turn");
+                                            }
+                                            archon_tui::DispatchResult::Queued => {
+                                                tracing::debug!("queued guardrail repair turn");
+                                            }
+                                            archon_tui::DispatchResult::Rejected(err) => {
+                                                tracing::error!(
+                                                    "guardrail repair dispatch rejected: {err}"
+                                                );
+                                            }
+                                        }
+                                        post_turn_queue.push_back(PostTurnAction::PersistSession {
+                                            guardrail: Some(guardrail.clone()),
+                                        });
+                                    }
                                 }
                             }
                             Some(PostTurnAction::SkillComplete { reload_registry_for }) => {
@@ -768,6 +820,35 @@ pub(crate) fn run_session_loop(
             // prompts drain via poll_completion. Session persistence is
             // pushed onto post_turn_queue and runs when poll_completion
             // observes this turn's outcome.
+            let task_class = archon_world_model::guardrail::classify_task(
+                &input,
+                archon_world_model::integration::WorldAdvisorSurface::InteractiveSession,
+            );
+            let guardrail_surface = match task_class {
+                archon_world_model::RuntimeTaskClass::CodingChange
+                | archon_world_model::RuntimeTaskClass::Debugging
+                | archon_world_model::RuntimeTaskClass::Refactor => {
+                    archon_world_model::integration::WorldAdvisorSurface::CodingTask
+                }
+                _ => archon_world_model::integration::WorldAdvisorSurface::InteractiveSession,
+            };
+            let action_ref = format!("interactive-turn-{}", uuid::Uuid::new_v4());
+            let guardrail = crate::command::world_model::begin_guarded_action(
+                &config,
+                guardrail_surface,
+                &session_id_for_input,
+                &action_ref,
+                &input,
+            );
+            if let Some(record) = &guardrail
+                && !record.decision.allowed_to_finalize
+                && !record.decision.required_actions.is_empty()
+            {
+                let _ = input_tui_tx.send(TuiEvent::TextDelta(format!(
+                    "\nWorld model guardrail: {:?} risk; verification required before completion: {:?}.\n",
+                    record.decision.risk_tier, record.decision.required_actions
+                )));
+            }
             match agent_dispatcher.lock().unwrap().spawn_turn(
                 effective_input,
                 adapter.clone() as std::sync::Arc<dyn archon_tui::TurnRunner>,
@@ -782,7 +863,7 @@ pub(crate) fn run_session_loop(
                     tracing::error!("dispatch rejected: {err}");
                 }
             }
-            post_turn_queue.push_back(PostTurnAction::PersistSession);
+            post_turn_queue.push_back(PostTurnAction::PersistSession { guardrail });
         }
         // END INPUT_HANDLER — arch-lint.sh scopes D1 grep to this region
 

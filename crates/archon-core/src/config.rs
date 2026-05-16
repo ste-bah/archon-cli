@@ -1139,6 +1139,7 @@ pub struct WorldModelConfig {
     pub eval: WorldModelEvalConfig,
     pub cold_start: WorldModelColdStartConfig,
     pub auto_trainer: WorldModelAutoTrainerConfig,
+    pub guardrails: WorldModelGuardrailsConfig,
     pub retention: WorldModelRetentionConfig,
 }
 
@@ -1163,6 +1164,7 @@ impl Default for WorldModelConfig {
             eval: WorldModelEvalConfig::default(),
             cold_start: WorldModelColdStartConfig::default(),
             auto_trainer: WorldModelAutoTrainerConfig::default(),
+            guardrails: WorldModelGuardrailsConfig::default(),
             retention: WorldModelRetentionConfig::default(),
         }
     }
@@ -1392,6 +1394,54 @@ impl Default for WorldModelAutoTrainerConfig {
             first_run_threshold: 300,
             max_runtime_ms: 300_000,
             tick_interval_ms: 60_000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorldModelGuardrailsConfig {
+    pub enabled: bool,
+    pub interactive_mode: String,
+    pub pipeline_mode: String,
+    pub tool_run_mode: String,
+    pub verification_run_mode: String,
+    pub high_risk_threshold: f32,
+    pub medium_risk_threshold: f32,
+    pub critical_risk_threshold: f32,
+    pub require_tests_for_coding_high_risk: bool,
+    pub require_build_for_coding_high_risk: bool,
+    pub require_lint_for_coding_high_risk: bool,
+    pub require_typecheck_for_coding_high_risk: bool,
+    pub require_plan_review_for_plan_drift: bool,
+    pub require_source_check_for_research_high_risk: bool,
+    pub require_manual_approval_for_critical: bool,
+    pub max_guardrail_overhead_ms: u64,
+    pub record_outcomes_without_prediction: bool,
+    pub max_guardrail_events_per_session: usize,
+}
+
+impl Default for WorldModelGuardrailsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interactive_mode: "advisory".into(),
+            pipeline_mode: "guarded".into(),
+            tool_run_mode: "learn_only".into(),
+            verification_run_mode: "learn_only".into(),
+            high_risk_threshold: 0.70,
+            medium_risk_threshold: 0.45,
+            critical_risk_threshold: 0.85,
+            require_tests_for_coding_high_risk: true,
+            require_build_for_coding_high_risk: true,
+            require_lint_for_coding_high_risk: false,
+            require_typecheck_for_coding_high_risk: false,
+            require_plan_review_for_plan_drift: true,
+            require_source_check_for_research_high_risk: true,
+            require_manual_approval_for_critical: false,
+            max_guardrail_overhead_ms: 40,
+            record_outcomes_without_prediction: true,
+            max_guardrail_events_per_session: 500,
         }
     }
 }
@@ -1643,12 +1693,65 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
         }
     }
 
+    validate_world_model_guardrails(&config.learning.world_model.guardrails)?;
+
     // personality profile
     config
         .personality
         .validate()
         .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
 
+    Ok(())
+}
+
+fn validate_world_model_guardrails(
+    guardrails: &WorldModelGuardrailsConfig,
+) -> Result<(), ConfigError> {
+    for (name, value) in [
+        ("interactive_mode", guardrails.interactive_mode.as_str()),
+        ("pipeline_mode", guardrails.pipeline_mode.as_str()),
+        ("tool_run_mode", guardrails.tool_run_mode.as_str()),
+        (
+            "verification_run_mode",
+            guardrails.verification_run_mode.as_str(),
+        ),
+    ] {
+        if !matches!(
+            value,
+            "off" | "learn_only" | "advisory" | "guarded" | "strict"
+        ) {
+            return Err(ConfigError::ValidationError(format!(
+                "learning.world_model.guardrails.{name} must be off, learn_only, advisory, guarded, or strict, got \"{value}\""
+            )));
+        }
+    }
+    for (name, value) in [
+        ("medium_risk_threshold", guardrails.medium_risk_threshold),
+        ("high_risk_threshold", guardrails.high_risk_threshold),
+        (
+            "critical_risk_threshold",
+            guardrails.critical_risk_threshold,
+        ),
+    ] {
+        if !(0.0..=1.0).contains(&value) {
+            return Err(ConfigError::ValidationError(format!(
+                "learning.world_model.guardrails.{name} must be 0.0..=1.0, got {value}"
+            )));
+        }
+    }
+    if guardrails.medium_risk_threshold > guardrails.high_risk_threshold
+        || guardrails.high_risk_threshold > guardrails.critical_risk_threshold
+    {
+        return Err(ConfigError::ValidationError(
+            "learning.world_model.guardrails thresholds must satisfy medium <= high <= critical"
+                .into(),
+        ));
+    }
+    if guardrails.max_guardrail_overhead_ms == 0 {
+        return Err(ConfigError::ValidationError(
+            "learning.world_model.guardrails.max_guardrail_overhead_ms must be > 0".into(),
+        ));
+    }
     Ok(())
 }
 
@@ -1718,6 +1821,34 @@ pub fn save_voice_enabled(enabled: bool) -> Result<(), ConfigError> {
     Ok(())
 }
 
+/// Persist selected world-model guardrail modes to the HOME config file.
+pub fn save_world_model_guardrail_modes(
+    interactive_mode: Option<&str>,
+    pipeline_mode: Option<&str>,
+) -> Result<PathBuf, ConfigError> {
+    let path = default_config_path();
+    let mut config = if path.exists() {
+        let content = fs::read_to_string(&path)?;
+        toml::from_str::<ArchonConfig>(&content)?
+    } else {
+        ArchonConfig::default()
+    };
+    if let Some(mode) = interactive_mode {
+        config.learning.world_model.guardrails.interactive_mode = mode.to_string();
+    }
+    if let Some(mode) = pipeline_mode {
+        config.learning.world_model.guardrails.pipeline_mode = mode.to_string();
+    }
+    validate(&config)?;
+    let serialized = toml::to_string_pretty(&config)
+        .map_err(|e| ConfigError::ValidationError(format!("TOML serialize error: {e}")))?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, serialized)?;
+    Ok(path)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1782,6 +1913,43 @@ mod tests {
     #[test]
     fn write_example_config_contains_consciousness_section() {
         assert!(write_example_config().contains("[consciousness]"));
+    }
+
+    #[test]
+    fn write_example_config_contains_world_model_guardrails_section() {
+        assert!(write_example_config().contains("[learning.world_model.guardrails]"));
+        let cfg: ArchonConfig = toml::from_str(&write_example_config()).unwrap();
+        assert_eq!(
+            cfg.learning.world_model.guardrails.interactive_mode,
+            "advisory"
+        );
+        assert_eq!(cfg.learning.world_model.guardrails.pipeline_mode, "guarded");
+        assert_eq!(
+            cfg.learning
+                .world_model
+                .guardrails
+                .max_guardrail_overhead_ms,
+            40
+        );
+    }
+
+    #[test]
+    fn world_model_guardrail_config_validation_rejects_bad_modes_and_thresholds() {
+        let mut cfg = ArchonConfig::default();
+        cfg.learning.world_model.guardrails.interactive_mode = "YOLO".into();
+        assert!(validate(&cfg).is_err());
+
+        let mut cfg = ArchonConfig::default();
+        cfg.learning.world_model.guardrails.medium_risk_threshold = 0.80;
+        cfg.learning.world_model.guardrails.high_risk_threshold = 0.70;
+        assert!(validate(&cfg).is_err());
+
+        let mut cfg = ArchonConfig::default();
+        cfg.learning
+            .world_model
+            .guardrails
+            .max_guardrail_overhead_ms = 0;
+        assert!(validate(&cfg).is_err());
     }
 
     #[test]

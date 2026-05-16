@@ -14,6 +14,7 @@ pub mod embedding_audit;
 pub mod eval;
 pub mod evolution;
 pub mod features;
+pub mod guardrail;
 pub mod ingest;
 pub mod integration;
 pub mod jepa;
@@ -35,10 +36,17 @@ pub use advisor::{
 };
 pub use backend::{BackendKind, BackendStatus};
 pub use eval::{EvalConfig, PromotionGateReport};
+pub use guardrail::{
+    GuardedActionKind, GuardrailFinalStatus, GuardrailReasonCode, GuardrailRequiredAction,
+    GuardrailRiskScores, GuardrailStatusCounts, RuntimeTaskClass, VerificationKind,
+    VerificationOutcome, VerificationRequirement, VerificationStatus, WorldGuardedAction,
+    WorldGuardrailDecision, WorldGuardrailMode, WorldGuardrailOutcome, WorldGuardrailPolicyConfig,
+    WorldGuardrailPredictionContext, WorldRiskTier,
+};
 pub use jepa::{
-    JepaEvalRecord, JepaPromotionGateReport, JepaRepresentationComparisonReport, JepaTraceModel,
-    JepaTrainingConfig, JepaTrainingExample, JepaTrainingLosses, JepaTrainingOutcome,
-    JEPA_MODEL_KIND,
+    JEPA_MODEL_KIND, JepaEvalRecord, JepaPromotionGateReport, JepaRepresentationComparisonReport,
+    JepaTraceModel, JepaTrainingConfig, JepaTrainingExample, JepaTrainingLosses,
+    JepaTrainingOutcome,
 };
 pub use representation::{
     GenericEmbeddingRepresentationAdapter, TraceAction, TraceTransition, TraceWindow,

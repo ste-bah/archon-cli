@@ -114,20 +114,41 @@ async fn handle_code(
         archon_llm::providers::ProviderCapability::PipelineCoding,
         "archon pipeline code",
     )?;
-    let world_record = crate::command::world_model::record_runtime_advisory(
+    let world_guardrail = crate::command::world_model::begin_guarded_action(
         config,
-        archon_world_model::integration::WorldAdvisorSurface::Pipeline,
+        archon_world_model::integration::WorldAdvisorSurface::PipelineStep,
         "pipeline-code",
         "pipeline_code_start",
-        task,
+        &format!("coding pipeline: {task}"),
     );
+    let world_record = world_guardrail
+        .as_ref()
+        .map(|record| record.advisory.clone());
+    let world_record = world_record.unwrap_or_else(|| {
+        crate::command::world_model::record_runtime_advisory(
+            config,
+            archon_world_model::integration::WorldAdvisorSurface::Pipeline,
+            "pipeline-code",
+            "pipeline_code_start",
+            task,
+        )
+    });
     tracing::debug!(
         continue_foreground_flow = world_record.continue_foreground_flow,
         "world_model.pipeline_advisory"
     );
+    if let Some(record) = &world_guardrail
+        && !record.decision.allowed_to_finalize
+        && !record.decision.required_actions.is_empty()
+    {
+        println!(
+            "World model guardrail: {:?} risk; pipeline completion requires {:?}.",
+            record.decision.risk_tier, record.decision.required_actions
+        );
+    }
     let _ = crate::command::world_model::record_runtime_counterfactual_advice(
         config,
-        archon_world_model::integration::WorldAdvisorSurface::Pipeline,
+        archon_world_model::integration::WorldAdvisorSurface::PipelineStep,
         task,
         &[
             ("pipeline-code", "run the full coding pipeline now"),
@@ -164,12 +185,31 @@ async fn handle_code(
     )
     .await?;
     print_pipeline_result(&result, cwd).await;
-    crate::command::world_model::record_runtime_outcome(
-        config,
-        &world_record,
-        &result.final_output,
-        Some(&result.session_id),
-    );
+    if let Some(record) = &world_guardrail {
+        if let Some(outcome) = crate::command::world_model::record_guardrail_completion_outcome(
+            config,
+            record,
+            true,
+            &result.final_output,
+            Some(&result.session_id),
+        ) && matches!(
+            outcome.final_status,
+            archon_world_model::GuardrailFinalStatus::BlockedMissingVerification
+                | archon_world_model::GuardrailFinalStatus::BlockedFailedVerification
+        ) {
+            println!(
+                "World model guardrail: pipeline output is not marked verified yet; required actions: {:?}",
+                record.decision.required_actions
+            );
+        }
+    } else {
+        crate::command::world_model::record_runtime_outcome(
+            config,
+            &world_record,
+            &result.final_output,
+            Some(&result.session_id),
+        );
+    }
     crate::command::world_model::schedule_dynamic_trainer_tick(config.clone());
     Ok(())
 }
@@ -197,20 +237,41 @@ async fn handle_research(
         archon_llm::providers::ProviderCapability::PipelineResearch,
         "archon pipeline research",
     )?;
-    let world_record = crate::command::world_model::record_runtime_advisory(
+    let world_guardrail = crate::command::world_model::begin_guarded_action(
         config,
-        archon_world_model::integration::WorldAdvisorSurface::Pipeline,
+        archon_world_model::integration::WorldAdvisorSurface::PipelineStep,
         "pipeline-research",
         "pipeline_research_start",
-        topic,
+        &format!("research pipeline: {topic}"),
     );
+    let world_record = world_guardrail
+        .as_ref()
+        .map(|record| record.advisory.clone());
+    let world_record = world_record.unwrap_or_else(|| {
+        crate::command::world_model::record_runtime_advisory(
+            config,
+            archon_world_model::integration::WorldAdvisorSurface::Pipeline,
+            "pipeline-research",
+            "pipeline_research_start",
+            topic,
+        )
+    });
     tracing::debug!(
         continue_foreground_flow = world_record.continue_foreground_flow,
         "world_model.pipeline_advisory"
     );
+    if let Some(record) = &world_guardrail
+        && !record.decision.allowed_to_finalize
+        && !record.decision.required_actions.is_empty()
+    {
+        println!(
+            "World model guardrail: {:?} risk; pipeline completion requires {:?}.",
+            record.decision.risk_tier, record.decision.required_actions
+        );
+    }
     let _ = crate::command::world_model::record_runtime_counterfactual_advice(
         config,
-        archon_world_model::integration::WorldAdvisorSurface::Pipeline,
+        archon_world_model::integration::WorldAdvisorSurface::PipelineStep,
         topic,
         &[
             ("pipeline-research", "run the full research pipeline now"),
@@ -247,12 +308,31 @@ async fn handle_research(
     )
     .await?;
     print_pipeline_result(&result, cwd).await;
-    crate::command::world_model::record_runtime_outcome(
-        config,
-        &world_record,
-        &result.final_output,
-        Some(&result.session_id),
-    );
+    if let Some(record) = &world_guardrail {
+        if let Some(outcome) = crate::command::world_model::record_guardrail_completion_outcome(
+            config,
+            record,
+            true,
+            &result.final_output,
+            Some(&result.session_id),
+        ) && matches!(
+            outcome.final_status,
+            archon_world_model::GuardrailFinalStatus::BlockedMissingVerification
+                | archon_world_model::GuardrailFinalStatus::BlockedFailedVerification
+        ) {
+            println!(
+                "World model guardrail: pipeline output is not marked verified yet; required actions: {:?}",
+                record.decision.required_actions
+            );
+        }
+    } else {
+        crate::command::world_model::record_runtime_outcome(
+            config,
+            &world_record,
+            &result.final_output,
+            Some(&result.session_id),
+        );
+    }
     crate::command::world_model::schedule_dynamic_trainer_tick(config.clone());
     Ok(())
 }

@@ -10,6 +10,7 @@ use cozo::DbInstance;
 pub(crate) struct AuditedSandboxBackend {
     inner: Arc<dyn SandboxBackend>,
     config: archon_core::sandbox::SandboxConfig,
+    archon_config: archon_core::config::ArchonConfig,
     run_id: String,
     agent_type: String,
     sandbox_session_id: String,
@@ -31,12 +32,13 @@ impl std::fmt::Debug for AuditedSandboxBackend {
 
 pub(crate) fn audit_sandbox_backend(
     inner: Arc<dyn SandboxBackend>,
-    config: &archon_core::sandbox::SandboxConfig,
+    config: &archon_core::config::ArchonConfig,
     run_id: impl Into<String>,
     agent_type: impl Into<String>,
 ) -> Arc<dyn SandboxBackend> {
     Arc::new(AuditedSandboxBackend::new(
         inner,
+        config.sandbox.clone(),
         config.clone(),
         run_id.into(),
         agent_type.into(),
@@ -48,6 +50,7 @@ impl AuditedSandboxBackend {
     fn new(
         inner: Arc<dyn SandboxBackend>,
         config: archon_core::sandbox::SandboxConfig,
+        archon_config: archon_core::config::ArchonConfig,
         run_id: String,
         agent_type: String,
         db: Option<Arc<DbInstance>>,
@@ -56,6 +59,7 @@ impl AuditedSandboxBackend {
         let backend = Self {
             inner,
             config,
+            archon_config,
             run_id,
             agent_type,
             sandbox_session_id,
@@ -167,6 +171,35 @@ impl AuditedSandboxBackend {
             .to_ascii_lowercase()
             .replace('-', "_")
     }
+
+    fn record_world_guardrail_tool_result(
+        &self,
+        request: &SandboxCommandRequest,
+        result: Option<&SandboxCommandResult>,
+    ) {
+        let Some(result) = result else {
+            return;
+        };
+        let Some(active) = crate::command::world_model::active_guardrail_for_session(&self.run_id)
+        else {
+            return;
+        };
+        let is_error = result.is_error;
+        let output_summary = result.content.chars().take(500).collect::<String>();
+        tracing::debug!(
+            parent_action_id = %active.action.action_id,
+            command = %request.command,
+            is_error,
+            "world_model.guardrail_tool_result"
+        );
+        let _ = crate::command::world_model::record_guardrail_tool_result_for_session(
+            &self.archon_config,
+            &self.run_id,
+            &request.command,
+            is_error,
+            &output_summary,
+        );
+    }
 }
 
 impl SandboxBackend for AuditedSandboxBackend {
@@ -188,7 +221,7 @@ impl SandboxBackend for AuditedSandboxBackend {
         request: SandboxCommandRequest,
     ) -> Pin<Box<dyn Future<Output = Option<SandboxCommandResult>> + Send + 'a>> {
         Box::pin(async move {
-            let result = self.inner.execute_bash(request).await;
+            let result = self.inner.execute_bash(request.clone()).await;
             match &result {
                 Some(result) if result.is_error => {
                     self.record_event("Bash", "failed", "sandbox_bash_error");
@@ -196,6 +229,7 @@ impl SandboxBackend for AuditedSandboxBackend {
                 Some(_) => self.record_event("Bash", "executed", "sandbox_bash_ok"),
                 None => self.record_event("Bash", "host_fallback", "sandbox_backend_delegated"),
             }
+            self.record_world_guardrail_tool_result(&request, result.as_ref());
             result
         })
     }
@@ -346,6 +380,7 @@ mod tests {
         let wrapper = AuditedSandboxBackend::new(
             Arc::new(FakeSandboxBackend { bash_result: None }),
             config,
+            archon_core::config::ArchonConfig::default(),
             "run-1".to_string(),
             "reviewer".to_string(),
             Some(db.clone()),
@@ -380,6 +415,7 @@ mod tests {
                 }),
             }),
             config,
+            archon_core::config::ArchonConfig::default(),
             "run-1".to_string(),
             "coder".to_string(),
             Some(db.clone()),
@@ -421,6 +457,7 @@ mod tests {
         let wrapper = AuditedSandboxBackend::new(
             Arc::new(FakeSandboxBackend { bash_result: None }),
             config,
+            archon_core::config::ArchonConfig::default(),
             "run-2".to_string(),
             "reviewer".to_string(),
             Some(db.clone()),

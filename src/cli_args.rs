@@ -28,7 +28,7 @@ pub use strategy_actions::{
     CompletionAction, GametheoryAction, PipelineAction, ProviderProfilesAction, ProvidersAction,
     SandboxAction, TeamAction,
 };
-pub use world_model_actions::WorldAction;
+pub use world_model_actions::{WorldAction, WorldGuardAction, WorldGuardPolicyAction};
 
 #[cfg(test)]
 mod permissions_parse_tests;

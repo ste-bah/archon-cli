@@ -120,4 +120,58 @@ pub enum WorldAction {
         /// Prior model id to restore
         model_id: String,
     },
+    /// Inspect and configure runtime world-model guardrails
+    Guard {
+        #[command(subcommand)]
+        action: WorldGuardAction,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum WorldGuardAction {
+    /// Show runtime guardrail status and ledger counters
+    Status,
+    /// Inspect one guarded action
+    Inspect {
+        /// Guarded action id
+        action_id: String,
+    },
+    /// List recently guarded actions
+    List {
+        /// Filter by session id
+        #[arg(long)]
+        session: Option<String>,
+        /// Filter by surface name
+        #[arg(long)]
+        surface: Option<String>,
+        /// Filter by status: all, blocked, open, complete
+        #[arg(long)]
+        status: Option<String>,
+    },
+    /// Replay structured guardrail outcomes into downstream stores
+    ReplayOutcomes {
+        /// Filter by session id
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// Show or update guardrail policy
+    Policy {
+        #[command(subcommand)]
+        action: WorldGuardPolicyAction,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum WorldGuardPolicyAction {
+    /// Show active guardrail policy
+    Show,
+    /// Persist selected guardrail policy modes to config.toml
+    Set {
+        /// Desired interactive mode
+        #[arg(long)]
+        interactive_mode: Option<String>,
+        /// Desired pipeline mode
+        #[arg(long)]
+        pipeline_mode: Option<String>,
+    },
 }

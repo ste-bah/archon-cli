@@ -65,23 +65,44 @@ impl CommandHandler for ArchonResearchHandler {
             "Starting research pipeline for topic: {topic}\n",
         )));
         let world_context = archon_core::config::load_config().ok().map(|config| {
-            let record = crate::command::world_model::record_runtime_advisory(
+            let guardrail = crate::command::world_model::begin_guarded_action(
                 &config,
-                archon_world_model::integration::WorldAdvisorSurface::Pipeline,
+                archon_world_model::integration::WorldAdvisorSurface::PipelineStep,
                 "archon-research",
                 "tui_archon_research_start",
-                &topic,
+                &format!("research pipeline: {topic}"),
             );
+            let advisory = guardrail
+                .as_ref()
+                .map(|record| record.advisory.clone())
+                .unwrap_or_else(|| {
+                    crate::command::world_model::record_runtime_advisory(
+                        &config,
+                        archon_world_model::integration::WorldAdvisorSurface::Pipeline,
+                        "archon-research",
+                        "tui_archon_research_start",
+                        &format!("research pipeline: {topic}"),
+                    )
+                });
             tracing::debug!(
-                continue_foreground_flow = record.continue_foreground_flow,
+                continue_foreground_flow = advisory.continue_foreground_flow,
                 "world_model.tui_archon_research_advisory"
             );
-            (config, record)
+            (config, guardrail, advisory)
         });
-        if let Some((config, _)) = world_context.as_ref() {
+        if let Some((config, guardrail, _)) = world_context.as_ref() {
+            if let Some(record) = guardrail
+                && !record.decision.allowed_to_finalize
+                && !record.decision.required_actions.is_empty()
+            {
+                let _ = tui_tx.send(TuiEvent::TextDelta(format!(
+                    "World model guardrail: {:?} risk; pipeline completion requires {:?}.\n",
+                    record.decision.risk_tier, record.decision.required_actions
+                )));
+            }
             let _ = crate::command::world_model::record_runtime_counterfactual_advice(
                 config,
-                archon_world_model::integration::WorldAdvisorSurface::Pipeline,
+                archon_world_model::integration::WorldAdvisorSurface::PipelineStep,
                 &topic,
                 &[
                     ("pipeline-research", "run the full research pipeline now"),
@@ -123,13 +144,35 @@ impl CommandHandler for ArchonResearchHandler {
                         result.total_cost_usd,
                         result.duration.as_secs_f64(),
                     )));
-                    if let Some((config, record)) = world_context.as_ref() {
-                        crate::command::world_model::record_runtime_outcome(
-                            config,
-                            record,
-                            &result.final_output,
-                            Some(&result.session_id),
-                        );
+                    if let Some((config, guardrail, advisory)) = world_context.as_ref() {
+                        if let Some(record) = guardrail {
+                            if let Some(outcome) =
+                                crate::command::world_model::record_guardrail_completion_outcome(
+                                    config,
+                                    record,
+                                    true,
+                                    &result.final_output,
+                                    Some(&result.session_id),
+                                )
+                                && matches!(
+                                    outcome.final_status,
+                                    archon_world_model::GuardrailFinalStatus::BlockedMissingVerification
+                                        | archon_world_model::GuardrailFinalStatus::BlockedFailedVerification
+                                )
+                            {
+                                let _ = tui_tx.send(TuiEvent::TextDelta(format!(
+                                    "World model guardrail: pipeline output is not marked verified yet; required actions: {:?}\n",
+                                    record.decision.required_actions
+                                )));
+                            }
+                        } else {
+                            crate::command::world_model::record_runtime_outcome(
+                                config,
+                                advisory,
+                                &result.final_output,
+                                Some(&result.session_id),
+                            );
+                        }
                         crate::command::world_model::schedule_dynamic_trainer_tick(config.clone());
                     }
                 }

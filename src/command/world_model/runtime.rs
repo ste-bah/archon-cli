@@ -73,6 +73,13 @@ pub(crate) fn record_runtime_outcome(
             .clone()
             .unwrap_or_else(|| "unknown".into()),
         actual_summary: actual_summary.to_string(),
+        task_class: None,
+        final_status: None,
+        verification_outcomes: Vec::new(),
+        user_correction_observed: false,
+        plan_drift_observed: false,
+        provider_incident_observed: false,
+        retry_count: 0,
         latent_surprise,
         evidence_refs: evidence_refs.clone(),
         created_at: chrono::Utc::now(),
@@ -83,6 +90,75 @@ pub(crate) fn record_runtime_outcome(
             bundle_id: bundle_id.to_string(),
             prediction_id: outcome.prediction_id.clone(),
             outcome_id,
+            evidence_refs,
+            created_at: chrono::Utc::now(),
+        };
+        let _ = archon_world_model::integration::append_bundle_attachment(&root, &attachment);
+    }
+}
+
+pub(crate) fn record_runtime_guardrail_outcome(
+    config: &archon_core::config::ArchonConfig,
+    record: &archon_world_model::integration::WorldAdvisorSurfaceRecord,
+    outcome: &mut archon_world_model::WorldGuardrailOutcome,
+    bundle_id: Option<&str>,
+) {
+    let Ok(root) = super::world_model_root() else {
+        return;
+    };
+    let mut latent_surprise = None;
+    let mut evidence_refs = outcome.evidence_refs.clone();
+    if let Some(bundle_id) = bundle_id {
+        evidence_refs.push(format!("bundle:{bundle_id}"));
+    }
+    if let Some(prediction) = &record.prediction {
+        if let Ok((updated, _)) = super::predict::record_outcome_for_prediction(
+            config,
+            &root,
+            &prediction.prediction_id,
+            &outcome.actual_summary,
+        ) {
+            latent_surprise = updated.latent_surprise;
+            evidence_refs.extend(updated.evidence_refs);
+        }
+    }
+    evidence_refs.sort();
+    evidence_refs.dedup();
+    outcome.latent_surprise = latent_surprise;
+    outcome.evidence_refs = evidence_refs.clone();
+
+    let runtime_outcome = archon_world_model::integration::WorldRuntimeOutcomeRecord {
+        surface: record.surface,
+        prediction_id: record
+            .prediction
+            .as_ref()
+            .map(|prediction| prediction.prediction_id.clone()),
+        session_id: record
+            .session_id
+            .clone()
+            .unwrap_or_else(|| "unknown".into()),
+        action_ref: record
+            .action_ref
+            .clone()
+            .unwrap_or_else(|| "unknown".into()),
+        actual_summary: outcome.actual_summary.clone(),
+        task_class: Some(outcome.task_class),
+        final_status: Some(outcome.final_status),
+        verification_outcomes: outcome.verification_outcomes.clone(),
+        user_correction_observed: outcome.user_correction_observed,
+        plan_drift_observed: outcome.plan_drift_observed,
+        provider_incident_observed: outcome.provider_incident_observed,
+        retry_count: outcome.retry_count,
+        latent_surprise,
+        evidence_refs: evidence_refs.clone(),
+        created_at: chrono::Utc::now(),
+    };
+    let _ = archon_world_model::integration::append_runtime_outcome(&root, &runtime_outcome);
+    if let Some(bundle_id) = bundle_id {
+        let attachment = archon_world_model::integration::WorldAuditedBundleAttachment {
+            bundle_id: bundle_id.to_string(),
+            prediction_id: runtime_outcome.prediction_id.clone(),
+            outcome_id: outcome.outcome_id.clone(),
             evidence_refs,
             created_at: chrono::Utc::now(),
         };

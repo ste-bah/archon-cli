@@ -81,12 +81,7 @@ fn session_sandbox_backend(
     };
     let backend =
         crate::runtime::sandbox_mode::apply_configured_sandbox_mode(backend, &config.sandbox);
-    crate::runtime::sandbox_audit::audit_sandbox_backend(
-        backend,
-        &config.sandbox,
-        session_id,
-        agent_type,
-    )
+    crate::runtime::sandbox_audit::audit_sandbox_backend(backend, config, session_id, agent_type)
 }
 
 fn open_governed_learning_db(working_dir: &std::path::Path) -> Option<Arc<cozo::DbInstance>> {

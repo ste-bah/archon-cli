@@ -17,6 +17,11 @@ pub enum WorldAdvisorSurface {
     ProviderRuntime,
     MemorySurfacing,
     AgentEvolution,
+    InteractiveSession,
+    CodingTask,
+    ToolRun,
+    VerificationRun,
+    PipelineStep,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -41,6 +46,20 @@ pub struct WorldRuntimeOutcomeRecord {
     pub session_id: String,
     pub action_ref: String,
     pub actual_summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_class: Option<crate::guardrail::RuntimeTaskClass>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub final_status: Option<crate::guardrail::GuardrailFinalStatus>,
+    #[serde(default)]
+    pub verification_outcomes: Vec<crate::guardrail::VerificationOutcome>,
+    #[serde(default)]
+    pub user_correction_observed: bool,
+    #[serde(default)]
+    pub plan_drift_observed: bool,
+    #[serde(default)]
+    pub provider_incident_observed: bool,
+    #[serde(default)]
+    pub retry_count: u32,
     pub latent_surprise: Option<f32>,
     pub evidence_refs: Vec<String>,
     pub created_at: DateTime<Utc>,
@@ -161,6 +180,11 @@ mod tests {
             WorldAdvisorSurface::ProviderRuntime,
             WorldAdvisorSurface::MemorySurfacing,
             WorldAdvisorSurface::AgentEvolution,
+            WorldAdvisorSurface::InteractiveSession,
+            WorldAdvisorSurface::CodingTask,
+            WorldAdvisorSurface::ToolRun,
+            WorldAdvisorSurface::VerificationRun,
+            WorldAdvisorSurface::PipelineStep,
         ] {
             let record = WorldAdvisorSurfaceRecord::unavailable(
                 surface,
@@ -200,6 +224,13 @@ mod tests {
             session_id: "s1".into(),
             action_ref: "a1".into(),
             actual_summary: "completed".into(),
+            task_class: None,
+            final_status: None,
+            verification_outcomes: Vec::new(),
+            user_correction_observed: false,
+            plan_drift_observed: false,
+            provider_incident_observed: false,
+            retry_count: 0,
             latent_surprise: Some(0.2),
             evidence_refs: vec!["bundle:b1".into()],
             created_at: Utc::now(),
@@ -215,15 +246,11 @@ mod tests {
         let outcome_path = append_runtime_outcome(temp.path(), &outcome).unwrap();
         let attachment_path = append_bundle_attachment(temp.path(), &attachment).unwrap();
 
-        assert!(
-            std::fs::read_to_string(outcome_path)
-                .unwrap()
-                .contains("completed")
-        );
-        assert!(
-            std::fs::read_to_string(attachment_path)
-                .unwrap()
-                .contains("\"bundle_id\":\"b1\"")
-        );
+        assert!(std::fs::read_to_string(outcome_path)
+            .unwrap()
+            .contains("completed"));
+        assert!(std::fs::read_to_string(attachment_path)
+            .unwrap()
+            .contains("\"bundle_id\":\"b1\""));
     }
 }

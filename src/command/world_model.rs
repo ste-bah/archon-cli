@@ -9,6 +9,7 @@ use crate::cli_args::WorldAction;
 mod actions;
 mod candidate;
 mod embedding_runtime;
+mod guard;
 mod ingest_files;
 mod labeling_runtime;
 mod predict;
@@ -16,6 +17,11 @@ mod runtime;
 mod status;
 mod trainer_runtime;
 
+pub(crate) use guard::{
+    RuntimeGuardrailRecord, active_guardrail_for_session, begin_guarded_action,
+    forced_repair_prompt, record_guardrail_completion_outcome,
+    record_guardrail_tool_result_for_session, record_guardrail_turn_outcome,
+};
 pub(crate) use runtime::{
     record_provider_runtime_advisory, record_runtime_advisory,
     record_runtime_counterfactual_advice, record_runtime_outcome,
@@ -188,7 +194,70 @@ pub(crate) async fn handle_world_command(
             );
             Ok(())
         }
+        WorldAction::Guard { action } => {
+            println!("{}", render_guard_command(action, config)?);
+            Ok(())
+        }
     }
+}
+
+fn render_guard_command(
+    action: &crate::cli_args::WorldGuardAction,
+    config: &archon_core::config::ArchonConfig,
+) -> Result<String> {
+    match action {
+        crate::cli_args::WorldGuardAction::Status => {
+            Ok(guard::render_guard_status(config, &world_model_root()?))
+        }
+        crate::cli_args::WorldGuardAction::Inspect { action_id } => {
+            guard::render_guard_inspect(&world_model_root()?, action_id)
+        }
+        crate::cli_args::WorldGuardAction::List {
+            session,
+            surface,
+            status,
+        } => guard::render_guard_list(
+            &world_model_root()?,
+            session.as_deref(),
+            surface.as_deref(),
+            status.as_deref(),
+        ),
+        crate::cli_args::WorldGuardAction::ReplayOutcomes { session } => {
+            guard::render_guard_replay_outcomes(&world_model_root()?, session.as_deref())
+        }
+        crate::cli_args::WorldGuardAction::Policy { action } => match action {
+            crate::cli_args::WorldGuardPolicyAction::Show => Ok(guard::render_guard_policy(config)),
+            crate::cli_args::WorldGuardPolicyAction::Set {
+                interactive_mode,
+                pipeline_mode,
+            } => {
+                render_guard_policy_set_hint(interactive_mode.as_deref(), pipeline_mode.as_deref())
+            }
+        },
+    }
+}
+
+fn render_guard_policy_set_hint(
+    interactive_mode: Option<&str>,
+    pipeline_mode: Option<&str>,
+) -> Result<String> {
+    for mode in [interactive_mode, pipeline_mode].into_iter().flatten() {
+        if !archon_world_model::WorldGuardrailMode::parses(mode) {
+            bail!("guardrail mode must be off, learn_only, advisory, guarded, or strict");
+        }
+    }
+    let path =
+        archon_core::config::save_world_model_guardrail_modes(interactive_mode, pipeline_mode)?;
+    Ok(format!(
+        "World Model Guardrail Policy Update\n\
+         =================================\n\
+         Saved: {path}\n\
+         interactive_mode = {interactive}\n\
+         pipeline_mode = {pipeline}",
+        path = path.display(),
+        interactive = interactive_mode.unwrap_or("<unchanged>"),
+        pipeline = pipeline_mode.unwrap_or("<unchanged>"),
+    ))
 }
 
 fn validate_ingest_args(session_id: Option<&str>, backfill: bool) -> Result<()> {

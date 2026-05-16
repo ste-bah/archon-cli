@@ -477,6 +477,76 @@ archon world trainer-tick \
 If `jepa.enabled = true`, or `model_kind = "jepa_transition"`, the tick uses the
 JEPA trainer path. Otherwise it trains the default latent transition model.
 
+## Optional: Turn On Runtime Guardrails
+
+The world model can now protect normal Archon sessions as well as pipeline runs.
+This is separate from training. Training teaches Archon what tends to go wrong;
+guardrails decide what to do with that prediction at runtime.
+
+Check the current guardrail policy:
+
+```bash
+archon world guard status
+archon world guard policy show
+```
+
+Fresh installs default to:
+
+| Surface | Default | Meaning |
+|---|---|---|
+| Normal chat/coding turns | `advisory` | Record risk and warn, but do not force repair. |
+| Pipelines | `guarded` | High-risk pipeline work must have verification before it is marked clean. |
+| Tool runs | `learn_only` | Tool outcomes are recorded for learning without extra blocking. |
+| Verification runs | `learn_only` | Test/build/lint results feed the guarded action. |
+
+To make ordinary coding sessions guarded, run:
+
+```bash
+archon world guard policy set --interactive-mode guarded
+```
+
+To return to warning-only behavior:
+
+```bash
+archon world guard policy set --interactive-mode advisory
+```
+
+For a normal request such as:
+
+```text
+Build a Python app that does ABCD and XYZ.
+```
+
+Archon will classify the turn as a coding task, ask the world model for a
+prediction, and create a guarded action. If the task is high risk in guarded
+mode, the turn is not considered complete until required verification is
+recorded. For coding tasks that usually means tests and a build/check command.
+
+The assistant may still stream text while working. Guarding does not retract
+tokens. It gates the completion state: if verification is missing or failed,
+Archon injects a repair turn instead of silently treating the answer as done.
+
+Useful inspection commands:
+
+```bash
+archon world guard list
+archon world guard inspect <action-id>
+archon world guard replay-outcomes
+```
+
+What a blocked turn means:
+
+| What happened | What Archon does |
+|---|---|
+| Required tests/build were not run | Records `blocked_missing_verification` and starts a repair turn. |
+| Required verification failed | Records `blocked_failed_verification` and asks for a fix or explicit blocker. |
+| Verification later passes | Records the guarded action as verified. |
+| World model is cold/unavailable | Records the unavailable reason and continues foreground work. |
+
+This is not a security sandbox and it does not prove code correctness. It is a
+quality loop: predict risk, require the right checks, record the outcome, and
+feed that result back into future training.
+
 ## Common Outcomes
 
 | What you see | What it means | What to do |
