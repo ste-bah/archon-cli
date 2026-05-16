@@ -54,12 +54,12 @@ Latest local verification:
 - `archon world_model::tests`, `archon-policy`, and single-threaded `agent_evolve` tests pass.
 - `cargo check --bin archon` passes with two existing warnings in provider status/LLM helpers.
 - README local-link audit and `git diff --check` pass.
-- CUDA feature compilation passes with `/usr/local/cuda-13.2`, and the full CUDA-feature world-model library suite passes locally on WSL after driver/toolkit compatibility was corrected.
+- CUDA feature compilation passes with `/usr/local/cuda-13.2`, and the full CUDA-feature world-model library suite passes locally on WSL after driver/toolkit compatibility was corrected. See `docs/development/world-model-cuda-validation.md`.
 
 ## Notes For Continuation
 
 - `mlx-rs` is pinned to `=0.25.3` and only wired for macOS aarch64 behind `mlx-metal`.
 - Metal is experimental until a real Apple Silicon validation run is recorded.
-- Native CUDA is validated on this WSL setup; MLX Metal still requires Apple Silicon hardware validation. CPU remains the supported default.
+- Native CUDA is validated on this WSL setup; MLX Metal still requires Apple Silicon hardware validation. CPU remains the supported default. See `docs/development/world-model-mlx-metal-validation.md` for the Apple Silicon evidence checklist.
 - The first model path is intentionally small and advisory; behavior-changing use remains gated.
 - No new source/doc file in this implementation should exceed 500 lines.

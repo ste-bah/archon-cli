@@ -34,6 +34,13 @@ artifacts, and bridge/parity test metadata. CUDA and Apple Silicon execution
 must be validated on matching hardware and recorded in the JEPA candidate's
 `JepaBackendExecutionReport`.
 
+The current CUDA validation record is
+[`docs/development/world-model-cuda-validation.md`](../development/world-model-cuda-validation.md).
+The MLX Metal validation checklist is
+[`docs/development/world-model-mlx-metal-validation.md`](../development/world-model-mlx-metal-validation.md);
+Metal remains experimental until that checklist is filled from real Apple
+Silicon hardware.
+
 Promotion compares candidates from the same backend by default. Cross-backend
 parity is a frozen-weights forward-pass check: train or build one deterministic
 CPU checkpoint, bridge the same weights to CUDA or MLX Metal, run the same

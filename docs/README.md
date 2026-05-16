@@ -40,6 +40,8 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [CLI flags](reference/cli-flags.md) — every command-line argument
 - [Environment variables](reference/env-vars.md) — `ARCHON_*` overrides
 - [World-model backends](reference/world-model-backends.md) — CPU, CUDA, and MLX Metal support matrix
+- [CUDA world-model validation](development/world-model-cuda-validation.md) — local CUDA JEPA validation evidence
+- [MLX Metal world-model validation](development/world-model-mlx-metal-validation.md) — Apple Silicon validation checklist
 - [World-model embeddings](reference/world-model-embeddings.md) — local and third-party embedding provider matrix
 - [Provider capabilities](generated/provider-capabilities.md) — generated Anthropic/Codex surface-support matrix
 - [Command surface matrix](generated/command-surface-matrix.md) — generated CLI/slash/TUI parity matrix

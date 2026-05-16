@@ -145,8 +145,8 @@ Complete:
 - [x] Probe every accelerator backend with a tiny synchronized tensor self-test before selecting or training on it.
 - [x] Route candidate training and active prediction through the selected backend with backend-specific checkpoint format.
 
-- Native CUDA tensor training/inference code is feature-gated and has passed local WSL validation with the CUDA 13.2 toolkit path.
-- Native MLX Metal tensor training/inference code is feature-gated and needs Apple Silicon validation before removing experimental status.
+- Native CUDA tensor training/inference code is feature-gated and has passed local WSL validation with the CUDA 13.2 toolkit path. The validation record lives in `docs/development/world-model-cuda-validation.md`.
+- Native MLX Metal tensor training/inference code is feature-gated and needs Apple Silicon validation before removing experimental status. The pending validation checklist lives in `docs/development/world-model-mlx-metal-validation.md`.
 - Record real Apple Silicon validation before changing Metal from experimental to supported.
 
 ## M5: Agent Evolution And Documentation Finalisation
@@ -164,7 +164,7 @@ Complete:
 
 ## Remaining External Validation Gates
 
-- Run MLX Metal validation on real Apple Silicon before removing the experimental status.
+- Run MLX Metal validation on real Apple Silicon before removing the experimental status; update `docs/development/world-model-mlx-metal-validation.md` with device, command, candidate, and execution-report evidence.
 - Keep CUDA validation in CI/manual release notes when CUDA runners are available; local WSL validation now passes.
 
 ## Verification Results
