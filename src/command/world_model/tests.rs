@@ -207,6 +207,16 @@ fn predict_next_uses_active_model_when_ready() {
     assert!(explained.contains("Predicted next state:"));
     assert!(explained.contains("Outcome: pending"));
     assert!(explained.contains("Evidence refs: runtime_action:a1"));
+    let persisted = predict::load_prediction(temp.path(), &prediction_id)
+        .unwrap()
+        .expect("prediction should be persisted");
+    assert!(
+        persisted
+            .guardrail_scores
+            .expect("prediction should include auxiliary guardrail scores")
+            .predicted_verification_needed
+            .is_some()
+    );
 }
 
 #[test]
@@ -355,7 +365,11 @@ fn train_jepa_rejects_latent_dim_state_dim_mismatch() {
 
     let error = candidate::render_train_jepa(&config, temp.path(), true, None).unwrap_err();
 
-    assert!(error.to_string().contains("must equal active transition state_dim"));
+    assert!(
+        error
+            .to_string()
+            .contains("must equal active transition state_dim")
+    );
 }
 
 #[test]
@@ -481,6 +495,17 @@ fn predict_next_uses_active_jepa_model_when_configured() {
     assert!(rendered.contains(&format!("Model: {candidate_id}")));
     assert!(rendered.contains("Model kind: jepa_transition"));
     assert!(rendered.contains("Representation: archon-jepa:"));
+    let prediction_id = prediction_id_from(&rendered);
+    let persisted = predict::load_prediction(temp.path(), &prediction_id)
+        .unwrap()
+        .expect("prediction should be persisted");
+    assert!(
+        persisted
+            .guardrail_scores
+            .expect("jepa prediction should include auxiliary guardrail scores")
+            .predicted_verification_needed
+            .is_some()
+    );
 }
 
 #[test]

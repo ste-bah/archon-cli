@@ -92,10 +92,7 @@ impl JepaTrainingConfig {
             ("gamma_horizon", self.gamma_horizon),
             ("delta_var", self.delta_var),
             ("min_latent_std", self.min_latent_std),
-            (
-                "min_effective_rank_ratio",
-                self.min_effective_rank_ratio,
-            ),
+            ("min_effective_rank_ratio", self.min_effective_rank_ratio),
             ("horizon_consistency_tol", self.horizon_consistency_tol),
         ] {
             if !value.is_finite() || value < 0.0 {
@@ -398,11 +395,7 @@ impl JepaTraceModel {
         self.predictor.predict(context, action, horizon)
     }
 
-    pub fn predict_auxiliary(
-        &self,
-        context: &[f32],
-        action: &[f32],
-    ) -> Result<Vec<(String, f32)>> {
+    pub fn predict_auxiliary(&self, context: &[f32], action: &[f32]) -> Result<Vec<(String, f32)>> {
         if context.len() != self.metadata.latent_dim || action.len() != self.metadata.latent_dim {
             bail!("jepa auxiliary latent dimensions must match");
         }
@@ -424,7 +417,10 @@ impl JepaTraceModel {
             || !self.target_encoder.finite()
             || !self.predictor.finite()
             || !self.auxiliary_heads.iter().all(JepaAuxiliaryHead::finite)
-            || !self.transition_model.as_ref().is_none_or(transition_model_finite)
+            || !self
+                .transition_model
+                .as_ref()
+                .is_none_or(transition_model_finite)
         {
             bail!("jepa checkpoint contains non-finite values");
         }
@@ -687,8 +683,11 @@ pub fn build_jepa_training_examples(
     let builder = TraceWindowBuilder::new(rows);
     let mut examples = Vec::new();
     for horizon in &config.prediction_horizons {
-        let transitions =
-            builder.adjacent_transitions(config.context_window_rows, config.target_window_rows, *horizon)?;
+        let transitions = builder.adjacent_transitions(
+            config.context_window_rows,
+            config.target_window_rows,
+            *horizon,
+        )?;
         examples.extend(transitions.into_iter().map(JepaTrainingExample::from));
     }
     Ok(examples)
@@ -1034,9 +1033,15 @@ pub fn write_jepa_safetensors_checkpoint(
         ("target_hidden_bias", tensors.target_hidden_bias),
         ("target_output_weights", tensors.target_output_weights),
         ("target_output_bias", tensors.target_output_bias),
-        ("predictor_context_weights", tensors.predictor_context_weights),
+        (
+            "predictor_context_weights",
+            tensors.predictor_context_weights,
+        ),
         ("predictor_action_weights", tensors.predictor_action_weights),
-        ("predictor_horizon_weights", tensors.predictor_horizon_weights),
+        (
+            "predictor_horizon_weights",
+            tensors.predictor_horizon_weights,
+        ),
         ("predictor_bias", tensors.predictor_bias),
         ("auxiliary_bias", tensors.auxiliary_bias),
         ("auxiliary_latent_weights", tensors.auxiliary_latent_weights),
@@ -1328,13 +1333,22 @@ fn window_features(window: &TraceWindow, dimensions: usize, role: &str) -> Resul
         bail!("jepa dimensions must be greater than zero");
     }
     let mut features = vec![0.0; dimensions];
-    add_token(&mut features, &format!("{role}:session:{}", window.session_id), 0.10);
+    add_token(
+        &mut features,
+        &format!("{role}:session:{}", window.session_id),
+        0.10,
+    );
     add_token(
         &mut features,
         &format!("{role}:anchor:{}", window.anchor_row_id),
         0.05,
     );
-    add_numeric(&mut features, "horizon", normalized_horizon(window.horizon), 0.50);
+    add_numeric(
+        &mut features,
+        "horizon",
+        normalized_horizon(window.horizon),
+        0.50,
+    );
     add_numeric(
         &mut features,
         "graph.session_neighbor_count",
@@ -1385,7 +1399,11 @@ fn action_features(action: &TraceAction, dimensions: usize, role: &str) -> Resul
         bail!("jepa dimensions must be greater than zero");
     }
     let mut features = vec![0.0; dimensions];
-    add_token(&mut features, &format!("{role}:action:{}", action.action_ref), 0.20);
+    add_token(
+        &mut features,
+        &format!("{role}:action:{}", action.action_ref),
+        0.20,
+    );
     add_token(
         &mut features,
         &format!("{role}:kind:{:?}", action.action_kind),
@@ -1407,14 +1425,22 @@ fn action_features(action: &TraceAction, dimensions: usize, role: &str) -> Resul
 }
 
 fn add_row_features(features: &mut [f32], row: &WorldTraceRow, weight: f32, role: &str) {
-    add_token(features, &format!("{role}:source:{:?}", row.source), 0.45 * weight);
+    add_token(
+        features,
+        &format!("{role}:source:{:?}", row.source),
+        0.45 * weight,
+    );
     add_token(
         features,
         &format!("{role}:action_kind:{:?}", row.action_kind),
         0.65 * weight,
     );
     if let Some(provider) = &row.provider {
-        add_token(features, &format!("{role}:provider:{provider}"), 0.55 * weight);
+        add_token(
+            features,
+            &format!("{role}:provider:{provider}"),
+            0.55 * weight,
+        );
     }
     if let Some(model) = &row.model {
         add_token(features, &format!("{role}:model:{model}"), 0.40 * weight);
@@ -1437,7 +1463,12 @@ fn add_row_features(features: &mut [f32], row: &WorldTraceRow, weight: f32, role
 
 fn add_scalar_features(features: &mut [f32], scalar: &ScalarFeatures, weight: f32) {
     if let Some(value) = scalar.cost_usd {
-        add_numeric(features, "scalar.cost_usd", (value as f32 / 2.0).clamp(0.0, 8.0), weight);
+        add_numeric(
+            features,
+            "scalar.cost_usd",
+            (value as f32 / 2.0).clamp(0.0, 8.0),
+            weight,
+        );
     }
     if let Some(value) = scalar.duration_ms {
         add_numeric(
@@ -2134,8 +2165,7 @@ mod tests {
 
         assert_eq!(record.format, "candle_safetensors");
         assert_eq!(
-            loaded.predictor_bias,
-            model.predictor.bias,
+            loaded.predictor_bias, model.predictor.bias,
             "predictor bias should roundtrip through the checkpoint"
         );
     }

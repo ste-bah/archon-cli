@@ -5,9 +5,12 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use archon_world_model::embedding::{EmbeddingRequest, WorldEmbeddingAdapter};
+use archon_world_model::guardrail::GuardrailRiskScores;
 use archon_world_model::jepa::JEPA_MODEL_KIND;
 use archon_world_model::registry::{LATENT_TRANSITION_MODEL_KIND, ModelRegistry};
-use archon_world_model::representation::{TraceAction, TraceWindowBuilder, WorldRepresentationAdapter};
+use archon_world_model::representation::{
+    TraceAction, TraceWindowBuilder, WorldRepresentationAdapter,
+};
 use archon_world_model::schema::{WorldActionKind, WorldTraceRow};
 
 use super::embedding_runtime::build_embedding_adapter;
@@ -34,6 +37,8 @@ pub(super) struct PersistedPrediction {
     pub latent_surprise: Option<f32>,
     #[serde(default)]
     pub evidence_refs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guardrail_scores: Option<GuardrailRiskScores>,
     pub created_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome_recorded_at: Option<DateTime<Utc>>,
@@ -44,6 +49,7 @@ struct PredictionInference {
     vector: Vec<f32>,
     model_kind: String,
     representation_source: String,
+    guardrail_scores: Option<GuardrailRiskScores>,
 }
 
 fn default_prediction_model_kind() -> String {
@@ -128,7 +134,8 @@ pub(super) fn persist_active_checkpoint_prediction(
         return Ok(None);
     }
 
-    let inference = predict_with_checkpoint(config, root, &model_id, session_id, action_ref, summary)?;
+    let inference =
+        predict_with_checkpoint(config, root, &model_id, session_id, action_ref, summary)?;
     let prediction = PersistedPrediction {
         prediction_id: format!("world-prediction-{}", uuid::Uuid::new_v4()),
         model_id,
@@ -143,6 +150,7 @@ pub(super) fn persist_active_checkpoint_prediction(
         actual_next_state: None,
         latent_surprise: None,
         evidence_refs: vec![format!("runtime_action:{action_ref}")],
+        guardrail_scores: inference.guardrail_scores,
         created_at: Utc::now(),
         outcome_recorded_at: None,
     };
@@ -264,6 +272,13 @@ fn predict_with_checkpoint(
         &action,
         candidate.model.metadata.backend,
     )?;
+    let guardrail_scores = Some(guardrail_scores_from_auxiliary(
+        candidate
+            .model
+            .predict_auxiliary(&state, &action)?
+            .iter()
+            .map(|prediction| (prediction.label.as_str(), prediction.probability)),
+    ));
     Ok(PredictionInference {
         summary: format!(
             "next-state dim={} norm={:.4}",
@@ -273,6 +288,7 @@ fn predict_with_checkpoint(
         vector: next,
         model_kind: LATENT_TRANSITION_MODEL_KIND.into(),
         representation_source: format!("{}:{}", adapter.provider_name(), adapter.model_name()),
+        guardrail_scores,
     })
 }
 
@@ -319,6 +335,13 @@ fn predict_with_jepa_checkpoint(
         &action,
         transition.metadata.backend,
     )?;
+    let guardrail_scores = Some(guardrail_scores_from_auxiliary(
+        candidate
+            .model
+            .predict_auxiliary(&state, &action)?
+            .iter()
+            .map(|(label, probability)| (label.as_str(), *probability)),
+    ));
     let elapsed_ms = started.elapsed().as_millis() as u64;
     if elapsed_ms > config.learning.world_model.jepa.max_prediction_latency_ms {
         anyhow::bail!(
@@ -335,6 +358,7 @@ fn predict_with_jepa_checkpoint(
         vector: next,
         model_kind: JEPA_MODEL_KIND.into(),
         representation_source: format!("archon-jepa:{}", candidate.model.metadata.model_id),
+        guardrail_scores,
     })
 }
 
@@ -415,6 +439,31 @@ fn embed(
 
 fn vector_norm(values: &[f32]) -> f32 {
     values.iter().map(|value| value * value).sum::<f32>().sqrt()
+}
+
+fn guardrail_scores_from_auxiliary<'a>(
+    predictions: impl IntoIterator<Item = (&'a str, f32)>,
+) -> GuardrailRiskScores {
+    let mut scores = GuardrailRiskScores::default();
+    for (label, probability) in predictions {
+        let probability = finite_probability(probability);
+        match label {
+            "failure" => scores.predicted_failure = probability,
+            "retry" => scores.predicted_retry = probability,
+            "provider_incident" => scores.predicted_provider_incident = probability,
+            "verification_needed" => scores.predicted_verification_needed = probability,
+            "user_correction" => scores.predicted_user_correction = probability,
+            "plan_drift" => scores.predicted_plan_drift = probability,
+            "high_cost" => scores.predicted_high_cost = probability,
+            "slow_run" => scores.predicted_slow_run = probability,
+            _ => {}
+        }
+    }
+    scores
+}
+
+fn finite_probability(probability: f32) -> Option<f32> {
+    probability.is_finite().then(|| probability.clamp(0.0, 1.0))
 }
 
 fn cosine_error(left: &[f32], right: &[f32]) -> f32 {

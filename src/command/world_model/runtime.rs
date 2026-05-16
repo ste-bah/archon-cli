@@ -209,6 +209,7 @@ fn runtime_advisory_record(
                     prediction_id: prediction.prediction_id,
                     model_id: prediction.model_id,
                     predicted_next_state_summary: prediction.predicted_next_state_summary,
+                    guardrail_scores: prediction.guardrail_scores,
                     evidence_refs: prediction.evidence_refs,
                     created_at: prediction.created_at,
                 }),

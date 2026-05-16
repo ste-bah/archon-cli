@@ -388,7 +388,7 @@ impl Default for WorldGuardrailPredictionContext {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct GuardrailRiskScores {
     pub predicted_failure: Option<f32>,
     pub predicted_retry: Option<f32>,

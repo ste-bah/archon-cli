@@ -246,11 +246,15 @@ mod tests {
         let outcome_path = append_runtime_outcome(temp.path(), &outcome).unwrap();
         let attachment_path = append_bundle_attachment(temp.path(), &attachment).unwrap();
 
-        assert!(std::fs::read_to_string(outcome_path)
-            .unwrap()
-            .contains("completed"));
-        assert!(std::fs::read_to_string(attachment_path)
-            .unwrap()
-            .contains("\"bundle_id\":\"b1\""));
+        assert!(
+            std::fs::read_to_string(outcome_path)
+                .unwrap()
+                .contains("completed")
+        );
+        assert!(
+            std::fs::read_to_string(attachment_path)
+                .unwrap()
+                .contains("\"bundle_id\":\"b1\"")
+        );
     }
 }

@@ -3,18 +3,17 @@ use std::path::Path;
 use anyhow::{Result, bail};
 use chrono::Utc;
 
+use archon_world_model::embedding::{DeterministicHashEmbeddingAdapter, MemoryEmbeddingAdapter};
 use archon_world_model::eval::{
     BrierImprovementReport, PromotionGateReport, evaluate_auxiliary_label_brier,
     evaluate_brier_improvement, evaluate_next_state_cosine_gate, evaluate_surprise_ks_gate,
 };
-use archon_world_model::embedding::{DeterministicHashEmbeddingAdapter, MemoryEmbeddingAdapter};
 use archon_world_model::jepa::{
-    JEPA_MODEL_KIND, JepaEvalRecord, JepaPromotionGateReport,
-    JepaRepresentationComparisonReport,
+    JEPA_MODEL_KIND, JepaEvalRecord, JepaPromotionGateReport, JepaRepresentationComparisonReport,
 };
 use archon_world_model::model::{CpuLatentTransitionModel, LatentTransitionExample};
-use archon_world_model::representation::GenericEmbeddingRepresentationAdapter;
 use archon_world_model::registry::{CandidateEvalRecord, JepaCandidateRecord, ModelRegistry};
+use archon_world_model::representation::GenericEmbeddingRepresentationAdapter;
 use archon_world_model::schema::WorldLabelSet;
 use archon_world_model::storage::WorldModelStore;
 
@@ -367,7 +366,9 @@ pub(super) fn render_inspect_jepa(root: &Path, candidate_id: &str) -> Result<Str
         candidate.outcome.collapse.mean_latent_std,
         candidate.outcome.collapse.effective_rank_ratio,
         candidate.outcome.horizon.passes,
-        eval.as_ref().map(|record| record.gates.passed).unwrap_or(false),
+        eval.as_ref()
+            .map(|record| record.gates.passed)
+            .unwrap_or(false),
         candidate.checkpoint.path.display(),
         candidate.training_run.display()
     ))
@@ -620,9 +621,7 @@ fn jepa_candidate_count(root: &Path) -> usize {
     };
     entries
         .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry.path().extension().and_then(|ext| ext.to_str()) == Some("json")
-        })
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("json"))
         .count()
 }
 
@@ -791,7 +790,12 @@ fn compare_jepa_representations(
         Ok(report) => report,
         Err(error) => JepaRepresentationComparisonReport::fail_closed(
             candidate.metadata.model_id.clone(),
-            if promotion_gating { "fastembed" } else { baseline }.to_string(),
+            if promotion_gating {
+                "fastembed"
+            } else {
+                baseline
+            }
+            .to_string(),
             error.to_string(),
             config.learning.world_model.jepa.min_heldout_examples,
             config.learning.world_model.jepa.min_baseline_improvement,
@@ -806,21 +810,28 @@ fn compare_jepa_representations_inner(
     baseline: &str,
     promotion_gating: bool,
 ) -> Result<JepaRepresentationComparisonReport> {
-    let baseline_backend = if promotion_gating { "fastembed" } else { baseline };
+    let baseline_backend = if promotion_gating {
+        "fastembed"
+    } else {
+        baseline
+    };
     let state_dim = config.learning.world_model.state_dim;
     let jepa_examples =
         archon_world_model::train::examples_from_rows_with_representation_adapter(rows, candidate)?;
     let baseline_adapter = baseline_representation_adapter(baseline_backend, state_dim)?;
-    let baseline_examples = archon_world_model::train::examples_from_rows_with_representation_adapter(
-        rows,
-        baseline_adapter.as_ref(),
-    )?;
+    let baseline_examples =
+        archon_world_model::train::examples_from_rows_with_representation_adapter(
+            rows,
+            baseline_adapter.as_ref(),
+        )?;
     if jepa_examples.len() != baseline_examples.len() {
         bail!("jepa and baseline example counts differ");
     }
     let (jepa_train, jepa_heldout) = split_for_eval(&jepa_examples)?;
     let (baseline_train, baseline_heldout) = split_for_eval(&baseline_examples)?;
-    if promotion_gating && jepa_heldout.len() < config.learning.world_model.jepa.min_heldout_examples {
+    if promotion_gating
+        && jepa_heldout.len() < config.learning.world_model.jepa.min_heldout_examples
+    {
         bail!(
             "heldout example count {} is below min_heldout_examples={}",
             jepa_heldout.len(),
@@ -867,12 +878,12 @@ fn baseline_representation_adapter(
     state_dim: usize,
 ) -> Result<Box<dyn archon_world_model::WorldRepresentationAdapter>> {
     match baseline {
-        "fastembed" => Ok(Box::new(GenericEmbeddingRepresentationAdapter::new(Box::new(
-            MemoryEmbeddingAdapter::local_fastembed(state_dim)?,
-        )))),
-        "deterministic-hash" => Ok(Box::new(GenericEmbeddingRepresentationAdapter::new(Box::new(
-            DeterministicHashEmbeddingAdapter::new(state_dim)?,
-        )))),
+        "fastembed" => Ok(Box::new(GenericEmbeddingRepresentationAdapter::new(
+            Box::new(MemoryEmbeddingAdapter::local_fastembed(state_dim)?),
+        ))),
+        "deterministic-hash" => Ok(Box::new(GenericEmbeddingRepresentationAdapter::new(
+            Box::new(DeterministicHashEmbeddingAdapter::new(state_dim)?),
+        ))),
         _ => bail!("unsupported representation baseline: {baseline}"),
     }
 }

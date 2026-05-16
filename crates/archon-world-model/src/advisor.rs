@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::guardrail::GuardrailRiskScores;
 use crate::trace::{ColdStartStats, ColdStartStatus, ColdStartThresholds, evaluate_cold_start};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -8,6 +9,8 @@ pub struct WorldPrediction {
     pub prediction_id: String,
     pub model_id: String,
     pub predicted_next_state_summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guardrail_scores: Option<GuardrailRiskScores>,
     pub evidence_refs: Vec<String>,
     pub created_at: DateTime<Utc>,
 }
@@ -18,6 +21,7 @@ impl WorldPrediction {
             prediction_id: format!("world-prediction-{}", uuid::Uuid::new_v4()),
             model_id: model_id.into(),
             predicted_next_state_summary: summary.into(),
+            guardrail_scores: None,
             evidence_refs: Vec::new(),
             created_at: Utc::now(),
         }

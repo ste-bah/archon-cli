@@ -146,6 +146,17 @@ impl CommandHandler for ArchonResearchHandler {
                     )));
                     if let Some((config, guardrail, advisory)) = world_context.as_ref() {
                         if let Some(record) = guardrail {
+                            let step_report =
+                                crate::command::world_model::record_guardrail_pipeline_steps(
+                                    config, record, &result,
+                                );
+                            if step_report.steps_recorded > 0 {
+                                let _ = tui_tx.send(TuiEvent::TextDelta(format!(
+                                    "World model guardrail: recorded {} pipeline steps and {} verification signals.\n",
+                                    step_report.steps_recorded,
+                                    step_report.parent_verifications_recorded
+                                )));
+                            }
                             if let Some(outcome) =
                                 crate::command::world_model::record_guardrail_completion_outcome(
                                     config,

@@ -186,6 +186,14 @@ async fn handle_code(
     .await?;
     print_pipeline_result(&result, cwd).await;
     if let Some(record) = &world_guardrail {
+        let step_report =
+            crate::command::world_model::record_guardrail_pipeline_steps(config, record, &result);
+        if step_report.steps_recorded > 0 {
+            println!(
+                "World model guardrail: recorded {} pipeline steps and {} verification signals.",
+                step_report.steps_recorded, step_report.parent_verifications_recorded
+            );
+        }
         if let Some(outcome) = crate::command::world_model::record_guardrail_completion_outcome(
             config,
             record,
@@ -309,6 +317,14 @@ async fn handle_research(
     .await?;
     print_pipeline_result(&result, cwd).await;
     if let Some(record) = &world_guardrail {
+        let step_report =
+            crate::command::world_model::record_guardrail_pipeline_steps(config, record, &result);
+        if step_report.steps_recorded > 0 {
+            println!(
+                "World model guardrail: recorded {} pipeline steps and {} verification signals.",
+                step_report.steps_recorded, step_report.parent_verifications_recorded
+            );
+        }
         if let Some(outcome) = crate::command::world_model::record_guardrail_completion_outcome(
             config,
             record,

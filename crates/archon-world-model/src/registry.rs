@@ -538,7 +538,8 @@ mod tests {
             prediction_horizons: vec![1],
             ..crate::jepa::JepaTrainingConfig::default()
         };
-        let (model, outcome) = crate::jepa::train_jepa_candidate(&[first, second], &config).unwrap();
+        let (model, outcome) =
+            crate::jepa::train_jepa_candidate(&[first, second], &config).unwrap();
 
         let path = registry.write_jepa_candidate(&model, &outcome).unwrap();
         let loaded = registry
@@ -553,7 +554,10 @@ mod tests {
                 .join(format!("{}.safetensors", model.metadata.model_id))
                 .exists()
         );
-        assert_eq!(loaded.model.metadata.model_kind, crate::jepa::JEPA_MODEL_KIND);
+        assert_eq!(
+            loaded.model.metadata.model_kind,
+            crate::jepa::JEPA_MODEL_KIND
+        );
         assert_eq!(loaded.outcome.status, outcome.status);
         assert_eq!(loaded.checkpoint.format, "candle_safetensors");
         assert!(loaded.training_run.exists());

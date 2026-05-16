@@ -129,9 +129,7 @@ fn jepa_candidate_count() -> usize {
     };
     entries
         .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry.path().extension().and_then(|ext| ext.to_str()) == Some("json")
-        })
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("json"))
         .count()
 }
 
