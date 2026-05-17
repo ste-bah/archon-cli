@@ -10,6 +10,7 @@ use archon_world_model::eval::{
 };
 use archon_world_model::jepa::{
     JEPA_MODEL_KIND, JepaEvalRecord, JepaPromotionGateReport, JepaRepresentationComparisonReport,
+    PersistedEvalMode,
 };
 use archon_world_model::model::{CpuLatentTransitionModel, LatentTransitionExample};
 use archon_world_model::registry::{CandidateEvalRecord, JepaCandidateRecord, ModelRegistry};
@@ -349,7 +350,13 @@ pub(super) fn render_eval_jepa(
     );
     let record = JepaEvalRecord {
         candidate_id: candidate_id.to_string(),
-        comparison,
+        mode: PersistedEvalMode::Full,
+        baseline_skipped: false,
+        skipped_reason: None,
+        corpus_fingerprint: None,
+        config_fingerprint: "legacy".to_string(),
+        eval_schema_version: 0,
+        comparison: Some(comparison),
         collapse: candidate.outcome.collapse.clone(),
         horizon: candidate.outcome.horizon.clone(),
         gates,
@@ -380,11 +387,11 @@ pub(super) fn render_eval_jepa(
          Comparison report: {}",
         candidate.model.metadata.model_kind,
         candidate.model.metadata.example_count,
-        record.comparison.heldout_examples,
-        record.comparison.baseline_backend,
-        record.comparison.baseline_available,
-        record.comparison.relative_improvement * 100.0,
-        record.comparison.brier_regressed,
+        record.comparison.as_ref().map(|c| c.heldout_examples).unwrap_or(0),
+        record.comparison.as_ref().map(|c| c.baseline_backend.as_str()).unwrap_or("none"),
+        record.comparison.as_ref().map(|c| c.baseline_available).unwrap_or(false),
+        record.comparison.as_ref().map(|c| c.relative_improvement * 100.0).unwrap_or(0.0),
+        record.comparison.as_ref().map(|c| c.brier_regressed).unwrap_or(false),
         record.gates.corpus_sufficient,
         record.gates.representation_collapse,
         record.gates.multi_horizon_consistency,

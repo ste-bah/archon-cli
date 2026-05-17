@@ -26,7 +26,13 @@ fn candidate_id_from(rendered: &str) -> String {
 fn passing_jepa_eval_record(candidate_id: &str) -> archon_world_model::jepa::JepaEvalRecord {
     archon_world_model::jepa::JepaEvalRecord {
         candidate_id: candidate_id.into(),
-        comparison: archon_world_model::jepa::JepaRepresentationComparisonReport {
+        mode: archon_world_model::jepa::PersistedEvalMode::Full,
+        baseline_skipped: false,
+        skipped_reason: None,
+        corpus_fingerprint: None,
+        config_fingerprint: "legacy".to_string(),
+        eval_schema_version: 0,
+        comparison: Some(archon_world_model::jepa::JepaRepresentationComparisonReport {
             candidate_id: candidate_id.into(),
             baseline_backend: "fastembed".into(),
             baseline_available: true,
@@ -39,7 +45,7 @@ fn passing_jepa_eval_record(candidate_id: &str) -> archon_world_model::jepa::Jep
             min_baseline_improvement: 0.05,
             brier_regressed: false,
             passed: true,
-        },
+        }),
         collapse: archon_world_model::jepa::JepaCollapseReport {
             mean_latent_std: 0.06,
             effective_rank_ratio: 0.60,
