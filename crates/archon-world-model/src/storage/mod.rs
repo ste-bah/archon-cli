@@ -7,6 +7,7 @@ pub mod cozo_store;
 pub mod jsonl;
 pub mod retention;
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -77,6 +78,10 @@ impl WorldModelStore {
     pub fn load_rows(&self) -> Result<Vec<WorldTraceRow>> {
         cozo_store::all_rows(&self.db)
     }
+
+    pub fn row_ids(&self) -> Result<HashSet<String>> {
+        cozo_store::row_ids(&self.db)
+    }
 }
 
 #[cfg(test)]
@@ -131,5 +136,6 @@ mod tests {
         let rows = store.load_rows().unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].row_id, "row-1");
+        assert!(store.row_ids().unwrap().contains("row-1"));
     }
 }

@@ -109,6 +109,7 @@ async fn render_session_ingest(
          Session: {session_id}\n\
          Files read: {}\n\
          Rows normalized: {}\n\
+         Rows skipped:     {}\n\
          Rows persisted:  {}\n\
          Cozo upserts:    {}\n\
          Warnings: {}\n\
@@ -117,6 +118,7 @@ async fn render_session_ingest(
          Sources: {}",
         report.files_read,
         report.rows_normalized,
+        report.rows_skipped,
         report.rows_persisted,
         report.cozo_rows,
         report.warnings,
@@ -148,6 +150,7 @@ async fn render_backfill_ingest(
          Mode: backfill\n\
          Files read: {}\n\
          Rows normalized: {}\n\
+         Rows skipped:     {}\n\
          Rows persisted:  {}\n\
          Cozo upserts:    {}\n\
          Warnings: {}\n\
@@ -157,6 +160,7 @@ async fn render_backfill_ingest(
          Sources: {}",
         report.files_read,
         report.rows_normalized,
+        report.rows_skipped,
         report.rows_persisted,
         report.cozo_rows,
         report.warnings,
@@ -330,4 +334,3 @@ fn cold_start_thresholds(
         min_observed_days: cold_start.min_observed_days,
     }
 }
-

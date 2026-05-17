@@ -49,6 +49,24 @@ pub fn count_rows(db: &DbInstance) -> Result<usize> {
     Ok(result.rows[0][0].get_int().unwrap_or(0) as usize)
 }
 
+pub fn row_ids(db: &DbInstance) -> Result<HashSet<String>> {
+    let result = db
+        .run_script(
+            "?[row_id] := *world_trace_rows{row_id}",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("world trace row-id query failed: {e}"))?;
+
+    let mut row_ids = HashSet::with_capacity(result.rows.len());
+    for row in &result.rows {
+        if let Some(row_id) = row[0].get_str() {
+            row_ids.insert(row_id.to_string());
+        }
+    }
+    Ok(row_ids)
+}
+
 pub fn all_rows(db: &DbInstance) -> Result<Vec<WorldTraceRow>> {
     let result = db
         .run_script(
@@ -209,6 +227,7 @@ mod tests {
         put_rows(&db, &[row]).unwrap();
 
         assert_eq!(count_rows(&db).unwrap(), 1);
+        assert!(row_ids(&db).unwrap().contains("stable-row"));
         let stats = cold_start_stats(&db).unwrap();
         assert_eq!(stats.rows, 1);
         assert_eq!(stats.sessions, 1);
