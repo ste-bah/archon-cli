@@ -58,3 +58,7 @@ crates/archon-llm/src/providers/codex/spoof.rs  # expires 2026-06-30  # Codex sp
 
 # --- v1.3.1 JEPA/guardrails/CUDA-MLX (PRD-006D/006E/006F) ---
 src/cli_args/tests.rs                            # expires 2026-06-30  # v1.3.1 006E guardrail CLI tests; world-model files split in 4f79dc0, this one pending split
+
+# --- PRD-008 audit-remediation (commits f63b0e6, b274114; merged 2026-05-18) ---
+src/command/behaviour.rs                         # expires 2026-06-30  # PRD-008 governed rollback/apply/correction CLI surface; split is allowlist-shrinks follow-up
+src/command/world_model/ingest_files.rs          # expires 2026-06-30  # PRD-008 world-model ingest path; split is allowlist-shrinks follow-up
