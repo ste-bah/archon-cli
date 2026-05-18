@@ -93,6 +93,23 @@ pub struct WorldModelPolicy {
     pub allow_third_party_embeddings: bool,
     pub allow_llm_labeler: bool,
     pub allow_behavior_changes: bool,
+
+    /// Permit persisting embedding vectors to ~/.archon/world-model/embedding-cache/.
+    /// Fail-closed default: false. T015 wires the gate.
+    #[serde(default)]
+    pub allow_embedding_cache: bool,
+
+    /// Permit storing raw (unredacted) text in world-model cache records.
+    /// Named `allow_world_model_raw_text_storage` to AVOID collision with
+    /// ReasoningQualityPolicy::allow_raw_text_storage (F-CRIT-01, DEC-JEVAL-04).
+    /// Fail-closed default: false.
+    #[serde(default)]
+    pub allow_world_model_raw_text_storage: bool,
+
+    /// Permit `archon world eval-jepa --background` to spawn detached worker.
+    /// Fail-closed default: false. T023 wires the gate before spawn_background_worker.
+    #[serde(default)]
+    pub allow_eval_background_jobs: bool,
 }
 
 impl Default for WorldModelPolicy {
@@ -101,7 +118,57 @@ impl Default for WorldModelPolicy {
             allow_third_party_embeddings: false,
             allow_llm_labeler: false,
             allow_behavior_changes: false,
+            allow_embedding_cache: false,              // fail-closed
+            allow_world_model_raw_text_storage: false, // fail-closed
+            allow_eval_background_jobs: false,         // fail-closed
         }
+    }
+}
+
+#[cfg(test)]
+mod world_model_policy_tests {
+    use super::*;
+
+    #[test]
+    fn old_policy_document_fails_closed_for_all_new_keys() {
+        // Simulate a policy document without the new keys (e.g. written before T022)
+        let toml = r#"
+allow_third_party_embeddings = false
+allow_llm_labeler = false
+allow_behavior_changes = false
+"#;
+        let policy: WorldModelPolicy = toml::from_str(toml).expect("deserialize");
+        assert!(
+            !policy.allow_embedding_cache,
+            "allow_embedding_cache must default to false (fail-closed)"
+        );
+        assert!(
+            !policy.allow_world_model_raw_text_storage,
+            "allow_world_model_raw_text_storage must default to false (fail-closed)"
+        );
+        assert!(
+            !policy.allow_eval_background_jobs,
+            "allow_eval_background_jobs must default to false (fail-closed)"
+        );
+    }
+
+    #[test]
+    fn no_field_name_collision_with_reasoning_quality_policy() {
+        let wm = WorldModelPolicy::default();
+        let rq = ReasoningQualityPolicy::default();
+        // Both names exist; the existence of both fields with distinct names is
+        // a compile-time guarantee that there is no collision.
+        let _wm_field: bool = wm.allow_world_model_raw_text_storage;
+        let _rq_field: bool = rq.allow_raw_text_storage;
+        // If either field were renamed to match the other, this test would fail to compile.
+    }
+
+    #[test]
+    fn default_world_model_policy_has_all_three_new_fields_false() {
+        let p = WorldModelPolicy::default();
+        assert!(!p.allow_embedding_cache);
+        assert!(!p.allow_world_model_raw_text_storage);
+        assert!(!p.allow_eval_background_jobs);
     }
 }
 
