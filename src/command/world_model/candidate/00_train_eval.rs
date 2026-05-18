@@ -441,11 +441,22 @@ pub(super) fn render_eval_jepa(
     root: &Path,
     candidate_id: &str,
 ) -> Result<String> {
+    // CRIT-6: stage-boundary progress prints so operator can observe long evals.
+    // ForegroundProgressReporter (T013) is scaffolding for future per-row ticks;
+    // these eprintln! calls cover the coarse stage boundaries without it.
+    let stage_start = std::time::Instant::now();
+
+    eprintln!("Stage: load_candidate");
     let registry = ModelRegistry::open(root)?;
     let candidate = registry.load_jepa_candidate(candidate_id)?;
+
+    eprintln!(
+        "Stage: load_rows ({:.1}s elapsed)",
+        stage_start.elapsed().as_secs_f64()
+    );
     let rows = WorldModelStore::open(root)?.load_rows()?;
 
-    // CRIT-2: compute proper fingerprints before constructing the eval record.
+    // Compute proper fingerprints before constructing the eval record.
     // corpus_fingerprint: hash of row content — catches corpus mutations since eval.
     let corpus_fingerprint =
         Some(archon_world_model::jepa::JepaEvalPlanner::compute_corpus_fingerprint(&rows));
@@ -459,9 +470,19 @@ pub(super) fn render_eval_jepa(
         .jepa
         .eval_schema_version_or_default();
 
+    eprintln!(
+        "Stage: baseline_embed (corpus rows: {}, {:.1}s elapsed)",
+        rows.len(),
+        stage_start.elapsed().as_secs_f64()
+    );
     let comparison =
         compare_jepa_representations(config, &candidate.model, &rows, "fastembed", true);
     let comparison_path = registry.write_jepa_representation_comparison(&comparison)?;
+
+    eprintln!(
+        "Stage: gates ({:.1}s elapsed)",
+        stage_start.elapsed().as_secs_f64()
+    );
     let checkpoint_size_passed = checkpoint_under_jepa_cap(config, &candidate)?;
     let tensor_safety = candidate.model.validate_finite().is_ok();
     let corpus_sufficient = candidate.model.metadata.example_count as usize
@@ -508,6 +529,11 @@ pub(super) fn render_eval_jepa(
         gates,
         created_at: Utc::now(),
     };
+
+    eprintln!(
+        "Stage: report (total: {:.1}s)",
+        stage_start.elapsed().as_secs_f64()
+    );
     let eval_path = registry.write_jepa_eval_report(&record)?;
 
     Ok(format!(
