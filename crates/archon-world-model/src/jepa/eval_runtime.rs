@@ -29,6 +29,10 @@ pub struct JepaEvalResolverConfig {
     /// Default 0 (T019 will use this many from the parity sample; 0 means the
     /// entire provided sample is used, capped by sample length in practice).
     pub min_metal_validation_examples: usize,
+    /// Minimum number of examples to use in CUDA parity validation.
+    /// Maps to `WorldModelJepaConfig::min_cuda_validation_examples` in archon-core.
+    /// Default 0.
+    pub min_cuda_validation_examples: usize,
 }
 
 /// CPU-vs-accelerator parity sample report.
@@ -147,15 +151,35 @@ impl BackendRuntimeResolver {
         cli_override: Option<JepaEvalBackendKind>,
     ) -> Result<Box<dyn JepaEvalRuntime>> {
         let required = Self::cuda_is_required(metadata, resolver_config, cli_override);
+
         #[cfg(not(feature = "cuda"))]
-        if required {
-            anyhow::bail!(
-                "CUDA backend required but not available (binary not built with feature=cuda). \
-                 Rebuild with --features cuda, or use --backend cpu if policy/config allow fallback."
+        {
+            if required {
+                anyhow::bail!(
+                    "CUDA backend required but not available (binary not built with feature=cuda). \
+                     Rebuild with --features cuda, or use --backend cpu if policy/config allow fallback."
+                );
+            }
+            // CUDA not required and not available — fall back to CPU
+            tracing::warn!(
+                backend = "cuda",
+                fallback = "cpu",
+                "CUDA backend not compiled; falling back to CPU (allowed because not required)"
             );
+            return Self::resolve_cpu(metadata.latent_dim, resolver_config.parity_floor);
         }
-        // Stub until T020
-        anyhow::bail!("CUDA JepaEvalRuntime not yet implemented — see TASK-JEVAL-020")
+
+        #[cfg(feature = "cuda")]
+        {
+            let runtime = CudaEvalRuntime::new(
+                metadata,
+                metadata.latent_dim,
+                resolver_config.parity_floor,
+                resolver_config.min_cuda_validation_examples,
+                resolver_config.allow_cpu_fallback,
+            )?;
+            Ok(Box::new(runtime))
+        }
     }
 }
 
@@ -221,6 +245,7 @@ mod tests_eval_runtime {
             prefer_accelerator: false,
             parity_floor: 0.0,
             min_metal_validation_examples: 0,
+            min_cuda_validation_examples: 0,
         };
         assert!(BackendRuntimeResolver::cuda_is_required(
             &metadata, &config, None
@@ -236,6 +261,7 @@ mod tests_eval_runtime {
             prefer_accelerator: true,
             parity_floor: 0.0,
             min_metal_validation_examples: 0,
+            min_cuda_validation_examples: 0,
         };
         assert!(BackendRuntimeResolver::cuda_is_required(
             &metadata, &config, None
@@ -251,6 +277,7 @@ mod tests_eval_runtime {
             prefer_accelerator: false,
             parity_floor: 0.0,
             min_metal_validation_examples: 0,
+            min_cuda_validation_examples: 0,
         };
         assert!(!BackendRuntimeResolver::cuda_is_required(
             &metadata, &config, None
