@@ -551,6 +551,20 @@ backend_parity_cosine_floor = 0.99
 max_backend_prediction_latency_ms = 50
 max_backend_first_call_latency_ms = 5000
 
+[learning.world_model.jepa.eval]
+mode = "quick"                    # quick | full | promotion
+batch_size = 256
+embedding_batch_size = 64
+progress_interval_rows = 500
+quick_max_runtime_ms = 30000      # quick must be bounded (ms, not minutes)
+full_max_runtime_ms = 0           # 0 = unlimited (handles 30+ min workloads)
+promotion_max_runtime_ms = 0      # 0 = unlimited
+stale_heartbeat_ms = 120000       # stale lock detection when budget = 0
+cache_enabled = true
+cache_max_mb = 2048               # ~680k BGE-base 768-dim f32 vectors
+background_default = false
+eval_schema_version = 1           # bump to invalidate ALL cache entries and keys
+
 [learning.world_model.guardrails]
 enabled = true
 interactive_mode = "advisory"
