@@ -35,3 +35,8 @@ mod tests {
     include!("jepa/19_tests_mlx.rs");
     include!("jepa/20_tests_gates_checkpoint.rs");
 }
+
+#[cfg(test)]
+mod tests_eval_pipeline {
+    include!("jepa/21_tests_eval_pipeline.rs");
+}
