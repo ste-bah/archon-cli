@@ -183,23 +183,47 @@ pub struct EmbeddingCacheConfig {
     pub cache_enabled: bool,
     pub cache_max_bytes: u64,
     pub redact_before_embedding: bool,
+    /// Schema version used to invalidate all cached keys when the eval schema changes.
+    /// Bump this to force a cold cache on all keys.
+    /// TODO(T025): read from config.learning.world_model.jepa.eval.eval_schema_version
+    pub eval_schema_version: u32,
 }
 
 pub struct CachedEmbeddingAdapter {
     inner: Box<dyn WorldEmbeddingAdapter>,
     config: EmbeddingCacheConfig,
+    /// Resolved from WorldModelPolicy.allow_embedding_cache at construction time.
+    /// When false, write_cached() is skipped (read-through only — policy denies persistence).
+    allow_cache: bool,
 }
 
+/// On-disk record for a cached embedding.
+/// IMPORTANT: no raw `text` field — allow_world_model_raw_text_storage = false means
+/// raw text is never persisted to disk (DEC-JEVAL-04).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct EmbeddingCacheRecord {
     key: String,
     vector: EmbeddingVector,
     created_at: DateTime<Utc>,
+    /// sha256 of the exact text post-redaction — used for cache validation, not re-embedding.
+    text_hash: String,
+    /// Schema version at write time — stored for provenance; the key already encodes this.
+    eval_schema_version: u32,
+    /// Source hash at write time — provenance only, never hashed into the cache key.
+    source_hash: String,
 }
 
 impl CachedEmbeddingAdapter {
-    pub fn new(inner: Box<dyn WorldEmbeddingAdapter>, config: EmbeddingCacheConfig) -> Self {
-        Self { inner, config }
+    pub fn new(
+        inner: Box<dyn WorldEmbeddingAdapter>,
+        config: EmbeddingCacheConfig,
+        allow_cache: bool,
+    ) -> Self {
+        Self {
+            inner,
+            config,
+            allow_cache,
+        }
     }
 
     fn cache_path(&self, key: &str) -> PathBuf {
@@ -210,6 +234,13 @@ impl CachedEmbeddingAdapter {
     }
 
     fn cache_key(&self, request: &EmbeddingRequest) -> String {
+        // Hash the exact post-redaction text first so the outer key never encodes raw text.
+        let text_hash = {
+            let mut h = Sha256::new();
+            h.update(request.text.as_bytes());
+            hex::encode(h.finalize())
+        };
+
         let mut hasher = Sha256::new();
         hasher.update(self.inner.provider_name().as_bytes());
         hasher.update(b"\0");
@@ -219,9 +250,13 @@ impl CachedEmbeddingAdapter {
         hasher.update(b"\0");
         hasher.update(request.redaction_policy.as_bytes());
         hasher.update(b"\0");
-        hasher.update(request.source_hash.as_bytes());
+        // eval_schema_version replaces source_hash in the key: bumping the version invalidates
+        // all cached entries. source_hash was invariant to row-content changes when row_ids were
+        // unchanged, causing silent stale cache hits.
+        hasher.update(self.config.eval_schema_version.to_string().as_bytes());
         hasher.update(b"\0");
-        hasher.update(request.text.as_bytes());
+        // text_hash (sha256 of the exact post-redaction text) — sensitive to text changes.
+        hasher.update(text_hash.as_bytes());
         hex::encode(hasher.finalize())
     }
 
@@ -238,10 +273,24 @@ impl CachedEmbeddingAdapter {
         Ok((record.key == key).then_some(record.vector))
     }
 
-    fn write_cached(&self, key: &str, vector: &EmbeddingVector) -> Result<()> {
+    fn write_cached(
+        &self,
+        key: &str,
+        request: &EmbeddingRequest,
+        vector: &EmbeddingVector,
+    ) -> Result<()> {
         if !self.config.cache_enabled {
             return Ok(());
         }
+        // Policy gate: resolved at construction. When false, skip persistence (read-through only).
+        if !self.allow_cache {
+            return Ok(());
+        }
+        let text_hash = {
+            let mut h = Sha256::new();
+            h.update(request.text.as_bytes());
+            hex::encode(h.finalize())
+        };
         let path = self.cache_path(key);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -250,8 +299,12 @@ impl CachedEmbeddingAdapter {
             key: key.to_string(),
             vector: vector.clone(),
             created_at: Utc::now(),
+            text_hash,
+            eval_schema_version: self.config.eval_schema_version,
+            source_hash: request.source_hash.clone(),
         };
         std::fs::write(path, serde_json::to_vec_pretty(&record)?)?;
+        // Reuse existing prune_cache — do NOT add a duplicate prune_if_needed() function.
         prune_cache(&self.config.cache_dir, self.config.cache_max_bytes)?;
         Ok(())
     }
@@ -284,7 +337,7 @@ impl WorldEmbeddingAdapter for CachedEmbeddingAdapter {
             return Ok(vector);
         }
         let vector = self.inner.embed(&request)?;
-        self.write_cached(&key, &vector)?;
+        self.write_cached(&key, &request, &vector)?;
         Ok(vector)
     }
 }
@@ -469,7 +522,9 @@ mod tests {
                 cache_enabled: true,
                 cache_max_bytes: 1024 * 1024,
                 redact_before_embedding: true,
+                eval_schema_version: 1,
             },
+            true,
         );
         let request = EmbeddingRequest {
             text: "token=supersecret value".into(),
@@ -495,5 +550,131 @@ mod tests {
         std::fs::write(&path, "x".repeat(128)).unwrap();
         prune_cache(temp.path(), 1).unwrap();
         assert!(!path.exists());
+    }
+
+    fn make_test_cached_adapter(config: EmbeddingCacheConfig) -> CachedEmbeddingAdapter {
+        CachedEmbeddingAdapter::new(
+            Box::new(DeterministicHashEmbeddingAdapter::new(4).unwrap()),
+            config,
+            true,
+        )
+    }
+
+    fn default_cache_config(cache_dir: std::path::PathBuf) -> EmbeddingCacheConfig {
+        EmbeddingCacheConfig {
+            cache_dir,
+            cache_enabled: true,
+            cache_max_bytes: 1024 * 1024,
+            redact_before_embedding: false,
+            eval_schema_version: 1,
+        }
+    }
+
+    fn default_request() -> EmbeddingRequest {
+        EmbeddingRequest {
+            text: "hello world".into(),
+            source_hash: "hash-a".into(),
+            redaction_policy: "none".into(),
+        }
+    }
+
+    #[test]
+    fn cache_key_unchanged_when_only_source_hash_differs() {
+        let temp = tempfile::tempdir().unwrap();
+        let adapter = make_test_cached_adapter(default_cache_config(temp.path().to_path_buf()));
+        let req1 = EmbeddingRequest {
+            text: "hello world".into(),
+            source_hash: "hash-a".into(),
+            redaction_policy: "none".into(),
+        };
+        let req2 = EmbeddingRequest {
+            text: "hello world".into(),
+            source_hash: "hash-b".into(),
+            redaction_policy: "none".into(),
+        };
+        assert_eq!(
+            adapter.cache_key(&req1),
+            adapter.cache_key(&req2),
+            "cache_key must not change when only source_hash differs"
+        );
+    }
+
+    #[test]
+    fn cache_key_changes_when_text_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let adapter = make_test_cached_adapter(default_cache_config(temp.path().to_path_buf()));
+        let req1 = EmbeddingRequest {
+            text: "hello".into(),
+            ..default_request()
+        };
+        let req2 = EmbeddingRequest {
+            text: "world".into(),
+            ..default_request()
+        };
+        assert_ne!(
+            adapter.cache_key(&req1),
+            adapter.cache_key(&req2),
+            "cache_key must change when text changes"
+        );
+    }
+
+    #[test]
+    fn cache_key_changes_when_eval_schema_version_changes() {
+        let temp1 = tempfile::tempdir().unwrap();
+        let temp2 = tempfile::tempdir().unwrap();
+        let cfg1 = EmbeddingCacheConfig {
+            eval_schema_version: 1,
+            ..default_cache_config(temp1.path().to_path_buf())
+        };
+        let cfg2 = EmbeddingCacheConfig {
+            eval_schema_version: 2,
+            ..default_cache_config(temp2.path().to_path_buf())
+        };
+        let req = default_request();
+        assert_ne!(
+            make_test_cached_adapter(cfg1).cache_key(&req),
+            make_test_cached_adapter(cfg2).cache_key(&req),
+            "cache_key must change when eval_schema_version changes"
+        );
+    }
+
+    #[test]
+    fn allow_cache_false_skips_disk_write() {
+        let temp = tempfile::tempdir().unwrap();
+        let cache_dir = temp.path().join("cache");
+        let calls = Arc::new(AtomicUsize::new(0));
+        // Build adapter with allow_cache = false — policy denies persistence.
+        let adapter = CachedEmbeddingAdapter::new(
+            Box::new(CountingAdapter {
+                calls: Arc::clone(&calls),
+            }),
+            EmbeddingCacheConfig {
+                cache_dir: cache_dir.clone(),
+                cache_enabled: true,
+                cache_max_bytes: 1024 * 1024,
+                redact_before_embedding: false,
+                eval_schema_version: 1,
+            },
+            false, // allow_cache = false
+        );
+        let request = EmbeddingRequest {
+            text: "some text".into(),
+            source_hash: "s1".into(),
+            redaction_policy: "none".into(),
+        };
+        // embed should succeed (read-through via inner adapter)
+        let result = adapter.embed(&request).unwrap();
+        assert!(!result.values.is_empty());
+        // inner adapter was still called (no cached hit)
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        // No file should have been written to cache_dir
+        let cache_exists = cache_dir.exists()
+            && std::fs::read_dir(&cache_dir)
+                .map(|mut d| d.next().is_some())
+                .unwrap_or(false);
+        assert!(
+            !cache_exists,
+            "cache_dir should be empty when allow_cache=false"
+        );
     }
 }

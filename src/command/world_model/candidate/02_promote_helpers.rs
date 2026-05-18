@@ -263,10 +263,30 @@ fn baseline_representation_adapter(
     baseline: &str,
     state_dim: usize,
 ) -> Result<Box<dyn archon_world_model::WorldRepresentationAdapter>> {
+    // Load policy fail-closed; allow_embedding_cache defaults to false.
+    let policy =
+        archon_policy::load_effective_policy(&std::env::current_dir()?).unwrap_or_default();
+    let allow_cache = policy.world_model.allow_embedding_cache;
     match baseline {
-        "fastembed" => Ok(Box::new(GenericEmbeddingRepresentationAdapter::new(
-            Box::new(MemoryEmbeddingAdapter::local_fastembed(state_dim)?),
-        ))),
+        "fastembed" => {
+            let inner = Box::new(MemoryEmbeddingAdapter::local_fastembed(state_dim)?);
+            let cache_config = archon_world_model::embedding::EmbeddingCacheConfig {
+                cache_dir: super::world_model_root()?
+                    .join("embeddings")
+                    .join("cache"),
+                cache_enabled: allow_cache,
+                cache_max_bytes: 256 * 1024 * 1024, // 256 MiB default
+                redact_before_embedding: true,
+                // TODO(T025): read from config.learning.world_model.jepa.eval.eval_schema_version
+                eval_schema_version: 1u32,
+            };
+            let cached = Box::new(archon_world_model::embedding::CachedEmbeddingAdapter::new(
+                inner,
+                cache_config,
+                allow_cache,
+            ));
+            Ok(Box::new(GenericEmbeddingRepresentationAdapter::new(cached)))
+        }
         "deterministic-hash" => Ok(Box::new(GenericEmbeddingRepresentationAdapter::new(
             Box::new(DeterministicHashEmbeddingAdapter::new(state_dim)?),
         ))),
