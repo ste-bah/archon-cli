@@ -362,34 +362,27 @@ pub(super) fn render_eval_jepa_with_options(
     render_eval_jepa(config, root, candidate_id)
 }
 
-/// Handles `--background`: applies policy gate then spawns a detached worker.
+/// Handles `--background`: returns a clear deferral error.
+///
+/// CRIT-1 fix: the previous implementation called `spawn_background_worker`
+/// which re-execs with `--__bg-worker --run-id <id>` flags that are NOT wired
+/// into the CLI dispatch — the grandchild would die immediately on arg parsing.
+///
+/// This honest deferral prevents silent breakage while the background worker
+/// entry point is staged for a future task. Operators are given a clear
+/// workaround (foreground mode with shell backgrounding or tmux).
 fn handle_background_eval(
     _config: &archon_core::config::ArchonConfig,
-    root: &Path,
+    _root: &Path,
     _candidate_id: &str,
 ) -> Result<String> {
-    // Load effective policy (fail-closed default if file is absent or unreadable).
-    let policy = archon_policy::load_effective_policy(&std::env::current_dir()?)
-        .unwrap_or_default();
-    if !policy.world_model.allow_eval_background_jobs {
-        anyhow::bail!(
-            "Policy does not permit background eval jobs \
-             (allow_eval_background_jobs = false). \
-             Remove --background or update policy: \
-             [policy.world_model] allow_eval_background_jobs = true \
-             (ERR-JEVAL-09)"
-        );
-    }
-
-    let run_id = JepaEvalRunStore::generate_run_id();
-    let run_dir = root.join("jepa/eval-runs");
-    let store = JepaEvalRunStore::new(run_dir)?;
-    store.spawn_background_worker(&run_id, &[])?;
-    Ok(format!(
-        "Background eval started. Run ID: {run_id}\n\
-         Check status:  archon world eval-jepa-status {run_id}\n\
-         List runs:     archon world eval-jepa-runs\n"
-    ))
+    anyhow::bail!(
+        "Background eval execution requires a background-worker entry point that \
+         has not yet been wired into the CLI. Use foreground mode (omit --background) \
+         for now. The --background flag will be fully wired in a future task.\n\n\
+         Workaround: run `archon world eval-jepa <candidate>` in the foreground; \
+         to release the terminal, use shell backgrounding or `nohup`/`tmux`."
+    )
 }
 
 /// Handles `--resume <run-id>`: validates run record and cache preconditions.

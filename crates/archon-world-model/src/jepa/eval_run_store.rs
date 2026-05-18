@@ -306,6 +306,12 @@ impl JepaEvalRunStore {
     /// double-fork + setsid pattern so the grandchild is fully detached from
     /// the controlling terminal.
     ///
+    /// EXPERIMENTAL: The current implementation re-execs with
+    /// `--__bg-worker --run-id <id>` flags that are NOT YET wired into the
+    /// CLI dispatch — the grandchild will fail immediately on arg parsing.
+    /// Callers should currently NOT invoke this method; use foreground eval
+    /// instead. Wiring the dispatch entry point is deferred to a future task.
+    ///
     /// The grandchild's stdout/stderr are redirected to `<run_id>.log` in the
     /// store's run directory; stdin is redirected to `/dev/null`.
     ///
