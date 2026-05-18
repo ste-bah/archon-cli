@@ -624,7 +624,7 @@ pub mod archon_memory::vector_search
 pub fn archon_memory::vector_search::delete_embedding(db: &cozo_ce::DbInstance, memory_id: &str) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::vector_search::init_embedding_schema(db: &cozo_ce::DbInstance, dim: usize) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::vector_search::search_similar(db: &cozo_ce::DbInstance, query_vec: &[f32], top_k: usize) -> core::result::Result<alloc::vec::Vec<(alloc::string::String, f64)>, archon_memory::types::MemoryError>
-pub fn archon_memory::vector_search::store_embedding(db: &cozo_ce::DbInstance, memory_id: &str, embedding: &[f32], provider: &str, _dim: usize) -> core::result::Result<(), archon_memory::types::MemoryError>
+pub fn archon_memory::vector_search::store_embedding(db: &cozo_ce::DbInstance, memory_id: &str, embedding: &[f32], provider: &str, dim: usize) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub enum archon_memory::MemoryAccess
 pub archon_memory::MemoryAccess::Direct
 pub archon_memory::MemoryAccess::Direct::_server_handle: tokio::runtime::task::join::JoinHandle<()>

@@ -1,112 +1,77 @@
 # Plugins
 
-Plugins are dynamically loaded Rust libraries (`.so` / `.dll` / `.dylib`) implementing the `archon_plugin::api` trait. They register new tools, hooks, skills, and slash commands at runtime.
+Plugins are WebAssembly modules loaded with a `.archon-plugin/plugin.json` manifest. They can register tools, hooks, and slash commands when the manifest declares the matching structured capability and the operator grants it.
 
-## Plugin layout
+## Plugin Layout
 
-```
+```text
 .archon/plugins/
-├── my-plugin/
-│   ├── plugin.toml         # manifest
-│   └── libmy_plugin.so     # compiled plugin
+|-- my-plugin/
+|   |-- .archon-plugin/
+|   |   `-- plugin.json
+|   `-- plugin.wasm
 ```
 
-## Manifest schema
+## Manifest Schema
 
-`plugin.toml`:
+`plugin.json`:
 
-```toml
-name = "my-plugin"
-version = "0.1.0"
-description = "Example plugin"
-author = "you@example.com"
-capabilities = ["tools", "skills", "hooks"]    # which surfaces this plugin extends
-
-[[tools]]
-name = "MyTool"
-description = "Does something specific"
-schema = "schemas/my-tool.json"
-permission = "Risky"                            # Safe | Risky | Variable
-
-[[skills]]
-name = "my-plugin-skill"
-description = "Workflow shortcut"
-trigger = "/my-plugin"
-template_path = "templates/my-skill.md"
-
-[[hooks]]
-event = "PostToolUse"
-command = "scripts/post-hook.sh"
-timeout = 30
+```json
+{
+  "name": "my-plugin",
+  "version": "0.1.0",
+  "description": "Example plugin",
+  "author": "you@example.com",
+  "capabilities": [
+    { "kind": "ToolRegister" },
+    { "kind": "ReadFs", "paths": ["/repo/docs"] },
+    { "kind": "Network", "hosts": ["api.example.com"] }
+  ],
+  "required_host_functions": [
+    "archon_log",
+    "archon_register_tool",
+    "archon_host_call"
+  ]
+}
 ```
+
+Legacy string capability entries such as `"ReadFs"` are rejected with a migration error. Filesystem capabilities must list absolute paths. Network capabilities must enumerate concrete hosts; `"*"` is not valid in plugin manifests. A wildcard network grant is only available as an explicit high-risk operator approval outside the manifest path and is recorded as a load warning.
+
+If a plugin declares a required host function Archon does not implement, loading fails with a manifest validation error.
 
 ## CLI
 
 ```bash
-archon plugin list                # discovered plugins
-archon plugin info <name>         # show manifest + status
+archon plugin list
+archon plugin info <name>
 ```
 
 In the TUI:
-```
-/plugin                           # list plugins
-/plugin info <name>               # show details
-/reload-plugins                   # re-scan plugin directories
+
+```text
+/plugin
+/plugin info <name>
+/reload-plugins
 ```
 
-## Discovery paths
+## Discovery Paths
 
-archon-cli searches for plugins in (priority order):
+archon-cli searches for plugins in priority order:
 
 1. `<workdir>/.archon/plugins/`
 2. `~/.config/archon/plugins/`
-3. `~/.local/share/archon/plugins/` (system-installed)
+3. `~/.local/share/archon/plugins/`
 
 A plugin found at multiple paths uses the highest-priority location.
 
 ## Architecture
 
-Plugins run **out-of-process** with crash isolation. The plugin host bridges tool calls and hook invocations via JSON-RPC over stdio. If a plugin panics or hangs, the host kills it and surfaces the error to the user without taking down the main archon process.
-
-## Building a plugin
-
-```toml
-# Cargo.toml
-[package]
-name = "my-plugin"
-
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-archon-plugin-api = "0.1"
-```
-
-```rust
-// src/lib.rs
-use archon_plugin_api::*;
-
-#[no_mangle]
-pub extern "C" fn archon_plugin_register(host: &mut PluginHost) {
-    host.register_tool(MyTool::new());
-    host.register_skill(MySkill::new());
-}
-```
-
-Compile with:
-```bash
-cargo build --release --crate-type cdylib
-cp target/release/libmy_plugin.so ~/.config/archon/plugins/my-plugin/
-```
+Plugins run inside the Archon WASM host with fuel and memory limits. A plugin that panics, exceeds its fuel budget, exceeds memory limits, or fails ABI negotiation is skipped without taking down the main Archon process.
 
 The full plugin API surface lives in `crates/archon-plugin/`.
 
-## Built-in plugin examples
+## See Also
 
-The repo includes example plugins under `examples/plugins/` (when present) demonstrating tool and skill registration patterns.
-
-## See also
-
-- [Hooks](hooks.md) — event-driven shell commands (lighter-weight than plugins)
-- [Skills](../reference/skills.md) — TOML-based skills (no compilation required)
-- [Adding a tool](../development/adding-a-tool.md) — built-in tool implementation
+- [Hooks](hooks.md) - event-driven shell commands
+- [Skills](../reference/skills.md) - TOML-based skills
+- [Adding a tool](../development/adding-a-tool.md) - built-in tool implementation

@@ -114,6 +114,8 @@ pub struct WebConfig {
     pub bind_address: String,
     /// Open the default browser automatically after server starts.
     pub open_browser: bool,
+    /// Maximum accepted HTTP request body size for mutating web APIs.
+    pub max_body_bytes: usize,
 }
 
 impl Default for WebConfig {
@@ -122,6 +124,7 @@ impl Default for WebConfig {
             port: 8421,
             bind_address: "127.0.0.1".to_string(),
             open_browser: true,
+            max_body_bytes: 64 * 1024 * 1024,
         }
     }
 }
@@ -167,6 +170,7 @@ pub struct WebServer {
     policy: EffectivePolicySummary,
     paths: WebRuntimePaths,
     chat_backend: Option<Arc<dyn chat::WebChatBackend>>,
+    unsafe_allow_unauthenticated_nonlocal_bind: bool,
 }
 
 impl WebServer {
@@ -189,6 +193,7 @@ impl WebServer {
             policy,
             paths: WebRuntimePaths::default(),
             chat_backend: None,
+            unsafe_allow_unauthenticated_nonlocal_bind: false,
         }
     }
 
@@ -204,11 +209,22 @@ impl WebServer {
             policy,
             paths,
             chat_backend: None,
+            unsafe_allow_unauthenticated_nonlocal_bind: false,
         }
     }
 
     pub fn with_chat_backend(mut self, backend: Arc<dyn chat::WebChatBackend>) -> Self {
         self.chat_backend = Some(backend);
+        self
+    }
+
+    /// UNSAFE: allow a non-loopback bind without bearer-token auth.
+    ///
+    /// This is intentionally not a `WebConfig` field so it cannot be enabled
+    /// silently through persistent config. The CLI exposes it as an explicit,
+    /// noisy operator override.
+    pub fn unsafe_allow_unauthenticated_nonlocal_bind_for_cli(mut self) -> Self {
+        self.unsafe_allow_unauthenticated_nonlocal_bind = true;
         self
     }
 
@@ -218,9 +234,18 @@ impl WebServer {
             .parse()
             .map_err(|e| anyhow::anyhow!("invalid bind address: {e}"))?;
 
-        if !self.config.is_localhost() && self.token.is_none() {
+        let token = validate_bind_auth(
+            &self.config,
+            &self.token,
+            self.unsafe_allow_unauthenticated_nonlocal_bind,
+        )?;
+
+        if !self.config.is_localhost()
+            && token.is_none()
+            && self.unsafe_allow_unauthenticated_nonlocal_bind
+        {
             tracing::warn!(
-                "web: server bound to {} without auth token — \
+                "web: UNSAFE override enabled: server bound to {} without auth token; \
                  non-localhost access is unauthenticated",
                 self.config.bind_address
             );
@@ -230,10 +255,10 @@ impl WebServer {
         live.record("web.runtime.started", "Archon web workbench started");
 
         let state = AppState {
-            token: self.token.clone(),
+            token: token.clone(),
             api: WebApiState::from_server_config(
                 &self.config,
-                self.token.is_some(),
+                token.is_some(),
                 self.policy.clone(),
                 self.paths.clone(),
             ),
@@ -242,54 +267,7 @@ impl WebServer {
             chat_backend: self.chat_backend.clone(),
         };
 
-        let local_origins: Vec<HeaderValue> = [
-            format!("http://127.0.0.1:{}", self.config.port),
-            format!("http://localhost:{}", self.config.port),
-            format!("http://[::1]:{}", self.config.port),
-        ]
-        .iter()
-        .filter_map(|origin| origin.parse().ok())
-        .collect();
-        let cors = CorsLayer::new()
-            .allow_origin(AllowOrigin::list(local_origins))
-            .allow_methods(Any)
-            .allow_headers(Any);
-
-        let app = Router::new()
-            .route("/", get(index_handler))
-            .route("/health", get(health_handler))
-            .route("/api/status", get(api::status_handler))
-            .route("/api/auth/session", get(auth::session_handler))
-            .route("/api/auth/logout", post(auth::logout_handler))
-            .route(
-                "/api/chat/submit",
-                post(chat::submit_handler).layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
-            )
-            .route("/api/config/effective", get(api::config_handler))
-            .route("/api/policy/effective", get(api::policy_handler))
-            .route("/api/live/snapshot", get(live::snapshot_handler))
-            .route(
-                "/api/actions/evaluate",
-                post(actions::evaluate_action_handler),
-            )
-            .route("/api/uploads/policy", get(uploads::policy_handler))
-            .route("/api/uploads/intent", post(uploads::intent_handler))
-            .route("/api/corpus/summary", get(corpus::summary_handler))
-            .route("/api/corpus/search", get(corpus::search_handler))
-            .route("/api/corpus/source", get(corpus::preview_handler))
-            .route("/api/learning/summary", get(inspect::learning_handler))
-            .route("/api/world/summary", get(world::summary_handler))
-            .route("/api/pipelines/summary", get(pipelines::summary_handler))
-            .route("/api/metrics/summary", get(metrics::summary_handler))
-            .route("/api/evidence/graph", get(evidence::graph_handler))
-            .route("/api/settings/summary", get(inspect::settings_handler))
-            .route(
-                "/api/settings/theme-profile",
-                get(settings::theme_profile_handler).post(settings::save_theme_profile_handler),
-            )
-            .route("/static/{*path}", get(static_handler))
-            .layer(cors)
-            .with_state(state);
+        let app = build_app(&self.config, state);
 
         tracing::info!("web: listening on http://{addr}");
         println!("Archon web UI: http://{addr}");
@@ -310,6 +288,83 @@ impl WebServer {
             .await
             .map_err(|e| anyhow::anyhow!("web: server error: {e}"))
     }
+}
+
+fn build_app(config: &WebConfig, state: AppState) -> Router {
+    let local_origins: Vec<HeaderValue> = [
+        format!("http://127.0.0.1:{}", config.port),
+        format!("http://localhost:{}", config.port),
+        format!("http://[::1]:{}", config.port),
+    ]
+    .iter()
+    .filter_map(|origin| origin.parse().ok())
+    .collect();
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::list(local_origins))
+        .allow_methods(Any)
+        .allow_headers(Any);
+
+    Router::new()
+        .route("/", get(index_handler))
+        .route("/health", get(health_handler))
+        .route("/api/status", get(api::status_handler))
+        .route("/api/auth/session", get(auth::session_handler))
+        .route("/api/auth/logout", post(auth::logout_handler))
+        .route(
+            "/api/chat/submit",
+            post(chat::submit_handler).layer(DefaultBodyLimit::max(config.max_body_bytes)),
+        )
+        .route("/api/config/effective", get(api::config_handler))
+        .route("/api/policy/effective", get(api::policy_handler))
+        .route("/api/live/snapshot", get(live::snapshot_handler))
+        .route(
+            "/api/actions/evaluate",
+            post(actions::evaluate_action_handler),
+        )
+        .route("/api/uploads/policy", get(uploads::policy_handler))
+        .route("/api/uploads/intent", post(uploads::intent_handler))
+        .route("/api/corpus/summary", get(corpus::summary_handler))
+        .route("/api/corpus/search", get(corpus::search_handler))
+        .route("/api/corpus/source", get(corpus::preview_handler))
+        .route("/api/learning/summary", get(inspect::learning_handler))
+        .route("/api/world/summary", get(world::summary_handler))
+        .route("/api/pipelines/summary", get(pipelines::summary_handler))
+        .route("/api/metrics/summary", get(metrics::summary_handler))
+        .route("/api/evidence/graph", get(evidence::graph_handler))
+        .route("/api/settings/summary", get(inspect::settings_handler))
+        .route(
+            "/api/settings/theme-profile",
+            get(settings::theme_profile_handler).post(settings::save_theme_profile_handler),
+        )
+        .route("/static/{*path}", get(static_handler))
+        .layer(cors)
+        .with_state(state)
+}
+
+fn validate_bind_auth(
+    config: &WebConfig,
+    token: &Option<String>,
+    unsafe_allow_unauthenticated_nonlocal_bind: bool,
+) -> anyhow::Result<Option<String>> {
+    let token = token
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
+    if config.is_localhost() || token.is_some() {
+        return Ok(token);
+    }
+
+    if unsafe_allow_unauthenticated_nonlocal_bind {
+        return Ok(None);
+    }
+
+    anyhow::bail!(
+        "web: refusing to bind {} without an auth token; use localhost, provide a token, \
+         or pass the explicit CLI-only --allow-unauthenticated-nonlocal-bind override",
+        config.bind_address
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -380,6 +435,26 @@ pub(crate) fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<(), Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, header};
+    use tower::ServiceExt;
+
+    fn test_state(config: &WebConfig, token: Option<String>) -> AppState {
+        let auth_required = token.is_some();
+        let paths = WebRuntimePaths::default();
+        AppState {
+            token,
+            api: WebApiState::from_server_config(
+                config,
+                auth_required,
+                EffectivePolicySummary::default_safe(),
+                paths.clone(),
+            ),
+            live: WebLiveManager::new(16),
+            paths,
+            chat_backend: None,
+        }
+    }
 
     #[test]
     fn runtime_paths_use_memory_database_file() {
@@ -392,5 +467,93 @@ mod tests {
     fn runtime_paths_honor_explicit_memory_file() {
         let paths = WebRuntimePaths::from_overrides(Some("/tmp/custom-memory.db"), None);
         assert_eq!(paths.memory_db, PathBuf::from("/tmp/custom-memory.db"));
+    }
+
+    #[test]
+    fn nonlocal_bind_without_token_is_rejected_by_default() {
+        let config = WebConfig {
+            bind_address: "0.0.0.0".to_string(),
+            ..WebConfig::default()
+        };
+        let err = validate_bind_auth(&config, &None, false).unwrap_err();
+        assert!(err.to_string().contains("refusing to bind"));
+    }
+
+    #[test]
+    fn nonlocal_bind_with_blank_token_is_rejected_by_default() {
+        let config = WebConfig {
+            bind_address: "0.0.0.0".to_string(),
+            ..WebConfig::default()
+        };
+        let err = validate_bind_auth(&config, &Some("   ".to_string()), false).unwrap_err();
+        assert!(err.to_string().contains("refusing to bind"));
+    }
+
+    #[test]
+    fn nonlocal_bind_with_token_is_allowed() {
+        let config = WebConfig {
+            bind_address: "0.0.0.0".to_string(),
+            ..WebConfig::default()
+        };
+        let token = validate_bind_auth(&config, &Some("secret-token".to_string()), false).unwrap();
+        assert_eq!(token.as_deref(), Some("secret-token"));
+    }
+
+    #[test]
+    fn nonlocal_bind_without_token_requires_explicit_cli_unsafe_override() {
+        let config = WebConfig {
+            bind_address: "0.0.0.0".to_string(),
+            ..WebConfig::default()
+        };
+        let token = validate_bind_auth(&config, &None, true).unwrap();
+        assert!(token.is_none());
+    }
+
+    #[tokio::test]
+    async fn chat_submit_requires_bearer_auth_when_token_is_configured() {
+        let config = WebConfig {
+            bind_address: "0.0.0.0".to_string(),
+            open_browser: false,
+            ..WebConfig::default()
+        };
+        let app = build_app(&config, test_state(&config, Some("secret-token".into())));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/chat/submit")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"message":"hello","attachments":[]}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn chat_submit_body_limit_is_configurable() {
+        let config = WebConfig {
+            open_browser: false,
+            max_body_bytes: 16,
+            ..WebConfig::default()
+        };
+        let app = build_app(&config, test_state(&config, None));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/chat/submit")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"message":"this body is too large","attachments":[]}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 }

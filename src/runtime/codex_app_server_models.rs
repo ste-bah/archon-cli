@@ -63,6 +63,7 @@ fn parse_model(item: &serde_json::Value) -> Option<ModelInfo> {
             .or_else(|| read_u32(item, "context_window"))
             .or_else(|| read_u32(item, "maxContextWindow"))
             .or_else(|| read_u32(item, "max_context_window"))
+            .or_else(|| known_context_window(id))
             .unwrap_or(0),
     })
 }
@@ -71,7 +72,15 @@ fn model_info(id: &str, display_name: &str) -> ModelInfo {
     ModelInfo {
         id: id.to_string(),
         display_name: display_name.to_string(),
-        context_window: 0,
+        context_window: known_context_window(id).unwrap_or(0),
+    }
+}
+
+fn known_context_window(id: &str) -> Option<u32> {
+    match id {
+        "gpt-5.5" | "gpt-5.4" => Some(1_050_000),
+        "gpt-5.4-mini" | "gpt-5.3-codex" => Some(400_000),
+        _ => None,
     }
 }
 
@@ -108,13 +117,28 @@ mod tests {
         assert_eq!(models.len(), 2);
         assert_eq!(models[0].id, "gpt-5.5");
         assert_eq!(models[0].display_name, "GPT 5.5");
+        assert_eq!(models[0].context_window, 1_050_000);
         assert_eq!(models[1].id, "gpt-5.4-mini");
+        assert_eq!(models[1].context_window, 400_000);
+    }
+
+    #[test]
+    fn live_catalog_keeps_explicit_context_window_over_fallback() {
+        let response = serde_json::json!({
+            "data": [
+                {"id": "gpt-5.5", "contextWindow": 1234}
+            ]
+        });
+
+        let models = parse_model_list(&response);
+
+        assert_eq!(models[0].context_window, 1234);
     }
 
     #[test]
     fn fallback_models_use_configured_catalog() {
         let config = CodexProviderConfig {
-            app_server_model_catalog: vec!["one".into(), "two".into()],
+            app_server_model_catalog: vec!["gpt-5.5".into(), "two".into()],
             ..CodexProviderConfig::default()
         };
 
@@ -122,7 +146,9 @@ mod tests {
 
         assert_eq!(
             models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
-            vec!["one", "two"]
+            vec!["gpt-5.5", "two"]
         );
+        assert_eq!(models[0].context_window, 1_050_000);
+        assert_eq!(models[1].context_window, 0);
     }
 }

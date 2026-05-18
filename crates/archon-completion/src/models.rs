@@ -18,7 +18,7 @@ pub enum CompletionState {
 
 // ── CompletionClaim (§10.2) ──────────────────────────────────────────────────
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum CompletionClaimKind {
     Done,
     Implemented,
@@ -32,7 +32,7 @@ pub enum CompletionClaimKind {
     AnswerGrounded,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum EvidenceKind {
     CommandRun,
     TestRun,

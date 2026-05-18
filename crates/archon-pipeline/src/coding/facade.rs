@@ -5,7 +5,7 @@
 //! token budget via `PromptBudget`. Layers 5-9 gracefully degrade to empty
 //! strings when learning systems are not active.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::Instant;
 use tokio::sync::mpsc::UnboundedSender;
@@ -65,6 +65,7 @@ fn agent_to_info(agent: &CodingAgent, _models: &AnthropicModelsConfig) -> AgentI
         model: agent.model.to_string(),
         phase: agent.phase as u32,
         critical: agent.critical,
+        parallelizable: agent.parallelizable,
         quality_threshold: phase_threshold(agent.phase as u32),
         tool_access_level: match agent.tool_access {
             ToolAccess::ReadOnly => ToolAccessLevel::ReadOnly,
@@ -76,6 +77,12 @@ fn agent_to_info(agent: &CodingAgent, _models: &AnthropicModelsConfig) -> AgentI
 /// Find a [`CodingAgent`] in the static `AGENTS` array by key.
 fn find_coding_agent(key: &str) -> Option<&'static CodingAgent> {
     AGENTS.iter().find(|a| a.key == key)
+}
+
+const CODING_PARALLEL_WAVE_LIMIT: usize = 4;
+
+fn dependencies_satisfied(agent: &CodingAgent, completed: &HashSet<&str>) -> bool {
+    agent.depends_on.iter().all(|dep| completed.contains(*dep))
 }
 
 // ---------------------------------------------------------------------------
@@ -357,15 +364,44 @@ impl PipelineFacade for CodingFacade {
     /// Determine the next agent by using the count of completed results as
     /// the index into the static `AGENTS` array.
     async fn next_agent(&self, session: &PipelineSession) -> Result<NextAgent> {
-        let idx = session.agent_results.len();
-        if idx >= AGENTS.len() {
+        let completed: HashSet<&str> = session
+            .agent_results
+            .iter()
+            .map(|(agent, _)| agent.key.as_str())
+            .collect();
+        if completed.len() >= AGENTS.len() {
             return Ok(NextAgent::Done);
         }
-        let coding_agent = &AGENTS[idx];
-        Ok(NextAgent::Continue(agent_to_info(
-            coding_agent,
-            &self.models,
-        )))
+        let Some(first) = AGENTS.iter().find(|agent| {
+            !completed.contains(agent.key) && dependencies_satisfied(agent, &completed)
+        }) else {
+            anyhow::bail!(
+                "coding pipeline cannot find a runnable agent; completed={}",
+                completed.len()
+            );
+        };
+
+        if !first.parallelizable {
+            return Ok(NextAgent::Continue(agent_to_info(first, &self.models)));
+        }
+
+        let wave: Vec<AgentInfo> = AGENTS
+            .iter()
+            .filter(|agent| {
+                !completed.contains(agent.key)
+                    && agent.parallelizable
+                    && agent.phase == first.phase
+                    && dependencies_satisfied(agent, &completed)
+            })
+            .take(CODING_PARALLEL_WAVE_LIMIT)
+            .map(|agent| agent_to_info(agent, &self.models))
+            .collect();
+
+        if wave.len() > 1 {
+            Ok(NextAgent::ContinueWave(wave))
+        } else {
+            Ok(NextAgent::Continue(agent_to_info(first, &self.models)))
+        }
     }
 
     /// Build the (messages, system, tools) triple with 11-layer prompt
@@ -619,6 +655,32 @@ mod tests {
         match facade.next_agent(&session).await.unwrap() {
             NextAgent::Done => {} // expected
             _ => panic!("expected Done after all agents"),
+        }
+    }
+
+    #[tokio::test]
+    async fn next_agent_groups_parallelizable_same_phase_wave() {
+        let facade = make_facade();
+        let mut session = facade.init_session("task").await.unwrap();
+
+        for agent in AGENTS
+            .iter()
+            .take_while(|agent| agent.key != "interface-designer")
+        {
+            let info = agent_to_info(agent, &AnthropicModelsConfig::default());
+            session.agent_results.push((info, make_result("output")));
+        }
+
+        match facade.next_agent(&session).await.unwrap() {
+            NextAgent::ContinueWave(wave) => {
+                let keys = wave
+                    .iter()
+                    .map(|agent| agent.key.as_str())
+                    .collect::<Vec<_>>();
+                assert_eq!(keys, vec!["interface-designer", "data-architect"]);
+                assert!(wave.iter().all(|agent| agent.parallelizable));
+            }
+            _ => panic!("expected a deterministic parallel wave"),
         }
     }
 

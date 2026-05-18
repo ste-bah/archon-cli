@@ -563,6 +563,7 @@ The 8 learning subsystems. Each is an independent toggle.
 ```toml
 [learning.sona]            # Self-Organizing Network Architecture
 enabled = true
+pipeline_recording = false
 
 [learning.provenance]      # L-Score system
 enabled = true
@@ -584,6 +585,11 @@ Each subsystem only takes resources (memory, embedding compute, occasional LLM c
 - You don't trust a particular subsystem's outputs
 - Memory-graph cost is high
 - You want to A/B test the agent's behavior with one subsystem off
+
+`learning.sona.enabled` records interactive learning trajectories by default.
+Pipeline and batch runs stay off unless `learning.sona.pipeline_recording = true`
+is set explicitly, so automated jobs do not start recording trajectories just
+because the interactive learning path is enabled.
 
 See [Learning systems architecture](../architecture/learning-systems.md) for what each subsystem does.
 
@@ -859,10 +865,10 @@ retain_checkpoint_count = 5
 | `labeler.max_events_per_prompt` | `30` | Initial cap for each LLM labeling request. Backfill splits larger files into chunks so provider responses stay parseable. |
 | `labeler.max_prompt_chars` | `128000` | Upper bound for a single labeler prompt after redaction and row projection. The labeler adaptively shrinks excerpts and splits oversized batches before failing. |
 | `training.backend` | `"auto"` | Selects an accelerator only after its tensor self-test probe passes, otherwise CPU if fallback is allowed. |
-| `jepa.enabled` | `false` | Keeps JEPA candidate training opt-in while `latent_transition` stays the default model kind. |
+| `jepa.enabled` | `false` | Keeps JEPA-inspired candidate training opt-in while `latent_transition` stays the default model kind. |
 | `jepa.latent_dim` | `384` | JEPA vector size. Training rejects a value that differs from `state_dim`. |
-| `jepa.prediction_horizons` | `[1, 3, 5]` | Future trace horizons used for JEPA candidate examples and horizon-loss accounting. |
-| `jepa.require_native_accelerator_ops` | `true` | CUDA/Metal JEPA candidates must carry native execution proof for required tensor-heavy stages. |
+| `jepa.prediction_horizons` | `[1, 3, 5]` | Future trace horizons used for JEPA-inspired candidate examples and horizon-loss accounting. |
+| `jepa.require_native_accelerator_ops` | `true` | CUDA/Metal JEPA-inspired candidates must carry native execution proof for required tensor-heavy stages. |
 | `jepa.allow_accelerated_candidate_cpu_stage` | `false` | Rejects CUDA/Metal-labelled candidates when required JEPA stages fall back to CPU. |
 | `jepa.min_cuda_validation_examples` | `512` | Minimum examples captured in CUDA training-time hardware execution evidence. |
 | `jepa.min_metal_validation_examples` | `512` | Minimum examples captured in MLX Metal training-time hardware execution evidence. |
@@ -1212,6 +1218,7 @@ Browser-based workbench. The frontend is embedded in the `archon` binary from
 port = 8421
 bind_address = "127.0.0.1"
 open_browser = true
+max_body_bytes = 67108864
 ```
 
 | Field | Default | What / Why |
@@ -1219,6 +1226,7 @@ open_browser = true
 | `port` | `8421` | TCP port for `archon web`. |
 | `bind_address` | `"127.0.0.1"` | Bind address. `"127.0.0.1"` = local only (safe default). `"0.0.0.0"` = network-accessible (only if you also configured TLS + auth). |
 | `open_browser` | `true` | Auto-open browser to the web UI URL on `archon web`. Disable for headless / CI deployments. |
+| `max_body_bytes` | `67108864` | Maximum HTTP request body size for mutating web APIs such as `/api/chat/submit`. |
 
 Run `archon web` from the project root you want to inspect. For a blank
 project, initialise the directory first with `scripts/archon-init.sh`; the web
@@ -1472,6 +1480,7 @@ tls_key  = "/etc/letsencrypt/live/archon.example.com/privkey.pem"
 [web]
 bind_address = "0.0.0.0"
 open_browser = false
+max_body_bytes = 67108864
 
 [permissions]
 mode = "plan"               # remote sessions are read-only by default

@@ -44,7 +44,7 @@ pub(super) fn render_promote_jepa(root: &Path, model_id: &str) -> Result<String>
 
     let path = registry.promote_model_kind(model_id, JEPA_MODEL_KIND)?;
     Ok(format!(
-        "World Model JEPA Promote\n\
+        "World Model JEPA-Inspired Promote\n\
          ========================\n\
          Active model: {model_id}\n\
          Model kind: {JEPA_MODEL_KIND}\n\

@@ -48,6 +48,7 @@ pub(crate) fn provider_event_record(event: ProviderRuntimeEvent) -> ProviderRunt
 fn event_type_label(event_type: ProviderRuntimeEventType) -> &'static str {
     match event_type {
         ProviderRuntimeEventType::RequestStarted => "request_started",
+        ProviderRuntimeEventType::RequestRetry => "request_retry",
         ProviderRuntimeEventType::RequestSucceeded => "request_succeeded",
         ProviderRuntimeEventType::RequestFailed => "request_failed",
         ProviderRuntimeEventType::TokenRefreshed => "token_refreshed",

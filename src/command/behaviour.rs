@@ -246,7 +246,8 @@ fn cmd_generate_proposals(db: &DbInstance) -> Result<()> {
     let events =
         archon_learning::store::list_all_learning_events(db).map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let proposals = archon_learning::proposal::generate_proposals(&events);
+    let proposals = archon_learning::proposal::generate_proposals_for_store(db, &events)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if proposals.is_empty() {
         println!("No proposals generated (thresholds not met).");
@@ -382,21 +383,45 @@ fn cmd_deny(db: &DbInstance, proposal_id: &str) -> Result<()> {
 }
 
 fn cmd_rollback(db: &DbInstance, version_id: &str, reason: Option<&str>) -> Result<()> {
-    let result = archon_learning::rollback::rollback_to_version(
+    let cwd = std::env::current_dir()?;
+    cmd_rollback_with_workspace(db, version_id, reason, &cwd)
+}
+
+fn cmd_rollback_with_workspace(
+    db: &DbInstance,
+    version_id: &str,
+    reason: Option<&str>,
+    workspace_dir: &std::path::Path,
+) -> Result<()> {
+    let policy = archon_policy::load_effective_policy(workspace_dir)
+        .map_err(|e| anyhow::anyhow!("failed to load policy: {e}"))?;
+    let recent_incidents = recent_false_completion_count(db)?;
+    let result = archon_learning::rollback::rollback_to_version_with_policy(
         db,
         version_id,
         "cli",
         reason.unwrap_or("manual rollback via CLI"),
+        &policy,
+        recent_incidents,
     )
     .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    println!(
-        "Rolled back {kind} from {from} to {to} (v{ver})",
-        kind = result.new_version.manifest_kind.as_str(),
-        from = result.rolled_back_from_version_id,
-        to = result.new_version.version_id,
-        ver = result.new_version.version_number,
-    );
+    if let Some(new_version) = result.new_version {
+        println!(
+            "Rolled back {kind} from {from} to {to} (v{ver})",
+            kind = new_version.manifest_kind.as_str(),
+            from = result.rolled_back_from_version_id,
+            to = new_version.version_id,
+            ver = new_version.version_number,
+        );
+    } else {
+        println!(
+            "Rollback proposal {proposal_id} for {kind} target {target} is awaiting approval.",
+            proposal_id = result.proposal.proposal_id,
+            kind = result.proposal.manifest_kind.as_str(),
+            target = result.rolled_back_from_version_id,
+        );
+    }
     Ok(())
 }
 
@@ -404,7 +429,8 @@ fn cmd_rollback(db: &DbInstance, version_id: &str, reason: Option<&str>) -> Resu
 mod tests {
     use super::*;
     use archon_learning::models::{
-        BehaviourManifestKind, BehaviourProposal, PolicyDecision, ProposalStatus, RiskLevel,
+        BehaviourManifestKind, BehaviourManifestVersion, BehaviourProposal, PolicyDecision,
+        ProposalStatus, RiskLevel,
     };
 
     fn test_db() -> DbInstance {
@@ -429,6 +455,26 @@ mod tests {
             created_at: "2026-05-03T00:00:00Z".into(),
         };
         archon_learning::store::insert_behaviour_proposal(db, &proposal).unwrap();
+    }
+
+    fn seed_manifest_version(
+        db: &DbInstance,
+        version_id: &str,
+        kind: BehaviourManifestKind,
+        content: serde_json::Value,
+    ) {
+        let version = BehaviourManifestVersion {
+            version_id: version_id.to_string(),
+            manifest_kind: kind,
+            version_number: 1,
+            content,
+            diff: "seed".to_string(),
+            parent_version_id: None,
+            created_by_proposal_id: None,
+            is_rollback_target: false,
+            created_at: "2026-05-03T00:00:00Z".to_string(),
+        };
+        archon_learning::store::insert_manifest_version(db, &version).unwrap();
     }
 
     #[test]
@@ -462,5 +508,59 @@ mod tests {
             .unwrap();
         assert_eq!(stored.status, ProposalStatus::Applied);
         assert_eq!(stored.policy_decision, PolicyDecision::AutoApplied);
+    }
+
+    #[test]
+    fn behaviour_rollback_default_policy_queues_approval() {
+        let db = test_db();
+        seed_manifest_version(
+            &db,
+            "bmv-cli-v1",
+            BehaviourManifestKind::RetrievalProfile,
+            serde_json::json!({"weight": 0.8}),
+        );
+        let workspace = tempfile::tempdir().unwrap();
+
+        cmd_rollback_with_workspace(&db, "bmv-cli-v1", Some("test rollback"), workspace.path())
+            .unwrap();
+
+        let proposals =
+            archon_learning::store::list_behaviour_proposals(&db, Some("Pending")).unwrap();
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].proposed_version, "rollback-to-bmv-cli-v1");
+        let versions =
+            archon_learning::store::list_manifest_version_history(&db, "RetrievalProfile").unwrap();
+        assert_eq!(versions.len(), 1);
+    }
+
+    #[test]
+    fn behaviour_rollback_workspace_policy_auto_applies_low_risk() {
+        let db = test_db();
+        seed_manifest_version(
+            &db,
+            "bmv-cli-v1",
+            BehaviourManifestKind::RetrievalProfile,
+            serde_json::json!({"weight": 0.8}),
+        );
+        let workspace = tempfile::tempdir().unwrap();
+        let policy_dir = workspace.path().join(".archon");
+        std::fs::create_dir_all(&policy_dir).unwrap();
+        std::fs::write(
+            policy_dir.join("policy.toml"),
+            "[policy.learning]\nauto_apply_low_risk = true\n",
+        )
+        .unwrap();
+
+        cmd_rollback_with_workspace(&db, "bmv-cli-v1", Some("test rollback"), workspace.path())
+            .unwrap();
+
+        let proposals =
+            archon_learning::store::list_behaviour_proposals(&db, Some("Applied")).unwrap();
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].policy_decision, PolicyDecision::AutoApplied);
+        let versions =
+            archon_learning::store::list_manifest_version_history(&db, "RetrievalProfile").unwrap();
+        assert_eq!(versions.len(), 2);
+        assert!(versions.iter().any(|v| v.is_rollback_target));
     }
 }

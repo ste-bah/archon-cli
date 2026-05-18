@@ -27,6 +27,7 @@ pub struct WebRuntimeStatus {
     pub bind_address: String,
     pub port: u16,
     pub auth_required: bool,
+    pub max_body_bytes: usize,
     pub dev_mode: bool,
     pub asset_mode: String,
 }
@@ -69,6 +70,7 @@ pub struct WebConfigSummary {
     pub port: u16,
     pub bind_address: String,
     pub open_browser: bool,
+    pub max_body_bytes: usize,
     pub auth_required: bool,
     pub non_loopback_bind: bool,
 }
@@ -147,6 +149,7 @@ impl WebApiState {
                 bind_address: config.bind_address.clone(),
                 port: config.port,
                 auth_required,
+                max_body_bytes: config.max_body_bytes,
                 dev_mode,
                 asset_mode: if dev_mode { "vite-dev" } else { "embedded" }.to_string(),
             },
@@ -159,6 +162,7 @@ impl WebApiState {
                 port: config.port,
                 bind_address: config.bind_address.clone(),
                 open_browser: config.open_browser,
+                max_body_bytes: config.max_body_bytes,
                 auth_required,
                 non_loopback_bind: !config.is_localhost(),
             },
@@ -357,6 +361,7 @@ mod tests {
             port: 9001,
             bind_address: "0.0.0.0".to_string(),
             open_browser: false,
+            max_body_bytes: 1024,
         };
         let state = WebApiState::from_server_config(
             &cfg,
@@ -365,7 +370,9 @@ mod tests {
             WebRuntimePaths::default(),
         );
         assert_eq!(state.status().web.port, 9001);
+        assert_eq!(state.status().web.max_body_bytes, 1024);
         assert!(state.config().web.non_loopback_bind);
+        assert_eq!(state.config().web.max_body_bytes, 1024);
         assert!(state.status().web.auth_required);
     }
 

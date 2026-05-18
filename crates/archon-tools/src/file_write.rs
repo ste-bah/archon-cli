@@ -1,8 +1,8 @@
 use std::fs;
-use std::path::Path;
 
 use serde_json::json;
 
+use crate::path_guard::resolve_write_target_path;
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
 pub struct WriteTool;
@@ -23,7 +23,7 @@ impl Tool for WriteTool {
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Absolute path to the file to write"
+                    "description": "Path to the file to write. Must resolve inside working_dir or an allowed extra_dir."
                 },
                 "content": {
                     "type": "string",
@@ -34,7 +34,7 @@ impl Tool for WriteTool {
         })
     }
 
-    async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
+    async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::error("file_path is required and must be a string"),
@@ -45,7 +45,10 @@ impl Tool for WriteTool {
             None => return ToolResult::error("content is required and must be a string"),
         };
 
-        let path = Path::new(file_path);
+        let path = match resolve_write_target_path(file_path, ctx) {
+            Ok(path) => path,
+            Err(e) => return ToolResult::error(e),
+        };
 
         // Create parent directories
         if let Some(parent) = path.parent()
@@ -55,7 +58,7 @@ impl Tool for WriteTool {
             return ToolResult::error(format!("Failed to create parent directory: {e}"));
         }
 
-        match fs::write(path, content) {
+        match fs::write(&path, content) {
             Ok(()) => ToolResult::success(format!("File created successfully at: {file_path}")),
             Err(e) => ToolResult::error(format!("Failed to write file: {e}")),
         }

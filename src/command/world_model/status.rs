@@ -88,10 +88,10 @@ pub(crate) fn render_world_status_with_stats(
          Active model:       {active}\n\
          Candidate models:   {candidate_count}\n\
          Active model kind:  {active_kind}\n\
-         JEPA enabled:       {jepa_enabled}\n\
-         JEPA status:        {jepa_status}\n\
-         JEPA latent dim:    {jepa_latent_dim}\n\
-         JEPA candidates:    {jepa_candidate_count}\n\
+         JEPA-inspired enabled:    {jepa_enabled}\n\
+         JEPA-inspired status:     {jepa_status}\n\
+         JEPA-inspired latent dim: {jepa_latent_dim}\n\
+         JEPA-inspired candidates: {jepa_candidate_count}\n\
          Selected backend:   {selected_backend}\n\
          Backend fallback:   {fallback}\n\
          Auto-trainer:       {auto_trainer}\n\

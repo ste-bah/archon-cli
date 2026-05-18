@@ -106,7 +106,7 @@ pub(super) fn render_train_jepa(
     let max_runtime_ms = max_runtime_ms.unwrap_or(config.learning.world_model.jepa.max_runtime_ms);
 
     Ok(format!(
-        "World Model JEPA Train\n\
+        "World Model JEPA-Inspired Train\n\
          =======================\n\
          Candidate mode: forced{}\n\
          Candidate: {}\n\
@@ -131,7 +131,7 @@ pub(super) fn render_train_jepa(
          Horizons: {:?}\n\
          Parameters: {}\n\
          Loss total: {:.4}\n\
-         Loss JEPA: {:.4}\n\
+         Loss JEPA-inspired: {:.4}\n\
          Loss MSE: {:.4}\n\
          Loss aux: {:.4}\n\
          Loss horizon: {:.4}\n\
@@ -358,7 +358,7 @@ pub(super) fn render_eval_jepa(
     let eval_path = registry.write_jepa_eval_report(&record)?;
 
     Ok(format!(
-        "World Model JEPA Eval\n\
+        "World Model JEPA-Inspired Eval\n\
          =====================\n\
          Candidate: {candidate_id}\n\
          Model kind: {}\n\
@@ -397,4 +397,3 @@ pub(super) fn render_eval_jepa(
         comparison_path.display()
     ))
 }
-

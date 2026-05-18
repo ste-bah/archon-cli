@@ -249,7 +249,7 @@ fn test_resume_run_completes_missing_specialists_from_checkpoint() {
     assert_eq!(result.resumed_specialists, 1);
     assert_eq!(result.skipped_completed_specialists, 1);
     assert_eq!(result.failed_specialists, 0);
-    assert!((result.total_cost_usd - 1.2533).abs() < 0.000001);
+    assert!((result.total_cost_usd - 1.2665).abs() < 0.000001);
 
     let rows = db
             .run_script(

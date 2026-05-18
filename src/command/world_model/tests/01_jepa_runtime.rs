@@ -26,7 +26,7 @@ fn predict_next_uses_active_jepa_model_when_configured() {
 
     assert!(rendered.contains(&format!("Model: {candidate_id}")));
     assert!(rendered.contains("Model kind: jepa_transition"));
-    assert!(rendered.contains("Representation: archon-jepa:"));
+    assert!(rendered.contains("Representation: archon-jepa-inspired:"));
     assert!(rendered.contains("Runtime backend: cpu"));
     assert!(rendered.contains("Runtime native prediction: true"));
     let prediction_id = prediction_id_from(&rendered);

@@ -68,11 +68,16 @@ Configure:
 port = 8421
 bind_address = "127.0.0.1"
 open_browser = true
+max_body_bytes = 67108864
 ```
 
 For local use, keep `bind_address = "127.0.0.1"`. Binding to `0.0.0.0` makes
 the workbench network-accessible and causes Archon to create/use a bearer token.
 Use that only behind a trusted network boundary or reverse proxy.
+
+For bearer-token web auth, `/api/auth/logout` is informational: Archon does not
+track server-side token sessions, so clients must discard the bearer token to
+log out.
 
 ## Headless mode
 

@@ -223,12 +223,14 @@ async fn main() -> Result<()> {
             port,
             ref bind_address,
             no_open,
+            allow_unauthenticated_nonlocal_bind,
         }) => {
             use crate::command::web::handle_web_command;
             return handle_web_command(
                 port,
                 bind_address.clone(),
                 no_open,
+                allow_unauthenticated_nonlocal_bind,
                 &config,
                 &cli,
                 &env_vars,

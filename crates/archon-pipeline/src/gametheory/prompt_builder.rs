@@ -37,6 +37,28 @@ pub fn build_specialist_prompt_with_prior_context(
     prior_context: &str,
     dependency_outputs: &[(&str, &str)], // (dep_agent_key, dep_output)
 ) -> String {
+    build_specialist_prompt_with_template(
+        agent_key,
+        agent_display_name,
+        "",
+        situation,
+        fingerprint_summary,
+        prior_context,
+        dependency_outputs,
+    )
+}
+
+/// Assemble a specialist prompt with an agent source-file body loaded from
+/// `.archon/agents/gametheory/*.md`.
+pub fn build_specialist_prompt_with_template(
+    agent_key: &str,
+    agent_display_name: &str,
+    agent_template: &str,
+    situation: &str,
+    fingerprint_summary: &str,
+    prior_context: &str,
+    dependency_outputs: &[(&str, &str)], // (dep_agent_key, dep_output)
+) -> String {
     let mut parts = Vec::new();
 
     // Part 1: Role
@@ -45,6 +67,9 @@ pub fn build_specialist_prompt_with_prior_context(
         display = agent_display_name,
         key = agent_key,
     ));
+    if !agent_template.trim().is_empty() {
+        parts.push(format!("## Agent Source Instructions\n\n{agent_template}"));
+    }
 
     // Part 2: Situation
     parts.push(format!("## Situation\n\n{situation}"));

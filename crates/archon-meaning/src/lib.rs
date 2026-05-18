@@ -14,7 +14,10 @@ use cozo::{DataValue, DbInstance, ScriptMutability};
 use sha2::{Digest, Sha256};
 
 pub use errors::{MeaningError, Result};
-pub use resolver::{HydratedTriplet, list_hydrated_triplets, resolve_triplet_embeddings};
+pub use resolver::{
+    FALLBACK_FEATURE_SPACE, HydratedTriplet, STORED_EMBEDDING_FEATURE_SPACE,
+    list_hydrated_triplets, resolve_triplet_embeddings,
+};
 pub use samples::{MeaningLabel, MeaningSample};
 pub use triplets::TripletRecord;
 

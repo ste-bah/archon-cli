@@ -45,6 +45,7 @@ async fn manager_start_bad_server_records_crash() {
         transport: "stdio".into(),
         url: None,
         headers: None,
+        tool_policy: Default::default(),
     };
 
     let errors = mgr.start_all(vec![config]).await;
@@ -142,6 +143,7 @@ async fn test_get_server_info_includes_disabled_flag() {
         transport: "stdio".into(),
         url: None,
         headers: None,
+        tool_policy: Default::default(),
     };
     let _ = mgr.start_all(vec![config]).await;
 
@@ -189,6 +191,7 @@ async fn build_mcp_tools_crashed_server_skipped() {
         transport: "stdio".into(),
         url: None,
         headers: None,
+        tool_policy: Default::default(),
     };
     let _ = mgr.start_all(vec![config]).await;
 

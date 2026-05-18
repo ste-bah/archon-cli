@@ -113,6 +113,7 @@ pub async fn connect_mcp_with_oauth(
         transport: "sse".into(),
         url: Some(sse_url.to_string()),
         headers: None,
+        tool_policy: Default::default(),
     };
 
     McpClient::initialize(&config, (sink_boxed, guarded)).await
@@ -121,9 +122,9 @@ pub async fn connect_mcp_with_oauth(
 /// Background task that drains the outbound channel and POSTs each message
 /// with a fresh Bearer token. On 401, refreshes via `oauth` and retries once.
 ///
-/// Errors past the single retry drop the message with a warn log — matches
-/// the vanilla `post_pump_task` behavior so rmcp surfaces missing responses
-/// as request-level timeouts rather than transport-level errors.
+/// Errors past the single retry drop the message with a warn log. A 404 is
+/// terminal for this transport instance and closes the pump so callers can
+/// reconnect instead of silently timing out on future sends.
 async fn oauth_post_pump_task(
     client: reqwest::Client,
     url: Url,
@@ -149,6 +150,13 @@ async fn oauth_post_pump_task(
             Ok(resp) if resp.status().is_success() => {
                 tracing::trace!(status = %resp.status(), "oauth-sse: POST ok");
                 false
+            }
+            Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => {
+                tracing::warn!(
+                    status = %resp.status(),
+                    "oauth-sse: POST returned 404 — session invalid; closing transport for reconnect"
+                );
+                return;
             }
             Ok(resp) => {
                 tracing::warn!(status = %resp.status(), "oauth-sse: POST non-2xx (non-401)");
@@ -181,6 +189,13 @@ async fn oauth_post_pump_task(
         match post_with_bearer(&client, &url, &extra_headers, &new_token, &body).await {
             Ok(resp) if resp.status().is_success() => {
                 tracing::info!(status = %resp.status(), "oauth-sse: retry after refresh OK");
+            }
+            Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => {
+                tracing::warn!(
+                    status = %resp.status(),
+                    "oauth-sse: retry after refresh returned 404 — session invalid; closing transport for reconnect"
+                );
+                return;
             }
             Ok(resp) => {
                 tracing::warn!(

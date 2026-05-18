@@ -115,6 +115,37 @@ fn score_returns_high_similarity_for_matching_text() {
         archon_constellation::score_text(&db, "project", "permission boundary regression tests")
             .unwrap();
     assert!(score.similarity > 0.7);
+    assert_eq!(
+        score.feature_space,
+        archon_constellation::LEXICAL_CENTROID_FEATURE_SPACE
+    );
+    assert_eq!(
+        score.scoring_source,
+        "vec_constellations:constellation_embedding_idx"
+    );
+}
+
+#[test]
+fn constellation_vector_index_is_queried_for_scoring() {
+    let db = db();
+    seed_sample(
+        &db,
+        "p1",
+        "workspace",
+        "positive",
+        "UserAccepted",
+        "indexed constellation vector path",
+    );
+    let build = archon_constellation::build_constellation(&db, "project").unwrap();
+    let score =
+        archon_constellation::score_text(&db, "project", "indexed constellation vector path")
+            .unwrap();
+
+    assert_eq!(score.centroid_id, build.centroid_id.unwrap());
+    assert_eq!(
+        score.scoring_source,
+        "vec_constellations:constellation_embedding_idx"
+    );
 }
 
 #[test]

@@ -31,7 +31,7 @@ Backend failures must not block foreground Archon work. Accelerator probe failur
 The non-accelerated implementation validates CPU behavior, backend selection,
 checkpoint metadata, Candle safetensors roundtrips, MLX array checkpoint
 artifacts, and bridge/parity test metadata. CUDA and Apple Silicon execution
-must be validated on matching hardware and recorded in the JEPA candidate's
+must be validated on matching hardware and recorded in the JEPA-inspired candidate's
 `JepaBackendExecutionReport`.
 
 The current CUDA validation record is
@@ -50,7 +50,7 @@ cross-backend retrain parity gate.
 
 ## JEPA Acceleration Proof
 
-A JEPA candidate may report `backend = "cuda"` or `backend = "metal"` only when
+A JEPA-inspired candidate may report `backend = "cuda"` or `backend = "metal"` only when
 its candidate manifest includes a training-time `JepaBackendExecutionReport`
 showing:
 

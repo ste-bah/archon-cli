@@ -137,6 +137,32 @@ async fn chat_roundtrip_happy_path() {
 }
 
 #[tokio::test]
+async fn compat_complete_rejects_tools_when_descriptor_does_not_advertise_tool_use() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let descriptor = make_descriptor(&server.uri(), AuthFlavor::BearerApiKey);
+    let provider = make_provider(descriptor, "test-key");
+    let mut request = simple_user_request("test-default-model");
+    request.tools = vec![json!({
+        "name": "do_thing",
+        "input_schema": {"type": "object"}
+    })];
+
+    match provider.complete(request).await {
+        Err(LlmError::Unsupported(message)) => {
+            assert!(message.contains("refusing to drop"));
+            assert!(message.contains("tool definition"));
+        }
+        Err(other) => panic!("expected Unsupported, got {other:?}"),
+        Ok(_) => panic!("expected unsupported tools to fail before network"),
+    }
+}
+
+#[tokio::test]
 async fn bearer_auth_header_sent() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))

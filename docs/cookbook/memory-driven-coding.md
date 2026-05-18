@@ -48,8 +48,13 @@ These accrue in the memory graph automatically. After ~50 sessions in the same p
 
 ```
 /recall <keyword>                  # keyword search
-/memory search <query>             # semantic search
+/memory search <query>             # semantic search when embeddings are configured
 ```
+
+Keyword-only recall and structured memory filters use an explicit full-scan
+contract. On large memory graphs Archon logs a latency warning unless an
+embedding provider is attached so hybrid retrieval can narrow candidates with
+the vector index first.
 
 In agent context, the model can call `memory_recall` directly:
 ```jsonc

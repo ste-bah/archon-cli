@@ -2,6 +2,10 @@ use sha2::{Digest, Sha256};
 
 use crate::schema::VECTOR_DIM;
 
+/// Deterministic lexical feature hashing for cheap constellation drift checks.
+///
+/// This is deliberately not a semantic embedding model; user-facing surfaces
+/// label it as a lexical feature space.
 pub fn text_vector(text: &str) -> Vec<f32> {
     let mut vector = vec![0.0; VECTOR_DIM];
     for token in tokenize(text) {

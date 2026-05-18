@@ -173,6 +173,7 @@
             model: "test-model".into(),
             phase: 5,
             critical,
+            parallelizable: false,
             quality_threshold,
             tool_access_level: archon_pipeline::runner::ToolAccessLevel::ReadOnly,
         }
@@ -211,4 +212,3 @@
             output,
         }
     }
-

@@ -69,12 +69,39 @@ pub struct EpochMetrics {
 // TrainingOutcome
 // ---------------------------------------------------------------------------
 
+/// Input-source counts for a training run.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TrainingDataSources {
+    pub sona_trajectories: usize,
+    pub sona_triplets: usize,
+    pub meaning_triplets: usize,
+}
+
+impl TrainingDataSources {
+    pub fn has_training_signal(&self) -> bool {
+        self.sona_triplets >= 2 || self.meaning_triplets > 0
+    }
+
+    pub fn no_data_reason(&self) -> Option<&'static str> {
+        if self.sona_trajectories == 0 && self.meaning_triplets == 0 {
+            Some("no_sona_trajectories_or_meaning_triplets")
+        } else if !self.has_training_signal() {
+            Some("insufficient_sona_triplets_and_no_meaning_triplets")
+        } else {
+            None
+        }
+    }
+}
+
 /// Result of a completed training run.
 #[derive(Debug, Clone)]
 pub struct TrainingOutcome {
     pub epochs_completed: usize,
     pub batches_processed: usize,
     pub samples_processed: usize,
+    pub sona_samples_processed: usize,
+    pub meaning_triplets_processed: usize,
+    pub data_sources: TrainingDataSources,
     pub initial_loss: f32,
     pub final_loss: f32,
     pub best_loss: f32,

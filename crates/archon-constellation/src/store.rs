@@ -18,6 +18,8 @@ pub struct ConstellationCentroid {
     pub created_at: String,
 }
 
+pub const LEXICAL_CENTROID_FEATURE_SPACE: &str = "lexical_feature_space/hash-centroid-v1";
+
 pub fn insert_centroid(db: &DbInstance, centroid: &ConstellationCentroid) -> Result<()> {
     let vector_json = serde_json::to_string(&centroid.vector)?;
     let sample_ids_json = serde_json::to_string(&centroid.sample_ids)?;
@@ -59,7 +61,7 @@ pub fn insert_vector(db: &DbInstance, centroid_id: &str, vector: &[f32]) -> Resu
     );
     params.insert(
         "provider".into(),
-        DataValue::from("archon-hash-centroid-v1"),
+        DataValue::from(LEXICAL_CENTROID_FEATURE_SPACE),
     );
     db.run_script(
         "?[centroid_id, embedding, provider] <- [[$id, $embedding, $provider]] \
@@ -69,6 +71,48 @@ pub fn insert_vector(db: &DbInstance, centroid_id: &str, vector: &[f32]) -> Resu
     )
     .map_err(|e| ConstellationError::Store(format!("insert centroid vector failed: {e}")))?;
     Ok(())
+}
+
+pub fn query_vectors(db: &DbInstance, vector: &[f32], limit: usize) -> Result<Vec<(String, f64)>> {
+    let mut params = BTreeMap::new();
+    params.insert(
+        "query".into(),
+        DataValue::Vec(Vector::F32(Array1::from_vec(vector.to_vec()))),
+    );
+    params.insert("k".into(), DataValue::from(limit.max(1) as i64));
+    let result = db
+        .run_script(
+            "?[centroid_id, distance] := ~vec_constellations:constellation_embedding_idx{
+                centroid_id,
+                |
+                query: $query,
+                k: $k,
+                ef: 50,
+                bind_distance: distance
+            }",
+            params,
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| ConstellationError::Store(format!("query vec_constellations failed: {e}")))?;
+
+    let mut rows = Vec::with_capacity(result.rows.len());
+    for row in result.rows {
+        let centroid_id = row
+            .first()
+            .and_then(DataValue::get_str)
+            .unwrap_or_default()
+            .to_string();
+        let distance = row.get(1).and_then(DataValue::get_float).unwrap_or(1.0);
+        if !centroid_id.is_empty() {
+            rows.push((centroid_id, distance));
+        }
+    }
+    rows.sort_by(|left, right| {
+        left.1
+            .partial_cmp(&right.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    Ok(rows)
 }
 
 pub fn list_centroids(db: &DbInstance) -> Result<Vec<ConstellationCentroid>> {

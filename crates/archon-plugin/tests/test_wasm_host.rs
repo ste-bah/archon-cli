@@ -180,13 +180,16 @@ fn plugin_capability_all_variants_exist() {
         PluginCapability::ReadFs(vec![PathBuf::from("/tmp")]),
         PluginCapability::WriteFs(vec![PathBuf::from("/tmp")]),
         PluginCapability::Network(vec!["example.com".into()]),
+        PluginCapability::NetworkWildcardApproved {
+            approval: "operator-approved-test".into(),
+        },
         PluginCapability::ToolRegister,
         PluginCapability::HookRegister,
         PluginCapability::CommandRegister,
         PluginCapability::LspRegister,
         PluginCapability::DataDirWrite,
     ];
-    assert_eq!(caps.len(), 9);
+    assert_eq!(caps.len(), 10);
 }
 
 // ── CapabilityChecker tests ───────────────────────────────────────────────────
@@ -222,6 +225,20 @@ fn checker_denies_network_when_not_granted() {
 fn checker_allows_network_for_granted_host() {
     let checker =
         CapabilityChecker::new(vec![PluginCapability::Network(vec!["example.com".into()])]);
+    assert!(checker.can_use_network("example.com"));
+}
+
+#[test]
+fn checker_does_not_treat_plain_star_host_as_wildcard() {
+    let checker = CapabilityChecker::new(vec![PluginCapability::Network(vec!["*".into()])]);
+    assert!(!checker.can_use_network("example.com"));
+}
+
+#[test]
+fn checker_allows_network_for_explicit_wildcard_approval() {
+    let checker = CapabilityChecker::new(vec![PluginCapability::NetworkWildcardApproved {
+        approval: "operator-approved-test".into(),
+    }]);
     assert!(checker.can_use_network("example.com"));
 }
 

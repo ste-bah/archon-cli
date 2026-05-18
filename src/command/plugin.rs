@@ -168,7 +168,10 @@ pub fn handle_plugin_command(action: PluginAction) -> anyhow::Result<()> {
                         println!("Description: {desc}");
                     }
                     if !p.manifest.capabilities.is_empty() {
-                        println!("Capabilities: {}", p.manifest.capabilities.join(", "));
+                        println!(
+                            "Capabilities: {}",
+                            p.manifest.capability_labels().join(", ")
+                        );
                     }
                     println!("Data dir:    {}", p.data_dir.display());
                 }

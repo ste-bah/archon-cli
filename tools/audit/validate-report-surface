@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+"""Validate audit-report surface facts for Archon finalisation reviews.
+
+The script intentionally checks facts that are easy to overstate in prose:
+crate/doc counts, test annotation counts, symbol references, and a few
+feature-vs-implementation probes. It prints machine-readable JSON so a report
+appendix can cite a rerunnable command instead of hand-counted claims.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+TEST_ATTR_RE = re.compile(r"#\s*\[\s*(?:tokio::|async_std::)?test(?:\([^]]*\))?\s*\]")
+DEFAULT_SYMBOLS = [
+    "SystemPromptAssembler",
+    "to_prompt_text",
+    "AutoModeEvaluator",
+    "ProviderRuntimeSupervisor",
+    "apply_diff",
+    "parallelizable",
+    "ReadFs",
+    "allow_unauthenticated_nonlocal_bind",
+    "memory.embedding.store_failed",
+]
+
+
+def run(args: list[str], *, check: bool = False) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        args,
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=check,
+    )
+
+
+def git_value(*args: str) -> str:
+    proc = run(["git", *args])
+    if proc.returncode != 0:
+        return ""
+    return proc.stdout.strip()
+
+
+def iter_files(root: Path, pattern: str) -> list[Path]:
+    if not root.exists():
+        return []
+    return [p for p in root.rglob(pattern) if p.is_file()]
+
+
+def crate_names() -> list[tuple[str, Path]]:
+    crates: list[tuple[str, Path]] = []
+    for cargo_toml in sorted((REPO_ROOT / "crates").glob("*/Cargo.toml")):
+        name = cargo_toml.parent.name
+        for line in cargo_toml.read_text(encoding="utf-8").splitlines():
+            match = re.match(r'\s*name\s*=\s*"([^"]+)"', line)
+            if match:
+                name = match.group(1)
+                break
+        crates.append((name, cargo_toml.parent))
+    return crates
+
+
+def docs_count() -> int:
+    doc_files: list[Path] = []
+    for dirname in ["docs", "scripts", "extensions"]:
+        doc_files.extend(iter_files(REPO_ROOT / dirname, "*.md"))
+    doc_files.extend(p for p in REPO_ROOT.glob("*.md") if p.is_file())
+    return len(doc_files)
+
+
+def count_test_attrs(paths: list[Path]) -> int:
+    total = 0
+    for path in paths:
+        try:
+            total += len(TEST_ATTR_RE.findall(path.read_text(encoding="utf-8")))
+        except UnicodeDecodeError:
+            continue
+    return total
+
+
+def test_counts_by_crate() -> dict[str, dict[str, int]]:
+    result: dict[str, dict[str, int]] = {}
+    for name, crate_dir in crate_names():
+        inline = count_test_attrs(iter_files(crate_dir / "src", "*.rs"))
+        integration = count_test_attrs(iter_files(crate_dir / "tests", "*.rs"))
+        result[name] = {
+            "inline": inline,
+            "integration": integration,
+            "total": inline + integration,
+        }
+    return result
+
+
+def path_is_test(path: str) -> bool:
+    normalized = path.replace(os.sep, "/")
+    return (
+        "/tests/" in normalized
+        or normalized.endswith("_tests.rs")
+        or normalized.endswith("/tests.rs")
+    )
+
+
+def symbol_references(symbols: list[str]) -> dict[str, dict[str, object]]:
+    refs: dict[str, dict[str, object]] = {}
+    for symbol in symbols:
+        proc = run(
+            [
+                "rg",
+                "--line-number",
+                "--fixed-strings",
+                "--glob",
+                "*.rs",
+                "--glob",
+                "!target/**",
+                "--glob",
+                "!.git/**",
+                symbol,
+                ".",
+            ]
+        )
+        lines = [line for line in proc.stdout.splitlines() if line]
+        paths = sorted({line.split(":", 1)[0].removeprefix("./") for line in lines})
+        test_lines = [line for line in lines if path_is_test(line.split(":", 1)[0])]
+        refs[symbol] = {
+            "total_references": len(lines),
+            "test_references": len(test_lines),
+            "non_test_references": len(lines) - len(test_lines),
+            "files": paths,
+        }
+    return refs
+
+
+def bash_surface() -> dict[str, object]:
+    direct_files = [
+        p
+        for p in sorted((REPO_ROOT / "tests").glob("*.rs"))
+        if 'Command::new("bash")' in p.read_text(encoding="utf-8", errors="ignore")
+    ]
+    command_new_refs = 0
+    test_attrs = 0
+    for path in direct_files:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        command_new_refs += text.count('Command::new("bash")')
+        test_attrs += len(TEST_ATTR_RE.findall(text))
+    literal_files = [
+        p
+        for p in sorted((REPO_ROOT / "tests").glob("*.rs"))
+        if "bash" in p.read_text(encoding="utf-8", errors="ignore")
+    ]
+    return {
+        "direct_command_new_files": [str(p.relative_to(REPO_ROOT)) for p in direct_files],
+        "direct_command_new_references": command_new_refs,
+        "test_annotations_in_direct_command_new_files": test_attrs,
+        "literal_bash_files": [str(p.relative_to(REPO_ROOT)) for p in literal_files],
+    }
+
+
+def feature_checks(symbols: dict[str, dict[str, object]]) -> dict[str, object]:
+    return {
+        "system_prompt_assembler_has_non_test_refs": symbols["SystemPromptAssembler"][
+            "non_test_references"
+        ]
+        > 0,
+        "to_prompt_text_has_non_test_refs": symbols["to_prompt_text"]["non_test_references"] > 0,
+        "auto_mode_evaluator_has_non_test_refs": symbols["AutoModeEvaluator"][
+            "non_test_references"
+        ]
+        > 0,
+        "provider_runtime_supervisor_non_test_refs": symbols["ProviderRuntimeSupervisor"][
+            "non_test_references"
+        ],
+        "parallelizable_non_test_refs": symbols["parallelizable"]["non_test_references"],
+        "web_unsafe_nonlocal_bind_refs": symbols["allow_unauthenticated_nonlocal_bind"][
+            "files"
+        ],
+    }
+
+
+def build_report(symbols: list[str]) -> dict[str, object]:
+    tests = test_counts_by_crate()
+    symbol_counts = symbol_references(symbols)
+    return {
+        "schema_version": 1,
+        "git": {
+            "branch": git_value("branch", "--show-current"),
+            "commit": git_value("rev-parse", "HEAD"),
+            "dirty": bool(git_value("status", "--short")),
+        },
+        "counts": {
+            "crates": len(crate_names()),
+            "docs": docs_count(),
+        },
+        "tests": {
+            "by_crate": tests,
+            "spot_checks": {
+                "archon-leann": tests.get("archon-leann"),
+                "archon-plugin": tests.get("archon-plugin"),
+                "bash": bash_surface(),
+            },
+        },
+        "caller_counts": symbol_counts,
+        "feature_checks": feature_checks(symbol_counts),
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--symbol",
+        action="append",
+        dest="symbols",
+        help="Additional cited symbol/string to count. Can be passed multiple times.",
+    )
+    parser.add_argument("--expect-crates", type=int)
+    parser.add_argument("--expect-docs", type=int)
+    args = parser.parse_args()
+
+    symbols = DEFAULT_SYMBOLS + [s for s in (args.symbols or []) if s not in DEFAULT_SYMBOLS]
+    report = build_report(symbols)
+    print(json.dumps(report, indent=2, sort_keys=True))
+
+    errors: list[str] = []
+    if args.expect_crates is not None and report["counts"]["crates"] != args.expect_crates:
+        errors.append(
+            f"expected {args.expect_crates} crates, got {report['counts']['crates']}"
+        )
+    if args.expect_docs is not None and report["counts"]["docs"] != args.expect_docs:
+        errors.append(f"expected {args.expect_docs} docs, got {report['counts']['docs']}")
+    if errors:
+        for error in errors:
+            print(f"validate-report-surface: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

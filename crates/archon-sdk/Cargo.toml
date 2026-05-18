@@ -38,4 +38,5 @@ rust-embed = "8"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
+tower = { workspace = true, features = ["util"] }
 uuid = { workspace = true }

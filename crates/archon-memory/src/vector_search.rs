@@ -85,8 +85,15 @@ pub fn store_embedding(
     memory_id: &str,
     embedding: &[f32],
     provider: &str,
-    _dim: usize,
+    dim: usize,
 ) -> Result<(), MemoryError> {
+    if embedding.len() != dim {
+        return Err(MemoryError::Embedding(format!(
+            "embedding dimension mismatch for memory {memory_id}: got {}, expected {dim}",
+            embedding.len()
+        )));
+    }
+
     let arr = ndarray::Array1::from_vec(embedding.to_vec());
 
     let mut params = BTreeMap::new();

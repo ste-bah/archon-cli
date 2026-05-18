@@ -20,6 +20,14 @@ pub struct LoadedPlugin {
     pub wasm_path: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginLoadWarning {
+    WildcardNetworkGrant {
+        requested_hosts: Vec<String>,
+        approval: String,
+    },
+}
+
 // ── PluginLoadResult ──────────────────────────────────────────────────────────
 
 /// Result of a full plugin directory scan.
@@ -37,4 +45,6 @@ pub struct PluginLoadResult {
     /// Plugin IDs in this list are inferred from the directory name when the
     /// manifest cannot be parsed.
     pub errors: Vec<(String, PluginError)>,
+    /// Non-fatal high-risk or migration-relevant load warnings.
+    pub warnings: Vec<(String, PluginLoadWarning)>,
 }

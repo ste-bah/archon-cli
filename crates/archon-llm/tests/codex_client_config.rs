@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use archon_llm::auth::CodexCredentials;
-use archon_llm::provider::{LlmError, LlmRequest};
+use archon_llm::provider::{LlmError, LlmProvider, LlmRequest};
 use archon_llm::providers::codex::client::{
     CodexProvider, build_codex_headers, build_reasoning_config, clamp_reasoning_effort,
     validate_spoof_headers,
@@ -109,6 +109,35 @@ fn codex_request_body_stays_responses_shaped_without_anthropic_cache_control() {
     assert!(wire.get("input").is_some());
     assert!(wire.get("messages").is_none());
     assert!(!wire.to_string().contains("cache_control"));
+}
+
+#[test]
+fn codex_models_report_known_context_windows() {
+    let provider = CodexProvider::new(
+        PathBuf::from("/tmp/archon-test-codex-auth.json"),
+        SpoofConfig::default(),
+        reqwest::Client::new(),
+    )
+    .expect("provider");
+    let models = provider.models();
+
+    assert_eq!(
+        models
+            .iter()
+            .find(|model| model.id == "gpt-5.5")
+            .unwrap()
+            .context_window,
+        1_050_000
+    );
+    assert_eq!(
+        models
+            .iter()
+            .find(|model| model.id == "gpt-5.3-codex")
+            .unwrap()
+            .context_window,
+        400_000
+    );
+    assert!(models.iter().all(|model| model.context_window > 0));
 }
 
 #[test]

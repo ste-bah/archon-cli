@@ -4,9 +4,8 @@
 //!   1. Parses `Mcp-Session-Id: <id>` from the first POST response headers
 //!      (classic MCP servers return it as part of the `initialize` 202).
 //!   2. Injects `Mcp-Session-Id: <cached>` on every subsequent POST.
-//!   3. On server 404 (session invalid), logs + drops the message and
-//!      surfaces to the caller as a bounded rmcp request timeout — NOT an
-//!      infinite retry loop.
+//!   3. On server 404 (session invalid), terminates the current transport so
+//!      higher layers can reconnect — NOT an infinite retry loop.
 //!   4. Maintains per-client isolation: two concurrent `connect_mcp` calls
 //!      against distinct servers see distinct, non-interfering session IDs.
 
@@ -197,6 +196,7 @@ fn sse_config(name: &str, addr: SocketAddr) -> ServerConfig {
         transport: "sse".into(),
         url: Some(format!("http://{addr}/sse")),
         headers: None,
+        tool_policy: Default::default(),
     }
 }
 

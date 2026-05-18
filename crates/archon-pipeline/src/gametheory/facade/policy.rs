@@ -25,10 +25,11 @@ pub(super) fn apply_policy_gates_to_routing(
         let enabled_set: HashSet<String> = enabled.iter().cloned().collect();
         let before = enabled.len();
         enabled.retain(|agent_key| {
-            if !enable_tier11 && agent_tier(agent_key) == Some(11) {
+            if !enable_tier11 && matches!(agent_tier(agent_key), Some(11 | 12)) {
+                let tier = agent_tier(agent_key).unwrap_or(0);
                 skipped.push((
                     agent_key.clone(),
-                    "Tier 11 disabled: pass --enable-tier11 and set policy.gametheory.enable_tier11=true".to_string(),
+                    format!("Tier {tier} disabled: pass --enable-tier11 and set policy.gametheory.enable_tier11=true to enable sensitive high-tier specialists"),
                 ));
                 return false;
             }

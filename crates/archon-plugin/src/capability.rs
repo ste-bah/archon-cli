@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 ///
 /// Plugins are denied-by-default. Each capability must be explicitly granted
 /// in the plugin's manifest and accepted by the user during installation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PluginCapability {
     /// No capabilities (placeholder / deny-all).
     None,
@@ -18,6 +18,8 @@ pub enum PluginCapability {
     WriteFs(Vec<PathBuf>),
     /// Outbound network access to specific hostnames.
     Network(Vec<String>),
+    /// Explicit high-risk operator approval for unrestricted outbound network.
+    NetworkWildcardApproved { approval: String },
     /// Permission to register tools with the Archon tool registry.
     ToolRegister,
     /// Permission to register hooks in the Archon hook system.
@@ -78,10 +80,19 @@ impl CapabilityChecker {
     /// Check if the plugin may make outbound network calls to `hostname`.
     pub fn can_use_network(&self, hostname: &str) -> bool {
         for cap in &self.capabilities {
-            if let PluginCapability::Network(hosts) = cap
-                && hosts.iter().any(|h| h == hostname || h == "*")
-            {
-                return true;
+            match cap {
+                PluginCapability::Network(hosts) if hosts.iter().any(|h| h == hostname) => {
+                    return true;
+                }
+                PluginCapability::NetworkWildcardApproved { approval } => {
+                    tracing::warn!(
+                        approval = %approval,
+                        hostname = %hostname,
+                        "plugin wildcard network capability used"
+                    );
+                    return true;
+                }
+                _ => {}
             }
         }
         false

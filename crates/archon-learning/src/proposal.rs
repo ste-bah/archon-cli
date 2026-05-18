@@ -18,6 +18,8 @@
 
 use std::collections::HashMap;
 
+use cozo::DbInstance;
+
 use crate::models::*;
 
 const PROPOSAL_WINDOW_DAYS: i64 = 7;
@@ -28,22 +30,53 @@ const PROPOSAL_WINDOW_DAYS: i64 = 7;
 /// proposals when aggregation criteria are met.
 pub fn generate_proposals(events: &[LearningEvent]) -> Vec<BehaviourProposal> {
     let mut proposals = Vec::new();
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(PROPOSAL_WINDOW_DAYS);
 
-    proposals.extend(check_source_contradictions(events));
-    proposals.extend(check_gate_failures(events));
-    proposals.extend(check_user_correction_clusters(events));
+    proposals.extend(check_source_contradictions(events, cutoff));
+    proposals.extend(check_gate_failures(events, cutoff));
+    proposals.extend(check_user_correction_clusters(events, cutoff));
 
     proposals
 }
 
+/// Generate proposals for persistence, populating the current manifest version
+/// from the governed-learning store before any caller can apply the proposal.
+pub fn generate_proposals_for_store(
+    db: &DbInstance,
+    events: &[LearningEvent],
+) -> Result<Vec<BehaviourProposal>, crate::errors::LearningError> {
+    let mut proposals = generate_proposals(events);
+    populate_current_versions(db, &mut proposals)?;
+    Ok(proposals)
+}
+
+pub fn populate_current_versions(
+    db: &DbInstance,
+    proposals: &mut [BehaviourProposal],
+) -> Result<(), crate::errors::LearningError> {
+    for proposal in proposals {
+        proposal.current_version = crate::manifest::load_current(db, &proposal.manifest_kind)
+            .map_err(crate::errors::LearningError::from)?
+            .map(|version| version.version_id)
+            .unwrap_or_else(|| "none".to_string());
+    }
+    Ok(())
+}
+
 /// Rule 1: >=3 SourceContradicted for same source → SourceQualityProfile proposal.
-fn check_source_contradictions(events: &[LearningEvent]) -> Vec<BehaviourProposal> {
+fn check_source_contradictions(
+    events: &[LearningEvent],
+    cutoff: chrono::DateTime<chrono::Utc>,
+) -> Vec<BehaviourProposal> {
     let mut proposals = Vec::new();
 
     // Group SourceContradicted events by source_artifact_id
     let mut source_counts: HashMap<&str, Vec<&LearningEvent>> = HashMap::new();
     for event in events {
         if event.event_type == LearningEventType::SourceContradicted {
+            if !is_within_window(event, cutoff) {
+                continue;
+            }
             source_counts
                 .entry(event.source_artifact_id.as_str())
                 .or_default()
@@ -65,7 +98,7 @@ fn check_source_contradictions(events: &[LearningEvent]) -> Vec<BehaviourProposa
                 ),
                 workspace_id: source_events[0].workspace_id.clone(),
                 manifest_kind: BehaviourManifestKind::SourceQualityProfile,
-                current_version: String::new(), // filled by apply step
+                current_version: "unresolved".to_string(),
                 proposed_version: format!(
                     "v-{}",
                     uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string()
@@ -94,12 +127,18 @@ fn check_source_contradictions(events: &[LearningEvent]) -> Vec<BehaviourProposa
 }
 
 /// Rule 2: >=3 GateFailed for same gate → PipelineGates proposal.
-fn check_gate_failures(events: &[LearningEvent]) -> Vec<BehaviourProposal> {
+fn check_gate_failures(
+    events: &[LearningEvent],
+    cutoff: chrono::DateTime<chrono::Utc>,
+) -> Vec<BehaviourProposal> {
     let mut proposals = Vec::new();
 
     let mut gate_counts: HashMap<&str, Vec<&LearningEvent>> = HashMap::new();
     for event in events {
         if event.event_type == LearningEventType::GateFailed {
+            if !is_within_window(event, cutoff) {
+                continue;
+            }
             gate_counts
                 .entry(event.source_artifact_id.as_str())
                 .or_default()
@@ -119,7 +158,7 @@ fn check_gate_failures(events: &[LearningEvent]) -> Vec<BehaviourProposal> {
                 ),
                 workspace_id: gate_events[0].workspace_id.clone(),
                 manifest_kind: BehaviourManifestKind::PipelineGates,
-                current_version: String::new(),
+                current_version: "unresolved".to_string(),
                 proposed_version: format!(
                     "v-{}",
                     uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string()
@@ -148,8 +187,10 @@ fn check_gate_failures(events: &[LearningEvent]) -> Vec<BehaviourProposal> {
 }
 
 /// Rule 3: >=3 UserCorrected for same rule id within 7 days.
-fn check_user_correction_clusters(events: &[LearningEvent]) -> Vec<BehaviourProposal> {
-    let cutoff = chrono::Utc::now() - chrono::Duration::days(PROPOSAL_WINDOW_DAYS);
+fn check_user_correction_clusters(
+    events: &[LearningEvent],
+    cutoff: chrono::DateTime<chrono::Utc>,
+) -> Vec<BehaviourProposal> {
     let mut rule_counts: HashMap<&str, Vec<&LearningEvent>> = HashMap::new();
 
     for event in events {
@@ -182,7 +223,7 @@ fn check_user_correction_clusters(events: &[LearningEvent]) -> Vec<BehaviourProp
                 ),
                 workspace_id: rule_events[0].workspace_id.clone(),
                 manifest_kind: BehaviourManifestKind::BehaviouralRuleAdjustment,
-                current_version: String::new(),
+                current_version: "unresolved".to_string(),
                 proposed_version: format!(
                     "v-{}",
                     uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string()
@@ -219,6 +260,7 @@ fn is_within_window(event: &LearningEvent, cutoff: chrono::DateTime<chrono::Utc>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cozo::DbInstance;
 
     fn make_event(
         event_type: LearningEventType,
@@ -252,6 +294,31 @@ mod tests {
         }
     }
 
+    fn test_db() -> DbInstance {
+        let path = format!("/tmp/test-proposal-{}.db", uuid::Uuid::new_v4());
+        let db = DbInstance::new("sqlite", &path, "").unwrap();
+        crate::schema::ensure_learning_schema(&db).unwrap();
+        db
+    }
+
+    fn seed_manifest_version(db: &DbInstance, version_id: &str, kind: BehaviourManifestKind) {
+        crate::store::insert_manifest_version(
+            db,
+            &BehaviourManifestVersion {
+                version_id: version_id.to_string(),
+                manifest_kind: kind,
+                version_number: 1,
+                content: serde_json::json!({"seed": true}),
+                diff: "seed".to_string(),
+                parent_version_id: None,
+                created_by_proposal_id: None,
+                is_rollback_target: false,
+                created_at: chrono::Utc::now().to_rfc3339(),
+            },
+        )
+        .unwrap();
+    }
+
     #[test]
     fn test_three_contradictions_emit_proposal() {
         let events = vec![
@@ -266,6 +333,37 @@ mod tests {
             BehaviourManifestKind::SourceQualityProfile
         );
         assert_eq!(proposals[0].evidence_ids.len(), 3);
+        assert_eq!(proposals[0].current_version, "unresolved");
+    }
+
+    #[test]
+    fn source_contradictions_outside_window_do_not_fire() {
+        let old =
+            (chrono::Utc::now() - chrono::Duration::days(PROPOSAL_WINDOW_DAYS + 1)).to_rfc3339();
+        let events = vec![
+            make_event_at(
+                LearningEventType::SourceContradicted,
+                "source-1",
+                "ws-1",
+                old.clone(),
+            ),
+            make_event_at(
+                LearningEventType::SourceContradicted,
+                "source-1",
+                "ws-1",
+                old.clone(),
+            ),
+            make_event_at(
+                LearningEventType::SourceContradicted,
+                "source-1",
+                "ws-1",
+                old,
+            ),
+        ];
+
+        let proposals = generate_proposals(&events);
+
+        assert!(proposals.is_empty());
     }
 
     #[test]
@@ -306,6 +404,31 @@ mod tests {
             proposals[0].manifest_kind,
             BehaviourManifestKind::PipelineGates
         );
+    }
+
+    #[test]
+    fn gate_failures_outside_window_do_not_fire() {
+        let old =
+            (chrono::Utc::now() - chrono::Duration::days(PROPOSAL_WINDOW_DAYS + 1)).to_rfc3339();
+        let events = vec![
+            make_event_at(
+                LearningEventType::GateFailed,
+                "gate-sherlock",
+                "ws-1",
+                old.clone(),
+            ),
+            make_event_at(
+                LearningEventType::GateFailed,
+                "gate-sherlock",
+                "ws-1",
+                old.clone(),
+            ),
+            make_event_at(LearningEventType::GateFailed, "gate-sherlock", "ws-1", old),
+        ];
+
+        let proposals = generate_proposals(&events);
+
+        assert!(proposals.is_empty());
     }
 
     #[test]
@@ -390,5 +513,25 @@ mod tests {
         let proposals = generate_proposals(&events);
 
         assert!(proposals.is_empty());
+    }
+
+    #[test]
+    fn generate_proposals_for_store_populates_current_manifest_version() {
+        let db = test_db();
+        seed_manifest_version(
+            &db,
+            "bmv-source-v1",
+            BehaviourManifestKind::SourceQualityProfile,
+        );
+        let events = vec![
+            make_event(LearningEventType::SourceContradicted, "source-1", "ws-1"),
+            make_event(LearningEventType::SourceContradicted, "source-1", "ws-1"),
+            make_event(LearningEventType::SourceContradicted, "source-1", "ws-1"),
+        ];
+
+        let proposals = generate_proposals_for_store(&db, &events).unwrap();
+
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].current_version, "bmv-source-v1");
     }
 }

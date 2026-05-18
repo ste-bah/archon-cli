@@ -7,6 +7,8 @@ use sha2::{Digest, Sha256};
 use crate::{MeaningError, MeaningSample, Result, TripletRecord};
 
 const FALLBACK_EMBEDDING_DIM: usize = 1536;
+pub const STORED_EMBEDDING_FEATURE_SPACE: &str = "semantic_embedding/vec_text_chunks";
+pub const FALLBACK_FEATURE_SPACE: &str = "lexical_feature_space/hash-text-v1";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HydratedTriplet {
@@ -15,6 +17,7 @@ pub struct HydratedTriplet {
     pub anchor: Vec<f32>,
     pub positive: Vec<f32>,
     pub negative: Vec<f32>,
+    pub embedding_sources: Vec<String>,
 }
 
 pub fn resolve_triplet_embeddings(
@@ -36,9 +39,14 @@ pub fn resolve_triplet_embeddings(
     Ok(Some(HydratedTriplet {
         triplet_id: triplet.triplet_id.clone(),
         workspace_id: triplet.workspace_id.clone(),
-        anchor,
-        positive,
-        negative,
+        embedding_sources: vec![
+            anchor.feature_space,
+            positive.feature_space,
+            negative.feature_space,
+        ],
+        anchor: anchor.vector,
+        positive: positive.vector,
+        negative: negative.vector,
     }))
 }
 
@@ -64,7 +72,7 @@ fn resolve_embedding(
     db: &DbInstance,
     samples: &[MeaningSample],
     id: &str,
-) -> Result<Option<Vec<f32>>> {
+) -> Result<Option<ResolvedEmbedding>> {
     let Some(sample) = samples
         .iter()
         .find(|sample| sample.sample_id == id || sample.artifact_id == id)
@@ -74,11 +82,31 @@ fn resolve_embedding(
 
     for candidate in [&sample.sample_id, &sample.artifact_id] {
         if let Some(embedding) = lookup_embedding(db, candidate)? {
-            return Ok(Some(embedding));
+            return Ok(Some(ResolvedEmbedding::new(
+                embedding,
+                STORED_EMBEDDING_FEATURE_SPACE,
+            )));
         }
     }
 
-    Ok(Some(text_embedding(&sample.text, FALLBACK_EMBEDDING_DIM)))
+    Ok(Some(ResolvedEmbedding::new(
+        text_embedding(&sample.text, FALLBACK_EMBEDDING_DIM),
+        FALLBACK_FEATURE_SPACE,
+    )))
+}
+
+struct ResolvedEmbedding {
+    vector: Vec<f32>,
+    feature_space: String,
+}
+
+impl ResolvedEmbedding {
+    fn new(vector: Vec<f32>, feature_space: &str) -> Self {
+        Self {
+            vector,
+            feature_space: feature_space.to_string(),
+        }
+    }
 }
 
 fn lookup_embedding(db: &DbInstance, chunk_id: &str) -> Result<Option<Vec<f32>>> {
@@ -258,6 +286,46 @@ mod tests {
         assert_eq!(hydrated.anchor.len(), 3);
         assert_eq!(hydrated.positive, vec![0.1, 0.0, 0.0]);
         assert_eq!(hydrated.negative, vec![0.9, 0.0, 0.0]);
+        assert_eq!(
+            hydrated.embedding_sources,
+            vec![
+                STORED_EMBEDDING_FEATURE_SPACE,
+                STORED_EMBEDDING_FEATURE_SPACE,
+                STORED_EMBEDDING_FEATURE_SPACE,
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_triplet_embeddings_labels_hash_fallbacks_as_lexical_features() {
+        let db = db();
+        crate::ensure_schema(&db).unwrap();
+        crate::insert_sample(
+            &db,
+            &sample("anchor", "anchor-artifact", MeaningLabel::Positive),
+        )
+        .unwrap();
+        crate::insert_sample(
+            &db,
+            &sample("good", "good-artifact", MeaningLabel::Positive),
+        )
+        .unwrap();
+        crate::insert_sample(&db, &sample("bad", "bad-artifact", MeaningLabel::Negative)).unwrap();
+
+        let hydrated =
+            resolve_triplet_embeddings(&db, &triplet("t1", "anchor-artifact", "good", "bad"))
+                .unwrap()
+                .unwrap();
+
+        assert_eq!(hydrated.anchor.len(), FALLBACK_EMBEDDING_DIM);
+        assert_eq!(
+            hydrated.embedding_sources,
+            vec![
+                FALLBACK_FEATURE_SPACE,
+                FALLBACK_FEATURE_SPACE,
+                FALLBACK_FEATURE_SPACE
+            ]
+        );
     }
 
     #[test]

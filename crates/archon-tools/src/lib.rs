@@ -22,6 +22,7 @@ pub mod gametheory;
 pub mod glob_tool;
 pub mod grep;
 pub mod monitor;
+pub(crate) mod path_guard;
 pub mod plan_mode;
 pub mod powershell;
 pub mod push_notification;

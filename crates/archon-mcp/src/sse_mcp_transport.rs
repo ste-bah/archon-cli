@@ -37,12 +37,12 @@
 //!   drop with `Last-Event-ID` replay and bounded exponential backoff
 //!   (see [`crate::sse_reconnect`]).
 //! * #203 MCP-SSE-SESSION-ID — `Mcp-Session-Id` header captured from POST
-//!   responses and injected on every subsequent POST; 404 responses drop
-//!   the message (rmcp surfaces a bounded request timeout). Full
-//!   session re-initialization on 404 is a follow-up.
+//!   responses and injected on every subsequent POST; 404 responses terminate
+//!   the POST pump so the sink closes and higher layers can reconnect instead
+//!   of silently dropping messages forever.
 //!
-//! POST failures are logged at `tracing::warn!` but do not fail the transport;
-//! rmcp observes request timeouts for any messages that fail to deliver.
+//! Non-terminal POST failures are logged at `tracing::warn!`; rmcp observes
+//! request timeouts for messages that fail to deliver.
 
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -115,6 +115,16 @@ pub(crate) struct SseInboundSetup {
     pub frame_rx: mpsc::Receiver<SseFrame>,
     /// Lifecycle guard for the spawned SSE reconnect pump.
     pub sse_shutdown: crate::sse_reconnect::SseShutdown,
+}
+
+/// Reason the outbound POST pump stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PostPumpExit {
+    /// The outbound sink was dropped normally.
+    SinkClosed,
+    /// Server returned 404 for the session-bound POST endpoint. This is a
+    /// terminal state for the current transport; higher layers should reconnect.
+    SessionNotFound,
 }
 
 /// Open the SSE GET stream, wait for the `event: endpoint` frame, and return
@@ -318,19 +328,20 @@ pub async fn connect_mcp(
 /// Session-id coordination (#203): if `session_id` holds a value, it is
 /// injected as `Mcp-Session-Id: <id>` on each POST. After every response,
 /// if the server returned an `Mcp-Session-Id` header, it replaces the
-/// cached value. A `404` response is logged + dropped — rmcp observes the
-/// missing JSON-RPC response as a request-level timeout, bounded by rmcp's
-/// own tunables. Full session re-initialization on 404 is a follow-up.
+/// cached value. A `404` response is treated as a terminal state for this
+/// transport instance: the cached session id is cleared and the pump exits, so
+/// subsequent sink sends fail with "outbound channel closed" and higher layers
+/// can reconnect.
 ///
-/// Errors are logged but do not stop the pump: the rmcp runtime will observe
-/// request timeouts for messages whose responses never arrive.
+/// Non-terminal errors are logged but do not stop the pump: the rmcp runtime
+/// will observe request timeouts for messages whose responses never arrive.
 pub(crate) async fn post_pump_task(
     client: reqwest::Client,
     url: Url,
     headers: HashMap<HeaderName, HeaderValue>,
     session_id: SessionIdHandle,
     mut rx: mpsc::Receiver<TxJsonRpcMessage<RoleClient>>,
-) {
+) -> PostPumpExit {
     while let Some(msg) = rx.recv().await {
         let body = match serde_json::to_string(&msg) {
             Ok(s) => s,
@@ -371,12 +382,15 @@ pub(crate) async fn post_pump_task(
                 tracing::trace!(status = %resp.status(), "sse: POST ok");
             }
             Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => {
-                // Session expired / unknown. Drop the message; rmcp will
-                // observe a request timeout. Full re-init is a follow-up.
+                // Session expired / unknown. Close this transport instance so
+                // the caller can reconnect instead of silently timing out on
+                // every future message.
+                *session_id.write().await = None;
                 tracing::warn!(
                     status = %resp.status(),
-                    "sse: POST returned 404 — session likely invalid, dropping message"
+                    "sse: POST returned 404 — session invalid; closing transport for reconnect"
                 );
+                return PostPumpExit::SessionNotFound;
             }
             Ok(resp) => {
                 tracing::warn!(status = %resp.status(), "sse: POST non-2xx");
@@ -387,6 +401,7 @@ pub(crate) async fn post_pump_task(
         }
     }
     tracing::debug!("sse: outbound POST pump exited (sink closed)");
+    PostPumpExit::SinkClosed
 }
 
 /// Convert the user-supplied header map into validated
@@ -412,6 +427,9 @@ pub(crate) fn convert_headers(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{Router, routing::post};
+    use http::StatusCode;
+    use tokio::net::TcpListener;
 
     #[tokio::test]
     async fn connect_mcp_invalid_url_errors() {
@@ -448,5 +466,34 @@ mod tests {
             }
             other => panic!("expected Transport err, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn post_pump_404_closes_terminal_state_and_clears_session_id() {
+        let app = Router::new().route("/message", post(|| async { StatusCode::NOT_FOUND }));
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve");
+        });
+
+        let client = reqwest::Client::new();
+        let url = Url::parse(&format!("http://{addr}/message")).expect("url");
+        let session_id: SessionIdHandle = Arc::new(RwLock::new(Some("stale-session".into())));
+        let (tx, rx) = mpsc::channel(1);
+        let msg: TxJsonRpcMessage<RoleClient> = serde_json::from_value(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "ping"
+        }))
+        .expect("json-rpc ping");
+        tx.send(msg).await.expect("send message to pump");
+        drop(tx);
+
+        let exit = post_pump_task(client, url, HashMap::new(), Arc::clone(&session_id), rx).await;
+        assert_eq!(exit, PostPumpExit::SessionNotFound);
+        assert_eq!(*session_id.read().await, None);
+
+        server.abort();
     }
 }

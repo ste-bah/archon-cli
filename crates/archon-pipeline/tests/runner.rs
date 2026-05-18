@@ -9,6 +9,7 @@
 //! - Quality scores are stored in agent results
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -29,6 +30,86 @@ struct MockLlmClient {
     call_message_counts: Arc<Mutex<Vec<usize>>>,
     /// The canned content string to return.
     canned_response: String,
+}
+
+#[derive(Clone)]
+struct DelayedLlmClient {
+    delay: Duration,
+    active: Arc<AtomicUsize>,
+    max_active: Arc<AtomicUsize>,
+}
+
+#[derive(Clone)]
+struct SequencedLlmClient {
+    call_count: Arc<AtomicUsize>,
+}
+
+impl DelayedLlmClient {
+    fn new(delay: Duration) -> Self {
+        Self {
+            delay,
+            active: Arc::new(AtomicUsize::new(0)),
+            max_active: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    fn max_observed(&self) -> usize {
+        self.max_active.load(Ordering::SeqCst)
+    }
+}
+
+impl SequencedLlmClient {
+    fn new() -> Self {
+        Self {
+            call_count: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    fn calls(&self) -> usize {
+        self.call_count.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl LlmClient for DelayedLlmClient {
+    async fn send_message(
+        &self,
+        _messages: Vec<serde_json::Value>,
+        _system: Vec<serde_json::Value>,
+        _tools: Vec<serde_json::Value>,
+        _model: &str,
+    ) -> anyhow::Result<LlmResponse> {
+        let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+        self.max_active.fetch_max(active, Ordering::SeqCst);
+        tokio::time::sleep(self.delay).await;
+        self.active.fetch_sub(1, Ordering::SeqCst);
+        Ok(LlmResponse {
+            content: "wave output".into(),
+            tool_uses: vec![],
+            tokens_in: 10,
+            tokens_out: 5,
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl LlmClient for SequencedLlmClient {
+    async fn send_message(
+        &self,
+        _messages: Vec<serde_json::Value>,
+        _system: Vec<serde_json::Value>,
+        _tools: Vec<serde_json::Value>,
+        _model: &str,
+    ) -> anyhow::Result<LlmResponse> {
+        let call = self.call_count.fetch_add(1, Ordering::SeqCst);
+        let content = if call < 2 { "retry-me" } else { "retry-ok" };
+        Ok(LlmResponse {
+            content: content.into(),
+            tool_uses: vec![],
+            tokens_in: 10,
+            tokens_out: 5,
+        })
+    }
 }
 
 impl MockLlmClient {
@@ -92,6 +173,7 @@ impl StubFacade {
             model: "mock-model".to_string(),
             phase: index as u32 + 1,
             critical: true,
+            parallelizable: false,
             quality_threshold: 0.7,
             tool_access_level: ToolAccessLevel::ReadOnly,
         }
@@ -173,6 +255,165 @@ impl PipelineFacade for StubFacade {
             total_cost_usd: total_cost,
             duration,
             final_output: "Pipeline complete".to_string(),
+        })
+    }
+}
+
+struct WaveFacade;
+
+#[async_trait::async_trait]
+impl PipelineFacade for WaveFacade {
+    async fn init_session(&self, task: &str) -> anyhow::Result<PipelineSession> {
+        Ok(PipelineSession {
+            id: "test-session-wave".to_string(),
+            pipeline_type: PipelineType::Coding,
+            task: task.to_string(),
+            started_at: Instant::now(),
+            agent_results: vec![],
+            leann_context: String::new(),
+        })
+    }
+
+    async fn next_agent(&self, session: &PipelineSession) -> anyhow::Result<NextAgent> {
+        if session.agent_results.is_empty() {
+            let mut wave = vec![StubFacade::make_agent(0), StubFacade::make_agent(1)];
+            for agent in &mut wave {
+                agent.parallelizable = true;
+            }
+            Ok(NextAgent::ContinueWave(wave))
+        } else {
+            Ok(NextAgent::Done)
+        }
+    }
+
+    async fn build_prompt(
+        &self,
+        _session: &PipelineSession,
+        agent: &AgentInfo,
+    ) -> anyhow::Result<(
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+    )> {
+        Ok((
+            vec![serde_json::json!({"role": "user", "content": agent.key})],
+            vec![],
+            vec![],
+        ))
+    }
+
+    async fn score_quality(
+        &self,
+        _session: &PipelineSession,
+        _agent: &AgentInfo,
+        _result: &AgentResult,
+    ) -> anyhow::Result<QualityScore> {
+        Ok(QualityScore {
+            overall: 0.85,
+            dimensions: HashMap::new(),
+        })
+    }
+
+    async fn process_completion(
+        &self,
+        _session: &mut PipelineSession,
+        _agent: &AgentInfo,
+        _result: &AgentResult,
+        _quality: &QualityScore,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn finalize(&self, session: PipelineSession) -> anyhow::Result<PipelineResult> {
+        Ok(PipelineResult {
+            session_id: session.id.clone(),
+            pipeline_type: session.pipeline_type.clone(),
+            total_cost_usd: 0.0,
+            duration: session.started_at.elapsed(),
+            final_output: "wave complete".to_string(),
+            agent_results: session.agent_results,
+        })
+    }
+}
+
+struct WaveRetryFacade;
+
+#[async_trait::async_trait]
+impl PipelineFacade for WaveRetryFacade {
+    async fn init_session(&self, task: &str) -> anyhow::Result<PipelineSession> {
+        Ok(PipelineSession {
+            id: "test-session-wave-retry".to_string(),
+            pipeline_type: PipelineType::Coding,
+            task: task.to_string(),
+            started_at: Instant::now(),
+            agent_results: vec![],
+            leann_context: String::new(),
+        })
+    }
+
+    async fn next_agent(&self, session: &PipelineSession) -> anyhow::Result<NextAgent> {
+        if session.agent_results.is_empty() {
+            let mut wave = vec![StubFacade::make_agent(0), StubFacade::make_agent(1)];
+            for agent in &mut wave {
+                agent.parallelizable = true;
+            }
+            Ok(NextAgent::ContinueWave(wave))
+        } else {
+            Ok(NextAgent::Done)
+        }
+    }
+
+    async fn build_prompt(
+        &self,
+        _session: &PipelineSession,
+        agent: &AgentInfo,
+    ) -> anyhow::Result<(
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+    )> {
+        Ok((
+            vec![serde_json::json!({"role": "user", "content": agent.key})],
+            vec![],
+            vec![],
+        ))
+    }
+
+    async fn score_quality(
+        &self,
+        _session: &PipelineSession,
+        _agent: &AgentInfo,
+        result: &AgentResult,
+    ) -> anyhow::Result<QualityScore> {
+        let overall = if result.output == "retry-ok" {
+            0.85
+        } else {
+            0.10
+        };
+        Ok(QualityScore {
+            overall,
+            dimensions: HashMap::new(),
+        })
+    }
+
+    async fn process_completion(
+        &self,
+        _session: &mut PipelineSession,
+        _agent: &AgentInfo,
+        _result: &AgentResult,
+        _quality: &QualityScore,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn finalize(&self, session: PipelineSession) -> anyhow::Result<PipelineResult> {
+        Ok(PipelineResult {
+            session_id: session.id.clone(),
+            pipeline_type: session.pipeline_type.clone(),
+            total_cost_usd: 0.0,
+            duration: session.started_at.elapsed(),
+            final_output: "wave retry complete".to_string(),
+            agent_results: session.agent_results,
         })
     }
 }
@@ -349,6 +590,55 @@ async fn test_pipeline_result_contains_all_agents() {
         .map(|(info, _)| info.key.as_str())
         .collect();
     assert_eq!(keys, vec!["agent-1", "agent-2", "agent-3"]);
+}
+
+#[tokio::test]
+async fn test_parallel_wave_executes_agents_concurrently_and_commits_in_order() {
+    let facade = WaveFacade;
+    let llm = DelayedLlmClient::new(Duration::from_millis(120));
+
+    let start = Instant::now();
+    let result = run_pipeline(&facade, &llm, "parallel wave", None, None, None)
+        .await
+        .expect("parallel wave pipeline should succeed");
+    let elapsed = start.elapsed();
+
+    assert!(
+        elapsed < Duration::from_millis(220),
+        "two 120ms agents should overlap, elapsed={elapsed:?}"
+    );
+    assert!(
+        llm.max_observed() >= 2,
+        "expected at least two concurrent LLM calls"
+    );
+    let keys = result
+        .agent_results
+        .iter()
+        .map(|(agent, _)| agent.key.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(keys, vec!["agent-1", "agent-2"]);
+}
+
+#[tokio::test]
+async fn test_parallel_wave_retries_low_quality_outputs_before_commit() {
+    let facade = WaveRetryFacade;
+    let llm = SequencedLlmClient::new();
+
+    let result = run_pipeline(&facade, &llm, "parallel wave retry", None, None, None)
+        .await
+        .expect("parallel wave retry pipeline should succeed");
+
+    assert_eq!(
+        llm.calls(),
+        4,
+        "two low-quality first attempts should retry"
+    );
+    let outputs = result
+        .agent_results
+        .iter()
+        .map(|(_, result)| result.output.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(outputs, vec!["retry-ok", "retry-ok"]);
 }
 
 /// Verify that per-agent overhead (time spent in runner machinery, excluding

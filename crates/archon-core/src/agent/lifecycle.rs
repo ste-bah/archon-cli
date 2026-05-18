@@ -30,6 +30,7 @@ impl Agent {
             extraction_config: ExtractionConfig::default(),
             extraction_state: ExtractionState::default(),
             auto_extractor: None,
+            auto_extraction_tasks: Vec::new(),
             auto_evaluator: None,
             subagent_manager: Arc::new(Mutex::new(SubagentManager::default())),
             show_thinking: Arc::new(AtomicBool::new(true)),
@@ -241,6 +242,54 @@ impl Agent {
     /// Set the auto-extraction system (v0.1.23: LLM-driven fact extraction every N turns).
     pub fn set_auto_extractor(&mut self, extractor: Arc<AutoExtractor>) {
         self.auto_extractor = Some(extractor);
+    }
+
+    pub fn pending_auto_extraction_count(&self) -> usize {
+        self.auto_extraction_tasks.len()
+    }
+
+    pub fn prune_finished_auto_extractions(&mut self) {
+        let mut pending = Vec::with_capacity(self.auto_extraction_tasks.len());
+        for handle in self.auto_extraction_tasks.drain(..) {
+            if handle.is_finished() {
+                drop(handle);
+            } else {
+                pending.push(handle);
+            }
+        }
+        self.auto_extraction_tasks = pending;
+    }
+
+    pub async fn flush_auto_extractions(&mut self, timeout: std::time::Duration) -> usize {
+        let mut handles = std::mem::take(&mut self.auto_extraction_tasks);
+        let pending = handles.len();
+        if pending == 0 {
+            return 0;
+        }
+        let deadline = std::time::Instant::now() + timeout;
+        for mut handle in handles.drain(..) {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                tracing::warn!("auto-extraction task did not finish before shutdown timeout");
+                handle.abort();
+                let _ = handle.await;
+                continue;
+            }
+
+            let timeout = tokio::time::sleep(remaining);
+            tokio::pin!(timeout);
+            tokio::select! {
+                result = &mut handle => {
+                    let _ = result;
+                }
+                _ = &mut timeout => {
+                    tracing::warn!("auto-extraction task did not finish before shutdown timeout");
+                    handle.abort();
+                    let _ = handle.await;
+                }
+            }
+        }
+        pending
     }
 
     /// Wire the GNN auto-trainer's `record_memory(n)` hook.

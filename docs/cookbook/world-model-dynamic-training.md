@@ -1,8 +1,8 @@
-# World Model And JEPA Training Cookbook
+# World Model And JEPA-Inspired Training Cookbook
 
 This guide walks through a fresh Archon setup and shows how to get from "no
-world-model data yet" to an active advisory model, then to an optional JEPA
-representation model.
+world-model data yet" to an active advisory model, then to an optional
+JEPA-inspired representation model.
 
 The short version:
 
@@ -18,8 +18,8 @@ archon world promote-jepa <jepa-candidate-id>
 ```
 
 Do not expect all of those commands to pass on day one. The world model needs
-trace history. JEPA needs even more trace history because it is learning a
-representation, not just fitting a small transition model.
+trace history. The JEPA-inspired path needs even more trace history because it
+is learning a representation, not just fitting a small transition model.
 
 ## What You Are Building
 
@@ -33,10 +33,10 @@ There are two model kinds:
 | Model kind | What it does | When to use it |
 |---|---|---|
 | `latent_transition` | Existing local transition model over generic embeddings. | Default, good first model, lower data requirement. |
-| `jepa_transition` | JEPA trace representation plus transition model over JEPA latents. | Optional upgrade after there is enough trace history. |
+| `jepa_transition` | JEPA-inspired trace representation plus transition model over local latents. | Optional upgrade after there is enough trace history. |
 
 The runtime advisor never blocks your foreground work. If the corpus is cold, a
-checkpoint is missing, or JEPA is unavailable, Archon records the reason and
+checkpoint is missing, or the JEPA-inspired path is unavailable, Archon records the reason and
 continues.
 
 ## How Long It Usually Takes
@@ -113,7 +113,7 @@ target_arch = "aarch64"
 
 On Linux or non-Apple-Silicon macOS, `--features mlx-metal` only exercises the
 unsupported-target path; it does not validate Metal execution. Before treating a
-Metal JEPA candidate as promotable, run the Apple Silicon validation checklist in
+Metal JEPA-inspired candidate as promotable, run the Apple Silicon validation checklist in
 [`docs/development/world-model-mlx-metal-validation.md`](../development/world-model-mlx-metal-validation.md).
 
 ## Fresh Setup Checklist
@@ -175,7 +175,7 @@ min_training_examples = 2000
 min_heldout_examples = 200
 ```
 
-Leave `model_kind = "latent_transition"` until a JEPA candidate has passed eval
+Leave `model_kind = "latent_transition"` until a JEPA-inspired candidate has passed eval
 and promotion. Setting `model_kind = "jepa_transition"` too early is safe, but
 the advisor will fail open until a promoted JEPA checkpoint exists.
 
@@ -225,8 +225,8 @@ Corpus sessions:    <number>
 Observed days:      <number>
 Cold-start status:  ...
 Candidate models:   <number>
-JEPA status:        ...
-JEPA candidates:    <number>
+  JEPA-inspired status:     ...
+  JEPA-inspired candidates: <number>
 Advisor status:     ...
 ```
 
@@ -280,8 +280,8 @@ pass, keep using Archon, backfill later, and train another candidate.
 
 ## Step 4: Enable JEPA Candidate Training
 
-JEPA is opt-in for automatic training. Add this if you want the dynamic trainer
-to create JEPA candidates when the machine is idle:
+The JEPA-inspired path is opt-in for automatic training. Add this if you want the dynamic trainer
+to create JEPA-inspired candidates when the machine is idle:
 
 ```toml
 [learning.world_model.jepa]
@@ -306,7 +306,7 @@ Run:
 archon world status
 ```
 
-JEPA is worth trying when:
+The JEPA-inspired path is worth trying when:
 
 ```text
 Cold-start status:  ready
@@ -315,7 +315,7 @@ Corpus sessions:    comfortably above 50
 Observed days:      7 or more
 ```
 
-JEPA is worth evaluating for promotion when training output later says:
+The JEPA-inspired path is worth evaluating for promotion when training output later says:
 
 ```text
 Examples: 2000 or more
@@ -472,7 +472,7 @@ Look for:
 ```text
 Model kind:         jepa_transition
 Active model kind:  jepa_transition
-JEPA status:        active
+JEPA-inspired status:     active
 Advisor status:     ready
 ```
 
@@ -616,7 +616,7 @@ feed that result back into future training.
 | `Advisor status: fail-open` | Archon cannot safely advise yet. | This is safe. Train/promote a passing model or collect more data. |
 | `Corpus sufficient: false` | JEPA has fewer than `min_training_examples`. | Keep the candidate if you want, but it cannot promote yet. |
 | `Baseline available: false` | FastEmbed baseline was unavailable during JEPA eval. | Fix local embedding setup, then rerun `eval-jepa`. |
-| `Collapse gate: false` | JEPA latents collapsed or lack enough rank/variance. | Collect more varied traces and train a new candidate. |
+| `Collapse gate: false` | JEPA-inspired latents collapsed or lack enough rank/variance. | Collect more varied traces and train a new candidate. |
 | `Brier regressed: true` | Risk-label calibration got worse than baseline. | Do not promote; collect more outcomes and retry later. |
 | `jepa candidate ... has not passed all mandatory promotion gates` | Promotion is correctly refusing an unsafe candidate. | Read `eval-jepa` output, fix the failing condition, and train/eval again. |
 

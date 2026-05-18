@@ -23,6 +23,11 @@ fn web_config_default_open_browser_true() {
 }
 
 #[test]
+fn web_config_default_body_limit() {
+    assert_eq!(WebConfig::default().max_body_bytes, 64 * 1024 * 1024);
+}
+
+#[test]
 fn web_config_is_localhost_true_for_loopback() {
     let cfg = WebConfig::default();
     assert!(cfg.is_localhost());

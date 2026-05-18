@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::types::{McpError, ServerConfig};
+use crate::types::{McpError, McpToolBridgePolicy, ServerConfig};
 
 /// Raw on-disk shape of a single server entry inside `mcpServers`.
 #[derive(Debug, Deserialize)]
@@ -28,6 +28,8 @@ struct RawServerEntry {
     url: Option<String>,
     #[serde(default)]
     headers: Option<HashMap<String, String>>,
+    #[serde(default, rename = "toolPolicy", alias = "tool_policy")]
+    tool_policy: McpToolBridgePolicy,
 }
 
 fn default_transport() -> String {
@@ -102,6 +104,7 @@ fn parse_mcp_json(content: &str, source: &Path) -> Result<Vec<ServerConfig>, Mcp
                 transport: entry.transport,
                 url: entry.url,
                 headers: entry.headers,
+                tool_policy: entry.tool_policy,
             }
         })
         .collect();

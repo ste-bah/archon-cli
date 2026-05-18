@@ -12,6 +12,8 @@ pub struct ScoreResult {
     pub similarity: f64,
     pub distance: f64,
     pub sample_count: usize,
+    pub feature_space: String,
+    pub scoring_source: String,
 }
 
 pub fn score_text(db: &cozo::DbInstance, target: &str, text: &str) -> Result<ScoreResult> {
@@ -22,14 +24,44 @@ pub fn score_text(db: &cozo::DbInstance, target: &str, text: &str) -> Result<Sco
     let centroid = store::latest_centroid(db, target)?
         .ok_or_else(|| ConstellationError::MissingCentroid(target.to_string()))?;
     let query = text_vector(text);
-    let similarity = cosine_similarity(&centroid.vector, &query);
+    let (similarity, distance, scoring_source) = match store::query_vectors(db, &query, 16) {
+        Ok(rows) => rows
+            .into_iter()
+            .find(|(centroid_id, _)| centroid_id == &centroid.centroid_id)
+            .map(|(_, distance)| {
+                (
+                    (1.0 - distance).clamp(-1.0, 1.0),
+                    distance,
+                    "vec_constellations:constellation_embedding_idx".to_string(),
+                )
+            })
+            .unwrap_or_else(|| {
+                let similarity = cosine_similarity(&centroid.vector, &query);
+                (
+                    similarity,
+                    1.0 - similarity,
+                    "constellation_centroids.vector_json".to_string(),
+                )
+            }),
+        Err(error) => {
+            tracing::warn!(error = %error, "constellation vector index unavailable; falling back to stored centroid JSON");
+            let similarity = cosine_similarity(&centroid.vector, &query);
+            (
+                similarity,
+                1.0 - similarity,
+                "constellation_centroids.vector_json".to_string(),
+            )
+        }
+    };
     Ok(ScoreResult {
         target: centroid.target,
         centroid_id: centroid.centroid_id,
         version: centroid.version,
         similarity,
-        distance: 1.0 - similarity,
+        distance,
         sample_count: centroid.sample_count,
+        feature_space: store::LEXICAL_CENTROID_FEATURE_SPACE.to_string(),
+        scoring_source,
     })
 }
 

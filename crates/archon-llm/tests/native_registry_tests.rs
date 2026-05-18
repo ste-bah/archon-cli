@@ -93,6 +93,18 @@ fn every_native_entry_has_default_model() {
 }
 
 #[test]
+fn gemini_native_registry_entry_is_marked_as_gap_until_buildable() {
+    let descriptor = NATIVE_REGISTRY.get("gemini").expect("gemini descriptor");
+
+    assert!(
+        descriptor.is_gap,
+        "gemini must remain marked as a gap until dispatch_native can build it"
+    );
+    assert!(!descriptor.supports.streaming);
+    assert!(!descriptor.supports.tool_calling);
+}
+
+#[test]
 fn combined_breadth_ge_36() {
     let native = count_native();
     let compat = count_compat();

@@ -47,6 +47,29 @@ Model Context Protocol (MCP) extends archon-cli with external tools and resource
 
 Environment variables expand inline (`${VAR}`). Servers with `"disabled": true` are skipped.
 
+MCP tools default to Archon's `Risky` permission level unless the server entry
+sets an explicit tool policy. Use raw tool names or Archon's qualified
+`mcp__server__tool` names for overrides. Server-supplied MCP annotations and
+`_meta.archon.permissionLevel` hints are ignored unless `trustServerHints` is
+explicitly enabled for that server:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "mcp-server-filesystem",
+      "toolPolicy": {
+        "trustServerHints": true,
+        "toolPermissions": {
+          "read_file": "safe",
+          "delete_file": "dangerous"
+        }
+      }
+    }
+  }
+}
+```
+
 ## Config loading
 
 archon-cli auto-discovers config from:

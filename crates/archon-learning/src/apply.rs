@@ -85,14 +85,14 @@ fn apply_auto(
     proposal: &BehaviourProposal,
     new_content: Option<serde_json::Value>,
 ) -> Result<ApplyResult, LearningError> {
-    let content = new_content.unwrap_or(serde_json::json!({}));
+    let apply_content = resolve_apply_content(db, proposal, new_content)?;
     let current = manifest::load_current(db, &proposal.manifest_kind)?;
     let version = create_manifest_version(
         db,
         proposal,
-        &content,
+        &apply_content.content,
         current.as_ref().map(|v| v.version_id.as_str()),
-        false,
+        apply_content.is_rollback,
     )?;
 
     store::update_proposal_status(
@@ -105,13 +105,23 @@ fn apply_auto(
         message: e.to_string(),
     })?;
 
+    let event_type = if apply_content.is_rollback {
+        LearningEventType::ManifestRolledBack
+    } else {
+        LearningEventType::ManifestApplied
+    };
+    let mut signal = serde_json::json!({"manifest_kind": proposal.manifest_kind.as_str()});
+    if let Some(target_id) = apply_content.rollback_target_id.as_deref() {
+        signal["rolled_back_from"] = serde_json::json!(target_id);
+    }
+
     crate::events::record_event(
         db,
         &proposal.workspace_id,
-        LearningEventType::ManifestApplied,
+        event_type,
         &proposal.proposal_id,
         Some(&version.version_id),
-        serde_json::json!({"manifest_kind": proposal.manifest_kind.as_str()}),
+        signal,
         1.0,
         "",
     )
@@ -175,14 +185,14 @@ fn apply_approved(
     new_content: Option<serde_json::Value>,
     approver: Option<&str>,
 ) -> Result<ApplyResult, LearningError> {
-    let content = new_content.unwrap_or(serde_json::json!({}));
+    let apply_content = resolve_apply_content(db, proposal, new_content)?;
     let current = manifest::load_current(db, &proposal.manifest_kind)?;
     let version = create_manifest_version(
         db,
         proposal,
-        &content,
+        &apply_content.content,
         current.as_ref().map(|v| v.version_id.as_str()),
-        false,
+        apply_content.is_rollback,
     )?;
 
     store::update_proposal_status(
@@ -195,16 +205,26 @@ fn apply_approved(
         message: e.to_string(),
     })?;
 
+    let event_type = if apply_content.is_rollback {
+        LearningEventType::ManifestRolledBack
+    } else {
+        LearningEventType::ManifestApplied
+    };
+    let mut signal = serde_json::json!({
+        "manifest_kind": proposal.manifest_kind.as_str(),
+        "approver": approver.unwrap_or("system"),
+    });
+    if let Some(target_id) = apply_content.rollback_target_id.as_deref() {
+        signal["rolled_back_from"] = serde_json::json!(target_id);
+    }
+
     crate::events::record_event(
         db,
         &proposal.workspace_id,
-        LearningEventType::ManifestApplied,
+        event_type,
         &proposal.proposal_id,
         Some(&version.version_id),
-        serde_json::json!({
-            "manifest_kind": proposal.manifest_kind.as_str(),
-            "approver": approver.unwrap_or("system"),
-        }),
+        signal,
         1.0,
         "",
     )
@@ -221,6 +241,118 @@ fn apply_approved(
         new_version: Some(version),
         approval: None,
     })
+}
+
+struct ApplyContent {
+    content: serde_json::Value,
+    is_rollback: bool,
+    rollback_target_id: Option<String>,
+}
+
+fn resolve_apply_content(
+    db: &DbInstance,
+    proposal: &BehaviourProposal,
+    new_content: Option<serde_json::Value>,
+) -> Result<ApplyContent, LearningError> {
+    validate_proposal_for_apply(proposal)?;
+
+    if let Some(content) = new_content {
+        validate_apply_content(&content)?;
+        verify_diff_if_possible(db, proposal, content.clone())?;
+        return Ok(ApplyContent {
+            content,
+            is_rollback: false,
+            rollback_target_id: None,
+        });
+    }
+
+    if let Some(target_id) = proposal.proposed_version.strip_prefix("rollback-to-") {
+        let target = store::get_manifest_version(db, target_id)?.ok_or(
+            LearningError::RollbackTargetUnreachable {
+                version_id: target_id.to_string(),
+            },
+        )?;
+        if target.manifest_kind != proposal.manifest_kind {
+            return Err(LearningError::Validation {
+                message: format!(
+                    "rollback target {target_id} is {target_kind}, proposal is {proposal_kind}",
+                    target_kind = target.manifest_kind.as_str(),
+                    proposal_kind = proposal.manifest_kind.as_str(),
+                ),
+            });
+        }
+        return Ok(ApplyContent {
+            content: target.content,
+            is_rollback: true,
+            rollback_target_id: Some(target_id.to_string()),
+        });
+    }
+
+    if proposal.diff.trim().is_empty() {
+        return Err(LearningError::Validation {
+            message: format!(
+                "proposal {} has no explicit content and no diff-derived content",
+                proposal.proposal_id
+            ),
+        });
+    }
+
+    let content = serde_json::json!({
+        "manifest_kind": proposal.manifest_kind.as_str(),
+        "proposed_version": proposal.proposed_version.clone(),
+        "diff": proposal.diff.clone(),
+        "evidence_ids": proposal.evidence_ids.clone(),
+    });
+    validate_apply_content(&content)?;
+    Ok(ApplyContent {
+        content,
+        is_rollback: false,
+        rollback_target_id: None,
+    })
+}
+
+fn validate_proposal_for_apply(proposal: &BehaviourProposal) -> Result<(), LearningError> {
+    if proposal.current_version.trim().is_empty() || proposal.current_version == "unresolved" {
+        return Err(LearningError::Validation {
+            message: format!(
+                "proposal {} is missing current_version and is not auto-applicable",
+                proposal.proposal_id
+            ),
+        });
+    }
+    if proposal.proposed_version.trim().is_empty() {
+        return Err(LearningError::Validation {
+            message: format!(
+                "proposal {} is missing proposed_version",
+                proposal.proposal_id
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn validate_apply_content(content: &serde_json::Value) -> Result<(), LearningError> {
+    match content {
+        serde_json::Value::Object(map) if !map.is_empty() => Ok(()),
+        _ => Err(LearningError::Validation {
+            message: "proposal content must be a non-empty JSON object".into(),
+        }),
+    }
+}
+
+fn verify_diff_if_possible(
+    db: &DbInstance,
+    proposal: &BehaviourProposal,
+    new_content: serde_json::Value,
+) -> Result<(), LearningError> {
+    let trimmed = proposal.diff.trim();
+    if !trimmed.starts_with('[') {
+        return Ok(());
+    }
+    let Some(current) = manifest::load_current(db, &proposal.manifest_kind)? else {
+        return Ok(());
+    };
+    manifest::apply_diff(&current.content, trimmed, new_content).map(|_| ())
 }
 
 fn create_manifest_version(
@@ -281,7 +413,7 @@ mod tests {
             proposal_id: "test-prop-apply".to_string(),
             workspace_id: "ws-test".to_string(),
             manifest_kind: BehaviourManifestKind::RetrievalProfile,
-            current_version: String::new(),
+            current_version: "none".to_string(),
             proposed_version: "v2".to_string(),
             diff: "test diff".to_string(),
             evidence_ids: vec![],
@@ -292,6 +424,27 @@ mod tests {
         };
         store::insert_behaviour_proposal(db, &p).unwrap();
         p
+    }
+
+    fn seed_manifest_version(
+        db: &DbInstance,
+        version_id: &str,
+        kind: BehaviourManifestKind,
+        version_number: i64,
+        content: serde_json::Value,
+    ) {
+        let version = BehaviourManifestVersion {
+            version_id: version_id.to_string(),
+            manifest_kind: kind,
+            version_number,
+            content,
+            diff: "seed".to_string(),
+            parent_version_id: None,
+            created_by_proposal_id: None,
+            is_rollback_target: false,
+            created_at: format!("2026-01-01T00:00:{version_number:02}Z"),
+        };
+        store::insert_manifest_version(db, &version).unwrap();
     }
 
     #[test]
@@ -314,6 +467,76 @@ mod tests {
             result.new_version.unwrap().content,
             serde_json::json!({"weight": 0.5})
         );
+    }
+
+    #[test]
+    fn test_apply_rejects_empty_content() {
+        let db = test_db();
+        make_pending_proposal(&db);
+
+        let result = apply_decision(
+            &db,
+            "test-prop-apply",
+            PolicyDecision::AutoApplied,
+            Some(serde_json::json!({})),
+            None,
+        );
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("non-empty JSON object")
+        );
+    }
+
+    #[test]
+    fn test_apply_rejects_missing_current_version() {
+        let db = test_db();
+        let mut proposal = make_pending_proposal(&db);
+        proposal.proposal_id = "missing-current".into();
+        proposal.current_version = String::new();
+        store::insert_behaviour_proposal(&db, &proposal).unwrap();
+
+        let result = apply_decision(
+            &db,
+            "missing-current",
+            PolicyDecision::AutoApplied,
+            Some(serde_json::json!({"weight": 0.5})),
+            None,
+        );
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("current_version"));
+    }
+
+    #[test]
+    fn test_apply_wires_json_patch_diff_validation() {
+        let db = test_db();
+        seed_manifest_version(
+            &db,
+            "bmv-current",
+            BehaviourManifestKind::RetrievalProfile,
+            1,
+            serde_json::json!({"weight": 0.4}),
+        );
+        let mut proposal = make_pending_proposal(&db);
+        proposal.proposal_id = "json-patch-prop".into();
+        proposal.current_version = "bmv-current".into();
+        proposal.diff = r#"[{"op":"replace","path":"/weight","value":0.7}]"#.into();
+        store::insert_behaviour_proposal(&db, &proposal).unwrap();
+
+        let result = apply_decision(
+            &db,
+            "json-patch-prop",
+            PolicyDecision::AutoApplied,
+            Some(serde_json::json!({"weight": 0.9})),
+            None,
+        );
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("inconsistent"));
     }
 
     #[test]
@@ -425,6 +648,60 @@ mod tests {
     }
 
     #[test]
+    fn test_approved_rollback_proposal_uses_target_content() {
+        let db = test_db();
+        seed_manifest_version(
+            &db,
+            "bmv-v1",
+            BehaviourManifestKind::RetrievalProfile,
+            1,
+            serde_json::json!({"weight": 0.9}),
+        );
+        seed_manifest_version(
+            &db,
+            "bmv-v2",
+            BehaviourManifestKind::RetrievalProfile,
+            2,
+            serde_json::json!({"weight": 0.1}),
+        );
+
+        let proposal = BehaviourProposal {
+            proposal_id: "rollback-prop-apply".to_string(),
+            workspace_id: "ws-test".to_string(),
+            manifest_kind: BehaviourManifestKind::RetrievalProfile,
+            current_version: "bmv-v2".to_string(),
+            proposed_version: "rollback-to-bmv-v1".to_string(),
+            diff: "rollback test".to_string(),
+            evidence_ids: vec!["bmv-v1".to_string()],
+            risk_level: RiskLevel::Low,
+            policy_decision: PolicyDecision::PendingApproval,
+            status: ProposalStatus::Pending,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+        store::insert_behaviour_proposal(&db, &proposal).unwrap();
+
+        let result = apply_decision(
+            &db,
+            "rollback-prop-apply",
+            PolicyDecision::Approved,
+            None,
+            Some("human-reviewer"),
+        )
+        .unwrap();
+        let version = result
+            .new_version
+            .expect("approved rollback should create a version");
+
+        assert!(version.is_rollback_target);
+        assert_eq!(version.content, serde_json::json!({"weight": 0.9}));
+        assert_eq!(version.parent_version_id.as_deref(), Some("bmv-v2"));
+
+        let events = store::list_learning_events_by_type(&db, "ManifestRolledBack").unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].signal["rolled_back_from"], "bmv-v1");
+    }
+
+    #[test]
     fn test_full_governed_loop_event_to_apply_to_rollback() {
         let db = test_db();
 
@@ -467,7 +744,7 @@ mod tests {
         .unwrap();
 
         let all_events = store::list_all_learning_events(&db).unwrap();
-        let proposals = crate::proposal::generate_proposals(&all_events);
+        let proposals = crate::proposal::generate_proposals_for_store(&db, &all_events).unwrap();
         assert!(
             !proposals.is_empty(),
             "3 contradictions should trigger a proposal"
@@ -503,14 +780,22 @@ mod tests {
             .clone();
 
         // 5. Rollback the applied version
-        let rollback_result = crate::rollback::rollback_to_version(
+        let rollback_result = crate::rollback::rollback_to_version_with_auto_apply(
             &db,
             &version_id,
             "ws-loop",
             "integration test rollback",
+            true,
+            0,
         )
         .unwrap();
-        assert!(rollback_result.new_version.is_rollback_target);
+        assert!(
+            rollback_result
+                .new_version
+                .as_ref()
+                .expect("integration rollback should auto-apply")
+                .is_rollback_target
+        );
 
         // 6. Verify the full audit trail
         let all_events = store::list_all_learning_events(&db).unwrap();

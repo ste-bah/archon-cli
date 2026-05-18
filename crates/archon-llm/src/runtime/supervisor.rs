@@ -55,6 +55,21 @@ impl ProviderRuntimeSupervisor {
         ))
     }
 
+    pub fn request_retry(
+        &mut self,
+        retry_count: u32,
+        reason_code: impl Into<String>,
+    ) -> Result<(), ProviderRuntimeSupervisorError> {
+        self.record_event(
+            self.event(
+                ProviderRuntimeEventType::RequestRetry,
+                ProviderRuntimeSeverity::Warn,
+            )
+            .with_retry_count(retry_count)
+            .with_reason(reason_code),
+        )
+    }
+
     pub fn request_succeeded(&mut self) -> Result<(), ProviderRuntimeSupervisorError> {
         self.record_event(self.event(
             ProviderRuntimeEventType::RequestSucceeded,
@@ -144,7 +159,8 @@ impl ProviderRuntimeSupervisor {
             ProviderRuntimeEventType::RateLimitObserved
             | ProviderRuntimeEventType::UsageLimitObserved
             | ProviderRuntimeEventType::ProfileCooldownStarted
-            | ProviderRuntimeEventType::FallbackSelected => {
+            | ProviderRuntimeEventType::FallbackSelected
+            | ProviderRuntimeEventType::RequestRetry => {
                 self.status.health = ProviderHealthStatus::Degraded;
                 self.status.last_failure_at = Some(event.created_at);
             }

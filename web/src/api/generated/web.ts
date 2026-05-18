@@ -1,6 +1,6 @@
 export type ApiStatus = { status: string, version: string, web: WebRuntimeStatus, features: WebFeatureSummary, stores: Array<WebStoreStatus>, };
 
-export type WebRuntimeStatus = { bindAddress: string, port: number, authRequired: boolean, devMode: boolean, assetMode: string, };
+export type WebRuntimeStatus = { bindAddress: string, port: number, authRequired: boolean, maxBodyBytes: number, devMode: boolean, assetMode: string, };
 
 export type WebFeatureSummary = { chat: boolean, uploads: boolean, memoryLearning: boolean, worldModel: boolean, reasoningQuality: boolean, corpus: boolean, pipelines: boolean, metrics: boolean, };
 
@@ -8,7 +8,7 @@ export type WebStoreStatus = { name: string, status: string, detail: string, };
 
 export type EffectiveConfigSummary = { web: WebConfigSummary, frontendStack: FrontendStackSummary, };
 
-export type WebConfigSummary = { port: number, bindAddress: string, openBrowser: boolean, authRequired: boolean, nonLoopbackBind: boolean, };
+export type WebConfigSummary = { port: number, bindAddress: string, openBrowser: boolean, maxBodyBytes: number, authRequired: boolean, nonLoopbackBind: boolean, };
 
 export type FrontendStackSummary = { framework: string, bundler: string, generatedTypes: boolean, assetDelivery: string, };
 
@@ -34,7 +34,7 @@ export type WebActionAuditRow = { actionId: string, actionKind: string, allowed:
 export type WebActionResponse = { decision: WebActionDecision, audit: WebActionAuditRow, };
 
 
-export type WebAuthSession = { authenticated: boolean, authRequired: boolean, transport: string, cookieMode: boolean, csrfRequired: boolean, };
+export type WebAuthSession = { authenticated: boolean, authRequired: boolean, transport: string, cookieMode: boolean, csrfRequired: boolean, serverSideLogoutSupported: boolean, logoutMessage: string, };
 
 
 export type WebChatAttachment = { fileName: string, sizeBytes: number, mimeType: string, accepted: boolean, policyReason: string, dataBase64: string | null, storedPath: string | null, };

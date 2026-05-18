@@ -4,6 +4,37 @@ use cozo::DbInstance;
 use crate::graph::{raw_to_memory, read_all_memories};
 use crate::types::{Memory, MemoryError, SearchFilter};
 
+pub(crate) const FULL_SCAN_WARNING_THRESHOLD: usize = 10_000;
+
+pub(crate) fn full_scan_contract(
+    surface: &str,
+    row_count: usize,
+    limit: Option<usize>,
+) -> Option<String> {
+    if row_count < FULL_SCAN_WARNING_THRESHOLD {
+        return None;
+    }
+    Some(match limit {
+        Some(limit) => format!(
+            "{surface} is using a keyword/full-scan memory path over {row_count} rows before returning at most {limit}; attach an embedding provider for indexed vector narrowing or expect latency to scale with memory count"
+        ),
+        None => format!(
+            "{surface} is using a keyword/full-scan memory path over {row_count} rows; attach an embedding provider or expect latency to scale with memory count"
+        ),
+    })
+}
+
+pub(crate) fn warn_full_scan(surface: &str, row_count: usize, limit: Option<usize>) {
+    if let Some(message) = full_scan_contract(surface, row_count, limit) {
+        tracing::warn!(
+            surface,
+            row_count,
+            limit = limit.unwrap_or_default(),
+            "{message}"
+        );
+    }
+}
+
 /// Keyword-based recall with relevance ranking.
 ///
 /// Scoring formula per memory:
@@ -23,6 +54,7 @@ pub(crate) fn recall(
 
     // Fetch all memories and score them in Rust.
     let all_rows = read_all_memories(db)?;
+    warn_full_scan("memory.recall.keyword", all_rows.len(), Some(limit));
     let now = Utc::now();
 
     let mut scored: Vec<(f64, Memory)> = Vec::new();
@@ -93,6 +125,7 @@ pub(crate) fn search(db: &DbInstance, filter: &SearchFilter) -> Result<Vec<Memor
 
     // Fetch all memories and filter in Rust.
     let all_rows = read_all_memories(db)?;
+    warn_full_scan("memory.search.filter", all_rows.len(), None);
 
     let mut results: Vec<Memory> = Vec::new();
 
@@ -179,6 +212,19 @@ mod tests {
 
         let results = g.recall_memories("apple", 10).expect("recall failed");
         assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn full_scan_contract_warns_only_past_threshold() {
+        assert!(full_scan_contract("memory.recall.keyword", 10, Some(5)).is_none());
+        let message = full_scan_contract(
+            "memory.recall.keyword",
+            FULL_SCAN_WARNING_THRESHOLD,
+            Some(5),
+        )
+        .expect("threshold row count should warn");
+        assert!(message.contains("full-scan"));
+        assert!(message.contains("at most 5"));
     }
 
     #[test]

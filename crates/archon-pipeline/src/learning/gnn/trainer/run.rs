@@ -8,7 +8,7 @@ use super::super::triplets_loss::TripletBatch;
 use super::super::{GnnEnhancer, LayerWeights};
 use super::gradients::scale_grads;
 use super::metrics::compute_layer_norms;
-use super::types::{EpochMetrics, EpochResult, GnnTrainer, TrainingOutcome};
+use super::types::{EpochMetrics, EpochResult, GnnTrainer, TrainingDataSources, TrainingOutcome};
 
 impl GnnTrainer {
     /// Run the full training loop.
@@ -36,6 +36,8 @@ impl GnnTrainer {
     ) -> TrainingOutcome {
         let start_time = Instant::now();
         let mut samples_processed = 0usize;
+        let mut sona_samples_processed = 0usize;
+        let mut meaning_triplets_processed = 0usize;
         let mut batches_processed = 0usize;
         let mut timed_out = false;
         let mut cancelled = false;
@@ -43,16 +45,26 @@ impl GnnTrainer {
 
         // Build triplets (indices into samples)
         let triplets = loss::build_triplets(samples, &self.loss_config);
-        if triplets.len() < 2 && triplet_batch.triplets.is_empty() {
+        let data_sources = TrainingDataSources {
+            sona_trajectories: samples.len(),
+            sona_triplets: triplets.len(),
+            meaning_triplets: triplet_batch.triplets.len(),
+        };
+        if let Some(reason) = data_sources.no_data_reason() {
             warn!(
-                "Not enough triplets for training (trajectory={}, meaning={})",
-                triplets.len(),
-                triplet_batch.triplets.len()
+                reason,
+                sona_trajectories = data_sources.sona_trajectories,
+                sona_triplets = data_sources.sona_triplets,
+                meaning_triplets = data_sources.meaning_triplets,
+                "Not enough training data"
             );
             return TrainingOutcome {
                 epochs_completed: 0,
                 batches_processed: 0,
                 samples_processed: 0,
+                sona_samples_processed: 0,
+                meaning_triplets_processed: 0,
+                data_sources,
                 initial_loss: 0.0,
                 final_loss: 0.0,
                 best_loss: 0.0,
@@ -146,6 +158,8 @@ impl GnnTrainer {
                 triplet_batch,
                 &mut batches_processed,
                 &mut samples_processed,
+                &mut sona_samples_processed,
+                &mut meaning_triplets_processed,
                 cancel,
             );
             let cancelled_after_epoch =
@@ -220,6 +234,9 @@ impl GnnTrainer {
                 epochs_completed,
                 batches_processed,
                 samples_processed,
+                sona_samples_processed,
+                meaning_triplets_processed,
+                data_sources,
                 initial_loss,
                 final_loss: initial_loss,
                 best_loss,
@@ -291,6 +308,9 @@ impl GnnTrainer {
             epochs_completed,
             batches_processed,
             samples_processed,
+            sona_samples_processed,
+            meaning_triplets_processed,
+            data_sources,
             initial_loss,
             final_loss,
             best_loss,
@@ -338,6 +358,8 @@ impl GnnTrainer {
         triplet_batch: &TripletBatch,
         batches_processed: &mut usize,
         samples_processed: &mut usize,
+        sona_samples_processed: &mut usize,
+        meaning_triplets_processed: &mut usize,
         cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> EpochResult {
         let mut total_quality_loss = 0.0_f32;
@@ -358,6 +380,7 @@ impl GnnTrainer {
 
             *batches_processed += 1;
             *samples_processed += batch.len();
+            *sona_samples_processed += batch.len();
         }
 
         if !triplet_batch.triplets.is_empty()
@@ -369,6 +392,7 @@ impl GnnTrainer {
             self.apply_gradients(enhancer, &scaled);
             *batches_processed += 1;
             *samples_processed += triplet_batch.triplets.len();
+            *meaning_triplets_processed += triplet_batch.triplets.len();
         }
 
         let loss_quality = if quality_batch_count > 0 {

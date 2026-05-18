@@ -8,6 +8,7 @@ use super::redaction::redact_provider_metadata;
 #[serde(rename_all = "snake_case")]
 pub enum ProviderRuntimeEventType {
     RequestStarted,
+    RequestRetry,
     RequestSucceeded,
     RequestFailed,
     TokenRefreshed,

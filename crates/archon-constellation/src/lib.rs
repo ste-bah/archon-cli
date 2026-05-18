@@ -19,7 +19,7 @@ pub use drift_detector::{
 };
 pub use errors::{ConstellationError, Result};
 pub use score::{ScoreResult, score_text};
-pub use store::{ConstellationCentroid, list_centroids};
+pub use store::{ConstellationCentroid, LEXICAL_CENTROID_FEATURE_SPACE, list_centroids};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BuildReport {

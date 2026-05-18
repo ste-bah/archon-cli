@@ -74,6 +74,8 @@ impl McpClient {
                     name: t.name.to_string(),
                     description: t.description.map(|d| d.to_string()),
                     input_schema: schema,
+                    annotations: t.annotations,
+                    meta: t.meta.and_then(|meta| serde_json::to_value(meta).ok()),
                     server_name: self.server_name.clone(),
                 }
             })
@@ -233,6 +235,7 @@ mod tests {
             transport: "stdio".into(),
             url: None,
             headers: None,
+            tool_policy: Default::default(),
         };
         // echo exits immediately, so initialization should fail
         let transport =

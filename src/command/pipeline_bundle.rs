@@ -10,7 +10,7 @@ use archon_pipeline::audit::types::{BundleStatus, PipelineEvent};
 use chrono::Utc;
 
 use crate::command::pipeline_support::{
-    build_pipeline_adapter, build_pipeline_auto_trainer, init_leann, init_research_leann,
+    build_pipeline_adapter, build_pipeline_learning_stack, init_leann, init_research_leann,
     print_pipeline_result,
 };
 use crate::command::provider_gate::ensure_active_provider_supports;
@@ -57,13 +57,7 @@ pub(crate) async fn handle_resume(
                     archon_llm::providers::ProviderCapability::PipelineCoding,
                     "archon pipeline resume",
                 )?;
-                let auto_trainer = build_pipeline_auto_trainer(config, cwd);
-                let learning = archon_pipeline::learning::integration::LearningIntegration::new(
-                    None,
-                    None,
-                    Default::default(),
-                    auto_trainer,
-                );
+                let (learning, _) = build_pipeline_learning_stack(config, cwd);
                 let facade = archon_pipeline::coding::facade::CodingFacade::with_learning(learning)
                     .with_models(config.models.anthropic.clone())
                     .with_context(config.context.clone());
@@ -334,13 +328,7 @@ async fn legacy_resume_coding(
     adapter: &archon_pipeline::llm_adapter::ProviderLlmAdapter,
     task: &str,
 ) -> Result<()> {
-    let auto_trainer = build_pipeline_auto_trainer(config, cwd);
-    let learning = archon_pipeline::learning::integration::LearningIntegration::new(
-        None,
-        None,
-        Default::default(),
-        auto_trainer,
-    );
+    let (learning, _) = build_pipeline_learning_stack(config, cwd);
     let facade = archon_pipeline::coding::facade::CodingFacade::with_learning(learning)
         .with_context(config.context.clone());
     println!("Resuming coding pipeline...");

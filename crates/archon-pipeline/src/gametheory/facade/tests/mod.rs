@@ -57,6 +57,7 @@ struct CapturingLlmClient {
     canned_response: String,
     classification_response: Option<String>,
     prompts: Mutex<Vec<String>>,
+    models: Mutex<Vec<String>>,
 }
 
 impl CapturingLlmClient {
@@ -65,6 +66,7 @@ impl CapturingLlmClient {
             canned_response: canned.to_string(),
             classification_response: None,
             prompts: Mutex::new(Vec::new()),
+            models: Mutex::new(Vec::new()),
         }
     }
 
@@ -73,11 +75,16 @@ impl CapturingLlmClient {
             canned_response: canned.to_string(),
             classification_response: Some(classification),
             prompts: Mutex::new(Vec::new()),
+            models: Mutex::new(Vec::new()),
         }
     }
 
     fn prompts(&self) -> Vec<String> {
         self.prompts.lock().unwrap().clone()
+    }
+
+    fn models(&self) -> Vec<String> {
+        self.models.lock().unwrap().clone()
     }
 }
 
@@ -88,7 +95,7 @@ impl LlmClient for CapturingLlmClient {
         messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
-        _model: &str,
+        model: &str,
     ) -> std::result::Result<LlmResponse, anyhow::Error> {
         let prompt = messages
             .first()
@@ -97,6 +104,7 @@ impl LlmClient for CapturingLlmClient {
             .unwrap_or("")
             .to_string();
         self.prompts.lock().unwrap().push(prompt.clone());
+        self.models.lock().unwrap().push(model.to_string());
         let content = if prompt.starts_with("Classify this strategic situation") {
             self.classification_response
                 .clone()

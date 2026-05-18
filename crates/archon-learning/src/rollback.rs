@@ -1,7 +1,8 @@
 //! Rollback a manifest version to a previous target.
 //!
-//! Creates a NEW version (never mutates existing rows) whose content points to
-//! the rollback target. Sets is_rollback_target=true on the new version.
+//! Creates an audited rollback proposal, evaluates policy, and only creates a
+//! NEW version when policy allows auto-apply. Approval-required rollbacks leave
+//! manifest state untouched until a human decision applies them.
 //!
 //! Preconditions:
 //! - Target version must exist and must belong to the expected manifest_kind.
@@ -12,11 +13,14 @@ use cozo::DbInstance;
 
 use crate::errors::LearningError;
 use crate::models::*;
+use crate::policy;
 use crate::store;
 
 pub struct RollbackResult {
     pub proposal: BehaviourProposal,
-    pub new_version: BehaviourManifestVersion,
+    pub new_version: Option<BehaviourManifestVersion>,
+    pub approval: Option<BehaviourApproval>,
+    pub policy_outcomes: Vec<PolicyOutcome>,
     pub rolled_back_from_version_id: String,
 }
 
@@ -26,6 +30,48 @@ pub fn rollback_to_version(
     target_version_id: &str,
     workspace_id: &str,
     reason: &str,
+) -> Result<RollbackResult, LearningError> {
+    rollback_to_version_with_auto_apply(db, target_version_id, workspace_id, reason, false, 0)
+}
+
+/// Execute a rollback using an already-loaded Evidence Engine policy.
+pub fn rollback_to_version_with_policy(
+    db: &DbInstance,
+    target_version_id: &str,
+    workspace_id: &str,
+    reason: &str,
+    effective_policy: &archon_policy::EffectivePolicy,
+    recent_incident_count: usize,
+) -> Result<RollbackResult, LearningError> {
+    let target = store::get_manifest_version(db, target_version_id)?.ok_or(
+        LearningError::RollbackTargetUnreachable {
+            version_id: target_version_id.to_string(),
+        },
+    )?;
+    let policy_decision = effective_policy
+        .learning_auto_apply_decision(
+            target.manifest_kind.as_str(),
+            target.manifest_kind.default_risk_level().as_str(),
+        )
+        .allowed;
+    rollback_to_version_with_auto_apply(
+        db,
+        target_version_id,
+        workspace_id,
+        reason,
+        policy_decision,
+        recent_incident_count,
+    )
+}
+
+/// Execute a rollback with an explicit auto-apply permission decision.
+pub fn rollback_to_version_with_auto_apply(
+    db: &DbInstance,
+    target_version_id: &str,
+    workspace_id: &str,
+    reason: &str,
+    allow_auto_apply: bool,
+    recent_incident_count: usize,
 ) -> Result<RollbackResult, LearningError> {
     let target = store::get_manifest_version(db, target_version_id)?.ok_or(
         LearningError::RollbackTargetUnreachable {
@@ -42,8 +88,37 @@ pub fn rollback_to_version(
             }
         })?;
 
-    let proposal =
-        create_rollback_proposal(db, workspace_id, &manifest_kind, target_version_id, reason)?;
+    let proposal = create_rollback_proposal(
+        db,
+        workspace_id,
+        &manifest_kind,
+        current_head
+            .as_ref()
+            .map(|v| v.version_id.as_str())
+            .unwrap_or(""),
+        target_version_id,
+        reason,
+    )?;
+
+    let (decision, policy_outcomes) =
+        policy::evaluate_proposal(db, &proposal, allow_auto_apply, recent_incident_count)?;
+
+    if decision != PolicyDecision::AutoApplied {
+        let apply_result = crate::apply::apply_decision(
+            db,
+            &proposal.proposal_id,
+            decision,
+            None,
+            Some("system"),
+        )?;
+        return Ok(RollbackResult {
+            proposal: apply_result.proposal,
+            new_version: None,
+            approval: apply_result.approval,
+            policy_outcomes,
+            rolled_back_from_version_id: target_version_id.to_string(),
+        });
+    }
 
     let version_id = format!(
         "bmv-{}",
@@ -117,7 +192,9 @@ pub fn rollback_to_version(
 
     Ok(RollbackResult {
         proposal,
-        new_version,
+        new_version: Some(new_version),
+        approval: None,
+        policy_outcomes,
         rolled_back_from_version_id: target_version_id.to_string(),
     })
 }
@@ -126,6 +203,7 @@ fn create_rollback_proposal(
     db: &DbInstance,
     workspace_id: &str,
     manifest_kind: &BehaviourManifestKind,
+    current_version_id: &str,
     target_version_id: &str,
     reason: &str,
 ) -> Result<BehaviourProposal, LearningError> {
@@ -137,7 +215,7 @@ fn create_rollback_proposal(
         ),
         workspace_id: workspace_id.to_string(),
         manifest_kind: manifest_kind.clone(),
-        current_version: String::new(),
+        current_version: current_version_id.to_string(),
         proposed_version: format!("rollback-to-{target_version_id}"),
         diff: format!(
             "Rollback {kind} to version {target}\nReason: {reason}",
@@ -146,7 +224,7 @@ fn create_rollback_proposal(
         ),
         evidence_ids: vec![target_version_id.to_string()],
         risk_level: manifest_kind.default_risk_level(),
-        policy_decision: PolicyDecision::AutoApplied,
+        policy_decision: PolicyDecision::PendingApproval,
         status: ProposalStatus::Pending,
         created_at: created_at.clone(),
     };
@@ -185,13 +263,13 @@ mod tests {
             parent_version_id: None,
             created_by_proposal_id: Some("bp-seed".to_string()),
             is_rollback_target: false,
-            created_at: "2026-01-01T00:00:00Z".to_string(),
+            created_at: format!("2026-01-01T00:00:{version_number:02}Z"),
         };
         store::insert_manifest_version(db, &v).unwrap();
     }
 
     #[test]
-    fn test_rollback_creates_new_version() {
+    fn test_auto_apply_rollback_creates_new_version() {
         let db = test_db();
         seed_version(
             &db,
@@ -201,15 +279,20 @@ mod tests {
             serde_json::json!({"weight": 1.0}),
         );
 
-        let result = rollback_to_version(&db, "bmv-v1", "ws-test", "test rollback").unwrap();
+        let result =
+            rollback_to_version_with_auto_apply(&db, "bmv-v1", "ws-test", "test rollback", true, 0)
+                .unwrap();
+        let new_version = result
+            .new_version
+            .as_ref()
+            .expect("low-risk auto-apply should create a rollback version");
 
         assert_eq!(result.rolled_back_from_version_id, "bmv-v1");
-        assert!(result.new_version.is_rollback_target);
-        assert_eq!(
-            result.new_version.content,
-            serde_json::json!({"weight": 1.0})
-        );
-        assert!(result.new_version.version_number > 1);
+        assert!(new_version.is_rollback_target);
+        assert_eq!(new_version.content, serde_json::json!({"weight": 1.0}));
+        assert!(new_version.version_number > 1);
+        assert!(result.approval.is_none());
+        assert_eq!(result.proposal.status, ProposalStatus::Applied);
     }
 
     #[test]
@@ -235,11 +318,108 @@ mod tests {
         let proposal = store::get_behaviour_proposal(&db, &result.proposal.proposal_id)
             .unwrap()
             .unwrap();
-        assert_eq!(proposal.status, ProposalStatus::Applied);
+        assert_eq!(proposal.status, ProposalStatus::Pending);
+        assert_eq!(proposal.policy_decision, PolicyDecision::PendingApproval);
+        assert_eq!(proposal.current_version, "bmv-v1");
         assert_eq!(
             proposal.manifest_kind,
             BehaviourManifestKind::RetrievalProfile
         );
+        assert!(result.new_version.is_none());
+        assert!(result.approval.is_some());
+    }
+
+    #[test]
+    fn test_default_rollback_does_not_mutate_manifest_without_policy_allowance() {
+        let db = test_db();
+        seed_version(
+            &db,
+            "bmv-v1",
+            "RetrievalProfile",
+            1,
+            serde_json::json!({"weight": 0.8}),
+        );
+        seed_version(
+            &db,
+            "bmv-v2",
+            "RetrievalProfile",
+            2,
+            serde_json::json!({"weight": 0.2}),
+        );
+
+        let result = rollback_to_version(&db, "bmv-v1", "ws-test", "policy gate").unwrap();
+
+        assert!(result.new_version.is_none());
+        assert!(result.approval.is_some());
+        assert_eq!(result.proposal.status, ProposalStatus::Pending);
+        assert_eq!(result.proposal.current_version, "bmv-v2");
+
+        let versions = store::list_manifest_version_history(&db, "RetrievalProfile").unwrap();
+        assert_eq!(versions.len(), 2);
+        assert!(
+            store::list_learning_events_by_type(&db, "ManifestRolledBack")
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn test_rollback_records_policy_outcomes() {
+        let db = test_db();
+        seed_version(
+            &db,
+            "bmv-v1",
+            "RetrievalProfile",
+            1,
+            serde_json::json!({"weight": 0.8}),
+        );
+
+        let result = rollback_to_version(&db, "bmv-v1", "ws-test", "policy evidence").unwrap();
+
+        assert!(
+            result
+                .policy_outcomes
+                .iter()
+                .any(|o| o.rule_name == "fallback_pending_approval")
+        );
+        let stored =
+            store::list_policy_decisions_for_proposal(&db, &result.proposal.proposal_id).unwrap();
+        assert_eq!(stored.len(), result.policy_outcomes.len());
+        assert_eq!(stored[0].outcome, PolicyDecision::PendingApproval);
+    }
+
+    #[test]
+    fn test_high_risk_rollback_requires_approval_even_when_auto_apply_enabled() {
+        let db = test_db();
+        seed_version(
+            &db,
+            "bmv-gates-v1",
+            "PipelineGates",
+            1,
+            serde_json::json!({"required": ["tests"]}),
+        );
+
+        let result = rollback_to_version_with_auto_apply(
+            &db,
+            "bmv-gates-v1",
+            "ws-test",
+            "high-risk rollback",
+            true,
+            0,
+        )
+        .unwrap();
+
+        assert!(result.new_version.is_none());
+        assert!(result.approval.is_some());
+        assert_eq!(result.proposal.status, ProposalStatus::Pending);
+        assert!(
+            result
+                .policy_outcomes
+                .iter()
+                .any(|o| o.rule_name == "high_risk_requires_approval")
+        );
+        let versions = store::list_manifest_version_history(&db, "PipelineGates").unwrap();
+        assert_eq!(versions.len(), 1);
     }
 
     #[test]
@@ -253,7 +433,8 @@ mod tests {
             serde_json::json!({"weight": 0.9}),
         );
 
-        rollback_to_version(&db, "bmv-v1", "ws-test", "event log test").unwrap();
+        rollback_to_version_with_auto_apply(&db, "bmv-v1", "ws-test", "event log test", true, 0)
+            .unwrap();
 
         let events = store::list_learning_events_by_type(&db, "ManifestRolledBack").unwrap();
         assert!(!events.is_empty());

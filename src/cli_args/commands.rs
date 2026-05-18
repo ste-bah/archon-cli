@@ -81,6 +81,9 @@ pub enum Commands {
         /// Do not open browser automatically
         #[arg(long)]
         no_open: bool,
+        /// UNSAFE: allow a non-localhost bind without bearer-token auth
+        #[arg(long)]
+        allow_unauthenticated_nonlocal_bind: bool,
     },
     /// Submit an async agent task
     RunAgentAsync {

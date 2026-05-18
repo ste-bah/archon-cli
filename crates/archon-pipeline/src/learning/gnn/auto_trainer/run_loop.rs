@@ -82,13 +82,34 @@ impl AutoTrainer {
 
                     match outcome {
                         Ok(outcome) => {
-                            info!(
-                                epochs = outcome.epochs_completed,
-                                initial = outcome.initial_loss,
-                                final_loss = outcome.final_loss,
-                                best = outcome.best_loss,
-                                "AutoTrainer: training run complete"
-                            );
+                            let no_data_reason =
+                                outcome.data_sources.no_data_reason().map(str::to_string);
+                            if let Some(reason) = no_data_reason {
+                                warn!(
+                                    reason = %reason,
+                                    sona_trajectories = outcome.data_sources.sona_trajectories,
+                                    sona_triplets = outcome.data_sources.sona_triplets,
+                                    meaning_triplets = outcome.data_sources.meaning_triplets,
+                                    "auto_trainer.no_data"
+                                );
+                                *state2.last_no_data_reason.write().unwrap() = Some(reason);
+                                state2.no_data_count.fetch_add(1, Ordering::Relaxed);
+                            } else {
+                                info!(
+                                    epochs = outcome.epochs_completed,
+                                    initial = outcome.initial_loss,
+                                    final_loss = outcome.final_loss,
+                                    best = outcome.best_loss,
+                                    sona_trajectories = outcome.data_sources.sona_trajectories,
+                                    sona_triplets = outcome.data_sources.sona_triplets,
+                                    meaning_triplets = outcome.data_sources.meaning_triplets,
+                                    "AutoTrainer: training run complete"
+                                );
+                                *state2.last_no_data_reason.write().unwrap() = None;
+                                state2.training_count.fetch_add(1, Ordering::Relaxed);
+                                *state2.last_successful_train_time.write().unwrap() =
+                                    Some(Instant::now());
+                            }
                             *state2.last_outcome.write().unwrap() = Some(outcome);
                         }
                         Err(e) => {
@@ -105,7 +126,6 @@ impl AutoTrainer {
                         state2.total_corrections.load(Ordering::Relaxed),
                         Ordering::Relaxed,
                     );
-                    state2.training_count.fetch_add(1, Ordering::Relaxed);
                     *state2.last_train_time.write().unwrap() = Some(Instant::now());
                 }
             }

@@ -360,6 +360,13 @@ impl LlmProvider for OpenAiCompatProvider {
 
     async fn complete(&self, mut request: LlmRequest) -> Result<LlmResponse, LlmError> {
         self.resolve_request_model(&mut request);
+        if !request.tools.is_empty() && !self.supports_feature(ProviderFeature::ToolUse) {
+            return Err(LlmError::Unsupported(format!(
+                "{} does not advertise tool use; refusing to drop {} tool definition(s)",
+                self.name(),
+                request.tools.len()
+            )));
+        }
         let url = self.build_chat_url();
         let body = self.to_openai_wire(&request);
         let rb = self.http.post(&url).json(&body);
@@ -392,6 +399,13 @@ impl LlmProvider for OpenAiCompatProvider {
     /// `StreamEvent` enum the rest of the codebase consumes.
     async fn stream(&self, mut request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
         self.resolve_request_model(&mut request);
+        if !request.tools.is_empty() && !self.supports_feature(ProviderFeature::ToolUse) {
+            return Err(LlmError::Unsupported(format!(
+                "{} does not advertise tool use; refusing to drop {} tool definition(s)",
+                self.name(),
+                request.tools.len()
+            )));
+        }
         // Feature gate FIRST — never touch the network if streaming is off.
         // Validation Criterion 6.
         if !self.descriptor.supports.streaming {
