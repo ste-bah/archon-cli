@@ -274,9 +274,12 @@ impl JepaEvalPlanner {
 }
 
 /// One-line migration notice for PRD §9 (eval-jepa default changed to quick).
+/// CRIT-5: wording updated to accurately describe the wired quick-mode behaviour:
+/// Tier-0 gates now run first (no rows, no fastembed); only if Tier-0 passes does
+/// eval proceed to the full representation baseline.
 pub const MIGRATION_NOTICE: &str =
-    "Note: eval-jepa now defaults to --quick mode. Use --full to run the full \
-     representation baseline (previous default behaviour).";
+    "Note: eval-jepa now defaults to --quick mode (skips fastembed baseline on Tier-0 gate \
+     failure). Use --full to force the full representation baseline regardless of Tier-0 results.";
 
 #[cfg(test)]
 mod tests_eval_planner {
