@@ -20,6 +20,10 @@ pub struct JepaEvalResolverConfig {
     pub training_backend: String,
     pub allow_cpu_fallback: bool,
     pub prefer_accelerator: bool,
+    /// Minimum cosine similarity floor for backend parity validation.
+    /// Maps to `WorldModelJepaConfig::backend_parity_cosine_floor` in archon-core.
+    /// Set to 0.0 (the Default) when no floor is configured.
+    pub parity_floor: f32,
 }
 
 /// CPU-vs-accelerator parity sample report.
@@ -91,7 +95,7 @@ impl BackendRuntimeResolver {
                 && (!resolver_config.allow_cpu_fallback || resolver_config.prefer_accelerator))
     }
 
-    /// Resolve to a concrete runtime. T018/T019/T020 land the real impls.
+    /// Resolve to a concrete runtime. T018 (CPU) is wired; T019/T020 are stubs.
     pub fn resolve(
         metadata: &JepaTraceModelMetadata,
         resolver_config: &JepaEvalResolverConfig,
@@ -99,7 +103,9 @@ impl BackendRuntimeResolver {
     ) -> Result<Box<dyn JepaEvalRuntime>> {
         let preferred = Self::determine_preferred_backend(metadata, resolver_config, cli_override);
         match preferred {
-            JepaEvalBackendKind::Cpu => Self::resolve_cpu(),
+            JepaEvalBackendKind::Cpu => {
+                Self::resolve_cpu(metadata.latent_dim, resolver_config.parity_floor)
+            }
             JepaEvalBackendKind::MlxMetal => Self::resolve_mlx(),
             JepaEvalBackendKind::Cuda => {
                 Self::resolve_cuda(metadata, resolver_config, cli_override)
@@ -107,8 +113,8 @@ impl BackendRuntimeResolver {
         }
     }
 
-    fn resolve_cpu() -> Result<Box<dyn JepaEvalRuntime>> {
-        anyhow::bail!("CPU JepaEvalRuntime not yet implemented — see TASK-JEVAL-018")
+    fn resolve_cpu(latent_dim: usize, parity_floor: f32) -> Result<Box<dyn JepaEvalRuntime>> {
+        Ok(Box::new(CpuEvalRuntime::new(latent_dim, parity_floor)))
     }
 
     fn resolve_mlx() -> Result<Box<dyn JepaEvalRuntime>> {
@@ -204,6 +210,7 @@ mod tests_eval_runtime {
             training_backend: "cuda".into(),
             allow_cpu_fallback: false,
             prefer_accelerator: false,
+            parity_floor: 0.0,
         };
         assert!(BackendRuntimeResolver::cuda_is_required(
             &metadata, &config, None
@@ -217,6 +224,7 @@ mod tests_eval_runtime {
             training_backend: "cuda".into(),
             allow_cpu_fallback: true,
             prefer_accelerator: true,
+            parity_floor: 0.0,
         };
         assert!(BackendRuntimeResolver::cuda_is_required(
             &metadata, &config, None
@@ -230,6 +238,7 @@ mod tests_eval_runtime {
             training_backend: "cpu".into(),
             allow_cpu_fallback: true,
             prefer_accelerator: false,
+            parity_floor: 0.0,
         };
         assert!(!BackendRuntimeResolver::cuda_is_required(
             &metadata, &config, None

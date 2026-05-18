@@ -23,6 +23,7 @@ include!("jepa/eval_planner.rs");
 include!("jepa/eval_run_store.rs");
 include!("jepa/eval_progress.rs");
 include!("jepa/eval_runtime.rs");
+include!("jepa/eval_backends.rs");
 
 #[cfg(test)]
 mod tests {
