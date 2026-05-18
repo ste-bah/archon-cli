@@ -21,6 +21,7 @@ include!("jepa/12_features.rs");
 include!("jepa/13_aux_math_utils.rs");
 include!("jepa/eval_planner.rs");
 include!("jepa/eval_run_store.rs");
+include!("jepa/eval_progress.rs");
 
 #[cfg(test)]
 mod tests {

@@ -15,6 +15,7 @@ anyhow.workspace = true
 archon-llm = { path = "../archon-llm" }
 archon-memory = { path = "../archon-memory" }
 libc = "0.2"
+tracing.workspace = true
 candle-core = { version = "0.10.2", optional = true }
 chrono.workspace = true
 cozo.workspace = true
