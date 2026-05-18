@@ -9,8 +9,8 @@ use archon_world_model::eval::{
     evaluate_brier_improvement, evaluate_next_state_cosine_gate, evaluate_surprise_ks_gate,
 };
 use archon_world_model::jepa::{
-    JEPA_MODEL_KIND, JepaEvalRecord, JepaPromotionGateReport, JepaRepresentationComparisonReport,
-    PersistedEvalMode,
+    EvalRunStage, JEPA_MODEL_KIND, JepaEvalRecord, JepaPromotionGateReport,
+    JepaRepresentationComparisonReport, PersistedEvalMode,
 };
 use archon_world_model::model::{CpuLatentTransitionModel, LatentTransitionExample};
 use archon_world_model::registry::{CandidateEvalRecord, JepaCandidateRecord, ModelRegistry};
@@ -302,6 +302,137 @@ pub(super) fn render_eval(
             .unwrap_or_default(),
         record.report.all_primary_gates_passed(),
         path.display()
+    ))
+}
+
+/// Entry point for `archon world eval-jepa` with all v0.4.1 CLI flags.
+/// TASK-JEVAL-023.
+///
+/// Pragmatic wrapper: --full / --background / --resume / --backend / --no-cache
+/// are now parsed and routed. The existing render_eval_jepa already runs full
+/// promotion-grade evaluation (compare_jepa_representations with the fastembed
+/// baseline). The migration notice (PRD §9 / DEC-JEVAL-01) is emitted on the
+/// default invocation (no --full, no --resume, no --background) for one release.
+///
+/// Full wiring of --backend (BackendRuntimeResolver) and --no-cache
+/// (CachedEmbeddingAdapter write-bypass) is deferred to TASK-JEVAL-025.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn render_eval_jepa_with_options(
+    config: &archon_core::config::ArchonConfig,
+    root: &Path,
+    candidate_id: &str,
+    full: bool,
+    background: bool,
+    resume: Option<String>,
+    backend: Option<String>,
+    no_cache: bool,
+) -> Result<String> {
+    // 1. Emit migration notice when called in default (implicit) mode.
+    //    Suppressed when operator explicitly chooses --full, --background, or --resume.
+    if !full && resume.is_none() && !background {
+        eprintln!("{}", archon_world_model::jepa::MIGRATION_NOTICE);
+    }
+
+    // 2. Background path: policy gate, then spawn detached worker.
+    if background {
+        return handle_background_eval(config, root, candidate_id);
+    }
+
+    // 3. Resume path: look up run record, validate preconditions.
+    if let Some(ref run_id) = resume {
+        return handle_resume_eval(config, root, candidate_id, run_id, no_cache);
+    }
+
+    // 4. Log backend/no-cache overrides (full wiring deferred).
+    if let Some(backend_str) = backend.as_deref() {
+        tracing::info!(
+            backend_override = backend_str,
+            candidate = candidate_id,
+            "CLI backend override requested (full wiring deferred — uses default backend)"
+        );
+    }
+    if no_cache {
+        tracing::info!(
+            candidate = candidate_id,
+            "--no-cache flag set (full bypass wiring deferred — cache still used)"
+        );
+    }
+
+    // 5. Delegate to existing promotion-grade pipeline.
+    render_eval_jepa(config, root, candidate_id)
+}
+
+/// Handles `--background`: applies policy gate then spawns a detached worker.
+fn handle_background_eval(
+    _config: &archon_core::config::ArchonConfig,
+    root: &Path,
+    _candidate_id: &str,
+) -> Result<String> {
+    // Load effective policy (fail-closed default if file is absent or unreadable).
+    let policy = archon_policy::load_effective_policy(&std::env::current_dir()?)
+        .unwrap_or_default();
+    if !policy.world_model.allow_eval_background_jobs {
+        anyhow::bail!(
+            "Policy does not permit background eval jobs \
+             (allow_eval_background_jobs = false). \
+             Remove --background or update policy: \
+             [policy.world_model] allow_eval_background_jobs = true \
+             (ERR-JEVAL-09)"
+        );
+    }
+
+    let run_id = JepaEvalRunStore::generate_run_id();
+    let run_dir = root.join("jepa/eval-runs");
+    let store = JepaEvalRunStore::new(run_dir)?;
+    store.spawn_background_worker(&run_id, &[])?;
+    Ok(format!(
+        "Background eval started. Run ID: {run_id}\n\
+         Check status:  archon world eval-jepa-status {run_id}\n\
+         List runs:     archon world eval-jepa-runs\n"
+    ))
+}
+
+/// Handles `--resume <run-id>`: validates run record and cache preconditions.
+/// Full resume logic (driving the pipeline from `current_stage`) is deferred.
+fn handle_resume_eval(
+    _config: &archon_core::config::ArchonConfig,
+    root: &Path,
+    candidate_id: &str,
+    run_id: &str,
+    no_cache: bool,
+) -> Result<String> {
+    let run_dir = root.join("jepa/eval-runs");
+    let store = JepaEvalRunStore::new(run_dir)?;
+    let record = store.read_run(run_id).map_err(|e| {
+        anyhow::anyhow!(
+            "Cannot resume run {run_id}: {e}. \
+             List all runs: archon world eval-jepa-runs"
+        )
+    })?;
+
+    // Validate that the run belongs to the requested candidate.
+    if record.candidate_id != candidate_id {
+        anyhow::bail!(
+            "Run {run_id} belongs to candidate '{}', not '{candidate_id}'",
+            record.candidate_id
+        );
+    }
+
+    // F-HIGH-02: resuming a BaselineEmbed-stage run requires the embedding cache.
+    if matches!(record.current_stage, EvalRunStage::BaselineEmbed) && no_cache {
+        anyhow::bail!(
+            "--resume of a baseline_embed-stage run requires the embedding cache. \
+             Remove --no-cache flag. Run ID: {run_id} (ERR-JEVAL-07)"
+        );
+    }
+
+    // Full resume wiring is deferred; return current status as confirmation.
+    Ok(format!(
+        "Resume of run {run_id} (candidate '{candidate_id}') — full resume logic deferred.\n\
+         Current stage: {:?}, status: {:?}\n\
+         Re-run without --resume to start fresh, or track progress with:\n\
+         archon world eval-jepa-status {run_id}\n",
+        record.current_stage, record.status
     ))
 }
 

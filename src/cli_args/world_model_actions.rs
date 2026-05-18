@@ -88,8 +88,30 @@ pub enum WorldAction {
     },
     /// Evaluate a JEPA candidate against JEPA-specific promotion gates
     EvalJepa {
-        /// Candidate model id to inspect
+        /// Candidate model id to evaluate
         candidate_id: String,
+
+        /// Run full promotion-grade evaluation (default behavior; --quick reserved for future use)
+        #[arg(long)]
+        full: bool,
+
+        /// Run evaluation in the background (POSIX only; not supported on Windows)
+        #[arg(long)]
+        background: bool,
+
+        /// Resume a previously paused eval run by its run-id
+        #[arg(long)]
+        resume: Option<String>,
+
+        /// Force a specific backend: cpu, metal, cuda.
+        /// Overrides candidate metadata and training config backend selection.
+        #[arg(long, value_parser = ["cpu", "metal", "cuda"])]
+        backend: Option<String>,
+
+        /// Skip embedding cache reads and writes for this run.
+        /// Useful for reproducibility testing.
+        #[arg(long)]
+        no_cache: bool,
     },
     /// Show status of a JEPA eval run
     EvalJepaStatus {

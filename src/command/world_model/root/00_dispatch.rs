@@ -110,10 +110,26 @@ pub(crate) async fn handle_world_command(
             );
             Ok(())
         }
-        WorldAction::EvalJepa { candidate_id } => {
+        WorldAction::EvalJepa {
+            candidate_id,
+            full,
+            background,
+            resume,
+            backend,
+            no_cache,
+        } => {
             println!(
                 "{}",
-                candidate::render_eval_jepa(config, &world_model_root()?, candidate_id)?
+                candidate::render_eval_jepa_with_options(
+                    config,
+                    &world_model_root()?,
+                    candidate_id,
+                    *full,
+                    *background,
+                    resume.clone(),
+                    backend.clone(),
+                    *no_cache,
+                )?
             );
             Ok(())
         }
