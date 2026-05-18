@@ -345,16 +345,21 @@ pub(super) fn render_eval_jepa_with_options(
 
     // 4. Log backend/no-cache overrides (full wiring deferred).
     if let Some(backend_str) = backend.as_deref() {
-        tracing::info!(
+        eprintln!(
+            "⚠ --backend {backend_str} is parsed but not yet wired through the eval pipeline. \
+             Eval will use the candidate's default backend. Backend selection via \
+             BackendRuntimeResolver is staged for future integration."
+        );
+        tracing::warn!(
             backend_override = backend_str,
             candidate = candidate_id,
-            "CLI backend override requested (full wiring deferred — uses default backend)"
+            "CLI --backend flag ignored — eval pipeline not yet wired to BackendRuntimeResolver"
         );
     }
     if no_cache {
-        tracing::info!(
-            candidate = candidate_id,
-            "--no-cache flag set (full bypass wiring deferred — cache still used)"
+        eprintln!(
+            "⚠ --no-cache is parsed but not yet wired through the eval pipeline. \
+             The embedding cache will still be used per [learning.world_model.jepa.eval] config."
         );
     }
 
