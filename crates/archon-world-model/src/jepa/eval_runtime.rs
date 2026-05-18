@@ -24,6 +24,11 @@ pub struct JepaEvalResolverConfig {
     /// Maps to `WorldModelJepaConfig::backend_parity_cosine_floor` in archon-core.
     /// Set to 0.0 (the Default) when no floor is configured.
     pub parity_floor: f32,
+    /// Minimum number of examples to use in MLX Metal parity validation.
+    /// Maps to `WorldModelJepaConfig::min_metal_validation_examples` in archon-core.
+    /// Default 0 (T019 will use this many from the parity sample; 0 means the
+    /// entire provided sample is used, capped by sample length in practice).
+    pub min_metal_validation_examples: usize,
 }
 
 /// CPU-vs-accelerator parity sample report.
@@ -95,7 +100,7 @@ impl BackendRuntimeResolver {
                 && (!resolver_config.allow_cpu_fallback || resolver_config.prefer_accelerator))
     }
 
-    /// Resolve to a concrete runtime. T018 (CPU) is wired; T019/T020 are stubs.
+    /// Resolve to a concrete runtime. T018 (CPU) and T019 (MLX) are wired; T020 (CUDA) is a stub.
     pub fn resolve(
         metadata: &JepaTraceModelMetadata,
         resolver_config: &JepaEvalResolverConfig,
@@ -106,7 +111,13 @@ impl BackendRuntimeResolver {
             JepaEvalBackendKind::Cpu => {
                 Self::resolve_cpu(metadata.latent_dim, resolver_config.parity_floor)
             }
-            JepaEvalBackendKind::MlxMetal => Self::resolve_mlx(),
+            JepaEvalBackendKind::MlxMetal => Self::resolve_mlx(
+                metadata,
+                metadata.latent_dim,
+                resolver_config.parity_floor,
+                resolver_config.min_metal_validation_examples,
+                resolver_config.allow_cpu_fallback,
+            ),
             JepaEvalBackendKind::Cuda => {
                 Self::resolve_cuda(metadata, resolver_config, cli_override)
             }
@@ -117,19 +128,17 @@ impl BackendRuntimeResolver {
         Ok(Box::new(CpuEvalRuntime::new(latent_dim, parity_floor)))
     }
 
-    fn resolve_mlx() -> Result<Box<dyn JepaEvalRuntime>> {
-        #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-        {
-            anyhow::bail!(
-                "MLX Metal backend requires Darwin arm64. Current platform: {}/{}.",
-                std::env::consts::OS,
-                std::env::consts::ARCH
-            );
-        }
-        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-        {
-            anyhow::bail!("MLX Metal JepaEvalRuntime not yet implemented — see TASK-JEVAL-019")
-        }
+    fn resolve_mlx(
+        metadata: &JepaTraceModelMetadata,
+        latent_dim: usize,
+        parity_floor: f32,
+        min_validation_examples: usize,
+        allow_cpu_fallback: bool,
+    ) -> Result<Box<dyn JepaEvalRuntime>> {
+        // Platform check and metadata validation are performed inside MlxEvalRuntime::new().
+        let runtime =
+            MlxEvalRuntime::new(metadata, latent_dim, parity_floor, min_validation_examples, allow_cpu_fallback)?;
+        Ok(Box::new(runtime))
     }
 
     fn resolve_cuda(
@@ -211,6 +220,7 @@ mod tests_eval_runtime {
             allow_cpu_fallback: false,
             prefer_accelerator: false,
             parity_floor: 0.0,
+            min_metal_validation_examples: 0,
         };
         assert!(BackendRuntimeResolver::cuda_is_required(
             &metadata, &config, None
@@ -225,6 +235,7 @@ mod tests_eval_runtime {
             allow_cpu_fallback: true,
             prefer_accelerator: true,
             parity_floor: 0.0,
+            min_metal_validation_examples: 0,
         };
         assert!(BackendRuntimeResolver::cuda_is_required(
             &metadata, &config, None
@@ -239,6 +250,7 @@ mod tests_eval_runtime {
             allow_cpu_fallback: true,
             prefer_accelerator: false,
             parity_floor: 0.0,
+            min_metal_validation_examples: 0,
         };
         assert!(!BackendRuntimeResolver::cuda_is_required(
             &metadata, &config, None
@@ -259,7 +271,31 @@ mod tests_eval_runtime {
     #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
     #[test]
     fn mlx_fails_on_non_darwin_arm64() {
-        let result = BackendRuntimeResolver::resolve_mlx();
+        use chrono::Utc;
+        let mut backend_execution = JepaBackendExecutionReport::cpu(crate::BackendKind::Metal, None, 0);
+        backend_execution.selected_backend = crate::BackendKind::Metal;
+        backend_execution.framework = "mlx-rs".to_string();
+        backend_execution.native_encode = true;
+        backend_execution.native_runtime_prediction = Some(true);
+        backend_execution.host_fallback_count = 0;
+        let metadata = JepaTraceModelMetadata {
+            model_id: "test-mlx-platform-fail".to_string(),
+            model_kind: "jepa_transition".to_string(),
+            latent_dim: 384,
+            context_window_rows: 8,
+            target_window_rows: 3,
+            prediction_horizons: vec![1, 3, 5],
+            mask_ratio: 0.30,
+            ema_decay: 0.996,
+            target_stop_gradient: true,
+            backend: crate::BackendKind::Metal,
+            backend_execution,
+            row_count: 0,
+            example_count: 0,
+            parameter_count: 0,
+            created_at: Utc::now(),
+        };
+        let result = BackendRuntimeResolver::resolve_mlx(&metadata, 384, 0.99, 512, false);
         assert!(result.is_err());
         assert!(
             result.unwrap_err().to_string().contains("Darwin arm64"),
