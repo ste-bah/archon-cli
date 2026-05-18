@@ -19,6 +19,7 @@ include!("jepa/10_checkpoint_io.rs");
 include!("jepa/11_mask_encode_loss.rs");
 include!("jepa/12_features.rs");
 include!("jepa/13_aux_math_utils.rs");
+include!("jepa/eval_planner.rs");
 
 #[cfg(test)]
 mod tests {

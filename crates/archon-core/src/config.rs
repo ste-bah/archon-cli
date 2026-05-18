@@ -1332,6 +1332,17 @@ impl Default for WorldModelJepaConfig {
     }
 }
 
+impl WorldModelJepaConfig {
+    /// Returns the eval_schema_version used for config_fingerprint and cache_key
+    /// computations. Currently returns the constant `1` (current schema).
+    /// TASK-JEVAL-025 will add a proper `WorldModelJepaEvalConfig` sub-struct
+    /// with this field and update this helper to read it.
+    pub fn eval_schema_version_or_default(&self) -> u32 {
+        // TODO(TASK-JEVAL-025): read from eval sub-config when added
+        1
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WorldModelEvalConfig {
