@@ -170,7 +170,7 @@ pub(crate) async fn handle_world_command(
         WorldAction::PromoteJepa { model_id } => {
             println!(
                 "{}",
-                candidate::render_promote_jepa(&world_model_root()?, model_id)?
+                candidate::render_promote_jepa(&world_model_root()?, model_id, config)?
             );
             Ok(())
         }
