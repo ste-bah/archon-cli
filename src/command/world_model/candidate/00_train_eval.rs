@@ -306,13 +306,14 @@ pub(super) fn render_eval(
 }
 
 /// Entry point for `archon world eval-jepa` with all v0.4.1 CLI flags.
-/// TASK-JEVAL-023.
+/// TASK-JEVAL-023; CRIT-4 Tier-0 quick-mode short-circuit wired here.
 ///
-/// Pragmatic wrapper: --full / --background / --resume / --backend / --no-cache
-/// are now parsed and routed. The existing render_eval_jepa already runs full
-/// promotion-grade evaluation (compare_jepa_representations with the fastembed
-/// baseline). The migration notice (PRD §9 / DEC-JEVAL-01) is emitted on the
-/// default invocation (no --full, no --resume, no --background) for one release.
+/// Default (no --full): builds JepaEvalGateConfig from config, loads the
+/// candidate, runs Tier-0 gates. If any Tier-0 gate fails, writes a
+/// `baseline_skipped: true` eval record and returns WITHOUT running fastembed.
+/// This is the behaviour advertised by the migration notice (DEC-JEVAL-01).
+///
+/// --full: skip Tier-0 short-circuit and delegate directly to render_eval_jepa.
 ///
 /// Full wiring of --backend (BackendRuntimeResolver) and --no-cache
 /// (CachedEmbeddingAdapter write-bypass) is deferred to TASK-JEVAL-025.
@@ -327,13 +328,17 @@ pub(super) fn render_eval_jepa_with_options(
     backend: Option<String>,
     no_cache: bool,
 ) -> Result<String> {
+    use archon_world_model::jepa::{
+        JepaEvalGateConfig, JepaEvalPlanner, JepaPromotionGateReport, PersistedEvalMode,
+    };
+
     // 1. Emit migration notice when called in default (implicit) mode.
     //    Suppressed when operator explicitly chooses --full, --background, or --resume.
     if !full && resume.is_none() && !background {
         eprintln!("{}", archon_world_model::jepa::MIGRATION_NOTICE);
     }
 
-    // 2. Background path: policy gate, then spawn detached worker.
+    // 2. Background path — returns a clear deferral error (CRIT-1).
     if background {
         return handle_background_eval(config, root, candidate_id);
     }
@@ -343,7 +348,7 @@ pub(super) fn render_eval_jepa_with_options(
         return handle_resume_eval(config, root, candidate_id, run_id, no_cache);
     }
 
-    // 4. Log backend/no-cache overrides (full wiring deferred).
+    // 4. Emit visible warnings for deferred --backend / --no-cache flags (CRIT-3).
     if let Some(backend_str) = backend.as_deref() {
         eprintln!(
             "⚠ --backend {backend_str} is parsed but not yet wired through the eval pipeline. \
@@ -363,7 +368,78 @@ pub(super) fn render_eval_jepa_with_options(
         );
     }
 
-    // 5. Delegate to existing promotion-grade pipeline.
+    // 5. CRIT-4: In quick mode (default), run Tier-0 gates before touching fastembed.
+    //    Tier-0 operates on candidate metadata only — no rows needed, no embedding call.
+    if !full {
+        let jepa = &config.learning.world_model.jepa;
+        let gate_config = JepaEvalGateConfig {
+            min_training_examples: jepa.min_training_examples,
+            min_heldout_examples: jepa.min_heldout_examples,
+            min_cuda_validation_examples: jepa.min_cuda_validation_examples,
+            min_metal_validation_examples: jepa.min_metal_validation_examples,
+            backend_parity_cosine_floor: jepa.backend_parity_cosine_floor,
+            require_native_accelerator_ops: jepa.require_native_accelerator_ops,
+            allow_accelerated_candidate_cpu_stage: jepa.allow_accelerated_candidate_cpu_stage,
+            max_checkpoint_mb: jepa.max_checkpoint_mb,
+        };
+        let registry = archon_world_model::registry::ModelRegistry::open(root)?;
+        let candidate = registry.load_jepa_candidate(candidate_id)?;
+        let tier0_result = JepaEvalPlanner::evaluate_tier0(&candidate, &gate_config);
+
+        if !tier0_result.all_passed {
+            // Tier-0 failed: skip fastembed entirely, write a skipped eval record.
+            let config_fingerprint =
+                compute_config_fingerprint(&config.learning.world_model.jepa);
+            let eval_schema_version = jepa.eval_schema_version_or_default();
+            let skipped_reason = format!(
+                "Tier-0 gates failed: {:?}",
+                tier0_result.failures
+            );
+            let gates = JepaPromotionGateReport::quick_mode_skipped(
+                // corpus_sufficient: use training-time example count vs config threshold
+                (candidate.model.metadata.example_count as usize)
+                    >= jepa.min_training_examples,
+                // representation_collapse: from training outcome
+                candidate.outcome.collapse.passes,
+                // multi_horizon_consistency: from training outcome
+                candidate.outcome.horizon.passes,
+                // checkpoint_size: check inline since we already have the candidate
+                checkpoint_under_jepa_cap(config, &candidate).unwrap_or(false),
+                // tensor_safety
+                candidate.model.validate_finite().is_ok(),
+                // backend_execution: use Tier-0 backend gate (already checked above)
+                archon_world_model::jepa::jepa_backend_promotion_gate_failure(
+                    &candidate.model.metadata,
+                    jepa.min_cuda_validation_examples,
+                    jepa.min_metal_validation_examples,
+                ).is_none(),
+            );
+            let record = JepaEvalRecord {
+                candidate_id: candidate_id.to_string(),
+                mode: PersistedEvalMode::Quick,
+                baseline_skipped: true,
+                skipped_reason: Some(skipped_reason.clone()),
+                corpus_fingerprint: None, // rows not loaded — correct for a skipped record
+                config_fingerprint,
+                eval_schema_version,
+                comparison: None,
+                collapse: candidate.outcome.collapse.clone(),
+                horizon: candidate.outcome.horizon.clone(),
+                gates,
+                created_at: Utc::now(),
+            };
+            registry.write_jepa_eval_report(&record)?;
+            return Ok(format!(
+                "Quick eval rejected (Tier-0 failure): {}\n\
+                 Skipped fastembed baseline — no expensive embedding call made.\n\
+                 Eval record written with baseline_skipped=true.\n\
+                 Re-run with --full to force full evaluation regardless of Tier-0 results.",
+                skipped_reason
+            ));
+        }
+    }
+
+    // 6. Full mode OR Tier-0 passed in quick mode: delegate to the full pipeline.
     render_eval_jepa(config, root, candidate_id)
 }
 
