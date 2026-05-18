@@ -56,6 +56,28 @@ pub trait WorldRepresentationAdapter: Send + Sync {
     fn encode_state(&self, window: &TraceWindow) -> Result<Vec<f32>>;
     fn encode_action(&self, action: &TraceAction) -> Result<Vec<f32>>;
     fn encode_target(&self, window: &TraceWindow) -> Result<Vec<f32>>;
+
+    /// Encode a batch of context windows into state vectors.
+    ///
+    /// Default: sequential loop over [`Self::encode_state`].  Override with a batched path
+    /// (e.g. via [`WorldEmbeddingAdapter::embed_batch`]) to reduce embedding round-trips.
+    fn encode_state_batch(&self, windows: &[TraceWindow]) -> Result<Vec<Vec<f32>>> {
+        windows.iter().map(|w| self.encode_state(w)).collect()
+    }
+
+    /// Encode a batch of actions into action vectors.
+    ///
+    /// Default: sequential loop over [`Self::encode_action`].
+    fn encode_action_batch(&self, actions: &[TraceAction]) -> Result<Vec<Vec<f32>>> {
+        actions.iter().map(|a| self.encode_action(a)).collect()
+    }
+
+    /// Encode a batch of target windows into target vectors.
+    ///
+    /// Default: sequential loop over [`Self::encode_target`].
+    fn encode_target_batch(&self, windows: &[TraceWindow]) -> Result<Vec<Vec<f32>>> {
+        windows.iter().map(|w| self.encode_target(w)).collect()
+    }
 }
 
 pub struct GenericEmbeddingRepresentationAdapter {
@@ -120,6 +142,48 @@ impl WorldRepresentationAdapter for GenericEmbeddingRepresentationAdapter {
             window_source_hash(window, "target"),
             window_embedding_text(window, "target"),
         )
+    }
+
+    fn encode_state_batch(&self, windows: &[TraceWindow]) -> Result<Vec<Vec<f32>>> {
+        let requests: Vec<EmbeddingRequest> = windows
+            .iter()
+            .map(|w| EmbeddingRequest {
+                text: window_embedding_text(w, "state"),
+                source_hash: window_source_hash(w, "state"),
+                redaction_policy: self.redaction_policy.clone(),
+            })
+            .collect();
+        self.inner
+            .embed_batch(&requests)
+            .map(|vs| vs.into_iter().map(|v| v.values).collect())
+    }
+
+    fn encode_action_batch(&self, actions: &[TraceAction]) -> Result<Vec<Vec<f32>>> {
+        let requests: Vec<EmbeddingRequest> = actions
+            .iter()
+            .map(|a| EmbeddingRequest {
+                text: action_embedding_text(a),
+                source_hash: format!("action:{}", a.action_ref),
+                redaction_policy: self.redaction_policy.clone(),
+            })
+            .collect();
+        self.inner
+            .embed_batch(&requests)
+            .map(|vs| vs.into_iter().map(|v| v.values).collect())
+    }
+
+    fn encode_target_batch(&self, windows: &[TraceWindow]) -> Result<Vec<Vec<f32>>> {
+        let requests: Vec<EmbeddingRequest> = windows
+            .iter()
+            .map(|w| EmbeddingRequest {
+                text: window_embedding_text(w, "target"),
+                source_hash: window_source_hash(w, "target"),
+                redaction_policy: self.redaction_policy.clone(),
+            })
+            .collect();
+        self.inner
+            .embed_batch(&requests)
+            .map(|vs| vs.into_iter().map(|v| v.values).collect())
     }
 }
 
@@ -336,6 +400,7 @@ fn row_text(row: &WorldTraceRow) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::embedding::DeterministicHashEmbeddingAdapter;
     use crate::schema::{WorldActionKind, WorldTraceRow};
 
     #[test]
@@ -364,5 +429,76 @@ mod tests {
 
         assert_eq!(window.anchor_row_id, "tool");
         assert_eq!(window.graph_context.same_agent_prior_count, 1);
+    }
+
+    fn make_adapter() -> GenericEmbeddingRepresentationAdapter {
+        GenericEmbeddingRepresentationAdapter::new(Box::new(
+            DeterministicHashEmbeddingAdapter::new(8).unwrap(),
+        ))
+    }
+
+    fn make_two_transitions() -> (TraceWindow, TraceWindow, TraceAction) {
+        let row1 = WorldTraceRow::new("s1", WorldActionKind::ToolCall).with_row_id("r1");
+        let row2 = WorldTraceRow::new("s1", WorldActionKind::Verification).with_row_id("r2");
+        let builder = TraceWindowBuilder::new(&[row1.clone(), row2.clone()]);
+        let ctx = builder.context_window("r1", 1).unwrap();
+        let tgt = builder.target_window("r1", 1, 1).unwrap();
+        let action = TraceAction::from_row(&row1);
+        (ctx, tgt, action)
+    }
+
+    #[test]
+    fn encode_state_batch_default_matches_sequential() {
+        let adapter = make_adapter();
+        let (ctx, _tgt, _action) = make_two_transitions();
+        // Build two identical windows to verify ordering is preserved.
+        let windows = vec![ctx.clone(), ctx.clone()];
+
+        let batch = adapter.encode_state_batch(&windows).unwrap();
+        let seq: Vec<Vec<f32>> = windows
+            .iter()
+            .map(|w| adapter.encode_state(w).unwrap())
+            .collect();
+
+        assert_eq!(batch.len(), 2);
+        for (b, s) in batch.iter().zip(seq.iter()) {
+            assert_eq!(b, s, "batch and sequential results must be identical");
+        }
+    }
+
+    #[test]
+    fn encode_action_batch_default_matches_sequential() {
+        let adapter = make_adapter();
+        let (_ctx, _tgt, action) = make_two_transitions();
+        let actions = vec![action.clone(), action.clone()];
+
+        let batch = adapter.encode_action_batch(&actions).unwrap();
+        let seq: Vec<Vec<f32>> = actions
+            .iter()
+            .map(|a| adapter.encode_action(a).unwrap())
+            .collect();
+
+        assert_eq!(batch.len(), 2);
+        for (b, s) in batch.iter().zip(seq.iter()) {
+            assert_eq!(b, s);
+        }
+    }
+
+    #[test]
+    fn encode_target_batch_default_matches_sequential() {
+        let adapter = make_adapter();
+        let (_ctx, tgt, _action) = make_two_transitions();
+        let windows = vec![tgt.clone(), tgt.clone()];
+
+        let batch = adapter.encode_target_batch(&windows).unwrap();
+        let seq: Vec<Vec<f32>> = windows
+            .iter()
+            .map(|w| adapter.encode_target(w).unwrap())
+            .collect();
+
+        assert_eq!(batch.len(), 2);
+        for (b, s) in batch.iter().zip(seq.iter()) {
+            assert_eq!(b, s);
+        }
     }
 }

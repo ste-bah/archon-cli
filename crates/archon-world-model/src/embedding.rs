@@ -40,6 +40,14 @@ pub trait WorldEmbeddingAdapter: Send + Sync {
     fn provider_name(&self) -> &str;
     fn model_name(&self) -> &str;
     fn embed(&self, request: &EmbeddingRequest) -> Result<EmbeddingVector>;
+
+    /// Embed a batch of requests, returning one vector per request in order.
+    ///
+    /// Default: sequential loop over [`Self::embed`]. Override on concrete types that support
+    /// batch-native embedding (e.g. fastembed) to avoid redundant model-load overhead.
+    fn embed_batch(&self, requests: &[EmbeddingRequest]) -> Result<Vec<EmbeddingVector>> {
+        requests.iter().map(|r| self.embed(r)).collect()
+    }
 }
 
 pub struct MemoryEmbeddingAdapter {
@@ -121,6 +129,34 @@ impl WorldEmbeddingAdapter for MemoryEmbeddingAdapter {
             source_hash: request.source_hash.clone(),
             redaction_policy: request.redaction_policy.clone(),
         })
+    }
+
+    /// Batch-native override: passes all texts to the provider in a single call,
+    /// avoiding repeated model initialisation / inference round-trips.
+    fn embed_batch(&self, requests: &[EmbeddingRequest]) -> Result<Vec<EmbeddingVector>> {
+        let texts: Vec<String> = requests.iter().map(|r| r.text.clone()).collect();
+        let all_vectors = self
+            .provider
+            .embed(&texts)
+            .map_err(|error| anyhow::anyhow!("world-model batch embedding failed: {error}"))?;
+        if all_vectors.len() != requests.len() {
+            anyhow::bail!(
+                "embedding provider returned {} vectors for {} requests",
+                all_vectors.len(),
+                requests.len()
+            );
+        }
+        Ok(all_vectors
+            .into_iter()
+            .zip(requests.iter())
+            .map(|(raw, request)| EmbeddingVector {
+                values: project_vector(&raw, self.projection_dimensions),
+                provider: self.provider_name.clone(),
+                model: self.model_name.clone(),
+                source_hash: request.source_hash.clone(),
+                redaction_policy: request.redaction_policy.clone(),
+            })
+            .collect())
     }
 }
 
@@ -339,6 +375,54 @@ impl WorldEmbeddingAdapter for CachedEmbeddingAdapter {
         let vector = self.inner.embed(&request)?;
         self.write_cached(&key, &request, &vector)?;
         Ok(vector)
+    }
+
+    /// Batched override: single cache-lookup pass, then ONE inner `embed_batch` call for all
+    /// misses.  Preserves result order.
+    fn embed_batch(&self, requests: &[EmbeddingRequest]) -> Result<Vec<EmbeddingVector>> {
+        // Apply redaction and compute cache keys up-front.
+        let effective: Vec<EmbeddingRequest> = requests
+            .iter()
+            .map(|r| {
+                if self.config.redact_before_embedding {
+                    EmbeddingRequest {
+                        text: redact_embedding_text(&r.text),
+                        ..r.clone()
+                    }
+                } else {
+                    r.clone()
+                }
+            })
+            .collect();
+        let keys: Vec<String> = effective.iter().map(|r| self.cache_key(r)).collect();
+
+        // Cache lookup pass — collect hits, record miss indices.
+        let mut results: Vec<Option<EmbeddingVector>> = vec![None; requests.len()];
+        let mut miss_indices: Vec<usize> = Vec::new();
+        for (i, key) in keys.iter().enumerate() {
+            if let Ok(Some(v)) = self.read_cached(key) {
+                results[i] = Some(v);
+            } else {
+                miss_indices.push(i);
+            }
+        }
+
+        // Single inner embed_batch call for all misses.
+        if !miss_indices.is_empty() {
+            let miss_requests: Vec<EmbeddingRequest> =
+                miss_indices.iter().map(|&i| effective[i].clone()).collect();
+            let miss_vectors = self.inner.embed_batch(&miss_requests)?;
+            for (slot, &orig_idx) in miss_indices.iter().enumerate() {
+                let vector = miss_vectors[slot].clone();
+                let _ = self.write_cached(&keys[orig_idx], &effective[orig_idx], &vector);
+                results[orig_idx] = Some(vector);
+            }
+        }
+
+        results
+            .into_iter()
+            .map(|r| r.ok_or_else(|| anyhow::anyhow!("missing batch result")))
+            .collect()
     }
 }
 
@@ -675,6 +759,169 @@ mod tests {
         assert!(
             !cache_exists,
             "cache_dir should be empty when allow_cache=false"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Batch tests
+    // ---------------------------------------------------------------------------
+
+    /// An inner adapter that overrides `embed_batch` and counts how many times
+    /// the batch entry-point is called (not individual `embed` calls).
+    struct BatchCountingAdapter {
+        batch_calls: Arc<AtomicUsize>,
+    }
+
+    impl WorldEmbeddingAdapter for BatchCountingAdapter {
+        fn backend_kind(&self) -> EmbeddingBackendKind {
+            EmbeddingBackendKind::Local
+        }
+        fn dimensions(&self) -> usize {
+            4
+        }
+        fn provider_name(&self) -> &str {
+            "batch-counting"
+        }
+        fn model_name(&self) -> &str {
+            "test"
+        }
+        fn embed(&self, request: &EmbeddingRequest) -> Result<EmbeddingVector> {
+            // Delegate to a fresh deterministic adapter so singular calls still work.
+            DeterministicHashEmbeddingAdapter::new(4)
+                .unwrap()
+                .embed(request)
+        }
+        fn embed_batch(&self, requests: &[EmbeddingRequest]) -> Result<Vec<EmbeddingVector>> {
+            self.batch_calls.fetch_add(1, Ordering::SeqCst);
+            // Use the real deterministic adapter for output correctness.
+            let inner = DeterministicHashEmbeddingAdapter::new(4).unwrap();
+            requests.iter().map(|r| inner.embed(r)).collect()
+        }
+    }
+
+    fn make_batch_requests(texts: &[&str]) -> Vec<EmbeddingRequest> {
+        texts
+            .iter()
+            .map(|t| EmbeddingRequest {
+                text: (*t).to_string(),
+                source_hash: format!("h:{t}"),
+                redaction_policy: "none".into(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn embed_batch_default_matches_sequential() {
+        // DeterministicHashEmbeddingAdapter does NOT override embed_batch,
+        // so the default loop is exercised.
+        let adapter = DeterministicHashEmbeddingAdapter::new(8).unwrap();
+        let requests = make_batch_requests(&["alpha", "beta", "gamma"]);
+
+        let batch = adapter.embed_batch(&requests).unwrap();
+        let seq: Vec<EmbeddingVector> =
+            requests.iter().map(|r| adapter.embed(r).unwrap()).collect();
+
+        assert_eq!(batch.len(), seq.len());
+        for (b, s) in batch.iter().zip(seq.iter()) {
+            assert_eq!(b.values, s.values, "batch and sequential must agree");
+        }
+    }
+
+    #[test]
+    fn cached_embed_batch_single_inner_call_for_misses() {
+        let temp = tempfile::tempdir().unwrap();
+        let batch_calls = Arc::new(AtomicUsize::new(0));
+        let adapter = CachedEmbeddingAdapter::new(
+            Box::new(BatchCountingAdapter {
+                batch_calls: Arc::clone(&batch_calls),
+            }),
+            EmbeddingCacheConfig {
+                cache_dir: temp.path().join("cache"),
+                cache_enabled: true,
+                cache_max_bytes: 1024 * 1024,
+                redact_before_embedding: false,
+                eval_schema_version: 1,
+            },
+            true,
+        );
+        let requests = make_batch_requests(&["a", "b", "c"]);
+
+        // All three are cache misses — inner.embed_batch must be called exactly once.
+        let result = adapter.embed_batch(&requests).unwrap();
+        assert_eq!(result.len(), 3);
+        assert_eq!(
+            batch_calls.load(Ordering::SeqCst),
+            1,
+            "CachedEmbeddingAdapter must call inner.embed_batch exactly once for all misses"
+        );
+    }
+
+    #[test]
+    fn cached_embed_batch_hits_skip_inner() {
+        let temp = tempfile::tempdir().unwrap();
+        let batch_calls = Arc::new(AtomicUsize::new(0));
+        let adapter = CachedEmbeddingAdapter::new(
+            Box::new(BatchCountingAdapter {
+                batch_calls: Arc::clone(&batch_calls),
+            }),
+            EmbeddingCacheConfig {
+                cache_dir: temp.path().join("cache"),
+                cache_enabled: true,
+                cache_max_bytes: 1024 * 1024,
+                redact_before_embedding: false,
+                eval_schema_version: 1,
+            },
+            true,
+        );
+        let requests = make_batch_requests(&["x", "y"]);
+
+        // First call: 2 misses → 1 inner batch call.
+        let first = adapter.embed_batch(&requests).unwrap();
+        assert_eq!(batch_calls.load(Ordering::SeqCst), 1);
+
+        // Second call: 2 hits → 0 inner batch calls (total stays at 1).
+        let second = adapter.embed_batch(&requests).unwrap();
+        assert_eq!(
+            batch_calls.load(Ordering::SeqCst),
+            1,
+            "cache hits must not trigger additional inner batch calls"
+        );
+        assert_eq!(first[0].values, second[0].values);
+        assert_eq!(first[1].values, second[1].values);
+    }
+
+    #[test]
+    fn cached_embed_batch_partial_hits() {
+        let temp = tempfile::tempdir().unwrap();
+        let batch_calls = Arc::new(AtomicUsize::new(0));
+        let adapter = CachedEmbeddingAdapter::new(
+            Box::new(BatchCountingAdapter {
+                batch_calls: Arc::clone(&batch_calls),
+            }),
+            EmbeddingCacheConfig {
+                cache_dir: temp.path().join("cache"),
+                cache_enabled: true,
+                cache_max_bytes: 1024 * 1024,
+                redact_before_embedding: false,
+                eval_schema_version: 1,
+            },
+            true,
+        );
+
+        // Prime cache for "m" only.
+        let prime = make_batch_requests(&["m"]);
+        adapter.embed_batch(&prime).unwrap();
+        let calls_after_prime = batch_calls.load(Ordering::SeqCst);
+
+        // Now batch with 1 hit ("m") and 1 miss ("n").
+        let requests = make_batch_requests(&["m", "n"]);
+        let result = adapter.embed_batch(&requests).unwrap();
+        assert_eq!(result.len(), 2);
+        // One additional inner batch call for the single miss.
+        assert_eq!(
+            batch_calls.load(Ordering::SeqCst),
+            calls_after_prime + 1,
+            "exactly one inner batch call for the one miss"
         );
     }
 }
