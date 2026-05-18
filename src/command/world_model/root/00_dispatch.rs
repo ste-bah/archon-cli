@@ -117,6 +117,27 @@ pub(crate) async fn handle_world_command(
             );
             Ok(())
         }
+        WorldAction::EvalJepaStatus { run_id } => {
+            println!(
+                "{}",
+                candidate::render_eval_jepa_status(&world_model_root()?, run_id)?
+            );
+            Ok(())
+        }
+        WorldAction::EvalJepaRuns { limit } => {
+            println!(
+                "{}",
+                candidate::render_eval_jepa_runs(&world_model_root()?, *limit)?
+            );
+            Ok(())
+        }
+        WorldAction::EvalJepaCancel { run_id } => {
+            println!(
+                "{}",
+                candidate::render_eval_jepa_cancel(&world_model_root()?, run_id)?
+            );
+            Ok(())
+        }
         WorldAction::InspectJepa { candidate_id } => {
             println!(
                 "{}",

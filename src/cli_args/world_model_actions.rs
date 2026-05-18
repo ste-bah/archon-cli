@@ -91,6 +91,22 @@ pub enum WorldAction {
         /// Candidate model id to inspect
         candidate_id: String,
     },
+    /// Show status of a JEPA eval run
+    EvalJepaStatus {
+        /// Run ID (e.g. jeval-...)
+        run_id: String,
+    },
+    /// List recent JEPA eval runs
+    EvalJepaRuns {
+        /// Maximum number of runs to show
+        #[arg(long, default_value = "10")]
+        limit: usize,
+    },
+    /// Cancel a running JEPA eval job
+    EvalJepaCancel {
+        /// Run ID to cancel
+        run_id: String,
+    },
     /// Inspect a JEPA candidate manifest and gate state
     InspectJepa {
         /// Candidate model id to inspect
