@@ -543,6 +543,78 @@ impl JepaRuntimeBackendReport {
     }
 }
 
+/// Which hardware backend produced the embeddings / ran the eval.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JepaEvalBackendKind {
+    MlxMetal,
+    Cuda,
+    Cpu,
+}
+
+/// Lifecycle status of a single eval run persisted under eval-runs/<run-id>.json.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvalRunStatus {
+    Pending,
+    Running,
+    Paused,
+    Completed,
+    Failed,
+    Cancelled,
+    Stale,
+}
+
+/// Which pipeline stage the run is currently executing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvalRunStage {
+    Tier0,
+    Tier1,
+    BaselineEmbed,
+    TransitionFit,
+    Report,
+}
+
+/// Full on-disk run record schema (PRD-006C §6.2).
+/// Written atomically by JepaEvalRunStore (temp + rename).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JepaEvalRunRecord {
+    pub run_id: String,
+    pub candidate_id: String,
+    pub corpus_fingerprint: Option<String>,
+    /// Always None in 006C (training corpus separate from eval corpus).
+    pub training_corpus_fingerprint: Option<String>,
+    /// Quick | Full | Promotion — never Legacy (runtime selection only).
+    pub mode: RuntimeEvalMode,
+    pub backend: JepaEvalBackendKind,
+    pub status: EvalRunStatus,
+    pub current_stage: EvalRunStage,
+    /// Wall-clock ms per stage name.
+    pub stage_timings: std::collections::HashMap<String, u64>,
+    pub baseline_skipped: bool,
+    pub skipped_reason: Option<String>,
+    pub pid: u32,
+    pub host: String,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub rows_total: usize,
+    /// F-CRIT-01: incremented at every progress_interval_rows boundary.
+    pub rows_completed: usize,
+    pub transitions_total: usize,
+    /// F-CRIT-01: incremented at every progress_interval_rows boundary.
+    pub transitions_completed: usize,
+    pub embeddings_total: usize,
+    pub embeddings_completed: usize,
+    pub cache_hits: usize,
+    pub cache_misses: usize,
+    pub backend_parity_examples: usize,
+    pub failure_reason: Option<String>,
+    pub partial_gates: serde_json::Value,
+    pub result_paths: std::collections::HashMap<String, String>,
+}
+
 #[cfg(test)]
 mod tests_02 {
     use super::*;

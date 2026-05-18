@@ -1009,6 +1009,7 @@ dependencies = [
  "chrono",
  "cozo-ce",
  "hex",
+ "libc",
  "mlx-rs",
  "regex",
  "safetensors 0.7.0",
