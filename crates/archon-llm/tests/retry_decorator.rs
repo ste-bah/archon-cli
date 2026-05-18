@@ -28,6 +28,9 @@ use archon_llm::provider::{
     LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature,
 };
 use archon_llm::retry::{RetryDecision, RetryPolicy, RetryProvider, classify};
+use archon_llm::runtime::{
+    ProviderHealthStatus, ProviderRuntimeEventType, ProviderRuntimeSupervisor,
+};
 use archon_llm::streaming::StreamEvent;
 use archon_llm::types::Usage;
 
@@ -148,6 +151,46 @@ async fn retries_three_times_on_http_error() {
         }
         other => panic!("expected LlmError::Http, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn supervised_retry_records_start_retry_and_success_events() {
+    let inner = Arc::new(MockProvider::new(vec![
+        Err(LlmError::Http("boom once".into())),
+        Ok(ok_response()),
+    ]));
+    let supervisor = Arc::new(Mutex::new(ProviderRuntimeSupervisor::new(
+        "mock",
+        "provider_builder",
+    )));
+    let provider = RetryProvider::new_with_supervisor(
+        Arc::new(ArcDelegate(inner)),
+        tight_policy(),
+        Arc::clone(&supervisor),
+    );
+
+    provider
+        .complete(base_request())
+        .await
+        .expect("retry succeeds");
+
+    let guard = supervisor.lock().unwrap();
+    let event_types: Vec<_> = guard
+        .events()
+        .iter()
+        .map(|event| event.event_type)
+        .collect();
+    assert_eq!(
+        event_types,
+        vec![
+            ProviderRuntimeEventType::RequestStarted,
+            ProviderRuntimeEventType::RequestRetry,
+            ProviderRuntimeEventType::RequestSucceeded,
+        ]
+    );
+    assert_eq!(guard.events()[1].retry_count, Some(1));
+    assert_eq!(guard.events()[1].reason_code.as_deref(), Some("http"));
+    assert_eq!(guard.status().health, ProviderHealthStatus::Healthy);
 }
 
 // ---------------------------------------------------------------------------

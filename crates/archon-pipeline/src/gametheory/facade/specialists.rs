@@ -1,12 +1,15 @@
 use futures_util::future::join_all;
 #[cfg(test)]
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use crate::runner::LlmClient;
 
+use super::super::agents::GameTheoryAgent;
 use super::super::errors::GameTheoryError;
 use super::super::fingerprint::GameTheoryFingerprint;
 use super::super::prompt_builder;
+use super::super::registry::GAMETHEORY_AGENTS;
 use super::super::routing::RoutingDecision;
 #[cfg(test)]
 use super::MemoryRecallAudit;
@@ -229,6 +232,29 @@ async fn execute_specialist_call(
     system: &[serde_json::Value],
 ) -> SpecialistCallOutput {
     let recalled = recall_prior_context_for_agent(agent_key, memory_ctx);
+    let agent = registry_agent(agent_key);
+    let (display_name, model, source_body) = match agent {
+        Some(agent) => match load_agent_prompt_body(agent) {
+            Ok(body) => (agent.display_name, agent.model, body),
+            Err(error) => {
+                return SpecialistCallOutput {
+                    agent_key: agent_key.to_string(),
+                    output: None,
+                    error: Some(error.to_string()),
+                    audit: recalled.audit,
+                    cost_usd: 0.0,
+                };
+            }
+        },
+        None => {
+            tracing::warn!(
+                agent_key,
+                model = "claude-sonnet-4-6",
+                "gametheory.agent.model_override"
+            );
+            (agent_key, "claude-sonnet-4-6", String::new())
+        }
+    };
     if agent_key.ends_with("-FORCE-FAIL-FOR-TEST") {
         return SpecialistCallOutput {
             agent_key: agent_key.to_string(),
@@ -239,9 +265,10 @@ async fn execute_specialist_call(
         };
     }
 
-    let prompt = prompt_builder::build_specialist_prompt_with_prior_context(
+    let prompt = prompt_builder::build_specialist_prompt_with_template(
         agent_key,
-        agent_key,
+        display_name,
+        &source_body,
         situation,
         fingerprint_summary,
         &recalled.text,
@@ -253,7 +280,7 @@ async fn execute_specialist_call(
     })];
 
     match llm
-        .send_message(messages, system.to_vec(), vec![], "claude-sonnet-4-6")
+        .send_message(messages, system.to_vec(), vec![], model)
         .await
     {
         Ok(response) => SpecialistCallOutput {
@@ -261,11 +288,7 @@ async fn execute_specialist_call(
             output: Some(response.content),
             error: None,
             audit: recalled.audit,
-            cost_usd: estimate_llm_cost_usd(
-                "claude-sonnet-4-6",
-                response.tokens_in,
-                response.tokens_out,
-            ),
+            cost_usd: estimate_llm_cost_usd(model, response.tokens_in, response.tokens_out),
         },
         Err(e) => SpecialistCallOutput {
             agent_key: agent_key.to_string(),
@@ -274,5 +297,72 @@ async fn execute_specialist_call(
             audit: recalled.audit,
             cost_usd: 0.0,
         },
+    }
+}
+
+fn registry_agent(agent_key: &str) -> Option<&'static GameTheoryAgent> {
+    GAMETHEORY_AGENTS
+        .iter()
+        .find(|agent| agent.key == agent_key)
+}
+
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")))
+        .to_path_buf()
+}
+
+fn load_agent_prompt_body(agent: &GameTheoryAgent) -> Result<String, GameTheoryError> {
+    let path = workspace_root().join(agent.prompt_source_path);
+    if !path.is_file() {
+        return Err(GameTheoryError::MissingAgentFile {
+            path: path.display().to_string(),
+        });
+    }
+    let content = std::fs::read_to_string(&path).map_err(|error| GameTheoryError::Io {
+        message: format!("read {} failed: {error}", path.display()),
+    })?;
+    let (_frontmatter, body) =
+        crate::agent_loader::parse_frontmatter(&content).map_err(|error| {
+            GameTheoryError::Validation {
+                message: format!("parse {} failed: {error}", path.display()),
+            }
+        })?;
+    if body.trim().is_empty() {
+        return Err(GameTheoryError::Validation {
+            message: format!("agent source file has empty body: {}", path.display()),
+        });
+    }
+    Ok(body)
+}
+
+#[cfg(test)]
+mod prompt_source_tests {
+    use super::*;
+
+    #[test]
+    fn load_agent_prompt_body_fails_when_declared_source_file_is_missing() {
+        static ACCESS: &[super::super::super::agents::GameTheoryToolAccess] = &[];
+        let agent = GameTheoryAgent {
+            key: "missing-source-agent",
+            display_name: "Missing Source Agent",
+            tier: 1,
+            file: "missing-source-agent.md",
+            memory_keys: &[],
+            output_artifacts: &[],
+            prompt_source_path: ".archon/agents/gametheory/does-not-exist-for-test.md",
+            tool_access: ACCESS,
+            model: "opus",
+            condition: None,
+            depends_on: &[],
+            mandatory: false,
+        };
+
+        assert!(matches!(
+            load_agent_prompt_body(&agent),
+            Err(GameTheoryError::MissingAgentFile { .. })
+        ));
     }
 }

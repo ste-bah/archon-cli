@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use chrono::Utc;
 use cozo::{DataValue, ScriptMutability};
-use tracing::debug;
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use super::helpers::db_err;
@@ -65,7 +65,17 @@ impl MemoryGraph {
             .map_err(db_err)?;
 
         debug!(id = %id, "stored memory");
-        self.embed_and_store(&id, content);
+        if let Err(error) = self.embed_and_store(&id, content) {
+            warn!(memory_id = %id, error = %error, "memory.embedding.store_failed");
+            if let Err(delete_error) = self.delete_memory(&id) {
+                warn!(
+                    memory_id = %id,
+                    error = %delete_error,
+                    "memory.embedding.rollback_failed"
+                );
+            }
+            return Err(error);
+        }
         Ok(id)
     }
 

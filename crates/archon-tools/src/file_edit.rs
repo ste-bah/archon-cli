@@ -1,8 +1,8 @@
 use std::fs;
-use std::path::Path;
 
 use serde_json::json;
 
+use crate::path_guard::resolve_existing_file_path;
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
 pub struct EditTool;
@@ -23,7 +23,7 @@ impl Tool for EditTool {
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Absolute path to the file to modify"
+                    "description": "Path to the file to modify. Must resolve inside working_dir or an allowed extra_dir."
                 },
                 "old_string": {
                     "type": "string",
@@ -43,7 +43,7 @@ impl Tool for EditTool {
         })
     }
 
-    async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
+    async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::error("file_path is required and must be a string"),
@@ -68,8 +68,11 @@ impl Tool for EditTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let path = Path::new(file_path);
-        let content = match fs::read_to_string(path) {
+        let path = match resolve_existing_file_path(file_path, ctx) {
+            Ok(path) => path,
+            Err(e) => return ToolResult::error(e),
+        };
+        let content = match fs::read_to_string(&path) {
             Ok(c) => c,
             Err(e) => return ToolResult::error(format!("Failed to read file: {e}")),
         };
@@ -93,7 +96,7 @@ impl Tool for EditTool {
             content.replacen(old_string, new_string, 1)
         };
 
-        match fs::write(path, new_content) {
+        match fs::write(&path, new_content) {
             Ok(()) => ToolResult::success(format!("File {file_path} updated successfully.")),
             Err(e) => ToolResult::error(format!("Failed to write file: {e}")),
         }

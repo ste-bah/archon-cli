@@ -12,6 +12,7 @@ pub(crate) async fn handle_web_command(
     port: Option<u16>,
     bind_address: Option<String>,
     no_open: bool,
+    allow_unauthenticated_nonlocal_bind: bool,
     config: &ArchonConfig,
     cli: &Cli,
     env_vars: &ArchonEnvVars,
@@ -25,19 +26,22 @@ pub(crate) async fn handle_web_command(
     } else {
         config.web.open_browser
     };
-
     // Bearer token: required for non-localhost to prevent unauthenticated access.
     let is_local = matches!(effective_bind.as_str(), "127.0.0.1" | "::1" | "localhost");
-    let token = if is_local {
+    let token = if is_local || allow_unauthenticated_nonlocal_bind {
         None
     } else {
-        Some(archon_core::remote::auth::load_or_create_token().unwrap_or_else(|_| String::new()))
+        Some(
+            archon_core::remote::auth::load_or_create_token()
+                .map_err(|e| anyhow::anyhow!("failed to load web auth token: {e}"))?,
+        )
     };
 
     let web_cfg = WebConfig {
         port: effective_port,
         bind_address: effective_bind,
         open_browser: effective_open,
+        max_body_bytes: config.web.max_body_bytes,
     };
 
     let policy = web_policy_summary();
@@ -47,8 +51,11 @@ pub(crate) async fn handle_web_command(
     );
     let chat_backend =
         crate::command::web_chat::WebChatBridge::new(config, cli, env_vars, resolved_flags).await?;
-    let server = WebServer::with_policy_and_paths(web_cfg, token, policy, paths)
+    let mut server = WebServer::with_policy_and_paths(web_cfg, token, policy, paths)
         .with_chat_backend(Arc::new(chat_backend));
+    if allow_unauthenticated_nonlocal_bind {
+        server = server.unsafe_allow_unauthenticated_nonlocal_bind_for_cli();
+    }
     if let Err(e) = server.run().await {
         eprintln!("web server error: {e}");
         std::process::exit(1);

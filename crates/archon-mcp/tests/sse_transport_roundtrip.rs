@@ -189,6 +189,7 @@ async fn sse_transport_full_initialize_and_tools_list_roundtrip() {
         transport: "sse".into(),
         url: Some(sse_url),
         headers: None,
+        tool_policy: Default::default(),
     };
 
     // connect_server_for_test is a thin pub-wrapper around the private
@@ -258,6 +259,7 @@ async fn sse_transport_resolves_absolute_endpoint_url() {
         transport: "sse".into(),
         url: Some(sse_url),
         headers: None,
+        tool_policy: Default::default(),
     };
 
     let client = tokio::time::timeout(Duration::from_secs(10), connect_server_for_test(&config))
@@ -290,6 +292,7 @@ async fn sse_transport_without_url_errors_cleanly() {
         transport: "sse".into(),
         url: None,
         headers: None,
+        tool_policy: Default::default(),
     };
 
     let result = connect_server_for_test(&config).await;

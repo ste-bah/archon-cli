@@ -90,6 +90,7 @@ pub struct Agent {
     extraction_state: ExtractionState,
     // v0.1.23: AutoExtraction (LLM-based) learning system.
     auto_extractor: Option<Arc<AutoExtractor>>,
+    auto_extraction_tasks: Vec<tokio::task::JoinHandle<()>>,
     // GAP 6: Auto-mode permission evaluator
     auto_evaluator: Option<AutoModeEvaluator>,
     // GAP 8: Subagent manager
@@ -285,9 +286,11 @@ impl Agent {
                 .collect();
             let model = self.config.model.clone();
             let turn = self.turn_number as u32;
-            tokio::spawn(async move {
+            self.prune_finished_auto_extractions();
+            let handle = tokio::spawn(async move {
                 let _ = extractor.maybe_extract(&turns, turn, &model).await;
             });
+            self.auto_extraction_tasks.push(handle);
         }
 
         let mut agentic_iterations: u32 = 0;

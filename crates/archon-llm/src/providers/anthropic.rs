@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc::Receiver;
 
 use crate::anthropic::{AnthropicClient, ApiError};
+use crate::completion_accumulator::collect_completion_response;
 use crate::context_window::classify_context_window_error;
 use crate::provider::{
     DataFlowClassification, LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo,
@@ -156,54 +157,9 @@ impl LlmProvider for AnthropicProvider {
     /// Collect a full non-streaming response by consuming all stream events.
     ///
     /// Drives the same `stream_message` path underneath and collects
-    /// `TextDelta` + usage tokens into an `LlmResponse`.
+    /// stream content blocks and usage tokens into an `LlmResponse`.
     async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
-        use crate::streaming::StreamEvent;
-        use crate::types::Usage;
-
-        let mut rx = self.stream(request).await?;
-
-        let mut text_parts: Vec<String> = Vec::new();
-        let mut usage = Usage::default();
-        let mut stop_reason = String::new();
-
-        while let Some(event) = rx.recv().await {
-            match event {
-                StreamEvent::MessageStart {
-                    usage: start_usage, ..
-                } => {
-                    usage.merge(&start_usage);
-                }
-                StreamEvent::TextDelta { text, .. } => {
-                    text_parts.push(text);
-                }
-                StreamEvent::MessageDelta {
-                    stop_reason: sr,
-                    usage: delta_usage,
-                } => {
-                    if let Some(sr) = sr {
-                        stop_reason = sr;
-                    }
-                    if let Some(u) = delta_usage {
-                        usage.merge(&u);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        let full_text = text_parts.join("");
-        let content = if full_text.is_empty() {
-            vec![]
-        } else {
-            vec![serde_json::json!({"type": "text", "text": full_text})]
-        };
-
-        Ok(LlmResponse {
-            content,
-            usage,
-            stop_reason,
-        })
+        collect_completion_response(self.stream(request).await?).await
     }
 
     fn supports_feature(&self, feature: ProviderFeature) -> bool {

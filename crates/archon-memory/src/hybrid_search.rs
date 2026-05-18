@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use cozo::DbInstance;
 
 use crate::embedding::EmbeddingProvider;
-use crate::graph::{raw_to_memory, read_all_memories};
+use crate::graph::{raw_to_memory, read_all_memories, row_to_memory};
 use crate::types::{Memory, MemoryError};
 use crate::vector_search;
 
@@ -63,18 +63,9 @@ pub fn hybrid_search(
     ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     ranked.truncate(top_k);
 
-    // Fetch full Memory objects
-    let all_rows = read_all_memories(db)?;
-    let mut memory_map: HashMap<String, Memory> = HashMap::new();
-    for raw in all_rows {
-        if let Ok(mem) = raw_to_memory(raw) {
-            memory_map.insert(mem.id.clone(), mem);
-        }
-    }
-
     let mut results = Vec::with_capacity(ranked.len());
     for (id, _score) in ranked {
-        if let Some(mem) = memory_map.remove(&id) {
+        if let Ok(mem) = row_to_memory(db, &id) {
             results.push(mem);
         }
     }
@@ -96,6 +87,7 @@ fn compute_keyword_scores(
     }
 
     let all_rows = read_all_memories(db)?;
+    crate::search::warn_full_scan("memory.recall.hybrid_keyword", all_rows.len(), None);
     let mut scores: Vec<(String, f64)> = Vec::new();
 
     for raw in all_rows {

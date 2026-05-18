@@ -258,3 +258,21 @@ crates/archon-core/src/subagent_executor/run.rs
 
 # --- root src/cli_args ---
 src/cli_args/tests.rs
+
+# ============================================================================
+# PRD-008 audit-remediation (commits f63b0e6, b274114; merged 2026-05-18).
+# Owner: Steve / Archon. Dated justification: 2026-05-18.
+# These 7 files crossed 500 lines from the PRD-008 trust/safety remediation
+# (completion fail-closed gates, rollback policy, file path-guard, provider
+# completion accumulator, shell-chain classifier, SDK web bind hardening,
+# proposal validation/version capture) and their added regression tests.
+# Splitting each is the sanctioned allowlist-shrinks follow-up; allowlisted
+# here to unblock CI per explicit owner approval.
+# ============================================================================
+crates/archon-learning/src/proposal.rs
+crates/archon-llm/tests/retry_decorator.rs
+crates/archon-memory/tests/embedding_tests.rs
+crates/archon-sdk/src/web/mod.rs
+crates/archon-tools/tests/tool_tests.rs
+src/command/behaviour.rs
+src/command/world_model/ingest_files.rs

@@ -34,9 +34,27 @@ pub fn resolve_evidence(
             super::models::CompletionClaimKind::Implemented
             | super::models::CompletionClaimKind::Fixed => {
                 evidence.extend(find_diff_evidence(db, &claim.run_id)?);
+                if claim.claim_kind == super::models::CompletionClaimKind::Fixed {
+                    evidence.extend(find_test_run_evidence(db, &claim.run_id)?);
+                }
             }
-            _ => {
-                // Done, Verified, Documented — check gate results and review findings
+            super::models::CompletionClaimKind::Verified => {
+                evidence.extend(find_persisted_evidence(
+                    db,
+                    &claim.run_id,
+                    &[EvidenceKind::ReviewFinding],
+                    "no persisted review finding evidence found",
+                )?);
+            }
+            super::models::CompletionClaimKind::Documented => {
+                evidence.extend(find_persisted_evidence(
+                    db,
+                    &claim.run_id,
+                    &[EvidenceKind::GeneratedArtifact],
+                    "no persisted generated documentation artifact evidence found",
+                )?);
+            }
+            super::models::CompletionClaimKind::Done => {
                 evidence.extend(find_gate_evidence(db, &claim.run_id)?);
             }
         }
@@ -145,7 +163,12 @@ fn missing_evidence_record(run_id: &str, kind: EvidenceKind, summary: &str) -> C
 /// Find build evidence from gt_runs status.
 fn find_build_evidence(db: &DbInstance, run_id: &str) -> Result<Vec<CompletionEvidence>> {
     // Same pattern as test run evidence for now — gt_runs as canonical source.
-    find_test_run_evidence(db, run_id)
+    let mut evidence = find_test_run_evidence(db, run_id)?;
+    for ev in &mut evidence {
+        ev.evidence_kind = EvidenceKind::BuildResult;
+        ev.producer = format!("{}:build", ev.producer);
+    }
+    Ok(evidence)
 }
 
 /// Find ingestion job evidence from doc_processing_jobs.
@@ -261,25 +284,33 @@ fn find_citation_evidence(db: &DbInstance, run_id: &str) -> Result<Vec<Completio
 
 /// Find file diff / generated artifact evidence.
 fn find_diff_evidence(db: &DbInstance, run_id: &str) -> Result<Vec<CompletionEvidence>> {
-    let mut records: Vec<CompletionEvidence> = store::get_evidence_by_run(db, run_id)?
+    find_persisted_evidence(
+        db,
+        run_id,
+        &[EvidenceKind::FileDiff, EvidenceKind::GeneratedArtifact],
+        "no persisted file diff or generated artifact evidence found",
+    )
+}
+
+fn find_persisted_evidence(
+    db: &DbInstance,
+    run_id: &str,
+    kinds: &[EvidenceKind],
+    missing_summary: &str,
+) -> Result<Vec<CompletionEvidence>> {
+    let records: Vec<CompletionEvidence> = store::get_evidence_by_run(db, run_id)?
         .into_iter()
-        .filter(|ev| {
-            matches!(
-                ev.evidence_kind,
-                EvidenceKind::FileDiff | EvidenceKind::GeneratedArtifact
-            )
-        })
+        .filter(|ev| kinds.contains(&ev.evidence_kind))
         .collect();
 
-    if records.is_empty() {
-        records.push(missing_evidence_record(
-            run_id,
-            EvidenceKind::FileDiff,
-            "no persisted file diff or generated artifact evidence found",
-        ));
+    if !records.is_empty() {
+        return Ok(records);
     }
 
-    Ok(records)
+    Ok(kinds
+        .iter()
+        .map(|kind| missing_evidence_record(run_id, kind.clone(), missing_summary))
+        .collect())
 }
 
 /// Find gate result evidence.
@@ -486,7 +517,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_finds_persisted_gate_evidence() {
+    fn test_resolve_finds_persisted_gate_evidence_for_done_claim() {
         let db = test_db();
         crate::schema::ensure_completion_schema(&db).unwrap();
         let run_id = "run-gate-1";
@@ -512,8 +543,8 @@ mod tests {
             agent_key: None,
             model: None,
             task_type: "coding".into(),
-            claim_text: "verified".into(),
-            claim_kind: CompletionClaimKind::Verified,
+            claim_text: "done".into(),
+            claim_kind: CompletionClaimKind::Done,
             required_evidence: vec![EvidenceKind::GateResult],
             linked_evidence_ids: vec![],
             verified: false,

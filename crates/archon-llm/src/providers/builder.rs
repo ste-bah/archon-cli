@@ -36,15 +36,17 @@
 //! env var *name* is propagated.
 
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use crate::auth::default_credentials_path;
 use crate::config::LlmConfig;
 use crate::provider::LlmProvider;
 use crate::retry::{RetryPolicy, RetryProvider};
+use crate::runtime::ProviderRuntimeSupervisor;
 use crate::secrets::ApiKey;
 
 use super::codex::client::CodexProvider;
-use super::codex::spoof::SpoofConfig;
+use super::codex::spoof::{SpoofConfig, bundled_manifest};
 use super::descriptor::{AuthFlavor, CompatKind, ProviderDescriptor};
 use super::error::ProviderError;
 use super::local::LocalProvider;
@@ -64,6 +66,35 @@ pub fn build_llm_provider(
 ) -> Result<Arc<dyn LlmProvider>, ProviderError> {
     let policy = cfg.retry.clone().map(RetryPolicy::from).unwrap_or_default();
     build_llm_provider_with_policy(cfg, http, policy)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codex_builder_outer_retry_is_single_attempt() {
+        let policy = RetryPolicy {
+            max_attempts: 5,
+            ..RetryPolicy::default()
+        };
+
+        let effective = effective_retry_policy("openai-codex", policy);
+
+        assert_eq!(effective.max_attempts, 1);
+    }
+
+    #[test]
+    fn non_codex_builder_keeps_wrapper_retry_policy() {
+        let policy = RetryPolicy {
+            max_attempts: 4,
+            ..RetryPolicy::default()
+        };
+
+        let effective = effective_retry_policy("openai", policy);
+
+        assert_eq!(effective.max_attempts, 4);
+    }
 }
 
 /// Variant of `build_llm_provider` that accepts an explicit `RetryPolicy`,
@@ -95,9 +126,26 @@ pub fn build_llm_provider_with_policy(
         CompatKind::Native => dispatch_native(cfg, descriptor, http, api_key)?,
     };
 
-    Ok(Arc::new(RetryProvider::<dyn LlmProvider>::new(
-        inner, policy,
-    )))
+    let effective_policy = effective_retry_policy(descriptor.id.as_str(), policy);
+    let provider_id = inner.name().to_string();
+    let supervisor = Arc::new(Mutex::new(ProviderRuntimeSupervisor::new(
+        provider_id,
+        "provider_builder",
+    )));
+    Ok(Arc::new(
+        RetryProvider::<dyn LlmProvider>::new_with_supervisor(inner, effective_policy, supervisor),
+    ))
+}
+
+fn effective_retry_policy(provider_id: &str, mut policy: RetryPolicy) -> RetryPolicy {
+    if provider_id == "openai-codex" {
+        // Codex performs OAuth refresh and transient HTTP retry inside the
+        // provider because it must rebuild auth headers per attempt. Keep the
+        // outer builder wrapper for supervisor telemetry, but make it a
+        // single-attempt wrapper to avoid nested retry multiplication.
+        policy.max_attempts = 1;
+    }
+    policy
 }
 
 /// The **one** allowed `match descriptor.id` site in the whole providers
@@ -165,9 +213,24 @@ fn dispatch_native(
                 .as_ref()
                 .map(|u| u.to_string())
                 .unwrap_or_else(|| descriptor.base_url.to_string());
+            let spoof = bundled_manifest()
+                .map(|manifest| manifest.spoof)
+                .unwrap_or_else(|err| {
+                    tracing::warn!(
+                        error = %err,
+                        "Codex builder falling back to validated default spoof identity"
+                    );
+                    SpoofConfig::default()
+                });
+            spoof
+                .validate()
+                .map_err(|e| ProviderError::InvalidResponse {
+                    name: descriptor.display_name.clone(),
+                    detail: e.to_string(),
+                })?;
             let provider = CodexProvider::new_with_base_url(
                 default_credentials_path(),
-                SpoofConfig::default(),
+                spoof,
                 (*http).clone(),
                 base_url,
             )

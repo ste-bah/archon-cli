@@ -85,7 +85,7 @@ The CUDA JEPA tests include:
 
 The 512-example hardware validation floor is covered by
 `cuda_jepa_training_can_meet_hardware_validation_floor_when_available`. That
-test trains a CUDA-labelled JEPA candidate on a deterministic 520-row fixture,
+test trains a CUDA-labelled JEPA-inspired candidate on a deterministic 520-row fixture,
 asserts `validation_example_count >= 512`, asserts `host_fallback_count == 0`,
 and requires `jepa_backend_promotion_gate(..., 512, 512)` to pass.
 

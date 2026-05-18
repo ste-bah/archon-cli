@@ -304,7 +304,7 @@ impl WorldRepresentationAdapter for JepaTraceModel {
     }
 
     fn provider_name(&self) -> &str {
-        "archon-jepa"
+        "archon-jepa-inspired"
     }
 
     fn model_name(&self) -> &str {
@@ -323,4 +323,3 @@ impl WorldRepresentationAdapter for JepaTraceModel {
         self.target_encoder.encode_window(window)
     }
 }
-

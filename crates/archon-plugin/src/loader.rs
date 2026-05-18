@@ -7,7 +7,8 @@ use crate::cache::WasmCache;
 use crate::capability::PluginCapability;
 use crate::error::PluginError;
 use crate::manifest::load_manifest;
-use crate::result::{LoadedPlugin, PluginLoadResult};
+use crate::result::{LoadedPlugin, PluginLoadResult, PluginLoadWarning};
+use crate::types::{ManifestCapability, StructuredCapability};
 
 // ── PluginLoader ──────────────────────────────────────────────────────────────
 
@@ -99,13 +100,19 @@ impl PluginLoader {
             for (dir_name, plugin_dir) in pending {
                 let outcome = self.load_one(&dir_name, &plugin_dir, &loaded_names);
                 match outcome {
-                    LoadOutcome::Enabled(lp) => {
+                    LoadOutcome::Enabled(lp, warnings) => {
                         loaded_names.push(lp.plugin_id.clone());
+                        result
+                            .warnings
+                            .extend(warnings.into_iter().map(|w| (lp.plugin_id.clone(), w)));
                         result.enabled.push(lp);
                         made_progress = true;
                     }
-                    LoadOutcome::Disabled(lp) => {
+                    LoadOutcome::Disabled(lp, warnings) => {
                         loaded_names.push(lp.plugin_id.clone());
+                        result
+                            .warnings
+                            .extend(warnings.into_iter().map(|w| (lp.plugin_id.clone(), w)));
                         result.disabled.push(lp);
                         made_progress = true;
                     }
@@ -193,12 +200,11 @@ impl PluginLoader {
         let plugin_id = manifest.name.clone();
 
         // 2. Check capabilities
-        for cap_str in &manifest.capabilities {
-            if !self.is_capability_granted(cap_str) {
-                return LoadOutcome::Error(
-                    plugin_id,
-                    PluginError::CapabilityDenied(capability_from_str(cap_str)),
-                );
+        let mut warnings = Vec::new();
+        for manifest_capability in &manifest.capabilities {
+            let requested = capability_from_manifest(manifest_capability);
+            if !self.is_capability_granted(&requested, &mut warnings) {
+                return LoadOutcome::Error(plugin_id, PluginError::CapabilityDenied(requested));
             }
         }
 
@@ -233,24 +239,46 @@ impl PluginLoader {
         // 7. Enable/disable check
         let enabled = *self.enabled_plugins.get(&plugin_id).unwrap_or(&true);
         if enabled {
-            LoadOutcome::Enabled(lp)
+            LoadOutcome::Enabled(lp, warnings)
         } else {
-            LoadOutcome::Disabled(lp)
+            LoadOutcome::Disabled(lp, warnings)
         }
     }
 
-    fn is_capability_granted(&self, cap_str: &str) -> bool {
-        self.granted_capabilities
-            .iter()
-            .any(|c| capability_matches(c, cap_str))
+    fn is_capability_granted(
+        &self,
+        requested: &PluginCapability,
+        warnings: &mut Vec<PluginLoadWarning>,
+    ) -> bool {
+        for granted in &self.granted_capabilities {
+            if let Some(warning) = capability_matches(granted, requested) {
+                if let GrantWarning::WildcardNetwork { approval } = warning {
+                    let requested_hosts = match requested {
+                        PluginCapability::Network(hosts) => hosts.clone(),
+                        _ => Vec::new(),
+                    };
+                    tracing::warn!(
+                        approval = %approval,
+                        requested_hosts = ?requested_hosts,
+                        "plugin network capability granted by wildcard operator approval"
+                    );
+                    warnings.push(PluginLoadWarning::WildcardNetworkGrant {
+                        requested_hosts,
+                        approval,
+                    });
+                }
+                return true;
+            }
+        }
+        false
     }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 enum LoadOutcome {
-    Enabled(LoadedPlugin),
-    Disabled(LoadedPlugin),
+    Enabled(LoadedPlugin, Vec<PluginLoadWarning>),
+    Disabled(LoadedPlugin, Vec<PluginLoadWarning>),
     Error(String, PluginError),
     /// Dependencies not yet loaded — retry next iteration.
     DepPending,
@@ -263,13 +291,18 @@ fn infer_plugin_id(dir_name: &str, _plugin_dir: &PathBuf) -> String {
     dir_name.to_string()
 }
 
-/// Parse a capability string from the manifest (e.g., "Network", "ReadFs") into
-/// a `PluginCapability` variant for error reporting.
-fn capability_from_str(cap: &str) -> PluginCapability {
-    match cap {
-        "ReadFs" => PluginCapability::ReadFs(vec![]),
-        "WriteFs" => PluginCapability::WriteFs(vec![]),
-        "Network" => PluginCapability::Network(vec![]),
+fn capability_from_manifest(capability: &ManifestCapability) -> PluginCapability {
+    match capability {
+        ManifestCapability::Legacy(_) => PluginCapability::None,
+        ManifestCapability::Structured(cap) => capability_from_structured(cap),
+    }
+}
+
+fn capability_from_structured(cap: &StructuredCapability) -> PluginCapability {
+    match cap.kind.as_str() {
+        "ReadFs" => PluginCapability::ReadFs(cap.paths.clone()),
+        "WriteFs" => PluginCapability::WriteFs(cap.paths.clone()),
+        "Network" => PluginCapability::Network(cap.hosts.clone()),
         "ToolRegister" => PluginCapability::ToolRegister,
         "HookRegister" => PluginCapability::HookRegister,
         "CommandRegister" => PluginCapability::CommandRegister,
@@ -279,19 +312,57 @@ fn capability_from_str(cap: &str) -> PluginCapability {
     }
 }
 
-/// Check if a granted capability covers the requested capability string.
-fn capability_matches(granted: &PluginCapability, requested: &str) -> bool {
-    matches!(
-        (granted, requested),
-        (PluginCapability::ReadFs(_), "ReadFs")
-            | (PluginCapability::WriteFs(_), "WriteFs")
-            | (PluginCapability::Network(_), "Network")
-            | (PluginCapability::ToolRegister, "ToolRegister")
-            | (PluginCapability::HookRegister, "HookRegister")
-            | (PluginCapability::CommandRegister, "CommandRegister")
-            | (PluginCapability::LspRegister, "LspRegister")
-            | (PluginCapability::DataDirWrite, "DataDirWrite")
-    )
+enum GrantWarning {
+    None,
+    WildcardNetwork { approval: String },
+}
+
+/// Check if a granted capability covers the structured capability request.
+fn capability_matches(
+    granted: &PluginCapability,
+    requested: &PluginCapability,
+) -> Option<GrantWarning> {
+    match (granted, requested) {
+        (PluginCapability::ReadFs(granted_paths), PluginCapability::ReadFs(requested_paths)) => {
+            paths_cover(granted_paths, requested_paths).then_some(GrantWarning::None)
+        }
+        (PluginCapability::WriteFs(granted_paths), PluginCapability::WriteFs(requested_paths)) => {
+            paths_cover(granted_paths, requested_paths).then_some(GrantWarning::None)
+        }
+        (PluginCapability::Network(granted_hosts), PluginCapability::Network(requested_hosts)) => {
+            hosts_cover(granted_hosts, requested_hosts).then_some(GrantWarning::None)
+        }
+        (
+            PluginCapability::NetworkWildcardApproved { approval },
+            PluginCapability::Network(requested_hosts),
+        ) if !requested_hosts.is_empty() => Some(GrantWarning::WildcardNetwork {
+            approval: approval.clone(),
+        }),
+        (PluginCapability::ToolRegister, PluginCapability::ToolRegister)
+        | (PluginCapability::HookRegister, PluginCapability::HookRegister)
+        | (PluginCapability::CommandRegister, PluginCapability::CommandRegister)
+        | (PluginCapability::LspRegister, PluginCapability::LspRegister)
+        | (PluginCapability::DataDirWrite, PluginCapability::DataDirWrite) => {
+            Some(GrantWarning::None)
+        }
+        _ => None,
+    }
+}
+
+fn paths_cover(granted_paths: &[PathBuf], requested_paths: &[PathBuf]) -> bool {
+    !requested_paths.is_empty()
+        && requested_paths.iter().all(|requested| {
+            granted_paths
+                .iter()
+                .any(|granted| requested.starts_with(granted))
+        })
+}
+
+fn hosts_cover(granted_hosts: &[String], requested_hosts: &[String]) -> bool {
+    !requested_hosts.is_empty()
+        && requested_hosts
+            .iter()
+            .all(|requested| granted_hosts.iter().any(|granted| granted == requested))
 }
 
 // ── instantiate_wasm_plugins ──────────────────────────────────────────────────
@@ -332,7 +403,7 @@ pub fn instantiate_wasm_plugins(
             .manifest
             .capabilities
             .iter()
-            .map(|c| capability_from_str(c))
+            .map(capability_from_manifest)
             .collect();
 
         let mut host = match WasmPluginHost::new(PluginHostConfig::default()) {

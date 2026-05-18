@@ -35,9 +35,9 @@ World-model state lives under `~/.archon/world-model/`:
 | `ledgers/world-guardrail-outcomes.jsonl` | final guarded-action outcomes and structured learning labels |
 | `ledgers/embedding-policy-events.jsonl` | external embedding policy audit events |
 | `candidates/` | candidate checkpoints |
-| `jepa/candidates/` | JEPA representation candidate manifests and checkpoints |
-| `jepa/evals/` | JEPA-specific promotion gate reports |
-| `jepa/representation-comparisons/` | JEPA versus baseline representation comparison reports |
+| `jepa/candidates/` | JEPA-inspired representation candidate manifests and checkpoints |
+| `jepa/evals/` | JEPA-inspired promotion gate reports |
+| `jepa/representation-comparisons/` | JEPA-inspired versus baseline representation comparison reports |
 | `jepa/training-runs/` | JEPA component-loss training ledgers |
 | `active/model.json` | active advisory model pointer |
 
@@ -53,13 +53,13 @@ Runtime guardrails add a policy layer for interactive sessions, coding tasks, to
 
 Guardrail prediction remains fail-open. If prediction or guardrail storage is unavailable, Archon records the unavailable state and continues foreground work. Promotion and model selection gates remain fail-closed.
 
-## JEPA Representation Layer
+## JEPA-Inspired Representation Layer
 
-`model_kind = "jepa_transition"` enables the JEPA representation path. JEPA is a local trace-representation learner layered under the existing advisory transition model. It consumes structured trace windows, action metadata, graph context, scalar features, and deterministic lexical hashes. It does not require FastEmbed, OpenAI, or any third-party embedding provider for its own encoder path.
+`model_kind = "jepa_transition"` enables the compatibility model kind for Archon's JEPA-inspired representation path. The runtime surface reports `archon-jepa-inspired` because this is a local trace-representation learner layered under the existing advisory transition model: it consumes structured trace windows, action metadata, graph context, scalar features, and deterministic lexical hashes. It does not require FastEmbed, OpenAI, or any third-party embedding provider for its own encoder path.
 
-Training uses masked trace windows and future latent prediction. The target encoder is EMA-updated and marked stop-gradient; the predictor is a training objective only and is not invoked by runtime inference. Runtime JEPA predictions use context/action encoders plus the persisted transition model trained over JEPA latents.
+Training uses masked trace windows and future latent prediction. The target encoder is EMA-updated and marked stop-gradient; the predictor is a training objective only and is not invoked by runtime inference. Runtime predictions use context/action encoders plus the persisted transition model trained over JEPA-inspired latents.
 
-JEPA promotion fails closed. A candidate must pass corpus sufficiency, collapse, multi-horizon, checkpoint-size, tensor-safety, backend-execution, and fixed FastEmbed-baseline comparison gates. If a JEPA checkpoint is missing, invalid, mismatched, slow, or cannot encode, the runtime advisor records a typed unavailable reason and foreground work continues.
+JEPA-inspired promotion fails closed. A candidate must pass corpus sufficiency, collapse, multi-horizon, checkpoint-size, tensor-safety, backend-execution, and fixed FastEmbed-baseline comparison gates. If a checkpoint is missing, invalid, mismatched, slow, or cannot encode, the runtime advisor records a typed unavailable reason and foreground work continues.
 
 ## Labeling
 
@@ -106,6 +106,6 @@ archon world guard policy set --interactive-mode guarded --pipeline-mode strict
 
 ## Hardware Backends
 
-Default execution is CPU. Training writes JSON candidate manifests and backend-specific checkpoints. CUDA uses Candle behind the `cuda` feature. Apple Silicon Metal uses `mlx-rs` behind the `mlx-metal` feature and remains experimental until validated on real hardware. Accelerator backends are selected only after a probe creates the device, runs a tiny tensor operation, and synchronizes the result back to the host. JEPA CUDA/Metal candidates additionally require a `JepaBackendExecutionReport`; if native JEPA stages are unavailable, the candidate stays CPU-labelled with a fallback reason or the training command fails when CPU fallback is disabled.
+Default execution is CPU. Training writes JSON candidate manifests and backend-specific checkpoints. CUDA uses Candle behind the `cuda` feature. Apple Silicon Metal uses `mlx-rs` behind the `mlx-metal` feature and remains experimental until validated on real hardware. Accelerator backends are selected only after a probe creates the device, runs a tiny tensor operation, and synchronizes the result back to the host. JEPA-inspired CUDA/Metal candidates additionally require a `JepaBackendExecutionReport`; if native stages are unavailable, the candidate stays CPU-labelled with a fallback reason or the training command fails when CPU fallback is disabled.
 
 See [backend support](../reference/world-model-backends.md) and [embedding providers](../reference/world-model-embeddings.md).

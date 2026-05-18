@@ -32,7 +32,12 @@ fn write_plugin(plugins_dir: &std::path::Path, name: &str, version: &str, capabi
 
     let caps_json = capabilities
         .iter()
-        .map(|c| format!("\"{c}\""))
+        .map(|c| match *c {
+            "ReadFs" => r#"{"kind":"ReadFs","paths":["/tmp"]}"#.to_string(),
+            "WriteFs" => r#"{"kind":"WriteFs","paths":["/tmp"]}"#.to_string(),
+            "Network" => r#"{"kind":"Network","hosts":["example.com"]}"#.to_string(),
+            other => format!(r#"{{"kind":"{other}"}}"#),
+        })
         .collect::<Vec<_>>()
         .join(", ");
 
@@ -184,11 +189,123 @@ fn loader_loads_plugin_with_granted_capabilities() {
     std::fs::create_dir_all(&dir).unwrap();
     write_plugin(&dir, "net-plugin", "1.0.0", &["Network"]);
 
-    let loader =
-        PluginLoader::new(dir).with_granted_capabilities(vec![PluginCapability::Network(vec![])]);
+    let loader = PluginLoader::new(dir)
+        .with_granted_capabilities(vec![PluginCapability::Network(vec!["example.com".into()])]);
     let result = loader.load_all();
     assert_eq!(result.enabled.len(), 1);
     assert!(result.errors.is_empty());
+}
+
+#[test]
+fn loader_rejects_legacy_string_capability_with_migration_error() {
+    let dir = unique_tmp("archon-test-loader-legacy-cap");
+    std::fs::create_dir_all(&dir).unwrap();
+    let plugin_dir = dir.join("legacy-plugin").join(".archon-plugin");
+    std::fs::create_dir_all(&plugin_dir).unwrap();
+    std::fs::write(
+        plugin_dir.join("plugin.json"),
+        r#"{"name":"legacy-plugin","version":"1.0.0","capabilities":["ReadFs"]}"#,
+    )
+    .unwrap();
+
+    let loader = PluginLoader::new(dir)
+        .with_granted_capabilities(vec![PluginCapability::ReadFs(vec![PathBuf::from("/tmp")])]);
+    let result = loader.load_all();
+
+    assert!(result.enabled.is_empty());
+    assert_eq!(result.errors.len(), 1);
+    assert!(
+        result.errors[0]
+            .1
+            .to_string()
+            .contains("legacy string form"),
+        "unexpected error: {}",
+        result.errors[0].1
+    );
+}
+
+#[test]
+fn loader_rejects_manifest_network_wildcard() {
+    let dir = unique_tmp("archon-test-loader-network-wildcard");
+    std::fs::create_dir_all(&dir).unwrap();
+    let plugin_dir = dir.join("wild-plugin").join(".archon-plugin");
+    std::fs::create_dir_all(&plugin_dir).unwrap();
+    std::fs::write(
+        plugin_dir.join("plugin.json"),
+        r#"{"name":"wild-plugin","version":"1.0.0","capabilities":[{"kind":"Network","hosts":["*"]}]}"#,
+    )
+    .unwrap();
+
+    let loader = PluginLoader::new(dir).with_granted_capabilities(vec![
+        PluginCapability::NetworkWildcardApproved {
+            approval: "operator-approved-test".into(),
+        },
+    ]);
+    let result = loader.load_all();
+
+    assert!(result.enabled.is_empty());
+    assert_eq!(result.errors.len(), 1);
+    assert!(
+        result.errors[0].1.to_string().contains("enumerate hosts"),
+        "unexpected error: {}",
+        result.errors[0].1
+    );
+}
+
+#[test]
+fn loader_records_warning_for_structured_wildcard_operator_grant() {
+    use archon_plugin::result::PluginLoadWarning;
+
+    let dir = unique_tmp("archon-test-loader-wildcard-approval");
+    std::fs::create_dir_all(&dir).unwrap();
+    write_plugin(&dir, "net-plugin", "1.0.0", &["Network"]);
+
+    let loader = PluginLoader::new(dir).with_granted_capabilities(vec![
+        PluginCapability::NetworkWildcardApproved {
+            approval: "approved-by-admin".into(),
+        },
+    ]);
+    let result = loader.load_all();
+
+    assert_eq!(result.enabled.len(), 1);
+    assert!(result.errors.is_empty());
+    assert_eq!(
+        result.warnings,
+        vec![(
+            "net-plugin".into(),
+            PluginLoadWarning::WildcardNetworkGrant {
+                requested_hosts: vec!["example.com".into()],
+                approval: "approved-by-admin".into(),
+            },
+        )]
+    );
+}
+
+#[test]
+fn loader_rejects_unsupported_required_host_function() {
+    let dir = unique_tmp("archon-test-loader-host-fn");
+    std::fs::create_dir_all(&dir).unwrap();
+    let plugin_dir = dir.join("host-fn-plugin").join(".archon-plugin");
+    std::fs::create_dir_all(&plugin_dir).unwrap();
+    std::fs::write(
+        plugin_dir.join("plugin.json"),
+        r#"{"name":"host-fn-plugin","version":"1.0.0","required_host_functions":["archon_not_real"]}"#,
+    )
+    .unwrap();
+
+    let loader = PluginLoader::new(dir);
+    let result = loader.load_all();
+
+    assert!(result.enabled.is_empty());
+    assert_eq!(result.errors.len(), 1);
+    assert!(
+        result.errors[0]
+            .1
+            .to_string()
+            .contains("not implemented by the host"),
+        "unexpected error: {}",
+        result.errors[0].1
+    );
 }
 
 #[test]

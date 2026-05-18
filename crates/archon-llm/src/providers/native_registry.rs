@@ -69,9 +69,9 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
         },
     );
 
-    // 3. gemini (Google Generative Language API — no existing native impl;
-    //    historically handled via vertex.rs but the spec lists gemini as
-    //    its own native entry)
+    // 3. gemini (Google Generative Language API) is intentionally listed as
+    //    a gap until a concrete native provider is added. Vertex handles
+    //    Gemini-on-Vertex through a different auth/runtime shape.
     m.insert(
         "gemini",
         ProviderDescriptor {
@@ -82,16 +82,10 @@ pub static NATIVE_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor>> = La
             env_key_var: "GEMINI_API_KEY".into(),
             compat_kind: CompatKind::Native,
             default_model: "gemini-2.5-flash".into(),
-            supports: ProviderFeatures {
-                streaming: true,
-                tool_calling: true,
-                vision: true,
-                embeddings: true,
-                json_mode: true,
-            },
+            supports: ProviderFeatures::none(),
             headers: HashMap::new(),
             quirks: ProviderQuirks::DEFAULT,
-            is_gap: false,
+            is_gap: true,
         },
     );
 

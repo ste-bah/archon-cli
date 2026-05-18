@@ -109,5 +109,10 @@ fn hydrated(id: &str, anchor: [f32; 4], positive: [f32; 4], negative: [f32; 4]) 
         anchor: anchor.to_vec(),
         positive: positive.to_vec(),
         negative: negative.to_vec(),
+        embedding_sources: vec![
+            archon_meaning::STORED_EMBEDDING_FEATURE_SPACE.into(),
+            archon_meaning::STORED_EMBEDDING_FEATURE_SPACE.into(),
+            archon_meaning::STORED_EMBEDDING_FEATURE_SPACE.into(),
+        ],
     }
 }

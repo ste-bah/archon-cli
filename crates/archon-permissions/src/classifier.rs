@@ -114,30 +114,28 @@ pub fn classify_command(
         return CommandClass::Risky;
     }
 
-    // Check for dangerous substrings first (highest priority)
-    let lower = trimmed.to_lowercase();
+    // Check unquoted dangerous substrings first (highest priority).
+    let lower = unquoted_shell_text(trimmed).to_lowercase();
     for pattern in DANGEROUS_SUBSTRINGS {
         if lower.contains(&pattern.to_lowercase()) {
             return CommandClass::Dangerous;
         }
     }
 
-    // Check pipe chains -- each segment classified independently, worst wins
-    if trimmed.contains('|') {
-        let segments: Vec<&str> = trimmed.split('|').collect();
+    // Check shell command chains -- each segment classified independently, worst wins.
+    let segments = split_shell_chain(trimmed);
+    if segments.len() > 1 {
         let mut worst = CommandClass::Safe;
-        for segment in &segments {
-            let class =
-                classify_single_command(segment.trim(), user_safe, user_risky, user_dangerous);
+        for segment in segments {
+            let class = classify_command(segment.trim(), user_safe, user_risky, user_dangerous);
             worst = worse(worst, class);
         }
         return worst;
     }
 
-    // Check quoted arguments in bash -c / sh -c
-    if (trimmed.starts_with("bash -c") || trimmed.starts_with("sh -c")) && trimmed.len() > 8 {
-        // Extract the quoted command and classify it
-        let inner = extract_quoted_command(trimmed);
+    // Check quoted arguments in bash/sh -c forms, including common flag groups
+    // like `bash -lc "..."`.
+    if let Some(inner) = extract_shell_c_command(trimmed) {
         if !inner.is_empty() {
             let inner_class = classify_command(inner, user_safe, user_risky, user_dangerous);
             return worse(CommandClass::Risky, inner_class);
@@ -203,16 +201,134 @@ fn worse(a: CommandClass, b: CommandClass) -> CommandClass {
     }
 }
 
-/// Extract the command from bash -c "..." or bash -c '...'
-fn extract_quoted_command(full: &str) -> &str {
-    // Find the first quote after -c
-    let after_c = if let Some(idx) = full.find("-c") {
-        &full[idx + 2..]
-    } else {
-        return "";
-    };
+fn split_shell_chain(command: &str) -> Vec<&str> {
+    let mut segments = Vec::new();
+    let mut start = 0;
+    let mut i = 0;
+    let bytes = command.as_bytes();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
 
-    let trimmed = after_c.trim();
+    while i < command.len() {
+        let ch = command[i..].chars().next().expect("valid char boundary");
+        let width = ch.len_utf8();
+
+        if escaped {
+            escaped = false;
+            i += width;
+            continue;
+        }
+        if ch == '\\' && !in_single {
+            escaped = true;
+            i += width;
+            continue;
+        }
+        if ch == '\'' && !in_double {
+            in_single = !in_single;
+            i += width;
+            continue;
+        }
+        if ch == '"' && !in_single {
+            in_double = !in_double;
+            i += width;
+            continue;
+        }
+
+        if !in_single && !in_double {
+            let op_len = if ch == '&' && bytes.get(i + 1) == Some(&b'&') {
+                2
+            } else if ch == '|' && bytes.get(i + 1) == Some(&b'|') {
+                2
+            } else if ch == '|' || ch == ';' || ch == '\n' {
+                1
+            } else {
+                0
+            };
+
+            if op_len > 0 {
+                segments.push(command[start..i].trim());
+                i += op_len;
+                start = i;
+                continue;
+            }
+        }
+
+        i += width;
+    }
+
+    segments.push(command[start..].trim());
+    segments
+}
+
+fn unquoted_shell_text(command: &str) -> String {
+    let mut text = String::with_capacity(command.len());
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+
+    for ch in command.chars() {
+        if escaped {
+            if !in_single && !in_double {
+                text.push(ch);
+            }
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && !in_single {
+            escaped = true;
+            continue;
+        }
+        if ch == '\'' && !in_double {
+            in_single = !in_single;
+            text.push(' ');
+            continue;
+        }
+        if ch == '"' && !in_single {
+            in_double = !in_double;
+            text.push(' ');
+            continue;
+        }
+        if in_single || in_double {
+            continue;
+        }
+        text.push(ch);
+    }
+
+    text
+}
+
+/// Extract the command from shell invocations such as:
+/// - `bash -c "..."`
+/// - `bash -lc "..."`
+/// - `sh -c '...'`
+fn extract_shell_c_command(full: &str) -> Option<&str> {
+    let trimmed = full.trim_start();
+    let after_shell = trimmed
+        .strip_prefix("bash")
+        .or_else(|| trimmed.strip_prefix("sh"))?;
+    if !after_shell.chars().next().is_some_and(char::is_whitespace) {
+        return None;
+    }
+
+    let mut rest = after_shell.trim_start();
+    while let Some(flag_rest) = rest.strip_prefix('-') {
+        let token_end = flag_rest
+            .find(char::is_whitespace)
+            .unwrap_or(flag_rest.len());
+        let flags = &flag_rest[..token_end];
+        let after_flags = flag_rest[token_end..].trim_start();
+        if flags.contains('c') {
+            return Some(strip_outer_shell_quotes(after_flags));
+        }
+        rest = after_flags;
+    }
+
+    None
+}
+
+fn strip_outer_shell_quotes(value: &str) -> &str {
+    let trimmed = value.trim();
 
     if let Some(rest) = trimmed.strip_prefix('"') {
         rest.strip_suffix('"').unwrap_or(rest)

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
@@ -664,43 +664,25 @@ fn extract_strings_from_binary(path: &PathBuf) -> Result<String, std::io::Error>
 // Beta cache
 // ---------------------------------------------------------------------------
 
+const BETA_CACHE_VERSION: u32 = 1;
+const BETA_CACHE_MAX_AGE_SECONDS: i64 = 86_400;
+
+#[derive(serde::Deserialize)]
+struct BetaCache {
+    version: u32,
+    betas: Vec<String>,
+    timestamp: i64,
+    integrity: String,
+}
+
 /// Load cached betas from disk, or None if cache is stale/missing.
 pub fn load_cached_betas() -> Option<Vec<String>> {
-    let path = beta_cache_path();
-    let content = fs::read_to_string(&path).ok()?;
-
-    #[derive(serde::Deserialize)]
-    struct BetaCache {
-        betas: Vec<String>,
-        timestamp: i64,
-    }
-
-    let cache: BetaCache = serde_json::from_str(&content).ok()?;
-
-    // Check if cache is older than 24 hours
-    let age = chrono::Utc::now().timestamp() - cache.timestamp;
-    if age > 86400 {
-        return None; // stale
-    }
-
-    Some(cache.betas)
+    load_beta_cache_file(&beta_cache_path())
 }
 
 /// Save discovered betas to cache.
 pub fn save_betas_cache(betas: &[String]) {
-    let cache = serde_json::json!({
-        "betas": betas,
-        "timestamp": chrono::Utc::now().timestamp(),
-    });
-
-    let path = beta_cache_path();
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let _ = fs::write(
-        &path,
-        serde_json::to_string_pretty(&cache).unwrap_or_default(),
-    );
+    let _ = save_beta_cache_file(&beta_cache_path(), betas);
 }
 
 fn beta_cache_path() -> PathBuf {
@@ -716,40 +698,72 @@ fn beta_cache_path() -> PathBuf {
 
 /// Load the previously validated+cached beta list, or None if missing/stale.
 pub fn load_cached_validated_betas() -> Option<Vec<String>> {
-    let path = validated_beta_cache_path();
-    let content = fs::read_to_string(&path).ok()?;
-
-    #[derive(serde::Deserialize)]
-    struct BetaCache {
-        betas: Vec<String>,
-        timestamp: i64,
-    }
-
-    let cache: BetaCache = serde_json::from_str(&content).ok()?;
-
-    let age = chrono::Utc::now().timestamp() - cache.timestamp;
-    if age > 86400 {
-        return None; // stale
-    }
-
-    Some(cache.betas)
+    load_beta_cache_file(&validated_beta_cache_path())
 }
 
 /// Save the validated beta list to cache.
 pub fn save_validated_betas_cache(betas: &[String]) {
-    let cache = serde_json::json!({
-        "betas": betas,
-        "timestamp": chrono::Utc::now().timestamp(),
-    });
+    let _ = save_beta_cache_file(&validated_beta_cache_path(), betas);
+}
 
-    let path = validated_beta_cache_path();
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
+fn save_beta_cache_file(path: &Path, betas: &[String]) -> std::io::Result<()> {
+    let timestamp = chrono::Utc::now().timestamp();
+    let integrity = beta_cache_integrity(BETA_CACHE_VERSION, timestamp, betas);
+    let cache = serde_json::json!({
+        "version": BETA_CACHE_VERSION,
+        "betas": betas,
+        "timestamp": timestamp,
+        "integrity": integrity,
+    });
+    let content = serde_json::to_string_pretty(&cache).unwrap_or_default();
+    write_private_json_file(path, &content)
+}
+
+fn load_beta_cache_file(path: &Path) -> Option<Vec<String>> {
+    let content = fs::read_to_string(path).ok()?;
+    let cache: BetaCache = serde_json::from_str(&content).ok()?;
+    if cache.version != BETA_CACHE_VERSION {
+        return None;
     }
-    let _ = fs::write(
-        &path,
-        serde_json::to_string_pretty(&cache).unwrap_or_default(),
-    );
+    if cache.integrity != beta_cache_integrity(cache.version, cache.timestamp, &cache.betas) {
+        return None;
+    }
+    let age = chrono::Utc::now().timestamp() - cache.timestamp;
+    if age > BETA_CACHE_MAX_AGE_SECONDS {
+        return None;
+    }
+    Some(cache.betas)
+}
+
+fn beta_cache_integrity(version: u32, timestamp: i64, betas: &[String]) -> String {
+    let payload = serde_json::json!([version, timestamp, betas]);
+    let bytes = serde_json::to_vec(&payload).unwrap_or_default();
+    format!("sha256:{}", hex::encode(Sha256::digest(&bytes)))
+}
+
+fn write_private_json_file(path: &Path, content: &str) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .mode(0o600)
+            .open(path)?;
+        file.write_all(content.as_bytes())?;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(path, content)
+    }
 }
 
 fn validated_beta_cache_path() -> PathBuf {
@@ -895,6 +909,52 @@ mod beta_validation_cache_tests {
         for b in &betas {
             assert!(loaded_betas.contains(b), "loaded cache should contain {b}");
         }
+    }
+
+    #[test]
+    fn beta_cache_file_is_versioned_integrity_checked_and_private() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("archon").join("validated_betas.json");
+        let betas = vec![
+            "claude-code-20250219".to_string(),
+            "oauth-2025-04-20".to_string(),
+        ];
+
+        save_beta_cache_file(&path, &betas).expect("cache save succeeds");
+
+        let raw = fs::read_to_string(&path).expect("cache JSON exists");
+        let value: serde_json::Value = serde_json::from_str(&raw).expect("cache JSON parses");
+        assert_eq!(value["version"], BETA_CACHE_VERSION);
+        assert_eq!(value["betas"][0], betas[0]);
+        let integrity = value["integrity"]
+            .as_str()
+            .expect("cache carries integrity field");
+        assert!(integrity.starts_with("sha256:"));
+        assert_eq!(integrity.len(), "sha256:".len() + 64);
+        assert_eq!(load_beta_cache_file(&path), Some(betas));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let mode = fs::metadata(&path).expect("metadata").permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "beta cache must be written as 0600");
+        }
+    }
+
+    #[test]
+    fn beta_cache_load_rejects_tampered_integrity() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("archon").join("discovered_betas.json");
+        let betas = vec!["claude-code-20250219".to_string()];
+        save_beta_cache_file(&path, &betas).expect("cache save succeeds");
+
+        let raw = fs::read_to_string(&path).expect("cache JSON exists");
+        let mut value: serde_json::Value = serde_json::from_str(&raw).expect("cache JSON parses");
+        value["betas"] = serde_json::json!(["attacker-beta-2099-01-01"]);
+        fs::write(&path, serde_json::to_string_pretty(&value).unwrap()).unwrap();
+
+        assert_eq!(load_beta_cache_file(&path), None);
     }
 
     #[tokio::test]

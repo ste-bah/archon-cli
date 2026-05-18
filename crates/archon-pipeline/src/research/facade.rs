@@ -216,6 +216,7 @@ impl ResearchFacade {
                 agent.phase,
             )
             .is_critical_agent,
+            parallelizable: false,
             quality_threshold: 0.50,
             tool_access_level: tool_access,
         }

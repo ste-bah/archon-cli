@@ -25,6 +25,7 @@
 //!   the retry-after contract from upstream providers.
 
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -34,6 +35,10 @@ use crate::anthropic::AnthropicClient;
 use crate::provider::{
     DataFlowClassification, LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo,
     ProviderFeature,
+};
+use crate::runtime::{
+    ProviderRuntimeEvent, ProviderRuntimeEventType, ProviderRuntimeSeverity,
+    ProviderRuntimeSupervisor,
 };
 use crate::streaming::StreamEvent;
 
@@ -101,11 +106,28 @@ pub fn classify(err: &LlmError) -> RetryDecision {
 pub struct RetryProvider<P: LlmProvider + ?Sized> {
     inner: Arc<P>,
     policy: RetryPolicy,
+    supervisor: Option<Arc<Mutex<ProviderRuntimeSupervisor>>>,
 }
 
 impl<P: LlmProvider + ?Sized> RetryProvider<P> {
     pub fn new(inner: Arc<P>, policy: RetryPolicy) -> Self {
-        Self { inner, policy }
+        Self {
+            inner,
+            policy,
+            supervisor: None,
+        }
+    }
+
+    pub fn new_with_supervisor(
+        inner: Arc<P>,
+        policy: RetryPolicy,
+        supervisor: Arc<Mutex<ProviderRuntimeSupervisor>>,
+    ) -> Self {
+        Self {
+            inner,
+            policy,
+            supervisor: Some(supervisor),
+        }
     }
 
     /// Expose the policy for telemetry/introspection.
@@ -116,6 +138,10 @@ impl<P: LlmProvider + ?Sized> RetryProvider<P> {
     /// Expose the wrapped provider.
     pub fn inner(&self) -> &Arc<P> {
         &self.inner
+    }
+
+    pub fn supervisor(&self) -> Option<Arc<Mutex<ProviderRuntimeSupervisor>>> {
+        self.supervisor.as_ref().map(Arc::clone)
     }
 
     /// Compute the sleep duration for retry `attempt` (0-indexed), honoring
@@ -142,6 +168,54 @@ impl<P: LlmProvider + ?Sized> RetryProvider<P> {
             return Duration::from_secs(*retry_after_secs);
         }
         self.backoff_for_attempt(attempt)
+    }
+
+    fn record_runtime_event(
+        &self,
+        request: &LlmRequest,
+        event_type: ProviderRuntimeEventType,
+        severity: ProviderRuntimeSeverity,
+        reason_code: Option<&str>,
+        retry_count: Option<u32>,
+    ) {
+        let Some(supervisor) = &self.supervisor else {
+            return;
+        };
+        let mut event = ProviderRuntimeEvent::new(
+            self.inner.name().to_string(),
+            request
+                .request_origin
+                .clone()
+                .unwrap_or_else(|| "provider_builder".to_string()),
+            event_type,
+            severity,
+        )
+        .with_model(request.model.clone());
+        if let Some(reason) = reason_code {
+            event = event.with_reason(reason);
+        }
+        if let Some(count) = retry_count {
+            event = event.with_retry_count(count);
+        }
+        if let Ok(mut guard) = supervisor.lock() {
+            let _ = guard.record_event(event);
+        }
+    }
+}
+
+fn reason_code_for_error(err: &LlmError) -> &'static str {
+    match err {
+        LlmError::Http(_) => "http",
+        LlmError::Auth(_) => "auth",
+        LlmError::RateLimited { .. } => "rate_limited",
+        LlmError::Overloaded => "overloaded",
+        LlmError::Server { .. } => "server",
+        LlmError::Serialize(_) => "serialize",
+        LlmError::Unsupported(_) => "unsupported",
+        LlmError::ProviderNotFound { .. } => "provider_not_found",
+        LlmError::QuotaExceeded(_) => "quota_exceeded",
+        LlmError::Aborted => "aborted",
+        LlmError::ContextWindowExceeded { .. } => "context_window_exceeded",
     }
 }
 
@@ -172,16 +246,48 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
     }
 
     async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
+        self.record_runtime_event(
+            &request,
+            ProviderRuntimeEventType::RequestStarted,
+            ProviderRuntimeSeverity::Debug,
+            None,
+            None,
+        );
         let max = self.policy.max_attempts.max(1);
         let mut attempt: u32 = 0;
         loop {
             match self.inner.complete(request.clone()).await {
-                Ok(resp) => return Ok(resp),
+                Ok(resp) => {
+                    self.record_runtime_event(
+                        &request,
+                        ProviderRuntimeEventType::RequestSucceeded,
+                        ProviderRuntimeSeverity::Info,
+                        None,
+                        Some(attempt),
+                    );
+                    return Ok(resp);
+                }
                 Err(err) => {
                     attempt += 1;
                     if attempt >= max || classify(&err) == RetryDecision::FailFast {
+                        let reason = reason_code_for_error(&err);
+                        self.record_runtime_event(
+                            &request,
+                            ProviderRuntimeEventType::RequestFailed,
+                            ProviderRuntimeSeverity::Error,
+                            Some(reason),
+                            Some(attempt),
+                        );
                         return Err(err);
                     }
+                    let reason = reason_code_for_error(&err);
+                    self.record_runtime_event(
+                        &request,
+                        ProviderRuntimeEventType::RequestRetry,
+                        ProviderRuntimeSeverity::Warn,
+                        Some(reason),
+                        Some(attempt),
+                    );
                     let sleep = self.sleep_for_error(&err, attempt - 1);
                     tokio::time::sleep(sleep).await;
                 }
@@ -194,16 +300,48 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
     /// mid-stream failure is delivered as `StreamEvent::Error` and is out
     /// of scope for this decorator (see TASK-AGS-707 notes).
     async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
+        self.record_runtime_event(
+            &request,
+            ProviderRuntimeEventType::RequestStarted,
+            ProviderRuntimeSeverity::Debug,
+            None,
+            None,
+        );
         let max = self.policy.max_attempts.max(1);
         let mut attempt: u32 = 0;
         loop {
             match self.inner.stream(request.clone()).await {
-                Ok(rx) => return Ok(rx),
+                Ok(rx) => {
+                    self.record_runtime_event(
+                        &request,
+                        ProviderRuntimeEventType::RequestSucceeded,
+                        ProviderRuntimeSeverity::Info,
+                        None,
+                        Some(attempt),
+                    );
+                    return Ok(rx);
+                }
                 Err(err) => {
                     attempt += 1;
                     if attempt >= max || classify(&err) == RetryDecision::FailFast {
+                        let reason = reason_code_for_error(&err);
+                        self.record_runtime_event(
+                            &request,
+                            ProviderRuntimeEventType::RequestFailed,
+                            ProviderRuntimeSeverity::Error,
+                            Some(reason),
+                            Some(attempt),
+                        );
                         return Err(err);
                     }
+                    let reason = reason_code_for_error(&err);
+                    self.record_runtime_event(
+                        &request,
+                        ProviderRuntimeEventType::RequestRetry,
+                        ProviderRuntimeSeverity::Warn,
+                        Some(reason),
+                        Some(attempt),
+                    );
                     let sleep = self.sleep_for_error(&err, attempt - 1);
                     tokio::time::sleep(sleep).await;
                 }

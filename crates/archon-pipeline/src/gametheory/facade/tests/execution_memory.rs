@@ -129,6 +129,33 @@ fn test_facade_recalls_memory_for_specialist_keys() {
     assert_eq!(audits[0].cozo_hits, 1);
     assert_eq!(audits[0].leann_hits, 0);
 }
+
+#[test]
+fn test_real_specialist_loads_prompt_file_and_uses_registry_model() {
+    let llm = canned_specialist_llm();
+    let rd = RoutingDecision {
+        run_id: "run-prompt-model".into(),
+        fingerprint_id: "fp-prompt-model".into(),
+        enabled_specialists: vec!["nash-equilibrium-finder".into()],
+        skipped_specialists: vec![],
+        evaluated_conditions: vec![],
+        created_at: "2026-05-03T00:00:00Z".into(),
+    };
+
+    let (_outputs, failed, _audits) = block_on(execute_specialists_real(
+        &llm,
+        &rd,
+        &test_fingerprint("fp-prompt-model"),
+        "Two firms choose prices.",
+        &GameTheoryMemoryContext::default(),
+    ))
+    .unwrap();
+
+    assert!(failed.is_empty());
+    assert!(llm.prompts()[0].contains("Nash-Seeker"));
+    assert_eq!(llm.models()[0], "opus");
+}
+
 #[test]
 fn test_specialist_fixture_recalls_memory_for_debug_path() {
     let graph = archon_memory::MemoryGraph::in_memory().unwrap();

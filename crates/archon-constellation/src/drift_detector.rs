@@ -138,6 +138,8 @@ mod tests {
             similarity: 0.2,
             distance: 0.8,
             sample_count: 2,
+            feature_space: crate::LEXICAL_CENTROID_FEATURE_SPACE.to_string(),
+            scoring_source: "test".into(),
         };
         assert!(report_from_score(score, 0.5).drifted);
     }

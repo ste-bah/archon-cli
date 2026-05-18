@@ -328,6 +328,8 @@ pub struct WebConfig {
     pub bind_address: String,
     /// Open default browser automatically after server starts.
     pub open_browser: bool,
+    /// Maximum accepted HTTP request body size for mutating web APIs.
+    pub max_body_bytes: usize,
 }
 
 impl Default for WebConfig {
@@ -336,6 +338,7 @@ impl Default for WebConfig {
             port: 8421,
             bind_address: "127.0.0.1".to_string(),
             open_browser: true,
+            max_body_bytes: 64 * 1024 * 1024,
         }
     }
 }
@@ -786,7 +789,7 @@ impl Default for AutoExtractionConfig {
 #[serde(default)]
 #[derive(Default)]
 pub struct LearningConfig {
-    pub sona: ToggleConfig,
+    pub sona: SonaLearningConfig,
     pub provenance: ToggleConfig,
     pub desc: ToggleConfig,
     pub gnn: GnnModelConfig,
@@ -798,6 +801,24 @@ pub struct LearningConfig {
     pub reasoning_bank: ToggleConfig,
     pub reflexion: ReflexionConfig,
     pub agent_evolution: AgentEvolutionConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SonaLearningConfig {
+    pub enabled: bool,
+    /// Interactive sessions record SONA trajectories when `enabled`; pipeline
+    /// and batch runs require this explicit opt-in.
+    pub pipeline_recording: bool,
+}
+
+impl Default for SonaLearningConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            pipeline_recording: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -18,17 +18,13 @@ pub struct WebAuthSession {
     pub transport: String,
     pub cookie_mode: bool,
     pub csrf_required: bool,
+    pub server_side_logout_supported: bool,
+    pub logout_message: String,
 }
 
 pub(crate) async fn session_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let authenticated = check_auth(&state, &headers).is_ok();
-    let session = WebAuthSession {
-        authenticated,
-        auth_required: state.token.is_some(),
-        transport: "bearer-header".to_string(),
-        cookie_mode: false,
-        csrf_required: false,
-    };
+    let session = web_auth_session(authenticated, state.token.is_some());
     (StatusCode::OK, Json(session)).into_response()
 }
 
@@ -36,14 +32,25 @@ pub(crate) async fn logout_handler(State(state): State<AppState>, headers: Heade
     if let Err(resp) = check_auth(&state, &headers) {
         return resp;
     }
-    let session = WebAuthSession {
-        authenticated: false,
-        auth_required: state.token.is_some(),
+    let session = web_auth_session(true, state.token.is_some());
+    (StatusCode::OK, Json(session)).into_response()
+}
+
+fn web_auth_session(authenticated: bool, auth_required: bool) -> WebAuthSession {
+    WebAuthSession {
+        authenticated,
+        auth_required,
         transport: "bearer-header".to_string(),
         cookie_mode: false,
         csrf_required: false,
-    };
-    (StatusCode::OK, Json(session)).into_response()
+        server_side_logout_supported: false,
+        logout_message: if auth_required {
+            "Bearer-token auth has no server-side session to invalidate; clients must discard the token."
+                .to_string()
+        } else {
+            "No bearer token is required for this local web session.".to_string()
+        },
+    }
 }
 
 pub fn generated_typescript() -> String {
@@ -67,8 +74,18 @@ mod tests {
             transport: "bearer-header".to_string(),
             cookie_mode: false,
             csrf_required: false,
+            server_side_logout_supported: false,
+            logout_message: "Bearer-token auth has no server-side session to invalidate; clients must discard the token.".to_string(),
         };
         assert_eq!(session.transport, "bearer-header");
         assert!(!session.cookie_mode);
+    }
+
+    #[test]
+    fn bearer_logout_shape_is_honest_about_server_side_invalidation() {
+        let session = web_auth_session(true, true);
+        assert!(session.authenticated);
+        assert!(!session.server_side_logout_supported);
+        assert!(session.logout_message.contains("discard the token"));
     }
 }

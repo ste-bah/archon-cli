@@ -1,6 +1,7 @@
 //! Plugin metadata and manifest types for TASK-CLI-301.
 
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 // ── PluginManifest ────────────────────────────────────────────────────────────
 
@@ -35,9 +36,69 @@ pub struct PluginManifest {
     /// Required plugin dependencies (`"name@version"` strings).
     #[serde(default)]
     pub dependencies: Vec<String>,
-    /// Capabilities the plugin requires (as string names, validated at load time).
+    /// Capabilities the plugin requires, validated at load time.
     #[serde(default)]
-    pub capabilities: Vec<String>,
+    pub capabilities: Vec<ManifestCapability>,
+    /// Host functions this plugin requires from the Archon WASM host.
+    #[serde(default)]
+    pub required_host_functions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum ManifestCapability {
+    /// Legacy capability declarations such as `"ReadFs"`.
+    ///
+    /// These still deserialize so the loader can return a migration error
+    /// instead of a vague JSON parse error, but validation rejects them.
+    Legacy(String),
+    Structured(StructuredCapability),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StructuredCapability {
+    pub kind: String,
+    #[serde(default)]
+    pub paths: Vec<PathBuf>,
+    #[serde(default)]
+    pub hosts: Vec<String>,
+}
+
+impl ManifestCapability {
+    pub fn kind(&self) -> &str {
+        match self {
+            ManifestCapability::Legacy(kind) => kind,
+            ManifestCapability::Structured(cap) => cap.kind.as_str(),
+        }
+    }
+
+    pub fn label(&self) -> String {
+        match self {
+            ManifestCapability::Legacy(kind) => format!("{kind} (legacy)"),
+            ManifestCapability::Structured(cap) => match cap.kind.as_str() {
+                "ReadFs" | "WriteFs" => {
+                    let paths = cap
+                        .paths
+                        .iter()
+                        .map(|p| p.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{} paths=[{}]", cap.kind, paths)
+                }
+                "Network" => format!("Network hosts=[{}]", cap.hosts.join(", ")),
+                kind => kind.to_string(),
+            },
+        }
+    }
+}
+
+impl PluginManifest {
+    pub fn capability_labels(&self) -> Vec<String> {
+        self.capabilities
+            .iter()
+            .map(ManifestCapability::label)
+            .collect()
+    }
 }
 
 // ── PluginMetadata ────────────────────────────────────────────────────────────

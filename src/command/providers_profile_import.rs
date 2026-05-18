@@ -258,6 +258,7 @@ fn value_hash(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use archon_llm::types::Secret;
 
     fn test_db() -> DbInstance {
         let path = format!(
@@ -284,6 +285,88 @@ mod tests {
         assert_eq!(profile.identity_fingerprint.as_deref().unwrap().len(), 71);
         assert_eq!(profile.metadata_redacted_json["env_var"], "OPENAI_API_KEY");
         assert!(!raw.contains("sk-secret-value"));
+    }
+
+    #[test]
+    fn persisted_provider_auth_profiles_do_not_store_raw_secret_or_token() {
+        let db = test_db();
+        let now = "2026-05-08T12:00:00Z";
+        let api_secret = "sk-secret-value-token";
+        let api_profile = api_key_profile(
+            "openai-api-key-env",
+            "openai",
+            "OpenAI API key env",
+            "OPENAI_API_KEY",
+            api_secret,
+            now,
+        );
+        upsert_profile(&db, api_profile).unwrap();
+
+        let restored_api = get_provider_auth_profile(&db, "openai-api-key-env")
+            .unwrap()
+            .expect("api-key profile persisted");
+        let raw_api = serde_json::to_string(&restored_api).unwrap();
+        assert!(!raw_api.contains(api_secret));
+        assert_eq!(
+            restored_api.identity_fingerprint.as_deref(),
+            Some(secret_fingerprint(api_secret).as_str())
+        );
+        assert_eq!(
+            restored_api.metadata_redacted_json["env_var"],
+            "OPENAI_API_KEY"
+        );
+        assert_eq!(restored_api.metadata_redacted_json["secret_present"], true);
+        assert!(restored_api.metadata_redacted_json.get("secret").is_none());
+        assert!(restored_api.metadata_redacted_json.get("token").is_none());
+
+        let oauth_access = "sk-ant-oat-access-token";
+        let oauth_refresh = "sk-ant-oat-refresh-token";
+        let oauth_creds = OAuthCredentials {
+            access_token: Secret::new(oauth_access.to_string()),
+            refresh_token: Secret::new(oauth_refresh.to_string()),
+            expires_at: chrono::DateTime::parse_from_rfc3339("2026-05-08T13:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+            scopes: vec!["profile".into(), "offline_access".into()],
+            subscription_type: "max".into(),
+        };
+        upsert_profile(&db, anthropic_oauth_profile(&oauth_creds, now)).unwrap();
+
+        let restored_oauth = get_provider_auth_profile(&db, "anthropic-oauth-archon")
+            .unwrap()
+            .expect("oauth profile persisted");
+        let raw_oauth = serde_json::to_string(&restored_oauth).unwrap();
+        assert!(!raw_oauth.contains(oauth_access));
+        assert!(!raw_oauth.contains(oauth_refresh));
+        assert_eq!(
+            restored_oauth.identity_fingerprint.as_deref(),
+            Some(secret_fingerprint(oauth_refresh).as_str())
+        );
+        assert_eq!(restored_oauth.metadata_redacted_json["scope_count"], 2);
+        assert!(
+            restored_oauth
+                .metadata_redacted_json
+                .get("access_token")
+                .is_none()
+        );
+        assert!(
+            restored_oauth
+                .metadata_redacted_json
+                .get("refresh_token")
+                .is_none()
+        );
+        assert!(
+            restored_oauth
+                .metadata_redacted_json
+                .get("accessToken")
+                .is_none()
+        );
+        assert!(
+            restored_oauth
+                .metadata_redacted_json
+                .get("refreshToken")
+                .is_none()
+        );
     }
 
     #[test]

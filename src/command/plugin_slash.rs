@@ -226,7 +226,7 @@ fn render_info(name: &str, state: Option<&Arc<RwLock<HashMap<String, bool>>>>) -
             if !p.manifest.capabilities.is_empty() {
                 out.push_str(&format!(
                     "  Capabilities: {}\n",
-                    p.manifest.capabilities.join(", ")
+                    p.manifest.capability_labels().join(", ")
                 ));
             }
             if !p.manifest.dependencies.is_empty() {

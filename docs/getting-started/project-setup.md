@@ -169,6 +169,7 @@ The web workbench uses the same config layers. The default `[web]` section is:
 port = 8421
 bind_address = "127.0.0.1"
 open_browser = true
+max_body_bytes = 67108864
 ```
 
 Keep `bind_address = "127.0.0.1"` for local use. Non-loopback binds require the

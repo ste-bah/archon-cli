@@ -203,7 +203,7 @@ fn test_budget_cap_halts_pipeline_gracefully_with_partial_report() {
         )
         .unwrap();
     assert_eq!(rows.rows[0][0].get_str().unwrap(), "BudgetExceeded");
-    assert_eq!(rows.rows[0][1].get_str().unwrap(), "0.003300");
+    assert_eq!(rows.rows[0][1].get_str().unwrap(), "0.016500");
 
     let mut params = std::collections::BTreeMap::new();
     params.insert("rid".into(), cozo::DataValue::from(result.run_id.as_str()));
@@ -215,7 +215,7 @@ fn test_budget_cap_halts_pipeline_gracefully_with_partial_report() {
         )
         .unwrap();
     assert_eq!(specialist_rows.rows.len(), result.specialist_count);
-    assert_eq!(specialist_rows.rows[0][0].get_str().unwrap(), "0.003300");
+    assert_eq!(specialist_rows.rows[0][0].get_str().unwrap(), "0.016500");
 
     let mut params = std::collections::BTreeMap::new();
     params.insert("rid".into(), cozo::DataValue::from(result.run_id.as_str()));
@@ -226,7 +226,7 @@ fn test_budget_cap_halts_pipeline_gracefully_with_partial_report() {
             cozo::ScriptMutability::Immutable,
         )
         .unwrap();
-    assert_eq!(report_rows.rows[0][0].get_str().unwrap(), "0.003300");
+    assert_eq!(report_rows.rows[0][0].get_str().unwrap(), "0.016500");
 }
 #[test]
 fn test_style_flag_applied_to_section_writers() {

@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::PathBuf;
 
 use serde_json::json;
 
@@ -10,10 +11,7 @@ use archon_tools::grep::GrepTool;
 use archon_tools::tool::{PermissionLevel, Tool, ToolContext};
 
 fn test_ctx() -> ToolContext {
-    let dir = std::env::temp_dir()
-        .join("archon-tool-tests")
-        .join(uuid::Uuid::new_v4().to_string());
-    fs::create_dir_all(&dir).expect("create test dir");
+    let dir = fresh_temp_dir("work");
     ToolContext {
         working_dir: dir,
         session_id: "test-session".into(),
@@ -21,6 +19,14 @@ fn test_ctx() -> ToolContext {
         extra_dirs: vec![],
         ..Default::default()
     }
+}
+
+fn fresh_temp_dir(label: &str) -> PathBuf {
+    let dir = std::env::temp_dir()
+        .join("archon-tool-tests")
+        .join(format!("{label}-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&dir).expect("create test dir");
+    dir
 }
 
 fn cleanup(ctx: &ToolContext) {
@@ -164,6 +170,23 @@ async fn write_tool_creates_parent_directories() {
 }
 
 #[tokio::test]
+async fn write_tool_resolves_relative_path_inside_working_dir() {
+    let ctx = test_ctx();
+    let file = ctx.working_dir.join("relative.txt");
+
+    let result = WriteTool
+        .execute(
+            json!({ "file_path": "relative.txt", "content": "relative" }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error, "{}", result.content);
+    assert_eq!(fs::read_to_string(&file).expect("read"), "relative");
+    cleanup(&ctx);
+}
+
+#[tokio::test]
 async fn write_tool_overwrites_existing() {
     let ctx = test_ctx();
     let file = ctx.working_dir.join("existing.txt");
@@ -177,6 +200,120 @@ async fn write_tool_overwrites_existing() {
         .await;
 
     assert_eq!(fs::read_to_string(&file).expect("read"), "new content");
+    cleanup(&ctx);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn write_tool_rejects_symlinked_file_escape() {
+    use std::os::unix::fs::symlink;
+
+    let ctx = test_ctx();
+    let outside_dir = fresh_temp_dir("outside");
+    let outside_file = outside_dir.join("blocked.txt");
+    fs::write(&outside_file, "original").expect("write");
+    let link = ctx.working_dir.join("linked-file.txt");
+    symlink(&outside_file, &link).expect("create symlink");
+
+    let result = WriteTool
+        .execute(
+            json!({ "file_path": link.to_str().unwrap(), "content": "edited" }),
+            &ctx,
+        )
+        .await;
+
+    assert!(result.is_error, "write through symlink should be rejected");
+    assert!(result.content.contains("outside allowed directories"));
+    assert_eq!(fs::read_to_string(&outside_file).expect("read"), "original");
+    let _ = fs::remove_dir_all(&outside_dir);
+    cleanup(&ctx);
+}
+
+#[tokio::test]
+async fn write_tool_rejects_absolute_path_outside_allowed_roots() {
+    let ctx = test_ctx();
+    let outside_dir = fresh_temp_dir("outside");
+    let outside_file = outside_dir.join("blocked.txt");
+
+    let result = WriteTool
+        .execute(
+            json!({ "file_path": outside_file.to_str().unwrap(), "content": "blocked" }),
+            &ctx,
+        )
+        .await;
+
+    assert!(result.is_error, "write should be rejected");
+    assert!(result.content.contains("outside allowed directories"));
+    assert!(!outside_file.exists());
+    let _ = fs::remove_dir_all(&outside_dir);
+    cleanup(&ctx);
+}
+
+#[tokio::test]
+async fn write_tool_allows_extra_dir() {
+    let mut ctx = test_ctx();
+    let extra_dir = fresh_temp_dir("extra");
+    ctx.extra_dirs.push(extra_dir.clone());
+    let file = extra_dir.join("allowed.txt");
+
+    let result = WriteTool
+        .execute(
+            json!({ "file_path": file.to_str().unwrap(), "content": "allowed" }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error, "{}", result.content);
+    assert_eq!(fs::read_to_string(&file).expect("read"), "allowed");
+    let _ = fs::remove_dir_all(&extra_dir);
+    cleanup(&ctx);
+}
+
+#[tokio::test]
+async fn write_tool_rejects_relative_traversal_outside_working_dir() {
+    let ctx = test_ctx();
+    let outside_file = ctx
+        .working_dir
+        .parent()
+        .expect("working dir parent")
+        .join(format!("blocked-{}.txt", uuid::Uuid::new_v4()));
+    let relative_path = format!("../{}", outside_file.file_name().unwrap().to_string_lossy());
+
+    let result = WriteTool
+        .execute(
+            json!({ "file_path": relative_path, "content": "blocked" }),
+            &ctx,
+        )
+        .await;
+
+    assert!(result.is_error, "write should be rejected");
+    assert!(result.content.contains("outside allowed directories"));
+    assert!(!outside_file.exists());
+    cleanup(&ctx);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn write_tool_rejects_symlink_escape() {
+    use std::os::unix::fs::symlink;
+
+    let ctx = test_ctx();
+    let outside_dir = fresh_temp_dir("outside");
+    let link = ctx.working_dir.join("linked-outside");
+    symlink(&outside_dir, &link).expect("create symlink");
+    let escaped_file = outside_dir.join("blocked.txt");
+
+    let result = WriteTool
+        .execute(
+            json!({ "file_path": link.join("blocked.txt").to_str().unwrap(), "content": "blocked" }),
+            &ctx,
+        )
+        .await;
+
+    assert!(result.is_error, "write through symlink should be rejected");
+    assert!(result.content.contains("outside allowed directories"));
+    assert!(!escaped_file.exists());
+    let _ = fs::remove_dir_all(&outside_dir);
     cleanup(&ctx);
 }
 
@@ -205,6 +342,28 @@ async fn edit_tool_replaces_unique_string() {
     let content = fs::read_to_string(&file).expect("read");
     assert!(content.contains("hi there"));
     assert!(content.contains("goodbye world"));
+    cleanup(&ctx);
+}
+
+#[tokio::test]
+async fn edit_tool_resolves_relative_path_inside_working_dir() {
+    let ctx = test_ctx();
+    let file = ctx.working_dir.join("relative-edit.txt");
+    fs::write(&file, "original").expect("write");
+
+    let result = EditTool
+        .execute(
+            json!({
+                "file_path": "relative-edit.txt",
+                "old_string": "original",
+                "new_string": "edited"
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error, "{}", result.content);
+    assert_eq!(fs::read_to_string(&file).expect("read"), "edited");
     cleanup(&ctx);
 }
 
@@ -273,6 +432,86 @@ async fn edit_tool_old_string_not_found() {
 
     assert!(result.is_error);
     assert!(result.content.contains("not found"));
+    cleanup(&ctx);
+}
+
+#[tokio::test]
+async fn edit_tool_rejects_absolute_path_outside_allowed_roots() {
+    let ctx = test_ctx();
+    let outside_dir = fresh_temp_dir("outside");
+    let outside_file = outside_dir.join("blocked.txt");
+    fs::write(&outside_file, "original").expect("write");
+
+    let result = EditTool
+        .execute(
+            json!({
+                "file_path": outside_file.to_str().unwrap(),
+                "old_string": "original",
+                "new_string": "edited"
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(result.is_error, "edit should be rejected");
+    assert!(result.content.contains("outside allowed directories"));
+    assert_eq!(fs::read_to_string(&outside_file).expect("read"), "original");
+    let _ = fs::remove_dir_all(&outside_dir);
+    cleanup(&ctx);
+}
+
+#[tokio::test]
+async fn edit_tool_allows_extra_dir() {
+    let mut ctx = test_ctx();
+    let extra_dir = fresh_temp_dir("extra");
+    ctx.extra_dirs.push(extra_dir.clone());
+    let file = extra_dir.join("allowed.txt");
+    fs::write(&file, "original").expect("write");
+
+    let result = EditTool
+        .execute(
+            json!({
+                "file_path": file.to_str().unwrap(),
+                "old_string": "original",
+                "new_string": "edited"
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error, "{}", result.content);
+    assert_eq!(fs::read_to_string(&file).expect("read"), "edited");
+    let _ = fs::remove_dir_all(&extra_dir);
+    cleanup(&ctx);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn edit_tool_rejects_symlink_escape() {
+    use std::os::unix::fs::symlink;
+
+    let ctx = test_ctx();
+    let outside_dir = fresh_temp_dir("outside");
+    let outside_file = outside_dir.join("blocked.txt");
+    fs::write(&outside_file, "original").expect("write");
+    let link = ctx.working_dir.join("linked-file.txt");
+    symlink(&outside_file, &link).expect("create symlink");
+
+    let result = EditTool
+        .execute(
+            json!({
+                "file_path": link.to_str().unwrap(),
+                "old_string": "original",
+                "new_string": "edited"
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(result.is_error, "edit through symlink should be rejected");
+    assert!(result.content.contains("outside allowed directories"));
+    assert_eq!(fs::read_to_string(&outside_file).expect("read"), "original");
+    let _ = fs::remove_dir_all(&outside_dir);
     cleanup(&ctx);
 }
 

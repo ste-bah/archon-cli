@@ -274,6 +274,7 @@ Configure defaults in `~/.config/archon/config.toml` or
 port = 8421
 bind_address = "127.0.0.1"
 open_browser = true
+max_body_bytes = 67108864
 ```
 
 Binding to `127.0.0.1` is the safe default and does not require a token. Binding

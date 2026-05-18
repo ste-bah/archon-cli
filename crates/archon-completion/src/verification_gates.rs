@@ -7,6 +7,9 @@ use crate::errors::EvidenceEngineError;
 use crate::models::*;
 use async_trait::async_trait;
 
+type ClaimKindSet = &'static [CompletionClaimKind];
+type EvidenceKindSet = &'static [EvidenceKind];
+
 /// Trait for verification gates per TSPEC §10.5.
 #[async_trait]
 pub trait VerificationGate: Send + Sync {
@@ -16,6 +19,206 @@ pub trait VerificationGate: Send + Sync {
     ) -> Result<VerificationGateResult, EvidenceEngineError>;
 
     fn name(&self) -> &'static str;
+}
+
+fn claim_kind_label(kind: &CompletionClaimKind) -> &'static str {
+    match kind {
+        CompletionClaimKind::Done => "Done",
+        CompletionClaimKind::Implemented => "Implemented",
+        CompletionClaimKind::Fixed => "Fixed",
+        CompletionClaimKind::TestsPass => "TestsPass",
+        CompletionClaimKind::BuildPasses => "BuildPasses",
+        CompletionClaimKind::Verified => "Verified",
+        CompletionClaimKind::Documented => "Documented",
+        CompletionClaimKind::Ingested => "Ingested",
+        CompletionClaimKind::Indexed => "Indexed",
+        CompletionClaimKind::AnswerGrounded => "AnswerGrounded",
+    }
+}
+
+fn evidence_kind_label(kind: &EvidenceKind) -> &'static str {
+    match kind {
+        EvidenceKind::CommandRun => "CommandRun",
+        EvidenceKind::TestRun => "TestRun",
+        EvidenceKind::BuildResult => "BuildResult",
+        EvidenceKind::FileDiff => "FileDiff",
+        EvidenceKind::GeneratedArtifact => "GeneratedArtifact",
+        EvidenceKind::RetrievalEvidence => "RetrievalEvidence",
+        EvidenceKind::GateResult => "GateResult",
+        EvidenceKind::ReviewFinding => "ReviewFinding",
+        EvidenceKind::CitationTrace => "CitationTrace",
+        EvidenceKind::IngestionJob => "IngestionJob",
+    }
+}
+
+pub fn gate_name_for_claim_kind(kind: &CompletionClaimKind) -> &'static str {
+    match kind {
+        CompletionClaimKind::TestsPass => "TestsPassGate",
+        CompletionClaimKind::BuildPasses => "BuildPassesGate",
+        CompletionClaimKind::Implemented => "ImplementedGate",
+        CompletionClaimKind::Fixed => "FixedGate",
+        CompletionClaimKind::Ingested | CompletionClaimKind::Indexed => "IngestedGate",
+        CompletionClaimKind::AnswerGrounded => "AnswerGroundedGate",
+        CompletionClaimKind::Verified => "VerifiedGate",
+        CompletionClaimKind::Documented => "DocumentedGate",
+        CompletionClaimKind::Done => "DoneGate",
+    }
+}
+
+pub fn claim_has_passed_gate(
+    claim: &CompletionClaim,
+    gate_results: &[VerificationGateResult],
+) -> bool {
+    let gate_name = gate_name_for_claim_kind(&claim.claim_kind);
+    gate_results
+        .iter()
+        .any(|gate| gate.gate_name == gate_name && gate.passed)
+}
+
+struct EvidenceBackedGate {
+    name: &'static str,
+    claim_kinds: ClaimKindSet,
+    required_evidence: EvidenceKindSet,
+}
+
+#[async_trait]
+impl VerificationGate for EvidenceBackedGate {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    async fn evaluate(
+        &self,
+        request: &VerificationGateRequest,
+    ) -> Result<VerificationGateResult, EvidenceEngineError> {
+        let claims: Vec<&CompletionClaim> = request
+            .claims
+            .iter()
+            .filter(|claim| self.claim_kinds.contains(&claim.claim_kind))
+            .collect();
+
+        let gate_id = format!("gate-{}", uuid::Uuid::new_v4());
+        if claims.is_empty() {
+            return Ok(VerificationGateResult {
+                gate_id,
+                gate_name: self.name().into(),
+                passed: true,
+                resulting_state: CompletionState::NotRun,
+                blocked_claims: vec![],
+                required_missing_evidence: vec![],
+                explanation: format!("no {} claims to evaluate", self.name()),
+                provenance_record_id: String::new(),
+            });
+        }
+
+        let mut missing = Vec::new();
+        let mut failed = Vec::new();
+        let mut non_passed = Vec::new();
+
+        for required_kind in self.required_evidence {
+            let matching: Vec<&CompletionEvidence> = request
+                .available_evidence
+                .iter()
+                .filter(|evidence| evidence.evidence_kind == *required_kind)
+                .collect();
+
+            if matching.is_empty()
+                || matching
+                    .iter()
+                    .all(|evidence| evidence.status == EvidenceStatus::Missing)
+            {
+                missing.push(required_kind.clone());
+                continue;
+            }
+
+            if matching
+                .iter()
+                .any(|evidence| evidence.status == EvidenceStatus::Failed)
+            {
+                failed.push(required_kind.clone());
+                continue;
+            }
+
+            if !matching
+                .iter()
+                .any(|evidence| evidence.status == EvidenceStatus::Passed)
+            {
+                non_passed.push(required_kind.clone());
+            }
+        }
+
+        let blocked_claims: Vec<String> =
+            claims.iter().map(|claim| claim.claim_id.clone()).collect();
+        if !failed.is_empty() {
+            return Ok(VerificationGateResult {
+                gate_id,
+                gate_name: self.name().into(),
+                passed: false,
+                resulting_state: CompletionState::Failed,
+                blocked_claims,
+                required_missing_evidence: vec![],
+                explanation: format!(
+                    "{} evidence failed for {}",
+                    failed
+                        .iter()
+                        .map(evidence_kind_label)
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    self.name()
+                ),
+                provenance_record_id: String::new(),
+            });
+        }
+
+        if !missing.is_empty() || !non_passed.is_empty() {
+            let mut required_missing_evidence = missing.clone();
+            required_missing_evidence.extend(non_passed.clone());
+            let missing_labels = required_missing_evidence
+                .iter()
+                .map(evidence_kind_label)
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Ok(VerificationGateResult {
+                gate_id,
+                gate_name: self.name().into(),
+                passed: false,
+                resulting_state: CompletionState::NotRun,
+                blocked_claims,
+                required_missing_evidence,
+                explanation: format!(
+                    "missing passed evidence for {}: {missing_labels}",
+                    self.name()
+                ),
+                provenance_record_id: String::new(),
+            });
+        }
+
+        let claim_labels = claims
+            .iter()
+            .map(|claim| claim_kind_label(&claim.claim_kind))
+            .collect::<Vec<_>>()
+            .join("/");
+        let evidence_labels = self
+            .required_evidence
+            .iter()
+            .map(evidence_kind_label)
+            .collect::<Vec<_>>()
+            .join(", ");
+        Ok(VerificationGateResult {
+            gate_id,
+            gate_name: self.name().into(),
+            passed: true,
+            resulting_state: CompletionState::Verified,
+            blocked_claims: vec![],
+            required_missing_evidence: vec![],
+            explanation: format!(
+                "{} {} claims verified by passed evidence: {evidence_labels}",
+                claims.len(),
+                claim_labels,
+            ),
+            provenance_record_id: String::new(),
+        })
+    }
 }
 
 // ── TestsPassGate ────────────────────────────────────────────────────────────
@@ -356,8 +559,38 @@ pub async fn run_all_gates(
 
     let gates: Vec<Box<dyn VerificationGate>> = vec![
         Box::new(TestsPassGate),
+        Box::new(EvidenceBackedGate {
+            name: "BuildPassesGate",
+            claim_kinds: &[CompletionClaimKind::BuildPasses],
+            required_evidence: &[EvidenceKind::BuildResult],
+        }),
+        Box::new(EvidenceBackedGate {
+            name: "ImplementedGate",
+            claim_kinds: &[CompletionClaimKind::Implemented],
+            required_evidence: &[EvidenceKind::FileDiff, EvidenceKind::GeneratedArtifact],
+        }),
+        Box::new(EvidenceBackedGate {
+            name: "FixedGate",
+            claim_kinds: &[CompletionClaimKind::Fixed],
+            required_evidence: &[EvidenceKind::FileDiff, EvidenceKind::TestRun],
+        }),
         Box::new(IngestedGate),
         Box::new(AnswerGroundedGate),
+        Box::new(EvidenceBackedGate {
+            name: "VerifiedGate",
+            claim_kinds: &[CompletionClaimKind::Verified],
+            required_evidence: &[EvidenceKind::ReviewFinding],
+        }),
+        Box::new(EvidenceBackedGate {
+            name: "DocumentedGate",
+            claim_kinds: &[CompletionClaimKind::Documented],
+            required_evidence: &[EvidenceKind::GeneratedArtifact],
+        }),
+        Box::new(EvidenceBackedGate {
+            name: "DoneGate",
+            claim_kinds: &[CompletionClaimKind::Done],
+            required_evidence: &[EvidenceKind::GateResult],
+        }),
     ];
 
     let mut results = Vec::new();
@@ -544,5 +777,45 @@ mod tests {
         };
         let result = gate.evaluate(&req).await.unwrap();
         assert!(result.passed);
+    }
+
+    #[tokio::test]
+    async fn test_every_claim_kind_blocks_without_required_evidence() {
+        let kinds = [
+            CompletionClaimKind::Done,
+            CompletionClaimKind::Implemented,
+            CompletionClaimKind::Fixed,
+            CompletionClaimKind::TestsPass,
+            CompletionClaimKind::BuildPasses,
+            CompletionClaimKind::Verified,
+            CompletionClaimKind::Documented,
+            CompletionClaimKind::Ingested,
+            CompletionClaimKind::Indexed,
+            CompletionClaimKind::AnswerGrounded,
+        ];
+        let claims: Vec<CompletionClaim> = kinds
+            .iter()
+            .enumerate()
+            .map(|(idx, kind)| make_claim(&format!("cl-{idx}"), "run-1", *kind))
+            .collect();
+
+        let results = run_all_gates(&claims, &[], "run-1", "test").await.unwrap();
+        let blocked_claims: std::collections::HashSet<String> = results
+            .iter()
+            .flat_map(|result| result.blocked_claims.iter().cloned())
+            .collect();
+
+        for claim in &claims {
+            assert!(
+                blocked_claims.contains(&claim.claim_id),
+                "{:?} must be blocked without required evidence",
+                claim.claim_kind
+            );
+            assert!(
+                !claim_has_passed_gate(claim, &results),
+                "{:?} must not have a passed relevant gate without evidence",
+                claim.claim_kind
+            );
+        }
     }
 }

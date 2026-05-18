@@ -35,6 +35,30 @@ fn test_tier11_policy_gate_removes_agent_and_dependents() {
             .any(|(_, reason)| reason.contains("Tier 11 disabled"))
     );
 }
+
+#[test]
+fn test_tier12_policy_gate_removes_sensitive_agent_and_dependents() {
+    let mut routing = RoutingDecision {
+        run_id: "run-policy-tier12".into(),
+        fingerprint_id: "fp-policy-tier12".into(),
+        enabled_specialists: vec!["common-knowledge-analyst".into(), "dependent-agent".into()],
+        skipped_specialists: vec![],
+        evaluated_conditions: vec![],
+        created_at: "2026-05-03T00:00:00Z".into(),
+    };
+    let mut deps = HashMap::new();
+    deps.insert(
+        "dependent-agent".to_string(),
+        vec!["common-knowledge-analyst".to_string()],
+    );
+    apply_policy_gates_to_routing(&mut routing, &deps, false);
+
+    assert!(routing.enabled_specialists.is_empty());
+    assert!(routing.skipped_specialists.iter().any(|(key, reason)| {
+        key == "common-knowledge-analyst" && reason.contains("Tier 12 disabled")
+    }));
+}
+
 #[test]
 fn test_classify_only_persists_run_and_fingerprint() {
     let db = test_db();

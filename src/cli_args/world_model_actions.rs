@@ -57,7 +57,7 @@ pub enum WorldAction {
         #[arg(long)]
         max_runtime_ms: Option<u64>,
     },
-    /// Train a JEPA representation candidate from the stored world-model corpus
+    /// Train a JEPA-inspired representation candidate from the stored world-model corpus
     TrainJepa {
         /// Write a candidate checkpoint instead of touching the active model
         #[arg(long, default_value_t = true)]
@@ -86,7 +86,7 @@ pub enum WorldAction {
         /// Candidate model id to inspect
         candidate_id: Option<String>,
     },
-    /// Evaluate a JEPA candidate against JEPA-specific promotion gates
+    /// Evaluate a JEPA-inspired candidate against promotion gates
     EvalJepa {
         /// Candidate model id to evaluate
         candidate_id: String,
@@ -129,17 +129,17 @@ pub enum WorldAction {
         /// Run ID to cancel
         run_id: String,
     },
-    /// Inspect a JEPA candidate manifest and gate state
+    /// Inspect a JEPA-inspired candidate manifest and gate state
     InspectJepa {
         /// Candidate model id to inspect
         candidate_id: String,
     },
-    /// Compare JEPA representations against an exploratory baseline
+    /// Compare JEPA-inspired representations against an exploratory baseline
     CompareRepresentations {
         /// Exploratory baseline backend. Promotion gating always uses fastembed.
         #[arg(long, default_value = "fastembed")]
         baseline: String,
-        /// JEPA candidate model id to compare
+        /// JEPA-inspired candidate model id to compare
         #[arg(long)]
         candidate: String,
     },
@@ -148,9 +148,9 @@ pub enum WorldAction {
         /// Candidate model id to promote
         model_id: String,
     },
-    /// Promote a JEPA candidate after JEPA-specific gates pass
+    /// Promote a JEPA-inspired candidate after promotion gates pass
     PromoteJepa {
-        /// JEPA candidate model id to promote
+        /// JEPA-inspired candidate model id to promote
         model_id: String,
     },
     /// Roll back the active advisory pointer to a prior model

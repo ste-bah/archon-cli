@@ -49,6 +49,43 @@ fn test_agent() -> Agent {
 }
 
 #[tokio::test]
+async fn auto_extraction_flush_waits_for_pending_tasks() {
+    let mut agent = test_agent();
+    let completed = Arc::new(AtomicUsize::new(0));
+    let completed_task = Arc::clone(&completed);
+    agent.auto_extraction_tasks.push(tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        completed_task.fetch_add(1, Ordering::SeqCst);
+    }));
+
+    assert_eq!(agent.pending_auto_extraction_count(), 1);
+    let flushed = agent
+        .flush_auto_extractions(std::time::Duration::from_secs(1))
+        .await;
+
+    assert_eq!(flushed, 1);
+    assert_eq!(agent.pending_auto_extraction_count(), 0);
+    assert_eq!(completed.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn auto_extraction_prune_keeps_only_unfinished_tasks() {
+    let mut agent = test_agent();
+    agent.auto_extraction_tasks.push(tokio::spawn(async {}));
+    agent.auto_extraction_tasks.push(tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    }));
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+    agent.prune_finished_auto_extractions();
+
+    assert_eq!(agent.pending_auto_extraction_count(), 1);
+    agent
+        .flush_auto_extractions(std::time::Duration::from_millis(1))
+        .await;
+}
+
+#[tokio::test]
 async fn correction_detection_fires_event_callback_with_top_rule_id() {
     let mut agent = test_agent();
     let graph = MemoryGraph::in_memory().expect("in-memory graph");

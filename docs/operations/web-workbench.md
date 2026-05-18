@@ -47,11 +47,16 @@ The web workbench uses the normal Archon config layers:
 port = 8421
 bind_address = "127.0.0.1"
 open_browser = true
+max_body_bytes = 67108864
 ```
 
 `127.0.0.1` is the safe default. Binding to `0.0.0.0` makes the workbench
 network-accessible and causes Archon to create/use a bearer token. Use that only
 behind a trusted network boundary or reverse proxy.
+
+`max_body_bytes` caps mutating web API request bodies, including `/api/chat/submit`.
+Bearer-token logout cannot invalidate server-side state because the server does
+not keep token sessions; clients must discard the token locally.
 
 ## Mental model
 

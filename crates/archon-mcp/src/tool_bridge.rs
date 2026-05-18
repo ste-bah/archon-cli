@@ -2,14 +2,17 @@
 //!
 //! `McpTool` wraps a remote MCP tool so the LLM can discover and invoke it
 //! through the same interface as built-in tools. All MCP tools are prefixed
-//! `mcp__{server_name}__{tool_name}` and classified as [`PermissionLevel::Risky`].
+//! `mcp__{server_name}__{tool_name}`. Unknown tools default to
+//! [`PermissionLevel::Risky`]; explicit config can override, and server
+//! annotations / metadata are honored only when the server is configured as
+//! trusted.
 
 use std::sync::Arc;
 
 use archon_tools::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
 use crate::client::McpClient;
-use crate::types::{McpToolDef, ToolContent};
+use crate::types::{McpToolBridgePolicy, McpToolDef, McpToolRisk, ToolContent};
 
 /// Build the fully qualified tool name for an MCP tool.
 pub fn qualified_tool_name(server_name: &str, tool_name: &str) -> String {
@@ -24,6 +27,8 @@ pub struct McpTool {
     tool_def: McpToolDef,
     /// Shared client used for RPC calls.
     client: Arc<McpClient>,
+    /// Permission level computed from config and trusted metadata.
+    permission_level: PermissionLevel,
 }
 
 impl McpTool {
@@ -31,13 +36,122 @@ impl McpTool {
     ///
     /// The tool name is constructed as `mcp__{server_name}__{tool_name}`.
     pub fn new(server_name: &str, tool_def: McpToolDef, client: Arc<McpClient>) -> Self {
+        Self::with_policy(
+            server_name,
+            tool_def,
+            client,
+            McpToolBridgePolicy::default(),
+        )
+    }
+
+    /// Create a new bridge tool with an explicit per-server permission policy.
+    pub fn with_policy(
+        server_name: &str,
+        tool_def: McpToolDef,
+        client: Arc<McpClient>,
+        policy: McpToolBridgePolicy,
+    ) -> Self {
         let qualified_name = qualified_tool_name(server_name, &tool_def.name);
+        let permission_level = classify_mcp_tool_permission(server_name, &tool_def, &policy);
         Self {
             qualified_name,
             tool_def,
             client,
+            permission_level,
         }
     }
+}
+
+/// Classify an MCP tool into Archon's tool-permission levels.
+///
+/// Precedence:
+/// 1. Explicit operator config by raw or qualified tool name.
+/// 2. Trusted server `_meta.archon.permissionLevel` / `_meta.permissionLevel`.
+/// 3. Trusted MCP annotations and conservative capability-name hints.
+/// 4. Risky by default.
+pub fn classify_mcp_tool_permission(
+    server_name: &str,
+    tool_def: &McpToolDef,
+    policy: &McpToolBridgePolicy,
+) -> PermissionLevel {
+    let qualified_name = qualified_tool_name(server_name, &tool_def.name);
+    if let Some(level) = policy
+        .tool_permissions
+        .get(&qualified_name)
+        .or_else(|| policy.tool_permissions.get(&tool_def.name))
+    {
+        return level.as_permission_level();
+    }
+
+    if !policy.trust_server_hints {
+        return PermissionLevel::Risky;
+    }
+
+    if let Some(level) = tool_def.meta.as_ref().and_then(meta_permission_level) {
+        return level.as_permission_level();
+    }
+
+    if let Some(annotations) = &tool_def.annotations {
+        if annotations.read_only_hint == Some(true) && annotations.destructive_hint != Some(true) {
+            return PermissionLevel::Safe;
+        }
+        if annotations.destructive_hint == Some(true) {
+            return PermissionLevel::Risky;
+        }
+    }
+
+    classify_trusted_name_hint(&tool_def.name, tool_def.description.as_deref())
+        .unwrap_or(PermissionLevel::Risky)
+}
+
+fn meta_permission_level(meta: &serde_json::Value) -> Option<McpToolRisk> {
+    let raw = meta
+        .pointer("/archon/permissionLevel")
+        .or_else(|| meta.pointer("/archon/permission_level"))
+        .or_else(|| meta.pointer("/permissionLevel"))
+        .or_else(|| meta.pointer("/permission_level"))
+        .or_else(|| meta.pointer("/risk"))?
+        .as_str()?;
+    parse_tool_risk(raw)
+}
+
+fn parse_tool_risk(raw: &str) -> Option<McpToolRisk> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "safe" | "read" | "read_only" | "readonly" => Some(McpToolRisk::Safe),
+        "risky" | "write" | "medium" => Some(McpToolRisk::Risky),
+        "dangerous" | "danger" | "destructive" | "high" => Some(McpToolRisk::Dangerous),
+        _ => None,
+    }
+}
+
+fn classify_trusted_name_hint(name: &str, description: Option<&str>) -> Option<PermissionLevel> {
+    let joined = format!(
+        "{} {}",
+        name.to_ascii_lowercase(),
+        description.unwrap_or("").to_ascii_lowercase()
+    );
+    const DANGEROUS: &[&str] = &[
+        "delete", "remove", "destroy", "drop", "truncate", "erase", "purge", "kill",
+    ];
+    const MUTATING: &[&str] = &[
+        "write", "edit", "update", "create", "insert", "upsert", "patch", "apply", "execute",
+        "run", "send", "publish", "deploy", "commit", "push", "merge", "move", "rename",
+    ];
+    const READ_ONLY: &[&str] = &[
+        "read", "list", "search", "find", "get", "fetch", "inspect", "status", "describe", "query",
+        "lookup", "show",
+    ];
+
+    if DANGEROUS.iter().any(|word| joined.contains(word)) {
+        return Some(PermissionLevel::Dangerous);
+    }
+    if MUTATING.iter().any(|word| joined.contains(word)) {
+        return Some(PermissionLevel::Risky);
+    }
+    if READ_ONLY.iter().any(|word| joined.contains(word)) {
+        return Some(PermissionLevel::Safe);
+    }
+    None
 }
 
 /// Flatten MCP tool content into a single text string.
@@ -99,7 +213,7 @@ impl Tool for McpTool {
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
-        PermissionLevel::Risky
+        self.permission_level
     }
 }
 
@@ -107,6 +221,17 @@ impl Tool for McpTool {
 mod tests {
     use super::*;
     use crate::types::McpToolResult;
+
+    fn tool_def(name: &str) -> McpToolDef {
+        McpToolDef {
+            name: name.into(),
+            description: None,
+            input_schema: serde_json::json!({"type": "object"}),
+            annotations: None,
+            meta: None,
+            server_name: "server".into(),
+        }
+    }
 
     #[test]
     fn qualified_name_construction() {
@@ -188,6 +313,71 @@ mod tests {
         let text = flatten_content(&result.content);
         assert_eq!(text, "something broke");
         assert!(result.is_error);
+    }
+
+    #[test]
+    fn unknown_tool_defaults_risky() {
+        let tool = tool_def("mystery");
+        let policy = McpToolBridgePolicy::default();
+        assert_eq!(
+            classify_mcp_tool_permission("server", &tool, &policy),
+            PermissionLevel::Risky
+        );
+    }
+
+    #[test]
+    fn untrusted_read_only_annotation_stays_risky() {
+        let mut tool = tool_def("read_file");
+        tool.annotations = Some(rmcp::model::ToolAnnotations::new().read_only(true));
+        assert_eq!(
+            classify_mcp_tool_permission("server", &tool, &McpToolBridgePolicy::default()),
+            PermissionLevel::Risky
+        );
+    }
+
+    #[test]
+    fn trusted_read_only_annotation_can_be_safe() {
+        let mut tool = tool_def("read_file");
+        tool.annotations = Some(rmcp::model::ToolAnnotations::new().read_only(true));
+        let policy = McpToolBridgePolicy {
+            trust_server_hints: true,
+            tool_permissions: Default::default(),
+        };
+        assert_eq!(
+            classify_mcp_tool_permission("server", &tool, &policy),
+            PermissionLevel::Safe
+        );
+    }
+
+    #[test]
+    fn explicit_policy_overrides_metadata_and_names() {
+        let mut tool = tool_def("read_file");
+        tool.meta = Some(serde_json::json!({"archon": {"permissionLevel": "safe"}}));
+        let mut policy = McpToolBridgePolicy {
+            trust_server_hints: true,
+            tool_permissions: Default::default(),
+        };
+        policy
+            .tool_permissions
+            .insert("read_file".into(), McpToolRisk::Dangerous);
+        assert_eq!(
+            classify_mcp_tool_permission("server", &tool, &policy),
+            PermissionLevel::Dangerous
+        );
+    }
+
+    #[test]
+    fn trusted_meta_permission_hint_is_honored() {
+        let mut tool = tool_def("opaque");
+        tool.meta = Some(serde_json::json!({"archon": {"permissionLevel": "safe"}}));
+        let policy = McpToolBridgePolicy {
+            trust_server_hints: true,
+            tool_permissions: Default::default(),
+        };
+        assert_eq!(
+            classify_mcp_tool_permission("server", &tool, &policy),
+            PermissionLevel::Safe
+        );
     }
 
     // NOTE: McpTool::new() and the Tool trait methods (name, description,

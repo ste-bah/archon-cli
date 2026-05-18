@@ -35,7 +35,7 @@ pub(super) fn render_inspect_jepa(root: &Path, candidate_id: &str) -> Result<Str
     let eval = registry.load_jepa_eval_report(candidate_id)?;
 
     Ok(format!(
-        "World Model JEPA Inspect\n\
+        "World Model JEPA-Inspired Inspect\n\
          ========================\n\
          Candidate: {candidate_id}\n\
          Model kind: {}\n\
@@ -169,7 +169,7 @@ pub(super) fn render_compare_representations(
          Baseline: {}\n\
          Baseline available: {}\n\
          Heldout: {}\n\
-         JEPA cosine similarity: {:.4}\n\
+         JEPA-inspired cosine similarity: {:.4}\n\
          Baseline cosine similarity: {:.4}\n\
          Relative improvement: {:.2}%\n\
          Brier regressed: {}\n\
@@ -367,7 +367,7 @@ fn render_jepa_trainer_tick(
     }
 
     Ok(format!(
-        "World Model JEPA Trainer Tick\n\
+        "World Model JEPA-Inspired Trainer Tick\n\
          =============================\n\
          Decision: {:?}\n\
          Should train: {}\n\
@@ -395,4 +395,3 @@ fn render_jepa_trainer_tick(
             .unwrap_or_else(|| "none".into())
     ))
 }
-

@@ -36,6 +36,7 @@ fn make_agent(key: &str, critical: bool, threshold: f64) -> AgentInfo {
         model: "test".to_string(),
         phase: 1,
         critical,
+        parallelizable: false,
         quality_threshold: threshold,
         tool_access_level: ToolAccessLevel::ReadOnly,
     }

@@ -11,7 +11,8 @@ use archon_memory::{MemoryTrait, graph::MemoryGraph};
 
 use crate::cli_args::PipelineAction;
 use crate::command::pipeline_support::{
-    build_pipeline_adapter, init_leann, init_research_leann, print_pipeline_result,
+    build_pipeline_adapter, build_pipeline_learning_stack, init_leann, init_research_leann,
+    print_pipeline_result,
 };
 use crate::command::provider_gate::ensure_active_provider_supports;
 
@@ -162,12 +163,7 @@ async fn handle_code(
         ],
     );
     let adapter = build_pipeline_adapter(config, env_vars, "pipeline_code").await?;
-    let learning = archon_pipeline::learning::integration::LearningIntegration::new(
-        None,
-        None,
-        Default::default(),
-        None,
-    );
+    let (learning, _) = build_pipeline_learning_stack(config, cwd);
     let facade = archon_pipeline::coding::facade::CodingFacade::with_learning(learning)
         .with_models(config.models.anthropic.clone())
         .with_context(config.context.clone());

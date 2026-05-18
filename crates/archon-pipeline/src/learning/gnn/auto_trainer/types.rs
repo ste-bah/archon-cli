@@ -66,10 +66,16 @@ pub struct TrainerState {
     pub corrections_at_last_train: AtomicU64,
     /// How many training runs have completed.
     pub training_count: AtomicU64,
-    /// When the last training run completed (None = never).
+    /// How many trigger ticks found no trainable SONA or meaning data.
+    pub no_data_count: AtomicU64,
+    /// When the last trainer attempt completed (None = never). Used for throttle.
     pub last_train_time: RwLock<Option<Instant>>,
+    /// When the last non-empty training run completed (None = never).
+    pub last_successful_train_time: RwLock<Option<Instant>>,
     /// Outcome of the most recent training run.
     pub last_outcome: RwLock<Option<TrainingOutcome>>,
+    /// Explicit reason for the most recent no-data trainer tick.
+    pub last_no_data_reason: RwLock<Option<String>>,
     /// Set while a training run is executing in spawn_blocking.
     pub training_in_progress: AtomicBool,
 }
@@ -82,8 +88,11 @@ impl Default for TrainerState {
             memories_at_last_train: AtomicU64::new(0),
             corrections_at_last_train: AtomicU64::new(0),
             training_count: AtomicU64::new(0),
+            no_data_count: AtomicU64::new(0),
             last_train_time: RwLock::new(None),
+            last_successful_train_time: RwLock::new(None),
             last_outcome: RwLock::new(None),
+            last_no_data_reason: RwLock::new(None),
             training_in_progress: AtomicBool::new(false),
         }
     }
@@ -103,13 +112,16 @@ pub struct AutoTrainerStatus {
     pub trigger_elapsed_ms: u64,
     pub min_throttle_ms: u64,
     pub training_count: u64,
+    pub no_data_count: u64,
     pub total_memories: u64,
     pub total_corrections: u64,
     pub memories_since_last_train: u64,
     pub corrections_since_last_train: u64,
     pub seconds_since_last_train: Option<u64>,
+    pub seconds_since_last_attempt: Option<u64>,
     pub training_in_progress: bool,
     pub last_outcome: Option<TrainingOutcome>,
+    pub last_no_data_reason: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

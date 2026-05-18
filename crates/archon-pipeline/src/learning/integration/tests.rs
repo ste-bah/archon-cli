@@ -67,6 +67,61 @@ fn record_user_correction_event_writes_to_store() {
 }
 
 #[test]
+fn correction_cluster_persists_policy_evaluated_pending_proposal() {
+    let db = test_event_db();
+    let integration =
+        LearningIntegration::new(None, None, LearningIntegrationConfig::default(), None)
+            .with_event_store(Arc::clone(&db));
+
+    for _ in 0..3 {
+        integration.record_user_correction_event(UserCorrectionEventPayload {
+            correction_type: "ApproachCorrection".into(),
+            top_rule_id: Some("rule-policy-queued".into()),
+            user_input_excerpt: "use this instead".into(),
+            session_context: "turn:7".into(),
+        });
+    }
+
+    let proposals =
+        archon_learning::store::list_behaviour_proposals(db.as_ref(), Some("Pending")).unwrap();
+    assert_eq!(proposals.len(), 1);
+    assert_eq!(proposals[0].current_version, "none");
+    let policy_rows = archon_learning::store::list_policy_decisions_for_proposal(
+        db.as_ref(),
+        &proposals[0].proposal_id,
+    )
+    .unwrap();
+    assert!(
+        policy_rows
+            .iter()
+            .any(|row| row.rule_name == "high_risk_requires_approval")
+    );
+}
+
+#[test]
+fn persistent_sona_trajectory_reaches_trainer_query_source() {
+    let db = Arc::new(DbInstance::new("mem", "", "").unwrap());
+    crate::learning::schema::initialize_learning_schemas(db.as_ref()).unwrap();
+    let mut integration = LearningIntegration::new_with_persistent_sona(
+        Arc::clone(&db),
+        LearningIntegrationConfig::default(),
+        None,
+        8,
+    );
+
+    let ctx = integration.on_agent_start("agent-a", "phase1", "build widget", "pipe-001");
+    assert!(ctx.sona_context.contains("trajectory_id="));
+    integration.on_agent_complete("agent-a", 0.95, "completed successfully");
+
+    let samples =
+        crate::learning::gnn::auto_trainer_runtime::query_trajectories_for_training(db.as_ref(), 8)
+            .unwrap();
+    assert_eq!(samples.len(), 1);
+    assert_eq!(samples[0].embedding.len(), 8);
+    assert!(samples[0].quality > 0.0);
+}
+
+#[test]
 fn record_user_correction_event_skips_when_store_absent() {
     let integration =
         LearningIntegration::new(None, None, LearningIntegrationConfig::default(), None);

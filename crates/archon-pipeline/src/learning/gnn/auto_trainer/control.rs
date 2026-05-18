@@ -48,7 +48,8 @@ impl AutoTrainer {
         let at_last = self.state.memories_at_last_train.load(Ordering::Relaxed);
         let corr = self.state.total_corrections.load(Ordering::Relaxed);
         let corr_at_last = self.state.corrections_at_last_train.load(Ordering::Relaxed);
-        let last_time = self.state.last_train_time.read().unwrap();
+        let last_attempt_time = self.state.last_train_time.read().unwrap();
+        let last_successful_train_time = self.state.last_successful_train_time.read().unwrap();
 
         AutoTrainerStatus {
             enabled: self.config.enabled,
@@ -58,13 +59,16 @@ impl AutoTrainer {
             trigger_elapsed_ms: self.config.trigger_elapsed_ms,
             min_throttle_ms: self.config.min_throttle_ms,
             training_count: self.state.training_count.load(Ordering::Relaxed),
+            no_data_count: self.state.no_data_count.load(Ordering::Relaxed),
             total_memories: total,
             total_corrections: corr,
             memories_since_last_train: total.saturating_sub(at_last),
             corrections_since_last_train: corr.saturating_sub(corr_at_last),
-            seconds_since_last_train: last_time.map(|t| t.elapsed().as_secs()),
+            seconds_since_last_train: last_successful_train_time.map(|t| t.elapsed().as_secs()),
+            seconds_since_last_attempt: last_attempt_time.map(|t| t.elapsed().as_secs()),
             training_in_progress: self.state.training_in_progress.load(Ordering::Relaxed),
             last_outcome: self.state.last_outcome.read().unwrap().clone(),
+            last_no_data_reason: self.state.last_no_data_reason.read().unwrap().clone(),
         }
     }
 

@@ -4,6 +4,42 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+/// Permission policy Archon should apply to a bridged MCP tool.
+///
+/// Unknown tools intentionally default to Risky at the bridge layer. This enum
+/// exists for explicit operator config, not for trusting arbitrary server text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum McpToolRisk {
+    Safe,
+    Risky,
+    Dangerous,
+}
+
+impl McpToolRisk {
+    pub fn as_permission_level(self) -> archon_tools::tool::PermissionLevel {
+        match self {
+            Self::Safe => archon_tools::tool::PermissionLevel::Safe,
+            Self::Risky => archon_tools::tool::PermissionLevel::Risky,
+            Self::Dangerous => archon_tools::tool::PermissionLevel::Dangerous,
+        }
+    }
+}
+
+/// Operator policy for bridging tools from a single MCP server.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpToolBridgePolicy {
+    /// Whether to trust this server's MCP annotations and `_meta` permission
+    /// hints. Defaults false because MCP annotations are advisory.
+    #[serde(default)]
+    pub trust_server_hints: bool,
+    /// Explicit per-tool permission overrides keyed by raw tool name or by
+    /// Archon's qualified `mcp__server__tool` name.
+    #[serde(default)]
+    pub tool_permissions: HashMap<String, McpToolRisk>,
+}
+
 /// Configuration for a single MCP server, parsed from .mcp.json.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
@@ -30,6 +66,9 @@ pub struct ServerConfig {
     /// Custom headers (e.g. Authorization) for network transports.
     #[serde(default)]
     pub headers: Option<HashMap<String, String>>,
+    /// Tool bridge permission policy for this server.
+    #[serde(default, rename = "toolPolicy", alias = "tool_policy")]
+    pub tool_policy: McpToolBridgePolicy,
 }
 
 fn default_transport() -> String {
@@ -109,6 +148,14 @@ pub struct McpToolDef {
     pub description: Option<String>,
     /// JSON Schema describing expected input arguments.
     pub input_schema: serde_json::Value,
+    /// Optional MCP tool annotations. These are advisory and must only affect
+    /// permissions when the server is explicitly trusted.
+    #[serde(default)]
+    pub annotations: Option<rmcp::model::ToolAnnotations>,
+    /// Optional MCP `_meta` payload, preserved for explicit Archon permission
+    /// hints from trusted servers.
+    #[serde(default)]
+    pub meta: Option<serde_json::Value>,
     /// Which MCP server provides this tool.
     pub server_name: String,
 }
@@ -158,6 +205,7 @@ mod tests {
         assert_eq!(cfg.transport, "stdio");
         assert!(cfg.url.is_none());
         assert!(cfg.headers.is_none());
+        assert!(!cfg.tool_policy.trust_server_hints);
     }
 
     #[test]
@@ -194,6 +242,33 @@ mod tests {
     }
 
     #[test]
+    fn server_config_deserialize_tool_policy() {
+        let json = r#"{
+            "name": "trusted-local",
+            "transport": "stdio",
+            "toolPolicy": {
+                "trustServerHints": true,
+                "toolPermissions": {
+                    "delete_repo": "dangerous",
+                    "mcp__trusted-local__search": "safe"
+                }
+            }
+        }"#;
+        let cfg: ServerConfig = serde_json::from_str(json).expect("parse");
+        assert!(cfg.tool_policy.trust_server_hints);
+        assert_eq!(
+            cfg.tool_policy.tool_permissions.get("delete_repo"),
+            Some(&McpToolRisk::Dangerous)
+        );
+        assert_eq!(
+            cfg.tool_policy
+                .tool_permissions
+                .get("mcp__trusted-local__search"),
+            Some(&McpToolRisk::Safe)
+        );
+    }
+
+    #[test]
     fn mcp_error_display() {
         let err = McpError::ServerNotFound("foo".into());
         assert_eq!(err.to_string(), "server 'foo' not found");
@@ -211,12 +286,24 @@ mod tests {
             name: "read_file".into(),
             description: Some("Read a file from disk".into()),
             input_schema: serde_json::json!({"type": "object", "properties": {"path": {"type": "string"}}}),
+            annotations: Some(rmcp::model::ToolAnnotations::new().read_only(true)),
+            meta: Some(serde_json::json!({"archon": {"permissionLevel": "safe"}})),
             server_name: "filesystem".into(),
         };
         let json = serde_json::to_string(&tool).expect("serialize");
         let parsed: McpToolDef = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(parsed.name, "read_file");
         assert_eq!(parsed.server_name, "filesystem");
+        assert_eq!(
+            parsed.annotations.and_then(|a| a.read_only_hint),
+            Some(true)
+        );
+        assert_eq!(
+            parsed
+                .meta
+                .and_then(|m| m.pointer("/archon/permissionLevel").cloned()),
+            Some(serde_json::json!("safe"))
+        );
     }
 
     #[test]

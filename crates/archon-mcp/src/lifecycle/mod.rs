@@ -327,10 +327,11 @@ impl McpServerManager {
                 match client.list_tools().await {
                     Ok(tool_defs) => {
                         for tool_def in tool_defs {
-                            tools.push(crate::tool_bridge::McpTool::new(
+                            tools.push(crate::tool_bridge::McpTool::with_policy(
                                 server_name,
                                 tool_def,
                                 Arc::clone(client),
+                                entry.config.tool_policy.clone(),
                             ));
                         }
                     }

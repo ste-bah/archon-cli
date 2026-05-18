@@ -44,6 +44,7 @@ mod tests {
             transport: "stdio".into(),
             url: None,
             headers: None,
+            tool_policy: Default::default(),
         };
         // `cat` with piped stdin will block waiting for input, which is fine
         // for a transport — we just check it spawns successfully
@@ -62,6 +63,7 @@ mod tests {
             transport: "stdio".into(),
             url: None,
             headers: None,
+            tool_policy: Default::default(),
         };
         let result = spawn_transport(&config);
         assert!(result.is_err());
@@ -88,6 +90,7 @@ mod tests {
             transport: "stdio".into(),
             url: None,
             headers: None,
+            tool_policy: Default::default(),
         };
         let result = spawn_transport(&config);
         assert!(result.is_ok());
@@ -104,6 +107,7 @@ mod tests {
             transport: "stdio".into(),
             url: None,
             headers: None,
+            tool_policy: Default::default(),
         };
         // echo exits immediately, but spawn itself should succeed
         let result = spawn_transport(&config);

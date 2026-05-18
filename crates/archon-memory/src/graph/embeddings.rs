@@ -67,7 +67,7 @@ impl MemoryGraph {
                     ) {
                         Ok(()) => reindexed += 1,
                         Err(e) => {
-                            tracing::warn!(memory_id = %raw.id, error = %e, "store_embedding failed");
+                            tracing::warn!(memory_id = %raw.id, error = %e, "memory.embedding.store_failed");
                             failed += 1;
                         }
                     }
@@ -99,32 +99,38 @@ impl MemoryGraph {
     }
 
     /// Embed content and store the vector alongside the memory.
-    pub(super) fn embed_and_store(&self, memory_id: &str, content: &str) {
+    pub(super) fn embed_and_store(
+        &self,
+        memory_id: &str,
+        content: &str,
+    ) -> Result<(), MemoryError> {
         if content.len() < MIN_EMBED_CHARS {
-            return;
+            return Ok(());
         }
         let provider = match self.embedding_provider.read() {
             Ok(guard) => guard.clone(),
-            Err(_) => return,
+            Err(e) => {
+                return Err(MemoryError::Database(format!(
+                    "embedding provider lock poisoned: {e}"
+                )));
+            }
         };
         if let Some(ref provider) = provider {
             match provider.embed(&[content.to_string()]) {
-                Ok(vecs) if !vecs.is_empty() => {
-                    if let Err(e) = crate::vector_search::store_embedding(
-                        &self.db,
-                        memory_id,
-                        &vecs[0],
-                        "auto",
-                        provider.dimensions(),
-                    ) {
-                        tracing::warn!(memory_id, "failed to store embedding: {e}");
-                    }
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::warn!(memory_id, "failed to generate embedding: {e}");
-                }
+                Ok(vecs) if !vecs.is_empty() => crate::vector_search::store_embedding(
+                    &self.db,
+                    memory_id,
+                    &vecs[0],
+                    "auto",
+                    provider.dimensions(),
+                ),
+                Ok(_) => Err(MemoryError::Embedding(
+                    "embedding provider returned no vectors".into(),
+                )),
+                Err(e) => Err(e),
             }
+        } else {
+            Ok(())
         }
     }
 }

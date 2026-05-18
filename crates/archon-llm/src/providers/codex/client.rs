@@ -8,6 +8,7 @@ use tokio::sync::{Mutex, OnceCell};
 use uuid::Uuid;
 
 use crate::auth::{AuthError, CodexCredentials};
+use crate::completion_accumulator::collect_completion_response;
 use crate::oauth_codex::CodexOAuthClient;
 use crate::provider::{
     DataFlowClassification, LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo,
@@ -19,7 +20,6 @@ use crate::streaming::StreamEvent;
 use crate::tokens_codex::{
     ensure_codex_token_valid, read_codex_credentials_locked, write_codex_credentials_atomic,
 };
-use crate::types::Usage;
 
 use super::spoof::SpoofConfig;
 use super::translator::{
@@ -291,22 +291,22 @@ impl LlmProvider for CodexProvider {
             ModelInfo {
                 id: "gpt-5.5".into(),
                 display_name: "GPT-5.5".into(),
-                context_window: 0,
+                context_window: 1_050_000,
             },
             ModelInfo {
                 id: "gpt-5.4".into(),
                 display_name: "GPT-5.4".into(),
-                context_window: 0,
+                context_window: 1_050_000,
             },
             ModelInfo {
                 id: "gpt-5.4-mini".into(),
                 display_name: "GPT-5.4 Mini".into(),
-                context_window: 0,
+                context_window: 400_000,
             },
             ModelInfo {
                 id: "gpt-5.3-codex".into(),
                 display_name: "GPT-5.3 Codex".into(),
-                context_window: 0,
+                context_window: 400_000,
             },
         ]
     }
@@ -376,42 +376,7 @@ impl LlmProvider for CodexProvider {
     }
 
     async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
-        let mut rx = self.stream(request).await?;
-        let mut text = String::new();
-        let mut usage = Usage::default();
-        let mut stop_reason = String::new();
-
-        while let Some(event) = rx.recv().await {
-            match event {
-                StreamEvent::MessageStart {
-                    usage: start_usage, ..
-                } => usage.merge(&start_usage),
-                StreamEvent::TextDelta { text: delta, .. } => text.push_str(&delta),
-                StreamEvent::MessageDelta {
-                    usage: delta_usage,
-                    stop_reason: delta_stop,
-                } => {
-                    if let Some(delta_usage) = delta_usage {
-                        usage.merge(&delta_usage);
-                    }
-                    if let Some(delta_stop) = delta_stop {
-                        stop_reason = delta_stop;
-                    }
-                }
-                StreamEvent::Error { message, .. } => return Err(LlmError::Http(message)),
-                _ => {}
-            }
-        }
-
-        Ok(LlmResponse {
-            content: if text.is_empty() {
-                Vec::new()
-            } else {
-                vec![serde_json::json!({"type": "text", "text": text})]
-            },
-            usage,
-            stop_reason,
-        })
+        collect_completion_response(self.stream(request).await?).await
     }
 
     fn supports_feature(&self, feature: ProviderFeature) -> bool {

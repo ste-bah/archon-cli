@@ -106,7 +106,7 @@ fn status_reports_cold_start_defaults() {
     assert!(rendered.contains("Corpus rows:        0"));
     assert!(rendered.contains("cold_start"));
     assert!(rendered.contains("Active model:       none"));
-    assert!(rendered.contains("JEPA status:        disabled"));
+    assert!(rendered.contains("JEPA-inspired status:     disabled"));
     let expected_backend = if cfg!(feature = "cuda")
         && archon_world_model::backend::probe_backend(archon_world_model::BackendKind::Cuda)
             .available
@@ -324,7 +324,7 @@ fn jepa_trainer_tick_respects_recent_activity_gate() {
         candidate::render_trainer_tick(&config, temp.path(), Some(10_000), None, Some(90), false)
             .unwrap();
 
-    assert!(rendered.contains("World Model JEPA Trainer Tick"));
+    assert!(rendered.contains("World Model JEPA-Inspired Trainer Tick"));
     assert!(rendered.contains("Should train: false"));
     assert!(rendered.contains("Decision: RecentActivity"));
 }
@@ -362,7 +362,7 @@ fn train_jepa_writes_candidate_manifest_from_stored_rows() {
     let rendered = candidate::render_train_jepa(&config, temp.path(), true, Some(1_000)).unwrap();
 
     let candidate_id = candidate_id_from(&rendered);
-    assert!(rendered.contains("World Model JEPA Train"));
+    assert!(rendered.contains("World Model JEPA-Inspired Train"));
     assert!(rendered.contains("Model kind: jepa_transition"));
     assert!(rendered.contains("Requested backend: cpu"));
     assert!(rendered.contains("Selected backend: cpu"));
@@ -418,7 +418,7 @@ fn inspect_jepa_reports_candidate_manifest() {
 
     let rendered = candidate::render_inspect_jepa(temp.path(), &candidate_id).unwrap();
 
-    assert!(rendered.contains("World Model JEPA Inspect"));
+    assert!(rendered.contains("World Model JEPA-Inspired Inspect"));
     assert!(rendered.contains("Model kind: jepa_transition"));
     assert!(rendered.contains("Stop gradient: true"));
     assert!(rendered.contains("Requested backend: cpu"));
@@ -538,4 +538,3 @@ fn promote_jepa_requires_passing_eval_report() {
         Some("jepa_transition")
     );
 }
-

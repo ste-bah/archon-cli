@@ -192,7 +192,65 @@ fn status_reflects_current_state() {
     assert_eq!(status.total_memories, 42);
     assert_eq!(status.total_corrections, 3);
     assert_eq!(status.training_count, 0);
+    assert_eq!(status.no_data_count, 0);
+    assert!(status.last_no_data_reason.is_none());
     assert!(!status.training_in_progress);
+}
+
+#[test]
+fn no_data_tick_is_reported_separately_from_training_runs() {
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    runtime.block_on(async {
+        let config = AutoTrainerConfig {
+            enabled: true,
+            first_run_threshold: 1,
+            tick_interval_ms: 10,
+            min_throttle_ms: 0,
+            max_runtime_ms: 30_000,
+            ..Default::default()
+        };
+        let trainer = Arc::new(AutoTrainer::new(config));
+        let enhancer = Arc::new(GnnEnhancer::with_in_memory_weights(
+            Default::default(),
+            Default::default(),
+            0,
+        ));
+        let ws = Arc::new(WeightStore::with_in_memory());
+
+        trainer.spawn(
+            enhancer,
+            ws,
+            TrainingConfig {
+                max_epochs: 1,
+                max_runtime_ms: 30_000,
+                ..TrainingConfig::default()
+            },
+            Arc::new(std::vec::Vec::new),
+        );
+        trainer.record_memories(1);
+
+        for _ in 0..100 {
+            let status = trainer.status();
+            if status.no_data_count > 0 && !status.training_in_progress {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        let status = trainer.status();
+        assert_eq!(status.training_count, 0);
+        assert!(status.no_data_count > 0);
+        assert!(status.seconds_since_last_attempt.is_some());
+        assert!(status.seconds_since_last_train.is_none());
+        assert_eq!(
+            status.last_no_data_reason.as_deref(),
+            Some("no_sona_trajectories_or_meaning_triplets")
+        );
+        let outcome = status.last_outcome.expect("no-data outcome");
+        assert_eq!(outcome.data_sources.sona_trajectories, 0);
+        assert_eq!(outcome.data_sources.meaning_triplets, 0);
+        trainer.shutdown();
+    });
 }
 
 #[test]

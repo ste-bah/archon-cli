@@ -104,7 +104,10 @@ fn predict_with_jepa_checkpoint(
         ),
         vector: runtime.predicted_next_state,
         model_kind: JEPA_MODEL_KIND.into(),
-        representation_source: format!("archon-jepa:{}", candidate.model.metadata.model_id),
+        representation_source: format!(
+            "archon-jepa-inspired:{}",
+            candidate.model.metadata.model_id
+        ),
         guardrail_scores,
         jepa_runtime_backend_report: Some(runtime_backend_report),
     })

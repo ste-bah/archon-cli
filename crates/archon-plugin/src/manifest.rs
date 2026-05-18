@@ -6,12 +6,20 @@
 use std::path::Path;
 
 use crate::error::PluginError;
-use crate::types::PluginManifest;
+use crate::types::{ManifestCapability, PluginManifest};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 /// Relative path from a plugin directory to its manifest.
 pub const MANIFEST_RELATIVE_PATH: &str = ".archon-plugin/plugin.json";
+const SUPPORTED_HOST_FUNCTIONS: &[&str] = &[
+    "archon_log",
+    "archon_register_tool",
+    "archon_register_hook",
+    "archon_register_command",
+    "archon_host_call",
+    "archon_api_version",
+];
 
 // ── Loading ───────────────────────────────────────────────────────────────────
 
@@ -93,5 +101,78 @@ pub fn validate_manifest(
         });
     }
 
+    let manifest_path = plugin_dir.join(MANIFEST_RELATIVE_PATH);
+    let mut capability_errors = Vec::new();
+    for capability in &manifest.capabilities {
+        validate_capability(capability, &mut capability_errors);
+    }
+    for required in &manifest.required_host_functions {
+        if !SUPPORTED_HOST_FUNCTIONS.contains(&required.as_str()) {
+            capability_errors.push(format!(
+                "required_host_functions '{}' is not implemented by the host",
+                required
+            ));
+        }
+    }
+    if !capability_errors.is_empty() {
+        return Err(PluginError::ManifestValidationError {
+            path: manifest_path,
+            fields: capability_errors,
+        });
+    }
+
     Ok(manifest)
+}
+
+fn validate_capability(capability: &ManifestCapability, errors: &mut Vec<String>) {
+    match capability {
+        ManifestCapability::Legacy(kind) => errors.push(format!(
+            "capabilities entry '{}' uses the legacy string form; migrate to {{\"kind\":\"{}\", ...}}",
+            kind, kind
+        )),
+        ManifestCapability::Structured(cap) => match cap.kind.as_str() {
+            "ReadFs" | "WriteFs" => {
+                if cap.paths.is_empty() {
+                    errors.push(format!("{} requires a non-empty paths array", cap.kind));
+                }
+                for path in &cap.paths {
+                    if path.as_os_str().is_empty() || !path.is_absolute() {
+                        errors.push(format!(
+                            "{} path '{}' must be absolute",
+                            cap.kind,
+                            path.display()
+                        ));
+                    }
+                }
+                if !cap.hosts.is_empty() {
+                    errors.push(format!("{} does not accept hosts", cap.kind));
+                }
+            }
+            "Network" => {
+                if cap.hosts.is_empty() {
+                    errors.push("Network requires a non-empty hosts array".to_string());
+                }
+                if !cap.paths.is_empty() {
+                    errors.push("Network does not accept paths".to_string());
+                }
+                for host in &cap.hosts {
+                    if host.trim().is_empty() {
+                        errors.push("Network host entries must not be empty".to_string());
+                    } else if host == "*" {
+                        errors.push(
+                            "Network host '*' is not allowed in plugin manifests; enumerate hosts"
+                                .to_string(),
+                        );
+                    }
+                }
+            }
+            "ToolRegister" | "HookRegister" | "CommandRegister" | "LspRegister"
+            | "DataDirWrite" => {
+                if !cap.paths.is_empty() || !cap.hosts.is_empty() {
+                    errors.push(format!("{} does not accept paths or hosts", cap.kind));
+                }
+            }
+            other => errors.push(format!("unknown capability kind '{}'", other)),
+        },
+    }
 }

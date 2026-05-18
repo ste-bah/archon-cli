@@ -1,4 +1,4 @@
-//! JEPA-style trace representation candidate model.
+//! JEPA-inspired trace representation candidate model.
 //!
 //! M2 keeps the implementation intentionally local and deterministic: the
 //! encoders consume structured trace features plus deterministic lexical

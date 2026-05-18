@@ -7,6 +7,7 @@ use archon_core::env_vars::ArchonEnvVars;
 use archon_pipeline::audit::store::PipelineBundleStore;
 use archon_pipeline::audit::types::PipelineEvent;
 use archon_pipeline::leann_searcher::LeannSearcher;
+use archon_pipeline::learning::integration::{LearningIntegration, LearningIntegrationConfig};
 use chrono::Utc;
 
 use crate::runtime::llm::build_configured_llm_provider;
@@ -182,15 +183,47 @@ async fn completion_summary(
     Ok(Some(CompletionSummary { text: summary }))
 }
 
-pub(crate) fn build_pipeline_auto_trainer(
+pub(crate) fn build_pipeline_learning_stack(
     config: &ArchonConfig,
     cwd: &Path,
-) -> Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>> {
-    let at_cfg = &config.learning.gnn.auto_trainer;
-    if !at_cfg.enabled || !config.learning.gnn.enabled {
-        return None;
+) -> (
+    LearningIntegration,
+    Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
+) {
+    let db = open_pipeline_learning_db(cwd);
+    let auto_trainer = db
+        .as_ref()
+        .and_then(|db| build_pipeline_auto_trainer_from_db(config, Arc::clone(db)));
+    let mut integration_config = LearningIntegrationConfig {
+        track_trajectories: config.learning.sona.enabled && config.learning.sona.pipeline_recording,
+        ..LearningIntegrationConfig::default()
+    };
+    if !integration_config.track_trajectories {
+        tracing::info!(
+            sona_enabled = config.learning.sona.enabled,
+            pipeline_recording = config.learning.sona.pipeline_recording,
+            "pipeline SONA trajectory recording disabled"
+        );
     }
 
+    let learning = if let Some(db) = db
+        && config.learning.sona.enabled
+        && config.learning.sona.pipeline_recording
+    {
+        LearningIntegration::new_with_persistent_sona(
+            db,
+            integration_config,
+            auto_trainer.clone(),
+            config.learning.gnn.input_dim,
+        )
+    } else {
+        integration_config.track_trajectories = false;
+        LearningIntegration::new(None, None, integration_config, auto_trainer.clone())
+    };
+    (learning, auto_trainer)
+}
+
+fn open_pipeline_learning_db(cwd: &Path) -> Option<Arc<cozo::DbInstance>> {
     let db_path = cwd.join(".archon").join("learning.db");
     if let Some(parent) = db_path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -198,15 +231,25 @@ pub(crate) fn build_pipeline_auto_trainer(
     let db = match cozo::DbInstance::new("newrocksdb", db_path.to_str().unwrap_or(""), "") {
         Ok(db) => db,
         Err(e) => {
-            tracing::warn!(error = %e, "pipeline: learning DB unavailable; auto_trainer not spawned");
+            tracing::warn!(error = %e, "pipeline: learning DB unavailable");
             return None;
         }
     };
     if let Err(e) = archon_pipeline::learning::schema::initialize_learning_schemas(&db) {
-        tracing::warn!(error = %e, "pipeline: learning schema init failed; auto_trainer not spawned");
+        tracing::warn!(error = %e, "pipeline: learning schema init failed");
         return None;
     }
-    let db = Arc::new(db);
+    Some(Arc::new(db))
+}
+
+fn build_pipeline_auto_trainer_from_db(
+    config: &ArchonConfig,
+    db: Arc<cozo::DbInstance>,
+) -> Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>> {
+    let at_cfg = &config.learning.gnn.auto_trainer;
+    if !at_cfg.enabled || !config.learning.gnn.enabled {
+        return None;
+    }
 
     let gnn_cfg = &config.learning.gnn;
     let train_cfg = &gnn_cfg.training;

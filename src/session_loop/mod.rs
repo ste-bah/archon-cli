@@ -892,6 +892,18 @@ pub(crate) fn run_session_loop(
             let _ = agent_dispatcher.lock().unwrap().poll_completion();
         }
 
+        let flushed_auto_extractions = agent
+            .lock()
+            .await
+            .flush_auto_extractions(std::time::Duration::from_secs(10))
+            .await;
+        if flushed_auto_extractions > 0 {
+            tracing::info!(
+                count = flushed_auto_extractions,
+                "flushed pending auto-extraction tasks before session shutdown"
+            );
+        }
+
         // CRIT-06: Fire Stop hook when the input channel closes (session ending)
         let stop_fut = {
             let guard = agent.lock().await;

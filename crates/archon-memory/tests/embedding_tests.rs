@@ -45,6 +45,25 @@ impl EmbeddingProvider for MockProvider {
     }
 }
 
+struct MismatchedProvider {
+    declared_dim: usize,
+    actual_dim: usize,
+}
+
+impl EmbeddingProvider for MismatchedProvider {
+    fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, MemoryError> {
+        Ok(texts
+            .iter()
+            .enumerate()
+            .map(|(i, _)| synthetic_embedding(self.actual_dim, i))
+            .collect())
+    }
+
+    fn dimensions(&self) -> usize {
+        self.declared_dim
+    }
+}
+
 // ---------------------------------------------------------------------------
 // EmbeddingProvider trait contract
 // ---------------------------------------------------------------------------
@@ -157,6 +176,17 @@ fn store_and_delete_embeddings() {
     let results = vector_search::search_similar(g.db(), &emb, 10).expect("search");
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].0, "mem-2");
+}
+
+#[test]
+fn store_embedding_rejects_dimension_mismatch_before_cozo_write() {
+    let g = MemoryGraph::in_memory().expect("graph");
+    vector_search::init_embedding_schema(g.db(), 4).expect("schema");
+
+    let err = vector_search::store_embedding(g.db(), "memory-1", &[0.1, 0.2, 0.3], "mock", 4)
+        .expect_err("mismatched vectors must be rejected before Cozo write");
+
+    assert!(err.to_string().contains("dimension mismatch"), "{err}");
 }
 
 #[test]
@@ -350,6 +380,35 @@ fn graph_with_provider_stores_embeddings_on_store() {
     let query = synthetic_embedding(4, 0);
     let results = vector_search::search_similar(g.db(), &query, 10).expect("search");
     assert_eq!(results.len(), 1);
+}
+
+#[test]
+fn graph_store_memory_surfaces_embedding_store_failure() {
+    let g = MemoryGraph::in_memory().expect("graph");
+    let provider = std::sync::Arc::new(MismatchedProvider {
+        declared_dim: 4,
+        actual_dim: 3,
+    });
+    g.set_embedding_provider(provider).expect("set provider");
+
+    let err = g
+        .store_memory(
+            "enough content to trigger embedding",
+            "Bad embedding",
+            MemoryType::Fact,
+            0.5,
+            &[],
+            "test",
+            "",
+        )
+        .expect_err("embedding store failure must surface to caller");
+
+    assert!(err.to_string().contains("dimension mismatch"), "{err}");
+    assert_eq!(
+        g.memory_count().expect("count"),
+        0,
+        "memory row must not persist without its configured embedding"
+    );
 }
 
 #[test]

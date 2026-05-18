@@ -79,6 +79,7 @@ impl PipelineAuditRun {
                 model: record.requested_model,
                 phase: record.phase,
                 critical: record.critical,
+                parallelizable: false,
                 quality_threshold: record.quality_threshold,
                 tool_access_level: record.tool_access_level,
             };

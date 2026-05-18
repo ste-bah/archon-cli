@@ -198,6 +198,58 @@ fn safe_pipe_is_safe() {
 }
 
 // -----------------------------------------------------------------------
+// Shell chain classification
+// -----------------------------------------------------------------------
+
+#[test]
+fn semicolon_chain_uses_worst_classification() {
+    let (s, r, d) = no_overrides();
+    assert_eq!(
+        classify_command("echo ok; git commit -am test", &s, &r, &d),
+        CommandClass::Risky
+    );
+}
+
+#[test]
+fn logical_and_chain_uses_worst_classification() {
+    let (s, r, d) = no_overrides();
+    assert_eq!(
+        classify_command("cargo test && npm install express", &s, &r, &d),
+        CommandClass::Risky
+    );
+    assert_eq!(
+        classify_command("cargo test && git push", &s, &r, &d),
+        CommandClass::Dangerous
+    );
+}
+
+#[test]
+fn logical_or_chain_uses_worst_classification() {
+    let (s, r, d) = no_overrides();
+    assert_eq!(
+        classify_command("echo ok || git status", &s, &r, &d),
+        CommandClass::Safe
+    );
+    assert_eq!(
+        classify_command("false || git push", &s, &r, &d),
+        CommandClass::Dangerous
+    );
+}
+
+#[test]
+fn quoted_shell_operators_do_not_split_command_chains() {
+    let (s, r, d) = no_overrides();
+    assert_eq!(
+        classify_command("echo 'ok; git commit -am test'", &s, &r, &d),
+        CommandClass::Safe
+    );
+    assert_eq!(
+        classify_command(r#"echo "ok && npm install express""#, &s, &r, &d),
+        CommandClass::Safe
+    );
+}
+
+// -----------------------------------------------------------------------
 // bash -c quoted commands
 // -----------------------------------------------------------------------
 
@@ -206,6 +258,24 @@ fn bash_c_rm_rf_is_dangerous() {
     let (s, r, d) = no_overrides();
     assert_eq!(
         classify_command(r#"bash -c "rm -rf /""#, &s, &r, &d),
+        CommandClass::Dangerous
+    );
+}
+
+#[test]
+fn bash_c_shell_chain_uses_worst_classification() {
+    let (s, r, d) = no_overrides();
+    assert_eq!(
+        classify_command(r#"bash -c "echo ok; git commit -am test""#, &s, &r, &d),
+        CommandClass::Risky
+    );
+}
+
+#[test]
+fn bash_lc_shell_chain_uses_worst_classification() {
+    let (s, r, d) = no_overrides();
+    assert_eq!(
+        classify_command(r#"bash -lc "cargo test && git push""#, &s, &r, &d),
         CommandClass::Dangerous
     );
 }

@@ -1,10 +1,14 @@
 use super::types::{LearningContext, LearningIntegrationConfig};
 use crate::learning::gnn::auto_trainer::AutoTrainer;
 use crate::learning::reasoning::{ReasoningBank, ReasoningRequest, ReasoningResponse};
-use crate::learning::sona::{FeedbackInput, SonaEngine, Trajectory};
+use crate::learning::sona::{FeedbackInput, SonaConfig, SonaEngine, Trajectory};
 use archon_core::agent::UserCorrectionEventPayload;
+use archon_memory::embedding::EmbeddingProvider;
+use archon_memory::types::MemoryError;
 use cozo::DbInstance;
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
@@ -47,6 +51,32 @@ impl LearningIntegration {
             auto_trainer,
             event_store: None,
         }
+    }
+
+    /// Create a production-persistent SONA integration backed by the same
+    /// trajectory store that the GNN trainer queries.
+    pub fn new_with_persistent_sona(
+        db: Arc<DbInstance>,
+        mut config: LearningIntegrationConfig,
+        auto_trainer: Option<Arc<AutoTrainer>>,
+        gnn_input_dim: usize,
+    ) -> Self {
+        config.track_trajectories = config.track_trajectories && gnn_input_dim > 0;
+        let sona = if config.track_trajectories {
+            let sona_config = SonaConfig {
+                db: Some(db),
+                embedding_provider: Some(Arc::new(DeterministicTrajectoryEmbedding {
+                    dim: gnn_input_dim,
+                })),
+                gnn_input_dim,
+                ..SonaConfig::default()
+            };
+            Some(SonaEngine::new(sona_config))
+        } else {
+            None
+        };
+
+        Self::new(sona, None, config, auto_trainer)
     }
 
     /// Attach the governed-learning event store used for LearningEvent writes.
@@ -242,7 +272,16 @@ impl LearningIntegration {
             }
         };
 
-        for proposal in archon_learning::proposal::generate_proposals(&events) {
+        let proposals =
+            match archon_learning::proposal::generate_proposals_for_store(store, &events) {
+                Ok(proposals) => proposals,
+                Err(e) => {
+                    tracing::warn!("record_user_correction_event proposal generation failed: {e}");
+                    return;
+                }
+            };
+
+        for proposal in proposals {
             if proposal.manifest_kind
                 != archon_learning::models::BehaviourManifestKind::BehaviouralRuleAdjustment
                 || !proposal.diff.contains(&rule_marker)
@@ -254,6 +293,27 @@ impl LearningIntegration {
                     proposal_id = %proposal.proposal_id,
                     "record_user_correction_event proposal persist failed: {e}"
                 );
+                continue;
+            }
+            match archon_learning::policy::evaluate_proposal(store, &proposal, false, 0) {
+                Ok((decision, _)) => {
+                    if let Err(e) = archon_learning::apply::apply_decision(
+                        store,
+                        &proposal.proposal_id,
+                        decision,
+                        None,
+                        Some("learning-integration"),
+                    ) {
+                        tracing::warn!(
+                            proposal_id = %proposal.proposal_id,
+                            "record_user_correction_event proposal policy queue failed: {e}"
+                        );
+                    }
+                }
+                Err(e) => tracing::warn!(
+                    proposal_id = %proposal.proposal_id,
+                    "record_user_correction_event proposal policy evaluation failed: {e}"
+                ),
             }
         }
     }
@@ -284,5 +344,41 @@ impl LearningIntegration {
         }
 
         ctx
+    }
+}
+
+struct DeterministicTrajectoryEmbedding {
+    dim: usize,
+}
+
+impl EmbeddingProvider for DeterministicTrajectoryEmbedding {
+    fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, MemoryError> {
+        Ok(texts
+            .iter()
+            .map(|text| {
+                let mut vector = vec![0.0_f32; self.dim];
+                if self.dim == 0 {
+                    return vector;
+                }
+                for token in text.split_whitespace() {
+                    let mut hasher = DefaultHasher::new();
+                    token.hash(&mut hasher);
+                    let hash = hasher.finish();
+                    let idx = (hash as usize) % self.dim;
+                    vector[idx] += 1.0;
+                }
+                let norm = vector.iter().map(|v| v * v).sum::<f32>().sqrt();
+                if norm > 0.0 {
+                    for value in &mut vector {
+                        *value /= norm;
+                    }
+                }
+                vector
+            })
+            .collect())
+    }
+
+    fn dimensions(&self) -> usize {
+        self.dim
     }
 }

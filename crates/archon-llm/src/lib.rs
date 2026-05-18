@@ -5,6 +5,7 @@ pub mod anthropic;
 pub mod auth;
 // TASK-AGS-706: LlmConfig + resolve_descriptor — feeds build_llm_provider.
 pub mod compaction_policy;
+pub(crate) mod completion_accumulator;
 pub mod config;
 pub mod context_catalog;
 pub mod context_window;

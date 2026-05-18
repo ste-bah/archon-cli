@@ -12,4 +12,4 @@ mod tests;
 mod triplets;
 mod types;
 
-pub use types::{EpochMetrics, GnnTrainer, TrainingConfig, TrainingOutcome};
+pub use types::{EpochMetrics, GnnTrainer, TrainingConfig, TrainingDataSources, TrainingOutcome};

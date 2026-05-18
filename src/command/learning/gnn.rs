@@ -18,10 +18,14 @@ pub(crate) fn render_gnn_status(
     let total_memories = live.map(|s| s.total_memories).unwrap_or(0);
     let total_corrections = live.map(|s| s.total_corrections).unwrap_or(0);
     let training_count = live.map(|s| s.training_count).unwrap_or(0);
+    let no_data_count = live.map(|s| s.no_data_count).unwrap_or(0);
     let memories_since = live.map(|s| s.memories_since_last_train).unwrap_or(0);
     let corrections_since = live.map(|s| s.corrections_since_last_train).unwrap_or(0);
     let seconds_since_last = live.and_then(|s| s.seconds_since_last_train);
+    let seconds_since_last_attempt = live.and_then(|s| s.seconds_since_last_attempt);
     let in_progress = live.map(|s| s.training_in_progress).unwrap_or(false);
+    let last_sources = live.and_then(|s| s.last_outcome.as_ref().map(|o| o.data_sources.clone()));
+    let last_no_data_reason = live.and_then(|s| s.last_no_data_reason.as_deref());
 
     let first_run_threshold = live
         .map(|s| s.first_run_threshold)
@@ -46,11 +50,11 @@ pub(crate) fn render_gnn_status(
     };
     let new_memory_gate = gate(memories_since, trigger_new_memories);
     let correction_gate = gate(corrections_since, trigger_corrections);
-    let elapsed_gate = match seconds_since_last {
+    let elapsed_gate = match seconds_since_last_attempt {
         Some(seconds) => gate(seconds * 1000, trigger_elapsed_ms),
         None => "n/a (no last-run timestamp)".into(),
     };
-    let throttle_gate = match seconds_since_last {
+    let throttle_gate = match seconds_since_last_attempt {
         Some(seconds) => {
             let elapsed_ms = seconds * 1000;
             if elapsed_ms >= min_throttle_ms {
@@ -66,6 +70,18 @@ pub(crate) fn render_gnn_status(
         (false, Some(seconds)) => format!("{seconds}s ago"),
         (false, None) => "never".into(),
     };
+    let last_attempt = match seconds_since_last_attempt {
+        Some(seconds) => format!("{seconds}s ago"),
+        None => "never".into(),
+    };
+    let last_data_sources = match last_sources {
+        Some(sources) => format!(
+            "SONA trajectories={}, SONA triplets={}, meaning triplets={}",
+            sources.sona_trajectories, sources.sona_triplets, sources.meaning_triplets,
+        ),
+        None => "n/a".into(),
+    };
+    let last_no_data = last_no_data_reason.unwrap_or("none");
 
     format!(
         "GNN Auto-Trainer Status\n\
@@ -73,6 +89,11 @@ pub(crate) fn render_gnn_status(
          Enabled:           {enabled}\n\
          Total memories:    {total_memories}\n\
          Total corrections: {total_corrections}\n\
+         Training runs:     {training_count}\n\
+         No-data ticks:     {no_data_count}\n\
+         Last data:         {last_data_sources}\n\
+         Last no-data:      {last_no_data}\n\
+         Last attempt:      {last_attempt}\n\
          Last training:     {last_training}\n\
          First-run gate:    {first_run_gate}\n\
          New-memory gate:   {new_memory_gate}\n\

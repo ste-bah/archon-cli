@@ -122,7 +122,8 @@ pub async fn check_completion_with_context(
         let is_blocked = gate_results
             .iter()
             .any(|g| g.blocked_claims.contains(&claim.claim_id));
-        claim.verified = !is_blocked;
+        let has_passed_gate = verification_gates::claim_has_passed_gate(claim, &gate_results);
+        claim.verified = has_passed_gate && !is_blocked;
     }
 
     // 5. Assemble report
@@ -291,6 +292,33 @@ mod tests {
         assert!(!report.claims.is_empty(), "must extract claim from output");
         // With no evidence, state should NOT be Verified.
         assert_ne!(report.final_state, crate::models::CompletionState::Verified);
+    }
+
+    #[tokio::test]
+    async fn check_completion_does_not_verify_claims_by_vacuous_gate_passes() {
+        let db = test_db();
+        let report = check_completion(
+            &db,
+            "implementation-no-evidence-run",
+            "Implementation is done.",
+            "coding",
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            !report.claims.is_empty(),
+            "must extract implementation claim"
+        );
+        assert!(
+            report.claims.iter().all(|claim| !claim.verified),
+            "claims without a passed relevant gate must remain unverified"
+        );
+        assert_ne!(report.final_state, crate::models::CompletionState::Verified);
+        assert!(
+            report.calibrated_summary.contains("BLOCKED"),
+            "calibrated summary must show blocked unsupported claims"
+        );
     }
 
     #[tokio::test]

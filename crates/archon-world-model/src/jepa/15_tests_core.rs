@@ -68,7 +68,7 @@
         assert!(outcome.metadata.target_stop_gradient);
         assert_eq!(outcome.masking.mask_ratio, 0.30);
         assert!(model.transition_model.is_some());
-        assert_eq!(model.provider_name(), "archon-jepa");
+        assert_eq!(model.provider_name(), "archon-jepa-inspired");
     }
 
     #[test]
@@ -106,4 +106,3 @@
         assert!(outcome.metadata.backend_execution.native_loss_eval);
         assert_eq!(outcome.metadata.backend_execution.host_fallback_count, 0);
     }
-
