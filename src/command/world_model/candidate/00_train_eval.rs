@@ -444,6 +444,21 @@ pub(super) fn render_eval_jepa(
     let registry = ModelRegistry::open(root)?;
     let candidate = registry.load_jepa_candidate(candidate_id)?;
     let rows = WorldModelStore::open(root)?.load_rows()?;
+
+    // CRIT-2: compute proper fingerprints before constructing the eval record.
+    // corpus_fingerprint: hash of row content — catches corpus mutations since eval.
+    let corpus_fingerprint =
+        Some(archon_world_model::jepa::JepaEvalPlanner::compute_corpus_fingerprint(&rows));
+    // config_fingerprint: uses the same function as the promotion guard (02_promote_helpers.rs)
+    // so that check 6 in check_pre_promotion_conditions always matches.
+    let config_fingerprint = compute_config_fingerprint(&config.learning.world_model.jepa);
+    // eval_schema_version: stored standalone for cheap pre-check at promotion time (PRD §11).
+    let eval_schema_version = config
+        .learning
+        .world_model
+        .jepa
+        .eval_schema_version_or_default();
+
     let comparison =
         compare_jepa_representations(config, &candidate.model, &rows, "fastembed", true);
     let comparison_path = registry.write_jepa_representation_comparison(&comparison)?;
@@ -484,9 +499,9 @@ pub(super) fn render_eval_jepa(
         mode: PersistedEvalMode::Full,
         baseline_skipped: false,
         skipped_reason: None,
-        corpus_fingerprint: None,
-        config_fingerprint: "legacy".to_string(),
-        eval_schema_version: 0,
+        corpus_fingerprint,   // populated from actual corpus hash
+        config_fingerprint,   // populated from current config (matches promotion guard)
+        eval_schema_version,  // populated from config (not hardcoded 0)
         comparison: Some(comparison),
         collapse: candidate.outcome.collapse.clone(),
         horizon: candidate.outcome.horizon.clone(),
