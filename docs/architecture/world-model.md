@@ -61,6 +61,16 @@ Training uses masked trace windows and future latent prediction. The target enco
 
 JEPA-inspired promotion fails closed. A candidate must pass corpus sufficiency, collapse, multi-horizon, checkpoint-size, tensor-safety, backend-execution, and fixed FastEmbed-baseline comparison gates. If a checkpoint is missing, invalid, mismatched, slow, or cannot encode, the runtime advisor records a typed unavailable reason and foreground work continues.
 
+`archon world eval-jepa <candidate-id>` defaults to quick Tier-0 mode. Quick mode
+checks candidate metadata first and can write a `baseline_skipped = true` eval
+record without invoking FastEmbed when the candidate already fails mandatory
+metadata gates. Promotion requires a full eval record, so use
+`archon world eval-jepa <candidate-id> --full` before `promote-jepa`.
+The `--background`, `--backend`, and `--no-cache` flags are parsed for
+compatibility and operator visibility, but v1.3.2 keeps them fail-honest:
+background execution returns a clear deferral error, while backend/cache
+overrides warn when they are not yet wired into the full eval path.
+
 ## Labeling
 
 Rows get deterministic labels first. Hybrid mode keeps those labels and adds a
@@ -85,6 +95,10 @@ archon world train-jepa --candidate
 archon world trainer-tick
 archon world eval <candidate-id>
 archon world eval-jepa <candidate-id>
+archon world eval-jepa <candidate-id> --full
+archon world eval-jepa-status <run-id>
+archon world eval-jepa-runs --limit 10
+archon world eval-jepa-cancel <run-id>
 archon world inspect-jepa <candidate-id>
 archon world compare-representations --baseline fastembed --candidate <candidate-id>
 archon world promote <model-id>

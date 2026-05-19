@@ -78,6 +78,9 @@ require_approval_for_network_changes = true
 allow_third_party_embeddings = false
 allow_llm_labeler = false
 allow_behavior_changes = false
+allow_embedding_cache = false              # fail-closed; set true to enable eval embedding cache persistence
+allow_world_model_raw_text_storage = false # fail-closed; named distinctly from reasoning_quality.allow_raw_text_storage
+allow_eval_background_jobs = false         # fail-closed; reserved for background eval worker wiring
 
 
 # ----------------------------------------------------------------------------

@@ -65,6 +65,8 @@ pub(super) fn build_embedding_adapter(
     };
 
     if embeddings.cache_enabled || embeddings.redact_before_embedding {
+        // TODO(T025): read from config.learning.world_model.jepa.eval.eval_schema_version
+        let allow_cache = policy.world_model.allow_embedding_cache;
         Ok(Box::new(CachedEmbeddingAdapter::new(
             adapter,
             EmbeddingCacheConfig {
@@ -72,7 +74,9 @@ pub(super) fn build_embedding_adapter(
                 cache_enabled: embeddings.cache_enabled,
                 cache_max_bytes: embeddings.cache_max_mb.saturating_mul(1024 * 1024),
                 redact_before_embedding: embeddings.redact_before_embedding,
+                eval_schema_version: 1u32,
             },
+            allow_cache,
         )))
     } else {
         Ok(adapter)

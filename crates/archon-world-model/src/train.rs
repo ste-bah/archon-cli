@@ -169,17 +169,34 @@ pub fn examples_from_rows_with_representation_adapter(
 ) -> Result<Vec<LatentTransitionExample>> {
     let builder = TraceWindowBuilder::new(rows);
     let transitions = builder.adjacent_transitions(1, 1, 1)?;
-    transitions
-        .into_iter()
-        .map(|transition| {
-            Ok(LatentTransitionExample {
-                state: adapter.encode_state(&transition.context)?,
-                action: adapter.encode_action(&transition.action)?,
-                next_state: adapter.encode_target(&transition.target)?,
-                labels: transition.labels,
-            })
-        })
-        .collect()
+
+    // Batch the three encode passes so downstream adapters (e.g. CachedEmbeddingAdapter) can
+    // issue a single inner embed_batch call per pass rather than N singular embed calls.
+    // TODO(T025): read BATCH_SIZE from config.embedding_batch_size once config plumbing lands.
+    const BATCH_SIZE: usize = 64;
+
+    let mut examples = Vec::with_capacity(transitions.len());
+
+    for chunk in transitions.chunks(BATCH_SIZE) {
+        let contexts: Vec<_> = chunk.iter().map(|t| t.context.clone()).collect();
+        let actions: Vec<_> = chunk.iter().map(|t| t.action.clone()).collect();
+        let targets: Vec<_> = chunk.iter().map(|t| t.target.clone()).collect();
+
+        let states = adapter.encode_state_batch(&contexts)?;
+        let action_vecs = adapter.encode_action_batch(&actions)?;
+        let next_states = adapter.encode_target_batch(&targets)?;
+
+        for (i, transition) in chunk.iter().enumerate() {
+            examples.push(LatentTransitionExample {
+                state: states[i].clone(),
+                action: action_vecs[i].clone(),
+                next_state: next_states[i].clone(),
+                labels: transition.labels.clone(),
+            });
+        }
+    }
+
+    Ok(examples)
 }
 
 fn embed_row(

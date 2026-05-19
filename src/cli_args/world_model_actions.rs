@@ -88,8 +88,48 @@ pub enum WorldAction {
     },
     /// Evaluate a JEPA-inspired candidate against promotion gates
     EvalJepa {
-        /// Candidate model id to inspect
+        /// Candidate model id to evaluate
         candidate_id: String,
+
+        /// Run full promotion-grade evaluation.
+        /// Without this flag, eval-jepa uses quick Tier-0 mode and may skip the baseline.
+        #[arg(long)]
+        full: bool,
+
+        /// Request background evaluation.
+        /// Parsed for compatibility; the current CLI returns a clear deferral error.
+        #[arg(long)]
+        background: bool,
+
+        /// Inspect resume preconditions for a previously paused eval run by its run-id
+        #[arg(long)]
+        resume: Option<String>,
+
+        /// Force a specific backend: cpu, metal, cuda.
+        /// Parsed for compatibility; currently warns and uses the candidate/config path.
+        #[arg(long, value_parser = ["cpu", "metal", "cuda"])]
+        backend: Option<String>,
+
+        /// Skip embedding cache reads and writes for this run.
+        /// Parsed for compatibility; currently warns unless validating resume preconditions.
+        #[arg(long)]
+        no_cache: bool,
+    },
+    /// Show status of a JEPA eval run
+    EvalJepaStatus {
+        /// Run ID (e.g. jeval-...)
+        run_id: String,
+    },
+    /// List recent JEPA eval runs
+    EvalJepaRuns {
+        /// Maximum number of runs to show
+        #[arg(long, default_value = "10")]
+        limit: usize,
+    },
+    /// Cancel a running JEPA eval job
+    EvalJepaCancel {
+        /// Run ID to cancel
+        run_id: String,
     },
     /// Inspect a JEPA-inspired candidate manifest and gate state
     InspectJepa {

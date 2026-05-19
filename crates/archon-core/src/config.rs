@@ -1312,6 +1312,9 @@ pub struct WorldModelJepaConfig {
     pub backend_parity_cosine_floor: f32,
     pub max_backend_prediction_latency_ms: u64,
     pub max_backend_first_call_latency_ms: u64,
+    /// Eval pipeline configuration (`[learning.world_model.jepa.eval]`). PRD-006C §12.
+    #[serde(default)]
+    pub eval: WorldModelJepaEvalConfig,
 }
 
 impl Default for WorldModelJepaConfig {
@@ -1349,6 +1352,71 @@ impl Default for WorldModelJepaConfig {
             backend_parity_cosine_floor: 0.99,
             max_backend_prediction_latency_ms: 50,
             max_backend_first_call_latency_ms: 5_000,
+            eval: WorldModelJepaEvalConfig::default(),
+        }
+    }
+}
+
+impl WorldModelJepaConfig {
+    /// Returns the eval_schema_version used for config_fingerprint and cache_key
+    /// computations.
+    ///
+    /// T025: reads from the nested `eval` sub-config (no longer hardcoded 1u32).
+    /// Bump `learning.world_model.jepa.eval.eval_schema_version` in config to
+    /// invalidate all existing embedding cache entries.
+    pub fn eval_schema_version_or_default(&self) -> u32 {
+        // T025: now reads from nested eval config, not hardcoded
+        self.eval.eval_schema_version
+    }
+}
+
+/// Eval pipeline configuration for `[learning.world_model.jepa.eval]`.
+/// PRD-006C §12.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorldModelJepaEvalConfig {
+    /// Default eval mode: `"quick"` | `"full"` | `"promotion"`
+    pub mode: String,
+    /// JEPA encoding batch size (transitions per batch)
+    pub batch_size: usize,
+    /// Fastembed baseline embedding batch size
+    pub embedding_batch_size: usize,
+    /// Progress output interval in rows
+    pub progress_interval_rows: usize,
+    /// Quick-mode runtime budget in ms (must be > 0; quick must be fast)
+    pub quick_max_runtime_ms: u64,
+    /// Full-mode runtime budget in ms (0 = unlimited; handles 30+ min workloads)
+    pub full_max_runtime_ms: u64,
+    /// Promotion-mode runtime budget in ms (0 = unlimited)
+    pub promotion_max_runtime_ms: u64,
+    /// Heartbeat interval for stale lock detection when budget = 0
+    pub stale_heartbeat_ms: u64,
+    /// Enable embedding cache reads and writes
+    pub cache_enabled: bool,
+    /// Maximum embedding cache size in MB (LRU eviction when exceeded)
+    pub cache_max_mb: u64,
+    /// Reserved default for background execution once the eval worker is wired.
+    pub background_default: bool,
+    /// Schema version for embedding cache key invalidation.
+    /// Bump this value to invalidate ALL existing cache entries.
+    pub eval_schema_version: u32,
+}
+
+impl Default for WorldModelJepaEvalConfig {
+    fn default() -> Self {
+        Self {
+            mode: "quick".to_string(),
+            batch_size: 256,
+            embedding_batch_size: 64,
+            progress_interval_rows: 500,
+            quick_max_runtime_ms: 30_000,
+            full_max_runtime_ms: 0,
+            promotion_max_runtime_ms: 0,
+            stale_heartbeat_ms: 120_000,
+            cache_enabled: true,
+            cache_max_mb: 2048,
+            background_default: false,
+            eval_schema_version: 1,
         }
     }
 }
@@ -1780,6 +1848,33 @@ fn validate_world_model_jepa(jepa: &WorldModelJepaConfig) -> Result<(), ConfigEr
             "learning.world_model.jepa.max_backend_first_call_latency_ms must be > 0".into(),
         ));
     }
+
+    // T025: validate eval sub-config
+    let eval = &jepa.eval;
+    if !["quick", "full", "promotion"].contains(&eval.mode.as_str()) {
+        return Err(ConfigError::ValidationError(
+            "learning.world_model.jepa.eval.mode must be one of: quick, full, promotion".into(),
+        ));
+    }
+    if eval.quick_max_runtime_ms == 0 {
+        return Err(ConfigError::ValidationError(
+            "learning.world_model.jepa.eval.quick_max_runtime_ms must be > 0 \
+             (quick mode requires a bounded deadline)"
+                .into(),
+        ));
+    }
+    if eval.embedding_batch_size > eval.batch_size {
+        return Err(ConfigError::ValidationError(format!(
+            "learning.world_model.jepa.eval.embedding_batch_size ({}) must be <= batch_size ({})",
+            eval.embedding_batch_size, eval.batch_size
+        )));
+    }
+    if eval.eval_schema_version == 0 {
+        return Err(ConfigError::ValidationError(
+            "learning.world_model.jepa.eval.eval_schema_version must be >= 1".into(),
+        ));
+    }
+
     Ok(())
 }
 
@@ -2087,5 +2182,79 @@ mod tests {
         "#;
         let cfg: ArchonConfig = toml::from_str(toml_str).unwrap();
         assert!(!cfg.remote.ssh.agent_forwarding);
+    }
+
+    // -------------------------------------------------------------------------
+    // T025: WorldModelJepaEvalConfig validation tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn validate_jepa_eval_rejects_invalid_mode() {
+        let mut config = WorldModelJepaConfig::default();
+        config.eval.mode = "invalid".to_string();
+        let result = validate_world_model_jepa(&config);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("mode"));
+    }
+
+    #[test]
+    fn validate_jepa_eval_accepts_quick_full_promotion() {
+        for valid_mode in &["quick", "full", "promotion"] {
+            let mut config = WorldModelJepaConfig::default();
+            config.eval.mode = valid_mode.to_string();
+            assert!(
+                validate_world_model_jepa(&config).is_ok(),
+                "{valid_mode} must be valid"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_jepa_eval_rejects_zero_quick_runtime() {
+        let mut config = WorldModelJepaConfig::default();
+        config.eval.quick_max_runtime_ms = 0;
+        let result = validate_world_model_jepa(&config);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("quick_max_runtime_ms")
+        );
+    }
+
+    #[test]
+    fn validate_jepa_eval_rejects_oversized_embedding_batch() {
+        let mut config = WorldModelJepaConfig::default();
+        config.eval.batch_size = 64;
+        config.eval.embedding_batch_size = 256; // > batch_size
+        let result = validate_world_model_jepa(&config);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("embedding_batch_size")
+        );
+    }
+
+    #[test]
+    fn validate_jepa_eval_rejects_zero_schema_version() {
+        let mut config = WorldModelJepaConfig::default();
+        config.eval.eval_schema_version = 0;
+        let result = validate_world_model_jepa(&config);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("eval_schema_version")
+        );
+    }
+
+    #[test]
+    fn default_jepa_eval_config_passes_validation() {
+        let config = WorldModelJepaConfig::default();
+        assert!(validate_world_model_jepa(&config).is_ok());
     }
 }

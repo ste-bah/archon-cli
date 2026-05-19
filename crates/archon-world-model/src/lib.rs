@@ -49,7 +49,7 @@ pub use jepa::{
     JepaEvalRecord, JepaFeatureBatch, JepaPromotionGateReport, JepaRepresentationComparisonReport,
     JepaRuntimeBackendReport, JepaRuntimePrediction, JepaTensorBackend, JepaTraceModel,
     JepaTrainingConfig, JepaTrainingExample, JepaTrainingLosses, JepaTrainingOutcome,
-    MlxMetalJepaBackend,
+    MlxMetalJepaBackend, PersistedEvalMode, RuntimeEvalMode,
 };
 pub use representation::{
     GenericEmbeddingRepresentationAdapter, TraceAction, TraceTransition, TraceWindow,

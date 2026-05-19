@@ -221,7 +221,7 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         tui_surface: "World-model shell",
         status: SurfaceStatus::ShellOnly,
         source_of_truth: "src/cli_args.rs + src/command/world_model.rs + crates/archon-world-model",
-        notes: "Local world-model status, ingest/backfill, dynamic trainer tick, candidate train/eval/promote, fail-open prediction, outcome/surprise recording, action scoring, explain, and rollback are shell-first while the advisor remains advisory-only.",
+        notes: "Local world-model status, ingest/backfill, dynamic trainer tick, latent and JEPA candidate train/eval/promote, JEPA eval-run inspection, fail-open prediction, outcome/surprise recording, action scoring, explain, and rollback are shell-first while the advisor remains advisory-only.",
     },
     CommandSurfaceRow {
         cli: "archon team ...",

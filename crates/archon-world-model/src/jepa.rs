@@ -19,6 +19,15 @@ include!("jepa/10_checkpoint_io.rs");
 include!("jepa/11_mask_encode_loss.rs");
 include!("jepa/12_features.rs");
 include!("jepa/13_aux_math_utils.rs");
+include!("jepa/eval_planner.rs");
+include!("jepa/eval_run_store.rs");
+include!("jepa/eval_run_store_tests.rs");
+include!("jepa/eval_progress.rs");
+include!("jepa/eval_runtime.rs");
+include!("jepa/eval_backends.rs");
+include!("jepa/eval_backends_mlx.rs");
+include!("jepa/eval_backends_cuda.rs");
+include!("jepa/eval_backends_tests.rs");
 
 #[cfg(test)]
 mod tests {
@@ -29,4 +38,9 @@ mod tests {
     include!("jepa/18_tests_cuda.rs");
     include!("jepa/19_tests_mlx.rs");
     include!("jepa/20_tests_gates_checkpoint.rs");
+}
+
+#[cfg(test)]
+mod tests_eval_pipeline {
+    include!("jepa/21_tests_eval_pipeline.rs");
 }

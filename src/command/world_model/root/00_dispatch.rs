@@ -110,10 +110,47 @@ pub(crate) async fn handle_world_command(
             );
             Ok(())
         }
-        WorldAction::EvalJepa { candidate_id } => {
+        WorldAction::EvalJepa {
+            candidate_id,
+            full,
+            background,
+            resume,
+            backend,
+            no_cache,
+        } => {
             println!(
                 "{}",
-                candidate::render_eval_jepa(config, &world_model_root()?, candidate_id)?
+                candidate::render_eval_jepa_with_options(
+                    config,
+                    &world_model_root()?,
+                    candidate_id,
+                    *full,
+                    *background,
+                    resume.clone(),
+                    backend.clone(),
+                    *no_cache,
+                )?
+            );
+            Ok(())
+        }
+        WorldAction::EvalJepaStatus { run_id } => {
+            println!(
+                "{}",
+                candidate::render_eval_jepa_status(&world_model_root()?, run_id)?
+            );
+            Ok(())
+        }
+        WorldAction::EvalJepaRuns { limit } => {
+            println!(
+                "{}",
+                candidate::render_eval_jepa_runs(&world_model_root()?, *limit)?
+            );
+            Ok(())
+        }
+        WorldAction::EvalJepaCancel { run_id } => {
+            println!(
+                "{}",
+                candidate::render_eval_jepa_cancel(&world_model_root()?, run_id)?
             );
             Ok(())
         }
@@ -149,7 +186,7 @@ pub(crate) async fn handle_world_command(
         WorldAction::PromoteJepa { model_id } => {
             println!(
                 "{}",
-                candidate::render_promote_jepa(&world_model_root()?, model_id)?
+                candidate::render_promote_jepa(&world_model_root()?, model_id, config)?
             );
             Ok(())
         }

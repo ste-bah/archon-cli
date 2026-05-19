@@ -13,7 +13,7 @@ archon world train --candidate
 archon world eval <candidate-id>
 archon world promote <candidate-id>
 archon world train-jepa --candidate
-archon world eval-jepa <jepa-candidate-id>
+archon world eval-jepa <jepa-candidate-id> --full
 archon world promote-jepa <jepa-candidate-id>
 ```
 
@@ -49,7 +49,7 @@ These are practical expectations, not guarantees:
 | First local FastEmbed use | A few seconds to several minutes | The local embedding model may need to initialise or download/cache on first use. |
 | `archon world train --candidate` | Seconds to a few minutes | CPU is the reliable baseline. The configured trainer runtime budget is 5 minutes by default. |
 | `archon world train-jepa --candidate` | Seconds to a few minutes | Larger corpora take longer. The configured JEPA trainer runtime budget is 5 minutes by default. |
-| `eval-jepa` | Seconds to a few minutes | Uses the fixed FastEmbed baseline for promotion gating. |
+| `eval-jepa` | Seconds to a few minutes | Defaults to quick Tier-0 mode. Use `--full` for the fixed FastEmbed baseline and promotion gating. |
 
 If a command exits with a gate failure, that is usually not an error. It means
 the model was written as a candidate, but Archon does not trust it enough to make
@@ -381,10 +381,21 @@ previous eval report passed.
 
 ## Step 8: Evaluate JEPA
 
-Run:
+Run the cheap first check:
 
 ```bash
 archon world eval-jepa jepa-world-model-candidate-...
+```
+
+By default, `eval-jepa` runs quick Tier-0 mode. It checks candidate metadata
+before invoking the FastEmbed baseline. If Tier-0 fails, Archon writes a
+`baseline_skipped = true` eval report and tells you to collect more traces or
+retrain instead of spending time on a baseline comparison that cannot promote.
+
+Before promotion, run the full eval:
+
+```bash
+archon world eval-jepa jepa-world-model-candidate-... --full
 ```
 
 Important output:
@@ -404,6 +415,10 @@ Primary gates pass: true
 
 Promotion requires `Primary gates pass: true`.
 
+Promotion also requires a full eval record. A quick eval that skipped the
+baseline is useful feedback, but `promote-jepa` will reject it and ask you to
+rerun with `--full`.
+
 What the gates mean:
 
 | Gate | Why it exists |
@@ -418,6 +433,21 @@ What the gates mean:
 
 If `Primary gates pass` is false, do not force it. Keep collecting traces and
 try again later. `promote-jepa` will refuse a failed eval anyway.
+
+Eval run inspection commands:
+
+```bash
+archon world eval-jepa-runs --limit 10
+archon world eval-jepa-status <run-id>
+archon world eval-jepa-cancel <run-id>
+```
+
+The v1.3.2 CLI parses `--background`, `--resume`, `--backend`, and `--no-cache`
+so scripts can converge on the stable shape, but only the foreground quick/full
+path is fully wired today. `--background` returns a clear deferral error;
+`--resume` validates and reports the stored run state; `--backend` and
+`--no-cache` emit visible warnings when they are not yet affecting the full eval
+path.
 
 ## Step 9: Optional Baseline Comparison
 
@@ -670,6 +700,7 @@ After the corpus is comfortably past cold start:
 archon world train-jepa --candidate
 archon world inspect-jepa <jepa-candidate-id>
 archon world eval-jepa <jepa-candidate-id>
+archon world eval-jepa <jepa-candidate-id> --full
 ```
 
 Only after `Primary gates pass: true`:

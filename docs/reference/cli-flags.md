@@ -52,9 +52,17 @@ subagents, coding/research pipelines, and gametheory through Codex.
 | `archon world explain <PREDICTION_ID>` | Inspect a persisted prediction and any recorded outcome/surprise |
 | `archon world record-outcome <PREDICTION_ID> --actual-summary <TEXT>` | Attach a redacted actual next-state summary and compute latent surprise |
 | `archon world train [--candidate] [--max-runtime-ms MS]` | Train a local candidate manifest from the stored world-model corpus |
+| `archon world train-jepa [--candidate] [--max-runtime-ms MS]` | Train a JEPA-inspired representation candidate from the stored world-model corpus |
 | `archon world trainer-tick [--last-activity-age-ms MS] [--last-training-age-ms MS] [--battery-percent N] [--unplugged]` | Run one idle-aware dynamic trainer tick |
 | `archon world eval [CANDIDATE_ID]` | Evaluate a candidate manifest against mandatory promotion gates |
+| `archon world eval-jepa <CANDIDATE_ID> [--full] [--background] [--resume RUN_ID] [--backend cpu\|metal\|cuda] [--no-cache]` | Evaluate a JEPA-inspired candidate. Default mode is quick Tier-0; use `--full` before promotion. `--background`, `--backend`, and `--no-cache` currently emit explicit deferral warnings/errors instead of silently changing execution. |
+| `archon world eval-jepa-status <RUN_ID>` | Inspect a persisted JEPA eval run record |
+| `archon world eval-jepa-runs [--limit N]` | List recent JEPA eval run records |
+| `archon world eval-jepa-cancel <RUN_ID>` | Write a cancellation sentinel for a JEPA eval run |
+| `archon world inspect-jepa <CANDIDATE_ID>` | Inspect a JEPA-inspired candidate manifest and prior eval state |
+| `archon world compare-representations --baseline fastembed --candidate <CANDIDATE_ID>` | Compare a JEPA representation against an exploratory baseline. Promotion still uses the fixed FastEmbed baseline. |
 | `archon world promote <MODEL_ID>` | Promote only a candidate with a passing eval report |
+| `archon world promote-jepa <CANDIDATE_ID>` | Promote a JEPA-inspired candidate only after a full promotion-grade eval passes |
 | `archon world rollback <MODEL_ID>` | Restore a prior advisory model pointer |
 | `archon reasoning status` | Show reasoning-quality store, shadow, critic, and dead-letter status |
 | `archon reasoning inspect <SESSION_ID>` | Summarize reasoning-quality events for a session |
