@@ -790,7 +790,7 @@ pub async fn run_subagent(
     let auto_bg_ms = exec.auto_background_ms();
 
     let nested = ctx.nested;
-    let join = archon_observability::spawn_named("subagent-executor", {
+    let mut join = archon_observability::spawn_named("subagent-executor", {
         let exec = Arc::clone(&exec);
         let cancel = cancel.clone();
         let ctx = ctx.clone();
@@ -801,8 +801,12 @@ pub async fn run_subagent(
 
     let outcome = if auto_bg_ms == 0 {
         tokio::select! {
-            _ = cancel.cancelled() => SubagentOutcome::Cancelled,
-            r = join => match r {
+            _ = cancel.cancelled() => {
+                join.abort();
+                let _ = join.await;
+                SubagentOutcome::Cancelled
+            },
+            r = &mut join => match r {
                 Ok(Ok(text))  => SubagentOutcome::Completed(text),
                 Ok(Err(e))    => SubagentOutcome::Failed(format!("{e}")),
                 Err(e)        => SubagentOutcome::Failed(format!("join panic: {e}")),
@@ -811,8 +815,12 @@ pub async fn run_subagent(
     } else {
         let timer = tokio::time::sleep(Duration::from_millis(auto_bg_ms));
         tokio::select! {
-            _ = cancel.cancelled() => SubagentOutcome::Cancelled,
-            r = join => match r {
+            _ = cancel.cancelled() => {
+                join.abort();
+                let _ = join.await;
+                SubagentOutcome::Cancelled
+            },
+            r = &mut join => match r {
                 Ok(Ok(text))  => SubagentOutcome::Completed(text),
                 Ok(Err(e))    => SubagentOutcome::Failed(format!("{e}")),
                 Err(e)        => SubagentOutcome::Failed(format!("join panic: {e}")),
@@ -850,6 +858,8 @@ pub async fn run_subagent(
             // NO on_visible_complete call — see PRESERVE-D5 above.
         }
         SubagentOutcome::Cancelled => {
+            exec.on_inner_complete(subagent_id.clone(), Err("subagent cancelled".to_string()))
+                .await;
             let _ = exec
                 .on_visible_complete(
                     subagent_id.clone(),

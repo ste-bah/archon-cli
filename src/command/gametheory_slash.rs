@@ -686,12 +686,14 @@ mod tests {
         // `classify_then_status` tests).
         let prev_xdg = std::env::var_os("XDG_DATA_HOME");
         let prev_home = std::env::var_os("HOME");
+        let prev_gametheory_db = std::env::var_os("ARCHON_GAMETHEORY_DB_PATH");
         let root = std::env::temp_dir().join(format!("archon-gt-slash-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         // SAFETY: `ENV_LOCK` serialises this module's env mutations.
         unsafe {
             std::env::set_var("XDG_DATA_HOME", &root);
             std::env::set_var("HOME", &root);
+            std::env::set_var("ARCHON_GAMETHEORY_DB_PATH", root.join("gametheory.db"));
         }
         let result = f();
         // SAFETY: same lock-protected scope as above; restore original env.
@@ -703,6 +705,10 @@ mod tests {
             match prev_home {
                 Some(value) => std::env::set_var("HOME", value),
                 None => std::env::remove_var("HOME"),
+            }
+            match prev_gametheory_db {
+                Some(value) => std::env::set_var("ARCHON_GAMETHEORY_DB_PATH", value),
+                None => std::env::remove_var("ARCHON_GAMETHEORY_DB_PATH"),
             }
         }
         result
