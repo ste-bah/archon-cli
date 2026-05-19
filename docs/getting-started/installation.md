@@ -174,6 +174,10 @@ Build time on WSL2 with `-j1` is ~3-4 minutes; without it can OOM the entire WSL
 # Linux/macOS
 sudo cp target/release/archon /usr/local/bin/
 
+# macOS: if you copy the binary to an external/removable volume and the shell
+# reports only "killed", refresh the ad-hoc signature after copying.
+codesign --force --sign - /path/to/copied/archon
+
 # Or via cargo install (Linux/macOS/Windows)
 cargo install --path .
 # Installs to ~/.cargo/bin/archon — make sure ~/.cargo/bin is in PATH

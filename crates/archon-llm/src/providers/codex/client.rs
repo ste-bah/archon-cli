@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use serde::Serialize;
 use tokio::sync::{Mutex, OnceCell};
 use uuid::Uuid;
 
@@ -331,7 +332,44 @@ impl LlmProvider for CodexProvider {
         self.resolve_request_model(&mut request);
         self.ensure_preflight().await?;
         let body = self.build_request_body(&request)?;
-        let response = self.send_with_retry(&body).await?;
+        let wire_body_bytes = serialized_len(&body);
+        let origin = request.request_origin.as_deref().unwrap_or("unknown");
+        tracing::info!(
+            target: "archon::context",
+            provider = "openai-codex",
+            request_origin = origin,
+            request_model = %body.model,
+            request_wire_body_bytes = wire_body_bytes,
+            request_approx_wire_tokens = approx_tokens_from_bytes(wire_body_bytes),
+            request_instructions_bytes = body
+                .instructions
+                .as_ref()
+                .map(|instructions| instructions.len())
+                .unwrap_or(0),
+            request_input_bytes = serialized_len(&body.input),
+            request_tools_bytes = body.tools.as_ref().map(serialized_len).unwrap_or(0),
+            request_input_items = body.input.len(),
+            request_tool_count = body.tools.as_ref().map(|tools| tools.len()).unwrap_or(0),
+            "codex wire request size preflight"
+        );
+        let response = match self.send_with_retry(&body).await {
+            Ok(response) => response,
+            Err(err) => {
+                if err.is_context_window_exceeded() {
+                    tracing::warn!(
+                        target: "archon::context",
+                        provider = "openai-codex",
+                        request_origin = origin,
+                        request_model = %body.model,
+                        request_wire_body_bytes = wire_body_bytes,
+                        request_approx_wire_tokens = approx_tokens_from_bytes(wire_body_bytes),
+                        error = %err,
+                        "codex context window error with request size diagnostics"
+                    );
+                }
+                return Err(err);
+            }
+        };
         let byte_stream = response.bytes_stream();
 
         let (raw_tx, mut raw_rx) = tokio::sync::mpsc::channel(256);
@@ -393,6 +431,16 @@ impl LlmProvider for CodexProvider {
     fn data_flow_classification(&self) -> DataFlowClassification {
         classify_data_flow_endpoint(&self.base_url)
     }
+}
+
+fn serialized_len<T: Serialize>(value: &T) -> usize {
+    serde_json::to_vec(value)
+        .map(|bytes| bytes.len())
+        .unwrap_or(usize::MAX)
+}
+
+fn approx_tokens_from_bytes(bytes: usize) -> u64 {
+    bytes.div_ceil(4) as u64
 }
 
 pub fn build_reasoning_config(model: &str, effort: Option<&str>) -> Option<ReasoningConfig> {

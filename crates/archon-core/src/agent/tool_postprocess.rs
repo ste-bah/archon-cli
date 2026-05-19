@@ -381,8 +381,22 @@ impl Agent {
                 }
             }
 
+            let context_output = crate::agent::tool_result_context::cap_tool_output_for_context(
+                &pre.tool_name,
+                &result.content,
+            );
+            if context_output.truncated {
+                tracing::warn!(
+                    tool = %pre.tool_name,
+                    tool_use_id = %pre.tool_id,
+                    original_chars = context_output.original_chars,
+                    stored_chars = context_output.stored_chars,
+                    limit_chars = context_output.limit_chars,
+                    "tool output trimmed before model replay"
+                );
+            }
             self.state
-                .add_tool_result(&pre.tool_id, &result.content, result.is_error);
+                .add_tool_result(&pre.tool_id, &context_output.content, result.is_error);
         }
 
         // Atomicity safety net (v1.2.6): after dispatch + postprocess, every
@@ -453,5 +467,16 @@ mod tests {
 
         assert!(missing.is_empty());
         assert!(state.messages.is_empty());
+    }
+
+    #[test]
+    fn context_tool_output_cap_preserves_ui_result_shape() {
+        let content = "x".repeat(80_000);
+        let capped =
+            crate::agent::tool_result_context::cap_tool_output_for_context("Agent", &content);
+
+        assert!(capped.truncated);
+        assert!(capped.content.contains("tool output trimmed"));
+        assert!(capped.stored_chars <= capped.limit_chars);
     }
 }

@@ -688,10 +688,25 @@ impl SubagentRunner {
                         });
                     g.last_update = chrono::Utc::now();
                 }
+                let context_output = crate::agent::tool_result_context::cap_tool_output_for_context(
+                    &p.name,
+                    &result.content,
+                );
+                if context_output.truncated {
+                    tracing::warn!(
+                        tool = %p.name,
+                        tool_use_id = %p.id,
+                        original_chars = context_output.original_chars,
+                        stored_chars = context_output.stored_chars,
+                        limit_chars = context_output.limit_chars,
+                        scope = "subagent",
+                        "subagent tool output trimmed before model replay"
+                    );
+                }
                 tool_results.push(serde_json::json!({
                     "type": "tool_result",
                     "tool_use_id": p.id,
-                    "content": result.content,
+                    "content": context_output.content,
                     "is_error": result.is_error,
                 }));
                 self.emit_activity_stream(

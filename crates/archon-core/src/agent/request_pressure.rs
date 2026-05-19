@@ -1,5 +1,40 @@
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RequestSizeBreakdown {
+    pub total_body_bytes: usize,
+    pub approx_tokens: u64,
+    pub system_bytes: usize,
+    pub messages_bytes: usize,
+    pub tools_bytes: usize,
+    pub extra_bytes: usize,
+    pub message_count: usize,
+    pub tool_count: usize,
+}
+
 pub(crate) fn request_body_bytes(request: &archon_llm::provider::LlmRequest) -> usize {
-    serde_json::to_vec(&serde_json::json!({
+    let breakdown = request_size_breakdown(request);
+    if request.request_origin.is_some() {
+        tracing::info!(
+            target: "archon::context",
+            request_origin = request.request_origin.as_deref().unwrap_or("unknown"),
+            request_model = %request.model,
+            request_body_bytes = breakdown.total_body_bytes,
+            request_approx_tokens = breakdown.approx_tokens,
+            request_system_bytes = breakdown.system_bytes,
+            request_messages_bytes = breakdown.messages_bytes,
+            request_tools_bytes = breakdown.tools_bytes,
+            request_extra_bytes = breakdown.extra_bytes,
+            request_message_count = breakdown.message_count,
+            request_tool_count = breakdown.tool_count,
+            "llm request size preflight"
+        );
+    }
+    breakdown.total_body_bytes
+}
+
+pub(crate) fn request_size_breakdown(
+    request: &archon_llm::provider::LlmRequest,
+) -> RequestSizeBreakdown {
+    let total_body_bytes = serialized_len(&serde_json::json!({
         "model": &request.model,
         "max_tokens": request.max_tokens,
         "system": &request.system,
@@ -11,9 +46,28 @@ pub(crate) fn request_body_bytes(request: &archon_llm::provider::LlmRequest) -> 
         "extra": &request.extra,
         "request_origin": &request.request_origin,
         "reasoning_encrypted": &request.reasoning_encrypted,
-    }))
-    .map(|bytes| bytes.len())
-    .unwrap_or(usize::MAX)
+    }));
+
+    RequestSizeBreakdown {
+        total_body_bytes,
+        approx_tokens: approx_tokens_from_bytes(total_body_bytes),
+        system_bytes: serialized_len(&request.system),
+        messages_bytes: serialized_len(&request.messages),
+        tools_bytes: serialized_len(&request.tools),
+        extra_bytes: serialized_len(&request.extra),
+        message_count: request.messages.len(),
+        tool_count: request.tools.len(),
+    }
+}
+
+pub(crate) fn approx_tokens_from_bytes(bytes: usize) -> u64 {
+    bytes.div_ceil(4) as u64
+}
+
+fn serialized_len(value: &impl serde::Serialize) -> usize {
+    serde_json::to_vec(value)
+        .map(|bytes| bytes.len())
+        .unwrap_or(usize::MAX)
 }
 
 pub(crate) fn large_request_retry_body_bytes(config: &crate::config::ContextConfig) -> usize {
@@ -64,5 +118,29 @@ mod tests {
         };
 
         assert!(request_body_bytes(&request) > 100);
+    }
+
+    #[test]
+    fn request_size_breakdown_reports_major_components() {
+        let request = LlmRequest {
+            system: vec![serde_json::json!({"type": "text", "text": "sys"})],
+            messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
+            tools: vec![serde_json::json!({"name": "Agent", "description": "spawn"})],
+            extra: serde_json::json!({"runtime": "test"}),
+            ..LlmRequest::default()
+        };
+
+        let breakdown = request_size_breakdown(&request);
+
+        assert_eq!(breakdown.message_count, 1);
+        assert_eq!(breakdown.tool_count, 1);
+        assert!(breakdown.system_bytes > 0);
+        assert!(breakdown.messages_bytes > 0);
+        assert!(breakdown.tools_bytes > 0);
+        assert!(breakdown.total_body_bytes >= breakdown.messages_bytes);
+        assert_eq!(
+            breakdown.approx_tokens,
+            approx_tokens_from_bytes(breakdown.total_body_bytes)
+        );
     }
 }

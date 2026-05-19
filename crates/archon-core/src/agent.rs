@@ -47,6 +47,7 @@ mod tool_context;
 mod tool_dispatch;
 mod tool_postprocess;
 mod tool_preflight;
+pub(crate) mod tool_result_context;
 mod tool_types;
 mod turn_completion;
 mod types;
