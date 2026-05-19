@@ -129,6 +129,29 @@ fn create_worktree_branch_name() {
 }
 
 #[test]
+fn create_worktree_keeps_subagent_branches_unique() {
+    let (_dir, repo) = init_repo_with_commit();
+    let session_one = "subagent-11111111-2222-3333-4444-555555555555";
+    let session_two = "subagent-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+
+    let info_one = WorktreeManager::create_worktree(&repo, session_one).expect("first worktree");
+    let info_two = WorktreeManager::create_worktree(&repo, session_two).expect("second worktree");
+
+    assert_ne!(info_one.branch_name, info_two.branch_name);
+    assert_eq!(
+        info_one.branch_name,
+        "archon/subagent-11111111-2222-3333-4444-555555555555"
+    );
+    assert_eq!(
+        info_two.branch_name,
+        "archon/subagent-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    );
+
+    let _ = WorktreeManager::exit_worktree(&repo, &info_one, ExitAction::Discard);
+    let _ = WorktreeManager::exit_worktree(&repo, &info_two, ExitAction::Discard);
+}
+
+#[test]
 fn exit_keep_preserves_worktree() {
     let (_dir, repo) = init_repo_with_commit();
     let session_id = unique_session_id("keep");

@@ -158,7 +158,8 @@ impl AgentTool {
             description:
                 "Spawn a subagent to handle a complex task autonomously. Returns a SubagentRequest \
                 for the agent loop to execute. The subagent runs with its own conversation and \
-                tool set."
+                tool set. Use normal isolation for read-only work; only request worktree isolation \
+                when the subagent needs isolated file edits."
                     .into(),
         }
     }
@@ -170,7 +171,8 @@ impl AgentTool {
             "Spawn a subagent to handle a complex task autonomously. Returns a SubagentRequest \
             for the agent loop to execute. The subagent runs with its own conversation and \
             tool set. Use known subagent_type names directly. Use AgentCatalog to list, search, \
-            or inspect less-common agents before launching them."
+            or inspect less-common agents before launching them. Use normal isolation for read-only \
+            work; only request worktree isolation when the subagent needs isolated file edits."
                 .to_string();
 
         if !agents.is_empty() {
@@ -363,6 +365,8 @@ impl AgentTool {
         let model = input
             .get("model")
             .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
             .map(|s| s.to_string());
 
         let allowed_tools = match input.get("allowed_tools") {
@@ -416,11 +420,21 @@ impl AgentTool {
             .filter(|s| !s.trim().is_empty())
             .map(|s| s.to_string());
 
-        let isolation = input
+        let isolation = match input
             .get("isolation")
             .and_then(|v| v.as_str())
-            .filter(|s| !s.trim().is_empty())
-            .map(|s| s.to_string());
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            Some("none") => None,
+            Some("worktree") => Some("worktree".to_string()),
+            Some(other) => {
+                return Err(AgentToolError::InvalidInput(format!(
+                    "isolation must be 'none' or 'worktree', got '{other}'"
+                )));
+            }
+            None => None,
+        };
 
         Ok(SubagentRequest {
             prompt,
@@ -457,7 +471,7 @@ impl Tool for AgentTool {
                 },
                 "model": {
                     "type": "string",
-                    "description": "Model to use for the subagent (defaults to parent model)"
+                    "description": "Optional model override. Omit this unless the user explicitly asks for a different model; omitted or empty inherits the parent model/provider. Do not invent provider model IDs."
                 },
                 "allowed_tools": {
                     "type": "array",
@@ -478,8 +492,8 @@ impl Tool for AgentTool {
                 },
                 "isolation": {
                     "type": "string",
-                    "enum": ["worktree"],
-                    "description": "Isolation mode. 'worktree' creates a temporary git worktree for the subagent."
+                    "enum": ["none", "worktree"],
+                    "description": "Optional isolation mode. Use 'none' or omit this field for normal/read-only subagents. Use 'worktree' only when isolated file edits are required."
                 }
             }
         })
@@ -935,6 +949,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn blank_model_inherits_parent() {
+        let tool = AgentTool::new();
+        let request = tool
+            .validate_and_build(&json!({"prompt": "x", "model": "   "}))
+            .expect("blank model is ignored");
+
+        assert!(request.model.is_none());
+    }
+
+    #[tokio::test]
     async fn allowed_tools_parsed_from_array() {
         let tool = AgentTool::new();
         let input = json!({
@@ -1156,6 +1180,32 @@ mod tests {
         assert!(request.isolation.is_none());
     }
 
+    #[tokio::test]
+    async fn isolation_none_string_parsed_as_absent() {
+        let tool = AgentTool::new();
+        let input = json!({
+            "prompt": "Read the code",
+            "isolation": "none"
+        });
+
+        let request = tool.validate_and_build(&input).expect("valid input");
+        assert!(request.isolation.is_none());
+    }
+
+    #[tokio::test]
+    async fn invalid_isolation_returns_error() {
+        let tool = AgentTool::new();
+        let result = tool
+            .execute(
+                json!({"prompt": "Read the code", "isolation": "inplace"}),
+                &make_ctx(),
+            )
+            .await;
+
+        assert!(result.is_error);
+        assert!(result.content.contains("isolation must be"));
+    }
+
     #[test]
     fn isolation_backward_compatible_deserialization() {
         let json = r#"{
@@ -1192,6 +1242,8 @@ mod tests {
         let props = schema["properties"].as_object().unwrap();
         assert!(props.contains_key("isolation"));
         assert_eq!(props["isolation"]["type"], "string");
+        assert_eq!(props["isolation"]["enum"][0], "none");
+        assert_eq!(props["isolation"]["enum"][1], "worktree");
     }
 
     #[test]

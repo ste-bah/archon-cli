@@ -50,7 +50,7 @@ impl WorktreeManager {
     /// Create a new worktree for the given session.
     ///
     /// The worktree is placed at `<worktrees_dir>/<session_id>/` and a branch
-    /// named `archon/<session_id_short>` is created pointing at the current HEAD.
+    /// named `archon/<bounded_session_id>` is created pointing at the current HEAD.
     pub fn create_worktree(repo: &Repository, session_id: &str) -> Result<WorktreeInfo, String> {
         let wt_dir = Self::worktrees_dir().join(session_id);
 
@@ -72,8 +72,7 @@ impl WorktreeManager {
             .ok_or_else(|| "Repository has no workdir (bare repo)".to_string())?
             .to_path_buf();
 
-        let short = &session_id[..8.min(session_id.len())];
-        let branch_name = format!("archon/{short}");
+        let branch_name = format!("archon/{}", branch_component_from_session_id(session_id));
 
         // Create branch at HEAD
         let head = repo
@@ -303,6 +302,44 @@ fn dirs_next() -> PathBuf {
 /// Convert a branch name like `archon/abc12345` to a valid worktree name.
 fn branch_name_to_worktree_name(branch_name: &str) -> String {
     branch_name.replace('/', "-")
+}
+
+fn branch_component_from_session_id(session_id: &str) -> String {
+    const MAX_COMPONENT_LEN: usize = 64;
+
+    let mut component = String::with_capacity(session_id.len().min(MAX_COMPONENT_LEN));
+    let mut previous_was_dot = false;
+
+    for ch in session_id.chars() {
+        let mapped = match ch {
+            c if c.is_ascii_alphanumeric() || c == '-' || c == '_' => c,
+            '.' => '.',
+            _ => '-',
+        };
+
+        if mapped == '.' && previous_was_dot {
+            continue;
+        }
+
+        component.push(mapped);
+        previous_was_dot = mapped == '.';
+
+        if component.len() >= MAX_COMPONENT_LEN {
+            break;
+        }
+    }
+
+    let mut component = component.trim_matches(|c| c == '-' || c == '.').to_string();
+    while component.ends_with(".lock") {
+        component.truncate(component.len() - ".lock".len());
+        component = component.trim_matches(|c| c == '-' || c == '.').to_string();
+    }
+
+    if component.is_empty() {
+        "session".to_string()
+    } else {
+        component
+    }
 }
 
 /// Prune a worktree reference from git.
