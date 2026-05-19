@@ -6,7 +6,7 @@
 //! - Headless invalid JSON → Error response
 //! - Headless UserMessage → agent processing (smoke test — logs for wiring)
 
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -182,6 +182,15 @@ thinking_budget = 16384
 default_effort = "high"
 max_retries = 3
 
+[llm]
+provider = "local"
+
+[llm.local]
+base_url = "http://127.0.0.1:9/v1"
+model = "test-local"
+timeout_secs = 1
+pull_if_missing = false
+
 [identity]
 mode = "clean"
 anti_distillation = false
@@ -273,6 +282,7 @@ fn headless_ping_pong_round_trip() {
 
     let mut stdin = child.stdin.take().unwrap();
     let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+    let mut stderr = child.stderr.take().unwrap();
 
     // Send Ping
     let ping = serde_json::json!({"type": "ping"});
@@ -302,11 +312,13 @@ fn headless_ping_pong_round_trip() {
     }
 
     let _ = child.kill();
-    let _ = child.wait();
+    let status = child.wait().ok();
+    let mut stderr_text = String::new();
+    let _ = stderr.read_to_string(&mut stderr_text);
 
     assert!(
         response.contains("\"pong\""),
-        "expected Pong response, got: {response}"
+        "expected Pong response, got: {response}; status={status:?}; stderr={stderr_text}"
     );
 }
 
@@ -345,6 +357,7 @@ fn headless_invalid_json_returns_error() {
 
     let mut stdin = child.stdin.take().unwrap();
     let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+    let mut stderr = child.stderr.take().unwrap();
 
     // Send invalid JSON
     writeln!(stdin, "this is not json at all").unwrap();
@@ -372,10 +385,12 @@ fn headless_invalid_json_returns_error() {
     }
 
     let _ = child.kill();
-    let _ = child.wait();
+    let status = child.wait().ok();
+    let mut stderr_text = String::new();
+    let _ = stderr.read_to_string(&mut stderr_text);
 
     assert!(
         response.contains("\"error\""),
-        "expected Error response for invalid JSON, got: {response}"
+        "expected Error response for invalid JSON, got: {response}; status={status:?}; stderr={stderr_text}"
     );
 }
