@@ -39,6 +39,21 @@ const PASSTHROUGH_VARS: &[&str] = &[
     "TEMP",
 ];
 
+const BASH_COMPAT_PRELUDE: &str = r#"
+printf() {
+    if [ "${1-}" = "-v" ]; then
+        builtin printf "$@"
+        return
+    fi
+    if [ "${1-}" = "--" ]; then
+        shift
+        builtin printf -- "$@"
+        return
+    fi
+    builtin printf -- "$@"
+}
+"#;
+
 pub struct BashTool {
     pub timeout_secs: u64,
     pub max_output_bytes: usize,
@@ -85,6 +100,7 @@ impl Tool for BashTool {
             Some(c) => c,
             None => return ToolResult::error("command is required and must be a string"),
         };
+        let command = command_with_compat_prelude(command);
 
         let timeout_ms = input
             .get("timeout")
@@ -97,7 +113,7 @@ impl Tool for BashTool {
         if let Some(sandbox) = &ctx.sandbox
             && let Some(result) = sandbox
                 .execute_bash(archon_permissions::sandbox::SandboxCommandRequest {
-                    command: command.to_string(),
+                    command: command.clone(),
                     working_dir: ctx.working_dir.clone(),
                     timeout_ms,
                     max_output_bytes: self.max_output_bytes,
@@ -113,7 +129,7 @@ impl Tool for BashTool {
 
         let mut cmd = Command::new("/bin/bash");
         cmd.arg("-c")
-            .arg(command)
+            .arg(&command)
             .current_dir(&ctx.working_dir)
             .env_clear()
             .envs(env_vars)
@@ -232,6 +248,10 @@ impl Tool for BashTool {
     }
 }
 
+fn command_with_compat_prelude(command: &str) -> String {
+    format!("{BASH_COMPAT_PRELUDE}\n{command}")
+}
+
 /// Build a sanitized environment map.
 /// Public so PowerShell tool can reuse the same sanitization.
 pub fn sanitized_env() -> Vec<(String, String)> {
@@ -256,4 +276,51 @@ pub fn sanitized_env() -> Vec<(String, String)> {
     }
 
     env
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    fn ctx() -> ToolContext {
+        ToolContext {
+            working_dir: PathBuf::from("."),
+            ..ToolContext::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn printf_format_starting_with_dash_succeeds() {
+        let tool = BashTool {
+            timeout_secs: 1,
+            max_output_bytes: 1024,
+        };
+
+        let result = tool
+            .execute(json!({"command": "printf '--- heading ---\\n'"}), &ctx())
+            .await;
+
+        assert!(!result.is_error, "{}", result.content);
+        assert_eq!(result.content, "--- heading ---\n");
+    }
+
+    #[tokio::test]
+    async fn printf_wrapper_preserves_dash_dash_and_v() {
+        let tool = BashTool {
+            timeout_secs: 1,
+            max_output_bytes: 1024,
+        };
+
+        let result = tool
+            .execute(
+                json!({"command": "printf -- '--- one ---\\n'; printf -v label 'two'; printf '%s\\n' \"$label\""}),
+                &ctx(),
+            )
+            .await;
+
+        assert!(!result.is_error, "{}", result.content);
+        assert_eq!(result.content, "--- one ---\ntwo\n");
+    }
 }

@@ -8,9 +8,12 @@ impl AgentSubagentExecutor {
         ctx: ToolContext,
         _cancel: CancellationToken,
     ) -> Result<String, ExecutorError> {
-        // Register with the current manager API, which allocates its own id.
-        // The caller id remains the cache/marker id; the manager id tracks runtime status.
-        let manager_id = match self.subagent_manager.lock().await.register(request.clone()) {
+        let manager_id = match self
+            .subagent_manager
+            .lock()
+            .await
+            .register_with_id(subagent_id.clone(), request.clone())
+        {
             Ok(id) => id,
             Err(e) => {
                 return Err(ExecutorError::Internal(format!(
@@ -18,8 +21,6 @@ impl AgentSubagentExecutor {
                 )));
             }
         };
-        // Keep the caller-provided subagent_id for cache keys so
-        // on_inner_complete / on_visible_complete can find the entry.
         let cache_id = subagent_id.clone();
 
         // Register agent name for SendMessage resolution (AGT-026).
@@ -174,17 +175,6 @@ impl AgentSubagentExecutor {
             .clone()
             .or_else(|| resolved_def.as_ref().and_then(|d| d.isolation.clone()));
 
-        // cwd + worktree conflict early-return.
-        if request.cwd.is_some() && isolation.as_deref() == Some("worktree") {
-            let _ = self.subagent_manager.lock().await.mark_failed(
-                &manager_id,
-                "cwd override cannot be combined with isolation='worktree'".into(),
-            );
-            return Err(ExecutorError::Internal(
-                "cwd override cannot be combined with isolation='worktree'".into(),
-            ));
-        }
-
         // Session-scoped hook registration from agent def.
         if let Some(ref def) = resolved_def
             && let Some(ref hooks_json) = def.hooks
@@ -324,20 +314,22 @@ impl AgentSubagentExecutor {
             .build_subagent_tools(&request, resolved_def.as_ref())
             .await;
 
-        // Create worktree if isolation requests it.
+        let requested_cwd = super::paths::resolve_cwd(&self.working_dir, request.cwd.as_deref());
+
         let worktree_info = if isolation.as_deref() == Some("worktree") {
-            let wt_session = format!("subagent-{manager_id}");
-            match archon_tools::worktree_manager::WorktreeManager::create_worktree_from_path(
-                &self.working_dir,
-                &wt_session,
-            ) {
+            let source_root = requested_cwd.as_deref().unwrap_or(&self.working_dir);
+            match super::paths::create_worktree(source_root, &manager_id) {
                 Ok(info) => {
                     tracing::info!(subagent_id = %manager_id, worktree = %info.worktree_path.display(), "created worktree for isolated subagent");
                     Some(info)
                 }
                 Err(e) => {
-                    tracing::warn!(subagent_id = %manager_id, error = %e, "failed to create worktree, falling back to parent dir");
-                    None
+                    let _ = self
+                        .subagent_manager
+                        .lock()
+                        .await
+                        .mark_failed(&manager_id, e.clone());
+                    return Err(ExecutorError::Internal(e));
                 }
             }
         } else {
@@ -367,7 +359,7 @@ impl AgentSubagentExecutor {
         let working_dir = worktree_info
             .as_ref()
             .map(|wt| wt.worktree_path.clone())
-            .or_else(|| request.cwd.as_ref().map(std::path::PathBuf::from))
+            .or_else(|| requested_cwd.clone())
             .unwrap_or_else(|| self.working_dir.clone());
 
         let subagent_mode = {
@@ -481,25 +473,6 @@ impl AgentSubagentExecutor {
         self.emit_subagent_finished(&cache_id, &activity_agent_type, &model, &inner_result);
         self.on_inner_complete(cache_id.clone(), inner_result.clone())
             .await;
-
-        // Authoritative manager cleanup using manager_id. on_inner_complete
-        // above uses cache_id which misses the manager's agents HashMap (the
-        // manager allocates its own UUID at register time). Without this block
-        // the entry stays Running forever and exhausts the max_concurrent cap.
-        // Both ids are in scope here so this is the correct cleanup site.
-        // TODO(post-105) in completion.rs is resolved by this block.
-        {
-            let mut mgr = self.subagent_manager.lock().await;
-            match &inner_result {
-                Ok(text) => {
-                    let _ = mgr.complete(&manager_id, text.clone());
-                }
-                Err(reason) => {
-                    let _ = mgr.mark_failed(&manager_id, reason.clone());
-                }
-            }
-            mgr.cleanup_agent(&manager_id);
-        }
 
         match inner_result {
             Ok(text) => Ok(text),

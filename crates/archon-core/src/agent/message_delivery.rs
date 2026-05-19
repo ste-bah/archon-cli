@@ -140,11 +140,28 @@ impl Agent {
                                         archon_tools::subagent_executor::SubagentOutcome::Cancelled => ToolResult::error("subagent cancelled"),
                                     }
                                 } else {
-                                    // Path D: No transcript found — error
-                                    ToolResult::error(format!(
-                                        "No transcript found for agent '{}'",
-                                        req.to
-                                    ))
+                                    let state = {
+                                        let mgr = self.subagent_manager.lock().await;
+                                        mgr.get_status(&agent_id).map(|info| {
+                                            (format!("{:?}", info.status), info.result.clone())
+                                        })
+                                    };
+                                    match state {
+                                        Some((status, result)) => {
+                                            let detail = result.unwrap_or_else(|| "none".into());
+                                            ToolResult::error(format!(
+                                                "Agent '{}' is not running (status: {status}) and no transcript was found. Last result: {detail}",
+                                                req.to
+                                            ))
+                                        }
+                                        None => {
+                                            // Path D: no live state and no transcript.
+                                            ToolResult::error(format!(
+                                                "No transcript found for agent '{}'",
+                                                req.to
+                                            ))
+                                        }
+                                    }
                                 }
                             }
                         }

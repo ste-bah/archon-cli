@@ -62,6 +62,7 @@ use crate::subagent::SubagentManager;
 mod activity;
 mod classification;
 mod completion;
+mod paths;
 mod run;
 
 /// Snapshot of the `Agent` fields that the executor needs.

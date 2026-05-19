@@ -122,6 +122,9 @@ pub enum SubagentError {
     #[error("subagent not found: {0}")]
     NotFound(String),
 
+    #[error("subagent already exists and is running: {0}")]
+    AlreadyRunning(String),
+
     #[error("max concurrent subagents reached ({0})")]
     MaxConcurrent(usize),
 
@@ -160,17 +163,49 @@ impl SubagentManager {
 
     /// Register a new subagent request.  Returns the UUID assigned.
     pub fn register(&mut self, request: SubagentRequest) -> Result<String, SubagentError> {
+        self.register_with_id(Uuid::new_v4().to_string(), request)
+    }
+
+    /// Register a subagent under a caller-provided id.
+    ///
+    /// This keeps the id returned to the model aligned with manager status,
+    /// transcript files, progress lookup, SendMessage, and worktree cleanup.
+    /// A stopped entry may be reused for resume; a running duplicate is rejected.
+    pub fn register_with_id(
+        &mut self,
+        id: String,
+        request: SubagentRequest,
+    ) -> Result<String, SubagentError> {
         let active = self
             .agents
             .values()
             .filter(|a| a.status == SubagentStatus::Running)
             .count();
 
+        if let Some(existing) = self.agents.get_mut(&id) {
+            if existing.status == SubagentStatus::Running {
+                return Err(SubagentError::AlreadyRunning(id));
+            }
+            if active >= self.max_concurrent {
+                return Err(SubagentError::MaxConcurrent(self.max_concurrent));
+            }
+            self.pending_messages.remove(&id);
+            self.name_registry
+                .retain(|_, existing_id| existing_id != &id);
+            existing.request = request;
+            existing.status = SubagentStatus::Running;
+            existing.created_at = Utc::now();
+            existing.result = None;
+            existing.shutdown_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            existing.progress =
+                std::sync::Arc::new(std::sync::Mutex::new(ProgressTracker::default()));
+            return Ok(id);
+        }
+
         if active >= self.max_concurrent {
             return Err(SubagentError::MaxConcurrent(self.max_concurrent));
         }
 
-        let id = Uuid::new_v4().to_string();
         let info = SubagentInfo {
             id: id.clone(),
             request,

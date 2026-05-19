@@ -11,6 +11,73 @@ fn register_returns_uuid() {
 }
 
 #[test]
+fn register_with_id_uses_caller_id() {
+    let mut mgr = SubagentManager::default();
+    let id = mgr
+        .register_with_id("caller-id".into(), sample_request())
+        .expect("should register with caller id");
+
+    assert_eq!(id, "caller-id");
+    assert!(mgr.has_agent("caller-id"));
+}
+
+#[test]
+fn register_with_id_rejects_running_duplicate() {
+    let mut mgr = SubagentManager::default();
+    mgr.register_with_id("agent-1".into(), sample_request())
+        .expect("first register");
+
+    let err = mgr
+        .register_with_id("agent-1".into(), sample_request())
+        .unwrap_err();
+
+    assert!(err.to_string().contains("already exists"));
+}
+
+#[test]
+fn register_with_id_reuses_stopped_agent_for_resume() {
+    let mut mgr = SubagentManager::default();
+    let id = "agent-1".to_string();
+    mgr.register_with_id(id.clone(), sample_request())
+        .expect("first register");
+    mgr.mark_failed(&id, "old failure".into())
+        .expect("mark failed");
+    mgr.queue_pending_message(&id, "stale message".into());
+    mgr.register_name("stale-name".into(), id.clone());
+
+    let mut resumed = sample_request();
+    resumed.prompt = "resume prompt".into();
+    let returned = mgr
+        .register_with_id(id.clone(), resumed)
+        .expect("resume register");
+
+    let info = mgr.get_status(&id).expect("resumed agent should exist");
+    assert_eq!(returned, id);
+    assert_eq!(info.status, SubagentStatus::Running);
+    assert_eq!(info.request.prompt, "resume prompt");
+    assert!(info.result.is_none());
+    assert!(mgr.drain_pending_messages(&id).is_empty());
+    assert!(mgr.resolve_name("stale-name").is_none());
+}
+
+#[test]
+fn register_with_id_reuse_still_respects_max_concurrent() {
+    let mut mgr = SubagentManager::new(1);
+    mgr.register_with_id("stopped".into(), sample_request())
+        .expect("first register");
+    mgr.mark_failed("stopped", "old failure".into())
+        .expect("mark failed");
+    mgr.register_with_id("active".into(), sample_request())
+        .expect("second running agent");
+
+    let err = mgr
+        .register_with_id("stopped".into(), sample_request())
+        .unwrap_err();
+
+    assert!(matches!(err, SubagentError::MaxConcurrent(1)));
+}
+
+#[test]
 fn get_status_returns_running() {
     let mut mgr = SubagentManager::default();
     let id = mgr.register(sample_request()).unwrap();

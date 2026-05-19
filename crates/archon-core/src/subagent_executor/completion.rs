@@ -6,26 +6,6 @@ impl AgentSubagentExecutor {
         subagent_id: String,
         result: Result<String, String>,
     ) {
-        // Mark the subagent as completed/failed in the manager. The
-        // cache_id is the pre-allocated caller id; the manager keyed
-        // this subagent under its own manager-allocated id. Since
-        // SubagentManager.register returns an id that we no longer
-        // track here (this method only gets the caller id), we scan
-        // by looking up the most recent — but that's fragile. Instead,
-        // we rely on the fact that run_to_completion's caller holds
-        // the manager_id via its local variable when dispatching the
-        // inner-complete fire inside its own body, bypassing this
-        // trait method. That means this trait-level `on_inner_complete`
-        // path runs only for post-abandonment orphan tasks — and in
-        // those cases, the runner still holds a reference to the
-        // manager via `set_pending_message_source`, so the manager
-        // update happens inside the runner's drop path.
-        //
-        // To preserve the old behavior in the common case, we ALSO
-        // perform the manager update here using the manager's id
-        // lookup by caller id when possible. If the lookup misses,
-        // this becomes a no-op manager update (safe — the runner will
-        // reconcile).
         // Save agent memory (PRESERVE-D8 — single collapsed site).
         if let Ok(ref text) = result {
             let meta = self.memory_cache.lock().await.get(&subagent_id).cloned();
@@ -48,14 +28,9 @@ impl AgentSubagentExecutor {
                 }
             }
         }
-        // Best-effort manager update. Because the manager keys agents
-        // under their own internally-generated id, this call may miss
-        // for the caller-side cache_id. That is acceptable: the old
-        // behavior always matched because the manager id and the
-        // caller id were the same object. We cannot easily align
-        // those without changing the manager API; we preserve memory
-        // side effects (the critical PRESERVE-D8 invariant) and log
-        // the manager-update miss as a TODO(post-105).
+        // Best-effort manager update. The caller id is now the manager id,
+        // so visible status, SendMessage, progress, transcripts, and cleanup
+        // all converge on the same identifier.
         match &result {
             Ok(text) => {
                 let mut mgr = self.subagent_manager.lock().await;
