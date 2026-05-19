@@ -29,9 +29,16 @@ pub fn parse_datetime(s: &str) -> anyhow::Result<chrono::DateTime<chrono::Utc>> 
 
 /// List recent sessions for `--resume` with no ID.
 pub async fn handle_resume_list() -> anyhow::Result<()> {
-    let db_path = archon_session::storage::default_db_path();
-    let store = archon_session::storage::SessionStore::open(&db_path)
-        .map_err(|e| anyhow::anyhow!("failed to open session database: {e}"))?;
+    let config = archon_core::config::ArchonConfig::default();
+    handle_resume_list_with_config(&config).await
+}
+
+/// List recent sessions from the configured session database.
+pub async fn handle_resume_list_with_config(
+    config: &archon_core::config::ArchonConfig,
+) -> anyhow::Result<()> {
+    let db_path = crate::command::store_paths::session_db_path(config);
+    let store = crate::command::store_paths::open_session_store(&db_path)?;
 
     let sessions = store
         .list_sessions(20)
@@ -51,9 +58,17 @@ pub async fn handle_resume_list() -> anyhow::Result<()> {
 
 /// Load resume messages for `--resume <id>`.
 pub fn load_resume_messages(session_id: &str) -> anyhow::Result<Vec<serde_json::Value>> {
-    let db_path = archon_session::storage::default_db_path();
-    let store = archon_session::storage::SessionStore::open(&db_path)
-        .map_err(|e| anyhow::anyhow!("failed to open session database: {e}"))?;
+    let config = archon_core::config::ArchonConfig::default();
+    load_resume_messages_with_config(session_id, &config)
+}
+
+/// Load resume messages from the configured session database.
+pub fn load_resume_messages_with_config(
+    session_id: &str,
+    config: &archon_core::config::ArchonConfig,
+) -> anyhow::Result<Vec<serde_json::Value>> {
+    let db_path = crate::command::store_paths::session_db_path(config);
+    let store = crate::command::store_paths::open_session_store(&db_path)?;
     let (meta, raw_messages) = archon_session::resume::resume_session(&store, session_id)
         .map_err(|e| anyhow::anyhow!("failed to resume session: {e}"))?;
     eprintln!(

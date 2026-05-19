@@ -62,6 +62,10 @@ pub struct Cli {
     #[arg(long, value_name = "SCHEMA")]
     pub json_schema: Option<String>,
 
+    /// Path to a JSON schema file to validate the final assistant output against
+    #[arg(long, value_name = "PATH", conflicts_with = "json_schema")]
+    pub json_schema_path: Option<PathBuf>,
+
     /// Input format for print mode (text, stream-json)
     #[arg(long, value_name = "FORMAT", default_value = "text")]
     pub input_format: String,

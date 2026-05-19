@@ -24,6 +24,9 @@ auto_apply_low_risk = true
 allow_third_party_embeddings = true
 allow_llm_labeler = true
 allow_behavior_changes = true
+allow_embedding_cache = true
+allow_world_model_raw_text_storage = true
+allow_eval_background_jobs = true
 
 [policy.web]
 allow_mutating_actions = true
@@ -82,6 +85,9 @@ semantic_weight = 0.3
     assert!(load.policy.world_model.allow_third_party_embeddings);
     assert!(load.policy.world_model.allow_llm_labeler);
     assert!(load.policy.world_model.allow_behavior_changes);
+    assert!(load.policy.world_model.allow_embedding_cache);
+    assert!(load.policy.world_model.allow_world_model_raw_text_storage);
+    assert!(load.policy.world_model.allow_eval_background_jobs);
     assert!(load.policy.web.allow_mutating_actions);
     assert!(load.policy.web.allow_file_uploads);
     assert!(load.policy.web.allow_pipeline_controls);

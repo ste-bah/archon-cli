@@ -60,6 +60,7 @@ pub(crate) fn build_command_context<'a>(
             // dispatch — cheaper than stashing an `Arc<str>` threaded
             // through `SlashCommandContext`.
             session_id: Some(slash_ctx.session_id.clone()),
+            session_store: Some(Arc::clone(&slash_ctx.session_store)),
             // TASK-AGS-817: /memory DIRECT-pattern consumer. Populated
             // UNCONDITIONALLY here (not gated on the primary name, same
             // as AGS-815 session_id). `Arc<dyn MemoryTrait>` is cheap to

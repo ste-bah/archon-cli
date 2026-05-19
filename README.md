@@ -142,7 +142,7 @@ archon-cli/
 │   ├── archon-session/        # session checkpoints (CozoDB)
 │   ├── archon-memory/         # memory graph + embeddings (CozoDB)
 │   ├── archon-llm/            # provider clients + identity/spoofing
-│   ├── archon-tools/          # 43 built-in tools
+│   ├── archon-tools/          # 65 registered tools
 │   ├── archon-permissions/    # 7 permission modes
 │   ├── archon-mcp/            # MCP transport
 │   ├── archon-pipeline/       # 50+46 agent pipelines + game theory + learning systems

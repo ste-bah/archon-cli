@@ -91,68 +91,61 @@ impl CommandHandler for ResumeHandler {
         // behaviour for every shipped call site (single-token arg).
         let arg = args.first().map(|s| s.as_str()).unwrap_or("").trim();
 
-        // 1. Open the session store. Every downstream branch depends on
-        //    a valid `SessionStore`; a failure here surfaces as a user-
-        //    facing `TuiEvent::Error`, matching the shipped Err arm at
-        //    slash.rs:719-722.
-        let db_path = archon_session::storage::default_db_path();
-        match archon_session::storage::SessionStore::open(&db_path) {
-            Ok(store) => {
-                if arg.is_empty() {
-                    // 2a. No-arg path: show interactive session picker.
-                    //     Shipped behaviour at slash.rs:662-692.
-                    let query = archon_session::search::SessionSearchQuery::default();
-                    match archon_session::search::search_sessions(&store, &query) {
-                        Ok(results) => {
-                            if results.is_empty() {
-                                ctx.emit(TuiEvent::TextDelta(
-                                    "\nNo previous sessions found.\n".into(),
-                                ));
-                            } else {
-                                // Map SessionMetadata -> SessionPickerEntry
-                                // verbatim from slash.rs:674-683.
-                                let entries: Vec<SessionPickerEntry> = results
-                                    .iter()
-                                    .map(|m| SessionPickerEntry {
-                                        id: m.id.clone(),
-                                        name: m.name.clone().unwrap_or_default(),
-                                        turns: m.message_count / 2,
-                                        cost: m.total_cost,
-                                        last_active: m.last_active.chars().take(10).collect(),
-                                    })
-                                    .collect();
-                                let _ = ctx.tui_tx.send(TuiEvent::ShowSessionPicker(entries));
-                            }
-                        }
-                        Err(e) => {
-                            ctx.emit(TuiEvent::Error(format!("Search failed: {e}")));
-                        }
-                    }
-                } else {
-                    // 2b. Named-arg path: resolve by name or ID prefix.
-                    //     Shipped behaviour at slash.rs:694-716.
-                    match archon_session::naming::resolve_by_name(&store, arg) {
-                        Ok(Some(meta)) => {
-                            ctx.emit(TuiEvent::TextDelta(format!(
-                                "\nSession found: {}\nRestart with: \
-                                     archon --resume {}\n",
-                                meta.id, meta.id
-                            )));
-                        }
-                        Ok(None) => {
-                            ctx.emit(TuiEvent::TextDelta(format!(
-                                "\nNo session matching '{arg}'. Use \
-                                     /sessions to list.\n"
-                            )));
-                        }
-                        Err(e) => {
-                            ctx.emit(TuiEvent::Error(format!("Lookup failed: {e}")));
-                        }
+        let Some(store) = ctx.session_store.as_deref() else {
+            ctx.emit(TuiEvent::Error("Session store unavailable".into()));
+            return Ok(());
+        };
+
+        if arg.is_empty() {
+            // 2a. No-arg path: show interactive session picker.
+            //     Shipped behaviour at slash.rs:662-692.
+            let query = archon_session::search::SessionSearchQuery::default();
+            match archon_session::search::search_sessions(&store, &query) {
+                Ok(results) => {
+                    if results.is_empty() {
+                        ctx.emit(TuiEvent::TextDelta(
+                            "\nNo previous sessions found.\n".into(),
+                        ));
+                    } else {
+                        // Map SessionMetadata -> SessionPickerEntry
+                        // verbatim from slash.rs:674-683.
+                        let entries: Vec<SessionPickerEntry> = results
+                            .iter()
+                            .map(|m| SessionPickerEntry {
+                                id: m.id.clone(),
+                                name: m.name.clone().unwrap_or_default(),
+                                turns: m.message_count / 2,
+                                cost: m.total_cost,
+                                last_active: m.last_active.chars().take(10).collect(),
+                            })
+                            .collect();
+                        let _ = ctx.tui_tx.send(TuiEvent::ShowSessionPicker(entries));
                     }
                 }
+                Err(e) => {
+                    ctx.emit(TuiEvent::Error(format!("Search failed: {e}")));
+                }
             }
-            Err(e) => {
-                ctx.emit(TuiEvent::Error(format!("Session store error: {e}")));
+        } else {
+            // 2b. Named-arg path: resolve by name or ID prefix.
+            //     Shipped behaviour at slash.rs:694-716.
+            match archon_session::naming::resolve_by_name(&store, arg) {
+                Ok(Some(meta)) => {
+                    ctx.emit(TuiEvent::TextDelta(format!(
+                        "\nSession found: {}\nRestart with: \
+                                     archon --resume {}\n",
+                        meta.id, meta.id
+                    )));
+                }
+                Ok(None) => {
+                    ctx.emit(TuiEvent::TextDelta(format!(
+                        "\nNo session matching '{arg}'. Use \
+                                     /sessions to list.\n"
+                    )));
+                }
+                Err(e) => {
+                    ctx.emit(TuiEvent::Error(format!("Lookup failed: {e}")));
+                }
             }
         }
         Ok(())

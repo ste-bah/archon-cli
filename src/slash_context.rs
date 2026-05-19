@@ -30,6 +30,7 @@ pub(crate) struct SlashCommandContext {
     pub(crate) session_stats: Arc<tokio::sync::Mutex<SessionStats>>,
     pub(crate) permission_mode: Arc<tokio::sync::Mutex<String>>,
     pub(crate) session_id: String,
+    pub(crate) session_store: Arc<archon_session::storage::SessionStore>,
     pub(crate) cost_config: archon_core::config::CostConfig,
     pub(crate) memory: Arc<dyn MemoryTrait>,
     pub(crate) garden_config: GardenConfig,

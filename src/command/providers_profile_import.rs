@@ -235,16 +235,7 @@ fn profile_status(profile: &ProviderAuthProfileRecord) -> &'static str {
 }
 
 fn open_learning_db() -> Result<DbInstance> {
-    let base = archon_session::storage::default_db_path();
-    let parent = base
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("cannot determine data directory"))?;
-    let path = parent.join("learning.db");
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let path_str = path.to_string_lossy().to_string();
-    DbInstance::new("sqlite", &path_str, "").map_err(|e| anyhow::anyhow!("open learning db: {e}"))
+    crate::command::store_paths::open_evidence_db("learning", &["ARCHON_LEARNING_DB_PATH"])
 }
 
 fn secret_fingerprint(value: &str) -> String {

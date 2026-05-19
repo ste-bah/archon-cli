@@ -299,16 +299,7 @@ fn upload_root() -> Result<PathBuf> {
 }
 
 fn open_docs_db() -> Result<DbInstance> {
-    let path = dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from(".local/share"))
-        .join("archon")
-        .join("docs.db");
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let path_str = path.to_string_lossy().to_string();
-    let db = DbInstance::new("sqlite", &path_str, "")
-        .map_err(|err| anyhow::anyhow!("failed to open document store at {path_str}: {err}"))?;
+    let db = crate::command::store_paths::open_evidence_db("document", &["ARCHON_DOCS_DB_PATH"])?;
     archon_docs::schema::ensure_doc_schema(&db)?;
     Ok(db)
 }

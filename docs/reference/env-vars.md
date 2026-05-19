@@ -27,8 +27,14 @@
 | `ARCHON_LOG` | Override log level |
 | `RUST_LOG` | Tracing subscriber filter |
 | `ARCHON_DATA_DIR` | Override per-user state dir (default: `~/.local/share/archon`) |
+| `ARCHON_EVIDENCE_DB_PATH` | Override the shared project evidence store used by docs, completion, provenance, knowledge, meaning, constellation, game-theory, and governed-learning commands |
+| `ARCHON_COMPLETION_DB_PATH` | Override completion evidence store path only |
+| `ARCHON_DOCS_DB_PATH` | Override docs evidence store path only |
+| `ARCHON_LEARNING_DB_PATH` | Override governed-learning evidence store path only |
+| `ARCHON_SESSION_DB_PATH` | Override session database path; otherwise `[session].db_path` is used when configured |
 | `ARCHON_SESSIONS_DIR` | Override session directory |
 | `ARCHON_NO_TUI` | Force headless mode |
+| `ARCHON_TRUST_USER_GRAMMARS` | Set to `1`, `true`, or `yes` to allow TUI syntax highlighting to load user-provided tree-sitter `.so` grammars |
 | `EDITOR` | Used by `/commit` and skill workflows that open an editor |
 | `SHELL` | Inherited by `Bash` tool subprocesses |
 | `HOME` | Used to resolve `~/.config/archon/` and `~/.local/share/archon/` |

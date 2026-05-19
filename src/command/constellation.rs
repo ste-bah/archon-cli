@@ -9,26 +9,16 @@ use cozo::DbInstance;
 use crate::cli_args::ConstellationAction;
 
 fn constellation_db_path() -> PathBuf {
-    std::env::var_os("ARCHON_CONSTELLATION_DB_PATH")
-        .or_else(|| std::env::var_os("ARCHON_MEANING_DB_PATH"))
-        .or_else(|| std::env::var_os("ARCHON_KB_DB_PATH"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            dirs::data_dir()
-                .unwrap_or_else(|| PathBuf::from(".local/share"))
-                .join("archon")
-                .join("docs.db")
-        })
+    crate::command::store_paths::evidence_db_path(&[
+        "ARCHON_CONSTELLATION_DB_PATH",
+        "ARCHON_MEANING_DB_PATH",
+        "ARCHON_KB_DB_PATH",
+    ])
 }
 
 fn open_db() -> Result<DbInstance> {
     let db_path = constellation_db_path();
-    if let Some(parent) = db_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let path_str = db_path.to_string_lossy().to_string();
-    let db = DbInstance::new("sqlite", &path_str, "")
-        .map_err(|e| anyhow::anyhow!("Failed to open constellation store at {path_str}: {e}"))?;
+    let db = crate::command::store_paths::open_sqlite_db(&db_path, "constellation")?;
     archon_constellation::ensure_schema(&db)?;
     Ok(db)
 }

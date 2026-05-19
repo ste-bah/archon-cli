@@ -1,6 +1,7 @@
 # Coding Pipeline Manifest — 50-agent execution order
 # Source: crates/archon-pipeline/src/coding/agents.rs AGENTS array
-# This file is the SOLE authority on execution order and phase assignment.
+# Runtime execution order is currently compiled from the AGENTS array.
+# Keep this manifest in sync until the pipeline loader becomes the authority.
 
 [pipeline]
 name = "coding"

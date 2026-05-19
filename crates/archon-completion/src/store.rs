@@ -220,6 +220,82 @@ pub fn insert_completion_evidence(db: &DbInstance, ev: &CompletionEvidence) -> R
     );
     params.insert("pr".into(), DataValue::from(ev.producer.as_str()));
     params.insert(
+        "cmd".into(),
+        DataValue::from(ev.command_or_operation.as_deref().unwrap_or("")),
+    );
+    params.insert(
+        "st".into(),
+        DataValue::from(evidence_status_str(&ev.status)),
+    );
+    params.insert(
+        "ec".into(),
+        DataValue::from(ev.exit_code.unwrap_or(0) as i64),
+    );
+    params.insert(
+        "ih".into(),
+        DataValue::from(ev.input_hash.as_deref().unwrap_or("")),
+    );
+    params.insert(
+        "oh".into(),
+        DataValue::from(ev.output_hash.as_deref().unwrap_or("")),
+    );
+    params.insert(
+        "out".into(),
+        DataValue::from(ev.stdout_summary.as_deref().unwrap_or("")),
+    );
+    params.insert(
+        "err".into(),
+        DataValue::from(ev.stderr_summary.as_deref().unwrap_or("")),
+    );
+    params.insert(
+        "aj".into(),
+        DataValue::from(
+            serde_json::to_string(&ev.artifact_ids)
+                .unwrap_or_default()
+                .as_str(),
+        ),
+    );
+    params.insert(
+        "prid".into(),
+        DataValue::from(ev.provenance_record_id.as_str()),
+    );
+    params.insert("sa".into(), DataValue::from(ev.started_at.as_str()));
+    params.insert(
+        "coa".into(),
+        DataValue::from(ev.completed_at.as_deref().unwrap_or("")),
+    );
+
+    let insert = db.run_script(
+        "?[evidence_id, run_id, evidence_kind, producer, status, exit_code, \
+         input_hash, output_hash, command_or_operation, stdout_summary, stderr_summary, \
+         artifact_ids_json, provenance_record_id, started_at, completed_at] \
+         <- [[$eid, $rid, $ek, $pr, $st, $ec, $ih, $oh, $cmd, $out, $err, $aj, $prid, $sa, $coa]] \
+         :put completion_evidence { evidence_id => run_id, evidence_kind, producer, \
+         status, exit_code, input_hash, output_hash, command_or_operation, \
+         stdout_summary, stderr_summary, artifact_ids_json, provenance_record_id, \
+         started_at, completed_at }",
+        params,
+        ScriptMutability::Mutable,
+    );
+    if let Err(e) = insert {
+        if is_legacy_completion_evidence_error(&e.to_string()) {
+            return insert_completion_evidence_legacy(db, ev);
+        }
+        return Err(anyhow::anyhow!("insert completion_evidence failed: {e}"));
+    }
+    Ok(())
+}
+
+fn insert_completion_evidence_legacy(db: &DbInstance, ev: &CompletionEvidence) -> Result<()> {
+    let mut params = BTreeMap::new();
+    params.insert("eid".into(), DataValue::from(ev.evidence_id.as_str()));
+    params.insert("rid".into(), DataValue::from(ev.run_id.as_str()));
+    params.insert(
+        "ek".into(),
+        DataValue::from(evidence_kind_str(&ev.evidence_kind)),
+    );
+    params.insert("pr".into(), DataValue::from(ev.producer.as_str()));
+    params.insert(
         "st".into(),
         DataValue::from(evidence_status_str(&ev.status)),
     );
@@ -264,7 +340,7 @@ pub fn insert_completion_evidence(db: &DbInstance, ev: &CompletionEvidence) -> R
         params,
         ScriptMutability::Mutable,
     )
-    .map_err(|e| anyhow::anyhow!("insert completion_evidence failed: {e}"))?;
+    .map_err(|e| anyhow::anyhow!("insert legacy completion_evidence failed: {e}"))?;
     Ok(())
 }
 
@@ -272,18 +348,23 @@ pub fn get_evidence_by_run(db: &DbInstance, run_id: &str) -> Result<Vec<Completi
     let mut params = BTreeMap::new();
     params.insert("rid".into(), DataValue::from(run_id));
 
-    let result = db
-        .run_script(
-            "?[evidence_id, evidence_kind, producer, status, exit_code, \
-         input_hash, output_hash, artifact_ids_json, provenance_record_id, \
-         started_at, completed_at] \
+    let result = match db.run_script(
+        "?[evidence_id, evidence_kind, producer, status, exit_code, \
+         input_hash, output_hash, command_or_operation, stdout_summary, stderr_summary, \
+         artifact_ids_json, provenance_record_id, started_at, completed_at] \
          := *completion_evidence{evidence_id, run_id: $rid, evidence_kind, \
          producer, status, exit_code, input_hash, output_hash, \
-         artifact_ids_json, provenance_record_id, started_at, completed_at}",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("query completion_evidence failed: {e}"))?;
+         command_or_operation, stdout_summary, stderr_summary, artifact_ids_json, \
+         provenance_record_id, started_at, completed_at}",
+        params.clone(),
+        ScriptMutability::Immutable,
+    ) {
+        Ok(result) => result,
+        Err(e) if is_legacy_completion_evidence_error(&e.to_string()) => {
+            return get_evidence_by_run_legacy(db, run_id);
+        }
+        Err(e) => return Err(anyhow::anyhow!("query completion_evidence failed: {e}")),
+    };
 
     result
         .rows
@@ -298,16 +379,64 @@ pub fn get_evidence_by_run(db: &DbInstance, run_id: &str) -> Result<Vec<Completi
                 exit_code: Some(row[4].get_int().unwrap_or(0) as i32),
                 input_hash: opt_str(&row[5]),
                 output_hash: opt_str(&row[6]),
+                command_or_operation: opt_str(&row[7]),
+                stdout_summary: opt_str(&row[8]),
+                stderr_summary: opt_str(&row[9]),
+                artifact_ids: parse_string_list(req_str(row, 10)?),
+                provenance_record_id: req_str(row, 11)?.to_string(),
+                started_at: req_str(row, 12)?.to_string(),
+                completed_at: opt_str(&row[13]),
+            })
+        })
+        .collect()
+}
+
+fn get_evidence_by_run_legacy(db: &DbInstance, run_id: &str) -> Result<Vec<CompletionEvidence>> {
+    let mut params = BTreeMap::new();
+    params.insert("rid".into(), DataValue::from(run_id));
+
+    let result = db
+        .run_script(
+            "?[evidence_id, evidence_kind, producer, status, exit_code, \
+         input_hash, output_hash, artifact_ids_json, provenance_record_id, \
+         started_at, completed_at] \
+         := *completion_evidence{evidence_id, run_id: $rid, evidence_kind, \
+         producer, status, exit_code, input_hash, output_hash, \
+         artifact_ids_json, provenance_record_id, started_at, completed_at}",
+            params,
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("query legacy completion_evidence failed: {e}"))?;
+
+    result
+        .rows
+        .iter()
+        .map(|row| {
+            Ok(CompletionEvidence {
+                evidence_id: req_str(row, 0)?.to_string(),
+                run_id: run_id.to_string(),
+                evidence_kind: parse_evidence_kind(req_str(row, 1)?),
+                producer: req_str(row, 2)?.to_string(),
+                status: parse_evidence_status(req_str(row, 3)?),
+                exit_code: Some(row[4].get_int().unwrap_or(0) as i32),
+                input_hash: opt_str(&row[5]),
+                output_hash: opt_str(&row[6]),
+                command_or_operation: None,
                 stdout_summary: None,
                 stderr_summary: None,
                 artifact_ids: parse_string_list(req_str(row, 7)?),
                 provenance_record_id: req_str(row, 8)?.to_string(),
                 started_at: req_str(row, 9)?.to_string(),
                 completed_at: opt_str(&row[10]),
-                command_or_operation: None,
             })
         })
         .collect()
+}
+
+fn is_legacy_completion_evidence_error(message: &str) -> bool {
+    message.contains("command_or_operation")
+        || message.contains("stdout_summary")
+        || message.contains("stderr_summary")
 }
 
 // ── CompletionReport ─────────────────────────────────────────────────────────
@@ -843,13 +972,13 @@ mod tests {
             run_id: run_id.to_string(),
             evidence_kind: kind,
             producer: "test".into(),
-            command_or_operation: None,
+            command_or_operation: Some("cargo test".into()),
             status,
             exit_code: Some(0),
             input_hash: None,
             output_hash: None,
-            stdout_summary: None,
-            stderr_summary: None,
+            stdout_summary: Some("ok".into()),
+            stderr_summary: Some("no stderr".into()),
             artifact_ids: vec![],
             provenance_record_id: "prov-1".into(),
             started_at: chrono::Utc::now().to_rfc3339(),
@@ -910,6 +1039,9 @@ mod tests {
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].evidence_kind, EvidenceKind::TestRun);
         assert_eq!(all[0].status, EvidenceStatus::Passed);
+        assert_eq!(all[0].command_or_operation, ev.command_or_operation);
+        assert_eq!(all[0].stdout_summary, ev.stdout_summary);
+        assert_eq!(all[0].stderr_summary, ev.stderr_summary);
     }
 
     #[test]

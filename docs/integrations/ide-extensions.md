@@ -7,17 +7,19 @@ archon-cli runs inside IDEs via the `ide-stdio` subcommand, which exposes a JSON
 `archon ide-stdio` reads JSON-RPC 2.0 requests on stdin and writes responses to stdout. Notifications stream alongside (no `id` field).
 
 ```jsonc
-// Request: send a user message
-{ "jsonrpc": "2.0", "id": 1, "method": "session.send", "params": { "text": "hello" } }
+// Request: send a user prompt
+{ "jsonrpc": "2.0", "id": 1, "method": "archon/prompt", "params": { "text": "hello" } }
 
 // Response: assistant text
 { "jsonrpc": "2.0", "id": 1, "result": { "text": "hi", "tokens": 10 } }
 
-// Notification: streaming text delta
-{ "jsonrpc": "2.0", "method": "session.delta", "params": { "text": "hi", "session_id": "..." } }
+// Notification: streaming status
+{ "jsonrpc": "2.0", "method": "archon/status", "params": { "state": "running", "session_id": "..." } }
 ```
 
-Methods include `session.send`, `session.fork`, `session.resume`, `tools.list`, `agents.list`, `permissions.set`, `metrics.snapshot`. The full method surface lives in `crates/archon-sdk/src/ide.rs`.
+Implemented methods are `archon/initialize`, `archon/prompt`, `archon/cancel`,
+`archon/toolResult`, `archon/status`, and `archon/config`. The handler surface
+lives in `crates/archon-sdk/src/ide/handler.rs`.
 
 ## VS Code
 

@@ -2,7 +2,6 @@
 //!
 //! Wires `archon docs` subcommands to the archon-docs crate.
 
-use std::fs;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -21,20 +20,12 @@ use archon_docs::vlm::factory::{self as vlm_factory, VlmProviderInitStatus};
 use crate::cli_args::DocsAction;
 
 fn docs_db_path() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from(".local/share"))
-        .join("archon")
-        .join("docs.db")
+    crate::command::store_paths::evidence_db_path(&["ARCHON_DOCS_DB_PATH"])
 }
 
 fn open_db() -> Result<DbInstance> {
     let db_path = docs_db_path();
-    if let Some(parent) = db_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let path_str = db_path.to_string_lossy().to_string();
-    let db = DbInstance::new("sqlite", &path_str, "")
-        .map_err(|e| anyhow::anyhow!("Failed to open document store at {path_str}: {e}"))?;
+    let db = crate::command::store_paths::open_sqlite_db(&db_path, "document")?;
     ensure_doc_schema(&db)?;
     Ok(db)
 }

@@ -94,7 +94,8 @@ subagents, coding/research pipelines, and gametheory through Codex.
 | `-p, --print [QUERY]` | Non-interactive single-query mode (`-p` reads stdin) |
 | `--input-format <FMT>` | `text` / `json` / `stream-json` (default: text) |
 | `--output-format <FMT>` | `text` / `json` / `stream-json` (default: text) |
-| `--json-schema <SCHEMA>` | Validate final assistant output against JSON schema |
+| `--json-schema <SCHEMA>` | Validate final assistant output against an inline JSON schema string |
+| `--json-schema-path <PATH>` | Validate final assistant output against a JSON schema file |
 | `--max-turns <N>` | Hard cap on agent turns |
 | `--max-budget-usd <AMOUNT>` | Hard cost limit in USD |
 | `--no-session-persistence` | Don't persist session to disk (print mode) |

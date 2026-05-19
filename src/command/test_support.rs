@@ -409,6 +409,7 @@ impl CtxBuilder {
                 mcp_snapshot: self.mcp_snapshot,
                 context_snapshot: self.context_snapshot,
                 session_id: self.session_id,
+                session_store: None,
                 memory: self.memory,
                 garden_config: self.garden_config,
                 fast_mode_shared: self.fast_mode_shared,

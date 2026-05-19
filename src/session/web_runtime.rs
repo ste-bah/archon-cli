@@ -253,6 +253,7 @@ pub(crate) async fn spawn_web_session(
             session_stats: session_stats_shared,
             permission_mode: permission_mode_shared,
             session_id: session_id.to_string(),
+            session_store: Arc::clone(&session_store),
             cost_config: config.cost.clone(),
             memory: Arc::clone(&memory),
             garden_config: config.memory.garden.clone(),

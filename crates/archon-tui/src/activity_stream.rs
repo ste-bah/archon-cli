@@ -1,9 +1,13 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
+use crate::activity_stream_helpers::{
+    actor_subtitle, is_streaming_line, keeps_empty_line, name_style, role_label,
+    sanitize_activity_text, status_style, status_text, summarize, visible_text_lines,
+};
 use crate::activity_stream_layout::{inset, overlay_area};
 use crate::app::App;
 use crate::events::{
@@ -107,16 +111,7 @@ impl ActivityStreamState {
         }
         actor.updated_seq = next_seq;
         if should_keep_line(&update) {
-            actor.lines.push(ActivityLine {
-                kind: update.kind,
-                text: update.text,
-                tool: update.tool,
-                is_error: update.is_error,
-            });
-            if actor.lines.len() > MAX_LINES_PER_ACTOR {
-                let overflow = actor.lines.len() - MAX_LINES_PER_ACTOR;
-                actor.lines.drain(0..overflow);
-            }
+            actor.push_activity_line(update);
         }
         self.sort_actors();
         if self.follow_latest {
@@ -202,6 +197,41 @@ impl ActivityStreamState {
             )
         });
         self.selected = self.selected.min(self.actors.len().saturating_sub(1));
+    }
+}
+
+impl ActivityActor {
+    fn push_activity_line(&mut self, update: ActivityStreamUpdate) {
+        let text = sanitize_activity_text(&update.text);
+        if text.is_empty() && !keeps_empty_line(update.kind) {
+            return;
+        }
+
+        if is_streaming_line(update.kind)
+            && let Some(last) = self.lines.last_mut()
+            && last.kind == update.kind
+            && last.tool == update.tool
+            && last.is_error == update.is_error
+        {
+            last.text.push_str(&text);
+            self.trim_lines();
+            return;
+        }
+
+        self.lines.push(ActivityLine {
+            kind: update.kind,
+            text,
+            tool: update.tool,
+            is_error: update.is_error,
+        });
+        self.trim_lines();
+    }
+
+    fn trim_lines(&mut self) {
+        if self.lines.len() > MAX_LINES_PER_ACTOR {
+            let overflow = self.lines.len() - MAX_LINES_PER_ACTOR;
+            self.lines.drain(0..overflow);
+        }
     }
 }
 
@@ -328,7 +358,11 @@ fn render_actor_list(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(actor.name.clone(), name_style(selected, &app.theme)),
         ]));
         lines.push(Line::from(Span::styled(
-            actor_subtitle(actor),
+            actor_subtitle(
+                actor.provider.as_deref(),
+                actor.model.as_deref(),
+                actor.status,
+            ),
             Style::default().fg(app.theme.muted),
         )));
     }
@@ -354,7 +388,14 @@ fn render_stream(frame: &mut Frame, app: &App, area: Rect) {
             status_style(actor.status, &app.theme),
         ),
         Span::raw("  "),
-        Span::styled(actor_subtitle(actor), Style::default().fg(app.theme.muted)),
+        Span::styled(
+            actor_subtitle(
+                actor.provider.as_deref(),
+                actor.model.as_deref(),
+                actor.status,
+            ),
+            Style::default().fg(app.theme.muted),
+        ),
     ])];
     lines.push(Line::raw(""));
     for item in &actor.lines {
@@ -405,7 +446,14 @@ fn line_rows<'a>(item: &ActivityLine, theme: &crate::theme::Theme) -> Vec<Line<'
                 .unwrap_or_default(),
         ),
     ]));
-    for line in item.text.lines().take(16) {
+    let visible = visible_text_lines(&item.text);
+    if visible.omitted > 0 {
+        rows.push(Line::from(Span::styled(
+            format!("  ... {} earlier lines omitted", visible.omitted),
+            Style::default().fg(theme.muted),
+        )));
+    }
+    for line in visible.lines {
         rows.push(Line::from(Span::styled(
             format!("  {line}"),
             Style::default().fg(color),
@@ -418,68 +466,6 @@ fn should_keep_line(update: &ActivityStreamUpdate) -> bool {
     update.kind != ActivityStreamLineKind::Status
         || !update.text.trim().is_empty()
         || update.status != AgentActivityStatus::Running
-}
-
-fn role_label(role: AgentActivityRole) -> &'static str {
-    match role {
-        AgentActivityRole::Parent => "[PARENT]",
-        AgentActivityRole::Subagent => "[AGENT]",
-        AgentActivityRole::Background => "[BG]",
-    }
-}
-
-fn status_text(status: AgentActivityStatus) -> &'static str {
-    match status {
-        AgentActivityStatus::Queued => "queued",
-        AgentActivityStatus::Running => "running",
-        AgentActivityStatus::Waiting => "waiting",
-        AgentActivityStatus::WaitingForTool => "tool",
-        AgentActivityStatus::Backgrounded => "background",
-        AgentActivityStatus::Complete => "done",
-        AgentActivityStatus::Failed => "failed",
-        AgentActivityStatus::Cancelled => "cancelled",
-    }
-}
-
-fn status_style(status: AgentActivityStatus, theme: &crate::theme::Theme) -> Style {
-    let color = match status {
-        AgentActivityStatus::Complete => Color::Green,
-        AgentActivityStatus::Failed => Color::Red,
-        AgentActivityStatus::Cancelled => Color::DarkGray,
-        AgentActivityStatus::Waiting | AgentActivityStatus::WaitingForTool => Color::Yellow,
-        AgentActivityStatus::Backgrounded => Color::Cyan,
-        AgentActivityStatus::Queued => Color::DarkGray,
-        AgentActivityStatus::Running => theme.accent,
-    };
-    Style::default().fg(color).add_modifier(Modifier::BOLD)
-}
-
-fn name_style(selected: bool, theme: &crate::theme::Theme) -> Style {
-    let style = Style::default().fg(theme.fg);
-    if selected {
-        style.add_modifier(Modifier::BOLD)
-    } else {
-        style
-    }
-}
-
-fn actor_subtitle(actor: &ActivityActor) -> String {
-    match (&actor.provider, &actor.model) {
-        (Some(provider), Some(model)) => format!("{provider} / {model}"),
-        (None, Some(model)) => model.clone(),
-        (Some(provider), None) => provider.clone(),
-        (None, None) => status_text(actor.status).into(),
-    }
-}
-
-fn summarize(output: &str) -> String {
-    let trimmed = output.trim();
-    if trimmed.chars().count() <= 500 {
-        return trimmed.to_string();
-    }
-    let mut summary: String = trimmed.chars().take(500).collect();
-    summary.push_str("...");
-    summary
 }
 
 #[cfg(test)]

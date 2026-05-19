@@ -82,51 +82,57 @@ impl MessageLoader for RealMessageLoader {
         let db_path = archon_session::storage::default_db_path();
         let store = archon_session::storage::SessionStore::open(&db_path)
             .map_err(|e| format!("session store open failed: {e}"))?;
+        load_message_summaries(&store, session_id)
+    }
+}
 
-        let raw = store
-            .load_messages(session_id)
-            .map_err(|e| format!("load_messages failed: {e}"))?;
+fn load_message_summaries(
+    store: &archon_session::storage::SessionStore,
+    session_id: &str,
+) -> Result<Vec<MessageSummary>, String> {
+    let raw = store
+        .load_messages(session_id)
+        .map_err(|e| format!("load_messages failed: {e}"))?;
 
-        let mut out: Vec<MessageSummary> = Vec::new();
-        for (idx, raw_msg) in raw.iter().enumerate() {
-            let value: serde_json::Value = match serde_json::from_str(raw_msg) {
-                Ok(v) => v,
-                Err(_) => continue, // skip malformed rows
-            };
+    let mut out: Vec<MessageSummary> = Vec::new();
+    for (idx, raw_msg) in raw.iter().enumerate() {
+        let value: serde_json::Value = match serde_json::from_str(raw_msg) {
+            Ok(v) => v,
+            Err(_) => continue, // skip malformed rows
+        };
 
-            // Same content-extraction shape as the /resume path in
-            // src/session.rs around line 2123 — handle String and
-            // Array-of-{text} forms.
-            let content = match &value["content"] {
-                serde_json::Value::String(s) => s.clone(),
-                serde_json::Value::Array(arr) => arr
-                    .iter()
-                    .filter_map(|item| item["text"].as_str().map(|s| s.to_string()))
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-                _ => String::new(),
-            };
-            if content.is_empty() {
-                continue;
-            }
-
-            let timestamp = value["timestamp"]
-                .as_str()
-                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-                .map(|dt| dt.with_timezone(&chrono::Utc))
-                .unwrap_or_else(chrono::Utc::now);
-
-            let preview: String = content.chars().take(80).collect();
-
-            out.push(MessageSummary {
-                id: format!("msg-{idx:03}"),
-                timestamp,
-                preview,
-            });
+        // Same content-extraction shape as the /resume path in
+        // src/session.rs around line 2123 — handle String and
+        // Array-of-{text} forms.
+        let content = match &value["content"] {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Array(arr) => arr
+                .iter()
+                .filter_map(|item| item["text"].as_str().map(|s| s.to_string()))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            _ => String::new(),
+        };
+        if content.is_empty() {
+            continue;
         }
 
-        Ok(out)
+        let timestamp = value["timestamp"]
+            .as_str()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+            .unwrap_or_else(chrono::Utc::now);
+
+        let preview: String = content.chars().take(80).collect();
+
+        out.push(MessageSummary {
+            id: format!("msg-{idx:03}"),
+            timestamp,
+            preview,
+        });
     }
+
+    Ok(out)
 }
 
 pub(crate) struct RewindHandler {
@@ -152,10 +158,13 @@ impl CommandHandler for RewindHandler {
             anyhow::anyhow!("no active session — start a session before using /rewind")
         })?;
 
-        let messages = self
-            .loader
-            .load(&session_id)
-            .map_err(|e| anyhow::anyhow!(e))?;
+        let messages = if let Some(store) = ctx.session_store.as_deref() {
+            load_message_summaries(store, &session_id).map_err(|e| anyhow::anyhow!(e))?
+        } else {
+            self.loader
+                .load(&session_id)
+                .map_err(|e| anyhow::anyhow!(e))?
+        };
 
         if messages.is_empty() {
             return Err(anyhow::anyhow!("no messages to rewind to"));

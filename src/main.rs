@@ -423,12 +423,14 @@ async fn main() -> Result<()> {
 
     // Handle --resume with no ID: list recent sessions and exit
     if let Some(None) = &cli.resume {
-        return crate::session::handle_resume_list().await;
+        return crate::session::handle_resume_list_with_config(&config).await;
     }
 
     // For --resume with ID, load the session messages to restore
     let mut resume_messages = if let Some(Some(ref id)) = cli.resume {
-        Some(crate::session::load_resume_messages(id)?)
+        Some(crate::session::load_resume_messages_with_config(
+            id, &config,
+        )?)
     } else {
         None
     };
@@ -437,7 +439,7 @@ async fn main() -> Result<()> {
     if cli.continue_session && resume_messages.is_none() {
         let cwd = std::env::current_dir().unwrap_or_default();
         let cwd_str = cwd.to_string_lossy().to_string();
-        let db_path = archon_session::storage::default_db_path();
+        let db_path = crate::command::store_paths::session_db_path(&config);
         if let Ok(store) = archon_session::storage::SessionStore::open(&db_path) {
             match archon_session::listing::most_recent_in_directory(&store, &cwd_str) {
                 Ok(Some(meta)) => {
@@ -480,7 +482,7 @@ async fn main() -> Result<()> {
         // auto_resume is enabled. Look up the most-recent session for this cwd.
         let cwd = std::env::current_dir().unwrap_or_default();
         let cwd_str = cwd.to_string_lossy().to_string();
-        let db_path = archon_session::storage::default_db_path();
+        let db_path = crate::command::store_paths::session_db_path(&config);
         match archon_session::storage::SessionStore::open(&db_path) {
             Ok(store) => {
                 match archon_session::listing::most_recent_in_directory(&store, &cwd_str) {
@@ -524,7 +526,7 @@ async fn main() -> Result<()> {
 
     // ── Session search & management (CLI-208) ──────────────────
     if cli.sessions {
-        return crate::command::sessions::handle_sessions(&cli);
+        return crate::command::sessions::handle_sessions(&cli, &config);
     }
 
     // ── Background sessions (CLI-221) ─────────────────────────
@@ -568,6 +570,10 @@ async fn main() -> Result<()> {
             eprintln!("error: {e}");
             std::process::exit(1);
         });
+        let json_schema = resolve_json_schema(&cli).unwrap_or_else(|e| {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        });
 
         let print_config = PrintModeConfig {
             query,
@@ -576,7 +582,7 @@ async fn main() -> Result<()> {
             max_turns: cli.max_turns,
             max_budget_usd: cli.max_budget_usd,
             no_session_persistence: cli.no_session_persistence,
-            json_schema: cli.json_schema.clone(),
+            json_schema,
         };
 
         // Build a minimal agent for print mode (no TUI)
@@ -613,6 +619,18 @@ async fn main() -> Result<()> {
     .await
 }
 
+fn resolve_json_schema(cli: &Cli) -> Result<Option<String>> {
+    if let Some(schema) = &cli.json_schema {
+        return Ok(Some(schema.clone()));
+    }
+    let Some(path) = &cli.json_schema_path else {
+        return Ok(None);
+    };
+    let schema = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("failed to read JSON schema from {}: {e}", path.display()))?;
+    Ok(Some(schema))
+}
+
 // v0.1.23: Knowledge base CLI handler.
 #[cfg(test)]
 async fn handle_kb_action(action: cli_args::KbAction) -> Result<()> {
@@ -623,6 +641,24 @@ async fn handle_kb_action(action: cli_args::KbAction) -> Result<()> {
 mod wire_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn json_schema_path_reads_schema_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("schema.json");
+        let schema = r#"{"type":"object","required":["ok"]}"#;
+        std::fs::write(&path, schema).unwrap();
+        let cli = Cli::try_parse_from([
+            "archon",
+            "-p",
+            "return json",
+            "--json-schema-path",
+            path.to_str().unwrap(),
+        ])
+        .unwrap();
+
+        assert_eq!(resolve_json_schema(&cli).unwrap(), Some(schema.to_string()));
+    }
 
     #[test]
     fn strip_cache_control_noop_when_enabled() {

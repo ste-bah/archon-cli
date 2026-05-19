@@ -70,7 +70,18 @@ impl SkillRegistry {
     /// Register a skill. Also registers any aliases declared by the skill.
     pub fn register(&mut self, skill: Box<dyn Skill>) {
         let name = skill.name().to_string();
+        if self.skills.contains_key(&name) {
+            tracing::warn!(skill = %name, "replacing previously registered skill");
+        }
         for alias in skill.aliases() {
+            if let Some(existing) = self.aliases.get(alias) {
+                tracing::warn!(
+                    alias,
+                    previous_skill = %existing,
+                    new_skill = %name,
+                    "replacing previously registered skill alias"
+                );
+            }
             self.aliases.insert(alias.to_string(), name.clone());
         }
         self.skills.insert(name, skill);
@@ -78,6 +89,14 @@ impl SkillRegistry {
 
     /// Register an additional alias that maps to an existing skill name.
     pub fn register_alias(&mut self, alias: &str, name: &str) {
+        if let Some(existing) = self.aliases.get(alias) {
+            tracing::warn!(
+                alias,
+                previous_skill = %existing,
+                new_skill = %name,
+                "replacing previously registered skill alias"
+            );
+        }
         self.aliases.insert(alias.to_string(), name.to_string());
     }
 

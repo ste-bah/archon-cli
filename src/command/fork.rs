@@ -107,27 +107,22 @@ impl CommandHandler for ForkHandler {
             Some(name_arg)
         };
 
-        // 3. Open the session store. Every downstream branch depends
-        //    on a valid `SessionStore`; a failure here surfaces as a
-        //    user-facing `TuiEvent::Error`, matching the shipped Err
-        //    arm at slash.rs:638-641.
-        let db_path = archon_session::storage::default_db_path();
-        match archon_session::storage::SessionStore::open(&db_path) {
-            Ok(store) => match archon_session::fork::fork_session(&store, session_id, fork_name) {
-                Ok(new_id) => {
-                    let msg = format!(
-                        "\nConversation forked as: {new_id}\n\
+        let Some(store) = ctx.session_store.as_deref() else {
+            ctx.emit(TuiEvent::Error("Session store unavailable".into()));
+            return Ok(());
+        };
+
+        match archon_session::fork::fork_session(store, session_id, fork_name) {
+            Ok(new_id) => {
+                let msg = format!(
+                    "\nConversation forked as: {new_id}\n\
                              Resume with: archon --resume {new_id}\n\
                              Original session: {session_id}\n"
-                    );
-                    ctx.emit(TuiEvent::TextDelta(msg));
-                }
-                Err(e) => {
-                    ctx.emit(TuiEvent::Error(format!("Fork failed: {e}")));
-                }
-            },
+                );
+                ctx.emit(TuiEvent::TextDelta(msg));
+            }
             Err(e) => {
-                ctx.emit(TuiEvent::Error(format!("Session store error: {e}")));
+                ctx.emit(TuiEvent::Error(format!("Fork failed: {e}")));
             }
         }
         Ok(())

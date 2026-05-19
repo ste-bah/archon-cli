@@ -4,7 +4,9 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use crate::cli_args::Cli;
-pub(crate) use crate::command::utils::{handle_resume_list, load_resume_messages};
+pub(crate) use crate::command::utils::{
+    handle_resume_list_with_config, load_resume_messages_with_config,
+};
 use anyhow::Result;
 use archon_core::agent::{Agent, TimestampedEvent};
 use archon_core::env_vars::ArchonEnvVars;
@@ -85,11 +87,10 @@ fn session_sandbox_backend(
 }
 
 fn open_governed_learning_db(working_dir: &std::path::Path) -> Option<Arc<cozo::DbInstance>> {
-    let session_db = archon_session::storage::default_db_path();
-    let db_path = session_db
-        .parent()
-        .map(|parent| parent.join("learning.db"))
-        .unwrap_or_else(|| working_dir.join(".archon").join("learning.db"));
+    let db_path = std::env::var_os("ARCHON_LEARNING_DB_PATH")
+        .or_else(|| std::env::var_os("ARCHON_EVIDENCE_DB_PATH"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| working_dir.join(".archon").join("archon-data.db"));
     if let Some(parent) = db_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }

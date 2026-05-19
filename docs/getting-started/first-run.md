@@ -87,7 +87,7 @@ A 10-second smoke test:
 # 1. Confirm version
 archon --version
 
-# 2. List built-in tools (should be 43)
+# 2. List registered tools (should be 65)
 archon --list-tools | wc -l
 
 # 3. Print mode against a simple file

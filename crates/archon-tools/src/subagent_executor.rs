@@ -4,7 +4,7 @@
 //!
 //! archon-tools does NOT depend on archon-core; instead, archon-core
 //! installs a concrete `AgentSubagentExecutor` into the process-global
-//! OnceLock at startup (from `Agent::new`). Tool code resolves it at
+//! registry at startup (from `Agent::new`). Tool code resolves it at
 //! call time via `get_subagent_executor`. Tests install a
 //! `NoopSubagentExecutor` via `install_subagent_executor` directly.
 //!
@@ -22,7 +22,7 @@
 //!   PRESERVE-D5 (abandoned auto-backgrounded agents get inner side
 //!   effects but NOT visible hooks / worktree cleanup).
 
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
@@ -187,24 +187,33 @@ pub trait SubagentExecutor: Send + Sync {
 // Process-global executor registry.
 // ---------------------------------------------------------------------------
 
-// TODO(post-105): switch to parking_lot::RwLock<Option<Arc<dyn SubagentExecutor>>>
-// when a future test needs swappable executor state (e.g. RecordingExecutor
-// asserting "was save_agent_memory called N times with tags X?"). OnceLock
-// only permits install-once-per-process — swappable state requires a
-// RwLock + serial_test::serial guard. Do NOT refactor speculatively.
-static SUBAGENT_EXECUTOR: OnceLock<Arc<dyn SubagentExecutor>> = OnceLock::new();
+static SUBAGENT_EXECUTOR: OnceLock<RwLock<Option<Arc<dyn SubagentExecutor>>>> = OnceLock::new();
 
-/// Install a subagent executor for the process. First installer wins;
-/// subsequent calls are no-ops (documented install-once-per-process
-/// semantics).
+fn executor_slot() -> &'static RwLock<Option<Arc<dyn SubagentExecutor>>> {
+    SUBAGENT_EXECUTOR.get_or_init(|| RwLock::new(None))
+}
+
+/// Install or replace the subagent executor for the process.
+///
+/// Replacing is deliberate: a session restart or model/provider switch
+/// must not be pinned to the first executor that happened to initialize
+/// in this process.
 pub fn install_subagent_executor(exec: Arc<dyn SubagentExecutor>) {
-    // get_or_init expects `Fn() -> T`, so we wrap the clone in a closure.
-    // We deliberately ignore the return value — callers don't need to
-    // know whether their install was the winning one.
-    let _ = SUBAGENT_EXECUTOR.get_or_init(|| exec);
+    match executor_slot().write() {
+        Ok(mut slot) => {
+            *slot = Some(exec);
+        }
+        Err(poisoned) => {
+            let mut slot = poisoned.into_inner();
+            *slot = Some(exec);
+        }
+    }
 }
 
 /// Resolve the process-global subagent executor, if installed.
 pub fn get_subagent_executor() -> Option<Arc<dyn SubagentExecutor>> {
-    SUBAGENT_EXECUTOR.get().cloned()
+    match executor_slot().read() {
+        Ok(slot) => slot.clone(),
+        Err(poisoned) => poisoned.into_inner().clone(),
+    }
 }

@@ -118,6 +118,9 @@ struct RawWorldModelPolicy {
     allow_third_party_embeddings: Option<bool>,
     allow_llm_labeler: Option<bool>,
     allow_behavior_changes: Option<bool>,
+    allow_embedding_cache: Option<bool>,
+    allow_world_model_raw_text_storage: Option<bool>,
+    allow_eval_background_jobs: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -315,6 +318,15 @@ fn apply_world_model(policy: &mut WorldModelPolicy, raw: RawWorldModelPolicy) {
     }
     if let Some(value) = raw.allow_behavior_changes {
         policy.allow_behavior_changes = value;
+    }
+    if let Some(value) = raw.allow_embedding_cache {
+        policy.allow_embedding_cache = value;
+    }
+    if let Some(value) = raw.allow_world_model_raw_text_storage {
+        policy.allow_world_model_raw_text_storage = value;
+    }
+    if let Some(value) = raw.allow_eval_background_jobs {
+        policy.allow_eval_background_jobs = value;
     }
 }
 

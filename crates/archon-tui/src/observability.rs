@@ -8,20 +8,19 @@
 //! [`span_channel_send`], [`span_slash_dispatch`], [`RedactionLayer`]) to
 //! `archon_observability::{tracing, redaction}`.
 //!
-//! Post-LIFT this file contains **only re-exports** so every existing
-//! `archon_tui::observability::…` call site (state.rs, session.rs, unit +
-//! integration tests, benches) compiles unchanged. The goal of this shim is
-//! to hold the external surface stable during the wiring subtask that
-//! follows OBS-901; once every caller is migrated to the
-//! `archon_observability::` paths directly, this shim can be deleted.
+//! Post-LIFT this file mostly re-exports the shared observability surface so
+//! every existing `archon_tui::observability::…` call site (state.rs,
+//! session.rs, unit + integration tests, benches) compiles unchanged. It also
+//! retains the TUI-specific drain-side event counters below until those move
+//! into `archon-observability`.
 //!
 //! See `crates/archon-observability/src/metrics.rs` for the metrics impl +
 //! unit tests. `observability_tracing.rs` remains as an OBS-905-era shim
 //! that re-exports the tracing surface; it stays in place until the same
 //! wiring subtask retires it alongside this file.
 //!
-//! **Do not add new code here.** New helpers go into
-//! `archon-observability`.
+//! New cross-crate helpers should go into `archon-observability`; only
+//! TUI-specific compatibility wiring belongs here.
 
 pub use archon_observability::metrics::{
     ChannelMetrics, ChannelMetricsSnapshot, format_prometheus, serve_metrics, serve_metrics_on,

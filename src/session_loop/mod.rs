@@ -276,74 +276,67 @@ pub(crate) fn run_session_loop(
             // Session picker selection — load messages and restore conversation
             if let Some(session_id) = input.strip_prefix("__resume_session__ ") {
                 let session_id = session_id.trim();
-                let db_path = archon_session::storage::default_db_path();
-                match archon_session::storage::SessionStore::open(&db_path) {
-                    Ok(store) => {
-                        // Restore session name badge if present
-                        if let Ok(meta) = store.get_session(session_id)
-                            && let Some(name) = meta.name
-                        {
-                            let _ = input_tui_tx.send(TuiEvent::SessionRenamed(name));
-                        }
-                        match store.load_messages(session_id) {
-                            Ok(raw_messages) => {
-                                // Parse JSON strings back to Values
-                                let messages: Vec<serde_json::Value> = raw_messages
-                                    .iter()
-                                    .filter_map(|s| serde_json::from_str(s).ok())
-                                    .collect();
-                                let count = messages.len();
-                                {
-                                    let mut guard = agent.lock().await;
-                                    guard.clear_conversation_detached()
-                                }
-                                .await;
-
-                                // Display the loaded conversation history in the output
-                                let _ = input_tui_tx.send(TuiEvent::TextDelta(format!(
-                                    "\n━━━ Resumed session {session_id} ({count} messages) ━━━\n\n"
-                                )));
-                                for msg in &messages {
-                                    let role = msg["role"].as_str().unwrap_or("unknown");
-                                    // Extract text content (handles both string and array formats)
-                                    let content = match &msg["content"] {
-                                        serde_json::Value::String(s) => s.clone(),
-                                        serde_json::Value::Array(arr) => arr
-                                            .iter()
-                                            .filter_map(|item| {
-                                                item["text"].as_str().map(|s| s.to_string())
-                                            })
-                                            .collect::<Vec<_>>()
-                                            .join("\n"),
-                                        _ => String::new(),
-                                    };
-                                    if content.is_empty() {
-                                        continue;
-                                    }
-                                    let label = match role {
-                                        "user" => "> ",
-                                        "assistant" => "",
-                                        _ => "",
-                                    };
-                                    let _ = input_tui_tx
-                                        .send(TuiEvent::TextDelta(format!("{label}{content}\n\n")));
-                                }
-                                let _ = input_tui_tx.send(TuiEvent::TextDelta(
-                                    "━━━ End of history — continue conversation ━━━\n\n"
-                                        .to_string(),
-                                ));
-
-                                agent.lock().await.restore_conversation(messages);
-                            }
-                            Err(e) => {
-                                let _ = input_tui_tx
-                                    .send(TuiEvent::Error(format!("Failed to load session: {e}")));
-                            }
-                        }
+                {
+                    let store = Arc::clone(&session_store_for_input);
+                    // Restore session name badge if present
+                    if let Ok(meta) = store.get_session(session_id)
+                        && let Some(name) = meta.name
+                    {
+                        let _ = input_tui_tx.send(TuiEvent::SessionRenamed(name));
                     }
-                    Err(e) => {
-                        let _ =
-                            input_tui_tx.send(TuiEvent::Error(format!("Session store error: {e}")));
+                    match store.load_messages(session_id) {
+                        Ok(raw_messages) => {
+                            // Parse JSON strings back to Values
+                            let messages: Vec<serde_json::Value> = raw_messages
+                                .iter()
+                                .filter_map(|s| serde_json::from_str(s).ok())
+                                .collect();
+                            let count = messages.len();
+                            {
+                                let mut guard = agent.lock().await;
+                                guard.clear_conversation_detached()
+                            }
+                            .await;
+
+                            // Display the loaded conversation history in the output
+                            let _ = input_tui_tx.send(TuiEvent::TextDelta(format!(
+                                "\n━━━ Resumed session {session_id} ({count} messages) ━━━\n\n"
+                            )));
+                            for msg in &messages {
+                                let role = msg["role"].as_str().unwrap_or("unknown");
+                                // Extract text content (handles both string and array formats)
+                                let content = match &msg["content"] {
+                                    serde_json::Value::String(s) => s.clone(),
+                                    serde_json::Value::Array(arr) => arr
+                                        .iter()
+                                        .filter_map(|item| {
+                                            item["text"].as_str().map(|s| s.to_string())
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join("\n"),
+                                    _ => String::new(),
+                                };
+                                if content.is_empty() {
+                                    continue;
+                                }
+                                let label = match role {
+                                    "user" => "> ",
+                                    "assistant" => "",
+                                    _ => "",
+                                };
+                                let _ = input_tui_tx
+                                    .send(TuiEvent::TextDelta(format!("{label}{content}\n\n")));
+                            }
+                            let _ = input_tui_tx.send(TuiEvent::TextDelta(
+                                "━━━ End of history — continue conversation ━━━\n\n".to_string(),
+                            ));
+
+                            agent.lock().await.restore_conversation(messages);
+                        }
+                        Err(e) => {
+                            let _ = input_tui_tx
+                                .send(TuiEvent::Error(format!("Failed to load session: {e}")));
+                        }
                     }
                 }
                 let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
@@ -370,76 +363,69 @@ pub(crate) fn run_session_loop(
                 };
 
                 let target_session_id = session_id_for_input.clone();
-                let db_path = archon_session::storage::default_db_path();
-                match archon_session::storage::SessionStore::open(&db_path) {
-                    Ok(store) => {
-                        if let Err(e) = store.truncate_messages_after(&target_session_id, idx) {
-                            let _ = input_tui_tx
-                                .send(TuiEvent::Error(format!("Failed to truncate session: {e}")));
-                            let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
-                            continue;
-                        }
-
-                        // Reload the retained messages and rebuild the
-                        // in-memory conversation so the next turn sees
-                        // only history up to `idx`.
-                        match store.load_messages(&target_session_id) {
-                            Ok(raw_messages) => {
-                                let messages: Vec<serde_json::Value> = raw_messages
-                                    .iter()
-                                    .filter_map(|s| serde_json::from_str(s).ok())
-                                    .collect();
-                                let count = messages.len();
-                                {
-                                    let mut guard = agent.lock().await;
-                                    guard.clear_conversation_detached()
-                                }
-                                .await;
-
-                                let _ = input_tui_tx.send(TuiEvent::TextDelta(format!(
-                                    "\n━━━ Rewound to message {idx} ({count} messages kept) ━━━\n\n"
-                                )));
-                                for msg in &messages {
-                                    let role = msg["role"].as_str().unwrap_or("unknown");
-                                    let content = match &msg["content"] {
-                                        serde_json::Value::String(s) => s.clone(),
-                                        serde_json::Value::Array(arr) => arr
-                                            .iter()
-                                            .filter_map(|item| {
-                                                item["text"].as_str().map(|s| s.to_string())
-                                            })
-                                            .collect::<Vec<_>>()
-                                            .join("\n"),
-                                        _ => String::new(),
-                                    };
-                                    if content.is_empty() {
-                                        continue;
-                                    }
-                                    let label = match role {
-                                        "user" => "> ",
-                                        "assistant" => "",
-                                        _ => "",
-                                    };
-                                    let _ = input_tui_tx
-                                        .send(TuiEvent::TextDelta(format!("{label}{content}\n\n")));
-                                }
-                                let _ = input_tui_tx.send(TuiEvent::TextDelta(
-                                    "━━━ End of history — continue conversation ━━━\n\n"
-                                        .to_string(),
-                                ));
-
-                                agent.lock().await.restore_conversation(messages);
-                            }
-                            Err(e) => {
-                                let _ = input_tui_tx.send(TuiEvent::Error(format!(
-                                    "Failed to reload session after truncate: {e}"
-                                )));
-                            }
-                        }
+                {
+                    let store = Arc::clone(&session_store_for_input);
+                    if let Err(e) = store.truncate_messages_after(&target_session_id, idx) {
+                        let _ = input_tui_tx
+                            .send(TuiEvent::Error(format!("Failed to truncate session: {e}")));
+                        let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
+                        continue;
                     }
-                    Err(e) => {
-                        let _ =
-                            input_tui_tx.send(TuiEvent::Error(format!("Session store error: {e}")));
+
+                    // Reload the retained messages and rebuild the
+                    // in-memory conversation so the next turn sees
+                    // only history up to `idx`.
+                    match store.load_messages(&target_session_id) {
+                        Ok(raw_messages) => {
+                            let messages: Vec<serde_json::Value> = raw_messages
+                                .iter()
+                                .filter_map(|s| serde_json::from_str(s).ok())
+                                .collect();
+                            let count = messages.len();
+                            {
+                                let mut guard = agent.lock().await;
+                                guard.clear_conversation_detached()
+                            }
+                            .await;
+
+                            let _ = input_tui_tx.send(TuiEvent::TextDelta(format!(
+                                "\n━━━ Rewound to message {idx} ({count} messages kept) ━━━\n\n"
+                            )));
+                            for msg in &messages {
+                                let role = msg["role"].as_str().unwrap_or("unknown");
+                                let content = match &msg["content"] {
+                                    serde_json::Value::String(s) => s.clone(),
+                                    serde_json::Value::Array(arr) => arr
+                                        .iter()
+                                        .filter_map(|item| {
+                                            item["text"].as_str().map(|s| s.to_string())
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join("\n"),
+                                    _ => String::new(),
+                                };
+                                if content.is_empty() {
+                                    continue;
+                                }
+                                let label = match role {
+                                    "user" => "> ",
+                                    "assistant" => "",
+                                    _ => "",
+                                };
+                                let _ = input_tui_tx
+                                    .send(TuiEvent::TextDelta(format!("{label}{content}\n\n")));
+                            }
+                            let _ = input_tui_tx.send(TuiEvent::TextDelta(
+                                "━━━ End of history — continue conversation ━━━\n\n".to_string(),
+                            ));
+
+                            agent.lock().await.restore_conversation(messages);
+                        }
+                        Err(e) => {
+                            let _ = input_tui_tx.send(TuiEvent::Error(format!(
+                                "Failed to reload session after truncate: {e}"
+                            )));
+                        }
                     }
                 }
                 let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);

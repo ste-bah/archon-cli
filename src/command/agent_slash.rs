@@ -43,13 +43,16 @@ impl CommandHandler for AgentHandler {
         let subcommand = args.first().map(|s| s.as_str()).unwrap_or("list");
         let rest: &[String] = if args.is_empty() { &[] } else { &args[1..] };
 
+        if matches!(subcommand, "run" | "exec") {
+            return crate::command::run_agent::RunAgentHandler.execute(ctx, rest);
+        }
+
         let msg = match subcommand {
             "" | "list" => render_list(registry_arc.as_ref()),
             "info" | "show" => match rest.first() {
                 Some(name) => render_info(registry_arc.as_ref(), name),
                 None => render_usage("info: missing <name>"),
             },
-            "run" | "exec" => render_run_hint(rest),
             other => render_usage(&format!("unknown subcommand `{}`", other)),
         };
 
@@ -175,30 +178,6 @@ fn render_info(registry: &RwLock<AgentRegistry>, name: &str) -> String {
             out
         }
     }
-}
-
-fn render_run_hint(rest: &[String]) -> String {
-    if rest.is_empty() {
-        return "\n\
-            /agent run is a delegate-hint command. Use the /run-agent command:\n  \
-            /run-agent <agent-name> <task description>\n\n\
-            Run `/agent list` to see available agent names.\n"
-            .to_string();
-    }
-    let name = &rest[0];
-    let task = if rest.len() > 1 {
-        rest[1..].join(" ")
-    } else {
-        "<task description>".to_string()
-    };
-    format!(
-        "\n\
-        Use the /run-agent command to submit this agent asynchronously:\n  \
-        /run-agent {name} {task}\n\n\
-        The task will be queued and executed; progress is streamed to the TUI.\n",
-        name = name,
-        task = task
-    )
 }
 
 fn render_usage(prefix: &str) -> String {
@@ -363,7 +342,7 @@ mod tests {
     }
 
     #[test]
-    fn run_subcommand_delegates_to_run_agent_skill() {
+    fn run_subcommand_delegates_to_run_agent_handler() {
         let handler = AgentHandler;
         let (mut ctx, mut rx) = make_agent_ctx(Some(fixture_agent_registry()));
         handler
@@ -378,9 +357,14 @@ mod tests {
                 ],
             )
             .unwrap();
-        let body = take_text_delta(&mut rx);
-        assert!(body.contains("/run-agent sherlock-holmes audit the repo"));
-        assert!(body.contains("submit this agent asynchronously"));
+        let events = drain_tui_events(&mut rx);
+        assert!(
+            events.iter().any(|event| {
+                matches!(event, archon_tui::app::TuiEvent::Error(msg) if msg.contains("Unknown agent: sherlock-holmes"))
+            }),
+            "run subcommand should use /run-agent validation, got: {:?}",
+            events
+        );
     }
 
     #[test]

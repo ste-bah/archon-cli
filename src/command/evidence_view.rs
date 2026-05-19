@@ -193,31 +193,14 @@ fn docs_usage_line(reason: &str) -> String {
 }
 
 fn open_docs_db() -> Result<DbInstance> {
-    let path = dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from(".local/share"))
-        .join("archon")
-        .join("docs.db");
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let path_str = path.to_string_lossy().to_string();
-    let db = DbInstance::new("sqlite", &path_str, "")
-        .map_err(|e| anyhow::anyhow!("failed to open document store at {path_str}: {e}"))?;
+    let db = crate::command::store_paths::open_evidence_db("document", &["ARCHON_DOCS_DB_PATH"])?;
     archon_docs::schema::ensure_doc_schema(&db)?;
     Ok(db)
 }
 
 fn open_learning_db() -> Result<DbInstance> {
-    let path = dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from(".local/share"))
-        .join("archon")
-        .join("learning.db");
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let path_str = path.to_string_lossy().to_string();
-    let db = DbInstance::new("sqlite", &path_str, "")
-        .map_err(|e| anyhow::anyhow!("failed to open learning store at {path_str}: {e}"))?;
+    let db =
+        crate::command::store_paths::open_evidence_db("learning", &["ARCHON_LEARNING_DB_PATH"])?;
     archon_learning::schema::ensure_learning_schema(&db)?;
     Ok(db)
 }

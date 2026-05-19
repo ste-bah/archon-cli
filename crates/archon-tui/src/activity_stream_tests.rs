@@ -24,6 +24,40 @@ fn stream_keeps_actor_lines() {
 }
 
 #[test]
+fn streaming_text_deltas_coalesce_into_one_line() {
+    let mut state = ActivityStreamState::default();
+    state.apply_update(update("sherlock", AgentActivityStatus::Running, "HOL"));
+    state.apply_update(update("sherlock", AgentActivityStatus::Running, "MES"));
+    state.apply_update(update("sherlock", AgentActivityStatus::Running, ": ready"));
+
+    assert_eq!(state.actors.len(), 1);
+    assert_eq!(state.actors[0].lines.len(), 1);
+    assert_eq!(state.actors[0].lines[0].text, "HOLMES: ready");
+}
+
+#[test]
+fn streaming_text_deltas_preserve_newlines_inside_coalesced_line() {
+    let mut state = ActivityStreamState::default();
+    state.apply_update(update("sherlock", AgentActivityStatus::Running, "first"));
+    state.apply_update(update("sherlock", AgentActivityStatus::Running, "\nsecond"));
+
+    assert_eq!(state.actors[0].lines.len(), 1);
+    assert_eq!(state.actors[0].lines[0].text, "first\nsecond");
+}
+
+#[test]
+fn activity_text_strips_terminal_escape_sequences() {
+    let mut state = ActivityStreamState::default();
+    state.apply_update(update(
+        "sherlock",
+        AgentActivityStatus::Running,
+        "\u{1b}[33mhello\u{1b}[0m\rworld\u{0008}!",
+    ));
+
+    assert_eq!(state.actors[0].lines[0].text, "hello\nworld!");
+}
+
+#[test]
 fn foreground_can_be_backgrounded() {
     let mut state = ActivityStreamState::default();
     state.open();

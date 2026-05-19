@@ -124,14 +124,10 @@ async fn completion_summary(
     if result.final_output.trim().is_empty() {
         return Ok(None);
     }
-    let data_dir = dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from(".local/share"))
-        .join("archon");
-    std::fs::create_dir_all(&data_dir)?;
-    let path = data_dir.join("archon-data.db");
-    let path_str = path.to_string_lossy().to_string();
-    let db = cozo::DbInstance::new("sqlite", &path_str, "")
-        .map_err(|e| anyhow::anyhow!("open completion store at {path_str}: {e}"))?;
+    let db = crate::command::store_paths::open_evidence_db(
+        "completion",
+        &["ARCHON_COMPLETION_DB_PATH"],
+    )?;
     let task_type = match result.pipeline_type {
         archon_pipeline::runner::PipelineType::Coding => "coding",
         archon_pipeline::runner::PipelineType::Research => "research",

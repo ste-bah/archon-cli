@@ -5,10 +5,12 @@ use crate::cli_args::Cli;
 use crate::command::utils::parse_datetime;
 
 /// Handle `--sessions` flag: search, stats, or delete sessions.
-pub fn handle_sessions(cli: &Cli) -> anyhow::Result<()> {
-    let db_path = archon_session::storage::default_db_path();
-    let store = archon_session::storage::SessionStore::open(&db_path)
-        .map_err(|e| anyhow::anyhow!("failed to open session database: {e}"))?;
+pub fn handle_sessions(
+    cli: &Cli,
+    config: &archon_core::config::ArchonConfig,
+) -> anyhow::Result<()> {
+    let db_path = crate::command::store_paths::session_db_path(config);
+    let store = crate::command::store_paths::open_session_store(&db_path)?;
 
     // --sessions --delete <ID>
     if let Some(ref id) = cli.delete {

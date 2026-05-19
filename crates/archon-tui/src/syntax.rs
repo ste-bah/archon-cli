@@ -1,8 +1,9 @@
 //! Syntax highlighting for code blocks using tree-sitter.
 //!
-//! Provides [`highlight_code`] which attempts to load a tree-sitter grammar
-//! dynamically from `~/.local/share/archon/grammars/` and highlight the code.
-//! When no grammar is available, returns `None` so the caller can fall back.
+//! Provides [`highlight_code`] which can load a tree-sitter grammar
+//! dynamically from `~/.local/share/archon/grammars/` when the user opts in
+//! with `ARCHON_TRUST_USER_GRAMMARS=1`. When no trusted grammar is available,
+//! returns `None` so the caller can fall back.
 //!
 //! [`render_plain_code`] renders code as monospace text with an optional
 //! dim language label — used when no grammar is found.
@@ -60,12 +61,21 @@ const CAPTURE_NAMES: &[&str] = &[
     "punctuation.delimiter",
 ];
 
+const TRUST_USER_GRAMMARS_ENV: &str = "ARCHON_TRUST_USER_GRAMMARS";
+
 /// Grammar storage directory: `~/.local/share/archon/grammars/`.
 pub fn grammar_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from(".local/share"))
         .join("archon")
         .join("grammars")
+}
+
+fn user_grammars_trusted() -> bool {
+    matches!(
+        std::env::var(TRUST_USER_GRAMMARS_ENV).as_deref(),
+        Ok("1") | Ok("true") | Ok("yes")
+    )
 }
 
 /// Resolve the tree-sitter entry-point symbol name for a language.
@@ -84,10 +94,17 @@ fn symbol_name(lang: &str) -> String {
 ///
 /// # Safety
 ///
-/// Loading arbitrary shared libraries is inherently unsafe. We trust that
-/// grammar `.so` files placed in the grammar directory are valid tree-sitter
-/// grammars compiled for the host platform.
+/// Loading arbitrary shared libraries is inherently unsafe, so user-writable
+/// grammar `.so` files are ignored unless `ARCHON_TRUST_USER_GRAMMARS=1`.
 fn load_language(lang: &str) -> Option<tree_sitter::Language> {
+    if !user_grammars_trusted() {
+        tracing::debug!(
+            env = TRUST_USER_GRAMMARS_ENV,
+            "user tree-sitter grammar loading disabled"
+        );
+        return None;
+    }
+
     let dir = grammar_dir();
     let lib_path = dir.join(format!("{lang}.so"));
     if !lib_path.exists() {

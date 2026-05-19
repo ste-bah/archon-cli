@@ -667,14 +667,7 @@ fn print_fingerprint(fp: &gametheory::GameTheoryFingerprint) {
 }
 
 pub(crate) fn open_db() -> Result<DbInstance> {
-    let data_dir = dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from(".local/share"))
-        .join("archon");
-    std::fs::create_dir_all(&data_dir)?;
-    let path = data_dir.join("archon-data.db");
-    let path_str = path.to_string_lossy().to_string();
-    DbInstance::new("sqlite", &path_str, "")
-        .map_err(|e| anyhow::anyhow!("Failed to open gametheory store at {path_str}: {e}"))
+    crate::command::store_paths::open_evidence_db("gametheory", &["ARCHON_GAMETHEORY_DB_PATH"])
 }
 
 #[cfg(test)]

@@ -68,7 +68,7 @@ mod run;
 /// Snapshot of the `Agent` fields that the executor needs.
 ///
 /// This is populated by `Agent::new` and installed into the process
-/// OnceLock via `archon_tools::subagent_executor::install_subagent_executor`.
+/// global executor slot via `archon_tools::subagent_executor::install_subagent_executor`.
 pub struct AgentSubagentExecutor {
     client: Arc<dyn LlmProvider>,
     tool_registry: ToolRegistry,

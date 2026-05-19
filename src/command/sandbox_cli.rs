@@ -307,11 +307,9 @@ fn render_sessions_table(
 }
 
 fn learning_db_path() -> Result<std::path::PathBuf> {
-    let base = archon_session::storage::default_db_path();
-    let parent = base
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("cannot determine data directory"))?;
-    Ok(parent.join("learning.db"))
+    Ok(crate::command::store_paths::evidence_db_path(&[
+        "ARCHON_LEARNING_DB_PATH",
+    ]))
 }
 
 fn open_learning_db(path: &std::path::Path) -> Result<cozo::DbInstance> {

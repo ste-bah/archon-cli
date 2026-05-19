@@ -51,18 +51,17 @@ The governed-learning source of truth is persisted learning state:
 
 ## Proposal Kinds
 
-The proposal engine currently emits these manifest kinds:
+`archon behaviour generate-proposals` currently emits these manifest kinds:
 
 | Kind | Trigger |
 |---|---|
-| `RetrievalProfile` | Retrieval evidence suggests profile changes |
 | `SourceQualityProfile` | Three or more contradictions cluster on one source |
-| `AgentRoutingProfile` | Routing evidence suggests profile changes |
-| `ConstellationThresholds` | Constellation drift suggests threshold changes |
 | `PipelineGates` | Three or more gate failures cluster on one gate |
 | `BehaviouralRuleAdjustment` | Three or more user corrections cluster on one behavioural rule within seven days |
-| `PromptProfile` | Prompt-profile evidence suggests a reviewed prompt change |
-| `PolicyOverride` | Policy evidence suggests an explicit operator-reviewed override |
+
+Agent-evolution proposal commands use a separate proposal engine. That engine
+can emit reviewed agent-manifest changes such as `PromptProfile`,
+`ToolAccessProfile`, `QualityGateProfile`, and `ModelProfile`.
 
 `archon meaning` triplets are also consumed by the GNN auto-trainer as an
 auxiliary loss term. The governed proposal flow remains review-gated; triplet

@@ -106,6 +106,12 @@ pub struct CommandContext {
     /// DIRECT-pattern sync body (no async mutex writes back to
     /// shared state).
     pub(crate) session_id: Option<String>,
+    /// Shared session store for session-management slash commands.
+    ///
+    /// Populated unconditionally from `SlashCommandContext` so `/resume`,
+    /// `/fork`, `/rename`, and `/rewind` use the same configured database
+    /// as the running session instead of reopening the default path.
+    pub(crate) session_store: Option<Arc<archon_session::storage::SessionStore>>,
     /// TASK-AGS-817 DIRECT-pattern field (/memory).
     ///
     /// Shared memory handle for `/memory` (DIRECT pattern). `Arc` clone

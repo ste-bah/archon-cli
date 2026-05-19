@@ -61,12 +61,7 @@ pub(super) async fn prepare(
         .as_ref()
         .map(|s| crate::setup::parse_layer_filter(s));
 
-    let session_db = config
-        .session
-        .db_path
-        .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(archon_session::storage::default_db_path);
+    let session_db = crate::command::store_paths::session_db_path(config);
     let session_store = Arc::new(
         archon_session::storage::SessionStore::open(&session_db)
             .map_err(|e| anyhow::anyhow!("failed to open session store: {e}"))?,
@@ -77,7 +72,11 @@ pub(super) async fn prepare(
     let memory_access = archon_memory::open_memory_with_db_path(&memory_data_dir, &memory_db_path)
         .await
         .unwrap_or_else(|e| {
-            tracing::warn!("failed to open memory: {e}, using in-memory fallback");
+            tracing::warn!("failed to open persistent memory: {e}, using in-memory fallback");
+            eprintln!(
+                "Warning: failed to open persistent memory at {}; using in-memory fallback (memories will not persist): {e}",
+                memory_db_path.display()
+            );
             let graph = MemoryGraph::in_memory().expect("in-memory graph");
             MemoryAccess::Direct {
                 graph: Arc::new(graph),

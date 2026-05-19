@@ -22,6 +22,9 @@ impl ToolRegistry {
     /// Register a tool.
     pub fn register(&mut self, tool: Box<dyn Tool>) {
         let name = tool.name().to_string();
+        if self.tools.contains_key(&name) {
+            tracing::warn!(tool = %name, "replacing previously registered tool");
+        }
         self.tools.insert(name, Arc::from(tool));
     }
 

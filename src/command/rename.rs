@@ -158,32 +158,25 @@ impl CommandHandler for RenameHandler {
             )
         })?;
 
-        // Open the session store. Every downstream branch depends on a
-        // valid `SessionStore`; a failure here surfaces as a
-        // user-facing `TuiEvent::Error`, matching the shipped Err arm
-        // at slash.rs:454-458.
-        let db_path = archon_session::storage::default_db_path();
-        match archon_session::storage::SessionStore::open(&db_path) {
-            Ok(store) => {
-                match archon_session::naming::set_session_name(&store, session_id, name_arg) {
-                    Ok(()) => {
-                        // Success path: emit SessionRenamed first
-                        // (consumers gate on this variant for TUI
-                        // state), then the human-readable TextDelta.
-                        // Byte-identical to shipped slash.rs:437-445
-                        // order.
-                        ctx.emit(TuiEvent::SessionRenamed(name_arg.to_string()));
-                        ctx.emit(TuiEvent::TextDelta(format!(
-                            "\nSession renamed to: {name_arg}\n"
-                        )));
-                    }
-                    Err(e) => {
-                        ctx.emit(TuiEvent::Error(format!("Rename failed: {e}")));
-                    }
-                }
+        let Some(store) = ctx.session_store.as_deref() else {
+            ctx.emit(TuiEvent::Error("Session store unavailable".into()));
+            return Ok(());
+        };
+
+        match archon_session::naming::set_session_name(store, session_id, name_arg) {
+            Ok(()) => {
+                // Success path: emit SessionRenamed first
+                // (consumers gate on this variant for TUI
+                // state), then the human-readable TextDelta.
+                // Byte-identical to shipped slash.rs:437-445
+                // order.
+                ctx.emit(TuiEvent::SessionRenamed(name_arg.to_string()));
+                ctx.emit(TuiEvent::TextDelta(format!(
+                    "\nSession renamed to: {name_arg}\n"
+                )));
             }
             Err(e) => {
-                ctx.emit(TuiEvent::Error(format!("Session store error: {e}")));
+                ctx.emit(TuiEvent::Error(format!("Rename failed: {e}")));
             }
         }
         Ok(())
@@ -383,6 +376,10 @@ mod tests {
             let _env_guard = env_lock().lock().expect("env_lock");
             let tmp = tempfile::tempdir().expect("tempdir");
             let _env = EnvGuard::set(tmp.path());
+            let db_path = archon_session::storage::default_db_path();
+            ctx.session_store = Some(Arc::new(
+                archon_session::storage::SessionStore::open(&db_path).expect("session store"),
+            ));
             let res = h.execute(&mut ctx, &["mynewname".to_string()]);
             assert!(res.is_ok(), "execute must return Ok(()), got: {res:?}");
         }
@@ -431,6 +428,10 @@ mod tests {
             let _env_guard = env_lock().lock().expect("env_lock");
             let tmp = tempfile::tempdir().expect("tempdir");
             let _env = EnvGuard::set(tmp.path());
+            let db_path = archon_session::storage::default_db_path();
+            ctx.session_store = Some(Arc::new(
+                archon_session::storage::SessionStore::open(&db_path).expect("session store"),
+            ));
 
             let mut builder = RegistryBuilder::new();
             builder.insert_primary("rename", Arc::new(RenameHandler::new()));
