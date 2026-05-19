@@ -158,15 +158,38 @@ pub(super) async fn build(
     };
 
     let learning_cozo_db = {
-        let db_path = working_dir.join(".archon").join("learning.db");
+        let db_path = crate::command::store_paths::evidence_db_path_for_dir(
+            &working_dir,
+            &["ARCHON_LEARNING_DB_PATH"],
+        );
         if let Some(parent) = db_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        match cozo::DbInstance::new("newrocksdb", db_path.to_str().unwrap_or(""), "") {
+        match cozo::DbInstance::new("sqlite", db_path.to_str().unwrap_or(""), "") {
             Ok(db) => {
                 if let Err(e) = archon_pipeline::learning::schema::initialize_learning_schemas(&db)
                 {
                     tracing::warn!(error = %e, "Learning schema init failed; retrain may not work");
+                } else {
+                    match crate::command::pipeline_learning_migration::maybe_migrate_legacy_pipeline_learning(
+                        &working_dir,
+                        &db_path,
+                        &db,
+                    ) {
+                        Ok(Some(report)) => {
+                            tracing::info!(
+                                source = %report.source_path.display(),
+                                target = %report.target_path.display(),
+                                rows_copied = report.rows_copied,
+                                rows_skipped = report.rows_skipped,
+                                "migrated legacy RocksDB learning store"
+                            );
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            tracing::warn!(%error, "legacy learning store migration failed");
+                        }
+                    }
                 }
                 Some(Arc::new(db))
             }

@@ -375,6 +375,16 @@ impl Agent {
                 proactive_pressure_attempted = true;
                 continue 'agent_loop;
             }
+            let telemetry = self.compaction_telemetry_for(&active_model);
+            self.send_event(AgentEvent::ContextPressureUpdated {
+                tokens_used: autocompact::approx_tokens_from_bytes(request_body_bytes),
+                context_window,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 0,
+                context_name: Some("main".to_string()),
+                resolution_source: Some(telemetry.context_source.to_string()),
+            })
+            .await;
 
             self.send_event(AgentEvent::ApiCallStarted {
                 model: active_model.clone(),

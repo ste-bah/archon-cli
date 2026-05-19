@@ -14,8 +14,8 @@ Where archon-cli writes everything.
 | `~/.config/archon/` | `%APPDATA%\archon\` | Configuration |
 | `~/.config/archon/config.toml` | `%APPDATA%\archon\config.toml` | User config |
 | `~/.config/archon/.mcp.json` | `%APPDATA%\archon\.mcp.json` | Global MCP server config |
-| `~/.local/share/archon/` | `%APPDATA%\archon\share\` | State and data |
-| `~/.local/share/archon/sessions.db` | `...\sessions.db` | Session metadata + journal (CozoDB) |
+| Platform data dir + `archon/` (`~/Library/Application Support/archon/` on macOS, `~/.local/share/archon/` on Linux) | `%APPDATA%\archon\share\` | State and data |
+| Platform data dir + `archon/sessions/sessions.db` | `...\sessions\sessions.db` | Session metadata + journal (CozoDB) |
 | `~/.local/share/archon/sessions/<id>/` | `...\sessions\<id>\` | Per-session transcript + artefacts |
 | `~/.local/share/archon/logs/<id>.log` | `...\logs\<id>.log` | Per-session log file |
 | `~/.local/share/archon/checkpoints.db` | `...\checkpoints.db` | File snapshots (CozoDB) |
@@ -70,7 +70,7 @@ archon-cli uses CozoDB (file-based variant) for structured persistence. Each `.d
 
 ```bash
 # CozoDB CLI (cargo install cozo-bin)
-cozo restore ~/.local/share/archon/sessions.db
+cozo restore ~/.local/share/archon/sessions/sessions.db
 > :all
 ```
 
@@ -88,7 +88,7 @@ rm -rf ~/.archon
 
 To reset just sessions but keep memory:
 ```bash
-rm ~/.local/share/archon/sessions.db
+rm ~/.local/share/archon/sessions/sessions.db
 ```
 
 ## Migrating between machines

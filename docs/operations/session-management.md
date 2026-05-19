@@ -1,6 +1,6 @@
 # Session management
 
-Sessions store full message history, git branch, working directory, token usage, cost, and a name in CozoDB at `~/.local/share/archon/sessions.db`.
+Sessions store full message history, git branch, working directory, token usage, cost, and a name in CozoDB at the configured session DB path. By default that is the platform data directory plus `archon/sessions/sessions.db` (`~/Library/Application Support/archon/sessions/sessions.db` on macOS, `~/.local/share/archon/sessions/sessions.db` on Linux).
 
 > **TUI parity.** The session-management commands shown below as `archon --resume`, `archon --continue-session`, etc. are all available inside the TUI as slash commands: `/resume`, `/sessions`, `/rename`, `/fork`, `/tag`. See [CLI and TUI Command Parity](../cookbook/real-world-evidence-engine.md#cli-and-tui-command-parity). The CLI flags exist primarily for fresh-launch invocations and scripting; in-session work prefers the slash forms.
 
@@ -103,7 +103,7 @@ The `checkpoint_diff` module computes line-level diffs between versions for insp
 
 | Path | Purpose |
 |---|---|
-| `~/.local/share/archon/sessions.db` | Session metadata + journal (CozoDB) |
+| Platform data dir + `archon/sessions/sessions.db` | Session metadata + journal (CozoDB) |
 | `~/.local/share/archon/checkpoints.db` | File snapshots (CozoDB) |
 | `~/.local/share/archon/sessions/<id>/` | Per-session transcript + artefacts |
 | `~/.local/share/archon/logs/<id>.log` | Per-session log file |

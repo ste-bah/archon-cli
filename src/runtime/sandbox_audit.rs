@@ -236,11 +236,7 @@ impl SandboxBackend for AuditedSandboxBackend {
 }
 
 fn open_learning_db() -> anyhow::Result<DbInstance> {
-    let base = archon_session::storage::default_db_path();
-    let parent = base
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("cannot determine data directory"))?;
-    let path = parent.join("learning.db");
+    let path = crate::command::store_paths::evidence_db_path(&["ARCHON_LEARNING_DB_PATH"]);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

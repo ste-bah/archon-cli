@@ -220,11 +220,16 @@ pub(crate) fn build_pipeline_learning_stack(
 }
 
 fn open_pipeline_learning_db(cwd: &Path) -> Option<Arc<cozo::DbInstance>> {
-    let db_path = cwd.join(".archon").join("learning.db");
+    let db_path =
+        crate::command::store_paths::evidence_db_path_for_dir(cwd, &["ARCHON_LEARNING_DB_PATH"]);
+    open_pipeline_learning_db_at(cwd, &db_path)
+}
+
+fn open_pipeline_learning_db_at(cwd: &Path, db_path: &Path) -> Option<Arc<cozo::DbInstance>> {
     if let Some(parent) = db_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let db = match cozo::DbInstance::new("newrocksdb", db_path.to_str().unwrap_or(""), "") {
+    let db = match cozo::DbInstance::new("sqlite", db_path.to_str().unwrap_or(""), "") {
         Ok(db) => db,
         Err(e) => {
             tracing::warn!(error = %e, "pipeline: learning DB unavailable");
@@ -234,6 +239,23 @@ fn open_pipeline_learning_db(cwd: &Path) -> Option<Arc<cozo::DbInstance>> {
     if let Err(e) = archon_pipeline::learning::schema::initialize_learning_schemas(&db) {
         tracing::warn!(error = %e, "pipeline: learning schema init failed");
         return None;
+    }
+    match crate::command::pipeline_learning_migration::maybe_migrate_legacy_pipeline_learning(
+        cwd, db_path, &db,
+    ) {
+        Ok(Some(report)) => {
+            tracing::info!(
+                source = %report.source_path.display(),
+                target = %report.target_path.display(),
+                rows_copied = report.rows_copied,
+                rows_skipped = report.rows_skipped,
+                "pipeline: migrated legacy RocksDB learning store"
+            );
+        }
+        Ok(None) => {}
+        Err(error) => {
+            tracing::warn!(%error, "pipeline: legacy learning store migration failed");
+        }
     }
     Some(Arc::new(db))
 }
@@ -285,4 +307,22 @@ fn build_pipeline_auto_trainer_from_db(
         gnn_weight_seed: gnn_cfg.weight_seed,
     };
     archon_pipeline::learning::gnn::auto_trainer_runtime::build_and_spawn_auto_trainer(params, db)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pipeline_learning_schema_can_share_sqlite_evidence_store() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let db_path = temp.path().join(".archon").join("archon-data.db");
+        let db = open_pipeline_learning_db_at(temp.path(), &db_path).expect("pipeline db");
+
+        archon_learning::schema::ensure_learning_schema(db.as_ref())
+            .expect("governed learning schema");
+
+        assert!(db_path.exists());
+        assert!(!temp.path().join(".archon").join("learning.db").exists());
+    }
 }

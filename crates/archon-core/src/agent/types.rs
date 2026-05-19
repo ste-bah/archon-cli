@@ -35,6 +35,14 @@ pub enum AgentEvent {
     ApiCallStarted {
         model: String,
     },
+    ContextPressureUpdated {
+        tokens_used: u64,
+        context_window: u64,
+        cache_creation_tokens: u64,
+        cache_read_tokens: u64,
+        context_name: Option<String>,
+        resolution_source: Option<String>,
+    },
     TextDelta(String),
     ThinkingDelta(String),
     ToolCallStarted {
@@ -84,6 +92,7 @@ impl AgentEvent {
         match self {
             AgentEvent::UserPromptReady => "UserPromptReady",
             AgentEvent::ApiCallStarted { .. } => "ApiCallStarted",
+            AgentEvent::ContextPressureUpdated { .. } => "ContextPressureUpdated",
             AgentEvent::TextDelta(_) => "TextDelta",
             AgentEvent::ThinkingDelta(_) => "ThinkingDelta",
             AgentEvent::ToolCallStarted { .. } => "ToolCallStarted",

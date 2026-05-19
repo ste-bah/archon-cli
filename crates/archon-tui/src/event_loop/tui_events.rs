@@ -49,9 +49,12 @@ pub(super) async fn handle_tui_event(
             // cache_creation + cache_read — matches context_input_tokens from
             // the Anthropic usage response (same value used by the compaction
             // trigger via last_known_context_tokens in ConversationState).
-            app.status.context_tokens_used = input_tokens
+            let context_tokens = input_tokens
                 .saturating_add(cache_creation_tokens)
                 .saturating_add(cache_read_tokens);
+            if context_tokens > 0 {
+                app.status.context_tokens_used = context_tokens;
+            }
             app.status.cache_creation_tokens = app
                 .status
                 .cache_creation_tokens
@@ -339,5 +342,39 @@ mod tests {
                 .any(|task| task.name == "tui-pending-input-flush")
         );
         archon_observability::abort_alive_tasks();
+    }
+
+    #[tokio::test]
+    async fn zero_usage_turn_preserves_preflight_context_pressure() {
+        let mut app = App::new();
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+
+        handle_tui_event(
+            &mut app,
+            TuiEvent::ContextPressureUpdated {
+                tokens_used: 121_000,
+                context_window: 1_050_000,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 0,
+                context_name: Some("main".into()),
+                resolution_source: Some("bundled-catalog".into()),
+            },
+            &tx,
+        )
+        .await;
+        handle_tui_event(
+            &mut app,
+            TuiEvent::TurnComplete {
+                input_tokens: 0,
+                output_tokens: 10,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 0,
+            },
+            &tx,
+        )
+        .await;
+
+        assert_eq!(app.status.context_tokens_used, 121_000);
+        assert_eq!(app.status.context_name.as_deref(), Some("main"));
     }
 }

@@ -104,18 +104,28 @@ where the feature accepts those shapes.
 
 ## Data locations
 
-Most Evidence Engine commands use Cozo-backed SQLite files under the normal
-Archon data directory. Some handlers also accept environment overrides:
+Evidence Engine commands share the project-local Cozo-backed SQLite file at
+`<workspace>/.archon/archon-data.db` by default. Use environment overrides only
+when you intentionally want to split a surface into a separate store:
 
 | Area | Default or override |
 |---|---|
-| Docs | app data directory, `archon/docs.db`; no dedicated docs DB env override |
-| KB | `ARCHON_KB_DB_PATH`, otherwise app data directory |
-| Meaning | `ARCHON_MEANING_DB_PATH`, then `ARCHON_KB_DB_PATH`, otherwise app data directory |
-| Constellation | `ARCHON_CONSTELLATION_DB_PATH`, then `ARCHON_MEANING_DB_PATH`, then `ARCHON_KB_DB_PATH`, otherwise app data directory |
-| Completion integrity | `${XDG_DATA_HOME:-~/.local/share}/archon/archon-data.db` |
-| Game-theory runs | same application data store used by the gametheory handler |
+| Shared evidence store | `<workspace>/.archon/archon-data.db`, or `ARCHON_EVIDENCE_DB_PATH` |
+| Docs | `ARCHON_DOCS_DB_PATH`, then shared evidence store |
+| KB | `ARCHON_KB_DB_PATH`, then shared evidence store |
+| Meaning | `ARCHON_MEANING_DB_PATH`, then `ARCHON_KB_DB_PATH`, then shared evidence store |
+| Constellation | `ARCHON_CONSTELLATION_DB_PATH`, then `ARCHON_MEANING_DB_PATH`, then `ARCHON_KB_DB_PATH`, then shared evidence store |
+| Completion integrity | `ARCHON_COMPLETION_DB_PATH`, then shared evidence store |
+| Game-theory and governed learning | `ARCHON_LEARNING_DB_PATH`, then shared evidence store |
 | Policy | `/etc/archon/policy.toml`, `~/.archon/policy.toml`, `<workspace>/.archon/policy.toml` |
+
+On startup, pipeline learning also checks for the legacy project-local RocksDB
+store at `<workspace>/.archon/learning.db`. If the shared evidence store is
+using the default path, Archon copies legacy SONA/GNN rows into
+`<workspace>/.archon/archon-data.db` once and writes
+`<workspace>/.archon/learning.db.migrated-to-archon-data`. Explicit
+`ARCHON_LEARNING_DB_PATH` or `ARCHON_EVIDENCE_DB_PATH` overrides disable this
+automatic migration.
 
 ## Project Initialisation
 

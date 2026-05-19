@@ -18,7 +18,7 @@ use archon_llm::identity::{
     IdentityMode, IdentityProvider, get_or_create_device_id, resolve_and_validate_betas,
     resolve_identity_mode,
 };
-use archon_memory::{MemoryAccess, MemoryGraph, MemoryTrait};
+use archon_memory::MemoryTrait;
 use archon_tui::observability;
 
 pub(super) struct Bootstrap {
@@ -71,18 +71,12 @@ pub(super) async fn prepare(
         archon_memory::resolve_memory_paths(config.memory.db_path.as_deref());
     let memory_access = archon_memory::open_memory_with_db_path(&memory_data_dir, &memory_db_path)
         .await
-        .unwrap_or_else(|e| {
-            tracing::warn!("failed to open persistent memory: {e}, using in-memory fallback");
-            eprintln!(
-                "Warning: failed to open persistent memory at {}; using in-memory fallback (memories will not persist): {e}",
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "failed to open persistent memory at {}: {e}",
                 memory_db_path.display()
-            );
-            let graph = MemoryGraph::in_memory().expect("in-memory graph");
-            MemoryAccess::Direct {
-                graph: Arc::new(graph),
-                _server_handle: tokio::spawn(async {}),
-            }
-        });
+            )
+        })?;
     if let Some(graph) = memory_access.graph() {
         let embed_cfg = archon_memory::embedding::EmbeddingConfig {
             provider: config.memory.embedding_provider,

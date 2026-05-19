@@ -81,6 +81,21 @@ pub(super) fn spawn_agent_event_forwarder(
                         success: !result.is_error,
                         output: result.content,
                     },
+                    AgentEvent::ContextPressureUpdated {
+                        tokens_used,
+                        context_window,
+                        cache_creation_tokens,
+                        cache_read_tokens,
+                        context_name,
+                        resolution_source,
+                    } => TuiEvent::ContextPressureUpdated {
+                        tokens_used,
+                        context_window,
+                        cache_creation_tokens,
+                        cache_read_tokens,
+                        context_name,
+                        resolution_source,
+                    },
                     AgentEvent::TurnComplete {
                         input_tokens,
                         output_tokens,

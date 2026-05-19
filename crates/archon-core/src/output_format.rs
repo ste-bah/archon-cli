@@ -155,6 +155,7 @@ fn format_agent_event_stream_json(event: &AgentEvent) -> Option<String> {
 
         // Events that don't produce stream output
         AgentEvent::UserPromptReady
+        | AgentEvent::ContextPressureUpdated { .. }
         | AgentEvent::PermissionRequired { .. }
         | AgentEvent::PermissionGranted { .. }
         | AgentEvent::PermissionDenied { .. }

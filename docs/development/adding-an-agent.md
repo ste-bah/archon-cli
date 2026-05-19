@@ -61,7 +61,7 @@ Recommended:
 ## Loading
 
 The agent loader at `crates/archon-core/src/agents/loader.rs`:
-- Scans `<workdir>/.archon/agents/` and `~/.config/archon/agents/`
+- Scans `<workdir>/.archon/agents/` and `~/.archon/agents/`
 - Parses frontmatter + body
 - Validates against the schema
 - Registers into the runtime `AgentRegistry`

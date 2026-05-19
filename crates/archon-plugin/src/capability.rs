@@ -1,6 +1,6 @@
 //! Capability-based security model for TASK-CLI-301.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 // ── PluginCapability ──────────────────────────────────────────────────────────
 
@@ -57,7 +57,7 @@ impl CapabilityChecker {
     pub fn can_read_fs(&self, path: &Path) -> bool {
         for cap in &self.capabilities {
             if let PluginCapability::ReadFs(allowed) = cap
-                && allowed.iter().any(|p| path.starts_with(p))
+                && fs_path_allowed(path, allowed)
             {
                 return true;
             }
@@ -69,7 +69,7 @@ impl CapabilityChecker {
     pub fn can_write_fs(&self, path: &Path) -> bool {
         for cap in &self.capabilities {
             if let PluginCapability::WriteFs(allowed) = cap
-                && allowed.iter().any(|p| path.starts_with(p))
+                && fs_path_allowed(path, allowed)
             {
                 return true;
             }
@@ -131,5 +131,107 @@ impl CapabilityChecker {
         self.capabilities
             .iter()
             .any(|c| matches!(c, PluginCapability::DataDirWrite))
+    }
+}
+
+fn fs_path_allowed(path: &Path, allowed: &[PathBuf]) -> bool {
+    let Some(requested) = normalize_capability_path(path) else {
+        return false;
+    };
+    allowed.iter().any(|root| {
+        normalize_capability_path(root)
+            .as_ref()
+            .is_some_and(|allowed| requested.starts_with(allowed))
+    })
+}
+
+fn normalize_capability_path(path: &Path) -> Option<PathBuf> {
+    if let Ok(canonical) = std::fs::canonicalize(path) {
+        return Some(canonical);
+    }
+
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(path)
+    };
+    let absolute = normalize_lexically(absolute);
+
+    for ancestor in absolute.ancestors() {
+        if let Ok(mut canonical_parent) = std::fs::canonicalize(ancestor) {
+            let suffix = absolute.strip_prefix(ancestor).ok()?;
+            canonical_parent.push(suffix);
+            return Some(normalize_lexically(canonical_parent));
+        }
+    }
+
+    Some(absolute)
+}
+
+fn normalize_lexically(path: PathBuf) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+    normalized
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_path(name: &str) -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!("archon-plugin-{name}-{unique}"))
+    }
+
+    #[test]
+    fn checker_denies_read_through_symlink_escape() {
+        let root = temp_path("read-root");
+        let outside = temp_path("read-outside");
+        std::fs::create_dir_all(&root).expect("root");
+        std::fs::create_dir_all(&outside).expect("outside");
+        std::fs::write(outside.join("secret.txt"), "nope").expect("secret");
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, root.join("link")).expect("symlink");
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&outside, root.join("link")).expect("symlink");
+
+        let checker = CapabilityChecker::new(vec![PluginCapability::ReadFs(vec![root.clone()])]);
+        assert!(!checker.can_read_fs(&root.join("link/secret.txt")));
+
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn checker_denies_write_when_parent_symlink_escapes() {
+        let root = temp_path("write-root");
+        let outside = temp_path("write-outside");
+        std::fs::create_dir_all(&root).expect("root");
+        std::fs::create_dir_all(&outside).expect("outside");
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, root.join("link")).expect("symlink");
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&outside, root.join("link")).expect("symlink");
+
+        let checker = CapabilityChecker::new(vec![PluginCapability::WriteFs(vec![root.clone()])]);
+        assert!(!checker.can_write_fs(&root.join("link/new.txt")));
+
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside);
     }
 }

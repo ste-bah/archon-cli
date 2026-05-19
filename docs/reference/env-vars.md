@@ -26,12 +26,12 @@
 | `ARCHON_CONFIG` | Override config file path |
 | `ARCHON_LOG` | Override log level |
 | `RUST_LOG` | Tracing subscriber filter |
-| `ARCHON_DATA_DIR` | Override per-user state dir (default: `~/.local/share/archon`) |
-| `ARCHON_EVIDENCE_DB_PATH` | Override the shared project evidence store used by docs, completion, provenance, knowledge, meaning, constellation, game-theory, and governed-learning commands |
-| `ARCHON_COMPLETION_DB_PATH` | Override completion evidence store path only |
-| `ARCHON_DOCS_DB_PATH` | Override docs evidence store path only |
-| `ARCHON_LEARNING_DB_PATH` | Override governed-learning evidence store path only |
-| `ARCHON_SESSION_DB_PATH` | Override session database path; otherwise `[session].db_path` is used when configured |
+| `ARCHON_DATA_DIR` | Override per-user state dir (default: platform data dir + `archon`) |
+| `ARCHON_EVIDENCE_DB_PATH` | Override the shared project evidence store; otherwise evidence surfaces use `<workspace>/.archon/archon-data.db` |
+| `ARCHON_COMPLETION_DB_PATH` | Override completion evidence store path only; otherwise `ARCHON_EVIDENCE_DB_PATH` or the shared project evidence store is used |
+| `ARCHON_DOCS_DB_PATH` | Override docs evidence store path only; otherwise `ARCHON_EVIDENCE_DB_PATH` or the shared project evidence store is used |
+| `ARCHON_LEARNING_DB_PATH` | Override governed/pipeline-learning evidence store path only; otherwise `ARCHON_EVIDENCE_DB_PATH` or the shared project evidence store is used. Setting this disables automatic migration from legacy `<workspace>/.archon/learning.db` |
+| `ARCHON_SESSION_DB_PATH` | Override session database path; otherwise `[session].db_path`, then platform data dir + `archon/sessions/sessions.db` |
 | `ARCHON_SESSIONS_DIR` | Override session directory |
 | `ARCHON_NO_TUI` | Force headless mode |
 | `ARCHON_TRUST_USER_GRAMMARS` | Set to `1`, `true`, or `yes` to allow TUI syntax highlighting to load user-provided tree-sitter `.so` grammars |

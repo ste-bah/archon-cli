@@ -39,6 +39,7 @@ pub fn priority(ev: &AgentEvent) -> Priority {
         AgentEvent::TextDelta(_) | AgentEvent::ThinkingDelta(_) => Priority::Progress,
         AgentEvent::UserPromptReady
         | AgentEvent::ApiCallStarted { .. }
+        | AgentEvent::ContextPressureUpdated { .. }
         | AgentEvent::ToolCallStarted { .. }
         | AgentEvent::ToolCallComplete { .. }
         | AgentEvent::PermissionRequired { .. }
