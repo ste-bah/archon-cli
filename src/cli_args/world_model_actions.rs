@@ -91,25 +91,27 @@ pub enum WorldAction {
         /// Candidate model id to evaluate
         candidate_id: String,
 
-        /// Run full promotion-grade evaluation (default behavior; --quick reserved for future use)
+        /// Run full promotion-grade evaluation.
+        /// Without this flag, eval-jepa uses quick Tier-0 mode and may skip the baseline.
         #[arg(long)]
         full: bool,
 
-        /// Run evaluation in the background (POSIX only; not supported on Windows)
+        /// Request background evaluation.
+        /// Parsed for compatibility; the current CLI returns a clear deferral error.
         #[arg(long)]
         background: bool,
 
-        /// Resume a previously paused eval run by its run-id
+        /// Inspect resume preconditions for a previously paused eval run by its run-id
         #[arg(long)]
         resume: Option<String>,
 
         /// Force a specific backend: cpu, metal, cuda.
-        /// Overrides candidate metadata and training config backend selection.
+        /// Parsed for compatibility; currently warns and uses the candidate/config path.
         #[arg(long, value_parser = ["cpu", "metal", "cuda"])]
         backend: Option<String>,
 
         /// Skip embedding cache reads and writes for this run.
-        /// Useful for reproducibility testing.
+        /// Parsed for compatibility; currently warns unless validating resume preconditions.
         #[arg(long)]
         no_cache: bool,
     },

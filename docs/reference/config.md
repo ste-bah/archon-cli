@@ -889,7 +889,7 @@ retain_checkpoint_count = 5
 | `jepa.backend_parity_cosine_floor` | `0.99` | Frozen-weights CPU-vs-backend forward-pass cosine floor; not a full retrain parity gate. |
 | `jepa.max_backend_prediction_latency_ms` | `50` | Warm steady-state backend-native JEPA prediction cap. Cold device initialization is reported separately. |
 | `jepa.max_backend_first_call_latency_ms` | `5000` | Diagnostic budget for first-call device/context initialization. |
-| `jepa.eval.mode` | `"quick"` | Default eval mode when `--mode` is not specified. One of `quick`, `full`, `promotion`. |
+| `jepa.eval.mode` | `"quick"` | Internal default eval mode. The CLI defaults to quick Tier-0 mode and uses `--full` for promotion-grade eval. |
 | `jepa.eval.batch_size` | `256` | JEPA encoding batch size (transitions per batch). Must be >= `eval.embedding_batch_size`. |
 | `jepa.eval.embedding_batch_size` | `64` | Fastembed baseline embedding batch size. Must be <= `eval.batch_size`. |
 | `jepa.eval.progress_interval_rows` | `500` | Number of rows between progress log lines. |
@@ -899,7 +899,7 @@ retain_checkpoint_count = 5
 | `jepa.eval.stale_heartbeat_ms` | `120000` | Stale lock heartbeat threshold in ms. Used when runtime budget = 0 to detect hung jobs. |
 | `jepa.eval.cache_enabled` | `true` | Enable embedding cache reads and writes. Requires `policy.world_model.allow_embedding_cache = true`. |
 | `jepa.eval.cache_max_mb` | `2048` | Maximum embedding cache size in MB. LRU eviction removes oldest entries when exceeded (~680k BGE-base 768-dim vectors). |
-| `jepa.eval.background_default` | `false` | Default to background execution when not overridden. Requires `policy.world_model.allow_eval_background_jobs = true`. |
+| `jepa.eval.background_default` | `false` | Reserved background-execution default. v1.3.2 keeps CLI background eval fail-closed with a clear deferral error until the worker entry point is wired. |
 | `jepa.eval.eval_schema_version` | `1` | Schema version for embedding cache key invalidation. Bump to invalidate all existing cache entries. Must be >= 1. |
 | `guardrails.enabled` | `true` | Enables runtime guardrail ledgers and policy decisions. |
 | `guardrails.interactive_mode` | `"advisory"` | Normal session mode: `off`, `learn_only`, `advisory`, `guarded`, or `strict`. |
@@ -1297,7 +1297,7 @@ allow_llm_labeler = false
 allow_behavior_changes = false
 allow_embedding_cache = false              # fail-closed; set true to enable eval embedding cache persistence
 allow_world_model_raw_text_storage = false # fail-closed; named distinctly from reasoning_quality.allow_raw_text_storage
-allow_eval_background_jobs = false         # fail-closed; set true to allow --background eval runs
+allow_eval_background_jobs = false         # fail-closed; reserved for background eval worker wiring
 
 [policy.web]
 allow_mutating_actions = false
@@ -1362,7 +1362,7 @@ JEPA eval pipeline policy gates (all fail-closed by default):
 |---|---|---|
 | `policy.world_model.allow_embedding_cache` | `false` | Enables eval embedding cache persistence. Also requires `jepa.eval.cache_enabled = true`. |
 | `policy.world_model.allow_world_model_raw_text_storage` | `false` | Allows raw text storage in the world-model corpus. Named distinctly from `reasoning_quality.allow_raw_text_storage`. |
-| `policy.world_model.allow_eval_background_jobs` | `false` | Permits `--background` eval runs. Also requires `jepa.eval.background_default = true` or the `--background` CLI flag. |
+| `policy.world_model.allow_eval_background_jobs` | `false` | Reserved gate for background eval workers. v1.3.2 still rejects `--background` with a clear deferral error even when this is true. |
 
 Browser workbench actions require `[policy.web]` gates. The global
 `policy.web.allow_mutating_actions` gate must be true, and the matching

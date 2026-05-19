@@ -1395,7 +1395,7 @@ pub struct WorldModelJepaEvalConfig {
     pub cache_enabled: bool,
     /// Maximum embedding cache size in MB (LRU eviction when exceeded)
     pub cache_max_mb: u64,
-    /// Default to background execution (requires `policy.allow_eval_background_jobs`)
+    /// Reserved default for background execution once the eval worker is wired.
     pub background_default: bool,
     /// Schema version for embedding cache key invalidation.
     /// Bump this value to invalidate ALL existing cache entries.

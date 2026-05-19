@@ -166,8 +166,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v1.3.1** ([release notes](docs/release-notes/v1.3.1.md))
+- Current version: **v1.3.2** ([release notes](docs/release-notes/v1.3.2.md))
 - Stable release for local world-model advisory learning, first-class reasoning-quality events, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
+- v1.3.2 finalizes the JEPA eval pipeline with quick/full modes, promotion-safe eval provenance, eval-run status commands, backend/cache deferral warnings, and source-size cleanup.
 - v1.3.1 adds JEPA world-model training/runtime, normal-session and pipeline guardrails, CUDA/MLX accelerator support, and fresh-setup cookbook docs.
 - v1.3.0 removes model-facing `max_turns`, hardens compaction persistence/request-pressure recovery, moves long-tail agent discovery behind `AgentCatalog`, and preserves accurate subagent/context status.
 - v1.2.9 corrects the autocompaction trigger to use the current message-list estimate (not cumulative token usage) and converts proactive compaction failures to a soft-fail that falls through to the same turn's normal provider call. Reactive compaction remains fatal.

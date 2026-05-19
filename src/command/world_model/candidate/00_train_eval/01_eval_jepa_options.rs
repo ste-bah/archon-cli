@@ -1,4 +1,4 @@
-/// Entry point for `archon world eval-jepa` with all v0.4.1 CLI flags.
+/// Entry point for `archon world eval-jepa` with the v1.3.2 eval flags.
 /// TASK-JEVAL-023; CRIT-4 Tier-0 quick-mode short-circuit wired here.
 ///
 /// Default (no --full): builds JepaEvalGateConfig from config, loads the
@@ -8,8 +8,9 @@
 ///
 /// --full: skip Tier-0 short-circuit and delegate directly to render_eval_jepa.
 ///
-/// Full wiring of --backend (BackendRuntimeResolver) and --no-cache
-/// (CachedEmbeddingAdapter write-bypass) is deferred to TASK-JEVAL-025.
+/// Full runtime backend override wiring and the --no-cache write-bypass remain
+/// staged follow-ups; this handler emits visible warnings instead of silently
+/// pretending those flags affect the full eval path.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_eval_jepa_with_options(
     config: &archon_core::config::ArchonConfig,
