@@ -40,6 +40,13 @@ impl MlxEvalRuntime {
     ) -> anyhow::Result<Self> {
         #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
         {
+            let _ = (
+                candidate_metadata,
+                latent_dim,
+                parity_floor,
+                min_validation_examples,
+                allow_cpu_fallback,
+            );
             anyhow::bail!(
                 "MLX Metal backend requires Darwin arm64. Current platform: {}/{}.",
                 std::env::consts::OS,
@@ -144,4 +151,3 @@ impl JepaEvalRuntime for MlxEvalRuntime {
         })
     }
 }
-

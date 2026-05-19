@@ -323,10 +323,10 @@ mod tests_eval_runtime {
             created_at: Utc::now(),
         };
         let result = BackendRuntimeResolver::resolve_mlx(&metadata, 384, 0.99, 512, false);
-        assert!(result.is_err());
-        assert!(
-            result.unwrap_err().to_string().contains("Darwin arm64"),
-            "error must mention Darwin arm64"
-        );
+        let error = match result {
+            Ok(_) => panic!("resolve_mlx must fail on non-Darwin arm64"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("Darwin arm64"));
     }
 }

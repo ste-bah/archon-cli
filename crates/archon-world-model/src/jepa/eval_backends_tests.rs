@@ -293,8 +293,11 @@ mod tests_eval_backends {
     fn mlx_constructor_fails_on_non_darwin_arm64() {
         let meta = make_metadata_metal_ok();
         let result = MlxEvalRuntime::new(&meta, 384, 0.99, 512, false);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Darwin arm64"));
+        let error = match result {
+            Ok(_) => panic!("MLX runtime must fail on non-Darwin arm64"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("Darwin arm64"));
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
