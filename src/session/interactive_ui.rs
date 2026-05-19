@@ -240,6 +240,7 @@ pub(super) async fn run(
     archon_tui::app::run(archon_tui::app::AppConfig {
         event_rx: tui_event_rx,
         input_tx: user_input_tx,
+        model: active_model.clone(),
         splash: splash_opt,
         btw_tx: Some(btw_tx),
         permission_tx: Some(perm_prompt_tx),

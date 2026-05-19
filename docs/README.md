@@ -6,7 +6,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 - [Quick start](getting-started/quick-start.md) — install, authenticate, run your first agent in 5 minutes
 - [Installation](getting-started/installation.md) — full build instructions for macOS, Linux, Windows, WSL2
-- [Codex authentication](getting-started/codex-auth.md) — ChatGPT/Codex OAuth, TUI provider mode, tool use, subagents, pipelines
+- [Codex authentication](getting-started/codex-auth.md) — ChatGPT/Codex OAuth, TUI provider mode, provider-aware `/model`, tool use, subagents, pipelines
 - [Project setup](getting-started/project-setup.md) — bootstrap a project with `archon-init.sh` (flags, scenarios, troubleshooting)
 - [First run](getting-started/first-run.md) — what to expect, where data lives, common gotchas
 
@@ -101,7 +101,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Session management](operations/session-management.md) — resume, fork, checkpoint, rewind
 - [Web workbench](operations/web-workbench.md) — browser interface tabs, data sources, action safety, and setup
 - [TUI customization](operations/tui-customization.md) — themes, vim mode, keybindings
-- [Cost, effort, fast mode](operations/cost-effort.md) — token tracking, model selection, latency tuning
+- [Cost, effort, fast mode](operations/cost-effort.md) — token tracking, provider-aware model selection, latency tuning
 - [Context compaction](operations/context-compaction.md) — automatic and manual compression
 - [Cron & scheduling](operations/cron-scheduling.md) — recurring tasks, one-shot delays
 - [One-shot context handling](operations/one-shot-context.md) — why bounded calls use classification, not compaction

@@ -80,6 +80,7 @@ async fn app_run_drives_session_end_to_end() {
     let config = AppConfig {
         event_rx,
         input_tx,
+        model: "test-model".into(),
         splash: None,
         btw_tx: None,
         permission_tx: None,

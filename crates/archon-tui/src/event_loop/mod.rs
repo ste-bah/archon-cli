@@ -194,6 +194,7 @@ where
     let AppConfig {
         mut event_rx,
         input_tx,
+        model,
         splash,
         btw_tx,
         permission_tx,
@@ -206,6 +207,7 @@ where
     crate::commands::set_catalog(command_catalog);
 
     let mut app = App::new();
+    app.status.model = model;
     app.status.context_window = context_window;
     app.status.context_name = Some("main".to_string());
     app.status.resolution_source = context_source;

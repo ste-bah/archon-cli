@@ -39,6 +39,7 @@ pub type InputSender = tokio::sync::mpsc::Sender<String>;
 pub struct AppConfig {
     pub event_rx: crate::event_channel::TuiEventReceiver,
     pub input_tx: InputSender,
+    pub model: String,
     pub splash: Option<SplashConfig>,
     pub btw_tx: Option<tokio::sync::mpsc::Sender<String>>,
     pub permission_tx: Option<tokio::sync::mpsc::Sender<bool>>,

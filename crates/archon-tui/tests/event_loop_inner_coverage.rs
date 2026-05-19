@@ -57,6 +57,7 @@ async fn run_with_backend_walks_wide_event_surface() {
     let config = AppConfig {
         event_rx,
         input_tx,
+        model: "test-model".into(),
         splash: None,
         btw_tx: None,
         permission_tx: None,

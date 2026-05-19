@@ -104,6 +104,8 @@ provider = "openai-codex"
 default_model = "gpt-5.4" # optional; Archon uses this automatically if the old default is Claude-shaped
 ```
 
+In Codex TUI sessions, the bottom status bar is initialized from the active Codex model, and `/model` accepts Codex shortcuts and model IDs such as `default`, `codex`, `mini`, `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, and `gpt-5.3-codex`. Anthropic sessions continue to validate Claude shortcuts and Claude model IDs.
+
 Anthropic OAuth requests use the same Claude Code identity-spoof path as the agent and pipeline runners. Codex OAuth requests use the OpenAI Codex provider for chat, TUI sessions, tool use, subagents, `/btw`, team runs, and provider-neutral pipelines when `[llm].provider = "openai-codex"`. API-key users can set `ANTHROPIC_API_KEY=sk-ant-api...`; proxy users can still point the Anthropic-compatible URL at OpenRouter, DeepSeek, LiteLLM, or another compatible endpoint and use native/API-key mode.
 
 ## Documentation map

@@ -62,6 +62,97 @@ pub(crate) async fn build_model_snapshot(slash_ctx: &SlashCommandContext) -> Mod
     // Guard drops here — lock released before return.
 }
 
+const CODEX_SHORTCUTS: &[&str] = &["default", "codex", "mini", "opus", "sonnet", "haiku"];
+const CODEX_MODEL_IDS: &[&str] = &["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex"];
+
+fn snapshot_shortcuts(snap: &ModelSnapshot) -> String {
+    if looks_like_codex_model(&snap.current_model) {
+        CODEX_SHORTCUTS.join(", ")
+    } else {
+        archon_tools::validation::KNOWN_SHORTCUTS
+            .iter()
+            .map(|(shortcut, _)| *shortcut)
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+fn resolve_model_for_snapshot(input: &str, snap: &ModelSnapshot) -> Result<String, String> {
+    if looks_like_codex_model(&snap.current_model) {
+        resolve_codex_model_name(input)
+    } else {
+        archon_tools::validation::validate_model_name(input)
+    }
+}
+
+fn looks_like_codex_model(model: &str) -> bool {
+    let lower = model.trim().to_ascii_lowercase();
+    lower.starts_with("gpt-5.") || lower == "default" || lower == "codex" || lower == "mini"
+}
+
+fn resolve_codex_model_name(input: &str) -> Result<String, String> {
+    let trimmed = input.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    match lower.as_str() {
+        "default" | "opus" | "sonnet" => return Ok("gpt-5.5".to_string()),
+        "codex" => return Ok("gpt-5.3-codex".to_string()),
+        "mini" | "haiku" => return Ok("gpt-5.4-mini".to_string()),
+        _ => {}
+    }
+
+    if CODEX_MODEL_IDS
+        .iter()
+        .any(|model| lower == model.to_ascii_lowercase())
+        || lower.starts_with("gpt-5.")
+    {
+        return Ok(trimmed.to_string());
+    }
+
+    Err(unknown_codex_model_error(input))
+}
+
+fn unknown_codex_model_error(input: &str) -> String {
+    let mut candidates: Vec<String> = CODEX_SHORTCUTS
+        .iter()
+        .map(|shortcut| (*shortcut).into())
+        .collect();
+    candidates.extend(CODEX_MODEL_IDS.iter().map(|id| (*id).to_string()));
+    if let Some(suggestion) = closest_candidate(input, &candidates, 2) {
+        return format!(
+            "Error: Unknown model '{input}'. Did you mean '{suggestion}'?\n\n\
+             Valid shortcuts: {shortcuts}\n\
+             Valid model IDs: {ids}",
+            shortcuts = CODEX_SHORTCUTS.join(", "),
+            ids = CODEX_MODEL_IDS.join(", "),
+        );
+    }
+
+    format!(
+        "Error: Unknown model '{input}'.\n\n\
+         Valid shortcuts: {shortcuts}\n\
+         Valid model IDs: {ids}",
+        shortcuts = CODEX_SHORTCUTS.join(", "),
+        ids = CODEX_MODEL_IDS.join(", "),
+    )
+}
+
+fn closest_candidate(input: &str, candidates: &[String], max_distance: usize) -> Option<String> {
+    let mut best: Option<(&str, usize)> = None;
+    for candidate in candidates {
+        let distance = archon_tools::validation::edit_distance(input, candidate);
+        if distance <= max_distance {
+            match best {
+                None => best = Some((candidate, distance)),
+                Some((_, best_distance)) if distance < best_distance => {
+                    best = Some((candidate, distance));
+                }
+                _ => {}
+            }
+        }
+    }
+    best.map(|(candidate, _)| candidate.to_string())
+}
+
 /// Zero-sized handler registered as the primary `/model` command.
 /// Aliases: `[m, switch-model]`.
 pub(crate) struct ModelHandler;
@@ -76,6 +167,12 @@ impl CommandHandler for ModelHandler {
         // hypothetical multi-token future (e.g. flags). Whitespace-only
         // rejoin collapses back to the empty string.
         let arg_str = args.join(" ").trim().to_string();
+        let snap = ctx.model_snapshot.as_ref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "ModelHandler invoked without model_snapshot populated \
+                 — build_command_context bug"
+            )
+        })?;
 
         if arg_str.is_empty() {
             // READ path: the builder must have populated the snapshot
@@ -83,20 +180,15 @@ impl CommandHandler for ModelHandler {
             // indicates a wiring regression (builder bypassed or alias
             // map drifted); surface it as a loud `Err` rather than a
             // user-facing message.
-            let snap = ctx.model_snapshot.as_ref().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "ModelHandler invoked without model_snapshot populated \
-                     — build_command_context bug"
-                )
-            })?;
 
             // Byte-for-byte faithful to shipped READ body at
             // slash.rs:158-162. Output is a TextDelta (no view opened).
             let msg = format!(
                 "\nCurrent model: {current}\n\
                  Usage: /model <name>\n\
-                 Shortcuts: opus, sonnet, haiku\n",
+                 Shortcuts: {shortcuts}\n",
                 current = snap.current_model,
+                shortcuts = snapshot_shortcuts(snap),
             );
             ctx.emit(TuiEvent::TextDelta(msg));
             return Ok(());
@@ -105,7 +197,7 @@ impl CommandHandler for ModelHandler {
         // WRITE path: validate, then (on Ok) stash the effect + emit
         // ModelChanged + TextDelta. On Err emit TuiEvent::Error and do
         // NOT stash any effect.
-        match archon_tools::validation::validate_model_name(&arg_str) {
+        match resolve_model_for_snapshot(&arg_str, snap) {
             Ok(resolved) => {
                 // Sync slot-write: the actual `model_override_shared`
                 // mutex write is performed by `apply_effect` in
@@ -142,6 +234,18 @@ mod tests {
     use super::*;
     use crate::command::test_support::*;
 
+    fn anthropic_snapshot(current_model: &str) -> ModelSnapshot {
+        ModelSnapshot {
+            current_model: current_model.to_string(),
+        }
+    }
+
+    fn codex_snapshot(current_model: &str) -> ModelSnapshot {
+        ModelSnapshot {
+            current_model: current_model.to_string(),
+        }
+    }
+
     #[test]
     fn model_handler_description_matches() {
         let h = ModelHandler;
@@ -168,9 +272,7 @@ mod tests {
 
     #[test]
     fn model_handler_execute_no_args_emits_current_model_text() {
-        let snap = ModelSnapshot {
-            current_model: "opus".to_string(),
-        };
+        let snap = anthropic_snapshot("opus");
         let (mut ctx, mut rx) = make_model_ctx(Some(snap));
         let h = ModelHandler;
         h.execute(&mut ctx, &[])
@@ -220,8 +322,7 @@ mod tests {
 
     #[test]
     fn model_handler_execute_with_valid_arg_sets_effect_and_emits_events() {
-        // snapshot not needed for WRITE path, pass None.
-        let (mut ctx, mut rx) = make_model_ctx(None);
+        let (mut ctx, mut rx) = make_model_ctx(Some(anthropic_snapshot("claude-sonnet-4-6")));
         let h = ModelHandler;
         h.execute(&mut ctx, &["opus".to_string()])
             .expect("valid arg must produce Ok(())");
@@ -280,7 +381,7 @@ mod tests {
 
     #[test]
     fn model_handler_execute_with_invalid_arg_emits_error_no_effect() {
-        let (mut ctx, mut rx) = make_model_ctx(None);
+        let (mut ctx, mut rx) = make_model_ctx(Some(anthropic_snapshot("claude-sonnet-4-6")));
         let h = ModelHandler;
         h.execute(&mut ctx, &["definitely-not-a-model-xyz".to_string()])
             .expect("invalid arg path still returns Ok(()) — error is emitted as event");
@@ -301,6 +402,43 @@ mod tests {
                 );
             }
             other => panic!("expected TuiEvent::Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn model_handler_execute_with_codex_literal_sets_effect_and_emits_events() {
+        let (mut ctx, mut rx) = make_model_ctx(Some(codex_snapshot("gpt-5.4")));
+        let h = ModelHandler;
+        h.execute(&mut ctx, &["gpt-5.5".to_string()])
+            .expect("Codex literal must produce Ok(())");
+
+        let expected = "gpt-5.5".to_string();
+        match ctx.pending_effect.as_ref() {
+            Some(CommandEffect::SetModelOverride(s)) => assert_eq!(s, &expected),
+            Some(other) => panic!("unexpected CommandEffect variant: {other:?}"),
+            None => panic!("WRITE path must stash a CommandEffect::SetModelOverride"),
+        }
+
+        let events = drain_tui_events(&mut rx);
+        assert!(
+            events
+                .iter()
+                .any(|ev| matches!(ev, TuiEvent::ModelChanged(model) if model == &expected)),
+            "Codex literal must emit TuiEvent::ModelChanged({expected})"
+        );
+    }
+
+    #[test]
+    fn model_handler_execute_with_codex_alias_sets_effect() {
+        let (mut ctx, _rx) = make_model_ctx(Some(codex_snapshot("gpt-5.4")));
+        let h = ModelHandler;
+        h.execute(&mut ctx, &["mini".to_string()])
+            .expect("Codex alias must produce Ok(())");
+
+        match ctx.pending_effect.as_ref() {
+            Some(CommandEffect::SetModelOverride(s)) => assert_eq!(s, "gpt-5.4-mini"),
+            Some(other) => panic!("unexpected CommandEffect variant: {other:?}"),
+            None => panic!("WRITE path must stash a CommandEffect::SetModelOverride"),
         }
     }
 }
