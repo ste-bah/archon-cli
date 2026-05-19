@@ -1,5 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::sync::{Mutex as StdMutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use crate::auth::{AuthError, OAuthCredentials, parse_credentials_json};
@@ -14,6 +16,72 @@ const MAX_RETRIES: u32 = 5;
 const LOCK_RETRY_MIN_MS: u64 = 1000;
 const LOCK_RETRY_MAX_MS: u64 = 2000;
 
+#[cfg(test)]
+static TOKEN_ENDPOINT_OVERRIDE: OnceLock<StdMutex<Option<String>>> = OnceLock::new();
+
+#[cfg(test)]
+static CREDENTIALS_PATH_OVERRIDE: OnceLock<StdMutex<Option<PathBuf>>> = OnceLock::new();
+
+fn token_endpoint() -> String {
+    #[cfg(test)]
+    {
+        if let Some(endpoint) = TOKEN_ENDPOINT_OVERRIDE
+            .get_or_init(|| StdMutex::new(None))
+            .lock()
+            .expect("token endpoint test override lock should not be poisoned")
+            .clone()
+        {
+            return endpoint;
+        }
+    }
+
+    TOKEN_ENDPOINT.to_string()
+}
+
+#[cfg(test)]
+pub(crate) struct TokenEndpointOverrideGuard;
+
+#[cfg(test)]
+impl Drop for TokenEndpointOverrideGuard {
+    fn drop(&mut self) {
+        *TOKEN_ENDPOINT_OVERRIDE
+            .get_or_init(|| StdMutex::new(None))
+            .lock()
+            .expect("token endpoint test override lock should not be poisoned") = None;
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn set_token_endpoint_for_tests(endpoint: String) -> TokenEndpointOverrideGuard {
+    *TOKEN_ENDPOINT_OVERRIDE
+        .get_or_init(|| StdMutex::new(None))
+        .lock()
+        .expect("token endpoint test override lock should not be poisoned") = Some(endpoint);
+    TokenEndpointOverrideGuard
+}
+
+#[cfg(test)]
+pub(crate) struct CredentialsPathOverrideGuard;
+
+#[cfg(test)]
+impl Drop for CredentialsPathOverrideGuard {
+    fn drop(&mut self) {
+        *CREDENTIALS_PATH_OVERRIDE
+            .get_or_init(|| StdMutex::new(None))
+            .lock()
+            .expect("credentials path test override lock should not be poisoned") = None;
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn set_credentials_path_for_tests(path: PathBuf) -> CredentialsPathOverrideGuard {
+    *CREDENTIALS_PATH_OVERRIDE
+        .get_or_init(|| StdMutex::new(None))
+        .lock()
+        .expect("credentials path test override lock should not be poisoned") = Some(path);
+    CredentialsPathOverrideGuard
+}
+
 // ---------------------------------------------------------------------------
 // Token refresh
 // ---------------------------------------------------------------------------
@@ -26,7 +94,7 @@ pub async fn refresh_token(
     client: &reqwest::Client,
 ) -> Result<OAuthCredentials, AuthError> {
     let response = client
-        .post(TOKEN_ENDPOINT)
+        .post(token_endpoint())
         .form(&[
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh_token.expose()),
@@ -100,6 +168,18 @@ fn parse_refresh_response(body: &str) -> Result<OAuthCredentials, AuthError> {
 /// Falls back to `~/.claude/.credentials.json` if the new path doesn't exist
 /// (backward compatibility). Mirrors `auth::default_credentials_path()`.
 pub fn credentials_path() -> PathBuf {
+    #[cfg(test)]
+    {
+        if let Some(path) = CREDENTIALS_PATH_OVERRIDE
+            .get_or_init(|| StdMutex::new(None))
+            .lock()
+            .expect("credentials path test override lock should not be poisoned")
+            .clone()
+        {
+            return path;
+        }
+    }
+
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     let new_path = home.join(".archon").join(".credentials.json");
     if new_path.exists() {
@@ -207,13 +287,36 @@ pub async fn refresh_if_needed(
     path: &Path,
     client: &reqwest::Client,
 ) -> Result<OAuthCredentials, AuthError> {
+    refresh_with_policy(path, client, false).await
+}
+
+/// Refresh credentials immediately, regardless of the expiry buffer.
+///
+/// Used after an Anthropic 401 where the server has rejected a token that may
+/// still look valid locally.
+pub async fn force_refresh(
+    path: &Path,
+    client: &reqwest::Client,
+) -> Result<OAuthCredentials, AuthError> {
+    refresh_with_policy(path, client, true).await
+}
+
+async fn refresh_with_policy(
+    path: &Path,
+    client: &reqwest::Client,
+    force: bool,
+) -> Result<OAuthCredentials, AuthError> {
     let (creds, initial_mtime) = read_credentials_locked(path)?;
 
-    if !creds.is_expired() {
+    if !force && !creds.is_expired() {
         return Ok(creds);
     }
 
-    tracing::info!("OAuth token expired, refreshing...");
+    if force {
+        tracing::info!("OAuth token rejected by provider, refreshing...");
+    } else {
+        tracing::info!("OAuth token expired, refreshing...");
+    }
 
     // Retry loop for acquiring write lock
     for attempt in 0..MAX_RETRIES {
@@ -233,9 +336,13 @@ pub async fn refresh_if_needed(
                     tracing::debug!("credential file changed, re-reading");
                     let content = fs::read_to_string(path)?;
                     let new_creds = parse_credentials_json(&content)?;
-                    if !new_creds.is_expired() {
+                    if !force && !new_creds.is_expired() {
                         return Ok(new_creds);
                     }
+                    let refreshed = refresh_token(&new_creds.refresh_token, client).await?;
+                    write_credentials_atomic(path, &refreshed)?;
+                    tracing::info!("OAuth token refreshed successfully");
+                    return Ok(refreshed);
                 }
 
                 // Perform the actual refresh

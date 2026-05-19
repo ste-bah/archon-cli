@@ -2,6 +2,7 @@
 pub mod active;
 pub mod agentic;
 pub mod anthropic;
+pub(crate) mod anthropic_support;
 pub mod auth;
 // TASK-AGS-706: LlmConfig + resolve_descriptor — feeds build_llm_provider.
 pub mod compaction_policy;
@@ -31,6 +32,10 @@ pub mod tokens_codex;
 pub mod types;
 pub mod usage;
 
+#[cfg(test)]
+mod anthropic_oauth_refresh_tests;
+#[cfg(test)]
+mod anthropic_tests;
 #[cfg(test)]
 mod identity_spoof_contract_tests;
 
