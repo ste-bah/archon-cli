@@ -1,8 +1,10 @@
-use std::collections::HashSet;
-use std::sync::{Mutex as StdMutex, OnceLock};
 use std::time::Duration;
 
-use crate::auth::AuthProvider;
+pub use crate::anthropic_support::{ApiError, MessageRequest};
+use crate::anthropic_support::{
+    cached_tool_blocks, classify_error, effective_effort, effective_speed, extract_unknown_beta,
+};
+use crate::auth::{AuthError, AuthProvider, OAuthCredentials};
 use crate::identity::IdentityProvider;
 use crate::streaming::{StreamError, StreamEvent, parse_sse_event, split_sse_lines};
 
@@ -65,12 +67,37 @@ impl AnthropicClient {
         &self.api_url
     }
 
+    async fn request_auth_header(&self) -> Result<(String, String), ApiError> {
+        if let AuthProvider::OAuthToken(_) = &self.auth {
+            let credentials_path = crate::tokens::credentials_path();
+            let creds = crate::tokens::refresh_if_needed(&credentials_path, &self.http)
+                .await
+                .map_err(auth_error_to_api)?;
+            return Ok(oauth_header(&creds));
+        }
+
+        Ok(self.auth.header())
+    }
+
+    async fn force_refresh_oauth(&self) -> Result<(), ApiError> {
+        if !matches!(&self.auth, AuthProvider::OAuthToken(_)) {
+            return Ok(());
+        }
+
+        let credentials_path = crate::tokens::credentials_path();
+        crate::tokens::force_refresh(&credentials_path, &self.http)
+            .await
+            .map(|_| ())
+            .map_err(auth_error_to_api)
+    }
+
     /// Send a streaming messages request with automatic retry on 429/5xx.
     pub async fn stream_message(
         &self,
         request: MessageRequest,
     ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, ApiError> {
         let body = self.build_request_body(&request)?;
+        let mut refreshed_after_401 = false;
 
         for attempt in 0..=MAX_RETRIES {
             let request_id = uuid::Uuid::new_v4().to_string();
@@ -93,7 +120,7 @@ impl AnthropicClient {
                 headers.insert("anthropic-beta".into(), combined);
             }
 
-            let (auth_header_name, auth_header_value) = self.auth.header();
+            let (auth_header_name, auth_header_value) = self.request_auth_header().await?;
 
             let mut req = self.http.post(&self.api_url);
             req = req.header(&auth_header_name, &auth_header_value);
@@ -197,7 +224,20 @@ impl AnthropicClient {
                     return Err(err);
                 }
 
-                // 401, other errors: don't retry
+                // 401 on OAuth: force-refresh once, then retry with the
+                // refreshed request-local header on the next loop iteration.
+                ApiError::AuthError(_)
+                    if status.as_u16() == 401
+                        && matches!(&self.auth, AuthProvider::OAuthToken(_))
+                        && !refreshed_after_401 =>
+                {
+                    refreshed_after_401 = true;
+                    tracing::warn!("Anthropic OAuth token rejected, refreshing and retrying once");
+                    self.force_refresh_oauth().await?;
+                    continue;
+                }
+
+                // Repeated 401, non-OAuth auth, and other errors: don't retry.
                 _ => return Err(err),
             }
         }
@@ -271,7 +311,13 @@ impl AnthropicClient {
             let beta_header = candidates.join(",");
             let request_id = uuid::Uuid::new_v4().to_string();
 
-            let (auth_header_name, auth_header_value) = self.auth.header();
+            let (auth_header_name, auth_header_value) = match self.request_auth_header().await {
+                Ok(header) => header,
+                Err(e) => {
+                    tracing::warn!("Beta validation probe: auth refresh failed: {e}");
+                    break;
+                }
+            };
 
             let response = self
                 .http
@@ -410,393 +456,13 @@ impl AnthropicClient {
     }
 }
 
-fn effective_speed(request: &MessageRequest) -> Option<&str> {
-    let value = request.speed.as_deref()?;
-    if supports_speed(&request.model) {
-        return Some(value);
-    }
-    warn_dropped_knob(&request.model, "speed", value);
-    None
+fn oauth_header(creds: &OAuthCredentials) -> (String, String) {
+    (
+        "Authorization".to_string(),
+        format!("Bearer {}", creds.access_token.expose()),
+    )
 }
 
-fn effective_effort(request: &MessageRequest) -> Option<&str> {
-    let value = request.effort.as_deref()?;
-    if supports_output_effort(&request.model) {
-        return Some(value);
-    }
-    warn_dropped_knob(&request.model, "output_config.effort", value);
-    None
-}
-
-fn supports_speed(_model: &str) -> bool {
-    false
-}
-
-fn supports_output_effort(_model: &str) -> bool {
-    false
-}
-
-fn warn_dropped_knob(model: &str, field: &str, value: &str) {
-    static WARNED: OnceLock<StdMutex<HashSet<String>>> = OnceLock::new();
-    let key = format!("{model}:{field}");
-    let warned = WARNED.get_or_init(|| StdMutex::new(HashSet::new()));
-    let Ok(mut guard) = warned.lock() else {
-        return;
-    };
-    if guard.insert(key) {
-        tracing::warn!(
-            provider = "anthropic",
-            model,
-            field,
-            value,
-            "dropping unsupported Anthropic request knob"
-        );
-    }
-}
-
-fn cached_tool_blocks(tools: &[serde_json::Value]) -> Vec<serde_json::Value> {
-    // Anthropic counts every block carrying `cache_control` as a separate
-    // cache breakpoint and hard-caps the request at 4 (HTTP 400 otherwise).
-    // `cache_control` is a PREFIX marker: tagging only the final tool caches
-    // the entire preceding tools array as a single breakpoint. Tagging every
-    // tool both blows the 4-breakpoint budget and is semantically redundant.
-    let mut tools: Vec<serde_json::Value> = tools.to_vec();
-    if let Some(last) = tools.last_mut()
-        && let Some(obj) = last.as_object_mut()
-        && !obj.contains_key("cache_control")
-    {
-        obj.insert(
-            "cache_control".into(),
-            serde_json::json!({ "type": "ephemeral" }),
-        );
-    }
-    tools
-}
-
-// ---------------------------------------------------------------------------
-// Request types
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct MessageRequest {
-    pub model: String,
-    pub max_tokens: u32,
-    pub system: Vec<serde_json::Value>,
-    pub messages: Vec<serde_json::Value>,
-    pub tools: Vec<serde_json::Value>,
-    pub thinking: Option<serde_json::Value>,
-    /// When fast mode is active, set to `Some("fast")`.
-    pub speed: Option<String>,
-    /// When effort is not High, set to the effort level string (e.g. `"low"`, `"medium"`).
-    pub effort: Option<String>,
-    /// Diagnostic marker: None, "main_session", or "subagent".
-    pub request_origin: Option<String>,
-}
-
-impl Default for MessageRequest {
-    fn default() -> Self {
-        Self {
-            model: "claude-sonnet-4-6".into(),
-            max_tokens: 8192,
-            system: Vec::new(),
-            messages: Vec::new(),
-            tools: Vec::new(),
-            thinking: None,
-            speed: None,
-            effort: None,
-            request_origin: None,
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Error types
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, thiserror::Error)]
-pub enum ApiError {
-    #[error("HTTP error: {0}")]
-    HttpError(String),
-
-    #[error("authentication error: {0}")]
-    AuthError(String),
-
-    #[error("rate limited: retry after {retry_after_secs}s")]
-    RateLimited { retry_after_secs: u64 },
-
-    #[error("server overloaded (529)")]
-    Overloaded,
-
-    #[error("server error ({status}): {message}")]
-    ServerError { status: u16, message: String },
-
-    #[error("serialization error: {0}")]
-    SerializeError(String),
-}
-
-/// Extract the unknown beta name from a 400 error body.
-///
-/// Looks for the pattern `"Unknown beta flag: <name>"` and returns `<name>`.
-fn extract_unknown_beta(body: &str) -> Option<String> {
-    const MARKER: &str = "Unknown beta flag: ";
-    let start = body.find(MARKER)? + MARKER.len();
-    let rest = &body[start..];
-    // Beta name ends at a `"` or end of string
-    let end = rest.find('"').unwrap_or(rest.len());
-    let name = rest[..end].trim().to_string();
-    if name.is_empty() { None } else { Some(name) }
-}
-
-fn classify_error(status: u16, body: &str, retry_after_header: Option<&str>) -> ApiError {
-    match status {
-        401 => ApiError::AuthError(format!("authentication failed: {body}")),
-        403 => ApiError::AuthError(format!(
-            "authentication/identity rejected (403). If using spoof mode, check \
-             identity.spoof_version matches the current Claude Code version, or \
-             run /refresh-identity to rediscover beta headers. Body: {body}"
-        )),
-        429 => ApiError::RateLimited {
-            retry_after_secs: retry_after_header
-                .and_then(|s| s.parse().ok())
-                .unwrap_or_else(|| extract_retry_after(body)),
-        },
-        529 => ApiError::Overloaded,
-        500 | 502 | 503 => ApiError::ServerError {
-            status,
-            message: body.to_string(),
-        },
-        _ => ApiError::HttpError(format!("HTTP {status}: {body}")),
-    }
-}
-
-fn extract_retry_after(body: &str) -> u64 {
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(body)
-        && let Some(secs) = v.get("retry_after").and_then(|v| v.as_u64())
-    {
-        return secs;
-    }
-    30
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-#[cfg(test)]
-mod beta_validation_tests {
-    use super::*;
-
-    #[test]
-    fn test_extract_unknown_beta_parses_correctly() {
-        let body = r#"{"type":"error","error":{"type":"invalid_request_error","message":"Unknown beta flag: xyz-2025-01-01"}}"#;
-        let result = extract_unknown_beta(body);
-        assert_eq!(result, Some("xyz-2025-01-01".to_string()));
-    }
-
-    #[test]
-    fn test_extract_unknown_beta_returns_none_for_unrelated_error() {
-        let body = r#"{"type":"error","error":{"type":"authentication_error","message":"Invalid API key"}}"#;
-        let result = extract_unknown_beta(body);
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn test_extract_unknown_beta_returns_none_for_empty_body() {
-        let result = extract_unknown_beta("");
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn test_extract_unknown_beta_handles_beta_with_hyphens() {
-        let body = r#"{"type":"error","error":{"message":"Unknown beta flag: my-feature-flag-2025-12-31"}}"#;
-        let result = extract_unknown_beta(body);
-        assert_eq!(result, Some("my-feature-flag-2025-12-31".to_string()));
-    }
-
-    #[tokio::test]
-    async fn test_validate_betas_with_empty_candidates_returns_empty() {
-        use crate::auth::AuthProvider;
-        use crate::identity::{IdentityMode, IdentityProvider};
-        use crate::types::Secret;
-
-        let auth = AuthProvider::ApiKey(Secret::new("test-key".to_string()));
-        let identity = IdentityProvider::new(
-            IdentityMode::Clean,
-            "test-session".to_string(),
-            "test-device".to_string(),
-            String::new(),
-        );
-        let client = AnthropicClient::new(auth, identity, None);
-        let result = client.validate_betas(vec![]).await;
-        assert!(
-            result.is_empty(),
-            "empty candidates should return empty immediately without any API call"
-        );
-    }
-
-    #[test]
-    fn test_probe_body_structure() {
-        // Verify that the probe body construction generates the expected shape.
-        let body = serde_json::json!({
-            "model": "claude-haiku-4-5-20251001",
-            "max_tokens": 1,
-            "messages": [{"role": "user", "content": "."}],
-            "stream": false,
-        });
-        assert_eq!(body["model"], "claude-haiku-4-5-20251001");
-        assert_eq!(body["max_tokens"], 1);
-        assert_eq!(body["stream"], false);
-        assert!(body["messages"].is_array());
-        let msgs = body["messages"].as_array().unwrap();
-        assert_eq!(msgs.len(), 1);
-        assert_eq!(msgs[0]["role"], "user");
-        assert_eq!(msgs[0]["content"], ".");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::auth::AuthProvider;
-    use crate::identity::IdentityProvider;
-    use crate::types::Secret;
-
-    fn make_auth() -> AuthProvider {
-        AuthProvider::ApiKey(Secret::new("test-key".to_string()))
-    }
-
-    fn make_identity() -> IdentityProvider {
-        IdentityProvider::new(
-            crate::identity::IdentityMode::Clean,
-            "test-session".to_string(),
-            "test-device".to_string(),
-            String::new(),
-        )
-    }
-
-    #[test]
-    fn test_custom_api_url_stored() {
-        let client = AnthropicClient::new(
-            make_auth(),
-            make_identity(),
-            Some("http://localhost:11434/v1/messages".to_string()),
-        );
-        assert_eq!(client.api_url, "http://localhost:11434/v1/messages");
-    }
-
-    #[test]
-    fn test_default_api_url_when_none() {
-        let client = AnthropicClient::new(make_auth(), make_identity(), None);
-        assert_eq!(client.api_url, API_URL);
-    }
-
-    #[test]
-    fn test_custom_api_url_used_not_constant() {
-        let custom_url = "https://my-proxy.example.com/v1/messages";
-        let client =
-            AnthropicClient::new(make_auth(), make_identity(), Some(custom_url.to_string()));
-        // Confirm it is NOT using the hardcoded constant
-        assert_ne!(client.api_url, API_URL);
-        assert_eq!(client.api_url, custom_url);
-    }
-
-    #[test]
-    fn unsupported_speed_and_effort_are_dropped_from_wire_body() {
-        let client = AnthropicClient::new(make_auth(), make_identity(), None);
-        let request = MessageRequest {
-            model: "claude-sonnet-4-6".to_string(),
-            messages: vec![serde_json::json!({
-                "role": "user",
-                "content": "summarize this"
-            })],
-            speed: Some("fast".to_string()),
-            effort: Some("low".to_string()),
-            ..MessageRequest::default()
-        };
-
-        let body = client
-            .build_request_body(&request)
-            .expect("request body serializes");
-        let body_json: serde_json::Value =
-            serde_json::from_str(&body).expect("request body parses as JSON");
-
-        assert_eq!(body_json.get("speed"), None);
-        assert_eq!(body_json.get("output_config"), None);
-        assert!(
-            !body.contains("\"speed\""),
-            "unsupported speed knob must not reach Anthropic wire body: {body}"
-        );
-        assert!(
-            !body.contains("\"output_config\""),
-            "unsupported effort knob must not reach Anthropic wire body: {body}"
-        );
-    }
-
-    #[test]
-    fn tool_definitions_get_anthropic_cache_control() {
-        let client = AnthropicClient::new(make_auth(), make_identity(), None);
-        let request = MessageRequest {
-            messages: vec![serde_json::json!({"role": "user", "content": "hi"})],
-            tools: vec![
-                serde_json::json!({
-                    "name": "Agent",
-                    "description": "spawn",
-                    "input_schema": {"type": "object"}
-                }),
-                serde_json::json!({
-                    "name": "Read",
-                    "description": "read",
-                    "input_schema": {"type": "object"}
-                }),
-            ],
-            ..MessageRequest::default()
-        };
-
-        let body = client.build_request_body(&request).unwrap();
-        let body_json: serde_json::Value = serde_json::from_str(&body).unwrap();
-        // `cache_control` is a prefix breakpoint: only the FINAL tool carries
-        // it, which caches the entire tools array as a single breakpoint.
-        // Non-final tools must NOT each carry one (4-breakpoint budget).
-        assert!(
-            body_json["tools"][0].get("cache_control").is_none(),
-            "non-final tools must not each carry cache_control"
-        );
-        assert_eq!(
-            body_json["tools"][1]["cache_control"],
-            serde_json::json!({"type": "ephemeral"})
-        );
-    }
-
-    #[test]
-    fn cache_control_blocks_stay_within_anthropic_budget() {
-        // Anthropic rejects requests with >4 cache_control blocks (HTTP 400
-        // "A maximum of 4 blocks with cache_control may be provided").
-        // Identity-spoof system blocks already consume up to 3; the tools
-        // array must add at most 1 (a single prefix breakpoint on the final
-        // tool), never one per tool. Regression guard for the 72-breakpoint
-        // production incident.
-        let client = AnthropicClient::new(make_auth(), make_identity(), None);
-        let tools: Vec<serde_json::Value> = (0..40)
-            .map(|i| {
-                serde_json::json!({
-                    "name": format!("tool_{i}"),
-                    "description": "x",
-                    "input_schema": {"type": "object"}
-                })
-            })
-            .collect();
-        let request = MessageRequest {
-            messages: vec![serde_json::json!({"role": "user", "content": "hi"})],
-            tools,
-            ..MessageRequest::default()
-        };
-
-        let body = client.build_request_body(&request).unwrap();
-        let count = body.matches("\"cache_control\"").count();
-        assert!(
-            count <= 4,
-            "serialized request carries {count} cache_control blocks; \
-             Anthropic caps at 4. body={body}"
-        );
-    }
+fn auth_error_to_api(err: AuthError) -> ApiError {
+    ApiError::AuthError(err.to_string())
 }
