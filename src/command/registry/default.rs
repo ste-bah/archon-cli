@@ -32,6 +32,7 @@ use crate::command::mcp::McpHandler;
 use crate::command::memory::MemoryHandler;
 use crate::command::model::ModelHandler;
 use crate::command::permissions::PermissionsHandler;
+use crate::command::pipeline_slash::PipelineSlashHandler;
 use crate::command::recall::RecallHandler;
 use crate::command::release_notes::ReleaseNotesHandler;
 use crate::command::reload::ReloadHandler;
@@ -172,13 +173,7 @@ pub(crate) fn default_registry() -> Registry {
             "Run governed-learning behaviour CLI commands from inside the TUI",
         )),
     );
-    b.insert_primary(
-        "pipeline",
-        Arc::new(crate::command::cli_mirror::CliMirrorHandler::prefixed(
-            "pipeline",
-            "Run pipeline CLI commands from inside the TUI",
-        )),
-    );
+    b.insert_primary("pipeline", Arc::new(PipelineSlashHandler));
     b.insert_primary(
         "auth",
         Arc::new(crate::command::cli_mirror::CliMirrorHandler::prefixed(

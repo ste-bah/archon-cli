@@ -93,6 +93,8 @@ pub(crate) mod pipeline;
 pub(crate) mod pipeline_bundle;
 pub(crate) mod pipeline_declarative;
 pub(crate) mod pipeline_learning_migration;
+pub(crate) mod pipeline_slash;
+pub(crate) mod pipeline_slash_progress;
 pub(crate) mod pipeline_support;
 pub(crate) mod provider_gate;
 // TASK-TUI-626: /plan Plan Mode toggle via SNAPSHOT+EFFECT pattern.
