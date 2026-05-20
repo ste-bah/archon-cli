@@ -67,14 +67,6 @@ impl MemoryGraph {
         debug!(id = %id, "stored memory");
         if let Err(error) = self.embed_and_store(&id, content) {
             warn!(memory_id = %id, error = %error, "memory.embedding.store_failed");
-            if let Err(delete_error) = self.delete_memory(&id) {
-                warn!(
-                    memory_id = %id,
-                    error = %delete_error,
-                    "memory.embedding.rollback_failed"
-                );
-            }
-            return Err(error);
         }
         Ok(id)
     }
@@ -215,6 +207,12 @@ impl MemoryGraph {
                 ScriptMutability::Mutable,
             )
             .map_err(db_err)?;
+
+        if content.is_some()
+            && let Err(error) = self.embed_and_store(id, new_content)
+        {
+            warn!(memory_id = %id, error = %error, "memory.embedding.store_failed");
+        }
 
         Ok(())
     }

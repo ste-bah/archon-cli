@@ -104,9 +104,6 @@ impl MemoryGraph {
         memory_id: &str,
         content: &str,
     ) -> Result<(), MemoryError> {
-        if content.len() < MIN_EMBED_CHARS {
-            return Ok(());
-        }
         let provider = match self.embedding_provider.read() {
             Ok(guard) => guard.clone(),
             Err(e) => {
@@ -116,6 +113,16 @@ impl MemoryGraph {
             }
         };
         if let Some(ref provider) = provider {
+            if content.len() < MIN_EMBED_CHARS {
+                if let Err(error) = crate::vector_search::delete_embedding(&self.db, memory_id) {
+                    tracing::warn!(
+                        memory_id,
+                        error = %error,
+                        "memory.embedding.delete_short_content_failed"
+                    );
+                }
+                return Ok(());
+            }
             match provider.embed(&[content.to_string()]) {
                 Ok(vecs) if !vecs.is_empty() => crate::vector_search::store_embedding(
                     &self.db,

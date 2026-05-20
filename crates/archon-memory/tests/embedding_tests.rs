@@ -3,6 +3,8 @@
 //! These tests use CozoDB in-memory backend and synthetic embeddings so they
 //! run without network access or model downloads.
 
+use std::sync::Arc;
+
 use archon_memory::embedding::{
     EmbeddingConfig, EmbeddingProvider, EmbeddingProviderKind, create_provider,
 };
@@ -153,6 +155,23 @@ fn init_embedding_schema_idempotent() {
     vector_search::init_embedding_schema(g.db(), 768).expect("second should not error");
 }
 
+#[test]
+fn init_embedding_schema_rebuilds_when_dimension_changes() {
+    let g = MemoryGraph::in_memory().expect("graph");
+    vector_search::init_embedding_schema(g.db(), 4).expect("initial schema");
+    vector_search::store_embedding(g.db(), "old-memory", &synthetic_embedding(4, 0), "mock", 4)
+        .expect("store old embedding");
+
+    vector_search::init_embedding_schema(g.db(), 6).expect("rebuild schema for new dimension");
+    vector_search::store_embedding(g.db(), "new-memory", &synthetic_embedding(6, 1), "mock", 6)
+        .expect("store new embedding after rebuild");
+
+    let results =
+        vector_search::search_similar(g.db(), &synthetic_embedding(6, 1), 10).expect("search");
+    assert!(results.iter().any(|(id, _)| id == "new-memory"));
+    assert!(!results.iter().any(|(id, _)| id == "old-memory"));
+}
+
 // ---------------------------------------------------------------------------
 // vector_search: store + delete
 // ---------------------------------------------------------------------------
@@ -195,6 +214,61 @@ fn delete_nonexistent_embedding_is_ok() {
     vector_search::init_embedding_schema(g.db(), 4).expect("schema");
     // Should not error even if no row exists
     vector_search::delete_embedding(g.db(), "does-not-exist").expect("delete noop");
+}
+
+#[test]
+fn store_memory_keeps_row_when_embedding_indexing_fails() {
+    let g = MemoryGraph::in_memory().expect("graph");
+    g.set_embedding_provider(Arc::new(MismatchedProvider {
+        declared_dim: 4,
+        actual_dim: 3,
+    }))
+    .expect("provider attaches");
+
+    let id = g
+        .store_memory(
+            "long enough content to trigger embedding",
+            "survives embedding failure",
+            MemoryType::Fact,
+            0.7,
+            &["pipeline".into()],
+            "test",
+            "",
+        )
+        .expect("memory text should survive embedding failure");
+
+    let stored = g.get_memory(&id).expect("stored memory remains readable");
+    assert_eq!(stored.title, "survives embedding failure");
+    assert_eq!(stored.content, "long enough content to trigger embedding");
+}
+
+#[test]
+fn update_memory_keeps_new_content_when_embedding_indexing_fails() {
+    let g = MemoryGraph::in_memory().expect("graph");
+    g.set_embedding_provider(Arc::new(MockProvider::new(4)))
+        .expect("provider attaches");
+    let id = g
+        .store_memory(
+            "initial long content for embedding",
+            "update survives embedding failure",
+            MemoryType::Fact,
+            0.7,
+            &["pipeline".into()],
+            "test",
+            "",
+        )
+        .expect("initial store");
+
+    g.set_embedding_provider(Arc::new(MismatchedProvider {
+        declared_dim: 4,
+        actual_dim: 3,
+    }))
+    .expect("mismatched provider attaches");
+    g.update_memory(&id, Some("updated long content still persists"), None)
+        .expect("update should not fail just because embedding indexing fails");
+
+    let stored = g.get_memory(&id).expect("stored memory remains readable");
+    assert_eq!(stored.content, "updated long content still persists");
 }
 
 // ---------------------------------------------------------------------------
@@ -383,7 +457,7 @@ fn graph_with_provider_stores_embeddings_on_store() {
 }
 
 #[test]
-fn graph_store_memory_surfaces_embedding_store_failure() {
+fn graph_store_memory_degrades_when_embedding_store_fails() {
     let g = MemoryGraph::in_memory().expect("graph");
     let provider = std::sync::Arc::new(MismatchedProvider {
         declared_dim: 4,
@@ -391,7 +465,7 @@ fn graph_store_memory_surfaces_embedding_store_failure() {
     });
     g.set_embedding_provider(provider).expect("set provider");
 
-    let err = g
+    let id = g
         .store_memory(
             "enough content to trigger embedding",
             "Bad embedding",
@@ -401,13 +475,14 @@ fn graph_store_memory_surfaces_embedding_store_failure() {
             "test",
             "",
         )
-        .expect_err("embedding store failure must surface to caller");
+        .expect("memory row should persist even when embedding indexing fails");
 
-    assert!(err.to_string().contains("dimension mismatch"), "{err}");
+    let stored = g.get_memory(&id).expect("memory remains readable");
+    assert_eq!(stored.title, "Bad embedding");
     assert_eq!(
         g.memory_count().expect("count"),
-        0,
-        "memory row must not persist without its configured embedding"
+        1,
+        "embedding failure must not delete the authoritative memory row"
     );
 }
 

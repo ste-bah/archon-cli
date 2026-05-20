@@ -18,6 +18,8 @@ fn empty_rows() -> NamedRows {
     NamedRows::new(vec![], vec![])
 }
 
+const SCHEMA_PROBE_ID: &str = "__archon_embedding_schema_probe__";
+
 // ---------------------------------------------------------------------------
 // Schema
 // ---------------------------------------------------------------------------
@@ -29,7 +31,27 @@ fn empty_rows() -> NamedRows {
 ///
 /// This function is idempotent: calling it multiple times is safe.
 pub fn init_embedding_schema(db: &DbInstance, dim: usize) -> Result<(), MemoryError> {
-    // Create the stored relation
+    create_embedding_relation(db, dim)?;
+    create_embedding_index(db, dim)?;
+
+    if let Err(error) = probe_embedding_schema(db, dim) {
+        tracing::warn!(
+            dim,
+            error = %error,
+            "memory_embeddings schema incompatible with provider; rebuilding derived embedding index"
+        );
+        rebuild_embedding_schema(db, dim)?;
+        probe_embedding_schema(db, dim).map_err(|probe_error| {
+            MemoryError::Database(format!(
+                "memory_embeddings rebuild completed but {dim}-dim schema probe still failed: {probe_error}"
+            ))
+        })?;
+    }
+
+    Ok(())
+}
+
+fn create_embedding_relation(db: &DbInstance, dim: usize) -> Result<(), MemoryError> {
     let create_rel = format!(
         ":create memory_embeddings {{
             memory_id: String
@@ -48,7 +70,10 @@ pub fn init_embedding_schema(db: &DbInstance, dim: usize) -> Result<(), MemoryEr
             }
         })?;
 
-    // Create the HNSW index
+    Ok(())
+}
+
+fn create_embedding_index(db: &DbInstance, dim: usize) -> Result<(), MemoryError> {
     let create_idx = format!(
         "::hnsw create memory_embeddings:embedding_idx {{
             dim: {dim},
@@ -72,6 +97,40 @@ pub fn init_embedding_schema(db: &DbInstance, dim: usize) -> Result<(), MemoryEr
             }
         })?;
 
+    Ok(())
+}
+
+fn rebuild_embedding_schema(db: &DbInstance, dim: usize) -> Result<(), MemoryError> {
+    // Embeddings are derived data. If the provider dimension changes, drop only
+    // the vector relation/index and let `archon memory reindex --all` rebuild
+    // from the authoritative `memories` relation.
+    let _ = db.run_script(
+        "::index drop memory_embeddings:embedding_idx",
+        Default::default(),
+        ScriptMutability::Mutable,
+    );
+    let _ = db.run_script(
+        "{::remove memory_embeddings}",
+        Default::default(),
+        ScriptMutability::Mutable,
+    );
+    create_embedding_relation(db, dim)?;
+    create_embedding_index(db, dim)
+}
+
+fn probe_embedding_schema(db: &DbInstance, dim: usize) -> Result<(), MemoryError> {
+    let probe = vec![0.0_f32; dim];
+    store_embedding(db, SCHEMA_PROBE_ID, &probe, "schema-probe", dim).map_err(|error| {
+        MemoryError::Database(format!(
+            "failed to store {dim}-dim schema probe in memory_embeddings: {error}"
+        ))
+    })?;
+    if let Err(error) = delete_embedding(db, SCHEMA_PROBE_ID) {
+        tracing::warn!(
+            error = %error,
+            "failed to remove memory_embeddings schema probe row"
+        );
+    }
     Ok(())
 }
 
@@ -107,7 +166,13 @@ pub fn store_embedding(
         params,
         ScriptMutability::Mutable,
     )
-    .map_err(db_err)?;
+    .map_err(|e| {
+        MemoryError::Database(format!(
+            "failed to store {}-dim embedding for memory {memory_id}; \
+             memory_embeddings may have been created for a different provider dimension: {e}",
+            embedding.len()
+        ))
+    })?;
 
     Ok(())
 }

@@ -1,6 +1,12 @@
 ---
 name: nucleolus-calculator
-description: NUCLEOLUS ALLOCATION specialist. Use PROACTIVELY for cooperative games where you need a unique, always-existing allocation that minimizes maximum coalitional dissatisfaction. MUST BE USED as an alternative to Shapley value when the core is empty and you need a principled fair allocation. Computes the leximin nucleolus: minimize the maximum excess, then the second-maximum, and so on.
+description: >-
+  NUCLEOLUS ALLOCATION specialist. Use PROACTIVELY for cooperative games where
+  you need a unique, always-existing allocation that minimizes maximum
+  coalitional dissatisfaction. MUST BE USED as an alternative to Shapley value
+  when the core is empty and you need a principled fair allocation. Computes the
+  leximin nucleolus: minimize the maximum excess, then the second-maximum, and
+  so on.
 tools: Read, Grep, Glob
 model: opus
 permissionMode: default
