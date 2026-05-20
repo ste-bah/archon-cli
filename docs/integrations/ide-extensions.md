@@ -7,19 +7,35 @@ archon-cli runs inside IDEs via the `ide-stdio` subcommand, which exposes a JSON
 `archon ide-stdio` reads JSON-RPC 2.0 requests on stdin and writes responses to stdout. Notifications stream alongside (no `id` field).
 
 ```jsonc
-// Request: send a user prompt
-{ "jsonrpc": "2.0", "id": 1, "method": "archon/prompt", "params": { "text": "hello" } }
+// Request: initialize a session
+{ "jsonrpc": "2.0", "id": 1, "method": "archon/initialize", "params": { "clientInfo": { "name": "vscode-archon", "version": "0.1.0" }, "capabilities": { "inlineCompletion": false, "toolExecution": true, "diff": true, "terminal": true } } }
 
-// Response: assistant text
-{ "jsonrpc": "2.0", "id": 1, "result": { "text": "hi", "tokens": 10 } }
+// Response: initialized server session
+{ "jsonrpc": "2.0", "id": 1, "result": { "sessionId": "...", "serverVersion": "1.3.2", "capabilities": { "inlineCompletion": false, "toolExecution": false, "diff": false, "terminal": false } } }
 
-// Notification: streaming status
-{ "jsonrpc": "2.0", "method": "archon/status", "params": { "state": "running", "session_id": "..." } }
+// Request: queue a prompt for that session
+{ "jsonrpc": "2.0", "id": 2, "method": "archon/prompt", "params": { "sessionId": "...", "text": "hello", "contextFiles": [] } }
+
+// Response: prompt accepted
+{ "jsonrpc": "2.0", "id": 2, "result": { "queued": true } }
+
+// Request: fetch protocol status
+{ "jsonrpc": "2.0", "id": 3, "method": "archon/status", "params": { "sessionId": "..." } }
+
+// Response: status snapshot
+{ "jsonrpc": "2.0", "id": 3, "result": { "model": "claude-sonnet-4-6", "inputTokens": 0, "outputTokens": 0, "cost": 0.0 } }
+
+// Notification: streamed assistant text
+{ "jsonrpc": "2.0", "method": "archon/textDelta", "params": { "sessionId": "...", "text": "hi" } }
 ```
 
 Implemented methods are `archon/initialize`, `archon/prompt`, `archon/cancel`,
 `archon/toolResult`, `archon/status`, and `archon/config`. The handler surface
 lives in `crates/archon-sdk/src/ide/handler.rs`.
+
+The event bridge emits notifications such as `archon/textDelta`,
+`archon/thinkingDelta`, `archon/toolCall`, `archon/permissionRequest`, and
+`archon/turnComplete`.
 
 ## VS Code
 

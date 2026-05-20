@@ -33,6 +33,15 @@ pub struct SkillContext {
     pub model: String,
     /// Agent registry for agent management skills (/create-agent, /run-agent, etc.).
     pub agent_registry: Option<std::sync::Arc<std::sync::RwLock<crate::agents::AgentRegistry>>>,
+    /// Shared session store for session-management skills.
+    ///
+    /// Interactive sessions populate this from the active configured store so
+    /// skills like `/tag`, `/rename`, `/sessions`, and `/stats` do not reopen
+    /// the platform default database and accidentally bypass `session.db_path`.
+    /// Tool-driven or unit-test contexts may leave it unset, in which case
+    /// session-mutating skills fail closed instead of reopening an unrelated
+    /// default database.
+    pub session_store: Option<std::sync::Arc<archon_session::storage::SessionStore>>,
 }
 
 /// A skill that can be invoked via a slash command.

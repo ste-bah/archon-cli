@@ -58,10 +58,12 @@ async fn ingest_source(db: &DbInstance, source: &str) -> Result<()> {
             .unwrap_or("text/plain")
             .to_string();
         let body = response.text().await?;
-        let document_id = persist_text_document(db, source, &media_type, &body)?;
-        let chunks = archon_docs::store::list_chunks_for_doc(db, &document_id)?;
-        println!("Ingested: {document_id}");
-        println!("Chunks: {}", chunks.len());
+        let result = archon_docs::ingest_text::ingest_text_source(db, source, &media_type, &body)?;
+        println!("Ingested: {}", result.document_id);
+        if !result.was_new {
+            println!("Skipped duplicate: true");
+        }
+        println!("Chunks: {}", result.chunks_registered);
         return Ok(());
     }
     let path = PathBuf::from(source);
@@ -80,66 +82,6 @@ async fn ingest_source(db: &DbInstance, source: &str) -> Result<()> {
         println!("Chunks: {}", chunks.len());
     }
     Ok(())
-}
-
-fn persist_text_document(
-    db: &DbInstance,
-    source_path: &str,
-    media_type: &str,
-    content: &str,
-) -> Result<String> {
-    let content_hash = archon_docs::hash::sha256_str(content);
-    if let Some(existing) = archon_docs::store::get_doc_by_hash(db, &content_hash)? {
-        return Ok(existing.document_id);
-    }
-
-    let document_id = format!("doc-{}", uuid::Uuid::new_v4());
-    let artifact_id = format!("artifact-{document_id}-text");
-    let now = chrono::Utc::now().to_rfc3339();
-    let doc = archon_docs::models::SourceDocument {
-        document_id: document_id.clone(),
-        source_path: source_path.to_string(),
-        media_type: media_type.to_string(),
-        content_hash: content_hash.clone(),
-        discovered_at: now.clone(),
-        status: archon_docs::models::DocumentStatus::Ingested,
-    };
-    archon_docs::store::insert_doc_source(db, &doc)?;
-
-    let artifact = archon_docs::models::ArtifactRecord {
-        artifact_id: artifact_id.clone(),
-        document_id: document_id.clone(),
-        artifact_type: "text".into(),
-        content_hash,
-        created_at: now,
-        provenance_record_id: String::new(),
-    };
-    archon_docs::store::insert_artifact(db, &artifact)?;
-
-    let offsets = vec![archon_docs::models::PageOffset {
-        page: 1,
-        char_start: 0,
-        char_end: content.len(),
-    }];
-    let page_chunks = archon_docs::chunking::chunk_with_page_anchors(content, &offsets);
-    let chunks =
-        archon_docs::chunking::build_chunk_artifacts(&document_id, &artifact_id, &page_chunks);
-    for chunk in &chunks {
-        archon_docs::store::insert_chunk(db, chunk)?;
-    }
-    index_chunks_if_provider(db, &chunks);
-    Ok(document_id)
-}
-
-fn index_chunks_if_provider(db: &DbInstance, chunks: &[archon_docs::models::ChunkArtifact]) {
-    if archon_docs::embed::get_provider().is_none() {
-        return;
-    }
-    for chunk in chunks {
-        if let Err(e) = archon_docs::retrieval::index_chunk(db, chunk) {
-            tracing::warn!(chunk_id = %chunk.chunk_id, error = %e, "failed to index KB chunk");
-        }
-    }
 }
 
 async fn list_chunks(db: &DbInstance) -> Result<()> {
@@ -346,17 +288,17 @@ mod tests {
     #[test]
     fn persist_text_document_writes_doc_and_chunk_rows() {
         let db = test_db();
-        let document_id = persist_text_document(
+        let result = archon_docs::ingest_text::ingest_text_source(
             &db,
             "https://example.test/policy.txt",
             "text/plain",
             "Archon uses CozoDB.",
         )
         .unwrap();
-        let doc = archon_docs::store::get_doc_source(&db, &document_id)
+        let doc = archon_docs::store::get_doc_source(&db, &result.document_id)
             .unwrap()
             .unwrap();
-        let chunks = archon_docs::store::list_chunks_for_doc(&db, &document_id).unwrap();
+        let chunks = archon_docs::store::list_chunks_for_doc(&db, &result.document_id).unwrap();
         assert_eq!(doc.source_path, "https://example.test/policy.txt");
         assert_eq!(chunks.len(), 1);
         assert!(chunks[0].content.contains("Archon uses CozoDB"));
@@ -365,21 +307,22 @@ mod tests {
     #[test]
     fn persist_text_document_deduplicates_by_content_hash() {
         let db = test_db();
-        let first = persist_text_document(
+        let first = archon_docs::ingest_text::ingest_text_source(
             &db,
             "https://example.test/a.txt",
             "text/plain",
             "Same text.",
         )
         .unwrap();
-        let second = persist_text_document(
+        let second = archon_docs::ingest_text::ingest_text_source(
             &db,
             "https://example.test/b.txt",
             "text/plain",
             "Same text.",
         )
         .unwrap();
-        assert_eq!(first, second);
+        assert_eq!(first.document_id, second.document_id);
+        assert!(!second.was_new);
     }
 
     #[test]

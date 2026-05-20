@@ -67,10 +67,6 @@ impl Agent {
     /// TASK-AGS-105: install the `AgentSubagentExecutor` into the process
     /// OnceLock so `AgentTool::execute` and `TaskCreateTool::execute` can
     /// resolve it via `archon_tools::subagent_executor::get_subagent_executor`.
-    ///
-    /// Called explicitly by the embedder (CLI, tests) AFTER constructing the
-    /// `Agent` with its full field set (hook_registry, memory, etc.). This is
-    /// a separate step from `Agent::new` because many of the fields the
     /// TASK-AGS-107: set the cancel token for Ctrl+C propagation.
     /// Called from the input handler spawn in main.rs before
     /// process_message, cleared afterward.
@@ -78,9 +74,13 @@ impl Agent {
         self.config.cancel_token = token;
     }
 
-    /// executor needs are set via post-construction setters
-    /// (`set_hook_registry`, `set_memory`, ...). The install is idempotent
-    /// per-process (OnceLock semantics): first caller wins.
+    /// Install or replace the process-wide subagent executor used by
+    /// `AgentTool` and task-backed agent launches.
+    ///
+    /// Called explicitly by the embedder after constructing `Agent` with full
+    /// runtime state such as hooks, memory, working dir, parent model, and
+    /// permissions. The underlying slot is replaceable so tests and restarted
+    /// sessions can install a fresh executor in the same process.
     pub fn install_subagent_executor(&self) {
         let exec = crate::subagent_executor::AgentSubagentExecutor::new(
             Arc::clone(&self.client),

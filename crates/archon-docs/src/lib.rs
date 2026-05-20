@@ -10,6 +10,7 @@ mod ingest_artifacts;
 mod ingest_directory;
 mod ingest_multimodal;
 mod ingest_pdf;
+pub mod ingest_text;
 pub mod inspect;
 pub mod ocr;
 pub mod pdf;

@@ -720,6 +720,7 @@ pub(crate) fn run_session_loop(
                             working_dir: cmd_ctx.working_dir.clone(),
                             model: cmd_ctx.default_model.clone(),
                             agent_registry: Some(Arc::clone(&cmd_ctx.agent_registry)),
+                            session_store: Some(Arc::clone(&cmd_ctx.session_store)),
                         };
                         s.execute(&cmd_args, &skill_ctx)
                     })

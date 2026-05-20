@@ -98,14 +98,12 @@ async fn handle_code(
         println!("=== Coding Pipeline Dry Run ===");
         println!("Task: {task}");
         println!("\nAgent Sequence (50 agents):");
-        println!("  Phase 1: task-analyzer, requirement-extractor, requirement-prioritizer");
-        println!(
-            "  Phase 2: pattern-explorer, technology-scout, feasibility-analyzer, codebase-analyzer"
-        );
-        println!("  Phase 3: system-designer, component-designer, interface-designer, ...");
+        println!("  Phase 1: contract-agent, requirement-extractor, requirement-prioritizer");
+        println!("  Phase 2: feasibility-analyzer, research-planner, codebase-analyzer, ...");
+        println!("  Phase 3: integration-architect, wiring-obligation-agent, phase-3-reviewer");
         println!("  Phase 4: code-generator, unit-implementer, api-implementer, ...");
         println!("  Phase 5: test-generator, integration-tester, security-tester, ...");
-        println!("  Phase 6: final-refactorer, sign-off-approver");
+        println!("  Phase 6: quality-gate, final-refactorer, sign-off-approver, ...");
         println!("\nEstimated cost: ~$2.50-5.00 (varies by task complexity)");
         return Ok(());
     }

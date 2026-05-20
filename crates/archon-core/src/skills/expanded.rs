@@ -7,6 +7,17 @@
 
 use super::{Skill, SkillContext, SkillOutput, SkillRegistry};
 
+fn with_session_store(
+    ctx: &SkillContext,
+    f: impl FnOnce(&archon_session::storage::SessionStore) -> SkillOutput,
+) -> SkillOutput {
+    if let Some(store) = ctx.session_store.as_deref() {
+        return f(store);
+    }
+
+    SkillOutput::Error("Session store is unavailable in this context.".to_string())
+}
+
 // ---------------------------------------------------------------------------
 // Macro for simple descriptor skills (same pattern as builtin.rs)
 // ---------------------------------------------------------------------------
@@ -97,14 +108,12 @@ expanded_skill!(TagSkill, "tag", "Tag current session", |args, ctx| {
         );
     }
     let tag = args.join(" ");
-    let db_path = archon_session::storage::default_db_path();
-    match archon_session::storage::SessionStore::open(&db_path) {
-        Ok(store) => match archon_session::metadata::add_tag(&store, &ctx.session_id, &tag) {
+    with_session_store(ctx, |store| {
+        match archon_session::metadata::add_tag(store, &ctx.session_id, &tag) {
             Ok(()) => SkillOutput::Text(format!("Session tagged as '{tag}'.")),
             Err(e) => SkillOutput::Error(format!("Tag failed: {e}")),
-        },
-        Err(e) => SkillOutput::Error(format!("Failed to open session store: {e}")),
-    }
+        }
+    })
 });
 
 expanded_skill!(
@@ -118,16 +127,14 @@ expanded_skill!(
             );
         }
         let new_name = args.join(" ");
-        let db_path = archon_session::storage::default_db_path();
-        match archon_session::storage::SessionStore::open(&db_path) {
-            Ok(store) => {
-                match archon_session::naming::set_session_name(&store, &ctx.session_id, &new_name) {
-                    Ok(()) => SkillOutput::Text(format!("Session renamed to '{new_name}'.")),
-                    Err(e) => SkillOutput::Error(format!("Rename failed: {e}")),
-                }
-            }
-            Err(e) => SkillOutput::Error(format!("Failed to open session store: {e}")),
-        }
+        with_session_store(ctx, |store| match archon_session::naming::set_session_name(
+            store,
+            &ctx.session_id,
+            &new_name,
+        ) {
+            Ok(()) => SkillOutput::Text(format!("Session renamed to '{new_name}'.")),
+            Err(e) => SkillOutput::Error(format!("Rename failed: {e}")),
+        })
     }
 );
 
@@ -135,12 +142,7 @@ expanded_skill!(
     SessionsSkill,
     "sessions",
     "Search and list previous sessions",
-    |args, _ctx| {
-        let db_path = archon_session::storage::default_db_path();
-        let store = match archon_session::storage::SessionStore::open(&db_path) {
-            Ok(s) => s,
-            Err(e) => return SkillOutput::Error(format!("Failed to open session store: {e}")),
-        };
+    |args, ctx| {
         let query = archon_session::search::SessionSearchQuery {
             text: if args.is_empty() {
                 None
@@ -149,17 +151,19 @@ expanded_skill!(
             },
             ..Default::default()
         };
-        match archon_session::search::search_sessions(&store, &query) {
-            Ok(results) => {
-                if results.is_empty() {
-                    SkillOutput::Text("No sessions found.".to_string())
-                } else {
-                    let listing = archon_session::listing::format_session_list(&results);
-                    SkillOutput::Text(format!("\n{} sessions:\n{listing}", results.len()))
+        with_session_store(ctx, |store| {
+            match archon_session::search::search_sessions(store, &query) {
+                Ok(results) => {
+                    if results.is_empty() {
+                        SkillOutput::Text("No sessions found.".to_string())
+                    } else {
+                        let listing = archon_session::listing::format_session_list(&results);
+                        SkillOutput::Text(format!("\n{} sessions:\n{listing}", results.len()))
+                    }
                 }
+                Err(e) => SkillOutput::Error(format!("Search failed: {e}")),
             }
-            Err(e) => SkillOutput::Error(format!("Search failed: {e}")),
-        }
+        })
     }
 );
 
@@ -608,10 +612,9 @@ expanded_skill!(
     StatsSkill,
     "stats",
     "Daily usage, session history, model preferences",
-    |_args, _ctx| {
-        let db_path = archon_session::storage::default_db_path();
-        match archon_session::storage::SessionStore::open(&db_path) {
-            Ok(store) => match archon_session::search::session_stats(&store) {
+    |_args, ctx| {
+        with_session_store(ctx, |store| {
+            match archon_session::search::session_stats(store) {
                 Ok(stats) => {
                     let mut out = String::from("\nSession statistics:\n");
                     out.push_str(&format!("  Total sessions:  {}\n", stats.total_sessions));
@@ -624,9 +627,8 @@ expanded_skill!(
                     SkillOutput::Text(out)
                 }
                 Err(e) => SkillOutput::Error(format!("Stats error: {e}")),
-            },
-            Err(e) => SkillOutput::Error(format!("Failed to open session store: {e}")),
-        }
+            }
+        })
     }
 );
 

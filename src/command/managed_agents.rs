@@ -8,7 +8,7 @@
 //!   - reports whether `ARCHON_REGISTRY_URL` is set in the current
 //!     environment (and what its value is)
 //!   - points the user at the canonical CLI surface
-//!     (`archon agent search --registry-url <URL>`) which DOES actually
+//!     (`archon agent-search --registry-url <URL>`) which DOES actually
 //!     hit the remote registry and render the listing
 //!
 //! # Spec/reality reconciliation
@@ -23,7 +23,7 @@
 //!      `build_command_context` (which IS async) via a new SNAPSHOT
 //!      field on `CommandContext`.
 //!   2. There is no session-shared registry URL config. The CLI subcommand
-//!      `archon agent search --registry-url <URL>` accepts the URL per
+//!      `archon agent-search --registry-url <URL>` accepts the URL per
 //!      invocation; nothing carries it across to the slash dispatch
 //!      surface. There is no default URL constant, no env var
 //!      consumed by the existing remote-source constructor.
@@ -111,9 +111,9 @@ fn render_status(registry_url: Option<&str>) -> String {
     out.push_str("To fetch and list the remote registry, use the CLI\n");
     out.push_str("subcommand (which threads the URL through to the\n");
     out.push_str("async RemoteDiscoverySource::load_all path):\n\n");
-    out.push_str("  archon agent search --registry-url <URL>\n");
-    out.push_str("  archon agent search --registry-url <URL> --tag <tag>\n");
-    out.push_str("  archon agent search --registry-url <URL> --capability <cap>\n\n");
+    out.push_str("  archon agent-search --registry-url <URL>\n");
+    out.push_str("  archon agent-search --registry-url <URL> --tag <tag>\n");
+    out.push_str("  archon agent-search --registry-url <URL> --capability <cap>\n\n");
 
     out.push_str("Notes\n");
     out.push_str(
@@ -151,7 +151,7 @@ mod tests {
         let body = render_status(None);
         assert!(body.contains("ARCHON_REGISTRY_URL: (unset)"));
         assert!(body.contains("Status: not configured"));
-        assert!(body.contains("archon agent search --registry-url"));
+        assert!(body.contains("archon agent-search --registry-url"));
         assert!(body.contains("Managed agents (remote registry) — status"));
     }
 
@@ -233,6 +233,6 @@ mod tests {
             other => panic!("expected TextDelta, got {:?}", other),
         };
         assert!(body.contains("Managed agents (remote registry)"));
-        assert!(body.contains("archon agent search --registry-url"));
+        assert!(body.contains("archon agent-search --registry-url"));
     }
 }

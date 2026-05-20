@@ -20,7 +20,7 @@ Where archon-cli writes everything.
 | `~/.local/share/archon/logs/<id>.log` | `...\logs\<id>.log` | Per-session log file |
 | `~/.local/share/archon/checkpoints.db` | `...\checkpoints.db` | File snapshots (CozoDB) |
 | `~/.local/share/archon/memory.db` | `...\memory.db` | Memory graph (CozoDB) |
-| `~/.local/share/archon/identity-cache.json` | `...\identity-cache.json` | Beta header probe cache |
+| `~/.config/archon/validated_betas.json` | `%APPDATA%\archon\validated_betas.json` | Beta header probe cache |
 | `~/.local/share/archon/cron.db` | `...\cron.db` | Scheduled tasks (CozoDB) |
 | `~/.local/share/archon/plugins/` | `...\plugins\` | System-installed plugins |
 | `~/.local/share/archon/skills/` | `...\skills\` | User-installed skills |

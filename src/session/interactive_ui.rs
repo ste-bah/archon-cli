@@ -212,6 +212,7 @@ pub(super) async fn run(
         resolved_flags.bare_mode,
         &active_model,
         &working_dir,
+        &session_store,
         session_id,
     );
 

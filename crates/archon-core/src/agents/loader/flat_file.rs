@@ -3,7 +3,7 @@ use std::path::Path;
 use tracing::warn;
 
 use super::AgentLoadError;
-use crate::agents::definition::{AgentMeta, AgentSource, CustomAgentDefinition};
+use crate::agents::definition::{AgentMeta, AgentSource, CustomAgentDefinition, PermissionMode};
 
 fn extract_yaml_frontmatter_and_body(content: &str) -> Option<(String, String)> {
     let mut lines = content.lines();
@@ -87,6 +87,17 @@ fn parse_flat_file_agent(
         .and_then(|v| v.as_str())
         .map(String::from);
 
+    let effort = parsed
+        .get("effort")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    let permission_mode = parsed
+        .pointer("/permissions/default_mode")
+        .or_else(|| parsed.get("permission_mode"))
+        .and_then(|v| v.as_str())
+        .and_then(PermissionMode::from_str_opt);
+
     let color = parsed
         .get("color")
         .and_then(|v| v.as_str())
@@ -103,6 +114,10 @@ fn parse_flat_file_agent(
         .unwrap_or_default();
 
     let base_dir = path.parent().map(|p| p.to_string_lossy().into_owned());
+    let mut meta = AgentMeta::default();
+    if let Some(version) = parsed.get("version").and_then(|v| v.as_str()) {
+        meta.version = version.to_string();
+    }
 
     Ok(Some(CustomAgentDefinition {
         agent_type,
@@ -112,9 +127,9 @@ fn parse_flat_file_agent(
         disallowed_tools: None,
         tool_guidance: String::new(),
         model,
-        effort: None,
+        effort,
         max_turns: None,
-        permission_mode: None,
+        permission_mode,
         background: false,
         initial_prompt: None,
         color,
@@ -123,7 +138,7 @@ fn parse_flat_file_agent(
         leann_queries: Vec::new(),
         tags,
         source: source.clone(),
-        meta: AgentMeta::default(),
+        meta,
         filename: Some(filename_stem.to_string()),
         base_dir,
         isolation: None,

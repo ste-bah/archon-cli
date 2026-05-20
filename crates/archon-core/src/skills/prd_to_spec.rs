@@ -59,6 +59,7 @@ mod tests {
             working_dir: std::env::temp_dir(),
             model: "test".into(),
             agent_registry: None,
+            session_store: None,
         };
         let out = PrdToSpecSkill.execute(&[], &ctx);
         match out {
@@ -74,6 +75,7 @@ mod tests {
             working_dir: std::env::temp_dir(),
             model: "test".into(),
             agent_registry: None,
+            session_store: None,
         };
         let args: Vec<String> = vec!["docs/feature.md".into()];
         let out = PrdToSpecSkill.execute(&args, &ctx);
@@ -92,6 +94,7 @@ mod tests {
             working_dir: std::env::temp_dir(),
             model: "test".into(),
             agent_registry: None,
+            session_store: None,
         };
         let args: Vec<String> = vec!["docs/feature.md".into()];
         let out = PrdToSpecSkill.execute(&args, &ctx);

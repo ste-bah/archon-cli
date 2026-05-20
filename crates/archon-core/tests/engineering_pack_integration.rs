@@ -17,6 +17,7 @@ fn engineering_skill_executes_emits_prompt() {
         working_dir: std::env::temp_dir(),
         model: "test".into(),
         agent_registry: None,
+        session_store: None,
     };
     let registry = register_builtins();
     let skill = registry.resolve("grill-me").unwrap();
@@ -32,6 +33,7 @@ fn engineering_skill_uses_embedded_when_no_overrides() {
         working_dir: tmp.path().to_path_buf(),
         model: "test".into(),
         agent_registry: None,
+        session_store: None,
     };
     let registry = register_builtins();
     let skill = registry.resolve("grill-me").unwrap();
@@ -62,6 +64,7 @@ fn engineering_skill_workdir_flat_override_wins() {
         working_dir: tmp.path().to_path_buf(),
         model: "test".into(),
         agent_registry: None,
+        session_store: None,
     };
     let registry = register_builtins();
     let skill = registry.resolve("grill-me").unwrap();
@@ -96,6 +99,7 @@ fn engineering_skill_workdir_subdir_override_wins() {
         working_dir: tmp.path().to_path_buf(),
         model: "test".into(),
         agent_registry: None,
+        session_store: None,
     };
     let registry = register_builtins();
     let skill = registry.resolve("grill-me").unwrap();

@@ -29,23 +29,19 @@
 //!
 //! `ctx.session_id` may be `None` (no active session). When None, `/rewind`
 //! returns `Err("no active session")`. When Some, the handler loads the
-//! session's messages via a `MessageLoader` seam (production impl is a
-//! stub — the real SessionStore message-fetch wiring is deferred to a
-//! TUI-620-followup ticket). Empty list => `Err("no messages to rewind to")`.
+//! session's messages from the shared configured `SessionStore` carried in the
+//! command context. Empty list => `Err("no messages to rewind to")`.
 //!
 //! # Gate 2 scope
 //!
 //! - `MessageLoader` trait seam (like `TagStore`) so tests inject a
 //!   `MockMessageLoader` without instantiating Cozo.
-//! - `RewindHandler` with `new()` (production `RealMessageLoader`) and
-//!   `with_loader(...)` (test injection).
+//! - `RewindHandler` with `new()` and `with_loader(...)` (test injection).
 //! - 3 tests exercising the three branches (no session_id, no messages,
 //!   happy path emits `ShowMessageSelector`).
 //!
 //! # Deferred (TUI-620-followup)
 //!
-//! - Real `RealMessageLoader` implementation wiring to
-//!   `archon_session::storage::SessionStore`.
 //! - Full ratatui render of `MessageSelector`.
 //! - Input priority-branch routing in `event_loop/input.rs`.
 //! - Truncate-on-confirm: apply the selection to the session history.
@@ -54,36 +50,11 @@ use archon_tui::app::{MessageSummary, TuiEvent};
 
 use crate::command::registry::{CommandContext, CommandHandler};
 
-/// Seam — tests inject a `MockMessageLoader`, production uses
-/// `RealMessageLoader`. Returns a `Result<Vec<MessageSummary>, String>` so
-/// the handler can surface loader errors via `anyhow::anyhow!(e)`.
+/// Seam — tests inject a `MockMessageLoader`. Returns a
+/// `Result<Vec<MessageSummary>, String>` so the handler can surface loader
+/// errors via `anyhow::anyhow!(e)`.
 pub(crate) trait MessageLoader: Send + Sync {
     fn load(&self, session_id: &str) -> Result<Vec<MessageSummary>, String>;
-}
-
-pub(crate) struct RealMessageLoader;
-
-impl MessageLoader for RealMessageLoader {
-    /// TUI-620-followup: load persisted messages for `session_id` from the
-    /// default SessionStore, parse each row as JSON, and project into the
-    /// `MessageSummary` struct consumed by the overlay.
-    ///
-    /// * `id` — stable `msg-NNN` derived from the message's ordinal
-    ///   position in the store.
-    /// * `timestamp` — taken from the JSON `timestamp` field when present
-    ///   and parseable; otherwise defaults to `chrono::Utc::now()`.
-    /// * `preview` — extracted from the JSON `content` (string OR array of
-    ///   `{text}` objects — mirrors the resume path in `src/session.rs`),
-    ///   truncated to 80 chars.
-    ///
-    /// Messages with empty content are skipped (matches session.rs's
-    /// resume-display behaviour).
-    fn load(&self, session_id: &str) -> Result<Vec<MessageSummary>, String> {
-        let db_path = archon_session::storage::default_db_path();
-        let store = archon_session::storage::SessionStore::open(&db_path)
-            .map_err(|e| format!("session store open failed: {e}"))?;
-        load_message_summaries(&store, session_id)
-    }
 }
 
 fn load_message_summaries(
@@ -136,19 +107,19 @@ fn load_message_summaries(
 }
 
 pub(crate) struct RewindHandler {
-    loader: std::sync::Arc<dyn MessageLoader>,
+    loader: Option<std::sync::Arc<dyn MessageLoader>>,
 }
 
 impl RewindHandler {
     pub(crate) fn new() -> Self {
-        Self {
-            loader: std::sync::Arc::new(RealMessageLoader),
-        }
+        Self { loader: None }
     }
 
     #[cfg(test)]
     pub(crate) fn with_loader(loader: std::sync::Arc<dyn MessageLoader>) -> Self {
-        Self { loader }
+        Self {
+            loader: Some(loader),
+        }
     }
 }
 
@@ -162,6 +133,8 @@ impl CommandHandler for RewindHandler {
             load_message_summaries(store, &session_id).map_err(|e| anyhow::anyhow!(e))?
         } else {
             self.loader
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("session store is unavailable"))?
                 .load(&session_id)
                 .map_err(|e| anyhow::anyhow!(e))?
         };

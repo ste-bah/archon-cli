@@ -54,8 +54,8 @@ Required frontmatter:
 Recommended:
 - `tools` — explicit allow-list (defaults to all if omitted)
 - `permissions.default_mode` — agent's effective permission mode
-- `capabilities` — searchable tags
-- `tags` — additional searchable tags
+- `capabilities` — discovery/search metadata; it does not grant runtime tools
+- `tags` — runtime and discovery search tags
 - `model`, `effort` — overrides
 
 ## Loading
@@ -69,6 +69,12 @@ The agent loader at `crates/archon-core/src/agents/loader.rs`:
 Run `/refresh` to re-scan after dropping a new file.
 
 ## Discovery & search
+
+The CLI `agent-list`, `agent-search`, and `agent-info` commands use the
+discovery catalog. The TUI `/agent` surface and `/run-agent` use the live
+runtime `AgentRegistry`. Both load flat-file agents, but the catalog keeps
+extra metadata such as capabilities for filtering, while execution uses the
+runtime fields such as tools, model, effort, permission mode, and prompt body.
 
 ```bash
 archon agent-list
@@ -84,6 +90,9 @@ In TUI:
 /agent info code-reviewer
 /agent run code-reviewer "review crates/archon-llm"
 ```
+
+`/agent run ...` is an alias path that delegates to `/run-agent ...`; there is
+not a second executor behind the umbrella command.
 
 ## Invoking
 

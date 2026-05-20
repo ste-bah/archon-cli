@@ -417,8 +417,9 @@ pub(crate) fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<(), Re
         return Ok(());
     };
 
-    // Accept token in Authorization header or (for GET requests) as a query
-    // param — query param handling lives in the caller for simplicity.
+    // Accept bearer tokens from the Authorization header only. Query-string
+    // tokens are intentionally not accepted here so tokens do not leak through
+    // URLs or request logs.
     let provided = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())

@@ -8,6 +8,7 @@ fn make_ctx() -> SkillContext {
         working_dir: std::path::PathBuf::from("/tmp"),
         model: "test-model".to_string(),
         agent_registry: None,
+        session_store: None,
     }
 }
 

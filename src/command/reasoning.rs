@@ -24,6 +24,7 @@ pub(crate) async fn handle_reasoning_command(
             include_llm,
         } => crate::command::reasoning_backfill::render_backfill(
             &root,
+            config,
             *sessions,
             *emit_world_rows,
             *include_llm,

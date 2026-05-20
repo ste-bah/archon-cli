@@ -69,6 +69,7 @@ mod tests {
             working_dir: std::env::temp_dir(),
             model: "test".into(),
             agent_registry: None,
+            session_store: None,
         };
         assert_eq!(SpecToTasksSkill.name(), "spec-to-tasks");
         assert!(!SpecToTasksSkill.description().is_empty());

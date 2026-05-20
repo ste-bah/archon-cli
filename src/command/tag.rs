@@ -59,35 +59,6 @@ pub(crate) trait TagStore: Send + Sync {
     fn delete_tag(&self, session_id: &str, tag: &str) -> Result<(), String>;
 }
 
-/// Production `TagStore` — opens `SessionStore::open_default()` on each
-/// call. Suboptimal for perf but preserves the zero-shared-state handler
-/// pattern used by other DIRECT-with-storage handlers (fork, resume).
-pub(crate) struct RealTagStore;
-
-impl TagStore for RealTagStore {
-    fn list_tags(&self, session_id: &str) -> Result<Vec<String>, String> {
-        let store = archon_session::storage::SessionStore::open_default()
-            .map_err(|e| format!("failed to open session store: {}", e))?;
-        store
-            .list_tags(session_id)
-            .map_err(|e| format!("list_tags failed: {}", e))
-    }
-    fn put_tag(&self, session_id: &str, tag: &str) -> Result<(), String> {
-        let store = archon_session::storage::SessionStore::open_default()
-            .map_err(|e| format!("failed to open session store: {}", e))?;
-        store
-            .put_tag(session_id, tag)
-            .map_err(|e| format!("put_tag failed: {}", e))
-    }
-    fn delete_tag(&self, session_id: &str, tag: &str) -> Result<(), String> {
-        let store = archon_session::storage::SessionStore::open_default()
-            .map_err(|e| format!("failed to open session store: {}", e))?;
-        store
-            .delete_tag(session_id, tag)
-            .map_err(|e| format!("delete_tag failed: {}", e))
-    }
-}
-
 /// Strip ASCII control chars (< 0x20) from `s`, then trim whitespace.
 /// Intentionally simple: Cozo stores tags as String; the less sanitization
 /// surface the better (we do NOT remove Unicode control chars beyond ASCII
@@ -102,19 +73,53 @@ fn sanitize_tag(s: &str) -> String {
 
 /// `/tag` handler — toggles a tag on the current session.
 pub(crate) struct TagHandler {
-    store: std::sync::Arc<dyn TagStore>,
+    store: Option<std::sync::Arc<dyn TagStore>>,
 }
 
 impl TagHandler {
     pub(crate) fn new() -> Self {
-        Self {
-            store: std::sync::Arc::new(RealTagStore),
-        }
+        Self { store: None }
     }
 
     #[cfg(test)]
     pub(crate) fn with_store(store: std::sync::Arc<dyn TagStore>) -> Self {
-        Self { store }
+        Self { store: Some(store) }
+    }
+
+    fn list_tags(&self, ctx: &CommandContext, session_id: &str) -> Result<Vec<String>, String> {
+        if let Some(store) = ctx.session_store.as_deref() {
+            return store
+                .list_tags(session_id)
+                .map_err(|e| format!("list_tags failed: {}", e));
+        }
+        self.store
+            .as_deref()
+            .ok_or_else(|| "session store is unavailable".to_string())?
+            .list_tags(session_id)
+    }
+
+    fn put_tag(&self, ctx: &CommandContext, session_id: &str, tag: &str) -> Result<(), String> {
+        if let Some(store) = ctx.session_store.as_deref() {
+            return store
+                .put_tag(session_id, tag)
+                .map_err(|e| format!("put_tag failed: {}", e));
+        }
+        self.store
+            .as_deref()
+            .ok_or_else(|| "session store is unavailable".to_string())?
+            .put_tag(session_id, tag)
+    }
+
+    fn delete_tag(&self, ctx: &CommandContext, session_id: &str, tag: &str) -> Result<(), String> {
+        if let Some(store) = ctx.session_store.as_deref() {
+            return store
+                .delete_tag(session_id, tag)
+                .map_err(|e| format!("delete_tag failed: {}", e));
+        }
+        self.store
+            .as_deref()
+            .ok_or_else(|| "session store is unavailable".to_string())?
+            .delete_tag(session_id, tag)
     }
 }
 
@@ -131,14 +136,12 @@ impl CommandHandler for TagHandler {
         })?;
 
         let existing = self
-            .store
-            .list_tags(&session_id)
+            .list_tags(ctx, &session_id)
             .map_err(|e| anyhow::anyhow!(e))?;
 
         let message = if existing.iter().any(|t| t == &tag) {
             // Toggle off: delete the matching tag.
-            self.store
-                .delete_tag(&session_id, &tag)
+            self.delete_tag(ctx, &session_id, &tag)
                 .map_err(|e| anyhow::anyhow!(e))?;
             format!("Removed tag #{}", tag)
         } else {
@@ -146,12 +149,10 @@ impl CommandHandler for TagHandler {
             // Preserves spec's "single visible tag" view while using the
             // multi-tag storage schema.
             for old in &existing {
-                self.store
-                    .delete_tag(&session_id, old)
+                self.delete_tag(ctx, &session_id, old)
                     .map_err(|e| anyhow::anyhow!(e))?;
             }
-            self.store
-                .put_tag(&session_id, &tag)
+            self.put_tag(ctx, &session_id, &tag)
                 .map_err(|e| anyhow::anyhow!(e))?;
             format!("Tagged session with #{}", tag)
         };
@@ -376,9 +377,8 @@ mod tests {
     #[ignore = "Gate 5 live smoke — exercises Registry dispatch via default_registry(), run via --ignored"]
     fn tag_dispatches_via_registry() {
         // Gate 5 smoke: Registry::get("tag") must return Some(handler) because
-        // default_registry() registers TagHandler::new() (with the real
-        // RealTagStore). To avoid hitting Cozo, exercise the two pre-storage
-        // Err paths:
+        // default_registry() registers TagHandler::new(). To avoid needing a
+        // shared session store, exercise the two pre-storage Err paths:
         //   - args=[] -> empty-tag Err (short-circuits before session check)
         //   - args=["foo"] with default bug ctx (session_id None) -> no-session Err
         // Both prove the dispatcher ran the handler; neither touches Cozo.

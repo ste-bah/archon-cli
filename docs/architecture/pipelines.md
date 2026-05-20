@@ -36,12 +36,12 @@ Triggered by `/archon-code` (or `archon pipeline code <task>`). Decomposes a cod
 
 | Phase | Agents | Purpose |
 |---|---|---|
-| 1. Understanding | contract-agent, requirement-extractor, requirement-prioritizer, scope-definer, context-gatherer, feasibility-analyzer, pattern-explorer, technology-scout | Parse the task, extract requirements, define scope, explore codebase |
-| 2. Exploration | context-gatherer, codebase-analyzer, pattern-explorer, technology-scout, ambiguity-clarifier | Explore the codebase, identify patterns, clarify unknowns |
-| 3. Architecture | system-designer, component-designer, interface-designer, data-architect, security-architect, integration-architect, performance-architect | Design system architecture, components, interfaces |
-| 4. Implementation | code-generator, unit-implementer, service-implementer, api-implementer, frontend-implementer, data-layer-implementer, type-implementer, error-handler-implementer, logger-implementer, config-implementer, integration-tester, dependency-manager | Generate code, types, error handling |
-| 5. Quality | code-quality-improver, sherlock-holmes (forensic review), security-tester, regression-tester, coverage-analyzer, code-simplifier, final-refactorer | Review, test, refactor |
-| 6. Sign-off | sign-off-approver, phase-1-reviewer ... phase-6-reviewer | Final review and approval |
+| 1. Understanding (8) | contract-agent, requirement-extractor, requirement-prioritizer, scope-definer, context-gatherer, codebase-analyzer, pattern-explorer, technology-scout | Parse the task, extract requirements, define scope, explore codebase context |
+| 2. Design (10) | feasibility-analyzer, research-planner, phase-1-reviewer, phase-2-reviewer, system-designer, component-designer, interface-designer, data-architect, performance-architect, security-architect | Validate feasibility, plan research, design system/components/interfaces, and review early phases |
+| 3. WiringPlan (3) | integration-architect, wiring-obligation-agent, phase-3-reviewer | Plan integration obligations and review the wiring plan |
+| 4. Implementation (11) | code-generator, type-implementer, unit-implementer, service-implementer, data-layer-implementer, api-implementer, frontend-implementer, error-handler-implementer, config-implementer, logger-implementer, integration-verification-agent | Generate and wire the implementation slices |
+| 5. Testing (9) | phase-4-reviewer, test-generator, test-runner, integration-tester, regression-tester, security-tester, coverage-analyzer, test-fixer, phase-5-reviewer | Generate, run, fix, and review test/security/coverage evidence |
+| 6. Refinement (9) | dependency-manager, implementation-coordinator, quality-gate, performance-optimizer, code-quality-improver, final-refactorer, sign-off-approver, phase-6-reviewer, recovery-agent | Coordinate, optimize, refactor, sign off, and recover failed work |
 
 50 total agents. Each phase has reviewers that gate progression.
 
@@ -73,11 +73,11 @@ L3 is what makes the pipeline self-improving — past successes inform present d
 ### Gate enforcement
 
 5 deterministic gates between phases:
-1. Specification → Exploration: requirements complete, scope defined
-2. Exploration → Architecture: codebase understood, patterns identified
-3. Architecture → Implementation: design approved by 2 reviewers
-4. Implementation → Quality: code compiles, tests defined
-5. Quality → Sign-off: all tests pass, Sherlock review approves
+1. Understanding → Design: requirements complete, scope defined
+2. Design → WiringPlan: architecture/design reviewed and feasible
+3. WiringPlan → Implementation: integration obligations reviewed
+4. Implementation → Testing: code compiles, wiring verified
+5. Testing → Refinement: tests/security/coverage reviewed
 
 Each gate has explicit pass/fail criteria. Failed gates block progression and can trigger a Reflexion retry.
 

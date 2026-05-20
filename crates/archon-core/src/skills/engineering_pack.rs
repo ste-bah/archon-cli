@@ -90,6 +90,7 @@ mod tests {
             working_dir: std::env::temp_dir(),
             model: "test".into(),
             agent_registry: None,
+            session_store: None,
         };
         assert_eq!(GrillMeSkill.name(), "grill-me");
         assert!(!GrillMeSkill.description().is_empty());

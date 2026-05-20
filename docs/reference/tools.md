@@ -1,6 +1,10 @@
 # Tools reference
 
-Tools are callable by the LLM during agent turns. **65 registered tools across 16 categories** (verified at `crates/archon-core/src/dispatch.rs`).
+Tools are callable by the LLM during agent turns. The core registry is built in
+`crates/archon-core/src/dispatch.rs`, and session setup conditionally adds
+tools such as LEANN, memory, and verbosity controls when those subsystems are
+enabled. Use `/tools` or `ToolSearch` for the live tool surface in a running
+session.
 
 Permission level is per-tool:
 - **Safe** — auto-approved by default

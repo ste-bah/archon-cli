@@ -62,6 +62,7 @@ mod tests {
             working_dir: std::env::temp_dir(),
             model: "test".into(),
             agent_registry: None,
+            session_store: None,
         };
         let out = ToPrdSkill.execute(&[], &ctx);
         match out {
@@ -80,6 +81,7 @@ mod tests {
             working_dir: std::env::temp_dir(),
             model: "test".into(),
             agent_registry: None,
+            session_store: None,
         };
         let out = ToPrdSkill.execute(&[], &ctx);
         match out {
@@ -97,6 +99,7 @@ mod tests {
             working_dir: std::env::temp_dir(),
             model: "test".into(),
             agent_registry: None,
+            session_store: None,
         };
         let args: Vec<String> = vec!["focus".into(), "on".into(), "auth".into()];
         let out = ToPrdSkill.execute(&args, &ctx);

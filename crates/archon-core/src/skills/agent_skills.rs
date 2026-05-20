@@ -577,6 +577,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("/tmp"),
             model: "sonnet".into(),
             agent_registry: None,
+            session_store: None,
         };
         let output = skill.execute(&[], &ctx);
         assert!(matches!(output, SkillOutput::Error(_)));
@@ -590,6 +591,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("/tmp/project"),
             model: "sonnet".into(),
             agent_registry: None,
+            session_store: None,
         };
         let output = skill.execute(&["code".into(), "reviewer".into()], &ctx);
         match output {
@@ -638,6 +640,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("/tmp"),
             model: "sonnet".into(),
             agent_registry: None,
+            session_store: None,
         };
         let output = skill.execute(&[], &ctx);
         assert!(matches!(output, SkillOutput::Error(_)));
@@ -653,6 +656,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("/tmp"),
             model: "sonnet".into(),
             agent_registry: Some(reg),
+            session_store: None,
         };
         let output = skill.execute(&[], &ctx);
         match output {
@@ -673,6 +677,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("/tmp"),
             model: "sonnet".into(),
             agent_registry: None,
+            session_store: None,
         };
         let output = skill.execute(&[], &ctx);
         assert!(matches!(output, SkillOutput::Error(_)));
@@ -686,6 +691,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("/home/user/proj"),
             model: "sonnet".into(),
             agent_registry: None,
+            session_store: None,
         };
         let output = skill.execute(
             &[
@@ -719,6 +725,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("/tmp"),
             model: "sonnet".into(),
             agent_registry: None,
+            session_store: None,
         };
         let output = skill.execute(&["my-agent".into()], &ctx);
         assert!(matches!(output, SkillOutput::Error(_)));
@@ -732,6 +739,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("/tmp"),
             model: "sonnet".into(),
             agent_registry: None,
+            session_store: None,
         };
         let output = skill.execute(&["my-agent".into(), "INVALID".into()], &ctx);
         match output {
@@ -748,6 +756,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("/tmp"),
             model: "sonnet".into(),
             agent_registry: None,
+            session_store: None,
         };
         let output = skill.execute(
             &[
@@ -780,6 +789,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("/tmp"),
             model: "sonnet".into(),
             agent_registry: None,
+            session_store: None,
         };
         let output = skill.execute(&[], &ctx);
         assert!(matches!(output, SkillOutput::Error(_)));
@@ -793,6 +803,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("/tmp"),
             model: "sonnet".into(),
             agent_registry: None,
+            session_store: None,
         };
         let output = skill.execute(&["old-agent".into()], &ctx);
         match output {
@@ -813,6 +824,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("/tmp"),
             model: "sonnet".into(),
             agent_registry: None,
+            session_store: None,
         };
         let output = skill.execute(&["old-agent".into(), "--restore".into()], &ctx);
         match output {
@@ -836,6 +848,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("/tmp"),
             model: "sonnet".into(),
             agent_registry: None,
+            session_store: None,
         };
         let output = skill.execute(&[], &ctx);
         assert!(matches!(output, SkillOutput::Error(_)));
@@ -849,6 +862,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("/tmp"),
             model: "sonnet".into(),
             agent_registry: None,
+            session_store: None,
         };
         let output = skill.execute(&["nonexistent-agent".into()], &ctx);
         assert!(matches!(output, SkillOutput::Error(_)));
@@ -866,6 +880,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("/tmp"),
             model: "sonnet".into(),
             agent_registry: None,
+            session_store: None,
         };
         let output = skill.execute(&[], &ctx);
         assert!(matches!(output, SkillOutput::Error(_)));
@@ -879,6 +894,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("/tmp"),
             model: "sonnet".into(),
             agent_registry: None,
+            session_store: None,
         };
         let output = skill.execute(&["my-agent".into(), "1.0".into()], &ctx);
         match output {
@@ -899,6 +915,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("/tmp"),
             model: "sonnet".into(),
             agent_registry: None,
+            session_store: None,
         };
         let output = skill.execute(&["my-agent".into()], &ctx);
         match output {
@@ -922,6 +939,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("/home/user/project"),
             model: "sonnet".into(),
             agent_registry: None,
+            session_store: None,
         };
         let output = skill.execute(&["security".into(), "scanner".into()], &ctx);
         match output {

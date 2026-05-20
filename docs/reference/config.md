@@ -1080,7 +1080,7 @@ auto_resume = false
 | Field | Default | What / Why |
 |---|---|---|
 | `auto_resume` | `false` | When `true`, automatically resume the most recent session in the current working directory at startup. Set `false` to start fresh every time. Manual resume always works via `archon -c` or `archon --resume <id>`. |
-| `db_path` | unset | Override session DB path. Default: `~/.archon/sessions/`. |
+| `db_path` | unset | Override session DB path. Default: platform data dir + `archon/sessions/sessions.db` (`~/Library/Application Support/archon/sessions/sessions.db` on macOS, `~/.local/share/archon/sessions/sessions.db` on Linux). |
 
 ---
 
@@ -1435,7 +1435,7 @@ ANTHROPIC_BASE_URL=http://localhost:4000/v1/messages archon
 
 ### Beta header validation
 
-On first startup, archon sends a cheap probe (Haiku, 1 token) to validate which `anthropic-beta` headers the endpoint accepts, then strips any rejected. Probed headers cache at `~/.local/share/archon/identity-cache.json`. Run `/refresh-identity` to clear and re-probe — useful when switching endpoints.
+On first startup, archon sends a cheap probe (Haiku, 1 token) to validate which `anthropic-beta` headers the endpoint accepts, then strips any rejected. Probed headers cache at `~/.config/archon/validated_betas.json`. Run `/refresh-identity` to clear and re-probe — useful when switching endpoints.
 
 ---
 

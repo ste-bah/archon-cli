@@ -66,7 +66,7 @@ Beyond the 80 primaries, archon-cli ships **68 built-in skills** (33 in `crates/
 
 | Command | Aliases | Description |
 |---|---|---|
-| `/agent` | — | Umbrella: `/agent list`, `/agent info <name>`, `/agent run <name>` |
+| `/agent` | — | Umbrella: `/agent list`, `/agent info <name>`, `/agent run <name>`; `run` delegates to `/run-agent` |
 | `/run-agent` | — | Invoke a custom agent by name with a task description (async via TaskService, using the active provider) |
 | `/archon-code` | — | Start the 50-agent coding pipeline on a task using the active provider |
 | `/archon-research` | — | Start the 46-agent PhD research pipeline on a topic using the active provider |

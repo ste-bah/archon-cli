@@ -5,12 +5,13 @@ use anyhow::Result;
 
 pub(crate) fn render_backfill(
     root: &Path,
+    config: &archon_core::config::ArchonConfig,
     sessions: Option<usize>,
     emit_world_rows: bool,
     include_llm: bool,
 ) -> Result<String> {
-    let session_store = archon_session::storage::SessionStore::open_default()
-        .map_err(|e| anyhow::anyhow!("open session store: {e}"))?;
+    let session_db_path = crate::command::store_paths::session_db_path(config);
+    let session_store = crate::command::store_paths::open_session_store(&session_db_path)?;
     let limit = sessions.unwrap_or(usize::MAX).min(u32::MAX as usize) as u32;
     let metas = session_store
         .list_sessions(limit)

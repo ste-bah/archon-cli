@@ -169,6 +169,30 @@ fn flat_file_loader_tools_yaml_array() {
 }
 
 #[test]
+fn flat_file_loader_runtime_frontmatter_fields() {
+    let tmp = TempDir::new().unwrap();
+    let agents_dir = tmp.path().join("agents");
+    fs::create_dir_all(&agents_dir).unwrap();
+    fs::write(
+        agents_dir.join("configured.md"),
+        "---\nname: configured\ndescription: Has runtime metadata\nversion: 2.1.0\n\
+         model: sonnet\neffort: high\npermissions:\n  default_mode: auto\n---\n\nBody.\n",
+    )
+    .unwrap();
+
+    let agents = load_flat_file_agents(&agents_dir, AgentSource::Project).unwrap();
+    assert_eq!(agents.len(), 1);
+    let agent = &agents[0];
+    assert_eq!(agent.model.as_deref(), Some("sonnet"));
+    assert_eq!(agent.effort.as_deref(), Some("high"));
+    assert_eq!(
+        agent.permission_mode,
+        Some(crate::agents::definition::PermissionMode::Auto)
+    );
+    assert_eq!(agent.meta.version, "2.1.0");
+}
+
+#[test]
 fn flat_file_loader_filename_stem_fallback() {
     let tmp = TempDir::new().unwrap();
     let agents_dir = tmp.path().join("agents");

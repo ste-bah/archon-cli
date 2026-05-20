@@ -1,5 +1,4 @@
 //! Session management command handlers.
-//! Extracted from main.rs to reduce main.rs from 6234 to < 500 lines.
 
 use crate::cli_args::Cli;
 use crate::command::utils::parse_datetime;

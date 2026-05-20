@@ -60,8 +60,8 @@ Inside the TUI (recommended):
 ```
 > /archon-code implement OAuth2 token refresh with file locking
 Starting coding pipeline for task: implement OAuth2 token refresh with file locking
-[task-analyzer] parsing task contract...
-[task-analyzer] complete (2.1s, $0.04)
+[contract-agent] parsing task contract...
+[contract-agent] complete (2.1s, $0.04)
 [requirement-extractor] extracting functional + non-functional requirements...
 …
 ```
@@ -90,37 +90,37 @@ The pipeline runs 6 phases sequentially. Each phase has reviewers that gate prog
 
 ### Phase 1: Understanding (8 agents)
 
-`contract-agent` parses the input contract → `requirement-extractor` pulls out functional/non-functional requirements → `requirement-prioritizer` MoSCoW-orders them → `scope-definer` sets boundaries → `context-gatherer` reads existing code → `feasibility-analyzer` validates technical feasibility → `pattern-explorer` identifies relevant patterns → `technology-scout` evaluates external solutions.
+`contract-agent` parses the input contract → `requirement-extractor` pulls out functional/non-functional requirements → `requirement-prioritizer` MoSCoW-orders them → `scope-definer` sets boundaries → `context-gatherer` reads existing code → `codebase-analyzer` maps architecture → `pattern-explorer` identifies relevant patterns → `technology-scout` evaluates external solutions.
 
 Output: agent output persisted in the audited bundle with prompt hashes, token/cost metadata, and quality scoring.
 
-### Phase 2: Exploration (5 agents)
+### Phase 2: Design (10 agents)
 
-`context-gatherer` reads existing code → `codebase-analyzer` maps architecture → `pattern-explorer` identifies relevant patterns → `technology-scout` evaluates external solutions → `ambiguity-clarifier` resolves unknowns.
+`feasibility-analyzer` validates technical feasibility → `research-planner` maps discovery work → phase reviewers check the understanding/design boundary → `system-designer`, `component-designer`, `interface-designer`, `data-architect`, `performance-architect`, and `security-architect` define the architecture.
 
-Output: exploration output persisted in the audited bundle with prompt and attempt records.
+Output: design output persisted in the audited bundle with prompt and attempt records.
 
-### Phase 3: Architecture (7 agents)
+### Phase 3: WiringPlan (3 agents)
 
-`system-designer` does high-level → `component-designer` does internal → `interface-designer` defines APIs → `data-architect` designs storage → `security-architect` flags threats → `integration-architect` plans external connections → `performance-architect` plans for load.
+`integration-architect` plans external connections → `wiring-obligation-agent` makes integration obligations explicit → `phase-3-reviewer` checks that the plan is implementable.
 
-Output: architecture output persisted in the audited bundle.
+Output: wiring plan persisted in the audited bundle.
 
-### Phase 4: Implementation (12 agents)
+### Phase 4: Implementation (11 agents)
 
-Splits the work: `code-generator`, `unit-implementer`, `service-implementer`, `api-implementer`, `frontend-implementer`, `data-layer-implementer`, `type-implementer`, `error-handler-implementer`, `logger-implementer`, `config-implementer`, `integration-tester`, `dependency-manager`.
+Splits the work: `code-generator`, `type-implementer`, `unit-implementer`, `service-implementer`, `data-layer-implementer`, `api-implementer`, `frontend-implementer`, `error-handler-implementer`, `config-implementer`, `logger-implementer`, and `integration-verification-agent`.
 
 Each writes its slice in parallel where possible. Output: actual code in `<workdir>` plus audited agent outputs and retry attempts in the bundle.
 
-### Phase 5: Quality (7 agents)
+### Phase 5: Testing (9 agents)
 
-`code-quality-improver`, `sherlock-holmes` (forensic review), `security-tester`, `regression-tester`, `coverage-analyzer`, `code-simplifier`, `final-refactorer`. The Sherlock Holmes agent independently re-reads the code; reviews from other agents are not trusted.
+`phase-4-reviewer`, `test-generator`, `test-runner`, `integration-tester`, `regression-tester`, `security-tester`, `coverage-analyzer`, `test-fixer`, and `phase-5-reviewer` generate, run, fix, and review test evidence.
 
 Output: quality findings, test evidence, retry decisions, and accepted outputs in the audited bundle.
 
-### Phase 6: Sign-off (8 agents)
+### Phase 6: Refinement (9 agents)
 
-`sign-off-approver` plus phase-1 through phase-6 reviewers. Each phase is checked once more. Final approval gates the pipeline closing.
+`dependency-manager`, `implementation-coordinator`, `quality-gate`, `performance-optimizer`, `code-quality-improver`, `final-refactorer`, `sign-off-approver`, `phase-6-reviewer`, and `recovery-agent` coordinate final cleanup, optimization, sign-off, and recovery.
 
 Output: final sign-off output. Pipeline marks the session complete, runs completion integrity on the final answer in the CLI path, and stores the summary in bundle state.
 
@@ -199,12 +199,12 @@ Task: Add archon docs summarize <doc-id>: read persisted chunks, produce cited
       summaries, write provenance edges, add tests, update docs
 
 Agent Sequence (50 agents):
-  Phase 1: task-analyzer, requirement-extractor, requirement-prioritizer
-  Phase 2: pattern-explorer, technology-scout, feasibility-analyzer, codebase-analyzer
-  Phase 3: system-designer, component-designer, interface-designer, ...
+  Phase 1: contract-agent, requirement-extractor, requirement-prioritizer
+  Phase 2: feasibility-analyzer, research-planner, codebase-analyzer, ...
+  Phase 3: integration-architect, wiring-obligation-agent, phase-3-reviewer
   Phase 4: code-generator, unit-implementer, api-implementer, ...
   Phase 5: test-generator, integration-tester, security-tester, ...
-  Phase 6: final-refactorer, sign-off-approver
+  Phase 6: quality-gate, final-refactorer, sign-off-approver, ...
 
 Estimated cost: ~$2.50-5.00 (varies by task complexity)
 ```
@@ -214,8 +214,8 @@ Then drive the actual run from inside the TUI:
 ```
 > /archon-code Add archon docs summarize <doc-id>: read persisted chunks, produce cited summaries, write provenance edges, add tests, update docs
 Starting coding pipeline for task: Add archon docs summarize <doc-id>: ...
-[task-analyzer] parsing task contract...
-[task-analyzer] complete (2.1s, $0.04)
+[contract-agent] parsing task contract...
+[contract-agent] complete (2.1s, $0.04)
 [requirement-extractor] extracting functional + non-functional requirements...
 [requirement-extractor] complete (3.8s, $0.07)
 [requirement-prioritizer] MoSCoW-ordering 14 requirements...
@@ -230,7 +230,7 @@ including provider/model/cost metadata where known:
 ```
 ─── Agent Activity ─────────────────────────────────────────────
   ▶ pipeline-coordinator   openai-codex/gpt-5.4 running   00:42
-    └─ [AGENT] task-analyzer       openai-codex/gpt-5.4 done       3.1s
+    └─ [AGENT] contract-agent      openai-codex/gpt-5.4 done       3.1s
     └─ [AGENT] requirement-extractor             done       4.8s
     └─ [AGENT] requirement-prioritizer           running    1.2s
 ─────────────────────────────────────────────────────────────────
@@ -290,7 +290,7 @@ Forensic-review-friendly: the bundle stays so you can reconstruct prompts, outpu
 Status:    Complete
 Phase:     phase-6 sign-off
 Total cost: $11.48
-Agents run: 48 / 48
+Agents run: 50 / 50
 Files modified: crates/archon-docs/src/summarize.rs (new), tests/docs_summarize_smoke.rs (new), 4 others
 ```
 

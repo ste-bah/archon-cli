@@ -104,6 +104,7 @@ impl Tool for SkillTool {
                     working_dir: ctx.working_dir.clone(),
                     model: String::new(),
                     agent_registry: None,
+                    session_store: None,
                 };
 
                 match skill.execute(&args, &skill_ctx) {

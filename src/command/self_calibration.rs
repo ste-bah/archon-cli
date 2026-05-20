@@ -85,7 +85,7 @@ pub async fn handle_self_command(
         } => trust_status(),
         SelfAction::Plans {
             action: SelfPlansAction::Inspect { session_id },
-        } => inspect_plans(&session_id),
+        } => inspect_plans(&session_id, config),
     }
 }
 
@@ -266,9 +266,9 @@ fn trust_status() -> Result<()> {
     Ok(())
 }
 
-fn inspect_plans(session_id: &str) -> Result<()> {
-    let store = archon_session::storage::SessionStore::open_default()
-        .map_err(|e| anyhow::anyhow!("open session store: {e}"))?;
+fn inspect_plans(session_id: &str, config: &ArchonConfig) -> Result<()> {
+    let session_db_path = crate::command::store_paths::session_db_path(config);
+    let store = crate::command::store_paths::open_session_store(&session_db_path)?;
     let plans = archon_session::plan::PlanStore::new(store.db())?;
     let Some(plan) = plans.load_latest_plan(session_id)? else {
         println!("No plan artifacts found for session {session_id}.");
