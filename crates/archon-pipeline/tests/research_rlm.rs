@@ -28,6 +28,12 @@ fn research_rlm_injects_pinned_structure_and_rolling_outputs() {
     let context = rlm.build_context(&session(), validator);
 
     assert!(context.contains("Research RLM Identity"));
+    assert!(context.contains("Logical `research/...` namespaces are memory keys"));
+    assert!(
+        context
+            .contains(".archon/pipelines/test-session/outputs/markdown/031-introduction-writer.md")
+    );
+    assert!(!context.contains("/Volumes/Externalwork/archon-cli/project-1/research/writing"));
     assert!(context.contains("Pinned Output `005-dissertation-architect`"));
     assert!(context.contains("Rolling Output `031-introduction-writer`"));
     assert!(context.contains("Deterministic Consistency Pre-Scan"));

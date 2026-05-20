@@ -684,7 +684,7 @@ async fn run_pipeline_inner(
                     result.quality = Some(quality.clone());
 
                     let meets_threshold = quality.overall >= agent.quality_threshold;
-                    let accepted = meets_threshold || attempt >= PIPELINE_MAX_ATTEMPTS;
+                    let accepted = attempt_accepted(meets_threshold, agent.critical, attempt);
                     let failure_reason = (!meets_threshold).then(|| {
                         format!(
                             "Quality {:.2} below threshold {:.2}",
@@ -717,6 +717,11 @@ async fn run_pipeline_inner(
 
                     if accepted {
                         break (result, quality, prompt_hashes);
+                    }
+                    if attempt >= PIPELINE_MAX_ATTEMPTS && agent.critical {
+                        let reason = quality_gate_failure(&agent, quality.overall, attempt);
+                        fail_audit(&mut audit, &reason)?;
+                        return Err(anyhow::anyhow!(reason));
                     }
 
                     // Record failure for reflexion on next attempt.
@@ -1117,7 +1122,8 @@ async fn run_pipeline_inner(
                                 quality.overall, prepared.agent.quality_threshold
                             )
                         });
-                        let accepted = meets_threshold || attempt >= PIPELINE_MAX_ATTEMPTS;
+                        let accepted =
+                            attempt_accepted(meets_threshold, prepared.agent.critical, attempt);
                         if let Some(audit) = audit.as_ref() {
                             attempts.push(audit.record_attempt_completed(
                                 prepared.ordinal,
@@ -1143,6 +1149,12 @@ async fn run_pipeline_inner(
 
                         if accepted {
                             break;
+                        }
+                        if attempt >= PIPELINE_MAX_ATTEMPTS && prepared.agent.critical {
+                            let reason =
+                                quality_gate_failure(&prepared.agent, quality.overall, attempt);
+                            fail_audit(&mut audit, &reason)?;
+                            return Err(anyhow::anyhow!(reason));
                         }
 
                         if let Some(ri) = reflexion.as_deref_mut() {
@@ -1401,6 +1413,17 @@ fn pipeline_attempt_retry_delay(attempt: usize) -> Duration {
     Duration::from_millis(delay_ms.min(2_000))
 }
 
+fn attempt_accepted(meets_threshold: bool, critical: bool, attempt: usize) -> bool {
+    meets_threshold || (!critical && attempt >= PIPELINE_MAX_ATTEMPTS)
+}
+
+fn quality_gate_failure(agent: &AgentInfo, score: f64, attempt: usize) -> String {
+    format!(
+        "Critical agent '{}' failed quality threshold {:.2} after {} attempts (best score: {:.2})",
+        agent.key, agent.quality_threshold, attempt, score
+    )
+}
+
 fn fail_audit(audit: &mut Option<PipelineAuditRun>, error: &str) -> Result<()> {
     if let Some(audit) = audit.as_mut() {
         audit.fail(error)?;
@@ -1482,6 +1505,22 @@ mod tests {
     }
 
     // -- extract_modified_files ----------------------------------------------
+
+    #[test]
+    fn critical_agents_do_not_pass_on_final_low_quality_attempt() {
+        assert!(!attempt_accepted(false, true, PIPELINE_MAX_ATTEMPTS));
+    }
+
+    #[test]
+    fn noncritical_agents_can_continue_after_final_low_quality_attempt() {
+        assert!(attempt_accepted(false, false, PIPELINE_MAX_ATTEMPTS));
+    }
+
+    #[test]
+    fn threshold_pass_accepts_any_agent() {
+        assert!(attempt_accepted(true, true, 1));
+        assert!(attempt_accepted(true, false, 1));
+    }
 
     #[test]
     fn extract_modified_files_empty_log_returns_empty() {

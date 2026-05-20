@@ -74,7 +74,7 @@ impl ResearchRlm {
 
         let mut parts = vec![
             self.identity_context(session, agent, entries.len()),
-            self.manifest_context(entries),
+            self.manifest_context(session, entries),
             self.namespace_context(agent),
         ];
 
@@ -109,23 +109,28 @@ impl ResearchRlm {
              Completed agents: {}\n\
              Contract: Archon injects persisted run-level memory and rolling context. \
              Do not claim filesystem or memory-store access is unavailable when the \
-             required evidence is present in this context.",
+             required evidence is present in this context. Logical `research/...` \
+             namespaces are memory keys, not project-root file paths. If you need \
+             to read a prior artifact, use only the concrete `.archon/pipelines/...` \
+             paths listed in the manifest. Return the full Markdown deliverable, \
+             not a status note saying artifacts or memory were created.",
             session.id, agent.key, agent.phase, completed_count
         )
     }
 
-    fn manifest_context(&self, entries: &[ResearchRlmEntry]) -> String {
+    fn manifest_context(&self, session: &PipelineSession, entries: &[ResearchRlmEntry]) -> String {
         let rows = entries
             .iter()
             .map(|entry| {
                 format!(
-                    "- `{ordinal:03}-{key}` phase {phase}, tokens approx {tokens}, memory: {memory}, artifacts: {artifacts}",
+                    "- `{ordinal:03}-{key}` phase {phase}, tokens approx {tokens}, memory: {memory}, artifacts: {artifacts}\n  files: {files}",
                     ordinal = entry.ordinal,
                     key = entry.agent_key,
                     phase = entry.phase,
                     tokens = entry.token_count,
                     memory = entry.memory_keys.join(", "),
-                    artifacts = entry.output_artifacts.join(", ")
+                    artifacts = entry.output_artifacts.join(", "),
+                    files = manifest_files(session, entry).join("; ")
                 )
             })
             .collect::<Vec<_>>()
@@ -351,6 +356,28 @@ fn entries_from_session(session: &PipelineSession) -> Vec<ResearchRlmEntry> {
             }
         })
         .collect()
+}
+
+fn manifest_files(session: &PipelineSession, entry: &ResearchRlmEntry) -> Vec<String> {
+    let prefix = format!(".archon/pipelines/{}/outputs", session.id);
+    let stem = format!("{:03}-{}", entry.ordinal, entry.agent_key);
+    let mut files = vec![format!("{prefix}/markdown/{stem}.md")];
+    for key in &entry.memory_keys {
+        files.push(format!("{prefix}/rlm/{}.md", safe_path_segment(key)));
+    }
+    for artifact in &entry.output_artifacts {
+        files.push(format!("{prefix}/artifacts/{stem}/{artifact}"));
+        files.push(format!("{prefix}/rlm/research/artifacts/{artifact}.md"));
+    }
+    files
+}
+
+fn safe_path_segment(value: &str) -> String {
+    value
+        .split('/')
+        .filter(|segment| !segment.is_empty() && *segment != "." && *segment != "..")
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn is_writer(agent_key: &str) -> bool {

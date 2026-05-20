@@ -112,6 +112,14 @@ static CRITICAL_AGENTS: &[&str] = &[
     "bias-detector",
     "quality-assessor",
     "validity-guardian",
+    "introduction-writer",
+    "literature-review-writer",
+    "methodology-writer",
+    "results-writer",
+    "discussion-writer",
+    "conclusion-writer",
+    "chapter-synthesizer",
+    "abstract-writer",
 ];
 
 static WRITING_AGENTS: &[&str] = &[
