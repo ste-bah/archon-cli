@@ -43,34 +43,7 @@ pub async fn handle_kb_command(action: KbAction) -> Result<()> {
 
 async fn ingest_source(db: &DbInstance, source: &str) -> Result<()> {
     if source.starts_with("http://") || source.starts_with("https://") {
-        let response = reqwest::get(source).await?;
-        let status = response.status();
-        if !status.is_success() {
-            anyhow::bail!("URL ingest failed for {source}: HTTP {status}");
-        }
-        let media_type = response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("text/plain")
-            .split(';')
-            .next()
-            .unwrap_or("text/plain")
-            .to_string();
-        if !is_text_url_media_type(&media_type) {
-            anyhow::bail!(
-                "KB URL ingest only supports text-like URLs; got `{media_type}` from {source}. \
-                 Download binary/media sources and run `archon docs ingest <path>` or `archon kb ingest <path>`."
-            );
-        }
-        let body = response.text().await?;
-        let result = archon_docs::ingest_text::ingest_text_source(db, source, &media_type, &body)?;
-        println!("Ingested: {}", result.document_id);
-        if !result.was_new {
-            println!("Skipped duplicate: true");
-        }
-        println!("Chunks: {}", result.chunks_registered);
-        return Ok(());
+        return crate::command::kb_url::ingest_url(db, source).await;
     }
     let path = PathBuf::from(source);
     if !path.exists() {
@@ -88,31 +61,6 @@ async fn ingest_source(db: &DbInstance, source: &str) -> Result<()> {
         println!("Chunks: {}", chunks.len());
     }
     Ok(())
-}
-
-fn is_text_url_media_type(media_type: &str) -> bool {
-    let normalized = media_type
-        .split(';')
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_ascii_lowercase();
-    normalized.starts_with("text/")
-        || normalized.ends_with("+json")
-        || normalized.ends_with("+xml")
-        || matches!(
-            normalized.as_str(),
-            "application/json"
-                | "application/ld+json"
-                | "application/x-ndjson"
-                | "application/xml"
-                | "application/xhtml+xml"
-                | "application/rss+xml"
-                | "application/atom+xml"
-                | "application/yaml"
-                | "application/x-yaml"
-                | "application/toml"
-        )
 }
 
 async fn list_chunks(db: &DbInstance) -> Result<()> {
@@ -354,33 +302,6 @@ mod tests {
         .unwrap();
         assert_eq!(first.document_id, second.document_id);
         assert!(!second.was_new);
-    }
-
-    #[test]
-    fn url_media_type_gate_accepts_text_like_content() {
-        for media_type in [
-            "text/plain",
-            "text/html; charset=utf-8",
-            "application/json",
-            "application/activity+json",
-            "application/rss+xml",
-            "application/x-yaml",
-        ] {
-            assert!(
-                is_text_url_media_type(media_type),
-                "{media_type} should be accepted"
-            );
-        }
-    }
-
-    #[test]
-    fn url_media_type_gate_rejects_binary_content() {
-        for media_type in ["application/pdf", "image/png", "audio/mpeg"] {
-            assert!(
-                !is_text_url_media_type(media_type),
-                "{media_type} should be rejected"
-            );
-        }
     }
 
     #[test]

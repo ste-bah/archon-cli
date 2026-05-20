@@ -74,6 +74,7 @@ pub(crate) mod help;
 pub(crate) mod hooks;
 pub(crate) mod ide_stdio;
 pub(crate) mod kb;
+pub(crate) mod kb_url;
 pub(crate) mod learning;
 pub(crate) mod learning_status;
 pub(crate) mod login;

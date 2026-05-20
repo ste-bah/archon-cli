@@ -7,6 +7,7 @@ pub mod store;
 pub mod chunking;
 pub mod ingest;
 mod ingest_artifacts;
+pub mod ingest_bytes;
 mod ingest_directory;
 mod ingest_multimodal;
 mod ingest_pdf;

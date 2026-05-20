@@ -88,7 +88,7 @@ pub fn is_supported_media_type(media_type: &str) -> bool {
 }
 
 /// Determine whether the media type can go through the OCR → chunk pipeline.
-fn is_ocr_runnable(media_type: &str) -> bool {
+pub(crate) fn is_ocr_runnable(media_type: &str) -> bool {
     matches!(
         media_type,
         "text/plain"
@@ -283,7 +283,7 @@ pub async fn ingest_file_with_policy(
 
 /// Run the full OCR → page records → chunking → provenance pipeline
 /// for a single document. All inserts go through the Cozo `db`.
-async fn run_ingest_pipeline_with_bytes(
+pub(crate) async fn run_ingest_pipeline_with_bytes(
     db: &DbInstance,
     document_id: &str,
     file_path: &str,

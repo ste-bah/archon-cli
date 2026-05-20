@@ -12,7 +12,7 @@ Current `archon kb --help` surface:
 
 | Command | Purpose | Important flags |
 |---|---|---|
-| `ingest <source>` | Ingest a file, text URL, or directory into the KB | `--domain` |
+| `ingest <source>` | Ingest a file, URL, or directory into the KB | `--domain` |
 | `list` | List all nodes | none |
 | `search <query>` | Search nodes | `--limit`, `--mode exact|semantic|hybrid` |
 | `process` | Extract structured intelligence from doc chunks | `--claims`, `--entities`, `--relations`, `--contradictions` |
@@ -28,11 +28,12 @@ The expected persisted relations are claims, entities, relations, source-quality
 records, and contradictions. `archon kb process` should write those rows from
 real document chunks, and the list/search commands should read them back.
 
-URL ingest is intentionally text-source only. Text, HTML, JSON, XML, YAML, and
-similar text-like content is stored with document, page, chunk, and provenance
-rows. Binary media such as PDFs, images, and audio should be downloaded first
-and ingested from a local path so the governed docs OCR/PDF/VLM pipeline and
-project policy gates can run.
+URL ingest uses the same governed document pipeline as local ingest for
+supported document media: plain text, Markdown, PDF, PNG, JPEG, and TIFF. The
+URL remains the stored source path while fetched bytes are passed through the
+same hashing, duplicate detection, OCR/PDF/image/VLM policy gates, chunking,
+and provenance rows. Additional text-like web formats such as HTML, JSON, XML,
+YAML, and TOML are stored through the text-source path.
 
 ## Full State Verification
 
