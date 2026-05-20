@@ -35,6 +35,16 @@ uses `app_server_url`; `app_server_transport = "stdio"` spawns
 schemes `ws`, `wss`, `http`, and `https` are accepted for compatibility;
 invalid targets fail closed and are redacted before persistence.
 
+## Model Defaults
+
+When `[llm].provider = "openai-codex"`, Archon normalizes inherited Claude-shaped
+defaults into the configured Codex model aliases before interactive sessions and
+subagents see them. This prevents a Codex session from leaking a literal
+`claude-*` model id into provider calls. The mapping is controlled by
+`[models.openai-codex]`: `default` is used for Sonnet/Opus-tier inherited
+defaults, and `mini` is used for Haiku-tier inherited defaults. A concrete
+Codex model configured as `api.default_model` is preserved.
+
 ## OAuth
 
 Run:

@@ -30,9 +30,9 @@ pub enum RemoteAction {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum KbAction {
-    /// Ingest a file, URL, or directory into the knowledge base
+    /// Ingest a file, text URL, or directory into the knowledge base
     Ingest {
-        /// Path or URL to ingest
+        /// Path or text URL to ingest
         source: String,
         /// Domain tag for the ingested content
         #[arg(long)]
