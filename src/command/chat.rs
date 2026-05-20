@@ -169,7 +169,7 @@ fn response_text(content: &[serde_json::Value]) -> String {
 fn default_model(provider: &str, config: &archon_core::config::ArchonConfig) -> String {
     match provider {
         "anthropic" => config.api.default_model.clone(),
-        "openai-codex" => "gpt-5.4".into(),
+        "openai-codex" => config.models.openai_codex.default.clone(),
         other => archon_llm::providers::get_native(other)
             .or_else(|| archon_llm::providers::get_compat(other))
             .map(|d| d.default_model.clone())

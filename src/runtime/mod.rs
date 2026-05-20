@@ -11,6 +11,7 @@ mod codex_app_server_models;
 mod codex_app_server_provider;
 mod codex_app_server_rpc;
 mod codex_auto_provider;
+pub(crate) mod codex_model;
 pub(crate) mod codex_provider;
 pub(crate) mod codex_strategy;
 pub(crate) mod hooks;

@@ -140,6 +140,41 @@ fn format_skill_help() {
     assert!(text.contains("Show all commands"));
 }
 
+#[test]
+fn duplicate_skill_registration_keeps_first_skill() {
+    let mut reg = SkillRegistry::new();
+    reg.register(Box::new(DummySkill::new("duplicate", "First description")));
+    reg.register(Box::new(DummySkill::new("duplicate", "Second description")));
+
+    let text = reg.format_skill_help("duplicate").unwrap();
+    assert!(text.contains("First description"));
+    assert!(!text.contains("Second description"));
+}
+
+#[test]
+fn duplicate_declared_alias_keeps_first_skill() {
+    let mut reg = SkillRegistry::new();
+    reg.register(Box::new(
+        DummySkill::new("first", "First").with_aliases(vec!["dup"]),
+    ));
+    reg.register(Box::new(
+        DummySkill::new("second", "Second").with_aliases(vec!["dup"]),
+    ));
+
+    assert_eq!(reg.resolve("dup").map(|s| s.name()), Some("first"));
+}
+
+#[test]
+fn duplicate_manual_alias_keeps_first_skill() {
+    let mut reg = SkillRegistry::new();
+    reg.register(Box::new(DummySkill::new("first", "First")));
+    reg.register(Box::new(DummySkill::new("second", "Second")));
+    reg.register_alias("dup", "first");
+    reg.register_alias("dup", "second");
+
+    assert_eq!(reg.resolve("dup").map(|s| s.name()), Some("first"));
+}
+
 // ---------------------------------------------------------------------------
 // Discovery tests
 // ---------------------------------------------------------------------------

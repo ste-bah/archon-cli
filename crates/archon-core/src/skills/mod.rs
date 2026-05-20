@@ -80,7 +80,8 @@ impl SkillRegistry {
     pub fn register(&mut self, skill: Box<dyn Skill>) {
         let name = skill.name().to_string();
         if self.skills.contains_key(&name) {
-            tracing::warn!(skill = %name, "replacing previously registered skill");
+            tracing::warn!(skill = %name, "skipping duplicate skill registration");
+            return;
         }
         for alias in skill.aliases() {
             if let Some(existing) = self.aliases.get(alias) {
@@ -88,8 +89,9 @@ impl SkillRegistry {
                     alias,
                     previous_skill = %existing,
                     new_skill = %name,
-                    "replacing previously registered skill alias"
+                    "skipping duplicate skill alias registration"
                 );
+                continue;
             }
             self.aliases.insert(alias.to_string(), name.clone());
         }
@@ -103,8 +105,9 @@ impl SkillRegistry {
                 alias,
                 previous_skill = %existing,
                 new_skill = %name,
-                "replacing previously registered skill alias"
+                "skipping duplicate skill alias registration"
             );
+            return;
         }
         self.aliases.insert(alias.to_string(), name.to_string());
     }

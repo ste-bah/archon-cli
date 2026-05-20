@@ -110,6 +110,8 @@ fn store_artifacts(
     content_hash: &str,
     content: &str,
 ) -> Result<(), DocsError> {
+    let artifact_provenance_id = format!("prov-{artifact_id}");
+    let page_provenance_id = format!("prov-{page_id}");
     store::insert_artifact(
         db,
         &ArtifactRecord {
@@ -118,7 +120,7 @@ fn store_artifacts(
             artifact_type: "source_text".to_string(),
             content_hash: content_hash.to_string(),
             created_at: chrono::Utc::now().to_rfc3339(),
-            provenance_record_id: String::new(),
+            provenance_record_id: artifact_provenance_id,
         },
     )
     .map_err(storage)?;
@@ -133,7 +135,7 @@ fn store_artifacts(
             image_hash: None,
             width: None,
             height: None,
-            provenance_record_id: String::new(),
+            provenance_record_id: page_provenance_id,
         },
     )
     .map_err(storage)?;
@@ -197,6 +199,10 @@ mod tests {
         assert_eq!(doc.status, DocumentStatus::Ingested);
         let artifacts = store::list_artifacts_for_doc(&db, &result.document_id).unwrap();
         assert_eq!(artifacts.len(), 1);
+        assert!(!artifacts[0].provenance_record_id.is_empty());
+        let pages = store::list_pages_for_doc(&db, &result.document_id).unwrap();
+        assert_eq!(pages.len(), 1);
+        assert!(!pages[0].provenance_record_id.is_empty());
         let chunks = store::list_chunks_for_doc(&db, &result.document_id).unwrap();
         assert_eq!(chunks.len(), 1);
         let chunk_edges = store::list_provenance_from(&db, &chunks[0].chunk_id).unwrap();

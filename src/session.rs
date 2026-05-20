@@ -52,8 +52,10 @@ fn is_codex_session(config: &archon_core::config::ArchonConfig) -> bool {
 }
 
 fn active_session_model(config: &archon_core::config::ArchonConfig) -> String {
-    if is_codex_session(config) && config.api.default_model.starts_with("claude") {
-        "gpt-5.4".into()
+    if is_codex_session(config)
+        && let Some(model) = crate::runtime::codex_model::codex_model_for_anthropic_default(config)
+    {
+        model
     } else {
         config.api.default_model.clone()
     }
@@ -225,12 +227,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn active_session_model_uses_codex_default_when_claude_default_would_leak() {
+    fn active_session_model_uses_configured_codex_default_when_claude_default_would_leak() {
         let mut config = archon_core::config::ArchonConfig::default();
         config.llm.provider = "openai-codex".into();
         config.api.default_model = "claude-sonnet-4-6".into();
+        config.models.openai_codex.default = "gpt-codex-default".into();
 
-        assert_eq!(active_session_model(&config), "gpt-5.4");
+        assert_eq!(active_session_model(&config), "gpt-codex-default");
+    }
+
+    #[test]
+    fn active_session_model_uses_configured_codex_mini_for_haiku_default() {
+        let mut config = archon_core::config::ArchonConfig::default();
+        config.llm.provider = "openai-codex".into();
+        config.api.default_model = "claude-haiku-4-5-20251001".into();
+        config.models.openai_codex.mini = "gpt-codex-mini".into();
+
+        assert_eq!(active_session_model(&config), "gpt-codex-mini");
     }
 
     #[test]

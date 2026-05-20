@@ -223,8 +223,10 @@ fn build_llm_request(
 }
 
 fn retrospective_model(config: &ArchonConfig, provider: &dyn LlmProvider) -> String {
-    if provider.name() == "openai-codex" && config.api.default_model.starts_with("claude") {
-        return "gpt-5.4".into();
+    if provider.name() == "openai-codex"
+        && let Some(model) = crate::runtime::codex_model::codex_model_for_anthropic_default(config)
+    {
+        return model;
     }
     config.api.default_model.clone()
 }
