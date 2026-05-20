@@ -33,6 +33,7 @@ fn research_rlm_injects_pinned_structure_and_rolling_outputs() {
         context
             .contains(".archon/pipelines/test-session/outputs/markdown/031-introduction-writer.md")
     );
+    assert!(!context.contains(".md.md"));
     assert!(!context.contains("/Volumes/Externalwork/archon-cli/project-1/research/writing"));
     assert!(context.contains("Pinned Output `005-dissertation-architect`"));
     assert!(context.contains("Rolling Output `031-introduction-writer`"));

@@ -367,7 +367,7 @@ fn manifest_files(session: &PipelineSession, entry: &ResearchRlmEntry) -> Vec<St
     }
     for artifact in &entry.output_artifacts {
         files.push(format!("{prefix}/artifacts/{stem}/{artifact}"));
-        files.push(format!("{prefix}/rlm/research/artifacts/{artifact}.md"));
+        files.push(format!("{prefix}/rlm/research/artifacts/{artifact}"));
     }
     files
 }

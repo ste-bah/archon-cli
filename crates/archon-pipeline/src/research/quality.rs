@@ -213,6 +213,39 @@ fn phase_weight(phase: u8) -> f64 {
     }
 }
 
+fn contains_any(haystack: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| haystack.contains(needle))
+}
+
+fn abstract_body(text: &str) -> String {
+    let mut in_abstract = false;
+    let mut lines = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.eq_ignore_ascii_case("## abstract") {
+            in_abstract = true;
+            continue;
+        }
+        if in_abstract
+            && (trimmed.starts_with("## ")
+                || trimmed.starts_with("*keywords*:")
+                || trimmed.starts_with("Keywords:"))
+        {
+            break;
+        }
+        if in_abstract {
+            lines.push(line);
+        }
+    }
+
+    let body = lines.join("\n").trim().to_string();
+    if body.is_empty() {
+        text.to_string()
+    } else {
+        body
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Academic markers
 // ---------------------------------------------------------------------------
@@ -318,6 +351,10 @@ impl PhDQualityCalculator {
 
     /// Assess the quality of `text` produced by the agent described by `context`.
     pub fn assess_quality(&self, text: &str, context: &QualityContext) -> QualityAssessment {
+        if context.agent_key == "abstract-writer" {
+            return self.assess_abstract_quality(text, context);
+        }
+
         let content_depth = self.score_content_depth(text, context);
         let structural_quality = self.score_structural_quality(text);
         let research_rigor = self.score_research_rigor(text);
@@ -354,6 +391,106 @@ impl PhDQualityCalculator {
                 structural_quality,
                 research_rigor,
                 completeness,
+                format_quality,
+            },
+            tier,
+            summary,
+        }
+    }
+
+    fn assess_abstract_quality(&self, text: &str, context: &QualityContext) -> QualityAssessment {
+        let body = abstract_body(text);
+        let body_words = Self::count_words(&body);
+        let text_lower = text.to_lowercase();
+        let body_lower = body.to_lowercase();
+
+        let content_depth = match body_words {
+            0..80 => 0.03,
+            80..120 => 0.08,
+            120..300 => 0.23,
+            300..450 => 0.18,
+            _ => 0.10,
+        };
+
+        let structural_quality = [
+            text_lower.contains("## abstract"),
+            text_lower.contains("*keywords*:") || text_lower.contains("keywords:"),
+            !text.contains("```"),
+            !text.lines().any(|line| line.contains('|')),
+        ]
+        .into_iter()
+        .filter(|present| *present)
+        .count() as f64
+            * 0.05;
+
+        let research_rigor = [
+            contains_any(
+                &body_lower,
+                &["examined", "used", "synthesized", "analysis"],
+            ),
+            contains_any(&body_lower, &["found", "findings", "indicate", "support"]),
+            contains_any(&body_lower, &["no empirical", "cannot yet", "future work"]),
+        ]
+        .into_iter()
+        .filter(|present| *present)
+        .count() as f64
+            * 0.06;
+
+        let completeness = [
+            contains_any(
+                &body_lower,
+                &["purpose", "paper examined", "study examined"],
+            ),
+            contains_any(&body_lower, &["method", "used", "synthesized", "analysis"]),
+            contains_any(&body_lower, &["results", "findings", "found", "indicate"]),
+            contains_any(
+                &body_lower,
+                &["conclude", "suggest", "implication", "future"],
+            ),
+        ]
+        .into_iter()
+        .filter(|present| *present)
+        .count() as f64
+            * 0.05;
+
+        let format_quality = if text_lower.contains("*keywords*:") {
+            0.09
+        } else {
+            0.04
+        };
+        let score = ((content_depth
+            + structural_quality.min(0.20)
+            + research_rigor.min(0.25)
+            + completeness.min(0.20)
+            + format_quality)
+            * phase_weight(context.phase))
+        .min(0.95);
+
+        let tier = match score {
+            s if s >= 0.85 => QualityTier::Excellent,
+            s if s >= 0.70 => QualityTier::Good,
+            s if s >= 0.50 => QualityTier::Adequate,
+            _ => QualityTier::Poor,
+        };
+        let summary = format!(
+            "{} abstract quality ({:.2}): body_words={}, content_depth={:.3}, structural={:.3}, rigor={:.3}, completeness={:.3}, format={:.3}",
+            tier,
+            score,
+            body_words,
+            content_depth,
+            structural_quality.min(0.20),
+            research_rigor.min(0.25),
+            completeness.min(0.20),
+            format_quality,
+        );
+
+        QualityAssessment {
+            score,
+            breakdown: QualityBreakdown {
+                content_depth,
+                structural_quality: structural_quality.min(0.20),
+                research_rigor: research_rigor.min(0.25),
+                completeness: completeness.min(0.20),
                 format_quality,
             },
             tier,
@@ -880,8 +1017,62 @@ mod tests {
         let result = c.assess_quality(&text, &ctx);
         // Should get decent score with all expected sections present
         assert!(
-            result.score > 0.20,
+            result.score >= 0.50,
             "Abstract writer with all sections should score reasonably, got {}",
+            result.score
+        );
+    }
+
+    #[test]
+    fn apa_style_abstract_passes_abstract_gate() {
+        let text = r#"# Abstract: Governing Proprietary Match Scoring
+
+## Abstract
+
+Financial-crime screening platforms require secure, explainable, configurable,
+and operationally manageable match-scoring and alert-disposition capabilities.
+This paper examined how a GKB-style architecture can support proprietary match
+scoring and disposition algorithms for sanctions, anti-money laundering,
+politically exposed person, and watchlist screening use cases. The study used
+the GKB high-level design document as the primary architectural source and
+synthesized relevant research on entity resolution, probabilistic record
+linkage, explainable decision systems, model governance, secure software
+architecture, and competitor capabilities. The analysis found that the proposed
+architecture is best interpreted as a governed decision platform comprising an
+Alert Disposition Hub, Configuration Manager, Match Scoring Adapter, model
+execution service, messaging topics, asynchronous processing options, and
+model-version metadata. No empirical benchmark results were available;
+therefore, superiority over competitors cannot yet be claimed. Findings suggest
+that proprietary advantage should come from governed evidence fusion,
+explainability, configuration safety, secure deployment, and continuous
+validation rather than opaque scoring alone. Future work should benchmark
+accuracy, false-positive reduction, latency, scalability, analyst trust,
+security resilience, and update governance.
+
+*Keywords*: financial-crime screening, entity resolution, match scoring,
+disposition algorithms, model governance
+"#;
+
+        let c = calc();
+        let ctx = PhDQualityCalculator::create_quality_context("abstract-writer", 6);
+        let result = c.assess_quality(text, &ctx);
+        assert!(
+            result.score >= 0.50,
+            "concise APA-style abstract should pass, got {} ({})",
+            result.score,
+            result.summary
+        );
+    }
+
+    #[test]
+    fn abstract_status_stub_fails_abstract_gate() {
+        let text = "Completed abstract-writer output.\n\nArtifacts created:\n- abstract.md\n- executive-summary.md\n\nMemory stored.";
+        let c = calc();
+        let ctx = PhDQualityCalculator::create_quality_context("abstract-writer", 6);
+        let result = c.assess_quality(text, &ctx);
+        assert!(
+            result.score < 0.50,
+            "status stub must not pass abstract gate, got {}",
             result.score
         );
     }
