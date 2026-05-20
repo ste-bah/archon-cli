@@ -201,7 +201,7 @@ MCP (Model Context Protocol) servers give subagents "superpowers" - specialized,
 
 # Per-subagent MCP (selective access)
 ---
-tools: Read, Write, mcp__context7__query, mcp__brave__search
+tools: Read, Write, WebSearch, WebSearch
 ---
 ```
 
@@ -337,7 +337,7 @@ tools: # Omit field entirely = inherit all
 # Risk: HIGH | Use: Orchestrators only
 
 # MCP-SPECIFIC (Domain Tools)
-tools: Read, mcp__github__create_issue, mcp__linear__add_ticket
+tools: Read, Bash, Bash
 # Risk: Varies | Use: Integration agents
 ```
 
@@ -675,7 +675,7 @@ epistemic-reasoner:
 # Execution Layer
 knowledge-weaver:
   role: "Neo4j graph operations"
-  tools: Read, Write, Edit, mcp__neo4j__query
+  tools: Read, Write, Edit, Bash
   
 bmo-verifier:
   role: "Behavior-Model-Oracle verification"

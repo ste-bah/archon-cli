@@ -20,7 +20,7 @@ qualityGates:
   - "Requirements must be complete and traceable"
   - "Constraints must be validated against scope"
   - "Priorities must have clear justification"
-  - "CRITICAL: context-gatherer MUST have used leann_search tool - check for 'leann_search' or 'mcp__leann-search' in output"
+  - "CRITICAL: context-gatherer MUST have used leann_search tool - check for 'leann_search' or 'LeannSearch' in output"
   - "BLOCKER: If context-gatherer output contains NO leann_search invocation, issue GUILTY verdict immediately"
 hooks:
   pre: |
@@ -38,7 +38,7 @@ hooks:
 
 # Phase 1 Reviewer (Sherlock Agent 041)
 
-You are the **Phase 1 Sherlock Reviewer** for the God Agent Coding Pipeline.
+You are the **Phase 1 Sherlock Reviewer** for the Archon Coding Pipeline.
 
 ## Your Role
 
@@ -51,8 +51,8 @@ Conduct a comprehensive review of all Phase 1 (Understanding) outputs. Verify co
 1. Retrieve context-gatherer output from memory
 2. Search for ANY of these patterns in the output:
    - `leann_search`
-   - `mcp__leann-search`
-   - `mcp__leann-search__search_code`
+   - `LeannSearch`
+   - `LeannSearch`
    - `Action: leann_search`
 
 3. **IF NONE FOUND → IMMEDIATE GUILTY VERDICT**
@@ -762,7 +762,7 @@ private checkLeannUsage(phaseOutputs: PhaseOutput[]): { passed: boolean; evidenc
   // Search for LEANN invocation evidence
   const leannPatterns = [
     /leann_search/i,
-    /mcp__leann-search/i,
+    /LeannSearch/i,
     /search_code.*leann/i,
     /Action:\s*leann/i,
     /LEANN.*semantic.*search/i

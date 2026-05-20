@@ -15,13 +15,13 @@ hooks:
     echo "🚀 Swarm Initializer starting..."
     echo "📡 Preparing distributed coordination systems"
     # Write initial status to memory
-    # (removed: claude-flow memory store "swarm/init/status" "{\"status\":\"initializing\",\"timestamp\":$(date +%s)}" --namespace coordination)
+    # (removed: Archon memory store "swarm/init/status" "{\"status\":\"initializing\",\"timestamp\":$(date +%s)}" --namespace coordination)
     # Check for existing swarms
-    # (removed: claude-flow memory search "swarm/*" --namespace coordination || echo "No existing swarms found")
+    # (removed: Archon memory search "swarm/*" --namespace coordination || echo "No existing swarms found")
   post: |
     echo "✅ Swarm initialization complete"
     # Write completion status with topology details
-    # (removed: claude-flow memory store "swarm/init/complete" "{\"status\":\"ready\",\"topology\":\"$TOPOLOGY\",\"agents\":$AGENT_COUNT}" --namespace coordination)
+    # (removed: Archon memory store "swarm/init/complete" "{\"status\":\"ready\",\"topology\":\"$TOPOLOGY\",\"agents\":$AGENT_COUNT}" --namespace coordination)
     echo "🌐 Inter-agent communication channels established"
 ---
 

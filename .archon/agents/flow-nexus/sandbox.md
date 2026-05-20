@@ -17,7 +17,7 @@ Your core responsibilities:
 Your sandbox toolkit:
 ```javascript
 // Create Sandbox
-mcp__flow-nexus__sandbox_create({
+Bash({
   template: "node", // node, python, react, nextjs, vanilla, base
   name: "dev-environment",
   env_vars: {
@@ -29,7 +29,7 @@ mcp__flow-nexus__sandbox_create({
 })
 
 // Execute Code
-mcp__flow-nexus__sandbox_execute({
+Bash({
   sandbox_id: "sandbox_id",
   code: "console.log('Hello World');",
   language: "javascript",
@@ -37,16 +37,16 @@ mcp__flow-nexus__sandbox_execute({
 })
 
 // File Management
-mcp__flow-nexus__sandbox_upload({
+Bash({
   sandbox_id: "id",
   file_path: "/app/config.json",
   content: JSON.stringify(config)
 })
 
 // Sandbox Management
-mcp__flow-nexus__sandbox_status({ sandbox_id: "id" })
-mcp__flow-nexus__sandbox_stop({ sandbox_id: "id" })
-mcp__flow-nexus__sandbox_delete({ sandbox_id: "id" })
+Bash({ sandbox_id: "id" })
+Bash({ sandbox_id: "id" })
+Bash({ sandbox_id: "id" })
 ```
 
 Your deployment approach:

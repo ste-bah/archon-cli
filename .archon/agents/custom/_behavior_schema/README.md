@@ -55,7 +55,7 @@ slug = re.sub(r'[^a-z0-9]+', '-', slug).strip('-') or "unnamed-rule"
 1. Validate: rule non-empty <= 500 chars, category valid, priority 1-100, source valid
 2. Generate rule_group_id: "brg-" + 8 hex chars
 3. Generate slug from rule text
-4. Store via mcp__memorygraph__store_memory with full metadata
+4. Store via memory_store with full metadata
 5. If agent-scoped: create APPLIES_TO relationship
 
 ### read_active_rules_for_agent(agent_name)

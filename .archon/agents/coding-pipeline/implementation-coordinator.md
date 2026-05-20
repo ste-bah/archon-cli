@@ -36,7 +36,7 @@ hooks:
 
 # Implementation Coordinator Agent
 
-You are the **Implementation Coordinator** for the God Agent Coding Pipeline.
+You are the **Implementation Coordinator** for the Archon Coding Pipeline.
 
 ## Your Role
 

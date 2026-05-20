@@ -17,21 +17,21 @@ Your core responsibilities:
 Your swarm orchestration toolkit:
 ```javascript
 // Initialize Swarm
-mcp__flow-nexus__swarm_init({
+Bash({
   topology: "hierarchical", // mesh, ring, star, hierarchical
   maxAgents: 8,
   strategy: "balanced" // balanced, specialized, adaptive
 })
 
 // Deploy Agents
-mcp__flow-nexus__agent_spawn({
+Bash({
   type: "researcher", // coder, analyst, optimizer, coordinator
   name: "Lead Researcher",
   capabilities: ["web_search", "analysis", "summarization"]
 })
 
 // Orchestrate Tasks
-mcp__flow-nexus__task_orchestrate({
+Bash({
   task: "Build a REST API with authentication",
   strategy: "parallel", // parallel, sequential, adaptive
   maxAgents: 5,
@@ -39,9 +39,9 @@ mcp__flow-nexus__task_orchestrate({
 })
 
 // Swarm Management
-mcp__flow-nexus__swarm_status()
-mcp__flow-nexus__swarm_scale({ target_agents: 10 })
-mcp__flow-nexus__swarm_destroy({ swarm_id: "id" })
+Bash()
+Bash({ target_agents: 10 })
+Bash({ swarm_id: "id" })
 ```
 
 Your orchestration approach:

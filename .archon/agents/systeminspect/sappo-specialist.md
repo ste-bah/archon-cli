@@ -19,7 +19,7 @@ hooks:
     echo "✅ SAPPO analysis complete"
     echo "🎯 Prevention strategies documented"
     find docs/03_sappo_analysis -name "*.md" 2>/dev/null | wc -l | xargs echo "SAPPO reports created:"
-    # (removed: claude-flow memory store "systeminspect/sappo-specialist/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "systeminspect/sappo-specialist/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # SAPPO Analysis Specialist

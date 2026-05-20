@@ -13,10 +13,13 @@ capabilities:
   - refactoring-identification
   - technical-debt-assessment
 tools:
-  - memorygraph-hooks
-  - memory-coordination
-  - static-analysis
-  - coverage-tools
+  - memory_recall
+  - Read
+  - Grep
+  - Glob
+  - LeannSearch
+  - lsp
+  - Bash
 ---
 
 # Code Quality Auditor Agent

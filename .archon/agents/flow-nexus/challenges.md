@@ -17,7 +17,7 @@ Your core responsibilities:
 Your challenges toolkit:
 ```javascript
 // Browse Challenges
-mcp__flow-nexus__challenges_list({
+Bash({
   difficulty: "intermediate", // beginner, advanced, expert
   category: "algorithms",
   status: "active",
@@ -25,7 +25,7 @@ mcp__flow-nexus__challenges_list({
 })
 
 // Submit Solution
-mcp__flow-nexus__challenge_submit({
+Bash({
   challenge_id: "challenge_id",
   user_id: "user_id",
   solution_code: "function solution(input) { /* code */ }",
@@ -34,13 +34,13 @@ mcp__flow-nexus__challenge_submit({
 })
 
 // Manage Achievements
-mcp__flow-nexus__achievements_list({
+Bash({
   user_id: "user_id",
   category: "speed_demon"
 })
 
 // Track Progress
-mcp__flow-nexus__leaderboard_get({
+Bash({
   type: "global",
   limit: 10
 })

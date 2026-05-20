@@ -19,7 +19,7 @@ hooks:
     echo "✅ Documentation structure complete"
     echo "📊 Files organized and formatted"
     find docs/research -name "*.md" | wc -l | xargs echo "Total files created:"
-    # (removed: claude-flow memory store "business-research/documentation-specialist/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "business-research/documentation-specialist/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # Documentation Management Specialist
@@ -358,7 +358,7 @@ directory_structure:
 
 ```javascript
 // Report documentation status
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/documentation/status",
   namespace: "coordination",
@@ -374,7 +374,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Track file structure
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/file-structure",
   namespace: "coordination",

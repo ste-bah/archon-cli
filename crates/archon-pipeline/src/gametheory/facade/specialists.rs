@@ -3,9 +3,9 @@ use futures_util::future::join_all;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::runner::LlmClient;
+use crate::runner::{AgentExecutionRequest, AgentInfo, LlmClient, PipelineType, ToolAccessLevel};
 
-use super::super::agents::GameTheoryAgent;
+use super::super::agents::{GameTheoryAgent, GameTheoryToolAccess};
 use super::super::errors::GameTheoryError;
 use super::super::fingerprint::GameTheoryFingerprint;
 use super::super::prompt_builder;
@@ -192,6 +192,7 @@ pub(super) async fn execute_specialists_real_with_options(
         let calls = active_wave.iter().map(|agent_key| {
             execute_specialist_call(
                 llm,
+                &fingerprint.run_id,
                 agent_key,
                 situation,
                 &fingerprint_summary,
@@ -225,6 +226,7 @@ pub(super) async fn execute_specialists_real_with_options(
 
 async fn execute_specialist_call(
     llm: &dyn LlmClient,
+    run_id: &str,
     agent_key: &str,
     situation: &str,
     fingerprint_summary: &str,
@@ -279,8 +281,52 @@ async fn execute_specialist_call(
         "content": prompt
     })];
 
+    let tool_access_level = agent
+        .map(|agent| {
+            if agent
+                .tool_access
+                .iter()
+                .any(|tool| matches!(tool, GameTheoryToolAccess::Write))
+            {
+                ToolAccessLevel::Full
+            } else {
+                ToolAccessLevel::ReadOnly
+            }
+        })
+        .unwrap_or(ToolAccessLevel::ReadOnly);
+    let allowed_tools = agent
+        .map(|agent| agent.allowed_tool_names())
+        .unwrap_or_else(|| {
+            vec![
+                "Read".into(),
+                "Grep".into(),
+                "Glob".into(),
+                "memory_recall".into(),
+            ]
+        });
+
     match llm
-        .send_message(messages, system.to_vec(), vec![], model)
+        .run_agent(AgentExecutionRequest {
+            session_id: run_id.to_string(),
+            pipeline_type: PipelineType::GameTheory,
+            task: situation.to_string(),
+            ordinal: 0,
+            attempt: 1,
+            agent: AgentInfo {
+                key: agent_key.to_string(),
+                display_name: display_name.to_string(),
+                model: model.to_string(),
+                phase: agent.map(|agent| agent.tier as u32).unwrap_or(0),
+                critical: false,
+                parallelizable: true,
+                quality_threshold: 0.5,
+                tool_access_level,
+            },
+            messages,
+            system: system.to_vec(),
+            tools: vec![],
+            allowed_tools,
+        })
         .await
     {
         Ok(response) => SpecialistCallOutput {

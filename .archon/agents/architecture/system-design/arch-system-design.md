@@ -42,7 +42,7 @@ capabilities:
     - WebSearch  # For researching patterns
   restricted_tools:
     - Edit  # Should not modify existing code
-    - MultiEdit
+    - Edit
     - Bash  # No code execution
     - Task  # Should not spawn implementation agents
   max_file_operations: 30

@@ -18,10 +18,8 @@ tools:
   - Glob
   - Grep
   - Bash
-  - mcp__memorygraph__get_memory_statistics
-  - # (claude-flow tool task_orchestrate removed)
-  - mcp__serena__get_symbols_overview
-  - mcp__serena__find_symbol
+  - memory_recall
+  - lsp
 ---
 
 # Architecture Mapper Agent
@@ -88,7 +86,7 @@ Read each README to understand module purposes
 
 **Step 3: Create Directory Map with Annotations**
 ```javascript
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan/architecture",
   key: "directory-structure",
@@ -174,7 +172,7 @@ Grep("EventSource|text/event-stream", output_mode: "content")
 **Step 4: Extract Endpoint Details**
 ```javascript
 // For each discovered endpoint:
-mcp__serena__find_symbol({
+lsp({
   name_path: "router",
   relative_path: "src/api/routes",
   include_body: true,
@@ -182,7 +180,7 @@ mcp__serena__find_symbol({
 })
 
 // Store endpoint inventory
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan/architecture",
   key: "api-endpoints",
@@ -243,7 +241,7 @@ Grep("session\\.query\\(|session\\.add\\(", output_mode: "content", glob: "**/*.
 
 **Step 3: Map Complete Data Flow**
 ```javascript
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan/architecture",
   key: "data-flows",
@@ -296,7 +294,7 @@ Read("prisma/schema.prisma") -> extract models, relations, indexes
 
 # TypeORM/Sequelize models
 Glob("**/models/**/*.{js,ts}")
-mcp__serena__find_symbol({
+lsp({
   name_path: "model",
   relative_path: "src/models",
   include_body: true
@@ -333,7 +331,7 @@ Glob("**/types/**/*.ts")
 Glob("**/*.d.ts")
 
 # Extract interfaces
-mcp__serena__find_symbol({
+lsp({
   name_path: "interface",
   include_kinds: [11],  # Interface kind
   include_body: true
@@ -342,7 +340,7 @@ mcp__serena__find_symbol({
 
 **Step 5: Build Entity Relationship Diagram Data**
 ```javascript
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan/architecture",
   key: "database-schema",
@@ -437,7 +435,7 @@ Glob("**/components/**/*{Chart,Graph,Plot,Diagram}*.{js,ts,jsx,tsx,vue}")
 Grep("react-flow|mermaid|cytoscape|vis\\.js|gojs", output_mode: "files_with_matches")
 
 # Custom visualization components
-mcp__serena__find_symbol({
+lsp({
   name_path: "Diagram",
   substring_matching: true,
   include_body: true
@@ -467,7 +465,7 @@ Grep("three\\.js|webgl|babylon", output_mode: "files_with_matches")
 
 **Store Complete Architecture Map:**
 ```javascript
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan/architecture",
   key: "complete-architecture",
@@ -507,7 +505,7 @@ mcp__memorygraph__get_memory_statistics({
 
 ```javascript
 // Share API patterns with Integration Point Discoverer
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan/integration-points",
   key: "api-patterns",
@@ -519,7 +517,7 @@ mcp__memorygraph__get_memory_statistics({
 })
 
 // Share schema for Integration analysis
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan/schema",
   key: "database-models",

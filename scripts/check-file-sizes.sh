@@ -18,16 +18,14 @@ cd "$REPO_ROOT"
 
 ALLOWLIST_FILE="scripts/check-file-sizes.allowlist"
 
-# Load allowlist into an associative array (paths are repo-relative).
-declare -A ALLOW
+# Normalize allowlist entries into a temp file (paths are repo-relative).
+# Keep this Bash 3.2-compatible for macOS runners and developer machines.
+ALLOWLIST_NORMALIZED="$(mktemp)"
+trap 'rm -f "$ALLOWLIST_NORMALIZED"' EXIT
 if [ -f "$ALLOWLIST_FILE" ]; then
-  while IFS= read -r line; do
-    # Strip comments and whitespace.
-    entry="${line%%#*}"
-    entry="$(echo "$entry" | awk '{$1=$1;print}')"
-    [ -z "$entry" ] && continue
-    ALLOW["$entry"]=1
-  done < "$ALLOWLIST_FILE"
+  sed 's/#.*//' "$ALLOWLIST_FILE" | awk '{$1=$1;print}' | sed '/^$/d' > "$ALLOWLIST_NORMALIZED"
+else
+  : > "$ALLOWLIST_NORMALIZED"
 fi
 
 TOTAL=0
@@ -43,7 +41,7 @@ while IFS= read -r f; do
   TOTAL=$((TOTAL + 1))
   lines=$(wc -l < "$f" | awk '{print $1}')
   if [ "$lines" -gt "$THRESHOLD" ]; then
-    if [ -n "${ALLOW[$rel]+set}" ]; then
+    if grep -Fxq -- "$rel" "$ALLOWLIST_NORMALIZED"; then
       ALLOWED=$((ALLOWED + 1))
       ALLOWED_OUT+=$(printf '  %6d  %s (allowlisted)\n' "$lines" "$rel")$'\n'
     else

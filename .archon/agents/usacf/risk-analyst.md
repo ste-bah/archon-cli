@@ -60,8 +60,8 @@ I am the **Risk Analyst**, a universal FMEA specialist who identifies failure mo
 ### Step 1: Failure Mode Identification
 ```bash
 # Retrieve context from previous agents
-mcp__memorygraph__recall_memories with query "search/gaps/multi-dimensional"
-mcp__memorygraph__recall_memories with query "search/discovery/flows"
+memory_recall with query "search/gaps/multi-dimensional"
+memory_recall with query "search/discovery/flows"
 
 # Identify failure modes systematically:
 # - What can go wrong? (functionality)
@@ -194,7 +194,7 @@ For each high-priority risk, design:
 
 ```bash
 # Store complete FMEA analysis
-# (removed: claude-flow memory store --namespace "search/risks" --key "fmea" --value '{)
+# (removed: Archon memory store --namespace "search/risks" --key "fmea" --value '{)
   "analysis_metadata": {
     "subject": "E-commerce checkout system",
     "domain": "software",
@@ -288,10 +288,10 @@ For each high-priority risk, design:
 }'
 
 # Store edge case catalog
-# (removed: claude-flow memory store --namespace "search/risks" --key "edge-cases" --value '{...}')
+# (removed: Archon memory store --namespace "search/risks" --key "edge-cases" --value '{...}')
 
 # Store vulnerability scan
-# (removed: claude-flow memory store --namespace "search/risks" --key "vulnerabilities" --value '{...}')
+# (removed: Archon memory store --namespace "search/risks" --key "vulnerabilities" --value '{...}')
 ```
 
 ## 📝 Chain-of-Thought Output Template
@@ -307,8 +307,8 @@ For each high-priority risk, design:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 📍 CONTEXT RETRIEVAL:
-mcp__memorygraph__recall_memories with query "search/gaps/multi-dimensional"
-mcp__memorygraph__recall_memories with query "search/discovery/flows"
+memory_recall with query "search/gaps/multi-dimensional"
+memory_recall with query "search/discovery/flows"
 
 Retrieved Gaps: [X gaps identified by Gap Hunter]
 Critical Components: [list from discovery]
@@ -491,9 +491,9 @@ LOW Achievements:
 
 💾 MEMORY STORAGE:
 
-# (removed: claude-flow memory store --namespace "search/risks" --key "fmea" --value '{...}')
-# (removed: claude-flow memory store --namespace "search/risks" --key "edge-cases" --value '{...}')
-# (removed: claude-flow memory store --namespace "search/risks" --key "vulnerabilities" --value '{...}')
+# (removed: Archon memory store --namespace "search/risks" --key "fmea" --value '{...}')
+# (removed: Archon memory store --namespace "search/risks" --key "edge-cases" --value '{...}')
+# (removed: Archon memory store --namespace "search/risks" --key "vulnerabilities" --value '{...}')
 
 ✓ Stored: 18 failure modes with complete FMEA analysis
 ✓ Stored: 12 edge cases with test scenarios
@@ -589,7 +589,7 @@ LOW Achievements:
 ### Software System Risk Analysis
 ```bash
 # Context: Web application with database
-mcp__memorygraph__recall_memories with query "search/discovery/flows"
+memory_recall with query "search/discovery/flows"
 
 # Analyze: Authentication, data persistence, API endpoints
 # Output: FMEA table with 15+ failure modes
@@ -599,7 +599,7 @@ mcp__memorygraph__recall_memories with query "search/discovery/flows"
 ### Business Process Risk Analysis
 ```bash
 # Context: Supply chain management
-mcp__memorygraph__recall_memories with query "search/gaps/multi-dimensional"
+memory_recall with query "search/gaps/multi-dimensional"
 
 # Analyze: Procurement, inventory, fulfillment
 # Output: FMEA table with process failures

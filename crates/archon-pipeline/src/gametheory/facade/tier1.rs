@@ -1,10 +1,13 @@
 use anyhow::Result;
 use futures_util::future::join_all;
 
-use crate::runner::{LlmClient, LlmResponse};
+use crate::runner::{
+    AgentExecutionRequest, AgentInfo, LlmClient, LlmResponse, PipelineType, ToolAccessLevel,
+};
 
 use super::super::errors::GameTheoryError;
 use super::super::fingerprint::{AxisVerdict, GameTheoryFingerprint};
+use super::super::registry::GAMETHEORY_AGENTS;
 use super::memory_context::recall_prior_context_for_agent;
 use super::types::Tier1AgentOutput;
 use super::{GameTheoryMemoryContext, MemoryRecallAudit, TIER1_MEMORY_AGENT_KEYS};
@@ -35,7 +38,7 @@ pub(super) async fn execute_tier1_real(
 
     let tier1_calls = TIER1_MEMORY_AGENT_KEYS
         .iter()
-        .map(|agent_key| execute_tier1_agent(llm, agent_key, situation, &prior_context));
+        .map(|agent_key| execute_tier1_agent(llm, run_id, agent_key, situation, &prior_context));
     let responses = join_all(tier1_calls).await;
     let mut outputs = Vec::new();
     let mut failures = Vec::new();
@@ -65,6 +68,7 @@ pub(super) async fn execute_tier1_real(
 
 async fn execute_tier1_agent(
     llm: &dyn LlmClient,
+    run_id: &str,
     agent_key: &str,
     situation: &str,
     prior_context: &str,
@@ -87,8 +91,51 @@ async fn execute_tier1_agent(
         "content": user_content
     })];
 
+    let (display_name, model, allowed_tools) = GAMETHEORY_AGENTS
+        .iter()
+        .find(|agent| agent.key == agent_key)
+        .map(|agent| {
+            (
+                agent.display_name.to_string(),
+                agent.model.to_string(),
+                agent.allowed_tool_names(),
+            )
+        })
+        .unwrap_or_else(|| {
+            (
+                agent_key.to_string(),
+                "claude-sonnet-4-6".to_string(),
+                vec![
+                    "Read".into(),
+                    "Grep".into(),
+                    "Glob".into(),
+                    "memory_recall".into(),
+                ],
+            )
+        });
+
     let response: LlmResponse = llm
-        .send_message(messages, system, vec![], "claude-sonnet-4-6")
+        .run_agent(AgentExecutionRequest {
+            session_id: run_id.to_string(),
+            pipeline_type: PipelineType::GameTheory,
+            task: situation.to_string(),
+            ordinal: 0,
+            attempt: 1,
+            agent: AgentInfo {
+                key: agent_key.to_string(),
+                display_name,
+                model,
+                phase: 1,
+                critical: true,
+                parallelizable: true,
+                quality_threshold: 0.5,
+                tool_access_level: ToolAccessLevel::ReadOnly,
+            },
+            messages,
+            system,
+            tools: vec![],
+            allowed_tools,
+        })
         .await
         .map_err(|e| GameTheoryError::Storage {
             message: e.to_string(),

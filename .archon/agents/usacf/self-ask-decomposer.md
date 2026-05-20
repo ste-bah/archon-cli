@@ -123,7 +123,7 @@ For each generated question, assign a confidence score:
 ### Phase 1: Question Generation
 ```bash
 # Initialize question workspace
-# (removed: claude-flow memory store --namespace "search/meta" --key "self-ask-session-start" --value '{"timestamp": "<current>", "subject": "<analysis_topic>"}')
+# (removed: Archon memory store --namespace "search/meta" --key "self-ask-session-start" --value '{"timestamp": "<current>", "subject": "<analysis_topic>"}')
 ```
 
 **Generate 5 questions per category:**
@@ -145,7 +145,7 @@ for question in questions:
 ### Phase 3: Research Prioritization
 ```bash
 # Identify critical gaps
-# (removed: claude-flow memory store --namespace "search/meta" --key "research-priorities" --value '{)
+# (removed: Archon memory store --namespace "search/meta" --key "research-priorities" --value '{)
   "critical_gaps": [<0-39% questions>],
   "important_gaps": [<40-69% questions>],
   "confidence_sufficient": [<70-100% questions>]
@@ -154,7 +154,7 @@ for question in questions:
 
 ### Phase 4: Memory Storage
 ```bash
-# (removed: claude-flow memory store --namespace "search/meta" --key "self-ask-questions" --value '{)
+# (removed: Archon memory store --namespace "search/meta" --key "self-ask-questions" --value '{)
   "structural_questions": [<5 questions with scores>],
   "functional_questions": [<5 questions with scores>],
   "contextual_questions": [<5 questions with scores>],
@@ -345,21 +345,21 @@ for question in questions:
 ### Handoff to Step-Back Analyzer
 ```bash
 # After generating questions, trigger abstraction
-# (removed: claude-flow memory retrieve --namespace "search/meta" --key "self-ask-questions")
+# (removed: Archon memory retrieve --namespace "search/meta" --key "self-ask-questions")
 # Step-back agent uses questions to identify first-principles gaps
 ```
 
 ### Handoff to Meta-Learning Orchestrator
 ```bash
 # Meta-learner uses confidence scores to select analysis strategies
-# (removed: claude-flow memory retrieve --namespace "search/meta" --key "research-priorities")
+# (removed: Archon memory retrieve --namespace "search/meta" --key "research-priorities")
 # Routes critical gaps to deep-dive agents
 ```
 
 ### Handoff to Domain Analysts
 ```bash
 # Questions guide specialized analysis
-# (removed: claude-flow memory retrieve --namespace "search/meta" --key "self-ask-questions")
+# (removed: Archon memory retrieve --namespace "search/meta" --key "self-ask-questions")
 # Each analyst addresses questions in their domain
 ```
 
@@ -392,7 +392,7 @@ for question in questions:
 
 After each use, store lessons learned:
 ```bash
-# (removed: claude-flow memory store --namespace "search/meta" --key "self-ask-lessons" --value '{)
+# (removed: Archon memory store --namespace "search/meta" --key "self-ask-lessons" --value '{)
   "domain": "<software/business/research/product>",
   "most_valuable_questions": [<questions that revealed critical gaps>],
   "missed_questions": [<what should have been asked>],

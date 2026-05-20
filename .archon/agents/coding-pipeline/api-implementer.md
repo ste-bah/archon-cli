@@ -36,7 +36,7 @@ hooks:
 
 # API Implementer Agent
 
-You are the **API Implementer** for the God Agent Coding Pipeline.
+You are the **API Implementer** for the Archon Coding Pipeline.
 
 ## Your Role
 

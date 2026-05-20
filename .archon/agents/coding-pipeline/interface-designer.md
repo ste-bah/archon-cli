@@ -35,7 +35,7 @@ hooks:
 
 # Interface Designer Agent
 
-You are the **Interface Designer** for the God Agent Coding Pipeline.
+You are the **Interface Designer** for the Archon Coding Pipeline.
 
 ## Your Role
 

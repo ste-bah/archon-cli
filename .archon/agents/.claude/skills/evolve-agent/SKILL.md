@@ -98,7 +98,7 @@ Rules:
    - Reset quality counters: total_selections=0, total_completions=0, total_fallbacks=0, all rates=0.0
    - Create MemoryGraph version record:
      ```
-     mcp__memorygraph__store_memory:
+     memory_store:
        type: "general"
        title: "agent_version:{agent_name}:v{version}"
        content: {"version": N, "generation": M, "evolution_type": "FIX", "change_summary": "{direction}", "trigger": "post-task-analysis"}

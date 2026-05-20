@@ -57,12 +57,13 @@ fn pipeline_type_tag(pt: &PipelineType) -> &'static str {
         PipelineType::Research => "research",
         PipelineType::Learning => "learning",
         PipelineType::Kb => "kb",
+        PipelineType::GameTheory => "gametheory",
     }
 }
 
 /// Well-known pipeline type tags used to exclude them when inferring the source
 /// agent from a memory's tag list.
-const PIPELINE_TYPE_TAGS: &[&str] = &["coding", "research", "learning", "kb"];
+const PIPELINE_TYPE_TAGS: &[&str] = &["coding", "research", "learning", "kb", "gametheory"];
 
 /// Attempt to extract the source agent key from a memory's tags.
 ///

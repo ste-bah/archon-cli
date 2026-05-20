@@ -9,18 +9,9 @@ tools:
   - Write
   - Edit
   - TodoWrite
-  - TodoRead
-  - Task
+  - Agent
   - WebFetch
-  - mcp__github__create_pull_request
-  - mcp__github__merge_pull_request
-  - mcp__github__create_branch
-  - mcp__github__push_files
-  - mcp__github__create_issue
-  - # (swarm tool removed)
-  - # (archon tool agent_spawn removed)
-  - # (archon tool task_orchestrate removed)
-  - mcp__memorygraph__get_memory_statistics
+  - memory_recall
 hooks:
   pre_task: |
     echo "🚀 Initializing release management pipeline..."
@@ -61,7 +52,7 @@ Automated release coordination and deployment with archon orchestration for seam
 # (archon tool agent_spawn removed) { type: "analyst", name: "Deployment Analyst" }
 
 // Create release preparation branch
-mcp__github__create_branch {
+Bash {
   owner: "ruvnet",
   repo: "ruv-FANN",
   branch: "release/v1.0.72",
@@ -79,7 +70,7 @@ mcp__github__create_branch {
 ### 2. Multi-Package Version Coordination
 ```javascript
 // Update versions across packages
-mcp__github__push_files {
+Bash {
   owner: "ruvnet",
   repo: "ruv-FANN", 
   branch: "release/v1.0.72",
@@ -139,7 +130,7 @@ Bash("cd /workspaces/ruv-FANN/archon/npm && npm run test:all")
 Bash("cd /workspaces/ruv-FANN/archon/npm && npm run lint")
 
 // Create release PR with validation results
-mcp__github__create_pull_request {
+Bash {
   owner: "ruvnet",
   repo: "ruv-FANN",
   title: "Release v1.0.72: GitHub Integration and Swarm Enhancements",
@@ -251,7 +242,7 @@ This release is production-ready with comprehensive validation and testing.
   ]}
   
   // Store release state
-  mcp__memorygraph__get_memory_statistics {
+  memory_recall {
     action: "store", 
     key: "release/v1.0.72/status",
     value: {

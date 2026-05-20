@@ -11,7 +11,7 @@ and resumed safely.
 flowchart TB
     USER["User task"] --> CHOOSE{"Pipeline type"}
     CHOOSE --> CODE["Coding pipeline<br/>50 agents / 6 phases"]
-    CHOOSE --> RESEARCH["Research pipeline<br/>46 agents / 7 phases"]
+    CHOOSE --> RESEARCH["Research pipeline<br/>46 agents / 8 phases"]
     CHOOSE --> GT["Game-theory pipeline<br/>84 specialists / 12 tiers"]
 
     CODE --> ART["Audited run bundle<br/>prompts, attempts, outputs, state, audit log"]
@@ -57,6 +57,19 @@ The agent loader at `crates/archon-pipeline/src/agent_loader.rs` reads the promp
 
 Flat-file YAML-frontmatter agents (added in v0.1.10) live separately at `<workdir>/.archon/agents/` or `~/.archon/agents/` and are loaded by `crates/archon-core/src/agents/loader.rs::AgentRegistry::load_with_user_home`. Those are user-extensible and invoked via `/run-agent <name>`, NOT part of the pipeline.
 
+### Runtime execution model
+
+Inside the TUI, `/archon-code`, `/archon-research`, and `/gametheory` run
+pipeline stages through the installed Archon subagent executor. Each stage is
+launched as a real subagent with its pipeline agent key, model tier, allowed
+tool set, memory/doc/LEANN access where applicable, transcript capture, hooks,
+and Agent Activity events. This matches the god-code/god-research style runtime
+instead of treating a pipeline stage as a plain provider chat call.
+
+The shared runner still keeps a provider-only fallback for tests and standalone
+non-interactive command paths. In that fallback, the same prompts and audited
+bundle are used, but no live subagent executor is available.
+
 ### Layered context (L0-L3)
 
 Every coding pipeline agent receives 4 layers of context:
@@ -93,7 +106,12 @@ Built-in coding/research pipeline state lives in
 | `audit.log` | Append-only JSONL event stream for run creation/resume, prompts, LLM attempts, quality scores, retries, completion, abort/failure |
 | `prompts/` | Serialized prompt/system/tool records with content hashes |
 | `agents/` | Per-agent audit records linking prompts, accepted output, attempts, quality, tokens, cost, and tool-use log |
+| `outputs/markdown/` | Research pipeline canonical Markdown copy of every accepted agent output |
+| `outputs/artifacts/` | Research pipeline named per-agent artifacts declared by the agent definition |
+| `outputs/rlm/` | Research pipeline run-level memory namespaces materialized as Markdown |
 | `outputs/` | Accepted agent outputs plus `outputs/attempts/` for retry/failure attempt text |
+| `exports/final-paper.md` | Research pipeline final paper normalized to the canonical APA 7 Markdown structure |
+| `exports/final-paper.pdf` | Research pipeline final paper rendered as a page-numbered PDF artifact |
 | `verification/` | Optional verifier reports written by `archon pipeline verify --write-report` |
 | `exports/` | Operator-chosen trace export destination when writing into the bundle |
 
@@ -125,23 +143,28 @@ the observed outcome, computes surprise when a persisted prediction exists, and
 links the audited bundle into the world-model ledgers. These calls are
 fail-open: a cold or unavailable world model never blocks the pipeline.
 
-## Research pipeline (46 agents)
+## Research Pipeline (46 Agents / 8 Phases)
 
-Triggered by `/archon-research` (or `archon pipeline research <topic>`). 7 phases, 46 specialized agents.
+Triggered by `/archon-research` (or `archon pipeline research <topic>`). It runs 46 specialized agents across 8 phases; Phase 8 is final assembly by `chapter-synthesizer`.
 
 ### Phases
 
 | Phase | Agents | Purpose |
 |---|---|---|
-| 1. Self-Ask Decomposition | self-ask-decomposer, ambiguity-clarifier, construct-definer | Break the topic into 15-20 essential questions |
-| 2. Context Tier Manager | context-tier-manager | Hot/warm/cold tier organization for 300+ sources |
-| 3. Literature Mapping | literature-mapper, source-tier-classifier, citation-extractor, theoretical-framework-analyst, methodology-scanner | Build the literature landscape |
-| 4. Gap Analysis | gap-hunter, contradiction-analyzer, risk-analyst | Identify gaps, contradictions, risks |
-| 5. Synthesis | systematic-reviewer, quality-assessor, bias-detector, evidence-synthesizer, pattern-analyst, thematic-synthesizer, theory-builder | Synthesize findings |
-| 6. Methodology | hypothesis-generator, model-architect, opportunity-identifier, method-designer, sampling-strategist, instrument-developer, ethics-reviewer, validity-guardian, analysis-planner | Design empirical methodology |
-| 7. Writing | dissertation-architect, introduction-writer, literature-review-writer, methodology-writer, results-writer, discussion-writer, conclusion-writer, chapter-synthesizer, apa-citation-specialist, abstract-writer, adversarial-reviewer, citation-validator, reproducibility-checker, confidence-quantifier, file-length-manager, consistency-validator | Write the manuscript |
+| 1. Foundation | step-back-analyzer, self-ask-decomposer, ambiguity-clarifier, research-planner, construct-definer, dissertation-architect | Frame the topic, decompose questions, resolve ambiguity, plan research, define constructs, and lock chapter structure |
+| 2. Discovery | literature-mapper, source-tier-classifier, citation-extractor, context-tier-manager | Map sources, classify credibility, extract citations, and organize context tiers |
+| 3. Architecture | theoretical-framework-analyst, contradiction-analyzer, gap-hunter, risk-analyst | Build the theoretical frame and identify contradictions, gaps, and risks |
+| 4. Synthesis | evidence-synthesizer, pattern-analyst, thematic-synthesizer, theory-builder, opportunity-identifier | Synthesize evidence into patterns, themes, theory, and opportunities |
+| 5. Design | method-designer, hypothesis-generator, model-architect, analysis-planner, sampling-strategist, instrument-developer, validity-guardian, methodology-scanner, methodology-writer | Design methodology, hypotheses, models, analysis, sampling, instruments, validity controls, and methodology prose |
+| 6. Writing | introduction-writer, literature-review-writer, results-writer, discussion-writer, conclusion-writer, abstract-writer | Draft the major paper sections against the locked structure |
+| 7. Validation | systematic-reviewer, ethics-reviewer, adversarial-reviewer, confidence-quantifier, citation-validator, reproducibility-checker, apa-citation-specialist, consistency-validator, quality-assessor, bias-detector, file-length-manager | Validate citations, consistency, quality, ethics, reproducibility, bias, confidence, and structure |
+| 8. Final Assembly | chapter-synthesizer | Compose the validated chapter outputs into the final research paper |
 
-46 total agents. Backed by DESC episodic memory across phases.
+46 total agents. The final assembly agent is part of the runtime agent loop and must use the locked chapter structure produced during the run. The research facade maintains a run-level memory pack: accepted outputs are written to research namespaces, pinned chapter/citation context is carried forward, recent outputs are supplied through a phase-aware rolling window, and validation agents receive deterministic pre-scan evidence from the host runtime. On successful research completion, Archon validates that the final text has a title, abstract, body, one `References` section, and appendices after references, then writes `exports/final-paper.md` and `exports/final-paper.pdf` in the audited bundle. Backed by DESC episodic memory across phases.
+
+Research context comes from ingested docs/KB/provenance plus the RLM bundle.
+LEANN semantic code search is reserved for coding/context workflows and is not
+initialized by `/archon-research` or `archon pipeline research`.
 
 ## Game-Theory Evidence Pipeline
 
@@ -149,6 +172,13 @@ Triggered by `archon gametheory ...` or `/gametheory run ...`. It classifies a
 strategic situation, builds a 9-axis fingerprint, routes through the
 project-local `.archon/specs/gametheory.yaml`, executes selected specialists in
 dependency-respecting parallel waves, and persists the report.
+
+The game-theory lane is deliberately separate from the coding/research bundle
+runner: classification, YAML routing, specialist DAGs, checkpoints, and Cozo
+source-of-truth tables remain owned by `archon-pipeline::gametheory`. In the
+TUI, Tier 1 classifiers and selected specialists still execute through the
+shared subagent-backed `LlmClient::run_agent` seam so they get the same agent
+runtime as the other slash-driven pipelines without changing routing semantics.
 
 Use it for:
 

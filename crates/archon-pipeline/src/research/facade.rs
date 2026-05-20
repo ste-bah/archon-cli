@@ -32,6 +32,7 @@ use crate::learning::integration::PhDLearningIntegration;
 use super::agents::{RESEARCH_AGENTS, ResearchAgent, get_agent_by_key};
 use super::prompt_builder::ResearchPromptBuilder;
 use super::quality::PhDQualityCalculator;
+use super::rlm::{ResearchRlm, research_output_namespaces};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -58,6 +59,8 @@ pub struct ResearchFacade {
     style_prompt: Option<String>,
     /// Optional PhD learning integration for recording quality feedback.
     learning: Option<Mutex<PhDLearningIntegration>>,
+    /// Run-level memory for god-research style rolling context.
+    rlm_store: Mutex<ResearchRlm>,
     /// Optional sender for per-agent progress events (TUI streaming).
     /// Uses internal mutability so the sender can be attached after
     /// construction (it's not known at bootstrap time).
@@ -85,6 +88,7 @@ impl ResearchFacade {
             project_path,
             style_prompt,
             learning: None,
+            rlm_store: Mutex::new(ResearchRlm::new()),
             tui_sender: Mutex::new(None),
             models: archon_core::config::AnthropicModelsConfig::default(),
             context: archon_core::config::ContextConfig::default(),
@@ -107,6 +111,7 @@ impl ResearchFacade {
             project_path,
             style_prompt,
             learning: Some(Mutex::new(learning)),
+            rlm_store: Mutex::new(ResearchRlm::new()),
             tui_sender: Mutex::new(None),
             models: archon_core::config::AnthropicModelsConfig::default(),
             context: archon_core::config::ContextConfig::default(),
@@ -180,15 +185,24 @@ impl ResearchFacade {
         String::new()
     }
 
-    /// Recall all memory keys for an agent, concatenating non-empty values.
-    fn recall_prior_context(&self, agent: &ResearchAgent) -> String {
+    /// Recall memory and audited prior outputs for an agent.
+    fn recall_prior_context(&self, session: &PipelineSession, agent: &ResearchAgent) -> String {
         let mut parts = Vec::new();
-        for &mk in agent.memory_keys {
-            let content = self.recall_memory(mk);
-            if !content.is_empty() {
-                parts.push(content);
+
+        if let Ok(rlm) = self.rlm_store.lock() {
+            let context = rlm.build_context(session, agent);
+            if !context.is_empty() {
+                parts.push(context);
             }
         }
+
+        for namespace in research_output_namespaces(agent) {
+            let content = self.recall_memory(&namespace);
+            if !content.is_empty() {
+                parts.push(format!("### Persistent Memory: `{namespace}`\n\n{content}"));
+            }
+        }
+
         parts.join("\n\n---\n\n")
     }
 
@@ -274,7 +288,7 @@ impl PipelineFacade for ResearchFacade {
         let research_agent = get_agent_by_key(&agent.key)
             .with_context(|| format!("Unknown research agent key: {}", agent.key))?;
 
-        let prior_context = self.recall_prior_context(research_agent);
+        let prior_context = self.recall_prior_context(session, research_agent);
 
         let style = self.style_prompt.as_deref();
 
@@ -375,12 +389,19 @@ impl PipelineFacade for ResearchFacade {
         result: &AgentResult,
         quality: &QualityScore,
     ) -> Result<()> {
-        // Store output at agent's primary memory key — persisted via
-        // CozoDB + HNSW with tags per REQ-RESEARCH-008.
+        // Store output at agent's run-level and persistent memory keys.
         if let Some(research_agent) = get_agent_by_key(&agent.key)
-            && let Some(&primary_key) = research_agent.memory_keys.first()
+            && let Ok(mut rlm) = self.rlm_store.lock()
         {
-            self.store_memory(primary_key, result.output.clone());
+            rlm.write_agent_output(research_agent, _session.agent_results.len(), &result.output);
+        }
+
+        // Store output at all declared memory keys -- persisted via
+        // CozoDB + HNSW with tags per REQ-RESEARCH-008.
+        if let Some(research_agent) = get_agent_by_key(&agent.key) {
+            for namespace in research_output_namespaces(research_agent) {
+                self.store_memory(&namespace, result.output.clone());
+            }
         }
 
         // Feed quality to PhD learning subsystem
@@ -682,7 +703,7 @@ mod tests {
         let session = facade.init_session("test").await.unwrap();
 
         let agent_info = ResearchFacade::to_agent_info(
-            &RESEARCH_AGENTS[29],
+            &RESEARCH_AGENTS[28],
             &archon_core::config::AnthropicModelsConfig::default(),
         );
         assert_eq!(agent_info.key, "introduction-writer");
@@ -724,7 +745,7 @@ mod tests {
         assert_eq!(info.phase, 1);
         assert_eq!(info.tool_access_level, ToolAccessLevel::ReadOnly);
 
-        let writer = &RESEARCH_AGENTS[29];
+        let writer = &RESEARCH_AGENTS[28];
         let writer_info = ResearchFacade::to_agent_info(
             writer,
             &archon_core::config::AnthropicModelsConfig::default(),
@@ -829,5 +850,49 @@ mod tests {
             .iter()
             .any(|m| m.title == "research/foundation/framing");
         assert!(found, "should find the stored memory by title");
+    }
+
+    #[tokio::test]
+    async fn consistency_prompt_gets_archon_runtime_context() {
+        let facade = make_facade();
+        let mut session = facade.init_session("test").await.unwrap();
+        for (key, output) in [
+            (
+                "dissertation-architect",
+                "**Total Chapters**: 8\n\n## Chapter 1: Introduction",
+            ),
+            (
+                "introduction-writer",
+                "Chapter 1 introduces the study and previews Chapter 2.",
+            ),
+            (
+                "literature-review-writer",
+                "Chapter 2 reviews literature and supports Chapter 3.",
+            ),
+        ] {
+            let agent = get_agent_by_key(key).unwrap();
+            let info = ResearchFacade::to_agent_info(
+                agent,
+                &archon_core::config::AnthropicModelsConfig::default(),
+            );
+            session
+                .agent_results
+                .push((info, make_agent_result(output)));
+        }
+
+        let validator = get_agent_by_key("consistency-validator").unwrap();
+        let info = ResearchFacade::to_agent_info(
+            validator,
+            &archon_core::config::AnthropicModelsConfig::default(),
+        );
+        let (messages, _, _) = facade.build_prompt(&session, &info).await.unwrap();
+        let content = messages[0]["content"].as_str().unwrap();
+
+        assert!(content.contains("## Research RLM Identity"));
+        assert!(content.contains("## Accepted Output Manifest"));
+        assert!(content.contains("## Deterministic Consistency Pre-Scan"));
+        assert!(content.contains("Locked chapter count detected: 8"));
+        assert!(content.contains("introduction-writer"));
+        assert!(content.contains("do not claim that memory"));
     }
 }

@@ -17,7 +17,7 @@ Your core responsibilities:
 Your neural network toolkit:
 ```javascript
 // Train Model
-mcp__flow-nexus__neural_train({
+Bash({
   config: {
     architecture: {
       type: "feedforward", // lstm, gan, autoencoder, transformer
@@ -38,7 +38,7 @@ mcp__flow-nexus__neural_train({
 })
 
 // Distributed Training
-mcp__flow-nexus__neural_cluster_init({
+Bash({
   name: "training-cluster",
   architecture: "transformer",
   topology: "mesh",
@@ -46,7 +46,7 @@ mcp__flow-nexus__neural_cluster_init({
 })
 
 // Run Inference
-mcp__flow-nexus__neural_predict({
+Bash({
   model_id: "model_id",
   input: [[0.5, 0.3, 0.2]],
   user_id: "user_id"

@@ -16,7 +16,7 @@ hooks:
     memory_store "research_context_$(date +%s)" "$TASK"
   post: |
     echo "📊 Research findings documented"
-    memory_search "research_*" | head -5
+    memory_recall "research_*" | head -5
 ---
 
 # Research and Analysis Agent
@@ -123,7 +123,7 @@ read specific-file.ts
 ### Memory Coordination
 ```javascript
 // Report research status
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/researcher/status",
   namespace: "coordination",
@@ -137,7 +137,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Share research findings
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/research-findings",
   namespace: "coordination",
@@ -150,7 +150,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Check prior research
-mcp__memorygraph__search_memories {
+memory_recall {
   pattern: "swarm/shared/research-*",
   namespace: "coordination",
   limit: 10

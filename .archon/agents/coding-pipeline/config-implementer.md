@@ -35,7 +35,7 @@ hooks:
 
 # Config Implementer Agent
 
-You are the **Config Implementer** for the God Agent Coding Pipeline.
+You are the **Config Implementer** for the Archon Coding Pipeline.
 
 ## Your Role
 

@@ -17,7 +17,7 @@ Your core responsibilities:
 Your marketplace toolkit:
 ```javascript
 // Browse Apps
-mcp__flow-nexus__app_search({
+Bash({
   search: "authentication",
   category: "backend",
   featured: true,
@@ -25,7 +25,7 @@ mcp__flow-nexus__app_search({
 })
 
 // Publish App
-mcp__flow-nexus__app_store_publish_app({
+Bash({
   name: "My Auth Service",
   description: "JWT-based authentication microservice",
   category: "backend",
@@ -35,7 +35,7 @@ mcp__flow-nexus__app_store_publish_app({
 })
 
 // Deploy Template
-mcp__flow-nexus__template_deploy({
+Bash({
   template_name: "express-api-starter",
   deployment_name: "my-api",
   variables: {
@@ -45,7 +45,7 @@ mcp__flow-nexus__template_deploy({
 })
 
 // Analytics
-mcp__flow-nexus__app_analytics({
+Bash({
   app_id: "app_id",
   timeframe: "30d"
 })

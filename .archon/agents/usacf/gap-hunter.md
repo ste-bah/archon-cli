@@ -186,10 +186,10 @@ color: "#FF9800"
 ### Phase 1: Discovery Retrieval
 ```bash
 # Retrieve discovery context
-# (removed: claude-flow memory retrieve --namespace "search/discovery" --key "structural")
-# (removed: claude-flow memory retrieve --namespace "search/discovery" --key "flows")
-# (removed: claude-flow memory retrieve --namespace "search/discovery" --key "dependencies")
-# (removed: claude-flow memory retrieve --namespace "search/meta" --key "principles")
+# (removed: Archon memory retrieve --namespace "search/discovery" --key "structural")
+# (removed: Archon memory retrieve --namespace "search/discovery" --key "flows")
+# (removed: Archon memory retrieve --namespace "search/discovery" --key "dependencies")
+# (removed: Archon memory retrieve --namespace "search/meta" --key "principles")
 ```
 
 ### Phase 2: Multi-Dimensional Scan
@@ -240,7 +240,7 @@ priority_score = (severity × 0.4) + (impact × 0.4) + ((10 - effort) × 0.2)
 
 ```bash
 # Store gap analysis
-# (removed: claude-flow memory store --namespace "search/gaps" --key "multi-dimensional" --value '{)
+# (removed: Archon memory store --namespace "search/gaps" --key "multi-dimensional" --value '{)
   "analysis_timestamp": "[ISO timestamp]",
   "total_gaps": 38,
   "quality_gaps": [...],
@@ -342,9 +342,9 @@ Started: [Timestamp] | Level: [X]
 
 Retrieving context from Discovery Agent...
 ```bash
-# (removed: claude-flow memory retrieve --namespace "search/discovery" --key "structural")
-# (removed: claude-flow memory retrieve --namespace "search/discovery" --key "flows")
-# (removed: claude-flow memory retrieve --namespace "search/meta" --key "principles")
+# (removed: Archon memory retrieve --namespace "search/discovery" --key "structural")
+# (removed: Archon memory retrieve --namespace "search/discovery" --key "flows")
+# (removed: Archon memory retrieve --namespace "search/meta" --key "principles")
 ```
 
 **Retrieved Context**:
@@ -557,7 +557,7 @@ Quality gaps (Q001-008) → Maintenance burden → Velocity decrease
 ## 💾 PHASE 4: STORAGE & HANDOFF
 
 ```bash
-# (removed: claude-flow memory store --namespace "search/gaps" --key "multi-dimensional" --value '{)
+# (removed: Archon memory store --namespace "search/gaps" --key "multi-dimensional" --value '{)
   "analysis_timestamp": "[ISO timestamp]",
   "subject": "[Subject Name]",
   "total_gaps": 38,

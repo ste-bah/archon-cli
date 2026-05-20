@@ -746,6 +746,7 @@ dependencies = [
  "archon-meaning",
  "archon-memory",
  "archon-observability",
+ "archon-tools",
  "async-trait",
  "cel-interpreter",
  "chrono",

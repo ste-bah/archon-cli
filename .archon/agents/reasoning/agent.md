@@ -40,20 +40,20 @@ A sophisticated Goal-Oriented Action Planning (GOAP) specialist that dynamically
 ## Primary Tools
 
 ### Sublinear-Time Solver Tools
-- `mcp__sublinear-time-solver__solve` - Optimize action sequences and resource allocation
-- `mcp__sublinear-time-solver__pageRank` - Prioritize goals and actions based on importance
-- `mcp__sublinear-time-solver__analyzeMatrix` - Analyze goal dependencies and system properties
-- `mcp__sublinear-time-solver__predictWithTemporalAdvantage` - Predict future states before data arrives
-- `mcp__sublinear-time-solver__estimateEntry` - Evaluate partial state information efficiently
-- `mcp__sublinear-time-solver__calculateLightTravel` - Compute temporal advantages for time-critical planning
-- `mcp__sublinear-time-solver__demonstrateTemporalLead` - Validate predictive planning scenarios
+- `Bash` - Optimize action sequences and resource allocation
+- `Bash` - Prioritize goals and actions based on importance
+- `Bash` - Analyze goal dependencies and system properties
+- `Bash` - Predict future states before data arrives
+- `Bash` - Evaluate partial state information efficiently
+- `Bash` - Compute temporal advantages for time-critical planning
+- `Bash` - Validate predictive planning scenarios
 
 ### Claude Flow Integration Tools
-- `mcp__flow-nexus__swarm_init` - Initialize multi-agent execution systems
-- `mcp__flow-nexus__task_orchestrate` - Execute planned action sequences
-- `mcp__flow-nexus__agent_spawn` - Create specialized agents for specific goals
-- `mcp__flow-nexus__workflow_create` - Define repeatable goal achievement patterns
-- `mcp__flow-nexus__sandbox_create` - Isolated environments for goal testing
+- `Bash` - Initialize multi-agent execution systems
+- `Bash` - Execute planned action sequences
+- `Bash` - Create specialized agents for specific goals
+- `Bash` - Define repeatable goal achievement patterns
+- `Bash` - Isolated environments for goal testing
 
 ## Workflow
 
@@ -125,7 +125,7 @@ async function buildActionGraph(actions, worldState) {
   }
 
   // Analyze matrix properties for optimization
-  const analysis = await mcp__sublinear_time_solver__analyzeMatrix({
+  const analysis = await Bash({
     matrix: {
       rows: n,
       cols: n,
@@ -145,7 +145,7 @@ async function buildActionGraph(actions, worldState) {
 ```javascript
 async function prioritizeGoals(actionGraph, goals) {
   // Use PageRank to identify critical actions and goals
-  const pageRank = await mcp__sublinear_time_solver__pageRank({
+  const pageRank = await Bash({
     adjacency: {
       rows: actionGraph.length,
       cols: actionGraph.length,
@@ -171,14 +171,14 @@ async function prioritizeGoals(actionGraph, goals) {
 ```javascript
 async function planWithTemporalAdvantage(planningMatrix, constraints) {
   // Predict optimal solutions before full problem manifestation
-  const prediction = await mcp__sublinear_time_solver__predictWithTemporalAdvantage({
+  const prediction = await Bash({
     matrix: planningMatrix,
     vector: constraints,
     distanceKm: 12000 // Global coordination distance
   });
 
   // Validate temporal feasibility
-  const validation = await mcp__sublinear_time_solver__validateTemporalAdvantage({
+  const validation = await Bash({
     size: planningMatrix.rows,
     distanceKm: 12000
   });
@@ -252,30 +252,30 @@ async function findOptimalPath(startState, goalState, actions) {
 ```javascript
 async function coordinateWithSwarm(complexGoal) {
   // Initialize planning swarm
-  const swarm = await mcp__claude_flow__swarm_init({
+  const swarm = await Agent({
     topology: "hierarchical",
     maxAgents: 8,
     strategy: "adaptive"
   });
 
   // Spawn specialized planning agents
-  const coordinator = await mcp__claude_flow__agent_spawn({
+  const coordinator = await Agent({
     type: "coordinator",
     capabilities: ["goal_decomposition", "plan_synthesis"]
   });
 
-  const analyst = await mcp__claude_flow__agent_spawn({
+  const analyst = await Agent({
     type: "analyst",
     capabilities: ["constraint_analysis", "feasibility_assessment"]
   });
 
-  const optimizer = await mcp__claude_flow__agent_spawn({
+  const optimizer = await Agent({
     type: "optimizer",
     capabilities: ["path_optimization", "resource_allocation"]
   });
 
   // Orchestrate distributed planning
-  const planningTask = await mcp__claude_flow__task_orchestrate({
+  const planningTask = await Agent({
     task: `Plan execution for: ${complexGoal}`,
     strategy: "parallel",
     priority: "high"
@@ -292,7 +292,7 @@ async function achieveConsensus(agents, proposals) {
   const consensusMatrix = buildConsensusMatrix(agents, proposals);
 
   // Solve for optimal consensus
-  const consensus = await mcp__sublinear_time_solver__solve({
+  const consensus = await Bash({
     matrix: consensusMatrix,
     vector: generatePreferenceVector(agents),
     method: "neumann",
@@ -316,7 +316,7 @@ async function achieveConsensus(agents, proposals) {
 ```javascript
 async function decomposeGoal(complexGoal) {
   // Create sandbox for goal simulation
-  const sandbox = await mcp__flow_nexus__sandbox_create({
+  const sandbox = await Bash({
     template: "node",
     name: "goal-decomposition",
     env_vars: {
@@ -332,7 +332,7 @@ async function decomposeGoal(complexGoal) {
   const dependencyMatrix = buildDependencyMatrix(subgoals);
 
   // Optimize execution order
-  const executionOrder = await mcp__sublinear_time_solver__pageRank({
+  const executionOrder = await Bash({
     adjacency: dependencyMatrix,
     damping: 0.9
   });
@@ -408,7 +408,7 @@ class DynamicPlanner {
       this.currentPlan = newPlan;
 
       // Store successful pattern
-      await mcp__claude_flow__memory_usage({
+      await memory_recall({
         action: "store",
         namespace: "goap-patterns",
         key: `replan_${Date.now()}`,
@@ -435,7 +435,7 @@ class PlanningLearner {
       await this.storeSuccessPattern(executedPlan, effectiveness);
 
       // Train neural network on successful patterns
-      await mcp__flow_nexus__neural_train({
+      await Bash({
         config: {
           architecture: {
             type: "feedforward",
@@ -462,7 +462,7 @@ class PlanningLearner {
 
   async retrieveSimilarPatterns(currentSituation) {
     // Search for similar successful patterns
-    const patterns = await mcp__claude_flow__memory_search({
+    const patterns = await Agent({
       pattern: `situation:${this.encodeSituation(currentSituation)}`,
       namespace: "goap-patterns",
       limit: 10
@@ -512,7 +512,7 @@ class GOAPBehaviorTree {
     const planMatrix = this.buildPlanningMatrix();
     const constraints = this.extractConstraints();
 
-    const solution = await mcp__sublinear_time_solver__solve({
+    const solution = await Bash({
       matrix: planMatrix,
       vector: constraints,
       method: "random-walk",
@@ -554,7 +554,7 @@ class UtilityPlanner {
     const utilityMatrix = this.buildUtilityMatrix(utilities);
     const preferenceVector = Object.values(this.utilityWeights);
 
-    const optimal = await mcp__sublinear_time_solver__solve({
+    const optimal = await Bash({
       matrix: utilityMatrix,
       vector: preferenceVector,
       method: "neumann"
@@ -611,7 +611,7 @@ const subGoals = [
 const dependencyMatrix = buildDependencyMatrix(subGoals);
 
 // Optimize execution order
-const optimizedPlan = await mcp__sublinear_time_solver__solve({
+const optimizedPlan = await Bash({
   matrix: dependencyMatrix,
   vector: resourceConstraints,
   method: "neumann"
@@ -628,7 +628,7 @@ const objectives = [
 ];
 
 // Use PageRank for multi-objective prioritization
-const objectivePriorities = await mcp__sublinear_time_solver__pageRank({
+const objectivePriorities = await Bash({
   adjacency: buildObjectiveGraph(objectives),
   personalized: objectives.map(o => o.urgency)
 });
@@ -640,7 +640,7 @@ const resourceAllocation = optimizeResourceAllocation(objectivePriorities);
 ### Example 3: Predictive Action Planning
 ```javascript
 // Predict market conditions before they change
-const marketPrediction = await mcp__sublinear_time_solver__predictWithTemporalAdvantage({
+const marketPrediction = await Bash({
   matrix: marketTrendMatrix,
   vector: currentMarketState,
   distanceKm: 20000 // Global market data propagation
@@ -656,7 +656,7 @@ const results = await executeWithTemporalLead(strategicActions);
 ### Example 4: Multi-Agent Goal Coordination
 ```javascript
 // Initialize coordinated swarm
-const coordinatedSwarm = await mcp__flow_nexus__swarm_init({
+const coordinatedSwarm = await Bash({
   topology: "mesh",
   maxAgents: 12,
   strategy: "specialized"
@@ -664,13 +664,13 @@ const coordinatedSwarm = await mcp__flow_nexus__swarm_init({
 
 // Spawn specialized agents for different goal aspects
 const agents = await Promise.all([
-  mcp__flow_nexus__agent_spawn({ type: "researcher", capabilities: ["data_analysis"] }),
-  mcp__flow_nexus__agent_spawn({ type: "coder", capabilities: ["implementation"] }),
-  mcp__flow_nexus__agent_spawn({ type: "optimizer", capabilities: ["performance"] })
+  Bash({ type: "researcher", capabilities: ["data_analysis"] }),
+  Bash({ type: "coder", capabilities: ["implementation"] }),
+  Bash({ type: "optimizer", capabilities: ["performance"] })
 ]);
 
 // Coordinate goal achievement
-const coordinatedExecution = await mcp__flow_nexus__task_orchestrate({
+const coordinatedExecution = await Bash({
   task: "Build and optimize recommendation system",
   strategy: "adaptive",
   maxAgents: 3
@@ -680,7 +680,7 @@ const coordinatedExecution = await mcp__flow_nexus__task_orchestrate({
 ### Example 5: Adaptive Replanning
 ```javascript
 // Monitor execution progress
-const executionStatus = await mcp__flow_nexus__task_status({
+const executionStatus = await Bash({
   taskId: currentExecutionId,
   detailed: true
 });
@@ -691,7 +691,7 @@ if (executionStatus.deviation > threshold) {
   const updatedMatrix = updateConstraintMatrix(executionStatus.changes);
 
   // Generate new optimal plan
-  const revisedPlan = await mcp__sublinear_time_solver__solve({
+  const revisedPlan = await Bash({
     matrix: updatedMatrix,
     vector: updatedObjectives,
     method: "adaptive"

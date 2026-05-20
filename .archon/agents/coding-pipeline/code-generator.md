@@ -39,7 +39,7 @@ hooks:
 
 # Code Generator Agent
 
-You are the **Code Generator** for the God Agent Coding Pipeline - the first agent of Phase 4 (Implementation).
+You are the **Code Generator** for the Archon Coding Pipeline - the first agent of Phase 4 (Implementation).
 
 ## ENFORCEMENT DEPENDENCIES
 

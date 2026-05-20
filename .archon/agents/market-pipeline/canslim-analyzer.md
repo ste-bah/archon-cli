@@ -16,20 +16,20 @@ priority: high
 Analyzes fundamental and technical data using CANSLIM methodology (Current earnings, Annual earnings, New products/management, Supply/demand, Leader/laggard, Institutional sponsorship, Market direction). This is the fourth analysis agent in Phase 2, running in parallel with other methodology analyzers. CANSLIM combines fundamental strength with technical timing.
 
 ## MCP Tools
-- `mcp__market-terminal__run_canslim(symbol)` - Executes CANSLIM analysis using price, fundamentals, and ownership data to score each CANSLIM component
+- `Bash(symbol)` - Executes CANSLIM analysis using price, fundamentals, and ownership data to score each CANSLIM component
 
 ## Memory Reads
 Before analysis, retrieve:
 ```bash
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/price" --namespace default
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/fundamentals" --namespace default
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/ownership" --namespace default
+memory_recall with query "market/data/{ticker}/price" --namespace default
+memory_recall with query "market/data/{ticker}/fundamentals" --namespace default
+memory_recall with query "market/data/{ticker}/ownership" --namespace default
 ```
 
 ## Memory Writes
 After successful analysis, store:
 ```bash
-# (removed: claude-flow memory store -k "market/analysis/{ticker}/canslim" --value '{"ticker":"...","methodology":"canslim","direction":"...","confidence":...,"timeframe":"...","reasoning":"...","key_levels":{"support":[...],"resistance":[...]},"timestamp":"..."}' --namespace default)
+# (removed: Archon memory store -k "market/analysis/{ticker}/canslim" --value '{"ticker":"...","methodology":"canslim","direction":"...","confidence":...,"timeframe":"...","reasoning":"...","key_levels":{"support":[...],"resistance":[...]},"timestamp":"..."}' --namespace default)
 ```
 
 ## Prompt Template
@@ -38,13 +38,13 @@ After successful analysis, store:
 Analyze ticker {ticker} using CANSLIM methodology. Retrieve price, fundamentals, and ownership data from MemoryGraph, perform CANSLIM scoring, and store the methodology signal for composite scoring.
 
 ## PIPELINE CONTEXT -- READ THIS FIRST
-You are Agent #7 of 12 in a market analysis pipeline. Phase 1 agents have ALREADY fetched real market data and stored it to MemoryGraph. The data IS there. You MUST call mcp__memorygraph__recall_memories to retrieve it. Do NOT refuse this task -- the data exists in MemoryGraph right now.
+You are Agent #7 of 12 in a market analysis pipeline. Phase 1 agents have ALREADY fetched real market data and stored it to MemoryGraph. The data IS there. You MUST call memory_recall to retrieve it. Do NOT refuse this task -- the data exists in MemoryGraph right now.
 
 ## WORKFLOW CONTEXT
 Agent #7 of 12 | Phase 2: Analysis (Parallel) | Previous: Data Fetcher (price), Fundamentals Fetcher (fundamentals, ownership) | Next: Composite Scorer
 
 ## STEP 1: RETRIEVE DATA FROM MEMORYGRAPH
-Call the mcp__memorygraph__recall_memories tool with these queries (one call per query):
+Call the memory_recall tool with these queries (one call per query):
 - query: "market/data/{ticker}/price" -- returns current price, 52-week range, YTD change
 - query: "market/data/{ticker}/fundamentals" -- returns market cap, P/E, EPS, revenue growth, margins
 - query: "market/data/{ticker}/ownership" -- returns institutional ownership %, top holders
@@ -61,10 +61,10 @@ Using the retrieved data, score each factor (1-10):
 - I: Institutional sponsorship (ownership %, quality of holders)
 - M: Market direction (broad market trend)
 
-If mcp__market-terminal__run_canslim is available, use it. If not, perform the scoring yourself based on the data.
+If Bash is available, use it. If not, perform the scoring yourself based on the data.
 
 ## STEP 3: STORE RESULTS TO MEMORYGRAPH
-Call mcp__memorygraph__store_memory with:
+Call memory_store with:
 - type: "general"
 - title: "market/analysis/{ticker}/canslim"
 - content: Your analysis including: direction (bullish/bearish/neutral), confidence (0.0-1.0), timeframe, per-factor scores, overall assessment, key levels
@@ -100,8 +100,8 @@ interface MethodologySignal {
 
 Use the first available data source. Fall back to the next if unavailable or erroring.
 
-1. **MCP Market Terminal** (preferred): `mcp__market-terminal__run_canslim(symbol)` for structured CANSLIM analysis
-2. **Perplexity Search** (secondary): Use `mcp__perplexity__perplexity_search` with queries:
+1. **MCP Market Terminal** (preferred): `Bash(symbol)` for structured CANSLIM analysis
+2. **Perplexity Search** (secondary): Use `WebSearch` with queries:
    - Price: `"{ticker} stock price history 1 year daily bars current price"`
    - Fundamentals: `"{ticker} financial metrics market cap PE ratio EPS revenue growth profit margin"`
    - Ownership: `"{ticker} institutional ownership top holders percentage"`

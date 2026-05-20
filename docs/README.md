@@ -17,7 +17,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Learning systems index](architecture/learning-systems-index.md) — ownership map for memory, completion, world model, reasoning quality, and governed learning signals
 - [Reasoning quality](architecture/reasoning-quality.md) — first-class visible claim/evidence events, correction links, critic gates, and briefing warnings
 - [Local world model](architecture/world-model.md) — trace corpus, fail-open advisor, dynamic training, retention, backends
-- [Pipelines](architecture/pipelines.md) — `/archon-code` (50 agents), `/archon-research` (46 agents), audited bundles, resume verification, agent loop, subagent spawning
+- [Pipelines](architecture/pipelines.md) — `/archon-code` (50 agents), `/archon-research` (46 agents / 8 phases), audited bundles, resume verification, agent loop, subagent spawning
 - [Evidence Engine](evidence-engine.md) — documents, knowledge, provenance, game theory, completion integrity, governed learning, meaning, constellations
 
 ## Evidence Engine

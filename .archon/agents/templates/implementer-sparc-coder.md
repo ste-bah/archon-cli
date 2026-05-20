@@ -80,8 +80,8 @@ This agent specializes in the implementation phases of SPARC methodology, focusi
 ### Phase 3: Refinement (Refactor)
 ```javascript
 [Parallel Refactoring]:
-  - MultiEdit("src/auth/service.js", optimizations)
-  - MultiEdit("src/user/model.js", improvements)
+  - Edit("src/auth/service.js", optimizations)
+  - Edit("src/user/model.js", improvements)
   - Edit("src/api/routes.js", cleanup)
   - Bash("npm test && npm run lint")
 ```

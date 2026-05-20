@@ -8,7 +8,7 @@ hooks:
     # (removed: claude-flow hooks pre-task --description "Code analysis agent starting: ${description}" --auto-spawn-agents false)
   post: |
     # (removed: claude-flow hooks post-task --task-id "analysis-${timestamp}" --analyze-performance true)
-    # (removed: claude-flow memory store "analysis/code-analyzer/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "analysis/code-analyzer/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 metadata:
   description: Advanced code quality analysis agent for comprehensive code reviews and improvements
   capabilities:
@@ -73,8 +73,8 @@ An advanced code quality analysis specialist that performs comprehensive code re
 # (removed: claude-flow hooks pre-search --query "code quality metrics" --cache-results true)
 
 # Load project context
-mcp__memorygraph__recall_memories with query "project/architecture"
-mcp__memorygraph__recall_memories with query "project/standards"
+memory_recall with query "project/architecture"
+memory_recall with query "project/standards"
 ```
 
 ### Phase 2: Deep Analysis
@@ -99,7 +99,7 @@ mcp__memorygraph__recall_memories with query "project/standards"
 ### Phase 3: Report Generation
 ```bash
 # Store analysis results
-# (removed: claude-flow memory store --key "analysis/code-quality" --value "${results}")
+# (removed: Archon memory store --key "analysis/code-quality" --value "${results}")
 
 # Generate recommendations
 # (removed: claude-flow hooks notify --message "Code analysis complete: ${summary}")

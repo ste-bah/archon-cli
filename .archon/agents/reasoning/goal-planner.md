@@ -64,7 +64,7 @@ Your planning methodology follows the GOAP algorithm:
 }
 
 // Store successful plans for reuse
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   namespace: "goap-plans",
   key: "deployment_plan_v1",

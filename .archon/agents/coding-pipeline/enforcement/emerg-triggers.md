@@ -2,7 +2,7 @@
 
 ## Overview
 
-The EMERG (Emergency Response and Graceful Mitigation) Trigger System provides 17 emergency triggers with cascading fallback chains for handling catastrophic situations in the God Agent Coding Pipeline. Unlike PROHIB (which prevents violations), EMERG handles situations that have already occurred and require immediate escalation.
+The EMERG (Emergency Response and Graceful Mitigation) Trigger System provides 17 emergency triggers with cascading fallback chains for handling catastrophic situations in the Archon Coding Pipeline. Unlike PROHIB (which prevents violations), EMERG handles situations that have already occurred and require immediate escalation.
 
 **Memory Key**: `coding/enforcement/emerg-state`
 

@@ -14,8 +14,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use archon_pipeline::runner::{
-    AgentInfo, AgentResult, LlmClient, LlmResponse, NextAgent, PipelineFacade, PipelineResult,
-    PipelineSession, PipelineType, QualityScore, ToolAccessLevel, run_pipeline,
+    AgentExecutionRequest, AgentInfo, AgentResult, LlmClient, LlmResponse, NextAgent,
+    PipelineFacade, PipelineResult, PipelineSession, PipelineType, QualityScore, ToolAccessLevel,
+    run_pipeline,
 };
 
 // ---------------------------------------------------------------------------
@@ -44,6 +45,11 @@ struct SequencedLlmClient {
     call_count: Arc<AtomicUsize>,
 }
 
+#[derive(Clone)]
+struct AgentPathLlmClient {
+    calls: Arc<Mutex<Vec<(String, String, String)>>>,
+}
+
 impl DelayedLlmClient {
     fn new(delay: Duration) -> Self {
         Self {
@@ -67,6 +73,18 @@ impl SequencedLlmClient {
 
     fn calls(&self) -> usize {
         self.call_count.load(Ordering::SeqCst)
+    }
+}
+
+impl AgentPathLlmClient {
+    fn new() -> Self {
+        Self {
+            calls: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn calls(&self) -> Vec<(String, String, String)> {
+        self.calls.lock().unwrap().clone()
     }
 }
 
@@ -108,6 +126,32 @@ impl LlmClient for SequencedLlmClient {
             tool_uses: vec![],
             tokens_in: 10,
             tokens_out: 5,
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl LlmClient for AgentPathLlmClient {
+    async fn send_message(
+        &self,
+        _messages: Vec<serde_json::Value>,
+        _system: Vec<serde_json::Value>,
+        _tools: Vec<serde_json::Value>,
+        _model: &str,
+    ) -> anyhow::Result<LlmResponse> {
+        anyhow::bail!("runner should call run_agent when an agent-aware client is provided")
+    }
+
+    async fn run_agent(&self, request: AgentExecutionRequest) -> anyhow::Result<LlmResponse> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push((request.session_id, request.task, request.agent.key));
+        Ok(LlmResponse {
+            content: "agent path output".into(),
+            tool_uses: vec![],
+            tokens_in: 11,
+            tokens_out: 7,
         })
     }
 }
@@ -539,6 +583,29 @@ async fn test_three_agent_pipeline_executes_end_to_end() {
     // The result should contain a valid session id.
     assert_eq!(result.session_id, "test-session-001");
     assert_eq!(result.final_output, "Pipeline complete");
+}
+
+#[tokio::test]
+async fn test_runner_uses_agent_execution_path_when_available() {
+    let facade = StubFacade::new();
+    let llm = AgentPathLlmClient::new();
+
+    let result = run_pipeline(&facade, &llm, "use real agents", None, None, None)
+        .await
+        .expect("pipeline should use run_agent");
+
+    assert_eq!(result.agent_results.len(), 3);
+    let calls = llm.calls();
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[0].0, "test-session-001");
+    assert_eq!(calls[0].1, "use real agents");
+    assert_eq!(
+        calls
+            .iter()
+            .map(|(_, _, agent)| agent.as_str())
+            .collect::<Vec<_>>(),
+        vec!["agent-1", "agent-2", "agent-3"]
+    );
 }
 
 /// Verify context isolation: each LLM call should receive a fresh message

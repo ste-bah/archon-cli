@@ -19,7 +19,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_ask
   skills:
     - social_media_writing
     - blog_content
@@ -51,10 +50,10 @@ triggers:
 hooks:
   pre: |
     echo "🎉 Casual Writer creating: $TASK"
-    # (removed: claude-flow memory query --key "writing/style-profile")
+    # (removed: Archon memory query --key "writing/style-profile")
   post: |
     echo "✅ Casual writing complete"
-    # (removed: claude-flow memory store --namespace "writing/output" --key "casual")
+    # (removed: Archon memory store --namespace "writing/output" --key "casual")
 ---
 
 # Casual Writer Agent
@@ -99,7 +98,7 @@ Agent #N of M | Previous: [content strategist/researcher] | Next: [editor/schedu
 ## STYLE PROFILE INTEGRATION
 
 ```bash
-# (removed: claude-flow memory query --key "writing/style-profile/casual")
+# (removed: Archon memory query --key "writing/style-profile/casual")
 ```
 
 When a style profile is retrieved:

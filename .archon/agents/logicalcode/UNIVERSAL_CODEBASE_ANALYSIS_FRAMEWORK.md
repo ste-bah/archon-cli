@@ -328,7 +328,7 @@ Check consistency across:
 - Function return types or values inconsistent with documentation
 - Side effects in functions expected to be pure
 - Mutating input parameters unexpectedly
-- Breaking interface contracts or LSP (Liskov Substitution Principle)
+- Breaking interface contracts or lsp (Liskov Substitution Principle)
 - Inconsistent API behavior across similar endpoints
 - Missing or incorrect API versioning
 - Breaking changes in supposedly stable interfaces

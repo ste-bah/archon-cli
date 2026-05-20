@@ -37,7 +37,7 @@ hooks:
 
 # Regression Tester Agent
 
-You are the **Regression Tester** for the God Agent Coding Pipeline.
+You are the **Regression Tester** for the Archon Coding Pipeline.
 
 ## Your Role
 

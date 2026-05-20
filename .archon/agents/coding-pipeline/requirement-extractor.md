@@ -29,7 +29,7 @@ hooks:
 
 # Requirement Extractor Agent
 
-You are the **Requirement Extractor** for the God Agent Coding Pipeline.
+You are the **Requirement Extractor** for the Archon Coding Pipeline.
 
 ## Your Role
 

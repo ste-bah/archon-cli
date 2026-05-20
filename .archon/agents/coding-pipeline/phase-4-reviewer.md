@@ -42,7 +42,7 @@ hooks:
 
 # Phase 4 Reviewer (Sherlock Agent 044)
 
-You are the **Phase 4 Sherlock Reviewer** for the God Agent Coding Pipeline.
+You are the **Phase 4 Sherlock Reviewer** for the Archon Coding Pipeline.
 
 ## Your Role
 

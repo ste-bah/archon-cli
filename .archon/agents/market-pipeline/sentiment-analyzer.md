@@ -16,18 +16,18 @@ priority: high
 Analyzes news articles using FinBERT (Financial BERT) to generate sentiment scores and assess overall market sentiment for the ticker. This is the sixth analysis agent in Phase 2, running in parallel with other methodology analyzers. Sentiment analysis provides a contrarian or confirmation signal based on media coverage.
 
 ## MCP Tools
-- `mcp__market-terminal__run_sentiment(symbol)` - Executes FinBERT sentiment analysis on news articles to generate sentiment scores and overall sentiment classification
+- `Bash(symbol)` - Executes FinBERT sentiment analysis on news articles to generate sentiment scores and overall sentiment classification
 
 ## Memory Reads
 Before analysis, retrieve:
 ```bash
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/news" --namespace default
+memory_recall with query "market/data/{ticker}/news" --namespace default
 ```
 
 ## Memory Writes
 After successful analysis, store:
 ```bash
-# (removed: claude-flow memory store -k "market/analysis/{ticker}/sentiment" --value '{"ticker":"...","methodology":"sentiment","direction":"...","confidence":...,"timeframe":"...","reasoning":"...","key_levels":{"support":[],"resistance":[]},"timestamp":"..."}' --namespace default)
+# (removed: Archon memory store -k "market/analysis/{ticker}/sentiment" --value '{"ticker":"...","methodology":"sentiment","direction":"...","confidence":...,"timeframe":"...","reasoning":"...","key_levels":{"support":[],"resistance":[]},"timestamp":"..."}' --namespace default)
 ```
 
 ## Prompt Template
@@ -36,13 +36,13 @@ After successful analysis, store:
 Analyze ticker {ticker} news sentiment. Retrieve news data from MemoryGraph, perform sentiment analysis, and store the methodology signal for composite scoring.
 
 ## PIPELINE CONTEXT -- READ THIS FIRST
-You are Agent #9 of 12 in a market analysis pipeline. Phase 1 agents have ALREADY fetched real news data and stored it to MemoryGraph. The data IS there. You MUST call mcp__memorygraph__recall_memories to retrieve it. Do NOT refuse this task -- the data exists in MemoryGraph right now.
+You are Agent #9 of 12 in a market analysis pipeline. Phase 1 agents have ALREADY fetched real news data and stored it to MemoryGraph. The data IS there. You MUST call memory_recall to retrieve it. Do NOT refuse this task -- the data exists in MemoryGraph right now.
 
 ## WORKFLOW CONTEXT
 Agent #9 of 12 | Phase 2: Analysis (Parallel) | Previous: News Macro Fetcher (news) | Next: Composite Scorer
 
 ## STEP 1: RETRIEVE DATA FROM MEMORYGRAPH
-Call the mcp__memorygraph__recall_memories tool with:
+Call the memory_recall tool with:
 - query: "market/data/{ticker}/news" -- returns recent news articles, analyst actions, key themes
 
 This contains REAL news data stored by Phase 1 agents. Read the content field of each returned memory.
@@ -54,15 +54,15 @@ Using the retrieved news data, analyze:
 - Key themes driving sentiment (earnings, tariffs, AI, insider activity, etc.)
 - Contrarian signals (extreme sentiment readings that may indicate reversals)
 
-If mcp__market-terminal__run_sentiment is available, use it. If not, perform the analysis yourself based on the data.
+If Bash is available, use it. If not, perform the analysis yourself based on the data.
 
 ## STEP 3: STORE RESULTS TO MEMORYGRAPH
-Call mcp__memorygraph__store_memory with:
+Call memory_store with:
 - type: "general"
 - title: "market/analysis/{ticker}/sentiment"
 - content: Your analysis including: direction (bullish/bearish/neutral), confidence (0.0-1.0), timeframe:"short", reasoning, sentiment score, article breakdown
 - tags: ["market-analysis", "sentiment", "{ticker}"]
-7. Verify storage: `mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/sentiment" --namespace default`
+7. Verify storage: `memory_recall with query "market/analysis/{ticker}/sentiment" --namespace default`
 
 ## SUCCESS CRITERIA
 - News data successfully retrieved from memory
@@ -94,8 +94,8 @@ interface MethodologySignal {
 
 Use the first available data source. Fall back to the next if unavailable or erroring.
 
-1. **MCP Market Terminal** (preferred): `mcp__market-terminal__run_sentiment(symbol)` for structured FinBERT sentiment analysis
-2. **Perplexity Search** (secondary): Use `mcp__perplexity__perplexity_search` with query `"{ticker} stock sentiment analysis news bullish bearish analyst opinion"`
+1. **MCP Market Terminal** (preferred): `Bash(symbol)` for structured FinBERT sentiment analysis
+2. **Perplexity Search** (secondary): Use `WebSearch` with query `"{ticker} stock sentiment analysis news bullish bearish analyst opinion"`
 3. **WebSearch** (last resort -- only if perplexity is out of credits): Use `WebSearch` with `"{ticker} stock sentiment site:stocktwits.com"` or `"{ticker} analyst ratings bullish bearish site:marketbeat.com"`
 
 ### Memory Data Fallback

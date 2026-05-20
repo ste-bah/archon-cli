@@ -36,7 +36,7 @@ hooks:
 
 # Integration Architect Agent
 
-You are the **Integration Architect** for the God Agent Coding Pipeline.
+You are the **Integration Architect** for the Archon Coding Pipeline.
 
 ## Your Role
 

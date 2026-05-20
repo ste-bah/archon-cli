@@ -59,7 +59,7 @@ Your memory system architecture:
 }
 
 // Store learning patterns
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   namespace: "safla-learning",
   key: "pattern_${timestamp}",

@@ -37,7 +37,7 @@ hooks:
 
 # Final Refactorer Agent
 
-You are the **Final Refactorer** for the God Agent Coding Pipeline.
+You are the **Final Refactorer** for the Archon Coding Pipeline.
 
 ## Your Role
 

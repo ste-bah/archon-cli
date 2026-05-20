@@ -34,7 +34,6 @@ capabilities:
     - Read
     - Write
     - Edit
-    - MultiEdit
     - Grep
     - Glob
   restricted_tools:

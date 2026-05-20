@@ -52,7 +52,7 @@ If sanitization fails, ask the user for an explicit name.
    - "Existing agent '{existing}' has a similar name. Create anyway?"
 
 3. Search MemoryGraph for existing agent registrations:
-   - Use `mcp__memorygraph__recall_memories` with query "agent-definition {description keywords}"
+   - Use `memory_recall` with query "agent-definition {description keywords}"
    - If matching agent-definition memories found: warn about overlap
 
 If any warnings were raised, wait for user to confirm before proceeding.
@@ -238,7 +238,7 @@ Do NOT present the definition for review. Do NOT ask "approve/revise/cancel". Ju
 2. Write each generated file using the Write tool
 3. Register in MemoryGraph:
    ```
-   mcp__memorygraph__store_memory:
+   memory_store:
      type: "general"
      title: "Agent definition: {name}"
      content: "Custom agent definition: {name} -- {one-line description from INTENT section}"

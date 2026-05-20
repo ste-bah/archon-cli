@@ -16,9 +16,9 @@ priority: high
 Fetches fundamental financial data, institutional ownership, and insider activity for a given ticker symbol. This is the second data agent in Phase 1, running in parallel with data-fetcher and news-macro-fetcher. It provides the quantitative and qualitative foundation for fundamental analysis, particularly CANSLIM methodology.
 
 ## MCP Tools
-- `mcp__market-terminal__get_fundamentals(symbol)` - Retrieves financial metrics including market cap, P/E ratio, EPS, revenue growth, profit margin, debt-to-equity, sector, and industry
-- `mcp__market-terminal__get_ownership(symbol)` - Retrieves institutional ownership percentage and top institutional holders with position changes
-- `mcp__market-terminal__get_insider_activity(symbol, days=90)` - Retrieves insider transactions (buy/sell) over the past 90 days with net sentiment analysis
+- `Bash(symbol)` - Retrieves financial metrics including market cap, P/E ratio, EPS, revenue growth, profit margin, debt-to-equity, sector, and industry
+- `Bash(symbol)` - Retrieves institutional ownership percentage and top institutional holders with position changes
+- `Bash(symbol, days=90)` - Retrieves insider transactions (buy/sell) over the past 90 days with net sentiment analysis
 
 ## Memory Reads
 None (this is a Phase 1 data collection agent with no upstream dependencies)
@@ -26,9 +26,9 @@ None (this is a Phase 1 data collection agent with no upstream dependencies)
 ## Memory Writes
 After successful data retrieval, store:
 ```bash
-# (removed: claude-flow memory store -k "market/data/{ticker}/fundamentals" --value '{"ticker":"...","market_cap":...,"pe_ratio":...,"eps":...,"revenue_growth":...,"profit_margin":...,"debt_to_equity":...,"sector":"...","industry":"..."}' --namespace default)
-# (removed: claude-flow memory store -k "market/data/{ticker}/ownership" --value '{"ticker":"...","institutional_pct":...,"top_holders":[...],"total_institutions":...}' --namespace default)
-# (removed: claude-flow memory store -k "market/data/{ticker}/insider" --value '{"ticker":"...","days":90,"transactions":[...],"net_insider_sentiment":"..."}' --namespace default)
+# (removed: Archon memory store -k "market/data/{ticker}/fundamentals" --value '{"ticker":"...","market_cap":...,"pe_ratio":...,"eps":...,"revenue_growth":...,"profit_margin":...,"debt_to_equity":...,"sector":"...","industry":"..."}' --namespace default)
+# (removed: Archon memory store -k "market/data/{ticker}/ownership" --value '{"ticker":"...","institutional_pct":...,"top_holders":[...],"total_institutions":...}' --namespace default)
+# (removed: Archon memory store -k "market/data/{ticker}/insider" --value '{"ticker":"...","days":90,"transactions":[...],"net_insider_sentiment":"..."}' --namespace default)
 ```
 
 ## Prompt Template
@@ -48,14 +48,14 @@ None required (first agent in pipeline)
 3. For Thesis Generator: key "market/data/{ticker}/insider" - Insider transactions and sentiment
 
 ## STEPS
-1. Call `mcp__market-terminal__get_fundamentals({ticker})` to retrieve financial metrics
-2. Call `mcp__market-terminal__get_ownership({ticker})` to retrieve institutional ownership
-3. Call `mcp__market-terminal__get_insider_activity({ticker}, days=90)` to retrieve insider transactions
+1. Call `Bash({ticker})` to retrieve financial metrics
+2. Call `Bash({ticker})` to retrieve institutional ownership
+3. Call `Bash({ticker}, days=90)` to retrieve insider transactions
 4. Validate data completeness (ensure all required fields are present)
 5. Store fundamentals data to memory key "market/data/{ticker}/fundamentals"
 6. Store ownership data to memory key "market/data/{ticker}/ownership"
 7. Store insider data to memory key "market/data/{ticker}/insider"
-8. Verify storage: `mcp__memorygraph__recall_memories with query "market/data/{ticker}/fundamentals" --namespace default`
+8. Verify storage: `memory_recall with query "market/data/{ticker}/fundamentals" --namespace default`
 
 ## SUCCESS CRITERIA
 - Fundamentals data retrieved with valid financial metrics
@@ -113,8 +113,8 @@ interface InsiderData {
 
 Use the first available data source. Fall back to the next if unavailable or erroring.
 
-1. **MCP Market Terminal** (preferred): `mcp__market-terminal__get_fundamentals(symbol)`, `mcp__market-terminal__get_ownership(symbol)`, `mcp__market-terminal__get_insider_activity(symbol, days=90)`
-2. **Perplexity Search** (secondary): Use `mcp__perplexity__perplexity_search` with queries:
+1. **MCP Market Terminal** (preferred): `Bash(symbol)`, `Bash(symbol)`, `Bash(symbol, days=90)`
+2. **Perplexity Search** (secondary): Use `WebSearch` with queries:
    - Fundamentals: `"{ticker} financial metrics market cap PE ratio EPS revenue growth profit margin"`
    - Ownership: `"{ticker} institutional ownership top holders percentage"`
    - Insider: `"{ticker} insider transactions buying selling 90 days"`

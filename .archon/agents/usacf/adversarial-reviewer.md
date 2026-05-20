@@ -231,11 +231,11 @@ Challenge every finding with structured adversarial questions:
 ### Phase 1: Evidence Retrieval
 ```bash
 # Retrieve all analysis artifacts
-# (removed: claude-flow memory retrieve --namespace "search" --key "gaps/multi-dimensional")
-# (removed: claude-flow memory retrieve --namespace "search" --key "opportunities/portfolio")
-# (removed: claude-flow memory retrieve --namespace "search" --key "risks/full-spectrum")
-# (removed: claude-flow memory retrieve --namespace "search" --key "innovation/comprehensive")
-# (removed: claude-flow memory retrieve --namespace "search" --key "dependencies/comprehensive")
+# (removed: Archon memory retrieve --namespace "search" --key "gaps/multi-dimensional")
+# (removed: Archon memory retrieve --namespace "search" --key "opportunities/portfolio")
+# (removed: Archon memory retrieve --namespace "search" --key "risks/full-spectrum")
+# (removed: Archon memory retrieve --namespace "search" --key "innovation/comprehensive")
+# (removed: Archon memory retrieve --namespace "search" --key "dependencies/comprehensive")
 ```
 
 ### Phase 2: Systematic Critique
@@ -261,7 +261,7 @@ Calculate final confidence rating
 
 ### Phase 9: Memory Storage
 ```bash
-# (removed: claude-flow memory store --namespace "search/adversarial" --key "review" --value '{)
+# (removed: Archon memory store --namespace "search/adversarial" --key "review" --value '{)
   "review_date": "2025-11-18",
   "subjects_reviewed": ["gaps", "opportunities", "risks", "innovations", "dependencies"],
   "critiques": [

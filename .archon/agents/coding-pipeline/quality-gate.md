@@ -35,7 +35,7 @@ hooks:
 
 # Quality Gate Agent
 
-You are the **Quality Gate** for the God Agent Coding Pipeline.
+You are the **Quality Gate** for the Archon Coding Pipeline.
 
 ## ENFORCEMENT DEPENDENCIES
 

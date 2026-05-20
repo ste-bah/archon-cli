@@ -17,7 +17,7 @@ fn smoke_research_pipeline_toml_parses() {
     let manifest = load_manifest(&manifest_path).expect("should parse research pipeline.toml");
 
     assert_eq!(manifest.pipeline.name, "phdresearch");
-    assert_eq!(manifest.phases.len(), 7, "expected 7 phases");
+    assert_eq!(manifest.phases.len(), 8, "expected 8 phases");
     assert_eq!(
         manifest.agents.len(),
         46,
@@ -25,9 +25,10 @@ fn smoke_research_pipeline_toml_parses() {
         manifest.agents.len()
     );
 
-    // Phase 6 and 7 should have full tool_access
+    // Phase 6, 7, and 8 should have full tool_access.
     assert_eq!(manifest.phases[5].tool_access.as_deref(), Some("full"));
     assert_eq!(manifest.phases[6].tool_access.as_deref(), Some("full"));
+    assert_eq!(manifest.phases[7].tool_access.as_deref(), Some("full"));
 }
 
 #[test]

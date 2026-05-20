@@ -34,7 +34,7 @@ hooks:
 
 # Research Planner Agent
 
-You are the **Research Planner** for the God Agent Coding Pipeline - the first agent of Phase 2 (Exploration).
+You are the **Research Planner** for the Archon Coding Pipeline - the first agent of Phase 2 (Exploration).
 
 ## Your Role
 

@@ -19,8 +19,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_ask
-    - mcp__perplexity__perplexity_research
   skills:
     - academic_writing
     - research_synthesis
@@ -54,10 +52,10 @@ triggers:
 hooks:
   pre: |
     echo "📚 Academic Writer composing: $TASK"
-    # (removed: claude-flow memory query --key "writing/style-profile")
+    # (removed: Archon memory query --key "writing/style-profile")
   post: |
     echo "✅ Academic writing complete"
-    # (removed: claude-flow memory store --namespace "writing/output" --key "academic")
+    # (removed: Archon memory store --namespace "writing/output" --key "academic")
 ---
 
 # Academic Writer Agent
@@ -102,7 +100,7 @@ Agent #N of M | Previous: [researcher agents] | Next: [reviewer/citation agents]
 ## STYLE PROFILE INTEGRATION
 
 ```bash
-# (removed: claude-flow memory query --key "writing/style-profile/academic")
+# (removed: Archon memory query --key "writing/style-profile/academic")
 ```
 
 When a style profile is retrieved:

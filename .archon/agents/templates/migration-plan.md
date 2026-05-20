@@ -23,7 +23,7 @@ hooks:
     echo "✅ Migration planning completed"
     echo "📊 Agent mapping strategy defined"
     echo "🚀 Ready for systematic agent system rollout"
-    # (removed: claude-flow memory store "templates/migration-planner/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "templates/migration-planner/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # Claude Flow Commands to Agent System Migration Plan
@@ -78,7 +78,7 @@ tools:
   allowed:
     - # (swarm tool removed)
     - # (claude-flow tool topology_optimize removed)
-    - mcp__memorygraph__get_memory_statistics
+    - memory_recall
     - TodoWrite
   restricted:
     - Bash
@@ -111,7 +111,7 @@ tools:
     - # (claude-flow tool agent_spawn removed)
     - # (claude-flow tool daa_agent_create removed)
     - # (claude-flow tool agent_list removed)
-    - mcp__memorygraph__get_memory_statistics
+    - memory_recall
   restricted:
     - Bash
     - Write
@@ -147,7 +147,7 @@ tools:
     - # (claude-flow tool task_results removed)
     - # (claude-flow tool parallel_execute removed)
     - TodoWrite
-    - TodoRead
+    - TodoWrite
   restricted:
     - Bash
     - Write
@@ -184,7 +184,7 @@ tools:
     - # (swarm tool removed)
     - # (claude-flow tool agent_spawn removed)
     - # (claude-flow tool task_orchestrate removed)
-    - mcp__memorygraph__get_memory_statistics
+    - memory_recall
     - TodoWrite
     - Read
   restricted:
@@ -222,7 +222,7 @@ tools:
     - # (swarm tool removed)
     - # (claude-flow tool agent_spawn removed)
     - # (claude-flow tool github_code_review removed)
-    - mcp__memorygraph__get_memory_statistics
+    - memory_recall
   restricted:
     - Write
     - Edit
@@ -294,8 +294,8 @@ tools:
     - # (claude-flow tool agent_spawn removed)
     - # (claude-flow tool task_orchestrate removed)
     - TodoWrite
-    - TodoRead
-    - mcp__memorygraph__get_memory_statistics
+    - TodoWrite
+    - memory_recall
   restricted:
     - Bash
     - Write
@@ -329,7 +329,7 @@ tools:
     - Read
     - Write
     - Edit
-    - MultiEdit
+    - Edit
     - Bash
     - # (claude-flow tool sparc_mode removed)
     - TodoWrite
@@ -471,8 +471,8 @@ capabilities:
   - synchronization
 tools:
   allowed:
-    - mcp__memorygraph__get_memory_statistics
-    - mcp__memorygraph__search_memories
+    - memory_recall
+    - memory_recall
     - # (claude-flow tool memory_namespace removed)
     - # (claude-flow tool memory_compress removed)
     - # (claude-flow tool memory_sync removed)

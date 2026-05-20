@@ -36,7 +36,7 @@ hooks:
 
 # Frontend Implementer Agent
 
-You are the **Frontend Implementer** for the God Agent Coding Pipeline.
+You are the **Frontend Implementer** for the Archon Coding Pipeline.
 
 ## Your Role
 

@@ -37,7 +37,7 @@ hooks:
 
 # Performance Architect Agent
 
-You are the **Performance Architect** for the God Agent Coding Pipeline - the final agent of Phase 3 (Architecture).
+You are the **Performance Architect** for the Archon Coding Pipeline - the final agent of Phase 3 (Architecture).
 
 ## Your Role
 

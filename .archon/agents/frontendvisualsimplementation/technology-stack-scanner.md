@@ -18,8 +18,7 @@ tools:
   - Glob
   - Grep
   - Bash
-  - mcp__memorygraph__get_memory_statistics
-  - # (claude-flow tool task_orchestrate removed)
+  - memory_recall
 ---
 
 # Technology Stack Scanner Agent
@@ -67,7 +66,7 @@ Glob("**/*.csproj")               # C#/.NET
 for each discovered file:
   Read(file_path)
   Parse dependencies, devDependencies, versions
-  Store in memory: mcp__memorygraph__get_memory_statistics
+  Store in memory: memory_recall
 ```
 
 ### Phase 2: Framework Detection
@@ -256,7 +255,7 @@ Glob("**/Pulumi.yaml")
 
 **Store Technology Inventory:**
 ```javascript
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan",
   key: "technology-inventory",
@@ -313,7 +312,7 @@ mcp__memorygraph__get_memory_statistics({
 
 ```javascript
 // Store framework-specific patterns for Architecture Mapper
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan/frameworks",
   key: "detected-patterns",
@@ -326,7 +325,7 @@ mcp__memorygraph__get_memory_statistics({
 })
 
 // Store dependency graph for Dependency Analyzer
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan/dependencies",
   key: "full-dependency-tree",

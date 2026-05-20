@@ -223,15 +223,16 @@ fn test_scanner_handles_empty_directory() {
 }
 
 #[test]
-fn test_scanner_ignores_non_md_files() {
+fn test_scanner_accepts_text_and_markdown_outputs() {
     let dir = TempDir::new().expect("should create temp dir");
     fs::write(dir.path().join("01-agent-a.md"), "valid markdown").unwrap();
-    fs::write(dir.path().join("02-agent-b.txt"), "text file ignored").unwrap();
+    fs::write(dir.path().join("02-agent-b.txt"), "valid text output").unwrap();
     fs::write(dir.path().join("notes.json"), "{}").unwrap();
 
     let outputs = scan_outputs(dir.path()).expect("should scan outputs");
-    assert_eq!(outputs.len(), 1, "only .md files should be scanned");
+    assert_eq!(outputs.len(), 2, ".md and .txt files should be scanned");
     assert_eq!(outputs[0].agent_key, "agent-a");
+    assert_eq!(outputs[1].agent_key, "agent-b");
 }
 
 // ---------------------------------------------------------------------------

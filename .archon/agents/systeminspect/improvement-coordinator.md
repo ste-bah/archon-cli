@@ -19,7 +19,7 @@ hooks:
     echo "✅ Continuous improvement framework complete"
     echo "🎯 Metrics and feedback loops established"
     find docs/06_continuous_improvement -name "*.md" 2>/dev/null | wc -l | xargs echo "Framework documents created:"
-    # (removed: claude-flow memory store "systeminspect/improvement-coordinator/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "systeminspect/improvement-coordinator/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # Continuous Improvement Framework Specialist

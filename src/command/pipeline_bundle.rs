@@ -10,8 +10,7 @@ use archon_pipeline::audit::types::{BundleStatus, PipelineEvent};
 use chrono::Utc;
 
 use crate::command::pipeline_support::{
-    build_pipeline_adapter, build_pipeline_learning_stack, init_leann, init_research_leann,
-    print_pipeline_result,
+    build_pipeline_adapter, build_pipeline_learning_stack, init_leann, print_pipeline_result,
 };
 use crate::command::provider_gate::ensure_active_provider_supports;
 
@@ -87,10 +86,9 @@ pub(crate) async fn handle_resume(
                 let memory: Arc<dyn MemoryTrait> = Arc::new(
                     MemoryGraph::in_memory().expect("in-memory graph for research resume"),
                 );
-                let leann = init_research_leann(cwd).await;
                 let facade = archon_pipeline::research::facade::ResearchFacade::with_learning(
                     memory,
-                    leann,
+                    None,
                     cwd.display().to_string(),
                     None,
                     phd_learning,
@@ -347,10 +345,9 @@ async fn legacy_resume_research(
     let phd_learning = archon_pipeline::learning::integration::PhDLearningIntegration::new();
     let memory: Arc<dyn MemoryTrait> =
         Arc::new(MemoryGraph::in_memory().expect("in-memory graph for research resume"));
-    let leann = init_research_leann(cwd).await;
     let facade = archon_pipeline::research::facade::ResearchFacade::with_learning(
         memory,
-        leann,
+        None,
         cwd.display().to_string(),
         None,
         phd_learning,

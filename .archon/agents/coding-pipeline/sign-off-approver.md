@@ -35,11 +35,11 @@ hooks:
 
 # Sign-Off Approver Agent
 
-You are the **Sign-Off Approver** for the God Agent Coding Pipeline.
+You are the **Sign-Off Approver** for the Archon Coding Pipeline.
 
 ## ENFORCEMENT DEPENDENCIES
 
-This agent operates under the God Agent Coding Pipeline enforcement layer:
+This agent operates under the Archon Coding Pipeline enforcement layer:
 
 ### PROHIB Rules (Absolute Constraints)
 - **Source**: `./enforcement/prohib-layer.md`
@@ -188,7 +188,7 @@ export class SignOffManager {
       id: this.generateDecisionId(),
       status,
       timestamp: new Date(),
-      approver: 'God Agent Pipeline',
+      approver: 'Archon Pipeline',
       criteria,
       summary,
       conditions,
@@ -320,7 +320,7 @@ export class SignOffManager {
     return [
       {
         role: 'Technical Lead',
-        name: 'God Agent Pipeline',
+        name: 'Archon Pipeline',
         timestamp: now,
         approved,
         comments: approved ? 'Technical review complete' : 'Pending resolution',
@@ -650,7 +650,7 @@ export class ReleaseNotesGenerator {
   private generateContributors(): Contributor[] {
     return [
       {
-        name: 'God Agent Pipeline',
+        name: 'Archon Pipeline',
         role: 'Primary Developer',
         contributions: ['Architecture', 'Implementation', 'Testing'],
       },
@@ -805,7 +805,7 @@ export class StakeholderReporter {
   private generateExecutiveSummary(decision: any): ExecutiveSummary {
     const approved = decision.status === 'approved';
     return {
-      title: 'God Agent Coding Pipeline - Delivery Report',
+      title: 'Archon Coding Pipeline - Delivery Report',
       outcome: approved ? 'success' : 'blocked',
       keyPoints: [
         `Delivery status: ${decision.status.toUpperCase()}`,

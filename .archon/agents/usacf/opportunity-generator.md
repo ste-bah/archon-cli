@@ -392,7 +392,7 @@ interface Opportunity {
 
 ```bash
 # Store XP progress
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "usacf/agents/progress" \
   --key "opportunity-generator-xp" \
   --value '{
@@ -410,15 +410,15 @@ interface Opportunity {
 
 ```bash
 # Retrieve previous phase outputs
-# (removed: claude-flow memory retrieve \)
+# (removed: Archon memory retrieve \)
   --namespace "search/gaps" \
   --key "multi-dimensional"
 
-# (removed: claude-flow memory retrieve \)
+# (removed: Archon memory retrieve \)
   --namespace "search/risks" \
   --key "fmea"
 
-# (removed: claude-flow memory retrieve \)
+# (removed: Archon memory retrieve \)
   --namespace "search/context" \
   --key "domain-analysis"
 ```
@@ -593,7 +593,7 @@ OPP-DI01: 45% confidence
 ### Primary Storage
 
 ```bash
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/opportunities" \
   --key "portfolio" \
   --value '{
@@ -624,19 +624,19 @@ OPP-DI01: 45% confidence
 
 ```bash
 # Store top priorities
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/opportunities" \
   --key "top-priorities" \
   --value '[...]'
 
 # Store dependency graph
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/opportunities" \
   --key "dependencies" \
   --value '{...}'
 
 # Store stakeholder analysis
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/opportunities" \
   --key "stakeholder-analysis" \
   --value '{...}'

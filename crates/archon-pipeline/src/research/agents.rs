@@ -1,15 +1,16 @@
 //! 46-agent research pipeline definitions.
 //!
 //! Ports the TypeScript PhD pipeline agent configuration to Rust.
-//! 46 agents across 7 phases:
+//! 46 agents across 8 phases:
 //!
-//! - Phase 1 Foundation (7): step-back analysis, decomposition, planning, architecture
+//! - Phase 1 Foundation (6): step-back analysis, decomposition, planning, architecture
 //! - Phase 2 Discovery (4): literature mapping, source classification, citations
 //! - Phase 3 Architecture (4): theoretical framework, contradictions, gaps, risks
 //! - Phase 4 Synthesis (5): evidence synthesis, patterns, themes, theory building
 //! - Phase 5 Design (9): methodology, hypotheses, models, instruments, validity
 //! - Phase 6 Writing (6): dissertation chapter writing (introduction through abstract)
 //! - Phase 7 Validation (11): systematic review, ethics, quality assurance
+//! - Phase 8 Final Assembly (1): compose the final paper from validated chapters
 
 use serde::{Deserialize, Serialize};
 
@@ -37,7 +38,7 @@ const BASE_TOOLS: &[ResearchToolAccess] = &[
     ResearchToolAccess::Grep,
 ];
 
-/// Extended tool set for Phase 6 writing agents (includes Write).
+/// Extended tool set for writing and final-assembly agents (includes Write).
 const WRITER_TOOLS: &[ResearchToolAccess] = &[
     ResearchToolAccess::WebSearch,
     ResearchToolAccess::WebFetch,
@@ -179,7 +180,7 @@ impl<'de> Deserialize<'de> for ResearchPhase {
 /// All 46 research-pipeline agents in execution order.
 pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
     // =========================================================================
-    // PHASE 1: FOUNDATION (7 agents, indices 0-6)
+    // PHASE 1: FOUNDATION (6 agents, indices 0-5)
     // =========================================================================
     ResearchAgent {
         key: "step-back-analyzer",
@@ -246,6 +247,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         phase: 1,
         file: "dissertation-architect.md",
         memory_keys: &[
+            "research/structure/chapters",
             "research/writing/structure",
             "research/document/architecture",
         ],
@@ -253,18 +255,8 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         prompt_source_path: ".archon/agents/phdresearch/dissertation-architect.md",
         tool_access: BASE_TOOLS,
     },
-    ResearchAgent {
-        key: "chapter-synthesizer",
-        display_name: "Chapter Synthesizer",
-        phase: 1,
-        file: "chapter-synthesizer.md",
-        memory_keys: &["research/quality/synthesis", "research/document/final"],
-        output_artifacts: &["final-synthesis.md", "dissertation-complete.md"],
-        prompt_source_path: ".archon/agents/phdresearch/chapter-synthesizer.md",
-        tool_access: BASE_TOOLS,
-    },
     // =========================================================================
-    // PHASE 2: DISCOVERY (4 agents, indices 7-10)
+    // PHASE 2: DISCOVERY (4 agents, indices 6-9)
     // =========================================================================
     ResearchAgent {
         key: "literature-mapper",
@@ -307,7 +299,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         tool_access: BASE_TOOLS,
     },
     // =========================================================================
-    // PHASE 3: ARCHITECTURE (4 agents, indices 11-14)
+    // PHASE 3: ARCHITECTURE (4 agents, indices 10-13)
     // =========================================================================
     ResearchAgent {
         key: "theoretical-framework-analyst",
@@ -353,7 +345,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         tool_access: BASE_TOOLS,
     },
     // =========================================================================
-    // PHASE 4: SYNTHESIS (5 agents, indices 15-19)
+    // PHASE 4: SYNTHESIS (5 agents, indices 14-18)
     // =========================================================================
     ResearchAgent {
         key: "evidence-synthesizer",
@@ -409,7 +401,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         tool_access: BASE_TOOLS,
     },
     // =========================================================================
-    // PHASE 5: DESIGN (9 agents, indices 20-28)
+    // PHASE 5: DESIGN (9 agents, indices 19-27)
     // =========================================================================
     ResearchAgent {
         key: "method-designer",
@@ -508,7 +500,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         tool_access: BASE_TOOLS,
     },
     // =========================================================================
-    // PHASE 6: WRITING (6 agents, indices 29-34)
+    // PHASE 6: WRITING (6 agents, indices 28-33)
     // =========================================================================
     ResearchAgent {
         key: "introduction-writer",
@@ -574,7 +566,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         tool_access: WRITER_TOOLS,
     },
     // =========================================================================
-    // PHASE 7: VALIDATION (11 agents, indices 35-45)
+    // PHASE 7: VALIDATION (11 agents, indices 34-44)
     // =========================================================================
     ResearchAgent {
         key: "systematic-reviewer",
@@ -659,6 +651,15 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         file: "consistency-validator.md",
         memory_keys: &[
             "research/quality/consistency",
+            "research/structure/chapters",
+            "research/writing/introduction",
+            "research/writing/literature",
+            "research/writing/methodology",
+            "research/writing/results",
+            "research/writing/discussion",
+            "research/writing/conclusion",
+            "research/writing/abstract",
+            "research/quality/citations",
             "research/document/coherence",
         ],
         output_artifacts: &["consistency-report.md", "coherence-audit.md"],
@@ -695,13 +696,40 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         prompt_source_path: ".archon/agents/phdresearch/file-length-manager.md",
         tool_access: BASE_TOOLS,
     },
+    // =========================================================================
+    // PHASE 8: FINAL ASSEMBLY (1 agent, index 45)
+    // =========================================================================
+    ResearchAgent {
+        key: "chapter-synthesizer",
+        display_name: "Chapter Synthesizer",
+        phase: 8,
+        file: "chapter-synthesizer.md",
+        memory_keys: &[
+            "research/document/final",
+            "research/structure/chapters",
+            "research/writing/introduction",
+            "research/writing/literature",
+            "research/writing/methodology",
+            "research/writing/results",
+            "research/writing/discussion",
+            "research/writing/conclusion",
+            "research/writing/abstract",
+            "research/quality/citations",
+            "research/quality/validation",
+            "research/quality/consistency",
+            "research/quality/structure",
+        ],
+        output_artifacts: &["final-paper.md", "dissertation-complete.md"],
+        prompt_source_path: ".archon/agents/phdresearch/chapter-synthesizer.md",
+        tool_access: WRITER_TOOLS,
+    },
 ];
 
 // ---------------------------------------------------------------------------
-// 7 phase definitions
+// 8 phase definitions
 // ---------------------------------------------------------------------------
 
-/// All 7 research-pipeline phases in order.
+/// All 8 research-pipeline phases in order.
 pub static RESEARCH_PHASES: &[ResearchPhase] = &[
     ResearchPhase {
         id: 1,
@@ -714,7 +742,6 @@ pub static RESEARCH_PHASES: &[ResearchPhase] = &[
             "research-planner",
             "construct-definer",
             "dissertation-architect",
-            "chapter-synthesizer",
         ],
     },
     ResearchPhase {
@@ -798,6 +825,12 @@ pub static RESEARCH_PHASES: &[ResearchPhase] = &[
             "file-length-manager",
         ],
     },
+    ResearchPhase {
+        id: 8,
+        name: "Final Assembly",
+        description: "Compose the validated chapter outputs, citation audit, and structural checks into the final university-standard research paper.",
+        agent_keys: &["chapter-synthesizer"],
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -809,7 +842,7 @@ pub fn get_all_agents() -> &'static [ResearchAgent] {
     RESEARCH_AGENTS
 }
 
-/// Returns agents belonging to the given phase number (1-7).
+/// Returns agents belonging to the given phase number (1-8).
 pub fn get_agents_by_phase(phase: u8) -> Vec<&'static ResearchAgent> {
     RESEARCH_AGENTS
         .iter()
@@ -827,7 +860,7 @@ pub fn get_agent_index(key: &str) -> Option<usize> {
     RESEARCH_AGENTS.iter().position(|a| a.key == key)
 }
 
-/// Looks up a research phase by its ID (1-7).
+/// Looks up a research phase by its ID (1-8).
 pub fn get_phase_by_id(id: u8) -> Option<&'static ResearchPhase> {
     RESEARCH_PHASES.iter().find(|p| p.id == id)
 }

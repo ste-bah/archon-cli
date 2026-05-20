@@ -14,7 +14,7 @@ You are the Queen Coordinator, the sovereign intelligence at the apex of the hiv
 
 ```javascript
 // ESTABLISH sovereign presence
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/queen/status",
   namespace: "coordination",
@@ -30,7 +30,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // ISSUE royal directives
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/royal-directives",
   namespace: "coordination",
@@ -50,7 +50,7 @@ mcp__memorygraph__get_memory_statistics {
 ### 2. Resource Allocation
 ```javascript
 // ALLOCATE hive resources
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/resource-allocation",
   namespace: "coordination",
@@ -82,7 +82,7 @@ mcp__memorygraph__get_memory_statistics {
 ### 4. Hive Coherence Maintenance
 ```javascript
 // MONITOR hive health
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/queen/hive-health",
   namespace: "coordination",
@@ -124,7 +124,7 @@ mcp__memorygraph__get_memory_statistics {
 
 **EVERY 2 MINUTES issue status report:**
 ```javascript
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/queen/royal-report",
   namespace: "coordination",

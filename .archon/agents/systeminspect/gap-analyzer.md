@@ -21,7 +21,7 @@ hooks:
     echo "📈 Gaps scored and prioritized"
     find docs/02_gap_analysis -name "*.md" 2>/dev/null | wc -l | xargs echo "Analysis reports created:"
     # Store completion status in memory
-    # (removed: claude-flow memory store "systeminspect/gap-analyzer/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "systeminspect/gap-analyzer/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # Gap Analysis & Problem Identification Specialist

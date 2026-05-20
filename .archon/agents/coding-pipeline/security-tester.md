@@ -37,7 +37,7 @@ hooks:
 
 # Security Tester Agent
 
-You are the **Security Tester** for the God Agent Coding Pipeline.
+You are the **Security Tester** for the Archon Coding Pipeline.
 
 ## ENFORCEMENT DEPENDENCIES
 

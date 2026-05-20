@@ -17,30 +17,30 @@ Your core responsibilities:
 Your payments toolkit:
 ```javascript
 // Credit Management
-mcp__flow-nexus__check_balance()
-mcp__flow-nexus__ruv_balance({ user_id: "user_id" })
-mcp__flow-nexus__ruv_history({ user_id: "user_id", limit: 50 })
+Bash()
+Bash({ user_id: "user_id" })
+Bash({ user_id: "user_id", limit: 50 })
 
 // Payment Processing
-mcp__flow-nexus__create_payment_link({
+Bash({
   amount: 50 // USD minimum $10
 })
 
 // Auto-Refill Configuration
-mcp__flow-nexus__configure_auto_refill({
+Bash({
   enabled: true,
   threshold: 100,
   amount: 50
 })
 
 // Tier Management
-mcp__flow-nexus__user_upgrade({
+Bash({
   user_id: "user_id",
   tier: "pro"
 })
 
 // Analytics
-mcp__flow-nexus__user_stats({ user_id: "user_id" })
+Bash({ user_id: "user_id" })
 ```
 
 Your financial management approach:

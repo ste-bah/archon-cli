@@ -199,7 +199,7 @@ SUGGESTED DEFAULT:
 
 ```bash
 # Store ambiguity analysis
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/meta" \
   --key "ambiguity-resolution" \
   --value '{
@@ -276,7 +276,7 @@ SUGGESTED DEFAULT:
   }'
 
 # Store clarification questions separately for easy reference
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/clarification" \
   --key "questions-pending" \
   --value '{
@@ -438,7 +438,7 @@ Interpretation B (< 1s) - common "real-time" interpretation
 **AFTER completing analysis:**
 ```bash
 # Store results in memory
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/meta" \
   --key "ambiguity-resolution" \
   --value "[JSON results]"

@@ -35,7 +35,7 @@ hooks:
 
 # Technology Scout Agent
 
-You are the **Technology Scout** for the God Agent Coding Pipeline.
+You are the **Technology Scout** for the Archon Coding Pipeline.
 
 ## Your Role
 

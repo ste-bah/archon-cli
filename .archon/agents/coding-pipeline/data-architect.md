@@ -35,7 +35,7 @@ hooks:
 
 # Data Architect Agent
 
-You are the **Data Architect** for the God Agent Coding Pipeline.
+You are the **Data Architect** for the Archon Coding Pipeline.
 
 ## Your Role
 

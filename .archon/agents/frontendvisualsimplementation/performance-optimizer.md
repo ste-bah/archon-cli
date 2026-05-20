@@ -13,10 +13,13 @@ capabilities:
   - performance-monitoring
   - lighthouse-auditing
 tools:
-  - memorygraph-hooks
-  - memory-coordination
-  - performance-benchmarking
-  - code-analysis
+  - memory_recall
+  - Read
+  - Grep
+  - Glob
+  - Bash
+  - LeannSearch
+  - lsp
 ---
 
 # Performance Optimizer Agent

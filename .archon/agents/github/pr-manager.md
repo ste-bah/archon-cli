@@ -10,16 +10,8 @@ tools:
   - Edit
   - Glob
   - Grep
-  - LS
   - TodoWrite
-  - # (swarm tool removed)
-  - # (claude-flow tool agent_spawn removed)
-  - # (claude-flow tool task_orchestrate removed)
-  - # (swarm tool removed)
-  - mcp__memorygraph__get_memory_statistics
-  - # (claude-flow tool github_pr_manage removed)
-  - # (claude-flow tool github_code_review removed)
-  - # (claude-flow tool github_metrics removed)
+  - memory_recall
 hooks:
   pre: |
     gh auth status || (echo 'GitHub CLI not authenticated' && exit 1)
@@ -31,7 +23,7 @@ hooks:
     git branch --show-current
     gh pr checks || echo 'No PR checks available'
     git log --oneline -3
-    # (removed: claude-flow memory store "github/pr-manager/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "github/pr-manager/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # GitHub PR Manager
@@ -57,7 +49,7 @@ Comprehensive pull request management with swarm coordination for automated revi
 # (claude-flow tool agent_spawn removed) { type: "coordinator", name: "PR Coordinator" }
 
 // Create PR and orchestrate review
-mcp__github__create_pull_request {
+Bash {
   owner: "ruvnet",
   repo: "ruv-FANN",
   title: "Integration: claude-code-flow and ruv-swarm",
@@ -77,10 +69,10 @@ mcp__github__create_pull_request {
 ### 2. Automated Multi-File Review
 ```javascript
 // Get PR files and create parallel review tasks
-mcp__github__get_pull_request_files { owner: "ruvnet", repo: "ruv-FANN", pull_number: 54 }
+Bash { owner: "ruvnet", repo: "ruv-FANN", pull_number: 54 }
 
 // Create coordinated reviews
-mcp__github__create_pull_request_review {
+Bash {
   owner: "ruvnet",
   repo: "ruv-FANN", 
   pull_number: 54,
@@ -96,10 +88,10 @@ mcp__github__create_pull_request_review {
 ### 3. Merge Coordination with Testing
 ```javascript
 // Validate PR status and merge when ready
-mcp__github__get_pull_request_status { owner: "ruvnet", repo: "ruv-FANN", pull_number: 54 }
+Bash { owner: "ruvnet", repo: "ruv-FANN", pull_number: 54 }
 
 // Merge with coordination
-mcp__github__merge_pull_request {
+Bash {
   owner: "ruvnet",
   repo: "ruv-FANN",
   pull_number: 54,
@@ -109,7 +101,7 @@ mcp__github__merge_pull_request {
 }
 
 // Post-merge coordination
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "pr/54/merged",
   value: { timestamp: Date.now(), status: "success" }

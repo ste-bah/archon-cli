@@ -1,7 +1,7 @@
 ---
 name: issue-tracker
 description: Intelligent issue management and project coordination with automated tracking, progress monitoring, and team coordination
-tools: # (swarm tool removed), # (claude-flow tool agent_spawn removed), # (claude-flow tool task_orchestrate removed), mcp__memorygraph__get_memory_statistics, Bash, TodoWrite, Read, Write
+tools: memory_recall, Bash, TodoWrite, Read, Write
 color: green
 type: development
 capabilities:
@@ -38,14 +38,14 @@ Intelligent issue management and project coordination with ruv-swarm integration
 - **Cross-repository issue synchronization** for monorepo management
 
 ## Tools Available
-- `mcp__github__create_issue`
-- `mcp__github__list_issues`
-- `mcp__github__get_issue`
-- `mcp__github__update_issue`
-- `mcp__github__add_issue_comment`
-- `mcp__github__search_issues`
+- `Bash`
+- `Bash`
+- `Bash`
+- `Bash`
+- `Bash`
+- `Bash`
 - (swarm tools removed)
-- `TodoWrite`, `TodoRead`, `Task`, `Bash`, `Read`, `Write`
+- `TodoWrite`, `TodoWrite`, `Task`, `Bash`, `Read`, `Write`
 
 ## Usage Patterns
 
@@ -58,7 +58,7 @@ Intelligent issue management and project coordination with ruv-swarm integration
 # (claude-flow tool agent_spawn removed) { type: "coder", name: "Implementation Planner" }
 
 // Create comprehensive issue
-mcp__github__create_issue {
+Bash {
   owner: "ruvnet",
   repo: "ruv-FANN",
   title: "Integration Review: claude-code-flow and ruv-swarm complete integration",
@@ -90,13 +90,13 @@ mcp__github__create_issue {
 ### 2. Automated Progress Updates
 ```javascript
 // Update issue with progress from swarm memory
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "retrieve",
   key: "issue/54/progress"
 }
 
 // Add coordinated progress comment
-mcp__github__add_issue_comment {
+Bash {
   owner: "ruvnet",
   repo: "ruv-FANN",
   issue_number: 54,
@@ -119,7 +119,7 @@ mcp__github__add_issue_comment {
 }
 
 // Store progress in swarm memory
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "issue/54/latest_update",
   value: { timestamp: Date.now(), progress: "89%", status: "near_completion" }
@@ -129,14 +129,14 @@ mcp__memorygraph__get_memory_statistics {
 ### 3. Multi-Issue Project Coordination
 ```javascript
 // Search and coordinate related issues
-mcp__github__search_issues {
+Bash {
   q: "repo:ruvnet/ruv-FANN label:integration state:open",
   sort: "created",
   order: "desc"
 }
 
 // Create coordinated issue updates
-mcp__github__update_issue {
+Bash {
   owner: "ruvnet",
   repo: "ruv-FANN",
   issue_number: 54,
@@ -185,7 +185,7 @@ mcp__github__update_issue {
   ]}
   
   // Store initial coordination state
-  mcp__memorygraph__get_memory_statistics {
+  memory_recall {
     action: "store",
     key: "project/github_integration/issues",
     value: { created: Date.now(), total_issues: 3, status: "initialized" }

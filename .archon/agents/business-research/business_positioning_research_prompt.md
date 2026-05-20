@@ -747,7 +747,7 @@ Feasibility Critique Questions:
 # (claude-flow tool task_results removed)({ taskId: "arc-A-research" })
 
 // Search memory for shared findings
-mcp__memorygraph__search_memories({
+memory_recall({
   pattern: "swarm/shared/*",
   namespace: "coordination",
   limit: 20

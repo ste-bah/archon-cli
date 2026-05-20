@@ -37,7 +37,7 @@ hooks:
 
 # Service Implementer Agent
 
-You are the **Service Implementer** for the God Agent Coding Pipeline.
+You are the **Service Implementer** for the Archon Coding Pipeline.
 
 ## Your Role
 

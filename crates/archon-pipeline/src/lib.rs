@@ -21,6 +21,7 @@ pub mod research;
 pub mod retry;
 pub mod runner;
 pub mod session;
+pub mod subagent_adapter;
 
 // --- Phase 4: Declarative pipeline execution ---
 pub mod error;

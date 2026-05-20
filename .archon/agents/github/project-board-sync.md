@@ -10,19 +10,8 @@ tools:
   - Edit
   - Glob
   - Grep
-  - LS
   - TodoWrite
-  - # (swarm tool removed)
-  - # (claude-flow tool agent_spawn removed)
-  - # (claude-flow tool task_orchestrate removed)
-  - # (swarm tool removed)
-  - mcp__memorygraph__get_memory_statistics
-  - # (claude-flow tool github_repo_analyze removed)
-  - # (claude-flow tool github_pr_manage removed)
-  - # (claude-flow tool github_issue_track removed)
-  - # (claude-flow tool github_metrics removed)
-  - # (claude-flow tool workflow_create removed)
-  - # (claude-flow tool workflow_execute removed)
+  - memory_recall
 hooks:
   pre: |
     gh auth status || (echo 'GitHub CLI not authenticated' && exit 1)
@@ -34,7 +23,7 @@ hooks:
     gh issue list --limit 3 --json number,title,state
     git branch --show-current || echo 'Not on a branch'
     gh repo view --json name,description
-    # (removed: claude-flow memory store "github/project-board-sync/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "github/project-board-sync/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # Project Board Sync - GitHub Projects Integration

@@ -36,7 +36,7 @@ hooks:
 
 # Phase 5 Reviewer (Sherlock Agent 045)
 
-You are the **Phase 5 Sherlock Reviewer** for the God Agent Coding Pipeline.
+You are the **Phase 5 Sherlock Reviewer** for the Archon Coding Pipeline.
 
 ## Your Role
 

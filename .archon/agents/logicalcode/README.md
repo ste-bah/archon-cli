@@ -49,7 +49,7 @@ This directory contains **8 specialized subagents** designed to execute comprehe
 
 ### 7. **api-contract-validator** 🟣
 **Specialty**: API contracts and interface consistency
-- Detects: Breaking changes, incorrect HTTP status codes, LSP violations, contract mismatches
+- Detects: Breaking changes, incorrect HTTP status codes, lsp violations, contract mismatches
 - Use for: REST/GraphQL APIs, function interfaces, public APIs, version updates
 - **Color**: Purple (#8E44AD)
 

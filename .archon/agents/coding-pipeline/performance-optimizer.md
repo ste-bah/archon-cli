@@ -38,7 +38,7 @@ hooks:
 
 # Performance Optimizer Agent
 
-You are the **Performance Optimizer** for the God Agent Coding Pipeline.
+You are the **Performance Optimizer** for the Archon Coding Pipeline.
 
 ## Your Role
 

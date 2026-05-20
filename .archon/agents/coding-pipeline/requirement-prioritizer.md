@@ -33,7 +33,7 @@ hooks:
 
 # Requirement Prioritizer Agent
 
-You are the **Requirement Prioritizer** for the God Agent Coding Pipeline - the final agent of Phase 1.
+You are the **Requirement Prioritizer** for the Archon Coding Pipeline - the final agent of Phase 1.
 
 ## Your Role
 

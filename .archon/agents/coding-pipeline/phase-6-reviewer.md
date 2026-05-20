@@ -15,10 +15,12 @@ capabilities:
   - code-quality-assessment
   - optimization-impact-analysis
 tools:
-  - code-analyzer
-  - performance-profiler
-  - semantic-diff
-  - regression-detector
+  - Read
+  - Grep
+  - Glob
+  - LeannSearch
+  - lsp
+  - Bash
 qualityGates:
   minLScore: 0.85
   maxReworkCycles: 2

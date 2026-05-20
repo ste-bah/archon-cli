@@ -364,7 +364,7 @@ async function implementFeatureWithSPARC(feature: string) {
 }
 
 // Store successful patterns
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   namespace: "code-patterns",
   key: "oauth_implementation_plan",

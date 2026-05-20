@@ -19,7 +19,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_ask
   skills:
     - creative_writing
     - poetry
@@ -57,10 +56,10 @@ triggers:
 hooks:
   pre: |
     echo "🎨 Creative Writer crafting: $TASK"
-    # (removed: claude-flow memory query --key "writing/style-profile")
+    # (removed: Archon memory query --key "writing/style-profile")
   post: |
     echo "✅ Creative writing complete"
-    # (removed: claude-flow memory store --namespace "writing/output" --key "creative")
+    # (removed: Archon memory store --namespace "writing/output" --key "creative")
 ---
 
 # Creative Writer Agent
@@ -104,7 +103,7 @@ Agent #N of M | Previous: [research/planning agents] | Next: [reviewer/editor ag
 ## STYLE PROFILE INTEGRATION
 
 ```bash
-# (removed: claude-flow memory query --key "writing/style-profile/creative")
+# (removed: Archon memory query --key "writing/style-profile/creative")
 ```
 
 When a style profile is retrieved:

@@ -13,6 +13,19 @@ pub enum GameTheoryToolAccess {
     WebFetch,
 }
 
+impl GameTheoryToolAccess {
+    pub fn tool_name(self) -> &'static str {
+        match self {
+            Self::Read => "Read",
+            Self::Grep => "Grep",
+            Self::Glob => "Glob",
+            Self::Write => "Write",
+            Self::WebSearch => "WebSearch",
+            Self::WebFetch => "WebFetch",
+        }
+    }
+}
+
 /// A single game-theory agent definition loaded from the curated arsenal.
 #[derive(Clone, Debug, Serialize)]
 pub struct GameTheoryAgent {
@@ -28,6 +41,20 @@ pub struct GameTheoryAgent {
     pub condition: Option<&'static str>,
     pub depends_on: &'static [&'static str],
     pub mandatory: bool,
+}
+
+impl GameTheoryAgent {
+    pub fn allowed_tool_names(&self) -> Vec<String> {
+        let mut tools: Vec<String> = self
+            .tool_access
+            .iter()
+            .map(|tool| tool.tool_name().to_string())
+            .collect();
+        if !tools.iter().any(|tool| tool == "memory_recall") {
+            tools.push("memory_recall".to_string());
+        }
+        tools
+    }
 }
 
 /// A tier in the 12-tier game-theory organisation.

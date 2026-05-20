@@ -8,21 +8,11 @@ tools:
   - Read
   - Write
   - Edit
-  - LS
   - Glob
   - TodoWrite
-  - TodoRead
-  - Task
+  - Agent
   - WebFetch
-  - mcp__github__create_repository
-  - mcp__github__fork_repository
-  - mcp__github__search_repositories
-  - mcp__github__push_files
-  - mcp__github__create_or_update_file
-  - # (swarm tool removed)
-  - # (claude-flow tool agent_spawn removed)
-  - # (claude-flow tool task_orchestrate removed)
-  - mcp__memorygraph__get_memory_statistics
+  - memory_recall
 hooks:
   pre_task: |
     echo "🏗️ Initializing repository architecture analysis..."
@@ -62,11 +52,11 @@ Repository structure optimization and multi-repo management with ruv-swarm coord
 # (claude-flow tool agent_spawn removed) { type: "coordinator", name: "Multi-Repo Coordinator" }
 
 // Analyze current repository structure
-LS("/workspaces/ruv-FANN/claude-code-flow/claude-code-flow")
-LS("/workspaces/ruv-FANN/ruv-swarm/npm")
+Glob("/workspaces/ruv-FANN/claude-code-flow/claude-code-flow")
+Glob("/workspaces/ruv-FANN/ruv-swarm/npm")
 
 // Search for related repositories
-mcp__github__search_repositories {
+Bash {
   query: "user:ruvnet claude",
   sort: "updated",
   order: "desc"
@@ -83,7 +73,7 @@ mcp__github__search_repositories {
 ### 2. Multi-Repository Template Creation
 ```javascript
 // Create standardized repository template
-mcp__github__create_repository {
+Bash {
   name: "claude-project-template",
   description: "Standardized template for Claude Code projects with ruv-swarm integration",
   private: false,
@@ -91,7 +81,7 @@ mcp__github__create_repository {
 }
 
 // Push template structure
-mcp__github__push_files {
+Bash {
   owner: "ruvnet",
   repo: "claude-project-template",
   branch: "main",
@@ -174,7 +164,7 @@ const repositories = [
 
 // Update common files across repositories
 repositories.forEach(repo => {
-  mcp__github__create_or_update_file({
+  Bash({
     owner: "ruvnet",
     repo: "ruv-FANN",
     path: `${repo}/.github/workflows/integration.yml`,
@@ -206,13 +196,13 @@ jobs:
   # (claude-flow tool agent_spawn removed) { type: "optimizer", name: "Performance Optimizer" }
   # (claude-flow tool agent_spawn removed) { type: "researcher", name: "Best Practices Researcher" }
   # (claude-flow tool agent_spawn removed) { type: "coordinator", name: "Multi-Repo Coordinator" }
-  
+
   // Analyze current repository structures
-  LS("/workspaces/ruv-FANN/claude-code-flow/claude-code-flow")
-  LS("/workspaces/ruv-FANN/ruv-swarm/npm") 
+  Glob("/workspaces/ruv-FANN/claude-code-flow/claude-code-flow")
+  Glob("/workspaces/ruv-FANN/ruv-swarm/npm")
   Read("/workspaces/ruv-FANN/claude-code-flow/claude-code-flow/package.json")
   Read("/workspaces/ruv-FANN/ruv-swarm/npm/package.json")
-  
+
   // Search for architectural patterns using gh CLI
   ARCH_PATTERNS=$(Bash(`gh search repos "language:javascript template architecture" \
     --limit 10 \
@@ -221,7 +211,7 @@ jobs:
     --order desc`))
   
   // Create optimized structure files
-  mcp__github__push_files {
+  Bash {
     branch: "architecture/optimization",
     files: [
       {
@@ -254,7 +244,7 @@ jobs:
   ]}
   
   // Store architecture analysis
-  mcp__memorygraph__get_memory_statistics {
+  memory_recall {
     action: "store",
     key: "architecture/analysis/results",
     value: {

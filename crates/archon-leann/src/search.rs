@@ -41,6 +41,10 @@ impl Search {
 
     /// Embed code snippet, run HNSW search, dedup by file_path (highest score wins).
     pub fn find_similar_code(&self, code: &str, limit: usize) -> Result<Vec<SearchResult>> {
+        if limit == 0 || !self.has_indexed_chunks()? {
+            return Ok(Vec::new());
+        }
+
         // Overfetch to have headroom for dedup
         let fetch_k = (limit * OVERFETCH_MULTIPLIER).max(limit + 10);
 
@@ -89,6 +93,10 @@ impl Search {
         language: Option<&str>,
         path_pattern: Option<&str>,
     ) -> Result<Vec<SearchResult>> {
+        if limit == 0 || !self.has_indexed_chunks()? {
+            return Ok(Vec::new());
+        }
+
         // Overfetch to have headroom after filtering
         let fetch_k = (limit * OVERFETCH_MULTIPLIER).max(limit + 10);
 
@@ -134,6 +142,20 @@ impl Search {
     // -----------------------------------------------------------------------
     // Internal helpers
     // -----------------------------------------------------------------------
+
+    /// Return whether the index has at least one searchable chunk before
+    /// paying the cost to initialise or call the embedding backend.
+    fn has_indexed_chunks(&self) -> Result<bool> {
+        let result = self
+            .db
+            .run_script(
+                "?[chunk_id] := *code_chunks{chunk_id} :limit 1",
+                Default::default(),
+                ScriptMutability::Immutable,
+            )
+            .map_err(|e| anyhow::anyhow!("code chunk existence check failed: {}", e))?;
+        Ok(!result.rows.is_empty())
+    }
 
     /// Embed a single text string and return the embedding vector.
     fn embed_text(&self, text: &str) -> Result<Vec<f32>> {

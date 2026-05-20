@@ -33,7 +33,13 @@ Starting research pipeline for topic: impact of transformer architectures on ret
 …
 ```
 
-The handler spawns the audited pipeline async via `tokio::spawn`. Per-agent progress streams to the TUI through canonical activity events and conversation output, while prompts, attempts, accepted outputs, quality scores, and state are persisted under `<workdir>/.archon/pipelines/<session-id>/`. The conversation stays interactive — you can keep using other slash commands while the run is in flight.
+The handler spawns the audited pipeline async via `tokio::spawn`. Per-agent progress streams to the TUI through canonical activity events and conversation output, while prompts, attempts, accepted outputs, quality scores, run-level memory, and state are persisted under `<workdir>/.archon/pipelines/<session-id>/`. The conversation stays interactive — you can keep using other slash commands while the run is in flight.
+
+In the TUI, each research stage is launched through the installed Archon
+subagent executor, not as a bare provider prompt. That gives every agent the
+same memory, document, transcript, hook, and Agent Activity plumbing used by
+normal subagents, while the audited research bundle remains the source of truth
+for pipeline resume and verification.
 
 Continuation is handled by the shared pipeline control surface, not by a second
 `/archon-research` invocation. If the run is interrupted, use
@@ -52,63 +58,92 @@ If `--dry-run` is needed (the CLI form supports it; the slash form does not):
 archon pipeline research "..." --dry-run
 ```
 
-## What happens — 7 agent phases, 46 agents, final assembly
+## What Happens — 8 Agent Phases, 46 Agents
 
 The pipeline runs phases sequentially with phase-reviewer gates between each.
 Each agent output is persisted to the audited bundle at
 `<workdir>/.archon/pipelines/<session-id>/` for verification and inspection.
+Archon also builds a research RLM pack for each later agent: a pinned chapter
+structure, a phase-aware rolling window of recent accepted outputs, selected
+writer outputs for validation/final assembly, and deterministic pre-scan data.
+This is the host-side context handoff; research agents do not need shell/file
+tools to read the bundle during the LLM call.
 
-### Phase 1: Scoping (5 agents)
+### Phase 1: Foundation (6 agents)
 
-`research-planner` decomposes the topic into research questions → `gap-hunter` identifies what's missing in the existing literature → `step-back-analyzer` reframes the question against parent domains → `methodology-scanner` picks the appropriate research method → `dissertation-architect` plans the chapter structure.
+`step-back-analyzer` reframes the question against parent domains → `self-ask-decomposer` decomposes the topic into essential questions → `ambiguity-clarifier` resolves unclear terms → `research-planner` plans the research flow → `construct-definer` defines core constructs → `dissertation-architect` locks the chapter structure.
 
-Output: `phase1-scope.md` with research questions, methodology, gap analysis.
+Output: framing, decomposition, definitions, research plan, constructs, and chapter structure.
 
-### Phase 2: Literature mapping (8 agents)
+### Phase 2: Discovery (4 agents)
 
-`literature-mapper` runs a hybrid retrieval over the KB → `source-tier-classifier` ranks sources by quality → `methodology-scanner` tags each source's method → `theoretical-framework-analyst` extracts theoretical lenses → `pattern-analyst` looks for recurring claims → `gap-analyzer` confirms what's still missing → `evidence-synthesizer` clusters findings → `bias-detector` flags conflicts of interest.
+`literature-mapper` runs a hybrid retrieval over the KB → `source-tier-classifier` ranks sources by quality → `citation-extractor` extracts citation material → `context-tier-manager` organizes hot/warm/cold context tiers.
 
-Output: `phase2-literature.md` with annotated bibliography + cluster map.
+Output: literature map, source catalog, source tiers, citation extracts, and context hierarchy.
 
-### Phase 3: Theoretical synthesis (4 agents)
+### Phase 3: Architecture (4 agents)
 
-`thematic-synthesizer` builds themes across sources → `theory-builder` constructs the theoretical framework → `model-architect` formalises the model → `confidence-quantifier` assigns calibrated confidence to each claim.
+`theoretical-framework-analyst` extracts theoretical lenses → `contradiction-analyzer` lists detected contradictions and resolutions → `gap-hunter` confirms what's still missing → `risk-analyst` flags conclusions sensitive to weak evidence.
 
-Output: `phase3-synthesis.md`.
+Output: theoretical framework, contradiction report, research gaps, and risk assessment.
 
-### Phase 4: Critical analysis (6 agents)
+### Phase 4: Synthesis (5 agents)
 
-`adversarial-reviewer` red-teams every claim → `contradiction-analyzer` lists detected contradictions and resolutions → `bias-detector` flags methodological bias → `validity-guardian` checks internal/external/construct validity → `risk-analyst` flags conclusions sensitive to single-study evidence → `quality-assessor` overall study-quality grading.
+`evidence-synthesizer` clusters findings → `pattern-analyst` finds recurring claims → `thematic-synthesizer` builds themes across sources → `theory-builder` constructs the theoretical model → `opportunity-identifier` identifies research and product opportunities.
 
-Output: `phase4-critique.md`.
+Output: evidence synthesis, pattern catalog, theme hierarchy, theory development, and opportunity matrix.
 
-### Phase 5: Methodology and design (5 agents)
+### Phase 5: Design (9 agents)
 
-`method-designer`, `instrument-developer`, `sampling-strategist`, `analysis-planner`, `ethics-reviewer`. Used when the research output is a proposal rather than a review.
+`method-designer`, `hypothesis-generator`, `model-architect`, `analysis-planner`, `sampling-strategist`, `instrument-developer`, `validity-guardian`, `methodology-scanner`, and `methodology-writer` design the research method and methodology chapter.
 
-Output: `phase5-method.md` (skipped if `--mode review`).
+Output: research design, hypotheses, conceptual model, analysis plan, sampling strategy, instruments, validity assessment, methodology survey, and methodology chapter.
 
-### Phase 6: Writing (8 agents)
+### Phase 6: Writing (6 agents)
 
-`introduction-writer`, `literature-review-writer`, `methodology-writer`, `results-writer`, `discussion-writer`, `conclusion-writer`, `chapter-synthesizer`, `executive-brief-writer`. Each produces its section against the structure from Phase 1.
+`introduction-writer`, `literature-review-writer`, `methodology-writer`, `results-writer`, `discussion-writer`, `conclusion-writer`. Each produces its section against the structure from Phase 1.
 
-Output: `phase6-draft.md` (full draft) + `executive-brief.md` (1-page summary).
+Output: introduction, literature review, results, discussion, conclusion, and abstract sections.
 
-### Phase 7: Citations and reproducibility (5 agents)
+### Phase 7: Validation (11 agents)
 
-`citation-extractor` builds the references list → `apa-citation-specialist` formats per APA 7 → `citation-validator` confirms every claim has a complete citation (Author, Year, URL, page/paragraph) → `reproducibility-checker` verifies methods are independently replicable → `consistency-validator` cross-checks chapter references against actual document structure.
+`systematic-reviewer`, `ethics-reviewer`, `adversarial-reviewer`, `confidence-quantifier`, `citation-validator`, `reproducibility-checker`, `apa-citation-specialist`, `consistency-validator`, `quality-assessor`, `bias-detector`, and `file-length-manager` validate the draft before final assembly.
 
-Output: `phase7-citations.md` + final `references.bib`.
+Output: systematic review, ethics review, adversarial critique, confidence scores, citation validation, reproducibility report, APA audit, consistency report, quality assessment, bias analysis, and structure audit.
 
-### Final assembly
+### Phase 8: Final assembly (1 agent)
 
-The final-stage orchestrator assembles accepted agent outputs into the final
-research paper, preserving citation and confidence context from the audited
-agent records.
+`chapter-synthesizer` runs after Phase 7 validation as the final agent in the
+pipeline. It assembles accepted chapter outputs into the final research paper,
+preserving citation and confidence context from the audited agent records.
 
-Output: final research answer. Pipeline marks the session complete, runs
-completion integrity on the final answer in the CLI path, and stores the
-summary in bundle state.
+Output: a final research paper. After `chapter-synthesizer` finishes, Archon
+normalizes the accepted output into the canonical APA 7 paper structure, requires
+exactly one `References` section, keeps appendices after references, and writes:
+
+```
+<workdir>/.archon/pipelines/<session-id>/exports/final-paper.md
+<workdir>/.archon/pipelines/<session-id>/exports/final-paper.pdf
+```
+
+The pipeline then marks the session complete, runs completion integrity on the
+final answer in the CLI path, and stores the summary in bundle state.
+
+## Where outputs are written
+
+The audited bundle contains both raw trace data and usable research artifacts:
+
+| Path | Contents |
+|---|---|
+| `outputs/markdown/<nnn>-<agent>.md` | Canonical Markdown copy of every accepted agent output |
+| `outputs/artifacts/<nnn>-<agent>/...` | Named artifacts declared by that agent, such as chapter plans or validation reports |
+| `outputs/rlm/research/...` | Run-level memory namespace materialized as Markdown for inspection and resume/debugging |
+| `exports/final-paper.md` | Final normalized research paper |
+| `exports/final-paper.pdf` | Final rendered PDF |
+
+The research pipeline uses ingested docs/KB/provenance and the RLM bundle for
+research context. LEANN is code-context infrastructure for coding workflows and
+is not initialized for `/archon-research`.
 
 ## Live progress in the TUI
 
@@ -142,7 +177,7 @@ SESSION ID                                 KIND       PHASE       STATUS    STAR
 > /pipeline status 01HYCDF3RR…
 > /pipeline verify 01HYCDF3RR… --write-report
 > /pipeline inspect 01HYCDF3RR…
-Status:    InProgress (phase 3 of 7)
+Status:    InProgress (phase 3 of 8)
 Phase:     theoretical-synthesis
 Last agent: thematic-synthesizer (completed 4s ago)
 Cost:      $3.92 / $20.00 budget
@@ -175,6 +210,8 @@ Phase:     final assembly
 Total cost: $14.27
 Agents run: 46 / 46
 Bundle: .archon/pipelines/01HYCDF3RR…
+Final paper Markdown: .archon/pipelines/01HYCDF3RR…/exports/final-paper.md
+Final paper PDF: .archon/pipelines/01HYCDF3RR…/exports/final-paper.pdf
 Total sources cited: 47
 Final draft: 11428 words
 Duration: 18m 42s

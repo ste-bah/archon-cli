@@ -1272,21 +1272,21 @@ graph TD
 
 ```bash
 # Discovery Phase (Agents #1-4)
-# (removed: claude-flow memory retrieve --namespace "search/discovery" --key "structure-map")
-# (removed: claude-flow memory retrieve --namespace "search/discovery" --key "flow-analysis")
-# (removed: claude-flow memory retrieve --namespace "search/discovery" --key "dependency-graph")
-# (removed: claude-flow memory retrieve --namespace "search/discovery" --key "context-package")
+# (removed: Archon memory retrieve --namespace "search/discovery" --key "structure-map")
+# (removed: Archon memory retrieve --namespace "search/discovery" --key "flow-analysis")
+# (removed: Archon memory retrieve --namespace "search/discovery" --key "dependency-graph")
+# (removed: Archon memory retrieve --namespace "search/discovery" --key "context-package")
 
 # Analysis Phase (Agents #5-7)
-# (removed: claude-flow memory retrieve --namespace "search/analysis" --key "gap-analysis")
-# (removed: claude-flow memory retrieve --namespace "search/analysis" --key "risk-fmea")
-# (removed: claude-flow memory retrieve --namespace "search/analysis" --key "pattern-insights")
+# (removed: Archon memory retrieve --namespace "search/analysis" --key "gap-analysis")
+# (removed: Archon memory retrieve --namespace "search/analysis" --key "risk-fmea")
+# (removed: Archon memory retrieve --namespace "search/analysis" --key "pattern-insights")
 
 # Synthesis Phase (Agents #8-11)
-# (removed: claude-flow memory retrieve --namespace "search/synthesis" --key "opportunity-portfolio")
-# (removed: claude-flow memory retrieve --namespace "search/synthesis" --key "adversarial-review")
-# (removed: claude-flow memory retrieve --namespace "search/synthesis" --key "confidence-assessment")
-# (removed: claude-flow memory retrieve --namespace "search/synthesis" --key "meta-insights")
+# (removed: Archon memory retrieve --namespace "search/synthesis" --key "opportunity-portfolio")
+# (removed: Archon memory retrieve --namespace "search/synthesis" --key "adversarial-review")
+# (removed: Archon memory retrieve --namespace "search/synthesis" --key "confidence-assessment")
+# (removed: Archon memory retrieve --namespace "search/synthesis" --key "meta-insights")
 ```
 
 ### Storage Protocol
@@ -1294,7 +1294,7 @@ graph TD
 **Store Final Report**:
 
 ```bash
-# (removed: claude-flow memory store --namespace "search/synthesis" --key "final-report" --value '{)
+# (removed: Archon memory store --namespace "search/synthesis" --key "final-report" --value '{)
   "executive_summary": {
     "key_findings": [...],
     "recommendations": [...],

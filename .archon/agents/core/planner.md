@@ -126,7 +126,7 @@ plan:
 }
 
 // Share task breakdown
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/planner/task-breakdown",
   namespace: "coordination",
@@ -151,7 +151,7 @@ mcp__memorygraph__get_memory_statistics {
 ### Memory Coordination
 ```javascript
 // Report planning status
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/planner/status",
   namespace: "coordination",

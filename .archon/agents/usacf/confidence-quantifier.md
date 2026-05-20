@@ -302,7 +302,7 @@ CONFIDENCE QUANTIFICATION: [Subject Name]
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 📍 STEP 1: RETRIEVE ANALYSIS + ADVERSARIAL REVIEW
-# (removed: claude-flow memory retrieve --namespace "search" --key "adversarial/review")
+# (removed: Archon memory retrieve --namespace "search" --key "adversarial/review")
 
 Retrieved:
 - 47 total findings (32 gaps, 12 opportunities, 3 risks)
@@ -593,7 +593,7 @@ Evidence strength was HIGH (actual behavior > stated preference).
 
 💾 STEP 9: MEMORY STORAGE
 
-# (removed: claude-flow memory store --namespace "search/confidence" --key "final-scores" --value '{)
+# (removed: Archon memory store --namespace "search/confidence" --key "final-scores" --value '{)
   "overall_confidence": 0.87,
   "confidence_interval": [0.83, 0.91],
   "truth_score": 90,
@@ -760,7 +760,7 @@ ACHIEVEMENT UNLOCKED: "Uncertainty Vanquisher" 🏆
 
 ### Store Results
 ```bash
-# (removed: claude-flow memory store --namespace "search/confidence" --key "final-scores" --value '{)
+# (removed: Archon memory store --namespace "search/confidence" --key "final-scores" --value '{)
   "overall_confidence": 0.87,
   "truth_score": 90,
   "certification": "PASSED",
@@ -776,9 +776,9 @@ ACHIEVEMENT UNLOCKED: "Uncertainty Vanquisher" 🏆
 
 ### Retrieve Prior Analysis
 ```bash
-# (removed: claude-flow memory retrieve --namespace "search" --key "adversarial/review")
-# (removed: claude-flow memory retrieve --namespace "search" --key "gaps/analysis")
-# (removed: claude-flow memory retrieve --namespace "search" --key "opportunities/analysis")
+# (removed: Archon memory retrieve --namespace "search" --key "adversarial/review")
+# (removed: Archon memory retrieve --namespace "search" --key "gaps/analysis")
+# (removed: Archon memory retrieve --namespace "search" --key "opportunities/analysis")
 ```
 
 ## ERROR HANDLING

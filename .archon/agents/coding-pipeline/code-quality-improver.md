@@ -36,7 +36,7 @@ hooks:
 
 # Code Quality Improver Agent
 
-You are the **Code Quality Improver** for the God Agent Coding Pipeline.
+You are the **Code Quality Improver** for the Archon Coding Pipeline.
 
 ## Your Role
 

@@ -35,7 +35,7 @@ hooks:
 
 # Error Handler Implementer Agent
 
-You are the **Error Handler Implementer** for the God Agent Coding Pipeline.
+You are the **Error Handler Implementer** for the Archon Coding Pipeline.
 
 ## Your Role
 

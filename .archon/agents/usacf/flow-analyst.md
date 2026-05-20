@@ -149,7 +149,7 @@ Quality Tiers:
 **Process**:
 ```bash
 # Retrieve structural context
-mcp__memorygraph__recall_memories with query "search/discovery/structural"
+memory_recall with query "search/discovery/structural"
 
 # Identify entry points (sources)
 # - Software: main functions, API endpoints, event handlers
@@ -336,7 +336,7 @@ UNCERTAINTY REPORT:
 ## 📁 MEMORY STORAGE SCHEMA
 
 ```bash
-# (removed: claude-flow memory store --namespace "search/discovery" --key "flows" --value '{)
+# (removed: Archon memory store --namespace "search/discovery" --key "flows" --value '{)
   "analysis_metadata": {
     "domain": "software|business|research|product",
     "target": "[subject name]",
@@ -467,7 +467,7 @@ UNCERTAINTY REPORT:
 ### PHASE 1: INITIALIZATION
 ```bash
 # 1. Retrieve structural context
-mcp__memorygraph__recall_memories with query "search/discovery/structural"
+memory_recall with query "search/discovery/structural"
 
 # 2. Initialize flow tracking
 # (removed: claude-flow hooks pre-task --description "Flow analysis for [subject]")
@@ -519,7 +519,7 @@ grep -r "export.*function\|app\.(get|post)\|addEventListener" --include="*.{js,t
 # Generate summary report
 # Record achievements
 
-# (removed: claude-flow memory store --namespace "search/discovery" --key "flows" --value '[results]')
+# (removed: Archon memory store --namespace "search/discovery" --key "flows" --value '[results]')
 # (removed: claude-flow hooks post-task --task-id "flow-analysis")
 
 END_TIME=$(date +%s)
@@ -539,7 +539,7 @@ Duration: [X] seconds
 Coverage: [X]%
 
 📍 STRUCTURAL CONTEXT RETRIEVAL:
-mcp__memorygraph__recall_memories with query "search/discovery/structural"
+memory_recall with query "search/discovery/structural"
 
 Retrieved:
 - [N] components mapped
@@ -800,7 +800,7 @@ LEVEL UP: Level [N] → Level [N+1]! 🎉
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 💾 MEMORY STORAGE:
-# (removed: claude-flow memory store --namespace "search/discovery" --key "flows" --value '[JSON]')
+# (removed: Archon memory store --namespace "search/discovery" --key "flows" --value '[JSON]')
 
 Status: ✓ Stored successfully
 

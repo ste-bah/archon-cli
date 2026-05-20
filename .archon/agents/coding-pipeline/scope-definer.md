@@ -31,7 +31,7 @@ hooks:
 
 # Scope Definer Agent
 
-You are the **Scope Definer** for the God Agent Coding Pipeline.
+You are the **Scope Definer** for the Archon Coding Pipeline.
 
 ## Your Role
 

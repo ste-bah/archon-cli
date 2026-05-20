@@ -538,7 +538,7 @@ success_criteria:
 # (removed: claude-flow hooks session-restore --session-id "step-back-$(date +%s)")
 
 # 2. Check for prior analysis
-# (removed: claude-flow memory retrieve --namespace "search/meta" --key "principles")
+# (removed: Archon memory retrieve --namespace "search/meta" --key "principles")
 
 # 3. Initialize performance tracking
 # (removed: claude-flow hooks pre-task --description "Step-back principle analysis")
@@ -722,7 +722,7 @@ Next Steps for Downstream Agents:
 
 ```bash
 # Store complete analysis
-# (removed: claude-flow memory store --namespace "search/meta" --key "principles" --value '{)
+# (removed: Archon memory store --namespace "search/meta" --key "principles" --value '{)
   "timestamp": "ISO-8601",
   "domain": {
     "primary": "string",
@@ -772,17 +772,17 @@ Next Steps for Downstream Agents:
 }'
 
 # Store for quick retrieval
-# (removed: claude-flow memory store --namespace "search/quick" --key "last_principles" --value '{...abbreviated...}')
+# (removed: Archon memory store --namespace "search/quick" --key "last_principles" --value '{...abbreviated...}')
 ```
 
 ### Retrieval for Downstream Agents
 
 ```bash
 # Domain analyzers retrieve principles
-# (removed: claude-flow memory retrieve --namespace "search/meta" --key "principles")
+# (removed: Archon memory retrieve --namespace "search/meta" --key "principles")
 
 # Use in evaluation
-# (removed: claude-flow memory search --namespace "search/meta" --pattern "anti_patterns")
+# (removed: Archon memory search --namespace "search/meta" --pattern "anti_patterns")
 ```
 
 ---
@@ -815,13 +815,13 @@ Stored for: All downstream agents
 
 ```bash
 # Receive task
-INPUT=$(# (removed: claude-flow memory retrieve --namespace "search/meta" --key "task"))
+INPUT=$(# (removed: Archon memory retrieve --namespace "search/meta" --key "task"))
 
 # Perform analysis
 # [Execute step-back analysis]
 
 # Store results
-# (removed: claude-flow memory store --namespace "search/meta" --key "principles" --value "{...}")
+# (removed: Archon memory store --namespace "search/meta" --key "principles" --value "{...}")
 
 # Notify next agents
 # (removed: claude-flow hooks notify --message "Principles extracted, ready for domain analysis")
@@ -984,13 +984,13 @@ universal_patterns:
 # (removed: claude-flow hooks post-task --task-id "step-back-[id]" --export-metrics true)
 
 # Train neural patterns
-# (removed: claude-flow neural train --pattern_type "principle_extraction" --training_data "$(# (removed: claude-flow memory retrieve --namespace search/meta --key principles)"))
+# (removed: claude-flow neural train --pattern_type "principle_extraction" --training_data "$(# (removed: Archon memory retrieve --namespace search/meta --key principles)"))
 
 # Analyze performance
 # (removed: claude-flow agent metrics --agentId "step-back-analyzer")
 
 # Update anti-pattern library
-# (removed: claude-flow memory store --namespace "search/learning" --key "new_anti_patterns" --value "{...}")
+# (removed: Archon memory store --namespace "search/learning" --key "new_anti_patterns" --value "{...}")
 ```
 
 ### Continuous Learning Goals

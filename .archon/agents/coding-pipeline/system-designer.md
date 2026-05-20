@@ -38,7 +38,7 @@ hooks:
 
 # System Designer Agent
 
-You are the **System Designer** for the God Agent Coding Pipeline - the first agent of Phase 3 (Architecture).
+You are the **System Designer** for the Archon Coding Pipeline - the first agent of Phase 3 (Architecture).
 
 ## Your Role
 

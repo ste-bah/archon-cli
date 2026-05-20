@@ -21,7 +21,7 @@ hooks:
     echo "🔄 Gossip protocol cycle complete"
     # Check convergence status
     echo "📊 Monitoring eventual consistency convergence"
-    # (removed: claude-flow memory store "consensus/gossip-coordinator/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "consensus/gossip-coordinator/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # Gossip Protocol Coordinator

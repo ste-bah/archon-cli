@@ -643,21 +643,21 @@ Example: "Coupling at the data layer causes cascading failures during schema mig
 **MEMORY STORAGE STRATEGY**:
 ```bash
 # HOT - Store in primary namespace with short keys
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/meta" \
   --key "principles" \
   --value '[{...}]' \
   --ttl 86400
 
 # WARM - Store with longer TTL, descriptive keys
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/meta" \
   --key "self-ask-questions" \
   --value '[{...}]' \
   --ttl 43200
 
 # COLD - Store in archive namespace
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/archive" \
   --key "metadata-[timestamp]" \
   --value '{...}' \

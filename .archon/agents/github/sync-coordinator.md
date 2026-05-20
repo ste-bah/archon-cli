@@ -4,25 +4,12 @@ description: Multi-repository synchronization coordinator that manages version a
 type: coordination
 color: "#9B59B6"
 tools:
-  - mcp__github__push_files
-  - mcp__github__create_or_update_file
-  - mcp__github__get_file_contents
-  - mcp__github__create_pull_request
-  - mcp__github__search_repositories
-  - mcp__github__list_repositories
-  - # (swarm tool removed)
-  - # (claude-flow tool agent_spawn removed)
-  - # (claude-flow tool task_orchestrate removed)
-  - mcp__memorygraph__get_memory_statistics
-  - # (claude-flow tool coordination_sync removed)
-  - # (claude-flow tool load_balance removed)
-  - TodoWrite
-  - TodoRead
   - Bash
+  - memory_recall
+  - TodoWrite
   - Read
   - Write
   - Edit
-  - MultiEdit
 hooks:
   pre: |
     echo "Initialize multi-repository synchronization swarm with hierarchical coordination"
@@ -32,7 +19,7 @@ hooks:
     echo "Validate synchronization success across all coordinated repositories"
     echo "Update package documentation with synchronization status and metrics"
     echo "Generate comprehensive synchronization report with recommendations"
-    # (removed: claude-flow memory store "github/sync-coordinator/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "github/sync-coordinator/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # GitHub Sync Coordinator
@@ -48,13 +35,13 @@ Multi-package synchronization and version alignment with ruv-swarm coordination 
 - **Release coordination** with automated deployment pipelines
 
 ## Tools Available
-- `mcp__github__push_files`
-- `mcp__github__create_or_update_file`
-- `mcp__github__get_file_contents`
-- `mcp__github__create_pull_request`
-- `mcp__github__search_repositories`
+- `Bash`
+- `Bash`
+- `Bash`
+- `Bash`
+- `Bash`
 - (swarm tools removed)
-- `TodoWrite`, `TodoRead`, `Task`, `Bash`, `Read`, `Write`, `Edit`, `MultiEdit`
+- `TodoWrite`, `TodoWrite`, `Task`, `Bash`, `Read`, `Write`, `Edit`, `Edit`
 
 ## Usage Patterns
 
@@ -110,7 +97,7 @@ Bash(`gh api repos/:owner/:repo/contents/claude-code-flow/claude-code-flow/CLAUD
   -f sha="$(gh api repos/:owner/:repo/contents/claude-code-flow/claude-code-flow/CLAUDE.md?ref=sync/documentation --jq '.sha' 2>/dev/null || echo '')")`)
 
 // Store sync state in memory
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "sync/documentation/status",
   value: { timestamp: Date.now(), status: "synchronized", files: ["CLAUDE.md"] }
@@ -120,7 +107,7 @@ mcp__memorygraph__get_memory_statistics {
 ### 3. Cross-Package Feature Integration
 ```javascript
 // Coordinate feature implementation across packages
-mcp__github__push_files {
+Bash {
   owner: "ruvnet",
   repo: "ruv-FANN",
   branch: "feature/github-commands",
@@ -198,7 +185,7 @@ This integration uses ruv-swarm agents for:
   Read("/workspaces/ruv-FANN/ruv-swarm/docs/CLAUDE.md")
   
   // Synchronize multiple files simultaneously
-  mcp__github__push_files {
+  Bash {
     branch: "sync/complete-integration",
     files: [
       { path: "claude-code-flow/claude-code-flow/package.json", content: "[aligned package.json]" },
@@ -223,7 +210,7 @@ This integration uses ruv-swarm agents for:
   ]}
   
   // Store comprehensive sync state
-  mcp__memorygraph__get_memory_statistics {
+  memory_recall {
     action: "store",
     key: "sync/complete/status",
     value: {
@@ -361,15 +348,15 @@ const testMatrix = {
 // Advanced conflict detection and resolution
 const syncConflictResolver = async (conflicts) => {
   // Initialize conflict resolution swarm
-  await mcp__claude_flow__swarm_init({ topology: "mesh", maxAgents: 6 });
+  await Agent({ topology: "mesh", maxAgents: 6 });
   
   // Spawn specialized conflict resolution agents
-  await mcp__claude_flow__agent_spawn({ type: "analyst", name: "Conflict Analyzer" });
-  await mcp__claude_flow__agent_spawn({ type: "coder", name: "Resolution Developer" });
-  await mcp__claude_flow__agent_spawn({ type: "reviewer", name: "Solution Validator" });
+  await Agent({ type: "analyst", name: "Conflict Analyzer" });
+  await Agent({ type: "coder", name: "Resolution Developer" });
+  await Agent({ type: "reviewer", name: "Solution Validator" });
   
   // Store conflict context in swarm memory
-  await mcp__claude_flow__memory_usage({
+  await memory_recall({
     action: "store",
     key: "sync/conflicts/current",
     value: {
@@ -380,7 +367,7 @@ const syncConflictResolver = async (conflicts) => {
   });
   
   // Coordinate conflict resolution workflow
-  return await mcp__claude_flow__task_orchestrate({
+  return await Agent({
     task: "Resolve synchronization conflicts with multi-agent validation",
     strategy: "sequential",
     priority: "high"
@@ -391,7 +378,7 @@ const syncConflictResolver = async (conflicts) => {
 ### Comprehensive Synchronization Metrics
 ```bash
 # Store detailed synchronization metrics
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "sync/metrics/session",
   value: {
@@ -425,7 +412,7 @@ mcp__memorygraph__get_memory_statistics {
 # (claude-flow tool coordination_sync removed) { swarmId: "error-recovery-swarm" }
 
 # Store recovery state
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "sync/recovery/state",
   value: {

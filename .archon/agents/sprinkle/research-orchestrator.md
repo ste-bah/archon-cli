@@ -11,7 +11,7 @@ capabilities:
   - timeline_management
   - deliverable_integration
 priority: critical
-tools: Read, Write, Grep, Glob, Bash, Task
+tools: Read, Write, Grep, Glob, Bash, Agent
 ---
 
 # Research Orchestrator

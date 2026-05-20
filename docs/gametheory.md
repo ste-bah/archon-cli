@@ -113,6 +113,13 @@ Interactive TUI users get one umbrella command:
 | `/gametheory list-agents [--tier N]` | List specialists |
 | `/gametheory specimens [--filter axis=value] [--ingest]` | Inspect specimen library |
 
+When used from the TUI, Tier 1 classification agents and routed specialists run
+through Archon's subagent executor. The game-theory lane itself is unchanged:
+the YAML routing graph, dependency waves, checkpoints, and Cozo tables still
+control the run. The subagent layer supplies runtime parity with `/archon-code`
+and `/archon-research`: tool filtering, memory/doc access, transcripts, hooks,
+and live Agent Activity rows.
+
 ## End-to-end TUI walkthrough
 
 The pipeline is async — `/gametheory run` queues a run and returns immediately with a `run-id`. You then use the inspection commands to watch it progress. Here's a real session for evaluating a strategic decision.

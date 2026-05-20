@@ -203,7 +203,7 @@ search_strategy:
 
 ```javascript
 // Report research progress
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/researcher/status",
   namespace: "coordination",
@@ -219,7 +219,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Share research findings
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/arc-A-findings",
   namespace: "coordination",
@@ -232,7 +232,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Check for prior research
-mcp__memorygraph__search_memories {
+memory_recall {
   pattern: "swarm/shared/arc-*",
   namespace: "coordination",
   limit: 10

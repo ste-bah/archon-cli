@@ -42,39 +42,40 @@ fn test_all_agents_have_web_tools() {
 }
 
 #[test]
-fn test_phase_6_agents_have_write() {
-    let phase_6_keys: HashSet<&str> = [
+fn test_writing_agents_have_write() {
+    let write_agent_keys: HashSet<&str> = [
         "introduction-writer",
         "literature-review-writer",
         "results-writer",
         "discussion-writer",
         "conclusion-writer",
         "abstract-writer",
+        "chapter-synthesizer",
     ]
     .into_iter()
     .collect();
 
     for agent in RESEARCH_AGENTS.iter() {
-        if agent.phase == 6 {
+        if agent.phase == 6 || agent.phase == 8 {
             assert!(
-                phase_6_keys.contains(agent.key),
-                "Unexpected phase 6 agent: {}",
+                write_agent_keys.contains(agent.key),
+                "Unexpected writing/final assembly agent: {}",
                 agent.key
             );
             assert!(
                 agent.tool_access.contains(&ResearchToolAccess::Write),
-                "Phase 6 agent '{}' must have Write tool access",
+                "Writing/final assembly agent '{}' must have Write tool access",
                 agent.key
             );
         }
     }
 
-    // Also verify non-phase-6 agents do NOT have Write
+    // Also verify non-writing agents do NOT have Write.
     for agent in RESEARCH_AGENTS.iter() {
-        if agent.phase != 6 {
+        if !write_agent_keys.contains(agent.key) {
             assert!(
                 !agent.tool_access.contains(&ResearchToolAccess::Write),
-                "Non-phase-6 agent '{}' should not have Write tool access",
+                "Non-writing agent '{}' should not have Write tool access",
                 agent.key
             );
         }
@@ -83,23 +84,24 @@ fn test_phase_6_agents_have_write() {
 
 #[test]
 fn test_phase_counts() {
-    let mut counts = [0u32; 8]; // index 0 unused, 1-7 for phases
+    let mut counts = [0u32; 9]; // index 0 unused, 1-8 for phases
     for agent in RESEARCH_AGENTS.iter() {
         assert!(
-            (1..=7).contains(&agent.phase),
+            (1..=8).contains(&agent.phase),
             "Agent '{}' has invalid phase {}",
             agent.key,
             agent.phase
         );
         counts[agent.phase as usize] += 1;
     }
-    assert_eq!(counts[1], 7, "Phase 1 should have 7 agents");
+    assert_eq!(counts[1], 6, "Phase 1 should have 6 agents");
     assert_eq!(counts[2], 4, "Phase 2 should have 4 agents");
     assert_eq!(counts[3], 4, "Phase 3 should have 4 agents");
     assert_eq!(counts[4], 5, "Phase 4 should have 5 agents");
     assert_eq!(counts[5], 9, "Phase 5 should have 9 agents");
     assert_eq!(counts[6], 6, "Phase 6 should have 6 agents");
     assert_eq!(counts[7], 11, "Phase 7 should have 11 agents");
+    assert_eq!(counts[8], 1, "Phase 8 should have 1 agent");
 }
 
 #[test]
@@ -126,27 +128,34 @@ fn test_agent_lookup_by_key() {
     let agent = agent.unwrap();
     assert_eq!(agent.phase, 7);
 
+    // Check final assembly
+    let agent = get_agent_by_key("chapter-synthesizer");
+    assert!(agent.is_some(), "chapter-synthesizer must be found");
+    let agent = agent.unwrap();
+    assert_eq!(agent.phase, 8);
+
     // Non-existent key
     assert!(get_agent_by_key("nonexistent").is_none());
 }
 
 #[test]
 fn test_get_agents_by_phase() {
-    assert_eq!(get_agents_by_phase(1).len(), 7);
+    assert_eq!(get_agents_by_phase(1).len(), 6);
     assert_eq!(get_agents_by_phase(2).len(), 4);
     assert_eq!(get_agents_by_phase(3).len(), 4);
     assert_eq!(get_agents_by_phase(4).len(), 5);
     assert_eq!(get_agents_by_phase(5).len(), 9);
     assert_eq!(get_agents_by_phase(6).len(), 6);
     assert_eq!(get_agents_by_phase(7).len(), 11);
-    assert_eq!(get_agents_by_phase(8).len(), 0);
+    assert_eq!(get_agents_by_phase(8).len(), 1);
 }
 
 #[test]
 fn test_get_agent_index() {
     assert_eq!(get_agent_index("step-back-analyzer"), Some(0));
     assert_eq!(get_agent_index("self-ask-decomposer"), Some(1));
-    assert_eq!(get_agent_index("file-length-manager"), Some(45));
+    assert_eq!(get_agent_index("file-length-manager"), Some(44));
+    assert_eq!(get_agent_index("chapter-synthesizer"), Some(45));
     assert_eq!(get_agent_index("nonexistent"), None);
 }
 
@@ -157,14 +166,18 @@ fn test_get_phase_by_id() {
     let phase = phase.unwrap();
     assert_eq!(phase.id, 1);
     assert_eq!(phase.name, "Foundation");
-    assert_eq!(phase.agent_keys.len(), 7);
+    assert_eq!(phase.agent_keys.len(), 6);
 
     let phase = get_phase_by_id(7).unwrap();
     assert_eq!(phase.name, "Validation");
     assert_eq!(phase.agent_keys.len(), 11);
 
+    let phase = get_phase_by_id(8).unwrap();
+    assert_eq!(phase.name, "Final Assembly");
+    assert_eq!(phase.agent_keys, &["chapter-synthesizer"]);
+
     assert!(get_phase_by_id(0).is_none());
-    assert!(get_phase_by_id(8).is_none());
+    assert!(get_phase_by_id(9).is_none());
 }
 
 #[test]
@@ -211,6 +224,7 @@ fn test_phase_names() {
         (5, "Design"),
         (6, "Writing"),
         (7, "Validation"),
+        (8, "Final Assembly"),
     ];
     for (id, name) in &expected {
         let phase = get_phase_by_id(*id).unwrap();
@@ -220,7 +234,7 @@ fn test_phase_names() {
 
 #[test]
 fn test_research_phases_count() {
-    assert_eq!(RESEARCH_PHASES.len(), 7, "Must have exactly 7 phases");
+    assert_eq!(RESEARCH_PHASES.len(), 8, "Must have exactly 8 phases");
 }
 
 #[test]

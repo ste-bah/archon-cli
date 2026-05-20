@@ -26,6 +26,7 @@ mod interactive_finish;
 mod interactive_setup;
 mod interactive_ui;
 mod modes;
+mod pipeline_adapter;
 mod reasoning_quality;
 mod slash_context_builder;
 mod splash;

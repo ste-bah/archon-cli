@@ -21,7 +21,7 @@ hooks:
     echo "📈 Performance analysis complete"
     # Generate performance report
     echo "📋 Compiling benchmarking results and recommendations"
-    # (removed: claude-flow memory store "consensus/performance-benchmarker/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "consensus/performance-benchmarker/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # Performance Benchmarker

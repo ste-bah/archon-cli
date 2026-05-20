@@ -16,7 +16,7 @@ hooks:
     echo "🎯 Task Orchestrator initializing"
     memory_store "orchestrator_start" "$(date +%s)"
     # Check for existing task plans
-    memory_search "task_plan" | tail -1
+    memory_recall "task_plan" | tail -1
   post: |
     echo "✅ Task orchestration complete"
     memory_store "orchestration_complete_$(date +%s)" "Tasks distributed and monitored"

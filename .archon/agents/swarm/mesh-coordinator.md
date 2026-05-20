@@ -21,13 +21,13 @@ hooks:
     # Initialize consensus mechanisms
     # (claude-flow tool daa_consensus removed) --agents="all" --proposal="{\"coordination_protocol\":\"gossip\",\"consensus_threshold\":0.67}"
     # Store network state
-    mcp__memorygraph__get_memory_statistics store "mesh:network:${TASK_ID}" "$(date): Mesh network initialized" --namespace=mesh
+    memory_recall store "mesh:network:${TASK_ID}" "$(date): Mesh network initialized" --namespace=mesh
   post: |
     echo "✨ Mesh coordination complete - network resilient"
     # Generate network analysis
     # (claude-flow tool performance_report removed) --format=json --timeframe=24h
     # Store final network metrics
-    mcp__memorygraph__get_memory_statistics store "mesh:metrics:${TASK_ID}" "$(# (swarm tool removed))" --namespace=mesh
+    memory_recall store "mesh:metrics:${TASK_ID}" "$(# (swarm tool removed))" --namespace=mesh
     # Graceful network shutdown
     # (claude-flow tool daa_communication removed) --from="mesh-coordinator" --to="all" --message="{\"type\":\"network_shutdown\",\"reason\":\"task_complete\"}"
 ---

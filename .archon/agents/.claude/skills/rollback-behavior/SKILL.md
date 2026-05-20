@@ -29,7 +29,7 @@ Validate:
 ## Step 2: Retrieve Version History
 
 Search MemoryGraph for all behavior rules (active AND inactive) for this scope:
-- Call `mcp__memorygraph__search_memories` with tags `["behavior-rule", "{agent_scope}"]`
+- Call `memory_recall` with tags `["behavior-rule", "{agent_scope}"]`
 - Parse each result's content as JSON
 - Group by `rule_group_id`
 - Within each group, sort by `version` DESC

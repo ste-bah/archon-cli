@@ -254,7 +254,7 @@ query_design_principles:
 
 ```javascript
 // Report gap analysis status
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/gap-identifier/status",
   namespace: "coordination",
@@ -271,7 +271,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Share critical gaps
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/critical-gaps",
   namespace: "coordination",
@@ -292,7 +292,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Track gap resolution
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/gap-tracker/GAP-A1",
   namespace: "coordination",

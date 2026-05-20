@@ -20,7 +20,7 @@ hooks:
     echo "✅ System mapping complete"
     echo "📈 Architecture documented with visual diagrams"
     find docs/01_system_mapping -name "*.md" 2>/dev/null | wc -l | xargs echo "Documents created:"
-    # (removed: claude-flow memory store "systeminspect/system-mapper/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "systeminspect/system-mapper/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # System Discovery & Mapping Specialist

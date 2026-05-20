@@ -16,7 +16,7 @@ hooks:
     echo "🔤 SPARC Pseudocode phase initiated"
     memory_store "sparc_phase" "pseudocode"
     # Retrieve specification from memory
-    memory_search "spec_complete" | tail -1
+    memory_recall "spec_complete" | tail -1
   post: |
     echo "✅ Pseudocode phase complete"
     memory_store "pseudo_complete_$(date +%s)" "Algorithms designed"

@@ -19,9 +19,8 @@ tools:
   - Glob
   - Grep
   - Bash
-  - mcp__memorygraph__get_memory_statistics
-  - mcp__serena__find_symbol
-  - mcp__serena__find_referencing_symbols
+  - memory_recall
+  - lsp
 ---
 
 # Integration Point Discoverer Agent
@@ -82,7 +81,7 @@ Grep("pydantic|marshmallow", output_mode: "content", glob: "**/*.py", -C: 2)
 
 **Step 3: Identify Schema Integration Opportunities**
 ```javascript
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan/integration",
   key: "schema-integration-points",
@@ -147,7 +146,7 @@ Grep("queue\\.add|task\\.delay|job\\.create", output_mode: "content", glob: "**/
 **Step 2: Analyze Workflow Data Structures**
 ```bash
 # Find workflow state definitions
-mcp__serena__find_symbol({
+lsp({
   name_path: "workflow",
   substring_matching: true,
   include_body: true
@@ -162,7 +161,7 @@ Grep("steps|stages|phases|tasks", output_mode: "content", glob: "**/workflows/**
 
 **Step 3: Map Workflow Visualization Opportunities**
 ```javascript
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan/integration",
   key: "workflow-visualization-points",
@@ -310,7 +309,7 @@ Grep("GET.*config|POST.*config|PUT.*config", output_mode: "content", glob: "**/a
 
 **Step 3: Map Parameterization Opportunities**
 ```javascript
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan/integration",
   key: "parameterization-points",
@@ -461,7 +460,7 @@ Grep("broadcast|emit|publish", output_mode: "content", glob: "**/socket/**/*.{js
 
 **Step 3: Identify Real-time Integration Opportunities**
 ```javascript
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan/integration",
   key: "realtime-integration-points",
@@ -592,13 +591,13 @@ mcp__memorygraph__get_memory_statistics({
 **Step 1: Cross-Reference Integration Points**
 ```javascript
 // Retrieve data from other SCAN agents
-const techStack = mcp__memorygraph__get_memory_statistics({
+const techStack = memory_recall({
   action: "retrieve",
   namespace: "sapire/scan",
   key: "technology-inventory"
 })
 
-const architecture = mcp__memorygraph__get_memory_statistics({
+const architecture = memory_recall({
   action: "retrieve",
   namespace: "sapire/scan/architecture",
   key: "complete-architecture"
@@ -607,7 +606,7 @@ const architecture = mcp__memorygraph__get_memory_statistics({
 
 **Step 2: Identify Integration Gaps**
 ```javascript
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan/integration",
   key: "gap-analysis",
@@ -734,14 +733,14 @@ mcp__memorygraph__get_memory_statistics({
 **Retrieve Architecture Data:**
 ```javascript
 // Get data from Architecture Mapper
-const architecture = mcp__memorygraph__get_memory_statistics({
+const architecture = memory_recall({
   action: "retrieve",
   namespace: "sapire/scan/architecture",
   key: "complete-architecture"
 })
 
 // Get data from Technology Stack Scanner
-const techStack = mcp__memorygraph__get_memory_statistics({
+const techStack = memory_recall({
   action: "retrieve",
   namespace: "sapire/scan",
   key: "technology-inventory"

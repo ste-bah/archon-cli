@@ -9,19 +9,8 @@ tools:
   - Write
   - Edit
   - TodoWrite
-  - TodoRead
-  - Task
+  - Agent
   - WebFetch
-  - mcp__github__create_pull_request
-  - mcp__github__merge_pull_request
-  - mcp__github__create_branch
-  - mcp__github__push_files
-  - mcp__github__create_issue
-  - # (swarm tool removed)
-  - # (claude-flow tool agent_spawn removed)
-  - # (claude-flow tool task_orchestrate removed)
-  - # (claude-flow tool parallel_execute removed)
-  - # (claude-flow tool load_balance removed)
 hooks:
   pre_task: |
     echo "🐝 Initializing release swarm coordination..."

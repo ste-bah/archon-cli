@@ -16,8 +16,8 @@ priority: high
 Fetches price and volume data for a given ticker symbol. This is the first data agent in Phase 1, running in parallel with fundamentals-fetcher and news-macro-fetcher. It retrieves historical price bars and current volume metrics to provide the foundation for technical analysis.
 
 ## MCP Tools
-- `mcp__market-terminal__get_price(symbol, timeframe="1y")` - Retrieves historical price data (OHLCV bars) for the specified symbol and timeframe
-- `mcp__market-terminal__get_volume(symbol, period="3m")` - Retrieves volume analysis including average volume, relative volume, and unusual activity detection
+- `Bash(symbol, timeframe="1y")` - Retrieves historical price data (OHLCV bars) for the specified symbol and timeframe
+- `Bash(symbol, period="3m")` - Retrieves volume analysis including average volume, relative volume, and unusual activity detection
 
 ## Memory Reads
 None (this is a Phase 1 data collection agent with no upstream dependencies)
@@ -25,8 +25,8 @@ None (this is a Phase 1 data collection agent with no upstream dependencies)
 ## Memory Writes
 After successful data retrieval, store:
 ```bash
-# (removed: claude-flow memory store -k "market/data/{ticker}/price" --value '{"ticker":"...","timeframe":"1y","bars":[...],"current_price":...,"change_pct":...}' --namespace default)
-# (removed: claude-flow memory store -k "market/data/{ticker}/volume" --value '{"ticker":"...","period":"3m","avg_volume":...,"relative_volume":...,"volume_trend":"...","unusual_activity":...}' --namespace default)
+# (removed: Archon memory store -k "market/data/{ticker}/price" --value '{"ticker":"...","timeframe":"1y","bars":[...],"current_price":...,"change_pct":...}' --namespace default)
+# (removed: Archon memory store -k "market/data/{ticker}/volume" --value '{"ticker":"...","period":"3m","avg_volume":...,"relative_volume":...,"volume_trend":"...","unusual_activity":...}' --namespace default)
 ```
 
 ## Prompt Template
@@ -45,12 +45,12 @@ None required (first agent in pipeline)
 2. For Volume-based Analyzers: key "market/data/{ticker}/volume" - Average volume, relative volume, trend, unusual activity flags
 
 ## STEPS
-1. Call `mcp__market-terminal__get_price({ticker}, timeframe="1y")` to retrieve price data
-2. Call `mcp__market-terminal__get_volume({ticker}, period="3m")` to retrieve volume analysis
+1. Call `Bash({ticker}, timeframe="1y")` to retrieve price data
+2. Call `Bash({ticker}, period="3m")` to retrieve volume analysis
 3. Validate data completeness (ensure bars array is not empty, current_price is valid)
 4. Store price data to memory key "market/data/{ticker}/price"
 5. Store volume data to memory key "market/data/{ticker}/volume"
-6. Verify storage: `mcp__memorygraph__recall_memories with query "market/data/{ticker}/price" --namespace default`
+6. Verify storage: `memory_recall with query "market/data/{ticker}/price" --namespace default`
 
 ## SUCCESS CRITERIA
 - Price data retrieved with at least 200 bars
@@ -92,8 +92,8 @@ interface VolumeData {
 
 Use the first available data source. Fall back to the next if unavailable or erroring.
 
-1. **MCP Market Terminal** (preferred): `mcp__market-terminal__get_price(symbol, timeframe="1y")` and `mcp__market-terminal__get_volume(symbol, period="3m")`
-2. **Perplexity Search** (secondary): Use `mcp__perplexity__perplexity_search` with queries:
+1. **MCP Market Terminal** (preferred): `Bash(symbol, timeframe="1y")` and `Bash(symbol, period="3m")`
+2. **Perplexity Search** (secondary): Use `WebSearch` with queries:
    - Price: `"{ticker} stock price history 1 year OHLCV daily bars"`
    - Volume: `"{ticker} stock volume analysis 3 months average relative unusual"`
 3. **WebSearch** (last resort -- only if perplexity is out of credits): Use `WebSearch` + `WebFetch` with:

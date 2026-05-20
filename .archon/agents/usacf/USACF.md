@@ -166,7 +166,7 @@ Store as: search/meta/self-ask-questions
 **Set analysis depth parameters**:
 
 ```bash
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/config" \
   --key "depth-control" \
   --value '{
@@ -246,7 +246,7 @@ Store as: search/meta/research-plan
 **Organize context by access frequency**:
 
 ```bash
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/context" \
   --key "tier-structure" \
   --value '{
@@ -301,7 +301,7 @@ Task("memory-manager", "Load hot context for Phase 0: [list critical items]")
 # (memory managed by MemoryGraph MCP)
 
 # Enable observability logging
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/observability" \
   --key "config" \
   --value '{
@@ -314,7 +314,7 @@ Task("memory-manager", "Load hot context for Phase 0: [list critical items]")
   }'
 
 # Initialize Search Session with Enhanced Metadata
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/session" \
   --key "config" \
   --value '{
@@ -351,7 +351,7 @@ Task("memory-manager", "Load hot context for Phase 0: [list critical items]")
   }'
 
 # Initialize Enhanced State Space
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/state" \
   --key "current" \
   --value '{
@@ -367,7 +367,7 @@ Task("memory-manager", "Load hot context for Phase 0: [list critical items]")
   }'
 
 # Initialize Version Control
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/version-control" \
   --key "changelog" \
   --value '{
@@ -768,7 +768,7 @@ const META_SWARM = {
 # (removed: claude-flow coordination swarm-init --topology adaptive-hierarchical)
 
 # Enable parallel tool calling
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/config" \
   --key "parallelization" \
   --value '{
@@ -810,7 +810,7 @@ You are a specialized {domain} search operator in the Universal Search Algorithm
 ### Step-Back Principles
 ```bash
 # Retrieve guiding principles
-mcp__memorygraph__recall_memories with query "search/meta/principles"
+memory_recall with query "search/meta/principles"
 ```
 **Your analysis MUST align with**: {principles}
 **Avoid these anti-patterns**: {anti_patterns}
@@ -818,16 +818,16 @@ mcp__memorygraph__recall_memories with query "search/meta/principles"
 ### Self-Ask Integration
 Before starting, answer these pre-generated questions relevant to your mission:
 ```bash
-mcp__memorygraph__recall_memories with query "search/meta/self-ask-questions"
+memory_recall with query "search/meta/self-ask-questions"
 ```
 {filtered questions for this agent}
 
 ### Memory Retrieval (What You Inherit)
 ```bash
 # Retrieve work from previous agents (in parallel)
-mcp__memorygraph__recall_memories with query "search/{phase}/{key1}" &
-mcp__memorygraph__recall_memories with query "search/{phase}/{key2}" &
-mcp__memorygraph__recall_memories with query "search/{phase}/{key3}" &
+memory_recall with query "search/{phase}/{key1}" &
+memory_recall with query "search/{phase}/{key2}" &
+memory_recall with query "search/{phase}/{key3}" &
 wait
 ```
 
@@ -1073,7 +1073,7 @@ IF score < 100:
 ### Store for Future Agents
 ```bash
 # PRIMARY OUTPUT (what next agents need most)
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/{phase}/{type}" \
   --key "{component_id}" \
   --value '{
@@ -1088,7 +1088,7 @@ IF score < 100:
   }'
 
 # OBSERVABILITY DATA
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/observability/reasoning" \
   --key "{task_id}" \
   --value '{
@@ -1098,7 +1098,7 @@ IF score < 100:
   }'
 
 # VERSION CONTROL
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/version-control/changelog" \
   --key "{task_id}" \
   --value '{
@@ -3160,7 +3160,7 @@ Store retrospective as: search/learning/retrospectives/{search_id}
 `)
 
 # Update Learning Database
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/learning/sessions" \
   --key "{search_id}" \
   --value '{
@@ -3258,7 +3258,7 @@ done
 
 **Diagnosis:**
 ```bash
-mcp__memorygraph__recall_memories with query "search/{phase}/confidence/{agent_id}"
+memory_recall with query "search/{phase}/confidence/{agent_id}"
 ```
 
 **Solution:**
@@ -3273,7 +3273,7 @@ mcp__memorygraph__recall_memories with query "search/{phase}/confidence/{agent_i
 **Diagnosis:**
 Check validation criteria:
 ```bash
-mcp__memorygraph__recall_memories with query "search/validation/gates/{phase}"
+memory_recall with query "search/validation/gates/{phase}"
 ```
 
 **Solution:**
@@ -3286,7 +3286,7 @@ mcp__memorygraph__recall_memories with query "search/validation/gates/{phase}"
 
 **Diagnosis:**
 ```bash
-mcp__memorygraph__recall_memories with query "search/adversarial/critiques/{critique_id}"
+memory_recall with query "search/adversarial/critiques/{critique_id}"
 ```
 
 **Solution:**
@@ -3300,7 +3300,7 @@ mcp__memorygraph__recall_memories with query "search/adversarial/critiques/{crit
 
 **Diagnosis:**
 ```bash
-mcp__memorygraph__recall_memories with query "search/perspectives/conflicts/{conflict_id}"
+memory_recall with query "search/perspectives/conflicts/{conflict_id}"
 ```
 
 **Solution:**
@@ -3381,7 +3381,7 @@ echo "Time limit: $TIME_LIMIT"
 # (memory managed by MemoryGraph MCP)
 
 # Configure search
-# (removed: claude-flow memory store \)
+# (removed: Archon memory store \)
   --namespace "search/session" \
   --key "config" \
   --value "{
@@ -3452,7 +3452,7 @@ echo "[Phase 6] Learning & Retrospective..."
 
 # Output results
 echo "=== Search Complete ==="
-mcp__memorygraph__recall_memories with query "search/output/final-comprehensive-report" > report.md
+memory_recall with query "search/output/final-comprehensive-report" > report.md
 echo "Report saved: report.md"
 
 # Export metrics

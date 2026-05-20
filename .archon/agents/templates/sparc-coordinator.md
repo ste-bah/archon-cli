@@ -16,7 +16,7 @@ hooks:
     echo "🎯 SPARC Coordinator initializing methodology workflow"
     memory_store "sparc_session_start" "$(date +%s)"
     # Check for existing SPARC phase data
-    memory_search "sparc_phase" | tail -1
+    memory_recall "sparc_phase" | tail -1
   post: |
     echo "✅ SPARC coordination phase complete"
     memory_store "sparc_coord_complete_$(date +%s)" "SPARC methodology phases coordinated"

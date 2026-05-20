@@ -21,7 +21,7 @@ hooks:
     # Train adaptive models
     # (claude-flow tool neural_train removed) coordination --training_data="historical_swarm_data" --epochs=30
     # Store baseline metrics
-    mcp__memorygraph__get_memory_statistics store "adaptive:baseline:${TASK_ID}" "$(# (claude-flow tool performance_report removed) --format=json)" --namespace=adaptive
+    memory_recall store "adaptive:baseline:${TASK_ID}" "$(# (claude-flow tool performance_report removed) --format=json)" --namespace=adaptive
     # Set up real-time monitoring
     # (swarm tool removed) --interval=2000 --swarmId="${SWARM_ID}"
   post: |
@@ -33,7 +33,7 @@ hooks:
     # Export learned patterns
     # (claude-flow tool model_save removed) "adaptive-coordinator-${TASK_ID}" "/tmp/adaptive-model-$(date +%s).json"
     # Update persistent knowledge base
-    mcp__memorygraph__get_memory_statistics store "adaptive:learned:${TASK_ID}" "$(date): Adaptive patterns learned and saved" --namespace=adaptive
+    memory_recall store "adaptive:learned:${TASK_ID}" "$(date): Adaptive patterns learned and saved" --namespace=adaptive
 ---
 
 # Adaptive Swarm Coordinator

@@ -16,18 +16,18 @@ priority: high
 Analyzes price data using Elliott Wave Theory to identify wave patterns, fibonacci retracements, and trend direction. This is the second analysis agent in Phase 2, running in parallel with other methodology analyzers. Elliott Wave focuses on fractal price patterns and impulse/corrective wave structures.
 
 ## MCP Tools
-- `mcp__market-terminal__run_elliott(symbol)` - Executes Elliott Wave analysis to detect wave counts, fibonacci levels, and trend projections
+- `Bash(symbol)` - Executes Elliott Wave analysis to detect wave counts, fibonacci levels, and trend projections
 
 ## Memory Reads
 Before analysis, retrieve:
 ```bash
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/price" --namespace default
+memory_recall with query "market/data/{ticker}/price" --namespace default
 ```
 
 ## Memory Writes
 After successful analysis, store:
 ```bash
-# (removed: claude-flow memory store -k "market/analysis/{ticker}/elliott" --value '{"ticker":"...","methodology":"elliott_wave","direction":"...","confidence":...,"timeframe":"...","reasoning":"...","key_levels":{"support":[...],"resistance":[...]},"timestamp":"..."}' --namespace default)
+# (removed: Archon memory store -k "market/analysis/{ticker}/elliott" --value '{"ticker":"...","methodology":"elliott_wave","direction":"...","confidence":...,"timeframe":"...","reasoning":"...","key_levels":{"support":[...],"resistance":[...]},"timestamp":"..."}' --namespace default)
 ```
 
 ## Prompt Template
@@ -36,13 +36,13 @@ After successful analysis, store:
 Analyze ticker {ticker} using Elliott Wave Theory. Retrieve price data from MemoryGraph, perform Elliott Wave analysis, and store the methodology signal for composite scoring.
 
 ## PIPELINE CONTEXT -- READ THIS FIRST
-You are Agent #5 of 12 in a market analysis pipeline. Phase 1 agents have ALREADY fetched real market data and stored it to MemoryGraph. The data IS there. You MUST call mcp__memorygraph__recall_memories to retrieve it. Do NOT refuse this task -- the data exists in MemoryGraph right now.
+You are Agent #5 of 12 in a market analysis pipeline. Phase 1 agents have ALREADY fetched real market data and stored it to MemoryGraph. The data IS there. You MUST call memory_recall to retrieve it. Do NOT refuse this task -- the data exists in MemoryGraph right now.
 
 ## WORKFLOW CONTEXT
 Agent #5 of 12 | Phase 2: Analysis (Parallel) | Previous: Data Fetcher (price) | Next: Composite Scorer
 
 ## STEP 1: RETRIEVE DATA FROM MEMORYGRAPH
-Call the mcp__memorygraph__recall_memories tool with:
+Call the memory_recall tool with:
 - query: "market/data/{ticker}/price" -- returns current price, 52-week range, YTD change, price history
 
 This contains REAL market data stored by Phase 1 agents. Read the content field of each returned memory.
@@ -55,15 +55,15 @@ Using the retrieved price data, analyze:
 - Fibonacci extension levels for targets
 - Wave degree and trend direction
 
-If mcp__market-terminal__run_elliott is available, use it. If not, perform the analysis yourself based on the data.
+If Bash is available, use it. If not, perform the analysis yourself based on the data.
 
 ## STEP 3: STORE RESULTS TO MEMORYGRAPH
-Call mcp__memorygraph__store_memory with:
+Call memory_store with:
 - type: "general"
 - title: "market/analysis/{ticker}/elliott"
 - content: Your analysis including: direction (bullish/bearish/neutral), confidence (0.0-1.0), timeframe, reasoning, fibonacci levels as support/resistance
 - tags: ["market-analysis", "elliott-wave", "{ticker}"]
-7. Verify storage: `mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/elliott" --namespace default`
+7. Verify storage: `memory_recall with query "market/analysis/{ticker}/elliott" --namespace default`
 
 ## SUCCESS CRITERIA
 - Price data successfully retrieved from memory
@@ -95,8 +95,8 @@ interface MethodologySignal {
 
 Use the first available data source. Fall back to the next if unavailable or erroring.
 
-1. **MCP Market Terminal** (preferred): `mcp__market-terminal__run_elliott(symbol)` for structured Elliott Wave analysis
-2. **Perplexity Search** (secondary): Use `mcp__perplexity__perplexity_search` with query `"{ticker} Elliott Wave analysis wave count fibonacci retracement extension"`
+1. **MCP Market Terminal** (preferred): `Bash(symbol)` for structured Elliott Wave analysis
+2. **Perplexity Search** (secondary): Use `WebSearch` with query `"{ticker} Elliott Wave analysis wave count fibonacci retracement extension"`
 3. **WebSearch** (last resort -- only if perplexity is out of credits): Use `WebSearch` with `"{ticker} Elliott Wave analysis site:tradingview.com"` or `"{ticker} wave count fibonacci"`
 
 ### Memory Data Fallback

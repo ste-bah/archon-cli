@@ -377,7 +377,7 @@ interface ContextualMessaging {
 
 ```javascript
 // Report positioning development status
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/positioning/status",
   namespace: "coordination",
@@ -393,7 +393,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Share final validated positioning
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/final-positioning",
   namespace: "coordination",
@@ -413,7 +413,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Retrieve synthesis elements
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "retrieve",
   key: "swarm/shared/positioning-elements",
   namespace: "coordination"

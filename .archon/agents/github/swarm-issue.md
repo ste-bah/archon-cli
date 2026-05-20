@@ -4,18 +4,9 @@ description: GitHub issue-based swarm coordination agent that transforms issues 
 type: coordination
 color: "#FF6B35"
 tools:
-  - mcp__github__get_issue
-  - mcp__github__create_issue
-  - mcp__github__update_issue
-  - mcp__github__list_issues
-  - mcp__github__create_issue_comment
-  - # (swarm tool removed)
-  - # (claude-flow tool agent_spawn removed)
-  - # (claude-flow tool task_orchestrate removed)
-  - mcp__memorygraph__get_memory_statistics
-  - TodoWrite
-  - TodoRead
   - Bash
+  - memory_recall
+  - TodoWrite
   - Grep
   - Read
   - Write
@@ -28,7 +19,7 @@ hooks:
     echo "Update issue with swarm progress and agent assignments"
     echo "Create follow-up tasks based on swarm analysis results"
     echo "Generate comprehensive swarm coordination report"
-    # (removed: claude-flow memory store "github/swarm-issue/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "github/swarm-issue/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # Swarm Issue - Issue-Based Swarm Coordination
@@ -524,7 +515,7 @@ npx ruv-swarm github issue-init 567 \
 # (claude-flow tool agent_spawn removed) { type: "tester", name: "Validation Engineer" }
 
 # Store issue context in swarm memory
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "issue/#{issue_number}/context",
   value: { title: "issue_title", labels: ["labels"], complexity: "high" }
@@ -544,10 +535,10 @@ mcp__memorygraph__get_memory_statistics {
 const preHook = async (issue) => {
   // Initialize swarm with issue-specific topology
   const topology = determineTopology(issue.complexity);
-  await mcp__claude_flow__swarm_init({ topology, maxAgents: 6 });
+  await Agent({ topology, maxAgents: 6 });
   
   // Store issue context for swarm agents
-  await mcp__claude_flow__memory_usage({
+  await memory_recall({
     action: "store",
     key: `issue/${issue.number}/metadata`,
     value: { issue, analysis: await analyzeIssue(issue) }
@@ -563,7 +554,7 @@ const postHook = async (results) => {
   await createFollowupTasks(results.remainingWork);
   
   // Store completion metrics
-  await mcp__claude_flow__memory_usage({
+  await memory_recall({
     action: "store", 
     key: `issue/${issue.number}/completion`,
     value: { metrics: results.metrics, timestamp: Date.now() }

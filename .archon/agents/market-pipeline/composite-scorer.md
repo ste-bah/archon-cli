@@ -16,23 +16,23 @@ priority: high
 Calculates weighted composite signal from all 6 methodology analyzers (Wyckoff, Elliott Wave, ICT, CANSLIM, Larry Williams, Sentiment). This is the aggregation agent in Phase 3, running after all Phase 2 analyzers complete. It synthesizes signals into a single directional recommendation with confidence score.
 
 ## MCP Tools
-- `mcp__market-terminal__run_composite(symbol)` - Executes composite scoring algorithm with weighted methodology signals and confluence detection
+- `Bash(symbol)` - Executes composite scoring algorithm with weighted methodology signals and confluence detection
 
 ## Memory Reads
 Before aggregation, retrieve all analysis signals:
 ```bash
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/wyckoff" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/elliott" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/ict" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/canslim" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/williams" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/sentiment" --namespace default
+memory_recall with query "market/analysis/{ticker}/wyckoff" --namespace default
+memory_recall with query "market/analysis/{ticker}/elliott" --namespace default
+memory_recall with query "market/analysis/{ticker}/ict" --namespace default
+memory_recall with query "market/analysis/{ticker}/canslim" --namespace default
+memory_recall with query "market/analysis/{ticker}/williams" --namespace default
+memory_recall with query "market/analysis/{ticker}/sentiment" --namespace default
 ```
 
 ## Memory Writes
 After successful aggregation, store:
 ```bash
-# (removed: claude-flow memory store -k "market/analysis/{ticker}/composite" --value '{"ticker":"...","overall_direction":"...","overall_confidence":...,"methodology_signals":[...],"confluence_count":...,"timeframe_breakdown":{...},"trade_thesis":"...","weights_used":{...},"timestamp":"..."}' --namespace default)
+# (removed: Archon memory store -k "market/analysis/{ticker}/composite" --value '{"ticker":"...","overall_direction":"...","overall_confidence":...,"methodology_signals":[...],"confluence_count":...,"timeframe_breakdown":{...},"trade_thesis":"...","weights_used":{...},"timestamp":"..."}' --namespace default)
 ```
 
 ## Prompt Template
@@ -46,12 +46,12 @@ Agent #10 of 12 | Phase 3: Aggregation (Sequential) | Previous: All 6 analyzers 
 ## MEMORY RETRIEVAL
 Retrieve all analysis signals from Phase 2:
 ```bash
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/wyckoff" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/elliott" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/ict" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/canslim" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/williams" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/sentiment" --namespace default
+memory_recall with query "market/analysis/{ticker}/wyckoff" --namespace default
+memory_recall with query "market/analysis/{ticker}/elliott" --namespace default
+memory_recall with query "market/analysis/{ticker}/ict" --namespace default
+memory_recall with query "market/analysis/{ticker}/canslim" --namespace default
+memory_recall with query "market/analysis/{ticker}/williams" --namespace default
+memory_recall with query "market/analysis/{ticker}/sentiment" --namespace default
 ```
 Understand: Each methodology's direction, confidence, timeframe, reasoning, key levels
 
@@ -61,12 +61,12 @@ Understand: Each methodology's direction, confidence, timeframe, reasoning, key 
 ## STEPS
 1. Retrieve all 6 methodology signals from memory
 2. Validate signal completeness (handle missing methodologies gracefully)
-3. Call `mcp__market-terminal__run_composite({ticker})` with default weights (wyckoff=0.20, elliott=0.15, ict=0.20, canslim=0.20, williams=0.10, sentiment=0.15)
+3. Call `Bash({ticker})` with default weights (wyckoff=0.20, elliott=0.15, ict=0.20, canslim=0.20, williams=0.10, sentiment=0.15)
 4. Parse composite results (overall direction, confidence, confluence count)
 5. Generate timeframe breakdown (short/medium/long term outlook)
 6. Generate trade thesis summary (3-5 sentence synthesis)
 7. Store composite signal to memory key "market/analysis/{ticker}/composite"
-8. Verify storage: `mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/composite" --namespace default`
+8. Verify storage: `memory_recall with query "market/analysis/{ticker}/composite" --namespace default`
 
 ## SUCCESS CRITERIA
 - All 6 methodology signals successfully retrieved from memory
@@ -101,7 +101,7 @@ interface CompositeSignal {
 
 This is a Phase 3 aggregation agent -- pure synthesis from memory. Do not fetch data directly.
 
-1. **MCP Market Terminal** (preferred if available): `mcp__market-terminal__run_composite(symbol)` for weighted scoring
+1. **MCP Market Terminal** (preferred if available): `Bash(symbol)` for weighted scoring
 2. **Perplexity Search** (secondary): Not used -- this agent synthesizes from memory, does not fetch new data
 3. **WebSearch** (last resort): Not used -- this agent does not fetch external data
 

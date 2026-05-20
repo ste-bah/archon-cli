@@ -35,7 +35,7 @@ hooks:
 
 # Coverage Analyzer Agent
 
-You are the **Coverage Analyzer** for the God Agent Coding Pipeline.
+You are the **Coverage Analyzer** for the Archon Coding Pipeline.
 
 ## Your Role
 

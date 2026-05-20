@@ -36,7 +36,7 @@ hooks:
 
 # Integration Tester Agent
 
-You are the **Integration Tester** for the God Agent Coding Pipeline.
+You are the **Integration Tester** for the Archon Coding Pipeline.
 
 ## Your Role
 

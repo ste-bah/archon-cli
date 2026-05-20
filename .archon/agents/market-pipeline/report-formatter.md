@@ -22,32 +22,32 @@ None (pure formatting from memory)
 Before report formatting, retrieve all data, analysis, and thesis:
 ```bash
 # Data tier
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/price" --namespace default
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/volume" --namespace default
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/fundamentals" --namespace default
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/ownership" --namespace default
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/insider" --namespace default
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/news" --namespace default
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/macro_calendar" --namespace default
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/macro_history" --namespace default
+memory_recall with query "market/data/{ticker}/price" --namespace default
+memory_recall with query "market/data/{ticker}/volume" --namespace default
+memory_recall with query "market/data/{ticker}/fundamentals" --namespace default
+memory_recall with query "market/data/{ticker}/ownership" --namespace default
+memory_recall with query "market/data/{ticker}/insider" --namespace default
+memory_recall with query "market/data/{ticker}/news" --namespace default
+memory_recall with query "market/data/{ticker}/macro_calendar" --namespace default
+memory_recall with query "market/data/{ticker}/macro_history" --namespace default
 
 # Analysis tier
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/composite" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/wyckoff" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/elliott" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/ict" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/canslim" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/williams" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/sentiment" --namespace default
+memory_recall with query "market/analysis/{ticker}/composite" --namespace default
+memory_recall with query "market/analysis/{ticker}/wyckoff" --namespace default
+memory_recall with query "market/analysis/{ticker}/elliott" --namespace default
+memory_recall with query "market/analysis/{ticker}/ict" --namespace default
+memory_recall with query "market/analysis/{ticker}/canslim" --namespace default
+memory_recall with query "market/analysis/{ticker}/williams" --namespace default
+memory_recall with query "market/analysis/{ticker}/sentiment" --namespace default
 
 # Output tier
-mcp__memorygraph__recall_memories with query "market/output/{ticker}/thesis" --namespace default
+memory_recall with query "market/output/{ticker}/thesis" --namespace default
 ```
 
 ## Memory Writes
 After successful report formatting, store:
 ```bash
-# (removed: claude-flow memory store -k "market/output/{ticker}/report" --value '{"ticker":"...","report_markdown":"...","generated_at":"...","data_completeness":...}' --namespace default)
+# (removed: Archon memory store -k "market/output/{ticker}/report" --value '{"ticker":"...","report_markdown":"...","generated_at":"...","data_completeness":...}' --namespace default)
 ```
 
 ## Prompt Template
@@ -61,28 +61,28 @@ Agent #12 of 12 (FINAL) | Phase 4: Output (Sequential) | Previous: All agents (d
 ## MEMORY RETRIEVAL
 Retrieve all data from Phase 1:
 ```bash
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/price" --namespace default
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/volume" --namespace default
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/fundamentals" --namespace default
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/ownership" --namespace default
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/insider" --namespace default
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/news" --namespace default
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/macro_calendar" --namespace default
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/macro_history" --namespace default
+memory_recall with query "market/data/{ticker}/price" --namespace default
+memory_recall with query "market/data/{ticker}/volume" --namespace default
+memory_recall with query "market/data/{ticker}/fundamentals" --namespace default
+memory_recall with query "market/data/{ticker}/ownership" --namespace default
+memory_recall with query "market/data/{ticker}/insider" --namespace default
+memory_recall with query "market/data/{ticker}/news" --namespace default
+memory_recall with query "market/data/{ticker}/macro_calendar" --namespace default
+memory_recall with query "market/data/{ticker}/macro_history" --namespace default
 ```
 Retrieve all analysis from Phase 2-3:
 ```bash
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/composite" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/wyckoff" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/elliott" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/ict" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/canslim" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/williams" --namespace default
-mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/sentiment" --namespace default
+memory_recall with query "market/analysis/{ticker}/composite" --namespace default
+memory_recall with query "market/analysis/{ticker}/wyckoff" --namespace default
+memory_recall with query "market/analysis/{ticker}/elliott" --namespace default
+memory_recall with query "market/analysis/{ticker}/ict" --namespace default
+memory_recall with query "market/analysis/{ticker}/canslim" --namespace default
+memory_recall with query "market/analysis/{ticker}/williams" --namespace default
+memory_recall with query "market/analysis/{ticker}/sentiment" --namespace default
 ```
 Retrieve thesis from Phase 4:
 ```bash
-mcp__memorygraph__recall_memories with query "market/output/{ticker}/thesis" --namespace default
+memory_recall with query "market/output/{ticker}/thesis" --namespace default
 ```
 Understand: All data, all methodology signals, composite score, and investment thesis
 
@@ -102,7 +102,7 @@ Understand: All data, all methodology signals, composite score, and investment t
 10. Format key factors, risks, catalysts (from thesis generator)
 11. Generate markdown report string with all sections
 12. Store report to memory key "market/output/{ticker}/report"
-13. Verify storage: `mcp__memorygraph__recall_memories with query "market/output/{ticker}/report" --namespace default`
+13. Verify storage: `memory_recall with query "market/output/{ticker}/report" --namespace default`
 
 ## SUCCESS CRITERIA
 - All data, analysis, and thesis successfully retrieved from memory

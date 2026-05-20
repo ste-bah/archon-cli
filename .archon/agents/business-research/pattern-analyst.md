@@ -14,7 +14,7 @@ hooks:
   pre: |
     echo "🔍 Pattern Analyst examining: $TASK"
     echo "📊 Loading research findings from memory..."
-    memory_search "research_*" | head -10
+    memory_recall "research_*" | head -10
   post: |
     echo "✅ Pattern analysis complete"
     echo "📈 Themes and contradictions documented"
@@ -200,7 +200,7 @@ How this pattern impacts:
 
 ```javascript
 // Report analysis status
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/analyst/status",
   namespace: "coordination",
@@ -216,7 +216,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Share pattern analysis
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/patterns-arc-A",
   namespace: "coordination",
@@ -238,7 +238,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Retrieve research findings
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "retrieve",
   key: "swarm/shared/arc-A-findings",
   namespace: "coordination"

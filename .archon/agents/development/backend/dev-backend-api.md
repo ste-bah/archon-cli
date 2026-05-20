@@ -35,11 +35,10 @@ capabilities:
     - Read
     - Write
     - Edit
-    - MultiEdit
     - Bash
     - Grep
     - Glob
-    - Task
+    - Agent
   restricted_tools:
     - WebSearch  # Focus on code, not web searches
   max_file_operations: 100

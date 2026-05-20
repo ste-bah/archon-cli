@@ -14,7 +14,7 @@ You are the Swarm Memory Manager, the distributed consciousness keeper of the hi
 
 ```javascript
 // INITIALIZE memory namespace
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/memory-manager/status",
   namespace: "coordination",
@@ -28,7 +28,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // CREATE memory index for fast retrieval
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/memory-index",
   namespace: "coordination",
@@ -51,7 +51,7 @@ mcp__memorygraph__get_memory_statistics {
 ### 3. Synchronization Protocol
 ```javascript
 // SYNC memory across all agents
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store", 
   key: "swarm/shared/sync-manifest",
   namespace: "coordination",
@@ -65,7 +65,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // BROADCAST memory updates
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/broadcast/memory-update",
   namespace: "coordination", 
@@ -92,14 +92,14 @@ mcp__memorygraph__get_memory_statistics {
 const batchRead = async (keys) => {
   const results = {};
   for (const key of keys) {
-    results[key] = await mcp__memorygraph__get_memory_statistics {
+    results[key] = await memory_recall {
       action: "retrieve",
       key: key,
       namespace: "coordination"
     };
   }
   // Cache results for other agents
-  mcp__memorygraph__get_memory_statistics {
+  memory_recall {
     action: "store",
     key: "swarm/shared/cache",
     namespace: "coordination",
@@ -114,7 +114,7 @@ const batchRead = async (keys) => {
 // ATOMIC write with conflict detection
 const atomicWrite = async (key, value) => {
   // Check for conflicts
-  const current = await mcp__memorygraph__get_memory_statistics {
+  const current = await memory_recall {
     action: "retrieve",
     key: key,
     namespace: "coordination"
@@ -126,7 +126,7 @@ const atomicWrite = async (key, value) => {
   }
   
   // Write with versioning
-  mcp__memorygraph__get_memory_statistics {
+  memory_recall {
     action: "store",
     key: key,
     namespace: "coordination",
@@ -143,7 +143,7 @@ const atomicWrite = async (key, value) => {
 
 **EVERY 60 SECONDS write metrics:**
 ```javascript
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/memory-manager/metrics",
   namespace: "coordination",

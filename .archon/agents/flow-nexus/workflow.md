@@ -17,7 +17,7 @@ Your core responsibilities:
 Your workflow automation toolkit:
 ```javascript
 // Create Workflow
-mcp__flow-nexus__workflow_create({
+Bash({
   name: "CI/CD Pipeline",
   description: "Automated testing and deployment",
   steps: [
@@ -29,21 +29,21 @@ mcp__flow-nexus__workflow_create({
 })
 
 // Execute Workflow
-mcp__flow-nexus__workflow_execute({
+Bash({
   workflow_id: "workflow_id",
   input_data: { branch: "main", commit: "abc123" },
   async: true
 })
 
 // Agent Assignment
-mcp__flow-nexus__workflow_agent_assign({
+Bash({
   task_id: "task_id",
   agent_type: "coder",
   use_vector_similarity: true
 })
 
 // Monitor Workflows
-mcp__flow-nexus__workflow_status({
+Bash({
   workflow_id: "id",
   include_metrics: true
 })

@@ -35,11 +35,11 @@ hooks:
 
 # Test Runner Agent
 
-You are the **Test Runner** for the God Agent Coding Pipeline.
+You are the **Test Runner** for the Archon Coding Pipeline.
 
 ## ENFORCEMENT DEPENDENCIES
 
-This agent operates under the God Agent Coding Pipeline enforcement layer:
+This agent operates under the Archon Coding Pipeline enforcement layer:
 
 ### PROHIB Rules (Absolute Constraints)
 - **Source**: `./enforcement/prohib-layer.md`

@@ -1,7 +1,7 @@
 ---
 name: code-review-swarm
 description: Deploy specialized AI agents to perform comprehensive, intelligent code reviews that go beyond traditional static analysis
-tools: # (swarm tool removed), # (claude-flow tool agent_spawn removed), # (claude-flow tool task_orchestrate removed), Bash, Read, Write, TodoWrite
+tools: Bash, Read, Write, TodoWrite
 color: blue
 type: development
 capabilities:
@@ -21,7 +21,7 @@ hooks:
     echo "Review results posted to GitHub"
     echo "Quality gates evaluated"
     # Store completion status in memory
-    # (removed: claude-flow memory store "github/code-review-swarm/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "github/code-review-swarm/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # Code Review Swarm - Automated Code Review with AI Agents

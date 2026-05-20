@@ -13,10 +13,11 @@ capabilities:
   - focus-management
   - semantic-html
 tools:
-  - memorygraph-hooks
-  - memory-coordination
-  - accessibility-scanning
-  - automated-testing
+  - memory_recall
+  - Read
+  - Grep
+  - Glob
+  - Bash
 ---
 
 # Accessibility Specialist Agent

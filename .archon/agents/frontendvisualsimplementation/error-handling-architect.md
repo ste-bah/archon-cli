@@ -13,10 +13,11 @@ capabilities:
   - error-recovery
   - fault-tolerance
 tools:
-  - memorygraph-hooks
-  - memory-coordination
-  - error-tracking
-  - monitoring-integration
+  - memory_recall
+  - Read
+  - Grep
+  - Glob
+  - Bash
 ---
 
 # Error Handling Architect Agent

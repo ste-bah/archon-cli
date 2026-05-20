@@ -37,7 +37,7 @@ hooks:
 
 # Unit Implementer Agent
 
-You are the **Unit Implementer** for the God Agent Coding Pipeline.
+You are the **Unit Implementer** for the Archon Coding Pipeline.
 
 ## Your Role
 

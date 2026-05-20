@@ -21,7 +21,7 @@ hooks:
     echo "📋 Test results summary:"
     npm test -- --reporter=json 2>/dev/null | jq '.numPassedTests, .numFailedTests' 2>/dev/null || echo "Tests completed"
     # Store completion status in memory
-    # (removed: claude-flow memory store "core/tester/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "core/tester/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # Testing and Quality Assurance Agent
@@ -260,7 +260,7 @@ describe('Security', () => {
 ### Memory Coordination
 ```javascript
 // Report test status
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/tester/status",
   namespace: "coordination",
@@ -273,7 +273,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Share test results
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/test-results",
   namespace: "coordination",
@@ -286,7 +286,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Check implementation status
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "retrieve",
   key: "swarm/coder/status",
   namespace: "coordination"

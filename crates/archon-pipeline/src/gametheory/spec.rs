@@ -74,7 +74,7 @@ pub fn build_specialist_spec(
             StepSpec {
                 id: agent_key.clone(),
                 agent: agent_key.clone(),
-                input: serde_json::json!({"situation": situation}),
+                input: serde_json::json!({ "situation": situation }),
                 depends_on,
                 retry: Default::default(),
                 timeout_secs: 600,

@@ -16,8 +16,11 @@ use serde::{Deserialize, Serialize};
 use futures_util::future::join_all;
 
 use crate::audit::runtime::{PipelineAuditRun, PromptHashes};
+use crate::audit::types::PipelineEvent;
 use crate::learning::integration::LearningIntegration;
 use crate::learning::reflexion::{FailedTrajectory, ReflexionInjector};
+use crate::research::artifacts::write_research_agent_artifacts;
+use crate::research::final_artifact::write_final_research_artifacts;
 
 const PIPELINE_MAX_ATTEMPTS: usize = 3;
 
@@ -32,6 +35,7 @@ pub enum PipelineType {
     Research,
     Learning,
     Kb,
+    GameTheory,
 }
 
 /// Determines what tools an agent is allowed to invoke.
@@ -292,6 +296,25 @@ pub struct LlmResponse {
     pub tokens_out: u64,
 }
 
+/// Full context needed to execute one pipeline agent.
+///
+/// Implementations may run this as a plain provider completion or as a real
+/// tool-capable subagent. The default [`LlmClient`] implementation preserves
+/// the legacy provider-completion path.
+#[derive(Clone, Debug)]
+pub struct AgentExecutionRequest {
+    pub session_id: String,
+    pub pipeline_type: PipelineType,
+    pub task: String,
+    pub ordinal: usize,
+    pub attempt: usize,
+    pub agent: AgentInfo,
+    pub messages: Vec<serde_json::Value>,
+    pub system: Vec<serde_json::Value>,
+    pub tools: Vec<serde_json::Value>,
+    pub allowed_tools: Vec<String>,
+}
+
 /// Abstraction over the underlying LLM transport. Concrete implementations
 /// live in `archon-llm`; the pipeline crate depends only on this trait.
 #[async_trait]
@@ -303,6 +326,12 @@ pub trait LlmClient: Send + Sync {
         tools: Vec<serde_json::Value>,
         model: &str,
     ) -> Result<LlmResponse>;
+
+    async fn run_agent(&self, request: AgentExecutionRequest) -> Result<LlmResponse> {
+        let model = request.agent.model.clone();
+        self.send_message(request.messages, request.system, request.tools, &model)
+            .await
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -568,7 +597,18 @@ async fn run_pipeline_inner(
                     // Execute against the LLM.
                     let agent_start = Instant::now();
                     let llm_response = match llm
-                        .send_message(messages, system, tools, &agent.model)
+                        .run_agent(AgentExecutionRequest {
+                            session_id: session.id.clone(),
+                            pipeline_type: session.pipeline_type.clone(),
+                            task: session.task.clone(),
+                            ordinal,
+                            attempt,
+                            agent: agent.clone(),
+                            messages,
+                            system,
+                            tools,
+                            allowed_tools: Vec::new(),
+                        })
                         .await
                     {
                         Ok(response) => response,
@@ -726,6 +766,24 @@ async fn run_pipeline_inner(
                 if let Some(audit) = audit.as_mut() {
                     if let Some(prompt) = accepted_prompt {
                         audit.record_agent_completed(ordinal, &agent, &result, attempts, prompt)?;
+                        if session.pipeline_type == PipelineType::Research {
+                            let bundle_dir = audit.store().bundle_dir(&session.id);
+                            for artifact in write_research_agent_artifacts(
+                                &bundle_dir,
+                                ordinal,
+                                &agent.key,
+                                &result.output,
+                            )? {
+                                audit.store().append_event(
+                                    &session.id,
+                                    PipelineEvent::ArtifactWritten {
+                                        artifact_type: "research-agent-output".to_string(),
+                                        path: relative_to_bundle(&bundle_dir, &artifact.path),
+                                        content_hash: artifact.hash,
+                                    },
+                                )?;
+                            }
+                        }
                     }
                 }
                 session.agent_results.push((agent, result));
@@ -794,7 +852,18 @@ async fn run_pipeline_inner(
                     }
                     let start = Instant::now();
                     let response = llm
-                        .send_message(messages, system, tools, &prepared.agent.model)
+                        .run_agent(AgentExecutionRequest {
+                            session_id: prepared.session.id.clone(),
+                            pipeline_type: prepared.session.pipeline_type.clone(),
+                            task: prepared.session.task.clone(),
+                            ordinal: prepared.ordinal,
+                            attempt,
+                            agent: prepared.agent.clone(),
+                            messages,
+                            system,
+                            tools,
+                            allowed_tools: Vec::new(),
+                        })
                         .await?;
                     let mut result = AgentResult {
                         output: response.content,
@@ -890,12 +959,18 @@ async fn run_pipeline_inner(
                 let calls = prepared.into_iter().map(|prepared| async move {
                     let start = Instant::now();
                     let response = match llm
-                        .send_message(
-                            prepared.messages.clone(),
-                            prepared.system.clone(),
-                            prepared.tools.clone(),
-                            &prepared.agent.model,
-                        )
+                        .run_agent(AgentExecutionRequest {
+                            session_id: prepared.session.id.clone(),
+                            pipeline_type: prepared.session.pipeline_type.clone(),
+                            task: prepared.session.task.clone(),
+                            ordinal: prepared.ordinal,
+                            attempt: 1,
+                            agent: prepared.agent.clone(),
+                            messages: prepared.messages.clone(),
+                            system: prepared.system.clone(),
+                            tools: prepared.tools.clone(),
+                            allowed_tools: Vec::new(),
+                        })
                         .await
                     {
                         Ok(response) => response,
@@ -1188,10 +1263,49 @@ async fn run_pipeline_inner(
             return Err(error);
         }
     };
+    if result.pipeline_type == PipelineType::Research
+        && let Some(audit_run) = audit.as_ref()
+    {
+        let bundle_dir = audit_run.store().bundle_dir(&result.session_id);
+        match write_final_research_artifacts(&bundle_dir, &result.final_output) {
+            Ok(artifacts) => {
+                let markdown_path = relative_to_bundle(&bundle_dir, &artifacts.markdown_path);
+                let pdf_path = relative_to_bundle(&bundle_dir, &artifacts.pdf_path);
+                audit_run.store().append_event(
+                    &result.session_id,
+                    PipelineEvent::ArtifactWritten {
+                        artifact_type: "research-paper-markdown".to_string(),
+                        path: markdown_path,
+                        content_hash: artifacts.markdown_hash,
+                    },
+                )?;
+                audit_run.store().append_event(
+                    &result.session_id,
+                    PipelineEvent::ArtifactWritten {
+                        artifact_type: "research-paper-pdf".to_string(),
+                        path: pdf_path,
+                        content_hash: artifacts.pdf_hash,
+                    },
+                )?;
+            }
+            Err(error) => {
+                let error = error.context("failed to produce final APA research paper artifacts");
+                fail_audit(&mut audit, &error.to_string())?;
+                return Err(error);
+            }
+        }
+    }
     if let Some(audit) = audit.as_mut() {
         audit.complete(&result.final_output)?;
     }
     Ok(result)
+}
+
+fn relative_to_bundle(bundle_dir: &Path, path: &Path) -> String {
+    path.strip_prefix(bundle_dir)
+        .unwrap_or(path)
+        .display()
+        .to_string()
 }
 
 fn is_context_window_error(error: &anyhow::Error) -> bool {

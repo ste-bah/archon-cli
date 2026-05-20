@@ -4,21 +4,9 @@ description: Pull request swarm management agent that coordinates multi-agent co
 type: development
 color: "#4ECDC4"
 tools:
-  - mcp__github__get_pull_request
-  - mcp__github__create_pull_request
-  - mcp__github__update_pull_request
-  - mcp__github__list_pull_requests
-  - mcp__github__create_pr_comment
-  - mcp__github__get_pr_diff
-  - mcp__github__merge_pull_request
-  - # (swarm tool removed)
-  - # (claude-flow tool agent_spawn removed)
-  - # (claude-flow tool task_orchestrate removed)
-  - mcp__memorygraph__get_memory_statistics
-  - # (claude-flow tool coordination_sync removed)
-  - TodoWrite
-  - TodoRead
   - Bash
+  - memory_recall
+  - TodoWrite
   - Grep
   - Read
   - Write
@@ -32,7 +20,7 @@ hooks:
     echo "Update PR with comprehensive swarm review results"
     echo "Coordinate merge decisions based on swarm analysis"
     echo "Generate PR completion metrics and learnings"
-    # (removed: claude-flow memory store "github/swarm-pr/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "github/swarm-pr/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # Swarm PR - Managing Swarms through Pull Requests
@@ -332,7 +320,7 @@ When using with Claude Code:
 # (claude-flow tool agent_spawn removed) { type: "optimizer", name: "Performance Optimizer" }
 
 # Store PR context for swarm coordination
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "pr/#{pr_number}/analysis",
   value: { 
@@ -361,10 +349,10 @@ const prPreHook = async (prData) => {
   const topology = complexity > 7 ? "hierarchical" : "mesh";
   
   // Initialize swarm with PR-specific configuration
-  await mcp__claude_flow__swarm_init({ topology, maxAgents: 8 });
+  await Agent({ topology, maxAgents: 8 });
   
   // Store comprehensive PR context
-  await mcp__claude_flow__memory_usage({
+  await memory_recall({
     action: "store",
     key: `pr/${prData.number}/context`,
     value: {
@@ -376,7 +364,7 @@ const prPreHook = async (prData) => {
   });
   
   // Coordinate initial agent synchronization
-  await mcp__claude_flow__coordination_sync({ swarmId: "current" });
+  await Agent({ swarmId: "current" });
 };
 
 // Post-hook: PR Completion and Metrics
@@ -388,7 +376,7 @@ const prPostHook = async (results) => {
   await updatePRWithResults(report);
   
   // Store completion metrics for future optimization
-  await mcp__claude_flow__memory_usage({
+  await memory_recall({
     action: "store",
     key: `pr/${results.number}/completion`,
     value: {
@@ -414,7 +402,7 @@ const prPostHook = async (results) => {
 }
 
 # Store merge decision context
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "pr/merge_decisions/#{pr_number}",
   value: {

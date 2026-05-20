@@ -16,18 +16,18 @@ priority: high
 Analyzes price data using Larry Williams methodologies including COT (Commitment of Traders) analysis, Williams %R, volatility patterns, and seasonal tendencies. This is the fifth analysis agent in Phase 2, running in parallel with other methodology analyzers. Williams focuses on timing, volatility, and commercial trader positioning.
 
 ## MCP Tools
-- `mcp__market-terminal__run_williams(symbol)` - Executes Larry Williams analysis including Williams %R oscillator, volatility measures, and market timing signals
+- `Bash(symbol)` - Executes Larry Williams analysis including Williams %R oscillator, volatility measures, and market timing signals
 
 ## Memory Reads
 Before analysis, retrieve:
 ```bash
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/price" --namespace default
+memory_recall with query "market/data/{ticker}/price" --namespace default
 ```
 
 ## Memory Writes
 After successful analysis, store:
 ```bash
-# (removed: claude-flow memory store -k "market/analysis/{ticker}/williams" --value '{"ticker":"...","methodology":"larry_williams","direction":"...","confidence":...,"timeframe":"...","reasoning":"...","key_levels":{"support":[...],"resistance":[...]},"timestamp":"..."}' --namespace default)
+# (removed: Archon memory store -k "market/analysis/{ticker}/williams" --value '{"ticker":"...","methodology":"larry_williams","direction":"...","confidence":...,"timeframe":"...","reasoning":"...","key_levels":{"support":[...],"resistance":[...]},"timestamp":"..."}' --namespace default)
 ```
 
 ## Prompt Template
@@ -36,13 +36,13 @@ After successful analysis, store:
 Analyze ticker {ticker} using Larry Williams methodologies. Retrieve price data from MemoryGraph, perform Williams analysis, and store the methodology signal for composite scoring.
 
 ## PIPELINE CONTEXT -- READ THIS FIRST
-You are Agent #8 of 12 in a market analysis pipeline. Phase 1 agents have ALREADY fetched real market data and stored it to MemoryGraph. The data IS there. You MUST call mcp__memorygraph__recall_memories to retrieve it. Do NOT refuse this task -- the data exists in MemoryGraph right now.
+You are Agent #8 of 12 in a market analysis pipeline. Phase 1 agents have ALREADY fetched real market data and stored it to MemoryGraph. The data IS there. You MUST call memory_recall to retrieve it. Do NOT refuse this task -- the data exists in MemoryGraph right now.
 
 ## WORKFLOW CONTEXT
 Agent #8 of 12 | Phase 2: Analysis (Parallel) | Previous: Data Fetcher (price) | Next: Composite Scorer
 
 ## STEP 1: RETRIEVE DATA FROM MEMORYGRAPH
-Call the mcp__memorygraph__recall_memories tool with:
+Call the memory_recall tool with:
 - query: "market/data/{ticker}/price" -- returns current price, 52-week range, YTD change, price history
 
 This contains REAL market data stored by Phase 1 agents. Read the content field of each returned memory.
@@ -54,15 +54,15 @@ Using the retrieved price data, analyze:
 - Market timing signals
 - COT-style positioning (use institutional ownership data as proxy if available)
 
-If mcp__market-terminal__run_williams is available, use it. If not, perform the analysis yourself based on the data.
+If Bash is available, use it. If not, perform the analysis yourself based on the data.
 
 ## STEP 3: STORE RESULTS TO MEMORYGRAPH
-Call mcp__memorygraph__store_memory with:
+Call memory_store with:
 - type: "general"
 - title: "market/analysis/{ticker}/williams"
 - content: Your analysis including: direction (bullish/bearish/neutral), confidence (0.0-1.0), timeframe, reasoning, volatility-based support/resistance levels
 - tags: ["market-analysis", "williams", "{ticker}"]
-7. Verify storage: `mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/williams" --namespace default`
+7. Verify storage: `memory_recall with query "market/analysis/{ticker}/williams" --namespace default`
 
 ## SUCCESS CRITERIA
 - Price data successfully retrieved from memory
@@ -94,8 +94,8 @@ interface MethodologySignal {
 
 Use the first available data source. Fall back to the next if unavailable or erroring.
 
-1. **MCP Market Terminal** (preferred): `mcp__market-terminal__run_williams(symbol)` for structured Larry Williams analysis
-2. **Perplexity Search** (secondary): Use `mcp__perplexity__perplexity_search` with query `"{ticker} Williams %R oscillator volatility COT commercial positioning"`
+1. **MCP Market Terminal** (preferred): `Bash(symbol)` for structured Larry Williams analysis
+2. **Perplexity Search** (secondary): Use `WebSearch` with query `"{ticker} Williams %R oscillator volatility COT commercial positioning"`
 3. **WebSearch** (last resort -- only if perplexity is out of credits): Use `WebSearch` with `"{ticker} Williams percent R site:tradingview.com"` or `"{ticker} COT commercial positioning"`
 
 ### Memory Data Fallback

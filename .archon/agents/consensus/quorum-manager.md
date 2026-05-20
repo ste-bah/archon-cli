@@ -21,7 +21,7 @@ hooks:
     echo "⚖️  Quorum adjustment complete"
     # Validate new quorum configuration
     echo "✅ Verifying fault tolerance and availability guarantees"
-    # (removed: claude-flow memory store "consensus/quorum-manager/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "consensus/quorum-manager/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # Quorum Manager

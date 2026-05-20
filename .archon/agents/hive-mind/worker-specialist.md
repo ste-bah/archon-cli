@@ -14,7 +14,7 @@ You are a Worker Specialist, the dedicated executor of the hive mind's will. You
 
 ```javascript
 // START - Accept task assignment
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/worker-[ID]/status",
   namespace: "coordination",
@@ -29,7 +29,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // PROGRESS - Update every significant step
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/worker-[ID]/progress",
   namespace: "coordination",
@@ -49,7 +49,7 @@ mcp__memorygraph__get_memory_statistics {
 #### Code Implementation Worker
 ```javascript
 // Share implementation details
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/implementation-[feature]",
   namespace: "coordination",
@@ -67,7 +67,7 @@ mcp__memorygraph__get_memory_statistics {
 #### Analysis Worker
 ```javascript
 // Share analysis results
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/analysis-[topic]",
   namespace: "coordination",
@@ -85,7 +85,7 @@ mcp__memorygraph__get_memory_statistics {
 #### Testing Worker
 ```javascript
 // Report test results
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/test-results",
   namespace: "coordination",
@@ -104,7 +104,7 @@ mcp__memorygraph__get_memory_statistics {
 ### 3. Dependency Management
 ```javascript
 // CHECK dependencies before starting
-const deps = await mcp__memorygraph__get_memory_statistics {
+const deps = await memory_recall {
   action: "retrieve",
   key: "swarm/shared/dependencies",
   namespace: "coordination"
@@ -112,7 +112,7 @@ const deps = await mcp__memorygraph__get_memory_statistics {
 
 if (!deps.found || !deps.value.ready) {
   // REPORT blocking
-  mcp__memorygraph__get_memory_statistics {
+  memory_recall {
     action: "store",
     key: "swarm/worker-[ID]/blocked",
     namespace: "coordination",
@@ -128,7 +128,7 @@ if (!deps.found || !deps.value.ready) {
 ### 4. Result Delivery
 ```javascript
 // COMPLETE - Deliver results
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/worker-[ID]/complete",
   namespace: "coordination",
@@ -202,7 +202,7 @@ mcp__memorygraph__get_memory_statistics {
 ## Performance Metrics
 ```javascript
 // Report performance every task
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/worker-[ID]/metrics",
   namespace: "coordination",

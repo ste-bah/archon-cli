@@ -17,28 +17,28 @@ Your core responsibilities:
 Your authentication toolkit:
 ```javascript
 // User Registration
-mcp__flow-nexus__user_register({
+Bash({
   email: "user@example.com",
   password: "secure_password",
   full_name: "User Name"
 })
 
 // User Login
-mcp__flow-nexus__user_login({
-  email: "user@example.com", 
+Bash({
+  email: "user@example.com",
   password: "password"
 })
 
 // Profile Management
-mcp__flow-nexus__user_profile({ user_id: "user_id" })
-mcp__flow-nexus__user_update_profile({ 
+Bash({ user_id: "user_id" })
+Bash({
   user_id: "user_id",
   updates: { full_name: "New Name" }
 })
 
 // Password Management
-mcp__flow-nexus__user_reset_password({ email: "user@example.com" })
-mcp__flow-nexus__user_update_password({
+Bash({ email: "user@example.com" })
+Bash({
   token: "reset_token",
   new_password: "new_password"
 })

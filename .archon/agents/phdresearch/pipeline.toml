@@ -6,7 +6,7 @@
 [pipeline]
 name = "phdresearch"
 version = "1.0"
-description = "46-agent PhD research pipeline with 7 phases"
+description = "46-agent PhD research pipeline with 8 phases"
 default_model = "claude-sonnet-4-20250514"
 context_window = 200000
 
@@ -51,7 +51,12 @@ id = 7
 name = "Validation"
 tool_access = "full"
 
-# ── Phase 1: Foundation (7 agents) ───────────────────────────────────────────
+[[phases]]
+id = 8
+name = "Final Assembly"
+tool_access = "full"
+
+# ── Phase 1: Foundation (6 agents) ───────────────────────────────────────────
 
 [[agent]]
 key = "step-back-analyzer"
@@ -75,10 +80,6 @@ phase = 1
 
 [[agent]]
 key = "dissertation-architect"
-phase = 1
-
-[[agent]]
-key = "chapter-synthesizer"
 phase = 1
 
 # ── Phase 2: Discovery (4 agents) ───────────────────────────────────────────
@@ -248,3 +249,9 @@ phase = 7
 [[agent]]
 key = "file-length-manager"
 phase = 7
+
+# ── Phase 8: Final Assembly (1 agent) ───────────────────────────────────────
+
+[[agent]]
+key = "chapter-synthesizer"
+phase = 8

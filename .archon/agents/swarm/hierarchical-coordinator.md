@@ -17,7 +17,7 @@ hooks:
     # Initialize swarm topology
     # (swarm tool removed) hierarchical --maxAgents=10 --strategy=adaptive
     # MANDATORY: Write initial status to coordination namespace
-    mcp__memorygraph__get_memory_statistics store "swarm/hierarchical/status" "{\"agent\":\"hierarchical-coordinator\",\"status\":\"initializing\",\"timestamp\":$(date +%s),\"topology\":\"hierarchical\"}" --namespace=coordination
+    memory_recall store "swarm/hierarchical/status" "{\"agent\":\"hierarchical-coordinator\",\"status\":\"initializing\",\"timestamp\":$(date +%s),\"topology\":\"hierarchical\"}" --namespace=coordination
     # Set up monitoring
     # (swarm tool removed) --interval=5000 --swarmId="${SWARM_ID}"
   post: |
@@ -25,7 +25,7 @@ hooks:
     # Generate performance report
     # (claude-flow tool performance_report removed) --format=detailed --timeframe=24h
     # MANDATORY: Write completion status
-    mcp__memorygraph__get_memory_statistics store "swarm/hierarchical/complete" "{\"status\":\"complete\",\"agents_used\":$(# (swarm tool removed) | jq '.agents.total'),\"timestamp\":$(date +%s)}" --namespace=coordination
+    memory_recall store "swarm/hierarchical/complete" "{\"status\":\"complete\",\"agents_used\":$(# (swarm tool removed) | jq '.agents.total'),\"timestamp\":$(date +%s)}" --namespace=coordination
     # Cleanup resources
     # (claude-flow tool coordination_sync removed) --swarmId="${SWARM_ID}"
 ---
@@ -148,7 +148,7 @@ WORKERS WORKERS WORKERS WORKERS
 
 ```javascript
 // 1️⃣ IMMEDIATELY write initial status
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/hierarchical/status",
   namespace: "coordination",
@@ -162,7 +162,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // 2️⃣ UPDATE progress after each delegation
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/hierarchical/progress",
   namespace: "coordination",
@@ -175,7 +175,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // 3️⃣ SHARE command structure for workers
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/hierarchy",
   namespace: "coordination",
@@ -188,14 +188,14 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // 4️⃣ CHECK worker status before assigning
-const workerStatus = mcp__memorygraph__get_memory_statistics {
+const workerStatus = memory_recall {
   action: "retrieve",
   key: "swarm/worker-1/status",
   namespace: "coordination"
 }
 
 // 5️⃣ SIGNAL completion
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/hierarchical/complete",
   namespace: "coordination",

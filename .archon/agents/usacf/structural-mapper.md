@@ -568,7 +568,7 @@ echo "Completeness: $COMPLETENESS%"
 
 ```bash
 # Store structural map in memory
-# (removed: claude-flow memory store --namespace "search/discovery" --key "structural" --value '{)
+# (removed: Archon memory store --namespace "search/discovery" --key "structural" --value '{)
   "domain_type": "software",
   "scan_timestamp": "2025-11-18T10:30:00Z",
   "components": [
@@ -884,7 +884,7 @@ ROOT
 
 **Access Command**:
 ```bash
-# (removed: claude-flow memory retrieve --namespace "search/discovery" --key "structural")
+# (removed: Archon memory retrieve --namespace "search/discovery" --key "structural")
 ```
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1007,7 +1007,7 @@ grep -r "^import\|^from\|^require" --include="*.{py,js,ts}"
 # 5. Generate report (use template above)
 
 # 6. Store in memory
-# (removed: claude-flow memory store --namespace "search/discovery" --key "structural" --value '{...}')
+# (removed: Archon memory store --namespace "search/discovery" --key "structural" --value '{...}')
 
 # 7. Complete
 # (removed: claude-flow hooks post-task --task-id "structural-mapping")

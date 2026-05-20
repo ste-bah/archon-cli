@@ -24,7 +24,7 @@ hooks:
       npm run lint --if-present
     fi
     # Store completion status in memory
-    # (removed: claude-flow memory store "core/coder/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "core/coder/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # Code Implementation Agent
@@ -207,7 +207,7 @@ src/
 ### Memory Coordination
 ```javascript
 // Report implementation status
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/coder/status",
   namespace: "coordination",
@@ -221,7 +221,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Share code decisions
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/implementation",
   namespace: "coordination",
@@ -234,7 +234,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Check dependencies
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "retrieve",
   key: "swarm/shared/dependencies",
   namespace: "coordination"

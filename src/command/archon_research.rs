@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use crate::command::pipeline_support::final_research_artifact_paths;
 use crate::command::registry::{CommandContext, CommandHandler};
 use archon_pipeline::research::facade::ResearchFacade;
 use archon_pipeline::runner::{LlmClient, run_pipeline_audited};
@@ -48,7 +49,6 @@ impl CommandHandler for ArchonResearchHandler {
         };
 
         let tui_tx = ctx.tui_tx.clone();
-        let leann = ctx.leann.clone();
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
         // Facade emits per-agent progress as Strings; forward to TUI as TextDelta.
@@ -126,23 +126,35 @@ impl CommandHandler for ArchonResearchHandler {
                 llm.as_ref(),
                 &topic,
                 &cwd,
-                leann.as_deref(),
+                // Research evidence comes from docs/KB/web sources; LEANN is
+                // code search and can initialise a local embedding backend.
+                None,
                 None,
                 None,
             )
             .await
             {
                 Ok(result) => {
+                    let artifact_text = final_research_artifact_paths(&result, &cwd)
+                        .map(|(markdown, pdf)| {
+                            format!(
+                                "Final paper Markdown: {}\nFinal paper PDF: {}\n",
+                                markdown.display(),
+                                pdf.display()
+                            )
+                        })
+                        .unwrap_or_default();
                     let _ = tui_tx.send(TuiEvent::TextDelta(format!(
                         "\n=== Pipeline Complete ===\n\
                          Session: {}\n\
                          Agents run: {}\n\
                          Total cost: ${:.4}\n\
-                         Duration: {:.1}s\n",
+                         Duration: {:.1}s\n{}",
                         result.session_id,
                         result.agent_results.len(),
                         result.total_cost_usd,
                         result.duration.as_secs_f64(),
+                        artifact_text,
                     )));
                     if let Some((config, guardrail, advisory)) = world_context.as_ref() {
                         if let Some(record) = guardrail {

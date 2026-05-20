@@ -16,9 +16,9 @@ priority: high
 Fetches news articles, macroeconomic calendar events, and macro indicator history for a given ticker symbol. This is the third data agent in Phase 1, running in parallel with data-fetcher and fundamentals-fetcher. It provides sentiment data and macroeconomic context for sentiment analysis and overall market environment assessment.
 
 ## MCP Tools
-- `mcp__market-terminal__get_news(symbol, limit=20)` - Retrieves recent news articles with sentiment scores and summaries
-- `mcp__market-terminal__get_macro_calendar(days=30)` - Retrieves upcoming macroeconomic events (FOMC, jobs report, GDP, etc.) with impact levels
-- `mcp__market-terminal__get_macro_history(indicator, symbol="SPY")` - Retrieves historical macro indicator data (inflation, unemployment, interest rates) with trend analysis
+- `Bash(symbol, limit=20)` - Retrieves recent news articles with sentiment scores and summaries
+- `Bash(days=30)` - Retrieves upcoming macroeconomic events (FOMC, jobs report, GDP, etc.) with impact levels
+- `Bash(indicator, symbol="SPY")` - Retrieves historical macro indicator data (inflation, unemployment, interest rates) with trend analysis
 
 ## Memory Reads
 None (this is a Phase 1 data collection agent with no upstream dependencies)
@@ -26,9 +26,9 @@ None (this is a Phase 1 data collection agent with no upstream dependencies)
 ## Memory Writes
 After successful data retrieval, store:
 ```bash
-# (removed: claude-flow memory store -k "market/data/{ticker}/news" --value '{"ticker":"...","articles":[...],"overall_sentiment":...}' --namespace default)
-# (removed: claude-flow memory store -k "market/data/{ticker}/macro_calendar" --value '{"days":30,"events":[...],"high_impact_count":...}' --namespace default)
-# (removed: claude-flow memory store -k "market/data/{ticker}/macro_history" --value '{"indicator":"...","symbol":"SPY","data_points":[...],"current_value":...,"trend":"..."}' --namespace default)
+# (removed: Archon memory store -k "market/data/{ticker}/news" --value '{"ticker":"...","articles":[...],"overall_sentiment":...}' --namespace default)
+# (removed: Archon memory store -k "market/data/{ticker}/macro_calendar" --value '{"days":30,"events":[...],"high_impact_count":...}' --namespace default)
+# (removed: Archon memory store -k "market/data/{ticker}/macro_history" --value '{"indicator":"...","symbol":"SPY","data_points":[...],"current_value":...,"trend":"..."}' --namespace default)
 ```
 
 ## Prompt Template
@@ -48,14 +48,14 @@ None required (first agent in pipeline)
 3. For Thesis Generator: key "market/data/{ticker}/macro_history" - Historical macro data with trend analysis
 
 ## STEPS
-1. Call `mcp__market-terminal__get_news({ticker}, limit=20)` to retrieve recent news
-2. Call `mcp__market-terminal__get_macro_calendar(days=30)` to retrieve upcoming macro events
-3. Call `mcp__market-terminal__get_macro_history(indicator="CPI", symbol="SPY")` to retrieve inflation data
+1. Call `Bash({ticker}, limit=20)` to retrieve recent news
+2. Call `Bash(days=30)` to retrieve upcoming macro events
+3. Call `Bash(indicator="CPI", symbol="SPY")` to retrieve inflation data
 4. Validate data completeness (ensure articles array is not empty, events are present)
 5. Store news data to memory key "market/data/{ticker}/news"
 6. Store macro calendar to memory key "market/data/{ticker}/macro_calendar"
 7. Store macro history to memory key "market/data/{ticker}/macro_history"
-8. Verify storage: `mcp__memorygraph__recall_memories with query "market/data/{ticker}/news" --namespace default`
+8. Verify storage: `memory_recall with query "market/data/{ticker}/news" --namespace default`
 
 ## SUCCESS CRITERIA
 - News data retrieved with at least 10 articles
@@ -110,8 +110,8 @@ interface MacroHistoryData {
 
 Use the first available data source. Fall back to the next if unavailable or erroring.
 
-1. **MCP Market Terminal** (preferred): `mcp__market-terminal__get_news(symbol, limit=20)`, `mcp__market-terminal__get_macro_calendar(days=30)`, `mcp__market-terminal__get_macro_history(indicator, symbol="SPY")`
-2. **Perplexity Search** (secondary): Use `mcp__perplexity__perplexity_search` with queries:
+1. **MCP Market Terminal** (preferred): `Bash(symbol, limit=20)`, `Bash(days=30)`, `Bash(indicator, symbol="SPY")`
+2. **Perplexity Search** (secondary): Use `WebSearch` with queries:
    - News: `"{ticker} stock news last 30 days earnings analyst upgrades downgrades"`
    - Macro calendar: `"macroeconomic calendar upcoming events FOMC jobs GDP CPI next 30 days"`
    - Macro history: `"US CPI inflation rate unemployment rate interest rate trend past 12 months"`

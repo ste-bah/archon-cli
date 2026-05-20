@@ -2,8 +2,8 @@
 //!
 //! Assembles agent prompts from five sections: agent instructions, workflow
 //! context, prior context (with safe truncation), output expectations, and
-//! task completion summary. Phase 6 agents additionally receive style
-//! injection via [`StyleInjector`].
+//! task completion summary. Phase 6 and final-assembly agents additionally
+//! receive style injection via [`StyleInjector`].
 
 use super::agents::{RESEARCH_AGENTS, get_phase_by_id};
 use super::style::StyleInjector;
@@ -57,7 +57,7 @@ impl ResearchPromptBuilder {
     /// * `total_agents` – total agent count (typically 46)
     /// * `task` – the research query / task description
     /// * `prior_context` – recalled memory content from previous agents
-    /// * `style_prompt` – optional style override for Phase 6 agents
+    /// * `style_prompt` – optional style override for writing/final assembly
     pub fn build(
         &self,
         agent: &super::agents::ResearchAgent,
@@ -77,7 +77,7 @@ impl ResearchPromptBuilder {
 
         // Part 3: Prior Context (omitted if empty)
         if !prior_context.is_empty() {
-            parts.push(self.build_prior_context(prior_context));
+            parts.push(self.build_prior_context(agent, prior_context));
         }
 
         // Part 4: Output Expectations
@@ -88,8 +88,8 @@ impl ResearchPromptBuilder {
 
         let mut prompt = parts.join("\n\n");
 
-        // Phase 6: inject style guidelines
-        if agent.phase == 6
+        // Phase 6 and final assembly: inject style guidelines
+        if (agent.phase == 6 || agent.phase == 8)
             && let Some(style) = style_prompt
         {
             let injector = StyleInjector::new();
@@ -166,12 +166,26 @@ impl ResearchPromptBuilder {
         )
     }
 
-    fn build_prior_context(&self, prior_context: &str) -> String {
+    fn build_prior_context(
+        &self,
+        agent: &super::agents::ResearchAgent,
+        prior_context: &str,
+    ) -> String {
+        let max_chars = if agent.key == "chapter-synthesizer" {
+            120_000
+        } else if agent.phase >= 7 {
+            80_000
+        } else {
+            10_000
+        };
         let escaped = escape_backticks(prior_context);
-        let truncated = safe_truncate(&escaped, 10_000);
+        let truncated = safe_truncate(&escaped, max_chars);
         format!(
             "## Prior Context\n\
-             The following context has been recalled from previous agent outputs:\n\n\
+             The following context has been injected by the Archon runtime from memory, \
+             accepted prior agent outputs, and deterministic pre-scans where applicable. \
+             Treat it as available evidence for this agent call; do not claim that memory \
+             or filesystem access is unavailable when the needed data appears here.\n\n\
              {}",
             truncated,
         )
@@ -225,17 +239,15 @@ mod tests {
         ResearchPromptBuilder::new()
     }
 
-    // 1. Prompt has all 5 sections for a Phase 4 agent
     #[test]
     fn prompt_has_all_5_sections_phase4() {
         let b = builder();
-        // evidence-synthesizer is index 15, Phase 4
-        let agent = &RESEARCH_AGENTS[15];
+        let agent = &RESEARCH_AGENTS[14];
         assert_eq!(agent.key, "evidence-synthesizer");
 
         let prompt = b.build(
             agent,
-            15,
+            14,
             46,
             "AI in healthcare",
             "some prior context",
@@ -255,23 +267,21 @@ mod tests {
             prompt.contains("## Task Completion"),
             "missing task completion"
         );
-        // Part 1 is the agent instructions (either file content or fallback)
         assert!(
             prompt.contains("Evidence Synthesizer") || prompt.contains("evidence-synthesizer"),
             "missing agent instructions reference"
         );
     }
 
-    // 2. Workflow context shows correct position
     #[test]
     fn workflow_context_correct_position() {
         let b = builder();
-        let agent = &RESEARCH_AGENTS[15];
-        let prompt = b.build(agent, 15, 46, "test query", "", None);
+        let agent = &RESEARCH_AGENTS[14];
+        let prompt = b.build(agent, 14, 46, "test query", "", None);
 
         assert!(
-            prompt.contains("Agent #16 of 46"),
-            "should show 1-based index: Agent #16 of 46"
+            prompt.contains("Agent #15 of 46"),
+            "should show 1-based index: Agent #15 of 46"
         );
         assert!(
             prompt.contains("Phase: 4 - Synthesis"),
@@ -279,7 +289,6 @@ mod tests {
         );
     }
 
-    // 3. Prior context truncated at 10000 chars with marker
     #[test]
     fn prior_context_truncation() {
         let b = builder();
@@ -291,16 +300,13 @@ mod tests {
             prompt.contains("... [truncated]"),
             "should have truncation marker"
         );
-        // The prior context section should not contain all 15000 chars
         let prior_section = prompt.split("## Prior Context").nth(1).unwrap_or("");
-        // Truncated to 10000 + marker
         assert!(
             prior_section.chars().count() < 12_000,
             "truncated section should be well under 15000 chars"
         );
     }
 
-    // 4. Empty prior context omits the section
     #[test]
     fn empty_prior_context_omitted() {
         let b = builder();
@@ -313,7 +319,6 @@ mod tests {
         );
     }
 
-    // 5. Backtick escaping in prior context
     #[test]
     fn backtick_escaping() {
         let b = builder();
@@ -331,11 +336,10 @@ mod tests {
         );
     }
 
-    // 6. Output expectations include memory_keys[0]
     #[test]
     fn output_expectations_memory_key() {
         let b = builder();
-        let agent = &RESEARCH_AGENTS[0]; // step-back-analyzer
+        let agent = &RESEARCH_AGENTS[0];
         let prompt = b.build(agent, 0, 46, "test", "", None);
 
         assert!(
@@ -348,18 +352,16 @@ mod tests {
         );
     }
 
-    // 7. Phase 6 agent gets style injection
     #[test]
     fn phase6_style_injection() {
         let b = builder();
-        // introduction-writer is index 29, Phase 6
-        let agent = &RESEARCH_AGENTS[29];
+        let agent = &RESEARCH_AGENTS[28];
         assert_eq!(agent.key, "introduction-writer");
         assert_eq!(agent.phase, 6);
 
         let prompt = b.build(
             agent,
-            29,
+            28,
             46,
             "test",
             "",
@@ -376,33 +378,57 @@ mod tests {
         );
     }
 
-    // 8. Missing agent instruction file uses fallback
+    #[test]
+    fn final_assembly_gets_larger_prior_context_budget() {
+        let b = builder();
+        let agent = RESEARCH_AGENTS.last().unwrap();
+        assert_eq!(agent.key, "chapter-synthesizer");
+        assert_eq!(agent.phase, 8);
+
+        let long_context: String = "x".repeat(20_000);
+        let prompt = b.build(agent, 45, 46, "test", &long_context, None);
+
+        assert!(
+            !prompt.contains("... [truncated]"),
+            "final assembly should be able to see chapter-scale context"
+        );
+    }
+
+    #[test]
+    fn final_assembly_gets_style_injection() {
+        let b = builder();
+        let agent = RESEARCH_AGENTS.last().unwrap();
+        assert_eq!(agent.key, "chapter-synthesizer");
+
+        let prompt = b.build(agent, 45, 46, "test", "", Some("Use APA 7 formatting"));
+
+        assert!(
+            prompt.contains("## STYLE GUIDELINES"),
+            "final assembly should receive style guidelines"
+        );
+        assert!(prompt.contains("APA 7"));
+    }
+
     #[test]
     fn missing_instruction_file_fallback() {
         let b = builder();
         let agent = &RESEARCH_AGENTS[0];
-        // The prompt_source_path likely doesn't exist in the test environment
-        // so it should fall back to the default message
         let prompt = b.build(agent, 0, 46, "test", "", None);
 
-        // Either the file was found OR we got the fallback
         assert!(
             prompt.contains("Step-Back Analyzer") || prompt.contains("step-back-analyzer"),
             "should contain agent reference either from file or fallback"
         );
     }
 
-    // 9. safe_truncate preserves char boundaries (multi-byte)
     #[test]
     fn safe_truncate_char_boundary() {
-        // Each emoji is multiple bytes but one char
-        let text = "🎉🎊🎈🎆🎇"; // 5 chars
+        let text = "🎉🎊🎈🎆🎇";
         let result = safe_truncate(text, 3);
         assert!(result.starts_with("🎉🎊🎈"));
         assert!(result.contains("... [truncated]"));
     }
 
-    // 10. safe_truncate no-op when under limit
     #[test]
     fn safe_truncate_no_op() {
         let text = "short";
@@ -410,7 +436,6 @@ mod tests {
         assert_eq!(result, "short");
     }
 
-    // 11. escape_backticks replaces triple backticks
     #[test]
     fn escape_backticks_works() {
         let input = "before ``` middle ``` after";
@@ -418,23 +443,20 @@ mod tests {
         assert_eq!(result, "before \\`\\`\\` middle \\`\\`\\` after");
     }
 
-    // 12. Phase 6 without style_prompt does NOT get STYLE GUIDELINES
     #[test]
     fn phase6_no_style_prompt_no_injection() {
         let b = builder();
-        let agent = &RESEARCH_AGENTS[29]; // introduction-writer, Phase 6
-        let prompt = b.build(agent, 29, 46, "test", "", None);
+        let agent = &RESEARCH_AGENTS[28];
+        let prompt = b.build(agent, 28, 46, "test", "", None);
         assert!(
             !prompt.contains("## STYLE GUIDELINES"),
             "no style_prompt means no STYLE GUIDELINES section"
         );
     }
 
-    // 13. Workflow context shows previous and next agents
     #[test]
     fn workflow_context_prev_next() {
         let b = builder();
-        // Agent at index 1 (self-ask-decomposer)
         let agent = &RESEARCH_AGENTS[1];
         let prompt = b.build(agent, 1, 46, "test", "", None);
 
@@ -448,7 +470,6 @@ mod tests {
         );
     }
 
-    // 14. First agent shows "none (first agent)"
     #[test]
     fn first_agent_prev_none() {
         let b = builder();
@@ -457,7 +478,6 @@ mod tests {
         assert!(prompt.contains("Previous agent: none (first agent)"));
     }
 
-    // 15. Last agent shows "none (final agent)"
     #[test]
     fn last_agent_next_none() {
         let b = builder();

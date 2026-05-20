@@ -6,36 +6,11 @@ use archon_core::config::ArchonConfig;
 use archon_core::env_vars::ArchonEnvVars;
 use archon_pipeline::audit::store::PipelineBundleStore;
 use archon_pipeline::audit::types::PipelineEvent;
-use archon_pipeline::leann_searcher::LeannSearcher;
 use archon_pipeline::learning::integration::{LearningIntegration, LearningIntegrationConfig};
+use archon_pipeline::runner::PipelineType;
 use chrono::Utc;
 
 use crate::runtime::llm::build_configured_llm_provider;
-
-struct CodeIndexLeannSearcher {
-    index: Arc<archon_leann::CodeIndex>,
-}
-
-impl LeannSearcher for CodeIndexLeannSearcher {
-    fn search(&self, query: &str) -> String {
-        match self.index.search_code(query, 5) {
-            Ok(results) if !results.is_empty() => {
-                let mut out = String::with_capacity(results.len() * 256);
-                for r in &results {
-                    let snippet: String = r.content.chars().take(300).collect();
-                    out.push_str(&format!(
-                        "{}:{}  {}\n",
-                        r.file_path.display(),
-                        r.line_start,
-                        snippet
-                    ));
-                }
-                out
-            }
-            _ => String::new(),
-        }
-    }
-}
 
 pub(crate) async fn build_pipeline_adapter(
     config: &ArchonConfig,
@@ -66,35 +41,6 @@ pub(crate) async fn init_leann(cwd: &Path) -> Option<archon_pipeline::runner::Le
     }
 }
 
-pub(crate) async fn init_research_leann(cwd: &Path) -> Option<Arc<dyn LeannSearcher>> {
-    let db_path = cwd.join(".archon").join("leann.db");
-    if let Some(parent) = db_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    match archon_leann::CodeIndex::new(&db_path, Default::default()) {
-        Ok(idx) => {
-            let idx = Arc::new(idx);
-            let config = archon_leann::IndexConfig {
-                root_path: cwd.to_path_buf(),
-                include_patterns: vec!["**/*.rs".into(), "**/*.py".into(), "**/*.ts".into()],
-                exclude_patterns: vec![
-                    "**/target/**".into(),
-                    "**/node_modules/**".into(),
-                    "**/.git/**".into(),
-                ],
-            };
-            if let Err(e) = idx.index_repository(cwd, &config).await {
-                tracing::warn!(error = %e, "LEANN repo indexing failed; research pipeline continuing without code context");
-            }
-            Some(Arc::new(CodeIndexLeannSearcher { index: idx }))
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "LEANN unavailable for research pipeline; continuing without code context");
-            None
-        }
-    }
-}
-
 pub(crate) async fn print_pipeline_result(
     result: &archon_pipeline::runner::PipelineResult,
     cwd: &Path,
@@ -104,12 +50,33 @@ pub(crate) async fn print_pipeline_result(
     println!("Agents run: {}", result.agent_results.len());
     println!("Total cost: ${:.4}", result.total_cost_usd);
     println!("Duration: {:.1}s", result.duration.as_secs_f64());
+    if let Some((markdown_path, pdf_path)) = final_research_artifact_paths(result, cwd) {
+        println!("Final paper Markdown: {}", markdown_path.display());
+        println!("Final paper PDF: {}", pdf_path.display());
+    }
     match completion_summary(result, cwd).await {
         Ok(Some(summary)) => println!("Completion integrity: {}", summary.text),
         Ok(None) => {}
         Err(error) => {
             println!("Completion integrity: unavailable ({error})");
         }
+    }
+}
+
+pub(crate) fn final_research_artifact_paths(
+    result: &archon_pipeline::runner::PipelineResult,
+    cwd: &Path,
+) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+    if result.pipeline_type != PipelineType::Research {
+        return None;
+    }
+    let bundle_dir = PipelineBundleStore::new(cwd).bundle_dir(&result.session_id);
+    let (markdown_path, pdf_path) =
+        archon_pipeline::research::final_artifact::artifact_paths(&bundle_dir);
+    if markdown_path.exists() || pdf_path.exists() {
+        Some((markdown_path, pdf_path))
+    } else {
+        None
     }
 }
 
@@ -133,6 +100,7 @@ async fn completion_summary(
         archon_pipeline::runner::PipelineType::Research => "research",
         archon_pipeline::runner::PipelineType::Learning => "learning",
         archon_pipeline::runner::PipelineType::Kb => "kb",
+        archon_pipeline::runner::PipelineType::GameTheory => "gametheory",
     };
     let (agent_key, model) = result
         .agent_results

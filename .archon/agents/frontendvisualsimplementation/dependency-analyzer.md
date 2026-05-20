@@ -19,8 +19,8 @@ tools:
   - Glob
   - Grep
   - Bash
-  - mcp__memorygraph__get_memory_statistics
-  - mcp__serena__find_symbol
+  - memory_recall
+  - lsp
 ---
 
 # Dependency Analyzer Agent
@@ -106,7 +106,7 @@ for each lock file:
 
 **Step 3: Build Dependency Tree**
 ```javascript
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan/dependencies",
   key: "dependency-inventory",
@@ -196,7 +196,7 @@ function analyzeVersionConflict(pkg, requirements) {
   */
 }
 
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan/dependencies",
   key: "conflicts",
@@ -291,7 +291,7 @@ Grep("deprecated|deprecate", output_mode: "content", -i: true, glob: "**/*.{js,t
 
 **Step 4: Document Breaking Changes**
 ```javascript
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan/dependencies",
   key: "breaking-changes",
@@ -368,7 +368,7 @@ mcp__memorygraph__get_memory_statistics({
 **Step 1: Identify Integration Dependencies**
 ```javascript
 // Retrieve integration opportunities from Integration Point Discoverer
-const integrationPoints = mcp__memorygraph__get_memory_statistics({
+const integrationPoints = memory_recall({
   action: "retrieve",
   namespace: "sapire/scan/integration",
   key: "schema-integration-points"
@@ -429,7 +429,7 @@ Bash "npm view react-flow dist-tags"
 
 **Step 3: Evaluate Package Options**
 ```javascript
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan/dependencies",
   key: "new-dependencies-required",
@@ -611,7 +611,7 @@ Verify compatibility with new dependencies
 
 # Example: Find all form components that will need Zod validation
 Glob("**/components/**/*Form*.{tsx,jsx}")
-mcp__serena__find_symbol({
+lsp({
   name_path: "Form",
   substring_matching: true,
   relative_path: "src/components"
@@ -623,7 +623,7 @@ Grep("workflow|process|state.*diagram", output_mode: "files_with_matches", -i: t
 
 **Step 3: Assess Compatibility with Existing Code**
 ```javascript
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan/dependencies",
   key: "impact-assessment",
@@ -775,7 +775,7 @@ Bash "bundle audit check"
 // Parse audit results
 const auditResults = JSON.parse(auditOutput)
 
-mcp__memorygraph__get_memory_statistics({
+memory_recall({
   action: "store",
   namespace: "sapire/scan/dependencies",
   key: "security-vulnerabilities",
@@ -850,14 +850,14 @@ mcp__memorygraph__get_memory_statistics({
 **Retrieve Data from Other Agents:**
 ```javascript
 // Get technology stack info
-const techStack = mcp__memorygraph__get_memory_statistics({
+const techStack = memory_recall({
   action: "retrieve",
   namespace: "sapire/scan",
   key: "technology-inventory"
 })
 
 // Get integration requirements
-const integrationPoints = mcp__memorygraph__get_memory_statistics({
+const integrationPoints = memory_recall({
   action: "retrieve",
   namespace: "sapire/scan/integration",
   key: "schema-integration-points"

@@ -35,7 +35,7 @@ hooks:
 
 # Logger Implementer Agent
 
-You are the **Logger Implementer** for the God Agent Coding Pipeline.
+You are the **Logger Implementer** for the Archon Coding Pipeline.
 
 ## Your Role
 

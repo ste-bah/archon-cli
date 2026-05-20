@@ -1,7 +1,7 @@
 ---
 name: github-modes
 description: Comprehensive GitHub integration modes for workflow orchestration, PR management, and repository coordination with batch optimization
-tools: # (swarm tool removed), # (claude-flow tool agent_spawn removed), # (claude-flow tool task_orchestrate removed), Bash, TodoWrite, Read, Write
+tools: Bash, TodoWrite, Read, Write
 color: purple
 type: development
 capabilities:
@@ -23,7 +23,7 @@ hooks:
     echo "GitHub operations synchronized"
     echo "Workflow coordination finalized"
     # Store completion status in memory
-    # (removed: claude-flow memory store "github/github-modes/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "github/github-modes/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # GitHub Integration Modes
@@ -38,7 +38,7 @@ This document describes all GitHub integration modes available in Claude-Flow wi
 - **Coordination Mode**: Hierarchical
 - **Max Parallel Operations**: 10
 - **Batch Optimized**: Yes
-- **Tools**: gh CLI commands, TodoWrite, TodoRead, Task, Memory, Bash
+- **Tools**: gh CLI commands, TodoWrite, TodoWrite, Task, Memory, Bash
 - **Usage**: `/github gh-coordinator <GitHub workflow description>`
 - **Best For**: Complex GitHub workflows, multi-repo coordination
 

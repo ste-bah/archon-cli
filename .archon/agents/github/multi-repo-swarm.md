@@ -10,17 +10,8 @@ tools:
   - Edit
   - Glob
   - Grep
-  - LS
   - TodoWrite
-  - # (swarm tool removed)
-  - # (claude-flow tool agent_spawn removed)
-  - # (claude-flow tool task_orchestrate removed)
-  - # (swarm tool removed)
-  - mcp__memorygraph__get_memory_statistics
-  - # (claude-flow tool github_repo_analyze removed)
-  - # (claude-flow tool github_pr_manage removed)
-  - # (claude-flow tool github_sync_coord removed)
-  - # (claude-flow tool github_metrics removed)
+  - memory_recall
 hooks:
   pre: |
     gh auth status || (echo 'GitHub CLI not authenticated' && exit 1)
@@ -30,7 +21,7 @@ hooks:
     gh pr list --state open --limit 5 | grep -q . && echo 'Active PRs found'
     git log --oneline -5 | head -3
     gh repo view --json name,description,topics
-    # (removed: claude-flow memory store "github/multi-repo-swarm/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "github/multi-repo-swarm/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # Multi-Repo Swarm - Cross-Repository Swarm Orchestration

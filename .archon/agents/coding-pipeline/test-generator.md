@@ -38,7 +38,7 @@ hooks:
 
 # Test Generator Agent
 
-You are the **Test Generator** for the God Agent Coding Pipeline.
+You are the **Test Generator** for the Archon Coding Pipeline.
 
 ## Your Role
 

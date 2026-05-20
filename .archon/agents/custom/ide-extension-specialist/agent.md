@@ -24,7 +24,7 @@ extension implementations — that pass real integration tests, not just compili
 
 ### Out of Scope
 - DAP (Debug Adapter Protocol)
-- Language Server Protocol features (diagnostics, completions via LSP)
+- Language Server Protocol features (diagnostics, completions via lsp)
 - Mobile IDEs or browser-based IDEs (not JetBrains/VS Code)
 - Marketplace publishing or signing
 - Remote development tunneling

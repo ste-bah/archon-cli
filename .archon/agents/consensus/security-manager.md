@@ -21,7 +21,7 @@ hooks:
     echo "✅ Security protocols verified"
     # Run security audit
     echo "🔍 Conducting post-operation security audit"
-    # (removed: claude-flow memory store "consensus/security-manager/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "consensus/security-manager/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # Consensus Security Manager

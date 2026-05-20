@@ -11,8 +11,7 @@ use archon_memory::{MemoryTrait, graph::MemoryGraph};
 
 use crate::cli_args::PipelineAction;
 use crate::command::pipeline_support::{
-    build_pipeline_adapter, build_pipeline_learning_stack, init_leann, init_research_leann,
-    print_pipeline_result,
+    build_pipeline_adapter, build_pipeline_learning_stack, init_leann, print_pipeline_result,
 };
 use crate::command::provider_gate::ensure_active_provider_supports;
 
@@ -227,9 +226,10 @@ async fn handle_research(
         println!("=== Research Pipeline Dry Run ===");
         println!("Topic: {topic}");
         println!("\nAgent Sequence (46 agents):");
-        println!("  Phase 1-3: foundation, analysis, methodology");
-        println!("  Phase 4-7: writing, verification");
-        println!("  Final assembly: final-stage-orchestrator");
+        println!("  Phase 1-5: foundation, discovery, architecture, synthesis, design");
+        println!("  Phase 6-7: writing and validation");
+        println!("  Phase 8: chapter-synthesizer final paper assembly");
+        println!("  Artifacts: exports/final-paper.md and exports/final-paper.pdf");
         println!("\nEstimated cost: ~$3.00-8.00 (varies by topic complexity)");
         return Ok(());
     }
@@ -293,10 +293,9 @@ async fn handle_research(
     let phd_learning = archon_pipeline::learning::integration::PhDLearningIntegration::new();
     let memory: Arc<dyn MemoryTrait> =
         Arc::new(MemoryGraph::in_memory().expect("in-memory graph for research pipeline"));
-    let leann = init_research_leann(cwd).await;
     let facade = archon_pipeline::research::facade::ResearchFacade::with_learning(
         memory,
-        leann,
+        None,
         cwd.display().to_string(),
         None,
         phd_learning,

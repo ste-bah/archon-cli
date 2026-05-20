@@ -18,10 +18,12 @@ capabilities:
   - feedback-verification
   - learning-loop-enforcement
 tools:
-  - memory-inspector
-  - agent-orchestrator
-  - rollback-manager
-  - failure-analyzer
+  - memory_recall
+  - Agent
+  - Read
+  - Grep
+  - Glob
+  - Bash
 qualityGates:
   minRecoverySuccessRate: 0.80
   maxRecoveryAttempts: 3

@@ -4,22 +4,9 @@ description: GitHub Actions workflow automation agent that creates intelligent, 
 type: automation
 color: "#E74C3C"
 tools:
-  - mcp__github__create_workflow
-  - mcp__github__update_workflow
-  - mcp__github__list_workflows
-  - mcp__github__get_workflow_runs
-  - mcp__github__create_workflow_dispatch
-  - # (swarm tool removed)
-  - # (claude-flow tool agent_spawn removed)
-  - # (claude-flow tool task_orchestrate removed)
-  - mcp__memorygraph__get_memory_statistics
-  - # (claude-flow tool performance_report removed)
-  - # (claude-flow tool bottleneck_analyze removed)
-  - # (claude-flow tool workflow_create removed)
-  - # (claude-flow tool automation_setup removed)
-  - TodoWrite
-  - TodoRead
   - Bash
+  - memory_recall
+  - TodoWrite
   - Read
   - Write
   - Edit
@@ -33,7 +20,7 @@ hooks:
     echo "Deploy optimized workflows with continuous performance monitoring"
     echo "Generate workflow automation metrics and optimization recommendations"
     echo "Update automation rules based on swarm learning and performance data"
-    # (removed: claude-flow memory store "github/workflow-automation/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "github/workflow-automation/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # Workflow Automation - GitHub Actions Integration
@@ -531,7 +518,7 @@ npx ruv-swarm actions profile \
 }
 
 # Store performance insights in swarm memory
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "workflow/performance/analysis",
   value: {
@@ -548,16 +535,16 @@ mcp__memorygraph__get_memory_statistics {
 // Swarm-powered workflow creation
 const createIntelligentWorkflow = async (repoContext) => {
   // Initialize workflow generation swarm
-  await mcp__claude_flow__swarm_init({ topology: "hierarchical", maxAgents: 8 });
+  await Agent({ topology: "hierarchical", maxAgents: 8 });
   
   // Spawn specialized workflow agents
-  await mcp__claude_flow__agent_spawn({ type: "architect", name: "Workflow Architect" });
-  await mcp__claude_flow__agent_spawn({ type: "coder", name: "YAML Generator" });
-  await mcp__claude_flow__agent_spawn({ type: "optimizer", name: "Performance Optimizer" });
-  await mcp__claude_flow__agent_spawn({ type: "tester", name: "Workflow Validator" });
+  await Agent({ type: "architect", name: "Workflow Architect" });
+  await Agent({ type: "coder", name: "YAML Generator" });
+  await Agent({ type: "optimizer", name: "Performance Optimizer" });
+  await Agent({ type: "tester", name: "Workflow Validator" });
   
   // Create adaptive workflow based on repository analysis
-  const workflow = await mcp__claude_flow__workflow_create({
+  const workflow = await Agent({
     name: "Intelligent CI/CD Pipeline",
     steps: [
       {
@@ -584,7 +571,7 @@ const createIntelligentWorkflow = async (repoContext) => {
   });
   
   // Store workflow configuration in memory
-  await mcp__claude_flow__memory_usage({
+  await memory_recall({
     action: "store",
     key: `workflow/${repoContext.name}/config`,
     value: {
@@ -603,7 +590,7 @@ const createIntelligentWorkflow = async (repoContext) => {
 ### Continuous Learning and Optimization
 ```bash
 # Implement continuous workflow learning
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "workflow/learning/patterns",
   value: {

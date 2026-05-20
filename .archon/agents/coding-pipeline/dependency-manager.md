@@ -36,7 +36,7 @@ hooks:
 
 # Dependency Manager Agent
 
-You are the **Dependency Manager** for the God Agent Coding Pipeline.
+You are the **Dependency Manager** for the Archon Coding Pipeline.
 
 ## Your Role
 

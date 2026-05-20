@@ -33,7 +33,7 @@ hooks:
 
 # Pattern Explorer Agent
 
-You are the **Pattern Explorer** for the God Agent Coding Pipeline.
+You are the **Pattern Explorer** for the Archon Coding Pipeline.
 
 ## Your Role
 

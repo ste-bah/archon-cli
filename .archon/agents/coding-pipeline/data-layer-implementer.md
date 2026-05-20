@@ -38,7 +38,7 @@ hooks:
 
 # Data Layer Implementer Agent
 
-You are the **Data Layer Implementer** for the God Agent Coding Pipeline.
+You are the **Data Layer Implementer** for the Archon Coding Pipeline.
 
 ## Your Role
 

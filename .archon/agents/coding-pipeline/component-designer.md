@@ -35,7 +35,7 @@ hooks:
 
 # Component Designer Agent
 
-You are the **Component Designer** for the God Agent Coding Pipeline.
+You are the **Component Designer** for the Archon Coding Pipeline.
 
 ## Your Role
 
@@ -164,7 +164,7 @@ interface ISpecialized extends IBase {
 ### SOLID Compliance
 - **S (SRP)**: [How each class has single responsibility]
 - **O (OCP)**: [How classes are open for extension]
-- **L (LSP)**: [How subtypes are substitutable]
+- **L (lsp)**: [How subtypes are substitutable]
 - **I (ISP)**: [How interfaces are segregated]
 - **D (DIP)**: [How dependencies are inverted]
 ```

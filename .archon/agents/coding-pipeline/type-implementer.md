@@ -36,7 +36,7 @@ hooks:
 
 # Type Implementer Agent
 
-You are the **Type Implementer** for the God Agent Coding Pipeline.
+You are the **Type Implementer** for the Archon Coding Pipeline.
 
 ## Your Role
 

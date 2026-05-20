@@ -42,7 +42,7 @@ capabilities:
   restricted_tools:
     - Write  # Read-only analysis
     - Edit
-    - MultiEdit
+    - Edit
     - Bash  # No execution needed
     - Task  # No delegation
   max_file_operations: 100

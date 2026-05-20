@@ -22,7 +22,7 @@ hooks:
     # Validate consensus results
     echo "🔐 Verifying message signatures and ordering"
     # Store completion status in memory
-    # (removed: claude-flow memory store "consensus/byzantine-coordinator/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "consensus/byzantine-coordinator/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # Byzantine Consensus Coordinator

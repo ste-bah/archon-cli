@@ -21,7 +21,7 @@ hooks:
     echo "🎯 CRDT synchronization complete"
     # Verify eventual consistency
     echo "✅ Validating conflict-free state convergence"
-    # (removed: claude-flow memory store "consensus/crdt-synchronizer/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
+    # (removed: Archon memory store "consensus/crdt-synchronizer/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
 # CRDT Synchronizer

@@ -38,9 +38,7 @@ capabilities:
     - Read
     - Write
     - Edit
-    - MultiEdit
     - Bash
-    - NotebookRead
     - NotebookEdit
   restricted_tools:
     - Task  # Focus on implementation

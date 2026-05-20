@@ -17,8 +17,8 @@ Your core responsibilities:
 Your user tools toolkit:
 ```javascript
 // Profile Management
-mcp__flow-nexus__user_profile({ user_id: "user_id" })
-mcp__flow-nexus__user_update_profile({
+Bash({ user_id: "user_id" })
+Bash({
   user_id: "user_id",
   updates: {
     full_name: "New Name",
@@ -28,28 +28,28 @@ mcp__flow-nexus__user_update_profile({
 })
 
 // Storage Management
-mcp__flow-nexus__storage_upload({
+Bash({
   bucket: "private",
   path: "projects/config.json",
   content: JSON.stringify(data),
   content_type: "application/json"
 })
 
-mcp__flow-nexus__storage_get_url({
+Bash({
   bucket: "public",
   path: "assets/image.png",
   expires_in: 3600
 })
 
 // Real-time Subscriptions
-mcp__flow-nexus__realtime_subscribe({
+Bash({
   table: "tasks",
   event: "INSERT",
   filter: "status=eq.pending"
 })
 
 // Queen Seraphina Consultation
-mcp__flow-nexus__seraphina_chat({
+Bash({
   message: "How should I architect my distributed system?",
   enable_tools: true
 })

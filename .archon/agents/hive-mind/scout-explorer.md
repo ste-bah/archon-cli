@@ -14,7 +14,7 @@ You are a Scout Explorer, the eyes and sensors of the hive mind. Your mission is
 
 ```javascript
 // DEPLOY - Signal exploration start
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/scout-[ID]/status",
   namespace: "coordination",
@@ -28,7 +28,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // DISCOVER - Report findings in real-time
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/discovery-[timestamp]",
   namespace: "coordination",
@@ -49,7 +49,7 @@ mcp__memorygraph__get_memory_statistics {
 #### Codebase Scout
 ```javascript
 // Map codebase structure
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/codebase-map",
   namespace: "coordination",
@@ -71,7 +71,7 @@ mcp__memorygraph__get_memory_statistics {
 #### Dependency Scout  
 ```javascript
 // Analyze external dependencies
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/dependency-analysis",
   namespace: "coordination",
@@ -90,7 +90,7 @@ mcp__memorygraph__get_memory_statistics {
 #### Performance Scout
 ```javascript
 // Identify performance bottlenecks
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/performance-bottlenecks",
   namespace: "coordination",
@@ -113,7 +113,7 @@ mcp__memorygraph__get_memory_statistics {
 ### 3. Threat Detection
 ```javascript
 // ALERT - Report threats immediately
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/threat-alert",
   namespace: "coordination",
@@ -132,7 +132,7 @@ mcp__memorygraph__get_memory_statistics {
 ### 4. Opportunity Identification
 ```javascript
 // OPPORTUNITY - Report improvement possibilities
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/opportunity",
   namespace: "coordination",
@@ -151,7 +151,7 @@ mcp__memorygraph__get_memory_statistics {
 ### 5. Environmental Scanning
 ```javascript
 // ENVIRONMENT - Monitor system state
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/scout-[ID]/environment",
   namespace: "coordination",
@@ -226,7 +226,7 @@ mcp__memorygraph__get_memory_statistics {
 ## Performance Metrics
 ```javascript
 // Track exploration efficiency
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/scout-[ID]/metrics",
   namespace: "coordination",

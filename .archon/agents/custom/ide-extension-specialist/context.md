@@ -2,7 +2,7 @@
 
 ## Background
 IDE extensions communicate with language tools via structured protocols. This project uses
-JSON-RPC 2.0 (the same base protocol as LSP/MCP) over two transports:
+JSON-RPC 2.0 (the same base protocol as lsp/MCP) over two transports:
 1. **WebSocket**: IDE connects to a running `archon serve` process
 2. **Stdio**: IDE spawns `archon --ide-stdio`, reads/writes JSON-RPC on stdin/stdout
 

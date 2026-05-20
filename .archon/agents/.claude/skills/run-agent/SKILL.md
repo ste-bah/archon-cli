@@ -58,7 +58,7 @@ Read each file if it exists. Track which files are present:
 ## Step 4: Recall MemoryGraph Context
 
 If `memory_keys` exists and has `recall_queries`:
-1. For each query in `recall_queries`, call `mcp__memorygraph__recall_memories` with the query
+1. For each query in `recall_queries`, call `memory_recall` with the query
 2. Collect results into `memory_context` string (concatenate relevant memory content)
 3. If any query returns empty: note internally (debug level, no user warning)
 4. If MemoryGraph is unavailable: set `memory_context = ""`, warn user: "MemoryGraph unavailable. Running without memory context."
@@ -66,9 +66,9 @@ If `memory_keys` exists and has `recall_queries`:
 ## Step 5: Query LEANN Code Context
 
 If `memory_keys` exists and has `leann_queries`:
-1. Try calling `mcp__leann-search__get_stats`
+1. Try calling `LeannSearch__get_stats`
    - If error/unavailable: skip ALL LEANN queries silently. Do NOT warn user.
-2. If LEANN is running: for each query in `leann_queries`, call `mcp__leann-search__search_code`
+2. If LEANN is running: for each query in `leann_queries`, call `LeannSearch`
 3. Collect results into `leann_context` string
 4. If no results or LEANN not running: set `leann_context = ""`
 
@@ -77,12 +77,12 @@ If `memory_keys` exists and has `leann_queries`:
 This step recalls active behavior rules from MemoryGraph and combines them with behavior.md.
 
 1. **Recall agent-scoped rules**:
-   - Call `mcp__memorygraph__search_memories` with tags `["behavior-rule", "{agent_name}"]`
+   - Call `memory_recall` with tags `["behavior-rule", "{agent_name}"]`
    - Parse each result's content as JSON
    - Filter: `active == true`
 
 2. **Recall global rules**:
-   - Call `mcp__memorygraph__search_memories` with tags `["behavior-rule", "global"]`
+   - Call `memory_recall` with tags `["behavior-rule", "global"]`
    - Parse each result's content as JSON
    - Filter: `active == true`
 
@@ -225,7 +225,7 @@ After the subagent returns successfully:
 
 5. **Store MemoryGraph execution record** (lightweight reference):
    ```
-   mcp__memorygraph__store_memory:
+   memory_store:
      type: "general"
      title: "exec_{agent_name}_{timestamp}"
      content: "Agent '{agent_name}' invocation #{invocation_number}. Task: {first 100 chars}. Completed: {heuristic}. Trace: .claude/agents/traces/{agent_name}/{timestamp}.json"
@@ -271,7 +271,7 @@ If `meta.json` does not exist, create it with all fields:
 ## Step 12: Post-Execution Summary (Optional)
 
 If MemoryGraph is available, store a brief output summary:
-- Call `mcp__memorygraph__store_memory` with:
+- Call `memory_store` with:
   - type: "general"
   - title: "Agent output: {name} -- {first 50 chars of task}"
   - content: "Agent '{name}' executed task: {first 100 chars of task}. Output summary: {first 200 chars of output}."
@@ -347,7 +347,7 @@ Produce ONLY valid JSON matching this schema:
 6. **Reclassify behavior.md targets**: If any suggestion has `target_file: "behavior.md"`, reclassify as a behavior adjustment proposal (not a FIX evolution)
 7. **Store analysis in MemoryGraph**:
    ```
-   mcp__memorygraph__store_memory:
+   memory_store:
      type: "general"
      title: "analysis_{agent_name}_{timestamp}"
      content: {full analysis JSON}

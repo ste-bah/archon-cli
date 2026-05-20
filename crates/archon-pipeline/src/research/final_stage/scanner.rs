@@ -1,4 +1,4 @@
-//! Output scanner — reads agent output files matching `{index}-{agent-key}.md`.
+//! Output scanner — reads agent output files matching `{index}-{agent-key}.md|txt`.
 
 use anyhow::Result;
 use std::path::Path;
@@ -16,10 +16,10 @@ pub struct AgentOutput {
     pub file_path: String,
 }
 
-/// Scan a directory for agent output markdown files matching pattern `{NN}-{agent-key}.md`.
+/// Scan a directory for agent output files matching pattern `{NN}-{agent-key}.md|txt`.
 ///
-/// Files are returned sorted by filename. Non-`.md` files and files whose names
-/// do not match the expected pattern are silently skipped.
+/// Files are returned sorted by filename. Non-text/markdown files and files
+/// whose names do not match the expected pattern are silently skipped.
 pub fn scan_outputs(dir: &Path) -> Result<Vec<AgentOutput>> {
     let mut outputs = Vec::new();
     if !dir.exists() {
@@ -31,7 +31,10 @@ pub fn scan_outputs(dir: &Path) -> Result<Vec<AgentOutput>> {
 
     for entry in entries {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+        let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+            continue;
+        };
+        if !matches!(ext, "md" | "txt") {
             continue;
         }
         let filename = match path.file_stem().and_then(|s| s.to_str()) {

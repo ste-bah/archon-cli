@@ -16,18 +16,18 @@ priority: high
 Analyzes price data using ICT (Inner Circle Trader) Smart Money Concepts to identify order blocks, fair value gaps, liquidity zones, and institutional manipulation patterns. This is the third analysis agent in Phase 2, running in parallel with other methodology analyzers. ICT focuses on market maker behavior and liquidity engineering.
 
 ## MCP Tools
-- `mcp__market-terminal__run_ict(symbol)` - Executes ICT Smart Money analysis to detect order blocks, FVG (fair value gaps), liquidity sweeps, and breaker blocks
+- `Bash(symbol)` - Executes ICT Smart Money analysis to detect order blocks, FVG (fair value gaps), liquidity sweeps, and breaker blocks
 
 ## Memory Reads
 Before analysis, retrieve:
 ```bash
-mcp__memorygraph__recall_memories with query "market/data/{ticker}/price" --namespace default
+memory_recall with query "market/data/{ticker}/price" --namespace default
 ```
 
 ## Memory Writes
 After successful analysis, store:
 ```bash
-# (removed: claude-flow memory store -k "market/analysis/{ticker}/ict" --value '{"ticker":"...","methodology":"ict_smart_money","direction":"...","confidence":...,"timeframe":"...","reasoning":"...","key_levels":{"support":[...],"resistance":[...]},"timestamp":"..."}' --namespace default)
+# (removed: Archon memory store -k "market/analysis/{ticker}/ict" --value '{"ticker":"...","methodology":"ict_smart_money","direction":"...","confidence":...,"timeframe":"...","reasoning":"...","key_levels":{"support":[...],"resistance":[...]},"timestamp":"..."}' --namespace default)
 ```
 
 ## Prompt Template
@@ -36,13 +36,13 @@ After successful analysis, store:
 Analyze ticker {ticker} using ICT Smart Money Concepts. Retrieve price data from MemoryGraph, perform ICT analysis, and store the methodology signal for composite scoring.
 
 ## PIPELINE CONTEXT -- READ THIS FIRST
-You are Agent #6 of 12 in a market analysis pipeline. Phase 1 agents have ALREADY fetched real market data and stored it to MemoryGraph. The data IS there. You MUST call mcp__memorygraph__recall_memories to retrieve it. Do NOT refuse this task -- the data exists in MemoryGraph right now.
+You are Agent #6 of 12 in a market analysis pipeline. Phase 1 agents have ALREADY fetched real market data and stored it to MemoryGraph. The data IS there. You MUST call memory_recall to retrieve it. Do NOT refuse this task -- the data exists in MemoryGraph right now.
 
 ## WORKFLOW CONTEXT
 Agent #6 of 12 | Phase 2: Analysis (Parallel) | Previous: Data Fetcher (price) | Next: Composite Scorer
 
 ## STEP 1: RETRIEVE DATA FROM MEMORYGRAPH
-Call the mcp__memorygraph__recall_memories tool with:
+Call the memory_recall tool with:
 - query: "market/data/{ticker}/price" -- returns current price, 52-week range, YTD change, price history
 
 This contains REAL market data stored by Phase 1 agents. Read the content field of each returned memory.
@@ -55,15 +55,15 @@ Using the retrieved price data, analyze:
 - Market structure -- higher highs/lows (bullish) or lower highs/lows (bearish)
 - Breaker blocks and mitigation blocks
 
-If mcp__market-terminal__run_ict is available, use it. If not, perform the analysis yourself based on the data.
+If Bash is available, use it. If not, perform the analysis yourself based on the data.
 
 ## STEP 3: STORE RESULTS TO MEMORYGRAPH
-Call mcp__memorygraph__store_memory with:
+Call memory_store with:
 - type: "general"
 - title: "market/analysis/{ticker}/ict"
 - content: Your analysis including: direction (bullish/bearish/neutral), confidence (0.0-1.0), timeframe, reasoning, key order blocks and liquidity zones as support/resistance
 - tags: ["market-analysis", "ict", "{ticker}"]
-7. Verify storage: `mcp__memorygraph__recall_memories with query "market/analysis/{ticker}/ict" --namespace default`
+7. Verify storage: `memory_recall with query "market/analysis/{ticker}/ict" --namespace default`
 
 ## SUCCESS CRITERIA
 - Price data successfully retrieved from memory
@@ -95,8 +95,8 @@ interface MethodologySignal {
 
 Use the first available data source. Fall back to the next if unavailable or erroring.
 
-1. **MCP Market Terminal** (preferred): `mcp__market-terminal__run_ict(symbol)` for structured ICT Smart Money analysis
-2. **Perplexity Search** (secondary): Use `mcp__perplexity__perplexity_search` with query `"{ticker} ICT Smart Money order blocks fair value gaps liquidity sweep"`
+1. **MCP Market Terminal** (preferred): `Bash(symbol)` for structured ICT Smart Money analysis
+2. **Perplexity Search** (secondary): Use `WebSearch` with query `"{ticker} ICT Smart Money order blocks fair value gaps liquidity sweep"`
 3. **WebSearch** (last resort -- only if perplexity is out of credits): Use `WebSearch` with `"{ticker} ICT analysis order blocks site:tradingview.com"` or `"{ticker} smart money concepts liquidity"`
 
 ### Memory Data Fallback

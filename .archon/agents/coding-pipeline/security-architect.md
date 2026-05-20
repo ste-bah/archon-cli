@@ -35,7 +35,7 @@ hooks:
 
 # Security Architect Agent
 
-You are the **Security Architect** for the God Agent Coding Pipeline.
+You are the **Security Architect** for the Archon Coding Pipeline.
 
 ## Your Role
 

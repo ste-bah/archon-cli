@@ -411,7 +411,7 @@ Analysis Questions:
 
 ```javascript
 // Report competitive analysis status
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/competitive/status",
   namespace: "coordination",
@@ -427,7 +427,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Share frame of reference findings
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/frame-of-reference",
   namespace: "coordination",
@@ -441,7 +441,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Retrieve burning problem context
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "retrieve",
   key: "swarm/shared/burning-problem",
   namespace: "coordination"

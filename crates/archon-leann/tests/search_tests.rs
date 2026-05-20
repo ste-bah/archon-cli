@@ -10,6 +10,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use cozo::{DataValue, DbInstance, ScriptMutability, Vector};
 use ndarray::Array1;
@@ -57,6 +58,21 @@ impl EmbeddingProvider for ConstantEmbeddingProvider {
     }
     fn dimensions(&self) -> usize {
         self.vector.len()
+    }
+}
+
+struct CountingEmbeddingProvider {
+    calls: Arc<AtomicUsize>,
+}
+
+impl EmbeddingProvider for CountingEmbeddingProvider {
+    fn embed(&self, texts: &[String]) -> std::result::Result<Vec<Vec<f32>>, MemoryError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0, 0.0]).collect())
+    }
+
+    fn dimensions(&self) -> usize {
+        4
     }
 }
 
@@ -122,6 +138,26 @@ mod search_tests {
         assert!(
             results.is_empty(),
             "empty index should return empty results"
+        );
+    }
+
+    #[test]
+    fn search_code_empty_index_does_not_embed_query() {
+        let db = test_db();
+        let indexer = setup_indexer(db.clone());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let embedder: Arc<dyn EmbeddingProvider> = Arc::new(CountingEmbeddingProvider {
+            calls: Arc::clone(&calls),
+        });
+        let search = Search::new(db, embedder);
+        let _ = indexer;
+
+        let results = search.search_code("fn main", 10).expect("search_code");
+        assert!(results.is_empty());
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "empty LEANN index must not initialise or call the embedder"
         );
     }
 

@@ -57,7 +57,7 @@ Every parameter becomes a form field. NO manual form code. Types define UI.
 
 ## 🚀 SPECIALIZED WORKER AGENT SYSTEM
 
-This framework leverages **23 specialized worker agents** organized into 5 sequential phases (local development focus). All agents coordinate via Claude Flow memory and are located in:
+This framework leverages **23 specialized worker agents** organized into 5 sequential phases (local development focus). All agents coordinate via Archon memory and are located in:
 ```
 .claude/agents/frontendvisualsimplementation/sapire/
 ```
@@ -111,7 +111,7 @@ This framework leverages **23 specialized worker agents** organized into 5 seque
 // Phase 1: SCAN - Run all 4 agents in parallel
 [Single Message - Phase 1]:
   # (swarm tool removed)({ topology: "mesh", maxAgents: 8 })
-  mcp__memorygraph__get_memory_statistics({ action: "store", namespace: "sapire", key: "codebase_path", value: "/path/to/codebase" })
+  memory_recall({ action: "store", namespace: "sapire", key: "codebase_path", value: "/path/to/codebase" })
 
   Task("Tech Stack Scanner", "Scan /path/to/codebase - identify all frameworks, dependencies, testing tools, CI/CD. Store findings in memory under sapire/scan/tech-stack", "technology-stack-scanner")
   Task("Architecture Mapper", "Map /path/to/codebase architecture - directories, APIs, data flows, schemas. Store in sapire/scan/architecture", "architecture-mapper")
@@ -1646,7 +1646,7 @@ Each document is:
 ✅ **Universal** - Works with ANY tech stack (Python, Node, Java, Go, etc.)
 ✅ **Comprehensive** - 23 specialized agents cover all analysis aspects
 ✅ **Parallel** - Up to 8 agents run simultaneously per phase
-✅ **Memory-Coordinated** - Agents share findings via Claude Flow memory
+✅ **Memory-Coordinated** - Agents share findings via Archon memory
 ✅ **Quality-Gated** - Each phase must complete before next begins
 ✅ **Actionable** - Generates 27+ implementation-ready documents (more for complex codebases)
 ✅ **Local Development Focus** - Complete code, configs, and tests for running locally

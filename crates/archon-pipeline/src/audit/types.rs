@@ -168,6 +168,11 @@ pub enum PipelineEvent {
         verified_claim_count: usize,
         report_id: String,
     },
+    ArtifactWritten {
+        artifact_type: String,
+        path: String,
+        content_hash: String,
+    },
     RunCompleted {
         final_output_hash: String,
         completed_agent_count: usize,

@@ -274,7 +274,7 @@ npm run complexity-check
 ### Memory Coordination
 ```javascript
 // Report review status
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/reviewer/status",
   namespace: "coordination",
@@ -288,7 +288,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Share review findings
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/review-findings",
   namespace: "coordination",
@@ -301,7 +301,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Check implementation details
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "retrieve",
   key: "swarm/coder/status",
   namespace: "coordination"

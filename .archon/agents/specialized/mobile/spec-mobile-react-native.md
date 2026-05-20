@@ -41,7 +41,6 @@ capabilities:
     - Read
     - Write
     - Edit
-    - MultiEdit
     - Bash
     - Grep
     - Glob

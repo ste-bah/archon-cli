@@ -219,9 +219,11 @@ pub(super) async fn build(
         .with_models(config.models.anthropic.clone())
         .with_context(config.context.clone()),
     );
-    let llm_adapter: Arc<dyn archon_pipeline::runner::LlmClient> = Arc::new(
-        archon_pipeline::llm_adapter::ProviderLlmAdapter::new(Arc::clone(&provider))
-            .with_origin("tui_pipeline"),
+    let llm_adapter = super::pipeline_adapter::build_subagent_pipeline_client(
+        Arc::clone(&provider),
+        &agent_config,
+        &working_dir,
+        session_id,
     );
     let agent_event_tx_for_dispatcher = agent_event_tx.clone();
     let mut agent = Agent::new(

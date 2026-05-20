@@ -41,12 +41,12 @@ Validation:
 ## Step 2: Recall Current Rules
 
 1. Search MemoryGraph for active rules matching the scope:
-   - Call `mcp__memorygraph__search_memories` with tags `["behavior-rule", "{agent_scope}"]`
+   - Call `memory_recall` with tags `["behavior-rule", "{agent_scope}"]`
    - Parse each result's content as JSON
    - Filter: `active == true`
    - Sort by: priority DESC, then modified_at DESC
 2. If agent_scope != "global", also recall global rules (for context only, not editable):
-   - Call `mcp__memorygraph__search_memories` with tags `["behavior-rule", "global"]`
+   - Call `memory_recall` with tags `["behavior-rule", "global"]`
    - Filter: `active == true`
 3. If MemoryGraph is unavailable: warn user, proceed with empty rule set.
 
@@ -171,7 +171,7 @@ On approval, for each merged rule:
 **NEW rules**:
 1. Generate rule_group_id: "brg-" + 8 random hex chars
 2. Generate slug from rule text
-3. Store via `mcp__memorygraph__store_memory`:
+3. Store via `memory_store`:
    - type: "general"
    - title: `behavior_rule:{agent_scope}:{category}:{slug}:v1`
    - content: JSON with all metadata fields (version=1, active=true)
@@ -180,14 +180,14 @@ On approval, for each merged rule:
 
 **MODIFIED rules**:
 1. Find existing rule's memory ID via search
-2. Update existing rule: set active=false via `mcp__memorygraph__update_memory`
+2. Store a superseding inactive metadata record via `memory_store`
 3. Create new version: version+1, new content with updated rule text
-4. Store new version via `mcp__memorygraph__store_memory`
-5. Create SUPERSEDES relationship: new version -> old version via `mcp__memorygraph__create_relationship`
+4. Store new version via `memory_store`
+5. Record SUPERSEDES relationship metadata in the new version content
 
 **REMOVED rules**:
 1. Find existing rule's memory ID
-2. Update: set active=false via `mcp__memorygraph__update_memory`
+2. Store an inactive tombstone/update record via `memory_store`
 3. No new version created — just deactivated
 
 **After all changes applied:**

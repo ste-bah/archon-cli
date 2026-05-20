@@ -19,7 +19,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_ask
   skills:
     - business_writing
     - report_generation
@@ -51,10 +50,10 @@ triggers:
 hooks:
   pre: |
     echo "💼 Professional Writer drafting: $TASK"
-    # (removed: claude-flow memory query --key "writing/style-profile")
+    # (removed: Archon memory query --key "writing/style-profile")
   post: |
     echo "✅ Professional writing complete"
-    # (removed: claude-flow memory store --namespace "writing/output" --key "professional")
+    # (removed: Archon memory store --namespace "writing/output" --key "professional")
 ---
 
 # Professional Writer Agent
@@ -99,7 +98,7 @@ Agent #N of M | Previous: [analyst/researcher agents] | Next: [reviewer/presente
 ## STYLE PROFILE INTEGRATION
 
 ```bash
-# (removed: claude-flow memory query --key "writing/style-profile/professional")
+# (removed: Archon memory query --key "writing/style-profile/professional")
 ```
 
 When a style profile is retrieved:

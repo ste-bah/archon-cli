@@ -192,6 +192,16 @@ pub(super) fn build_interactive_system_prompt(
 
 fn agent_prompt_text(def: &archon_core::agents::definition::CustomAgentDefinition) -> String {
     let mut prompt = def.system_prompt.clone();
+    let tool_contract = match def.allowed_tools.as_ref() {
+        Some(tools) if !tools.is_empty() => format!(
+            "Use only these registered Archon tool names: {}.",
+            tools.join(", ")
+        ),
+        _ => "Use only registered Archon tool names available in this session.".to_string(),
+    };
+    prompt = format!(
+        "{prompt}\n\n<archon-tool-contract>\n{tool_contract}\nDo not call legacy MCP, Claude Flow, God pipeline, or ruv-swarm tool names. Do not run `claude-flow` or `npx ruv-swarm` through Bash. Map code search to LeannSearch/lsp/Grep/Read, memory work to memory_recall/memory_store, research/doc work to Doc*/WebSearch/WebFetch, and delegation to Agent.\n</archon-tool-contract>"
+    );
     if !def.tool_guidance.is_empty() {
         prompt = format!(
             "{prompt}\n\n<tool-guidance>\n{}\n</tool-guidance>",
@@ -278,6 +288,21 @@ mod tests {
         apply_prompt_cache_policy(&mut blocks, &config, "openai-codex");
 
         assert!(blocks[0].get("cache_control").is_none());
+    }
+
+    #[test]
+    fn custom_agent_prompt_includes_archon_tool_contract() {
+        let def = archon_core::agents::definition::CustomAgentDefinition {
+            system_prompt: "You are a test agent.".to_string(),
+            allowed_tools: Some(vec!["Read".to_string(), "LeannSearch".to_string()]),
+            ..Default::default()
+        };
+
+        let prompt = agent_prompt_text(&def);
+
+        assert!(prompt.contains("<archon-tool-contract>"));
+        assert!(prompt.contains("Read, LeannSearch"));
+        assert!(prompt.contains("Do not run `claude-flow` or `npx ruv-swarm` through Bash"));
     }
 
     #[test]

@@ -301,7 +301,7 @@ Evidence:
 
 ```javascript
 // Report problem validation status
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/problem-validator/status",
   namespace: "coordination",
@@ -317,7 +317,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Share burning problem findings
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/burning-problem",
   namespace: "coordination",
@@ -336,7 +336,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Retrieve prior research
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "retrieve",
   key: "swarm/researcher/arc-A-findings",
   namespace: "coordination"

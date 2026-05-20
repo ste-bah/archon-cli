@@ -15,7 +15,7 @@ hooks:
   pre: |
     echo "🔗 Synthesis Specialist integrating: $TASK"
     echo "📊 Loading all arc findings from memory..."
-    memory_search "swarm/shared/arc-*" | head -20
+    memory_recall "swarm/shared/arc-*" | head -20
   post: |
     echo "✅ Cross-arc synthesis complete"
     echo "🎯 Positioning elements defined"
@@ -373,7 +373,7 @@ When we combine Arc A problem validation, Arc B competitive gap analysis, and Ar
 
 ```javascript
 // Report synthesis status
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/synthesis/status",
   namespace: "coordination",
@@ -389,7 +389,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Share synthesis results
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "store",
   key: "swarm/shared/positioning-elements",
   namespace: "coordination",
@@ -407,7 +407,7 @@ mcp__memorygraph__get_memory_statistics {
 }
 
 // Retrieve all arc findings
-mcp__memorygraph__get_memory_statistics {
+memory_recall {
   action: "retrieve",
   key: "swarm/shared/arc-A-findings",
   namespace: "coordination"

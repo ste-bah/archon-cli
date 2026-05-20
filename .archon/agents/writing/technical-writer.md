@@ -19,7 +19,6 @@ capabilities:
     - Glob
     - WebSearch
     - WebFetch
-    - mcp__perplexity__perplexity_ask
   skills:
     - technical_documentation
     - api_documentation
@@ -50,10 +49,10 @@ triggers:
 hooks:
   pre: |
     echo "📖 Technical Writer documenting: $TASK"
-    # (removed: claude-flow memory query --key "writing/style-profile")
+    # (removed: Archon memory query --key "writing/style-profile")
   post: |
     echo "✅ Technical writing complete"
-    # (removed: claude-flow memory store --namespace "writing/output" --key "technical")
+    # (removed: Archon memory store --namespace "writing/output" --key "technical")
 ---
 
 # Technical Writer Agent
@@ -99,7 +98,7 @@ Agent #N of M | Previous: [developer/architect agents] | Next: [reviewer/tester 
 ## STYLE PROFILE INTEGRATION
 
 ```bash
-# (removed: claude-flow memory query --key "writing/style-profile/technical")
+# (removed: Archon memory query --key "writing/style-profile/technical")
 ```
 
 When a style profile is retrieved:
