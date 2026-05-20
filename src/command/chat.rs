@@ -194,8 +194,10 @@ mod tests {
 
     #[test]
     fn default_model_uses_codex_default_for_codex_provider() {
-        let config = archon_core::config::ArchonConfig::default();
-        assert_eq!(default_model("openai-codex", &config), "gpt-5.4");
+        let mut config = archon_core::config::ArchonConfig::default();
+        config.models.openai_codex.default = "gpt-codex-default".into();
+
+        assert_eq!(default_model("openai-codex", &config), "gpt-codex-default");
     }
 
     #[test]
