@@ -25,6 +25,7 @@ use super::types::{
     InProgressRun, ReplaySpecialistResult, ResumeRunResult, SpecialistExecutionOutcome,
 };
 use super::{GameTheoryMemoryContext, GameTheoryRunOptions, require_llm};
+use crate::learning::integration::LearningIntegration;
 use crate::runner::LlmClient;
 
 /// Re-evaluate routing from the stored Tier 1 fingerprint and persist the
@@ -60,6 +61,19 @@ pub async fn replay_single_specialist(
     memory_ctx: GameTheoryMemoryContext,
     options: GameTheoryRunOptions,
 ) -> Result<ReplaySpecialistResult, GameTheoryError> {
+    replay_single_specialist_with_learning(db, run_id, agent_key, llm, memory_ctx, options, None)
+        .await
+}
+
+pub async fn replay_single_specialist_with_learning(
+    db: &DbInstance,
+    run_id: &str,
+    agent_key: &str,
+    llm: Option<&dyn LlmClient>,
+    memory_ctx: GameTheoryMemoryContext,
+    options: GameTheoryRunOptions,
+    learning: Option<&mut LearningIntegration>,
+) -> Result<ReplaySpecialistResult, GameTheoryError> {
     if !GAMETHEORY_AGENTS.iter().any(|agent| agent.key == agent_key) {
         return Err(GameTheoryError::AgentNotFound {
             key: agent_key.to_string(),
@@ -86,6 +100,7 @@ pub async fn replay_single_specialist(
         &situation,
         &memory_ctx,
         &options,
+        learning,
     )
     .await?;
 
@@ -232,6 +247,7 @@ pub async fn resume_run_from_checkpoint(
             &situation,
             &memory_ctx,
             &options,
+            None,
         )
         .await?
     };

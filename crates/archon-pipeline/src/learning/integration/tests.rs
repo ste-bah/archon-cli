@@ -1,4 +1,7 @@
 use super::*;
+use crate::learning::desc::{DescEpisode, DescEpisodeStore, EpisodeQuery};
+use crate::learning::patterns::PatternStore;
+use crate::learning::reasoning::{ReasoningBank, ReasoningBankConfig, ReasoningBankDeps};
 use archon_core::agent::UserCorrectionEventPayload;
 use cozo::DbInstance;
 use std::sync::Arc;
@@ -119,6 +122,61 @@ fn persistent_sona_trajectory_reaches_trainer_query_source() {
     assert_eq!(samples.len(), 1);
     assert_eq!(samples[0].embedding.len(), 8);
     assert!(samples[0].quality > 0.0);
+}
+
+#[test]
+fn persistent_learning_stack_injects_reasoning_bank_and_desc_episodes() {
+    let db = Arc::new(DbInstance::new("mem", "", "").unwrap());
+    crate::learning::schema::initialize_learning_schemas(db.as_ref()).unwrap();
+    let desc_store = DescEpisodeStore::from_arc(Arc::clone(&db));
+    desc_store
+        .store_episode(&DescEpisode {
+            episode_id: "episode-seed".into(),
+            session_id: "prior-session".into(),
+            task_type: "phase1".into(),
+            description: "need schema design before API wiring".into(),
+            solution: "Designed schema first, then wired API boundaries.".into(),
+            outcome: "success".into(),
+            quality_score: 0.95,
+            reward: 0.95,
+            tags: vec!["pipeline".into()],
+            trajectory_id: None,
+            created_at: 0,
+            updated_at: 0,
+        })
+        .unwrap();
+
+    let reasoning_bank = ReasoningBank::new(ReasoningBankDeps {
+        pattern_store: PatternStore::new(),
+        causal_memory: None,
+        gnn_enhancer: None,
+        sona_engine: None,
+        config: ReasoningBankConfig::default(),
+    });
+    let mut integration =
+        LearningIntegration::new(None, None, LearningIntegrationConfig::default(), None)
+            .with_reasoning_bank(reasoning_bank)
+            .with_desc_store(desc_store);
+
+    let ctx = integration.on_agent_start(
+        "agent-a",
+        "phase1",
+        "break down the implementation steps",
+        "pipe-001",
+    );
+
+    assert!(!ctx.desc_episodes.is_empty());
+    assert!(ctx.reasoning_context.contains("Decomposition"));
+
+    integration.on_agent_complete("agent-a", 0.9, "implemented in order");
+    let episodes = DescEpisodeStore::from_arc(db)
+        .find_episodes(&EpisodeQuery {
+            task_type: Some("phase1".into()),
+            min_quality: Some(0.8),
+            limit: 10,
+        })
+        .unwrap();
+    assert!(episodes.len() >= 2);
 }
 
 #[test]

@@ -18,6 +18,13 @@ flowchart TB
     RESEARCH --> PAPERS["Audited run bundle<br/>prompts, attempts, outputs, state, audit log"]
     GT --> STRAT["Strategic artifacts<br/>fingerprint, routing, specialist outputs, sections, report"]
 
+    CODE --> LEARNCTX["Runtime learning stack<br/>SONA + ReasoningBank + DESC + Reflexion"]
+    RESEARCH --> LEARNCTX
+    GT --> LEARNCTX
+    LEARNCTX --> CODE
+    LEARNCTX --> RESEARCH
+    LEARNCTX --> GT
+
     ART --> PROV["Provenance and completion integrity"]
     PAPERS --> PROV
     STRAT --> PROV
@@ -70,6 +77,13 @@ The shared runner still keeps a provider-only fallback for tests and standalone
 non-interactive command paths. In that fallback, the same prompts and audited
 bundle are used, but no live subagent executor is available.
 
+Before each coding/research agent runs, the command layer builds the runtime
+learning stack. The runner asks `LearningIntegration` for SONA trajectory
+metadata, ReasoningBank context, and DESC episodes, injects those into the
+agent system context, then writes SONA feedback and DESC episodes after the
+quality score is known. `ReflexionInjector` is passed separately and supplies
+prior failed-attempt context on retries.
+
 ### Layered context (L0-L3)
 
 Every coding pipeline agent receives 4 layers of context:
@@ -79,9 +93,11 @@ Every coding pipeline agent receives 4 layers of context:
 | L0 | Task description | Original user request |
 | L1 | Prior agent outputs | Outputs from completed agents in the audited session |
 | L2 | LEANN semantic search | Code from the working repo relevant to the current step |
-| L3 | ReasoningBank patterns | Successful patterns from prior similar tasks |
+| L3 | Learning context | SONA trajectory marker, ReasoningBank context, and DESC episodes from prior similar tasks |
 
-L3 is what makes the pipeline self-improving — past successes inform present decisions.
+L3 is what makes the pipeline self-improving — past successes and prior
+failures inform present decisions, while the accepted output feeds SONA/DESC
+for later runs.
 
 ### Gate enforcement
 
@@ -179,6 +195,14 @@ source-of-truth tables remain owned by `archon-pipeline::gametheory`. In the
 TUI, Tier 1 classifiers and selected specialists still execute through the
 shared subagent-backed `LlmClient::run_agent` seam so they get the same agent
 runtime as the other slash-driven pipelines without changing routing semantics.
+
+GameTheory is also learning-aware. Tier 1 classification, specialist waves,
+replay, slash commands, and agent-callable GameTheory tools call
+`LearningIntegration::on_agent_start` / `on_agent_complete`. That means
+ReasoningBank and DESC context can shape classification and specialist prompts,
+and SONA trajectories are recorded for TUI runs by default. Shell and tool
+GameTheory runs record SONA only when `learning.sona.pipeline_recording = true`;
+the canonical strategic state remains the `gt_*` tables.
 
 Use it for:
 

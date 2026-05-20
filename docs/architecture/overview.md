@@ -27,7 +27,7 @@ graph TB
             TOOLS["archon-tools<br/>(43 tools)"]
         end
         subgraph pipeline["Pipeline & Intelligence Layer"]
-            PIPE["archon-pipeline<br/>(50 coding + 46 research agents)"]
+            PIPE["archon-pipeline<br/>(50 coding + 46 research + game-theory agents)"]
             LEANN["archon-leann<br/>(semantic code search)"]
         end
         subgraph evidence["Evidence Engine Layer"]
@@ -57,6 +57,7 @@ graph TB
     PIPE --> LLM
     PIPE --> LEANN
     PIPE --> MEMORY
+    PIPE --> LEARN
     CORE --> DOCS
     CORE --> KB
     CORE --> PROV
@@ -222,6 +223,12 @@ The self-learning layer has two complementary halves:
 6. **DESC** — Episodic memory store
 7. **Reflexion** — 3-attempt retry loop with self-critique
 8. **AutoCapture** — automatic fact extraction from agent transcripts
+
+The live runtime stack injects SONA, ReasoningBank, DESC, and Reflexion into
+coding/research agents through the shared runner. The game-theory lane keeps
+its `gt_*` run ledger as source of truth, but Tier 1 and specialist agents now
+call the same learning hooks so SONA/DESC/ReasoningBank can inform later
+strategic runs.
 
 Evidence Engine learning surfaces:
 

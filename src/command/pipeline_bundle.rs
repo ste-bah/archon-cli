@@ -10,7 +10,8 @@ use archon_pipeline::audit::types::{BundleStatus, PipelineEvent};
 use chrono::Utc;
 
 use crate::command::pipeline_support::{
-    build_pipeline_adapter, build_pipeline_learning_stack, init_leann, print_pipeline_result,
+    build_pipeline_adapter, build_pipeline_learning_stack, build_reflexion_injector, init_leann,
+    print_pipeline_result,
 };
 use crate::command::provider_gate::ensure_active_provider_supports;
 
@@ -56,11 +57,12 @@ pub(crate) async fn handle_resume(
                     archon_llm::providers::ProviderCapability::PipelineCoding,
                     "archon pipeline resume",
                 )?;
-                let (learning, _) = build_pipeline_learning_stack(config, cwd);
-                let facade = archon_pipeline::coding::facade::CodingFacade::with_learning(learning)
+                let (mut learning, _) = build_pipeline_learning_stack(config, cwd);
+                let facade = archon_pipeline::coding::facade::CodingFacade::new()
                     .with_models(config.models.anthropic.clone())
                     .with_context(config.context.clone());
                 let leann = init_leann(cwd).await;
+                let mut reflexion = build_reflexion_injector(config);
                 println!("Resuming audited coding pipeline...");
                 let result = archon_pipeline::runner::resume_pipeline_audited(
                     &facade,
@@ -68,8 +70,8 @@ pub(crate) async fn handle_resume(
                     session_id,
                     cwd,
                     leann.as_ref(),
-                    None,
-                    None,
+                    reflexion.as_mut(),
+                    learning.as_mut(),
                 )
                 .await?;
                 print_pipeline_result(&result, cwd).await;
@@ -81,6 +83,8 @@ pub(crate) async fn handle_resume(
                     archon_llm::providers::ProviderCapability::PipelineResearch,
                     "archon pipeline resume",
                 )?;
+                let (mut trajectory_learning, _) = build_pipeline_learning_stack(config, cwd);
+                let mut reflexion = build_reflexion_injector(config);
                 let phd_learning =
                     archon_pipeline::learning::integration::PhDLearningIntegration::new();
                 let memory: Arc<dyn MemoryTrait> = Arc::new(
@@ -97,7 +101,13 @@ pub(crate) async fn handle_resume(
                 .with_context(config.context.clone());
                 println!("Resuming audited research pipeline...");
                 let result = archon_pipeline::runner::resume_pipeline_audited(
-                    &facade, &adapter, session_id, cwd, None, None, None,
+                    &facade,
+                    &adapter,
+                    session_id,
+                    cwd,
+                    None,
+                    reflexion.as_mut(),
+                    trajectory_learning.as_mut(),
                 )
                 .await?;
                 print_pipeline_result(&result, cwd).await;
@@ -326,12 +336,20 @@ async fn legacy_resume_coding(
     adapter: &archon_pipeline::llm_adapter::ProviderLlmAdapter,
     task: &str,
 ) -> Result<()> {
-    let (learning, _) = build_pipeline_learning_stack(config, cwd);
-    let facade = archon_pipeline::coding::facade::CodingFacade::with_learning(learning)
-        .with_context(config.context.clone());
+    let (mut learning, _) = build_pipeline_learning_stack(config, cwd);
+    let mut reflexion = build_reflexion_injector(config);
+    let facade =
+        archon_pipeline::coding::facade::CodingFacade::new().with_context(config.context.clone());
     println!("Resuming coding pipeline...");
-    let result =
-        archon_pipeline::runner::run_pipeline(&facade, adapter, task, None, None, None).await?;
+    let result = archon_pipeline::runner::run_pipeline(
+        &facade,
+        adapter,
+        task,
+        None,
+        reflexion.as_mut(),
+        learning.as_mut(),
+    )
+    .await?;
     print_pipeline_result(&result, cwd).await;
     Ok(())
 }
@@ -342,6 +360,8 @@ async fn legacy_resume_research(
     adapter: &archon_pipeline::llm_adapter::ProviderLlmAdapter,
     task: &str,
 ) -> Result<()> {
+    let (mut trajectory_learning, _) = build_pipeline_learning_stack(config, cwd);
+    let mut reflexion = build_reflexion_injector(config);
     let phd_learning = archon_pipeline::learning::integration::PhDLearningIntegration::new();
     let memory: Arc<dyn MemoryTrait> =
         Arc::new(MemoryGraph::in_memory().expect("in-memory graph for research resume"));
@@ -354,8 +374,15 @@ async fn legacy_resume_research(
     )
     .with_context(config.context.clone());
     println!("Resuming research pipeline...");
-    let result =
-        archon_pipeline::runner::run_pipeline(&facade, adapter, task, None, None, None).await?;
+    let result = archon_pipeline::runner::run_pipeline(
+        &facade,
+        adapter,
+        task,
+        None,
+        reflexion.as_mut(),
+        trajectory_learning.as_mut(),
+    )
+    .await?;
     print_pipeline_result(&result, cwd).await;
     Ok(())
 }

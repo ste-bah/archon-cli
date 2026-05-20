@@ -17,6 +17,7 @@ use super::quality;
 use super::routing::{evaluate_routing, load_spec, resolve_spec_path};
 use super::schema::ensure_gametheory_schema;
 use super::spec::build_specialist_spec;
+use crate::learning::integration::LearningIntegration;
 use crate::runner::LlmClient;
 
 mod costs;
@@ -42,7 +43,7 @@ use persistence::{
 use policy::{apply_policy_gates_to_routing, build_dependency_map};
 pub use replay::{
     list_in_progress_runs, replay_routing_from_stored_fingerprint, replay_single_specialist,
-    resume_run_from_checkpoint,
+    replay_single_specialist_with_learning, resume_run_from_checkpoint,
 };
 use specialists::execute_specialists_real_with_options;
 #[cfg(test)]
@@ -82,12 +83,22 @@ pub async fn classify(
     situation: &str,
     llm: Option<&dyn LlmClient>,
 ) -> Result<GameTheoryFingerprint, GameTheoryError> {
+    classify_with_learning(db, situation, llm, None).await
+}
+
+pub async fn classify_with_learning(
+    db: &DbInstance,
+    situation: &str,
+    llm: Option<&dyn LlmClient>,
+    learning: Option<&mut LearningIntegration>,
+) -> Result<GameTheoryFingerprint, GameTheoryError> {
     let (fingerprint, _) = classify_internal(
         db,
         situation,
         llm,
         &GameTheoryMemoryContext::default(),
         true,
+        learning,
     )
     .await?;
     Ok(fingerprint)
@@ -99,6 +110,7 @@ async fn classify_internal(
     llm: Option<&dyn LlmClient>,
     memory_ctx: &GameTheoryMemoryContext,
     allow_keyword_fallback: bool,
+    mut learning: Option<&mut LearningIntegration>,
 ) -> Result<(GameTheoryFingerprint, Vec<MemoryRecallAudit>), GameTheoryError> {
     let situation = situation.trim();
     if situation.is_empty() {
@@ -125,7 +137,16 @@ async fn classify_internal(
     // Attempt real Tier 1 classification, fall back to keyword analysis
     let mut memory_audits = Vec::new();
     let fingerprint = if let Some(llm_client) = llm {
-        match execute_tier1_real(llm_client, &run_id, situation, &now, memory_ctx).await {
+        match execute_tier1_real(
+            llm_client,
+            &run_id,
+            situation,
+            &now,
+            memory_ctx,
+            learning.as_deref_mut(),
+        )
+        .await
+        {
             Ok((fp, audits)) => {
                 memory_audits.extend(audits);
                 fp
@@ -233,6 +254,21 @@ pub async fn run_full_pipeline_with_options(
     memory_ctx: GameTheoryMemoryContext,
     options: GameTheoryRunOptions,
 ) -> Result<FullPipelineResult, GameTheoryError> {
+    run_full_pipeline_with_learning_options(
+        db, situation, spec_path, llm, memory_ctx, options, None,
+    )
+    .await
+}
+
+pub async fn run_full_pipeline_with_learning_options(
+    db: &DbInstance,
+    situation: &str,
+    spec_path: Option<&Path>,
+    llm: Option<&dyn LlmClient>,
+    memory_ctx: GameTheoryMemoryContext,
+    options: GameTheoryRunOptions,
+    mut learning: Option<&mut LearningIntegration>,
+) -> Result<FullPipelineResult, GameTheoryError> {
     let llm_client = require_llm(llm, "gametheory full pipeline")?;
     let kb_context = load_kb_run_context(db, options.kb_pack_id.as_deref()).map_err(|e| {
         GameTheoryError::Storage {
@@ -248,6 +284,7 @@ pub async fn run_full_pipeline_with_options(
         Some(llm_client),
         &memory_ctx,
         false,
+        learning.as_deref_mut(),
     )
     .await?;
     update_gt_run_status(
@@ -337,6 +374,7 @@ pub async fn run_full_pipeline_with_options(
         &analysis_situation,
         &memory_ctx,
         &options,
+        learning.as_deref_mut(),
     )
     .await?;
     memory_recall.extend(specialist_outcome.memory_audits.clone());

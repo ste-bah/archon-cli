@@ -66,12 +66,17 @@ In agent context, the model can call `memory_recall` directly:
 When an agent task fails (e.g., generates code that doesn't compile), Reflexion captures the failure, generates a self-critique, and retries up to 3 times with the critique injected into context:
 
 ```toml
-[reflexion]
+[learning.reflexion]
 enabled = true
-max_attempts = 3
+max_per_agent = 3
 ```
 
 This is automatic — no slash command needed. The third attempt has access to all prior critiques.
+
+Coding and research pipeline agents also receive DESC episodic summaries and
+ReasoningBank context when those learning toggles are enabled. That context is
+injected by the shared runner before the agent call, then the accepted output is
+fed back into SONA/DESC after the quality score is known.
 
 ## ReasoningBank in practice
 
@@ -128,5 +133,5 @@ Synchronous run, blocks the input loop while training. Outcome table prints afte
 ## See also
 
 - [Learning systems](../architecture/learning-systems.md) — full deep dive
-- [Configuration](../reference/config.md) — `[reasoning_bank]`, `[learning.gnn]`, `[reflexion]`
+- [Configuration](../reference/config.md) — `[learning.reasoning_bank]`, `[learning.gnn]`, `[learning.reflexion]`
 - [Custom agents](custom-agent-workflows.md) — wrapping ReasoningBank in your own agents

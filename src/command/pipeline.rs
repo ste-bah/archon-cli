@@ -11,7 +11,8 @@ use archon_memory::{MemoryTrait, graph::MemoryGraph};
 
 use crate::cli_args::PipelineAction;
 use crate::command::pipeline_support::{
-    build_pipeline_adapter, build_pipeline_learning_stack, init_leann, print_pipeline_result,
+    build_pipeline_adapter, build_pipeline_learning_stack, build_reflexion_injector, init_leann,
+    print_pipeline_result,
 };
 use crate::command::provider_gate::ensure_active_provider_supports;
 
@@ -160,11 +161,12 @@ async fn handle_code(
         ],
     );
     let adapter = build_pipeline_adapter(config, env_vars, "pipeline_code").await?;
-    let (learning, _) = build_pipeline_learning_stack(config, cwd);
-    let facade = archon_pipeline::coding::facade::CodingFacade::with_learning(learning)
+    let (mut learning, _) = build_pipeline_learning_stack(config, cwd);
+    let facade = archon_pipeline::coding::facade::CodingFacade::new()
         .with_models(config.models.anthropic.clone())
         .with_context(config.context.clone());
     let leann = init_leann(cwd).await;
+    let mut reflexion = build_reflexion_injector(config);
     println!("Starting coding pipeline...");
     println!("Task: {task}");
     let result = archon_pipeline::runner::run_pipeline_audited(
@@ -173,8 +175,8 @@ async fn handle_code(
         task,
         cwd,
         leann.as_ref(),
-        None,
-        None,
+        reflexion.as_mut(),
+        learning.as_mut(),
     )
     .await?;
     print_pipeline_result(&result, cwd).await;
@@ -290,6 +292,8 @@ async fn handle_research(
         ],
     );
     let adapter = build_pipeline_adapter(config, env_vars, "pipeline_research").await?;
+    let (mut trajectory_learning, _) = build_pipeline_learning_stack(config, cwd);
+    let mut reflexion = build_reflexion_injector(config);
     let phd_learning = archon_pipeline::learning::integration::PhDLearningIntegration::new();
     let memory: Arc<dyn MemoryTrait> =
         Arc::new(MemoryGraph::in_memory().expect("in-memory graph for research pipeline"));
@@ -305,7 +309,13 @@ async fn handle_research(
     println!("Starting research pipeline...");
     println!("Topic: {topic}");
     let result = archon_pipeline::runner::run_pipeline_audited(
-        &facade, &adapter, topic, cwd, None, None, None,
+        &facade,
+        &adapter,
+        topic,
+        cwd,
+        None,
+        reflexion.as_mut(),
+        trajectory_learning.as_mut(),
     )
     .await?;
     print_pipeline_result(&result, cwd).await;

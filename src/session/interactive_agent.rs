@@ -190,20 +190,7 @@ pub(super) async fn build(
 
     let auto_trainer = build_auto_trainer(config, &learning_cozo_db);
 
-    let coding_pipeline_facade = if let Some(db) = learning_cozo_db.as_ref()
-        && config.learning.sona.enabled
-    {
-        archon_pipeline::coding::facade::CodingFacade::with_learning(
-            archon_pipeline::learning::integration::LearningIntegration::new_with_persistent_sona(
-                Arc::clone(db),
-                Default::default(),
-                auto_trainer.clone(),
-                config.learning.gnn.input_dim,
-            ),
-        )
-    } else {
-        archon_pipeline::coding::facade::CodingFacade::new()
-    };
+    let coding_pipeline_facade = archon_pipeline::coding::facade::CodingFacade::new();
     let coding_pipeline: Arc<archon_pipeline::coding::facade::CodingFacade> = Arc::new(
         coding_pipeline_facade
             .with_models(config.models.anthropic.clone())

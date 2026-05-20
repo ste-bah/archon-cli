@@ -1,11 +1,29 @@
 # Learning systems
 
-archon-cli's pipeline engine includes 8 interconnected learning subsystems. They provide trajectory optimization, causal reasoning, graph neural enhancement, and contradiction detection. All systems accept `Option<T>` dependencies — when a system is unavailable, the pipeline continues with reduced capability rather than failing (`REQ-LEARN-013`).
+archon-cli's pipeline engine includes 8 interconnected learning subsystems.
+They provide trajectory optimization, causal reasoning, graph neural
+enhancement, episodic recall, contradiction detection, and retry learning.
+Runtime wiring is deliberately fail-open: every subsystem is optional, and when
+one dependency is unavailable the pipeline continues with reduced capability
+rather than failing (`REQ-LEARN-013`).
+
+The persistent runtime stack now proves the live paths for SONA, ReasoningBank,
+DESC, and Reflexion. Coding/research command surfaces build
+`LearningIntegration` plus `ReflexionInjector` in
+`src/command/pipeline_support.rs`; the shared runner injects the resulting
+context into real agent execution; and the game-theory facade calls the same
+learning start/complete hooks from classify, specialist, replay,
+slash-command, and tool-executor paths.
 
 ## Component map
 
 ```mermaid
-graph TB
+flowchart TB
+    SURFACE["CLI / TUI / tool surface"]
+    STACK["Runtime learning stack<br/>LearningIntegration + ReflexionInjector"]
+    RUNNER["Shared coding/research runner"]
+    GT["Game-theory facade<br/>Tier 1 + specialists"]
+
     SONA["SONA<br/>Self-Organizing Network Architecture"]
     RB["ReasoningBank<br/>12 modes (4 core + 8 extended)"]
     GNN["GNN Enhancer<br/>3-layer round-trip attention<br/>1536D → 1024 → 1280 → 1536"]
@@ -15,6 +33,14 @@ graph TB
     DESC["DESC<br/>episodic memory"]
     REFL["Reflexion<br/>3-attempt retry"]
     AC["AutoCapture<br/>fact extraction"]
+
+    SURFACE --> STACK
+    STACK --> RUNNER
+    STACK --> GT
+    STACK --> SONA
+    STACK --> RB
+    STACK --> DESC
+    STACK --> REFL
 
     SONA --> RB
     RB --> GNN
@@ -36,7 +62,11 @@ outcomes into governed, inspectable system changes.
 
 ```mermaid
 flowchart TB
-    TURN["Agent turn / pipeline step"] --> CAPTURE["AutoCapture<br/>facts, trajectory, outcome"]
+    TURN["Agent turn / pipeline step"] --> START["LearningIntegration.on_agent_start"]
+    START --> PROMPT["Prompt context<br/>SONA marker + ReasoningBank + DESC"]
+    PROMPT --> TURN
+    TURN --> COMPLETE["LearningIntegration.on_agent_complete"]
+    COMPLETE --> CAPTURE["AutoCapture<br/>facts, trajectory, outcome"]
     CAPTURE --> MEMORY["Memory graph<br/>entities, relations, embeddings"]
     CAPTURE --> SONA2["SONA trajectories"]
     MEMORY --> RB2["ReasoningBank<br/>12 modes + Hybrid"]
@@ -113,11 +143,20 @@ more corrections cluster on the same rule id within seven days.
 
 ### SONA (Self-Organizing Network Architecture)
 
-Trajectory-based pattern store. Every agent step (route, agent_key, outcome, metadata) is captured as a `Trajectory`. SONA clusters similar trajectories into patterns; agents query SONA for relevant prior trajectories before acting.
+Trajectory-based pattern store. Agent steps are captured as `Trajectory` rows
+with route, agent key, outcome, and metadata. SONA clusters similar
+trajectories into patterns and supplies training samples to the GNN
+auto-trainer.
 
 - **Storage:** CozoDB `sona_trajectories` relation
 - **Embeddings:** trajectory embeddings via fastembed (768-dim) or OpenAI (1536-dim)
-- **Capture:** every successful agent dispatch via AutoCapture
+- **Interactive capture:** normal interactive learning and TUI slash pipelines
+  record when `learning.sona.enabled = true`
+- **Batch capture:** `archon pipeline ...`, `archon gametheory ...`, and
+  agent-callable GameTheory tools record SONA only when
+  `learning.sona.pipeline_recording = true`
+- **Prompt context:** the runner injects the active trajectory id into agent
+  context so accepted output can be fed back to the same trajectory
 
 ### ReasoningBank — 12 reasoning modes
 
@@ -205,11 +244,23 @@ Detects when newly captured memories contradict existing ones. Runs alongside th
 
 ### DESC — episodic memory
 
-Detailed Episodic Storage and Compression. Stores full agent episodes with structured metadata; supports retrieval by episode similarity.
+Detailed Episodic Storage and Compression. Stores agent episodes with
+structured metadata, filters high-quality prior episodes by phase/task type,
+injects relevant summaries at agent start, and persists the current episode at
+agent completion.
+
+- **Storage:** CozoDB `desc_episodes` and `desc_episode_metadata`
+- **Injection:** coding/research runner system context and game-theory prompt
+  context
+- **Persistence:** successful and low-quality completions are both recorded,
+  with `outcome = "success"` or `"needs_improvement"`
 
 ### Reflexion — 3-attempt retry loop
 
-When an agent task fails, Reflexion captures the failure, generates a self-critique, and retries up to 3 times with the critique injected into context. Configured in `[reflexion]` section.
+When a shared-runner agent attempt misses its quality threshold, Reflexion
+records the failed trajectory and retries with a formatted "prior failed
+attempts" section injected into context. Configured in
+`[learning.reflexion]`.
 
 ### AutoCapture & AutoExtraction
 
@@ -218,23 +269,38 @@ When an agent task fails, Reflexion captures the failure, generates a self-criti
 
 ## Wiring (pipeline runner)
 
-`LearningIntegration` orchestrates all 8 systems. Construction site: `crates/archon-pipeline/src/runner.rs:388,402`.
+Runtime construction happens in `src/command/pipeline_support.rs`.
+`LearningIntegration` owns SONA, ReasoningBank, DESC, event-store, and
+AutoTrainer hooks. `ReflexionInjector` is constructed beside it and passed into
+the shared runner because Reflexion is retry-loop state, not persisted
+trajectory state.
 
 ```rust
-LearningIntegration::new(
-    Some(sona),
-    Some(reasoning_bank),
-    config,
-    Some(auto_trainer),
-)
+build_pipeline_learning_stack(config, cwd)
+build_interactive_learning_stack(config, cozo_db, auto_trainer)
+build_reflexion_injector(config)
 ```
 
 All deps are `Option<T>` for graceful degradation. Hooks fire on:
-- `on_agent_start` — query ReasoningBank for context, create SONA trajectory
-- `on_agent_complete` — finalize trajectory, capture facts via AutoCapture, signal AutoTrainer
+- `on_agent_start` — create SONA trajectory, retrieve DESC episodes, query ReasoningBank context
+- `on_agent_complete` — finalize SONA feedback, persist DESC episode, signal AutoTrainer
 - `on_correction_recorded` — increment correction counter, may trigger retrain
 - `record_user_correction_event` — persist `UserCorrected` events for governed proposals
 - `score_quality` — assigns quality score to trajectory for triplet sampling
+
+GameTheory does not use the shared coding/research bundle runner, but it does
+call the same learning hooks from Tier 1 classification, specialist execution,
+and replay. Its strategic source-of-truth tables stay `gt_*`; SONA/DESC are
+cross-run learning signals rather than replacements for the GameTheory run
+ledger.
+
+Regression coverage for these live paths:
+
+- `crates/archon-pipeline/tests/runner.rs::test_runner_persists_sona_trajectory_when_learning_supplied`
+- `crates/archon-pipeline/tests/runner.rs::test_runner_injects_reasoning_bank_and_desc_context`
+- `crates/archon-pipeline/tests/runner.rs::test_parallel_wave_injects_reflexion_context_on_retry`
+- `crates/archon-pipeline/src/learning/integration/tests.rs::persistent_learning_stack_injects_reasoning_bank_and_desc_episodes`
+- `crates/archon-pipeline/src/gametheory/facade/tests/pipeline.rs::test_full_pipeline_records_sona_when_learning_supplied`
 
 ## /learning-status
 
@@ -288,6 +354,20 @@ did Archon store, learn, propose, apply, or reject?"
 ## Configuration
 
 ```toml
+[learning.sona]
+enabled = true
+pipeline_recording = false
+
+[learning.desc]
+enabled = true
+
+[learning.reasoning_bank]
+enabled = true
+
+[learning.reflexion]
+enabled = true
+max_per_agent = 3
+
 [learning.gnn]
 enabled = true
 input_dim = 1536
@@ -321,31 +401,6 @@ trigger_corrections = 3
 first_run_threshold = 30
 max_runtime_ms = 300000       # 5 minutes
 tick_interval_ms = 60000      # 1 minute
-
-[reasoning_bank]
-default_max_results = 5
-default_confidence_threshold = 0.7
-default_min_l_score = 0.3
-enable_trajectory_tracking = true
-enable_auto_mode_selection = true
-# Per-mode weights (used by Hybrid aggregator)
-deductive_weight = 1.0
-inductive_weight = 1.0
-abductive_weight = 1.0
-analogical_weight = 1.0
-adversarial_weight = 1.0
-counterfactual_weight = 1.0
-temporal_weight = 1.0
-constraint_weight = 1.0
-decomposition_weight = 1.0
-first_principles_weight = 1.0
-causal_weight = 1.0
-contextual_weight = 1.0
-pattern_weight = 0.5
-
-[reflexion]
-enabled = true
-max_attempts = 3
 
 [auto_extraction]
 enabled = true

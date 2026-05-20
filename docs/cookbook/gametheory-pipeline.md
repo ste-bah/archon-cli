@@ -100,6 +100,19 @@ Enabled specialists run in parallel up to `--max-concurrent`. Each is one of the
 
 Each specialist produces a structured section. Cost typically $0.30-1.50 per specialist depending on prompt length + model.
 
+### Learning context during the run
+
+Tier 1 and specialist prompts are learning-aware. When the corresponding
+`[learning.*]` toggles are enabled, GameTheory asks the shared learning stack
+for ReasoningBank context and DESC episodes before each agent call, then records
+completion feedback afterwards. TUI `/gametheory` runs also record SONA
+trajectories by default; shell and agent-tool runs record SONA only when
+`learning.sona.pipeline_recording = true`.
+
+The strategic source of truth is still the GameTheory Cozo tables. SONA/DESC
+make later runs smarter; `gt_*` relations are what you inspect to verify the
+current run.
+
 ### Phase 4 — Report assembly (1 agent, ~5-10s, ~$0.10-0.30)
 
 A report-writer agent assembles the specialist sections into a coherent final report in the requested `--style`. Persists to `.archon/gametheory/<run-id>/report.md`.

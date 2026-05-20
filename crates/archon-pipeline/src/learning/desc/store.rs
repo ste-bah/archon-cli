@@ -3,6 +3,7 @@ use super::types::{DescEpisode, EpisodeQuery};
 use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // DescEpisodeStore
@@ -10,7 +11,7 @@ use std::collections::BTreeMap;
 
 /// DESC Episode Store - direct CozoDB access, no UCM daemon.
 pub struct DescEpisodeStore {
-    pub(crate) db: DbInstance,
+    pub(crate) db: Arc<DbInstance>,
 }
 
 impl DescEpisodeStore {
@@ -18,6 +19,11 @@ impl DescEpisodeStore {
     ///
     /// Call `schema::initialize_learning_schemas(&db)` before constructing.
     pub fn new(db: DbInstance) -> Self {
+        Self { db: Arc::new(db) }
+    }
+
+    /// Create a store backed by a shared project learning database.
+    pub fn from_arc(db: Arc<DbInstance>) -> Self {
         Self { db }
     }
 

@@ -102,12 +102,12 @@ fn phase4_pipelines_use_provider_neutral_adapter() {
     assert!(!gametheory.contains("AnthropicLlmAdapter"));
     assert!(!gametheory.contains("AnthropicClient::new"));
 
-    // Post-refactor (commit 02145e3 "Finalize 1.2.0 release and split session runtime"):
-    // the ProviderLlmAdapter::new(Arc::clone(&provider)) site moved from
-    // src/session.rs into src/session/interactive_agent.rs. The negative
-    // `tui-pipeline-device` assert applies across the whole session module so
-    // the legacy hack can never sneak back in via a split file.
+    // Post-refactor, the provider clone lives in interactive_agent.rs and the
+    // provider-neutral adapter construction lives in the split pipeline adapter.
+    // The negative `tui-pipeline-device` assert applies across the whole
+    // session module so the legacy hack can never sneak back in via a split file.
     let interactive_agent = read("src/session/interactive_agent.rs");
+    let pipeline_adapter = read("src/session/pipeline_adapter.rs");
     let session_all = read_all(&[
         "src/session.rs",
         "src/session/btw.rs",
@@ -116,6 +116,7 @@ fn phase4_pipelines_use_provider_neutral_adapter() {
         "src/session/config_watcher.rs",
         "src/session/event_forwarder.rs",
         "src/session/interactive_agent.rs",
+        "src/session/pipeline_adapter.rs",
         "src/session/interactive_bootstrap.rs",
         "src/session/interactive_finish.rs",
         "src/session/interactive_setup.rs",
@@ -126,7 +127,12 @@ fn phase4_pipelines_use_provider_neutral_adapter() {
         "src/session/splash.rs",
     ]);
     let _ = session; // legacy binding kept above; phase4 enforcement now spans the module.
-    assert!(interactive_agent.contains("ProviderLlmAdapter::new(Arc::clone(&provider))"));
+    assert!(interactive_agent.contains("build_subagent_pipeline_client("));
+    assert!(interactive_agent.contains("Arc::clone(&provider)"));
+    assert!(
+        pipeline_adapter
+            .contains("ProviderLlmAdapter::new(provider).with_origin(\"tui_pipeline\")")
+    );
     assert!(!session_all.contains("tui-pipeline-device"));
 }
 

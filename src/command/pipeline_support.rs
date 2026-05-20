@@ -6,7 +6,12 @@ use archon_core::config::ArchonConfig;
 use archon_core::env_vars::ArchonEnvVars;
 use archon_pipeline::audit::store::PipelineBundleStore;
 use archon_pipeline::audit::types::PipelineEvent;
+use archon_pipeline::learning::causal::CausalMemory;
+use archon_pipeline::learning::desc::DescEpisodeStore;
 use archon_pipeline::learning::integration::{LearningIntegration, LearningIntegrationConfig};
+use archon_pipeline::learning::patterns::PatternStore;
+use archon_pipeline::learning::reasoning::{ReasoningBank, ReasoningBankConfig, ReasoningBankDeps};
+use archon_pipeline::learning::reflexion::ReflexionInjector;
 use archon_pipeline::runner::PipelineType;
 use chrono::Utc;
 
@@ -39,6 +44,79 @@ pub(crate) async fn init_leann(cwd: &Path) -> Option<archon_pipeline::runner::Le
             None
         }
     }
+}
+
+pub(crate) fn build_interactive_learning_stack(
+    config: &ArchonConfig,
+    db: Option<Arc<cozo::DbInstance>>,
+    auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
+) -> Option<LearningIntegration> {
+    build_learning_stack_from_db(config, db, auto_trainer, config.learning.sona.enabled)
+}
+
+pub(crate) fn build_reflexion_injector(config: &ArchonConfig) -> Option<ReflexionInjector> {
+    config
+        .learning
+        .reflexion
+        .enabled
+        .then(|| ReflexionInjector::new(config.learning.reflexion.max_per_agent))
+}
+
+fn build_learning_stack_from_db(
+    config: &ArchonConfig,
+    db: Option<Arc<cozo::DbInstance>>,
+    auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
+    track_trajectories: bool,
+) -> Option<LearningIntegration> {
+    let has_learning = track_trajectories
+        || config.learning.reasoning_bank.enabled
+        || config.learning.desc.enabled
+        || auto_trainer.is_some();
+    if !has_learning {
+        return None;
+    }
+
+    let mut integration_config = LearningIntegrationConfig {
+        track_trajectories,
+        ..LearningIntegrationConfig::default()
+    };
+    let mut learning = if let Some(db) = db.clone() {
+        LearningIntegration::new_with_persistent_sona(
+            db,
+            integration_config,
+            auto_trainer.clone(),
+            config.learning.gnn.input_dim,
+        )
+    } else {
+        integration_config.track_trajectories = false;
+        LearningIntegration::new(None, None, integration_config, auto_trainer.clone())
+    };
+
+    if config.learning.reasoning_bank.enabled {
+        learning = learning.with_reasoning_bank(build_reasoning_bank(config));
+    }
+    if config.learning.desc.enabled
+        && let Some(db) = db
+    {
+        learning = learning.with_desc_store(DescEpisodeStore::from_arc(db));
+    }
+
+    Some(learning)
+}
+
+fn build_reasoning_bank(config: &ArchonConfig) -> ReasoningBank {
+    let causal_memory = config
+        .learning
+        .causal_memory
+        .enabled
+        .then(CausalMemory::new);
+    ReasoningBank::new(ReasoningBankDeps {
+        pattern_store: PatternStore::new(),
+        causal_memory,
+        gnn_enhancer: None,
+        sona_engine: None,
+        config: ReasoningBankConfig::default(),
+    })
 }
 
 pub(crate) async fn print_pipeline_result(
@@ -151,14 +229,14 @@ pub(crate) fn build_pipeline_learning_stack(
     config: &ArchonConfig,
     cwd: &Path,
 ) -> (
-    LearningIntegration,
+    Option<LearningIntegration>,
     Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
 ) {
     let db = open_pipeline_learning_db(cwd);
     let auto_trainer = db
         .as_ref()
         .and_then(|db| build_pipeline_auto_trainer_from_db(config, Arc::clone(db)));
-    let mut integration_config = LearningIntegrationConfig {
+    let integration_config = LearningIntegrationConfig {
         track_trajectories: config.learning.sona.enabled && config.learning.sona.pipeline_recording,
         ..LearningIntegrationConfig::default()
     };
@@ -170,20 +248,12 @@ pub(crate) fn build_pipeline_learning_stack(
         );
     }
 
-    let learning = if let Some(db) = db
-        && config.learning.sona.enabled
-        && config.learning.sona.pipeline_recording
-    {
-        LearningIntegration::new_with_persistent_sona(
-            db,
-            integration_config,
-            auto_trainer.clone(),
-            config.learning.gnn.input_dim,
-        )
-    } else {
-        integration_config.track_trajectories = false;
-        LearningIntegration::new(None, None, integration_config, auto_trainer.clone())
-    };
+    let learning = build_learning_stack_from_db(
+        config,
+        db,
+        auto_trainer.clone(),
+        integration_config.track_trajectories,
+    );
     (learning, auto_trainer)
 }
 

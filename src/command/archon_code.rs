@@ -6,6 +6,9 @@
 
 use std::sync::Arc;
 
+use crate::command::pipeline_support::{
+    build_interactive_learning_stack, build_reflexion_injector,
+};
 use crate::command::registry::{CommandContext, CommandHandler};
 use archon_pipeline::coding::facade::CodingFacade;
 use archon_pipeline::runner::{LlmClient, run_pipeline_audited};
@@ -49,6 +52,11 @@ impl CommandHandler for ArchonCodeHandler {
 
         let tui_tx = ctx.tui_tx.clone();
         let leann = ctx.leann.clone();
+        let loaded_config = archon_core::config::load_config().ok();
+        let mut learning = loaded_config.as_ref().and_then(|config| {
+            build_interactive_learning_stack(config, ctx.cozo_db.clone(), ctx.auto_trainer.clone())
+        });
+        let mut reflexion = loaded_config.as_ref().and_then(build_reflexion_injector);
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
         // Facade emits per-agent progress as Strings; forward to TUI as TextDelta.
@@ -64,7 +72,7 @@ impl CommandHandler for ArchonCodeHandler {
         let _ = tui_tx.send(TuiEvent::TextDelta(format!(
             "Starting coding pipeline for task: {task}\n",
         )));
-        let world_context = archon_core::config::load_config().ok().map(|config| {
+        let world_context = loaded_config.map(|config| {
             let guardrail = crate::command::world_model::begin_guarded_action(
                 &config,
                 archon_world_model::integration::WorldAdvisorSurface::PipelineStep,
@@ -124,8 +132,8 @@ impl CommandHandler for ArchonCodeHandler {
                 &task,
                 &cwd,
                 leann.as_deref(),
-                None,
-                None,
+                reflexion.as_mut(),
+                learning.as_mut(),
             )
             .await
             {

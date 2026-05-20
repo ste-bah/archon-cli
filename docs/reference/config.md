@@ -616,10 +616,19 @@ Each subsystem only takes resources (memory, embedding compute, occasional LLM c
 - Memory-graph cost is high
 - You want to A/B test the agent's behavior with one subsystem off
 
-`learning.sona.enabled` records interactive learning trajectories by default.
-Pipeline and batch runs stay off unless `learning.sona.pipeline_recording = true`
-is set explicitly, so automated jobs do not start recording trajectories just
-because the interactive learning path is enabled.
+`learning.sona.enabled` records normal interactive learning and TUI slash
+pipeline trajectories by default, including `/archon-code`, `/archon-research`,
+and `/gametheory`. Shell/batch runs (`archon pipeline ...`,
+`archon gametheory ...`) and agent-callable GameTheory tools stay off unless
+`learning.sona.pipeline_recording = true` is set explicitly, so automated jobs
+do not start recording trajectories just because the interactive learning path
+is enabled.
+
+ReasoningBank and DESC are injected into both the shared coding/research runner
+and the game-theory classify/specialist paths when their toggles are enabled.
+Reflexion is a shared-runner retry feature: coding/research agents receive
+prior failed-attempt context on quality-gated retries when
+`learning.reflexion.enabled = true`.
 
 See [Learning systems architecture](../architecture/learning-systems.md) for what each subsystem does.
 

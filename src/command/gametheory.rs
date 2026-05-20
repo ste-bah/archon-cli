@@ -9,6 +9,7 @@ use cozo::DbInstance;
 
 use crate::cli_args::GametheoryAction;
 use crate::command::gametheory_inspect;
+use crate::command::pipeline_support::build_pipeline_learning_stack;
 use crate::command::provider_gate::ensure_active_provider_supports;
 use crate::runtime::llm::build_configured_llm_provider;
 use archon_core::config::ArchonConfig;
@@ -210,8 +211,10 @@ async fn run_classify_only(
 ) -> Result<()> {
     let llm = build_llm_client(config, env_vars).await;
     let llm_ref: Option<&dyn LlmClient> = llm.as_ref().map(|a| a as &dyn LlmClient);
+    let cwd = std::env::current_dir()?;
+    let (mut learning, _) = build_pipeline_learning_stack(config, &cwd);
 
-    match gametheory::classify(db, situation, llm_ref).await {
+    match gametheory::classify_with_learning(db, situation, llm_ref, learning.as_mut()).await {
         Ok(fp) => {
             print_fingerprint(&fp);
             println!("Fingerprint persisted to Cozo (gt_runs, gt_fingerprints).");
@@ -250,6 +253,8 @@ async fn run_full(
     let llm_ref: Option<&dyn LlmClient> = llm.as_ref().map(|a| a as &dyn LlmClient);
     let path = spec_path.map(std::path::Path::new);
     let memory_ctx = open_memory_context(debug_memory)?;
+    let cwd = std::env::current_dir()?;
+    let (mut learning, _) = build_pipeline_learning_stack(config, &cwd);
     let tier11_allowed = resolve_tier11_policy(enable_tier11)?;
     let options = gametheory::GameTheoryRunOptions {
         budget_usd: budget,
@@ -259,8 +264,14 @@ async fn run_full(
         kb_pack_id: kb.map(str::to_string),
     };
 
-    match gametheory::run_full_pipeline_with_options(
-        db, situation, path, llm_ref, memory_ctx, options,
+    match gametheory::run_full_pipeline_with_learning_options(
+        db,
+        situation,
+        path,
+        llm_ref,
+        memory_ctx,
+        options,
+        learning.as_mut(),
     )
     .await
     {
@@ -440,13 +451,16 @@ async fn handle_replay(
     if let Some(agent_key) = rerun_specialist {
         let llm = build_llm_client(config, env_vars).await;
         let llm_ref: Option<&dyn LlmClient> = llm.as_ref().map(|a| a as &dyn LlmClient);
-        let result = gametheory::replay_single_specialist(
+        let cwd = std::env::current_dir()?;
+        let (mut learning, _) = build_pipeline_learning_stack(config, &cwd);
+        let result = gametheory::replay_single_specialist_with_learning(
             &db,
             run_id,
             agent_key,
             llm_ref,
             open_memory_context(false)?,
             gametheory::GameTheoryRunOptions::default(),
+            learning.as_mut(),
         )
         .await
         .map_err(|e| anyhow::anyhow!("specialist replay failed: {e}"))?;

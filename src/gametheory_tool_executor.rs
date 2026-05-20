@@ -14,6 +14,7 @@ use archon_tools::gametheory::{
 };
 use async_trait::async_trait;
 
+use crate::command::pipeline_support::build_pipeline_learning_stack;
 use crate::command::{gametheory as cli_gametheory, gametheory_inspect};
 
 #[derive(Clone)]
@@ -35,7 +36,9 @@ impl GameTheoryExecutor for PipelineGameTheoryExecutor {
         let db = cli_gametheory::open_db()?;
         let llm = self.build_llm().await;
         let llm_ref = llm.as_ref().map(|client| client as &dyn LlmClient);
-        let result = gametheory::run_full_pipeline_with_options(
+        let cwd = std::env::current_dir()?;
+        let (mut learning, _) = build_pipeline_learning_stack(&self.config, &cwd);
+        let result = gametheory::run_full_pipeline_with_learning_options(
             &db,
             &request.situation,
             None,
@@ -48,6 +51,7 @@ impl GameTheoryExecutor for PipelineGameTheoryExecutor {
                 enable_tier11: false,
                 kb_pack_id: None,
             },
+            learning.as_mut(),
         )
         .await?;
         let persisted_status = gametheory_inspect::render_status(&db, Some(&result.run_id))?;
@@ -115,7 +119,11 @@ impl GameTheoryExecutor for PipelineGameTheoryExecutor {
         let db = cli_gametheory::open_db()?;
         let llm = self.build_llm().await;
         let llm_ref = llm.as_ref().map(|client| client as &dyn LlmClient);
-        let fingerprint = gametheory::classify(&db, &request.situation, llm_ref).await?;
+        let cwd = std::env::current_dir()?;
+        let (mut learning, _) = build_pipeline_learning_stack(&self.config, &cwd);
+        let fingerprint =
+            gametheory::classify_with_learning(&db, &request.situation, llm_ref, learning.as_mut())
+                .await?;
         let artifact_id = format!("fingerprint:{}", fingerprint.run_id);
         let persisted = gametheory_inspect::render_inspect_artifact(&db, &artifact_id)?;
         Ok(format!(
@@ -153,13 +161,16 @@ impl PipelineGameTheoryExecutor {
         let db = cli_gametheory::open_db()?;
         let llm = self.build_llm().await;
         let llm_ref = llm.as_ref().map(|client| client as &dyn LlmClient);
-        let result = gametheory::replay_single_specialist(
+        let cwd = std::env::current_dir()?;
+        let (mut learning, _) = build_pipeline_learning_stack(&self.config, &cwd);
+        let result = gametheory::replay_single_specialist_with_learning(
             &db,
             run_id,
             agent_key,
             llm_ref,
             cli_gametheory::open_memory_context(false)?,
             gametheory::GameTheoryRunOptions::default(),
+            learning.as_mut(),
         )
         .await?;
         let artifact_id = format!("specialist:{run_id}:{}", result.agent_key);

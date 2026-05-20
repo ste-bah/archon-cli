@@ -7,6 +7,7 @@ use archon_tui::app::{EvidenceRowPayload, TuiEvent, ViewId};
 use cozo::{DbInstance, ScriptMutability};
 
 use crate::command::gametheory_inspect;
+use crate::command::pipeline_support::build_interactive_learning_stack;
 use crate::command::registry::{CommandContext, CommandHandler};
 
 pub(crate) const GAMETHEORY_SUBCOMMANDS: &[&str] = &[
@@ -93,6 +94,10 @@ fn start_run(ctx: &mut CommandContext, args: &[String]) -> Result<()> {
     let situation = situation_args.join(" ");
     let tui_tx = ctx.tui_tx.clone();
     let llm = ctx.llm_adapter.clone();
+    let loaded_config = archon_core::config::load_config().ok();
+    let mut learning = loaded_config.as_ref().and_then(|config| {
+        build_interactive_learning_stack(config, ctx.cozo_db.clone(), ctx.auto_trainer.clone())
+    });
     let kb_note = kb_pack_id
         .as_deref()
         .map(|kb| format!(" using KB `{kb}`"))
@@ -106,7 +111,7 @@ fn start_run(ctx: &mut CommandContext, args: &[String]) -> Result<()> {
         let result = async {
             let db = open_db()?;
             let llm_ref = llm.as_ref().map(|arc| arc.as_ref() as &dyn LlmClient);
-            gametheory::run_full_pipeline_with_options(
+            gametheory::run_full_pipeline_with_learning_options(
                 &db,
                 &situation,
                 None,
@@ -116,6 +121,7 @@ fn start_run(ctx: &mut CommandContext, args: &[String]) -> Result<()> {
                     kb_pack_id,
                     ..gametheory::GameTheoryRunOptions::default()
                 },
+                learning.as_mut(),
             )
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))
@@ -145,6 +151,10 @@ fn start_classify_only(ctx: &mut CommandContext, args: &[String]) -> Result<()> 
     let situation = args.join(" ");
     let tui_tx = ctx.tui_tx.clone();
     let llm = ctx.llm_adapter.clone();
+    let loaded_config = archon_core::config::load_config().ok();
+    let mut learning = loaded_config.as_ref().and_then(|config| {
+        build_interactive_learning_stack(config, ctx.cozo_db.clone(), ctx.auto_trainer.clone())
+    });
     emit(
         ctx,
         format!("Classifying game-theory situation: {situation}\n"),
@@ -154,7 +164,12 @@ fn start_classify_only(ctx: &mut CommandContext, args: &[String]) -> Result<()> 
         let result = async {
             let db = open_db()?;
             let llm_ref = llm.as_ref().map(|arc| arc.as_ref() as &dyn LlmClient);
-            let fingerprint = gametheory::classify(&db, &situation, llm_ref)
+            let fingerprint = gametheory::classify_with_learning(
+                &db,
+                &situation,
+                llm_ref,
+                learning.as_mut(),
+            )
                 .await
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
             Ok(format!(
@@ -207,6 +222,10 @@ fn start_async_replay(
 ) -> Result<()> {
     let tui_tx = ctx.tui_tx.clone();
     let llm = ctx.llm_adapter.clone();
+    let loaded_config = archon_core::config::load_config().ok();
+    let mut learning = loaded_config.as_ref().and_then(|config| {
+        build_interactive_learning_stack(config, ctx.cozo_db.clone(), ctx.auto_trainer.clone())
+    });
     emit(ctx, format!("Starting game-theory replay for {run_id}\n"))?;
 
     archon_observability::spawn_named("gametheory-slash-replay", async move {
@@ -217,13 +236,14 @@ fn start_async_replay(
                     anyhow::bail!("run not found: {run_id}");
                 };
                 let llm_ref = llm.as_ref().map(|arc| arc.as_ref() as &dyn LlmClient);
-                let result = gametheory::run_full_pipeline_with_options(
+                let result = gametheory::run_full_pipeline_with_learning_options(
                     &db,
                     &situation,
                     None,
                     llm_ref,
                     gametheory::GameTheoryMemoryContext::default(),
                     gametheory::GameTheoryRunOptions::default(),
+                    learning.as_mut(),
                 )
                 .await
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -237,13 +257,14 @@ fn start_async_replay(
                 anyhow::bail!("internal replay error: missing rerun specialist");
             };
             let llm_ref = llm.as_ref().map(|arc| arc.as_ref() as &dyn LlmClient);
-            let result = gametheory::replay_single_specialist(
+            let result = gametheory::replay_single_specialist_with_learning(
                 &db,
                 &run_id,
                 &agent_key,
                 llm_ref,
                 gametheory::GameTheoryMemoryContext::default(),
                 gametheory::GameTheoryRunOptions::default(),
+                learning.as_mut(),
             )
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;

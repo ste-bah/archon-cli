@@ -85,6 +85,50 @@ When `--kb <pack>` is supplied, the run reads matching `doc_sources` and
 Tier 1 and specialist prompts, and writes a `stage:kb-context` checkpoint with
 the pack id plus document/chunk counts.
 
+## Learning integration
+
+GameTheory has its own routing and persistence lane, but it now calls Archon's
+shared learning stack at the same execution boundaries as the coding/research
+pipelines.
+
+```mermaid
+flowchart LR
+    SURFACE["CLI / TUI / GameTheory tool"]
+    STACK["LearningIntegration"]
+    TIER1["Tier 1 classify"]
+    ROUTE["YAML routing"]
+    SPEC["Specialist waves"]
+    GTDB["gt_* Cozo tables<br/>source of truth"]
+    SONA["SONA trajectories"]
+    DESC["DESC episodes"]
+    RB["ReasoningBank context"]
+
+    SURFACE --> STACK
+    STACK --> TIER1
+    STACK --> SPEC
+    RB --> TIER1
+    DESC --> TIER1
+    RB --> SPEC
+    DESC --> SPEC
+    TIER1 --> ROUTE --> SPEC --> GTDB
+    TIER1 --> SONA
+    SPEC --> SONA
+    SPEC --> DESC
+```
+
+Practical behavior:
+
+- ReasoningBank and DESC are injected into Tier 1 and specialist prompts when
+  their `[learning.*]` toggles are enabled.
+- TUI `/gametheory` runs record SONA trajectories when `learning.sona.enabled =
+  true`.
+- Shell `archon gametheory ...` runs and agent-callable GameTheory tools record
+  SONA only when `learning.sona.pipeline_recording = true`.
+- SONA/DESC do not replace the strategic source of truth. Operators should
+  inspect `gt_runs`, `gt_fingerprints`, `gt_routing_decisions`,
+  `gt_specialist_outputs`, `gt_sections`, and `gt_final_reports` for run
+  verification.
+
 Full State Verification should read these through CLI inspection commands:
 
 ```bash

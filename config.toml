@@ -362,6 +362,9 @@ every_n_turns = 5
 # SONA — Self-Organizing Network Architecture (trajectory pattern store)
 [learning.sona]
 enabled = true
+# TUI slash pipelines record when enabled. Shell/batch pipelines and
+# agent-callable GameTheory tools require this explicit opt-in.
+pipeline_recording = false
 
 # ProvenanceStore — L-Score system tracking memory reliability
 [learning.provenance]

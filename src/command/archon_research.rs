@@ -6,7 +6,9 @@
 
 use std::sync::Arc;
 
-use crate::command::pipeline_support::final_research_artifact_paths;
+use crate::command::pipeline_support::{
+    build_interactive_learning_stack, build_reflexion_injector, final_research_artifact_paths,
+};
 use crate::command::registry::{CommandContext, CommandHandler};
 use archon_pipeline::research::facade::ResearchFacade;
 use archon_pipeline::runner::{LlmClient, run_pipeline_audited};
@@ -49,6 +51,11 @@ impl CommandHandler for ArchonResearchHandler {
         };
 
         let tui_tx = ctx.tui_tx.clone();
+        let loaded_config = archon_core::config::load_config().ok();
+        let mut learning = loaded_config.as_ref().and_then(|config| {
+            build_interactive_learning_stack(config, ctx.cozo_db.clone(), ctx.auto_trainer.clone())
+        });
+        let mut reflexion = loaded_config.as_ref().and_then(build_reflexion_injector);
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
         // Facade emits per-agent progress as Strings; forward to TUI as TextDelta.
@@ -64,7 +71,7 @@ impl CommandHandler for ArchonResearchHandler {
         let _ = tui_tx.send(TuiEvent::TextDelta(format!(
             "Starting research pipeline for topic: {topic}\n",
         )));
-        let world_context = archon_core::config::load_config().ok().map(|config| {
+        let world_context = loaded_config.map(|config| {
             let guardrail = crate::command::world_model::begin_guarded_action(
                 &config,
                 archon_world_model::integration::WorldAdvisorSurface::PipelineStep,
@@ -129,8 +136,8 @@ impl CommandHandler for ArchonResearchHandler {
                 // Research evidence comes from docs/KB/web sources; LEANN is
                 // code search and can initialise a local embedding backend.
                 None,
-                None,
-                None,
+                reflexion.as_mut(),
+                learning.as_mut(),
             )
             .await
             {

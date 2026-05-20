@@ -568,6 +568,14 @@ async fn run_pipeline_inner(
                                 "text": format!("## Reasoning Context\n{}", learning_ctx.reasoning_context),
                             }));
                         }
+                        if !learning_ctx.desc_episodes.is_empty() {
+                            system.push(serde_json::json!({
+                                "text": format!(
+                                    "## DESC Episodes\n{}",
+                                    learning_ctx.desc_episodes.join("\n\n")
+                                ),
+                            }));
+                        }
                     }
 
                     // Inject reflexion context on retry.
@@ -613,11 +621,31 @@ async fn run_pipeline_inner(
                     {
                         Ok(response) => response,
                         Err(error) => {
-                            if is_context_window_error(&error) && attempt == 1 {
+                            if is_context_window_error(&error) && attempt < PIPELINE_MAX_ATTEMPTS {
                                 tracing::warn!(
                                     agent_key = %agent.key,
                                     "pipeline prompt exceeded context; rebuilding with retry budget"
                                 );
+                                continue;
+                            }
+                            if is_retryable_pipeline_attempt_error(&error)
+                                && attempt < PIPELINE_MAX_ATTEMPTS
+                            {
+                                let reason = error.to_string();
+                                if let Some(audit) = audit.as_ref() {
+                                    audit
+                                        .record_attempt_failed(ordinal, &agent, attempt, &reason)?;
+                                    audit.record_agent_retry(ordinal, &agent, attempt, &reason)?;
+                                }
+                                let delay = pipeline_attempt_retry_delay(attempt);
+                                tracing::warn!(
+                                    agent_key = %agent.key,
+                                    attempt = attempt,
+                                    retry_delay_ms = delay.as_millis() as u64,
+                                    error = %reason,
+                                    "pipeline agent attempt failed with retryable transport error"
+                                );
+                                tokio::time::sleep(delay).await;
                                 continue;
                             }
                             if let Some(audit) = audit.as_ref() {
@@ -930,6 +958,14 @@ async fn run_pipeline_inner(
                     if !learning_ctx.reasoning_context.is_empty() {
                         system.push(serde_json::json!({
                             "text": format!("## Reasoning Context\n{}", learning_ctx.reasoning_context),
+                        }));
+                    }
+                    if !learning_ctx.desc_episodes.is_empty() {
+                        system.push(serde_json::json!({
+                            "text": format!(
+                                "## DESC Episodes\n{}",
+                                learning_ctx.desc_episodes.join("\n\n")
+                            ),
                         }));
                     }
 
@@ -1321,6 +1357,48 @@ fn is_context_window_error(error: &anyhow::Error) -> bool {
             None,
         )
         .is_some()
+}
+
+fn is_retryable_pipeline_attempt_error(error: &anyhow::Error) -> bool {
+    if let Some(err) = error.downcast_ref::<archon_llm::provider::LlmError>() {
+        if err.is_context_window_exceeded() {
+            return false;
+        }
+        return matches!(
+            err,
+            archon_llm::provider::LlmError::Http(_)
+                | archon_llm::provider::LlmError::RateLimited { .. }
+                | archon_llm::provider::LlmError::Overloaded
+                | archon_llm::provider::LlmError::Server { .. }
+        );
+    }
+
+    let message = error.to_string().to_ascii_lowercase();
+    [
+        "http error",
+        "error decoding response body",
+        "connection reset",
+        "connection closed",
+        "connection refused",
+        "timed out",
+        "timeout",
+        "temporarily unavailable",
+        "server overloaded",
+        "rate limited",
+        "429",
+        "500",
+        "502",
+        "503",
+        "504",
+    ]
+    .iter()
+    .any(|marker| message.contains(marker))
+}
+
+fn pipeline_attempt_retry_delay(attempt: usize) -> Duration {
+    let exponent = (attempt as u32).saturating_sub(1);
+    let delay_ms = 250u64.saturating_mul(2u64.saturating_pow(exponent));
+    Duration::from_millis(delay_ms.min(2_000))
 }
 
 fn fail_audit(audit: &mut Option<PipelineAuditRun>, error: &str) -> Result<()> {

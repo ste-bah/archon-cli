@@ -1,4 +1,8 @@
 use super::types::{LearningContext, LearningIntegrationConfig};
+use crate::learning::desc::{
+    DEFAULT_MAX_INJECTION, DEFAULT_MIN_INJECTION_QUALITY, DescEpisode, DescEpisodeStore,
+    InjectionFilter,
+};
 use crate::learning::gnn::auto_trainer::AutoTrainer;
 use crate::learning::reasoning::{ReasoningBank, ReasoningRequest, ReasoningResponse};
 use crate::learning::sona::{FeedbackInput, SonaConfig, SonaEngine, Trajectory};
@@ -22,9 +26,12 @@ use std::sync::Arc;
 pub struct LearningIntegration {
     sona: Option<SonaEngine>,
     reasoning_bank: Option<ReasoningBank>,
+    desc_store: Option<DescEpisodeStore>,
     config: LearningIntegrationConfig,
     /// Maps agent_name -> active trajectory_id for feedback routing.
     active_trajectories: HashMap<String, String>,
+    /// Maps agent_name -> active context for DESC episode persistence.
+    active_agent_contexts: HashMap<String, ActiveAgentContext>,
     /// Pipeline session ID for trajectory grouping.
     session_id: String,
     /// GNN auto-trainer hooks (PR 3 v0.1.26). Incremented on memory store and
@@ -45,8 +52,10 @@ impl LearningIntegration {
         Self {
             sona,
             reasoning_bank,
+            desc_store: None,
             config,
             active_trajectories: HashMap::new(),
+            active_agent_contexts: HashMap::new(),
             session_id: uuid::Uuid::new_v4().to_string(),
             auto_trainer,
             event_store: None,
@@ -85,6 +94,19 @@ impl LearningIntegration {
         self
     }
 
+    /// Attach a ReasoningBank used for runtime reasoning context injection.
+    pub fn with_reasoning_bank(mut self, reasoning_bank: ReasoningBank) -> Self {
+        self.reasoning_bank = Some(reasoning_bank);
+        self
+    }
+
+    /// Attach the DESC episodic memory store used for episode injection and
+    /// completion persistence.
+    pub fn with_desc_store(mut self, desc_store: DescEpisodeStore) -> Self {
+        self.desc_store = Some(desc_store);
+        self
+    }
+
     /// Called when an agent starts execution.
     ///
     /// Creates a SONA trajectory (if available) and queries ReasoningBank
@@ -97,18 +119,54 @@ impl LearningIntegration {
         pipeline_id: &str,
     ) -> LearningContext {
         let mut ctx = LearningContext::default();
+        let route = format!("{}{}/{}", self.config.route_prefix, phase, agent_name);
+        let session = if pipeline_id.is_empty() {
+            self.session_id.clone()
+        } else {
+            pipeline_id.to_string()
+        };
+
+        self.active_agent_contexts.insert(
+            agent_name.to_string(),
+            ActiveAgentContext {
+                phase: phase.to_string(),
+                task: task.to_string(),
+                session_id: session.clone(),
+            },
+        );
+
+        if let Some(ref desc_store) = self.desc_store {
+            match InjectionFilter::filter_for_injection(
+                desc_store,
+                phase,
+                DEFAULT_MAX_INJECTION,
+                DEFAULT_MIN_INJECTION_QUALITY,
+            ) {
+                Ok(injection) => {
+                    ctx.desc_episodes = injection
+                        .episodes
+                        .into_iter()
+                        .map(|ranked| {
+                            format!(
+                                "episode_id={}, task_type={}, quality={:.2}, outcome={}, summary={}",
+                                ranked.episode.episode_id,
+                                ranked.episode.task_type,
+                                ranked.episode.quality_score,
+                                ranked.episode.outcome,
+                                ranked.episode.description
+                            )
+                        })
+                        .collect();
+                }
+                Err(e) => tracing::warn!(agent_name, error = %e, "DESC injection lookup failed"),
+            }
+        }
 
         // Create SONA trajectory
         if let Some(ref mut sona) = self.sona
             && self.config.track_trajectories
         {
-            let route = format!("{}{}/{}", self.config.route_prefix, phase, agent_name);
-            let session = if pipeline_id.is_empty() {
-                &self.session_id
-            } else {
-                pipeline_id
-            };
-            let traj: Trajectory = sona.create_trajectory(&route, agent_name, session);
+            let traj: Trajectory = sona.create_trajectory(&route, agent_name, &session);
             ctx.sona_context = format!(
                 "trajectory_id={}, route={}, agent={}",
                 traj.trajectory_id, traj.route, traj.agent_key
@@ -126,7 +184,11 @@ impl LearningIntegration {
                 task_type: None,
                 max_results: Some(3),
                 confidence_threshold: Some(self.config.quality_threshold),
-                context: None,
+                context: if ctx.desc_episodes.is_empty() {
+                    None
+                } else {
+                    Some(ctx.desc_episodes.clone())
+                },
             };
             let response: ReasoningResponse = rb.reason(&request);
             if response.overall_confidence > 0.0 {
@@ -168,11 +230,13 @@ impl LearningIntegration {
         }
 
         let traj_id = match self.active_trajectories.remove(agent_name) {
-            Some(id) => id,
-            None => return,
+            Some(id) => Some(id),
+            None => None,
         };
 
-        if let Some(ref mut sona) = self.sona {
+        if let Some(ref mut sona) = self.sona
+            && let Some(traj_id) = traj_id.clone()
+        {
             let input = FeedbackInput {
                 trajectory_id: traj_id,
                 quality: quality_score,
@@ -185,6 +249,32 @@ impl LearningIntegration {
             };
             // Best-effort feedback - ignore errors
             let _ = sona.provide_feedback(&input);
+        }
+
+        if let Some(ref desc_store) = self.desc_store
+            && let Some(active) = self.active_agent_contexts.remove(agent_name)
+        {
+            let episode = DescEpisode {
+                episode_id: uuid::Uuid::new_v4().to_string(),
+                session_id: active.session_id,
+                task_type: active.phase,
+                description: active.task,
+                solution: truncate_for_episode(_output_summary, 4000),
+                outcome: if quality_score >= self.config.quality_threshold {
+                    "success".to_string()
+                } else {
+                    "needs_improvement".to_string()
+                },
+                quality_score,
+                reward: quality_score,
+                tags: vec!["pipeline".to_string(), agent_name.to_string()],
+                trajectory_id: traj_id,
+                created_at: 0,
+                updated_at: 0,
+            };
+            if let Err(e) = desc_store.store_episode(&episode) {
+                tracing::warn!(agent_name, error = %e, "DESC episode persistence failed");
+            }
         }
     }
 
@@ -349,6 +439,22 @@ impl LearningIntegration {
 
 struct DeterministicTrajectoryEmbedding {
     dim: usize,
+}
+
+#[derive(Debug, Clone)]
+struct ActiveAgentContext {
+    phase: String,
+    task: String,
+    session_id: String,
+}
+
+fn truncate_for_episode(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(max_chars).collect();
+    out.push_str("...");
+    out
 }
 
 impl EmbeddingProvider for DeterministicTrajectoryEmbedding {

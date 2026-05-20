@@ -1,6 +1,8 @@
 use anyhow::Result;
 use futures_util::future::join_all;
+use std::collections::HashMap;
 
+use crate::learning::integration::{LearningContext, LearningIntegration};
 use crate::runner::{
     AgentExecutionRequest, AgentInfo, LlmClient, LlmResponse, PipelineType, ToolAccessLevel,
 };
@@ -24,6 +26,7 @@ pub(super) async fn execute_tier1_real(
     situation: &str,
     now: &str,
     memory_ctx: &GameTheoryMemoryContext,
+    mut learning: Option<&mut LearningIntegration>,
 ) -> Result<(GameTheoryFingerprint, Vec<MemoryRecallAudit>), GameTheoryError> {
     let mut audits = Vec::new();
     let mut prior_context_parts = Vec::new();
@@ -35,16 +38,35 @@ pub(super) async fn execute_tier1_real(
         audits.push(recalled.audit);
     }
     let prior_context = prior_context_parts.join("\n\n---\n\n");
+    let mut learning_contexts = HashMap::new();
+    if let Some(li) = learning.as_deref_mut() {
+        for agent_key in TIER1_MEMORY_AGENT_KEYS {
+            let ctx = li.on_agent_start(agent_key, "tier1", situation, run_id);
+            learning_contexts.insert((*agent_key).to_string(), ctx);
+        }
+    }
 
-    let tier1_calls = TIER1_MEMORY_AGENT_KEYS
-        .iter()
-        .map(|agent_key| execute_tier1_agent(llm, run_id, agent_key, situation, &prior_context));
+    let tier1_calls = TIER1_MEMORY_AGENT_KEYS.iter().map(|agent_key| {
+        execute_tier1_agent(
+            llm,
+            run_id,
+            agent_key,
+            situation,
+            &prior_context,
+            learning_contexts.get(*agent_key),
+        )
+    });
     let responses = join_all(tier1_calls).await;
     let mut outputs = Vec::new();
     let mut failures = Vec::new();
     for response in responses {
         match response {
-            Ok(output) => outputs.push(output),
+            Ok(output) => {
+                if let Some(li) = learning.as_deref_mut() {
+                    li.on_agent_complete(&output.agent_key, 0.9, &output.content);
+                }
+                outputs.push(output);
+            }
             Err(err) => failures.push(err.to_string()),
         }
     }
@@ -72,17 +94,20 @@ async fn execute_tier1_agent(
     agent_key: &str,
     situation: &str,
     prior_context: &str,
+    learning_context: Option<&LearningContext>,
 ) -> Result<Tier1AgentOutput, GameTheoryError> {
     let system = vec![serde_json::json!({
         "type": "text",
         "text": tier1_system_prompt(agent_key)
     })];
 
-    let user_content = if prior_context.is_empty() {
+    let combined_context = combine_prior_and_learning_context(prior_context, learning_context);
+
+    let user_content = if combined_context.is_empty() {
         format!("Classify this strategic situation as Tier 1 agent `{agent_key}`:\n\n{situation}")
     } else {
         format!(
-            "Classify this strategic situation as Tier 1 agent `{agent_key}`:\n\n{situation}\n\n## Recalled Prior Context\n\n{prior_context}"
+            "Classify this strategic situation as Tier 1 agent `{agent_key}`:\n\n{situation}\n\n## Recalled Prior Context\n\n{combined_context}"
         )
     };
 
@@ -144,6 +169,31 @@ async fn execute_tier1_agent(
         agent_key: agent_key.to_string(),
         content: response.content,
     })
+}
+
+fn combine_prior_and_learning_context(
+    prior_context: &str,
+    learning_context: Option<&LearningContext>,
+) -> String {
+    let mut parts = Vec::new();
+    if !prior_context.trim().is_empty() {
+        parts.push(prior_context.to_string());
+    }
+    if let Some(ctx) = learning_context {
+        if !ctx.sona_context.is_empty() {
+            parts.push(format!("## SONA Trajectory\n{}", ctx.sona_context));
+        }
+        if !ctx.reasoning_context.is_empty() {
+            parts.push(format!("## Reasoning Context\n{}", ctx.reasoning_context));
+        }
+        if !ctx.desc_episodes.is_empty() {
+            parts.push(format!(
+                "## DESC Episodes\n{}",
+                ctx.desc_episodes.join("\n\n")
+            ));
+        }
+    }
+    parts.join("\n\n---\n\n")
 }
 
 fn tier1_system_prompt(agent_key: &str) -> &'static str {

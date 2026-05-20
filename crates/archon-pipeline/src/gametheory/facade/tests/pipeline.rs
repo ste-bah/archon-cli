@@ -1,5 +1,11 @@
 use super::super::*;
 use super::*;
+use crate::learning::{
+    gnn::auto_trainer_runtime::query_trajectories_for_training,
+    integration::{LearningIntegration, LearningIntegrationConfig},
+    schema::initialize_learning_schemas,
+};
+use std::sync::Arc;
 
 #[test]
 fn test_full_pipeline_produces_report() {
@@ -117,6 +123,54 @@ fn test_full_pipeline_produces_report() {
     assert!(edge_types.contains(&"contributed_to_section"));
     assert!(edge_types.contains(&"assembled_into_report"));
 }
+
+#[test]
+fn test_full_pipeline_records_sona_when_learning_supplied() {
+    let db = test_db();
+    let spec_path = std::path::Path::new("../../.archon/specs/gametheory.yaml");
+
+    if !spec_path.exists() {
+        eprintln!("spec file not found, skipping gametheory SONA test");
+        return;
+    }
+
+    let learning_db = Arc::new(cozo::DbInstance::new("mem", "", "").unwrap());
+    initialize_learning_schemas(learning_db.as_ref()).unwrap();
+    let mut learning = LearningIntegration::new_with_persistent_sona(
+        Arc::clone(&learning_db),
+        LearningIntegrationConfig::default(),
+        None,
+        8,
+    );
+
+    let llm = canned_pipeline_llm();
+    let result = block_on(run_full_pipeline_with_learning_options(
+        &db,
+        "Two firms simultaneously set prices in a Bertrand duopoly with asymmetric costs.",
+        Some(spec_path),
+        Some(&llm),
+        GameTheoryMemoryContext::default(),
+        GameTheoryRunOptions {
+            budget_usd: 20.0,
+            max_concurrent: 1,
+            style_profile_id: Some("technical".to_string()),
+            enable_tier11: false,
+            kb_pack_id: None,
+        },
+        Some(&mut learning),
+    ))
+    .expect("gametheory pipeline should complete with learning enabled");
+
+    assert_eq!(result.status, "completed");
+    let samples = query_trajectories_for_training(learning_db.as_ref(), 8).unwrap();
+    assert!(
+        samples.len() >= 2,
+        "tier1 and specialist agents should record SONA trajectories"
+    );
+    assert!(samples.iter().all(|sample| sample.quality > 0.0));
+    assert!(samples.iter().all(|sample| sample.embedding.len() == 8));
+}
+
 #[test]
 fn test_full_pipeline_partial_status_on_failure() {
     let db = test_db();

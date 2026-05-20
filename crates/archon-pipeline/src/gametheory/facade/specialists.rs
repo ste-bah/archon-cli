@@ -1,8 +1,8 @@
 use futures_util::future::join_all;
-#[cfg(test)]
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::learning::integration::{LearningContext, LearningIntegration};
 use crate::runner::{AgentExecutionRequest, AgentInfo, LlmClient, PipelineType, ToolAccessLevel};
 
 use super::super::agents::{GameTheoryAgent, GameTheoryToolAccess};
@@ -146,6 +146,7 @@ pub(super) async fn execute_specialists_real(
         situation,
         memory_ctx,
         &GameTheoryRunOptions::default(),
+        None,
     )
     .await?;
     Ok((outcome.outputs, outcome.failed, outcome.memory_audits))
@@ -158,6 +159,7 @@ pub(super) async fn execute_specialists_real_with_options(
     situation: &str,
     memory_ctx: &GameTheoryMemoryContext,
     options: &GameTheoryRunOptions,
+    mut learning: Option<&mut LearningIntegration>,
 ) -> Result<SpecialistExecutionOutcome, GameTheoryError> {
     let fingerprint_summary = prompt_builder::fingerprint_summary_text(fingerprint);
     let mut outcome = SpecialistExecutionOutcome::default();
@@ -189,6 +191,17 @@ pub(super) async fn execute_specialists_real_with_options(
         }
         outcome.max_observed_concurrent = outcome.max_observed_concurrent.max(active_wave.len());
 
+        let mut learning_contexts = HashMap::new();
+        if let Some(li) = learning.as_deref_mut() {
+            for agent_key in active_wave {
+                let phase = agent_tier(agent_key)
+                    .map(|tier| format!("tier{tier}"))
+                    .unwrap_or_else(|| "specialist".to_string());
+                let ctx = li.on_agent_start(agent_key, &phase, situation, &fingerprint.run_id);
+                learning_contexts.insert(agent_key.clone(), ctx);
+            }
+        }
+
         let calls = active_wave.iter().map(|agent_key| {
             execute_specialist_call(
                 llm,
@@ -198,10 +211,20 @@ pub(super) async fn execute_specialists_real_with_options(
                 &fingerprint_summary,
                 memory_ctx,
                 &system,
+                learning_contexts.get(agent_key),
             )
         });
         let results = join_all(calls).await;
         for result in results {
+            if let Some(li) = learning.as_deref_mut() {
+                let quality = if result.output.is_some() { 0.9 } else { 0.0 };
+                let summary = result
+                    .output
+                    .as_deref()
+                    .or(result.error.as_deref())
+                    .unwrap_or_default();
+                li.on_agent_complete(&result.agent_key, quality, summary);
+            }
             outcome.memory_audits.push(result.audit);
             if let Some(output) = result.output {
                 if let Some(tier) = agent_tier(&result.agent_key) {
@@ -232,6 +255,7 @@ async fn execute_specialist_call(
     fingerprint_summary: &str,
     memory_ctx: &GameTheoryMemoryContext,
     system: &[serde_json::Value],
+    learning_context: Option<&LearningContext>,
 ) -> SpecialistCallOutput {
     let recalled = recall_prior_context_for_agent(agent_key, memory_ctx);
     let agent = registry_agent(agent_key);
@@ -267,13 +291,15 @@ async fn execute_specialist_call(
         };
     }
 
+    let combined_prior_context =
+        combine_prior_and_learning_context(&recalled.text, learning_context);
     let prompt = prompt_builder::build_specialist_prompt_with_template(
         agent_key,
         display_name,
         &source_body,
         situation,
         fingerprint_summary,
-        &recalled.text,
+        &combined_prior_context,
         &[],
     );
     let messages = vec![serde_json::json!({
@@ -344,6 +370,31 @@ async fn execute_specialist_call(
             cost_usd: 0.0,
         },
     }
+}
+
+fn combine_prior_and_learning_context(
+    prior_context: &str,
+    learning_context: Option<&LearningContext>,
+) -> String {
+    let mut parts = Vec::new();
+    if !prior_context.trim().is_empty() {
+        parts.push(prior_context.to_string());
+    }
+    if let Some(ctx) = learning_context {
+        if !ctx.sona_context.is_empty() {
+            parts.push(format!("## SONA Trajectory\n{}", ctx.sona_context));
+        }
+        if !ctx.reasoning_context.is_empty() {
+            parts.push(format!("## Reasoning Context\n{}", ctx.reasoning_context));
+        }
+        if !ctx.desc_episodes.is_empty() {
+            parts.push(format!(
+                "## DESC Episodes\n{}",
+                ctx.desc_episodes.join("\n\n")
+            ));
+        }
+    }
+    parts.join("\n\n---\n\n")
 }
 
 fn registry_agent(agent_key: &str) -> Option<&'static GameTheoryAgent> {

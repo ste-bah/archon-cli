@@ -13,6 +13,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use archon_pipeline::learning::{
+    desc::{DescEpisode, DescEpisodeStore},
+    gnn::auto_trainer_runtime::query_trajectories_for_training,
+    integration::{LearningIntegration, LearningIntegrationConfig},
+    patterns::PatternStore,
+    reasoning::{ReasoningBank, ReasoningBankConfig, ReasoningBankDeps},
+    reflexion::ReflexionInjector,
+    schema::initialize_learning_schemas,
+};
 use archon_pipeline::runner::{
     AgentExecutionRequest, AgentInfo, AgentResult, LlmClient, LlmResponse, NextAgent,
     PipelineFacade, PipelineResult, PipelineSession, PipelineType, QualityScore, ToolAccessLevel,
@@ -29,6 +38,8 @@ use archon_pipeline::runner::{
 struct MockLlmClient {
     /// Vec of message-vec lengths recorded per call, in order.
     call_message_counts: Arc<Mutex<Vec<usize>>>,
+    /// Flattened system context recorded per call, in order.
+    system_texts: Arc<Mutex<Vec<String>>>,
     /// The canned content string to return.
     canned_response: String,
 }
@@ -46,8 +57,20 @@ struct SequencedLlmClient {
 }
 
 #[derive(Clone)]
+struct RecordingSequencedLlmClient {
+    call_count: Arc<AtomicUsize>,
+    system_texts: Arc<Mutex<Vec<String>>>,
+}
+
+#[derive(Clone)]
 struct AgentPathLlmClient {
     calls: Arc<Mutex<Vec<(String, String, String)>>>,
+}
+
+#[derive(Clone)]
+struct FlakyAgentLlmClient {
+    calls: Arc<AtomicUsize>,
+    failures_before_success: usize,
 }
 
 impl DelayedLlmClient {
@@ -76,6 +99,23 @@ impl SequencedLlmClient {
     }
 }
 
+impl RecordingSequencedLlmClient {
+    fn new() -> Self {
+        Self {
+            call_count: Arc::new(AtomicUsize::new(0)),
+            system_texts: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn calls(&self) -> usize {
+        self.call_count.load(Ordering::SeqCst)
+    }
+
+    fn recorded_system_texts(&self) -> Vec<String> {
+        self.system_texts.lock().unwrap().clone()
+    }
+}
+
 impl AgentPathLlmClient {
     fn new() -> Self {
         Self {
@@ -85,6 +125,19 @@ impl AgentPathLlmClient {
 
     fn calls(&self) -> Vec<(String, String, String)> {
         self.calls.lock().unwrap().clone()
+    }
+}
+
+impl FlakyAgentLlmClient {
+    fn new(failures_before_success: usize) -> Self {
+        Self {
+            calls: Arc::new(AtomicUsize::new(0)),
+            failures_before_success,
+        }
+    }
+
+    fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
     }
 }
 
@@ -131,6 +184,33 @@ impl LlmClient for SequencedLlmClient {
 }
 
 #[async_trait::async_trait]
+impl LlmClient for RecordingSequencedLlmClient {
+    async fn send_message(
+        &self,
+        _messages: Vec<serde_json::Value>,
+        system: Vec<serde_json::Value>,
+        _tools: Vec<serde_json::Value>,
+        _model: &str,
+    ) -> anyhow::Result<LlmResponse> {
+        let system_text = system
+            .iter()
+            .filter_map(|entry| entry.get("text").and_then(|text| text.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        self.system_texts.lock().unwrap().push(system_text);
+
+        let call = self.call_count.fetch_add(1, Ordering::SeqCst);
+        let content = if call < 2 { "retry-me" } else { "retry-ok" };
+        Ok(LlmResponse {
+            content: content.into(),
+            tool_uses: vec![],
+            tokens_in: 10,
+            tokens_out: 5,
+        })
+    }
+}
+
+#[async_trait::async_trait]
 impl LlmClient for AgentPathLlmClient {
     async fn send_message(
         &self,
@@ -156,16 +236,49 @@ impl LlmClient for AgentPathLlmClient {
     }
 }
 
+#[async_trait::async_trait]
+impl LlmClient for FlakyAgentLlmClient {
+    async fn send_message(
+        &self,
+        _messages: Vec<serde_json::Value>,
+        _system: Vec<serde_json::Value>,
+        _tools: Vec<serde_json::Value>,
+        _model: &str,
+    ) -> anyhow::Result<LlmResponse> {
+        anyhow::bail!("runner should call run_agent for this test")
+    }
+
+    async fn run_agent(&self, _request: AgentExecutionRequest) -> anyhow::Result<LlmResponse> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst);
+        if call < self.failures_before_success {
+            anyhow::bail!(
+                "subagent failed: HTTP error: http_error: HTTP error: error decoding response body"
+            );
+        }
+        Ok(LlmResponse {
+            content: "agent path output".into(),
+            tool_uses: vec![],
+            tokens_in: 11,
+            tokens_out: 7,
+        })
+    }
+}
+
 impl MockLlmClient {
     fn new(canned_response: &str) -> Self {
         Self {
             call_message_counts: Arc::new(Mutex::new(Vec::new())),
+            system_texts: Arc::new(Mutex::new(Vec::new())),
             canned_response: canned_response.to_string(),
         }
     }
 
     fn recorded_message_counts(&self) -> Vec<usize> {
         self.call_message_counts.lock().unwrap().clone()
+    }
+
+    fn recorded_system_texts(&self) -> Vec<String> {
+        self.system_texts.lock().unwrap().clone()
     }
 }
 
@@ -174,7 +287,7 @@ impl LlmClient for MockLlmClient {
     async fn send_message(
         &self,
         messages: Vec<serde_json::Value>,
-        _system: Vec<serde_json::Value>,
+        system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
     ) -> anyhow::Result<LlmResponse> {
@@ -183,6 +296,12 @@ impl LlmClient for MockLlmClient {
             .lock()
             .unwrap()
             .push(messages.len());
+        let system_text = system
+            .iter()
+            .filter_map(|entry| entry.get("text").and_then(|text| text.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        self.system_texts.lock().unwrap().push(system_text);
 
         Ok(LlmResponse {
             content: self.canned_response.clone(),
@@ -608,6 +727,93 @@ async fn test_runner_uses_agent_execution_path_when_available() {
     );
 }
 
+#[tokio::test]
+async fn test_runner_persists_sona_trajectory_when_learning_supplied() {
+    let db = Arc::new(cozo::DbInstance::new("mem", "", "").unwrap());
+    initialize_learning_schemas(db.as_ref()).unwrap();
+    let mut learning = LearningIntegration::new_with_persistent_sona(
+        Arc::clone(&db),
+        LearningIntegrationConfig::default(),
+        None,
+        8,
+    );
+    let facade = StubFacade::new();
+    let llm = MockLlmClient::new("Agent output OK");
+
+    let result = run_pipeline(
+        &facade,
+        &llm,
+        "persist SONA trajectory",
+        None,
+        None,
+        Some(&mut learning),
+    )
+    .await
+    .expect("pipeline should complete with learning enabled");
+
+    assert_eq!(result.agent_results.len(), 3);
+    let samples = query_trajectories_for_training(db.as_ref(), 8).unwrap();
+    assert_eq!(samples.len(), 3);
+    assert!(samples.iter().all(|sample| sample.quality > 0.0));
+    assert!(samples.iter().all(|sample| sample.embedding.len() == 8));
+}
+
+#[tokio::test]
+async fn test_runner_injects_reasoning_bank_and_desc_context() {
+    let db = Arc::new(cozo::DbInstance::new("mem", "", "").unwrap());
+    initialize_learning_schemas(db.as_ref()).unwrap();
+
+    let desc_store = DescEpisodeStore::from_arc(Arc::clone(&db));
+    desc_store
+        .store_episode(&DescEpisode {
+            episode_id: "episode-seed".into(),
+            session_id: "prior-session".into(),
+            task_type: "1".into(),
+            description: "need schema design before API wiring".into(),
+            solution: "Designed schema first, then wired API boundaries.".into(),
+            outcome: "success".into(),
+            quality_score: 0.95,
+            reward: 0.95,
+            tags: vec!["pipeline".into()],
+            trajectory_id: None,
+            created_at: 0,
+            updated_at: 0,
+        })
+        .unwrap();
+
+    let reasoning_bank = ReasoningBank::new(ReasoningBankDeps {
+        pattern_store: PatternStore::new(),
+        causal_memory: None,
+        gnn_enhancer: None,
+        sona_engine: None,
+        config: ReasoningBankConfig::default(),
+    });
+    let mut learning =
+        LearningIntegration::new(None, None, LearningIntegrationConfig::default(), None)
+            .with_reasoning_bank(reasoning_bank)
+            .with_desc_store(desc_store);
+
+    let facade = StubFacade::new();
+    let llm = MockLlmClient::new("Agent output OK");
+
+    let result = run_pipeline(
+        &facade,
+        &llm,
+        "break down the implementation steps",
+        None,
+        None,
+        Some(&mut learning),
+    )
+    .await
+    .expect("pipeline should complete with learning context enabled");
+
+    assert_eq!(result.agent_results.len(), 3);
+    let system_text = llm.recorded_system_texts().join("\n");
+    assert!(system_text.contains("## DESC Episodes"));
+    assert!(system_text.contains("episode-seed"));
+    assert!(system_text.contains("## Reasoning Context"));
+}
+
 /// Verify context isolation: each LLM call should receive a fresh message
 /// history (not an accumulation of prior agents' messages). Our stub facade
 /// returns exactly 1 message per prompt, so every call should see len == 1.
@@ -706,6 +912,60 @@ async fn test_parallel_wave_retries_low_quality_outputs_before_commit() {
         .map(|(_, result)| result.output.as_str())
         .collect::<Vec<_>>();
     assert_eq!(outputs, vec!["retry-ok", "retry-ok"]);
+}
+
+#[tokio::test]
+async fn test_pipeline_retries_transient_agent_transport_errors() {
+    let facade = StubFacade::new();
+    let llm = FlakyAgentLlmClient::new(1);
+
+    let result = run_pipeline(&facade, &llm, "transient transport retry", None, None, None)
+        .await
+        .expect("transient subagent transport failure should retry");
+
+    assert_eq!(result.agent_results.len(), 3);
+    assert_eq!(
+        llm.calls(),
+        4,
+        "first agent should need one retry, then remaining agents run once"
+    );
+}
+
+#[tokio::test]
+async fn test_parallel_wave_injects_reflexion_context_on_retry() {
+    let facade = WaveRetryFacade;
+    let llm = RecordingSequencedLlmClient::new();
+    let mut reflexion = ReflexionInjector::new(3);
+
+    let result = run_pipeline(
+        &facade,
+        &llm,
+        "parallel wave retry",
+        None,
+        Some(&mut reflexion),
+        None,
+    )
+    .await
+    .expect("parallel wave retry pipeline should succeed");
+
+    assert_eq!(llm.calls(), 4);
+    assert_eq!(result.agent_results.len(), 2);
+
+    let system_texts = llm.recorded_system_texts();
+    assert!(
+        system_texts
+            .iter()
+            .filter(|text| text.contains("## Reflexion"))
+            .count()
+            >= 2,
+        "each retried wave agent should receive reflexion context: {system_texts:?}"
+    );
+    assert!(
+        system_texts
+            .iter()
+            .any(|text| text.contains("Quality 0.10 below threshold")),
+        "reflexion context should include the concrete failed quality reason"
+    );
 }
 
 /// Verify that per-agent overhead (time spent in runner machinery, excluding

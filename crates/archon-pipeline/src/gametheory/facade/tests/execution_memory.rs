@@ -273,6 +273,7 @@ fn test_cost_tracked_per_specialist() {
         "Two firms choose prices.",
         &GameTheoryMemoryContext::default(),
         &GameTheoryRunOptions::default(),
+        None,
     ))
     .unwrap();
 
@@ -309,6 +310,7 @@ fn test_concurrency_cap_respected_per_run_flag() {
             enable_tier11: false,
             kb_pack_id: None,
         },
+        None,
     ))
     .unwrap();
 
@@ -345,6 +347,7 @@ fn test_specialists_dispatch_in_parallel_waves() {
             enable_tier11: false,
             kb_pack_id: None,
         },
+        None,
     ))
     .unwrap();
 
@@ -369,6 +372,7 @@ fn test_tier1_foundation_agents_run_as_parallel_wave() {
         "Two firms simultaneously set prices in a Bertrand duopoly.",
         "2026-05-04T00:00:00Z",
         &GameTheoryMemoryContext::default(),
+        None,
     ))
     .unwrap();
 
