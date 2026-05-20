@@ -268,6 +268,26 @@ pub(crate) fn maybe_migrate_legacy_pipeline_learning(
     }))
 }
 
+pub(crate) fn maybe_migrate_legacy_pipeline_learning_with_log(
+    cwd: &Path,
+    target_path: &Path,
+    target: &DbInstance,
+    caller: &'static str,
+) {
+    match maybe_migrate_legacy_pipeline_learning(cwd, target_path, target) {
+        Ok(Some(report)) => tracing::info!(
+            caller,
+            source = %report.source_path.display(),
+            target = %report.target_path.display(),
+            rows_copied = report.rows_copied,
+            rows_skipped = report.rows_skipped,
+            "migrated legacy RocksDB learning store"
+        ),
+        Ok(None) => {}
+        Err(error) => tracing::warn!(caller, %error, "legacy learning store migration failed"),
+    }
+}
+
 fn evidence_db_override_is_set() -> bool {
     ["ARCHON_LEARNING_DB_PATH", "ARCHON_EVIDENCE_DB_PATH"]
         .iter()

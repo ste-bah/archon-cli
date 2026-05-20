@@ -171,25 +171,12 @@ pub(super) async fn build(
                 {
                     tracing::warn!(error = %e, "Learning schema init failed; retrain may not work");
                 } else {
-                    match crate::command::pipeline_learning_migration::maybe_migrate_legacy_pipeline_learning(
+                    crate::command::pipeline_learning_migration::maybe_migrate_legacy_pipeline_learning_with_log(
                         &working_dir,
                         &db_path,
                         &db,
-                    ) {
-                        Ok(Some(report)) => {
-                            tracing::info!(
-                                source = %report.source_path.display(),
-                                target = %report.target_path.display(),
-                                rows_copied = report.rows_copied,
-                                rows_skipped = report.rows_skipped,
-                                "migrated legacy RocksDB learning store"
-                            );
-                        }
-                        Ok(None) => {}
-                        Err(error) => {
-                            tracing::warn!(%error, "legacy learning store migration failed");
-                        }
-                    }
+                        "interactive",
+                    );
                 }
                 Some(Arc::new(db))
             }

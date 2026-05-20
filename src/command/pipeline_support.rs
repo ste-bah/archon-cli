@@ -240,23 +240,9 @@ fn open_pipeline_learning_db_at(cwd: &Path, db_path: &Path) -> Option<Arc<cozo::
         tracing::warn!(error = %e, "pipeline: learning schema init failed");
         return None;
     }
-    match crate::command::pipeline_learning_migration::maybe_migrate_legacy_pipeline_learning(
-        cwd, db_path, &db,
-    ) {
-        Ok(Some(report)) => {
-            tracing::info!(
-                source = %report.source_path.display(),
-                target = %report.target_path.display(),
-                rows_copied = report.rows_copied,
-                rows_skipped = report.rows_skipped,
-                "pipeline: migrated legacy RocksDB learning store"
-            );
-        }
-        Ok(None) => {}
-        Err(error) => {
-            tracing::warn!(%error, "pipeline: legacy learning store migration failed");
-        }
-    }
+    crate::command::pipeline_learning_migration::maybe_migrate_legacy_pipeline_learning_with_log(
+        cwd, db_path, &db, "pipeline",
+    );
     Some(Arc::new(db))
 }
 
