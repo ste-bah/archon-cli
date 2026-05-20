@@ -82,6 +82,11 @@ Codex provider instead of Anthropic. The `ARCHON_CODEX_*` variables only affect
 the Codex provider; Anthropic OAuth/API-key/proxy settings remain separate.
 Never print access or refresh tokens in transcripts.
 
+Codex-backed sessions normalize inherited Claude-shaped `[api].default_model`
+values before provider calls. Sonnet/Opus-tier defaults map through
+`[models.openai-codex].default`, Haiku-tier defaults map through
+`[models.openai-codex].mini`, and concrete Codex model ids are preserved.
+
 ## Logging filters
 
 `RUST_LOG` accepts standard `tracing` filter syntax:

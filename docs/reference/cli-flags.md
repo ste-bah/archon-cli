@@ -117,7 +117,7 @@ subagents, coding/research pipelines, and gametheory through Codex.
 
 | Flag | Purpose |
 |---|---|
-| `--model <MODEL>` | Override default model |
+| `--model <MODEL>` | Override default model. In Codex sessions, inherited Claude-shaped defaults are normalized through `[models.openai-codex]`; explicit overrides are preserved. |
 | `--fast` | Fast mode (reduced latency, lower quality) |
 | `--effort <LEVEL>` | `high` / `medium` / `low` |
 | `--identity-spoof` | Enable Claude Code header spoofing |

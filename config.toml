@@ -73,6 +73,19 @@ provider = "anthropic"
 
 
 # ----------------------------------------------------------------------------
+# [models.openai-codex] — Codex model aliases
+# ----------------------------------------------------------------------------
+# These aliases are used by Codex sessions, chat defaults, and subagents. When
+# [llm].provider = "openai-codex" and [api].default_model is still a Claude
+# model id, Archon maps Sonnet/Opus-tier defaults to `default` and Haiku-tier
+# defaults to `mini` before calling Codex. Concrete Codex model ids are kept.
+[models.openai-codex]
+default = "gpt-5.5"
+codex = "gpt-5.3-codex"
+mini = "gpt-5.4-mini"
+
+
+# ----------------------------------------------------------------------------
 # [providers.openai-codex] — Codex (ChatGPT subscription) provider
 # ----------------------------------------------------------------------------
 # Codex authentication uses ChatGPT subscription OAuth tokens against

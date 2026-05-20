@@ -20,6 +20,7 @@ This page explains every section. Each table tells you **what** the field does, 
 
 - [`[api]`](#api) — Anthropic API + model defaults
 - [`[llm]`](#llm) — provider routing
+- [`[models.openai-codex]`](#modelsopenai-codex) — Codex model aliases
 - [`[providers.openai-codex]`](#providersopenai-codex) — Codex OAuth spoof manifest controls
 - [`[identity]`](#identity) — Claude Code spoofing
 - [`[personality]`](#personality) — agent personality profile
@@ -108,6 +109,35 @@ active provider through the shared `LlmProvider` path. There is deliberately no
 separate `[self_calibration]` provider block: switch retrospectives between
 Anthropic, Codex OAuth, OpenAI-compatible, or local providers by changing
 `[llm].provider` and the matching provider credentials.
+
+---
+
+## `[models.openai-codex]`
+
+Codex model aliases used by chat defaults, interactive sessions, subagents, and
+provider-neutral agentic surfaces.
+
+```toml
+[models.openai-codex]
+default = "gpt-5.5"
+codex = "gpt-5.3-codex"
+mini = "gpt-5.4-mini"
+```
+
+| Field | Default | What / Why |
+|---|---|---|
+| `default` | `"gpt-5.5"` | Frontier/default Codex model alias. Used for normal Codex chat defaults and for inherited Sonnet/Opus-tier session defaults. |
+| `codex` | `"gpt-5.3-codex"` | Codex-specific engineering model alias for surfaces that explicitly request the Codex-specialized tier. |
+| `mini` | `"gpt-5.4-mini"` | Fast/efficient Codex model alias. Used when a Codex session inherits a Haiku-tier default. |
+
+When `[llm].provider = "openai-codex"` and `[api].default_model` is still a
+Claude-shaped model id, Archon intentionally normalizes that inherited default
+before sessions and subagents see it. Sonnet/Opus-tier inherited defaults map to
+`[models.openai-codex].default`; Haiku-tier inherited defaults map to
+`[models.openai-codex].mini`. If `[api].default_model` is already a concrete
+Codex model id, Archon preserves it. This table is separate from
+`[providers.openai-codex].app_server_model_catalog`, which is only the fallback
+model-discovery list for Codex app-server runtime startup.
 
 ---
 

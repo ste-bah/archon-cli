@@ -153,7 +153,7 @@ Flags:
 | Flag | Default | Notes |
 |---|---|---|
 | `--provider` | `anthropic` | Set to `openai-codex` to route this turn through Codex. |
-| `--model` | `gpt-5.4` (Codex), `claude-sonnet-4-6` (Anthropic) | Override per invocation. The Codex default tracks the current Codex CLI ChatGPT-account model. |
+| `--model` | `gpt-5.5` (Codex), `claude-sonnet-4-6` (Anthropic) | Override per invocation. The Codex default comes from `[models.openai-codex].default`. |
 | `--no-stream` | streaming on | Print the full response after completion instead of streaming. |
 | `--max-tokens` | `1024` | Maximum output tokens for this single turn. |
 
@@ -167,8 +167,9 @@ To make the main interactive TUI use Codex, set the session provider in `config.
 [llm]
 provider = "openai-codex"
 
-[api]
-default_model = "gpt-5.4"
+[models.openai-codex]
+default = "gpt-5.5"
+mini = "gpt-5.4-mini"
 ```
 
 Then start Archon normally:
@@ -177,7 +178,7 @@ Then start Archon normally:
 archon
 ```
 
-In this mode Archon skips the Anthropic auth bootstrap and builds the session agent from the stored `openaiCodexOauth` credentials. If `default_model` is still a Claude-shaped value, Archon automatically uses `gpt-5.4` for the Codex-backed session.
+In this mode Archon skips the Anthropic auth bootstrap and builds the session agent from the stored `openaiCodexOauth` credentials. If `[api].default_model` is still a Claude-shaped value, Archon normalizes it before Codex sees it: Sonnet/Opus-tier defaults use `[models.openai-codex].default`, Haiku-tier defaults use `[models.openai-codex].mini`, and concrete Codex model ids are preserved.
 
 `/btw` side questions use the same active session provider. In a Codex-backed TUI session, `/btw what did you just decide?` is sent through Codex OAuth; in an Anthropic-backed session, the same command is sent through Anthropic OAuth/API key/proxy.
 
