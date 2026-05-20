@@ -155,6 +155,12 @@ pub async fn ingest_bytes_source_with_policy(
 fn media_type_suffix(media_type: &str) -> &'static str {
     match media_type {
         "text/markdown" => ".md",
+        "text/html" | "application/xhtml+xml" => ".html",
+        "application/json" | "application/ld+json" => ".json",
+        "application/x-ndjson" => ".jsonl",
+        "application/xml" | "application/rss+xml" | "application/atom+xml" => ".xml",
+        "application/yaml" | "application/x-yaml" => ".yaml",
+        "application/toml" => ".toml",
         "application/pdf" => ".pdf",
         "image/png" => ".png",
         "image/jpeg" => ".jpg",
@@ -227,5 +233,29 @@ mod tests {
 
         assert_eq!(first.document_id, second.document_id);
         assert!(!second.was_new);
+    }
+
+    #[tokio::test]
+    async fn byte_source_accepts_structured_text_media() {
+        let db = test_db();
+        let result = ingest_bytes_source_with_policy(
+            &db,
+            "https://example.test/data.json",
+            "application/json",
+            br#"{"answer":42}"#,
+            &archon_policy::EffectivePolicy::default(),
+        )
+        .await
+        .unwrap();
+        let doc = store::get_doc_source(&db, &result.document_id)
+            .unwrap()
+            .unwrap();
+        let chunks = store::list_chunks_for_doc(&db, &result.document_id).unwrap();
+
+        assert!(result.was_new);
+        assert_eq!(doc.source_path, "https://example.test/data.json");
+        assert_eq!(doc.media_type, "application/json");
+        assert_eq!(doc.status, DocumentStatus::Ingested);
+        assert_eq!(chunks.len(), 1);
     }
 }

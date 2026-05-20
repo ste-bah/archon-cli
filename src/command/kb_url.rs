@@ -27,20 +27,9 @@ pub(crate) async fn ingest_url(db: &DbInstance, source: &str) -> Result<()> {
         return Ok(());
     }
 
-    if is_text_url_media_type(&media_type) {
-        let body = String::from_utf8_lossy(&bytes);
-        let result = archon_docs::ingest_text::ingest_text_source(db, source, &media_type, &body)?;
-        println!("Ingested: {}", result.document_id);
-        if !result.was_new {
-            println!("Skipped duplicate: true");
-        }
-        println!("Chunks: {}", result.chunks_registered);
-        return Ok(());
-    }
-
     anyhow::bail!(
         "KB URL ingest does not support media type `{media_type}` from {source}. \
-         Supported URL media includes text, Markdown, PDF, PNG, JPEG, and TIFF."
+         Supported URL media includes text, Markdown, HTML, JSON, XML, YAML, TOML, PDF, PNG, JPEG, and TIFF."
     );
 }
 
@@ -98,6 +87,12 @@ fn infer_media_type_from_url(source: &str) -> Option<String> {
     match ext.as_str() {
         "txt" => Some("text/plain".to_string()),
         "md" | "markdown" => Some("text/markdown".to_string()),
+        "html" | "htm" => Some("text/html".to_string()),
+        "json" => Some("application/json".to_string()),
+        "jsonl" | "ndjson" => Some("application/x-ndjson".to_string()),
+        "xml" => Some("application/xml".to_string()),
+        "yaml" | "yml" => Some("application/yaml".to_string()),
+        "toml" => Some("application/toml".to_string()),
         "pdf" => Some("application/pdf".to_string()),
         "png" => Some("image/png".to_string()),
         "jpg" | "jpeg" => Some("image/jpeg".to_string()),
@@ -106,57 +101,10 @@ fn infer_media_type_from_url(source: &str) -> Option<String> {
     }
 }
 
-fn is_text_url_media_type(media_type: &str) -> bool {
-    let normalized = normalize_media_type(media_type);
-    normalized.starts_with("text/")
-        || normalized.ends_with("+json")
-        || normalized.ends_with("+xml")
-        || matches!(
-            normalized.as_str(),
-            "application/json"
-                | "application/ld+json"
-                | "application/x-ndjson"
-                | "application/xml"
-                | "application/xhtml+xml"
-                | "application/rss+xml"
-                | "application/atom+xml"
-                | "application/yaml"
-                | "application/x-yaml"
-                | "application/toml"
-        )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
-
-    #[test]
-    fn url_media_type_gate_accepts_text_like_content() {
-        for media_type in [
-            "text/plain",
-            "text/html; charset=utf-8",
-            "application/json",
-            "application/activity+json",
-            "application/rss+xml",
-            "application/x-yaml",
-        ] {
-            assert!(
-                is_text_url_media_type(media_type),
-                "{media_type} should be accepted"
-            );
-        }
-    }
-
-    #[test]
-    fn url_media_type_gate_rejects_unsupported_binary_content() {
-        for media_type in ["audio/mpeg", "video/mp4"] {
-            assert!(
-                !is_text_url_media_type(media_type),
-                "{media_type} should be rejected"
-            );
-        }
-    }
 
     #[test]
     fn url_media_type_resolver_uses_header_when_specific() {
@@ -178,6 +126,23 @@ mod tests {
         assert_eq!(
             resolve_url_media_type("https://example.test/file.pdf?download=1", &headers),
             "application/pdf"
+        );
+    }
+
+    #[test]
+    fn url_media_type_resolver_infers_structured_text_from_url() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("application/octet-stream"),
+        );
+        assert_eq!(
+            resolve_url_media_type("https://example.test/data.json", &headers),
+            "application/json"
+        );
+        assert_eq!(
+            resolve_url_media_type("https://example.test/page.html", &headers),
+            "text/html"
         );
     }
 }

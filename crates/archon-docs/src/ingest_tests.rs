@@ -6,6 +6,14 @@ fn test_detect_media_type() {
     assert_eq!(detect_media_type(Path::new("doc.pdf")), "application/pdf");
     assert_eq!(detect_media_type(Path::new("readme.md")), "text/markdown");
     assert_eq!(detect_media_type(Path::new("notes.txt")), "text/plain");
+    assert_eq!(detect_media_type(Path::new("page.html")), "text/html");
+    assert_eq!(
+        detect_media_type(Path::new("data.json")),
+        "application/json"
+    );
+    assert_eq!(detect_media_type(Path::new("feed.xml")), "application/xml");
+    assert_eq!(detect_media_type(Path::new("cfg.yaml")), "application/yaml");
+    assert_eq!(detect_media_type(Path::new("app.toml")), "application/toml");
     assert_eq!(detect_media_type(Path::new("img.png")), "image/png");
     assert_eq!(
         detect_media_type(Path::new("unknown.xyz")),
@@ -17,6 +25,11 @@ fn test_detect_media_type() {
 fn test_is_supported() {
     assert!(is_supported_media_type("text/plain"));
     assert!(is_supported_media_type("text/markdown"));
+    assert!(is_supported_media_type("text/html"));
+    assert!(is_supported_media_type("application/json"));
+    assert!(is_supported_media_type("application/xml"));
+    assert!(is_supported_media_type("application/yaml"));
+    assert!(is_supported_media_type("application/toml"));
     assert!(is_supported_media_type("application/pdf"));
     assert!(!is_supported_media_type("application/octet-stream"));
     assert!(!is_supported_media_type(

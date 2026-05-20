@@ -31,7 +31,8 @@ impl OcrProvider for LocalOcrProvider {
             .to_lowercase();
 
         match ext.as_str() {
-            "txt" | "md" | "markdown" => extract_text_file(path),
+            "txt" | "md" | "markdown" | "html" | "htm" | "json" | "jsonl" | "ndjson" | "xml"
+            | "yaml" | "yml" | "toml" => extract_text_file(path),
             "pdf" => extract_pdf_native(path).await,
             "png" | "jpg" | "jpeg" | "tif" | "tiff" => {
                 extract_image_with_tesseract(path, request.language_hint.as_deref()).await

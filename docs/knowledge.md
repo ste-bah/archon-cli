@@ -29,11 +29,10 @@ records, and contradictions. `archon kb process` should write those rows from
 real document chunks, and the list/search commands should read them back.
 
 URL ingest uses the same governed document pipeline as local ingest for
-supported document media: plain text, Markdown, PDF, PNG, JPEG, and TIFF. The
-URL remains the stored source path while fetched bytes are passed through the
-same hashing, duplicate detection, OCR/PDF/image/VLM policy gates, chunking,
-and provenance rows. Additional text-like web formats such as HTML, JSON, XML,
-YAML, and TOML are stored through the text-source path.
+supported document media: plain text, Markdown, HTML, JSON, XML, YAML, TOML,
+PDF, PNG, JPEG, and TIFF. The URL remains the stored source path while fetched
+bytes are passed through the same hashing, duplicate detection, OCR/PDF/image/VLM
+policy gates, chunking, indexing, and provenance rows.
 
 ## Full State Verification
 
