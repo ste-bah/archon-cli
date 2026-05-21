@@ -364,7 +364,7 @@ every_n_turns = 5
 enabled = true
 # TUI slash pipelines record when enabled. Shell/batch pipelines and
 # agent-callable GameTheory tools require this explicit opt-in.
-pipeline_recording = false
+pipeline_recording = true
 
 # ProvenanceStore — L-Score system tracking memory reliability
 [learning.provenance]
