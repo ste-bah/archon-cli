@@ -11,6 +11,7 @@ use super::pdf::write_research_pdf;
 pub struct ResearchPaperArtifacts {
     pub markdown_path: PathBuf,
     pub pdf_path: PathBuf,
+    pub chapter_paths: Vec<PathBuf>,
     pub markdown_hash: String,
     pub pdf_hash: String,
 }
@@ -64,6 +65,7 @@ pub fn write_final_research_artifacts(
     }
     fs::write(&markdown_path, markdown.as_bytes())
         .with_context(|| format!("write {}", markdown_path.display()))?;
+    let chapter_paths = write_chapter_files(bundle_dir, &paper)?;
     write_research_pdf(&pdf_path, &paper)
         .with_context(|| format!("write {}", pdf_path.display()))?;
 
@@ -72,6 +74,7 @@ pub fn write_final_research_artifacts(
     Ok(ResearchPaperArtifacts {
         markdown_path,
         pdf_path,
+        chapter_paths,
         markdown_hash,
         pdf_hash,
     })
@@ -257,6 +260,46 @@ fn normalise_appendix_title(title: &str) -> String {
 
 fn is_title_heading(title: &str, paper_title: &str) -> bool {
     title.trim().eq_ignore_ascii_case(paper_title.trim())
+}
+
+fn write_chapter_files(bundle_dir: &Path, paper: &ResearchPaper) -> Result<Vec<PathBuf>> {
+    let chapters_dir = bundle_dir.join("exports").join("chapters");
+    fs::create_dir_all(&chapters_dir)?;
+    let mut paths = Vec::new();
+    for (idx, section) in parse_sections(&paper.body_markdown).into_iter().enumerate() {
+        if classify_heading(&section.title) != SectionKind::Body {
+            continue;
+        }
+        let file_name = format!("{:02}-{}.md", idx + 1, slug(&section.title));
+        let path = chapters_dir.join(file_name);
+        let content = format!("## {}\n\n{}\n", section.title.trim(), section.body.trim());
+        fs::write(&path, content.as_bytes())
+            .with_context(|| format!("write {}", path.display()))?;
+        paths.push(path);
+    }
+    Ok(paths)
+}
+
+fn slug(title: &str) -> String {
+    let mut out = title
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    while out.contains("--") {
+        out = out.replace("--", "-");
+    }
+    let trimmed = out.trim_matches('-');
+    if trimmed.is_empty() {
+        "chapter".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn has_introduction_section(body_sections: &[String]) -> bool {

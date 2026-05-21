@@ -229,8 +229,11 @@ impl ChapterStructureLoader {
     /// Parse markdown fallback format (`### Chapter N: Title`).
     pub fn parse_from_markdown(content: &str) -> Result<ChapterStructure, ChapterStructureError> {
         let heading_re = Regex::new(r"### Chapter (\d+): (.+)").unwrap();
-        let content_re = Regex::new(r"(?i)\*\*Content(?:\s+Outline)?:\*\*\s*(.+)").unwrap();
-        let words_re = Regex::new(r"(?i)\*\*Word Count Target:\*\*\s*(\d+)").unwrap();
+        let content_re = Regex::new(r"(?i)\*\*Content(?:\s+Outline)?\*\*:?\s*(.*)").unwrap();
+        let words_re = Regex::new(
+            r"(?i)\*\*(?:Expected\s+)?Word Count(?: Target)?\*\*:\s*([0-9,]+)(?:\s*-\s*([0-9,]+))?",
+        )
+        .unwrap();
 
         let lines: Vec<&str> = content.lines().collect();
         let mut chapters: Vec<ChapterDefinition> = Vec::new();
@@ -243,19 +246,40 @@ impl ChapterStructureLoader {
 
                 let mut sections = Vec::new();
                 let mut target_words: u32 = 0;
+                let mut in_outline = false;
 
                 // Scan subsequent lines for metadata until next heading or EOF
                 let mut j = i + 1;
                 while j < lines.len() && !lines[j].starts_with("### ") {
                     if let Some(c) = content_re.captures(lines[j]) {
-                        sections = c[1]
-                            .split(',')
-                            .map(|s| s.trim().to_string())
-                            .filter(|s| !s.is_empty())
-                            .collect();
+                        in_outline = true;
+                        let inline = c.get(1).map(|m| m.as_str()).unwrap_or("").trim();
+                        if !inline.is_empty() {
+                            sections.extend(
+                                inline
+                                    .split(',')
+                                    .map(clean_outline_item)
+                                    .filter(|s| !s.is_empty()),
+                            );
+                        }
+                    } else if in_outline {
+                        let trimmed = lines[j].trim();
+                        if let Some(item) = trimmed.strip_prefix("- ") {
+                            sections.push(clean_outline_item(item));
+                        } else if trimmed.is_empty() {
+                            // keep scanning; architect outputs often separate the
+                            // label and bullets with a blank line
+                        } else if trimmed.starts_with("**") || trimmed.starts_with("---") {
+                            in_outline = false;
+                        }
                     }
                     if let Some(w) = words_re.captures(lines[j]) {
-                        target_words = w[1].parse().unwrap_or(0);
+                        let value = w
+                            .get(2)
+                            .or_else(|| w.get(1))
+                            .map(|m| m.as_str())
+                            .unwrap_or("0");
+                        target_words = parse_number(value);
                     }
                     j += 1;
                 }
@@ -342,6 +366,22 @@ impl ChapterStructureLoader {
     }
 }
 
+fn clean_outline_item(raw: &str) -> String {
+    raw.trim()
+        .trim_start_matches(|c: char| c.is_ascii_digit() || matches!(c, '.' | ')' | ' '))
+        .trim()
+        .trim_end_matches('.')
+        .to_string()
+}
+
+fn parse_number(raw: &str) -> u32 {
+    raw.chars()
+        .filter(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .unwrap_or(0)
+}
+
 // ---------------------------------------------------------------------------
 // DynamicAgentGenerator
 // ---------------------------------------------------------------------------
@@ -389,5 +429,33 @@ impl DynamicAgentGenerator {
                 ],
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ChapterStructureLoader;
+
+    #[test]
+    fn parses_architect_markdown_ranges_and_outline_bullets() {
+        let input = r#"# Dissertation Structure: Example
+
+**Status**: LOCKED
+**Total Chapters**: 1
+
+### Chapter 1: Introduction
+
+**Content Outline**:
+- 1.1 Background and scope.
+- 1.2 Research questions.
+
+**Expected Word Count**: 3,500-4,500 words
+"#;
+        let structure = ChapterStructureLoader::parse_structure(input).unwrap();
+        assert!(structure.locked);
+        assert_eq!(structure.total_chapters, 1);
+        assert_eq!(structure.chapters[0].target_words, 4500);
+        assert_eq!(structure.chapters[0].sections.len(), 2);
+        assert_eq!(structure.chapters[0].sections[0], "Background and scope");
     }
 }

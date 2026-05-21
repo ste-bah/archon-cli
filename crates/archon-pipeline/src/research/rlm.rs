@@ -268,6 +268,9 @@ fn pinned_agent_keys(agent: &ResearchAgent) -> Vec<&'static str> {
         ]);
     }
     if agent.phase >= 8 {
+        keys.push("citation-reconciler");
+    }
+    if agent.phase >= 8 {
         keys.extend([
             "introduction-writer",
             "literature-review-writer",

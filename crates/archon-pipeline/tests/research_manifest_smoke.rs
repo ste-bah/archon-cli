@@ -20,8 +20,8 @@ fn smoke_research_pipeline_toml_parses() {
     assert_eq!(manifest.phases.len(), 8, "expected 8 phases");
     assert_eq!(
         manifest.agents.len(),
-        46,
-        "expected 46 agents, got {}",
+        47,
+        "expected 47 agents, got {}",
         manifest.agents.len()
     );
 

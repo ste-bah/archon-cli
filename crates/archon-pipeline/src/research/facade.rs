@@ -1,7 +1,7 @@
 //! Research pipeline facade implementing [`PipelineFacade`].
 //!
 //! Wires together [`ResearchPromptBuilder`], [`PhDQualityCalculator`], and
-//! [`StyleInjector`] to drive the 46-agent research pipeline through the
+//! [`StyleInjector`] to drive the 47-agent research pipeline through the
 //! shared runner loop.
 //!
 //! # Memory
@@ -30,6 +30,7 @@ use crate::runner::{
 use crate::learning::integration::PhDLearningIntegration;
 
 use super::agents::{RESEARCH_AGENTS, ResearchAgent, get_agent_by_key};
+use super::final_assembly;
 use super::prompt_builder::ResearchPromptBuilder;
 use super::quality::PhDQualityCalculator;
 use super::rlm::{ResearchRlm, research_output_namespaces};
@@ -45,7 +46,7 @@ const TAG_PHD_PIPELINE: &str = "phd-pipeline";
 // ResearchFacade
 // ---------------------------------------------------------------------------
 
-/// Facade that drives the 46-agent PhD research pipeline.
+/// Facade that drives the 47-agent PhD research pipeline.
 pub struct ResearchFacade {
     quality_calculator: PhDQualityCalculator,
     prompt_builder: ResearchPromptBuilder,
@@ -253,7 +254,18 @@ impl PipelineFacade for ResearchFacade {
 
     async fn next_agent(&self, session: &PipelineSession) -> Result<NextAgent> {
         let idx = session.agent_results.len();
-        if idx >= RESEARCH_AGENTS.len() {
+        let final_idx = final_assembly::STATIC_AGENTS_BEFORE_FINAL;
+        if idx < final_idx {
+            let agent = &RESEARCH_AGENTS[idx];
+            return Ok(NextAgent::Continue(Self::to_agent_info(
+                agent,
+                &self.models,
+            )));
+        }
+        if let Some(agent) = final_assembly::next_final_stage_agent(session)? {
+            return Ok(NextAgent::Continue(agent));
+        }
+        if idx >= RESEARCH_AGENTS.len() || final_idx < idx {
             return Ok(NextAgent::Done);
         }
         let agent = &RESEARCH_AGENTS[idx];
@@ -285,21 +297,23 @@ impl PipelineFacade for ResearchFacade {
         Vec<serde_json::Value>,
         Vec<serde_json::Value>,
     )> {
-        let research_agent = get_agent_by_key(&agent.key)
-            .with_context(|| format!("Unknown research agent key: {}", agent.key))?;
-
-        let prior_context = self.recall_prior_context(session, research_agent);
-
         let style = self.style_prompt.as_deref();
 
-        let prompt_text = self.prompt_builder.build(
-            research_agent,
-            session.agent_results.len(),
-            RESEARCH_AGENTS.len(),
-            &session.task,
-            &prior_context,
-            style,
-        );
+        let prompt_text = if final_assembly::is_dynamic_final_key(&agent.key) {
+            final_assembly::build_final_stage_prompt(session, &agent.key, &session.task, style)?
+        } else {
+            let research_agent = get_agent_by_key(&agent.key)
+                .with_context(|| format!("Unknown research agent key: {}", agent.key))?;
+            let prior_context = self.recall_prior_context(session, research_agent);
+            self.prompt_builder.build(
+                research_agent,
+                session.agent_results.len(),
+                RESEARCH_AGENTS.len(),
+                &session.task,
+                &prior_context,
+                style,
+            )
+        };
         let context_window = archon_llm::context_window::resolve_context_window(
             &agent.model,
             self.context
@@ -347,10 +361,17 @@ impl PipelineFacade for ResearchFacade {
 
     async fn score_quality(
         &self,
-        _session: &PipelineSession,
+        session: &PipelineSession,
         agent: &AgentInfo,
         result: &AgentResult,
     ) -> Result<QualityScore> {
+        if final_assembly::is_dynamic_final_key(&agent.key) {
+            return Ok(final_assembly::score_final_stage_output(
+                session,
+                &agent.key,
+                &result.output,
+            ));
+        }
         let ctx = PhDQualityCalculator::create_quality_context(&agent.key, agent.phase as u8);
         let assessment = self.quality_calculator.assess_quality(&result.output, &ctx);
 
@@ -375,9 +396,14 @@ impl PipelineFacade for ResearchFacade {
             "format_quality".to_string(),
             assessment.breakdown.format_quality,
         );
+        let mut overall = assessment.score;
+        if super::citation_gate::hard_failure(&agent.key, &result.output).is_some() {
+            dimensions.insert("citation_gate".to_string(), 0.0);
+            overall = 0.0;
+        }
 
         Ok(QualityScore {
-            overall: assessment.score,
+            overall,
             dimensions,
         })
     }
@@ -389,6 +415,13 @@ impl PipelineFacade for ResearchFacade {
         result: &AgentResult,
         quality: &QualityScore,
     ) -> Result<()> {
+        if final_assembly::is_dynamic_final_key(&agent.key) {
+            self.store_memory(
+                &format!("research/final-stage/{}", agent.key),
+                result.output.clone(),
+            );
+        }
+
         // Store output at agent's run-level and persistent memory keys.
         if let Some(research_agent) = get_agent_by_key(&agent.key)
             && let Ok(mut rlm) = self.rlm_store.lock()
@@ -423,23 +456,7 @@ impl PipelineFacade for ResearchFacade {
     }
 
     async fn finalize(&self, session: PipelineSession) -> Result<PipelineResult> {
-        let total_cost: f64 = session.agent_results.iter().map(|(_, r)| r.cost_usd).sum();
-        let duration = session.started_at.elapsed();
-
-        let final_output = session
-            .agent_results
-            .last()
-            .map(|(_, r)| r.output.clone())
-            .unwrap_or_else(|| "No agent output produced.".to_string());
-
-        Ok(PipelineResult {
-            session_id: session.id,
-            pipeline_type: session.pipeline_type,
-            agent_results: session.agent_results,
-            total_cost_usd: total_cost,
-            duration,
-            final_output,
-        })
+        final_assembly::assemble_result(session)
     }
 }
 
@@ -538,7 +555,7 @@ mod tests {
         assert!(session.agent_results.is_empty());
     }
 
-    // 3. next_agent returns first agent then Done after 46
+    // 3. next_agent returns first agent then Done after all agents
     #[tokio::test]
     async fn next_agent_sequence() {
         let facade = make_facade();
@@ -569,6 +586,67 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn next_agent_runs_dynamic_final_stage_steps() {
+        let facade = make_facade();
+        let mut session = facade.init_session("test").await.unwrap();
+        let architecture = "\
+**Total Chapters**: 2
+
+### Chapter 1: Introduction
+**Expected Word Count**: 3,000 words
+**Content Outline**:
+- 1.1 Background and problem context
+- 1.2 Research aims
+
+### Chapter 2: Methodology
+**Expected Word Count**: 3,000 words
+**Content Outline**:
+- 2.1 Architecture research method
+- 2.2 Evaluation approach
+";
+
+        for agent in RESEARCH_AGENTS
+            .iter()
+            .take(final_assembly::STATIC_AGENTS_BEFORE_FINAL)
+        {
+            let info = ResearchFacade::to_agent_info(
+                agent,
+                &archon_core::config::AnthropicModelsConfig::default(),
+            );
+            let output = if info.key == "dissertation-architect" {
+                architecture
+            } else {
+                "accepted output"
+            };
+            session
+                .agent_results
+                .push((info, make_agent_result(output)));
+        }
+
+        for expected in [
+            final_assembly::SCANNER_KEY,
+            final_assembly::MAPPER_KEY,
+            "chapter-writer-001-introduction",
+            "chapter-writer-002-methodology",
+            final_assembly::COMBINER_KEY,
+            final_assembly::VALIDATOR_KEY,
+        ] {
+            let NextAgent::Continue(agent) = facade.next_agent(&session).await.unwrap() else {
+                panic!("expected final-stage agent {expected}");
+            };
+            assert_eq!(agent.key, expected);
+            session
+                .agent_results
+                .push((agent, make_agent_result("accepted final-stage output")));
+        }
+
+        match facade.next_agent(&session).await.unwrap() {
+            NextAgent::Done => {}
+            _ => panic!("Expected Done after dynamic final-stage agents"),
+        }
+    }
+
     // 4. score_quality returns valid score
     #[tokio::test]
     async fn score_quality_returns_valid() {
@@ -595,6 +673,29 @@ mod tests {
         assert!(score.dimensions.contains_key("research_rigor"));
         assert!(score.dimensions.contains_key("completeness"));
         assert!(score.dimensions.contains_key("format_quality"));
+    }
+
+    #[tokio::test]
+    async fn citation_reconciler_fail_language_hard_fails_quality() {
+        let facade = make_facade();
+        let session = facade.init_session("test").await.unwrap();
+        let agent = get_agent_by_key("citation-reconciler").unwrap();
+        let agent_info = ResearchFacade::to_agent_info(
+            agent,
+            &archon_core::config::AnthropicModelsConfig::default(),
+        );
+        let result = make_agent_result(
+            "# Citation Repair\n\n**Citation Repair Status**: FAIL\n\
+             Every in-text citation has reference entry | \u{274c}",
+        );
+
+        let score = facade
+            .score_quality(&session, &agent_info, &result)
+            .await
+            .unwrap();
+
+        assert_eq!(score.overall, 0.0);
+        assert_eq!(score.dimensions.get("citation_gate"), Some(&0.0));
     }
 
     // 5. process_completion stores at memory_keys[0] via MemoryTrait

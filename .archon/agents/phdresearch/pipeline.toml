@@ -1,4 +1,4 @@
-# Research Pipeline Manifest — 46-agent execution order
+# Research Pipeline Manifest — 47-agent execution order
 # Source: crates/archon-pipeline/src/research/agents.rs RESEARCH_AGENTS array
 # Runtime execution order is currently compiled from the RESEARCH_AGENTS array.
 # Keep this manifest in sync until the pipeline loader becomes the authority.
@@ -6,7 +6,7 @@
 [pipeline]
 name = "phdresearch"
 version = "1.0"
-description = "46-agent PhD research pipeline with 8 phases"
+description = "47-agent PhD research pipeline with 8 phases"
 default_model = "claude-sonnet-4-20250514"
 context_window = 200000
 
@@ -204,7 +204,7 @@ phase = 6
 key = "abstract-writer"
 phase = 6
 
-# ── Phase 7: Validation (11 agents) ─────────────────────────────────────────
+# ── Phase 7: Validation (12 agents) ─────────────────────────────────────────
 
 [[agent]]
 key = "systematic-reviewer"
@@ -232,6 +232,10 @@ phase = 7
 
 [[agent]]
 key = "apa-citation-specialist"
+phase = 7
+
+[[agent]]
+key = "citation-reconciler"
 phase = 7
 
 [[agent]]

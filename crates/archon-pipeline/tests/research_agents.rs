@@ -1,4 +1,4 @@
-//! Tests for the 46-agent research pipeline definitions.
+//! Tests for the 47-agent research pipeline definitions.
 
 use archon_pipeline::research::agents::*;
 use std::collections::HashSet;
@@ -7,8 +7,8 @@ use std::collections::HashSet;
 fn test_agent_count() {
     assert_eq!(
         RESEARCH_AGENTS.len(),
-        46,
-        "Research pipeline must have exactly 46 agents"
+        47,
+        "Research pipeline must have exactly 47 agents"
     );
 }
 
@@ -100,7 +100,7 @@ fn test_phase_counts() {
     assert_eq!(counts[4], 5, "Phase 4 should have 5 agents");
     assert_eq!(counts[5], 9, "Phase 5 should have 9 agents");
     assert_eq!(counts[6], 6, "Phase 6 should have 6 agents");
-    assert_eq!(counts[7], 11, "Phase 7 should have 11 agents");
+    assert_eq!(counts[7], 12, "Phase 7 should have 12 agents");
     assert_eq!(counts[8], 1, "Phase 8 should have 1 agent");
 }
 
@@ -146,7 +146,7 @@ fn test_get_agents_by_phase() {
     assert_eq!(get_agents_by_phase(4).len(), 5);
     assert_eq!(get_agents_by_phase(5).len(), 9);
     assert_eq!(get_agents_by_phase(6).len(), 6);
-    assert_eq!(get_agents_by_phase(7).len(), 11);
+    assert_eq!(get_agents_by_phase(7).len(), 12);
     assert_eq!(get_agents_by_phase(8).len(), 1);
 }
 
@@ -154,8 +154,9 @@ fn test_get_agents_by_phase() {
 fn test_get_agent_index() {
     assert_eq!(get_agent_index("step-back-analyzer"), Some(0));
     assert_eq!(get_agent_index("self-ask-decomposer"), Some(1));
-    assert_eq!(get_agent_index("file-length-manager"), Some(44));
-    assert_eq!(get_agent_index("chapter-synthesizer"), Some(45));
+    assert_eq!(get_agent_index("citation-reconciler"), Some(41));
+    assert_eq!(get_agent_index("file-length-manager"), Some(45));
+    assert_eq!(get_agent_index("chapter-synthesizer"), Some(46));
     assert_eq!(get_agent_index("nonexistent"), None);
 }
 
@@ -170,7 +171,7 @@ fn test_get_phase_by_id() {
 
     let phase = get_phase_by_id(7).unwrap();
     assert_eq!(phase.name, "Validation");
-    assert_eq!(phase.agent_keys.len(), 11);
+    assert_eq!(phase.agent_keys.len(), 12);
 
     let phase = get_phase_by_id(8).unwrap();
     assert_eq!(phase.name, "Final Assembly");
@@ -200,6 +201,46 @@ fn test_output_artifacts_non_empty() {
             agent.key
         );
     }
+}
+
+#[test]
+fn test_citation_reconciler_owns_final_reference_context() {
+    let reconciler = get_agent_by_key("citation-reconciler").unwrap();
+    assert!(
+        reconciler
+            .memory_keys
+            .contains(&"research/quality/citations")
+    );
+    assert!(
+        reconciler
+            .memory_keys
+            .contains(&"research/document/references")
+    );
+    assert!(
+        reconciler
+            .memory_keys
+            .contains(&"research/quality/citation-repair")
+    );
+
+    let consistency = get_agent_by_key("consistency-validator").unwrap();
+    assert!(
+        !consistency
+            .memory_keys
+            .contains(&"research/quality/citations"),
+        "consistency validator must not overwrite repaired citation context"
+    );
+
+    let finalizer = get_agent_by_key("chapter-synthesizer").unwrap();
+    assert!(
+        finalizer
+            .memory_keys
+            .contains(&"research/quality/citation-repair")
+    );
+    assert!(
+        finalizer
+            .memory_keys
+            .contains(&"research/document/references")
+    );
 }
 
 #[test]

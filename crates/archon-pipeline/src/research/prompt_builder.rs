@@ -54,7 +54,7 @@ impl ResearchPromptBuilder {
     /// # Arguments
     /// * `agent` – the research agent definition
     /// * `agent_index` – 0-based position in the pipeline
-    /// * `total_agents` – total agent count (typically 46)
+    /// * `total_agents` – total agent count (typically 47)
     /// * `task` – the research query / task description
     /// * `prior_context` – recalled memory content from previous agents
     /// * `style_prompt` – optional style override for writing/final assembly
@@ -248,7 +248,7 @@ mod tests {
         let prompt = b.build(
             agent,
             14,
-            46,
+            47,
             "AI in healthcare",
             "some prior context",
             None,
@@ -277,11 +277,11 @@ mod tests {
     fn workflow_context_correct_position() {
         let b = builder();
         let agent = &RESEARCH_AGENTS[14];
-        let prompt = b.build(agent, 14, 46, "test query", "", None);
+        let prompt = b.build(agent, 14, 47, "test query", "", None);
 
         assert!(
-            prompt.contains("Agent #15 of 46"),
-            "should show 1-based index: Agent #15 of 46"
+            prompt.contains("Agent #15 of 47"),
+            "should show 1-based index: Agent #15 of 47"
         );
         assert!(
             prompt.contains("Phase: 4 - Synthesis"),
@@ -294,7 +294,7 @@ mod tests {
         let b = builder();
         let agent = &RESEARCH_AGENTS[0];
         let long_context: String = "x".repeat(15_000);
-        let prompt = b.build(agent, 0, 46, "test", &long_context, None);
+        let prompt = b.build(agent, 0, 47, "test", &long_context, None);
 
         assert!(
             prompt.contains("... [truncated]"),
@@ -311,7 +311,7 @@ mod tests {
     fn empty_prior_context_omitted() {
         let b = builder();
         let agent = &RESEARCH_AGENTS[0];
-        let prompt = b.build(agent, 0, 46, "test", "", None);
+        let prompt = b.build(agent, 0, 47, "test", "", None);
 
         assert!(
             !prompt.contains("## Prior Context"),
@@ -324,7 +324,7 @@ mod tests {
         let b = builder();
         let agent = &RESEARCH_AGENTS[0];
         let context_with_backticks = "Here is code: ```python\nprint('hello')\n```";
-        let prompt = b.build(agent, 0, 46, "test", context_with_backticks, None);
+        let prompt = b.build(agent, 0, 47, "test", context_with_backticks, None);
 
         assert!(
             !prompt.contains("```python"),
@@ -340,7 +340,7 @@ mod tests {
     fn output_expectations_memory_key() {
         let b = builder();
         let agent = &RESEARCH_AGENTS[0];
-        let prompt = b.build(agent, 0, 46, "test", "", None);
+        let prompt = b.build(agent, 0, 47, "test", "", None);
 
         assert!(
             prompt.contains("Store output at: research/foundation/framing"),
@@ -362,7 +362,7 @@ mod tests {
         let prompt = b.build(
             agent,
             28,
-            46,
+            47,
             "test",
             "",
             Some("Use American English spelling conventions"),
@@ -386,7 +386,7 @@ mod tests {
         assert_eq!(agent.phase, 8);
 
         let long_context: String = "x".repeat(20_000);
-        let prompt = b.build(agent, 45, 46, "test", &long_context, None);
+        let prompt = b.build(agent, 46, 47, "test", &long_context, None);
 
         assert!(
             !prompt.contains("... [truncated]"),
@@ -400,7 +400,7 @@ mod tests {
         let agent = RESEARCH_AGENTS.last().unwrap();
         assert_eq!(agent.key, "chapter-synthesizer");
 
-        let prompt = b.build(agent, 45, 46, "test", "", Some("Use APA 7 formatting"));
+        let prompt = b.build(agent, 46, 47, "test", "", Some("Use APA 7 formatting"));
 
         assert!(
             prompt.contains("## STYLE GUIDELINES"),
@@ -413,7 +413,7 @@ mod tests {
     fn missing_instruction_file_fallback() {
         let b = builder();
         let agent = &RESEARCH_AGENTS[0];
-        let prompt = b.build(agent, 0, 46, "test", "", None);
+        let prompt = b.build(agent, 0, 47, "test", "", None);
 
         assert!(
             prompt.contains("Step-Back Analyzer") || prompt.contains("step-back-analyzer"),
@@ -447,7 +447,7 @@ mod tests {
     fn phase6_no_style_prompt_no_injection() {
         let b = builder();
         let agent = &RESEARCH_AGENTS[28];
-        let prompt = b.build(agent, 28, 46, "test", "", None);
+        let prompt = b.build(agent, 28, 47, "test", "", None);
         assert!(
             !prompt.contains("## STYLE GUIDELINES"),
             "no style_prompt means no STYLE GUIDELINES section"
@@ -458,7 +458,7 @@ mod tests {
     fn workflow_context_prev_next() {
         let b = builder();
         let agent = &RESEARCH_AGENTS[1];
-        let prompt = b.build(agent, 1, 46, "test", "", None);
+        let prompt = b.build(agent, 1, 47, "test", "", None);
 
         assert!(
             prompt.contains("Previous agent: step-back-analyzer"),
@@ -474,7 +474,7 @@ mod tests {
     fn first_agent_prev_none() {
         let b = builder();
         let agent = &RESEARCH_AGENTS[0];
-        let prompt = b.build(agent, 0, 46, "test", "", None);
+        let prompt = b.build(agent, 0, 47, "test", "", None);
         assert!(prompt.contains("Previous agent: none (first agent)"));
     }
 
@@ -483,7 +483,7 @@ mod tests {
         let b = builder();
         let last_idx = RESEARCH_AGENTS.len() - 1;
         let agent = &RESEARCH_AGENTS[last_idx];
-        let prompt = b.build(agent, last_idx, 46, "test", "", None);
+        let prompt = b.build(agent, last_idx, 47, "test", "", None);
         assert!(prompt.contains("Next agent: none (final agent)"));
     }
 }

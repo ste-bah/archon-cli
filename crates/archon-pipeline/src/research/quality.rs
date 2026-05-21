@@ -85,6 +85,7 @@ static AGENT_MIN_LENGTHS: LazyLock<HashMap<&'static str, usize>> = LazyLock::new
         ("results-writer", 4000),
         ("conclusion-writer", 3000),
         ("abstract-writer", 300),
+        ("citation-reconciler", 1500),
         ("chapter-synthesizer", 6000),
         ("systematic-reviewer", 5000),
         ("literature-mapper", 3000),
@@ -120,6 +121,8 @@ static CRITICAL_AGENTS: &[&str] = &[
     "conclusion-writer",
     "chapter-synthesizer",
     "abstract-writer",
+    "citation-reconciler",
+    "file-length-manager",
 ];
 
 static WRITING_AGENTS: &[&str] = &[
@@ -354,6 +357,9 @@ impl PhDQualityCalculator {
         if context.agent_key == "abstract-writer" {
             return self.assess_abstract_quality(text, context);
         }
+        if context.agent_key == "file-length-manager" {
+            return self.assess_file_length_manager_quality(text, context);
+        }
 
         let content_depth = self.score_content_depth(text, context);
         let structural_quality = self.score_structural_quality(text);
@@ -491,6 +497,116 @@ impl PhDQualityCalculator {
                 structural_quality: structural_quality.min(0.20),
                 research_rigor: research_rigor.min(0.25),
                 completeness: completeness.min(0.20),
+                format_quality,
+            },
+            tier,
+            summary,
+        }
+    }
+
+    fn assess_file_length_manager_quality(
+        &self,
+        text: &str,
+        context: &QualityContext,
+    ) -> QualityAssessment {
+        let lower = text.replace("**", "").replace('`', "").to_lowercase();
+        let status_pass = |label: &str| {
+            lower
+                .lines()
+                .any(|line| line.contains(label) && line.contains("pass"))
+        };
+        let status_fail = |label: &str| {
+            lower
+                .lines()
+                .any(|line| line.contains(label) && line.contains("fail"))
+        };
+
+        let required_passes = [
+            status_pass("length cap status"),
+            status_pass("chapter source coverage"),
+            status_pass("final assembly readiness"),
+        ];
+        let any_failed_status = [
+            status_fail("length cap status"),
+            status_fail("chapter source coverage"),
+            status_fail("final assembly readiness"),
+        ]
+        .into_iter()
+        .any(|failed| failed);
+
+        let pass_count = required_passes
+            .into_iter()
+            .filter(|present| *present)
+            .count();
+        let has_required_table = [
+            "abstract-writer",
+            "introduction-writer",
+            "literature-review-writer",
+            "methodology-writer",
+            "results-writer",
+            "discussion-writer",
+            "conclusion-writer",
+            "citation-reconciler",
+        ]
+        .into_iter()
+        .all(|marker| lower.contains(marker));
+        let has_aggregate = lower.contains("aggregate") && lower.contains("word");
+        let has_blocking_issues = lower.contains("blocking issues");
+        let has_final_instruction =
+            lower.contains("instruction to chapter-synthesizer") || lower.contains("proceed");
+        let has_path_evidence = lower.matches("outputs/markdown").count() >= 7;
+
+        let content_depth = match Self::count_words(text) {
+            0..100 => 0.04,
+            100..250 => 0.08,
+            250..500 => 0.14,
+            _ => 0.18,
+        };
+        let structural_quality = self.score_structural_quality(text).max(0.12).min(0.20);
+        let research_rigor = (pass_count as f64 * 0.04
+            + if has_required_table { 0.05 } else { 0.0 }
+            + if has_aggregate { 0.03 } else { 0.0 }
+            + if has_path_evidence { 0.03 } else { 0.0 })
+        .min(0.25);
+        let completeness = (pass_count as f64 * 0.04
+            + if has_required_table { 0.03 } else { 0.0 }
+            + if has_blocking_issues { 0.02 } else { 0.0 }
+            + if has_final_instruction { 0.03 } else { 0.0 })
+        .min(0.20);
+        let format_quality = self.score_format_quality(text).max(0.06).min(0.10);
+
+        let raw_total =
+            content_depth + structural_quality + research_rigor + completeness + format_quality;
+        let mut score = (raw_total * phase_weight(context.phase)).min(0.95);
+        if any_failed_status || pass_count < 3 {
+            score = score.min(0.35);
+        }
+
+        let tier = match score {
+            s if s >= 0.85 => QualityTier::Excellent,
+            s if s >= 0.70 => QualityTier::Good,
+            s if s >= 0.50 => QualityTier::Adequate,
+            _ => QualityTier::Poor,
+        };
+        let summary = format!(
+            "{} file-length gate quality ({:.2}): passes={}/3, content_depth={:.3}, structural={:.3}, rigor={:.3}, completeness={:.3}, format={:.3}",
+            tier,
+            score,
+            pass_count,
+            content_depth,
+            structural_quality,
+            research_rigor,
+            completeness,
+            format_quality,
+        );
+
+        QualityAssessment {
+            score,
+            breakdown: QualityBreakdown {
+                content_depth,
+                structural_quality,
+                research_rigor,
+                completeness,
                 format_quality,
             },
             tier,
@@ -1325,6 +1441,65 @@ disposition algorithms, model governance
         );
     }
 
+    #[test]
+    fn test_file_length_manager_pass_report_scores_adequate() {
+        let text = r#"
+Length Cap Status: PASS
+Chapter Source Coverage: PASS
+Final Assembly Readiness: PASS
+
+# File Length and Source-Coverage Validation Report
+
+## Required Source Coverage Table
+
+| Required source | Path verified | Words | Status |
+|---|---|---:|---|
+| abstract-writer | outputs/markdown/033-abstract-writer.md | 649 | PASS |
+| introduction-writer | outputs/markdown/028-introduction-writer.md | 2377 | PASS |
+| literature-review-writer | outputs/markdown/029-literature-review-writer.md | 4672 | PASS |
+| methodology-writer | outputs/markdown/027-methodology-writer.md | 2500 | PASS |
+| results-writer | outputs/markdown/030-results-writer.md | 1888 | PASS |
+| discussion-writer | outputs/markdown/031-discussion-writer.md | 2655 | PASS |
+| conclusion-writer | outputs/markdown/032-conclusion-writer.md | 1323 | PASS |
+| citation-reconciler | outputs/markdown/041-citation-reconciler.md | 2487 | PASS |
+
+## Aggregate Chapter-Source Word Count
+
+Aggregate chapter source material totals 16,064 words.
+
+## Blocking Issues
+
+None.
+
+## Instruction to Chapter-Synthesizer
+
+Proceed with final synthesis.
+"#;
+
+        let c = calc();
+        let ctx = PhDQualityCalculator::create_quality_context("file-length-manager", 7);
+        let result = c.assess_quality(text, &ctx);
+        assert!(
+            result.score >= 0.50,
+            "PASS file-length report should clear quality threshold, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_file_length_manager_fail_report_scores_poor() {
+        let text = "Length Cap Status: PASS\n\
+            Chapter Source Coverage: FAIL\n\
+            Final Assembly Readiness: FAIL";
+
+        let c = calc();
+        let ctx = PhDQualityCalculator::create_quality_context("file-length-manager", 7);
+        let result = c.assess_quality(text, &ctx);
+        assert!(
+            result.score < 0.50,
+            "FAIL file-length report must not clear quality threshold, got {result:?}"
+        );
+    }
+
     // 13. create_quality_context sets fields correctly
     #[test]
     fn test_create_quality_context() {
@@ -1333,12 +1508,19 @@ disposition algorithms, model governance
         assert_eq!(ctx.phase, 6);
         assert_eq!(ctx.expected_min_length, Some(5000));
         assert!(ctx.is_writing_agent);
-        assert!(!ctx.is_critical_agent);
+        assert!(ctx.is_critical_agent);
 
         let ctx2 = PhDQualityCalculator::create_quality_context("gap-hunter", 3);
         assert!(ctx2.is_critical_agent);
         assert!(!ctx2.is_writing_agent);
         assert_eq!(ctx2.expected_min_length, Some(1500));
+
+        let ctx_repair = PhDQualityCalculator::create_quality_context("citation-reconciler", 7);
+        assert!(ctx_repair.is_critical_agent);
+        assert_eq!(ctx_repair.expected_min_length, Some(1500));
+
+        let ctx_length = PhDQualityCalculator::create_quality_context("file-length-manager", 7);
+        assert!(ctx_length.is_critical_agent);
 
         let ctx3 = PhDQualityCalculator::create_quality_context("unknown-agent", 2);
         assert_eq!(ctx3.expected_min_length, None);

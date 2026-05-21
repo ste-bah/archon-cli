@@ -1,7 +1,7 @@
-//! 46-agent research pipeline definitions.
+//! 47-agent research pipeline definitions.
 //!
 //! Ports the TypeScript PhD pipeline agent configuration to Rust.
-//! 46 agents across 8 phases:
+//! 47 agents across 8 phases:
 //!
 //! - Phase 1 Foundation (6): step-back analysis, decomposition, planning, architecture
 //! - Phase 2 Discovery (4): literature mapping, source classification, citations
@@ -9,7 +9,7 @@
 //! - Phase 4 Synthesis (5): evidence synthesis, patterns, themes, theory building
 //! - Phase 5 Design (9): methodology, hypotheses, models, instruments, validity
 //! - Phase 6 Writing (6): dissertation chapter writing (introduction through abstract)
-//! - Phase 7 Validation (11): systematic review, ethics, quality assurance
+//! - Phase 7 Validation (12): systematic review, ethics, quality assurance
 //! - Phase 8 Final Assembly (1): compose the final paper from validated chapters
 
 use serde::{Deserialize, Serialize};
@@ -174,10 +174,10 @@ impl<'de> Deserialize<'de> for ResearchPhase {
 }
 
 // ---------------------------------------------------------------------------
-// 46 agent definitions
+// 47 agent definitions
 // ---------------------------------------------------------------------------
 
-/// All 46 research-pipeline agents in execution order.
+/// All 47 research-pipeline agents in execution order.
 pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
     // =========================================================================
     // PHASE 1: FOUNDATION (6 agents, indices 0-5)
@@ -566,7 +566,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         tool_access: WRITER_TOOLS,
     },
     // =========================================================================
-    // PHASE 7: VALIDATION (11 agents, indices 34-44)
+    // PHASE 7: VALIDATION (12 agents, indices 34-45)
     // =========================================================================
     ResearchAgent {
         key: "systematic-reviewer",
@@ -645,6 +645,21 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         tool_access: BASE_TOOLS,
     },
     ResearchAgent {
+        key: "citation-reconciler",
+        display_name: "Citation Reconciler",
+        phase: 7,
+        file: "citation-reconciler.md",
+        memory_keys: &[
+            "research/quality/citations",
+            "research/document/references",
+            "research/quality/citation-repair",
+            "research/sources/verified",
+        ],
+        output_artifacts: &["citation-reconciliation.md", "master-reference-list.md"],
+        prompt_source_path: ".archon/agents/phdresearch/citation-reconciler.md",
+        tool_access: BASE_TOOLS,
+    },
+    ResearchAgent {
         key: "consistency-validator",
         display_name: "Consistency Validator",
         phase: 7,
@@ -659,7 +674,6 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
             "research/writing/discussion",
             "research/writing/conclusion",
             "research/writing/abstract",
-            "research/quality/citations",
             "research/document/coherence",
         ],
         output_artifacts: &["consistency-report.md", "coherence-audit.md"],
@@ -697,7 +711,7 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
         tool_access: BASE_TOOLS,
     },
     // =========================================================================
-    // PHASE 8: FINAL ASSEMBLY (1 agent, index 45)
+    // PHASE 8: FINAL ASSEMBLY (1 agent, index 46)
     // =========================================================================
     ResearchAgent {
         key: "chapter-synthesizer",
@@ -716,6 +730,8 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &[
             "research/writing/abstract",
             "research/quality/citations",
             "research/quality/validation",
+            "research/quality/citation-repair",
+            "research/document/references",
             "research/quality/consistency",
             "research/quality/structure",
         ],
@@ -810,7 +826,7 @@ pub static RESEARCH_PHASES: &[ResearchPhase] = &[
     ResearchPhase {
         id: 7,
         name: "Validation",
-        description: "Final quality assurance including systematic review, ethics review, adversarial review, confidence quantification, citation validation, reproducibility checking, APA formatting, consistency validation, quality assessment, bias detection, and file length management.",
+        description: "Final quality assurance including systematic review, ethics review, adversarial review, confidence quantification, citation validation, reproducibility checking, APA formatting, citation reconciliation, consistency validation, quality assessment, bias detection, and file length management.",
         agent_keys: &[
             "systematic-reviewer",
             "ethics-reviewer",
@@ -819,6 +835,7 @@ pub static RESEARCH_PHASES: &[ResearchPhase] = &[
             "citation-validator",
             "reproducibility-checker",
             "apa-citation-specialist",
+            "citation-reconciler",
             "consistency-validator",
             "quality-assessor",
             "bias-detector",
@@ -837,7 +854,7 @@ pub static RESEARCH_PHASES: &[ResearchPhase] = &[
 // Helper functions
 // ---------------------------------------------------------------------------
 
-/// Returns a reference to all 46 research agents.
+/// Returns a reference to all 47 research agents.
 pub fn get_all_agents() -> &'static [ResearchAgent] {
     RESEARCH_AGENTS
 }

@@ -68,6 +68,8 @@ fn final_artifact_writes_markdown_and_pdf() {
     let pdf = fs::read(pdf_path).unwrap();
     assert!(pdf.starts_with(b"%PDF-1.4"));
     assert!(pdf.len() > 1000);
+    assert!(!artifacts.chapter_paths.is_empty());
+    assert!(artifacts.chapter_paths[0].exists());
 }
 
 #[test]
