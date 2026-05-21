@@ -66,13 +66,16 @@ pub(crate) fn handle_slash_command<'a>(
 
         // TASK-AGS-623 dispatcher gate (PATH A hybrid).
         //
-        // Every slash input now flows through exactly one `Dispatcher::dispatch
-        // call: parser → registry lookup → handler or
-        // `TuiEvent::Error("Unknown command: /{name}")` on miss. Recognized
-        // commands are fully executed by their registered handlers; there is
-        // no longer a legacy match fallthrough. Non-slash / empty / bare-`/`
-        // inputs short-circuit with `false` — the same behaviour the
-        // TASK-AGS-621 parser gate provided.
+        // Primary commands flow through `Dispatcher::dispatch`: parser →
+        // registry lookup → handler. Skill commands fall through to the
+        // session-loop skill executor below, so `/to-prd` and other built-in
+        // skills do not get a premature primary-command "Unknown command"
+        // diagnostic.
+        let dispatcher_recognizes = ctx.dispatcher.recognizes(input);
+        if !dispatcher_recognizes && resolves_skill_input(input, ctx.skill_registry.as_ref()) {
+            return false;
+        }
+
         // TASK-AGS-807 snapshot-pattern builder. Pre-populates
         // `CommandContext::status_snapshot` (owned values, no locks) when
         // the primary command resolves to /status or its alias /info.
@@ -110,7 +113,7 @@ pub(crate) fn handle_slash_command<'a>(
         if let Some(level) = __cmd_ctx.pending_effort_set.take() {
             effort_state.set_level(level);
         }
-        if !ctx.dispatcher.recognizes(input) {
+        if !dispatcher_recognizes {
             return false;
         }
 
@@ -119,6 +122,12 @@ pub(crate) fn handle_slash_command<'a>(
         // handler-owns-recognition pattern documented in registry.rs).
         true
     })
+}
+
+fn resolves_skill_input(input: &str, registry: &archon_core::skills::SkillRegistry) -> bool {
+    archon_core::skills::parser::parse_slash_command(input)
+        .map(|(name, _)| registry.resolve(&name).is_some())
+        .unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -161,4 +170,29 @@ pub(crate) fn handle_diff_command<'a>(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolves_builtin_prd_skills_for_fallback() {
+        let registry = archon_core::skills::builtin::register_builtins();
+
+        assert!(resolves_skill_input("/to-prd Build a thing", &registry));
+        assert!(resolves_skill_input(
+            "/prd-to-spec prds/example/PRD.md",
+            &registry
+        ));
+        assert!(resolves_skill_input("/prd Build a thing", &registry));
+    }
+
+    #[test]
+    fn unknown_slash_input_is_not_a_skill_fallback_candidate() {
+        let registry = archon_core::skills::builtin::register_builtins();
+
+        assert!(!resolves_skill_input("/not-a-real-command", &registry));
+        assert!(!resolves_skill_input("not a slash command", &registry));
+    }
 }
