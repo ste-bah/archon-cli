@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 
-use super::pdf::write_research_pdf;
+use super::{final_steps, pdf::write_research_pdf};
 
 #[derive(Clone, Debug)]
 pub struct ResearchPaperArtifacts {
@@ -57,7 +57,10 @@ pub fn write_final_research_artifacts(
     bundle_dir: &Path,
     final_output: &str,
 ) -> Result<ResearchPaperArtifacts> {
-    let paper = ResearchPaper::parse(final_output)?;
+    let mut paper = ResearchPaper::parse(final_output)?;
+    if let Some(refs) = final_steps::bundle_reference_section(bundle_dir) {
+        paper.references = normalise_references(&refs);
+    }
     let markdown = paper.to_markdown();
     let (markdown_path, pdf_path) = artifact_paths(bundle_dir);
     if let Some(parent) = markdown_path.parent() {
@@ -264,12 +267,16 @@ fn is_title_heading(title: &str, paper_title: &str) -> bool {
 
 fn write_chapter_files(bundle_dir: &Path, paper: &ResearchPaper) -> Result<Vec<PathBuf>> {
     let chapters_dir = bundle_dir.join("exports").join("chapters");
+    if chapters_dir.exists() {
+        fs::remove_dir_all(&chapters_dir)?;
+    }
     fs::create_dir_all(&chapters_dir)?;
     let mut paths = Vec::new();
-    for (idx, section) in parse_sections(&paper.body_markdown).into_iter().enumerate() {
-        if classify_heading(&section.title) != SectionKind::Body {
-            continue;
-        }
+    let sections = parse_sections(&paper.body_markdown)
+        .into_iter()
+        .filter(|section| classify_heading(&section.title) == SectionKind::Body)
+        .collect::<Vec<_>>();
+    for (idx, section) in group_chapter_sections(sections).into_iter().enumerate() {
         let file_name = format!("{:02}-{}.md", idx + 1, slug(&section.title));
         let path = chapters_dir.join(file_name);
         let content = format!("## {}\n\n{}\n", section.title.trim(), section.body.trim());
@@ -278,6 +285,55 @@ fn write_chapter_files(bundle_dir: &Path, paper: &ResearchPaper) -> Result<Vec<P
         paths.push(path);
     }
     Ok(paths)
+}
+
+fn group_chapter_sections(sections: Vec<Section>) -> Vec<Section> {
+    if !sections
+        .iter()
+        .any(|section| is_numbered_chapter_heading(&section.title))
+    {
+        return sections;
+    }
+    let mut grouped = Vec::new();
+    let mut current: Option<Section> = None;
+    for section in sections {
+        if is_numbered_chapter_heading(&section.title) {
+            if let Some(chapter) = current.replace(section) {
+                grouped.push(chapter);
+            }
+        } else if let Some(chapter) = current.as_mut() {
+            if !chapter.body.trim().is_empty() {
+                chapter.body.push_str("\n\n");
+            }
+            chapter.body.push_str("### ");
+            chapter.body.push_str(section.title.trim());
+            chapter.body.push_str("\n\n");
+            chapter.body.push_str(section.body.trim());
+        } else {
+            grouped.push(section);
+        }
+    }
+    if let Some(chapter) = current {
+        grouped.push(chapter);
+    }
+    grouped
+}
+
+fn is_numbered_chapter_heading(title: &str) -> bool {
+    let trimmed = title.trim();
+    if let Some((prefix, rest)) = trimmed.split_once('.') {
+        return prefix.chars().all(|c| c.is_ascii_digit())
+            && rest
+                .trim_start()
+                .chars()
+                .next()
+                .is_some_and(|c| !c.is_ascii_digit());
+    }
+    let normal = normalise_heading(title);
+    normal
+        .strip_prefix("chapter")
+        .and_then(|rest| rest.trim_start().chars().next())
+        .is_some_and(|c| c.is_ascii_digit())
 }
 
 fn slug(title: &str) -> String {
@@ -307,9 +363,23 @@ fn has_introduction_section(body_sections: &[String]) -> bool {
         section
             .lines()
             .next()
-            .map(|line| normalise_heading(line.trim_start_matches('#')).starts_with("introduction"))
+            .map(|line| is_introduction_heading(line.trim_start_matches('#')))
             .unwrap_or(false)
     })
+}
+
+fn is_introduction_heading(title: &str) -> bool {
+    let normal = normalise_heading(title);
+    if normal.starts_with("introduction") {
+        return true;
+    }
+    let Some(stripped) = normal.strip_prefix("chapter") else {
+        return false;
+    };
+    let stripped = stripped.trim_start().trim_start_matches(|c: char| {
+        c.is_ascii_digit() || matches!(c, '.' | ')' | ':' | '-' | ' ')
+    });
+    stripped.trim().starts_with("introduction")
 }
 
 fn normalise_references(input: &str) -> Vec<String> {

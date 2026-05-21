@@ -169,6 +169,16 @@ async fn completion_summary(
     if result.final_output.trim().is_empty() {
         return Ok(None);
     }
+    if result.pipeline_type == PipelineType::Research {
+        let store = PipelineBundleStore::new(cwd);
+        if let Ok(mut state) = store.load_state(&result.session_id) {
+            state.completion_integrity_summary = None;
+            state.completion_report_id = None;
+            state.updated_at = Utc::now();
+            store.save_state(&state)?;
+        }
+        return Ok(None);
+    }
     let db = crate::command::store_paths::open_evidence_db(
         "completion",
         &["ARCHON_COMPLETION_DB_PATH"],

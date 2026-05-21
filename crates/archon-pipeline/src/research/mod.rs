@@ -5,6 +5,7 @@ pub mod artifacts;
 pub mod chapters;
 pub mod citation_gate;
 pub mod facade;
+pub mod final_appendix;
 pub mod final_artifact;
 pub mod final_assembly;
 pub mod final_stage;

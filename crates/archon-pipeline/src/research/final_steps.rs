@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 
 use crate::runner::QualityScore;
 
@@ -170,13 +172,24 @@ pub fn score_validator_output(output: &str) -> QualityScore {
 pub fn clean_chapter_body(output: &str) -> String {
     let mut body = Vec::new();
     let mut skip_refs = false;
+    let mut skip_noise = false;
     for line in output.lines() {
         let trimmed = line.trim();
         let lower = trimmed.to_ascii_lowercase();
-        if lower.starts_with("# artifact:") || lower.starts_with("artifacts created:") {
+        if is_noise_heading(&lower) {
+            skip_noise = true;
             continue;
         }
-        if lower == "## references" || lower == "# references" {
+        if markdown_heading_level(trimmed).is_some() {
+            skip_noise = false;
+        }
+        if skip_noise || lower.starts_with("# artifact:") {
+            continue;
+        }
+        if matches!(
+            lower.as_str(),
+            "## references" | "# references" | "references"
+        ) {
             skip_refs = true;
             continue;
         }
@@ -191,26 +204,136 @@ pub fn clean_chapter_body(output: &str) -> String {
     body.join("\n").trim().to_string()
 }
 
+pub fn extract_abstract_section(output: &str) -> Option<String> {
+    let mut collecting = false;
+    let mut lines = Vec::new();
+    for line in output.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+        if markdown_heading_level(trimmed).is_some() {
+            if collecting {
+                break;
+            }
+            if lower == "## abstract" || lower == "# abstract" {
+                collecting = true;
+            }
+            continue;
+        }
+        if collecting {
+            lines.push(line);
+        }
+    }
+    let abstract_text = lines.join("\n").trim().to_string();
+    (!abstract_text.is_empty()).then_some(abstract_text)
+}
+
+pub fn best_reference_section(outputs: &[(&str, &str)]) -> Option<String> {
+    outputs
+        .iter()
+        .filter(|(key, _)| *key == "citation-reconciler")
+        .filter_map(|(_, output)| reference_section_candidate(output, true))
+        .max_by_key(|refs| reference_entry_count(refs))
+        .or_else(|| {
+            outputs
+                .iter()
+                .filter(|(key, _)| key.contains("citation") || key.contains("reference"))
+                .filter_map(|(_, output)| reference_section_candidate(output, false))
+                .max_by_key(|refs| reference_entry_count(refs))
+        })
+}
+
+fn reference_section_candidate(output: &str, master_only: bool) -> Option<String> {
+    let refs = extract_reference_section_with_mode(output, master_only);
+    (reference_entry_count(&refs) > 0).then_some(refs)
+}
+
 pub fn extract_reference_section(output: &str) -> String {
+    extract_reference_section_with_mode(output, false)
+}
+
+fn extract_reference_section_with_mode(output: &str, master_only: bool) -> String {
+    collect_reference_section(output, true).unwrap_or_else(|| {
+        if master_only {
+            String::new()
+        } else {
+            collect_reference_section(output, false).unwrap_or_default()
+        }
+    })
+}
+
+fn collect_reference_section(output: &str, master: bool) -> Option<String> {
     let mut collecting = false;
     let mut refs = Vec::new();
     for line in output.lines() {
-        let lower = line.to_ascii_lowercase();
-        if lower.contains("master reference list") || lower.trim() == "## references" {
+        let trimmed = line.trim();
+        let starts_target = reference_heading_matches(trimmed, master);
+        if starts_target {
             collecting = true;
             continue;
         }
-        if collecting && line.starts_with("## ") {
+        if collecting && markdown_heading_title(trimmed).is_some() {
             break;
         }
         if collecting {
-            let trimmed = line.trim();
             if !trimmed.is_empty() && !trimmed.starts_with('|') {
                 refs.push(trimmed.trim_start_matches("- ").to_string());
             }
         }
     }
-    refs.join("\n\n")
+    let refs = refs.join("\n\n");
+    (!refs.trim().is_empty()).then_some(refs)
+}
+
+fn reference_heading_matches(line: &str, master: bool) -> bool {
+    let Some(title) = markdown_heading_title(line) else {
+        return false;
+    };
+    let normal = title.to_ascii_lowercase();
+    if master {
+        normal.contains("master reference list")
+    } else {
+        matches!(
+            normal.as_str(),
+            "references" | "reference list" | "bibliography" | "works cited"
+        )
+    }
+}
+
+fn markdown_heading_title(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let hashes = trimmed.chars().take_while(|&c| c == '#').count();
+    if hashes == 0 || hashes > 6 {
+        return None;
+    }
+    let title = trimmed[hashes..].trim();
+    (!title.is_empty()).then_some(title)
+}
+
+fn reference_entry_count(refs: &str) -> usize {
+    refs.lines()
+        .filter(|line| {
+            let line = line.trim();
+            !line.starts_with("**")
+                && (line.contains("(19") || line.contains("(20") || line.contains("(n.d.)"))
+        })
+        .count()
+}
+
+pub fn fallback_hld_reference() -> String {
+    "GSS / GKB Architecture Team. (2020). *HLD - Match Scoring* \
+     [Internal high-level design document]. Global Screening / GKB."
+        .to_string()
+}
+
+pub fn bundle_reference_section(bundle_dir: &Path) -> Option<String> {
+    [
+        "outputs/041-citation-reconciler.txt",
+        "outputs/markdown/041-citation-reconciler.md",
+    ]
+    .iter()
+    .filter_map(|rel| fs::read_to_string(bundle_dir.join(rel)).ok())
+    .filter_map(|output| reference_section_candidate(&output, true))
+    .max_by_key(|refs| reference_entry_count(refs))
 }
 
 pub fn count_words(output: &str) -> usize {
@@ -251,4 +374,22 @@ pub fn slug(title: &str) -> String {
 
 fn contains_status_junk(lower: &str) -> bool {
     lower.contains("artifacts created:") || lower.contains("memory stored:")
+}
+
+fn is_noise_heading(lower: &str) -> bool {
+    matches!(
+        lower.trim_matches('#').trim(),
+        "abstract quality check"
+            | "keyword justification"
+            | "journal compliance"
+            | "quality gate"
+            | "executive summary"
+            | "artifacts created:"
+            | "memory stored:"
+    ) || lower.starts_with("completed ") && lower.contains(" output")
+}
+
+fn markdown_heading_level(line: &str) -> Option<usize> {
+    let hashes = line.chars().take_while(|&c| c == '#').count();
+    (hashes > 0 && hashes <= 6).then_some(hashes)
 }

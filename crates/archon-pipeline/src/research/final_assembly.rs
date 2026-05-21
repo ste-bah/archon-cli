@@ -7,7 +7,7 @@ use crate::runner::{
 };
 
 use super::chapters::{ChapterDefinition, ChapterStructure, ChapterStructureLoader};
-use super::final_steps;
+use super::{final_appendix, final_steps};
 
 pub const STATIC_AGENTS_BEFORE_FINAL: usize = 46;
 pub const SCANNER_KEY: &str = "final-stage-scanner";
@@ -114,12 +114,14 @@ pub fn score_final_stage_output(
 }
 
 pub fn assemble_result(session: PipelineSession) -> Result<PipelineResult> {
-    let final_output = session
-        .agent_results
-        .iter()
-        .find(|(agent, _)| agent.key == COMBINER_KEY)
-        .map(|(_, result)| result.output.clone())
-        .or_else(|| assemble_final_paper(&session))
+    let final_output = assemble_final_paper(&session)
+        .or_else(|| {
+            session
+                .agent_results
+                .iter()
+                .find(|(agent, _)| agent.key == COMBINER_KEY)
+                .map(|(_, result)| result.output.clone())
+        })
         .or_else(|| {
             session
                 .agent_results
@@ -168,8 +170,8 @@ pub fn assemble_final_paper(session: &PipelineSession) -> Option<String> {
     }
     out.push_str("\n## References\n\n");
     out.push_str(&reference_context(session));
-    out.push_str("\n\n## Appendix A: Primary Architecture Source\n\n");
-    out.push_str("The primary architecture source is the ingested GKB Match Scoring HLD PDF.");
+    out.push_str("\n\n");
+    out.push_str(&final_appendix::appendices(session, &structure));
     Some(out)
 }
 
@@ -270,7 +272,10 @@ fn validator_prompt(session: &PipelineSession) -> Result<String> {
          Validate the final combined paper below. Return PASS only if it has a title, Abstract, \
          ordered chapters, one References section, appendix material, coherent citations, and \
          no pipeline/status garbage. If there is a blocking issue, return FAIL with exact fixes.\n\n{}",
-        result_text(session, COMBINER_KEY).unwrap_or("Final combiner output unavailable."),
+        assemble_final_paper(session)
+            .as_deref()
+            .or_else(|| result_text(session, COMBINER_KEY))
+            .unwrap_or("Final combiner output unavailable."),
     ))
 }
 
@@ -288,15 +293,10 @@ fn stage_agent(key: &str, display_name: &str, critical: bool) -> AgentInfo {
 }
 
 fn chapter_agent(chapter: &ChapterDefinition) -> AgentInfo {
-    stage_agent(
-        &format!(
-            "chapter-writer-{:03}-{}",
-            chapter.number,
-            final_steps::slug(&chapter.title)
-        ),
-        &format!("Chapter {} Writer: {}", chapter.number, chapter.title),
-        true,
-    )
+    let slug = final_steps::slug(&chapter.title);
+    let key = format!("chapter-writer-{:03}-{slug}", chapter.number);
+    let display = format!("Chapter {} Writer: {}", chapter.number, chapter.title);
+    stage_agent(&key, &display, true)
 }
 
 fn structure_from_session(session: &PipelineSession) -> Result<Option<ChapterStructure>> {
@@ -346,15 +346,13 @@ fn source_context_for_chapter(session: &PipelineSession, chapter: &ChapterDefini
 }
 
 fn reference_context(session: &PipelineSession) -> String {
-    session
+    let outputs = session
         .agent_results
         .iter()
-        .find(|(agent, _)| agent.key == "citation-reconciler")
-        .map(|(_, result)| final_steps::extract_reference_section(&result.output))
-        .filter(|refs| !refs.trim().is_empty())
-        .unwrap_or_else(|| {
-            "GSS / GKB Architecture Team. (2020). *HLD - Match Scoring* [Internal high-level design document]. Global Screening / GKB.".to_string()
-        })
+        .map(|(agent, result)| (agent.key.as_str(), result.output.as_str()))
+        .collect::<Vec<_>>();
+    final_steps::best_reference_section(&outputs)
+        .unwrap_or_else(final_steps::fallback_hld_reference)
 }
 
 fn abstract_context(session: &PipelineSession) -> String {
@@ -362,7 +360,7 @@ fn abstract_context(session: &PipelineSession) -> String {
         .agent_results
         .iter()
         .find(|(agent, _)| agent.key == "abstract-writer")
-        .map(|(_, result)| final_steps::clean_chapter_body(&result.output))
+        .and_then(|(_, result)| final_steps::extract_abstract_section(&result.output))
         .unwrap_or_else(|| {
             "This paper examines GKB match scoring and proprietary disposition algorithm design."
                 .into()
@@ -444,23 +442,21 @@ fn has_result(session: &PipelineSession, key: &str) -> bool {
         .any(|(agent, _)| agent.key == key)
 }
 
-fn paper_title(session: &PipelineSession, structure: &ChapterStructure) -> String {
+fn paper_title(session: &PipelineSession, _structure: &ChapterStructure) -> String {
     if let Some(title) = architect_title(session) {
         return title;
     }
-    if !structure.chapters.is_empty() {
-        let task = session.task.trim();
-        let title = task
-            .strip_prefix("Write a research paper about ")
-            .or_else(|| task.strip_prefix("write a research paper about "))
-            .unwrap_or(task)
-            .split('.')
-            .next()
-            .unwrap_or(task)
-            .trim();
-        if !title.is_empty() {
-            return final_steps::truncate_chars(title, 140).replace('\n', " ");
-        }
+    let task = session.task.trim();
+    let title = task
+        .strip_prefix("Write a research paper about ")
+        .or_else(|| task.strip_prefix("write a research paper about "))
+        .unwrap_or(task)
+        .split('.')
+        .next()
+        .unwrap_or(task)
+        .trim();
+    if !title.is_empty() {
+        return final_steps::truncate_chars(title, 140).replace('\n', " ");
     }
     "Research Paper".to_string()
 }

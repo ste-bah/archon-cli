@@ -73,6 +73,106 @@ fn final_artifact_writes_markdown_and_pdf() {
 }
 
 #[test]
+fn final_artifact_accepts_numbered_chapter_introduction() {
+    let paper = r#"# Title
+
+## Abstract
+
+This paper has an abstract.
+
+# Chapter 1: Introduction
+
+The introduction is emitted as a numbered chapter heading.
+
+# References
+
+Smith, J. (2024). Screening systems. Journal of Compliance, 12(2), 10-22.
+"#;
+    let paper = ResearchPaper::parse(paper).unwrap();
+    assert!(paper.body_markdown.contains("Chapter 1: Introduction"));
+}
+
+#[test]
+fn final_artifact_groups_numbered_chapter_exports() {
+    let tmp = tempfile::tempdir().unwrap();
+    let stale_dir = tmp.path().join("exports").join("chapters");
+    fs::create_dir_all(&stale_dir).unwrap();
+    fs::write(stale_dir.join("stale.md"), "old").unwrap();
+    let paper = r#"# Title
+
+## Abstract
+
+This paper has an abstract.
+
+# 1. Introduction
+
+## 1.1 Background
+
+Introductory background.
+
+# 2. Architecture
+
+## 2.1 Components
+
+Architectural components.
+
+# References
+
+Smith, J. (2024). Screening systems. Journal of Compliance, 12(2), 10-22.
+"#;
+    let artifacts = write_final_research_artifacts(tmp.path(), paper).unwrap();
+    assert_eq!(artifacts.chapter_paths.len(), 2);
+    assert!(!stale_dir.join("stale.md").exists());
+    let chapter = fs::read_to_string(&artifacts.chapter_paths[0]).unwrap();
+    assert!(chapter.contains("### 1.1 Background"));
+}
+
+#[test]
+fn final_artifact_uses_bundle_master_references_when_sparse() {
+    let tmp = tempfile::tempdir().unwrap();
+    let outputs = tmp.path().join("outputs");
+    fs::create_dir_all(&outputs).unwrap();
+    fs::write(
+        outputs.join("041-citation-reconciler.txt"),
+        r#"## Canonical Citation Rules
+
+- Reconcile all citations before export.
+
+## Master Reference List
+
+Smith, J. (2024). Screening systems.
+
+Adams, R. (2023). Architecture controls.
+
+## Removed or Downgraded Citations
+
+| Citation | Action |
+|---|---|
+| Weak source | Removed |
+"#,
+    )
+    .unwrap();
+    let paper = r#"# Title
+
+## Abstract
+
+This paper has an abstract.
+
+## Introduction
+
+Body text.
+
+## References
+
+GSS / GKB Architecture Team. (2020). *HLD - Match Scoring* [Internal high-level design document]. Global Screening / GKB.
+"#;
+    write_final_research_artifacts(tmp.path(), paper).unwrap();
+    let markdown = fs::read_to_string(tmp.path().join("exports/final-paper.md")).unwrap();
+    assert!(markdown.contains("Adams, R. (2023). Architecture controls."));
+    assert!(markdown.contains("Smith, J. (2024). Screening systems."));
+}
+
+#[test]
 fn final_artifact_splits_line_separated_references() {
     let paper = r#"# Title
 
