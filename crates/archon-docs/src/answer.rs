@@ -3,10 +3,16 @@
 //! The answer flow: embed query → HNSW search → assemble answer
 //! with inline citations that resolve to source document/page/chunk records.
 
+use std::thread;
+use std::time::Duration;
+
 use cozo::DbInstance;
 
 use crate::errors::DocsError;
 use crate::retrieval::{SearchResult, search};
+
+const CITATION_SNIPPET_CHARS: usize = 200;
+const PROVENANCE_LOCK_RETRY_DELAYS_MS: &[u64] = &[50, 100, 200, 400];
 
 /// An answer with supporting evidence citations.
 #[derive(Clone, Debug)]
@@ -83,11 +89,7 @@ pub fn answer(db: &DbInstance, query: &str, top_k: usize) -> Result<Answer, Docs
             document_id: r.document_id.clone(),
             page_start: r.page_start,
             page_end: r.page_end,
-            snippet: if r.content.len() > 200 {
-                format!("{}...", &r.content[..200])
-            } else {
-                r.content.clone()
-            },
+            snippet: truncate_chars(&r.content, CITATION_SNIPPET_CHARS),
         })
         .collect();
 
@@ -134,12 +136,42 @@ pub fn persist_answer_provenance(db: &DbInstance, answer: &Answer) -> Result<usi
             edge_type: crate::models::ProvenanceEdgeType::Cites,
             created_at: now.clone(),
         };
-        crate::store::insert_provenance_edge(db, &edge).map_err(|e| DocsError::Storage {
-            message: e.to_string(),
-        })?;
-        inserted += 1;
+        if insert_answer_provenance_edge(db, &edge)? {
+            inserted += 1;
+        }
     }
     Ok(inserted)
+}
+
+fn insert_answer_provenance_edge(
+    db: &DbInstance,
+    edge: &crate::models::ProvenanceEdge,
+) -> Result<bool, DocsError> {
+    for attempt in 0..=PROVENANCE_LOCK_RETRY_DELAYS_MS.len() {
+        match crate::store::insert_provenance_edge(db, edge) {
+            Ok(()) => return Ok(true),
+            Err(e) => {
+                let message = e.to_string();
+                if !is_answer_provenance_lock_or_busy(&message) {
+                    return Err(DocsError::Storage { message });
+                }
+
+                if let Some(delay_ms) = PROVENANCE_LOCK_RETRY_DELAYS_MS.get(attempt) {
+                    thread::sleep(Duration::from_millis(*delay_ms));
+                    continue;
+                }
+
+                tracing::warn!(
+                    edge_id = %edge.edge_id,
+                    error = %message,
+                    "skipping answer provenance edge after sqlite lock retries"
+                );
+                return Ok(false);
+            }
+        }
+    }
+
+    Ok(false)
 }
 
 fn new_answer_id() -> String {
@@ -147,6 +179,23 @@ fn new_answer_id() -> String {
         "answer-{}",
         uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
     )
+}
+
+pub fn truncate_chars(text: &str, max_chars: usize) -> String {
+    let mut chars = text.chars();
+    let mut out: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        out.push_str("...");
+    }
+    out
+}
+
+fn is_answer_provenance_lock_or_busy(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("database is locked")
+        || lower.contains("code 5")
+        || (lower.contains("doc_provenance_edges")
+            && lower.contains("when executing against relation"))
 }
 
 /// Verify that every citation resolves to a real record.
@@ -259,6 +308,38 @@ mod tests {
     }
 
     #[test]
+    fn test_answer_citation_snippet_is_unicode_safe() {
+        let db = test_db();
+        setup(&db);
+
+        let chunk = crate::models::ChunkArtifact {
+            chunk_id: "chunk-unicode-1".into(),
+            document_id: "doc-unicode".into(),
+            artifact_id: "art-unicode-1".into(),
+            chunk_index: 0,
+            page_start: 1,
+            page_end: 1,
+            content: format!("{} sanctions scoring evidence", "é".repeat(201)),
+            content_hash: "hash-unicode-1".into(),
+            embedding_status: "pending".into(),
+        };
+        crate::store::insert_chunk(&db, &chunk).unwrap();
+        crate::retrieval::index_chunk(&db, &chunk).unwrap();
+
+        let ans = answer(&db, "sanctions scoring", 5).unwrap();
+        assert!(!ans.citations.is_empty());
+        assert_eq!(
+            ans.citations[0]
+                .snippet
+                .chars()
+                .filter(|c| *c == 'é')
+                .count(),
+            200
+        );
+        assert!(ans.citations[0].snippet.ends_with("..."));
+    }
+
+    #[test]
     fn test_answer_provenance_edges_are_persisted() {
         let db = test_db();
         setup(&db);
@@ -287,6 +368,19 @@ mod tests {
         assert_eq!(edges[0].from_artifact_id, ans.answer_id);
         assert_eq!(edges[0].to_artifact_id, "chunk-prov-1");
         assert_eq!(edges[0].edge_type, crate::models::ProvenanceEdgeType::Cites);
+    }
+
+    #[test]
+    fn test_answer_provenance_lock_detection_matches_cozo_messages() {
+        assert!(is_answer_provenance_lock_or_busy(
+            "insert provenance edge failed: database is locked (code 5)"
+        ));
+        assert!(is_answer_provenance_lock_or_busy(
+            "insert provenance edge failed: when executing against relation 'doc_provenance_edges'"
+        ));
+        assert!(!is_answer_provenance_lock_or_busy(
+            "insert provenance edge failed: missing parameter"
+        ));
     }
 
     #[test]
