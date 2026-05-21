@@ -229,9 +229,9 @@ impl ChapterStructureLoader {
     /// Parse markdown fallback format (`### Chapter N: Title`).
     pub fn parse_from_markdown(content: &str) -> Result<ChapterStructure, ChapterStructureError> {
         let heading_re = Regex::new(r"### Chapter (\d+): (.+)").unwrap();
-        let content_re = Regex::new(r"(?i)\*\*Content(?:\s+Outline)?\*\*:?\s*(.*)").unwrap();
+        let content_re = Regex::new(r"(?i)\*\*Content(?:\s+Outline)?:?\*\*:?\s*(.*)").unwrap();
         let words_re = Regex::new(
-            r"(?i)\*\*(?:Expected\s+)?Word Count(?: Target)?\*\*:\s*([0-9,]+)(?:\s*-\s*([0-9,]+))?",
+            r"(?i)\*\*(?:Expected\s+)?Word Count(?: Target)?:?\*\*:?\s*([0-9,]+)(?:\s*-\s*([0-9,]+))?",
         )
         .unwrap();
 
