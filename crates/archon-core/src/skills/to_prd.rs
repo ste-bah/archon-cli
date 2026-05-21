@@ -80,15 +80,25 @@ impl Skill for ToPrdSkill {
              \n\
              OUTPUT REQUIREMENTS:\n\
              1. {path_instruction}\n\
-             2. Use the Write tool to create the PRD. The tool input MUST be \
-                a JSON object with string fields named exactly \
-                `file_path` and `content`, for example: \
+             2. Write the PRD to disk with complete, valid tool JSON. For short \
+                PRDs, use the Write tool once. The tool input MUST be a JSON \
+                object with string fields named exactly `file_path` and \
+                `content`, for example: \
                 {{\"file_path\":\"prds/example/PRD.md\",\"content\":\"...\"}}.\n\
              3. `file_path` must be the PRD path string, not omitted, not \
                 nested, and not called `path` or `filename`.\n\
-             4. Create parent directories as needed through the Write tool.\n\
-             5. After writing, print the path you wrote to.\n\
-             6. Do NOT print the full PRD content to the conversation — only \
+             4. For detailed or long PRDs, do NOT put the entire document in one \
+                Write call. Keep each tool-call payload below 8,000 characters: \
+                create the parent directory, Write the title/table of contents \
+                and first sections, then append later sections in separate Bash \
+                heredoc chunks such as \
+                {{\"command\":\"cat <<'EOF' >> prds/example/PRD.md\\n...\\nEOF\"}}.\n\
+             5. Every Write or Bash call must contain a complete JSON object. \
+                Never start a Write call unless both `file_path` and `content` \
+                will be fully present in that same tool call.\n\
+             6. Create parent directories as needed before appending chunks.\n\
+             7. After writing, print the path you wrote to.\n\
+             8. Do NOT print the full PRD content to the conversation — only \
                 write it to the file."
         );
         SkillOutput::Prompt(format!("{template}\n\n---USER REQUEST---\n\n{user_block}"))
@@ -245,6 +255,8 @@ mod tests {
                 ));
                 assert!(s.contains("`file_path` and `content`"));
                 assert!(s.contains("\"file_path\":\"prds/example/PRD.md\""));
+                assert!(s.contains("Keep each tool-call payload below 8,000 characters"));
+                assert!(s.contains("append later sections in separate Bash"));
             }
             _ => panic!("expected Prompt"),
         }

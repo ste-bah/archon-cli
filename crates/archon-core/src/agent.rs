@@ -45,6 +45,7 @@ mod support;
 mod tests;
 mod tool_context;
 mod tool_dispatch;
+pub(crate) mod tool_input_json;
 mod tool_postprocess;
 mod tool_preflight;
 pub(crate) mod tool_result_context;
@@ -455,7 +456,7 @@ impl Agent {
             let mut thinking_content = String::new();
             let mut thinking_signature = String::new();
             let mut pending_tools: Vec<PendingToolCall> = Vec::new();
-            let mut _current_tool_index: Option<u32> = None;
+            let mut pending_tool_indices: Vec<u32> = Vec::new();
             let mut _stop_reason: Option<String> = None;
             let mut usage_acc = archon_llm::usage::UsageAccumulator::default();
 
@@ -483,7 +484,7 @@ impl Agent {
                                 name,
                                 input_json: String::new(),
                             });
-                            _current_tool_index = Some(index);
+                            pending_tool_indices.push(index);
                         }
                     }
 
@@ -497,16 +498,25 @@ impl Agent {
                         self.send_event(AgentEvent::ThinkingDelta(thinking)).await;
                     }
 
-                    StreamEvent::InputJsonDelta { partial_json, .. } => {
-                        // Accumulate JSON for the current tool call
-                        if let Some(tool) = pending_tools.last_mut() {
-                            tool.input_json.push_str(&partial_json);
+                    StreamEvent::InputJsonDelta {
+                        index,
+                        partial_json,
+                    } => {
+                        if !tool_input_json::append_delta_by_index(
+                            &mut pending_tools,
+                            &pending_tool_indices,
+                            index,
+                            &partial_json,
+                            |tool, delta| tool.input_json.push_str(delta),
+                        ) {
+                            tracing::warn!(
+                                tool_block_index = index,
+                                "received tool input JSON delta without matching tool block"
+                            );
                         }
                     }
 
-                    StreamEvent::ContentBlockStop { .. } => {
-                        _current_tool_index = None;
-                    }
+                    StreamEvent::ContentBlockStop { .. } => {}
 
                     StreamEvent::MessageDelta {
                         stop_reason: sr,
@@ -616,8 +626,33 @@ impl Agent {
             }
 
             for tool in &pending_tools {
-                let input: serde_json::Value =
-                    serde_json::from_str(&tool.input_json).unwrap_or(serde_json::json!({}));
+                let allow_empty = self
+                    .registry
+                    .lookup(&tool.name)
+                    .map(|tool_arc| {
+                        tool_input_json::schema_allows_empty_input(&tool_arc.input_schema())
+                    })
+                    .unwrap_or(false);
+                let input = match tool_input_json::parse_pending_tool_input(
+                    &tool.name,
+                    &tool.id,
+                    &tool.input_json,
+                    allow_empty,
+                ) {
+                    Ok(input) => input,
+                    Err(err) => {
+                        tracing::warn!(
+                            tool = %tool.name,
+                            tool_use_id = %tool.id,
+                            input_len = tool.input_json.len(),
+                            "{err}"
+                        );
+                        serde_json::json!({
+                            "_archon_malformed_tool_input": true,
+                            "error": err,
+                        })
+                    }
+                };
                 assistant_content.push(serde_json::json!({
                     "type": "tool_use",
                     "id": tool.id,

@@ -17,8 +17,52 @@ impl Agent {
         let mut allowed: Vec<PreflightResult> = Vec::new();
 
         for tool in pending_tools {
-            let mut input: serde_json::Value =
-                serde_json::from_str(&tool.input_json).unwrap_or(serde_json::json!({}));
+            let tool_arc = match self.registry.lookup(&tool.name) {
+                Some(t) => t,
+                None => {
+                    let result = ToolResult::error(format!(
+                        "Unknown tool: '{}'. Available tools: {}",
+                        tool.name,
+                        self.registry.tool_names().join(", ")
+                    ));
+                    self.send_event(AgentEvent::ToolCallComplete {
+                        name: tool.name.clone(),
+                        id: tool.id.clone(),
+                        result: result.clone(),
+                    })
+                    .await;
+                    self.state.add_tool_result(&tool.id, &result.content, true);
+                    continue;
+                }
+            };
+            let allow_empty =
+                super::tool_input_json::schema_allows_empty_input(&tool_arc.input_schema());
+            let mut input = match super::tool_input_json::parse_pending_tool_input(
+                &tool.name,
+                &tool.id,
+                &tool.input_json,
+                allow_empty,
+            ) {
+                Ok(input) => input,
+                Err(err) => {
+                    tracing::warn!(
+                        tool = %tool.name,
+                        tool_use_id = %tool.id,
+                        input_len = tool.input_json.len(),
+                        "{err}"
+                    );
+                    let result = ToolResult::error(err);
+                    self.send_event(AgentEvent::ToolCallComplete {
+                        name: tool.name.clone(),
+                        id: tool.id.clone(),
+                        result: result.clone(),
+                    })
+                    .await;
+                    self.state
+                        .add_tool_result(&tool.id, &result.content, result.is_error);
+                    continue;
+                }
+            };
 
             // --- Permission check ---
             let perm_mode = {
@@ -193,26 +237,6 @@ impl Agent {
                     tracing::info!(tool = %tool.name, "[Hook Status] {}", msg);
                 }
             }
-
-            // --- Resolve tool from registry ---
-            let tool_arc = match self.registry.lookup(&tool.name) {
-                Some(t) => t,
-                None => {
-                    let result = ToolResult::error(format!(
-                        "Unknown tool: '{}'. Available tools: {}",
-                        tool.name,
-                        self.registry.tool_names().join(", ")
-                    ));
-                    self.send_event(AgentEvent::ToolCallComplete {
-                        name: tool.name.clone(),
-                        id: tool.id.clone(),
-                        result: result.clone(),
-                    })
-                    .await;
-                    self.state.add_tool_result(&tool.id, &result.content, true);
-                    continue;
-                }
-            };
 
             // --- Sandbox check against final hook-mutated input ---
             let sandbox_result = self

@@ -417,7 +417,7 @@ impl SubagentRunner {
 
             let mut text_content = String::new();
             let mut pending_tools: Vec<PendingTool> = Vec::new();
-            let mut current_tool_index: Option<u32> = None;
+            let mut pending_tool_indices: Vec<u32> = Vec::new();
             let mut usage_acc = archon_llm::usage::UsageAccumulator::default();
             let mut retry_after_compact = false;
 
@@ -431,7 +431,6 @@ impl SubagentRunner {
                         tool_name,
                     } => {
                         if block_type == ContentBlockType::ToolUse {
-                            current_tool_index = Some(index);
                             let name = tool_name.clone().unwrap_or_default();
                             self.emit_activity_stream(
                                 "tool_call",
@@ -444,6 +443,7 @@ impl SubagentRunner {
                                 name,
                                 input_json: String::new(),
                             });
+                            pending_tool_indices.push(index);
                         }
                     }
                     StreamEvent::TextDelta { text, .. } => {
@@ -457,15 +457,21 @@ impl SubagentRunner {
                         index,
                         partial_json,
                     } => {
-                        if Some(index) == current_tool_index
-                            && let Some(tool) = pending_tools.last_mut()
-                        {
-                            tool.input_json.push_str(&partial_json);
+                        if !crate::agent::tool_input_json::append_delta_by_index(
+                            &mut pending_tools,
+                            &pending_tool_indices,
+                            index,
+                            &partial_json,
+                            |tool, delta| tool.input_json.push_str(delta),
+                        ) {
+                            tracing::warn!(
+                                tool_block_index = index,
+                                scope = "subagent",
+                                "received tool input JSON delta without matching tool block"
+                            );
                         }
                     }
-                    StreamEvent::ContentBlockStop { .. } => {
-                        current_tool_index = None;
-                    }
+                    StreamEvent::ContentBlockStop { .. } => {}
                     StreamEvent::Error {
                         error_type,
                         message,
@@ -610,8 +616,36 @@ impl SubagentRunner {
                 }));
             }
             for tool in &pending_tools {
-                let input: serde_json::Value =
-                    serde_json::from_str(&tool.input_json).unwrap_or(serde_json::json!({}));
+                let allow_empty = self
+                    .registry
+                    .lookup(&tool.name)
+                    .map(|tool_arc| {
+                        crate::agent::tool_input_json::schema_allows_empty_input(
+                            &tool_arc.input_schema(),
+                        )
+                    })
+                    .unwrap_or(false);
+                let input = match crate::agent::tool_input_json::parse_pending_tool_input(
+                    &tool.name,
+                    &tool.id,
+                    &tool.input_json,
+                    allow_empty,
+                ) {
+                    Ok(input) => input,
+                    Err(err) => {
+                        tracing::warn!(
+                            tool = %tool.name,
+                            tool_use_id = %tool.id,
+                            input_len = tool.input_json.len(),
+                            scope = "subagent",
+                            "{err}"
+                        );
+                        serde_json::json!({
+                            "_archon_malformed_tool_input": true,
+                            "error": err,
+                        })
+                    }
+                };
                 assistant_content.push(serde_json::json!({
                     "type": "tool_use",
                     "id": tool.id,
@@ -641,15 +675,43 @@ impl SubagentRunner {
                 id: String,
                 name: String,
                 input: serde_json::Value,
+                parse_error: Option<String>,
             }
             let mut prepared: Vec<PreparedTool> = Vec::with_capacity(pending_tools.len());
             for tool in &pending_tools {
-                let input: serde_json::Value =
-                    serde_json::from_str(&tool.input_json).unwrap_or(serde_json::json!({}));
+                let allow_empty = self
+                    .registry
+                    .lookup(&tool.name)
+                    .map(|tool_arc| {
+                        crate::agent::tool_input_json::schema_allows_empty_input(
+                            &tool_arc.input_schema(),
+                        )
+                    })
+                    .unwrap_or(false);
+                let (input, parse_error) =
+                    match crate::agent::tool_input_json::parse_pending_tool_input(
+                        &tool.name,
+                        &tool.id,
+                        &tool.input_json,
+                        allow_empty,
+                    ) {
+                        Ok(input) => (input, None),
+                        Err(err) => {
+                            tracing::warn!(
+                                tool = %tool.name,
+                                tool_use_id = %tool.id,
+                                input_len = tool.input_json.len(),
+                                scope = "subagent",
+                                "{err}"
+                            );
+                            (serde_json::json!({}), Some(err))
+                        }
+                    };
                 prepared.push(PreparedTool {
                     id: tool.id.clone(),
                     name: tool.name.clone(),
                     input,
+                    parse_error,
                 });
             }
 
@@ -661,9 +723,15 @@ impl SubagentRunner {
                 .map(|p| {
                     let name = p.name.clone();
                     let input = p.input.clone();
+                    let parse_error = p.parse_error.clone();
                     let registry = Arc::clone(&registry);
                     let ctx = self.tool_context.clone();
-                    async move { registry.dispatch(&name, input, &ctx).await }
+                    async move {
+                        if let Some(err) = parse_error {
+                            return ToolResult::error(err);
+                        }
+                        registry.dispatch(&name, input, &ctx).await
+                    }
                 })
                 .collect();
 
