@@ -11,8 +11,8 @@ impl Skill for ToPrdSkill {
     }
 
     fn description(&self) -> &str {
-        "Turn the current conversation context into a PRD using the ai-agent-prd \
-         framework. Writes to prds/<slug>/PRD.md."
+        "Turn the current conversation context or explicitly named sources into a \
+         PRD using the ai-agent-prd framework. Writes to prds/<slug>/PRD.md."
     }
 
     fn aliases(&self) -> Vec<&str> {
@@ -44,7 +44,39 @@ impl Skill for ToPrdSkill {
         let user_block = format!(
             "Use the ai-agent-prd framework above to write a PRD.\n\
              \n\
-             Source material: the current conversation context.{extra}\n\
+             Source material: always use the current conversation context as \
+                background.{extra}\n\
+             \n\
+             SOURCE GROUNDING CONTRACT:\n\
+             1. First classify the request as either `source-grounded` or \
+                `conversation-only`.\n\
+             2. Treat the request as `source-grounded` if the user names or \
+                implies required sources, including file paths, HLDs, PDFs, \
+                research papers, research packs, ingested docs, docs in memory, \
+                URLs, or exact document titles.\n\
+             3. For `source-grounded` requests, do NOT write the PRD until every \
+                required source has been retrieved, inspected, or searched with \
+                the available tools. Use Read for paths when possible, DocSearch \
+                or equivalent retrieval for ingested docs, and search tools for \
+                discoverable project files.\n\
+             4. If a required source cannot be accessed, stop and report the \
+                missing source instead of drafting from memory or guesswork.\n\
+             5. For `source-grounded` requests, include a `## Source Coverage` \
+                section in the PRD listing each required source, whether it was \
+                found, the sections or evidence used, and any gaps.\n\
+             6. For `conversation-only` requests, continue without documents but \
+                label the basis clearly as `Sources used: conversation only`, \
+                include assumptions, include open questions, and avoid claiming \
+                validated architecture, algorithms, compliance, or implementation \
+                facts that were not supplied by the user.\n\
+             7. For algorithm, research, or platform PRDs, include concrete \
+                technical requirements when supported by the sources: algorithm \
+                architecture, input feature model, deterministic guardrails, \
+                scorecard logic, thresholds or tuning policy, model or rules \
+                registries, data/API contracts, replay validation, audit lineage, \
+                security, observability, governance, rollout phases, acceptance \
+                criteria, and open decisions. Mark unknowns explicitly instead of \
+                inventing values.\n\
              \n\
              OUTPUT REQUIREMENTS:\n\
              1. {path_instruction}\n\
@@ -117,6 +149,27 @@ mod tests {
     }
 
     #[test]
+    fn to_prd_no_args_allows_conversation_only_draft_with_caveats() {
+        let ctx = SkillContext {
+            session_id: "test".into(),
+            working_dir: std::env::temp_dir(),
+            model: "test".into(),
+            agent_registry: None,
+            session_store: None,
+        };
+        let out = ToPrdSkill.execute(&[], &ctx);
+        match out {
+            SkillOutput::Prompt(s) => {
+                assert!(s.contains("conversation-only"));
+                assert!(s.contains("Sources used: conversation only"));
+                assert!(s.contains("include assumptions"));
+                assert!(s.contains("include open questions"));
+            }
+            _ => panic!("expected Prompt"),
+        }
+    }
+
+    #[test]
     fn to_prd_with_args_includes_extra_block() {
         let ctx = SkillContext {
             session_id: "test".into(),
@@ -130,6 +183,40 @@ mod tests {
         match out {
             SkillOutput::Prompt(s) => {
                 assert!(s.contains("focus on auth"));
+            }
+            _ => panic!("expected Prompt"),
+        }
+    }
+
+    #[test]
+    fn to_prd_with_named_sources_requires_retrieval_and_coverage() {
+        let ctx = SkillContext {
+            session_id: "test".into(),
+            working_dir: std::env::temp_dir(),
+            model: "test".into(),
+            agent_registry: None,
+            session_store: None,
+        };
+        let args: Vec<String> = vec![
+            "Use".into(),
+            "the".into(),
+            "HLD".into(),
+            "PDF,".into(),
+            "final".into(),
+            "research".into(),
+            "paper,".into(),
+            "and".into(),
+            "/tmp/research-pack.md".into(),
+        ];
+        let out = ToPrdSkill.execute(&args, &ctx);
+        match out {
+            SkillOutput::Prompt(s) => {
+                assert!(s.contains("SOURCE GROUNDING CONTRACT"));
+                assert!(s.contains("Treat the request as `source-grounded`"));
+                assert!(s.contains("do NOT write the PRD until every"));
+                assert!(s.contains("If a required source cannot be accessed"));
+                assert!(s.contains("## Source Coverage"));
+                assert!(s.contains("algorithm architecture"));
             }
             _ => panic!("expected Prompt"),
         }
