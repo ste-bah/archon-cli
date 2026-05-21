@@ -46,6 +46,8 @@ pub const KNOWN_ARCHON_VARS: &[&str] = &[
     "ARCHON_DISABLE_HOOKS",
     "ARCHON_DISABLE_MEMORY",
     "ARCHON_DISABLE_PERSONALITY",
+    // Memory / embeddings
+    "ARCHON_MEMORY_OPENAIKEY",
     // Debugging
     "ARCHON_DEBUG",
     "ARCHON_DEBUG_LOG_DIR",

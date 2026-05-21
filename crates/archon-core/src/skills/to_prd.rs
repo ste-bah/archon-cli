@@ -31,23 +31,47 @@ impl Skill for ToPrdSkill {
         } else {
             format!("\n\nAdditional input from the user: {}", args.join(" "))
         };
+        let path_instruction = match explicit_prd_output_path(args) {
+            Some(path) => format!(
+                "Use this exact output path: `{path}`. Do not choose a \
+                 different PRD slug or path."
+            ),
+            None => "Pick a kebab-case slug for the PRD subfolder (4-6 words max, \
+                 derived from the PRD title or main feature name), then write \
+                 to `prds/<your-slug>/PRD.md`."
+                .to_string(),
+        };
         let user_block = format!(
             "Use the ai-agent-prd framework above to write a PRD.\n\
              \n\
              Source material: the current conversation context.{extra}\n\
              \n\
              OUTPUT REQUIREMENTS:\n\
-             1. Pick a kebab-case slug for the PRD subfolder (4-6 words max, \
-                derived from the PRD title or main feature name).\n\
-             2. Use the Write tool to create the file at:\n\
-                `prds/<your-slug>/PRD.md`\n\
-                (relative to the current working directory; create parent dirs).\n\
-             3. After writing, print the path you wrote to.\n\
-             4. Do NOT print the full PRD content to the conversation — only \
+             1. {path_instruction}\n\
+             2. Use the Write tool to create the PRD. The tool input MUST be \
+                a JSON object with string fields named exactly \
+                `file_path` and `content`, for example: \
+                {{\"file_path\":\"prds/example/PRD.md\",\"content\":\"...\"}}.\n\
+             3. `file_path` must be the PRD path string, not omitted, not \
+                nested, and not called `path` or `filename`.\n\
+             4. Create parent directories as needed through the Write tool.\n\
+             5. After writing, print the path you wrote to.\n\
+             6. Do NOT print the full PRD content to the conversation — only \
                 write it to the file."
         );
         SkillOutput::Prompt(format!("{template}\n\n---USER REQUEST---\n\n{user_block}"))
     }
+}
+
+fn explicit_prd_output_path(args: &[String]) -> Option<String> {
+    args.iter().find_map(|arg| {
+        let start = arg.find("prds/")?;
+        let candidate = &arg[start..];
+        let cleaned = candidate.trim_matches(|c: char| {
+            matches!(c, '`' | '"' | '\'' | ',' | '.' | ';' | ':' | '(' | ')')
+        });
+        (cleaned.ends_with("PRD.md") && cleaned.contains('/')).then(|| cleaned.to_string())
+    })
 }
 
 #[cfg(test)]
@@ -109,6 +133,40 @@ mod tests {
             }
             _ => panic!("expected Prompt"),
         }
+    }
+
+    #[test]
+    fn to_prd_with_explicit_output_path_pins_write_path_and_schema() {
+        let ctx = SkillContext {
+            session_id: "test".into(),
+            working_dir: std::env::temp_dir(),
+            model: "test".into(),
+            agent_registry: None,
+            session_store: None,
+        };
+        let args: Vec<String> = vec![
+            "Write".into(),
+            "it".into(),
+            "to".into(),
+            "prds/gss-alert-disposition-platform/PRD.md.".into(),
+        ];
+        let out = ToPrdSkill.execute(&args, &ctx);
+        match out {
+            SkillOutput::Prompt(s) => {
+                assert!(s.contains(
+                    "Use this exact output path: `prds/gss-alert-disposition-platform/PRD.md`"
+                ));
+                assert!(s.contains("`file_path` and `content`"));
+                assert!(s.contains("\"file_path\":\"prds/example/PRD.md\""));
+            }
+            _ => panic!("expected Prompt"),
+        }
+    }
+
+    #[test]
+    fn explicit_prd_output_path_ignores_non_prd_paths() {
+        let args = vec!["docs/example.md".to_string()];
+        assert_eq!(explicit_prd_output_path(&args), None);
     }
 
     #[test]
