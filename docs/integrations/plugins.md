@@ -73,5 +73,5 @@ The full plugin API surface lives in `crates/archon-plugin/`.
 ## See Also
 
 - [Hooks](hooks.md) - event-driven shell commands
-- [Skills](../reference/skills.md) - TOML-based skills
+- [Skills](../reference/skills.md) - SKILL.md prompt workflows
 - [Adding a tool](../development/adding-a-tool.md) - built-in tool implementation

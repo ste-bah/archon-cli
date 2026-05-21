@@ -8,8 +8,8 @@ Skills are slash commands resolved through the Skill registry rather than the pr
 |---|---|---|
 | Registry | `default_registry()` in `src/command/registry.rs` | `crates/archon-core/src/skills/{builtin,expanded}.rs` + user/plugin paths |
 | Dispatch precedence | Higher | Lower (only invoked if no primary matches) |
-| Implementation | Rust handler with `CommandHandler` trait | TOML + prompt template (or Rust for built-in) |
-| User extension | Compile-time only (built-in) | Drop a TOML file in `<workdir>/.archon/skills/` |
+| Implementation | Rust handler with `CommandHandler` trait | SKILL.md prompt workflow (or Rust for built-in) |
+| User extension | Compile-time only (built-in) | Drop a SKILL.md file in a project/global skill root |
 
 When you type `/foo`, archon first checks the primary registry. If no primary matches, it falls back to the skill registry.
 
@@ -59,21 +59,28 @@ For the complete list, run `/skills` in the TUI.
 
 Users can replace any embedded skill body without recompiling. The loader checks, in order:
 
-1. `<workdir>/.archon/skills/<name>.md` (flat-file project)
-2. `<workdir>/.archon/skills/<name>/SKILL.md` (subdir project)
-3. `~/.config/archon/skills/<name>.md` (flat-file user)
-4. `~/.config/archon/skills/<name>/SKILL.md` (subdir user)
-5. Embedded fallback (binary)
+1. `<workdir>/.archon/skills/<name>/SKILL.md` (subdir project)
+2. `<workdir>/.archon/skills/<name>.md` (flat-file project)
+3. `<workdir>/.claude/skills/<name>/SKILL.md` or `<name>.md` (legacy project)
+4. User config skill roots, for example `~/.config/archon/skills/<name>/SKILL.md`
+5. User data skill roots, for example `~/.local/share/archon/skills/<name>/SKILL.md`
+6. Embedded fallback (binary)
 
 This means a project can pin a custom `/ci-gate-walker` that runs its own gate script, or a user can tweak `/tdd` globally for their workflow — all without recompiling archon-cli.
 
 ## User-authored skills
 
-Two formats are supported:
+Use SKILL.md files for user-authored skills. They are injected as prompts, so
+the agent executes the workflow using its normal tools.
 
 ### SKILL.md format (recommended)
 
-Drop a SKILL.md file in `<workdir>/.archon/skills/<name>.md` (flat) or `<workdir>/.archon/skills/<name>/SKILL.md` (subdir):
+Drop a SKILL.md file in a project-local or user-global skill root:
+
+- `<workdir>/.archon/skills/<name>/SKILL.md` (recommended project layout)
+- `<workdir>/.archon/skills/<name>.md` (project flat-file layout)
+- `~/.config/archon/skills/<name>/SKILL.md` or `<name>.md` (global config)
+- Platform data dir + `archon/skills/<name>/SKILL.md` or `<name>.md` (global installed skill)
 
 ```markdown
 ---
@@ -96,53 +103,8 @@ Push to staging and trigger webhook.
 ```
 
 Use `/write-a-skill` for an interactive authoring wizard.
-
-### TOML format (legacy)
-
-Drop a TOML file in `<workdir>/.archon/skills/<name>.toml`:
-
-```toml
-name = "deploy-staging"
-description = "Deploy current branch to staging"
-trigger = "/deploy-staging"
-template = '''
-1. Verify build passes: `cargo build --release`
-2. Run integration tests: `cargo test --workspace`
-3. Push to staging branch: `git push origin HEAD:staging`
-4. Trigger staging deployment via Vercel webhook
-5. Smoke test the staging URL
-'''
-```
-
-Fields:
-- `name` — unique identifier
-- `description` — shown in `/help` and `/skills`
-- `trigger` — slash command that invokes this skill
-- `template` — prompt body injected into the agent context
-- `parameters` (optional) — array of named arguments
-- `permissions` (optional) — required permission mode
-
-### Parameterized skills
-
-```toml
-name = "release"
-description = "Cut a release"
-trigger = "/release"
-parameters = [
-    { name = "version", description = "Semver version (e.g. 1.2.0)", required = true },
-    { name = "notes", description = "Release notes" },
-]
-template = '''
-Cut release version {version}:
-1. Update Cargo.toml workspace.package version
-2. Update README release-notes section
-3. Commit "chore(release): v{version}"
-4. Tag v{version}
-{notes}
-'''
-```
-
-Invoke with: `/release 1.2.0 "Local world model"`.
+Arguments passed to a skill are appended to the injected prompt, for example
+`/deploy-staging release-candidate`.
 
 ## Plugin-supplied skills
 
@@ -165,7 +127,8 @@ Skills are loaded via a two-pass scan at startup:
 1. **Subdir layout** — `<name>/SKILL.md` — scanned first
 2. **Flat-file layout** — `<name>.md` — scanned second; skipped if subdir already registered the same name
 
-This means subdir layout always wins on collision. Both project-local (`.archon/skills/`) and user-global (`~/.config/archon/skills/`) paths are scanned, with project taking precedence.
+This means subdir layout wins on collision. Project-local (`.archon/skills/`)
+and user-global skill roots are scanned, with project taking precedence.
 
 ```bash
 # In TUI
@@ -176,7 +139,8 @@ This means subdir layout always wins on collision. Both project-local (`.archon/
 archon --list-skills     # if implemented (check --help)
 ```
 
-User-authored skills auto-reload on `/refresh` or `/reload`.
+User-authored skills are loaded when the TUI session starts. Restart `archon`
+after adding or changing a skill.
 
 ## See also
 

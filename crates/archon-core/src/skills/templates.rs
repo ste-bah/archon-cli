@@ -55,13 +55,15 @@ pub fn resolve_template(name: &str, workdir: &Path) -> (String, TemplateSource) 
 /// Returns `Some(body)` if any override is found and parses cleanly,
 /// `None` otherwise (caller falls back to embedded).
 pub fn resolve_skill_body(name: &str, workdir: &Path) -> Option<String> {
-    let candidates: Vec<Option<PathBuf>> = vec![
-        Some(workdir.join(format!(".archon/skills/{name}.md"))),
-        Some(workdir.join(format!(".archon/skills/{name}/SKILL.md"))),
-        dirs::config_dir().map(|h| h.join(format!("archon/skills/{name}.md"))),
-        dirs::config_dir().map(|h| h.join(format!("archon/skills/{name}/SKILL.md"))),
-    ];
-    let candidates: Vec<PathBuf> = candidates.into_iter().flatten().collect();
+    let candidates: Vec<PathBuf> = crate::skills::discovery::skill_search_roots(workdir)
+        .into_iter()
+        .flat_map(|root| {
+            [
+                root.join(format!("{name}/SKILL.md")),
+                root.join(format!("{name}.md")),
+            ]
+        })
+        .collect();
 
     for path in candidates {
         if !path.is_file() {

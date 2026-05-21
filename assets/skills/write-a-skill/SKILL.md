@@ -45,14 +45,26 @@ Iterate until approved.
 
 Once approved, ask the user where to save:
 
-- **Project-local**: `<workdir>/.archon/skills/<name>.md` (only this project)
-- **Global**: `~/.config/archon/skills/<name>.md` (all projects)
+- **Project-local**: `<workdir>/.archon/skills/<name>/SKILL.md` (only this project)
+- **Global**: `~/.config/archon/skills/<name>/SKILL.md` (all projects)
 
-Write the final SKILL.md with the Write tool.
+Prefer project-local unless the user explicitly asks for global. If writing
+global, first confirm the path is within the session's allowed write
+directories; if not, tell the user to run `/add-dir ~/.config/archon` or use a
+project-local skill.
+
+Write the final SKILL.md with the Write tool. It can create parent directories
+inside allowed roots. For bundled helpers, write scripts under
+`<skill-dir>/scripts/`.
+
+After writing, read the SKILL.md and any script files back. Only report success
+if the files exist and their contents match what you intended to save. If any
+write/read fails, report the failure and do not claim the skill was created.
 
 ### 5. Restart instruction
 
-Tell the user to **restart archon** to pick up the new skill. Note: the `/refresh` command does not currently reload the SkillRegistry (the registry is `Arc<SkillRegistry>` with no interior mutability). A future Phase 3.5 ticket can add live reload.
+Tell the user to **restart archon** to pick up the new skill. `/refresh` does
+not currently reload the SkillRegistry.
 
 ### 6. Summary
 

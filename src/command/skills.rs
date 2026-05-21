@@ -16,9 +16,9 @@
 //!     + 5 tests.
 //!   - `App::skills_menu: Option<SkillsMenu>` field.
 //!   - Event-loop arm sets `app.skills_menu = Some(SkillsMenu::new(...))`.
-//!   - `SkillLister` trait seam — `RealSkillLister` builds a fresh
-//!     `SkillRegistry` via `register_builtins()` each call; `MockSkillLister`
-//!     for tests (`#[cfg(test)]`).
+//!   - `SkillLister` trait seam — `RealSkillLister` reads the active
+//!     session `SkillRegistry`, so user/global skills appear beside built-ins;
+//!     `MockSkillLister` drives unit tests.
 //!
 //! # Reconciliation with TASK-TUI-627.md spec
 //!
@@ -38,17 +38,17 @@ use crate::command::registry::{CommandContext, CommandHandler};
 
 /// Seam — tests inject `MockSkillLister`, production uses `RealSkillLister`.
 pub(crate) trait SkillLister: Send + Sync {
-    fn list(&self) -> Vec<SkillEntry>;
+    fn list(&self, ctx: &CommandContext) -> Vec<SkillEntry>;
 }
 
 pub(crate) struct RealSkillLister;
 
 impl SkillLister for RealSkillLister {
-    fn list(&self) -> Vec<SkillEntry> {
-        // Build a fresh registry via register_builtins() each call.
-        // Cheap: SkillRegistry::new() + built-in skill construction is
-        // allocation-only, no I/O.
-        let registry = archon_core::skills::builtin::register_builtins();
+    fn list(&self, ctx: &CommandContext) -> Vec<SkillEntry> {
+        let Some(registry) = ctx.skill_registry.as_ref() else {
+            return Vec::new();
+        };
+
         registry
             .list_all()
             .into_iter()
@@ -79,7 +79,7 @@ impl SkillsHandler {
 
 impl CommandHandler for SkillsHandler {
     fn execute(&self, ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
-        let skills = self.lister.list();
+        let skills = self.lister.list(ctx);
         if skills.is_empty() {
             return Err(anyhow::anyhow!("no skills available"));
         }
@@ -102,7 +102,7 @@ mod tests {
         entries: Vec<SkillEntry>,
     }
     impl SkillLister for MockSkillLister {
-        fn list(&self) -> Vec<SkillEntry> {
+        fn list(&self, _ctx: &CommandContext) -> Vec<SkillEntry> {
             self.entries.clone()
         }
     }
@@ -168,13 +168,32 @@ mod tests {
     }
 
     #[test]
+    fn real_lister_uses_active_session_skill_registry() {
+        let mut registry = archon_core::skills::SkillRegistry::new();
+        registry.register(Box::new(archon_core::skills::discovery::UserSkill {
+            name: "custom-skill".into(),
+            description: "Custom project skill".into(),
+            body: "Do custom work.".into(),
+        }));
+
+        let (ctx, _rx) = CtxBuilder::new()
+            .with_skill_registry(Arc::new(registry))
+            .build();
+        let skills = RealSkillLister.list(&ctx);
+
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "custom-skill");
+        assert_eq!(skills[0].description, "Custom project skill");
+    }
+
+    #[test]
     #[ignore = "Gate 5 live smoke — exercises Registry dispatch via default_registry(), run via --ignored"]
     fn skills_dispatches_via_registry() {
         // Gate 5 smoke: Registry::get("skills") must return Some(handler).
         // Dispatches with RealSkillLister (the registered production impl)
         // and accepts BOTH outcomes — non-flaky across test environments:
-        //   (a) Ok + ShowSkillsMenu with non-empty skills vec (builtins present).
-        //   (b) Err "no skills available" (no builtins in this env).
+        //   (a) Ok + ShowSkillsMenu with non-empty skills vec.
+        //   (b) Err "no skills available" (no registry in this fixture).
         // Either path proves dispatch wiring + SkillLister seam run correctly.
         use crate::command::registry::default_registry;
 

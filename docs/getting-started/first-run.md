@@ -28,6 +28,8 @@ What to expect when you launch `archon` for the first time.
 | `<workdir>/.archon/agents/` | Project-local custom agents |
 | `<workdir>/.archon/teams.toml` | Multi-agent team definitions |
 | `<workdir>/.archon/skills/` | User-authored skills |
+| `~/.config/archon/skills/` | Global user-authored skills and embedded-skill overrides |
+| Platform data dir + `archon/skills/` | User-installed global skills |
 
 Project-local config layers on top of user config — see [Configuration](../reference/config.md) for precedence.
 

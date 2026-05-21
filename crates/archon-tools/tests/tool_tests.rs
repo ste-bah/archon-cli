@@ -187,6 +187,40 @@ async fn write_tool_resolves_relative_path_inside_working_dir() {
 }
 
 #[tokio::test]
+async fn write_tool_accepts_common_file_path_aliases() {
+    let ctx = test_ctx();
+    let file = ctx.working_dir.join("alias-path.txt");
+
+    let result = WriteTool
+        .execute(
+            json!({ "path": "alias-path.txt", "content": "alias" }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error, "{}", result.content);
+    assert_eq!(fs::read_to_string(&file).expect("read"), "alias");
+    cleanup(&ctx);
+}
+
+#[tokio::test]
+async fn write_tool_accepts_content_text_alias() {
+    let ctx = test_ctx();
+    let file = ctx.working_dir.join("alias-content.txt");
+
+    let result = WriteTool
+        .execute(
+            json!({ "file_path": "alias-content.txt", "text": "alias content" }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error, "{}", result.content);
+    assert_eq!(fs::read_to_string(&file).expect("read"), "alias content");
+    cleanup(&ctx);
+}
+
+#[tokio::test]
 async fn write_tool_overwrites_existing() {
     let ctx = test_ctx();
     let file = ctx.working_dir.join("existing.txt");

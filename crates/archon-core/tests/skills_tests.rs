@@ -1,5 +1,5 @@
 use archon_core::skills::builtin::register_builtins;
-use archon_core::skills::discovery::discover_user_skills;
+use archon_core::skills::discovery::{discover_user_skills, discover_user_skills_from_roots};
 use archon_core::skills::parser::parse_slash_command;
 use archon_core::skills::{Skill, SkillContext, SkillOutput, SkillRegistry};
 use tempfile::TempDir;
@@ -182,7 +182,7 @@ fn duplicate_manual_alias_keeps_first_skill() {
 #[test]
 fn discover_empty_dir() {
     let tmp = TempDir::new().unwrap();
-    let skills = discover_user_skills(tmp.path());
+    let skills = discover_user_skills_from_roots(vec![tmp.path().join(".archon/skills")]);
     assert!(skills.is_empty());
 }
 
@@ -197,10 +197,9 @@ fn discover_skill_from_claude_dir() {
     )
     .unwrap();
     let skills = discover_user_skills(tmp.path());
-    assert_eq!(skills.len(), 1);
-    assert_eq!(skills[0].name, "test");
-    assert_eq!(skills[0].description, "A test skill");
-    assert!(skills[0].body.contains("Do the thing."));
+    let skill = skills.iter().find(|skill| skill.name == "test").unwrap();
+    assert_eq!(skill.description, "A test skill");
+    assert!(skill.body.contains("Do the thing."));
 }
 
 #[test]
@@ -214,8 +213,59 @@ fn discover_skill_from_archon_dir() {
     )
     .unwrap();
     let skills = discover_user_skills(tmp.path());
+    assert!(skills.iter().any(|skill| skill.name == "archon-test"));
+}
+
+#[test]
+fn discover_skill_from_global_root() {
+    let tmp = TempDir::new().unwrap();
+    let global_root = tmp.path().join("global/archon/skills");
+    std::fs::create_dir_all(global_root.join("global-test")).unwrap();
+    std::fs::write(
+        global_root.join("global-test/SKILL.md"),
+        "---\nname: global-test\ndescription: Global test skill\n---\nGlobal body.\n",
+    )
+    .unwrap();
+
+    let skills = discover_user_skills_from_roots(vec![global_root]);
     assert_eq!(skills.len(), 1);
-    assert_eq!(skills[0].name, "archon-test");
+    assert_eq!(skills[0].name, "global-test");
+    assert_eq!(skills[0].description, "Global test skill");
+}
+
+#[test]
+fn user_skill_executes_as_prompt_with_args() {
+    let tmp = TempDir::new().unwrap();
+    let skill_dir = tmp.path().join(".archon/skills/md-to-docx");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: md-to-docx\ndescription: Convert Markdown to Word\n---\nUse pandoc.\n",
+    )
+    .unwrap();
+
+    let skills = discover_user_skills(tmp.path());
+    let skill = skills
+        .iter()
+        .find(|skill| skill.name == "md-to-docx")
+        .unwrap();
+    let ctx = SkillContext {
+        session_id: "test".into(),
+        working_dir: tmp.path().to_path_buf(),
+        model: "test".into(),
+        agent_registry: None,
+        session_store: None,
+    };
+
+    let output = skill.execute(&["report.md".into()], &ctx);
+    match output {
+        SkillOutput::Prompt(prompt) => {
+            assert!(prompt.contains("Use pandoc."));
+            assert!(prompt.contains("---USER REQUEST---"));
+            assert!(prompt.contains("report.md"));
+        }
+        other => panic!("expected Prompt, got {other:?}"),
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -6,10 +6,10 @@
 //!
 //! Override resolution (highest priority first), via Phase 1 loader
 //! + the `resolve_skill_body` helper added below in `templates.rs`:
-//!   1. <workdir>/.archon/skills/<name>.md         (flat-file project)
-//!   2. <workdir>/.archon/skills/<name>/SKILL.md   (subdir project)
-//!   3. ~/.config/archon/skills/<name>.md          (flat-file user)
-//!   4. ~/.config/archon/skills/<name>/SKILL.md    (subdir user)
+//!   1. <workdir>/.archon/skills/<name>/SKILL.md   (subdir project)
+//!   2. <workdir>/.archon/skills/<name>.md         (flat-file project)
+//!   3. <workdir>/.claude/skills/<name>/SKILL.md   (legacy project)
+//!   4. user config/data skill roots
 //!   5. embedded fallback (this module)
 
 pub const GRILL_ME: &str = include_str!("../../../../assets/skills/grill-me/SKILL.md");

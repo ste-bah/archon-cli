@@ -35,12 +35,12 @@ impl Tool for WriteTool {
     }
 
     async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
-        let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
+        let file_path = match string_field_any(&input, &["file_path", "path", "filename", "file"]) {
             Some(p) => p,
             None => return ToolResult::error("file_path is required and must be a string"),
         };
 
-        let content = match input.get("content").and_then(|v| v.as_str()) {
+        let content = match string_field_any(&input, &["content", "text", "body"]) {
             Some(c) => c,
             None => return ToolResult::error("content is required and must be a string"),
         };
@@ -67,4 +67,9 @@ impl Tool for WriteTool {
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
         PermissionLevel::Risky
     }
+}
+
+fn string_field_any<'a>(input: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
+    keys.iter()
+        .find_map(|key| input.get(*key).and_then(|v| v.as_str()))
 }

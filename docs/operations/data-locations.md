@@ -23,7 +23,8 @@ Where archon-cli writes everything.
 | `~/.config/archon/validated_betas.json` | `%APPDATA%\archon\validated_betas.json` | Beta header probe cache |
 | `~/.local/share/archon/cron.db` | `...\cron.db` | Scheduled tasks (CozoDB) |
 | `~/.local/share/archon/plugins/` | `...\plugins\` | System-installed plugins |
-| `~/.local/share/archon/skills/` | `...\skills\` | User-installed skills |
+| `~/.config/archon/skills/` | `%APPDATA%\archon\skills\` | Global user-authored skills and embedded-skill overrides |
+| `~/.local/share/archon/skills/` | `...\skills\` | User-installed global skills |
 
 XDG environment variable overrides (Linux/macOS):
 - `XDG_CONFIG_HOME` overrides `~/.config` base
@@ -44,7 +45,7 @@ archon-cli specific overrides:
 | `config.local.toml` | Local-only overrides (gitignored by convention) |
 | `agents/` | Project-local custom agents (`.md` flat-file YAML or TOML manifests) |
 | `teams.toml` | Multi-agent team definitions |
-| `skills/<name>.toml` | User-authored skills |
+| `skills/<name>/SKILL.md` or `skills/<name>.md` | Project-local user-authored skills |
 | `plugins/` | Project-local plugins |
 | `pipelines/<session-id>/` | Audited built-in pipeline bundle: manifest, checksum state, audit log, prompts, agent records, outputs, verification reports, exports |
 | `plugin-artifacts/`, `artifacts/`, `runs/` | Optional plugin and run artifacts discoverable by world-model backfill |

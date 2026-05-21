@@ -1,6 +1,6 @@
 # Adding a skill
 
-Built-in skills are Rust-implemented composable command sequences. User-authored skills are SKILL.md or TOML files (covered in [Skills reference](../reference/skills.md)). This page covers built-in skill development.
+Built-in skills are Rust-implemented composable command sequences. User-authored skills are SKILL.md files (covered in [Skills reference](../reference/skills.md)). This page covers built-in skill development.
 
 ## Where built-in skills live
 
@@ -85,6 +85,6 @@ cargo fmt --all -- --check
 
 ## See also
 
-- [Skills reference](../reference/skills.md) — user-authored SKILL.md and TOML skills
+- [Skills reference](../reference/skills.md) — user-authored SKILL.md skills
 - [Slash commands reference](../reference/slash-commands.md) — primary commands
 - [Dev flow gates](dev-flow-gates.md)

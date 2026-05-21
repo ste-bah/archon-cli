@@ -1,6 +1,6 @@
 //! TASK-P0-B.4 Skill tool — LLM-facing wrapper around [`SkillRegistry`].
 //!
-//! Exposes built-in skills (same set that /skills enumerates in the TUI)
+//! Exposes the same built-in and user skills that the TUI session can invoke
 //! to LLM tool_use blocks. Two actions:
 //!   * `list` — returns JSON array of `{name, description}` for every
 //!     registered skill.
@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 
 use archon_tools::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
-use super::{SkillContext, SkillOutput, builtin};
+use super::{SkillContext, SkillOutput, builtin, discovery};
 
 pub struct SkillTool;
 
@@ -66,7 +66,10 @@ impl Tool for SkillTool {
             None => return ToolResult::error("missing required field: action"),
         };
 
-        let registry = builtin::register_builtins();
+        let mut registry = builtin::register_builtins();
+        for skill in discovery::discover_user_skills(&ctx.working_dir) {
+            registry.register(Box::new(skill));
+        }
 
         match action {
             "list" => {
@@ -187,6 +190,35 @@ mod tests {
             assert!(entry.get("name").is_some());
             assert!(entry.get("description").is_some());
         }
+    }
+
+    #[tokio::test]
+    async fn skill_tool_lists_user_skills_from_working_dir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let skill_dir = tmp.path().join(".archon/skills/local-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: local-skill\ndescription: Local skill\n---\nDo local work.\n",
+        )
+        .unwrap();
+
+        let tool = SkillTool;
+        let ctx = ToolContext {
+            working_dir: tmp.path().to_path_buf(),
+            session_id: "test-session".to_string(),
+            ..Default::default()
+        };
+        let result = tool.execute(json!({ "action": "list" }), &ctx).await;
+        assert!(!result.is_error);
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        let names: Vec<_> = parsed
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|entry| entry.get("name").and_then(|name| name.as_str()))
+            .collect();
+        assert!(names.contains(&"local-skill"));
     }
 
     #[tokio::test]

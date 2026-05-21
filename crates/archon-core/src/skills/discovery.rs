@@ -18,35 +18,79 @@ impl Skill for UserSkill {
         &self.description
     }
 
-    fn execute(&self, _args: &[String], _ctx: &SkillContext) -> SkillOutput {
-        SkillOutput::Markdown(self.body.clone())
+    fn execute(&self, args: &[String], _ctx: &SkillContext) -> SkillOutput {
+        let user_block = if args.is_empty() {
+            "Continue with the skill's process using the current conversation context.".to_string()
+        } else {
+            format!("User input for this skill invocation: {}", args.join(" "))
+        };
+
+        SkillOutput::Prompt(format!(
+            "{}\n\n---USER REQUEST---\n\n{}",
+            self.body, user_block
+        ))
     }
 }
 
-/// Discover user-defined skills from `.archon/skills/` directory (and `.claude/skills/` for backward compat).
+/// Discover user-defined skills from project-local and user-global skill roots.
 ///
 /// Two-pass scan per root: subdir layout (`<name>/SKILL.md`) first, then
 /// flat-file layout (`<name>.md`). Subdir wins on collision.
 pub fn discover_user_skills(working_dir: &Path) -> Vec<UserSkill> {
-    let search_roots = [
-        working_dir.join(".archon/skills"),
-        working_dir.join(".claude/skills"), // backward compat
-    ];
+    discover_user_skills_from_roots(skill_search_roots(working_dir))
+}
+
+/// Build skill search roots in precedence order.
+///
+/// Project-local roots win (including the deprecated `.claude/skills`
+/// compatibility root), followed by user config/data roots.
+pub fn skill_search_roots(working_dir: &Path) -> Vec<std::path::PathBuf> {
+    let project_archon = working_dir.join(".archon/skills");
+    let project_claude = working_dir.join(".claude/skills");
+
+    let mut roots = vec![project_archon, project_claude];
+
+    if let Some(config_dir) = dirs::config_dir() {
+        roots.push(config_dir.join("archon/skills"));
+    }
+    if let Some(home_dir) = dirs::home_dir() {
+        roots.push(home_dir.join(".config/archon/skills"));
+    }
+    if let Some(data_dir) = dirs::data_dir() {
+        roots.push(data_dir.join("archon/skills"));
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    roots
+        .into_iter()
+        .filter(|root| seen.insert(root.clone()))
+        .collect()
+}
+
+/// Discover user-defined skills from explicit roots.
+///
+/// This is public so integration tests and future plugin installers can verify
+/// the same root-ordering behavior without mutating a developer's real home.
+pub fn discover_user_skills_from_roots<I>(search_roots: I) -> Vec<UserSkill>
+where
+    I: IntoIterator<Item = std::path::PathBuf>,
+{
+    let search_roots: Vec<_> = search_roots.into_iter().collect();
 
     let mut skills = Vec::new();
 
-    let archon_root = &search_roots[0];
+    let archon_root = search_roots.first();
     for root in &search_roots {
         if !root.is_dir() {
             continue;
         }
 
         // Warn when loading from deprecated .claude/skills/ path
-        if root != archon_root && !archon_root.is_dir() {
+        if root.ends_with(".claude/skills") && archon_root.is_some_and(|r| !r.is_dir()) {
             tracing::warn!(
                 "Loading from deprecated path {}. Rename to {} to suppress this warning.",
                 root.display(),
-                archon_root.display()
+                archon_root.map_or_else(|| ".archon/skills".into(), |r| r.display().to_string())
             );
         }
 

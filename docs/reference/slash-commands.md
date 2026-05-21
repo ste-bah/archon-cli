@@ -195,20 +195,25 @@ For the full list, run `/skills` in the TUI or read `crates/archon-core/src/skil
 
 ## Custom skills
 
-User-authored skills live in `<workdir>/.archon/skills/<name>.toml`:
+User-authored skills live in project-local or user-global SKILL.md files, for
+example `<workdir>/.archon/skills/<name>/SKILL.md`:
 
-```toml
-name = "my-skill"
-description = "Custom workflow"
-trigger = "/my-skill"
-template = '''
-Run these steps:
-1. {step_one}
-2. {step_two}
-'''
+```markdown
+---
+name: my-skill
+description: Custom workflow. Use when you need this workflow.
+---
+
+# My Skill
+
+Run these steps with the current conversation context:
+
+1. Do the first thing.
+2. Do the second thing.
 ```
 
-See [Skills reference](skills.md) for the full TOML schema.
+See [Skills reference](skills.md) for discovery paths and the full SKILL.md
+format.
 
 ## See also
 
