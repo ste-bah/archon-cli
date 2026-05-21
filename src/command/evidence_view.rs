@@ -80,9 +80,16 @@ impl CommandHandler for LearningViewHandler {
         ) {
             let config = archon_core::config::load_config().unwrap_or_default();
             let live = ctx.auto_trainer.as_ref().map(|at| at.status());
+            let durable = ctx.memory.as_ref().and_then(|memory| {
+                crate::command::learning::gnn::durable_memory_stats(memory.as_ref())
+            });
             return emit(
                 ctx,
-                crate::command::learning::gnn::render_gnn_status(&config, live.as_ref()),
+                crate::command::learning::gnn::render_gnn_status_with_durable(
+                    &config,
+                    live.as_ref(),
+                    durable,
+                ),
             );
         }
         if matches!(

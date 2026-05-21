@@ -13,6 +13,6 @@ pub(crate) async fn handle_learning_command(
     match action {
         LearningAction::Gnn {
             action: LearningGnnAction::Status,
-        } => gnn::print_gnn_status(config),
+        } => gnn::print_gnn_status(config).await,
     }
 }
