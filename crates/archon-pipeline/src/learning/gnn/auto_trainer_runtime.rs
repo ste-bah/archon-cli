@@ -98,6 +98,8 @@ pub fn query_trajectories_for_training(
 /// here without a circular dep.
 pub struct AutoTrainerBuildParams {
     pub at_config: AutoTrainerConfig,
+    pub initial_total_memories: u64,
+    pub initial_total_corrections: u64,
     pub training_config: TrainingConfig,
     pub gnn_input_dim: usize,
     pub gnn_output_dim: usize,
@@ -198,7 +200,10 @@ pub fn build_and_spawn_auto_trainer(
         }
     });
 
+    let initial_total_memories = params.initial_total_memories;
+    let initial_total_corrections = params.initial_total_corrections;
     let at = Arc::new(AutoTrainer::new(params.at_config));
+    at.seed_counts(initial_total_memories, initial_total_corrections);
     at.spawn_with_triplet_provider(
         enhancer,
         trainer_weights,
@@ -232,6 +237,8 @@ mod tests {
                 enabled: false,
                 ..Default::default()
             },
+            initial_total_memories: 0,
+            initial_total_corrections: 0,
             training_config: TrainingConfig::default(),
             gnn_input_dim: 1536,
             gnn_output_dim: 1536,

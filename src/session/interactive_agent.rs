@@ -188,7 +188,7 @@ pub(super) async fn build(
     };
     let governed_learning_db = super::open_governed_learning_db(&working_dir);
 
-    let auto_trainer = build_auto_trainer(config, &learning_cozo_db);
+    let auto_trainer = build_auto_trainer(config, &learning_cozo_db, memory.as_ref());
 
     let coding_pipeline_facade = archon_pipeline::coding::facade::CodingFacade::new();
     let coding_pipeline: Arc<archon_pipeline::coding::facade::CodingFacade> = Arc::new(
@@ -405,6 +405,7 @@ async fn resolve_provider(
 fn build_auto_trainer(
     config: &archon_core::config::ArchonConfig,
     learning_cozo_db: &Option<Arc<cozo::DbInstance>>,
+    memory: &dyn MemoryTrait,
 ) -> Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>> {
     let at_cfg = &config.learning.gnn.auto_trainer;
     if !at_cfg.enabled || !config.learning.gnn.enabled {
@@ -424,6 +425,7 @@ fn build_auto_trainer(
 
     let gnn_cfg = &config.learning.gnn;
     let train_cfg = &gnn_cfg.training;
+    let seed = super::gnn_auto_trainer_seed::from_memory_graph(memory);
     let params = archon_pipeline::learning::gnn::auto_trainer_runtime::AutoTrainerBuildParams {
         at_config: archon_pipeline::learning::gnn::auto_trainer::AutoTrainerConfig {
             enabled: at_cfg.enabled,
@@ -435,6 +437,8 @@ fn build_auto_trainer(
             max_runtime_ms: at_cfg.max_runtime_ms,
             tick_interval_ms: at_cfg.tick_interval_ms,
         },
+        initial_total_memories: seed.total_memories,
+        initial_total_corrections: seed.total_corrections,
         training_config: archon_pipeline::learning::gnn::trainer::TrainingConfig {
             learning_rate: train_cfg.learning_rate,
             batch_size: train_cfg.batch_size,
@@ -469,6 +473,8 @@ fn build_auto_trainer(
             interval_ms = at_cfg.tick_interval_ms,
             throttle_ms = at_cfg.min_throttle_ms,
             first_run_threshold = at_cfg.first_run_threshold,
+            seeded_memories = seed.total_memories,
+            seeded_corrections = seed.total_corrections,
             "GNN auto-trainer spawned"
         );
     }

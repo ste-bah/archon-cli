@@ -316,6 +316,8 @@ fn build_pipeline_auto_trainer_from_db(
             max_runtime_ms: at_cfg.max_runtime_ms,
             tick_interval_ms: at_cfg.tick_interval_ms,
         },
+        initial_total_memories: 0,
+        initial_total_corrections: 0,
         training_config: archon_pipeline::learning::gnn::trainer::TrainingConfig {
             learning_rate: train_cfg.learning_rate,
             batch_size: train_cfg.batch_size,

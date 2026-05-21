@@ -178,6 +178,18 @@ fn record_correction_increments_counter() {
 }
 
 #[test]
+fn seed_counts_preserves_first_run_gate_pressure() {
+    let trainer = AutoTrainer::new(AutoTrainerConfig::default());
+    trainer.seed_counts(30, 3);
+
+    let status = trainer.status();
+    assert_eq!(status.total_memories, 30);
+    assert_eq!(status.total_corrections, 3);
+    assert_eq!(status.memories_since_last_train, 30);
+    assert_eq!(status.corrections_since_last_train, 3);
+}
+
+#[test]
 fn status_reflects_current_state() {
     let config = AutoTrainerConfig {
         enabled: true,

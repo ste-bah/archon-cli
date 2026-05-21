@@ -42,6 +42,19 @@ impl AutoTrainer {
             .fetch_add(count, Ordering::Relaxed);
     }
 
+    /// Seed counters from the durable memory graph before the loop starts.
+    ///
+    /// Last-train counters intentionally stay at zero so existing memories can
+    /// open the first-run and correction gates after a restart.
+    pub fn seed_counts(&self, total_memories: u64, total_corrections: u64) {
+        self.state
+            .total_memories
+            .fetch_max(total_memories, Ordering::Relaxed);
+        self.state
+            .total_corrections
+            .fetch_max(total_corrections, Ordering::Relaxed);
+    }
+
     /// Snapshot current state for `/learning-status`.
     pub fn status(&self) -> AutoTrainerStatus {
         let total = self.state.total_memories.load(Ordering::Relaxed);

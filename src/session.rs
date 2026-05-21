@@ -20,6 +20,7 @@ mod build_agent;
 mod build_prompt;
 mod config_watcher;
 mod event_forwarder;
+mod gnn_auto_trainer_seed;
 mod interactive_agent;
 mod interactive_bootstrap;
 mod interactive_finish;
