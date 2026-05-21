@@ -222,6 +222,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn skill_tool_list_does_not_return_user_skill_body() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let skill_dir = tmp.path().join(".archon/skills/leaky-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: leaky-skill\ndescription: Listed safely\n---\nNEVER_LEAK_SKILL_BODY\n",
+        )
+        .unwrap();
+
+        let tool = SkillTool;
+        let ctx = ToolContext {
+            working_dir: tmp.path().to_path_buf(),
+            session_id: "test-session".to_string(),
+            ..Default::default()
+        };
+        let result = tool.execute(json!({ "action": "list" }), &ctx).await;
+
+        assert!(!result.is_error);
+        assert!(result.content.contains("leaky-skill"));
+        assert!(result.content.contains("Listed safely"));
+        assert!(!result.content.contains("NEVER_LEAK_SKILL_BODY"));
+    }
+
+    #[tokio::test]
     async fn skill_tool_invoke_requires_name() {
         let tool = SkillTool;
         let result = tool.execute(json!({ "action": "invoke" }), &ctx()).await;

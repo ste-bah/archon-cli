@@ -80,6 +80,9 @@ const ALL_TYPES: [MemoryType; 7] = [
     MemoryType::PersonalitySnapshot,
 ];
 
+const BRIEFING_MEMORY_MAX_CHARS: usize = 800;
+const BRIEFING_TOTAL_MAX_CHARS: usize = 16_000;
+
 impl GardenReport {
     /// Format the consolidation report as a human-readable summary.
     pub fn format(&self) -> String {
@@ -349,15 +352,33 @@ pub fn generate_briefing(graph: &dyn MemoryTrait, limit: usize) -> Result<String
         for m in &all {
             out.push_str(&format!(
                 "- [{}] {} (importance: {:.2})\n",
-                m.memory_type, m.content, m.importance
+                m.memory_type,
+                truncate_content(&m.content, BRIEFING_MEMORY_MAX_CHARS),
+                m.importance
             ));
         }
     }
     out.push_str("</memory_briefing>");
-    Ok(out)
+    Ok(cap_briefing(out))
 }
 
 // ── helpers ──────────────────────────────────────────────────
+
+fn cap_briefing(mut out: String) -> String {
+    if out.len() <= BRIEFING_TOTAL_MAX_CHARS {
+        return out;
+    }
+
+    let marker = "\n[briefing truncated]\n</memory_briefing>";
+    let body_limit = BRIEFING_TOTAL_MAX_CHARS.saturating_sub(marker.len());
+    let mut end = body_limit.min(out.len());
+    while end > 0 && !out.is_char_boundary(end) {
+        end -= 1;
+    }
+    out.truncate(end);
+    out.push_str(marker);
+    out
+}
 
 fn get_memories_by_type(
     graph: &dyn MemoryTrait,
@@ -368,4 +389,31 @@ fn get_memories_by_type(
         ..SearchFilter::default()
     };
     graph.search_memories(&filter)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_content_caps_long_memory_body() {
+        let content = "x".repeat(BRIEFING_MEMORY_MAX_CHARS + 100);
+        let truncated = truncate_content(&content, BRIEFING_MEMORY_MAX_CHARS);
+
+        assert!(truncated.len() <= BRIEFING_MEMORY_MAX_CHARS + 3);
+        assert!(truncated.ends_with("..."));
+    }
+
+    #[test]
+    fn cap_briefing_preserves_closing_tag() {
+        let body = format!(
+            "<memory_briefing>\n{}\n</memory_briefing>",
+            "x".repeat(BRIEFING_TOTAL_MAX_CHARS * 2)
+        );
+        let capped = cap_briefing(body);
+
+        assert!(capped.len() <= BRIEFING_TOTAL_MAX_CHARS);
+        assert!(capped.contains("[briefing truncated]"));
+        assert!(capped.ends_with("</memory_briefing>"));
+    }
 }

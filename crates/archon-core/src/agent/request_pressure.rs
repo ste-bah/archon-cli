@@ -27,8 +27,47 @@ pub(crate) fn request_body_bytes(request: &archon_llm::provider::LlmRequest) -> 
             request_tool_count = breakdown.tool_count,
             "llm request size preflight"
         );
+        log_system_block_sizes(request);
     }
     breakdown.total_body_bytes
+}
+
+fn log_system_block_sizes(request: &archon_llm::provider::LlmRequest) {
+    if request.system.is_empty() {
+        return;
+    }
+
+    let mut blocks: Vec<(usize, usize, String)> = request
+        .system
+        .iter()
+        .enumerate()
+        .map(|(index, block)| {
+            let text = block
+                .get("text")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            let preview: String = text
+                .chars()
+                .take(80)
+                .map(|ch| if ch.is_control() { ' ' } else { ch })
+                .collect();
+            (index, serialized_len(block), preview)
+        })
+        .collect();
+    blocks.sort_by(|left, right| right.1.cmp(&left.1));
+
+    for (rank, (index, bytes, preview)) in blocks.into_iter().take(8).enumerate() {
+        tracing::info!(
+            target: "archon::context",
+            request_origin = request.request_origin.as_deref().unwrap_or("unknown"),
+            request_model = %request.model,
+            rank = rank + 1,
+            system_block_index = index,
+            system_block_bytes = bytes,
+            system_block_preview = %preview,
+            "llm request system block size"
+        );
+    }
 }
 
 pub(crate) fn request_size_breakdown(
