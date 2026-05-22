@@ -4,6 +4,8 @@ use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability};
 use serde::{Deserialize, Serialize};
 
+use crate::cozo_guard::run_script_guarded;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct AgentProfileVersionRecord {
     pub version_id: String,
@@ -135,12 +137,13 @@ pub fn insert_agent_profile_version(
         DataValue::from(version.created_at.as_str()),
     );
 
-    db.run_script(
+    run_script_guarded(
+        db,
         profile_version_put_script(),
         params,
         ScriptMutability::Mutable,
-    )
-    .map_err(|e| anyhow::anyhow!("insert agent_profile_versions failed: {e}"))?;
+        "insert agent_profile_versions failed",
+    )?;
     Ok(())
 }
 
@@ -150,13 +153,13 @@ pub fn get_agent_profile_version(
 ) -> Result<Option<AgentProfileVersionRecord>> {
     let mut params = BTreeMap::new();
     params.insert("vid".into(), DataValue::from(version_id));
-    let result = db
-        .run_script(
-            profile_version_query("version_id = $vid"),
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("get agent_profile_version failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        profile_version_query("version_id = $vid"),
+        params,
+        ScriptMutability::Immutable,
+        "get agent_profile_version failed",
+    )?;
     Ok(result.rows.first().map(|row| row_to_profile_version(row)))
 }
 
@@ -166,13 +169,13 @@ pub fn list_agent_profile_versions(
 ) -> Result<Vec<AgentProfileVersionRecord>> {
     let mut params = BTreeMap::new();
     params.insert("agent".into(), DataValue::from(agent_type));
-    let result = db
-        .run_script(
-            profile_version_query("agent_type = $agent"),
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list agent_profile_versions failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        profile_version_query("agent_type = $agent"),
+        params,
+        ScriptMutability::Immutable,
+        "list agent_profile_versions failed",
+    )?;
     let mut versions: Vec<_> = result
         .rows
         .iter()
@@ -188,13 +191,13 @@ pub fn get_active_agent_profile_version(
 ) -> Result<Option<AgentProfileVersionRecord>> {
     let mut params = BTreeMap::new();
     params.insert("agent".into(), DataValue::from(agent_type));
-    let result = db
-        .run_script(
-            profile_version_query("active_for_agent"),
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("get active agent_profile_version failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        profile_version_query("active_for_agent"),
+        params,
+        ScriptMutability::Immutable,
+        "get active agent_profile_version failed",
+    )?;
     Ok(result.rows.first().map(|row| row_to_profile_version(row)))
 }
 

@@ -6,6 +6,7 @@
 use anyhow::Result;
 use cozo::{DbInstance, ScriptMutability};
 
+use crate::cozo_guard::run_script_guarded;
 use crate::errors::COZO_RELATION_ALREADY_EXISTS;
 
 #[cfg(test)]
@@ -36,7 +37,13 @@ pub fn ensure_learning_schema(db: &DbInstance) -> Result<()> {
 
 /// Run a `:create` script, ignoring "already exists" errors only.
 fn run_create(db: &DbInstance, script: &str) -> Result<()> {
-    match db.run_script(script, Default::default(), ScriptMutability::Mutable) {
+    match run_script_guarded(
+        db,
+        script,
+        Default::default(),
+        ScriptMutability::Mutable,
+        "learning schema creation failed",
+    ) {
         Ok(_) => Ok(()),
         Err(e) => {
             let msg = e.to_string();

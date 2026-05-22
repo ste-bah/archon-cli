@@ -53,7 +53,8 @@ pub(crate) fn selected_provider_auth_profile_id(provider_id: &str) -> Option<Str
         std::fs::create_dir_all(parent).ok()?;
     }
     let path_str = path.to_string_lossy().to_string();
-    let db = DbInstance::new("sqlite", &path_str, "").ok()?;
+    let db =
+        archon_learning::cozo_guard::open_sqlite_guarded(&path_str, "open learning db").ok()?;
     archon_learning::schema::ensure_learning_schema(&db).ok()?;
     let allowed = default_auth_kinds(provider_id);
     select_provider_auth_profile_from_db(&db, provider_id, &allowed, None)

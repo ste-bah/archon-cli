@@ -4,6 +4,8 @@ use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability};
 use serde::{Deserialize, Serialize};
 
+use crate::cozo_guard::run_script_guarded;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ProviderAuthProfileRecord {
     pub profile_id: String,
@@ -153,8 +155,13 @@ pub fn insert_provider_auth_profile(
         DataValue::from(profile.metadata_redacted_json.to_string().as_str()),
     );
 
-    db.run_script(auth_profile_put_script(), params, ScriptMutability::Mutable)
-        .map_err(|e| anyhow::anyhow!("insert provider_auth_profiles failed: {e}"))?;
+    run_script_guarded(
+        db,
+        auth_profile_put_script(),
+        params,
+        ScriptMutability::Mutable,
+        "insert provider_auth_profiles failed",
+    )?;
     Ok(())
 }
 
@@ -164,13 +171,13 @@ pub fn get_provider_auth_profile(
 ) -> Result<Option<ProviderAuthProfileRecord>> {
     let mut params = BTreeMap::new();
     params.insert("pid".into(), DataValue::from(profile_id));
-    let result = db
-        .run_script(
-            auth_profile_query("profile_id = $pid"),
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("get provider_auth_profile failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        auth_profile_query("profile_id = $pid"),
+        params,
+        ScriptMutability::Immutable,
+        "get provider_auth_profile failed",
+    )?;
     Ok(result.rows.first().map(|row| row_to_auth_profile(row)))
 }
 
@@ -180,13 +187,13 @@ pub fn list_provider_auth_profiles(
 ) -> Result<Vec<ProviderAuthProfileRecord>> {
     let mut params = BTreeMap::new();
     params.insert("provider".into(), DataValue::from(provider_id));
-    let result = db
-        .run_script(
-            auth_profile_query("provider_id = $provider"),
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list provider_auth_profiles failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        auth_profile_query("provider_id = $provider"),
+        params,
+        ScriptMutability::Immutable,
+        "list provider_auth_profiles failed",
+    )?;
     let mut profiles: Vec<_> = result
         .rows
         .iter()
@@ -197,13 +204,13 @@ pub fn list_provider_auth_profiles(
 }
 
 pub fn list_all_provider_auth_profiles(db: &DbInstance) -> Result<Vec<ProviderAuthProfileRecord>> {
-    let result = db
-        .run_script(
-            auth_profile_query("all"),
-            Default::default(),
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list provider_auth_profiles failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        auth_profile_query("all"),
+        Default::default(),
+        ScriptMutability::Immutable,
+        "list provider_auth_profiles failed",
+    )?;
     let mut profiles: Vec<_> = result
         .rows
         .iter()

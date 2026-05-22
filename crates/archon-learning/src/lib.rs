@@ -4,6 +4,7 @@ pub mod agent_knowledge_digest;
 pub mod agent_profile_versions;
 pub mod agent_shadow_evaluations;
 pub mod apply;
+pub mod cozo_guard;
 pub mod errors;
 pub mod events;
 pub mod manifest;

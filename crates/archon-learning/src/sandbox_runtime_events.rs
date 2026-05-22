@@ -4,6 +4,8 @@ use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability};
 use serde::{Deserialize, Serialize};
 
+use crate::cozo_guard::run_script_guarded;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SandboxRuntimeEventRecord {
     pub event_id: String,
@@ -138,8 +140,13 @@ pub fn insert_sandbox_runtime_event(
     );
     params.insert("created".into(), DataValue::from(event.created_at.as_str()));
 
-    db.run_script(event_put_script(), params, ScriptMutability::Mutable)
-        .map_err(|e| anyhow::anyhow!("insert sandbox_runtime_events failed: {e}"))?;
+    run_script_guarded(
+        db,
+        event_put_script(),
+        params,
+        ScriptMutability::Mutable,
+        "insert sandbox_runtime_events failed",
+    )?;
     Ok(())
 }
 
@@ -149,13 +156,13 @@ pub fn get_sandbox_runtime_event(
 ) -> Result<Option<SandboxRuntimeEventRecord>> {
     let mut params = BTreeMap::new();
     params.insert("eid".into(), DataValue::from(event_id));
-    let result = db
-        .run_script(
-            event_query("event_id = $eid"),
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("get sandbox_runtime_event failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        event_query("event_id = $eid"),
+        params,
+        ScriptMutability::Immutable,
+        "get sandbox_runtime_event failed",
+    )?;
     Ok(result.rows.first().map(|row| row_to_event(row)))
 }
 
@@ -165,13 +172,13 @@ pub fn list_sandbox_runtime_events_by_backend(
 ) -> Result<Vec<SandboxRuntimeEventRecord>> {
     let mut params = BTreeMap::new();
     params.insert("backend".into(), DataValue::from(backend_kind));
-    let result = db
-        .run_script(
-            event_query("backend_kind = $backend"),
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list sandbox_runtime_events failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        event_query("backend_kind = $backend"),
+        params,
+        ScriptMutability::Immutable,
+        "list sandbox_runtime_events failed",
+    )?;
     Ok(sorted(result.rows.iter().map(|row| row_to_event(row))))
 }
 

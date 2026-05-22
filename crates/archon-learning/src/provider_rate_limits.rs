@@ -4,6 +4,8 @@ use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability};
 use serde::{Deserialize, Serialize};
 
+use crate::cozo_guard::run_script_guarded;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ProviderRateLimitWindowRecord {
     pub window_id: String,
@@ -127,8 +129,13 @@ pub fn insert_provider_rate_limit_window(
         DataValue::from(window.observed_at.as_str()),
     );
 
-    db.run_script(rate_limit_put_script(), params, ScriptMutability::Mutable)
-        .map_err(|e| anyhow::anyhow!("insert provider_rate_limit_windows failed: {e}"))?;
+    run_script_guarded(
+        db,
+        rate_limit_put_script(),
+        params,
+        ScriptMutability::Mutable,
+        "insert provider_rate_limit_windows failed",
+    )?;
     Ok(())
 }
 
@@ -138,13 +145,13 @@ pub fn get_provider_rate_limit_window(
 ) -> Result<Option<ProviderRateLimitWindowRecord>> {
     let mut params = BTreeMap::new();
     params.insert("wid".into(), DataValue::from(window_id));
-    let result = db
-        .run_script(
-            rate_limit_query("window_id = $wid"),
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("get provider_rate_limit_window failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        rate_limit_query("window_id = $wid"),
+        params,
+        ScriptMutability::Immutable,
+        "get provider_rate_limit_window failed",
+    )?;
     Ok(result.rows.first().map(|row| row_to_rate_limit(row)))
 }
 
@@ -154,13 +161,13 @@ pub fn list_provider_rate_limit_windows(
 ) -> Result<Vec<ProviderRateLimitWindowRecord>> {
     let mut params = BTreeMap::new();
     params.insert("provider".into(), DataValue::from(provider_id));
-    let result = db
-        .run_script(
-            rate_limit_query("provider_id = $provider"),
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list provider_rate_limit_windows failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        rate_limit_query("provider_id = $provider"),
+        params,
+        ScriptMutability::Immutable,
+        "list provider_rate_limit_windows failed",
+    )?;
     let mut windows: Vec<_> = result
         .rows
         .iter()

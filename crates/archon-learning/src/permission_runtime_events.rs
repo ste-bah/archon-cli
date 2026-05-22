@@ -4,6 +4,8 @@ use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability};
 use serde::{Deserialize, Serialize};
 
+use crate::cozo_guard::run_script_guarded;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PermissionRuntimeEventRecord {
     pub event_id: String,
@@ -115,12 +117,13 @@ pub fn insert_permission_runtime_event(
     );
     params.insert("created".into(), DataValue::from(event.created_at.as_str()));
 
-    db.run_script(
+    run_script_guarded(
+        db,
         permission_event_put_script(),
         params,
         ScriptMutability::Mutable,
-    )
-    .map_err(|e| anyhow::anyhow!("insert permission_runtime_events failed: {e}"))?;
+        "insert permission_runtime_events failed",
+    )?;
     Ok(())
 }
 
@@ -130,13 +133,13 @@ pub fn get_permission_runtime_event(
 ) -> Result<Option<PermissionRuntimeEventRecord>> {
     let mut params = BTreeMap::new();
     params.insert("eid".into(), DataValue::from(event_id));
-    let result = db
-        .run_script(
-            permission_event_query("event_id = $eid"),
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("get permission_runtime_event failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        permission_event_query("event_id = $eid"),
+        params,
+        ScriptMutability::Immutable,
+        "get permission_runtime_event failed",
+    )?;
     Ok(result.rows.first().map(|row| row_to_permission_event(row)))
 }
 
@@ -146,13 +149,13 @@ pub fn list_permission_runtime_events_by_session(
 ) -> Result<Vec<PermissionRuntimeEventRecord>> {
     let mut params = BTreeMap::new();
     params.insert("session".into(), DataValue::from(session_id));
-    let result = db
-        .run_script(
-            permission_event_query("session_id = $session"),
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list permission_runtime_events by session failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        permission_event_query("session_id = $session"),
+        params,
+        ScriptMutability::Immutable,
+        "list permission_runtime_events by session failed",
+    )?;
     Ok(sorted(
         result.rows.iter().map(|row| row_to_permission_event(row)),
     ))
@@ -161,13 +164,13 @@ pub fn list_permission_runtime_events_by_session(
 pub fn list_permission_runtime_events(
     db: &DbInstance,
 ) -> Result<Vec<PermissionRuntimeEventRecord>> {
-    let result = db
-        .run_script(
-            permission_event_query("all"),
-            BTreeMap::new(),
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list permission_runtime_events failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        permission_event_query("all"),
+        BTreeMap::new(),
+        ScriptMutability::Immutable,
+        "list permission_runtime_events failed",
+    )?;
     Ok(sorted(
         result.rows.iter().map(|row| row_to_permission_event(row)),
     ))
@@ -179,13 +182,13 @@ pub fn list_permission_runtime_events_by_decision(
 ) -> Result<Vec<PermissionRuntimeEventRecord>> {
     let mut params = BTreeMap::new();
     params.insert("decision".into(), DataValue::from(decision));
-    let result = db
-        .run_script(
-            permission_event_query("decision = $decision"),
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list permission_runtime_events by decision failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        permission_event_query("decision = $decision"),
+        params,
+        ScriptMutability::Immutable,
+        "list permission_runtime_events by decision failed",
+    )?;
     Ok(sorted(
         result.rows.iter().map(|row| row_to_permission_event(row)),
     ))

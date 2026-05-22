@@ -113,7 +113,7 @@ fn open_learning_db(path: &std::path::Path) -> Result<DbInstance> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    DbInstance::new("sqlite", &path_str, "").map_err(|e| anyhow::anyhow!("open learning db: {e}"))
+    archon_learning::cozo_guard::open_sqlite_guarded(&path_str, "open learning db")
 }
 
 #[cfg(test)]

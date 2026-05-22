@@ -98,7 +98,10 @@ fn open_governed_learning_db(working_dir: &std::path::Path) -> Option<Arc<cozo::
     if let Some(parent) = db_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    match cozo::DbInstance::new("sqlite", &db_path, "") {
+    match archon_learning::cozo_guard::open_sqlite_guarded(
+        db_path.to_string_lossy().as_ref(),
+        "open governed learning db",
+    ) {
         Ok(db) => {
             if let Err(e) = archon_learning::schema::ensure_learning_schema(&db) {
                 tracing::warn!(

@@ -4,6 +4,8 @@ use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability};
 use serde::{Deserialize, Serialize};
 
+use crate::cozo_guard::run_script_guarded;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ProviderRuntimeStatusSnapshotRecord {
     pub status_id: String,
@@ -138,8 +140,13 @@ pub fn insert_provider_runtime_status_snapshot(
         DataValue::from(status.observed_at.as_str()),
     );
 
-    db.run_script(status_put_script(), params, ScriptMutability::Mutable)
-        .map_err(|e| anyhow::anyhow!("insert provider_runtime_status_snapshots failed: {e}"))?;
+    run_script_guarded(
+        db,
+        status_put_script(),
+        params,
+        ScriptMutability::Mutable,
+        "insert provider_runtime_status_snapshots failed",
+    )?;
     Ok(())
 }
 
@@ -149,13 +156,13 @@ pub fn get_provider_runtime_status_snapshot(
 ) -> Result<Option<ProviderRuntimeStatusSnapshotRecord>> {
     let mut params = BTreeMap::new();
     params.insert("sid".into(), DataValue::from(status_id));
-    let result = db
-        .run_script(
-            status_query("status_id = $sid"),
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("get provider_runtime_status_snapshot failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        status_query("status_id = $sid"),
+        params,
+        ScriptMutability::Immutable,
+        "get provider_runtime_status_snapshot failed",
+    )?;
     Ok(result.rows.first().map(|row| row_to_status(row)))
 }
 
@@ -165,13 +172,13 @@ pub fn list_provider_runtime_status_snapshots(
 ) -> Result<Vec<ProviderRuntimeStatusSnapshotRecord>> {
     let mut params = BTreeMap::new();
     params.insert("provider".into(), DataValue::from(provider_id));
-    let result = db
-        .run_script(
-            status_query("provider_id = $provider"),
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list provider_runtime_status_snapshots failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        status_query("provider_id = $provider"),
+        params,
+        ScriptMutability::Immutable,
+        "list provider_runtime_status_snapshots failed",
+    )?;
     let mut statuses: Vec<_> = result.rows.iter().map(|row| row_to_status(row)).collect();
     statuses.sort_by(|a, b| b.observed_at.cmp(&a.observed_at));
     Ok(statuses)

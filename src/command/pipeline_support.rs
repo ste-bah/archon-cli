@@ -277,7 +277,10 @@ fn open_pipeline_learning_db_at(cwd: &Path, db_path: &Path) -> Option<Arc<cozo::
     if let Some(parent) = db_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let db = match cozo::DbInstance::new("sqlite", db_path.to_str().unwrap_or(""), "") {
+    let db = match archon_learning::cozo_guard::open_sqlite_guarded(
+        db_path.to_str().unwrap_or(""),
+        "open pipeline learning db",
+    ) {
         Ok(db) => db,
         Err(e) => {
             tracing::warn!(error = %e, "pipeline: learning DB unavailable");

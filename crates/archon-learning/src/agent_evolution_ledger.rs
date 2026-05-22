@@ -4,6 +4,8 @@ use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability};
 use serde::{Deserialize, Serialize};
 
+use crate::cozo_guard::run_script_guarded;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct AgentPerformanceLedgerRecord {
     pub event_id: String,
@@ -207,8 +209,13 @@ pub fn insert_agent_performance_ledger_record(
         DataValue::from(record.created_at.as_str()),
     );
 
-    db.run_script(ledger_put_script(), params, ScriptMutability::Mutable)
-        .map_err(|e| anyhow::anyhow!("insert agent_performance_ledger failed: {e}"))?;
+    run_script_guarded(
+        db,
+        ledger_put_script(),
+        params,
+        ScriptMutability::Mutable,
+        "insert agent_performance_ledger failed",
+    )?;
     Ok(())
 }
 
@@ -218,13 +225,13 @@ pub fn get_agent_performance_ledger_record(
 ) -> Result<Option<AgentPerformanceLedgerRecord>> {
     let mut params = BTreeMap::new();
     params.insert("eid".into(), DataValue::from(event_id));
-    let result = db
-        .run_script(
-            ledger_query("event_id = $eid"),
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("get agent_performance_ledger failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        ledger_query("event_id = $eid"),
+        params,
+        ScriptMutability::Immutable,
+        "get agent_performance_ledger failed",
+    )?;
     Ok(result.rows.first().map(|row| row_to_record(row)))
 }
 
@@ -234,13 +241,13 @@ pub fn list_agent_performance_ledger_by_agent(
 ) -> Result<Vec<AgentPerformanceLedgerRecord>> {
     let mut params = BTreeMap::new();
     params.insert("agent".into(), DataValue::from(agent_type));
-    let result = db
-        .run_script(
-            ledger_query("agent_type = $agent"),
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list agent_performance_ledger failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        ledger_query("agent_type = $agent"),
+        params,
+        ScriptMutability::Immutable,
+        "list agent_performance_ledger failed",
+    )?;
     let mut records: Vec<_> = result.rows.iter().map(|row| row_to_record(row)).collect();
     records.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     Ok(records)

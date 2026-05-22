@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability};
 
+use crate::cozo_guard::run_script_guarded;
 use crate::runtime_models::ProviderRuntimeEventRecord;
 
 pub fn insert_provider_runtime_event(
@@ -61,7 +62,8 @@ pub fn insert_provider_runtime_event(
     );
     params.insert("created".into(), DataValue::from(event.created_at.as_str()));
 
-    db.run_script(
+    run_script_guarded(
+        db,
         "?[event_id, provider_id, profile_id, model_id, runtime_mode, \
          event_type, severity, reason_code, message, retry_count, \
          fallback_from, fallback_to, request_id, run_id, pipeline_id, \
@@ -74,8 +76,8 @@ pub fn insert_provider_runtime_event(
          pipeline_id, raw_redacted_json, created_at }",
         params,
         ScriptMutability::Mutable,
-    )
-    .map_err(|e| anyhow::anyhow!("insert provider_runtime_events failed: {e}"))?;
+        "insert provider_runtime_events failed",
+    )?;
 
     Ok(())
 }
@@ -87,13 +89,13 @@ pub fn get_provider_runtime_event(
     let mut params = BTreeMap::new();
     params.insert("eid".into(), DataValue::from(event_id));
 
-    let result = db
-        .run_script(
-            provider_runtime_event_query("event_id = $eid"),
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("get provider_runtime_event failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        provider_runtime_event_query("event_id = $eid"),
+        params,
+        ScriptMutability::Immutable,
+        "get provider_runtime_event failed",
+    )?;
 
     Ok(result.rows.first().map(|row| row_to_provider_event(row)))
 }
@@ -105,19 +107,22 @@ pub fn list_provider_runtime_events(
     let result = if let Some(provider_id) = provider_id {
         let mut params = BTreeMap::new();
         params.insert("pid".into(), DataValue::from(provider_id));
-        db.run_script(
+        run_script_guarded(
+            db,
             provider_runtime_event_query("provider_id = $pid"),
             params,
             ScriptMutability::Immutable,
+            "list provider_runtime_events failed",
         )
     } else {
-        db.run_script(
+        run_script_guarded(
+            db,
             provider_runtime_event_query("true"),
             Default::default(),
             ScriptMutability::Immutable,
+            "list provider_runtime_events failed",
         )
-    }
-    .map_err(|e| anyhow::anyhow!("list provider_runtime_events failed: {e}"))?;
+    }?;
 
     let mut events: Vec<_> = result
         .rows

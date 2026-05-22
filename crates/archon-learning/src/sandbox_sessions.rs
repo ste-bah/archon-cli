@@ -4,6 +4,8 @@ use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability};
 use serde::{Deserialize, Serialize};
 
+use crate::cozo_guard::run_script_guarded;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SandboxSessionRecord {
     pub sandbox_session_id: String,
@@ -142,8 +144,13 @@ pub fn insert_sandbox_session(db: &DbInstance, session: &SandboxSessionRecord) -
         DataValue::from(session.updated_at.as_str()),
     );
 
-    db.run_script(session_put_script(), params, ScriptMutability::Mutable)
-        .map_err(|e| anyhow::anyhow!("insert sandbox_sessions failed: {e}"))?;
+    run_script_guarded(
+        db,
+        session_put_script(),
+        params,
+        ScriptMutability::Mutable,
+        "insert sandbox_sessions failed",
+    )?;
     Ok(())
 }
 
@@ -153,13 +160,13 @@ pub fn get_sandbox_session(
 ) -> Result<Option<SandboxSessionRecord>> {
     let mut params = BTreeMap::new();
     params.insert("sid".into(), DataValue::from(sandbox_session_id));
-    let result = db
-        .run_script(
-            session_query("sandbox_session_id = $sid"),
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("get sandbox_session failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        session_query("sandbox_session_id = $sid"),
+        params,
+        ScriptMutability::Immutable,
+        "get sandbox_session failed",
+    )?;
     Ok(result.rows.first().map(|row| row_to_session(row)))
 }
 
@@ -169,26 +176,26 @@ pub fn list_sandbox_sessions_by_status(
 ) -> Result<Vec<SandboxSessionRecord>> {
     let mut params = BTreeMap::new();
     params.insert("status".into(), DataValue::from(status));
-    let result = db
-        .run_script(
-            session_query("status = $status"),
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list sandbox_sessions failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        session_query("status = $status"),
+        params,
+        ScriptMutability::Immutable,
+        "list sandbox_sessions failed",
+    )?;
     let mut sessions: Vec<_> = result.rows.iter().map(|row| row_to_session(row)).collect();
     sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     Ok(sessions)
 }
 
 pub fn list_sandbox_sessions(db: &DbInstance) -> Result<Vec<SandboxSessionRecord>> {
-    let result = db
-        .run_script(
-            session_query("all"),
-            Default::default(),
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list sandbox_sessions failed: {e}"))?;
+    let result = run_script_guarded(
+        db,
+        session_query("all"),
+        Default::default(),
+        ScriptMutability::Immutable,
+        "list sandbox_sessions failed",
+    )?;
     let mut sessions: Vec<_> = result.rows.iter().map(|row| row_to_session(row)).collect();
     sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     Ok(sessions)

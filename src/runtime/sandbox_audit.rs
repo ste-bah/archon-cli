@@ -241,8 +241,7 @@ fn open_learning_db() -> anyhow::Result<DbInstance> {
         std::fs::create_dir_all(parent)?;
     }
     let path_str = path.to_string_lossy().to_string();
-    let db = DbInstance::new("sqlite", &path_str, "")
-        .map_err(|error| anyhow::anyhow!("open learning db: {error}"))?;
+    let db = archon_learning::cozo_guard::open_sqlite_guarded(&path_str, "open learning db")?;
     archon_learning::schema::ensure_learning_schema(&db)?;
     Ok(db)
 }
