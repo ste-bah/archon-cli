@@ -17,9 +17,35 @@ impl Agent {
         let mut allowed: Vec<PreflightResult> = Vec::new();
 
         for tool in pending_tools {
+            // Deny rules are authoritative even when a tool name is unknown.
+            // Check them before registry lookup so policy denials produce a
+            // denial audit instead of being masked as "Unknown tool".
+            let perm_mode = {
+                let mode = self.config.permission_mode.lock().await;
+                mode.clone()
+            };
+            let mut denial_reason = format!("mode={perm_mode}");
+            let description = format!("use {}", tool.name);
+            let checker_decision = self.permission_checker_decision(
+                &perm_mode,
+                &tool.name,
+                &tool.input_json,
+                &description,
+            );
+            if let PermissionDecision::Deny(reason) = &checker_decision {
+                self.deny_preflight_tool(tool, &perm_mode, reason).await;
+                continue;
+            }
+
             let tool_arc = match self.registry.lookup(&tool.name) {
                 Some(t) => t,
                 None => {
+                    if self
+                        .handle_unknown_tool_prelookup_hook_denial(tool, &perm_mode)
+                        .await
+                    {
+                        continue;
+                    }
                     let result = ToolResult::error(format!(
                         "Unknown tool: '{}'. Available tools: {}",
                         tool.name,
@@ -65,18 +91,6 @@ impl Agent {
             };
 
             // --- Permission check ---
-            let perm_mode = {
-                let mode = self.config.permission_mode.lock().await;
-                mode.clone()
-            };
-            let mut denial_reason = format!("mode={perm_mode}");
-            let description = format!("use {}", tool.name);
-            let checker_decision = self.permission_checker_decision(
-                &perm_mode,
-                &tool.name,
-                &tool.input_json,
-                &description,
-            );
             let parsed_mode = perm_mode.parse::<PermissionMode>().unwrap_or_default();
             let tool_allowed = match checker_decision {
                 PermissionDecision::Allow => {
@@ -92,10 +106,8 @@ impl Agent {
                     }
                 }
                 PermissionDecision::Deny(reason) => {
-                    denial_reason = reason.clone();
-                    self.fire_permission_denied_hook(tool, &perm_mode, &reason)
-                        .await;
-                    false
+                    self.deny_preflight_tool(tool, &perm_mode, &reason).await;
+                    continue;
                 }
             };
 
@@ -300,6 +312,81 @@ impl Agent {
         }
 
         allowed
+    }
+
+    async fn deny_preflight_tool(&mut self, tool: &PendingToolCall, mode: &str, reason: &str) {
+        self.fire_permission_denied_hook(tool, mode, reason).await;
+        {
+            let mut log = self.denial_log.lock().await;
+            log.record(&tool.name, reason);
+        }
+        let denied_result = ToolResult::error(format!(
+            "Permission denied for tool '{}'. Current mode: {}. Reason: {}",
+            tool.name, mode, reason
+        ));
+        self.send_event(AgentEvent::ToolCallComplete {
+            name: tool.name.clone(),
+            id: tool.id.clone(),
+            result: denied_result.clone(),
+        })
+        .await;
+        self.state
+            .add_tool_result(&tool.id, &denied_result.content, true);
+    }
+
+    async fn handle_unknown_tool_prelookup_hook_denial(
+        &mut self,
+        tool: &PendingToolCall,
+        mode: &str,
+    ) -> bool {
+        let Some(ref registry) = self.hook_registry else {
+            return false;
+        };
+        let input = serde_json::from_str::<serde_json::Value>(tool.input_json.trim())
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let hook_agg = registry
+            .execute_hooks(
+                crate::hooks::HookEvent::PreToolUse,
+                serde_json::json!({
+                    "hook_event": "PreToolUse",
+                    "tool_name": tool.name,
+                    "tool_input": input,
+                }),
+                &self.config.working_dir,
+                &self.config.session_id,
+            )
+            .await;
+
+        if hook_agg.is_blocked() {
+            let reason = hook_agg
+                .block_reason()
+                .unwrap_or_else(|| "hook blocked".to_owned());
+            let result = ToolResult::error(format!("Hook blocked: {reason}"));
+            self.send_event(AgentEvent::ToolCallComplete {
+                name: tool.name.clone(),
+                id: tool.id.clone(),
+                result: result.clone(),
+            })
+            .await;
+            self.state
+                .add_tool_result(&tool.id, &result.content, result.is_error);
+            return true;
+        }
+
+        if matches!(
+            hook_agg.permission_behavior,
+            Some(crate::hooks::PermissionBehavior::Deny)
+        ) {
+            let reason = hook_agg
+                .permission_decision_reason
+                .as_deref()
+                .unwrap_or("hook denied permission")
+                .to_string();
+            self.deny_preflight_tool(tool, mode, &reason).await;
+            return true;
+        }
+
+        false
     }
 
     async fn auto_mode_tool_allowed(
