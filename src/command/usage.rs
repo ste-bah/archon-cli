@@ -152,12 +152,8 @@ pub(crate) struct UsageSnapshot {
 /// resolves to `/usage`. All other commands leave
 /// `usage_snapshot = None` to avoid unnecessary lock traffic.
 ///
-/// Rates are hardcoded (`$3 / Mtok input`, `$15 / Mtok output`) — same
-/// drift-reconcile decision as the shipped body and the AGS-809 /cost
-/// builder. The spec variant with `provider_registry.price_table()` +
-/// multi-model breakdown is SCOPE-HELD per orchestrator "shipped wins"
-/// rule.
 pub(crate) async fn build_usage_snapshot(slash_ctx: &SlashCommandContext) -> UsageSnapshot {
+    let active_model = active_usage_model(slash_ctx).await;
     // Single mutex acquisition. Every derived value is computed INSIDE
     // this scope so the guard drops before the builder returns.
     let stats = slash_ctx.session_stats.lock().await;
@@ -165,9 +161,16 @@ pub(crate) async fn build_usage_snapshot(slash_ctx: &SlashCommandContext) -> Usa
     let input_tokens = stats.input_tokens;
     let output_tokens = stats.output_tokens;
     let turn_count = stats.turn_count;
-    let input_cost = input_tokens as f64 * 3.0 / 1_000_000.0;
-    let output_cost = output_tokens as f64 * 15.0 / 1_000_000.0;
-    let total_cost = input_cost + output_cost;
+    let total_cost = archon_core::cost::estimate_session_cost_usd(
+        &active_model,
+        input_tokens,
+        output_tokens,
+        stats.cache_stats.cache_creation_tokens,
+        stats.cache_stats.cache_read_tokens,
+    );
+    let output_cost =
+        archon_core::cost::estimate_turn_cost_usd(&active_model, 0, output_tokens, 0, 0);
+    let input_cost = (total_cost - output_cost).max(0.0);
 
     // REQUIRED: format_for_cost() must be called while we still hold
     // the guard because CacheStats lives inside SessionStats. The
@@ -184,6 +187,15 @@ pub(crate) async fn build_usage_snapshot(slash_ctx: &SlashCommandContext) -> Usa
         cache_stats_line,
     }
     // Guard drops here — lock released before return.
+}
+
+async fn active_usage_model(slash_ctx: &SlashCommandContext) -> String {
+    let override_model = slash_ctx.model_override_shared.lock().await;
+    if override_model.is_empty() {
+        slash_ctx.default_model.clone()
+    } else {
+        override_model.clone()
+    }
 }
 
 // ---------------------------------------------------------------------------

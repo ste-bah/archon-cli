@@ -41,9 +41,13 @@ pub(super) async fn handle_tui_event(
             cache_read_tokens,
         } => {
             app.on_turn_complete();
-            // Anthropic pricing: $3/MTok input, $15/MTok output
-            app.status.cost +=
-                (input_tokens as f64 * 3.0 + output_tokens as f64 * 15.0) / 1_000_000.0;
+            app.status.cost += archon_core::cost::estimate_turn_cost_usd(
+                &app.status.model,
+                input_tokens,
+                output_tokens,
+                cache_creation_tokens,
+                cache_read_tokens,
+            );
             // Absolute assignment: show current-turn context pressure, not
             // cumulative session total. Full context = billable input +
             // cache_creation + cache_read — matches context_input_tokens from

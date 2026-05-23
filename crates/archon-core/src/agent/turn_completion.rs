@@ -8,6 +8,7 @@ impl Agent {
         turn_output_tokens: u64,
         turn_cache_creation: u64,
         turn_cache_read: u64,
+        active_model: &str,
     ) {
         // No tool calls -- turn is complete
         // Update shared session stats for /status and /cost
@@ -16,13 +17,17 @@ impl Agent {
             stats.input_tokens = self.state.total_input_tokens;
             stats.output_tokens = self.state.total_output_tokens;
             stats.turn_count = self.turn_number;
-            // Rough cost estimate: $3/MTok input, $15/MTok output (Sonnet pricing)
-            stats.session_cost =
-                (stats.input_tokens as f64 * 3.0 + stats.output_tokens as f64 * 15.0) / 1_000_000.0;
             // Update cache statistics from this turn
             stats
                 .cache_stats
                 .update(turn_cache_creation, turn_cache_read, turn_input_tokens);
+            stats.session_cost = crate::cost::estimate_session_cost_usd(
+                active_model,
+                stats.input_tokens,
+                stats.output_tokens,
+                stats.cache_stats.cache_creation_tokens,
+                stats.cache_stats.cache_read_tokens,
+            );
         }
 
         // Apply turn completion to inner voice (energy decay, turn counter).

@@ -235,9 +235,10 @@ pub(super) async fn finish(
             ledger_context: super::agent_ledger::context(
                 session_id,
                 agent_def,
-                agent_model_for_ledger,
+                agent_model_for_ledger.clone(),
                 provider_name,
             ),
+            selected_model: agent_model_for_ledger,
         },
     );
 

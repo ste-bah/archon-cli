@@ -718,6 +718,7 @@ impl Agent {
                 turn_output_tokens,
                 turn_cache_creation,
                 turn_cache_read,
+                &active_model,
             )
             .await;
 

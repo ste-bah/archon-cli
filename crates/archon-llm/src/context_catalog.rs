@@ -288,6 +288,18 @@ mod tests {
     }
 
     #[test]
+    fn bundled_catalog_resolves_deepseek_anthropic_route() {
+        let catalog = ContextCatalog::bundled();
+
+        let entry = catalog
+            .lookup("anthropic", "deepseek-v4-pro[1m]", &[], Some("clean"))
+            .expect("deepseek anthropic entry");
+
+        assert_eq!(entry.context_window, 1_000_000);
+        assert_eq!(entry.max_output_tokens, Some(384_000));
+    }
+
+    #[test]
     fn workspace_context_catalog_overrides_bundled() {
         let dir = tempfile::tempdir().expect("tempdir");
         let archon_dir = dir.path().join(".archon");

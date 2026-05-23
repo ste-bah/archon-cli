@@ -76,3 +76,28 @@ source = "bundled"
 [providers.openai.models."o3-mini"]
 context_window = 200_000
 source = "bundled"
+
+[providers.anthropic.models."deepseek-v4-pro"]
+context_window = 1_000_000
+max_output_tokens = 384_000
+source = "deepseek-docs"
+
+[providers.anthropic.models."deepseek-v4-pro[1m]"]
+context_window = 1_000_000
+max_output_tokens = 384_000
+source = "deepseek-docs"
+
+[providers.deepseek.models."deepseek-v4-pro"]
+context_window = 1_000_000
+max_output_tokens = 384_000
+source = "deepseek-docs"
+
+[providers.deepseek.models."deepseek-v4-pro[1m]"]
+context_window = 1_000_000
+max_output_tokens = 384_000
+source = "deepseek-docs"
+
+[providers.deepseek.models."deepseek-v4-flash"]
+context_window = 1_000_000
+max_output_tokens = 384_000
+source = "deepseek-docs"

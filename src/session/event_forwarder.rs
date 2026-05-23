@@ -20,6 +20,7 @@ pub(super) struct AgentEventForwarderConfig {
     pub permission_events_db: Option<Arc<cozo::DbInstance>>,
     pub agent_ledger_db: Option<Arc<cozo::DbInstance>>,
     pub ledger_context: crate::runtime::agent_ledger_events::AgentLedgerContext,
+    pub selected_model: String,
 }
 
 pub(super) fn spawn_agent_event_forwarder(
@@ -40,6 +41,7 @@ pub(super) fn spawn_agent_event_forwarder(
         permission_events_db,
         agent_ledger_db,
         ledger_context,
+        selected_model,
     } = config;
     observability::spawn_named("agent-event-forwarder", async move {
         let mut coalescer = EventCoalescer::with_defaults();
@@ -116,6 +118,7 @@ pub(super) fn spawn_agent_event_forwarder(
                             &permission_mode,
                             &agent_ledger_db,
                             &ledger_context,
+                            &selected_model,
                         )
                         .await
                     }
@@ -194,10 +197,17 @@ async fn handle_turn_complete(
     permission_mode: &Arc<tokio::sync::Mutex<String>>,
     agent_ledger_db: &Option<Arc<cozo::DbInstance>>,
     ledger_context: &crate::runtime::agent_ledger_events::AgentLedgerContext,
+    selected_model: &str,
 ) -> TuiEvent {
     let estimated_cost = {
         let stats = session_stats.lock().await;
-        (stats.input_tokens as f64 * 3.0 + stats.output_tokens as f64 * 15.0) / 1_000_000.0
+        archon_core::cost::estimate_session_cost_usd(
+            selected_model,
+            stats.input_tokens,
+            stats.output_tokens,
+            stats.cache_stats.cache_creation_tokens,
+            stats.cache_stats.cache_read_tokens,
+        )
     };
 
     match cost_alert_state.check_cost(estimated_cost, cost_config) {
