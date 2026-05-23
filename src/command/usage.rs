@@ -81,16 +81,6 @@
 //! the /usage dispatch site. Mirrors every prior B-series SNAPSHOT
 //! migration.
 //!
-//! # R7 TEMPORARY DOUBLE-FIRE NOTE (Gates 1-4 scope)
-//!
-//! For Gates 1-4 of this ticket the legacy match arm at
-//! `src/command/slash.rs:315-336` is LEFT INTACT. Because
-//! `dispatcher.dispatch` fires the handler BEFORE the recognized-
-//! command short-circuit allows fall-through into the match, `/usage`
-//! will fire `UsageHandler` AND the legacy arm on every input. Gate 5
-//! (live-smoke + legacy-arm deletion) removes the double fire in
-//! production. Mirrors every prior B-series migration.
-
 use archon_tui::app::TuiEvent;
 
 use crate::command::registry::{CommandContext, CommandHandler};
@@ -126,11 +116,9 @@ pub(crate) struct UsageSnapshot {
     /// `SessionStats::turn_count` inside the mutex guard. This field
     /// is /usage-specific — /cost does not surface it.
     pub(crate) turn_count: u64,
-    /// Pre-computed input cost = `input_tokens * 3.0 / 1_000_000.0`.
-    /// Matches the shipped per-million rate at slash.rs:318.
+    /// Provider-aware pre-computed input/cache cost.
     pub(crate) input_cost: f64,
-    /// Pre-computed output cost = `output_tokens * 15.0 / 1_000_000.0`.
-    /// Matches the shipped per-million rate at slash.rs:319.
+    /// Provider-aware pre-computed output cost.
     pub(crate) output_cost: f64,
     /// `input_cost + output_cost` — the "Total cost" tail line.
     pub(crate) total_cost: f64,
