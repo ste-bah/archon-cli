@@ -72,6 +72,14 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         notes: "Document ingest/search/inspect routes through persisted document state.",
     },
     CommandSurfaceRow {
+        cli: "archon video ...",
+        slash_primary: Some("video"),
+        tui_surface: "CLI mirror",
+        status: SurfaceStatus::Done,
+        source_of_truth: "src/command/video.rs + crates/archon-video",
+        notes: "Video ingest/status/inspect/frame/transcript/summary commands are mirrored.",
+    },
+    CommandSurfaceRow {
         cli: "archon kb ...",
         slash_primary: Some("kb"),
         tui_surface: "CLI mirror",

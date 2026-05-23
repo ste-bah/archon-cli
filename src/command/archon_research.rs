@@ -1,6 +1,6 @@
 //! `/archon-research` slash-command handler.
 //!
-//! Spawns the 46-agent PhD research pipeline via `tokio::spawn` wrapping
+//! Spawns the 47-agent PhD research pipeline via `tokio::spawn` wrapping
 //! `archon_pipeline::runner::run_pipeline_audited()`. Per-agent progress events
 //! are streamed to the TUI via the facade's `tui_sender`.
 
@@ -21,7 +21,7 @@ impl CommandHandler for ArchonResearchHandler {
     fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         if args.is_empty() {
             ctx.emit(TuiEvent::TextDelta(
-                "\n/archon-research — run the 46-agent PhD research pipeline.\n\n\
+                "\n/archon-research — run the 47-agent PhD research pipeline.\n\n\
                  Usage: /archon-research <research topic>\n\n\
                  Example: /archon-research impact of transformer architectures on NLP\n"
                     .to_string(),
@@ -216,7 +216,7 @@ impl CommandHandler for ArchonResearchHandler {
     }
 
     fn description(&self) -> &str {
-        "Run the 46-agent PhD research pipeline on a topic"
+        "Run the 47-agent PhD research pipeline on a topic"
     }
 }
 

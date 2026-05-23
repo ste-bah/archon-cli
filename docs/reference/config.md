@@ -412,9 +412,9 @@ preflight_safety_margin = 0.05
 output_reserve_tokens = 8192
 preserve_recent_turns = 3
 manual_compact_force_strategy = "micro"
-# rate_limit_pressure_tokens = 250000
-# rate_limit_pressure_body_bytes = 1000000
-# large_request_retry_body_bytes = 1000000
+rate_limit_pressure_tokens = 120000
+rate_limit_pressure_body_bytes = 320000
+large_request_retry_body_bytes = 320000
 prompt_cache = true
 prompt_cache_mode = "explicit"
 prompt_cache_ttl = "5m"
@@ -429,9 +429,9 @@ prompt_cache_conversation = false
 | `output_reserve_tokens` | `8192` | Reserved headroom for the next assistant response; prompt budgeting subtracts this before applying the threshold. |
 | `preserve_recent_turns` | `3` | Always keep the last N turns verbatim across compaction. Keeps the immediate working context intact while older turns get summarized. |
 | `manual_compact_force_strategy` | `"micro"` | Strategy used by `/compact force` when the session is below the normal threshold. Bare `/compact` remains thresholded and behaves like `/compact auto`. |
-| `rate_limit_pressure_tokens` | unset | Optional proactive trigger for very large per-request token pressure. Leave unset unless calibrated from `/context`/logs after fixed prompt overhead is measured. |
-| `rate_limit_pressure_body_bytes` | unset | Optional proactive trigger for serialized request-body pressure. Set above the measured first-turn body size so fresh sessions do not immediately compact. |
-| `large_request_retry_body_bytes` | unset (`1_000_000` runtime fallback) | Requests at or above this serialized-body size do not blindly repeat identical provider 429 retries; Archon first tries one scoped compaction where supported. |
+| `rate_limit_pressure_tokens` | `120000` | Proactive trigger for very large per-request token pressure. This protects responsiveness even when the model advertises a very large context window. |
+| `rate_limit_pressure_body_bytes` | `320000` | Proactive trigger for serialized request-body pressure. Set above normal first-turn overhead, but below giant retained tool-output sessions. |
+| `large_request_retry_body_bytes` | `320000` | Requests at or above this serialized-body size do not blindly repeat identical provider 429 retries; Archon first tries one scoped compaction where supported. |
 | `prompt_cache` | `true` | Set Anthropic's `cache_control` flag on static blocks (system prompt, tool catalog, memory briefing). Cache hits are billed at a fraction of input cost; reduces session cost dramatically over long conversations. Disable only if you're hitting cache-correctness bugs. |
 | `prompt_cache_mode` | `"explicit"` | `"explicit"` uses cache breakpoints on stable prompt blocks; `"automatic"` strips explicit hints; `"hybrid"` keeps explicit hints and leaves room for provider-specific automatic caching where supported. |
 | `prompt_cache_ttl` | `"5m"` | Cache lifetime hint for providers that support TTLs. Set `"1h"` only when you accept the higher cache-write cost. |

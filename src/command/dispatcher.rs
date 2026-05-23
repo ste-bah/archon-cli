@@ -630,7 +630,7 @@ mod tests {
     /// subcommands and slash mirrors) → 78 (v0.1.40 Codex auth: /auth
     /// + /chat primaries for the OpenAI-Codex provider surface) → 80
     /// (v1.2.0 reasoning quality: /reasoning + /briefing).
-    const EXPECTED_PRIMARY_COUNT: usize = 80;
+    const EXPECTED_PRIMARY_COUNT: usize = 81;
 
     /// Drain every currently-queued event from `rx` using `try_recv`
     /// until the channel reports empty, returning the drained events

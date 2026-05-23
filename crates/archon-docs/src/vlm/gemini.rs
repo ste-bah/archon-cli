@@ -140,14 +140,15 @@ impl GeminiVlmProvider {
         }
     }
 
-    fn generate_once(&self, image_bytes: &[u8]) -> Result<String, DocsError> {
+    fn generate_once(&self, image_bytes: &[u8], prompt: Option<&str>) -> Result<String, DocsError> {
         self.rate_limiter.acquire()?;
+        let prompt_text = prompt.unwrap_or(IMAGE_DESCRIPTION_PROMPT);
         let mime = detect_mime(image_bytes)?;
         let url = self.endpoint_url(&format!("models/{}:generateContent", self.model))?;
         let body = json!({
             "contents": [{
                 "parts": [
-                    {"text": IMAGE_DESCRIPTION_PROMPT},
+                    {"text": prompt_text},
                     {"inlineData": {"mimeType": mime, "data": STANDARD.encode(image_bytes)}}
                 ]
             }]
@@ -209,9 +210,13 @@ impl GeminiVlmProvider {
 }
 
 impl VlmDescriptionProvider for GeminiVlmProvider {
-    fn describe_image(&self, image_bytes: &[u8]) -> Result<String, DocsError> {
+    fn describe_image(
+        &self,
+        image_bytes: &[u8],
+        prompt: Option<&str>,
+    ) -> Result<String, DocsError> {
         retry_rate_limited(RateLimitRetry::vlm_default(self.retry_base_delay), || {
-            self.generate_once(image_bytes)
+            self.generate_once(image_bytes, prompt)
         })
     }
 }

@@ -293,7 +293,7 @@ dependencies = [
 
 [[package]]
 name = "archon-bench"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "archon-core",
  "archon-pipeline",
@@ -310,7 +310,7 @@ dependencies = [
 
 [[package]]
 name = "archon-cli-workspace"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "archon-completion",
@@ -336,6 +336,7 @@ dependencies = [
  "archon-session",
  "archon-tools",
  "archon-tui",
+ "archon-video",
  "archon-world-model",
  "async-trait",
  "base64 0.22.1",
@@ -370,7 +371,7 @@ dependencies = [
 
 [[package]]
 name = "archon-completion"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "archon-learning",
@@ -390,7 +391,7 @@ dependencies = [
 
 [[package]]
 name = "archon-consciousness"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -405,7 +406,7 @@ dependencies = [
 
 [[package]]
 name = "archon-constellation"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "archon-meaning",
  "chrono",
@@ -423,7 +424,7 @@ dependencies = [
 
 [[package]]
 name = "archon-context"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -435,7 +436,7 @@ dependencies = [
 
 [[package]]
 name = "archon-core"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -497,7 +498,7 @@ dependencies = [
 
 [[package]]
 name = "archon-docs"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "archon-llm",
@@ -526,7 +527,7 @@ dependencies = [
 
 [[package]]
 name = "archon-knowledge"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "archon-docs",
@@ -545,7 +546,7 @@ dependencies = [
 
 [[package]]
 name = "archon-leann"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -573,7 +574,7 @@ dependencies = [
 
 [[package]]
 name = "archon-learning"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "archon-policy",
@@ -589,7 +590,7 @@ dependencies = [
 
 [[package]]
 name = "archon-llm"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -632,7 +633,7 @@ dependencies = [
 
 [[package]]
 name = "archon-mcp"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "archon-tools",
@@ -662,7 +663,7 @@ dependencies = [
 
 [[package]]
 name = "archon-meaning"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "chrono",
  "cozo-ce",
@@ -677,7 +678,7 @@ dependencies = [
 
 [[package]]
 name = "archon-memory"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -698,7 +699,7 @@ dependencies = [
 
 [[package]]
 name = "archon-observability"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "axum",
@@ -723,7 +724,7 @@ dependencies = [
 
 [[package]]
 name = "archon-permissions"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "glob",
@@ -736,7 +737,7 @@ dependencies = [
 
 [[package]]
 name = "archon-pipeline"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -774,7 +775,7 @@ dependencies = [
 
 [[package]]
 name = "archon-plugin"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -792,7 +793,7 @@ dependencies = [
 
 [[package]]
 name = "archon-policy"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "dirs",
  "serde",
@@ -803,7 +804,7 @@ dependencies = [
 
 [[package]]
 name = "archon-provenance"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "chrono",
  "cozo-ce",
@@ -818,7 +819,7 @@ dependencies = [
 
 [[package]]
 name = "archon-reasoning-quality"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "blake3",
@@ -834,7 +835,7 @@ dependencies = [
 
 [[package]]
 name = "archon-sdk"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -862,7 +863,7 @@ dependencies = [
 
 [[package]]
 name = "archon-session"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -879,7 +880,7 @@ dependencies = [
 
 [[package]]
 name = "archon-test-support"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -893,7 +894,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tools"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "archon-leann",
@@ -935,7 +936,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tui"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -985,7 +986,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tui-test-support"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "criterion",
  "dashmap 5.5.3",
@@ -1000,8 +1001,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "archon-video"
+version = "1.3.3"
+dependencies = [
+ "anyhow",
+ "archon-docs",
+ "archon-knowledge",
+ "archon-llm",
+ "archon-policy",
+ "async-trait",
+ "chrono",
+ "cozo-ce",
+ "dirs",
+ "hex",
+ "image",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+ "which",
+ "whisper-rs",
+]
+
+[[package]]
 name = "archon-world-model"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "anyhow",
  "archon-llm",
@@ -1516,6 +1545,8 @@ dependencies = [
  "cexpr",
  "clang-sys",
  "itertools 0.13.0",
+ "log",
+ "prettyplease",
  "proc-macro2",
  "quote",
  "regex",
@@ -10321,6 +10352,28 @@ dependencies = [
  "env_home",
  "rustix 1.1.4",
  "winsafe",
+]
+
+[[package]]
+name = "whisper-rs"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2088172d00f936c348d6a72f488dc2660ab3f507263a195df308a3c2383229f6"
+dependencies = [
+ "whisper-rs-sys",
+]
+
+[[package]]
+name = "whisper-rs-sys"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6986c0fe081241d391f09b9a071fbcbb59720c3563628c3c829057cf69f2a56f"
+dependencies = [
+ "bindgen 0.72.1",
+ "cfg-if",
+ "cmake",
+ "fs_extra",
+ "semver",
 ]
 
 [[package]]

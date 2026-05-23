@@ -23,14 +23,15 @@ pub(crate) async fn apply_vlm_description(
 ) -> Result<(), DocsError> {
     let policy = policy.clone();
     let image_bytes = content_bytes.to_vec();
-    let vlm_result =
-        tokio::task::spawn_blocking(move || vlm::describe_registered_image(&policy, &image_bytes))
-            .await
-            .map_err(|e| DocsError::VlmProvider {
-                provider: "runtime".into(),
-                message: format!("VLM worker join failed: {e}"),
-                status_code: None,
-            })?;
+    let vlm_result = tokio::task::spawn_blocking(move || {
+        vlm::describe_registered_image(&policy, &image_bytes, None)
+    })
+    .await
+    .map_err(|e| DocsError::VlmProvider {
+        provider: "runtime".into(),
+        message: format!("VLM worker join failed: {e}"),
+        status_code: None,
+    })?;
 
     match vlm_result {
         Err(e) => {

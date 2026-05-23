@@ -317,5 +317,5 @@ If the run produced governed-learning events, review proposals before they auto-
 - [Custom agents](custom-agent-workflows.md) — extending the pipeline
 - [Adding an agent](../development/adding-an-agent.md) — agent definition format
 - [PRD-driven development](prd-driven-development.md) — full PRD → code arc that ends in `/archon-code`
-- [Research pipeline (`/archon-research`)](archon-research-pipeline.md) — sibling 46-agent pipeline for prose instead of code
+- [Research pipeline (`/archon-research`)](archon-research-pipeline.md) — sibling 47-agent pipeline for prose instead of code
 - [Game-theory pipeline (`/gametheory`)](gametheory-pipeline.md) — sibling pipeline for strategic situation analysis (Tier 1 fingerprint → routing → specialists → report)

@@ -94,7 +94,11 @@ pub(super) struct MockVlmProvider {
 }
 
 impl crate::vlm::VlmDescriptionProvider for MockVlmProvider {
-    fn describe_image(&self, _image_bytes: &[u8]) -> Result<String, DocsError> {
+    fn describe_image(
+        &self,
+        _image_bytes: &[u8],
+        _prompt: Option<&str>,
+    ) -> Result<String, DocsError> {
         Ok(self.description.to_string())
     }
 }
@@ -102,7 +106,11 @@ impl crate::vlm::VlmDescriptionProvider for MockVlmProvider {
 pub(super) struct FailingVlmProvider;
 
 impl crate::vlm::VlmDescriptionProvider for FailingVlmProvider {
-    fn describe_image(&self, _image_bytes: &[u8]) -> Result<String, DocsError> {
+    fn describe_image(
+        &self,
+        _image_bytes: &[u8],
+        _prompt: Option<&str>,
+    ) -> Result<String, DocsError> {
         Err(DocsError::OcrApi {
             message: "synthetic VLM outage".into(),
             status_code: None,
@@ -115,7 +123,11 @@ pub(super) struct FailsOnceVlmProvider {
 }
 
 impl crate::vlm::VlmDescriptionProvider for FailsOnceVlmProvider {
-    fn describe_image(&self, _image_bytes: &[u8]) -> Result<String, DocsError> {
+    fn describe_image(
+        &self,
+        _image_bytes: &[u8],
+        _prompt: Option<&str>,
+    ) -> Result<String, DocsError> {
         if self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
             return Err(DocsError::OcrApi {
                 message: "synthetic first-image VLM failure".into(),

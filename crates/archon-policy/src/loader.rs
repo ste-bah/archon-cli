@@ -4,6 +4,7 @@ use serde::Deserialize;
 
 use crate::errors::{PolicyError, Result};
 use crate::models::*;
+use crate::video::{RawVideoPolicy, apply_video};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PolicySource {
@@ -78,6 +79,7 @@ struct RawPolicy {
     world_model: Option<RawWorldModelPolicy>,
     web: Option<RawWebPolicy>,
     reasoning_quality: Option<RawReasoningQualityPolicy>,
+    video: Option<RawVideoPolicy>,
     docs: Option<RawDocsPolicy>,
 }
 
@@ -231,6 +233,9 @@ fn apply_raw(policy: &mut EffectivePolicy, root: RawPolicyRoot) {
         }
         if let Some(reasoning_quality) = raw.reasoning_quality {
             apply_reasoning_quality(&mut policy.reasoning_quality, reasoning_quality);
+        }
+        if let Some(video) = raw.video {
+            apply_video(&mut policy.video, video);
         }
         if let Some(docs) = raw.docs {
             if let Some(vlm) = docs.vlm {

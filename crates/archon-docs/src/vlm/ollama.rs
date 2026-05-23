@@ -112,14 +112,19 @@ impl OllamaVlmProvider {
 }
 
 impl VlmDescriptionProvider for OllamaVlmProvider {
-    fn describe_image(&self, image_bytes: &[u8]) -> Result<String, DocsError> {
+    fn describe_image(
+        &self,
+        image_bytes: &[u8],
+        prompt: Option<&str>,
+    ) -> Result<String, DocsError> {
+        let prompt_text = prompt.unwrap_or(IMAGE_DESCRIPTION_PROMPT);
         let url = format!("{}/api/chat", self.endpoint.trim_end_matches('/'));
         let image = STANDARD.encode(image_bytes);
         let body = json!({
             "model": self.model,
             "messages": [{
                 "role": "user",
-                "content": IMAGE_DESCRIPTION_PROMPT,
+                "content": prompt_text,
                 "images": [image],
             }],
             "stream": false,
@@ -237,12 +242,43 @@ mod tests {
             .await;
         let endpoint = server.uri();
         let text = tokio::task::spawn_blocking(move || {
-            provider(endpoint, "gemma4:e4b").describe_image(b"image-bytes")
+            provider(endpoint, "gemma4:e4b").describe_image(b"image-bytes", None)
         })
         .await
         .unwrap()
         .unwrap();
         assert_eq!(text, "chart slopes upward");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn describe_image_uses_prompt_override() {
+        let server = MockServer::start().await;
+        let encoded = STANDARD.encode(b"image-bytes");
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .and(body_json(json!({
+                "model": "gemma4:e4b",
+                "messages": [{
+                    "role": "user",
+                    "content": crate::vlm::VIDEO_FRAME_PROMPT,
+                    "images": [encoded],
+                }],
+                "stream": false,
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "message": {"content": "frame has a slide"}
+            })))
+            .mount(&server)
+            .await;
+        let endpoint = server.uri();
+        let text = tokio::task::spawn_blocking(move || {
+            provider(endpoint, "gemma4:e4b")
+                .describe_image(b"image-bytes", Some(crate::vlm::VIDEO_FRAME_PROMPT))
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(text, "frame has a slide");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -257,7 +293,7 @@ mod tests {
             .await;
         let endpoint = server.uri();
         let text = tokio::task::spawn_blocking(move || {
-            provider(endpoint, "gemma4:e4b").describe_image(b"png")
+            provider(endpoint, "gemma4:e4b").describe_image(b"png", None)
         })
         .await
         .unwrap()
@@ -275,7 +311,7 @@ mod tests {
             .await;
         let endpoint = server.uri();
         let err = tokio::task::spawn_blocking(move || {
-            provider(endpoint, "gemma4:e4b").describe_image(b"png")
+            provider(endpoint, "gemma4:e4b").describe_image(b"png", None)
         })
         .await
         .unwrap()

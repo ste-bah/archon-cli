@@ -63,6 +63,22 @@ For PDFs, `status` and `inspect` also show embedded images extracted, images
 skipped by the icon/decorator filter, image OCR runs/failures, image VLM
 descriptions/failures, and rendered page fallback counts.
 
+## Video Sources
+
+Video evidence uses the `archon video` namespace and lands in the same
+document/KB retrieval stack as ordinary files. Transcript, OCR, VLM, and summary
+evidence are stored as `doc_chunks`, with `video_chunk_timeref` preserving
+timecode provenance for `archon docs answer`.
+
+```bash
+archon video ingest ./lecture.mp4 --transcript ./lecture.vtt --frames none
+archon video transcript <video-id> --format srt
+archon video inspect <video-id>
+```
+
+See [Video Evidence Ingest](video.md) for transcript-only, ASR, YouTube,
+frame-extraction, policy, and compliance workflows.
+
 Then index and search:
 
 ```bash

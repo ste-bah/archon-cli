@@ -112,7 +112,7 @@ fn serialized_len(value: &impl serde::Serialize) -> usize {
 pub(crate) fn large_request_retry_body_bytes(config: &crate::config::ContextConfig) -> usize {
     config
         .large_request_retry_body_bytes
-        .unwrap_or(1_000_000)
+        .unwrap_or(320_000)
         .try_into()
         .unwrap_or(usize::MAX)
 }
@@ -180,6 +180,17 @@ mod tests {
         assert_eq!(
             breakdown.approx_tokens,
             approx_tokens_from_bytes(breakdown.total_body_bytes)
+        );
+    }
+
+    #[test]
+    fn large_request_retry_default_is_below_observed_freeze_size() {
+        let config = crate::config::ContextConfig::default();
+
+        assert_eq!(large_request_retry_body_bytes(&config), 320_000);
+        assert!(
+            large_request_retry_body_bytes(&config) < 636_725,
+            "issue #42 request should be treated as large"
         );
     }
 }

@@ -19,6 +19,7 @@ pub mod provenance;
 pub mod status;
 
 pub mod answer;
+pub mod answer_timecode;
 pub mod embed;
 pub mod rerank;
 pub mod retrieval;

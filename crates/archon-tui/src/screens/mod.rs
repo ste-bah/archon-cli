@@ -21,4 +21,5 @@ pub mod settings_screen;
 pub mod skills_menu;
 pub mod task_overlay;
 pub mod theme_screen;
+pub mod video;
 pub mod voice_capture;

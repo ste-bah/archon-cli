@@ -105,10 +105,11 @@ async fn describe_image_sends_inlinedata_with_correct_mime() {
         .await;
     let endpoint_base = server.uri();
     let image = png.to_vec();
-    let text = tokio::task::spawn_blocking(move || provider(endpoint_base).describe_image(&image))
-        .await
-        .unwrap()
-        .unwrap();
+    let text =
+        tokio::task::spawn_blocking(move || provider(endpoint_base).describe_image(&image, None))
+            .await
+            .unwrap()
+            .unwrap();
     assert_eq!(text, "upward line chart");
 }
 
@@ -130,7 +131,7 @@ async fn describe_image_retries_up_to_five_attempts_on_429() {
         .await;
     let endpoint_base = server.uri();
     let text = tokio::task::spawn_blocking(move || {
-        provider(endpoint_base).describe_image(&[0x89, b'P', b'N', b'G'])
+        provider(endpoint_base).describe_image(&[0x89, b'P', b'N', b'G'], None)
     })
     .await
     .unwrap()
@@ -158,7 +159,7 @@ async fn describe_image_uses_exponential_backoff() {
     let elapsed = tokio::task::spawn_blocking(move || {
         let started = Instant::now();
         provider(endpoint_base)
-            .describe_image(&[0x89, b'P', b'N', b'G'])
+            .describe_image(&[0x89, b'P', b'N', b'G'], None)
             .unwrap();
         started.elapsed()
     })
@@ -177,7 +178,7 @@ async fn describe_image_gives_up_after_five_failed_429s() {
         .await;
     let endpoint_base = server.uri();
     let err = tokio::task::spawn_blocking(move || {
-        provider(endpoint_base).describe_image(&[0x89, b'P', b'N', b'G'])
+        provider(endpoint_base).describe_image(&[0x89, b'P', b'N', b'G'], None)
     })
     .await
     .unwrap()
@@ -196,7 +197,7 @@ async fn describe_image_does_not_retry_on_500() {
         .await;
     let endpoint_base = server.uri();
     let err = tokio::task::spawn_blocking(move || {
-        provider(endpoint_base).describe_image(&[0x89, b'P', b'N', b'G'])
+        provider(endpoint_base).describe_image(&[0x89, b'P', b'N', b'G'], None)
     })
     .await
     .unwrap()

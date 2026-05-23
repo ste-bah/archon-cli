@@ -63,7 +63,12 @@ impl AnthropicVlmProvider {
 }
 
 impl VlmDescriptionProvider for AnthropicVlmProvider {
-    fn describe_image(&self, image_bytes: &[u8]) -> Result<String, DocsError> {
+    fn describe_image(
+        &self,
+        image_bytes: &[u8],
+        prompt: Option<&str>,
+    ) -> Result<String, DocsError> {
+        let prompt_text = prompt.unwrap_or(IMAGE_DESCRIPTION_PROMPT);
         let mime = detect_mime(image_bytes)?;
         let request_id = uuid::Uuid::new_v4().to_string();
         let (auth_header_name, auth_header_value) = self.auth.header();
@@ -88,7 +93,7 @@ impl VlmDescriptionProvider for AnthropicVlmProvider {
                             "data": STANDARD.encode(image_bytes),
                         }
                     },
-                    {"type": "text", "text": IMAGE_DESCRIPTION_PROMPT}
+                    {"type": "text", "text": prompt_text}
                 ]
             }]
         });
@@ -200,10 +205,11 @@ mod tests {
             .await;
         let api_url = format!("{}/v1/messages", server.uri());
         let image = jpeg.to_vec();
-        let text = tokio::task::spawn_blocking(move || provider(api_url).describe_image(&image))
-            .await
-            .unwrap()
-            .unwrap();
+        let text =
+            tokio::task::spawn_blocking(move || provider(api_url).describe_image(&image, None))
+                .await
+                .unwrap()
+                .unwrap();
         assert_eq!(text, "annotated candlestick chart");
     }
 
@@ -222,7 +228,7 @@ mod tests {
             .await;
         let api_url = format!("{}/v1/messages", server.uri());
         let text = tokio::task::spawn_blocking(move || {
-            provider(api_url).describe_image(&[0x89, b'P', b'N', b'G'])
+            provider(api_url).describe_image(&[0x89, b'P', b'N', b'G'], None)
         })
         .await
         .unwrap()

@@ -108,6 +108,32 @@ In Codex TUI sessions, the bottom status bar is initialized from the active Code
 
 Anthropic OAuth requests use the same Claude Code identity-spoof path as the agent and pipeline runners. Codex OAuth requests use the OpenAI Codex provider for chat, TUI sessions, tool use, subagents, `/btw`, team runs, and provider-neutral pipelines when `[llm].provider = "openai-codex"`. API-key users can set `ANTHROPIC_API_KEY=sk-ant-api...`; proxy users can still point the Anthropic-compatible URL at OpenRouter, DeepSeek, LiteLLM, or another compatible endpoint and use native/API-key mode.
 
+## Video Evidence
+
+Video evidence is ingested through `archon video` and becomes ordinary document
+chunks, so `archon docs search`, `archon docs answer`, and `archon kb process`
+consume it without a separate flag.
+
+```bash
+# Local video with a user transcript
+archon video ingest ./lecture.mp4 --transcript ./lecture.vtt --frames none
+archon video inspect <video-id>
+
+# YouTube URL with your own transcript, no media download
+archon video ingest "https://www.youtube.com/watch?v=abc123" \
+  --transcript ./talk.vtt \
+  --metadata-only
+
+# Frame extraction for charts, diagrams, and slides
+archon video ingest ./market-review.mp4 --frames hybrid --vlm --yes
+archon video transcript <video-id> --format vtt
+archon docs answer "what did the chart show?"
+```
+
+Answers cite video chunks as `video@MM:SS` when timestamp provenance is present.
+See [`docs/video.md`](docs/video.md) for ASR, OCR/VLM, policy, and compliance
+details.
+
 ## Documentation map
 
 The docs are organised by user goal:

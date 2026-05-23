@@ -302,6 +302,11 @@ compact_threshold = 0.80
 # max_tokens = 200000
 # Recent turns always preserved through compaction
 preserve_recent_turns = 3
+# Proactive pressure gates keep giant transcripts/tool outputs from being
+# replayed verbatim just because a model advertises a very large context window.
+rate_limit_pressure_tokens = 120000
+rate_limit_pressure_body_bytes = 320000
+large_request_retry_body_bytes = 320000
 # Use cache_control breakpoints on static system prompt blocks
 prompt_cache = true
 # Max characters of hierarchical ARCHON.md (alias: claudemd_max_tokens)

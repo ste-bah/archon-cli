@@ -1,0 +1,20 @@
+use crate::events::ViewId;
+
+/// Active Evidence Engine inspection overlay.
+pub enum EvidenceViewState {
+    Docs(crate::screens::docs::DocsScreen),
+    GameTheory(crate::screens::gametheory::GameTheoryScreen),
+    Learning(crate::screens::learning::LearningScreen),
+    Video(crate::screens::video::VideoScreen),
+}
+
+impl EvidenceViewState {
+    pub fn view_id(&self) -> ViewId {
+        match self {
+            Self::Docs(_) => ViewId::Docs,
+            Self::GameTheory(_) => ViewId::GameTheory,
+            Self::Learning(_) => ViewId::Learning,
+            Self::Video(_) => ViewId::Video,
+        }
+    }
+}

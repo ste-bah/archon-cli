@@ -1,6 +1,6 @@
 # Running the research pipeline (`/archon-research`)
 
-End-to-end TUI walkthrough of the 46-agent PhD research pipeline. The TUI primary is `/archon-research` — equivalent to the shell command `archon pipeline research <topic>` but driven from inside an interactive session.
+End-to-end TUI walkthrough of the 47-agent PhD research pipeline. The TUI primary is `/archon-research` — equivalent to the shell command `archon pipeline research <topic>` but driven from inside an interactive session.
 
 > **Provider parity.** The research pipeline uses the active provider. Anthropic
 > OAuth/API-key/proxy remains the default; set `[llm].provider =
@@ -17,7 +17,7 @@ The research pipeline is the right tool for:
 - Policy / regulatory research that has to leave an inspectable provenance trail
 - Strategic intelligence packages that combine document evidence with multi-perspective synthesis
 
-For a quick fact-finding question, just chat normally — the 46-agent pipeline overhead isn't worth it for a single Google-able answer.
+For a quick fact-finding question, just chat normally — the 47-agent pipeline overhead isn't worth it for a single Google-able answer.
 
 ## Trigger
 
@@ -58,7 +58,7 @@ If `--dry-run` is needed (the CLI form supports it; the slash form does not):
 archon pipeline research "..." --dry-run
 ```
 
-## What Happens — 8 Agent Phases, 46 Agents
+## What Happens — 8 Agent Phases, 47 Agents
 
 The pipeline runs phases sequentially with phase-reviewer gates between each.
 Each agent output is persisted to the audited bundle at
@@ -255,7 +255,7 @@ Without an ingested KB, the pipeline falls back to model-only knowledge (whateve
 
 ## Cost expectations
 
-Full 46-agent pipeline on a moderate topic with a 50-source KB:
+Full 47-agent pipeline on a moderate topic with a 50-source KB:
 
 - ~200-400k input tokens (heavy due to KB context injection per agent)
 - ~30-60k output tokens

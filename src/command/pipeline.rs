@@ -227,7 +227,7 @@ async fn handle_research(
     if dry_run {
         println!("=== Research Pipeline Dry Run ===");
         println!("Topic: {topic}");
-        println!("\nAgent Sequence (46 agents):");
+        println!("\nAgent Sequence (47 agents):");
         println!("  Phase 1-5: foundation, discovery, architecture, synthesis, design");
         println!("  Phase 6-7: writing and validation");
         println!("  Phase 8: chapter-synthesizer final paper assembly");

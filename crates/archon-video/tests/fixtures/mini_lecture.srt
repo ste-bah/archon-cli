@@ -1,0 +1,19 @@
+1
+00:00:01,000 --> 00:00:03,000
+Welcome to the architecture review.
+
+2
+00:00:03,000 --> 00:00:06,000
+We identify the source systems.
+
+3
+00:00:06,000 --> 00:00:09,000
+Then we map the scoring process.
+
+4
+00:00:09,000 --> 00:00:12,000
+Evidence is attached to each decision.
+
+5
+00:00:12,000 --> 00:00:15,000
+The final recommendation is reviewed.

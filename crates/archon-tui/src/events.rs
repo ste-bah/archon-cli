@@ -1,9 +1,7 @@
 //! Canonical TUI event enum and layer-0 payload types.
 
-/// A session entry for the /resume picker.
-/// Defined here (layer 0) so that `TuiEvent::ShowSessionPicker` can reference
-/// it without events.rs having to import from crate::app. Re-exported from
-/// `crate::app` for external/public-API stability.
+pub use crate::video_events::VideoIngestProgressEvent;
+
 #[derive(Debug, Clone)]
 pub struct SessionPickerEntry {
     pub id: String,
@@ -13,11 +11,6 @@ pub struct SessionPickerEntry {
     pub last_active: String,
 }
 
-/// TASK-AGS-822: seeded with the 6 variants named by body-migrate
-/// tickets AGS-806..819. Future view-opening slash commands extend
-/// this enum per-ticket; the compile error on any missing arm is the
-/// preferred contract (so `#[non_exhaustive]` is deliberately NOT
-/// applied).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ViewId {
     Tasks,
@@ -29,6 +22,7 @@ pub enum ViewId {
     GameTheory,
     Docs,
     Learning,
+    Video,
 }
 
 /// Source-of-truth row payload for Evidence Engine inspection overlays.
@@ -419,6 +413,8 @@ pub enum TuiEvent {
         view_id: ViewId,
         rows: Vec<EvidenceRowPayload>,
     },
+    /// Incremental video ingest progress for the video overlay.
+    VideoIngestProgress(VideoIngestProgressEvent),
     /// Update a visible parent/subagent/background activity row.
     AgentActivity(AgentActivityUpdate),
     /// Append/update the foreground activity stream buffer.
@@ -478,6 +474,7 @@ impl TuiEvent {
             Self::ShowSearchResults { .. } => "ShowSearchResults",
             Self::OpenView(_) => "OpenView",
             Self::OpenViewRows { .. } => "OpenViewRows",
+            Self::VideoIngestProgress(_) => "VideoIngestProgress",
             Self::AgentActivity(_) => "AgentActivity",
             Self::ActivityStream(_) => "ActivityStream",
             Self::ContextPressureUpdated { .. } => "ContextPressureUpdated",

@@ -20,9 +20,9 @@
 //!                  ProviderNotFound
 //!   ```
 //!
-//!   `LlmError::RateLimited { retry_after_secs }` overrides the backoff
-//!   formula and sleeps for exactly the server-specified window, honoring
-//!   the retry-after contract from upstream providers.
+//!   Short `LlmError::RateLimited { retry_after_secs }` values override the
+//!   backoff formula. Very long retry windows fail fast so the caller can
+//!   surface a visible/cancellable status instead of freezing a turn.
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -41,6 +41,8 @@ use crate::runtime::{
     ProviderRuntimeSupervisor,
 };
 use crate::streaming::StreamEvent;
+
+const MAX_INLINE_RATE_LIMIT_RETRY_SECS: u64 = 60;
 
 /// Configuration for `RetryProvider`'s backoff loop.
 ///
@@ -80,7 +82,12 @@ pub enum RetryDecision {
 pub fn classify(err: &LlmError) -> RetryDecision {
     match err {
         LlmError::Http(_) => RetryDecision::Retry,
-        LlmError::RateLimited { .. } => RetryDecision::Retry,
+        LlmError::RateLimited { retry_after_secs }
+            if *retry_after_secs <= MAX_INLINE_RATE_LIMIT_RETRY_SECS =>
+        {
+            RetryDecision::Retry
+        }
+        LlmError::RateLimited { .. } => RetryDecision::FailFast,
         LlmError::Overloaded => RetryDecision::Retry,
         LlmError::Server { status, .. } if *status >= 500 => RetryDecision::Retry,
 
@@ -347,5 +354,28 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_rate_limit_is_retryable() {
+        let err = LlmError::RateLimited {
+            retry_after_secs: 30,
+        };
+
+        assert_eq!(classify(&err), RetryDecision::Retry);
+    }
+
+    #[test]
+    fn long_rate_limit_is_fail_fast() {
+        let err = LlmError::RateLimited {
+            retry_after_secs: 8_004,
+        };
+
+        assert_eq!(classify(&err), RetryDecision::FailFast);
     }
 }

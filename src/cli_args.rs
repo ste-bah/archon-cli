@@ -11,6 +11,7 @@ mod permissions_actions;
 mod reasoning_actions;
 mod root;
 mod strategy_actions;
+mod video_actions;
 mod world_model_actions;
 
 pub use agent_actions::{AgentAction, AgentEvolveAction};
@@ -28,6 +29,7 @@ pub use strategy_actions::{
     CompletionAction, GametheoryAction, PipelineAction, ProviderProfilesAction, ProvidersAction,
     SandboxAction, TeamAction,
 };
+pub use video_actions::VideoAction;
 pub use world_model_actions::{WorldAction, WorldGuardAction, WorldGuardPolicyAction};
 
 #[cfg(test)]

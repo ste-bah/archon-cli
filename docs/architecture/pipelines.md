@@ -1,7 +1,7 @@
 # Pipelines
 
 archon-cli ships three production pipeline families: a 50-agent coding pipeline,
-a 46-agent research pipeline, and the Evidence Engine game-theory pipeline.
+a 47-agent research pipeline, and the Evidence Engine game-theory pipeline.
 They are stateful, resumable, and integrate with memory, provenance,
 completion integrity, and governed learning. The built-in coding/research
 pipelines write audited run bundles that can be verified, inspected, exported,
@@ -11,7 +11,7 @@ and resumed safely.
 flowchart TB
     USER["User task"] --> CHOOSE{"Pipeline type"}
     CHOOSE --> CODE["Coding pipeline<br/>50 agents / 6 phases"]
-    CHOOSE --> RESEARCH["Research pipeline<br/>46 agents / 8 phases"]
+    CHOOSE --> RESEARCH["Research pipeline<br/>47 agents / 8 phases"]
     CHOOSE --> GT["Game-theory pipeline<br/>84 specialists / 12 tiers"]
 
     CODE --> ART["Audited run bundle<br/>prompts, attempts, outputs, state, audit log"]
@@ -56,7 +56,7 @@ Triggered by `/archon-code` (or `archon pipeline code <task>`). Decomposes a cod
 
 Pipeline agents are defined as **Rust constants** in:
 - `crates/archon-pipeline/src/coding/agents.rs::AGENTS` — 50 coding agents
-- `crates/archon-pipeline/src/research/agents.rs::RESEARCH_AGENTS` — 46 research agents
+- `crates/archon-pipeline/src/research/agents.rs::RESEARCH_AGENTS` — 47 research agents
 
 Each entry has fields: `key`, `phase`, `tool_access` (`ReadOnly` / `Full`), `depends_on` (predecessor keys), and `prompt_source_path` (path to a markdown file containing the agent's prompt template, e.g. `.archon/agents/coding-pipeline/<key>.md`).
 
@@ -159,7 +159,7 @@ the observed outcome, computes surprise when a persisted prediction exists, and
 links the audited bundle into the world-model ledgers. These calls are
 fail-open: a cold or unavailable world model never blocks the pipeline.
 
-## Research Pipeline (46 Agents / 8 Phases)
+## Research Pipeline (47 Agents / 8 Phases)
 
 Triggered by `/archon-research` (or `archon pipeline research <topic>`). It runs 46 specialized agents across 8 phases; Phase 8 is final assembly by `chapter-synthesizer`.
 

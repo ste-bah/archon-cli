@@ -1,5 +1,5 @@
 use super::*;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{body_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn provider(endpoint: String, api_key: Option<&str>) -> OpenAiCompatVlmProvider {
@@ -122,7 +122,7 @@ async fn describe_image_sends_openai_vision_data_url() {
         .mount(&server)
         .await;
     let endpoint = server.uri();
-    tokio::task::spawn_blocking(move || provider(endpoint, None).describe_image(png()))
+    tokio::task::spawn_blocking(move || provider(endpoint, None).describe_image(png(), None))
         .await
         .unwrap()
         .unwrap();
@@ -131,6 +131,10 @@ async fn describe_image_sends_openai_vision_data_url() {
     let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
     assert_eq!(body["model"], DEFAULT_OPENAI_COMPAT_MODEL);
     assert_eq!(body["messages"][0]["content"][0]["type"], "text");
+    assert_eq!(
+        body["messages"][0]["content"][0]["text"],
+        IMAGE_DESCRIPTION_PROMPT
+    );
     assert_eq!(body["messages"][0]["content"][1]["type"], "image_url");
     assert!(
         body["messages"][0]["content"][1]["image_url"]["url"]
@@ -138,6 +142,39 @@ async fn describe_image_sends_openai_vision_data_url() {
             .unwrap()
             .starts_with("data:image/png;base64,")
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn describe_image_uses_prompt_override() {
+    let server = MockServer::start().await;
+    let data_url = format!("data:image/png;base64,{}", STANDARD.encode(png()));
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .and(body_json(json!({
+            "model": DEFAULT_OPENAI_COMPAT_MODEL,
+            "max_tokens": DEFAULT_OPENAI_COMPAT_MAX_TOKENS,
+            "temperature": DEFAULT_OPENAI_COMPAT_TEMPERATURE,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": crate::vlm::VIDEO_FRAME_PROMPT},
+                    {"type": "image_url", "image_url": {"url": data_url}}
+                ]
+            }]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{"message": {"content": "video frame description"}}]
+        })))
+        .mount(&server)
+        .await;
+    let endpoint = server.uri();
+    let text = tokio::task::spawn_blocking(move || {
+        provider(endpoint, None).describe_image(png(), Some(crate::vlm::VIDEO_FRAME_PROMPT))
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(text, "video frame description");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -151,10 +188,11 @@ async fn describe_image_returns_string_content() {
         .mount(&server)
         .await;
     let endpoint = server.uri();
-    let text = tokio::task::spawn_blocking(move || provider(endpoint, None).describe_image(png()))
-        .await
-        .unwrap()
-        .unwrap();
+    let text =
+        tokio::task::spawn_blocking(move || provider(endpoint, None).describe_image(png(), None))
+            .await
+            .unwrap()
+            .unwrap();
     assert_eq!(text, "visual summary");
 }
 
@@ -172,10 +210,11 @@ async fn describe_image_returns_array_content_blocks() {
         .mount(&server)
         .await;
     let endpoint = server.uri();
-    let text = tokio::task::spawn_blocking(move || provider(endpoint, None).describe_image(png()))
-        .await
-        .unwrap()
-        .unwrap();
+    let text =
+        tokio::task::spawn_blocking(move || provider(endpoint, None).describe_image(png(), None))
+            .await
+            .unwrap()
+            .unwrap();
     assert_eq!(text, "line chart\nrising trend");
 }
 
@@ -188,10 +227,11 @@ async fn generate_once_maps_429_to_rate_limit() {
         .mount(&server)
         .await;
     let endpoint = server.uri();
-    let err = tokio::task::spawn_blocking(move || provider(endpoint, None).generate_once(png()))
-        .await
-        .unwrap()
-        .unwrap_err();
+    let err =
+        tokio::task::spawn_blocking(move || provider(endpoint, None).generate_once(png(), None))
+            .await
+            .unwrap()
+            .unwrap_err();
     assert!(
         matches!(err, DocsError::VlmRateLimit { provider, retry_after_secs: 7, .. } if provider == "openai-compat")
     );
@@ -207,10 +247,11 @@ async fn describe_image_handles_500() {
         .mount(&server)
         .await;
     let endpoint = server.uri();
-    let err = tokio::task::spawn_blocking(move || provider(endpoint, None).describe_image(png()))
-        .await
-        .unwrap()
-        .unwrap_err();
+    let err =
+        tokio::task::spawn_blocking(move || provider(endpoint, None).describe_image(png(), None))
+            .await
+            .unwrap()
+            .unwrap_err();
     assert!(
         matches!(err, DocsError::VlmProvider { provider, status_code: Some(500), .. } if provider == "openai-compat")
     );
@@ -226,7 +267,7 @@ async fn describe_image_maps_401_to_authentication() {
         .await;
     let endpoint = server.uri();
     let err = tokio::task::spawn_blocking(move || {
-        provider(endpoint, Some("bad-key")).describe_image(png())
+        provider(endpoint, Some("bad-key")).describe_image(png(), None)
     })
     .await
     .unwrap()
@@ -261,9 +302,10 @@ async fn malformed_json_is_provider_error() {
         .mount(&server)
         .await;
     let endpoint = server.uri();
-    let err = tokio::task::spawn_blocking(move || provider(endpoint, None).describe_image(png()))
-        .await
-        .unwrap()
-        .unwrap_err();
+    let err =
+        tokio::task::spawn_blocking(move || provider(endpoint, None).describe_image(png(), None))
+            .await
+            .unwrap()
+            .unwrap_err();
     assert!(matches!(err, DocsError::VlmProvider { provider, .. } if provider == "openai-compat"));
 }

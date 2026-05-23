@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+pub use crate::video::{
+    VideoAcquirePolicy, VideoAsrPolicy, VideoFramesPolicy, VideoPolicy, VideoSummaryPolicy,
+};
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct EffectivePolicy {
     pub network: NetworkPolicy,
@@ -9,6 +13,7 @@ pub struct EffectivePolicy {
     pub world_model: WorldModelPolicy,
     pub web: WebPolicy,
     pub reasoning_quality: ReasoningQualityPolicy,
+    pub video: VideoPolicy,
     pub docs: DocsPolicy,
 }
 

@@ -454,3 +454,23 @@ fn open_view_sets_learning_evidence_overlay_source_of_truth() {
     assert_eq!(view.view_id(), ViewId::Learning);
     assert!(matches!(view, EvidenceViewState::Learning(_)));
 }
+
+#[test]
+fn open_view_with_rows_sets_video_rows_from_source_of_truth() {
+    let mut app = App::new();
+    app.open_view_with_rows(
+        ViewId::Video,
+        vec![super::EvidenceRowPayload {
+            id: "video-1".into(),
+            title: "Interview".into(),
+            status: "success".into(),
+            detail: "42 segments".into(),
+        }],
+    );
+
+    let view = app.evidence_view.as_ref().expect("view opened");
+    let EvidenceViewState::Video(screen) = view else {
+        panic!("expected video view");
+    };
+    assert_eq!(screen.selected().unwrap().video_id, "video-1");
+}

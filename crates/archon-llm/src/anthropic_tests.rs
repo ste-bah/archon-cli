@@ -3,6 +3,8 @@ use crate::anthropic_support::extract_unknown_beta;
 use crate::auth::AuthProvider;
 use crate::identity::{IdentityMode, IdentityProvider};
 use crate::types::Secret;
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn make_auth() -> AuthProvider {
     AuthProvider::ApiKey(Secret::new("test-key".to_string()))
@@ -157,6 +159,73 @@ fn tool_definitions_get_anthropic_cache_control() {
         body_json["tools"][1]["cache_control"],
         serde_json::json!({"type": "ephemeral"})
     );
+}
+
+#[tokio::test]
+async fn long_retry_after_returns_without_sleeping() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "8004"))
+        .mount(&server)
+        .await;
+    let client = AnthropicClient::new(
+        make_auth(),
+        make_identity(),
+        Some(format!("{}/v1/messages", server.uri())),
+    );
+
+    let result = tokio::time::timeout(
+        std::time::Duration::from_millis(250),
+        client.stream_message(MessageRequest {
+            messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
+            ..MessageRequest::default()
+        }),
+    )
+    .await
+    .expect("long retry-after must not sleep inside the client");
+
+    assert!(matches!(
+        result,
+        Err(crate::anthropic::ApiError::RateLimited {
+            retry_after_secs: 8004
+        })
+    ));
+}
+
+#[tokio::test]
+async fn large_rate_limited_body_returns_for_caller_compaction() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "5"))
+        .mount(&server)
+        .await;
+    let client = AnthropicClient::new(
+        make_auth(),
+        make_identity(),
+        Some(format!("{}/v1/messages", server.uri())),
+    );
+
+    let result = tokio::time::timeout(
+        std::time::Duration::from_millis(250),
+        client.stream_message(MessageRequest {
+            messages: vec![serde_json::json!({
+                "role": "user",
+                "content": "x".repeat(400_000),
+            })],
+            ..MessageRequest::default()
+        }),
+    )
+    .await
+    .expect("large rate-limited request must not retry the identical body");
+
+    assert!(matches!(
+        result,
+        Err(crate::anthropic::ApiError::RateLimited {
+            retry_after_secs: 5
+        })
+    ));
 }
 
 #[test]

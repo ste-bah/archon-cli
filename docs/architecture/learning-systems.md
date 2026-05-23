@@ -409,7 +409,7 @@ min_confidence = 0.6
 
 ## See also
 
-- [Pipelines](pipelines.md) — how the learning systems integrate with the 50-agent and 46-agent pipelines
+- [Pipelines](pipelines.md) — how the learning systems integrate with the 50-agent and 47-agent pipelines
 - [Configuration](../reference/config.md) — full config schema
 - [Memory cookbook](../cookbook/memory-driven-coding.md) — using SONA + ReasoningBank in practice
 - [Governed learning](../governed-learning.md) — proposal, approval, and rollback workflow

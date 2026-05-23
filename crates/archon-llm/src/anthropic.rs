@@ -15,6 +15,8 @@ use crate::streaming::{StreamError, StreamEvent, parse_sse_event, split_sse_line
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
 const MAX_RETRIES: u32 = 3;
 const OVERLOAD_BASE_DELAY_SECS: u64 = 10;
+const LARGE_RATE_LIMIT_RETRY_BODY_BYTES: usize = 320_000;
+const MAX_INLINE_RATE_LIMIT_RETRY_SECS: u64 = 60;
 
 // ---------------------------------------------------------------------------
 // API client
@@ -174,10 +176,19 @@ impl AnthropicClient {
             match &err {
                 // 429: wait for retry-after then retry
                 ApiError::RateLimited { retry_after_secs } => {
-                    if body.len() >= 1_000_000 {
+                    if body.len() >= LARGE_RATE_LIMIT_RETRY_BODY_BYTES {
                         tracing::warn!(
                             body_len = body.len(),
-                            "large Anthropic request was rate limited; skipping identical provider retry"
+                            threshold_body_bytes = LARGE_RATE_LIMIT_RETRY_BODY_BYTES,
+                            "large Anthropic request was rate limited; returning to caller for compaction instead of retrying identical body"
+                        );
+                        return Err(err);
+                    }
+                    if *retry_after_secs > MAX_INLINE_RATE_LIMIT_RETRY_SECS {
+                        tracing::warn!(
+                            retry_after_secs,
+                            max_inline_retry_secs = MAX_INLINE_RATE_LIMIT_RETRY_SECS,
+                            "Anthropic retry-after is too long for an inline client sleep; returning rate limit to caller"
                         );
                         return Err(err);
                     }

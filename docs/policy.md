@@ -128,6 +128,60 @@ scanned/image-only fallback unless explicitly enabled.
 Document search defaults to hybrid retrieval. `[policy.docs.retrieval]` controls
 the exact/semantic weighting used by `archon docs search --mode hybrid`.
 
+Video ingest is default-deny through `[policy.video]`. Enable only the source
+and processing paths you intend to use. Transcript-only ingest can run without
+downloaders; external downloader/browser paths require explicit gates and user
+confirmation unless policy says otherwise.
+
+```toml
+[policy.video]
+enabled = false
+allow_youtube = false
+allow_direct_urls = false
+allow_external_downloaders = false
+allow_browser_automation = false
+allow_caption_capture = false
+allow_cloud_asr = false
+allow_cloud_vlm = false
+require_user_confirmation_for_download = true
+max_duration_minutes = 120
+max_download_mb = 2048
+max_frames = 500
+frame_interval_secs = 10
+scene_change_threshold = 0.35
+dedupe_threshold = 0.94
+
+[policy.video.acquire]
+browser_profile = "default"
+external_downloader_bin = "yt-dlp"
+po_token_provider = ""
+
+[policy.video.asr]
+provider = "whisper-rs"
+model = "base"
+device = "auto"
+vad_stable_timestamps = false
+model_cache_dir = ""
+model_source = ""
+diarization = false
+
+[policy.video.frames]
+mode = "scene"
+ocr = true
+vlm = true
+
+[policy.video.summary]
+enabled = false
+allow_llm_summary = false
+allow_cloud_summary = false
+provider = "disabled"
+```
+
+Video frame VLM calls require both `[policy.video].allow_cloud_vlm` for cloud
+providers and the existing `[policy.docs.vlm]`/worker/network gates. Video
+summary is disabled by default and writes one `video_summary` chunk only when
+`enabled` and `allow_llm_summary` are true.
+
 Governed-learning auto-apply is denied by default. Low-risk updates can only
 auto-apply when `policy.learning.auto_apply_low_risk = true`; prompt, blocking
 gate, policy, and network changes remain approval-gated.

@@ -1,5 +1,6 @@
 pub mod app;
 pub mod app_modals;
+mod app_views;
 pub use app::should_process_key_event;
 pub mod activity_stream;
 mod activity_stream_helpers;
@@ -34,6 +35,7 @@ pub mod qr;
 pub mod diff_view;
 pub mod theme_registry;
 pub mod verbosity;
+pub mod video_events;
 pub mod virtual_scroll;
 
 #[cfg(feature = "terminal-panel")]
@@ -60,6 +62,7 @@ pub use cancel::YieldGate;
 
 pub mod event_channel;
 pub mod events;
+pub mod evidence_view_state;
 pub use events::TuiEvent;
 pub mod state;
 pub use state::AppState;

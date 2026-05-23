@@ -136,7 +136,8 @@ impl OpenAiCompatVlmProvider {
         }
     }
 
-    fn generate_once(&self, image_bytes: &[u8]) -> Result<String, DocsError> {
+    fn generate_once(&self, image_bytes: &[u8], prompt: Option<&str>) -> Result<String, DocsError> {
+        let prompt_text = prompt.unwrap_or(IMAGE_DESCRIPTION_PROMPT);
         let mime = detect_mime(image_bytes)?;
         let data_url = format!("data:{mime};base64,{}", STANDARD.encode(image_bytes));
         let url = format!("{}/chat/completions", self.endpoint.trim_end_matches('/'));
@@ -147,7 +148,7 @@ impl OpenAiCompatVlmProvider {
             "messages": [{
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": IMAGE_DESCRIPTION_PROMPT},
+                    {"type": "text", "text": prompt_text},
                     {"type": "image_url", "image_url": {"url": data_url}}
                 ]
             }]
@@ -219,9 +220,13 @@ impl OpenAiCompatVlmProvider {
 }
 
 impl VlmDescriptionProvider for OpenAiCompatVlmProvider {
-    fn describe_image(&self, image_bytes: &[u8]) -> Result<String, DocsError> {
+    fn describe_image(
+        &self,
+        image_bytes: &[u8],
+        prompt: Option<&str>,
+    ) -> Result<String, DocsError> {
         retry_rate_limited(RateLimitRetry::vlm_default(Duration::from_secs(1)), || {
-            self.generate_once(image_bytes)
+            self.generate_once(image_bytes, prompt)
         })
     }
 }

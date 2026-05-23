@@ -20,18 +20,26 @@ cd "$REPO_ROOT"
 
 ALLOWLIST_FILE="scripts/check-tui-file-sizes.allowlist"
 
-declare -A ALLOW
+ALLOW_ENTRIES=""
 if [ -f "$ALLOWLIST_FILE" ]; then
   while IFS= read -r line || [ -n "$line" ]; do
     entry="${line%%#*}"
     entry="$(echo "$entry" | awk '{$1=$1;print}')"
     [ -z "$entry" ] && continue
-    # Use intermediate variable to avoid set -u triggering on
-    # path components inside the subscript expression.
-    key="$entry"
-    ALLOW["$key"]=1
+    ALLOW_ENTRIES="${ALLOW_ENTRIES}${entry}
+"
   done < "$ALLOWLIST_FILE"
 fi
+
+is_allowlisted() {
+  case "
+$ALLOW_ENTRIES" in
+    *"
+$1
+"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 TOTAL=0
 OVER=0
@@ -44,7 +52,7 @@ while IFS= read -r f; do
   TOTAL=$((TOTAL + 1))
   lines=$(wc -l < "$f" | awk '{print $1}')
   if [ "$lines" -gt "$THRESHOLD" ]; then
-    if [ -n "${ALLOW[$rel]+set}" ]; then
+    if is_allowlisted "$rel"; then
       ALLOWED=$((ALLOWED + 1))
       ALLOWED_OUT+=$(printf '  %6d  %s (allowlisted)\n' "$lines" "$rel")$'\n'
     else

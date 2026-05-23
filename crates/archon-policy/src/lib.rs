@@ -4,6 +4,7 @@ pub mod decision;
 pub mod errors;
 pub mod loader;
 pub mod models;
+mod video;
 
 use std::path::Path;
 

@@ -1,0 +1,10 @@
+WEBVTT
+
+00:00:01.000 --> 00:00:03.000
+This valid cue should survive.
+
+not-a-time --> 00:00:05.000
+This cue should be skipped with a warning.
+
+00:00:02.500 --> 00:00:04.000
+This cue overlaps and should warn.

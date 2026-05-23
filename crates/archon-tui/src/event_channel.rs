@@ -185,7 +185,9 @@ pub fn bounded_tui_event_channel_with_capacity(
 
 fn priority(event: &TuiEvent) -> EventPriority {
     match event {
-        TuiEvent::TextDelta(_) | TuiEvent::ThinkingDelta(_) => EventPriority::Progress,
+        TuiEvent::TextDelta(_) | TuiEvent::ThinkingDelta(_) | TuiEvent::VideoIngestProgress(_) => {
+            EventPriority::Progress
+        }
         _ => EventPriority::State,
     }
 }

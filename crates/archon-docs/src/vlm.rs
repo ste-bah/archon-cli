@@ -17,7 +17,8 @@ pub mod openai_compat;
 pub mod retry;
 
 pub trait VlmDescriptionProvider: Send + Sync {
-    fn describe_image(&self, image_bytes: &[u8]) -> Result<String, DocsError>;
+    fn describe_image(&self, image_bytes: &[u8], prompt: Option<&str>)
+    -> Result<String, DocsError>;
 }
 
 pub const IMAGE_DESCRIPTION_PROMPT: &str = r#"You are a precise image describer. Describe what the image shows in 2-4 sentences.
@@ -25,6 +26,13 @@ For charts, name the chart type, axes labels, time period, observable patterns, 
 For diagrams, describe the structure and labelled components.
 For photos, describe subject + setting + relevant detail.
 Write factually. Do not speculate. Do not add framing language ("This image shows...")."#;
+
+pub const VIDEO_FRAME_PROMPT: &str = "Describe this video frame as evidence. If it contains a chart, identify \
+chart type, axes labels, units, time period, legend, visible trend, anomalies \
+and annotations. If it contains a diagram, identify labelled components, arrows, \
+flow, hierarchy and relationships. If it contains slides, identify title, bullet \
+points, equations and visible claims. Do not infer beyond visible evidence. State \
+uncertainty when text is unreadable.";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct VlmProviderMetadata {
@@ -93,7 +101,7 @@ pub fn describe_image_with_policy(
             message: decision.reason,
         });
     }
-    provider.describe_image(image_bytes)
+    provider.describe_image(image_bytes, None)
 }
 
 static PROVIDER: RwLock<Option<Arc<RegisteredVlmProvider>>> = RwLock::new(None);
@@ -130,6 +138,7 @@ pub fn clear_provider() {
 pub fn describe_registered_image(
     policy: &archon_policy::EffectivePolicy,
     image_bytes: &[u8],
+    prompt: Option<&str>,
 ) -> Result<VlmDescriptionOutcome, DocsError> {
     let decision = policy.docs_vlm_decision();
     if !decision.allowed {
@@ -139,7 +148,7 @@ pub fn describe_registered_image(
         return Ok(VlmDescriptionOutcome::NoProvider);
     };
     let started = std::time::Instant::now();
-    let text = registered.provider.describe_image(image_bytes)?;
+    let text = registered.provider.describe_image(image_bytes, prompt)?;
     let metadata = registered.metadata();
     Ok(VlmDescriptionOutcome::Described(VlmDescription {
         text,
@@ -157,9 +166,68 @@ mod tests {
     struct MockVlm;
 
     impl VlmDescriptionProvider for MockVlm {
-        fn describe_image(&self, image_bytes: &[u8]) -> Result<String, DocsError> {
+        fn describe_image(
+            &self,
+            image_bytes: &[u8],
+            _prompt: Option<&str>,
+        ) -> Result<String, DocsError> {
             Ok(format!("{} bytes described", image_bytes.len()))
         }
+    }
+
+    struct PromptRecordingVlm {
+        prompt: std::sync::Mutex<Option<Option<String>>>,
+    }
+
+    impl PromptRecordingVlm {
+        fn new() -> Self {
+            Self {
+                prompt: std::sync::Mutex::new(None),
+            }
+        }
+
+        fn recorded_prompt(&self) -> Option<Option<String>> {
+            self.prompt
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone()
+        }
+    }
+
+    impl VlmDescriptionProvider for PromptRecordingVlm {
+        fn describe_image(
+            &self,
+            _image_bytes: &[u8],
+            prompt: Option<&str>,
+        ) -> Result<String, DocsError> {
+            *self
+                .prompt
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(prompt.map(str::to_owned));
+            Ok("recorded".into())
+        }
+    }
+
+    #[test]
+    fn video_frame_prompt_mentions_chart_diagram_and_slide() {
+        assert!(VIDEO_FRAME_PROMPT.contains("chart"));
+        assert!(VIDEO_FRAME_PROMPT.contains("diagram"));
+        assert!(VIDEO_FRAME_PROMPT.contains("slide"));
+    }
+
+    #[test]
+    fn describe_image_with_policy_passes_no_prompt_override() {
+        let mut policy = archon_policy::EffectivePolicy::default();
+        policy.docs.vlm.enabled = true;
+        policy.docs.vlm.mode = "local".into();
+        policy.docs.vlm.provider = "ollama".into();
+        policy.workers.vlm = "allow-local".into();
+        let provider = PromptRecordingVlm::new();
+
+        let description = describe_image_with_policy(&policy, &provider, b"image").unwrap();
+
+        assert_eq!(description, "recorded");
+        assert_eq!(provider.recorded_prompt(), Some(None));
     }
 
     #[test]

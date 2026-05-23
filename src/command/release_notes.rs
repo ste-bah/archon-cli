@@ -98,6 +98,8 @@ impl CommandHandler for ReleaseNotesHandler {
          - Permission model with 6 modes\n\
          - Print mode (-p) for scripting\n\
          - /btw side questions with parallel API calls\n\n\
+         - Video evidence ingest with transcript, frame OCR/VLM, and video@MM:SS citations\n\
+         - /video slash mirror for the archon video CLI namespace\n\n\
          Full changelog: https://github.com/archon-cli/archon/releases\n"
             )
             .to_string(),
@@ -135,6 +137,8 @@ mod tests {
          - Permission model with 6 modes\n\
          - Print mode (-p) for scripting\n\
          - /btw side questions with parallel API calls\n\n\
+         - Video evidence ingest with transcript, frame OCR/VLM, and video@MM:SS citations\n\
+         - /video slash mirror for the archon video CLI namespace\n\n\
          Full changelog: https://github.com/archon-cli/archon/releases\n"
     );
 

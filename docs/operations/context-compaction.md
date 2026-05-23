@@ -12,6 +12,9 @@ compact_threshold = 0.8             # Trigger when 80% full
 preflight_safety_margin = 0.05      # Start before the hard threshold
 output_reserve_tokens = 8192        # Leave space for the next answer
 preserve_recent_turns = 3           # Always keep the last N turns verbatim
+rate_limit_pressure_tokens = 120000 # Compact huge requests before provider retry pressure
+rate_limit_pressure_body_bytes = 320000
+large_request_retry_body_bytes = 320000
 prompt_cache = true                 # Anthropic prompt cache on static blocks
 prompt_cache_mode = "explicit"
 prompt_cache_ttl = "5m"
@@ -24,6 +27,8 @@ The provider-backed summary preserves:
 - Active rules / corrections
 
 Archon then replaces the original turns with the summary in the session journal. The recent N turns are preserved verbatim so the model has fresh context. If the summary request itself exceeds the provider context window, Archon retries with older API-round groups removed before failing structurally.
+
+Large tool outputs are also bounded before they are replayed to the model. The full output can still be shown in the UI/log path, but the LLM-visible transcript keeps only a bounded head/tail summary so a single verbose command cannot turn the next small prompt into a huge provider request.
 
 ## Manual compaction
 

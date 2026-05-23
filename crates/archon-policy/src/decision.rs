@@ -160,6 +160,117 @@ impl EffectivePolicy {
             PolicyDecision::deny("reasoning-quality session briefing injection is disabled")
         }
     }
+
+    pub fn video_ingest_decision(&self) -> PolicyDecision {
+        if self.video.enabled {
+            PolicyDecision::allow("video ingest is enabled by policy")
+        } else {
+            PolicyDecision::deny("video ingest is disabled by policy.video.enabled")
+        }
+    }
+
+    pub fn video_acquisition_decision(&self, method: &str) -> PolicyDecision {
+        let ingest = self.video_ingest_decision();
+        if !ingest.allowed {
+            return ingest;
+        }
+        match method {
+            "LocalFile" | "None" => PolicyDecision::allow("local video acquisition is allowed"),
+            "YouTube" => {
+                if self.video.allow_youtube {
+                    PolicyDecision::allow("YouTube video sources are enabled by policy")
+                } else {
+                    PolicyDecision::deny("YouTube video sources are disabled by policy.video")
+                }
+            }
+            "DirectUrl" | "DirectDownload" => {
+                if self.video.allow_direct_urls {
+                    PolicyDecision::allow("direct video URLs are enabled by policy")
+                } else {
+                    PolicyDecision::deny("direct video URLs are disabled by policy.video")
+                }
+            }
+            "ExternalDownloader" => {
+                if self.video.allow_external_downloaders {
+                    PolicyDecision::allow("external video downloader is enabled by policy")
+                } else {
+                    PolicyDecision::deny("external video downloader is disabled by policy.video")
+                }
+            }
+            "BrowserAutomation" => {
+                if self.video.allow_browser_automation {
+                    PolicyDecision::allow("browser video acquisition is enabled by policy")
+                } else {
+                    PolicyDecision::deny("browser video acquisition is disabled by policy.video")
+                }
+            }
+            other => {
+                PolicyDecision::deny(format!("unsupported video acquisition method '{other}'"))
+            }
+        }
+    }
+
+    pub fn video_asr_decision(&self) -> PolicyDecision {
+        let ingest = self.video_ingest_decision();
+        if !ingest.allowed {
+            return ingest;
+        }
+        if video_asr_is_local(&self.video.asr.provider) {
+            return PolicyDecision::allow("local video ASR is allowed by policy");
+        }
+        if !self.video.allow_cloud_asr {
+            return PolicyDecision::deny("cloud video ASR is disabled by policy.video");
+        }
+        if !cloud_worker_allowed(&self.workers.ocr) || !self.network.allow_cloud_vlm {
+            return PolicyDecision::deny(
+                "cloud video ASR requires policy.workers.ocr and policy.network.allow_cloud_vlm",
+            );
+        }
+        PolicyDecision::allow("cloud video ASR is allowed by policy")
+    }
+
+    pub fn video_vlm_decision(&self) -> PolicyDecision {
+        let ingest = self.video_ingest_decision();
+        if !ingest.allowed {
+            return ingest;
+        }
+        if !self.video.frames.vlm {
+            return PolicyDecision::deny("video frame VLM is disabled by policy.video.frames");
+        }
+        if docs_vlm_looks_cloud(self) && !self.video.allow_cloud_vlm {
+            return PolicyDecision::deny("cloud video VLM is disabled by policy.video");
+        }
+        self.docs_vlm_decision()
+    }
+
+    pub fn video_summary_decision(&self) -> PolicyDecision {
+        let ingest = self.video_ingest_decision();
+        if !ingest.allowed {
+            return ingest;
+        }
+        if !self.video.summary.enabled {
+            return PolicyDecision::deny("video summary is disabled by policy.video.summary");
+        }
+        if !self.video.summary.allow_llm_summary {
+            return PolicyDecision::deny("video LLM summary is disabled by policy.video.summary");
+        }
+        if summary_provider_is_cloud(&self.video.summary.provider) {
+            if !self.video.summary.allow_cloud_summary {
+                return PolicyDecision::deny(
+                    "cloud video summary is disabled by policy.video.summary",
+                );
+            }
+            if !cloud_worker_allowed(&self.workers.vlm)
+                || !self.network.allow_cloud_vlm
+                || !self.docs.vlm.allow_cloud
+            {
+                return PolicyDecision::deny(
+                    "cloud video summary requires workers, network, and docs VLM cloud gates",
+                );
+            }
+        }
+        PolicyDecision::allow("video summary is allowed by policy")
+    }
 }
 
 fn allow_provider_mode(
@@ -231,6 +342,32 @@ fn endpoint_looks_local(endpoint: &str) -> bool {
         || endpoint.starts_with("https://[::1]")
         || endpoint.starts_with("http://0.0.0.0")
         || endpoint.starts_with("https://0.0.0.0")
+}
+
+fn video_asr_is_local(provider: &str) -> bool {
+    matches!(
+        provider,
+        "whisper-rs" | "whisper-cli" | "local" | "disabled" | ""
+    )
+}
+
+fn cloud_worker_allowed(worker_policy: &str) -> bool {
+    matches!(worker_policy, "allow-cloud" | "allow" | "cloud")
+}
+
+fn docs_vlm_looks_cloud(policy: &EffectivePolicy) -> bool {
+    let vlm = &policy.docs.vlm;
+    match vlm.provider.as_str() {
+        "gemini" | "anthropic" => true,
+        "openai-compat" => {
+            vlm.mode == "cloud" || !endpoint_looks_local(&vlm.openai_compat.endpoint)
+        }
+        _ => vlm.mode == "cloud",
+    }
+}
+
+fn summary_provider_is_cloud(provider: &str) -> bool {
+    !matches!(provider, "disabled" | "local" | "ollama" | "")
 }
 
 #[cfg(test)]

@@ -14,6 +14,7 @@ pub fn draw_evidence_view(frame: &mut Frame, app: &App) {
         EvidenceViewState::Docs(screen) => screen.render(frame, area, &app.theme),
         EvidenceViewState::GameTheory(screen) => screen.render(frame, area, &app.theme),
         EvidenceViewState::Learning(screen) => screen.render(frame, area, &app.theme),
+        EvidenceViewState::Video(screen) => screen.render(frame, area, &app.theme),
     }
 }
 

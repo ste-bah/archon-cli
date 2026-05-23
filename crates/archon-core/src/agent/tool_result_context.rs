@@ -8,6 +8,7 @@ pub(crate) struct ContextToolOutput {
 }
 
 const DEFAULT_TOOL_RESULT_CONTEXT_CHARS: usize = 64_000;
+const SHELL_TOOL_RESULT_CONTEXT_CHARS: usize = 24_000;
 const SUBAGENT_TOOL_RESULT_CONTEXT_CHARS: usize = 32_000;
 
 pub(crate) fn cap_tool_output_for_context(tool_name: &str, content: &str) -> ContextToolOutput {
@@ -49,6 +50,7 @@ pub(crate) fn cap_tool_output_for_context(tool_name: &str, content: &str) -> Con
 
 fn context_limit_for_tool(tool_name: &str) -> usize {
     match tool_name {
+        "Bash" | "Shell" => SHELL_TOOL_RESULT_CONTEXT_CHARS,
         "Agent" | "SendMessage" | "TaskCreate" | "TaskOutput" => SUBAGENT_TOOL_RESULT_CONTEXT_CHARS,
         _ => DEFAULT_TOOL_RESULT_CONTEXT_CHARS,
     }
@@ -79,5 +81,18 @@ mod tests {
         assert!(output.content.contains("tool output trimmed"));
         assert!(output.content.starts_with('a'));
         assert!(output.content.ends_with('z'));
+    }
+
+    #[test]
+    fn giant_shell_output_gets_tighter_context_cap() {
+        let content = format!("{}{}", "h".repeat(100_000), "t".repeat(100_000));
+        let output = cap_tool_output_for_context("Bash", &content);
+
+        assert!(output.truncated);
+        assert_eq!(output.limit_chars, SHELL_TOOL_RESULT_CONTEXT_CHARS);
+        assert!(output.stored_chars <= SHELL_TOOL_RESULT_CONTEXT_CHARS);
+        assert!(output.content.contains("tool output trimmed"));
+        assert!(output.content.starts_with('h'));
+        assert!(output.content.ends_with('t'));
     }
 }

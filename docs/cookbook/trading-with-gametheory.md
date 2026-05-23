@@ -179,7 +179,7 @@ This is overkill for day trading. Useful for "should we initiate a position in t
 
 - [Game-theory pipeline reference](gametheory-pipeline.md) — the underlying pipeline mechanics, full TUI walkthrough, replay/resume semantics
 - [Game theory CLI reference](../gametheory.md) — full CLI/slash surface, Cozo source-of-truth tables
-- [Research pipeline (`/archon-research`)](archon-research-pipeline.md) — sibling 46-agent pipeline for deeper PhD-style due diligence
+- [Research pipeline (`/archon-research`)](archon-research-pipeline.md) — sibling 47-agent pipeline for deeper PhD-style due diligence
 - [Real-world Evidence Engine](real-world-evidence-engine.md) — composing docs + KB + gametheory + provenance into one workflow
 - [Document intelligence (`/docs`)](../docs.md) — ingest filings, research notes, central-bank statements
 - [Knowledge base (`/kb`)](../knowledge.md) — extract structured claims for `memory_recall` lookups during gametheory runs

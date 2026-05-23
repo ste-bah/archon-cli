@@ -6,8 +6,11 @@
 use std::thread;
 use std::time::Duration;
 
-use cozo::DbInstance;
+use cozo::{DataValue, DbInstance, ScriptMutability};
 
+pub use crate::answer_timecode::{
+    TimecodeMs, format_citation, format_citation_page, format_citation_video, format_ms_as_timecode,
+};
 use crate::errors::DocsError;
 use crate::retrieval::{SearchResult, search};
 
@@ -43,6 +46,17 @@ pub struct Citation {
 /// Returns a structured error if no embedding provider is configured
 /// or no documents are indexed.
 pub fn answer(db: &DbInstance, query: &str, top_k: usize) -> Result<Answer, DocsError> {
+    answer_with_timeref(db, query, top_k, &|chunk_id| {
+        lookup_video_timecode(db, chunk_id).unwrap_or(None)
+    })
+}
+
+pub fn answer_with_timeref(
+    db: &DbInstance,
+    query: &str,
+    top_k: usize,
+    timeref_resolver: &dyn Fn(&str) -> Option<TimecodeMs>,
+) -> Result<Answer, DocsError> {
     let answer_id = new_answer_id();
     let search_results = match search(db, query, top_k) {
         Ok(results) => results,
@@ -102,13 +116,18 @@ pub fn answer(db: &DbInstance, query: &str, top_k: usize) -> Result<Answer, Docs
     } else {
         let mut t = format!("Based on {} sources:\n", search_results.results.len());
         for (i, r) in search_results.results.iter().enumerate() {
-            t.push_str(&format!(
-                "\n[{}] (pages {}-{}, score {:.2}):\n{}\n",
+            let citation = Citation {
+                chunk_id: r.chunk_id.clone(),
+                document_id: r.document_id.clone(),
+                page_start: r.page_start,
+                page_end: r.page_end,
+                snippet: r.content.clone(),
+            };
+            t.push_str(&format_citation(
                 i + 1,
-                r.page_start,
-                r.page_end,
+                &citation,
                 r.score,
-                r.content
+                timeref_resolver(&r.chunk_id),
             ));
         }
         t
@@ -121,6 +140,22 @@ pub fn answer(db: &DbInstance, query: &str, top_k: usize) -> Result<Answer, Docs
         citations,
         sources: search_results.results,
     })
+}
+
+fn lookup_video_timecode(db: &DbInstance, chunk_id: &str) -> Result<Option<TimecodeMs>, DocsError> {
+    let mut params = std::collections::BTreeMap::new();
+    params.insert("cid".into(), DataValue::from(chunk_id));
+    let result = match db.run_script(
+        "?[start] := *video_chunk_timeref{chunk_id, timestamp_start_ms: start}, chunk_id = $cid",
+        params,
+        ScriptMutability::Immutable,
+    ) {
+        Ok(result) => result,
+        Err(_) => return Ok(None),
+    };
+    Ok(result.rows.first().map(|row| TimecodeMs {
+        start_ms: row[0].get_int().unwrap_or(0),
+    }))
 }
 
 /// Persist answer -> cited chunk edges so `/docs provenance <answer-id>` can
@@ -381,6 +416,14 @@ mod tests {
         assert!(!is_answer_provenance_lock_or_busy(
             "insert provenance edge failed: missing parameter"
         ));
+    }
+
+    #[test]
+    fn test_timecode_formatter_boundaries() {
+        assert_eq!(format_ms_as_timecode(760_000), "12:40");
+        assert_eq!(format_ms_as_timecode(0), "00:00");
+        assert_eq!(format_ms_as_timecode(3_661_000), "01:01:01");
+        assert_eq!(format_ms_as_timecode(7_200_000), "02:00:00");
     }
 
     #[test]

@@ -105,6 +105,27 @@ async fn handle_ingest(path_str: &str) -> Result<()> {
             }
         }
     } else {
+        if is_video_path(&path) {
+            let result = archon_video::ingest::ingest_video(
+                archon_video::ingest::IngestOpts {
+                    source: path.display().to_string(),
+                    transcript_path: None,
+                    metadata_only: false,
+                    frames_mode: None,
+                    asr_provider: None,
+                    vlm: false,
+                    yes: false,
+                },
+                &policy,
+                &db,
+            )
+            .await?;
+            println!(
+                "Ingested video: {} ({} chunk(s))",
+                result.video_id, result.chunk_count
+            );
+            return Ok(());
+        }
         match ingest::ingest_file_with_policy(&db, &path, &policy).await {
             Ok(r) if r.pipeline_failed => {
                 println!(
@@ -157,6 +178,18 @@ async fn handle_ingest(path_str: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn is_video_path(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "mp4" | "mkv" | "mov" | "webm" | "m4v"
+            )
+        })
+        .unwrap_or(false)
 }
 
 fn print_vlm_init_warning_if_needed(report: &vlm_factory::VlmProviderInitReport) {

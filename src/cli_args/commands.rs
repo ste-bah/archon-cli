@@ -4,7 +4,7 @@ use super::{
     AgentAction, AuthArgs, BehaviourAction, BriefingAction, ChatArgs, CompletionAction,
     ConstellationAction, DocsAction, GametheoryAction, KbAction, LearningAction, MeaningAction,
     MemoryAction, PermissionsAction, PipelineAction, PluginAction, ProvAction, ProvidersAction,
-    ReasoningAction, RemoteAction, SandboxAction, SelfAction, TeamAction, WorldAction,
+    ReasoningAction, RemoteAction, SandboxAction, SelfAction, TeamAction, VideoAction, WorldAction,
 };
 
 #[derive(Subcommand, Debug)]
@@ -222,6 +222,11 @@ pub enum Commands {
     Docs {
         #[command(subcommand)]
         action: DocsAction,
+    },
+    /// Ingest and inspect video evidence
+    Video {
+        #[command(subcommand)]
+        action: VideoAction,
     },
     /// Inspect and export provenance traces
     Prov {

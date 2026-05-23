@@ -33,6 +33,9 @@ fn empty_toml_produces_valid_defaults() {
     assert!((config.context.compact_threshold - 0.80).abs() < f32::EPSILON);
     assert!(config.context.max_tokens.is_none());
     assert_eq!(config.context.preserve_recent_turns, 3);
+    assert_eq!(config.context.rate_limit_pressure_tokens, Some(120_000));
+    assert_eq!(config.context.rate_limit_pressure_body_bytes, Some(320_000));
+    assert_eq!(config.context.large_request_retry_body_bytes, Some(320_000));
 
     // MemoryConfig defaults
     assert!(config.memory.enabled);

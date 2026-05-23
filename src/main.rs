@@ -341,6 +341,9 @@ async fn main() -> Result<()> {
         Some(Commands::Docs { ref action }) => {
             return crate::command::docs::handle_docs_command(action.clone()).await;
         }
+        Some(Commands::Video { ref action }) => {
+            return crate::command::video::handle_video_command(action.clone()).await;
+        }
         Some(Commands::Prov { ref action }) => {
             return crate::command::prov::handle_prov_command(action.clone()).await;
         }

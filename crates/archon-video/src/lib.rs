@@ -1,0 +1,20 @@
+pub mod acquire;
+pub mod asr;
+pub mod chunk_writer;
+pub mod dedupe;
+pub mod errors;
+pub mod frame_persist;
+pub mod frame_pipeline;
+pub mod frames;
+pub mod ingest;
+pub mod metadata;
+pub mod policy;
+pub mod provenance;
+pub mod schema;
+pub mod source;
+pub mod store;
+pub mod summary;
+pub mod transcript;
+pub mod visual;
+
+pub use errors::VideoError;

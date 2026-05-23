@@ -1,0 +1,40 @@
+[package]
+name = "archon-video"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+whisper-rs = ["dep:whisper-rs"]
+
+[dependencies]
+archon-docs = { path = "../archon-docs" }
+archon-llm = { path = "../archon-llm" }
+archon-policy = { path = "../archon-policy" }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+cozo = { workspace = true }
+dirs = { workspace = true }
+hex = { workspace = true }
+image = "0.25"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+which = { workspace = true }
+
+[dependencies.whisper-rs]
+version = "0.16"
+optional = true
+
+[dev-dependencies]
+archon-knowledge = { path = "../archon-knowledge" }
+tempfile = { workspace = true }

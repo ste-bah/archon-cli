@@ -17,12 +17,13 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Learning systems index](architecture/learning-systems-index.md) — ownership map for memory, completion, world model, reasoning quality, and governed learning signals
 - [Reasoning quality](architecture/reasoning-quality.md) — first-class visible claim/evidence events, correction links, critic gates, and briefing warnings
 - [Local world model](architecture/world-model.md) — trace corpus, fail-open advisor, dynamic training, retention, backends
-- [Pipelines](architecture/pipelines.md) — `/archon-code` (50 agents), `/archon-research` (46 agents / 8 phases), audited bundles, resume verification, agent loop, subagent spawning
+- [Pipelines](architecture/pipelines.md) — `/archon-code` (50 agents), `/archon-research` (47 agents / 8 phases), audited bundles, resume verification, agent loop, subagent spawning
 - [Evidence Engine](evidence-engine.md) — documents, knowledge, provenance, game theory, completion integrity, governed learning, meaning, constellations
 
 ## Evidence Engine
 
 - [Document intelligence](docs.md) — ingest, OCR/VLM policy, embeddings, exact/semantic/hybrid retrieval
+- [Video evidence](video.md) — transcript/ASR ingest, frame OCR/VLM, timecode citations, KB consumption
 - [Knowledge base](knowledge.md) — claims, entities, relations, source quality, contradictions
 - [Game theory](gametheory.md) — CLI, `/gametheory` slash command, tools, persisted run state
 - [Completion integrity](completion-integrity.md) — claims, evidence, incidents, trust scoring
@@ -32,7 +33,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Reference
 
-- [Slash commands](reference/slash-commands.md) — 80 primary commands grouped by purpose
+- [Slash commands](reference/slash-commands.md) — 81 primary commands grouped by purpose
 - [Tools](reference/tools.md) — 43 built-in tools available to agents
 - [Skills](reference/skills.md) — 68 built-in skills (composable command sequences)
 - [Permissions](reference/permissions.md) — 7 permission modes, rule lists, sandboxing
@@ -87,7 +88,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Real-world Evidence Engine examples](cookbook/real-world-evidence-engine.md) — research, education, business, trading, coding, and strategic analysis workflows
 - [Memory-driven coding](cookbook/memory-driven-coding.md) — using SONA + ReasoningBank to inform decisions
 - [Coding pipeline (`/archon-code`)](cookbook/god-code-pipeline.md) — 50-agent coding workflow end-to-end inside the TUI
-- [Research pipeline (`/archon-research`)](cookbook/archon-research-pipeline.md) — 46-agent PhD research workflow end-to-end inside the TUI
+- [Research pipeline (`/archon-research`)](cookbook/archon-research-pipeline.md) — 47-agent PhD research workflow end-to-end inside the TUI
 - [Game-theory pipeline (`/gametheory`)](cookbook/gametheory-pipeline.md) — Tier 1 classify → route → specialists → report end-to-end inside the TUI
 - [Trading and asset analysis with `/gametheory`](cookbook/trading-with-gametheory.md) — applying the game-theory pipeline to pre-trade assessment, post-event decomposition, counterparty analysis, strategy-viability tests, and macro reaction-function modelling
 - [World-model and JEPA training](cookbook/world-model-dynamic-training.md) — fresh setup, readiness checks, training, eval, promotion, and idle-aware trainer behavior
