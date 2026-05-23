@@ -53,6 +53,7 @@ pub async fn handle_video_command(action: VideoAction) -> Result<()> {
                 println!("Warning: {warning}");
             }
             print_vlm_init_warning_if_needed(&vlm_report);
+            crate::command::evidence_index::index_pending_evidence(&db, "video evidence");
         }
         VideoAction::Status | VideoAction::List => list_videos(&db)?,
         VideoAction::Inspect { video_id } => inspect_video(&db, &video_id)?,
@@ -158,6 +159,7 @@ async fn reprocess_video(
             println!("Warning: {warning}");
         }
         print_vlm_init_warning_if_needed(vlm_report);
+        crate::command::evidence_index::index_pending_evidence(db, "video evidence");
         return Ok(());
     }
     let mut warnings = Vec::new();
@@ -181,6 +183,7 @@ async fn reprocess_video(
         println!("Warning: {warning}");
     }
     print_vlm_init_warning_if_needed(vlm_report);
+    crate::command::evidence_index::index_pending_evidence(db, "video evidence");
     Ok(())
 }
 

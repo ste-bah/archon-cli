@@ -124,6 +124,7 @@ async fn handle_ingest(path_str: &str) -> Result<()> {
                 "Ingested video: {} ({} chunk(s))",
                 result.video_id, result.chunk_count
             );
+            crate::command::evidence_index::index_pending_evidence(&db, "video evidence");
             return Ok(());
         }
         match ingest::ingest_file_with_policy(&db, &path, &policy).await {

@@ -29,7 +29,9 @@ pub(crate) fn render_provider_status_with_config_and_live(
     let statuses = local_provider_statuses(provider_filter, &ProviderStatusEnv::detect(), config);
     let live_checks =
         live.then(|| collect_provider_live_checks(&statuses, config, &TcpProviderLivePinger));
-    render_provider_statuses_with_live(&statuses, live_checks.as_deref())
+    let mut out = render_provider_statuses_with_live(&statuses, live_checks.as_deref());
+    append_docs_vlm_status(&mut out, live);
+    out
 }
 
 pub(crate) fn render_and_persist_provider_status(
@@ -44,10 +46,9 @@ pub(crate) fn render_and_persist_provider_status(
     if json {
         render_provider_statuses_json(&statuses, live_checks.as_deref())
     } else {
-        Ok(render_provider_statuses_with_live(
-            &statuses,
-            live_checks.as_deref(),
-        ))
+        let mut out = render_provider_statuses_with_live(&statuses, live_checks.as_deref());
+        append_docs_vlm_status(&mut out, live);
+        Ok(out)
     }
 }
 
@@ -143,6 +144,47 @@ fn render_provider_statuses_with_live(
         ),
     }
     out
+}
+
+fn append_docs_vlm_status(out: &mut String, live: bool) {
+    let policy = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| archon_policy::load_effective_policy(&cwd).ok())
+        .unwrap_or_default();
+    let (provider, model) = archon_docs::vlm::factory::default_provider_summary(&policy);
+    out.push('\n');
+    out.push_str(
+        "Document/video VLM is policy-specific and may differ from generic local provider rows.\n",
+    );
+    if !live {
+        out.push_str(&format!(
+            "Document/video VLM: configured provider={} model={} (use --live for health check)\n",
+            provider,
+            if model.is_empty() {
+                "n/a"
+            } else {
+                model.as_str()
+            }
+        ));
+        return;
+    }
+
+    let report = archon_docs::vlm::factory::diagnostic_report(&policy);
+    let line = match report.status {
+        archon_docs::vlm::factory::VlmProviderInitStatus::Registered => {
+            format!("ok — {}/{}", report.provider, report.model)
+        }
+        archon_docs::vlm::factory::VlmProviderInitStatus::Disabled => {
+            format!("disabled — {}", report.message)
+        }
+        archon_docs::vlm::factory::VlmProviderInitStatus::Skipped => {
+            format!(
+                "skipped — {}/{}: {}",
+                report.provider, report.model, report.message
+            )
+        }
+    };
+    out.push_str(&format!("Document/video VLM: {line}\n"));
 }
 
 fn render_provider_statuses_json(
