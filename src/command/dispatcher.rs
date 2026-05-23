@@ -103,7 +103,7 @@ impl Dispatcher {
         };
 
         match self.registry.get(&parsed.name) {
-            Some(handler) => handler.execute(ctx, &parsed.args),
+            Some(handler) => handler.execute(ctx, &parsed.raw_args),
             None => {
                 // TASK-AGS-804: delegate message assembly to the
                 // dedicated formatter, which owns the zero / one /
@@ -327,7 +327,7 @@ mod tests {
     // Registry has no public "insert" API and TASK-AGS-623 is
     // out-of-scope for registry.rs changes, so these two tests
     // exercise the exact composition `Dispatcher::dispatch` performs
-    // (parser::parse → handler.execute(args)) against a fake handler
+    // (parser::parse → handler.execute(raw_args)) against a fake handler
     // directly, rather than round-tripping through a custom Registry.
     // This still guarantees that the parser output is faithfully
     // forwarded to handler.execute — which is the contract under test.
@@ -336,7 +336,7 @@ mod tests {
     fn invoke_handler_via_parse(handler: &dyn CommandHandler, input: &str) -> anyhow::Result<()> {
         let parsed = crate::command::parser::parse(input).expect("parser must accept input");
         let (mut ctx, _rx) = make_ctx();
-        handler.execute(&mut ctx, &parsed.args)
+        handler.execute(&mut ctx, &parsed.raw_args)
     }
 
     #[test]
@@ -354,6 +354,36 @@ mod tests {
             recorded[0],
             vec!["a".to_string(), "b".to_string(), "c".to_string()],
             "handler should receive parser-tokenized positional args in order"
+        );
+    }
+
+    #[test]
+    fn dispatch_preserves_cli_flag_tokens_for_handlers() {
+        let calls: Arc<Mutex<Vec<Vec<String>>>> = Arc::new(Mutex::new(Vec::new()));
+        let handler = RecordingHandler {
+            calls: Arc::clone(&calls),
+        };
+
+        invoke_handler_via_parse(
+            &handler,
+            "/video ingest https://example.test/watch?v=1 --frames hybrid --asr whisper-cpp --yes",
+        )
+        .unwrap();
+
+        let recorded = calls.lock().unwrap().clone();
+        assert_eq!(recorded.len(), 1, "handler should be called exactly once");
+        assert_eq!(
+            recorded[0],
+            vec![
+                "ingest".to_string(),
+                "https://example.test/watch?v=1".to_string(),
+                "--frames".to_string(),
+                "hybrid".to_string(),
+                "--asr".to_string(),
+                "whisper-cpp".to_string(),
+                "--yes".to_string()
+            ],
+            "CLI mirror handlers must receive the original flag tokens"
         );
     }
 

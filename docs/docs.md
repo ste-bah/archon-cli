@@ -72,12 +72,13 @@ timecode provenance for `archon docs answer`.
 
 ```bash
 archon video ingest ./lecture.mp4 --transcript ./lecture.vtt --frames none
+archon video ingest "https://youtu.be/abc123" --frames hybrid --asr whisper-cpp --yes
 archon video transcript <video-id> --format srt
 archon video inspect <video-id>
 ```
 
 See [Video Evidence Ingest](video.md) for transcript-only, ASR, YouTube,
-frame-extraction, policy, and compliance workflows.
+frame-extraction, policy, local binary setup, and compliance workflows.
 
 Then index and search:
 

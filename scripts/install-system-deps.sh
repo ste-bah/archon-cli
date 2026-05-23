@@ -2,11 +2,13 @@
 # install-system-deps.sh — POSIX-compatible system-package installer for archon-cli.
 #
 # Detects the host OS and installs build deps, poppler PDF utilities
-# (`pdftotext`, `pdfimages`, `pdftoppm`), Tesseract OCR, and optional
-# Docker/OpenShell sandbox runtime dependencies.
+# (`pdftotext`, `pdfimages`, `pdftoppm`), Tesseract OCR, video ingest
+# helpers (`ffmpeg`, `ffprobe`, `yt-dlp`, and `whisper-cli` where packaged),
+# and optional Docker/OpenShell sandbox runtime dependencies.
 #
-# Does NOT install Rust, VLM models, cloud OCR keys, provider credentials, or
-# enable sandbox backends in config.toml. OpenShell gateway setup is opt-in.
+# Does NOT install Rust, VLM/Whisper model files, cloud OCR keys, provider
+# credentials, or enable sandbox backends in config.toml. OpenShell gateway
+# setup is opt-in.
 #
 # Usage:
 #   sudo scripts/install-system-deps.sh         # install everything
@@ -91,14 +93,23 @@ case "$UNAME_S" in
         ;;
 esac
 
+if [ "$OS_FAMILY" = "macos" ]; then
+    for brew_dir in /opt/homebrew/bin /usr/local/bin; do
+        [ -d "$brew_dir" ] && PATH="$brew_dir:$PATH"
+    done
+    export PATH
+fi
+
 # Each variable below is a SPACE-SEPARATED list of package names appropriate
 # for the selected package manager. The runner concatenates all three groups
 # and runs them in a single pass for efficiency.
 PKG_BUILD=""
 PKG_PDF=""
 PKG_OCR=""
+PKG_VIDEO=""
 PKG_DOCKER=""
 PKG_OPENSHELL_PREREQ=""
+CHECK_WHISPER_CLI=false
 PKG_MGR=""
 PKG_INSTALL_CMD=""
 PKG_UPDATE_CMD=""
@@ -111,6 +122,7 @@ case "$DISTRO_ID" in
         PKG_BUILD="build-essential pkg-config libssl-dev git"
         PKG_PDF="poppler-utils"
         PKG_OCR="tesseract-ocr"
+        PKG_VIDEO="ffmpeg yt-dlp"
         PKG_DOCKER="docker.io"
         PKG_OPENSHELL_PREREQ="curl"
         ;;
@@ -121,6 +133,7 @@ case "$DISTRO_ID" in
         PKG_BUILD="gcc pkg-config openssl-devel git"
         PKG_PDF="poppler-utils"
         PKG_OCR="tesseract"
+        PKG_VIDEO="ffmpeg-free yt-dlp"
         PKG_DOCKER="moby-engine docker-cli"
         PKG_OPENSHELL_PREREQ="curl"
         ;;
@@ -131,6 +144,8 @@ case "$DISTRO_ID" in
         PKG_BUILD="base-devel openssl pkg-config git"
         PKG_PDF="poppler"
         PKG_OCR="tesseract"
+        PKG_VIDEO="ffmpeg yt-dlp whisper.cpp"
+        CHECK_WHISPER_CLI=true
         PKG_DOCKER="docker"
         PKG_OPENSHELL_PREREQ="curl"
         ;;
@@ -145,6 +160,7 @@ case "$DISTRO_ID" in
         PKG_BUILD="gcc pkg-config libopenssl-devel git"
         PKG_PDF="poppler-tools"
         PKG_OCR="tesseract-ocr"
+        PKG_VIDEO="ffmpeg yt-dlp"
         PKG_DOCKER="docker"
         PKG_OPENSHELL_PREREQ="curl"
         ;;
@@ -158,6 +174,7 @@ case "$DISTRO_ID" in
         PKG_BUILD="build-base openssl-dev pkgconfig git"
         PKG_PDF="poppler-utils"
         PKG_OCR="tesseract-ocr"
+        PKG_VIDEO="ffmpeg yt-dlp"
         PKG_DOCKER="docker"
         PKG_OPENSHELL_PREREQ="curl"
         ;;
@@ -170,6 +187,8 @@ case "$DISTRO_ID" in
         PKG_BUILD=""
         PKG_PDF="poppler"
         PKG_OCR="tesseract"
+        PKG_VIDEO="ffmpeg yt-dlp whisper-cpp"
+        CHECK_WHISPER_CLI=true
         PKG_DOCKER=""
         PKG_OPENSHELL_PREREQ=""
         ;;
@@ -180,6 +199,7 @@ case "$DISTRO_ID" in
         echo "    Build deps:        gcc/clang, pkg-config, openssl headers, git" >&2
         echo "    PDF utilities:     pdftotext + pdfimages + pdftoppm (poppler-utils)" >&2
         echo "    Image OCR:         tesseract-ocr" >&2
+        echo "    Video ingest:      ffmpeg + ffprobe, yt-dlp, whisper.cpp/whisper-cli" >&2
         echo "    Sandbox extras:    docker CLI/engine and openshell CLI (optional)" >&2
         exit 1
         ;;
@@ -223,11 +243,14 @@ if [ "$CHECK_ONLY" = true ]; then
     #   pdftotext  — text-layer extraction
     #   pdfimages  — embedded image extraction
     #   pdftoppm   — page-render fallback for scanned PDFs
-    for bin in gcc cc pkg-config git pdftotext pdfimages pdftoppm tesseract; do
+    for bin in gcc cc pkg-config git pdftotext pdfimages pdftoppm tesseract ffmpeg ffprobe yt-dlp; do
         if ! command -v "$bin" >/dev/null 2>&1; then
             MISSING="$MISSING $bin"
         fi
     done
+    if [ "$CHECK_WHISPER_CLI" = true ] && ! command -v whisper-cli >/dev/null 2>&1; then
+        MISSING="$MISSING whisper-cli"
+    fi
     if [ "$WITH_DOCKER" = true ] && ! command -v docker >/dev/null 2>&1; then
         MISSING="$MISSING docker"
     fi
@@ -250,13 +273,16 @@ if [ "$CHECK_ONLY" = true ]; then
         elif [ "$WITH_OPENSHELL" = true ]; then
             echo "  Run: $0 --with-openshell" >&2
         elif [ "$WITH_DOCKER" = true ]; then
-            echo "  Run: sudo $0 --with-docker" >&2
+            [ "$PKG_MGR" = "brew" ] && echo "  Run: $0 --with-docker" >&2 || echo "  Run: sudo $0 --with-docker" >&2
         else
-            echo "  Run: sudo $0" >&2
+            [ "$PKG_MGR" = "brew" ] && echo "  Run: $0" >&2 || echo "  Run: sudo $0" >&2
         fi
         exit 2
     fi
-    PRESENT="gcc/cc, pkg-config, git, pdftotext, pdfimages, pdftoppm, tesseract"
+    PRESENT="gcc/cc, pkg-config, git, pdftotext, pdfimages, pdftoppm, tesseract, ffmpeg, ffprobe, yt-dlp"
+    if [ "$CHECK_WHISPER_CLI" = true ]; then
+        PRESENT="$PRESENT, whisper-cli"
+    fi
     if [ "$WITH_DOCKER" = true ]; then
         PRESENT="$PRESENT, docker"
     fi
@@ -295,7 +321,7 @@ fi
 # ---------------------------------------------------------------------------
 # Dry-run prints the commands; otherwise execute
 # ---------------------------------------------------------------------------
-ALL_PKGS="$PKG_BUILD $PKG_PDF $PKG_OCR"
+ALL_PKGS="$PKG_BUILD $PKG_PDF $PKG_OCR $PKG_VIDEO"
 if [ "$WITH_DOCKER" = true ]; then
     ALL_PKGS="$ALL_PKGS $PKG_DOCKER"
 fi
@@ -377,7 +403,10 @@ setup_openshell_gateway
 if [ "$DRY_RUN" = false ]; then
     echo
     echo "install-system-deps.sh: verifying installs..."
-    VERIFY_BINS="pdftotext pdfimages pdftoppm tesseract"
+    VERIFY_BINS="pdftotext pdfimages pdftoppm tesseract ffmpeg ffprobe yt-dlp"
+    if [ "$CHECK_WHISPER_CLI" = true ]; then
+        VERIFY_BINS="$VERIFY_BINS whisper-cli"
+    fi
     if [ "$WITH_DOCKER" = true ]; then
         VERIFY_BINS="$VERIFY_BINS docker"
     fi
@@ -397,8 +426,9 @@ if [ "$DRY_RUN" = false ]; then
     echo "  1. Install Rust 1.85+ if not already: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
     echo "  2. Build archon-cli: cargo build --release --bin archon"
     echo "  3. Initialise a project: ./scripts/archon-init.sh --target /path/to/project"
+    echo "  4. For local video ASR, download a whisper.cpp model and set [policy.video.asr].model"
     if [ "$WITH_DOCKER" = true ]; then
-        echo "  4. Enable Docker sandboxing by setting [sandbox].backend=\"docker\" and [sandbox.docker].enabled=true"
+        echo "  5. Enable Docker sandboxing by setting [sandbox].backend=\"docker\" and [sandbox.docker].enabled=true"
     fi
     if [ "$WITH_OPENSHELL" = true ]; then
         if [ "$SETUP_OPENSHELL_GATEWAY" = true ]; then

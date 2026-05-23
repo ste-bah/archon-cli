@@ -19,6 +19,7 @@ source "$HOME/.cargo/env"
 git clone https://github.com/ste-bah/archon-cli
 cd archon-cli
 sudo scripts/install-system-deps.sh --check || sudo scripts/install-system-deps.sh
+# macOS/Homebrew: run the same installer without sudo.
 cargo build --release --bin archon
 ARCHON_BIN="$(pwd)/target/release/archon"
 ```

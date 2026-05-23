@@ -52,19 +52,32 @@ impl AcquisitionAdapter for ExternalDownloaderAdapter {
         }
         confirm_download(url, "yt-dlp", None, opts.yes, &opts.policy.video)?;
 
-        let output_template = std::env::temp_dir().join("archon-video-%(id)s.%(ext)s");
+        let output_dir = std::env::current_dir()
+            .unwrap_or_else(|_| std::env::temp_dir())
+            .join(".archon")
+            .join("video-artifacts")
+            .join("downloads");
+        std::fs::create_dir_all(&output_dir).map_err(|e| VideoError::AcquisitionFailed {
+            message: format!("create video download directory: {e}"),
+        })?;
         let mut cmd = Command::new(&self.bin);
         if opts.audio_only {
-            cmd.arg("-x");
+            cmd.args(["-x", "--audio-format", "wav"]);
         }
-        cmd.args(["--no-playlist", url, "-o"]);
-        cmd.arg(&output_template);
+        cmd.args(["--no-playlist", "--paths"]);
+        cmd.arg(&output_dir);
+        cmd.args(["-o", "archon-video-%(id)s.%(ext)s"]);
+        cmd.args(["--print", "after_move:filepath"]);
+        cmd.arg(url);
         let acquire = &opts.policy.video.acquire;
         if !acquire.browser_profile.is_empty() {
             cmd.args(["--cookies-from-browser", &acquire.browser_profile]);
         }
         if !acquire.po_token_provider.is_empty() {
             cmd.args(["--po-token-server", &acquire.po_token_provider]);
+        }
+        if let Some(ffmpeg_location) = ffmpeg_location_arg() {
+            cmd.args(["--ffmpeg-location", &ffmpeg_location]);
         }
         let output = cmd.output().await.map_err(|_| VideoError::BinaryNotFound {
             name: "yt-dlp".into(),
@@ -73,8 +86,9 @@ impl AcquisitionAdapter for ExternalDownloaderAdapter {
         if !output.status.success() {
             return Err(platform_or_acquisition_error(&output.stderr));
         }
+        let local_path = parse_downloaded_path(&output.stdout)?;
         Ok(AcquiredMedia {
-            local_path: output_template,
+            local_path,
             acquisition_method: AcquisitionMethod::ExternalDownloader,
             estimated_bytes: None,
         })
@@ -191,4 +205,37 @@ fn acquisition_error(message: impl Into<String>) -> VideoError {
     VideoError::AcquisitionFailed {
         message: message.into(),
     }
+}
+
+fn parse_downloaded_path(stdout: &[u8]) -> Result<PathBuf, VideoError> {
+    let stdout = String::from_utf8_lossy(stdout);
+    stdout
+        .lines()
+        .rev()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from)
+        .find(|path| path.exists())
+        .ok_or_else(|| {
+            acquisition_error(format!(
+                "yt-dlp completed but did not report an existing output path; stdout: {stdout}"
+            ))
+        })
+}
+
+fn ffmpeg_location_arg() -> Option<String> {
+    if let Ok(path) = std::env::var("ARCHON_FFMPEG_BIN") {
+        let path = PathBuf::from(path);
+        return Some(
+            path.parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or(path.as_path())
+                .display()
+                .to_string(),
+        );
+    }
+    let homebrew = PathBuf::from("/opt/homebrew/bin/ffmpeg");
+    homebrew
+        .exists()
+        .then(|| "/opt/homebrew/bin".to_string())
 }

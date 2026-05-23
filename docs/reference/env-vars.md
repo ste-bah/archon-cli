@@ -36,6 +36,15 @@
 | `ARCHON_SESSIONS_DIR` | Override session directory |
 | `ARCHON_NO_TUI` | Force headless mode |
 | `ARCHON_TRUST_USER_GRAMMARS` | Set to `1`, `true`, or `yes` to allow TUI syntax highlighting to load user-provided tree-sitter `.so` grammars |
+| `ARCHON_FFMPEG_BIN` | Override the `ffmpeg` binary used by video frame/audio extraction |
+| `ARCHON_FFPROBE_BIN` | Override the `ffprobe` binary used by video metadata extraction |
+| `ARCHON_WHISPER_BIN` | Override the `whisper-cli` binary used by `whisper-cpp` video ASR |
+| `ARCHON_FASTER_WHISPER_BIN` | Override the `faster-whisper` binary used by video ASR |
+| `ARCHON_YTDLP_BIN` | Override the `yt-dlp` binary used by YouTube/video acquisition |
+| `ARCHON_PDFTOTEXT_BIN` | Override the `pdftotext` binary used by document/PDF extraction |
+| `ARCHON_PDFIMAGES_BIN` | Override the `pdfimages` binary used by embedded PDF image extraction |
+| `ARCHON_PDFTOPPM_BIN` | Override the `pdftoppm` binary used by rendered PDF page fallback |
+| `ARCHON_TESSERACT_BIN` | Override the `tesseract` binary used by local OCR |
 | `EDITOR` | Used by `/commit` and skill workflows that open an editor |
 | `SHELL` | Inherited by `Bash` tool subprocesses |
 | `HOME` | Used to resolve `~/.config/archon/` and `~/.local/share/archon/` |
@@ -43,6 +52,14 @@
 | `XDG_DATA_HOME` | Linux/macOS: overrides `~/.local/share` base |
 | `APPDATA` | Windows: per-user state base |
 | `SSH_AUTH_SOCK` | Used by `archon remote ssh` for agent forwarding |
+
+Video binary overrides must be exported before starting the TUI if you want
+slash commands such as `/video ingest ... --asr whisper-cpp` to inherit them.
+For Apple Silicon Homebrew installs, common values are
+`ARCHON_FFMPEG_BIN=/opt/homebrew/bin/ffmpeg`,
+`ARCHON_FFPROBE_BIN=/opt/homebrew/bin/ffprobe`,
+`ARCHON_WHISPER_BIN=/opt/homebrew/bin/whisper-cli`, and
+`ARCHON_YTDLP_BIN=/opt/homebrew/bin/yt-dlp`.
 
 ## Resolution order for credentials
 

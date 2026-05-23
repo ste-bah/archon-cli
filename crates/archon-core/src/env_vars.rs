@@ -63,6 +63,16 @@ pub const KNOWN_ARCHON_VARS: &[&str] = &[
     "ARCHON_KB_DB_PATH",
     "ARCHON_MEANING_DB_PATH",
     "ARCHON_PROV_DB_PATH",
+    // Tool binary overrides
+    "ARCHON_FASTER_WHISPER_BIN",
+    "ARCHON_FFMPEG_BIN",
+    "ARCHON_FFPROBE_BIN",
+    "ARCHON_PDFIMAGES_BIN",
+    "ARCHON_PDFTOPPM_BIN",
+    "ARCHON_PDFTOTEXT_BIN",
+    "ARCHON_TESSERACT_BIN",
+    "ARCHON_WHISPER_BIN",
+    "ARCHON_YTDLP_BIN",
     // Telemetry (recognized but no-op)
     "ARCHON_DISABLE_TELEMETRY",
 ];

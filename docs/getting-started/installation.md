@@ -27,10 +27,11 @@ rustc --version    # verify: 1.85.0 or newer
 
 archon-cli links against OpenSSL via `reqwest` (rustls is also enabled, but build-deps still need pkg-config + libssl headers on Linux for transitive crates).
 
-> **Quick path: one-shot installer.** `scripts/install-system-deps.sh` detects your OS and installs the required build/doc-ingest packages at once: build deps + `pdftotext`/`pdfimages`/`pdftoppm` (poppler) for PDF ingest + `tesseract` for image OCR. Supports Ubuntu/Debian/WSL2, Fedora/RHEL/Rocky/Alma, Arch/Manjaro, openSUSE/SLE, Alpine, and macOS (Homebrew).
+> **Quick path: one-shot installer.** `scripts/install-system-deps.sh` detects your OS and installs the required build/doc-ingest/video packages at once: build deps + `pdftotext`/`pdfimages`/`pdftoppm` (poppler) for PDF ingest + `tesseract` for image OCR + `ffmpeg`/`ffprobe` and `yt-dlp` for video ingest. It installs `whisper-cli` where the host package manager provides it, currently Homebrew and Arch-family packages. Supports Ubuntu/Debian/WSL2, Fedora/RHEL/Rocky/Alma, Arch/Manjaro, openSUSE/SLE, Alpine, and macOS (Homebrew).
 >
 > ```bash
-> sudo scripts/install-system-deps.sh                  # required build/PDF/OCR deps
+> sudo scripts/install-system-deps.sh                  # Linux: required build/PDF/OCR/video deps
+> scripts/install-system-deps.sh                       # macOS/Homebrew: do not run brew under sudo
 > sudo scripts/install-system-deps.sh --with-docker    # add Docker sandbox deps
 > sudo scripts/install-system-deps.sh --with-openshell # add Docker + OpenShell deps
 > sudo scripts/install-system-deps.sh --with-sandbox   # add both sandbox extras
@@ -48,26 +49,26 @@ archon-cli links against OpenSSL via `reqwest` (rustls is also enabled, but buil
 
 ```bash
 sudo apt update
-sudo apt install -y build-essential pkg-config libssl-dev git poppler-utils tesseract-ocr
+sudo apt install -y build-essential pkg-config libssl-dev git poppler-utils tesseract-ocr ffmpeg yt-dlp
 ```
 
 ### Fedora / RHEL / Rocky
 
 ```bash
-sudo dnf install -y gcc pkg-config openssl-devel git poppler-utils tesseract
+sudo dnf install -y gcc pkg-config openssl-devel git poppler-utils tesseract ffmpeg-free yt-dlp
 ```
 
 ### Arch / Manjaro
 
 ```bash
-sudo pacman -S --needed base-devel openssl pkg-config git poppler tesseract
+sudo pacman -S --needed base-devel openssl pkg-config git poppler tesseract ffmpeg yt-dlp whisper.cpp
 ```
 
 ### macOS
 
 ```bash
 xcode-select --install
-brew install poppler tesseract             # PDF text extraction + image OCR
+brew install poppler tesseract ffmpeg yt-dlp whisper-cpp
 # OpenSSL supplied by the system; no extra steps for default builds.
 # If a transitive crate complains about OpenSSL:
 brew install pkg-config openssl
@@ -81,9 +82,16 @@ winget install Rustlang.Rustup
 winget install Microsoft.VisualStudio.2022.BuildTools
 # Select "Desktop development with C++" during install
 winget install Git.Git
+winget install Gyan.FFmpeg
+winget install yt-dlp.yt-dlp
 # Optional Docker sandbox backend:
 winget install Docker.DockerDesktop
 ```
+
+Native Windows users who want local `whisper-cpp` ASR should install a
+`whisper-cli` build from the upstream whisper.cpp project and set
+`ARCHON_WHISPER_BIN` to that binary. WSL2 users can use the Ubuntu/Debian setup
+above.
 
 ### Windows (WSL2 — recommended)
 
@@ -204,7 +212,7 @@ The install scripts split responsibilities:
 
 | Script | What it does | What it does not do |
 |---|---|---|
-| `scripts/install-system-deps.sh` | Installs/checks OS packages needed for building, PDF ingest, OCR, and optional sandbox backends | Does not initialise a project, write config, install provider credentials, or set up the web UI |
+| `scripts/install-system-deps.sh` | Installs/checks OS packages needed for building, PDF ingest, OCR, video ingest, and optional sandbox backends | Does not initialise a project, write config, install provider credentials, download Whisper/VLM model files, or set up the web UI |
 | `scripts/archon-init.sh` | Initialises an existing project directory with `.archon/`, `prds/`, `tasks/`, policy defaults, docs inboxes, and optional bundled assets | Does not create the target directory, install system packages, authenticate providers, or build the binary |
 
 If you already have a project directory, skip `mkdir -p` and point

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use archon_policy::VideoPolicy;
 use async_trait::async_trait;
+use serde_json::Value;
 use tempfile::{Builder, NamedTempFile};
 use tokio::process::Command;
 
@@ -54,6 +55,7 @@ pub async fn extract_audio_track(
             message: format!("create temp wav: {e}"),
         })?;
     let output = Command::new(&bin)
+        .args(["-hide_banner", "-nostdin", "-y"])
         .arg("-i")
         .arg(video_path)
         .args(["-vn", "-ar", "16000", "-ac", "1", "-f", "wav"])
@@ -147,8 +149,14 @@ impl AsrProvider for WhisperCppAdapter {
             .map_err(|e| VideoError::AsrProviderUnavailable {
                 message: format!("write whisper-cpp input: {e}"),
             })?;
+        let out_dir = tempfile::tempdir().map_err(|e| VideoError::AsrProviderUnavailable {
+            message: format!("create whisper-cpp output directory: {e}"),
+        })?;
+        let output_prefix = out_dir.path().join("transcript");
         let output = Command::new(&self.bin)
-            .args(["--model", &opts.model, "--output-json", "--file"])
+            .args(["--model", &opts.model, "--output-json", "--output-file"])
+            .arg(&output_prefix)
+            .arg("--file")
             .arg(tmp.path())
             .output()
             .await
@@ -156,18 +164,82 @@ impl AsrProvider for WhisperCppAdapter {
                 name: "whisper-cli".into(),
                 path: self.bin.clone(),
             })?;
-        if output.status.success() {
-            Ok(Vec::new())
-        } else {
-            Err(VideoError::AsrProviderUnavailable {
+        if !output.status.success() {
+            return Err(VideoError::AsrProviderUnavailable {
                 message: String::from_utf8_lossy(&output.stderr).to_string(),
-            })
+            });
         }
+        let json_path = output_prefix.with_extension("json");
+        let json = std::fs::read(&json_path).map_err(|e| VideoError::AsrProviderUnavailable {
+            message: format!(
+                "whisper-cpp succeeded but JSON output was not readable at {}: {e}",
+                json_path.display()
+            ),
+        })?;
+        parse_whisper_cpp_json(&json)
     }
 
     fn provider_name(&self) -> &str {
         "whisper-cpp"
     }
+}
+
+pub fn parse_whisper_cpp_json(json: &[u8]) -> Result<Vec<TranscriptSegment>, VideoError> {
+    let value: Value = serde_json::from_slice(json).map_err(|e| VideoError::AsrProviderUnavailable {
+        message: format!("parse whisper-cpp JSON: {e}"),
+    })?;
+    let Some(items) = value.get("transcription").and_then(Value::as_array) else {
+        return Ok(Vec::new());
+    };
+    let mut segments = Vec::new();
+    for item in items {
+        let text = item
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if text.is_empty() {
+            continue;
+        }
+        let (start_ms, end_ms) = whisper_segment_offsets(item).unwrap_or((0, 100));
+        segments.push(TranscriptSegment {
+            start_ms,
+            end_ms: end_ms.max(start_ms + 100),
+            text,
+            confidence: None,
+            speaker: None,
+        });
+    }
+    Ok(segments)
+}
+
+fn whisper_segment_offsets(item: &Value) -> Option<(u64, u64)> {
+    item.get("offsets")
+        .and_then(|offsets| {
+            Some((
+                offsets.get("from")?.as_u64()?,
+                offsets.get("to")?.as_u64()?,
+            ))
+        })
+        .or_else(|| {
+            let timestamps = item.get("timestamps")?;
+            Some((
+                parse_whisper_timestamp(timestamps.get("from")?.as_str()?)?,
+                parse_whisper_timestamp(timestamps.get("to")?.as_str()?)?,
+            ))
+        })
+}
+
+fn parse_whisper_timestamp(value: &str) -> Option<u64> {
+    let mut parts = value.replace(',', ".").split(':').map(str::to_string).collect::<Vec<_>>();
+    if parts.len() != 3 {
+        return None;
+    }
+    let seconds = parts.pop()?.parse::<f64>().ok()?;
+    let minutes = parts.pop()?.parse::<u64>().ok()?;
+    let hours = parts.pop()?.parse::<u64>().ok()?;
+    Some(hours * 3_600_000 + minutes * 60_000 + (seconds * 1000.0).round() as u64)
 }
 
 pub struct FasterWhisperAdapter {

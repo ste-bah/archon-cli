@@ -3,6 +3,7 @@ use std::io::Write;
 use archon_policy::EffectivePolicy;
 use archon_video::asr::{
     AsrOptions, AsrProvider, MockAsrAdapter, NullAsrAdapter, extract_audio_track,
+    parse_whisper_cpp_json,
 };
 use archon_video::errors::VideoError;
 use archon_video::ingest::{IngestOpts, ingest_video_with_asr_provider};
@@ -60,7 +61,15 @@ async fn extract_audio_track_uses_mock_ffmpeg() {
     write_script(
         &script,
         r#"#!/bin/sh
+	seen_y=0
+	seen_nostdin=0
 	for arg do out="$arg"; done
+	for arg do
+		[ "$arg" = "-y" ] && seen_y=1
+		[ "$arg" = "-nostdin" ] && seen_nostdin=1
+	done
+	[ "$seen_y" = 1 ] || exit 42
+	[ "$seen_nostdin" = 1 ] || exit 43
 	printf 'RIFF' > "$out"
 "#,
     );
@@ -73,6 +82,26 @@ async fn extract_audio_track_uses_mock_ffmpeg() {
     .unwrap();
 
     assert!(std::fs::metadata(wav.path()).unwrap().len() > 0);
+}
+
+#[test]
+fn whisper_cpp_json_is_converted_to_segments() {
+    let json = br#"{
+      "transcription": [
+        {
+          "timestamps": {"from": "00:00:01,000", "to": "00:00:02,500"},
+          "offsets": {"from": 1000, "to": 2500},
+          "text": " hello world "
+        }
+      ]
+    }"#;
+
+    let segments = parse_whisper_cpp_json(json).unwrap();
+
+    assert_eq!(segments.len(), 1);
+    assert_eq!(segments[0].start_ms, 1000);
+    assert_eq!(segments[0].end_ms, 2500);
+    assert_eq!(segments[0].text, "hello world");
 }
 
 #[tokio::test]

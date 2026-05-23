@@ -21,6 +21,7 @@ integration.
 git clone https://github.com/ste-bah/archon-cli
 cd archon-cli
 sudo scripts/install-system-deps.sh --check || sudo scripts/install-system-deps.sh
+# macOS/Homebrew: run scripts/install-system-deps.sh without sudo.
 # Optional sandbox deps: sudo scripts/install-system-deps.sh --with-sandbox
 cargo build --release --bin archon
 ARCHON_BIN="$(pwd)/target/release/archon"
@@ -124,6 +125,9 @@ archon video ingest "https://www.youtube.com/watch?v=abc123" \
   --transcript ./talk.vtt \
   --metadata-only
 
+# YouTube URL with governed local download and whisper-cpp ASR
+archon video ingest "https://youtu.be/abc123" --frames hybrid --asr whisper-cpp --yes
+
 # Frame extraction for charts, diagrams, and slides
 archon video ingest ./market-review.mp4 --frames hybrid --vlm --yes
 archon video transcript <video-id> --format vtt
@@ -150,7 +154,7 @@ The docs are organised by user goal:
 | **Security** | [`docs/security/`](docs/security/) — tool preflight, sandboxing, Docker, SSH, OpenShell |
 | **Reference** | [`docs/reference/`](docs/reference/) — slash commands, tools, skills, permissions, config schema, CLI flags, env vars |
 | **Integrations** | [`docs/integrations/`](docs/integrations/) — MCP, plugins, hooks, identity spoofing, VLM image descriptions, LSP, IDE extensions |
-| **Cookbook** | [`docs/cookbook/`](docs/cookbook/) — real-world evidence workflows, strategic engagement, memory-driven coding, god-code pipeline, custom agents |
+| **Cookbook** | [`docs/cookbook/`](docs/cookbook/) — real-world evidence workflows, YouTube/video evidence, strategic engagement, memory-driven coding, god-code pipeline, custom agents |
 | **Operations** | [`docs/operations/`](docs/operations/) — sessions, web workbench, TUI, cost, compaction, cron, remote control, troubleshooting, data locations |
 | **Development** | [`docs/development/`](docs/development/) — contributing, dev flow gates, adding tools/skills/agents, release process |
 | **Release notes** | [`docs/release-notes/`](docs/release-notes/) — per-version changelogs |
@@ -194,8 +198,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v1.3.4** ([release notes](docs/release-notes/v1.3.4.md))
+- Current version: **v1.3.5** ([release notes](docs/release-notes/v1.3.5.md))
 - Stable release for local world-model advisory learning, first-class reasoning-quality events, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
+- v1.3.5 hardens governed video evidence ingest: YouTube acquisition feeds local media into ASR/frame paths, `whisper-cpp` JSON segments become timecoded chunks, frame extraction uses PNG output, and setup/docs cover video dependencies across supported OS families.
 - v1.3.4 adds DeepSeek provider parity for Anthropic-compatible sessions, generic non-Claude `/model` selection, DeepSeek context/catalog coverage, and provider-aware TUI/session cost display.
 - v1.3.3 adds governed video evidence ingest, transcript/frame evidence storage, `/video` parity, and policy-gated video summaries.
 - v1.3.2 finalizes the JEPA eval pipeline with quick/full modes, promotion-safe eval provenance, eval-run status commands, backend/cache deferral warnings, and source-size cleanup.

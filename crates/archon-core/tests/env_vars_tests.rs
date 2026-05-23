@@ -461,8 +461,9 @@ fn doctor_shows_unset_for_missing_vars() {
 #[test]
 fn known_vars_list_has_correct_count() {
     // 4 auth + 12 codex + 4 model/behavior + 4 feature control
-    // + 1 memory/embedding + 7 debugging + 6 paths + 1 telemetry = 39
-    assert_eq!(KNOWN_ARCHON_VARS.len(), 39);
+    // + 1 memory/embedding + 7 debugging + 6 paths
+    // + 9 tool binary overrides + 1 telemetry = 48
+    assert_eq!(KNOWN_ARCHON_VARS.len(), 48);
 }
 
 #[test]
@@ -492,6 +493,15 @@ fn known_vars_contains_all_documented_vars() {
         "ARCHON_KB_DB_PATH",
         "ARCHON_MEANING_DB_PATH",
         "ARCHON_PROV_DB_PATH",
+        "ARCHON_FASTER_WHISPER_BIN",
+        "ARCHON_FFMPEG_BIN",
+        "ARCHON_FFPROBE_BIN",
+        "ARCHON_PDFIMAGES_BIN",
+        "ARCHON_PDFTOPPM_BIN",
+        "ARCHON_PDFTOTEXT_BIN",
+        "ARCHON_TESSERACT_BIN",
+        "ARCHON_WHISPER_BIN",
+        "ARCHON_YTDLP_BIN",
         "ARCHON_DISABLE_TELEMETRY",
     ];
 

@@ -14,6 +14,7 @@ use crate::chunk_writer::{
 };
 use crate::errors::VideoError;
 use crate::frame_pipeline::{FramePipelineInput, process_frame_pipeline};
+use crate::ingest_media::{acquire_media_if_needed, asr_audio_bytes, successful_video_by_hash};
 use crate::metadata::{MetadataOpts, VideoMetadata, extract_metadata};
 use crate::provenance::insert_edge;
 use crate::schema::create_video_schema;
@@ -73,11 +74,14 @@ pub async fn ingest_video_with_providers(
         metadata_only: opts.metadata_only,
         prefer_caption: false,
     };
-    let resolution = resolve_source(&opts.source, &resolve_opts, policy)?;
+    let mut resolution = resolve_source(&opts.source, &resolve_opts, policy)?;
+    if let Some(media) = acquire_media_if_needed(&opts, policy, &resolution).await? {
+        resolution.local_path = Some(media.local_path);
+    }
     let metadata = maybe_extract_metadata(&resolution).await?;
     let transcript_bytes = read_transcript_bytes(&opts).await?;
     let source_hash = compute_source_hash(&opts.source, transcript_bytes.as_deref());
-    if let Some(existing) = store::get_video_by_hash(db, &source_hash)? {
+    if let Some(existing) = successful_video_by_hash(db, &source_hash)? {
         return Ok(VideoIngestResult {
             video_id: existing.video_id,
             document_id: existing.document_id,
@@ -105,6 +109,7 @@ pub async fn ingest_video_with_providers(
         &opts,
         policy,
         transcript_bytes,
+        resolution.local_path.as_deref(),
         asr_provider,
         diarizer_provider,
     )
@@ -239,6 +244,7 @@ async fn resolve_segment_plan(
     opts: &IngestOpts,
     policy: &EffectivePolicy,
     transcript_bytes: Option<Vec<u8>>,
+    media_path: Option<&std::path::Path>,
     asr_provider: Option<&dyn AsrProvider>,
     diarizer_provider: Option<&dyn DiarizationProvider>,
 ) -> Result<SegmentPlan, VideoError> {
@@ -260,11 +266,26 @@ async fn resolve_segment_plan(
         });
     }
     let asr_opts = AsrOptions::from(&policy.video);
+    let audio_bytes = asr_audio_bytes(media_path, asr_provider.is_some()).await?;
     if let Some(provider) = asr_provider {
-        return build_asr_segment_plan(provider, &asr_opts, policy, diarizer_provider).await;
+        return build_asr_segment_plan(
+            provider,
+            &asr_opts,
+            policy,
+            diarizer_provider,
+            &audio_bytes,
+        )
+        .await;
     }
     let provider = select_asr_provider(&policy.video);
-    build_asr_segment_plan(provider.as_ref(), &asr_opts, policy, diarizer_provider).await
+    build_asr_segment_plan(
+        provider.as_ref(),
+        &asr_opts,
+        policy,
+        diarizer_provider,
+        &audio_bytes,
+    )
+    .await
 }
 
 async fn build_asr_segment_plan(
@@ -272,8 +293,9 @@ async fn build_asr_segment_plan(
     asr_opts: &AsrOptions,
     policy: &EffectivePolicy,
     diarizer_provider: Option<&dyn DiarizationProvider>,
+    audio_bytes: &[u8],
 ) -> Result<SegmentPlan, VideoError> {
-    let mut segments = provider.transcribe(&[], asr_opts).await?;
+    let mut segments = provider.transcribe(audio_bytes, asr_opts).await?;
     let mut warnings = Vec::new();
     if asr_opts.vad_stable_timestamps {
         enforce_monotonic_boundaries(&mut segments);
@@ -288,7 +310,7 @@ async fn build_asr_segment_plan(
             }
         };
         let (with_speakers, diarization_warnings) =
-            apply_diarization(segments, &[], diarizer).await;
+            apply_diarization(segments, audio_bytes, diarizer).await;
         segments = with_speakers;
         warnings.extend(diarization_warnings);
     }

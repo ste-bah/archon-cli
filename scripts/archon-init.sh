@@ -81,6 +81,7 @@ mkdir -p "$ARCHON_DIR/docs"
 mkdir -p "$ARCHON_DIR/docs/inbox"
 mkdir -p "$ARCHON_DIR/docs/images"
 mkdir -p "$ARCHON_DIR/evidence"
+mkdir -p "$ARCHON_DIR/video-artifacts/downloads"
 mkdir -p "$TARGET/prds"
 mkdir -p "$TARGET/tasks"
 
@@ -194,6 +195,48 @@ render_text_pdf_pages = false
 [policy.docs.retrieval]
 exact_weight = 0.45
 semantic_weight = 0.55
+
+[policy.video]
+enabled = false
+allow_youtube = false
+allow_direct_urls = false
+allow_external_downloaders = false
+allow_browser_automation = false
+allow_caption_capture = false
+allow_cloud_asr = false
+allow_cloud_vlm = false
+require_user_confirmation_for_download = true
+max_duration_minutes = 120
+max_download_mb = 2048
+max_frames = 500
+frame_interval_secs = 10
+scene_change_threshold = 0.35
+dedupe_threshold = 0.94
+
+[policy.video.acquire]
+browser_profile = "default"
+external_downloader_bin = "yt-dlp"
+po_token_provider = ""
+
+[policy.video.asr]
+provider = "whisper-rs"
+model = "base"
+device = "auto"
+vad_stable_timestamps = false
+model_cache_dir = ""
+model_source = ""
+diarization = false
+
+[policy.video.frames]
+mode = "scene"
+ocr = true
+vlm = true
+
+[policy.video.summary]
+enabled = false
+allow_llm_summary = false
+allow_cloud_summary = false
+provider = "disabled"
 EOF
 fi
 
@@ -218,6 +261,7 @@ echo "  .archon/specs/"
 echo "  .archon/docs/inbox/"
 echo "  .archon/docs/images/"
 echo "  .archon/evidence/"
+echo "  .archon/video-artifacts/downloads/"
 echo "  .archon/policy.toml"
 if [ "$NO_AGENTS" = false ]; then
     echo "  .archon/agents/"
@@ -228,16 +272,17 @@ echo "  tasks/"
 # ---------------------------------------------------------------------------
 # Helpful hint about the system-deps installer (separate concern from this
 # per-project init — this script never touches system packages or sudo).
-# Verifies build-essential / pdftotext / tesseract are available; if any
-# are missing, prints the one-liner to install them.
+# Verifies build, PDF/OCR, and video helper binaries are available; if any are
+# missing, prints the one-liner to install them.
 # ---------------------------------------------------------------------------
 SCRIPT_DIR=$(dirname "$0")
 DEPS_SCRIPT="$SCRIPT_DIR/install-system-deps.sh"
 if [ -x "$DEPS_SCRIPT" ]; then
     if ! "$DEPS_SCRIPT" --check >/dev/null 2>&1; then
         echo
-        echo "archon-init: system packages missing (build deps / pdftotext / tesseract)."
+        echo "archon-init: system packages missing (build/PDF/OCR/video helper deps)."
         echo "             To install them: sudo $DEPS_SCRIPT"
+        echo "             macOS/Homebrew users should omit sudo."
         echo "             To check: $DEPS_SCRIPT --check"
     fi
 fi

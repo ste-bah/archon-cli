@@ -87,6 +87,44 @@ exit 1
     assert!(err.to_string().contains("does not attempt to bypass"));
 }
 
+#[tokio::test]
+async fn external_downloader_returns_reported_output_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("yt-dlp-mock.sh");
+    let media = dir.path().join("download.wav");
+    write_script(
+        &script,
+        &format!(
+            r#"#!/bin/sh
+printf 'RIFF' > '{}'
+printf '%s\n' '{}'
+"#,
+            media.display(),
+            media.display()
+        ),
+    );
+    let mut policy = EffectivePolicy::default();
+    policy.video.enabled = true;
+    policy.video.allow_external_downloaders = true;
+    policy.video.require_user_confirmation_for_download = false;
+
+    let acquired = ExternalDownloaderAdapter {
+        bin: script.display().to_string(),
+    }
+    .acquire(
+        "https://example.test/video",
+        &AcquireOptions {
+            policy,
+            audio_only: true,
+            yes: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(acquired.local_path, media);
+}
+
 fn write_script(path: &std::path::Path, body: &str) {
     let mut file = std::fs::File::create(path).unwrap();
     file.write_all(body.as_bytes()).unwrap();

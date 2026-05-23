@@ -6,6 +6,9 @@ OCR, VLM, and summary output is stored as ordinary `doc_chunks`, with
 `video_chunk_timeref` rows preserving timestamp provenance for `video@MM:SS`
 citations.
 
+For a real-world end-to-end walkthrough, see
+[YouTube video evidence with local Whisper](cookbook/video-evidence-youtube-whisper.md).
+
 ## Quick Start
 
 ```bash
@@ -19,8 +22,14 @@ Inside the TUI, use the mirrored slash form:
 
 ```text
 /video ingest ./lecture.mp4 --transcript ./lecture.vtt --frames none
+/video ingest "https://youtu.be/abc123" --frames hybrid --asr whisper-cpp --yes
 /video inspect <video-id>
 ```
+
+The TUI slash command is a CLI mirror: flags such as `--frames`, `--asr`,
+`--metadata-only`, `--vlm`, and `--yes` are passed through to the same handler as
+`archon video ingest`. In a shell, quote video URLs that contain `&` or other
+shell metacharacters; inside the TUI, quote URLs with spaces only.
 
 ## Transcript-Only Workflow
 
@@ -48,7 +57,18 @@ archon video ingest ./interview.mp4 --asr whisper-cpp --frames scene --yes
 ```
 
 `ARCHON_FFMPEG_BIN`, `ARCHON_FFPROBE_BIN`, `ARCHON_WHISPER_BIN`, and
-`ARCHON_FASTER_WHISPER_BIN` can point Archon at non-default binaries.
+`ARCHON_FASTER_WHISPER_BIN` can point Archon at non-default binaries. On
+Apple Silicon with Homebrew installs, the common overrides are:
+
+```bash
+ARCHON_FFMPEG_BIN=/opt/homebrew/bin/ffmpeg \
+ARCHON_WHISPER_BIN=/opt/homebrew/bin/whisper-cli \
+archon video ingest ./interview.mp4 --asr whisper-cpp --frames scene --yes
+```
+
+`whisper-cpp` runs `whisper-cli` with JSON output enabled, then stores each
+transcript segment as timecoded document evidence. Archon extracts a temporary
+16 kHz mono WAV with `ffmpeg` before calling the ASR binary.
 
 ## YouTube With User Transcript
 
@@ -61,6 +81,22 @@ archon video ingest "https://youtu.be/abc123" --transcript ./talk.srt --metadata
 ```
 
 Playlist and channel URLs are rejected. Use a single video URL.
+
+## YouTube With Local ASR
+
+For full YouTube media ingest, enable the external-downloader policy path and
+set `external_downloader_bin` or `ARCHON_YTDLP_BIN`. Archon calls `yt-dlp`,
+writes the downloaded file under `<workspace>/.archon/video-artifacts/downloads`,
+then runs the selected ASR/frame paths against that local file.
+
+```bash
+archon video ingest "https://youtu.be/abc123" --frames hybrid --asr whisper-cpp --yes
+```
+
+`yt-dlp` may need `ffmpeg` for format merging or audio extraction. Current
+Archon builds pass the Homebrew `ffmpeg` directory to `yt-dlp` automatically
+when `/opt/homebrew/bin/ffmpeg` exists, or when `ARCHON_FFMPEG_BIN` points to an
+explicit binary.
 
 ## Policy-Gated Acquisition
 
@@ -77,9 +113,14 @@ allow_external_downloaders = true
 require_user_confirmation_for_download = true
 
 [policy.video.acquire]
-external_downloader_bin = "yt-dlp"
+external_downloader_bin = "/opt/homebrew/bin/yt-dlp"
 browser_profile = "default"
 po_token_provider = ""
+
+[policy.video.asr]
+provider = "whisper-cpp"
+model = "/Users/you/Library/Application Support/archon/models/whisper/ggml-small.en.bin"
+device = "auto"
 ```
 
 ## Chart And Diagram Extraction
@@ -91,6 +132,7 @@ written.
 ```bash
 archon video ingest ./market-review.mp4 --frames hybrid --vlm --yes
 archon video frames <video-id>
+archon video reprocess <video-id> --frames
 ```
 
 VLM frame descriptions use the dedicated video-frame prompt, which asks the
@@ -188,6 +230,20 @@ anti-bot evasion.
   use frame extraction with OCR/VLM.
 - `binary not found`: set `ARCHON_FFMPEG_BIN`, `ARCHON_FFPROBE_BIN`, or the
   relevant ASR binary env var.
+- YouTube ingest remains `running` with `0` tracks/chunks: inspect active
+  processes for `yt-dlp`, `ffmpeg`, or `whisper-cli`. If `ffmpeg` is idle and a
+  temporary `archon-video-audio-*.wav` file is `0B`, use a build that runs
+  `ffmpeg` non-interactively; current builds pass `-nostdin -y` for audio
+  extraction.
+- Transcript ingest succeeds but frame extraction writes `0` frames: current
+  builds extract PNG frames instead of MJPEG/JPEG to avoid AV1/non-full-range
+  YUV encoder failures. After updating the binary, run
+  `archon video reprocess <video-id> --frames`.
+- `yt-dlp` cannot find `ffmpeg`: set `ARCHON_FFMPEG_BIN` before starting the
+  shell/TUI, or install Homebrew `ffmpeg` at `/opt/homebrew/bin/ffmpeg`.
+- `yt-dlp` warns about no supported JavaScript runtime: URL extraction may still
+  work, but some YouTube formats can be unavailable. Install a supported runtime
+  such as Deno or Node if `yt-dlp` reports that formats are missing.
 - `video@MM:SS` citations missing: confirm `video_chunk_timeref` rows exist via
   `archon video inspect <video-id>`.
 - No summary: `[policy.video.summary]` is disabled by default.

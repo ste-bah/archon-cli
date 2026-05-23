@@ -1,4 +1,6 @@
-use anyhow::Result;
+use std::path::Path;
+
+use anyhow::{Result, bail};
 use cozo::{DataValue, DbInstance, ScriptMutability};
 
 use crate::cli_args::VideoAction;
@@ -50,13 +52,84 @@ pub async fn handle_video_command(action: VideoAction) -> Result<()> {
         VideoAction::Frames { video_id } => list_frames(&db, &video_id)?,
         VideoAction::Transcript { video_id, format } => export_transcript(&db, &video_id, &format)?,
         VideoAction::Summary { video_id } => show_summary(&db, &video_id)?,
-        VideoAction::Reprocess { video_id, .. } => {
-            anyhow::bail!(
-                "video reprocess is not implemented yet for {video_id}; rerun `archon video ingest` with the desired flags"
-            )
-        }
+        VideoAction::Reprocess {
+            video_id,
+            transcript,
+            frames,
+            ocr,
+            vlm,
+            asr,
+            summary,
+        } => reprocess_video(&db, &policy, &video_id, transcript, frames, ocr, vlm, asr, summary)
+            .await?,
     }
     Ok(())
+}
+
+async fn reprocess_video(
+    db: &DbInstance,
+    policy: &archon_policy::EffectivePolicy,
+    video_id: &str,
+    transcript: bool,
+    frames: bool,
+    ocr: bool,
+    vlm: bool,
+    asr: bool,
+    summary: bool,
+) -> Result<()> {
+    if transcript || asr || summary || (!frames && !ocr && !vlm) {
+        bail!(
+            "video reprocess currently supports frame evidence only; use `archon video reprocess {video_id} --frames`"
+        );
+    }
+    let Some(source) = archon_video::store::get_video_source(db, video_id)? else {
+        bail!("video not found: {video_id}");
+    };
+    if source.local_path.trim().is_empty() {
+        bail!("video {video_id} has no local media path to reprocess");
+    }
+    let artifact_id = source_artifact_for_frames(db, &source.document_id)?;
+    let existing = archon_video::store::list_frame_descriptions_for_video(db, video_id)?;
+    if !existing.is_empty() {
+        println!(
+            "Video {video_id} already has {} frame artifact(s); skipping duplicate frame extraction",
+            existing.len()
+        );
+        return Ok(());
+    }
+    let mut warnings = Vec::new();
+    archon_video::frame_pipeline::process_frame_pipeline(
+        db,
+        policy,
+        archon_video::frame_pipeline::FramePipelineInput {
+            frames_mode_override: Some(policy.video.frames.mode.as_str()),
+            local_video_path: Some(Path::new(&source.local_path)),
+            video_id,
+            document_id: &source.document_id,
+            source_artifact_id: &artifact_id,
+            created_at: &chrono::Utc::now().to_rfc3339(),
+        },
+        &mut warnings,
+    )
+    .await;
+    let count = archon_video::store::list_frame_descriptions_for_video(db, video_id)?.len();
+    println!("Reprocessed video frames: {video_id} ({count} frame artifact(s))");
+    for warning in warnings {
+        println!("Warning: {warning}");
+    }
+    Ok(())
+}
+
+fn source_artifact_for_frames(db: &DbInstance, document_id: &str) -> Result<String> {
+    let artifacts = archon_docs::store::list_artifacts_for_doc(db, document_id)?;
+    artifacts
+        .iter()
+        .find(|artifact| {
+            artifact.artifact_type == archon_video::chunk_writer::ARTIFACT_TYPE_VIDEO_TRANSCRIPT
+        })
+        .or_else(|| artifacts.first())
+        .map(|artifact| artifact.artifact_id.clone())
+        .ok_or_else(|| anyhow::anyhow!("video document {document_id} has no source artifact"))
 }
 
 fn list_frames(db: &DbInstance, video_id: &str) -> Result<()> {

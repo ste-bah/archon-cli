@@ -73,13 +73,15 @@ async fn extract_mode(
     opts: &FrameExtractionOpts,
     prefix: &str,
 ) -> Result<Vec<ExtractedFrame>, VideoError> {
-    let pattern = opts.output_dir.join(format!("{prefix}_%04d.jpg"));
+    let pattern = opts.output_dir.join(format!("{prefix}_%04d.png"));
     let filter = if prefix == "scene" {
         format!("select=gt(scene\\,{})", opts.scene_threshold)
     } else {
         format!("fps=1/{}", opts.interval_secs.max(0.1))
     };
     let output = Command::new(ffmpeg_bin(&opts.ffmpeg_bin))
+        .arg("-hide_banner")
+        .arg("-nostdin")
         .arg("-y")
         .arg("-i")
         .arg(video_path)
@@ -87,6 +89,8 @@ async fn extract_mode(
         .arg(filter)
         .arg("-frames:v")
         .arg(opts.max_frames.to_string())
+        .arg("-f")
+        .arg("image2")
         .arg(&pattern)
         .output()
         .await
@@ -141,7 +145,7 @@ fn collect_frames(
 fn frame_name_matches(path: &Path, prefix: &str) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with(prefix) && name.ends_with(".jpg"))
+        .is_some_and(|name| name.starts_with(prefix) && name.ends_with(".png"))
 }
 
 pub fn compute_frame_hash(image_path: &Path) -> Result<String, VideoError> {

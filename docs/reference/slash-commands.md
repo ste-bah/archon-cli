@@ -2,7 +2,7 @@
 
 All slash commands work in the interactive TUI. Type `/help` to see them in-app.
 
-As of v1.3.4 the registry contains **81 primary commands** (lockstep-tested at `EXPECTED_COMMAND_COUNT = 81` in `src/command/registry.rs` and `EXPECTED_PRIMARY_COUNT = 81` in `src/command/dispatcher.rs`). Aliases come from each handler's `aliases()` method.
+As of v1.3.5 the registry contains **81 primary commands** (lockstep-tested at `EXPECTED_COMMAND_COUNT = 81` in `src/command/registry.rs` and `EXPECTED_PRIMARY_COUNT = 81` in `src/command/dispatcher.rs`). Aliases come from each handler's `aliases()` method.
 
 For shell/TUI parity, see the generated [command surface matrix](../generated/command-surface-matrix.md). It is backed by `src/command/surface_matrix.rs` and has tests that fail when registered slash primaries drift.
 
@@ -120,7 +120,7 @@ Each command goes through the same persisted Cozo state as its `archon X` shell 
 | Command | Aliases | Description |
 |---|---|---|
 | `/docs` | — | Document intelligence: `open`, `list`, `status`, `show`, `inspect`, `chunks`, `provenance`, `model-status`, `ingest`, `index`, `search`, `answer` |
-| `/video` | — | Video evidence: `ingest`, `status`, `list`, `inspect`, `frames`, `transcript`, `summary`, `reprocess` through the CLI mirror |
+| `/video` | — | Video evidence: `ingest`, `status`, `list`, `inspect`, `frames`, `transcript`, `summary`, `reprocess` through the CLI mirror, preserving CLI flags such as `--frames`, `--asr`, and `--yes` |
 | `/kb` | — | Knowledge base: `ingest`, `list`, `search`, `process` (claims, entities, relations, contradictions), `claims`, `entities`, `relations`, `contradictions`, `stats` |
 | `/prov` | — | Provenance: `trace <artifact-id>`, `export <artifact-id>` (W3C PROV JSON-LD), `verify <artifact-id>` |
 | `/meaning` | — | Meaning compiler and GNN triplet source: `build --from learning-events|gametheory-runs`, `samples`, `contrastive`, `triplets`, `export --kind samples|triplets` |

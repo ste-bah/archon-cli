@@ -54,6 +54,10 @@ use thiserror::Error;
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct ParsedCommand {
     pub name: String,
+    /// Original tokens after the slash command name, preserving flag
+    /// tokens and ordering. Dispatch uses this so command handlers that
+    /// mirror CLI syntax receive the same argv shape the user typed.
+    pub raw_args: Vec<String>,
     pub args: Vec<String>,
     pub flags: HashMap<String, String>,
 }
@@ -159,9 +163,10 @@ pub(crate) fn parse(input: &str) -> Option<ParsedCommand> {
         return None;
     }
 
+    let raw_args: Vec<String> = iter.collect();
     let mut args: Vec<String> = Vec::new();
     let mut flags: HashMap<String, String> = HashMap::new();
-    for tok in iter {
+    for tok in &raw_args {
         if let Some(rest) = tok.strip_prefix("--") {
             // Bare `--` or `--=x` is malformed for the Option-returning
             // path; we swallow malformed flags by dropping them so the
@@ -181,11 +186,16 @@ pub(crate) fn parse(input: &str) -> Option<ParsedCommand> {
                 flags.insert(rest.to_string(), "true".to_string());
             }
         } else {
-            args.push(tok);
+            args.push(tok.clone());
         }
     }
 
-    Some(ParsedCommand { name, args, flags })
+    Some(ParsedCommand {
+        name,
+        raw_args,
+        args,
+        flags,
+    })
 }
 
 /// Return up to `limit` suggestions from `known` whose Levenshtein
@@ -318,28 +328,34 @@ impl CommandParser {
             return Err(ParseError::MissingName);
         }
 
+        let raw_args: Vec<String> = iter.collect();
         let mut args: Vec<String> = Vec::new();
         let mut flags: HashMap<String, String> = HashMap::new();
-        for tok in iter {
+        for tok in &raw_args {
             if let Some(rest) = tok.strip_prefix("--") {
                 if rest.is_empty() {
-                    return Err(ParseError::MalformedFlag(tok));
+                    return Err(ParseError::MalformedFlag(tok.clone()));
                 }
                 if let Some(eq_idx) = rest.find('=') {
                     let (k, v) = rest.split_at(eq_idx);
                     if k.is_empty() {
-                        return Err(ParseError::MalformedFlag(tok));
+                        return Err(ParseError::MalformedFlag(tok.clone()));
                     }
                     flags.insert(k.to_string(), v[1..].to_string());
                 } else {
                     flags.insert(rest.to_string(), "true".to_string());
                 }
             } else {
-                args.push(tok);
+                args.push(tok.clone());
             }
         }
 
-        Ok(ParsedCommand { name, args, flags })
+        Ok(ParsedCommand {
+            name,
+            raw_args,
+            args,
+            flags,
+        })
     }
 }
 
@@ -358,6 +374,7 @@ mod tests {
             parse("/fast"),
             Some(ParsedCommand {
                 name: "fast".to_string(),
+                raw_args: vec![],
                 args: vec![],
                 flags: HashMap::new(),
             }),
@@ -370,6 +387,7 @@ mod tests {
             parse("/effort high"),
             Some(ParsedCommand {
                 name: "effort".to_string(),
+                raw_args: vec!["high".to_string()],
                 args: vec!["high".to_string()],
                 flags: HashMap::new(),
             }),
@@ -382,6 +400,7 @@ mod tests {
             parse("/config sources"),
             Some(ParsedCommand {
                 name: "config".to_string(),
+                raw_args: vec!["sources".to_string()],
                 args: vec!["sources".to_string()],
                 flags: HashMap::new(),
             }),
@@ -394,6 +413,11 @@ mod tests {
             parse("/rules edit r1 \"some text with spaces\""),
             Some(ParsedCommand {
                 name: "rules".to_string(),
+                raw_args: vec![
+                    "edit".to_string(),
+                    "r1".to_string(),
+                    "some text with spaces".to_string(),
+                ],
                 args: vec![
                     "edit".to_string(),
                     "r1".to_string(),
@@ -425,6 +449,7 @@ mod tests {
             parse("/effort   high  "),
             Some(ParsedCommand {
                 name: "effort".to_string(),
+                raw_args: vec!["high".to_string()],
                 args: vec!["high".to_string()],
                 flags: HashMap::new(),
             }),
@@ -547,8 +572,50 @@ mod tests {
     fn parses_multiple_flags_and_args() {
         let parsed = parse("/run foo --verbose --retries=3 bar").expect("parse should succeed");
         assert_eq!(parsed.name, "run");
+        assert_eq!(
+            parsed.raw_args,
+            vec![
+                "foo".to_string(),
+                "--verbose".to_string(),
+                "--retries=3".to_string(),
+                "bar".to_string()
+            ]
+        );
         assert_eq!(parsed.args, vec!["foo".to_string(), "bar".to_string()]);
         assert_eq!(parsed.flag("verbose"), Some("true"));
         assert_eq!(parsed.flag("retries"), Some("3"));
+    }
+
+    #[test]
+    fn preserves_cli_shaped_raw_args_for_slash_mirrors() {
+        let parsed = parse(
+            "/video ingest https://example.test/watch?v=1 --frames hybrid --asr whisper-cpp --yes",
+        )
+        .expect("parse should succeed");
+
+        assert_eq!(
+            parsed.raw_args,
+            vec![
+                "ingest".to_string(),
+                "https://example.test/watch?v=1".to_string(),
+                "--frames".to_string(),
+                "hybrid".to_string(),
+                "--asr".to_string(),
+                "whisper-cpp".to_string(),
+                "--yes".to_string()
+            ]
+        );
+        assert_eq!(
+            parsed.args,
+            vec![
+                "ingest".to_string(),
+                "https://example.test/watch?v=1".to_string(),
+                "hybrid".to_string(),
+                "whisper-cpp".to_string()
+            ]
+        );
+        assert_eq!(parsed.flag("frames"), Some("true"));
+        assert_eq!(parsed.flag("asr"), Some("true"));
+        assert_eq!(parsed.flag("yes"), Some("true"));
     }
 }

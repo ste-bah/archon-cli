@@ -14,7 +14,12 @@ fn write_mock_ffmpeg(dir: &Path, source_image: &Path) -> PathBuf {
     let script = dir.join("ffmpeg-mock.sh");
     let body = format!(
         r#"#!/bin/sh
+seen_nostdin=0
 for arg do out="$arg"; done
+for arg do
+  [ "$arg" = "-nostdin" ] && seen_nostdin=1
+done
+[ "$seen_nostdin" = 1 ] || exit 43
 dir=$(dirname "$out")
 base=$(basename "$out")
 i=1
@@ -59,6 +64,9 @@ async fn interval_frame_extraction_respects_max_frames() {
     assert_eq!(frames.len(), 2);
     assert!(frames.iter().all(|frame| frame.timestamp_ms > 0));
     assert!(frames.iter().all(|frame| frame.image_path.exists()));
+    assert!(frames.iter().all(|frame| {
+        frame.image_path.extension().and_then(|ext| ext.to_str()) == Some("png")
+    }));
     assert!(frames.iter().all(|frame| frame.frame_hash.len() == 64));
 }
 

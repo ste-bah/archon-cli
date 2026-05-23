@@ -7,6 +7,7 @@ pub mod frame_persist;
 pub mod frame_pipeline;
 pub mod frames;
 pub mod ingest;
+mod ingest_media;
 pub mod metadata;
 pub mod policy;
 pub mod provenance;

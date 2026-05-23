@@ -176,10 +176,13 @@ Keep `bind_address = "127.0.0.1"` for local use. Non-loopback binds require the
 remote-control security posture described in
 [Remote control](../operations/remote-control.md#web-ui).
 
-If `archon-init.sh` finds missing build/PDF/OCR dependencies, it prints the
-`scripts/install-system-deps.sh` command to run. Sandbox backends are opt-in:
-use `scripts/install-system-deps.sh --with-docker`, `--with-openshell`, or
-`--with-sandbox` when the project will use Docker or OpenShell isolation.
+If `archon-init.sh` finds missing build/PDF/OCR/video helper dependencies, it
+prints the `scripts/install-system-deps.sh` command to run. That installer
+covers build tools, poppler, Tesseract, `ffmpeg`/`ffprobe`, `yt-dlp`, and
+`whisper-cli` where the detected OS package manager provides it. Sandbox
+backends are opt-in: use `scripts/install-system-deps.sh --with-docker`,
+`--with-openshell`, or `--with-sandbox` when the project will use Docker or
+OpenShell isolation.
 
 ## Troubleshooting
 
