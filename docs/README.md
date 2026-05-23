@@ -125,6 +125,8 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v1.3.4](release-notes/v1.3.4.md) — DeepSeek provider parity, Anthropic-compatible DeepSeek sessions, generic non-Claude model switching, and provider-aware cost display
+- [v1.3.3](release-notes/v1.3.3.md) — Governed video evidence ingest, `/video` slash parity, transcript/frame evidence storage, and policy-gated video summaries
 - [v1.3.2](release-notes/v1.3.2.md) — Finalize JEPA eval quick/full mode, promotion provenance, eval-run status commands, and source-size cleanup
 - [v1.3.1](release-notes/v1.3.1.md) — Add JEPA world-model training/runtime, normal-session and pipeline guardrails, CUDA/MLX accelerator support, and fresh-setup cookbook docs
 - [v1.3.0](release-notes/v1.3.0.md) — Remove model-facing subagent `max_turns`, harden compaction persistence/request-pressure recovery, add lazy agent catalog, and improve context/status signals
