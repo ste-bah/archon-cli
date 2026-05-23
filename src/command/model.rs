@@ -68,26 +68,48 @@ const CODEX_MODEL_IDS: &[&str] = &["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.
 fn snapshot_shortcuts(snap: &ModelSnapshot) -> String {
     if looks_like_codex_model(&snap.current_model) {
         CODEX_SHORTCUTS.join(", ")
-    } else {
+    } else if looks_like_anthropic_model(&snap.current_model) {
         archon_tools::validation::KNOWN_SHORTCUTS
             .iter()
             .map(|(shortcut, _)| *shortcut)
             .collect::<Vec<_>>()
             .join(", ")
+    } else {
+        "provider model ID".into()
     }
 }
 
 fn resolve_model_for_snapshot(input: &str, snap: &ModelSnapshot) -> Result<String, String> {
     if looks_like_codex_model(&snap.current_model) {
         resolve_codex_model_name(input)
-    } else {
+    } else if looks_like_anthropic_model(&snap.current_model) {
         archon_tools::validation::validate_model_name(input)
+    } else {
+        validate_provider_model_name(input)
     }
 }
 
 fn looks_like_codex_model(model: &str) -> bool {
     let lower = model.trim().to_ascii_lowercase();
     lower.starts_with("gpt-5.") || lower == "default" || lower == "codex" || lower == "mini"
+}
+
+fn looks_like_anthropic_model(model: &str) -> bool {
+    let lower = model.trim().to_ascii_lowercase();
+    lower == "opus" || lower == "sonnet" || lower == "haiku" || lower.starts_with("claude-")
+}
+
+fn validate_provider_model_name(input: &str) -> Result<String, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("Error: Model ID cannot be empty.".into());
+    }
+    if trimmed.chars().any(char::is_whitespace) {
+        return Err(format!(
+            "Error: Model ID cannot contain whitespace: {input}"
+        ));
+    }
+    Ok(trimmed.to_string())
 }
 
 fn resolve_codex_model_name(input: &str) -> Result<String, String> {
@@ -241,6 +263,12 @@ mod tests {
     }
 
     fn codex_snapshot(current_model: &str) -> ModelSnapshot {
+        ModelSnapshot {
+            current_model: current_model.to_string(),
+        }
+    }
+
+    fn provider_snapshot(current_model: &str) -> ModelSnapshot {
         ModelSnapshot {
             current_model: current_model.to_string(),
         }
@@ -437,6 +465,20 @@ mod tests {
 
         match ctx.pending_effect.as_ref() {
             Some(CommandEffect::SetModelOverride(s)) => assert_eq!(s, "gpt-5.4-mini"),
+            Some(other) => panic!("unexpected CommandEffect variant: {other:?}"),
+            None => panic!("WRITE path must stash a CommandEffect::SetModelOverride"),
+        }
+    }
+
+    #[test]
+    fn model_handler_execute_accepts_generic_provider_model_id() {
+        let (mut ctx, _rx) = make_model_ctx(Some(provider_snapshot("deepseek-v4-flash")));
+        let h = ModelHandler;
+        h.execute(&mut ctx, &["deepseek-v4-pro[1m]".to_string()])
+            .expect("generic provider model ids must be accepted");
+
+        match ctx.pending_effect.as_ref() {
+            Some(CommandEffect::SetModelOverride(s)) => assert_eq!(s, "deepseek-v4-pro[1m]"),
             Some(other) => panic!("unexpected CommandEffect variant: {other:?}"),
             None => panic!("WRITE path must stash a CommandEffect::SetModelOverride"),
         }

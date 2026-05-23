@@ -3,7 +3,8 @@
 | Variable | Description |
 |---|---|
 | `ANTHROPIC_API_KEY` | Claude API key (unless using OAuth) |
-| `ANTHROPIC_BASE_URL` | Override API endpoint (LiteLLM, Ollama, etc.) |
+| `ANTHROPIC_BASE_URL` | Override Anthropic-format endpoint or base URL (LiteLLM, Ollama, DeepSeek Anthropic API, etc.) |
+| `ANTHROPIC_MODEL` | Override the main Anthropic-format session model, useful for providers such as DeepSeek that document Claude Code-style env setup |
 | `ARCHON_API_KEY` | Alias for `ANTHROPIC_API_KEY` |
 | `ARCHON_OAUTH_TOKEN` | Pre-set OAuth bearer token (skips login) |
 | `ANTHROPIC_AUTH_TOKEN` | Legacy bearer token alias |
@@ -86,6 +87,21 @@ Codex-backed sessions normalize inherited Claude-shaped `[api].default_model`
 values before provider calls. Sonnet/Opus-tier defaults map through
 `[models.openai-codex].default`, Haiku-tier defaults map through
 `[models.openai-codex].mini`, and concrete Codex model ids are preserved.
+
+## DeepSeek Anthropic API
+
+For full TUI, subagent, and pipeline compatibility with DeepSeek's
+Anthropic-compatible agent endpoint, keep `[llm].provider = "anthropic"` and
+set:
+
+```bash
+export ANTHROPIC_AUTH_TOKEN="<your DeepSeek API key>"
+export ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"
+export ANTHROPIC_MODEL="deepseek-v4-pro[1m]"
+```
+
+`ANTHROPIC_BASE_URL` may be either a full `/v1/messages` endpoint or a provider
+base URL; base URLs are expanded to `/v1/messages` internally.
 
 ## Logging filters
 

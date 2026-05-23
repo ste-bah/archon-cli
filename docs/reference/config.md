@@ -72,15 +72,16 @@ thinking_budget = 16384
 default_effort = "high"
 max_retries = 3
 # base_url = "http://localhost:4000/v1/messages"
+# base_url = "https://api.deepseek.com/anthropic"
 ```
 
 | Field | Default | What / Why |
 |---|---|---|
-| `default_model` | `"claude-sonnet-4-6"` | Model used for the main agent. Options: `claude-haiku-4-5-20251001` (fast/cheap), `claude-sonnet-4-6` (balanced), `claude-opus-4-7` (highest quality). Override per-session with `--model <NAME>` or `/model` slash command. |
+| `default_model` | `"claude-sonnet-4-6"` | Model used for the main agent. Options: `claude-haiku-4-5-20251001` (fast/cheap), `claude-sonnet-4-6` (balanced), `claude-opus-4-7` (highest quality). Anthropic-compatible providers can use their own model IDs such as `deepseek-v4-pro[1m]`. Override per-session with `--model <NAME>` or `/model` slash command. |
 | `thinking_budget` | `16384` | Max tokens of "extended thinking" the model can use per turn. `0` disables extended thinking. Higher = more thorough reasoning but slower + costs more. Only Sonnet 4.6 and Opus 4.7 support extended thinking; Haiku ignores this. |
 | `default_effort` | `"high"` | Reasoning effort: `"low"`, `"medium"`, `"high"`. Maps to thinking budget tiers. `low` is best for quick lookups, `high` for code generation. Override with `--effort` or `/effort`. |
 | `max_retries` | `3` | HTTP retry attempts on transient failures (5xx, network errors). Each retry uses exponential backoff. Set higher for unreliable networks; never set 0 (rate-limit hiccups become hard failures). |
-| `base_url` | unset | Override API endpoint. Use to route through LiteLLM, Ollama, or any Anthropic-compatible proxy. See [Local LLMs and proxies](#local-llms-and-proxies). |
+| `base_url` | unset | Override API endpoint or base URL. Values ending in `/messages` are used as-is; base URLs such as `https://api.deepseek.com/anthropic` are expanded to `/v1/messages`. See [Local LLMs and proxies](#local-llms-and-proxies). |
 
 ---
 
@@ -100,7 +101,7 @@ provider = "anthropic"
 
 | Field | Default | What / Why |
 |---|---|---|
-| `provider` | `"anthropic"` | Active LLM provider. Use `"openai-codex"` for ChatGPT subscription OAuth, `"openai"` for API-key OpenAI routing, or the other listed providers for Bedrock, Vertex, and local servers. Anthropic is the default because archon-cli uses Claude features heavily. |
+| `provider` | `"anthropic"` | Active LLM provider. Use `"openai-codex"` for ChatGPT subscription OAuth, `"openai"` for API-key OpenAI routing, or the other listed providers for Bedrock, Vertex, local servers, and OpenAI-compatible IDs such as `"deepseek"`. Anthropic is the default because archon-cli uses Claude features heavily. |
 
 Sub-tables `[llm.openai]`, `[llm.bedrock]`, `[llm.vertex]`, `[llm.local]` configure each provider. Most users only need `[llm.openai]` if using OpenAI as primary or for embeddings — see [env-vars](env-vars.md#resolution-order-for-openai-key).
 
@@ -1454,6 +1455,32 @@ retrospectives to use the Codex provider.
 ## Local LLMs and proxies
 
 archon-cli speaks to any Anthropic-compatible endpoint via `ANTHROPIC_BASE_URL` or `[api] base_url`.
+Use a full `/messages` endpoint or a provider base URL; base URLs are expanded
+to `/v1/messages`.
+
+### DeepSeek Anthropic API
+
+DeepSeek's agent-tooling guidance recommends its Anthropic-compatible endpoint
+for Claude Code-style agents because it preserves the Anthropic Messages tool
+shape. Use `provider = "anthropic"` with a DeepSeek model and base URL:
+
+```toml
+[llm]
+provider = "anthropic"
+
+[api]
+default_model = "deepseek-v4-pro[1m]"
+base_url = "https://api.deepseek.com/anthropic"
+```
+
+Then set:
+
+```bash
+export ANTHROPIC_AUTH_TOKEN="<your DeepSeek API key>"
+```
+
+`ANTHROPIC_MODEL` also overrides the main Anthropic-format session model when
+set, matching DeepSeek's Claude Code setup style.
 
 ### LiteLLM
 

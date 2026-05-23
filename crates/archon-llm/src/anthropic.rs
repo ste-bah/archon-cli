@@ -12,7 +12,6 @@ use crate::streaming::{StreamError, StreamEvent, parse_sse_event, split_sse_line
 // Constants
 // ---------------------------------------------------------------------------
 
-const API_URL: &str = "https://api.anthropic.com/v1/messages";
 const MAX_RETRIES: u32 = 3;
 const OVERLOAD_BASE_DELAY_SECS: u64 = 10;
 const LARGE_RATE_LIMIT_RETRY_BODY_BYTES: usize = 320_000;
@@ -51,7 +50,7 @@ impl AnthropicClient {
             http,
             auth,
             identity,
-            api_url: api_url.unwrap_or_else(|| API_URL.to_string()),
+            api_url: crate::anthropic_url::messages_url(api_url),
         }
     }
 

@@ -28,8 +28,9 @@ thinking_budget = 16384
 default_effort = "high"
 # Max HTTP retry attempts on transient failures
 max_retries = 3
-# Override API endpoint (for LiteLLM / Ollama / proxies). Leave commented to use default.
+# Override API endpoint or base URL (for LiteLLM / Ollama / proxies). Leave commented to use default.
 # Resolution order: ANTHROPIC_BASE_URL env var > this field > https://api.anthropic.com/v1/messages
+# Base URLs such as https://api.deepseek.com/anthropic are expanded to /v1/messages.
 # base_url = "http://localhost:11434/v1/messages"
 
 
@@ -41,7 +42,7 @@ max_retries = 3
 # for swapping to another provider — uncomment only the one you want to use
 # AND change `provider` accordingly.
 [llm]
-# Active provider: "anthropic" | "openai-codex" | "openai" | "bedrock" | "vertex" | "local"
+# Active provider: "anthropic" | "openai-codex" | "openai" | "bedrock" | "vertex" | "local" | OpenAI-compatible IDs such as "deepseek"
 # Hybrid/LLM retrospectives (`archon self retrospective --analyzer hybrid|llm`)
 # use this active provider too; there is no separate retrospective provider key.
 provider = "anthropic"

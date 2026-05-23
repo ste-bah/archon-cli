@@ -3,6 +3,7 @@ pub mod active;
 pub mod agentic;
 pub mod anthropic;
 pub(crate) mod anthropic_support;
+pub(crate) mod anthropic_url;
 pub mod auth;
 // TASK-AGS-706: LlmConfig + resolve_descriptor — feeds build_llm_provider.
 pub mod compaction_policy;

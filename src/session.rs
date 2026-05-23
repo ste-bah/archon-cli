@@ -26,6 +26,7 @@ mod interactive_bootstrap;
 mod interactive_finish;
 mod interactive_setup;
 mod interactive_ui;
+mod model_selection;
 mod modes;
 mod pipeline_adapter;
 mod reasoning_quality;
@@ -33,6 +34,7 @@ mod slash_context_builder;
 mod splash;
 mod web_runtime;
 use activity::{session_activity_sink, session_activity_sink_with_tui};
+pub(super) use model_selection::active_session_model;
 pub(crate) use modes::{run_headless_session, run_print_mode_session};
 pub(crate) use web_runtime::{WebSessionHandle, spawn_web_session};
 
@@ -49,18 +51,8 @@ struct BuiltAgent {
     permission_mode: Arc<tokio::sync::Mutex<String>>,
 }
 
-fn is_codex_session(config: &archon_core::config::ArchonConfig) -> bool {
+pub(super) fn is_codex_session(config: &archon_core::config::ArchonConfig) -> bool {
     config.llm.provider == "openai-codex"
-}
-
-fn active_session_model(config: &archon_core::config::ArchonConfig) -> String {
-    if is_codex_session(config)
-        && let Some(model) = crate::runtime::codex_model::codex_model_for_anthropic_default(config)
-    {
-        model
-    } else {
-        config.api.default_model.clone()
-    }
 }
 
 fn session_sandbox_backend(

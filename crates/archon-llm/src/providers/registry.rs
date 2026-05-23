@@ -96,7 +96,7 @@ pub static OPENAI_COMPAT_REGISTRY: Lazy<HashMap<&'static str, ProviderDescriptor
                 auth_flavor: AuthFlavor::BearerApiKey,
                 env_key_var: "DEEPSEEK_API_KEY".into(),
                 compat_kind: CompatKind::OpenAiCompat,
-                default_model: "deepseek-chat".into(),
+                default_model: "deepseek-v4-flash".into(),
                 supports: ProviderFeatures::chat_only(),
                 headers: HashMap::new(),
                 is_gap: false,
