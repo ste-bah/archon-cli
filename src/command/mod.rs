@@ -175,6 +175,7 @@ pub(crate) mod update;
 pub(crate) mod usage;
 pub(crate) mod utils;
 pub(crate) mod video;
+pub(crate) mod video_delete;
 pub(crate) mod vim;
 pub(crate) mod voice;
 pub(crate) mod web;

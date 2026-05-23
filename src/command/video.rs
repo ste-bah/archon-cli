@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use anyhow::{Result, bail};
+use archon_docs::vlm::factory::{self as vlm_factory, VlmProviderInitStatus};
 use cozo::{DataValue, DbInstance, ScriptMutability};
 
 use crate::cli_args::VideoAction;
@@ -21,6 +22,11 @@ pub async fn handle_video_command(action: VideoAction) -> Result<()> {
             metadata_only,
             yes,
         } => {
+            let mut policy = policy.clone();
+            if vlm {
+                policy.video.frames.vlm = true;
+            }
+            let vlm_report = configure_video_vlm_if_needed(&policy);
             let result = archon_video::ingest::ingest_video(
                 archon_video::ingest::IngestOpts {
                     source,
@@ -46,12 +52,16 @@ pub async fn handle_video_command(action: VideoAction) -> Result<()> {
             for warning in result.warnings {
                 println!("Warning: {warning}");
             }
+            print_vlm_init_warning_if_needed(&vlm_report);
         }
         VideoAction::Status | VideoAction::List => list_videos(&db)?,
         VideoAction::Inspect { video_id } => inspect_video(&db, &video_id)?,
         VideoAction::Frames { video_id } => list_frames(&db, &video_id)?,
         VideoAction::Transcript { video_id, format } => export_transcript(&db, &video_id, &format)?,
         VideoAction::Summary { video_id } => show_summary(&db, &video_id)?,
+        VideoAction::Delete { video_id, yes } => {
+            crate::command::video_delete::delete_video(&db, &video_id, yes)?
+        }
         VideoAction::Reprocess {
             video_id,
             transcript,
@@ -60,15 +70,55 @@ pub async fn handle_video_command(action: VideoAction) -> Result<()> {
             vlm,
             asr,
             summary,
-        } => reprocess_video(&db, &policy, &video_id, transcript, frames, ocr, vlm, asr, summary)
-            .await?,
+        } => {
+            let mut policy = policy.clone();
+            if ocr {
+                policy.video.frames.ocr = true;
+            }
+            if vlm {
+                policy.video.frames.vlm = true;
+            }
+            let vlm_report = configure_video_vlm_if_needed(&policy);
+            reprocess_video(
+                &db,
+                &policy,
+                &vlm_report,
+                &video_id,
+                transcript,
+                frames,
+                ocr,
+                vlm,
+                asr,
+                summary,
+            )
+            .await?
+        }
     }
     Ok(())
+}
+
+fn configure_video_vlm_if_needed(
+    policy: &archon_policy::EffectivePolicy,
+) -> Option<vlm_factory::VlmProviderInitReport> {
+    policy
+        .video
+        .frames
+        .vlm
+        .then(|| vlm_factory::configure_registered_provider(policy))
+}
+
+fn print_vlm_init_warning_if_needed(report: &Option<vlm_factory::VlmProviderInitReport>) {
+    if let Some(report) = report {
+        if matches!(report.status, VlmProviderInitStatus::Skipped) {
+            println!("Warning: video frame VLM unavailable: {}", report.message);
+        }
+    }
 }
 
 async fn reprocess_video(
     db: &DbInstance,
     policy: &archon_policy::EffectivePolicy,
+    vlm_report: &Option<vlm_factory::VlmProviderInitReport>,
     video_id: &str,
     transcript: bool,
     frames: bool,
@@ -91,10 +141,23 @@ async fn reprocess_video(
     let artifact_id = source_artifact_for_frames(db, &source.document_id)?;
     let existing = archon_video::store::list_frame_descriptions_for_video(db, video_id)?;
     if !existing.is_empty() {
+        let mut warnings = Vec::new();
+        archon_video::frame_pipeline::process_existing_frame_visuals(
+            db,
+            policy,
+            video_id,
+            &source.document_id,
+            &mut warnings,
+        )
+        .await;
         println!(
-            "Video {video_id} already has {} frame artifact(s); skipping duplicate frame extraction",
+            "Reprocessed video frame visuals: {video_id} ({} existing frame artifact(s))",
             existing.len()
         );
+        for warning in warnings {
+            println!("Warning: {warning}");
+        }
+        print_vlm_init_warning_if_needed(vlm_report);
         return Ok(());
     }
     let mut warnings = Vec::new();
@@ -117,6 +180,7 @@ async fn reprocess_video(
     for warning in warnings {
         println!("Warning: {warning}");
     }
+    print_vlm_init_warning_if_needed(vlm_report);
     Ok(())
 }
 

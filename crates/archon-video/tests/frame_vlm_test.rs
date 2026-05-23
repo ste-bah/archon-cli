@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 
 use archon_docs::errors::DocsError;
@@ -52,6 +53,11 @@ impl VlmDescriptionProvider for FailingVlm {
             status_code: None,
         })
     }
+}
+
+fn vlm_test_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
 fn setup() -> (tempfile::TempDir, CwdGuard, DbInstance) {
@@ -116,6 +122,7 @@ fn persist_test_frame(db: &DbInstance) {
 
 #[tokio::test]
 async fn frame_vlm_uses_video_prompt_and_writes_chunk() {
+    let _lock = vlm_test_lock().lock().await;
     let (_dir, _guard, db) = setup();
     persist_test_frame(&db);
     let prompts = Arc::new(Mutex::new(Vec::new()));
@@ -147,6 +154,7 @@ async fn frame_vlm_uses_video_prompt_and_writes_chunk() {
 
 #[tokio::test]
 async fn frame_vlm_failure_marks_frame_and_keeps_chunks_empty() {
+    let _lock = vlm_test_lock().lock().await;
     let (_dir, _guard, db) = setup();
     persist_test_frame(&db);
     archon_docs::vlm::set_provider(Box::new(FailingVlm));

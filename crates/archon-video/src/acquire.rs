@@ -235,7 +235,5 @@ fn ffmpeg_location_arg() -> Option<String> {
         );
     }
     let homebrew = PathBuf::from("/opt/homebrew/bin/ffmpeg");
-    homebrew
-        .exists()
-        .then(|| "/opt/homebrew/bin".to_string())
+    homebrew.exists().then(|| "/opt/homebrew/bin".to_string())
 }

@@ -64,9 +64,11 @@ async fn interval_frame_extraction_respects_max_frames() {
     assert_eq!(frames.len(), 2);
     assert!(frames.iter().all(|frame| frame.timestamp_ms > 0));
     assert!(frames.iter().all(|frame| frame.image_path.exists()));
-    assert!(frames.iter().all(|frame| {
-        frame.image_path.extension().and_then(|ext| ext.to_str()) == Some("png")
-    }));
+    assert!(
+        frames.iter().all(|frame| {
+            frame.image_path.extension().and_then(|ext| ext.to_str()) == Some("png")
+        })
+    );
     assert!(frames.iter().all(|frame| frame.frame_hash.len() == 64));
 }
 

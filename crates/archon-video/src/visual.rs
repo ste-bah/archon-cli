@@ -36,9 +36,12 @@ pub async fn run_frame_ocr(
     };
     let text = result.full_text.trim().to_string();
     if text.is_empty() {
+        store::update_frame_status(db, &frame.frame_id, "ocr_empty", "OCR produced no text")
+            .map_err(store_error)?;
         return Ok(None);
     }
     store::update_frame_ocr_text(db, &frame.frame_id, &text).map_err(store_error)?;
+    store::update_frame_status(db, &frame.frame_id, "ocr_completed", "").map_err(store_error)?;
     write_visual_chunk(db, frame, document_id, &text, &frame.image_artifact_id)?;
     Ok(Some(text))
 }
@@ -51,6 +54,8 @@ pub async fn run_frame_vlm(
 ) -> Result<Option<String>, VideoError> {
     let decision = policy.video_vlm_decision();
     if !decision.allowed {
+        store::update_frame_status(db, &frame.frame_id, "vlm_denied", &decision.reason)
+            .map_err(store_error)?;
         return Ok(None);
     }
     let image_bytes = tokio::fs::read(resolve_frame_image_path(frame)?)
@@ -72,7 +77,19 @@ pub async fn run_frame_vlm(
     })?;
     let description = match vlm_result {
         Ok(VlmDescriptionOutcome::Described(description)) => description,
-        Ok(VlmDescriptionOutcome::Disabled(_)) | Ok(VlmDescriptionOutcome::NoProvider) => {
+        Ok(VlmDescriptionOutcome::Disabled(reason)) => {
+            store::update_frame_status(db, &frame.frame_id, "vlm_disabled", &reason)
+                .map_err(store_error)?;
+            return Ok(None);
+        }
+        Ok(VlmDescriptionOutcome::NoProvider) => {
+            store::update_frame_status(
+                db,
+                &frame.frame_id,
+                "vlm_no_provider",
+                "no VLM provider registered for video frame descriptions",
+            )
+            .map_err(store_error)?;
             return Ok(None);
         }
         Err(error) => {
@@ -83,9 +100,12 @@ pub async fn run_frame_vlm(
     };
     let text = description.text.trim().to_string();
     if text.is_empty() {
+        store::update_frame_status(db, &frame.frame_id, "vlm_empty", "VLM produced no text")
+            .map_err(store_error)?;
         return Ok(None);
     }
     store::update_frame_vlm_description(db, &frame.frame_id, &text).map_err(store_error)?;
+    store::update_frame_status(db, &frame.frame_id, "vlm_completed", "").map_err(store_error)?;
     let artifact_id = artifact_for_type(db, document_id, "video_frame_vlm", frame)
         .unwrap_or_else(|| frame.image_artifact_id.clone());
     write_visual_chunk(db, frame, document_id, &text, &artifact_id)?;

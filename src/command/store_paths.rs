@@ -63,6 +63,8 @@ pub(crate) fn open_sqlite_db(path: &Path, label: &str) -> Result<DbInstance> {
         std::fs::create_dir_all(parent)?;
     }
     let path_str = path.to_string_lossy().to_string();
-    DbInstance::new("sqlite", &path_str, "")
-        .map_err(|e| anyhow::anyhow!("failed to open {label} store at {path_str}: {e}"))
+    archon_learning::cozo_guard::open_sqlite_guarded(
+        &path_str,
+        &format!("open {label} store at {path_str}"),
+    )
 }

@@ -185,9 +185,10 @@ impl AsrProvider for WhisperCppAdapter {
 }
 
 pub fn parse_whisper_cpp_json(json: &[u8]) -> Result<Vec<TranscriptSegment>, VideoError> {
-    let value: Value = serde_json::from_slice(json).map_err(|e| VideoError::AsrProviderUnavailable {
-        message: format!("parse whisper-cpp JSON: {e}"),
-    })?;
+    let value: Value =
+        serde_json::from_slice(json).map_err(|e| VideoError::AsrProviderUnavailable {
+            message: format!("parse whisper-cpp JSON: {e}"),
+        })?;
     let Some(items) = value.get("transcription").and_then(Value::as_array) else {
         return Ok(Vec::new());
     };
@@ -216,12 +217,7 @@ pub fn parse_whisper_cpp_json(json: &[u8]) -> Result<Vec<TranscriptSegment>, Vid
 
 fn whisper_segment_offsets(item: &Value) -> Option<(u64, u64)> {
     item.get("offsets")
-        .and_then(|offsets| {
-            Some((
-                offsets.get("from")?.as_u64()?,
-                offsets.get("to")?.as_u64()?,
-            ))
-        })
+        .and_then(|offsets| Some((offsets.get("from")?.as_u64()?, offsets.get("to")?.as_u64()?)))
         .or_else(|| {
             let timestamps = item.get("timestamps")?;
             Some((
@@ -232,7 +228,11 @@ fn whisper_segment_offsets(item: &Value) -> Option<(u64, u64)> {
 }
 
 fn parse_whisper_timestamp(value: &str) -> Option<u64> {
-    let mut parts = value.replace(',', ".").split(':').map(str::to_string).collect::<Vec<_>>();
+    let mut parts = value
+        .replace(',', ".")
+        .split(':')
+        .map(str::to_string)
+        .collect::<Vec<_>>();
     if parts.len() != 3 {
         return None;
     }

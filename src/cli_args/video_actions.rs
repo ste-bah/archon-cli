@@ -41,6 +41,13 @@ pub enum VideoAction {
     },
     /// Show or rerun the LLM summary
     Summary { video_id: String },
+    /// Delete a video source and its document registry rows
+    Delete {
+        video_id: String,
+        /// Confirm destructive deletion
+        #[arg(long, short)]
+        yes: bool,
+    },
     /// Reprocess specific tracks
     Reprocess {
         video_id: String,

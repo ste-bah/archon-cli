@@ -66,6 +66,12 @@ pub async fn ingest_video_with_providers(
     asr_provider: Option<&dyn AsrProvider>,
     diarizer_provider: Option<&dyn DiarizationProvider>,
 ) -> Result<VideoIngestResult, VideoError> {
+    let mut effective_policy = policy.clone();
+    if opts.vlm {
+        effective_policy.video.frames.vlm = true;
+    }
+    let policy = &effective_policy;
+
     archon_docs::schema::ensure_doc_schema(db)?;
     create_video_schema(db)?;
 
