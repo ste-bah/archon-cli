@@ -249,8 +249,8 @@ mod tests {
     fn archon_research_handler_description_matches() {
         let desc = ArchonResearchHandler.description();
         assert!(
-            desc.contains("46-agent"),
-            "description must mention 46-agent, got: {desc}"
+            desc.contains("47-agent"),
+            "description must mention 47-agent, got: {desc}"
         );
     }
 
