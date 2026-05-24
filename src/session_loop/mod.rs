@@ -32,15 +32,21 @@ use crate::slash_context::SlashCommandContext;
 mod lifecycle_hooks;
 mod mcp_task;
 mod personality_save;
+mod post_turn;
+mod prompt_turn;
 mod session_export;
 mod session_history;
+mod session_shutdown;
 mod slash_handlers;
 
 use lifecycle_hooks::fire_session_startup_hooks;
 pub(crate) use mcp_task::{McpLifecycleTx, spawn_mcp_lifecycle_task};
 use personality_save::save_personality_snapshot_if_enabled;
+use post_turn::{PostTurnAction, handle_completed_turn};
+use prompt_turn::dispatch_user_prompt;
 use session_export::drain_pending_export;
 use session_history::{handle_resume_session, handle_truncate_session};
+use session_shutdown::finish_session;
 use slash_handlers::{handle_clear_command, handle_refresh_identity_command};
 
 /// Run the interactive agent input loop to completion.
@@ -119,14 +125,6 @@ pub(crate) fn run_session_loop(
         // popped on each `poll_completion()` outcome. Replaces the
         // per-spawn tail logic that used to live inside the deleted
         // `tokio::spawn(async move { process_message })` wrapper.
-        enum PostTurnAction {
-            PersistSession {
-                guardrail: Option<crate::command::world_model::RuntimeGuardrailRecord>,
-            },
-            SkillComplete {
-                reload_registry_for: Option<String>,
-            },
-        }
         let mut post_turn_queue: std::collections::VecDeque<PostTurnAction> =
             std::collections::VecDeque::new();
         let mut poll_tick = tokio::time::interval(std::time::Duration::from_millis(16));
@@ -161,82 +159,19 @@ pub(crate) fn run_session_loop(
                                 archon_tui::TurnOutcome::Cancelled => "cancelled",
                                 archon_tui::TurnOutcome::Failed(_) => "failed",
                             });
-                        // FIFO: pop the post-turn action for the dispatch
-                        // that just completed and run it.
-                        match post_turn_queue.pop_front() {
-                            Some(PostTurnAction::PersistSession { guardrail }) => {
-                                let guard = agent.lock().await;
-                                let messages: Vec<String> = guard
-                                    .conversation_state()
-                                    .messages
-                                    .iter()
-                                    .filter_map(|msg| serde_json::to_string(msg).ok())
-                                    .collect();
-                                if !messages.is_empty()
-                                    && let Err(e) = session_store_for_input
-                                        .replace_messages(&session_id_for_input, &messages)
-                                {
-                                    tracing::warn!("replace_messages post-turn failed: {e}");
-                                }
-                                drop(guard);
-                                if let Some(guardrail) = guardrail {
-                                    let completed = matches!(
-                                        outcome,
-                                        archon_tui::TurnOutcome::Completed
-                                    );
-                                    let guardrail_outcome = crate::command::world_model::record_guardrail_turn_outcome(
-                                        &config,
-                                        &guardrail,
-                                        completed,
-                                    );
-                                    if completed
-                                        && guardrail_outcome.as_ref().is_some_and(|outcome| {
-                                            matches!(
-                                                outcome.final_status,
-                                                archon_world_model::GuardrailFinalStatus::BlockedMissingVerification
-                                                    | archon_world_model::GuardrailFinalStatus::BlockedFailedVerification
-                                            )
-                                        })
-                                        && let Some(repair_prompt) =
-                                            crate::command::world_model::forced_repair_prompt(&guardrail)
-                                    {
-                                        let _ = input_tui_tx.send(TuiEvent::TextDelta(
-                                            "\nWorld model guardrail: required verification is missing; starting a repair turn before this can be marked complete.\n".into(),
-                                        ));
-                                        match agent_dispatcher.lock().unwrap().spawn_turn(
-                                            repair_prompt,
-                                            adapter.clone()
-                                                as std::sync::Arc<dyn archon_tui::TurnRunner>,
-                                        ) {
-                                            archon_tui::DispatchResult::Running { .. } => {
-                                                tracing::debug!("spawned guardrail repair turn");
-                                            }
-                                            archon_tui::DispatchResult::Queued => {
-                                                tracing::debug!("queued guardrail repair turn");
-                                            }
-                                            archon_tui::DispatchResult::Rejected(err) => {
-                                                tracing::error!(
-                                                    "guardrail repair dispatch rejected: {err}"
-                                                );
-                                            }
-                                        }
-                                        post_turn_queue.push_back(PostTurnAction::PersistSession {
-                                            guardrail: Some(guardrail.clone()),
-                                        });
-                                    }
-                                }
-                            }
-                            Some(PostTurnAction::SkillComplete { reload_registry_for }) => {
-                                if reload_registry_for.as_deref() == Some("create-agent")
-                                    && let Ok(mut reg) = cmd_ctx.agent_registry.write() {
-                                        reg.reload(&cmd_ctx.working_dir);
-                                        tracing::info!("agent registry reloaded");
-                                    }
-                                let _ = input_tui_tx
-                                    .send(TuiEvent::SlashCommandComplete);
-                            }
-                            None => {}
-                        }
+                        handle_completed_turn(
+                            outcome,
+                            &mut post_turn_queue,
+                            &agent,
+                            &config,
+                            &input_tui_tx,
+                            &session_store_for_input,
+                            &session_id_for_input,
+                            &agent_dispatcher,
+                            &adapter,
+                            &mut cmd_ctx,
+                        )
+                        .await;
                     }
                     continue;
                 }
@@ -536,148 +471,22 @@ pub(crate) fn run_session_loop(
                 // Not a known slash command — falls through to agent as normal input
             }
 
-            // Clear last response buffer for /copy
-            {
-                let mut resp = cmd_ctx.last_assistant_response.lock().await;
-                resp.clear();
-            }
-            // CRIT-06: Fire UserPromptSubmit hook before processing
-            {
-                let guard = agent.lock().await;
-                guard.fire_hook_detached(
-                    archon_core::hooks::HookType::UserPromptSubmit,
-                    serde_json::json!({
-                        "hook_event": "UserPromptSubmit",
-                        "prompt_length": input.len(),
-                    }),
-                )
-            }
-            .await;
-            // Signal the TUI that generation is starting BEFORE the agent runs.
-            // This is the canonical place is_generating gets set to true.
-            let _ = input_tui_tx.send(TuiEvent::GenerationStarted);
-            // AGT-011: Prepend initial_prompt to first user message
-            let effective_input = if let Some(prefix) = initial_prompt_pending.take() {
-                format!("{prefix}\n\n{input}")
-            } else {
-                input.clone()
-            };
-            // TASK-TUI-107: dispatch via AgentDispatcher. The old
-            // `handle.await`-prior serialization pattern is gone — queued
-            // prompts drain via poll_completion. Session persistence is
-            // pushed onto post_turn_queue and runs when poll_completion
-            // observes this turn's outcome.
-            let task_class = archon_world_model::guardrail::classify_task(
-                &input,
-                archon_world_model::integration::WorldAdvisorSurface::InteractiveSession,
-            );
-            let guardrail_surface = match task_class {
-                archon_world_model::RuntimeTaskClass::CodingChange
-                | archon_world_model::RuntimeTaskClass::Debugging
-                | archon_world_model::RuntimeTaskClass::Refactor => {
-                    archon_world_model::integration::WorldAdvisorSurface::CodingTask
-                }
-                _ => archon_world_model::integration::WorldAdvisorSurface::InteractiveSession,
-            };
-            let action_ref = format!("interactive-turn-{}", uuid::Uuid::new_v4());
-            let guardrail = crate::command::world_model::begin_guarded_action(
+            dispatch_user_prompt(
+                input,
+                &mut initial_prompt_pending,
+                &mut post_turn_queue,
+                &agent,
                 &config,
-                guardrail_surface,
+                &input_tui_tx,
+                &cmd_ctx,
                 &session_id_for_input,
-                &action_ref,
-                &input,
-            );
-            if let Some(record) = &guardrail
-                && !record.decision.allowed_to_finalize
-                && !record.decision.required_actions.is_empty()
-            {
-                let _ = input_tui_tx.send(TuiEvent::TextDelta(format!(
-                    "\nWorld model guardrail: {:?} risk; verification required before completion: {:?}.\n",
-                    record.decision.risk_tier, record.decision.required_actions
-                )));
-            }
-            match agent_dispatcher.lock().unwrap().spawn_turn(
-                effective_input,
-                adapter.clone() as std::sync::Arc<dyn archon_tui::TurnRunner>,
-            ) {
-                archon_tui::DispatchResult::Running { .. } => {
-                    tracing::debug!("spawned agent turn");
-                }
-                archon_tui::DispatchResult::Queued => {
-                    tracing::debug!("agent busy; queued prompt");
-                }
-                archon_tui::DispatchResult::Rejected(err) => {
-                    tracing::error!("dispatch rejected: {err}");
-                }
-            }
-            post_turn_queue.push_back(PostTurnAction::PersistSession { guardrail });
+                &agent_dispatcher,
+                &adapter,
+            )
+            .await;
         }
         // END INPUT_HANDLER — arch-lint.sh scopes D1 grep to this region
 
-        // AGT-015: Increment agent invocation count on session end.
-        // Wired ONLY here (not at /exit) to avoid double-counting — the Stop
-        // hook fires on ALL exit paths (/exit, /quit, Ctrl-C, channel close).
-        if let Some(ref def) = agent_def
-            && let Some(ref base_dir) = def.base_dir
-        {
-            let agent_dir = std::path::Path::new(base_dir);
-            if let Err(e) = archon_core::agents::memory::increment_invocation_count(agent_dir) {
-                tracing::warn!(
-                    agent = def.agent_type.as_str(),
-                    "failed to increment invocation count: {e}"
-                );
-            }
-        }
-
-        // TASK-TUI-107: drain in-flight turn + queue before the Stop hook.
-        let drain_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while (agent_dispatcher.lock().unwrap().is_busy()
-            || agent_dispatcher.lock().unwrap().queue_len() > 0)
-            && std::time::Instant::now() < drain_deadline
-        {
-            tokio::time::sleep(std::time::Duration::from_millis(16)).await;
-            let _ = agent_dispatcher.lock().unwrap().poll_completion();
-        }
-
-        let flushed_auto_extractions = agent
-            .lock()
-            .await
-            .flush_auto_extractions(std::time::Duration::from_secs(10))
-            .await;
-        if flushed_auto_extractions > 0 {
-            tracing::info!(
-                count = flushed_auto_extractions,
-                "flushed pending auto-extraction tasks before session shutdown"
-            );
-        }
-
-        // CRIT-06: Fire Stop hook when the input channel closes (session ending)
-        let stop_fut = {
-            let guard = agent.lock().await;
-            guard.fire_hook_detached(
-                archon_core::hooks::HookType::Stop,
-                serde_json::json!({
-                    "hook_event": "Stop",
-                    "reason": "session_end",
-                }),
-            )
-        };
-        let stop_result = tokio::time::timeout(std::time::Duration::from_secs(10), stop_fut).await;
-
-        // CRIT-06: Fire StopFailure if the graceful stop timed out
-        if stop_result.is_err() {
-            tracing::warn!("Stop hook timed out — firing StopFailure");
-            {
-                let guard = agent.lock().await;
-                guard.fire_hook_detached(
-                    archon_core::hooks::HookType::StopFailure,
-                    serde_json::json!({
-                        "hook_event": "StopFailure",
-                        "reason": "stop_hook_timeout",
-                    }),
-                )
-            }
-            .await;
-        }
+        finish_session(&agent_def, &agent, &agent_dispatcher).await;
     })
 }
