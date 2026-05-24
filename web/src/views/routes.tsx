@@ -4,6 +4,8 @@ import { ChatPage } from "./ChatPage";
 import { CorpusPage } from "./CorpusPage";
 import { DashboardPage } from "./DashboardPage";
 import { InspectionPage } from "./InspectionPage";
+import { IngestPage } from "./IngestPage";
+import { JepaPage } from "./JepaPage";
 import { MemoryPage } from "./MemoryPage";
 import { MetricsPage } from "./MetricsPage";
 import { PipelinePage } from "./PipelinePage";
@@ -20,6 +22,7 @@ import type {
   PipelineSummary,
   SettingsSummary,
   WebUploadPolicy,
+  WebIngestSummary,
   WorldInspectionSummary,
 } from "../api/generated/web";
 
@@ -38,6 +41,7 @@ interface WorkbenchRoutesProps {
   uploadsEnabled?: boolean;
   uploadPolicy?: WebUploadPolicy;
   corpus?: CorpusSummary;
+  ingest?: WebIngestSummary;
   learning?: LearningSummary;
   world?: WorldInspectionSummary;
   pipelines?: PipelineSummary;
@@ -54,6 +58,7 @@ export function WorkbenchRoutes(props: WorkbenchRoutesProps) {
       <Route path="/" element={<DashboardPage {...props} />} />
       <Route path="/chat" element={<ChatPage uploadPolicy={props.uploadPolicy} />} />
       <Route path="/corpus" element={<CorpusPage corpus={props.corpus} />} />
+      <Route path="/ingest" element={<IngestPage ingest={props.ingest} />} />
       <Route
         path="/memory"
         element={<MemoryPage learning={props.learning} />}
@@ -61,6 +66,10 @@ export function WorkbenchRoutes(props: WorkbenchRoutesProps) {
       <Route
         path="/world"
         element={<WorldPage world={props.world} />}
+      />
+      <Route
+        path="/jepa"
+        element={<JepaPage world={props.world} />}
       />
       <Route
         path="/pipelines"

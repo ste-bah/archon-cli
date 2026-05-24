@@ -326,6 +326,7 @@ pub fn generated_typescript() -> String {
         super::chat::generated_typescript(),
         super::uploads::generated_typescript(),
         super::corpus::generated_typescript(),
+        super::ingest::generated_typescript(),
         super::inspect::generated_typescript(),
         super::metrics::generated_typescript(),
         super::pipelines::generated_typescript(),

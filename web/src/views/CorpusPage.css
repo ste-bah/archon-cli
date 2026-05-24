@@ -78,6 +78,9 @@
   display: grid;
   gap: 3px;
   padding: 10px;
+  width: 100%;
+  color: var(--text);
+  text-align: left;
 }
 
 .corpus-root span,
@@ -130,6 +133,33 @@
 
 .corpus-result--active {
   border-color: var(--accent);
+}
+
+.corpus-root--active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-2) 90%);
+}
+
+.corpus-root-filter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.corpus-root-filter button {
+  min-height: 28px;
+  padding: 0 10px;
+  color: var(--accent);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
 }
 
 .corpus-meta {

@@ -68,22 +68,7 @@ impl WebSessionHandle {
     async fn handle_event(&self, event: TuiEvent, reply: &mut String) -> Result<bool> {
         match event {
             TuiEvent::TextDelta(text) | TuiEvent::BtwResponse(text) => reply.push_str(&text),
-            TuiEvent::ToolStart { name, .. } => {
-                reply.push_str(&format!("\n[tool] {name} started\n"));
-            }
-            TuiEvent::ToolComplete {
-                name,
-                success,
-                output,
-                ..
-            } => {
-                let status = if success { "done" } else { "failed" };
-                if output.trim().is_empty() {
-                    reply.push_str(&format!("\n[tool] {name} {status}\n"));
-                } else {
-                    reply.push_str(&format!("\n[tool] {name} {status}: {output}\n"));
-                }
-            }
+            TuiEvent::ToolStart { .. } | TuiEvent::ToolComplete { .. } => {}
             TuiEvent::TurnComplete { .. } | TuiEvent::SlashCommandComplete => return Ok(true),
             TuiEvent::Error(message) => {
                 if reply.trim().is_empty() {
@@ -375,10 +360,30 @@ pub(crate) async fn spawn_web_session(
 fn finish_reply(streamed: &str, fallback: &str) -> String {
     let streamed = streamed.trim();
     if streamed.is_empty() {
-        fallback.trim().to_string()
+        sanitize_web_reply(fallback)
     } else {
-        streamed.to_string()
+        sanitize_web_reply(streamed)
     }
+}
+
+fn sanitize_web_reply(value: &str) -> String {
+    let mut lines = Vec::new();
+    let mut skipping_tool_output = false;
+    for line in value.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("[tool] ") {
+            skipping_tool_output = trimmed.contains(" done:");
+            continue;
+        }
+        if skipping_tool_output {
+            if trimmed.is_empty() {
+                skipping_tool_output = false;
+            }
+            continue;
+        }
+        lines.push(line);
+    }
+    lines.join("\n").trim().to_string()
 }
 
 fn auth_label(env_vars: &ArchonEnvVars) -> String {
@@ -398,7 +403,7 @@ fn auth_label(env_vars: &ArchonEnvVars) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::finish_reply;
+    use super::{finish_reply, sanitize_web_reply};
 
     #[test]
     fn finish_reply_prefers_streamed_text() {
@@ -408,5 +413,18 @@ mod tests {
     #[test]
     fn finish_reply_uses_last_assistant_response_when_stream_empty() {
         assert_eq!(finish_reply("   ", " buffered reply "), "buffered reply");
+    }
+
+    #[test]
+    fn finish_reply_removes_legacy_tool_transcript_noise() {
+        let reply = sanitize_web_reply(
+            "\n[tool] DocSearch started\n\
+             [tool] memory_recall done: 10 memories found\n\
+             noisy memory row\n\
+             \n\
+             [tool] DocSearch failed: Error: database is locked\n\
+             The document store is locked right now.\n",
+        );
+        assert_eq!(reply, "The document store is locked right now.");
     }
 }

@@ -97,3 +97,29 @@ fn history_rows_restore_user_and_assistant_messages() {
     assert_eq!(response.messages[0].attachments.len(), 1);
     assert_eq!(response.messages[1].body, "hi there");
 }
+
+#[test]
+fn history_rows_hide_legacy_tool_output_noise() {
+    let response = history_from_rows(
+        &[WebChatLedgerRow {
+            message_id: "webmsg_1".into(),
+            message: "hello".into(),
+            attachments: Vec::new(),
+            assistant_reply: "\n[tool] DocSearch started\n\
+                [tool] memory_recall done: 10 memories found\n\
+                noisy memory row\n\
+                \n\
+                [tool] DocSearch failed: Error: database is locked\n\
+                The document store is locked right now.\n"
+                .into(),
+            created_at_ms: 1770000000,
+        }],
+        "/tmp/chat.messages.jsonl".into(),
+        false,
+    );
+    assert_eq!(response.messages.len(), 2);
+    assert_eq!(
+        response.messages[1].body,
+        "The document store is locked right now."
+    );
+}

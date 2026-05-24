@@ -18,6 +18,11 @@ import type {
   WebChatHistoryResponse,
   WebChatSubmitRequest,
   WebChatSubmitResponse,
+  WebIngestRunRequest,
+  WebIngestRunResponse,
+  WebIngestSummary,
+  WebKbCreateRequest,
+  WebKbCreateResponse,
   WebLiveSnapshot,
   WebUploadIntent,
   WebUploadIntentResponse,
@@ -97,6 +102,11 @@ export const apiClient = {
     getJson<CorpusSourcePreview>(
       `/api/corpus/source?path=${encodeURIComponent(path)}`,
     ),
+  ingestSummary: () => getJson<WebIngestSummary>("/api/ingest/summary"),
+  startIngest: (request: WebIngestRunRequest) =>
+    postJson<WebIngestRunResponse>("/api/ingest/run", request),
+  createKnowledgeBase: (request: WebKbCreateRequest) =>
+    postJson<WebKbCreateResponse>("/api/ingest/kb", request),
   learningSummary: () => getJson<LearningSummary>("/api/learning/summary"),
   worldSummary: () => getJson<WorldInspectionSummary>("/api/world/summary"),
   pipelineSummary: () => getJson<PipelineSummary>("/api/pipelines/summary"),

@@ -13,14 +13,22 @@ interface CorpusPageProps {
 export function CorpusPage({ corpus }: CorpusPageProps) {
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState("");
+  const [rootFilter, setRootFilter] = useState<string | undefined>();
   const [selectedPath, setSelectedPath] = useState<string | undefined>();
   const kinds = useMemo(() => uniqueKinds(corpus?.sources ?? []), [corpus]);
   const search = useQuery({
     queryKey: ["corpus-search", query, kind],
     queryFn: () => apiClient.corpusSearch(query, kind),
   });
-  const results = search.data?.results ?? corpus?.sources ?? [];
-  const chunks = search.data?.chunkMatches ?? [];
+  const rawResults = search.data?.results ?? corpus?.sources ?? [];
+  const results = useMemo(
+    () => filterByRoot(rawResults, rootFilter),
+    [rawResults, rootFilter],
+  );
+  const chunks = useMemo(
+    () => filterChunksByRoot(search.data?.chunkMatches ?? [], rootFilter),
+    [search.data?.chunkMatches, rootFilter],
+  );
   const selected = results.find((source) => source.path === selectedPath) ?? results[0];
   const preview = useQuery({
     queryKey: ["corpus-preview", selected?.path],
@@ -64,12 +72,30 @@ export function CorpusPage({ corpus }: CorpusPageProps) {
         </div>
         <div className="corpus-roots">
           {(corpus?.roots ?? []).map((root) => (
-            <div key={root.path} className="corpus-root">
+            <button
+              key={root.path}
+              type="button"
+              className={
+                rootFilter === root.path ? "corpus-root corpus-root--active" : "corpus-root"
+              }
+              onClick={() => {
+                setRootFilter((current) => (current === root.path ? undefined : root.path));
+                setSelectedPath(undefined);
+              }}
+            >
               <strong>{root.label}</strong>
               <span>{root.exists ? `${root.files} files` : "missing"}</span>
-            </div>
+            </button>
           ))}
         </div>
+        {rootFilter && (
+          <div className="corpus-root-filter" role="status">
+            <span>{shortPath(rootFilter)}</span>
+            <button type="button" onClick={() => setRootFilter(undefined)}>
+              Clear
+            </button>
+          </div>
+        )}
         <div className="corpus-results" aria-label="Corpus source results">
           {results.map((source) => (
             <button
@@ -194,6 +220,35 @@ function SourcePreview({
 
 function uniqueKinds(sources: CorpusSource[]) {
   return [...new Set(sources.map((source) => source.kind))].sort();
+}
+
+function filterByRoot(sources: CorpusSource[], rootPath?: string) {
+  if (!rootPath) {
+    return sources;
+  }
+  return sources.filter((source) => pathMatchesRoot(source.path, rootPath));
+}
+
+function filterChunksByRoot(chunks: CorpusChunkHit[], rootPath?: string) {
+  if (!rootPath) {
+    return chunks;
+  }
+  return chunks.filter((chunk) => pathMatchesRoot(chunk.sourcePath, rootPath));
+}
+
+function pathMatchesRoot(path: string, rootPath: string) {
+  const cleanPath = trimTrailingSlash(path);
+  const cleanRoot = trimTrailingSlash(rootPath);
+  return cleanPath === cleanRoot || cleanPath.startsWith(`${cleanRoot}/`);
+}
+
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "");
+}
+
+function shortPath(value: string) {
+  const parts = value.split("/").filter(Boolean);
+  return parts.slice(-3).join("/") || value;
 }
 
 function formatBytes(value?: number) {

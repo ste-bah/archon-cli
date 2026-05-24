@@ -13,7 +13,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::{Config as TsConfig, TS};
 
-use super::{AppState, check_auth, inspect::PathProbe};
+use super::{
+    AppState, check_auth,
+    inspect::PathProbe,
+    world_jepa::{JepaInspectionSummary, jepa_summary},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +35,7 @@ pub struct WorldInspectionSummary {
     pub reasoning_events: Vec<WorldModelRowPreview>,
     pub shadow_reports: Vec<WorldModelRowPreview>,
     pub predictions: Vec<WorldPredictionPreview>,
+    pub jepa: JepaInspectionSummary,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
@@ -121,6 +126,7 @@ fn world_summary() -> WorldInspectionSummary {
         reasoning_events: row_previews(&home.join("reasoning-quality"), "reasoning", 8),
         shadow_reports: shadow_rows(&home.join("reasoning-quality"), 8),
         predictions: prediction_rows(&advisor_ledger, 8),
+        jepa: jepa_summary(&root),
     }
 }
 
@@ -359,6 +365,7 @@ pub fn generated_typescript() -> String {
     let cfg = TsConfig::default().with_large_int("number");
     [
         exported(WorldInspectionSummary::decl(&cfg)),
+        exported(JepaInspectionSummary::decl(&cfg)),
         exported(WorldModelArtifact::decl(&cfg)),
         exported(WorldAdvisorEventPreview::decl(&cfg)),
         exported(WorldModelSignal::decl(&cfg)),

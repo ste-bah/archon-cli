@@ -10,6 +10,9 @@ pub mod auth;
 pub mod chat;
 pub mod corpus;
 pub mod evidence;
+pub mod ingest;
+mod ingest_jobs;
+mod ingest_store;
 pub mod inspect;
 pub mod live;
 pub mod metrics;
@@ -17,6 +20,7 @@ pub mod pipelines;
 pub mod settings;
 pub mod uploads;
 pub mod world;
+mod world_jepa;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -156,6 +160,8 @@ pub(crate) struct AppState {
     paths: WebRuntimePaths,
     /// Optional chat/session bridge supplied by the binary runtime.
     chat_backend: Option<Arc<dyn chat::WebChatBackend>>,
+    /// In-memory ingest job state for web-triggered document/KB/video operations.
+    ingest_jobs: ingest::WebIngestJobStore,
 }
 
 /// HTTP server that serves the embedded SPA.
@@ -265,6 +271,7 @@ impl WebServer {
             live,
             paths: self.paths.clone(),
             chat_backend: self.chat_backend.clone(),
+            ingest_jobs: ingest::new_job_store(),
         };
 
         let app = build_app(&self.config, state);
@@ -327,6 +334,9 @@ fn build_app(config: &WebConfig, state: AppState) -> Router {
         .route("/api/corpus/summary", get(corpus::summary_handler))
         .route("/api/corpus/search", get(corpus::search_handler))
         .route("/api/corpus/source", get(corpus::preview_handler))
+        .route("/api/ingest/summary", get(ingest::summary_handler))
+        .route("/api/ingest/run", post(ingest::run_handler))
+        .route("/api/ingest/kb", post(ingest::create_kb_handler))
         .route("/api/learning/summary", get(inspect::learning_handler))
         .route("/api/world/summary", get(world::summary_handler))
         .route("/api/pipelines/summary", get(pipelines::summary_handler))
@@ -455,6 +465,7 @@ mod tests {
             live: WebLiveManager::new(16),
             paths,
             chat_backend: None,
+            ingest_jobs: ingest::new_job_store(),
         }
     }
 

@@ -70,6 +70,27 @@ export type CorpusPreviewQuery = { path: string, };
 export type CorpusSourcePreview = { source: CorpusSource, content: string, lineCount: number, truncated: boolean, previewAvailable: boolean, policyReason: string, };
 
 
+export type WebIngestSummary = { allowed: boolean, policyReason: string, stores: Array<PathProbe>, documents: Array<WebDocStoreItem>, videos: Array<WebVideoStoreItem>, knowledgeBases: Array<WebKnowledgeBaseItem>, kbStats: WebKnowledgeStats, jobs: Array<WebIngestJob>, warnings: Array<string>, };
+
+export type WebDocStoreItem = { documentId: string, sourcePath: string, mediaType: string, status: string, chunks: number, pages: number, artifacts: number, ocrRuns: number, discoveredAt: string, };
+
+export type WebVideoStoreItem = { videoId: string, documentId: string, title: string, source: string, status: string, durationMs: number, chunks: number, transcriptSegments: number, frames: number, };
+
+export type WebKnowledgeBaseItem = { name: string, scope: string, path: string, files: number, bytes: number, exists: boolean, };
+
+export type WebKnowledgeStats = { chunks: number, claims: number, entities: number, relations: number, contradictions: number, };
+
+export type WebIngestJob = { jobId: string, label: string, target: string, command: string, status: string, startedAtMs: number, finishedAtMs: number | null, exitCode: number | null, stdoutTail: string, stderrTail: string, };
+
+export type WebIngestRunRequest = { target: string, source: string, frames: string | null, asr: string | null, transcript: string | null, vlm: boolean, metadataOnly: boolean, confirmed: boolean, };
+
+export type WebIngestRunResponse = { accepted: boolean, decision: WebActionDecision, job: WebIngestJob | null, };
+
+export type WebKbCreateRequest = { name: string, scope: string, description: string | null, confirmed: boolean, };
+
+export type WebKbCreateResponse = { accepted: boolean, decision: WebActionDecision, knowledgeBase: WebKnowledgeBaseItem | null, };
+
+
 export type PathProbe = { label: string, path: string, exists: boolean, files: number, bytes: number, };
 
 export type LearningSummary = { stores: Array<PathProbe>, signals: Array<LearningSignalItem>, memories: Array<LearningRowPreview>, learningEvents: Array<LearningRowPreview>, proposals: Array<LearningRowPreview>, trustDeltas: Array<LearningRowPreview>, recentSessions: Array<string>, sessionCount: number, reasoningStorePresent: boolean, };
@@ -114,7 +135,9 @@ export type WebThemeProfileEnvelope = { profile: WebThemeProfile, storagePath: s
 export type WebThemeProfileSaveRequest = { profile: WebThemeProfile, };
 
 
-export type WorldInspectionSummary = { root: PathProbe, ledgers: Array<PathProbe>, dbPresent: boolean, candidateCount: number, reasoningRootPresent: boolean, artifacts: Array<WorldModelArtifact>, advisorEvents: Array<WorldAdvisorEventPreview>, signals: Array<WorldModelSignal>, candidates: Array<WorldModelRowPreview>, reasoningEvents: Array<WorldModelRowPreview>, shadowReports: Array<WorldModelRowPreview>, predictions: Array<WorldPredictionPreview>, };
+export type WorldInspectionSummary = { root: PathProbe, ledgers: Array<PathProbe>, dbPresent: boolean, candidateCount: number, reasoningRootPresent: boolean, artifacts: Array<WorldModelArtifact>, advisorEvents: Array<WorldAdvisorEventPreview>, signals: Array<WorldModelSignal>, candidates: Array<WorldModelRowPreview>, reasoningEvents: Array<WorldModelRowPreview>, shadowReports: Array<WorldModelRowPreview>, predictions: Array<WorldPredictionPreview>, jepa: JepaInspectionSummary, };
+
+export type JepaInspectionSummary = { root: PathProbe, candidateCount: number, evalCount: number, trainingRunCount: number, comparisonCount: number, artifacts: Array<WorldModelArtifact>, signals: Array<WorldModelSignal>, candidates: Array<WorldModelRowPreview>, evals: Array<WorldModelRowPreview>, trainingRuns: Array<WorldModelRowPreview>, comparisons: Array<WorldModelRowPreview>, };
 
 export type WorldModelArtifact = { label: string, kind: string, status: string, path: string, files: number, bytes: number, };
 

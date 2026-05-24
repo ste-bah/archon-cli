@@ -1,6 +1,7 @@
 .metrics-layout {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
   gap: 16px;
 }
 
@@ -24,6 +25,9 @@
   gap: 6px;
   min-height: 118px;
   padding: 14px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
 }
 
 .metrics-card__icon {
@@ -47,8 +51,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  width: 100%;
   min-height: 70px;
   padding: 11px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
 }
 
 .metrics-row div,
@@ -71,10 +79,41 @@
   display: block;
 }
 
+.metrics-card:hover,
+.metrics-row:hover,
+.metrics-event:hover,
+.metrics-card:focus-visible,
+.metrics-row:focus-visible,
+.metrics-event:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.metrics-selection {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.4rem 1rem;
+}
+
+.metrics-selection p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .metrics-event,
 .metrics-empty {
   min-height: 110px;
   padding: 13px;
+}
+
+.metrics-event {
+  width: 100%;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
 }
 
 .metrics-event header,

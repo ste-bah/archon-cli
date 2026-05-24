@@ -6,8 +6,10 @@ const routes = [
   { id: "overview", path: "./", nav: "Overview", title: "Runtime posture" },
   { id: "chat", path: "./#/chat", nav: "Chat", title: "Conversation" },
   { id: "corpus", path: "./#/corpus", nav: "Corpus", title: "Corpus explorer" },
+  { id: "ingest", path: "./#/ingest", nav: "Ingest", title: "Ingest control" },
   { id: "memory", path: "./#/memory", nav: "Memory", title: "Memory and behaviour proposals" },
   { id: "world", path: "./#/world", nav: "World Model", title: "World model and reasoning quality" },
+  { id: "jepa", path: "./#/jepa", nav: "JEPA", title: "JEPA candidates and gates" },
   { id: "pipelines", path: "./#/pipelines", nav: "Pipelines", title: "Pipeline control room" },
   { id: "metrics", path: "./#/metrics", nav: "Metrics", title: "Performance metrics" },
   { id: "settings", path: "./#/settings", nav: "Settings", title: "Theme and safe controls" },
@@ -119,14 +121,36 @@ test("memory, world, corpus, and settings buttons perform visible actions", asyn
   await expect(page.getByText("Latent next-state prediction")).toBeVisible();
   await page.getByLabel("Ranked corpus chunks").getByRole("button", { name: /README\.md/ }).click();
   await expect(page.getByRole("heading", { name: "README.md" })).toBeVisible();
+  await page.getByRole("button", { name: /Repository docs/ }).click();
+  await expect(page.getByRole("status")).toContainText("repo/docs");
+
+  await page.goto("./#/ingest");
+  await page.getByPlaceholder("/path/file.pdf or https://...").fill("/repo/hld/design.pdf");
+  await page.getByRole("button", { name: "Run" }).first().click();
+  await expect(page.getByText("Store items")).toBeVisible();
+  await page.getByRole("button", { name: "videos" }).click();
+  await expect(page.getByRole("button", { name: "Architecture walkthrough" })).toBeVisible();
+  await page.getByPlaceholder("project evidence").fill("new kb");
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByText("Recent ingest runs")).toBeVisible();
 
   await page.goto("./#/world");
+  await page.getByRole("button", { name: "Candidates", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Show all" })).toBeVisible();
   await page.getByRole("button", { name: "Preview promote" }).first().click();
   await expect(page.getByRole("status")).toContainText("world.candidate.promote");
   await page.getByRole("button", { name: "Preview rollback" }).click();
   await expect(page.getByRole("status")).toContainText("world.active.rollback");
   await page.getByRole("button", { name: "Preview promote" }).nth(1).click();
   await expect(page.getByRole("status")).toContainText("world.candidate.promote");
+
+  await page.goto("./#/jepa");
+  await page.getByRole("button", { name: "eval", exact: true }).click();
+  await expect(page.getByRole("button", { name: /eval-001\.json/ }).first()).toBeVisible();
+
+  await page.goto("./#/metrics");
+  await page.getByRole("button", { name: "Bundle files" }).click();
+  await expect(page.getByLabel("Selected metric detail")).toContainText("Bundle files");
 
   await page.goto("./#/settings");
   await page.getByRole("button", { name: "Light", exact: true }).click();

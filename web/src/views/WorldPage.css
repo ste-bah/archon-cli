@@ -15,9 +15,17 @@
   gap: 6px;
   min-height: 118px;
   padding: 14px;
+  color: var(--text);
+  text-align: left;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface-2);
+}
+
+.world-metric--active,
+.world-row:focus-visible,
+.world-event:focus-visible {
+  border-color: var(--accent);
 }
 
 .world-metric__icon {
@@ -67,8 +75,11 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  width: 100%;
   min-height: 72px;
   padding: 11px;
+  color: var(--text);
+  text-align: left;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface-2);
@@ -112,6 +123,9 @@
 .world-event {
   display: grid;
   gap: 10px;
+  width: 100%;
+  color: var(--text);
+  text-align: left;
 }
 
 .world-event header,

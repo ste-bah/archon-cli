@@ -1,4 +1,5 @@
 import { Activity, Database, Gauge, TimerReset } from "lucide-react";
+import { useState } from "react";
 import { StatusPill } from "../components/StatusPill";
 import type { MetricsSummary, ProviderRuntimeMetric } from "../api/generated/web";
 import "./MetricsPage.css";
@@ -9,6 +10,7 @@ interface MetricsPageProps {
 }
 
 export function MetricsPage({ metrics, liveCount = 0 }: MetricsPageProps) {
+  const [selected, setSelected] = useState<MetricSelection | undefined>();
   const stores = metrics?.stores ?? [];
   const performance = metrics?.performance ?? [];
   const queues = metrics?.queues ?? [];
@@ -32,21 +34,37 @@ export function MetricsPage({ metrics, liveCount = 0 }: MetricsPageProps) {
             label="Bundle files"
             value={metrics?.webBundleFiles ?? 0}
             detail="embedded assets"
+            onSelect={() =>
+              setSelected(selection("Bundle files", `${metrics?.webBundleFiles ?? 0}`, `${formatBytes(metrics?.webBundleBytes ?? 0)} embedded assets`))
+            }
           />
           <MetricCard
             icon={<Activity size={18} aria-hidden="true" />}
             label="Live events"
             value={liveCount}
             detail="current snapshot"
+            onSelect={() => setSelected(selection("Live events", `${liveCount}`, "current web live-event snapshot"))}
           />
           <MetricCard
             icon={<Database size={18} aria-hidden="true" />}
             label="Providers"
             value={providerMetrics.length}
             detail="runtime telemetry"
+            onSelect={() => setSelected(selection("Providers", `${providerMetrics.length}`, "runtime telemetry providers with recorded metrics"))}
           />
         </div>
       </div>
+
+      {selected && (
+        <section className="panel panel--wide metrics-selection" aria-label="Selected metric detail">
+          <div>
+            <span className="eyebrow">Selection</span>
+            <h3>{selected.label}</h3>
+          </div>
+          <strong>{selected.value}</strong>
+          <p>{selected.detail}</p>
+        </section>
+      )}
 
       <section className="panel">
         <div className="panel-heading">
@@ -55,7 +73,11 @@ export function MetricsPage({ metrics, liveCount = 0 }: MetricsPageProps) {
         </div>
         <div className="metrics-list">
           {performance.map((item) => (
-            <MetricRow key={item.label} item={item} />
+            <MetricRow
+              key={item.label}
+              item={item}
+              onSelect={() => setSelected(selection(item.label, item.value, `${item.unit} · ${item.status}`))}
+            />
           ))}
         </div>
       </section>
@@ -67,7 +89,11 @@ export function MetricsPage({ metrics, liveCount = 0 }: MetricsPageProps) {
         </div>
         <div className="metrics-list">
           {queues.map((item) => (
-            <MetricRow key={item.label} item={item} />
+            <MetricRow
+              key={item.label}
+              item={item}
+              onSelect={() => setSelected(selection(item.label, item.value, `${item.unit} · ${item.status}`))}
+            />
           ))}
         </div>
       </section>
@@ -79,7 +105,12 @@ export function MetricsPage({ metrics, liveCount = 0 }: MetricsPageProps) {
         </div>
         <div className="metrics-list">
           {stores.map((store) => (
-            <div key={store.path} className="metrics-row">
+            <button
+              key={store.path}
+              type="button"
+              className="metrics-row"
+              onClick={() => setSelected(selection(store.label, store.status, `${store.path} · ${store.files} files · ${formatBytes(store.bytes)}`))}
+            >
               <div>
                 <strong>{store.label}</strong>
                 <span>{store.path}</span>
@@ -88,7 +119,7 @@ export function MetricsPage({ metrics, liveCount = 0 }: MetricsPageProps) {
                 </small>
               </div>
               <StatusPill tone={statusTone(store.status)}>{store.status}</StatusPill>
-            </div>
+            </button>
           ))}
         </div>
       </section>
@@ -106,7 +137,19 @@ export function MetricsPage({ metrics, liveCount = 0 }: MetricsPageProps) {
             </div>
           ) : (
             providerMetrics.map((provider) => (
-              <ProviderMetricRow key={provider.providerId} provider={provider} />
+              <ProviderMetricRow
+                key={provider.providerId}
+                provider={provider}
+                onSelect={() =>
+                  setSelected(
+                    selection(
+                      provider.providerId,
+                      `${provider.requestCount} requests`,
+                      `${provider.errorCount} errors · ${provider.retryCount} retries · ${provider.inputTokens + provider.outputTokens} tokens`,
+                    ),
+                  )
+                }
+              />
             ))
           )}
         </div>
@@ -125,7 +168,12 @@ export function MetricsPage({ metrics, liveCount = 0 }: MetricsPageProps) {
             </div>
           ) : (
             providerEvents.map((event) => (
-              <article key={`${event.providerId}:${event.createdAt}`} className="metrics-event">
+              <button
+                key={`${event.providerId}:${event.createdAt}`}
+                type="button"
+                className="metrics-event"
+                onClick={() => setSelected(selection(event.providerId, event.eventType, event.message))}
+              >
                 <header>
                   <strong>{event.providerId}</strong>
                   <StatusPill tone={statusTone(event.severity)}>{event.severity}</StatusPill>
@@ -134,7 +182,7 @@ export function MetricsPage({ metrics, liveCount = 0 }: MetricsPageProps) {
                 <small>
                   {event.modelId} · {event.eventType} · {event.createdAt}
                 </small>
-              </article>
+              </button>
             ))
           )}
         </div>
@@ -153,14 +201,19 @@ export function MetricsPage({ metrics, liveCount = 0 }: MetricsPageProps) {
             </div>
           ) : (
             events.map((event) => (
-              <article key={`${event.source}:${event.summary}`} className="metrics-event">
+              <button
+                key={`${event.source}:${event.summary}`}
+                type="button"
+                className="metrics-event"
+                onClick={() => setSelected(selection(event.source, event.severity, event.summary))}
+              >
                 <header>
                   <strong>{event.source}</strong>
                   <StatusPill tone={statusTone(event.severity)}>{event.severity}</StatusPill>
                 </header>
                 <p>{event.summary}</p>
                 <small>{event.createdAt}</small>
-              </article>
+              </button>
             ))
           )}
         </div>
@@ -169,9 +222,25 @@ export function MetricsPage({ metrics, liveCount = 0 }: MetricsPageProps) {
   );
 }
 
-function ProviderMetricRow({ provider }: { provider: ProviderRuntimeMetric }) {
+interface MetricSelection {
+  label: string;
+  value: string;
+  detail: string;
+}
+
+function selection(label: string, value: string, detail: string): MetricSelection {
+  return { label, value, detail };
+}
+
+function ProviderMetricRow({
+  provider,
+  onSelect,
+}: {
+  provider: ProviderRuntimeMetric;
+  onSelect: () => void;
+}) {
   return (
-    <div className="metrics-row metrics-row--provider">
+    <button type="button" className="metrics-row metrics-row--provider" onClick={onSelect}>
       <div>
         <strong>{provider.providerId}</strong>
         <span>
@@ -183,7 +252,7 @@ function ProviderMetricRow({ provider }: { provider: ProviderRuntimeMetric }) {
         </small>
       </div>
       <StatusPill tone={statusTone(provider.status)}>{provider.status}</StatusPill>
-    </div>
+    </button>
   );
 }
 
@@ -192,25 +261,33 @@ function MetricCard({
   label,
   value,
   detail,
+  onSelect,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string | number;
   detail: string;
+  onSelect: () => void;
 }) {
   return (
-    <section className="metrics-card" aria-label={label}>
+    <button type="button" className="metrics-card" aria-label={label} onClick={onSelect}>
       <span className="metrics-card__icon">{icon}</span>
       <span className="metric-tile__label">{label}</span>
       <strong>{value}</strong>
       <span className="metric-tile__detail">{detail}</span>
-    </section>
+    </button>
   );
 }
 
-function MetricRow({ item }: { item: { label: string; value: string; unit: string; status: string } }) {
+function MetricRow({
+  item,
+  onSelect,
+}: {
+  item: { label: string; value: string; unit: string; status: string };
+  onSelect: () => void;
+}) {
   return (
-    <div className="metrics-row">
+    <button type="button" className="metrics-row" onClick={onSelect}>
       <div>
         <strong>{item.label}</strong>
         <span>
@@ -218,7 +295,7 @@ function MetricRow({ item }: { item: { label: string; value: string; unit: strin
         </span>
       </div>
       <StatusPill tone={statusTone(item.status)}>{item.status}</StatusPill>
-    </div>
+    </button>
   );
 }
 

@@ -18,6 +18,12 @@ export function App() {
   const auth = useQuery({ queryKey: ["auth"], queryFn: apiClient.authSession });
   const uploads = useQuery({ queryKey: ["uploads"], queryFn: apiClient.uploadPolicy });
   const corpus = useQuery({ queryKey: ["corpus"], queryFn: apiClient.corpusSummary });
+  const ingest = useQuery({
+    queryKey: ["ingest"],
+    queryFn: apiClient.ingestSummary,
+    refetchInterval: (query) =>
+      query.state.data?.jobs.some((job) => job.status === "running") ? 2500 : false,
+  });
   const learning = useQuery({ queryKey: ["learning"], queryFn: apiClient.learningSummary });
   const world = useQuery({ queryKey: ["world"], queryFn: apiClient.worldSummary });
   const pipelines = useQuery({ queryKey: ["pipelines"], queryFn: apiClient.pipelineSummary });
@@ -51,6 +57,7 @@ export function App() {
           uploadsEnabled={uploads.data?.enabled}
           uploadPolicy={uploads.data}
           corpus={corpus.data}
+          ingest={ingest.data}
           learning={learning.data}
           world={world.data}
           pipelines={pipelines.data}

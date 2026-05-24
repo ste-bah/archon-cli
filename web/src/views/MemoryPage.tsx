@@ -11,6 +11,7 @@ interface MemoryPageProps {
 export function MemoryPage({ learning }: MemoryPageProps) {
   const [filter, setFilter] = useState("all");
   const [actionPreview, setActionPreview] = useState<string | null>(null);
+  const [selectedInfo, setSelectedInfo] = useState<string | null>(null);
   const filterOptions = ["all", "memory", "learning_event", "proposal", "trust"];
   const filteredRows = rowsForFilter(learning, filter);
 
@@ -38,9 +39,21 @@ export function MemoryPage({ learning }: MemoryPageProps) {
           </StatusPill>
         </div>
         <div className="metric-grid">
-          <MemoryMetric label="Sessions" value={learning?.sessionCount ?? 0} />
-          <MemoryMetric label="Stores" value={learning?.stores.length ?? 0} />
-          <MemoryMetric label="Rows" value={rowCount(learning)} />
+          <MemoryMetric
+            label="Sessions"
+            value={learning?.sessionCount ?? 0}
+            onClick={() => setSelectedInfo(`${learning?.sessionCount ?? 0} recent session ledgers found`)}
+          />
+          <MemoryMetric
+            label="Stores"
+            value={learning?.stores.length ?? 0}
+            onClick={() => setSelectedInfo(`${learning?.stores.length ?? 0} learning stores discovered`)}
+          />
+          <MemoryMetric
+            label="Rows"
+            value={rowCount(learning)}
+            onClick={() => setSelectedInfo(`${rowCount(learning)} learning rows across the active filter surfaces`)}
+          />
         </div>
         <div className="memory-filters" aria-label="Learning row filters">
           {filterOptions.map((option) => (
@@ -69,7 +82,12 @@ export function MemoryPage({ learning }: MemoryPageProps) {
               </div>
             ) : (
               filteredRows.slice(0, 5).map((row) => (
-                <div key={`${row.kind}:${row.path}:${row.label}:preview`} className="memory-row">
+                <button
+                  key={`${row.kind}:${row.path}:${row.label}:preview`}
+                  type="button"
+                  className="memory-row"
+                  onClick={() => setSelectedInfo(`${row.label}: ${row.detail}`)}
+                >
                   <div>
                     <strong>{row.label}</strong>
                     <span>{row.detail}</span>
@@ -79,11 +97,17 @@ export function MemoryPage({ learning }: MemoryPageProps) {
                       {row.kind}
                     </StatusPill>
                   </span>
-                </div>
+                </button>
               ))
             )}
           </div>
         </div>
+        {selectedInfo && (
+          <div className="memory-action-preview" role="status">
+            <strong>Selection</strong>
+            <span>{selectedInfo}</span>
+          </div>
+        )}
         {actionPreview && (
           <div className="memory-action-preview" role="status">
             <strong>Approval preview</strong>
@@ -97,7 +121,12 @@ export function MemoryPage({ learning }: MemoryPageProps) {
         </div>
         <div className="memory-list">
           {(learning?.signals ?? []).map((signal) => (
-            <div key={`${signal.kind}:${signal.path}`} className="memory-row">
+            <button
+              key={`${signal.kind}:${signal.path}`}
+              type="button"
+              className="memory-row"
+              onClick={() => setSelectedInfo(`${signal.label}: ${signal.path}`)}
+            >
               <div>
                 <strong>{signal.label}</strong>
                 <span>{signal.path}</span>
@@ -105,7 +134,7 @@ export function MemoryPage({ learning }: MemoryPageProps) {
               <StatusPill tone={signal.status === "present" ? "good" : "muted"}>
                 {signal.count} {signal.kind}
               </StatusPill>
-            </div>
+            </button>
           ))}
         </div>
       </section>
@@ -115,12 +144,17 @@ export function MemoryPage({ learning }: MemoryPageProps) {
         </div>
         <div className="memory-list">
           {(learning?.recentSessions ?? []).map((session) => (
-            <div key={session} className="memory-row">
+            <button
+              key={session}
+              type="button"
+              className="memory-row"
+              onClick={() => setSelectedInfo(`Session ${session}: activity ledger available for inspection`)}
+            >
               <div>
                 <strong>{session}</strong>
                 <span>activity ledger available for inspection</span>
               </div>
-            </div>
+            </button>
           ))}
         </div>
       </section>
@@ -153,13 +187,21 @@ export function MemoryPage({ learning }: MemoryPageProps) {
   );
 }
 
-function MemoryMetric({ label, value }: { label: string; value: number }) {
+function MemoryMetric({
+  label,
+  value,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  onClick: () => void;
+}) {
   return (
-    <div className="metric-tile">
+    <button type="button" className="metric-tile" onClick={onClick}>
       <span className="metric-tile__label">{label}</span>
       <strong>{value}</strong>
       <span className="metric-tile__detail">read-only learning surface</span>
-    </div>
+    </button>
   );
 }
 

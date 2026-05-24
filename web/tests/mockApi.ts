@@ -1,5 +1,30 @@
 import type { Page, Route } from "@playwright/test";
 import { appendChatMessages, chatHistory, chatSubmitResponse } from "./mockChat";
+import {
+  actionResponse,
+  advisorEvent,
+  corpusChunk,
+  corpusPreview,
+  corpusSource,
+  docItem,
+  ingestJob,
+  kbItem,
+  learningRow,
+  learningSignal,
+  metricsSummary,
+  pipelineAgent,
+  pipelineEvent,
+  pipelineOutput,
+  pipelineRun,
+  pipelineStage,
+  probe,
+  themeProfile,
+  videoItem,
+  worldArtifact,
+  worldPrediction,
+  worldRow,
+  worldSignal,
+} from "./mockFixtures";
 import { graphEdges, graphNodes } from "./mockGraph";
 
 export async function mockApi(page: Page) {
@@ -134,6 +159,31 @@ export async function mockApi(page: Page) {
       previewAvailable: true,
       policyReason: "read-only preview under configured corpus root",
     },
+    "/api/ingest/summary": {
+      allowed: true,
+      policyReason: "web ingest actions allowed by policy",
+      stores: [
+        probe("document store", "/repo/.archon/archon-data.db", true, 1, 48000),
+        probe("project docs", "/repo/.archon/docs", true, 2, 18000),
+        probe("project kb", "/repo/.archon/kb", true, 1, 8000),
+        probe("video artifacts", "/repo/.archon/video-artifacts", true, 3, 68000),
+      ],
+      documents: [
+        docItem("doc-1", "/repo/docs/architecture.md", "text/markdown", "Processed", 14, 3, 2, 0),
+        docItem("doc-2", "/repo/hld/design.pdf", "application/pdf", "Processed", 22, 9, 4, 1),
+      ],
+      videos: [
+        videoItem("video-1", "doc-video-1", "Architecture walkthrough", "https://youtu.be/example", "processed", 300000, 48, 42, 12),
+      ],
+      knowledgeBases: [
+        kbItem("project-evidence", "project", "/repo/.archon/kb/project-evidence", 3, 9000),
+      ],
+      kbStats: { chunks: 84, claims: 12, entities: 9, relations: 5, contradictions: 1 },
+      jobs: [
+        ingestJob("job-1", "design.pdf", "docs", "archon docs ingest /repo/hld/design.pdf", "completed"),
+      ],
+      warnings: [],
+    },
     "/api/learning/summary": {
       stores: [probe("Self calibration", "~/.archon/self-calibration", true, 12, 9000)],
       signals: [
@@ -192,6 +242,34 @@ export async function mockApi(page: Page) {
         worldPrediction("advisor unavailable", "pipeline", "cold_start", "advisor returned None until warm", "session-a"),
         worldPrediction("advisor prediction", "provider", "available", "fallback ranking attached", "session-b"),
       ],
+      jepa: {
+        root: probe("JEPA", "~/.archon/world-model/jepa", true, 8, 54000),
+        candidateCount: 1,
+        evalCount: 1,
+        trainingRunCount: 1,
+        comparisonCount: 1,
+        artifacts: [
+          worldArtifact("JEPA root", "jepa", "present", "~/.archon/world-model/jepa", 8, 54000),
+          worldArtifact("candidate registry", "candidate", "present", "~/.archon/world-model/jepa/candidates", 1, 14000),
+        ],
+        signals: [
+          worldSignal("Candidate registry", "present", "1 candidate files"),
+          worldSignal("Latest eval gate", "failed", "candidate-001"),
+          worldSignal("Latest training run", "present", "loss 0.047"),
+        ],
+        candidates: [
+          worldRow("candidate-001.json", "candidate", "recorded", "JEPA candidate checkpoint", "~/.archon/world-model/jepa/candidates/candidate-001.json"),
+        ],
+        evals: [
+          worldRow("eval-001.json", "eval", "failed", "rank gate failed", "~/.archon/world-model/jepa/evals/eval-001.json"),
+        ],
+        trainingRuns: [
+          worldRow("train-001.jsonl", "training", "recorded", "MLX Metal training run", "~/.archon/world-model/jepa/training-runs/train-001.jsonl"),
+        ],
+        comparisons: [
+          worldRow("compare-001.json", "comparison", "recorded", "representation comparison", "~/.archon/world-model/jepa/representation-comparisons/compare-001.json"),
+        ],
+      },
     },
     "/api/pipelines/summary": {
       definitions: [probe("Agents", ".archon/agents", true, 5, 11000)],
@@ -253,6 +331,34 @@ export async function mockApi(page: Page) {
       await json(route, actionResponse(request));
       return;
     }
+    if (url.pathname === "/api/ingest/run") {
+      const request = route.request().postDataJSON();
+      await json(route, {
+        accepted: true,
+        decision: {
+          allowed: true,
+          requiresConfirmation: true,
+          policyReason: "ingest accepted by mock policy",
+          dryRunAvailable: true,
+        },
+        job: ingestJob("job-new", request.source || request.target, request.target, `archon ${request.target} ingest`, "running"),
+      });
+      return;
+    }
+    if (url.pathname === "/api/ingest/kb") {
+      const request = route.request().postDataJSON();
+      await json(route, {
+        accepted: true,
+        decision: {
+          allowed: true,
+          requiresConfirmation: true,
+          policyReason: "kb create accepted by mock policy",
+          dryRunAvailable: true,
+        },
+        knowledgeBase: kbItem(request.name, request.scope, `/repo/.archon/kb/${request.name}`, 1, 1200),
+      });
+      return;
+    }
     if (url.pathname === "/api/settings/theme-profile" && route.request().method() === "POST") {
       const request = route.request().postDataJSON();
       await json(route, themeProfile(request.profile));
@@ -284,188 +390,4 @@ async function json(route: Route, body: unknown, status = 200) {
     contentType: "application/json",
     body: JSON.stringify(body),
   });
-}
-
-function actionResponse(request: { actionId: string; actionKind: string; dryRun: boolean }) {
-  const requiresConfirmation = !request.actionKind.startsWith("upload.");
-  const policyReason = request.dryRun
-    ? `dry-run evaluated for ${request.actionKind}`
-    : `action evaluated for ${request.actionKind}`;
-  return {
-    decision: {
-      allowed: request.dryRun,
-      requiresConfirmation,
-      policyReason,
-      dryRunAvailable: true,
-    },
-    audit: {
-      actionId: request.actionId,
-      actionKind: request.actionKind,
-      allowed: request.dryRun,
-      dryRun: request.dryRun,
-      policyReason,
-      createdAtMs: 1770000001,
-    },
-  };
-}
-
-function themeProfile(saved?: {
-  themeMode: string;
-  densityMode: string;
-  accentId: string;
-  accentHex: string;
-  accentStrongHex: string;
-  updatedAtMs: number;
-}) {
-  const profile = saved ?? {
-    themeMode: "dark",
-    densityMode: "comfortable",
-    accentId: "mint",
-    accentHex: "#87d8b4",
-    accentStrongHex: "#2fbc86",
-    updatedAtMs: 1770000000,
-  };
-  return {
-    profile,
-    storagePath: "~/.archon/web/theme-profile.json",
-    persisted: true,
-    exportJson: JSON.stringify(profile, null, 2),
-  };
-}
-
-function corpusPreview(path: string) {
-  if (path.includes("006A")) {
-    return {
-      source: corpusSource("World model PRD", "/repo/prds/006A.md", "md", 88000),
-      content: "# World Model PRD\n\nLatent next-state prediction, advisor posture, and evidence graph integration.",
-      lineCount: 3,
-      truncated: false,
-      previewAvailable: true,
-      policyReason: "read-only preview under configured corpus root",
-    };
-  }
-  return {
-    source: corpusSource("README.md", "/repo/README.md", "md", 32000),
-    content: "# Archon\n\nLocal-first agentic workbench with evidence, memory, pipelines, and governed learning.",
-    lineCount: 3,
-    truncated: false,
-    previewAvailable: true,
-    policyReason: "read-only preview under configured corpus root",
-  };
-}
-
-function metricsSummary() {
-  return {
-    logs: [probe("Logs", "~/.archon/logs", true, 6, 15000)],
-    budgets: [probe("Budget", "~/.archon/budget", true, 1, 700)],
-    webBundleFiles: 4,
-    webBundleBytes: 276000,
-    stores: [
-      metricStore("sessions", "ready", "~/.archon/sessions", 18, 40000),
-      metricStore("world model", "ready", "~/.archon/world-model", 8, 120000),
-      metricStore("reasoning quality", "missing", "~/.archon/reasoning-quality", 0, 0),
-    ],
-    performance: [
-      metricValue("Initial JS budget", "276 KB", "< 1.5 MB gzip", "good"),
-      metricValue("Tab switch target", "150", "ms", "tracked"),
-      metricValue("Live event target", "250", "ms", "tracked"),
-    ],
-    queues: [
-      metricValue("web action audit ledger", "4", "rows", "active"),
-      metricValue("reasoning-quality event ledger", "0", "rows", "quiet"),
-      metricValue("world advisor event ledger", "2", "rows", "active"),
-    ],
-    recentEvents: [
-      metricEvent("web", "pipeline.pause action evaluated in dry-run mode", "info", "ledger tail"),
-      metricEvent("world", "advisor unavailable: cold_start", "warn", "ledger tail"),
-    ],
-    providerMetrics: [
-      providerMetric("anthropic", 8, 1, 2, 42000, 9800, 0.64, 1240, "warn"),
-      providerMetric("codex", 5, 0, 0, 23000, 6100, 0, 0, "ok"),
-    ],
-    providerEvents: [
-      providerEvent("anthropic", "claude-sonnet-4-6", "request_failed", "warn", "provider retry recorded before fallback"),
-      providerEvent("codex", "gpt-5.4", "request_succeeded", "info", "usage counts recorded"),
-    ],
-  };
-}
-
-function probe(label: string, path: string, exists: boolean, files: number, bytes: number) {
-  return { label, path, exists, files, bytes };
-}
-
-function corpusSource(label: string, path: string, kind: string, bytes: number, excerpt: string | null = null) {
-  return { label, path, kind, bytes, excerpt, score: excerpt ? 2.4 : 0, matchKind: excerpt ? "chunk" : "source" };
-}
-
-function corpusChunk(sourceLabel: string, sourcePath: string, chunkLabel: string, lineStart: number, score: number, excerpt: string, embeddingStatus: string) {
-  return { sourceLabel, sourcePath, chunkLabel, lineStart, score, excerpt, embeddingStatus };
-}
-
-function learningSignal(label: string, kind: string, status: string, count: number, path: string) {
-  return { label, kind, status, count, path };
-}
-
-function learningRow(label: string, kind: string, status: string, detail: string, path: string) {
-  return { label, kind, status, detail, path };
-}
-
-function worldArtifact(label: string, kind: string, status: string, path: string, files: number, bytes: number) {
-  return { label, kind, status, path, files, bytes };
-}
-
-function advisorEvent(surface: string, reason: string, actionSummary: string, sessionId: string, createdAt: string) {
-  return { surface, reason, actionSummary, sessionId, createdAt };
-}
-
-function worldSignal(label: string, status: string, detail: string) {
-  return { label, status, detail };
-}
-
-function worldRow(label: string, kind: string, status: string, detail: string, path: string) {
-  return { label, kind, status, detail, path };
-}
-
-function worldPrediction(label: string, surface: string, status: string, detail: string, sessionId: string) {
-  return { label, surface, status, detail, sessionId };
-}
-
-function pipelineStage(label: string, family: string, status: string, agentCount: number) {
-  return { label, family, status, agentCount };
-}
-
-function pipelineAgent(name: string, family: string, responsibility: string, path: string, status: string) {
-  return { name, family, responsibility, path, status };
-}
-
-function pipelineRun(runId: string, family: string, status: string, path: string, updatedAt: string) {
-  return { runId, family, status, path, updatedAt };
-}
-
-function pipelineOutput(label: string, kind: string, path: string, bytes: number, updatedAt: string, tail: string) {
-  return { label, kind, path, bytes, updatedAt, tail };
-}
-
-function pipelineEvent(sessionId: string, eventType: string, status: string, summary: string, path: string) {
-  return { sessionId, eventType, status, summary, path };
-}
-
-function metricStore(label: string, status: string, path: string, files: number, bytes: number) {
-  return { label, status, path, files, bytes };
-}
-
-function metricValue(label: string, value: string, unit: string, status: string) {
-  return { label, value, unit, status };
-}
-
-function metricEvent(source: string, summary: string, severity: string, createdAt: string) {
-  return { source, summary, severity, createdAt };
-}
-
-function providerMetric(providerId: string, requestCount: number, errorCount: number, retryCount: number, inputTokens: number, outputTokens: number, estimatedCostUsd: number, latencyMsP95: number, status: string) {
-  return { providerId, requestCount, errorCount, retryCount, inputTokens, outputTokens, estimatedCostUsd, latencyMsP95, status };
-}
-
-function providerEvent(providerId: string, modelId: string, eventType: string, severity: string, message: string) {
-  return { providerId, modelId, eventType, severity, message, createdAt: "2026-05-12T09:10:11Z" };
 }

@@ -319,12 +319,13 @@ fn history_from_rows(
             policy_reason: "stored in web chat ledger".into(),
             stored_path: stored_path.clone(),
         });
-        if !row.assistant_reply.trim().is_empty() {
+        let assistant_reply = sanitize_history_reply(&row.assistant_reply);
+        if !assistant_reply.is_empty() {
             messages.push(WebChatHistoryMessage {
                 id: format!("{}:assistant", row.message_id),
                 role: "assistant".into(),
                 title: "Archon".into(),
-                body: row.assistant_reply.clone(),
+                body: assistant_reply,
                 attachments: Vec::new(),
                 created_at_ms: row.created_at_ms,
                 policy_reason: "restored from web chat ledger".into(),
@@ -337,6 +338,26 @@ fn history_from_rows(
         stored_path,
         truncated,
     }
+}
+
+fn sanitize_history_reply(value: &str) -> String {
+    let mut lines = Vec::new();
+    let mut skipping_tool_output = false;
+    for line in value.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("[tool] ") {
+            skipping_tool_output = trimmed.contains(" done:");
+            continue;
+        }
+        if skipping_tool_output {
+            if trimmed.is_empty() {
+                skipping_tool_output = false;
+            }
+            continue;
+        }
+        lines.push(line);
+    }
+    lines.join("\n").trim().to_string()
 }
 
 fn metadata_only(attachment: &WebChatAttachment) -> WebChatAttachment {

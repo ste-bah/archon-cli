@@ -6,6 +6,8 @@ import {
   FileSearch,
   Gauge,
   GitBranch,
+  PackagePlus,
+  Network,
   MessageSquare,
   Settings,
   type LucideIcon,
@@ -38,6 +40,12 @@ export const navItems: NavItem[] = [
     icon: FileSearch,
   },
   {
+    path: "/ingest",
+    label: "Ingest",
+    detail: "Documents, images, videos, and KBs",
+    icon: PackagePlus,
+  },
+  {
     path: "/memory",
     label: "Memory",
     detail: "Learning rows, memories, and proposals",
@@ -48,6 +56,12 @@ export const navItems: NavItem[] = [
     label: "World Model",
     detail: "Predictions, reasoning, candidates",
     icon: Database,
+  },
+  {
+    path: "/jepa",
+    label: "JEPA",
+    detail: "Candidates, eval gates, Metal/CUDA parity",
+    icon: Network,
   },
   {
     path: "/pipelines",
