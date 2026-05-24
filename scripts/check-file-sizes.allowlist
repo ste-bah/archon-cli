@@ -158,10 +158,6 @@ src/command/test_support.rs
 
 # --- root src ---
 src/session.rs
-# main.rs inflated 482 -> 511 by `cargo fmt --all` (commit 6adc1d6, pure
-# formatting, zero semantic change). Follow-up hygiene: either split
-# main.rs or hand-tighten fmt output to drop back under 500.
-src/main.rs
 # src/session_loop/mod.rs — post-extract of 915-line tokio::spawn body from
 # session.rs (TASK-SESSION-LOOP-EXTRACT, 2026-04-24). Resolves CI Send-bound
 # errors blocking archon-cli-workspace bin builds. Follow-up ticket

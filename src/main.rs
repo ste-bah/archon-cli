@@ -6,6 +6,9 @@ mod agent_handle;
 pub(crate) mod cli_args;
 mod command;
 mod gametheory_tool_executor;
+mod main_dispatch;
+#[cfg(test)]
+mod main_tests;
 mod panic_save;
 mod runtime;
 pub(crate) mod session;
@@ -29,7 +32,7 @@ use cli_args::{Cli, Commands};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
 
     // TASK-TUI-625-FOLLOWUP: wire --remote-url to ARCHON_REMOTE_URL so
     // the /session slash command's EnvRemoteUrlProvider can see the URL
@@ -171,232 +174,25 @@ async fn main() -> Result<()> {
     // TODO(TUI-330): app::TuiEvent moves to archon_tui::events::TuiEvent
     let voice_event_rx = crate::command::tui_helpers::setup_voice_pipeline(&config).await;
 
-    // Handle subcommands
-    match cli.command {
-        Some(Commands::Login) => {
-            return crate::command::auth::handle_auth(
-                crate::cli_args::AuthArgs {
-                    command: crate::cli_args::AuthSubcommand::Login {
-                        provider: crate::cli_args::AuthProviderKind::Anthropic,
-                        accept_tos: true,
-                    },
-                },
-                &config,
-            )
-            .await;
-        }
-        Some(Commands::Auth(args)) => {
-            return crate::command::auth::handle_auth(args, &config).await;
-        }
-        Some(Commands::Chat(args)) => {
-            return crate::command::chat::handle_chat(args, &config).await;
-        }
-        Some(Commands::Providers { action }) => {
-            return crate::command::providers::handle_providers(action, &config);
-        }
-        Some(Commands::Sandbox { action }) => {
-            return crate::command::sandbox_cli::handle_sandbox_command(action, &config);
-        }
-        Some(Commands::Permissions { action }) => {
-            return crate::command::permissions_cli::handle_permissions_command(&action);
-        }
-        Some(Commands::Plugin { action }) => {
-            return crate::command::plugin::handle_plugin_command(action);
-        }
-        Some(Commands::Update { check, force }) => {
-            use crate::command::update::handle_update_command;
-            return handle_update_command(check, force, &config).await;
-        }
-        Some(Commands::Remote { .. }) | Some(Commands::Serve { .. }) => {
-            use crate::command::remote::handle_remote_command;
-            return handle_remote_command(&cli, &config).await;
-        }
-        Some(Commands::Team { action }) => {
-            use crate::command::team::handle_team_command;
-            return handle_team_command(&action, &config, &env_vars).await;
-        }
-        Some(Commands::IdeStdio) => {
-            use crate::command::ide_stdio::handle_ide_stdio_command;
-            return handle_ide_stdio_command().await;
-        }
-        Some(Commands::Web {
-            port,
-            ref bind_address,
-            no_open,
-            allow_unauthenticated_nonlocal_bind,
-        }) => {
-            use crate::command::web::handle_web_command;
-            return handle_web_command(
-                port,
-                bind_address.clone(),
-                no_open,
-                allow_unauthenticated_nonlocal_bind,
-                &config,
-                &cli,
-                &env_vars,
-                &resolved_flags,
-            )
-            .await;
-        }
-        Some(Commands::Behaviour { action }) => {
-            use crate::command::behaviour::handle_behaviour_command;
-            return handle_behaviour_command(&action, &config).await;
-        }
-        Some(Commands::Agent { action }) => {
-            use crate::command::agent_evolve::handle_agent_command;
-            return handle_agent_command(&action, &config).await;
-        }
-        Some(Commands::Learning { action }) => {
-            return crate::command::learning::handle_learning_command(action, &config).await;
-        }
-        Some(Commands::World { action }) => {
-            return crate::command::world_model::handle_world_command(&action, &config, &env_vars)
-                .await;
-        }
-        Some(Commands::Reasoning { action }) => {
-            return crate::command::reasoning::handle_reasoning_command(&action, &config).await;
-        }
-        Some(Commands::Briefing { action }) => {
-            return crate::command::reasoning::handle_briefing_command(&action, &config).await;
-        }
-        Some(Commands::Pipeline { action }) => {
-            use crate::command::pipeline::handle_pipeline_command;
-            return handle_pipeline_command(&action, &config, &env_vars).await;
-        }
-        Some(Commands::RunAgentAsync {
-            name,
-            input,
-            version,
-            detach,
-        }) => {
-            use crate::command::task::handle_run_agent_async;
-            return handle_run_agent_async(name, input, version, detach, &working_dir_for_config)
-                .await;
-        }
-        Some(Commands::TaskStatus { task_id, watch }) => {
-            use crate::command::task::handle_task_status;
-            return handle_task_status(&task_id, watch, &working_dir_for_config).await;
-        }
-        Some(Commands::TaskResult { task_id, stream }) => {
-            use crate::command::task::handle_task_result;
-            return handle_task_result(&task_id, stream, &working_dir_for_config).await;
-        }
-        Some(Commands::TaskCancel { task_id }) => {
-            use crate::command::task::handle_task_cancel;
-            return handle_task_cancel(&task_id, &working_dir_for_config).await;
-        }
-        Some(Commands::TaskList {
-            state,
-            agent,
-            since,
-        }) => {
-            use crate::command::task::handle_task_list;
-            return handle_task_list(state, agent, since, &working_dir_for_config).await;
-        }
-        Some(Commands::TaskEvents { task_id, from_seq }) => {
-            use crate::command::task::handle_task_events;
-            return handle_task_events(&task_id, from_seq, &working_dir_for_config).await;
-        }
-        Some(Commands::Metrics) => {
-            use crate::command::task::handle_metrics;
-            return handle_metrics(&working_dir_for_config).await;
-        }
-        Some(Commands::AgentList { include_invalid }) => {
-            use crate::command::agent::handle_agent_list;
-            return handle_agent_list(include_invalid, &working_dir_for_config).await;
-        }
-        Some(Commands::AgentSearch {
-            tags,
-            capabilities,
-            name_pattern,
-            version,
-            logic,
-            include_invalid,
-            registry_url,
-        }) => {
-            use crate::command::agent::handle_agent_search;
-            return handle_agent_search(
-                tags,
-                capabilities,
-                name_pattern,
-                version,
-                logic,
-                include_invalid,
-                registry_url,
-                &working_dir_for_config,
-            )
-            .await;
-        }
-        Some(Commands::AgentInfo {
-            name,
-            version,
-            json,
-        }) => {
-            use crate::command::agent::handle_agent_info;
-            return handle_agent_info(name, version, json, &working_dir_for_config).await;
-        }
-        Some(Commands::Kb { ref action }) => {
-            return crate::command::kb::handle_kb_command(action.clone()).await;
-        }
-        Some(Commands::Docs { ref action }) => {
-            return crate::command::docs::handle_docs_command(action.clone()).await;
-        }
-        Some(Commands::Video { ref action }) => {
-            return crate::command::video::handle_video_command(action.clone()).await;
-        }
-        Some(Commands::Prov { ref action }) => {
-            return crate::command::prov::handle_prov_command(action.clone()).await;
-        }
-        Some(Commands::Meaning { ref action }) => {
-            return crate::command::meaning::handle_meaning_command(action.clone()).await;
-        }
-        Some(Commands::Constellation { ref action }) => {
-            return crate::command::constellation::handle_constellation_command(action.clone())
-                .await;
-        }
-        Some(Commands::Memory { ref action }) => {
-            return crate::command::memory_cli::handle_memory_command(action.clone()).await;
-        }
-        Some(Commands::SelfCmd { ref action }) => {
-            return crate::command::self_calibration::handle_self_command(
-                action.clone(),
-                &config,
-                &env_vars,
-            )
-            .await;
-        }
-        Some(Commands::Gametheory {
-            ref situation,
-            classify_only,
-            ref kb,
-            ref spec_path,
-            debug_memory,
-            budget,
-            max_concurrent,
-            ref style,
-            enable_tier11,
-            ref action,
-        }) => {
-            return crate::command::gametheory::handle_gametheory(
-                action.as_ref(),
-                situation.as_deref(),
-                classify_only,
-                kb.as_deref(),
-                spec_path.as_deref(),
-                debug_memory,
-                budget,
-                max_concurrent,
-                style,
-                enable_tier11,
-                &config,
-                &env_vars,
-            )
-            .await;
-        }
-        Some(Commands::Completion { ref action }) => {
-            return crate::command::completion::handle_completion(action).await;
-        }
-        None => {}
+    // Handle subcommands. Remote commands inspect the full CLI, so they keep
+    // the command attached; every other subcommand can be moved to the
+    // dispatcher while later interactive paths keep using the remaining flags.
+    if matches!(
+        &cli.command,
+        Some(Commands::Remote { .. }) | Some(Commands::Serve { .. })
+    ) {
+        return crate::command::remote::handle_remote_command(&cli, &config).await;
+    }
+    if let Some(command) = cli.command.take() {
+        return main_dispatch::handle_subcommand(
+            command,
+            &cli,
+            &config,
+            &env_vars,
+            &resolved_flags,
+            &working_dir_for_config,
+        )
+        .await;
     }
 
     // ── Headless mode (--headless) ───────────────────────────────
@@ -632,109 +428,4 @@ fn resolve_json_schema(cli: &Cli) -> Result<Option<String>> {
     let schema = std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("failed to read JSON schema from {}: {e}", path.display()))?;
     Ok(Some(schema))
-}
-
-// v0.1.23: Knowledge base CLI handler.
-#[cfg(test)]
-async fn handle_kb_action(action: cli_args::KbAction) -> Result<()> {
-    crate::command::kb::handle_kb_command(action).await
-}
-
-#[cfg(test)]
-mod wire_tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn json_schema_path_reads_schema_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("schema.json");
-        let schema = r#"{"type":"object","required":["ok"]}"#;
-        std::fs::write(&path, schema).unwrap();
-        let cli = Cli::try_parse_from([
-            "archon",
-            "-p",
-            "return json",
-            "--json-schema-path",
-            path.to_str().unwrap(),
-        ])
-        .unwrap();
-
-        assert_eq!(resolve_json_schema(&cli).unwrap(), Some(schema.to_string()));
-    }
-
-    #[test]
-    fn strip_cache_control_noop_when_enabled() {
-        let mut blocks = vec![
-            json!({"type": "text", "text": "a", "cache_control": {"type": "ephemeral"}}),
-            json!({"type": "text", "text": "b"}),
-        ];
-        crate::setup::strip_cache_control_if_disabled(&mut blocks, true);
-        assert!(blocks[0].get("cache_control").is_some());
-        assert!(blocks[1].get("cache_control").is_none());
-    }
-
-    #[test]
-    fn strip_cache_control_removes_key_when_disabled() {
-        let mut blocks = vec![
-            json!({"type": "text", "text": "a", "cache_control": {"type": "ephemeral"}}),
-            json!({"type": "text", "text": "b", "cache_control": {"type": "ephemeral", "scope": "org"}}),
-            json!({"type": "text", "text": "c"}),
-        ];
-        crate::setup::strip_cache_control_if_disabled(&mut blocks, false);
-        assert!(blocks[0].get("cache_control").is_none());
-        assert!(blocks[1].get("cache_control").is_none());
-        assert!(blocks[2].get("cache_control").is_none());
-        // Text content preserved
-        assert_eq!(blocks[0].get("text").unwrap(), "a");
-        assert_eq!(blocks[1].get("text").unwrap(), "b");
-        assert_eq!(blocks[2].get("text").unwrap(), "c");
-    }
-
-    // v0.1.23: KB CLI subcommand tests
-    #[tokio::test]
-    async fn kb_stats_on_empty_db() {
-        let result = run_kb_with_temp_store(cli_args::KbAction::Stats).await;
-        assert!(result.is_ok(), "stats on empty DB must succeed");
-    }
-
-    #[tokio::test]
-    async fn kb_list_on_empty_db() {
-        let result = run_kb_with_temp_store(cli_args::KbAction::List).await;
-        assert!(result.is_ok(), "list on empty DB must succeed");
-    }
-
-    #[tokio::test]
-    async fn kb_search_on_empty_db_returns_no_matches() {
-        let result = run_kb_with_temp_store(cli_args::KbAction::Search {
-            query: "nonexistent".into(),
-            limit: 10,
-            mode: "exact".into(),
-        })
-        .await;
-        assert!(result.is_ok(), "search on empty DB must succeed");
-    }
-
-    #[tokio::test]
-    async fn kb_stats_default_subcommand_works() {
-        // Verify the KbAction::Stats variant can be constructed and dispatched
-        let action = cli_args::KbAction::Stats;
-        let result = run_kb_with_temp_store(action).await;
-        assert!(result.is_ok());
-    }
-
-    async fn run_kb_with_temp_store(action: cli_args::KbAction) -> Result<()> {
-        let dir = tempfile::tempdir()?;
-        let db_path = dir.path().join("kb.db");
-        // Tests run with --test-threads=1 in this workstream, so mutating this
-        // process environment cannot race another KB test.
-        unsafe {
-            std::env::set_var("ARCHON_KB_DB_PATH", &db_path);
-        }
-        let result = handle_kb_action(action).await;
-        unsafe {
-            std::env::remove_var("ARCHON_KB_DB_PATH");
-        }
-        result
-    }
 }
