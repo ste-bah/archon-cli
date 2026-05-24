@@ -17,7 +17,6 @@
 //! helper modules (hooks, tui_events, slash_commands). See the
 //! commit body for the full rationale.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use archon_core::agent::Agent;
@@ -33,11 +32,15 @@ use crate::slash_context::SlashCommandContext;
 mod lifecycle_hooks;
 mod mcp_task;
 mod personality_save;
+mod session_export;
+mod session_history;
 mod slash_handlers;
 
 use lifecycle_hooks::fire_session_startup_hooks;
 pub(crate) use mcp_task::{McpLifecycleTx, spawn_mcp_lifecycle_task};
 use personality_save::save_personality_snapshot_if_enabled;
+use session_export::drain_pending_export;
+use session_history::{handle_resume_session, handle_truncate_session};
 use slash_handlers::{handle_clear_command, handle_refresh_identity_command};
 
 /// Run the interactive agent input loop to completion.
@@ -275,71 +278,13 @@ pub(crate) fn run_session_loop(
             };
             // Session picker selection — load messages and restore conversation
             if let Some(session_id) = input.strip_prefix("__resume_session__ ") {
-                let session_id = session_id.trim();
-                {
-                    let store = Arc::clone(&session_store_for_input);
-                    // Restore session name badge if present
-                    if let Ok(meta) = store.get_session(session_id)
-                        && let Some(name) = meta.name
-                    {
-                        let _ = input_tui_tx.send(TuiEvent::SessionRenamed(name));
-                    }
-                    match store.load_messages(session_id) {
-                        Ok(raw_messages) => {
-                            // Parse JSON strings back to Values
-                            let messages: Vec<serde_json::Value> = raw_messages
-                                .iter()
-                                .filter_map(|s| serde_json::from_str(s).ok())
-                                .collect();
-                            let count = messages.len();
-                            {
-                                let mut guard = agent.lock().await;
-                                guard.clear_conversation_detached()
-                            }
-                            .await;
-
-                            // Display the loaded conversation history in the output
-                            let _ = input_tui_tx.send(TuiEvent::TextDelta(format!(
-                                "\n━━━ Resumed session {session_id} ({count} messages) ━━━\n\n"
-                            )));
-                            for msg in &messages {
-                                let role = msg["role"].as_str().unwrap_or("unknown");
-                                // Extract text content (handles both string and array formats)
-                                let content = match &msg["content"] {
-                                    serde_json::Value::String(s) => s.clone(),
-                                    serde_json::Value::Array(arr) => arr
-                                        .iter()
-                                        .filter_map(|item| {
-                                            item["text"].as_str().map(|s| s.to_string())
-                                        })
-                                        .collect::<Vec<_>>()
-                                        .join("\n"),
-                                    _ => String::new(),
-                                };
-                                if content.is_empty() {
-                                    continue;
-                                }
-                                let label = match role {
-                                    "user" => "> ",
-                                    "assistant" => "",
-                                    _ => "",
-                                };
-                                let _ = input_tui_tx
-                                    .send(TuiEvent::TextDelta(format!("{label}{content}\n\n")));
-                            }
-                            let _ = input_tui_tx.send(TuiEvent::TextDelta(
-                                "━━━ End of history — continue conversation ━━━\n\n".to_string(),
-                            ));
-
-                            agent.lock().await.restore_conversation(messages);
-                        }
-                        Err(e) => {
-                            let _ = input_tui_tx
-                                .send(TuiEvent::Error(format!("Failed to load session: {e}")));
-                        }
-                    }
-                }
-                let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
+                handle_resume_session(
+                    &agent,
+                    &input_tui_tx,
+                    &session_store_for_input,
+                    session_id.trim(),
+                )
+                .await;
                 continue;
             }
 
@@ -350,85 +295,14 @@ pub(crate) fn run_session_loop(
             // from the SessionStore AND the agent's in-memory
             // conversation is rebuilt to match.
             if let Some(idx_str) = input.strip_prefix("__truncate_session__ ") {
-                let idx_str = idx_str.trim();
-                let idx: u64 = match idx_str.parse() {
-                    Ok(n) => n,
-                    Err(_) => {
-                        let _ = input_tui_tx.send(TuiEvent::TextDelta(format!(
-                            "\n[rewind: invalid index '{idx_str}']\n"
-                        )));
-                        let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
-                        continue;
-                    }
-                };
-
-                let target_session_id = session_id_for_input.clone();
-                {
-                    let store = Arc::clone(&session_store_for_input);
-                    if let Err(e) = store.truncate_messages_after(&target_session_id, idx) {
-                        let _ = input_tui_tx
-                            .send(TuiEvent::Error(format!("Failed to truncate session: {e}")));
-                        let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
-                        continue;
-                    }
-
-                    // Reload the retained messages and rebuild the
-                    // in-memory conversation so the next turn sees
-                    // only history up to `idx`.
-                    match store.load_messages(&target_session_id) {
-                        Ok(raw_messages) => {
-                            let messages: Vec<serde_json::Value> = raw_messages
-                                .iter()
-                                .filter_map(|s| serde_json::from_str(s).ok())
-                                .collect();
-                            let count = messages.len();
-                            {
-                                let mut guard = agent.lock().await;
-                                guard.clear_conversation_detached()
-                            }
-                            .await;
-
-                            let _ = input_tui_tx.send(TuiEvent::TextDelta(format!(
-                                "\n━━━ Rewound to message {idx} ({count} messages kept) ━━━\n\n"
-                            )));
-                            for msg in &messages {
-                                let role = msg["role"].as_str().unwrap_or("unknown");
-                                let content = match &msg["content"] {
-                                    serde_json::Value::String(s) => s.clone(),
-                                    serde_json::Value::Array(arr) => arr
-                                        .iter()
-                                        .filter_map(|item| {
-                                            item["text"].as_str().map(|s| s.to_string())
-                                        })
-                                        .collect::<Vec<_>>()
-                                        .join("\n"),
-                                    _ => String::new(),
-                                };
-                                if content.is_empty() {
-                                    continue;
-                                }
-                                let label = match role {
-                                    "user" => "> ",
-                                    "assistant" => "",
-                                    _ => "",
-                                };
-                                let _ = input_tui_tx
-                                    .send(TuiEvent::TextDelta(format!("{label}{content}\n\n")));
-                            }
-                            let _ = input_tui_tx.send(TuiEvent::TextDelta(
-                                "━━━ End of history — continue conversation ━━━\n\n".to_string(),
-                            ));
-
-                            agent.lock().await.restore_conversation(messages);
-                        }
-                        Err(e) => {
-                            let _ = input_tui_tx.send(TuiEvent::Error(format!(
-                                "Failed to reload session after truncate: {e}"
-                            )));
-                        }
-                    }
-                }
-                let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
+                handle_truncate_session(
+                    &agent,
+                    &input_tui_tx,
+                    &session_store_for_input,
+                    &session_id_for_input,
+                    idx_str.trim(),
+                )
+                .await;
                 continue;
             }
 
@@ -454,52 +328,13 @@ pub(crate) fn run_session_loop(
 
             // ── MCP manager actions from the overlay ─────────────
             if let Some(rest) = input.strip_prefix("__mcp_action__ ") {
-                let parts: Vec<&str> = rest.trim().splitn(2, ' ').collect();
-                if parts.len() == 2 {
-                    let (server_name, action) = (parts[0], parts[1]);
-                    match action {
-                        "reconnect" => {
-                            let _ = mcp_task::request_restart(&mcp_lifecycle_tx, server_name).await;
-                        }
-                        "disable" => {
-                            let _ = mcp_task::request_disable(&mcp_lifecycle_tx, server_name).await;
-                        }
-                        "enable" => {
-                            let _ = mcp_task::request_enable(&mcp_lifecycle_tx, server_name).await;
-                        }
-                        _ => {}
-                    }
-                    // Send updated state back to TUI overlay.
-                    let info = cmd_ctx.mcp_manager.get_server_info().await;
-                    let mut updated: Vec<archon_tui::app::McpServerEntry> = Vec::new();
-                    for (name, state, disabled) in info {
-                        let state_str = if disabled {
-                            "disabled"
-                        } else {
-                            match state {
-                                archon_mcp::types::ServerState::Ready => "ready",
-                                archon_mcp::types::ServerState::Starting
-                                | archon_mcp::types::ServerState::Restarting => "starting",
-                                archon_mcp::types::ServerState::Crashed => "crashed",
-                                archon_mcp::types::ServerState::Stopped => "stopped",
-                            }
-                        };
-                        let tools = if state_str == "ready" {
-                            cmd_ctx.mcp_manager.list_tools_for(&name).await
-                        } else {
-                            Vec::new()
-                        };
-                        updated.push(archon_tui::app::McpServerEntry {
-                            name: name.clone(),
-                            state: state_str.to_string(),
-                            tool_count: tools.len(),
-                            disabled,
-                            tools,
-                        });
-                    }
-                    let _ = input_tui_tx.send(TuiEvent::UpdateMcpManager(updated));
-                }
-                let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
+                mcp_task::handle_overlay_action(
+                    rest,
+                    &mcp_lifecycle_tx,
+                    &cmd_ctx.mcp_manager,
+                    &input_tui_tx,
+                )
+                .await;
                 continue;
             }
 
@@ -621,82 +456,7 @@ pub(crate) fn run_session_loop(
                 )
                 .await;
                 if handled {
-                    // TASK-AGS-POST-6-EXPORT-MIGRATE drain. The sync
-                    // `ExportHandler::execute` (src/command/export.rs)
-                    // stashes an `ExportDescriptor` in the shared
-                    // `cmd_ctx.pending_export_shared` slot when the
-                    // format arg parses; we `.take()` it here — where
-                    // the `agent` mutex and `cmd_ctx.session_id` are
-                    // in scope — and perform the async I/O verbatim
-                    // against the pre-migration intercept (former
-                    // :2431-2486). The handler cannot do this itself
-                    // because `CommandHandler::execute` is sync and
-                    // `apply_effect` in slash.rs runs with only
-                    // `SlashCommandContext` (no Agent mutex).
-                    // Single-shot by `.take()`; a None here means
-                    // either the command wasn't /export, or the
-                    // handler hit the parse-error branch (which
-                    // already emitted TuiEvent::Error directly).
-                    let export_desc = cmd_ctx
-                        .pending_export_shared
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .take();
-                    if let Some(desc) = export_desc {
-                        let format = desc.format;
-                        let format_arg = desc.format_arg_display;
-                        let export_result = {
-                            let guard = agent.lock().await;
-                            let messages = &guard.conversation_state().messages;
-                            archon_session::export::export_session(
-                                messages,
-                                &cmd_ctx.session_id,
-                                format,
-                            )
-                        };
-                        match export_result {
-                            Ok(content) => {
-                                let export_dir = dirs::data_dir()
-                                    .unwrap_or_else(|| PathBuf::from("."))
-                                    .join("archon")
-                                    .join("exports");
-                                if let Err(e) = std::fs::create_dir_all(&export_dir) {
-                                    let _ = input_tui_tx.send(TuiEvent::Error(format!(
-                                        "Failed to create export dir: {e}"
-                                    )));
-                                    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
-                                    continue;
-                                }
-                                let filename = archon_session::export::default_export_filename(
-                                    &cmd_ctx.session_id,
-                                    format,
-                                );
-                                let path = export_dir.join(&filename);
-                                match archon_session::export::write_export(&content, &path) {
-                                    Ok(()) => {
-                                        let _ = input_tui_tx.send(TuiEvent::TextDelta(format!(
-                                            "\nExported ({format_arg_display}) to {}\n",
-                                            path.display(),
-                                            format_arg_display = if format_arg.is_empty() {
-                                                "markdown"
-                                            } else {
-                                                format_arg.as_str()
-                                            }
-                                        )));
-                                    }
-                                    Err(e) => {
-                                        let _ = input_tui_tx
-                                            .send(TuiEvent::Error(format!("Export failed: {e}")));
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                let _ = input_tui_tx
-                                    .send(TuiEvent::Error(format!("Export failed: {e}")));
-                            }
-                        }
-                    }
-                    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
+                    drain_pending_export(&agent, &cmd_ctx, &input_tui_tx).await;
                     continue;
                 }
 

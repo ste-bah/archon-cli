@@ -30,6 +30,7 @@
 
 use archon_mcp::lifecycle::McpServerManager;
 use archon_mcp::types::McpError;
+use archon_tui::app::{McpServerEntry, TuiEvent};
 use tokio::sync::{mpsc, oneshot};
 
 /// Request message — owned `String` so the struct is `Send`.
@@ -161,4 +162,61 @@ pub(super) async fn request_disable(tx: &McpLifecycleTx, name: &str) -> Result<(
         Ok(reply) => reply.result,
         Err(_) => Ok(()),
     }
+}
+
+pub(super) async fn handle_overlay_action(
+    rest: &str,
+    mcp_lifecycle_tx: &McpLifecycleTx,
+    mcp_manager: &McpServerManager,
+    input_tui_tx: &archon_tui::event_channel::TuiEventSender,
+) {
+    let parts: Vec<&str> = rest.trim().splitn(2, ' ').collect();
+    if parts.len() == 2 {
+        let (server_name, action) = (parts[0], parts[1]);
+        match action {
+            "reconnect" => {
+                let _ = request_restart(mcp_lifecycle_tx, server_name).await;
+            }
+            "disable" => {
+                let _ = request_disable(mcp_lifecycle_tx, server_name).await;
+            }
+            "enable" => {
+                let _ = request_enable(mcp_lifecycle_tx, server_name).await;
+            }
+            _ => {}
+        }
+        let updated = refreshed_server_entries(mcp_manager).await;
+        let _ = input_tui_tx.send(TuiEvent::UpdateMcpManager(updated));
+    }
+    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
+}
+
+async fn refreshed_server_entries(mcp_manager: &McpServerManager) -> Vec<McpServerEntry> {
+    let mut updated = Vec::new();
+    for (name, state, disabled) in mcp_manager.get_server_info().await {
+        let state_str = if disabled {
+            "disabled"
+        } else {
+            match state {
+                archon_mcp::types::ServerState::Ready => "ready",
+                archon_mcp::types::ServerState::Starting
+                | archon_mcp::types::ServerState::Restarting => "starting",
+                archon_mcp::types::ServerState::Crashed => "crashed",
+                archon_mcp::types::ServerState::Stopped => "stopped",
+            }
+        };
+        let tools = if state_str == "ready" {
+            mcp_manager.list_tools_for(&name).await
+        } else {
+            Vec::new()
+        };
+        updated.push(McpServerEntry {
+            name,
+            state: state_str.to_string(),
+            tool_count: tools.len(),
+            disabled,
+            tools,
+        });
+    }
+    updated
 }
