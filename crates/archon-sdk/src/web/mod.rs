@@ -314,6 +314,7 @@ fn build_app(config: &WebConfig, state: AppState) -> Router {
             "/api/chat/submit",
             post(chat::submit_handler).layer(DefaultBodyLimit::max(config.max_body_bytes)),
         )
+        .route("/api/chat/history", get(chat::history_handler))
         .route("/api/config/effective", get(api::config_handler))
         .route("/api/policy/effective", get(api::policy_handler))
         .route("/api/live/snapshot", get(live::snapshot_handler))

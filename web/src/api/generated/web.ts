@@ -41,7 +41,11 @@ export type WebChatAttachment = { fileName: string, sizeBytes: number, mimeType:
 
 export type WebChatSubmitRequest = { message: string, attachments: Array<WebChatAttachment>, };
 
-export type WebChatSubmitResponse = { messageId: string, accepted: boolean, createdAtMs: number, policyReason: string, storedPath: string, reply: string, };
+export type WebChatSubmitResponse = { messageId: string, accepted: boolean, createdAtMs: number, policyReason: string, storedPath: string, reply: string, attachments: Array<WebChatAttachment>, };
+
+export type WebChatHistoryMessage = { id: string, role: string, title: string, body: string, attachments: Array<WebChatAttachment>, createdAtMs: number, policyReason: string, storedPath: string, };
+
+export type WebChatHistoryResponse = { messages: Array<WebChatHistoryMessage>, storedPath: string, truncated: boolean, };
 
 
 export type WebUploadPolicy = { enabled: boolean, maxFiles: number, maxBytesPerFile: number, acceptedMimeTypes: Array<string>, policyReason: string, };

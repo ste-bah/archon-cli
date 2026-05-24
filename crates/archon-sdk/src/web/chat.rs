@@ -62,6 +62,30 @@ pub struct WebChatSubmitResponse {
     pub policy_reason: String,
     pub stored_path: String,
     pub reply: String,
+    pub attachments: Vec<WebChatAttachment>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct WebChatHistoryMessage {
+    pub id: String,
+    pub role: String,
+    pub title: String,
+    pub body: String,
+    pub attachments: Vec<WebChatAttachment>,
+    pub created_at_ms: u128,
+    pub policy_reason: String,
+    pub stored_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct WebChatHistoryResponse {
+    pub messages: Vec<WebChatHistoryMessage>,
+    pub stored_path: String,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -69,9 +93,27 @@ pub struct WebChatSubmitResponse {
 struct WebChatLedgerRow {
     message_id: String,
     message: String,
+    #[serde(default)]
     attachments: Vec<WebChatAttachment>,
+    #[serde(default)]
     assistant_reply: String,
     created_at_ms: u128,
+}
+
+const HISTORY_LIMIT: usize = 100;
+
+pub(crate) async fn history_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(resp) = check_auth(&state, &headers) {
+        return resp;
+    }
+    match load_chat_history(HISTORY_LIMIT) {
+        Ok(history) => (StatusCode::OK, Json(history)).into_response(),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("chat history failed: {err}"),
+        )
+            .into_response(),
+    }
 }
 
 pub(crate) async fn submit_handler(
@@ -86,6 +128,10 @@ pub(crate) async fn submit_handler(
     let mut ledger_attachments: Vec<WebChatAttachment> =
         request.attachments.iter().map(metadata_only).collect();
     if response.accepted {
+        state.live.record(
+            "web.chat.submitted",
+            format!("web chat turn {} submitted", response.message_id),
+        );
         let Some(backend) = state.chat_backend.clone() else {
             response.accepted = false;
             response.policy_reason = "chat submit denied: web chat runtime unavailable".into();
@@ -96,10 +142,15 @@ pub(crate) async fn submit_handler(
                 response.reply = output.reply;
                 response.policy_reason = output.policy_reason;
                 ledger_attachments = output.attachments;
+                response.attachments = ledger_attachments.clone();
             }
             Err(err) => {
                 response.accepted = false;
                 response.policy_reason = format!("chat runtime failed: {err}");
+                state.live.record(
+                    "web.chat.failed",
+                    format!("web chat turn {} failed", response.message_id),
+                );
             }
         }
     }
@@ -107,6 +158,12 @@ pub(crate) async fn submit_handler(
         && let Err(err) = append_chat_row(&request, &response, &ledger_attachments)
     {
         tracing::warn!("web chat submit append failed: {err}");
+    }
+    if response.accepted {
+        state.live.record(
+            "web.chat.completed",
+            format!("web chat turn {} completed", response.message_id),
+        );
     }
     (StatusCode::OK, Json(response)).into_response()
 }
@@ -169,6 +226,7 @@ pub fn evaluate_chat_submit(request: &WebChatSubmitRequest) -> WebChatSubmitResp
         policy_reason: "chat message accepted by the web session runtime".into(),
         stored_path,
         reply: String::new(),
+        attachments: Vec::new(),
     }
 }
 
@@ -180,6 +238,7 @@ fn response(accepted: bool, reason: &str, stored_path: String) -> WebChatSubmitR
         policy_reason: reason.into(),
         stored_path,
         reply: String::new(),
+        attachments: Vec::new(),
     }
 }
 
@@ -209,6 +268,75 @@ fn append_chat_row(
         .open(path)
         .and_then(|mut file| std::io::Write::write_all(&mut file, line.as_bytes()))?;
     Ok(())
+}
+
+fn load_chat_history(limit: usize) -> anyhow::Result<WebChatHistoryResponse> {
+    let Some(path) = chat_ledger_path() else {
+        anyhow::bail!("home directory unavailable");
+    };
+    let stored_path = path.to_string_lossy().to_string();
+    let content = match std::fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(WebChatHistoryResponse {
+                messages: Vec::new(),
+                stored_path,
+                truncated: false,
+            });
+        }
+        Err(err) => return Err(err.into()),
+    };
+    let mut rows = Vec::new();
+    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+        match serde_json::from_str::<WebChatLedgerRow>(line) {
+            Ok(row) => rows.push(row),
+            Err(err) => tracing::warn!("web chat history skipped malformed row: {err}"),
+        }
+    }
+    let truncated = rows.len() > limit;
+    let start = rows.len().saturating_sub(limit);
+    Ok(history_from_rows(&rows[start..], stored_path, truncated))
+}
+
+fn history_from_rows(
+    rows: &[WebChatLedgerRow],
+    stored_path: String,
+    truncated: bool,
+) -> WebChatHistoryResponse {
+    let mut messages = Vec::new();
+    for row in rows {
+        messages.push(WebChatHistoryMessage {
+            id: format!("{}:user", row.message_id),
+            role: "user".into(),
+            title: "You".into(),
+            body: if row.message.trim().is_empty() {
+                "Attachments".into()
+            } else {
+                row.message.clone()
+            },
+            attachments: row.attachments.clone(),
+            created_at_ms: row.created_at_ms,
+            policy_reason: "stored in web chat ledger".into(),
+            stored_path: stored_path.clone(),
+        });
+        if !row.assistant_reply.trim().is_empty() {
+            messages.push(WebChatHistoryMessage {
+                id: format!("{}:assistant", row.message_id),
+                role: "assistant".into(),
+                title: "Archon".into(),
+                body: row.assistant_reply.clone(),
+                attachments: Vec::new(),
+                created_at_ms: row.created_at_ms,
+                policy_reason: "restored from web chat ledger".into(),
+                stored_path: stored_path.clone(),
+            });
+        }
+    }
+    WebChatHistoryResponse {
+        messages,
+        stored_path,
+        truncated,
+    }
 }
 
 fn metadata_only(attachment: &WebChatAttachment) -> WebChatAttachment {
@@ -245,6 +373,8 @@ pub fn generated_typescript() -> String {
         exported(WebChatAttachment::decl(&cfg)),
         exported(WebChatSubmitRequest::decl(&cfg)),
         exported(WebChatSubmitResponse::decl(&cfg)),
+        exported(WebChatHistoryMessage::decl(&cfg)),
+        exported(WebChatHistoryResponse::decl(&cfg)),
     ]
     .join("\n\n")
         + "\n"
@@ -255,76 +385,5 @@ fn exported(decl: String) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn chat_submit_rejects_empty_payload() {
-        let response = evaluate_chat_submit(&WebChatSubmitRequest {
-            message: "  ".into(),
-            attachments: Vec::new(),
-        });
-        assert!(!response.accepted);
-    }
-
-    #[test]
-    fn chat_submit_accepts_text_message() {
-        let response = evaluate_chat_submit(&WebChatSubmitRequest {
-            message: "hello".into(),
-            attachments: Vec::new(),
-        });
-        assert!(response.accepted);
-        assert!(response.message_id.starts_with("webmsg_"));
-    }
-
-    #[test]
-    fn chat_submit_rejects_denied_attachment() {
-        let response = evaluate_chat_submit(&WebChatSubmitRequest {
-            message: String::new(),
-            attachments: vec![WebChatAttachment {
-                file_name: "secret.bin".into(),
-                size_bytes: 42,
-                mime_type: "application/octet-stream".into(),
-                accepted: false,
-                policy_reason: "denied".into(),
-                data_base64: None,
-                stored_path: None,
-            }],
-        });
-        assert!(!response.accepted);
-    }
-
-    #[test]
-    fn chat_submit_accepts_attachment_bytes() {
-        let response = evaluate_chat_submit(&WebChatSubmitRequest {
-            message: String::new(),
-            attachments: vec![WebChatAttachment {
-                file_name: "notes.md".into(),
-                size_bytes: 5,
-                mime_type: "text/markdown".into(),
-                accepted: true,
-                policy_reason: "ok".into(),
-                data_base64: Some("aGVsbG8=".into()),
-                stored_path: None,
-            }],
-        });
-        assert!(response.accepted);
-    }
-
-    #[test]
-    fn chat_submit_rejects_attachment_without_bytes() {
-        let response = evaluate_chat_submit(&WebChatSubmitRequest {
-            message: String::new(),
-            attachments: vec![WebChatAttachment {
-                file_name: "notes.txt".into(),
-                size_bytes: 5,
-                mime_type: "text/plain".into(),
-                accepted: true,
-                policy_reason: "ok".into(),
-                data_base64: None,
-                stored_path: None,
-            }],
-        });
-        assert!(!response.accepted);
-    }
-}
+#[path = "chat_tests.rs"]
+mod tests;

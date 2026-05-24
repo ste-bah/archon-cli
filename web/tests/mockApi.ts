@@ -1,7 +1,9 @@
 import type { Page, Route } from "@playwright/test";
+import { appendChatMessages, chatHistory, chatSubmitResponse } from "./mockChat";
 import { graphEdges, graphNodes } from "./mockGraph";
 
 export async function mockApi(page: Page) {
+  const chatMessages: Array<Record<string, unknown>> = [];
   const responses: Record<string, unknown> = {
     "/api/status": {
       status: "ok",
@@ -99,14 +101,6 @@ export async function mockApi(page: Page) {
         policyReason: "upload intent accepted by web upload policy",
         dryRunAvailable: true,
       },
-    },
-    "/api/chat/submit": {
-      messageId: "webmsg_test",
-      accepted: true,
-      createdAtMs: 1770000000,
-      policyReason: "chat message accepted and recorded by the web workbench",
-      storedPath: "~/.archon/web/chat.messages.jsonl",
-      reply: "Mock Archon reply from live session",
     },
     "/api/corpus/summary": {
       roots: [probe("Repository docs", "/repo/docs", true, 42, 800000)],
@@ -266,7 +260,13 @@ export async function mockApi(page: Page) {
     }
     if (url.pathname === "/api/chat/submit") {
       const request = route.request().postDataJSON();
-      await json(route, chatSubmitResponse(request));
+      const response = chatSubmitResponse(request);
+      appendChatMessages(chatMessages, request, response);
+      await json(route, response);
+      return;
+    }
+    if (url.pathname === "/api/chat/history") {
+      await json(route, chatHistory(chatMessages));
       return;
     }
     if (url.pathname === "/api/corpus/source") {
@@ -306,30 +306,6 @@ function actionResponse(request: { actionId: string; actionKind: string; dryRun:
       policyReason,
       createdAtMs: 1770000001,
     },
-  };
-}
-
-function chatSubmitResponse(request: {
-  attachments?: Array<{ dataBase64?: string | null; fileName?: string }>;
-}) {
-  const missingBytes = request.attachments?.some((attachment) => !attachment.dataBase64) ?? false;
-  if (missingBytes) {
-    return {
-      messageId: "webmsg_blocked",
-      accepted: false,
-      createdAtMs: 1770000000,
-      policyReason: "chat submit denied: attachment bytes were not provided",
-      storedPath: "~/.archon/web/chat.messages.jsonl",
-      reply: "",
-    };
-  }
-  return {
-    messageId: "webmsg_test",
-    accepted: true,
-    createdAtMs: 1770000000,
-    policyReason: "chat message accepted and recorded by the web workbench",
-    storedPath: "~/.archon/web/chat.messages.jsonl",
-    reply: "Mock Archon reply from live session",
   };
 }
 

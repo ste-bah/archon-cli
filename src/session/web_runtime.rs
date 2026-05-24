@@ -3,19 +3,21 @@ use std::sync::Arc;
 use anyhow::Result;
 use archon_core::env_vars::ArchonEnvVars;
 use archon_llm::auth::{AuthProvider, resolve_auth_with_keys};
-use archon_tui::app::TuiEvent;
 use archon_tui::event_channel::TuiEventReceiver;
 use archon_tui::observability;
+use archon_tui::{AgentDispatcher, app::TuiEvent};
 
 use crate::cli_args::Cli;
 
-const WEB_TURN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(900);
+const WEB_TURN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 pub(crate) struct WebSessionHandle {
     input_tx: tokio::sync::mpsc::Sender<String>,
     permission_tx: tokio::sync::mpsc::Sender<bool>,
     event_rx: tokio::sync::Mutex<TuiEventReceiver>,
     last_assistant_response: Arc<tokio::sync::Mutex<String>>,
+    cancel_handle: Arc<std::sync::Mutex<Option<Arc<crate::agent_handle::AgentHandle>>>>,
+    dispatcher: Arc<std::sync::Mutex<AgentDispatcher>>,
 }
 
 impl WebSessionHandle {
@@ -42,9 +44,24 @@ impl WebSessionHandle {
                     }
                 }
                 _ = &mut timeout => {
-                    anyhow::bail!("web session turn timed out");
+                    self.cancel_inflight_turn();
+                    anyhow::bail!(
+                        "web session turn timed out after {}s",
+                        WEB_TURN_TIMEOUT.as_secs()
+                    );
                 }
             }
+        }
+    }
+
+    fn cancel_inflight_turn(&self) {
+        if let Ok(guard) = self.cancel_handle.lock()
+            && let Some(ref handle) = *guard
+        {
+            handle.fire_cancel();
+        }
+        if let Ok(mut dispatcher) = self.dispatcher.lock() {
+            let _ = dispatcher.cancel_current();
         }
     }
 
@@ -340,8 +357,8 @@ pub(crate) async fn spawn_web_session(
             mcp_lifecycle_tx,
             auto_capture,
             auto_trainer,
-            dispatcher,
-            cancel_handle,
+            Arc::clone(&dispatcher),
+            Arc::clone(&cancel_handle),
         ),
     );
 
@@ -350,6 +367,8 @@ pub(crate) async fn spawn_web_session(
         permission_tx: perm_prompt_tx,
         event_rx: tokio::sync::Mutex::new(tui_event_rx),
         last_assistant_response: last_assistant_response_shared,
+        cancel_handle,
+        dispatcher,
     }))
 }
 

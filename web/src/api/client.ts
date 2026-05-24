@@ -15,6 +15,7 @@ import type {
   WebActionRequest,
   WebActionResponse,
   WebAuthSession,
+  WebChatHistoryResponse,
   WebChatSubmitRequest,
   WebChatSubmitResponse,
   WebLiveSnapshot,
@@ -39,17 +40,33 @@ async function getJson<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: { ...authHeaders(), "Content-Type": "application/json" },
-    credentials: "same-origin",
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    throw new Error(`${path} failed with ${response.status}`);
+async function postJson<T>(path: string, body: unknown, timeoutMs?: number): Promise<T> {
+  const controller = timeoutMs ? new AbortController() : undefined;
+  const timeout = controller
+    ? window.setTimeout(() => controller.abort(), timeoutMs)
+    : undefined;
+  try {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(body),
+      signal: controller?.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`${path} failed with ${response.status}`);
+    }
+    return (await response.json()) as T;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(`${path} timed out after ${Math.round((timeoutMs ?? 0) / 1000)}s`);
+    }
+    throw error;
+  } finally {
+    if (timeout !== undefined) {
+      window.clearTimeout(timeout);
+    }
   }
-  return (await response.json()) as T;
 }
 
 function authHeaders(): HeadersInit {
@@ -68,8 +85,9 @@ export const apiClient = {
   uploadPolicy: () => getJson<WebUploadPolicy>("/api/uploads/policy"),
   uploadIntent: (request: WebUploadIntent) =>
     postJson<WebUploadIntentResponse>("/api/uploads/intent", request),
+  chatHistory: () => getJson<WebChatHistoryResponse>("/api/chat/history"),
   submitChat: (request: WebChatSubmitRequest) =>
-    postJson<WebChatSubmitResponse>("/api/chat/submit", request),
+    postJson<WebChatSubmitResponse>("/api/chat/submit", request, 300_000),
   corpusSummary: () => getJson<CorpusSummary>("/api/corpus/summary"),
   corpusSearch: (query: string, kind: string) =>
     getJson<CorpusSearchResponse>(

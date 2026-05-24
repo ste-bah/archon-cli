@@ -102,23 +102,30 @@ right Archon process and project directory.
 
 ### Chat
 
-The chat tab is the browser entry point for web-session interaction. The
-current foundation path records submitted messages locally under the Archon web
-ledger and validates attachment metadata through the upload policy API. The
-full TUI agent turn loop remains the richer provider/tool execution surface.
+The chat tab is the browser entry point for web-session interaction. It records
+submitted messages locally under the Archon web ledger, restores recent saved
+turns when the page is opened again, and validates attachment metadata through
+the upload policy API. The full TUI agent turn loop remains the richer
+provider/tool execution surface.
 
 Current foundation behaviour:
 
 | Area | Shows |
 |---|---|
-| Conversation shell | prompt area, submitted messages, and local web-session acknowledgements |
-| Attachments | file picker, upload-intent validation, and accepted attachment chips |
+| Conversation shell | prompt area, recent saved turns, pending assistant state, and local web-session responses |
+| Attachments | file picker, upload-intent validation, accepted attachment chips, and stored-upload status |
 | Auth state | whether the web session is loopback or token-protected |
+| History | last saved turns loaded from the web chat ledger, with a refresh control |
 
 When uploads are enabled by policy, attachment metadata is checked before the
 file is accepted. Uploads do not bypass normal tool, file, or policy gates.
 Submitted web-chat messages are appended to
-`~/.archon/web/chat.messages.jsonl` for auditability.
+`~/.archon/web/chat.messages.jsonl` for auditability. The browser calls
+`GET /api/chat/history` on page load to restore the latest ledger rows and uses
+`POST /api/chat/submit` for new turns. A web turn has a bounded timeout; if the
+live session does not complete in time, Archon cancels the in-flight dispatcher
+turn and reports the failure in the transcript instead of leaving the composer
+stuck forever.
 
 ### Corpus
 

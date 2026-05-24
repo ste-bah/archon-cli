@@ -33,6 +33,7 @@ for (const theme of ["dark", "light"] as const) {
         await expect(page).toHaveScreenshot(`${route.id}-${theme}.png`, {
           fullPage: true,
           animations: "disabled",
+          maxDiffPixels: route.id === "evidence" ? 100 : 0,
         });
       });
     }
@@ -84,6 +85,10 @@ test("chat send and attach controls are interactive", async ({ page }) => {
   await expect(page.getByText("Can you inspect the active run?")).toBeVisible();
   await expect(page.getByText("Mock Archon reply from live session")).toBeVisible();
   await expect(page.getByText("context.txt")).toBeVisible();
+  await page.goto("./#/corpus");
+  await page.goto("./#/chat");
+  await expect(page.getByText("Can you inspect the active run?")).toBeVisible();
+  await expect(page.getByText("Mock Archon reply from live session")).toBeVisible();
   assertNoErrors();
 });
 

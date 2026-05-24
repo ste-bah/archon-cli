@@ -1,0 +1,148 @@
+.chat-layout {
+  display: grid;
+  grid-template-rows: minmax(360px, 1fr) auto;
+  gap: 14px;
+  min-height: calc(100vh - 110px);
+}
+
+.chat-thread,
+.composer {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.chat-thread {
+  padding: 18px;
+  overflow: auto;
+}
+
+.message {
+  max-width: 760px;
+  padding: 14px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.message + .message {
+  margin-top: 10px;
+}
+
+.message--user {
+  margin-left: auto;
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--line) 62%);
+}
+
+.message--pending {
+  opacity: 0.76;
+}
+
+.message__header,
+.chat-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.message__header {
+  justify-content: space-between;
+}
+
+.message__header time,
+.message__meta,
+.chat-status {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.message p {
+  margin-top: 8px;
+  color: var(--muted);
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.chat-status {
+  flex-wrap: wrap;
+  margin: -4px 0 12px;
+}
+
+.chat-status span {
+  max-width: min(760px, 100%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.composer textarea {
+  min-height: 92px;
+  resize: vertical;
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg) 90%, var(--surface) 10%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+.composer__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.icon-action {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.attachment-chip {
+  gap: 8px;
+  max-width: 280px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-2) 82%, var(--accent) 18%);
+}
+
+.attachment-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-chip em {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-style: normal;
+}
+
+.composer button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+}
