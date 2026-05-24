@@ -1,11 +1,9 @@
 //! Slash-command handlers extracted from `session_loop/mod.rs` body.
 //!
-//! TASK #219 SESSION-LOOP-SPLIT: pulls the two largest in-loop
-//! handlers (`/clear` and `/refresh-identity`) into free async functions
-//! so `run_session_loop` shrinks toward the workspace 500-line ceiling.
-//! The smaller `/exit | /quit | /q` and `/compact` handlers stay inline
-//! because their bodies are already short (≤30 lines each) and their
-//! captured-state spread is minimal.
+//! TASK #219 SESSION-LOOP-SPLIT: pulls direct session-state handlers
+//! (`/clear` and `/refresh-identity`) into free async functions.
+//! `slash_dispatch.rs` owns the higher-level routing for exit, compact,
+//! built-in commands, and skill fallback.
 //!
 //! Behavior is unchanged — these helpers are byte-for-byte the same
 //! sequence the inline blocks ran, just parameterized.

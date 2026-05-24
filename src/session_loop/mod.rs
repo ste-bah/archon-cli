@@ -20,16 +20,16 @@
 use std::sync::Arc;
 
 use archon_core::agent::Agent;
-use archon_core::skills::{SkillContext, SkillOutput};
 use archon_llm::effort::EffortState;
 use archon_llm::fast_mode::FastModeState;
 use archon_pipeline::capture::AutoCapture;
 use archon_tui::app::TuiEvent;
 
-use crate::command::slash::handle_slash_command;
 use crate::slash_context::SlashCommandContext;
 
+mod control_input;
 mod lifecycle_hooks;
+mod loop_input;
 mod mcp_task;
 mod personality_save;
 mod post_turn;
@@ -37,17 +37,17 @@ mod prompt_turn;
 mod session_export;
 mod session_history;
 mod session_shutdown;
+mod slash_dispatch;
 mod slash_handlers;
 
+use control_input::{ControlInputContext, handle_control_input};
 use lifecycle_hooks::fire_session_startup_hooks;
+use loop_input::{LoopInput, LoopInputContext, next_loop_input};
 pub(crate) use mcp_task::{McpLifecycleTx, spawn_mcp_lifecycle_task};
-use personality_save::save_personality_snapshot_if_enabled;
-use post_turn::{PostTurnAction, handle_completed_turn};
+use post_turn::PostTurnAction;
 use prompt_turn::dispatch_user_prompt;
-use session_export::drain_pending_export;
-use session_history::{handle_resume_session, handle_truncate_session};
 use session_shutdown::finish_session;
-use slash_handlers::{handle_clear_command, handle_refresh_identity_command};
+use slash_dispatch::{SlashDispatchContext, dispatch_slash_or_skill};
 
 /// Run the interactive agent input loop to completion.
 ///
@@ -81,23 +81,15 @@ pub(crate) fn run_session_loop(
     mut cmd_ctx: SlashCommandContext,
     mcp_lifecycle_tx: McpLifecycleTx,
     auto_capture: Option<Arc<AutoCapture>>,
-    // Reference: archon-pipeline/src/learning/gnn/auto_trainer_runtime.rs.
-    // Forwarded to AgentHandle so the auto-capture site can call record_memory.
     auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
-    // GHOST-007: shared AgentDispatcher for /cancel is_busy() + cancel_current().
     agent_dispatcher: Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>,
-    // GHOST-007: late-init slot for AgentHandle. Populated here so /cancel
-    // can call fire_cancel() on the in-flight turn.
     cancel_handle_slot: Arc<std::sync::Mutex<Option<Arc<crate::agent_handle::AgentHandle>>>>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
     Box::pin(async move {
         let agent = Arc::new(tokio::sync::Mutex::new(agent));
 
-        // TASK #219: lifecycle hooks (Setup → SessionStart → InstructionsLoaded)
-        // extracted to lifecycle_hooks.rs.
         fire_session_startup_hooks(&agent).await;
 
-        // AGT-015: Send agent name/color to TUI status bar when in --agent mode
         if let Some(ref def) = agent_def {
             let _ = input_tui_tx.send(TuiEvent::SetAgentInfo {
                 name: def.agent_type.clone(),
@@ -105,13 +97,9 @@ pub(crate) fn run_session_loop(
             });
         }
 
-        // AGT-011: Track whether the agent's initial_prompt has been prepended
         let mut initial_prompt_pending: Option<String> =
             agent_def.as_ref().and_then(|d| d.initial_prompt.clone());
 
-        // TASK-TUI-107: AgentHandle bridges `Arc<Mutex<Agent>>` to TurnRunner.
-        // Created here (needs Arc<Mutex<Agent>> which is wrapped above).
-        // GHOST-007: published to cancel_handle_slot so /cancel can fire_cancel.
         let adapter = Arc::new(crate::agent_handle::AgentHandle::new(
             Arc::clone(&agent),
             auto_capture,
@@ -119,22 +107,11 @@ pub(crate) fn run_session_loop(
         ));
         *cancel_handle_slot.lock().unwrap() = Some(Arc::clone(&adapter));
 
-        // GHOST-007: agent_dispatcher is constructed in session.rs and shared
-        // via Arc<Mutex<>> so /cancel can call is_busy() + cancel_current().
-        // Per-turn post-completion actions: pushed in dispatch order,
-        // popped on each `poll_completion()` outcome. Replaces the
-        // per-spawn tail logic that used to live inside the deleted
-        // `tokio::spawn(async move { process_message })` wrapper.
         let mut post_turn_queue: std::collections::VecDeque<PostTurnAction> =
             std::collections::VecDeque::new();
         let mut poll_tick = tokio::time::interval(std::time::Duration::from_millis(16));
         poll_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-        // TASK #244 CONSCIOUSNESS-PERSIST-3: belt-and-braces signal handlers
-        // for off-terminal kills (`kill -INT/-TERM <pid>`). In-TUI Ctrl+C/D
-        // is handled by TASK #243 in the TUI input dispatcher; SIGINT is
-        // suppressed by the terminal driver (ISIG cleared) while raw mode is
-        // on, so these arms only fire pre-raw / post-raw / external kill.
         #[cfg(unix)]
         let mut sigterm_stream =
             match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
@@ -146,329 +123,74 @@ pub(crate) fn run_session_loop(
             };
         let shutdown_in_progress = std::sync::atomic::AtomicBool::new(false);
 
-        // BEGIN INPUT_HANDLER — arch-lint.sh scopes D1 grep to this region
         loop {
-            let input = tokio::select! {
-                biased;
-                _ = poll_tick.tick() => {
-                    let outcome = agent_dispatcher.lock().unwrap().poll_completion();
-                    if let Some(outcome) = outcome {
-                        tracing::debug!("dispatcher turn outcome: {}",
-                            match &outcome {
-                                archon_tui::TurnOutcome::Completed => "completed",
-                                archon_tui::TurnOutcome::Cancelled => "cancelled",
-                                archon_tui::TurnOutcome::Failed(_) => "failed",
-                            });
-                        handle_completed_turn(
-                            outcome,
-                            &mut post_turn_queue,
-                            &agent,
-                            &config,
-                            &input_tui_tx,
-                            &session_store_for_input,
-                            &session_id_for_input,
-                            &agent_dispatcher,
-                            &adapter,
-                            &mut cmd_ctx,
-                        )
-                        .await;
-                    }
-                    continue;
-                }
-                maybe_input = user_input_rx.recv() => {
-                    match maybe_input {
-                        Some(input) => input,
-                        None => break,
-                    }
-                }
-                _ = tokio::signal::ctrl_c() => {
-                    // TASK #244: external SIGINT (kill -INT). Synthesize "/exit"
-                    // so the existing handler runs the snapshot save + SessionEnd
-                    // hook + Goodbye/Done events. AtomicBool reentrancy guard
-                    // prevents double-save if user mashes Ctrl+C.
-                    if shutdown_in_progress.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                        continue;
-                    }
-                    tracing::info!("SIGINT received; routing through /exit");
-                    "/exit".to_string()
-                }
-                _ = async {
-                    #[cfg(unix)]
-                    {
-                        if let Some(s) = sigterm_stream.as_mut() {
-                            s.recv().await;
-                        } else {
-                            std::future::pending::<()>().await
-                        }
-                    }
-                    #[cfg(not(unix))]
-                    { std::future::pending::<()>().await }
-                } => {
-                    if shutdown_in_progress.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                        continue;
-                    }
-                    tracing::info!("SIGTERM received; routing through /exit");
-                    "/exit".to_string()
-                }
+            let input = match next_loop_input(LoopInputContext {
+                poll_tick: &mut poll_tick,
+                user_input_rx: &mut user_input_rx,
+                #[cfg(unix)]
+                sigterm_stream: &mut sigterm_stream,
+                shutdown_in_progress: &shutdown_in_progress,
+                agent: &agent,
+                config: &config,
+                input_tui_tx: &input_tui_tx,
+                session_store: &session_store_for_input,
+                session_id: &session_id_for_input,
+                dispatcher: &agent_dispatcher,
+                adapter: &adapter,
+                cmd_ctx: &mut cmd_ctx,
+                post_turn_queue: &mut post_turn_queue,
+            })
+            .await
+            {
+                LoopInput::Input(input) => input,
+                LoopInput::Continue => continue,
+                LoopInput::Stop => break,
             };
-            // Session picker selection — load messages and restore conversation
-            if let Some(session_id) = input.strip_prefix("__resume_session__ ") {
-                handle_resume_session(
-                    &agent,
-                    &input_tui_tx,
-                    &session_store_for_input,
-                    session_id.trim(),
-                )
-                .await;
+
+            if handle_control_input(
+                &input,
+                ControlInputContext {
+                    agent: &agent,
+                    input_tui_tx: &input_tui_tx,
+                    session_store: &session_store_for_input,
+                    session_id: &session_id_for_input,
+                    adapter: &adapter,
+                    dispatcher: &agent_dispatcher,
+                    mcp_lifecycle_tx: &mcp_lifecycle_tx,
+                    cmd_ctx: &cmd_ctx,
+                },
+            )
+            .await
+            {
                 continue;
             }
 
-            // ── TASK-TUI-620-followup: /rewind truncation ─────────
-            // Emitted by the MessageSelector overlay when the user hits
-            // Enter. `idx` is the message index the user rewound to —
-            // messages [0..=idx] are kept, everything after is dropped
-            // from the SessionStore AND the agent's in-memory
-            // conversation is rebuilt to match.
-            if let Some(idx_str) = input.strip_prefix("__truncate_session__ ") {
-                handle_truncate_session(
-                    &agent,
-                    &input_tui_tx,
-                    &session_store_for_input,
-                    &session_id_for_input,
-                    idx_str.trim(),
-                )
-                .await;
-                continue;
-            }
-
-            // ── TASK-AGS-107 / TASK-TUI-107: Ctrl+C cancel ───────
-            // TUI sends "__cancel__" when user presses Ctrl+C during
-            // generation. Fire the CancellationToken held by the adapter
-            // (propagates into ToolContext.cancel_parent → subagent
-            // child_token() chains) AND abort the tracked JoinHandle via
-            // the dispatcher (reaches the turn future at its next `.await`).
-            // Both operations are non-blocking.
-            if input == "__cancel__" {
-                adapter.fire_cancel();
-                match agent_dispatcher.lock().unwrap().cancel_current() {
-                    archon_tui::CancelOutcome::NoInflight => {
-                        tracing::debug!("Ctrl+C: no in-flight turn to cancel");
-                    }
-                    archon_tui::CancelOutcome::Aborted { elapsed_ms } => {
-                        tracing::info!("Ctrl+C: aborted in-flight turn (elapsed_ms={elapsed_ms})");
-                    }
-                }
-                continue;
-            }
-
-            // ── MCP manager actions from the overlay ─────────────
-            if let Some(rest) = input.strip_prefix("__mcp_action__ ") {
-                mcp_task::handle_overlay_action(
-                    rest,
-                    &mcp_lifecycle_tx,
-                    &cmd_ctx.mcp_manager,
-                    &input_tui_tx,
-                )
-                .await;
-                continue;
-            }
-
-            // ── Phase 2: Slash command dispatch (CLI-110) ────────
             if !slash_commands_disabled && input.starts_with('/') {
-                // GAP 1: /compact needs direct access to agent.compact()
-                if matches!(input.trim(), "/exit" | "/quit" | "/q") {
-                    // CLI-416 / TASK #242: save personality snapshot before exit.
-                    let iv_arc = agent.lock().await.inner_voice().cloned();
-                    save_personality_snapshot_if_enabled(
-                        iv_arc,
-                        cmd_ctx.memory.as_ref(),
-                        &cmd_ctx.session_id,
+                if dispatch_slash_or_skill(
+                    &input,
+                    SlashDispatchContext {
+                        agent: &agent,
+                        api_url: &api_url,
+                        input_tui_tx: &input_tui_tx,
+                        session_store: &session_store_for_input,
+                        session_id: &session_id_for_input,
                         persist_personality,
                         personality_history_limit,
                         session_start_confidence,
                         session_start_instant,
-                    )
-                    .await;
-
-                    // Fire SessionEnd hook and close the TUI
-                    {
-                        let guard = agent.lock().await;
-                        guard.fire_hook_detached(
-                            archon_core::hooks::HookType::SessionEnd,
-                            serde_json::json!({"hook_type": "session_end", "reason": "exit"}),
-                        )
-                    }
-                    .await;
-                    agent.lock().await.clear_watch_paths();
-                    let _ = input_tui_tx.send(TuiEvent::TextDelta("\nGoodbye.\n".into()));
-                    let _ = input_tui_tx.send(TuiEvent::Done);
-                    continue;
-                }
-                if input.trim() == "/compact" || input.trim().starts_with("/compact ") {
-                    let subcommand = input.trim().strip_prefix("/compact").unwrap().trim();
-                    let subcommand = if subcommand.is_empty() {
-                        None
-                    } else {
-                        Some(subcommand)
-                    };
-                    let (outcome, compacted_messages) = {
-                        let mut guard = agent.lock().await;
-                        let fut: std::pin::Pin<
-                            Box<
-                                dyn std::future::Future<
-                                        Output = archon_core::agent::ManualCompactOutcome,
-                                    > + Send
-                                    + '_,
-                            >,
-                        > = Box::pin(guard.compact(subcommand));
-                        let outcome = fut.await;
-                        let messages = if matches!(
-                            outcome,
-                            archon_core::agent::ManualCompactOutcome::Compacted { .. }
-                        ) {
-                            guard
-                                .conversation_state()
-                                .messages
-                                .iter()
-                                .filter_map(|msg| serde_json::to_string(msg).ok())
-                                .collect()
-                        } else {
-                            Vec::new()
-                        };
-                        (outcome, messages)
-                    };
-                    if !compacted_messages.is_empty()
-                        && let Err(e) = session_store_for_input
-                            .replace_messages(&session_id_for_input, &compacted_messages)
-                    {
-                        tracing::warn!("replace_messages after /compact failed: {e}");
-                    }
-                    let msg = outcome.into_status();
-                    let _ = input_tui_tx.send(TuiEvent::TextDelta(format!("\n{msg}\n")));
-                    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
-                    continue;
-                }
-
-                // /clear needs direct access to agent.clear_conversation()
-                if input.trim() == "/clear" {
-                    handle_clear_command(
-                        &agent,
-                        &cmd_ctx,
-                        &input_tui_tx,
-                        &session_store_for_input,
-                        &session_id_for_input,
-                        persist_personality,
-                        personality_history_limit,
-                        session_start_confidence,
-                        session_start_instant,
-                    )
-                    .await;
-                    continue;
-                }
-
-                // /refresh-identity — clears beta caches and re-runs discovery in background
-                if input.trim() == "/refresh-identity" {
-                    handle_refresh_identity_command(&agent, &api_url, &input_tui_tx).await;
-                    continue;
-                }
-
-                // TASK-AGS-POST-6-EXPORT-MIGRATE: upstream /export
-                // intercept DELETED. Parse + validate logic moved into
-                // `ExportHandler::execute` (src/command/export.rs); the
-                // mutex-requiring file-write I/O moved into the drain
-                // block below inside the `if handled {` branch where
-                // `agent` (Arc<tokio::sync::Mutex<Agent>>) and
-                // `cmd_ctx.session_id` are in scope. See
-                // src/command/export.rs module rustdoc for the full
-                // SIDECAR-SLOT rationale.
-
-                let handled = handle_slash_command(
-                    input.trim(),
-                    &mut fast_mode,
-                    &mut effort_state,
-                    &input_tui_tx,
-                    &mut cmd_ctx,
+                        fast_mode: &mut fast_mode,
+                        effort_state: &mut effort_state,
+                        cmd_ctx: &mut cmd_ctx,
+                        dispatcher: &agent_dispatcher,
+                        adapter: &adapter,
+                        post_turn_queue: &mut post_turn_queue,
+                    },
                 )
-                .await;
-                if handled {
-                    drain_pending_export(&agent, &cmd_ctx, &input_tui_tx).await;
+                .await
+                .is_handled()
+                {
                     continue;
                 }
-
-                // Fallback: check the skill registry for expanded commands
-                let (cmd_name, cmd_args) =
-                    match archon_core::skills::parser::parse_slash_command(input.trim()) {
-                        Some((name, args)) => (name, args),
-                        None => (String::new(), Vec::new()),
-                    };
-
-                // TASK-SESSION-LOOP-EXTRACT: compute skill output eagerly and
-                // drop the `&dyn Skill` borrow BEFORE the `.await`s below so
-                // rustc doesn't have to prove `for<'a> &'a dyn Skill: Send`.
-                // The skill registry lookup + `execute` are sync, so we can
-                // take the output as an owned value and release the borrow.
-                let skill_output: Option<SkillOutput> = {
-                    let skill = cmd_ctx.skill_registry.resolve(&cmd_name);
-                    skill.map(|s| {
-                        let skill_ctx = SkillContext {
-                            session_id: cmd_ctx.session_id.clone(),
-                            working_dir: cmd_ctx.working_dir.clone(),
-                            model: cmd_ctx.default_model.clone(),
-                            agent_registry: Some(Arc::clone(&cmd_ctx.agent_registry)),
-                            session_store: Some(Arc::clone(&cmd_ctx.session_store)),
-                        };
-                        s.execute(&cmd_args, &skill_ctx)
-                    })
-                };
-                if let Some(output) = skill_output {
-                    match output {
-                        SkillOutput::Prompt(prompt) => {
-                            // Equivalent to Claude Code's PromptCommand — inject into
-                            // the conversation as a user message and let the agent respond.
-                            {
-                                let mut resp = cmd_ctx.last_assistant_response.lock().await;
-                                resp.clear();
-                            }
-                            let _ = input_tui_tx.send(TuiEvent::GenerationStarted);
-                            // TASK-TUI-107: dispatch via AgentDispatcher. The
-                            // old `handle.await`-prior serialization pattern
-                            // is gone — queued prompts drain via poll_completion.
-                            // Post-turn work (SlashCommandComplete event,
-                            // optional registry reload) is pushed onto
-                            // post_turn_queue and runs when poll_completion
-                            // observes this turn's outcome.
-                            match agent_dispatcher.lock().unwrap().spawn_turn(
-                                prompt.clone(),
-                                adapter.clone() as std::sync::Arc<dyn archon_tui::TurnRunner>,
-                            ) {
-                                archon_tui::DispatchResult::Running { .. } => {
-                                    tracing::debug!("spawned skill agent turn");
-                                }
-                                archon_tui::DispatchResult::Queued => {
-                                    tracing::debug!("agent busy; queued skill prompt");
-                                }
-                                archon_tui::DispatchResult::Rejected(err) => {
-                                    tracing::error!("skill dispatch rejected: {err}");
-                                }
-                            }
-                            post_turn_queue.push_back(PostTurnAction::SkillComplete {
-                                reload_registry_for: Some(cmd_name.clone()),
-                            });
-                        }
-                        SkillOutput::Text(t) | SkillOutput::Markdown(t) => {
-                            let _ = input_tui_tx.send(TuiEvent::TextDelta(format!("\n{t}\n")));
-                            let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
-                        }
-                        SkillOutput::Error(e) => {
-                            let _ =
-                                input_tui_tx.send(TuiEvent::TextDelta(format!("\nError: {e}\n")));
-                            let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
-                        }
-                    }
-                    continue;
-                }
-
-                // Not a known slash command — falls through to agent as normal input
             }
 
             dispatch_user_prompt(
@@ -485,7 +207,6 @@ pub(crate) fn run_session_loop(
             )
             .await;
         }
-        // END INPUT_HANDLER — arch-lint.sh scopes D1 grep to this region
 
         finish_session(&agent_def, &agent, &agent_dispatcher).await;
     })
