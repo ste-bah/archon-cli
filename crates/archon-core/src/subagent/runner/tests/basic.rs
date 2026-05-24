@@ -83,6 +83,78 @@ async fn tool_use_then_text_returns_after_two_turns() {
 }
 
 #[tokio::test]
+async fn signed_thinking_is_replayed_for_anthropic_shape_after_tool_use() {
+    let provider = Arc::new(MockProvider::new_with_family(
+        vec![
+            thinking_tool_use_response("tool-1", "Read", r#"{"file_path":"/tmp/test.txt"}"#),
+            text_response("done"),
+        ],
+        ProviderFamily::AnthropicApi,
+    ));
+    let runner = make_runner(provider.clone(), 10);
+
+    let result = runner.run("Read /tmp/test.txt").await.unwrap();
+
+    assert_eq!(result, "done");
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 2);
+
+    let assistant_msg = requests[1]
+        .messages
+        .iter()
+        .find(|msg| msg.get("role").and_then(|role| role.as_str()) == Some("assistant"))
+        .expect("assistant tool-use turn is replayed");
+    let content = assistant_msg
+        .get("content")
+        .and_then(|value| value.as_array())
+        .expect("assistant content is block array");
+
+    assert_eq!(content[0]["type"], "thinking");
+    assert_eq!(content[0]["thinking"], "checking the file before answering");
+    assert_eq!(content[0]["signature"], "signed-thinking");
+    assert_eq!(content[1]["type"], "tool_use");
+}
+
+#[tokio::test]
+async fn encrypted_reasoning_is_replayed_without_raw_thinking_for_codex_shape() {
+    let provider = Arc::new(MockProvider::new_with_family(
+        vec![
+            thinking_tool_use_response("tool-1", "Read", r#"{"file_path":"/tmp/test.txt"}"#),
+            text_response("done"),
+        ],
+        ProviderFamily::CodexOAuth,
+    ));
+    let runner = make_runner(provider.clone(), 10);
+
+    let result = runner.run("Read /tmp/test.txt").await.unwrap();
+
+    assert_eq!(result, "done");
+    let requests = provider.requests();
+    assert_eq!(
+        requests[1].reasoning_encrypted.as_deref(),
+        Some("opaque-codex-reasoning")
+    );
+
+    let assistant_msg = requests[1]
+        .messages
+        .iter()
+        .find(|msg| msg.get("role").and_then(|role| role.as_str()) == Some("assistant"))
+        .expect("assistant tool-use turn is replayed");
+    let content = assistant_msg
+        .get("content")
+        .and_then(|value| value.as_array())
+        .expect("assistant content is block array");
+
+    assert!(
+        content
+            .iter()
+            .all(|block| block.get("type").and_then(|value| value.as_str()) != Some("thinking")),
+        "Codex/OpenAI Responses continuation should use encrypted reasoning, not raw thinking"
+    );
+    assert_eq!(content[0]["type"], "tool_use");
+}
+
+#[tokio::test]
 async fn max_turns_enforced() {
     // Every turn uses a tool, never returns text
     let provider = Arc::new(MockProvider::new(vec![

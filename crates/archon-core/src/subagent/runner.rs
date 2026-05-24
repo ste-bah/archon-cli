@@ -67,6 +67,12 @@ struct PendingTool {
     input_json: String,
 }
 
+#[derive(Debug, Default)]
+struct PendingThinkingBlock {
+    thinking: String,
+    signature: String,
+}
+
 impl SubagentRunner {
     #[allow(clippy::too_many_arguments)]
     pub fn new(

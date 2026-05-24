@@ -29,6 +29,7 @@ impl SubagentRunner {
         let mut auto_compact = crate::agent::AutoCompactState::default();
         let mut cumulative_billable_tokens = 0_u64;
         let mut last_known_context_tokens = 0_u64;
+        let mut reasoning_encrypted: Option<String> = None;
         let mut reactive_overflow_retried = false;
         let mut reactive_rate_limit_retried = false;
         let mut proactive_pressure_attempted = false;
@@ -221,7 +222,7 @@ impl SubagentRunner {
                 effort,
                 extra: serde_json::Value::Null,
                 request_origin: Some("subagent".into()),
-                reasoning_encrypted: None,
+                reasoning_encrypted: reasoning_encrypted.clone(),
             };
             let mut request_body_bytes = crate::agent::autocompact::request_body_bytes(&request);
             let large_retry_body_bytes = crate::agent::autocompact::large_request_retry_body_bytes(
@@ -416,6 +417,9 @@ impl SubagentRunner {
             };
 
             let mut text_content = String::new();
+            let mut thinking_blocks =
+                std::collections::BTreeMap::<u32, PendingThinkingBlock>::new();
+            let mut turn_reasoning_encrypted: Option<String> = None;
             let mut pending_tools: Vec<PendingTool> = Vec::new();
             let mut pending_tool_indices: Vec<u32> = Vec::new();
             let mut usage_acc = archon_llm::usage::UsageAccumulator::default();
@@ -444,14 +448,31 @@ impl SubagentRunner {
                                 input_json: String::new(),
                             });
                             pending_tool_indices.push(index);
+                        } else if block_type == ContentBlockType::Thinking {
+                            thinking_blocks.entry(index).or_default();
                         }
                     }
                     StreamEvent::TextDelta { text, .. } => {
                         self.emit_activity_stream("text", text.clone(), None, false);
                         text_content.push_str(&text);
                     }
-                    StreamEvent::ThinkingDelta { thinking, .. } => {
+                    StreamEvent::ThinkingDelta { index, thinking } => {
+                        thinking_blocks
+                            .entry(index)
+                            .or_default()
+                            .thinking
+                            .push_str(&thinking);
                         self.emit_activity_stream("thinking", thinking, None, false);
+                    }
+                    StreamEvent::SignatureDelta { index, signature } => {
+                        thinking_blocks
+                            .entry(index)
+                            .or_default()
+                            .signature
+                            .push_str(&signature);
+                    }
+                    StreamEvent::ReasoningEncrypted { blob } => {
+                        turn_reasoning_encrypted = Some(blob);
                     }
                     StreamEvent::InputJsonDelta {
                         index,
@@ -582,12 +603,13 @@ impl SubagentRunner {
                             g.last_update = chrono::Utc::now();
                         }
                     }
-                    _ => {} // SignatureDelta, MessageDelta{usage:None}, MessageStop, Ping, etc.
+                    _ => {} // MessageDelta{usage:None}, MessageStop, Ping, etc.
                 }
             }
             if retry_after_compact {
                 continue;
             }
+            reasoning_encrypted = turn_reasoning_encrypted;
             reactive_overflow_retried = false;
             reactive_rate_limit_retried = false;
             cumulative_billable_tokens += usage_acc.context_input_tokens;
@@ -609,6 +631,22 @@ impl SubagentRunner {
 
             // Build assistant message with text + tool_use blocks
             let mut assistant_content: Vec<serde_json::Value> = Vec::new();
+            let replay_signed_thinking = matches!(
+                self.provider.compaction_policy().wire_shape,
+                archon_llm::compaction_policy::WireShape::AnthropicMessages
+                    | archon_llm::compaction_policy::WireShape::VertexAnthropic
+            );
+            if replay_signed_thinking {
+                for block in thinking_blocks.values() {
+                    if !block.thinking.is_empty() {
+                        assistant_content.push(serde_json::json!({
+                            "type": "thinking",
+                            "thinking": block.thinking,
+                            "signature": block.signature,
+                        }));
+                    }
+                }
+            }
             if !text_content.is_empty() {
                 assistant_content.push(serde_json::json!({
                     "type": "text",

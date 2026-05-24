@@ -1,5 +1,6 @@
 use super::*;
 use crate::agent::AgentConfig;
+use archon_llm::compaction_policy::ProviderFamily;
 use archon_llm::identity::IdentityMode;
 use archon_llm::provider::{LlmError, LlmResponse, ModelInfo, ProviderFeature};
 use archon_llm::types::Usage;
@@ -11,15 +12,27 @@ use tokio::sync::mpsc;
 /// Mock provider that returns pre-configured responses.
 struct MockProvider {
     responses: std::sync::Mutex<Vec<Vec<StreamEvent>>>,
+    requests: std::sync::Mutex<Vec<LlmRequest>>,
+    provider_family: ProviderFamily,
     call_count: AtomicU32,
 }
 
 impl MockProvider {
     fn new(responses: Vec<Vec<StreamEvent>>) -> Self {
+        Self::new_with_family(responses, ProviderFamily::OpenAiCompatible)
+    }
+
+    fn new_with_family(responses: Vec<Vec<StreamEvent>>, provider_family: ProviderFamily) -> Self {
         Self {
             responses: std::sync::Mutex::new(responses),
+            requests: std::sync::Mutex::new(Vec::new()),
+            provider_family,
             call_count: AtomicU32::new(0),
         }
+    }
+
+    fn requests(&self) -> Vec<LlmRequest> {
+        self.requests.lock().unwrap().clone()
     }
 }
 
@@ -35,10 +48,15 @@ impl LlmProvider for MockProvider {
         false
     }
 
+    fn compaction_provider_family(&self) -> ProviderFamily {
+        self.provider_family
+    }
+
     async fn stream(
         &self,
-        _request: LlmRequest,
+        request: LlmRequest,
     ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, archon_llm::provider::LlmError> {
+        self.requests.lock().unwrap().push(request);
         let idx = self.call_count.fetch_add(1, Ordering::SeqCst) as usize;
         let events = {
             let mut responses = self.responses.lock().unwrap();
@@ -137,6 +155,55 @@ fn tool_use_response(tool_id: &str, tool_name: &str, input_json: &str) -> Vec<St
             partial_json: input_json.into(),
         },
         StreamEvent::ContentBlockStop { index: 0 },
+        StreamEvent::MessageStop,
+    ]
+}
+
+fn thinking_tool_use_response(
+    tool_id: &str,
+    tool_name: &str,
+    input_json: &str,
+) -> Vec<StreamEvent> {
+    vec![
+        StreamEvent::MessageStart {
+            id: "msg-thinking-tool".into(),
+            model: "mock".into(),
+            usage: Usage {
+                input_tokens: 10,
+                output_tokens: 20,
+                cache_creation_input_tokens: 0,
+                cache_read_input_tokens: 0,
+            },
+        },
+        StreamEvent::ContentBlockStart {
+            index: 0,
+            block_type: ContentBlockType::Thinking,
+            tool_use_id: None,
+            tool_name: None,
+        },
+        StreamEvent::ThinkingDelta {
+            index: 0,
+            thinking: "checking the file before answering".into(),
+        },
+        StreamEvent::SignatureDelta {
+            index: 0,
+            signature: "signed-thinking".into(),
+        },
+        StreamEvent::ContentBlockStop { index: 0 },
+        StreamEvent::ContentBlockStart {
+            index: 1,
+            block_type: ContentBlockType::ToolUse,
+            tool_use_id: Some(tool_id.into()),
+            tool_name: Some(tool_name.into()),
+        },
+        StreamEvent::InputJsonDelta {
+            index: 1,
+            partial_json: input_json.into(),
+        },
+        StreamEvent::ContentBlockStop { index: 1 },
+        StreamEvent::ReasoningEncrypted {
+            blob: "opaque-codex-reasoning".into(),
+        },
         StreamEvent::MessageStop,
     ]
 }
