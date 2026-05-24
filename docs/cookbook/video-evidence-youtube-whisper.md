@@ -9,13 +9,15 @@ The practical goal is:
 ```mermaid
 flowchart LR
     VIDEO["YouTube video"] --> DOWNLOAD["Governed yt-dlp download"]
-    DOWNLOAD --> AUDIO["ffmpeg audio extraction"]
-    AUDIO --> ASR["local whisper-cpp transcript"]
-    DOWNLOAD --> FRAMES["optional frame evidence"]
-    ASR --> DOCS["doc_chunks + video@MM:SS citations"]
-    FRAMES --> DOCS
-    DOCS --> KB["KB claims, entities, relations"]
-    DOCS --> PIPELINE["research / PRD / agent workflows"]
+DOWNLOAD --> AUDIO["ffmpeg audio extraction"]
+AUDIO --> ASR["local whisper-cpp transcript"]
+DOWNLOAD --> CAPTIONS["optional captured captions"]
+DOWNLOAD --> FRAMES["optional frame evidence"]
+ASR --> DOCS["doc_chunks + video@MM:SS citations"]
+CAPTIONS --> DOCS
+FRAMES --> DOCS
+DOCS --> KB["KB claims, entities, relations"]
+DOCS --> PIPELINE["research / PRD / agent workflows"]
 ```
 
 ## When To Use This
@@ -51,7 +53,7 @@ allow_youtube = true
 allow_direct_urls = false
 allow_external_downloaders = true
 allow_browser_automation = false
-allow_caption_capture = false
+allow_caption_capture = true
 allow_cloud_asr = false
 allow_cloud_vlm = false
 require_user_confirmation_for_download = true
@@ -100,6 +102,8 @@ Install or configure:
 - `ffmpeg` and `ffprobe` for media metadata, audio extraction, and frame work
 - `whisper-cli` from whisper.cpp for local ASR
 - a local Whisper model such as `ggml-small.en.bin`
+- optional `opencv-python` for frame fallback on awkward YouTube codecs
+- optional `rapidocr_onnxruntime` for local chart/text OCR fallback
 
 From the repo clone, the cross-OS dependency installer handles the packaged
 tools:
@@ -120,6 +124,8 @@ export ARCHON_YTDLP_BIN=/opt/homebrew/bin/yt-dlp
 export ARCHON_FFMPEG_BIN=/opt/homebrew/bin/ffmpeg
 export ARCHON_FFPROBE_BIN=/opt/homebrew/bin/ffprobe
 export ARCHON_WHISPER_BIN=/opt/homebrew/bin/whisper-cli
+# Optional: prefer RapidOCR for frame OCR and use Python/OpenCV frame fallback.
+export ARCHON_OCR_ENGINE=rapidocr
 ```
 
 Then start Archon from that shell.

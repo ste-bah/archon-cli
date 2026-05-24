@@ -11,6 +11,63 @@ async fn text_only_returns_immediately() {
     assert_eq!(provider.call_count.load(Ordering::SeqCst), 1);
 }
 
+struct AliasRecordingProvider {
+    seen_models: std::sync::Mutex<Vec<String>>,
+}
+
+#[async_trait::async_trait]
+impl LlmProvider for AliasRecordingProvider {
+    fn name(&self) -> &str {
+        "alias-provider"
+    }
+
+    fn models(&self) -> Vec<ModelInfo> {
+        vec![ModelInfo {
+            id: "gpt-resolved".into(),
+            display_name: "GPT Resolved".into(),
+            context_window: 400_000,
+        }]
+    }
+
+    fn supports_feature(&self, _: ProviderFeature) -> bool {
+        false
+    }
+
+    async fn stream(
+        &self,
+        request: LlmRequest,
+    ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
+        self.seen_models.lock().unwrap().push(request.model);
+        let events = text_response("resolved");
+        let (tx, rx) = mpsc::channel(events.len() + 1);
+        for event in events {
+            let _ = tx.send(event).await;
+        }
+        Ok(rx)
+    }
+
+    async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
+        unimplemented!()
+    }
+}
+
+#[tokio::test]
+async fn tier_alias_is_resolved_before_subagent_request() {
+    let provider = Arc::new(AliasRecordingProvider {
+        seen_models: std::sync::Mutex::new(Vec::new()),
+    });
+    let runner = make_runner_with_model(provider.clone(), 10, AgentConfig::default(), "sonnet");
+
+    let result = runner.run("Say hello").await.unwrap();
+
+    assert_eq!(result, "resolved");
+    assert_eq!(runner.model(), "gpt-resolved");
+    assert_eq!(
+        provider.seen_models.lock().unwrap().as_slice(),
+        ["gpt-resolved"]
+    );
+}
+
 #[tokio::test]
 async fn tool_use_then_text_returns_after_two_turns() {
     let provider = Arc::new(MockProvider::new(vec![

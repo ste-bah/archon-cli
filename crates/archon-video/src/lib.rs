@@ -1,5 +1,6 @@
 pub mod acquire;
 pub mod asr;
+mod captions;
 pub mod chunk_writer;
 pub mod dedupe;
 pub mod errors;
@@ -9,6 +10,7 @@ pub mod frames;
 pub mod ingest;
 mod ingest_media;
 pub mod metadata;
+mod opencv_frames;
 pub mod policy;
 pub mod provenance;
 pub mod schema;

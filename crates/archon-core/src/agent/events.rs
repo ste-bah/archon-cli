@@ -20,20 +20,27 @@ impl AgentActivitySink for ProviderModelActivitySink {
     }
 }
 
-pub(super) fn emit_tool_result_activity(ctx: &ToolContext, tool_name: &str, result: &ToolResult) {
+pub(super) fn emit_tool_result_activity(
+    ctx: &ToolContext,
+    tool_name: &str,
+    result: &ToolResult,
+    elapsed: std::time::Duration,
+) {
     if result.is_error {
-        crate::dispatch::emit_tool_activity(
+        crate::dispatch::emit_tool_activity_with_elapsed(
             ctx,
             tool_name,
             AgentActivityKind::ToolFailed,
             AgentActivityStatus::Failed,
+            Some(elapsed),
         );
     } else {
-        crate::dispatch::emit_tool_activity(
+        crate::dispatch::emit_tool_activity_with_elapsed(
             ctx,
             tool_name,
             AgentActivityKind::ToolCompleted,
             AgentActivityStatus::Completed,
+            Some(elapsed),
         );
     }
 }

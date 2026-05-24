@@ -63,6 +63,11 @@ pub const KNOWN_ARCHON_VARS: &[&str] = &[
     "ARCHON_KB_DB_PATH",
     "ARCHON_MEANING_DB_PATH",
     "ARCHON_PROV_DB_PATH",
+    // OCR / video helper tuning
+    "ARCHON_OCR_ENGINE",
+    "ARCHON_RAPIDOCR_MIN_SCORE",
+    "ARCHON_VIDEO_FRAME_FALLBACK",
+    "ARCHON_YTDLP_VIDEO_FORMAT",
     // Tool binary overrides
     "ARCHON_FASTER_WHISPER_BIN",
     "ARCHON_FFMPEG_BIN",
@@ -70,7 +75,9 @@ pub const KNOWN_ARCHON_VARS: &[&str] = &[
     "ARCHON_PDFIMAGES_BIN",
     "ARCHON_PDFTOPPM_BIN",
     "ARCHON_PDFTOTEXT_BIN",
+    "ARCHON_RAPIDOCR_PYTHON",
     "ARCHON_TESSERACT_BIN",
+    "ARCHON_VIDEO_OPENCV_PYTHON",
     "ARCHON_WHISPER_BIN",
     "ARCHON_YTDLP_BIN",
     // Telemetry (recognized but no-op)

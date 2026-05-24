@@ -81,6 +81,7 @@ impl SubagentRunner {
         agent_config: std::sync::Arc<crate::agent::AgentConfig>,
         identity: std::sync::Arc<IdentityProvider>,
     ) -> Self {
+        let model = resolved_model(provider.as_ref(), &model);
         Self {
             provider,
             system_prompt,
@@ -104,6 +105,10 @@ impl SubagentRunner {
             agent_config,
             identity,
         }
+    }
+
+    pub fn model(&self) -> &str {
+        &self.model
     }
 
     /// TASK-T3 (G4): wire a shared ProgressTracker so the runner can
@@ -223,4 +228,13 @@ impl SubagentRunner {
         .with_provider_model(self.provider.name(), self.model.clone());
         sink.emit(event);
     }
+}
+
+fn resolved_model(provider: &dyn LlmProvider, model: &str) -> String {
+    let mut request = LlmRequest {
+        model: model.to_string(),
+        ..LlmRequest::default()
+    };
+    provider.resolve_request_model(&mut request);
+    request.model
 }

@@ -63,6 +63,9 @@ impl AcquisitionAdapter for ExternalDownloaderAdapter {
         let mut cmd = Command::new(&self.bin);
         if opts.audio_only {
             cmd.args(["-x", "--audio-format", "wav"]);
+        } else {
+            let video_format = visual_video_format_selector();
+            cmd.args(["-f", video_format.as_str()]);
         }
         cmd.args(["--no-playlist", "--paths"]);
         cmd.arg(&output_dir);
@@ -236,4 +239,11 @@ fn ffmpeg_location_arg() -> Option<String> {
     }
     let homebrew = PathBuf::from("/opt/homebrew/bin/ffmpeg");
     homebrew.exists().then(|| "/opt/homebrew/bin".to_string())
+}
+
+fn visual_video_format_selector() -> String {
+    std::env::var("ARCHON_YTDLP_VIDEO_FORMAT")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "best[height<=720][ext=mp4]/best[height<=720]/best[ext=mp4]/best".into())
 }

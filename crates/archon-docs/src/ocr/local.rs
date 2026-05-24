@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use super::provider::{OcrExtractResult, OcrProvider, OcrRequest};
+use super::rapid;
 use crate::errors::DocsError;
 use crate::models::PageOffset;
 
@@ -35,10 +36,46 @@ impl OcrProvider for LocalOcrProvider {
             | "yaml" | "yml" | "toml" => extract_text_file(path),
             "pdf" => extract_pdf_native(path).await,
             "png" | "jpg" | "jpeg" | "tif" | "tiff" => {
-                extract_image_with_tesseract(path, request.language_hint.as_deref()).await
+                extract_image_local(path, request.language_hint.as_deref()).await
             }
             _ => Err(DocsError::UnsupportedMediaType { media_type: ext }),
         }
+    }
+}
+
+async fn extract_image_local(
+    path: &Path,
+    language_hint: Option<&str>,
+) -> Result<OcrExtractResult, DocsError> {
+    if rapid::prefer_rapidocr() {
+        let rapid_error = match rapid::extract_image_with_rapidocr(path).await {
+            Ok(result) => return Ok(result),
+            Err(error) => error.to_string(),
+        };
+        return extract_image_with_tesseract(path, language_hint)
+            .await
+            .map_err(|tesseract_error| DocsError::OcrApi {
+                message: format!(
+                    "{rapid_error}; tesseract fallback also failed: {tesseract_error}"
+                ),
+                status_code: None,
+            });
+    }
+
+    match extract_image_with_tesseract(path, language_hint).await {
+        Ok(result) => Ok(result),
+        Err(tesseract_error) if rapid::allow_rapidocr_fallback() => {
+            let tesseract_error = tesseract_error.to_string();
+            rapid::extract_image_with_rapidocr(path)
+                .await
+                .map_err(|rapid_error| DocsError::OcrApi {
+                    message: format!(
+                        "{tesseract_error}; RapidOCR fallback also failed: {rapid_error}"
+                    ),
+                    status_code: None,
+                })
+        }
+        Err(error) => Err(error),
     }
 }
 

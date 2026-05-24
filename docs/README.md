@@ -86,7 +86,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 - [Strategic engagement research](cookbook/strategic-engagement.md) — 22-document intelligence package workflow
 - [Real-world Evidence Engine examples](cookbook/real-world-evidence-engine.md) — research, education, business, trading, coding, and strategic analysis workflows
-- [YouTube video evidence with local Whisper](cookbook/video-evidence-youtube-whisper.md) — governed `yt-dlp` download, `ffmpeg`, `whisper-cpp`, TUI monitoring, and timecoded evidence consumption
+- [YouTube video evidence with local Whisper](cookbook/video-evidence-youtube-whisper.md) — governed `yt-dlp` download, caption-first ingest, `ffmpeg`, `whisper-cpp`, optional frame OCR fallbacks, TUI monitoring, and timecoded evidence consumption
 - [Memory-driven coding](cookbook/memory-driven-coding.md) — using SONA + ReasoningBank to inform decisions
 - [Coding pipeline (`/archon-code`)](cookbook/god-code-pipeline.md) — 50-agent coding workflow end-to-end inside the TUI
 - [Research pipeline (`/archon-research`)](cookbook/archon-research-pipeline.md) — 47-agent PhD research workflow end-to-end inside the TUI
@@ -126,6 +126,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v1.3.6](release-notes/v1.3.6.md) — Video evidence capture fallbacks: caption-first ingest, frame-friendly `yt-dlp`, OpenCV frame fallback, and RapidOCR image/frame OCR
 - [v1.3.5](release-notes/v1.3.5.md) — Governed YouTube/video ingest hardening, local `whisper-cpp` ASR chunks, PNG frame extraction, frame reprocess, and cross-OS setup docs
 - [v1.3.4](release-notes/v1.3.4.md) — DeepSeek provider parity, Anthropic-compatible DeepSeek sessions, generic non-Claude model switching, and provider-aware cost display
 - [v1.3.3](release-notes/v1.3.3.md) — Governed video evidence ingest, `/video` slash parity, transcript/frame evidence storage, and policy-gated video summaries

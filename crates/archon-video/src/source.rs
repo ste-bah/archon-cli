@@ -124,7 +124,7 @@ pub fn resolve_source(
         });
     }
 
-    let transcription_source_plan = choose_transcription_source(opts, policy);
+    let transcription_source_plan = choose_transcription_source(&classified.kind, opts, policy);
     let policy_snapshot_json = serde_json::to_string(&PolicySnapshot {
         acquisition_method: &acquisition_method,
         transcription_source: &transcription_source_plan,
@@ -261,12 +261,16 @@ fn choose_acquisition_method(
 }
 
 fn choose_transcription_source(
+    kind: &VideoSourceKind,
     opts: &ResolveOpts,
     policy: &EffectivePolicy,
 ) -> TranscriptionSource {
     if opts.transcript_path.is_some() || opts.metadata_only {
         TranscriptionSource::UserTranscript
-    } else if opts.prefer_caption && policy.video.allow_caption_capture {
+    } else if opts.prefer_caption
+        && policy.video.allow_caption_capture
+        && matches!(kind, VideoSourceKind::YouTube | VideoSourceKind::DirectUrl)
+    {
         TranscriptionSource::CapturedCaption
     } else {
         TranscriptionSource::LocalAsr

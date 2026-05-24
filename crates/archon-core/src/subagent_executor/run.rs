@@ -413,6 +413,7 @@ impl AgentSubagentExecutor {
             runner.set_effort(effort);
         }
         runner.set_activity_actor(cache_id.clone(), activity_agent_type.clone());
+        let activity_model = runner.model().to_string();
 
         if let Some(ref def) = resolved_def
             && let Some(ref reminder) = def.critical_system_reminder
@@ -459,7 +460,7 @@ impl AgentSubagentExecutor {
             }
         }
 
-        self.emit_subagent_started(&cache_id, &activity_agent_type, &model);
+        self.emit_subagent_started(&cache_id, &activity_agent_type, &activity_model);
 
         // --- RUN THE RUNNER ------------------------------------------
         let runner_result = runner.run(&request.prompt).await;
@@ -470,7 +471,12 @@ impl AgentSubagentExecutor {
             Ok(text) => Ok(text),
             Err(e) => Err(format!("Subagent failed: {e}")),
         };
-        self.emit_subagent_finished(&cache_id, &activity_agent_type, &model, &inner_result);
+        self.emit_subagent_finished(
+            &cache_id,
+            &activity_agent_type,
+            &activity_model,
+            &inner_result,
+        );
         self.on_inner_complete(cache_id.clone(), inner_result.clone())
             .await;
 

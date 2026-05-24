@@ -96,7 +96,14 @@ archon video ingest "https://youtu.be/abc123" --frames hybrid --asr whisper-cpp 
 `yt-dlp` may need `ffmpeg` for format merging or audio extraction. Current
 Archon builds pass the Homebrew `ffmpeg` directory to `yt-dlp` automatically
 when `/opt/homebrew/bin/ffmpeg` exists, or when `ARCHON_FFMPEG_BIN` points to an
-explicit binary.
+explicit binary. For video+frame ingest, Archon asks `yt-dlp` for a
+frame-friendly MP4-oriented format by default:
+`best[height<=720][ext=mp4]/best[height<=720]/best[ext=mp4]/best`. Override
+that with `ARCHON_YTDLP_VIDEO_FORMAT` when you need a different local policy.
+
+If `[policy.video].allow_caption_capture = true`, Archon first tries to capture
+English VTT captions with `yt-dlp`. Captions become timecoded transcript chunks.
+If no usable captions exist, it falls back to the configured ASR provider.
 
 ## Policy-Gated Acquisition
 
@@ -125,9 +132,11 @@ device = "auto"
 
 ## Chart And Diagram Extraction
 
-Frame extraction uses `ffmpeg` in `interval`, `scene`, or `hybrid` mode. Frames
-are deduplicated with a perceptual hash before OCR/VLM evidence chunks are
-written.
+Frame extraction uses `ffmpeg` in `interval`, `scene`, or `hybrid` mode. If
+`ffmpeg` cannot write frames from a difficult container or codec, Archon can
+fall back to a local Python/OpenCV sampler when `opencv-python` is available.
+Frames are deduplicated with a perceptual hash before OCR/VLM evidence chunks
+are written.
 
 ```bash
 archon video ingest ./market-review.mp4 --frames hybrid --vlm --yes
@@ -158,6 +167,11 @@ allow_cloud = false
 ```
 
 Cloud VLM/summary providers require the matching cloud policy gates.
+
+Local image OCR defaults to Tesseract. Set `ARCHON_OCR_ENGINE=rapidocr` to try
+RapidOCR first, or leave it unset to use RapidOCR only as a fallback if
+Tesseract fails. RapidOCR requires Python plus `rapidocr_onnxruntime` or
+`rapidocr`; OpenCV frame fallback requires `opencv-python`.
 
 ## Policy Configuration Reference
 

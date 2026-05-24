@@ -125,6 +125,49 @@ printf '%s\n' '{}'
     assert_eq!(acquired.local_path, media);
 }
 
+#[tokio::test]
+async fn external_downloader_requests_frame_friendly_video_format() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("yt-dlp-mock.sh");
+    let media = dir.path().join("download.mp4");
+    let seen = dir.path().join("seen_args.txt");
+    write_script(
+        &script,
+        &format!(
+            r#"#!/bin/sh
+printf '%s\n' "$*" > '{}'
+printf 'MP4' > '{}'
+printf '%s\n' '{}'
+"#,
+            seen.display(),
+            media.display(),
+            media.display()
+        ),
+    );
+    let mut policy = EffectivePolicy::default();
+    policy.video.enabled = true;
+    policy.video.allow_external_downloaders = true;
+    policy.video.require_user_confirmation_for_download = false;
+
+    let acquired = ExternalDownloaderAdapter {
+        bin: script.display().to_string(),
+    }
+    .acquire(
+        "https://example.test/video",
+        &AcquireOptions {
+            policy,
+            audio_only: false,
+            yes: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    let args = std::fs::read_to_string(seen).unwrap();
+    assert_eq!(acquired.local_path, media);
+    assert!(args.contains("-f best[height<=720][ext=mp4]/best[height<=720]"));
+}
+
 fn write_script(path: &std::path::Path, body: &str) {
     let mut file = std::fs::File::create(path).unwrap();
     file.write_all(body.as_bytes()).unwrap();

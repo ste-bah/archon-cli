@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use archon_observability::{AgentActivityEvent, AgentActivityKind, AgentActivityStatus};
 use archon_tools::plan_mode::is_tool_allowed_in_mode;
@@ -159,20 +160,23 @@ impl ToolRegistry {
             AgentActivityKind::ToolStarted,
             AgentActivityStatus::Running,
         );
+        let started_at = Instant::now();
         let result = tool.execute(input, ctx).await;
         if result.is_error {
-            emit_tool_activity(
+            emit_tool_activity_with_elapsed(
                 ctx,
                 tool_name,
                 AgentActivityKind::ToolFailed,
                 AgentActivityStatus::Failed,
+                Some(started_at.elapsed()),
             );
         } else {
-            emit_tool_activity(
+            emit_tool_activity_with_elapsed(
                 ctx,
                 tool_name,
                 AgentActivityKind::ToolCompleted,
                 AgentActivityStatus::Completed,
+                Some(started_at.elapsed()),
             );
         }
         result
@@ -185,13 +189,36 @@ pub(crate) fn emit_tool_activity(
     kind: AgentActivityKind,
     status: AgentActivityStatus,
 ) {
+    emit_tool_activity_with_elapsed(ctx, tool_name, kind, status, None);
+}
+
+pub(crate) fn emit_tool_activity_with_elapsed(
+    ctx: &ToolContext,
+    tool_name: &str,
+    kind: AgentActivityKind,
+    status: AgentActivityStatus,
+    elapsed: Option<Duration>,
+) {
     if let Some(sink) = &ctx.activity_sink {
+        let message = match elapsed {
+            Some(elapsed) => format!("{tool_name} elapsed={}", format_duration(elapsed)),
+            None => tool_name.to_string(),
+        };
         sink.emit(AgentActivityEvent::new(
             ctx.session_id.clone(),
             kind,
             status,
-            tool_name.to_string(),
+            message,
         ));
+    }
+}
+
+fn format_duration(elapsed: Duration) -> String {
+    let millis = elapsed.as_millis();
+    if millis < 1_000 {
+        format!("{millis}ms")
+    } else {
+        format!("{:.1}s", elapsed.as_secs_f64())
     }
 }
 
@@ -582,7 +609,8 @@ mod tests {
                 AgentActivityKind::ToolCompleted
             ]
         );
-        assert!(events.iter().all(|event| event.message == "ActivityEcho"));
+        assert_eq!(events[0].message, "ActivityEcho");
+        assert!(events[1].message.starts_with("ActivityEcho elapsed="));
         assert!(
             events
                 .iter()

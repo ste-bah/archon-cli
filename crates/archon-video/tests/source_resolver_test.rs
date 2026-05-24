@@ -50,6 +50,25 @@ fn resolver_accepts_youtube_when_policy_selects_downloader() {
 }
 
 #[test]
+fn resolver_records_caption_plan_when_policy_prefers_captions() {
+    let mut policy = video_policy();
+    policy.video.allow_youtube = true;
+    policy.video.allow_external_downloaders = true;
+    policy.video.allow_caption_capture = true;
+    let opts = ResolveOpts {
+        prefer_caption: true,
+        ..Default::default()
+    };
+
+    let resolved = resolve_source("https://youtu.be/abc123", &opts, &policy).unwrap();
+
+    assert_eq!(
+        resolved.transcription_source_plan,
+        TranscriptionSource::CapturedCaption
+    );
+}
+
+#[test]
 fn resolver_rejects_ftp_accepts_local_and_direct_url() {
     let mut policy = video_policy();
     policy.video.allow_direct_urls = true;

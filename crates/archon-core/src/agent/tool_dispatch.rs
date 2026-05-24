@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
@@ -40,8 +41,14 @@ impl Agent {
                             AgentActivityKind::ToolStarted,
                             AgentActivityStatus::Running,
                         );
+                        let started_at = Instant::now();
                         let result = tool.execute(input, &ctx_clone).await;
-                        emit_tool_result_activity(&ctx_clone, tool.name(), &result);
+                        emit_tool_result_activity(
+                            &ctx_clone,
+                            tool.name(),
+                            &result,
+                            started_at.elapsed(),
+                        );
                         result
                     } else if let Some(ref backend) = ctx_clone.sandbox {
                         match backend.check(tool.name(), &input) {
@@ -61,8 +68,14 @@ impl Agent {
                                     AgentActivityKind::ToolStarted,
                                     AgentActivityStatus::Running,
                                 );
+                                let started_at = Instant::now();
                                 let result = tool.execute(input, &ctx_clone).await;
-                                emit_tool_result_activity(&ctx_clone, tool.name(), &result);
+                                emit_tool_result_activity(
+                                    &ctx_clone,
+                                    tool.name(),
+                                    &result,
+                                    started_at.elapsed(),
+                                );
                                 result
                             }
                         }
@@ -73,8 +86,14 @@ impl Agent {
                             AgentActivityKind::ToolStarted,
                             AgentActivityStatus::Running,
                         );
+                        let started_at = Instant::now();
                         let result = tool.execute(input, &ctx_clone).await;
-                        emit_tool_result_activity(&ctx_clone, tool.name(), &result);
+                        emit_tool_result_activity(
+                            &ctx_clone,
+                            tool.name(),
+                            &result,
+                            started_at.elapsed(),
+                        );
                         result
                     };
                     (idx, result)
@@ -117,8 +136,14 @@ impl Agent {
                         AgentActivityKind::ToolStarted,
                         AgentActivityStatus::Running,
                     );
+                    let started_at = Instant::now();
                     let result = pre.tool_arc.execute(pre.input.clone(), &ctx).await;
-                    emit_tool_result_activity(&ctx, pre.tool_arc.name(), &result);
+                    emit_tool_result_activity(
+                        &ctx,
+                        pre.tool_arc.name(),
+                        &result,
+                        started_at.elapsed(),
+                    );
                     result
                 } else if let Some(ref backend) = ctx.sandbox {
                     match backend.check(pre.tool_arc.name(), &pre.input) {
@@ -138,8 +163,14 @@ impl Agent {
                                 AgentActivityKind::ToolStarted,
                                 AgentActivityStatus::Running,
                             );
+                            let started_at = Instant::now();
                             let result = pre.tool_arc.execute(pre.input.clone(), &ctx).await;
-                            emit_tool_result_activity(&ctx, pre.tool_arc.name(), &result);
+                            emit_tool_result_activity(
+                                &ctx,
+                                pre.tool_arc.name(),
+                                &result,
+                                started_at.elapsed(),
+                            );
                             result
                         }
                     }
@@ -150,8 +181,14 @@ impl Agent {
                         AgentActivityKind::ToolStarted,
                         AgentActivityStatus::Running,
                     );
+                    let started_at = Instant::now();
                     let result = pre.tool_arc.execute(pre.input.clone(), &ctx).await;
-                    emit_tool_result_activity(&ctx, pre.tool_arc.name(), &result);
+                    emit_tool_result_activity(
+                        &ctx,
+                        pre.tool_arc.name(),
+                        &result,
+                        started_at.elapsed(),
+                    );
                     result
                 };
                 results.push(result);

@@ -45,6 +45,14 @@ archon-cli links against OpenSSL via `reqwest` (rustls is also enabled, but buil
 > `[sandbox]` only after reviewing [Sandboxing](../security/sandboxing.md).
 > The manual per-distro lists below are kept for reference and for unsupported distros.
 
+Optional local video/image fallbacks use Python packages rather than OS
+packages. Install them into the Python environment used to start Archon when
+you want RapidOCR frame OCR or OpenCV frame extraction fallback:
+
+```bash
+python3 -m pip install rapidocr_onnxruntime opencv-python
+```
+
 ### Ubuntu / Debian / WSL2-Ubuntu
 
 ```bash

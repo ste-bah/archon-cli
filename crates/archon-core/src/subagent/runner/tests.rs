@@ -150,6 +150,15 @@ fn make_runner_with_config(
     max_turns: u32,
     agent_config: AgentConfig,
 ) -> SubagentRunner {
+    make_runner_with_model(provider, max_turns, agent_config, "mock-model")
+}
+
+fn make_runner_with_model(
+    provider: Arc<dyn LlmProvider>,
+    max_turns: u32,
+    agent_config: AgentConfig,
+    model: &str,
+) -> SubagentRunner {
     let registry = Arc::new(crate::dispatch::create_default_registry(
         std::env::current_dir().unwrap_or_default(),
         None,
@@ -168,7 +177,7 @@ fn make_runner_with_config(
         tool_defs,
         registry,
         ctx,
-        "mock-model".into(),
+        model.into(),
         max_turns,
         300,
         Arc::new(agent_config),

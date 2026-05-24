@@ -9,6 +9,7 @@ use crate::asr::{
     AsrOptions, AsrProvider, DiarizationProvider, apply_diarization, enforce_monotonic_boundaries,
     select_asr_provider, select_diarizer_provider,
 };
+use crate::captions::capture_caption_bytes;
 use crate::chunk_writer::{
     TranscriptChunkInput, write_transcript_artifact, write_transcript_chunk,
 };
@@ -18,7 +19,7 @@ use crate::ingest_media::{acquire_media_if_needed, asr_audio_bytes, successful_v
 use crate::metadata::{MetadataOpts, VideoMetadata, extract_metadata};
 use crate::provenance::insert_edge;
 use crate::schema::create_video_schema;
-use crate::source::{ResolveOpts, resolve_source};
+use crate::source::{ResolveOpts, TranscriptionSource, resolve_source};
 use crate::store::{self, TranscriptSegment as StoredSegment, VideoSource, VideoTrack};
 use crate::transcript::parse_transcript;
 
@@ -78,7 +79,7 @@ pub async fn ingest_video_with_providers(
     let resolve_opts = ResolveOpts {
         transcript_path: opts.transcript_path.clone(),
         metadata_only: opts.metadata_only,
-        prefer_caption: false,
+        prefer_caption: policy.video.allow_caption_capture,
     };
     let mut resolution = resolve_source(&opts.source, &resolve_opts, policy)?;
     if let Some(media) = acquire_media_if_needed(&opts, policy, &resolution).await? {
@@ -115,6 +116,10 @@ pub async fn ingest_video_with_providers(
         &opts,
         policy,
         transcript_bytes,
+        matches!(
+            resolution.transcription_source_plan,
+            TranscriptionSource::CapturedCaption
+        ),
         resolution.local_path.as_deref(),
         asr_provider,
         diarizer_provider,
@@ -250,6 +255,7 @@ async fn resolve_segment_plan(
     opts: &IngestOpts,
     policy: &EffectivePolicy,
     transcript_bytes: Option<Vec<u8>>,
+    prefer_captions: bool,
     media_path: Option<&std::path::Path>,
     asr_provider: Option<&dyn AsrProvider>,
     diarizer_provider: Option<&dyn DiarizationProvider>,
@@ -271,27 +277,54 @@ async fn resolve_segment_plan(
             provider: "none".into(),
         });
     }
+    let mut pre_asr_warnings = Vec::new();
+    if prefer_captions {
+        match capture_caption_bytes(&opts.source, &caption_downloader_bin(policy)).await {
+            Ok(Some(bytes)) => match parse_transcript(&bytes, None) {
+                Ok(parsed) if !parsed.segments.is_empty() => {
+                    return Ok(SegmentPlan {
+                        segments: parsed.segments,
+                        warnings: parsed.warnings,
+                        source_method: "captured_caption".into(),
+                        provider: "yt-dlp-caption".into(),
+                    });
+                }
+                Ok(parsed) => {
+                    pre_asr_warnings.extend(parsed.warnings);
+                    pre_asr_warnings
+                        .push("captured captions produced no transcript segments".into());
+                }
+                Err(err) => pre_asr_warnings.push(format!(
+                    "captured caption parse failed, falling back to ASR: {err}"
+                )),
+            },
+            Ok(None) => pre_asr_warnings
+                .push("caption capture found no English VTT subtitles; falling back to ASR".into()),
+            Err(err) => pre_asr_warnings.push(format!(
+                "caption capture failed, falling back to ASR: {err}"
+            )),
+        }
+    }
     let asr_opts = AsrOptions::from(&policy.video);
     let audio_bytes = asr_audio_bytes(media_path, asr_provider.is_some()).await?;
     if let Some(provider) = asr_provider {
-        return build_asr_segment_plan(
-            provider,
-            &asr_opts,
-            policy,
-            diarizer_provider,
-            &audio_bytes,
-        )
-        .await;
+        let mut plan =
+            build_asr_segment_plan(provider, &asr_opts, policy, diarizer_provider, &audio_bytes)
+                .await?;
+        plan.warnings.splice(0..0, pre_asr_warnings);
+        return Ok(plan);
     }
     let provider = select_asr_provider(&policy.video);
-    build_asr_segment_plan(
+    let mut plan = build_asr_segment_plan(
         provider.as_ref(),
         &asr_opts,
         policy,
         diarizer_provider,
         &audio_bytes,
     )
-    .await
+    .await?;
+    plan.warnings.splice(0..0, pre_asr_warnings);
+    Ok(plan)
 }
 
 async fn build_asr_segment_plan(
@@ -434,4 +467,11 @@ fn store_error(error: impl std::fmt::Display) -> VideoError {
     VideoError::Store {
         message: error.to_string(),
     }
+}
+
+fn caption_downloader_bin(policy: &EffectivePolicy) -> String {
+    std::env::var("ARCHON_YTDLP_BIN")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| policy.video.acquire.external_downloader_bin.clone())
 }

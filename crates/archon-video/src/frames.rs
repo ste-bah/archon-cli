@@ -73,6 +73,35 @@ async fn extract_mode(
     opts: &FrameExtractionOpts,
     prefix: &str,
 ) -> Result<Vec<ExtractedFrame>, VideoError> {
+    let ffmpeg_result = extract_mode_ffmpeg(video_path, opts, prefix).await;
+    if !crate::opencv_frames::fallback_enabled() {
+        return ffmpeg_result;
+    }
+    match ffmpeg_result {
+        Ok(frames) if !frames.is_empty() => Ok(frames),
+        Ok(frames) => {
+            match crate::opencv_frames::extract_with_opencv(video_path, opts, prefix).await {
+                Ok(fallback) if !fallback.is_empty() => Ok(fallback),
+                _ => Ok(frames),
+            }
+        }
+        Err(ffmpeg_error) => {
+            match crate::opencv_frames::extract_with_opencv(video_path, opts, prefix).await {
+                Ok(fallback) if !fallback.is_empty() => Ok(fallback),
+                Ok(_) => Err(ffmpeg_error),
+                Err(fallback_error) => Err(VideoError::FrameExtractionFailed {
+                    message: format!("{ffmpeg_error}; OpenCV fallback failed: {fallback_error}"),
+                }),
+            }
+        }
+    }
+}
+
+async fn extract_mode_ffmpeg(
+    video_path: &Path,
+    opts: &FrameExtractionOpts,
+    prefix: &str,
+) -> Result<Vec<ExtractedFrame>, VideoError> {
     let pattern = opts.output_dir.join(format!("{prefix}_%04d.png"));
     let filter = if prefix == "scene" {
         format!("select=gt(scene\\,{})", opts.scene_threshold)
@@ -111,7 +140,7 @@ async fn extract_mode(
     )
 }
 
-fn collect_frames(
+pub(crate) fn collect_frames(
     dir: &Path,
     prefix: &str,
     interval_secs: f64,

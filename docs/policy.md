@@ -187,7 +187,9 @@ For local video ASR, set `[policy.video.asr].provider = "whisper-cpp"` and point
 requires both `allow_youtube = true` and `allow_external_downloaders = true`.
 `external_downloader_bin` or `ARCHON_YTDLP_BIN` selects the `yt-dlp` binary;
 `ARCHON_FFMPEG_BIN` is used by both Archon audio/frame extraction and `yt-dlp`
-format merging.
+format merging. When `allow_caption_capture = true`, Archon tries governed
+English caption capture before ASR and falls back to `[policy.video.asr]` when
+captions are unavailable or unusable.
 
 Governed-learning auto-apply is denied by default. Low-risk updates can only
 auto-apply when `policy.learning.auto_apply_low_risk = true`; prompt, blocking

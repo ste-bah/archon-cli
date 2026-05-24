@@ -251,7 +251,9 @@ fn render_row<'a>(row: &AgentActivityRow, theme: &Theme, width: usize) -> Line<'
     };
     let mut detail = row.detail.clone().unwrap_or_default();
     if let Some(tool) = &row.current_tool {
-        detail = format!("{detail} tool={tool}");
+        if !detail.starts_with(tool) {
+            detail = format!("{detail} tool={tool}");
+        }
     }
     if let Some(run_id) = &row.run_id {
         detail = format!("{detail} run={run_id}");

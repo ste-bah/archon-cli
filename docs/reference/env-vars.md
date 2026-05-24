@@ -41,10 +41,16 @@
 | `ARCHON_WHISPER_BIN` | Override the `whisper-cli` binary used by `whisper-cpp` video ASR |
 | `ARCHON_FASTER_WHISPER_BIN` | Override the `faster-whisper` binary used by video ASR |
 | `ARCHON_YTDLP_BIN` | Override the `yt-dlp` binary used by YouTube/video acquisition |
+| `ARCHON_YTDLP_VIDEO_FORMAT` | Override the MP4-oriented `yt-dlp` format selector used for video+frame ingest |
 | `ARCHON_PDFTOTEXT_BIN` | Override the `pdftotext` binary used by document/PDF extraction |
 | `ARCHON_PDFIMAGES_BIN` | Override the `pdfimages` binary used by embedded PDF image extraction |
 | `ARCHON_PDFTOPPM_BIN` | Override the `pdftoppm` binary used by rendered PDF page fallback |
 | `ARCHON_TESSERACT_BIN` | Override the `tesseract` binary used by local OCR |
+| `ARCHON_OCR_ENGINE` | Set to `rapidocr` to prefer RapidOCR for image/frame OCR, or `tesseract` to disable RapidOCR fallback |
+| `ARCHON_RAPIDOCR_PYTHON` | Override the Python binary used for optional RapidOCR image/frame OCR |
+| `ARCHON_RAPIDOCR_MIN_SCORE` | Minimum RapidOCR confidence score, default `0.55` |
+| `ARCHON_VIDEO_FRAME_FALLBACK` | Set to `0`, `false`, `no`, or `off` to disable Python/OpenCV frame fallback |
+| `ARCHON_VIDEO_OPENCV_PYTHON` | Override the Python binary used for optional OpenCV frame fallback |
 | `EDITOR` | Used by `/commit` and skill workflows that open an editor |
 | `SHELL` | Inherited by `Bash` tool subprocesses |
 | `HOME` | Used to resolve `~/.config/archon/` and `~/.local/share/archon/` |

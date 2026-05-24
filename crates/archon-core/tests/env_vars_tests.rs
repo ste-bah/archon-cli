@@ -462,8 +462,8 @@ fn doctor_shows_unset_for_missing_vars() {
 fn known_vars_list_has_correct_count() {
     // 4 auth + 12 codex + 4 model/behavior + 4 feature control
     // + 1 memory/embedding + 7 debugging + 6 paths
-    // + 9 tool binary overrides + 1 telemetry = 48
-    assert_eq!(KNOWN_ARCHON_VARS.len(), 48);
+    // + 4 OCR/video helper tuning + 11 tool binary overrides + 1 telemetry = 54
+    assert_eq!(KNOWN_ARCHON_VARS.len(), 54);
 }
 
 #[test]
@@ -493,13 +493,19 @@ fn known_vars_contains_all_documented_vars() {
         "ARCHON_KB_DB_PATH",
         "ARCHON_MEANING_DB_PATH",
         "ARCHON_PROV_DB_PATH",
+        "ARCHON_OCR_ENGINE",
+        "ARCHON_RAPIDOCR_MIN_SCORE",
+        "ARCHON_VIDEO_FRAME_FALLBACK",
+        "ARCHON_YTDLP_VIDEO_FORMAT",
         "ARCHON_FASTER_WHISPER_BIN",
         "ARCHON_FFMPEG_BIN",
         "ARCHON_FFPROBE_BIN",
         "ARCHON_PDFIMAGES_BIN",
         "ARCHON_PDFTOPPM_BIN",
         "ARCHON_PDFTOTEXT_BIN",
+        "ARCHON_RAPIDOCR_PYTHON",
         "ARCHON_TESSERACT_BIN",
+        "ARCHON_VIDEO_OPENCV_PYTHON",
         "ARCHON_WHISPER_BIN",
         "ARCHON_YTDLP_BIN",
         "ARCHON_DISABLE_TELEMETRY",
