@@ -7,7 +7,6 @@ use archon_llm::streaming::StreamEvent;
 use archon_llm::types::ContentBlockType;
 use archon_tools::tool::ToolContext;
 use archon_tools::tool::ToolResult;
-use futures::future::join_all;
 
 use crate::dispatch::ToolRegistry;
 

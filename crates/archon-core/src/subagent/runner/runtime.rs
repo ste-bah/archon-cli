@@ -1,5 +1,9 @@
 use super::*;
 
+mod tool_round;
+
+use tool_round::replay_tool_round;
+
 impl SubagentRunner {
     /// Run the subagent loop with the given initial prompt.
     /// Returns the accumulated text output from the final turn.
@@ -629,214 +633,14 @@ impl SubagentRunner {
                 return Ok(text_content);
             }
 
-            // Build assistant message with text + tool_use blocks
-            let mut assistant_content: Vec<serde_json::Value> = Vec::new();
-            let replay_signed_thinking = matches!(
-                self.provider.compaction_policy().wire_shape,
-                archon_llm::compaction_policy::WireShape::AnthropicMessages
-                    | archon_llm::compaction_policy::WireShape::VertexAnthropic
-            );
-            if replay_signed_thinking {
-                for block in thinking_blocks.values() {
-                    if !block.thinking.is_empty() {
-                        assistant_content.push(serde_json::json!({
-                            "type": "thinking",
-                            "thinking": block.thinking,
-                            "signature": block.signature,
-                        }));
-                    }
-                }
-            }
-            if !text_content.is_empty() {
-                assistant_content.push(serde_json::json!({
-                    "type": "text",
-                    "text": text_content,
-                }));
-            }
-            for tool in &pending_tools {
-                let allow_empty = self
-                    .registry
-                    .lookup(&tool.name)
-                    .map(|tool_arc| {
-                        crate::agent::tool_input_json::schema_allows_empty_input(
-                            &tool_arc.input_schema(),
-                        )
-                    })
-                    .unwrap_or(false);
-                let input = match crate::agent::tool_input_json::parse_pending_tool_input(
-                    &tool.name,
-                    &tool.id,
-                    &tool.input_json,
-                    allow_empty,
-                ) {
-                    Ok(input) => input,
-                    Err(err) => {
-                        tracing::warn!(
-                            tool = %tool.name,
-                            tool_use_id = %tool.id,
-                            input_len = tool.input_json.len(),
-                            scope = "subagent",
-                            "{err}"
-                        );
-                        serde_json::json!({
-                            "_archon_malformed_tool_input": true,
-                            "error": err,
-                        })
-                    }
-                };
-                assistant_content.push(serde_json::json!({
-                    "type": "tool_use",
-                    "id": tool.id,
-                    "name": tool.name,
-                    "input": input,
-                }));
-            }
-            let assistant_msg = serde_json::json!({
-                "role": "assistant",
-                "content": assistant_content,
-            });
-            self.record_transcript(&assistant_msg);
-            messages.push(assistant_msg);
-
-            // ── Three-phase parallel tool dispatch (v0.1.12) ──────────────
-            // Mirrors claurst's proven pattern:
-            //   Phase 1: sequential pre-hook pass (hooks/permissions are
-            //            interactive and cannot be parallelized)
-            //   Phase 2: concurrent execution via futures::future::join_all
-            //            over Either<Left blocked, Right execute>.
-            //            join_all preserves input order natively.
-            //   Phase 3: assemble tool_result blocks in order, update
-            //            progress tracker (sync, no .await across locks)
-            //
-            // Phase 1 — collect PreparedTool entries.
-            struct PreparedTool {
-                id: String,
-                name: String,
-                input: serde_json::Value,
-                parse_error: Option<String>,
-            }
-            let mut prepared: Vec<PreparedTool> = Vec::with_capacity(pending_tools.len());
-            for tool in &pending_tools {
-                let allow_empty = self
-                    .registry
-                    .lookup(&tool.name)
-                    .map(|tool_arc| {
-                        crate::agent::tool_input_json::schema_allows_empty_input(
-                            &tool_arc.input_schema(),
-                        )
-                    })
-                    .unwrap_or(false);
-                let (input, parse_error) =
-                    match crate::agent::tool_input_json::parse_pending_tool_input(
-                        &tool.name,
-                        &tool.id,
-                        &tool.input_json,
-                        allow_empty,
-                    ) {
-                        Ok(input) => (input, None),
-                        Err(err) => {
-                            tracing::warn!(
-                                tool = %tool.name,
-                                tool_use_id = %tool.id,
-                                input_len = tool.input_json.len(),
-                                scope = "subagent",
-                                "{err}"
-                            );
-                            (serde_json::json!({}), Some(err))
-                        }
-                    };
-                prepared.push(PreparedTool {
-                    id: tool.id.clone(),
-                    name: tool.name.clone(),
-                    input,
-                    parse_error,
-                });
-            }
-
-            // Phase 2 — execute all tools concurrently via join_all.
-            // Each async block owns its cloned name/input/registry.
-            let registry = Arc::clone(&self.registry);
-            let exec_futures: Vec<_> = prepared
-                .iter()
-                .map(|p| {
-                    let name = p.name.clone();
-                    let input = p.input.clone();
-                    let parse_error = p.parse_error.clone();
-                    let registry = Arc::clone(&registry);
-                    let ctx = self.tool_context.clone();
-                    async move {
-                        if let Some(err) = parse_error {
-                            return ToolResult::error(err);
-                        }
-                        registry.dispatch(&name, input, &ctx).await
-                    }
-                })
-                .collect();
-
-            let exec_results: Vec<ToolResult> = join_all(exec_futures).await;
-
-            // Phase 3 — assemble tool_result blocks IN ORDER.
-            // join_all preserves input order, so zip is correct.
-            let mut tool_results: Vec<serde_json::Value> = Vec::with_capacity(prepared.len());
-            for (p, result) in prepared.iter().zip(exec_results.into_iter()) {
-                // Progress update — sync only, lock never crosses .await
-                if let Some(ref t) = self.progress
-                    && let Ok(mut g) = t.lock()
-                {
-                    g.tool_use_count += 1;
-                    if g.recent_activities.len() >= 5 {
-                        g.recent_activities.pop_front();
-                    }
-                    g.recent_activities
-                        .push_back(crate::subagent::ToolActivity {
-                            tool_name: p.name.clone(),
-                            timestamp: chrono::Utc::now(),
-                        });
-                    g.last_update = chrono::Utc::now();
-                }
-                let context_output = crate::agent::tool_result_context::cap_tool_output_for_context(
-                    &p.name,
-                    &result.content,
-                );
-                if context_output.truncated {
-                    tracing::warn!(
-                        tool = %p.name,
-                        tool_use_id = %p.id,
-                        original_chars = context_output.original_chars,
-                        stored_chars = context_output.stored_chars,
-                        limit_chars = context_output.limit_chars,
-                        scope = "subagent",
-                        "subagent tool output trimmed before model replay"
-                    );
-                }
-                tool_results.push(serde_json::json!({
-                    "type": "tool_result",
-                    "tool_use_id": p.id,
-                    "content": context_output.content,
-                    "is_error": result.is_error,
-                }));
-                self.emit_activity_stream(
-                    "tool_result",
-                    summarize_tool_output(&result.content),
-                    Some(&p.name),
-                    result.is_error,
-                );
-            }
-
-            // Add tool results as a user message
-            let tool_result_msg = serde_json::json!({
-                "role": "user",
-                "content": tool_results,
-            });
-            self.record_transcript(&tool_result_msg);
-            messages.push(tool_result_msg);
-
-            // AGT-026: Drain pending messages at tool round boundary and inject as user turns
-            let pending = self.drain_pending_as_user_turns().await;
-            for msg in pending {
-                self.record_transcript(&msg);
-                messages.push(msg);
-            }
+            replay_tool_round(
+                self,
+                &mut messages,
+                text_content,
+                thinking_blocks,
+                pending_tools,
+            )
+            .await;
         }
 
         self.emit_activity_stream(
