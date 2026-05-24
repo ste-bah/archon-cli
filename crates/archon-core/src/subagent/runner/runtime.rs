@@ -1,7 +1,9 @@
 use super::*;
 
+mod stream_round;
 mod tool_round;
 
+use stream_round::collect_stream_round;
 use tool_round::replay_tool_round;
 
 impl SubagentRunner {
@@ -328,317 +330,48 @@ impl SubagentRunner {
                 }
             }
 
-            // Stream the response
-            let mut rx = match self.provider.stream(request.clone()).await {
-                Ok(rx) => rx,
-                Err(e) if e.is_context_window_exceeded() && !reactive_overflow_retried => {
-                    reactive_overflow_retried = true;
-                    let (outcome, compacted) =
-                        crate::agent::autocompact::compact_json_messages_with_provider(
-                            self.provider.as_ref(),
-                            &self.model,
-                            &messages,
-                            crate::agent::CompactAction::Full,
-                            true,
-                        )
-                        .await
-                        .map_err(|err| {
-                            anyhow::anyhow!("reactive subagent compaction failed: {err}")
-                        })?;
-                    messages = compacted;
-                    let after_current_tokens = match outcome {
-                        crate::agent::autocompact::CompactionOutcome::Compacted {
-                            after_estimated_tokens,
-                            ..
-                        } => after_estimated_tokens,
-                        crate::agent::autocompact::CompactionOutcome::Skipped { .. } => {
-                            crate::agent::autocompact::estimate_messages_tokens(&messages)
-                        }
-                    };
-                    last_known_context_tokens = 0;
-                    auto_compact.on_success(after_current_tokens);
-                    self.provider
-                        .stream(LlmRequest {
-                            messages: messages.clone(),
-                            ..request
-                        })
-                        .await
-                        .map_err(anyhow::Error::new)?
-                }
-                Err(e)
-                    if crate::agent::autocompact::is_rate_limited_error(&e)
-                        && !reactive_rate_limit_retried
-                        && request_body_bytes >= large_retry_body_bytes =>
-                {
-                    reactive_rate_limit_retried = true;
-                    tracing::warn!(
-                        compaction.reason = "rate_limit_large_request",
-                        trigger_body_bytes = request_body_bytes,
-                        threshold_body_bytes = large_retry_body_bytes,
-                        provider_family = telemetry.provider_family,
-                        wire_shape = telemetry.wire_shape,
-                        native_context_window = telemetry.native_context_window,
-                        runtime_context_budget = telemetry.runtime_context_budget,
-                        context_source = telemetry.context_source,
-                        compaction_backend = telemetry.compaction_backend,
-                        scope = "subagent",
-                        force = true,
-                        "rate-limited subagent request is large; compacting before one retry"
-                    );
-                    let (outcome, compacted) =
-                        crate::agent::autocompact::compact_json_messages_with_provider(
-                            self.provider.as_ref(),
-                            &self.model,
-                            &messages,
-                            crate::agent::CompactAction::Full,
-                            true,
-                        )
-                        .await
-                        .map_err(|err| {
-                            anyhow::anyhow!("rate-limit subagent compaction failed: {err}")
-                        })?;
-                    messages = compacted;
-                    let after_current_tokens = match outcome {
-                        crate::agent::autocompact::CompactionOutcome::Compacted {
-                            after_estimated_tokens,
-                            ..
-                        } => after_estimated_tokens,
-                        crate::agent::autocompact::CompactionOutcome::Skipped { .. } => {
-                            crate::agent::autocompact::estimate_messages_tokens(&messages)
-                        }
-                    };
-                    last_known_context_tokens = 0;
-                    auto_compact.on_success(after_current_tokens);
-                    self.provider
-                        .stream(LlmRequest {
-                            messages: messages.clone(),
-                            ..request
-                        })
-                        .await
-                        .map_err(anyhow::Error::new)?
-                }
-                Err(e) => return Err(anyhow::Error::new(e)),
-            };
-
-            let mut text_content = String::new();
-            let mut thinking_blocks =
-                std::collections::BTreeMap::<u32, PendingThinkingBlock>::new();
-            let mut turn_reasoning_encrypted: Option<String> = None;
-            let mut pending_tools: Vec<PendingTool> = Vec::new();
-            let mut pending_tool_indices: Vec<u32> = Vec::new();
-            let mut usage_acc = archon_llm::usage::UsageAccumulator::default();
-            let mut retry_after_compact = false;
-
-            while let Some(event) = rx.recv().await {
-                usage_acc.record_event(&event);
-                match event {
-                    StreamEvent::ContentBlockStart {
-                        index,
-                        block_type,
-                        tool_use_id,
-                        tool_name,
-                    } => {
-                        if block_type == ContentBlockType::ToolUse {
-                            let name = tool_name.clone().unwrap_or_default();
-                            self.emit_activity_stream(
-                                "tool_call",
-                                format!("calling {name}"),
-                                Some(&name),
-                                false,
-                            );
-                            pending_tools.push(PendingTool {
-                                id: tool_use_id.unwrap_or_default(),
-                                name,
-                                input_json: String::new(),
-                            });
-                            pending_tool_indices.push(index);
-                        } else if block_type == ContentBlockType::Thinking {
-                            thinking_blocks.entry(index).or_default();
-                        }
-                    }
-                    StreamEvent::TextDelta { text, .. } => {
-                        self.emit_activity_stream("text", text.clone(), None, false);
-                        text_content.push_str(&text);
-                    }
-                    StreamEvent::ThinkingDelta { index, thinking } => {
-                        thinking_blocks
-                            .entry(index)
-                            .or_default()
-                            .thinking
-                            .push_str(&thinking);
-                        self.emit_activity_stream("thinking", thinking, None, false);
-                    }
-                    StreamEvent::SignatureDelta { index, signature } => {
-                        thinking_blocks
-                            .entry(index)
-                            .or_default()
-                            .signature
-                            .push_str(&signature);
-                    }
-                    StreamEvent::ReasoningEncrypted { blob } => {
-                        turn_reasoning_encrypted = Some(blob);
-                    }
-                    StreamEvent::InputJsonDelta {
-                        index,
-                        partial_json,
-                    } => {
-                        if !crate::agent::tool_input_json::append_delta_by_index(
-                            &mut pending_tools,
-                            &pending_tool_indices,
-                            index,
-                            &partial_json,
-                            |tool, delta| tool.input_json.push_str(delta),
-                        ) {
-                            tracing::warn!(
-                                tool_block_index = index,
-                                scope = "subagent",
-                                "received tool input JSON delta without matching tool block"
-                            );
-                        }
-                    }
-                    StreamEvent::ContentBlockStop { .. } => {}
-                    StreamEvent::Error {
-                        error_type,
-                        message,
-                    } => {
-                        let err = crate::agent::autocompact::classify_stream_error(
-                            self.provider.name(),
-                            &error_type,
-                            &message,
-                        );
-                        if err.is_context_window_exceeded() && !reactive_overflow_retried {
-                            reactive_overflow_retried = true;
-                            let (outcome, compacted) =
-                                crate::agent::autocompact::compact_json_messages_with_provider(
-                                    self.provider.as_ref(),
-                                    &self.model,
-                                    &messages,
-                                    crate::agent::CompactAction::Full,
-                                    true,
-                                )
-                                .await
-                                .map_err(|e| {
-                                    anyhow::anyhow!("reactive subagent compaction failed: {e}")
-                                })?;
-                            messages = compacted;
-                            let after_current_tokens = match outcome {
-                                crate::agent::autocompact::CompactionOutcome::Compacted {
-                                    after_estimated_tokens,
-                                    ..
-                                } => after_estimated_tokens,
-                                crate::agent::autocompact::CompactionOutcome::Skipped {
-                                    ..
-                                } => crate::agent::autocompact::estimate_messages_tokens(&messages),
-                            };
-                            last_known_context_tokens = 0;
-                            auto_compact.on_success(after_current_tokens);
-                            retry_after_compact = true;
-                            break;
-                        }
-                        if crate::agent::autocompact::is_rate_limited_error(&err)
-                            && !reactive_rate_limit_retried
-                            && request_body_bytes >= large_retry_body_bytes
-                        {
-                            reactive_rate_limit_retried = true;
-                            tracing::warn!(
-                                compaction.reason = "rate_limit_large_request_stream",
-                                trigger_body_bytes = request_body_bytes,
-                                threshold_body_bytes = large_retry_body_bytes,
-                                provider_family = telemetry.provider_family,
-                                wire_shape = telemetry.wire_shape,
-                                native_context_window = telemetry.native_context_window,
-                                runtime_context_budget = telemetry.runtime_context_budget,
-                                context_source = telemetry.context_source,
-                                compaction_backend = telemetry.compaction_backend,
-                                scope = "subagent",
-                                force = true,
-                                "rate-limited subagent stream is large; compacting before one retry"
-                            );
-                            let (outcome, compacted) =
-                                crate::agent::autocompact::compact_json_messages_with_provider(
-                                    self.provider.as_ref(),
-                                    &self.model,
-                                    &messages,
-                                    crate::agent::CompactAction::Full,
-                                    true,
-                                )
-                                .await
-                                .map_err(|e| {
-                                    anyhow::anyhow!("rate-limit subagent compaction failed: {e}")
-                                })?;
-                            messages = compacted;
-                            let after_current_tokens = match outcome {
-                                crate::agent::autocompact::CompactionOutcome::Compacted {
-                                    after_estimated_tokens,
-                                    ..
-                                } => after_estimated_tokens,
-                                crate::agent::autocompact::CompactionOutcome::Skipped {
-                                    ..
-                                } => crate::agent::autocompact::estimate_messages_tokens(&messages),
-                            };
-                            last_known_context_tokens = 0;
-                            auto_compact.on_success(after_current_tokens);
-                            retry_after_compact = true;
-                            break;
-                        }
-                        self.emit_activity_stream("error", message, None, true);
-                        return Err(anyhow::Error::new(err));
-                    }
-                    StreamEvent::MessageStart { ref usage, .. } => {
-                        // TASK-T3 (G4): accumulate Usage from message_start.
-                        // Lock guard MUST NOT cross an .await — only sync work in here.
-                        if let Some(ref t) = self.progress
-                            && let Ok(mut g) = t.lock()
-                        {
-                            g.cumulative_input_tokens += usage.input_tokens;
-                            g.cumulative_output_tokens += usage.output_tokens;
-                            g.cumulative_cache_creation_tokens += usage.cache_creation_input_tokens;
-                            g.cumulative_cache_read_tokens += usage.cache_read_input_tokens;
-                            g.last_update = chrono::Utc::now();
-                        }
-                    }
-                    StreamEvent::MessageDelta {
-                        usage: Some(ref u), ..
-                    } => {
-                        if let Some(ref t) = self.progress
-                            && let Ok(mut g) = t.lock()
-                        {
-                            g.cumulative_output_tokens += u.output_tokens;
-                            g.last_update = chrono::Utc::now();
-                        }
-                    }
-                    _ => {} // MessageDelta{usage:None}, MessageStop, Ping, etc.
-                }
-            }
-            if retry_after_compact {
+            let stream = collect_stream_round(
+                self,
+                &mut messages,
+                &mut auto_compact,
+                &mut reactive_overflow_retried,
+                &mut reactive_rate_limit_retried,
+                &mut last_known_context_tokens,
+                request,
+                request_body_bytes,
+                large_retry_body_bytes,
+                &telemetry,
+            )
+            .await?;
+            if stream.retry_after_compact {
                 continue;
             }
-            reasoning_encrypted = turn_reasoning_encrypted;
+            reasoning_encrypted = stream.reasoning_encrypted;
             reactive_overflow_retried = false;
             reactive_rate_limit_retried = false;
-            cumulative_billable_tokens += usage_acc.context_input_tokens;
-            last_known_context_tokens = usage_acc.context_input_tokens;
+            cumulative_billable_tokens += stream.context_input_tokens;
+            last_known_context_tokens = stream.context_input_tokens;
             tracing::trace!(cumulative_billable_tokens, "subagent billable input tokens");
 
             // If no tool calls, subagent is done — return accumulated text
-            if pending_tools.is_empty() {
+            if stream.pending_tools.is_empty() {
                 // Record final assistant text to transcript (AGT-024)
-                if !text_content.is_empty() {
+                if !stream.text_content.is_empty() {
                     self.record_transcript(&serde_json::json!({
                         "role": "assistant",
-                        "content": text_content,
+                        "content": stream.text_content,
                     }));
                 }
                 self.emit_activity_stream("final", "subagent turn complete", None, false);
-                return Ok(text_content);
+                return Ok(stream.text_content);
             }
 
             replay_tool_round(
                 self,
                 &mut messages,
-                text_content,
-                thinking_blocks,
-                pending_tools,
+                stream.text_content,
+                stream.thinking_blocks,
+                stream.pending_tools,
             )
             .await;
         }
