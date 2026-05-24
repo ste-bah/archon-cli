@@ -10,7 +10,8 @@
 //!       "type": "ws",
 //!       "url": "wss://example.com/mcp",
 //!       "headers": { "Authorization": "Bearer token" },
-//!       "headersHelper": "my-header-generator"
+//!       "headersHelper": "my-header-generator",
+//!       "allowInsecureWs": false
 //!     }
 //!   }
 //! }
@@ -41,7 +42,12 @@ pub const PERMANENT_CLOSE_CODES: &[u16] = &[1002, 4001, 4003];
 /// The config key is `"ws"`, not `"websocket"`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WsConfig {
-    /// WebSocket endpoint URL (`ws://` or `wss://`).
+    /// WebSocket endpoint URL.
+    ///
+    /// Secure WebSocket endpoints are accepted for all hosts. Plain
+    /// WebSocket endpoints are accepted only
+    /// for loopback/local endpoints unless `allow_insecure_ws` is explicitly
+    /// enabled.
     pub url: String,
 
     /// Custom HTTP headers to include in the WebSocket handshake request.
@@ -55,6 +61,13 @@ pub struct WsConfig {
     /// retried once before permanent failure.
     #[serde(rename = "headersHelper", default)]
     pub headers_helper: Option<String>,
+
+    /// Explicitly allow non-loopback plaintext WebSocket endpoints.
+    ///
+    /// Defaults to false. Prefer `wss://` for any remote or internet-exposed
+    /// MCP server; use this only for trusted private test networks.
+    #[serde(rename = "allowInsecureWs", alias = "allow_insecure_ws", default)]
+    pub allow_insecure_ws: bool,
 }
 
 // ---------------------------------------------------------------------------

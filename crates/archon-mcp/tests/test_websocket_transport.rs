@@ -17,6 +17,7 @@ fn ws_config_requires_url() {
         url: "wss://example.com/mcp".into(),
         headers: std::collections::HashMap::new(),
         headers_helper: None,
+        allow_insecure_ws: false,
     };
     assert_eq!(cfg.url, "wss://example.com/mcp");
 }
@@ -27,6 +28,7 @@ fn ws_config_accepts_headers_helper() {
         url: "wss://example.com/mcp".into(),
         headers: std::collections::HashMap::new(),
         headers_helper: Some("my-token-rotator".into()),
+        allow_insecure_ws: false,
     };
     assert_eq!(cfg.headers_helper.as_deref(), Some("my-token-rotator"));
 }
@@ -44,6 +46,18 @@ fn ws_config_from_json_type_ws() {
     assert_eq!(cfg.url, "wss://example.com/mcp");
     assert_eq!(cfg.headers.get("Authorization").unwrap(), "Bearer tok");
     assert_eq!(cfg.headers_helper.as_deref(), Some("my-helper"));
+    assert!(!cfg.allow_insecure_ws);
+}
+
+#[test]
+fn ws_config_from_json_allows_explicit_insecure_ws_opt_in() {
+    let json = r#"{
+        "type": "ws",
+        "url": "ws://private.example.test/mcp",
+        "allowInsecureWs": true
+    }"#;
+    let cfg: WsConfig = serde_json::from_str(json).unwrap();
+    assert!(cfg.allow_insecure_ws);
 }
 
 #[test]
@@ -207,6 +221,7 @@ fn transport_new_invalid_url_returns_error() {
         url: "not-a-url".into(),
         headers: std::collections::HashMap::new(),
         headers_helper: None,
+        allow_insecure_ws: false,
     };
     let result = WebSocketTransport::new(cfg, WsReconnectConfig::default());
     assert!(result.is_err(), "invalid URL must return error");
@@ -219,6 +234,7 @@ fn transport_new_http_url_rejected() {
         url: "http://example.com/mcp".into(),
         headers: std::collections::HashMap::new(),
         headers_helper: None,
+        allow_insecure_ws: false,
     };
     let result = WebSocketTransport::new(cfg, WsReconnectConfig::default());
     assert!(result.is_err(), "http:// URL must be rejected");
@@ -230,6 +246,7 @@ fn transport_new_ws_url_accepted() {
         url: "ws://localhost:9000/mcp".into(),
         headers: std::collections::HashMap::new(),
         headers_helper: None,
+        allow_insecure_ws: false,
     };
     let result = WebSocketTransport::new(cfg, WsReconnectConfig::default());
     assert!(result.is_ok(), "ws:// URL must be accepted");
@@ -241,9 +258,40 @@ fn transport_new_wss_url_accepted() {
         url: "wss://example.com/mcp".into(),
         headers: std::collections::HashMap::new(),
         headers_helper: None,
+        allow_insecure_ws: false,
     };
     let result = WebSocketTransport::new(cfg, WsReconnectConfig::default());
     assert!(result.is_ok(), "wss:// URL must be accepted");
+}
+
+#[test]
+fn transport_new_remote_plain_ws_rejected_by_default() {
+    let cfg = WsConfig {
+        url: "ws://example.com/mcp".into(),
+        headers: std::collections::HashMap::new(),
+        headers_helper: None,
+        allow_insecure_ws: false,
+    };
+    let result = WebSocketTransport::new(cfg, WsReconnectConfig::default());
+    assert!(
+        result.is_err(),
+        "remote ws:// URL must be rejected by default"
+    );
+}
+
+#[test]
+fn transport_new_remote_plain_ws_accepts_explicit_opt_in() {
+    let cfg = WsConfig {
+        url: "ws://example.com/mcp".into(),
+        headers: std::collections::HashMap::new(),
+        headers_helper: None,
+        allow_insecure_ws: true,
+    };
+    let result = WebSocketTransport::new(cfg, WsReconnectConfig::default());
+    assert!(
+        result.is_ok(),
+        "remote ws:// URL should require explicit allowInsecureWs"
+    );
 }
 
 #[tokio::test]
@@ -253,6 +301,7 @@ async fn transport_connect_refused_returns_error() {
         url: "ws://127.0.0.1:19999/mcp".into(),
         headers: std::collections::HashMap::new(),
         headers_helper: None,
+        allow_insecure_ws: false,
     };
     let transport = WebSocketTransport::new(cfg, WsReconnectConfig::default()).unwrap();
     let result = transport.connect().await;

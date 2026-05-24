@@ -28,6 +28,8 @@ struct RawServerEntry {
     url: Option<String>,
     #[serde(default)]
     headers: Option<HashMap<String, String>>,
+    #[serde(default, rename = "allowInsecureWs", alias = "allow_insecure_ws")]
+    allow_insecure_ws: bool,
     #[serde(default, rename = "toolPolicy", alias = "tool_policy")]
     tool_policy: McpToolBridgePolicy,
 }
@@ -104,6 +106,7 @@ fn parse_mcp_json(content: &str, source: &Path) -> Result<Vec<ServerConfig>, Mcp
                 transport: entry.transport,
                 url: entry.url,
                 headers: entry.headers,
+                allow_insecure_ws: entry.allow_insecure_ws,
                 tool_policy: entry.tool_policy,
             }
         })

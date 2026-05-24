@@ -113,6 +113,7 @@ pub async fn connect_mcp_with_oauth(
         transport: "sse".into(),
         url: Some(sse_url.to_string()),
         headers: None,
+        allow_insecure_ws: false,
         tool_policy: Default::default(),
     };
 

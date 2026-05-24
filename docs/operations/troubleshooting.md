@@ -111,6 +111,8 @@ The debug log shows the MCP handshake. Common issues:
 - `command` not in PATH
 - Required env vars (API tokens) missing
 - WebSocket endpoint requires TLS but config uses `ws://`
+- Remote plaintext WebSocket endpoint is blocked by default. Use `wss://`, or
+  set `allowInsecureWs: true` only for a trusted private-network MCP endpoint.
 
 ### MCP server connects but tools don't appear
 

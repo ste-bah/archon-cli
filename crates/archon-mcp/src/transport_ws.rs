@@ -65,7 +65,8 @@ pub struct WebSocketTransport {
 impl WebSocketTransport {
     /// Create a new transport, validating the URL.
     ///
-    /// Returns `Err` if the URL is invalid or not a WebSocket URL (ws:// or wss://).
+    /// Returns `Err` if the URL is invalid, not a WebSocket URL, or a remote
+    /// plaintext endpoint without explicit opt-in.
     pub fn new(config: WsConfig, reconnect: WsReconnectConfig) -> Result<Self, McpError> {
         let url = config.url.parse::<::url::Url>().map_err(|e| {
             McpError::Transport(format!("invalid WebSocket URL '{}': {}", config.url, e))
@@ -75,10 +76,11 @@ impl WebSocketTransport {
             "ws" | "wss" => {}
             scheme => {
                 return Err(McpError::Transport(format!(
-                    "WebSocket URL must use ws:// or wss://, got '{scheme}://'"
+                    "WebSocket URL must use the ws or wss scheme, got '{scheme}'"
                 )));
             }
         }
+        validate_ws_security(&url, config.allow_insecure_ws)?;
 
         Ok(Self {
             config,
@@ -263,4 +265,35 @@ fn rand_u64(bound: u64) -> u64 {
         return 0;
     }
     rand::rng().random_range(0..bound)
+}
+
+fn validate_ws_security(url: &::url::Url, allow_insecure_ws: bool) -> Result<(), McpError> {
+    if url.scheme() != "ws" {
+        return Ok(());
+    }
+    if is_loopback_ws_host(url.host_str()) {
+        return Ok(());
+    }
+    if allow_insecure_ws {
+        tracing::warn!(
+            endpoint = %url,
+            "plain WebSocket MCP endpoint allowed by explicit allowInsecureWs override"
+        );
+        return Ok(());
+    }
+    Err(McpError::Transport(
+        "plain WebSocket MCP endpoints are only allowed for localhost/loopback; use a secure WebSocket URL or set allowInsecureWs=true for a trusted private endpoint".to_string(),
+    ))
+}
+
+fn is_loopback_ws_host(host: Option<&str>) -> bool {
+    let Some(host) = host else {
+        return false;
+    };
+    if host.eq_ignore_ascii_case("localhost") || host.ends_with(".localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
 }

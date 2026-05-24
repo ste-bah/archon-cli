@@ -235,6 +235,7 @@ mod tests {
             transport: "stdio".into(),
             url: None,
             headers: None,
+            allow_insecure_ws: false,
             tool_policy: Default::default(),
         };
         // echo exits immediately, so initialization should fail

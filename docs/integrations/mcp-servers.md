@@ -8,7 +8,7 @@ Model Context Protocol (MCP) extends archon-cli with external tools and resource
 |---|---|
 | `stdio` | Local processes (default) |
 | `http` | Streamable HTTP MCP servers |
-| `websocket` / `ws` (`ws://`, `wss://`) | WebSocket JSON-RPC MCP servers |
+| `websocket` / `ws` (`wss://`, loopback `ws://`) | WebSocket JSON-RPC MCP servers |
 | `sse` | Classic MCP Server-Sent Events transport |
 
 ## Config schema
@@ -46,6 +46,26 @@ Model Context Protocol (MCP) extends archon-cli with external tools and resource
 ```
 
 Environment variables expand inline (`${VAR}`). Servers with `"disabled": true` are skipped.
+
+WebSocket MCP endpoints use secure defaults. Use `wss://` for remote servers.
+Plain `ws://` is accepted for loopback development endpoints such as
+`ws://localhost:9000/mcp` and `ws://127.0.0.1:9000/mcp`. A remote plaintext
+endpoint must opt in explicitly:
+
+```json
+{
+  "mcpServers": {
+    "private-lab-ws": {
+      "transport": "ws",
+      "url": "ws://mcp.private.example/mcp",
+      "allowInsecureWs": true
+    }
+  }
+}
+```
+
+Only use `allowInsecureWs` on a trusted private network. Internet-exposed MCP
+servers should use `wss://`.
 
 MCP tools default to Archon's `Risky` permission level unless the server entry
 sets an explicit tool policy. Use raw tool names or Archon's qualified

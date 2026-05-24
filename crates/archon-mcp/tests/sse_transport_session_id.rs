@@ -196,6 +196,7 @@ fn sse_config(name: &str, addr: SocketAddr) -> ServerConfig {
         transport: "sse".into(),
         url: Some(format!("http://{addr}/sse")),
         headers: None,
+        allow_insecure_ws: false,
         tool_policy: Default::default(),
     }
 }

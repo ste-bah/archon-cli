@@ -189,6 +189,7 @@ async fn sse_transport_full_initialize_and_tools_list_roundtrip() {
         transport: "sse".into(),
         url: Some(sse_url),
         headers: None,
+        allow_insecure_ws: false,
         tool_policy: Default::default(),
     };
 
@@ -259,6 +260,7 @@ async fn sse_transport_resolves_absolute_endpoint_url() {
         transport: "sse".into(),
         url: Some(sse_url),
         headers: None,
+        allow_insecure_ws: false,
         tool_policy: Default::default(),
     };
 
@@ -292,6 +294,7 @@ async fn sse_transport_without_url_errors_cleanly() {
         transport: "sse".into(),
         url: None,
         headers: None,
+        allow_insecure_ws: false,
         tool_policy: Default::default(),
     };
 

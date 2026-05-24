@@ -66,6 +66,11 @@ pub struct ServerConfig {
     /// Custom headers (e.g. Authorization) for network transports.
     #[serde(default)]
     pub headers: Option<HashMap<String, String>>,
+    /// Explicitly allow non-loopback plaintext WebSocket MCP endpoints.
+    ///
+    /// Defaults false. Prefer `wss://` for any remote endpoint.
+    #[serde(default, rename = "allowInsecureWs", alias = "allow_insecure_ws")]
+    pub allow_insecure_ws: bool,
     /// Tool bridge permission policy for this server.
     #[serde(default, rename = "toolPolicy", alias = "tool_policy")]
     pub tool_policy: McpToolBridgePolicy,

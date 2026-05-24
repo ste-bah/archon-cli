@@ -53,6 +53,7 @@ pub(super) async fn connect_server(config: &ServerConfig) -> Result<McpClient, M
                 url: url.to_string(),
                 headers: config.headers.clone().unwrap_or_default(),
                 headers_helper: None,
+                allow_insecure_ws: config.allow_insecure_ws,
             };
             let ws_transport = WebSocketTransport::new(ws_config, WsReconnectConfig::default())?;
             let active = ws_transport.connect().await?;
