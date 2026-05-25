@@ -1,5 +1,7 @@
 pub mod candidate_planner;
 mod candidate_store;
+pub mod cognitive_tick;
+mod cognitive_tick_store;
 pub mod config;
 mod cozo_guard;
 mod decision_codec;
@@ -21,6 +23,7 @@ pub mod verification_contracts;
 pub mod world_model_scoring;
 
 pub use candidate_planner::{CandidatePlanner, HeuristicWeights};
+pub use cognitive_tick::{CognitiveTick, TickReport};
 pub use config::CognitiveConfig;
 pub use decision_store::DecisionStore;
 pub use executive_loop::{
