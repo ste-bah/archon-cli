@@ -256,9 +256,13 @@ impl App {
         self.push_parent_activity_tool_result(name, output, !success);
         crate::agent_activity::tool_completed(&mut self.agent_activity, name, id, success);
         if !success {
-            let truncated: String = output.chars().take(200).collect();
-            self.output
-                .append_line(&format!("[tool] {name} failed: {truncated}"));
+            let output = output.trim_end();
+            if output.is_empty() {
+                self.output.append_line(&format!("[tool] {name} failed"));
+            } else {
+                self.output
+                    .append_line(&format!("[tool] {name} failed:\n{output}"));
+            }
         }
     }
 

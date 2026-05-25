@@ -246,6 +246,18 @@ fn app_tool_failure_shows_in_output() {
 }
 
 #[test]
+fn app_tool_failure_keeps_full_output() {
+    let mut app = App::new();
+    let full_error = format!("{}tail-marker", "x".repeat(250));
+    app.on_tool_start("Bash", "tool-long");
+    app.on_tool_complete("Bash", "tool-long", false, &full_error);
+
+    let rendered = app.output.all_lines().join("\n");
+    assert!(rendered.contains(&full_error));
+    assert!(rendered.contains("tail-marker"));
+}
+
+#[test]
 fn thinking_delta_does_not_pollute_output() {
     let mut app = App::new();
     app.show_thinking = true;

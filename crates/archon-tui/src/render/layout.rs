@@ -7,15 +7,15 @@ use ratatui::layout::{Constraint, Direction, Rect};
 
 use crate::output::OutputBuffer;
 
-pub const MIN_INPUT_HEIGHT: u16 = 3;
-pub const MAX_INPUT_HEIGHT: u16 = 12;
+pub const MIN_INPUT_HEIGHT: u16 = 5;
+pub const MAX_INPUT_HEIGHT: u16 = 14;
 
 /// Computed layout regions for the TUI.
 #[derive(Debug, Clone)]
 pub struct Layout {
     /// Output area (top, takes remaining space).
     pub output: Rect,
-    /// Input area (3 rows, just below output).
+    /// Input area (5-14 rows, just below output).
     pub input: Rect,
     /// Permission indicator (1 row).
     pub permission: Rect,
@@ -33,7 +33,7 @@ pub struct Layout {
 /// │         (min 3 rows)                  │
 /// ├──────────────┬───────────────────────┤
 /// │  INPUT AREA  │                       │
-/// │  (3-12 rows) │                       │
+/// │  (5-14 rows) │                       │
 /// ├──────────────┴───────────────────────┤
 /// │  PERMISSION (1 row)                  │
 /// ├───────────────────────────────────────┤

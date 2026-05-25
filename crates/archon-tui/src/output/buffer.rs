@@ -9,6 +9,7 @@ use ratatui::text::Line;
 
 use crate::markdown::render_markdown_line;
 use crate::output::render_cache::{RenderCache, RenderedOutputView, WrapCache, visible_line_range};
+use crate::output::sanitize::sanitize_output_text;
 use crate::theme::Theme;
 
 /// Output buffer -- append-only text buffer for streaming display.
@@ -48,6 +49,7 @@ impl OutputBuffer {
 
     /// Append text (may contain newlines).
     pub fn append(&mut self, text: &str) {
+        let text = sanitize_output_text(text);
         if text.is_empty() {
             return;
         }
@@ -63,10 +65,13 @@ impl OutputBuffer {
 
     /// Append a complete line.
     pub fn append_line(&mut self, line: &str) {
+        let line = sanitize_output_text(line);
         if !self.current_line.is_empty() {
             self.lines.push(std::mem::take(&mut self.current_line));
         }
-        self.lines.push(line.to_string());
+        for segment in line.split('\n') {
+            self.lines.push(segment.to_string());
+        }
         self.mark_dirty();
     }
 

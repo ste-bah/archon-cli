@@ -11,6 +11,7 @@
 
 mod buffer;
 mod render_cache;
+mod sanitize;
 mod thinking;
 mod tool_output;
 

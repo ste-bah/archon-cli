@@ -12,6 +12,7 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::output::OutputBuffer;
 use crate::splash;
 
 use super::cursor::set_input_cursor;
@@ -43,11 +44,16 @@ pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
 
     let visible_height = output_area.height;
     let output_width = output_area.width.saturating_sub(1); // -1 for scrollbar
+    let thinking_lines = app.thinking_lines();
+    let thinking_height = reserved_thinking_height(&thinking_lines, output_width, visible_height);
+    let transcript_height = visible_height
+        .saturating_sub(thinking_height)
+        .max((visible_height > 0) as u16);
     let rendered_view = app
         .output
-        .rendered_view(&app.theme, output_width, visible_height);
+        .rendered_view(&app.theme, output_width, transcript_height);
     let mut output_lines: Vec<Line<'_>> = rendered_view.lines;
-    output_lines.extend(app.thinking_lines());
+    output_lines.extend(thinking_lines);
     let total_wrapped = rendered_view.total_wrapped;
     let scroll_y = rendered_view.global_scroll_y;
 
@@ -63,14 +69,30 @@ pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
         .scroll((rendered_view.paragraph_scroll_y, 0));
     frame.render_widget(output_widget, output_area);
 
-    if total_wrapped > visible_height {
+    if total_wrapped > transcript_height {
         let mut scrollbar_state =
-            ScrollbarState::new(total_wrapped.saturating_sub(visible_height) as usize)
+            ScrollbarState::new(total_wrapped.saturating_sub(transcript_height) as usize)
                 .position(scroll_y as usize);
         let scrollbar =
             Scrollbar::new(ScrollbarOrientation::VerticalRight).style(Style::default().fg(t.muted));
         frame.render_stateful_widget(scrollbar, output_area, &mut scrollbar_state);
     }
+}
+
+fn reserved_thinking_height(lines: &[Line<'_>], width: u16, visible_height: u16) -> u16 {
+    if lines.is_empty() || visible_height == 0 {
+        return 0;
+    }
+    let raw_lines = lines.iter().map(line_text).collect::<Vec<_>>();
+    let refs = raw_lines.iter().map(String::as_str).collect::<Vec<_>>();
+    OutputBuffer::count_wrapped_rows(&refs, width).min(visible_height.saturating_sub(1))
+}
+
+fn line_text(line: &Line<'_>) -> String {
+    line.spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect()
 }
 
 pub(crate) fn input_prefix(app: &App) -> String {
