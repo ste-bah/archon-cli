@@ -12,6 +12,7 @@ pub mod store;
 pub mod tool_use_gate;
 pub mod types;
 pub mod verification_contracts;
+pub mod world_model_scoring;
 
 pub use candidate_planner::{CandidatePlanner, HeuristicWeights};
 pub use config::CognitiveConfig;
@@ -29,4 +30,8 @@ pub use types::{
 pub use verification_contracts::{
     ContractInput, VerificationContract, VerificationEngine, VerificationEvidence,
     VerificationKind, VerificationRequirement, VerificationVerdict,
+};
+pub use world_model_scoring::{
+    ModelKind, ModelPrediction, PredictionBackend, PredictionDimensions, ScoredCandidates,
+    WorldModelScorer, WorldModelState,
 };
