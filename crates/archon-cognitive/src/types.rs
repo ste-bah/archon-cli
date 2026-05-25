@@ -116,6 +116,8 @@ pub struct CognitiveDecision {
 
 #[derive(Debug, thiserror::Error)]
 pub enum CognitiveError {
+    #[error("cognitive io error: {0}")]
+    Io(#[from] std::io::Error),
     #[error("cognitive schema error: {0}")]
     Schema(String),
     #[error("cognitive store error: {0}")]

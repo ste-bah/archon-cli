@@ -1,3 +1,5 @@
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
 use cozo::{DbInstance, ScriptMutability};
 
 use crate::types::CognitiveError;
@@ -34,9 +36,12 @@ pub fn ensure_cognitive_schema(db: &DbInstance) -> Result<(), CognitiveError> {
 }
 
 fn run_idempotent(db: &DbInstance, script: &str) -> Result<(), CognitiveError> {
-    match db.run_script(script, Default::default(), ScriptMutability::Mutable) {
-        Ok(_) => Ok(()),
-        Err(err) => {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        db.run_script(script, Default::default(), ScriptMutability::Mutable)
+    }));
+    match result {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(err)) => {
             let msg = err.to_string();
             if msg.contains("already exists") || msg.contains("conflicts") {
                 Ok(())
@@ -44,5 +49,18 @@ fn run_idempotent(db: &DbInstance, script: &str) -> Result<(), CognitiveError> {
                 Err(CognitiveError::Schema(msg))
             }
         }
+        Err(payload) => Err(CognitiveError::Schema(panic_payload_message(
+            payload.as_ref(),
+        ))),
+    }
+}
+
+fn panic_payload_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else if let Some(message) = payload.downcast_ref::<&'static str>() {
+        (*message).to_string()
+    } else {
+        "unknown panic payload".to_string()
     }
 }

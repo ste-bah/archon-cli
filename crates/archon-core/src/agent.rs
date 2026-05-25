@@ -31,6 +31,8 @@ use crate::subagent::SubagentManager;
 
 pub mod autocompact;
 mod cognitive_gate;
+#[cfg(test)]
+mod cognitive_gate_tests;
 mod compaction;
 mod compaction_serde;
 mod events;
@@ -149,6 +151,7 @@ pub struct Agent {
     record_reasoning_turn_callback: Option<Arc<dyn Fn(ReasoningTurnEventPayload) + Send + Sync>>,
     reasoning_evidence_refs: Vec<ReasoningEvidenceEventPayload>,
     current_situation: Option<archon_cognitive::Situation>,
+    cognitive_store: Option<Arc<std::sync::Mutex<archon_cognitive::PersistentCognitiveStore>>>,
     #[allow(clippy::type_complexity)]
     inner_voice_change_callback: Option<Arc<dyn Fn(&InnerVoice) + Send + Sync>>,
 }

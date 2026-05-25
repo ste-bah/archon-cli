@@ -168,6 +168,9 @@ pub(super) async fn build_session_agent(
     let metrics = Arc::new(archon_tui::observability::ChannelMetrics::default());
     let metrics_sink: Arc<dyn ChannelMetricSink> = metrics.clone();
     agent.set_channel_metrics(metrics_sink);
+    if let Some(store) = super::open_cognitive_store(&working_dir) {
+        agent.set_cognitive_store(store);
+    }
 
     if let Err(e) = super::spawn_metrics_exporter(cli.metrics_port, Arc::clone(&metrics)) {
         eprintln!("Metrics exporter failed: {e}");

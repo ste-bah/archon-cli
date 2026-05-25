@@ -19,6 +19,7 @@ impl Agent {
             reason = %situation.reason,
             "classified cognitive situation"
         );
+        self.record_cognitive_situation(&situation);
         self.current_situation = Some(situation);
     }
 
@@ -69,6 +70,7 @@ impl Agent {
     ) {
         if let Some(situation) = self.current_situation.as_ref() {
             let decision = CognitiveDecision::for_tool(situation, &tool.name, verdict.clone());
+            self.record_cognitive_decision(&decision);
             tracing::debug!(
                 tool = %tool.name,
                 situation = situation.kind.as_str(),
@@ -91,5 +93,31 @@ impl Agent {
         .await;
         self.state
             .add_tool_result(&tool.id, &result.content, result.is_error);
+    }
+
+    fn record_cognitive_situation(&self, situation: &archon_cognitive::Situation) {
+        let Some(store) = self.cognitive_store.as_ref() else {
+            return;
+        };
+        let result = store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .put_situation(situation);
+        if let Err(err) = result {
+            tracing::warn!(error = %err, "cognitive situation persistence failed");
+        }
+    }
+
+    fn record_cognitive_decision(&self, decision: &CognitiveDecision) {
+        let Some(store) = self.cognitive_store.as_ref() else {
+            return;
+        };
+        let result = store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .put_decision(decision);
+        if let Err(err) = result {
+            tracing::warn!(error = %err, "cognitive decision persistence failed");
+        }
     }
 }

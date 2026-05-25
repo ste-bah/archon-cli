@@ -1,6 +1,6 @@
 use archon_cognitive::{
-    ClassifyInput, CognitiveDecision, CognitiveStore, CognitiveSurface, SituationClassifier,
-    ToolVerdict,
+    ClassifyInput, CognitiveDecision, CognitiveStore, CognitiveSurface, PersistentCognitiveStore,
+    SituationClassifier, ToolVerdict,
 };
 use cozo::{DbInstance, ScriptMutability};
 
@@ -43,4 +43,22 @@ fn store_writes_compact_situation_and_decision_rows() {
         )
         .expect("query decisions");
     assert_eq!(rows.rows[0][0].get_str(), Some("Bash"));
+}
+
+#[test]
+fn persistent_store_opens_project_local_database() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = PersistentCognitiveStore::open(temp.path().join("cognitive")).expect("open store");
+    let situation = SituationClassifier.classify(ClassifyInput {
+        user_text: "can you check CI?",
+        session_id: "persisted-session",
+        turn_number: 1,
+        surface: CognitiveSurface::Cli,
+    });
+    store.put_situation(&situation).expect("put situation");
+
+    assert!(store.root().ends_with("cognitive"));
+    assert!(store.db_path().ends_with("cognitive.db"));
+    assert_eq!(store.situation_count().expect("situation count"), 1);
+    assert_eq!(store.decision_count().expect("decision count"), 0);
 }
