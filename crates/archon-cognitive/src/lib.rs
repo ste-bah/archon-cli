@@ -4,6 +4,8 @@ pub mod config;
 mod cozo_guard;
 mod decision_codec;
 pub mod decision_store;
+pub mod executive_loop;
+mod executive_support;
 pub mod policy_gate;
 mod reflection_store;
 pub mod reflection_writer;
@@ -19,6 +21,10 @@ pub mod world_model_scoring;
 pub use candidate_planner::{CandidatePlanner, HeuristicWeights};
 pub use config::CognitiveConfig;
 pub use decision_store::DecisionStore;
+pub use executive_loop::{
+    ActionExecution, ActionExecutor, ActionOutcome, ExecutiveLoop, ExecutiveRunOutcome,
+    ExecutiveTurnInput, NoopActionExecutor, PlannedActionInput,
+};
 pub use policy_gate::{DenyReason, PolicyGate, PolicyVerdict, ProposalCheck, ProposalDenyReason};
 pub use reflection_writer::{
     LessonSink, NoopLessonSink, OutcomeSummary, ReflectInput, ReflectionRecord,
@@ -30,8 +36,8 @@ pub use store::{CognitiveStore, PersistentCognitiveStore};
 pub use tool_use_gate::{ToolGateInput, ToolUseGate};
 pub use types::{
     Candidate, CandidateActionKind, CandidateScore, ClassifierConfidence, CognitiveDecision,
-    CognitiveError, CognitiveSurface, DecisionRecord, RejectedCandidate, RiskLevel, ScoreSource,
-    Situation, SituationKind, ToolVerdict, direct_response_for,
+    CognitiveError, CognitiveSurface, DecisionRecord, ExecutiveStateSnapshot, RejectedCandidate,
+    RiskLevel, ScoreSource, Situation, SituationKind, ToolVerdict, direct_response_for,
 };
 pub use verification_contracts::{
     ContractInput, VerificationContract, VerificationEngine, VerificationEvidence,

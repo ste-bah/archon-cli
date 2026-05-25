@@ -247,6 +247,24 @@ pub struct CognitiveDecision {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExecutiveStateSnapshot {
+    pub session_id: String,
+    pub turn_number: u64,
+    pub stage: String,
+    pub situation_id: String,
+    pub user_text_hash: String,
+    pub situation_kind: SituationKind,
+    pub selected_candidate_id: Option<String>,
+    pub selected_action: Option<CandidateActionKind>,
+    pub policy_summary: String,
+    pub verification_summary: String,
+    pub prediction_available: bool,
+    pub reflection_id: Option<String>,
+    pub degraded: Vec<String>,
+    pub created_at: DateTime<Utc>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum CognitiveError {
     #[error("cognitive io error: {0}")]
