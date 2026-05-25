@@ -151,6 +151,14 @@ pub enum PipelineEvent {
         threshold: f64,
         accepted: bool,
     },
+    QualityGateForceAccepted {
+        ordinal: usize,
+        agent_key: String,
+        attempt: usize,
+        overall: f64,
+        threshold: f64,
+        reason: String,
+    },
     AgentRetried {
         ordinal: usize,
         agent_key: String,

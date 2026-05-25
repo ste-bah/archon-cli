@@ -19,10 +19,14 @@ use crate::learning::integration::LearningIntegration;
 use crate::learning::reflexion::ReflexionInjector;
 use crate::research::final_artifact::write_final_research_artifacts;
 
+mod quality_gate;
 mod single_agent;
 mod support;
 mod wave;
 
+pub use quality_gate::PipelineRunOptions;
+#[cfg(test)]
+use quality_gate::attempt_accepted;
 use single_agent::run_single_agent;
 use wave::run_parallel_wave;
 
@@ -430,6 +434,7 @@ pub async fn run_pipeline(
         &mut reflexion,
         &mut learning,
         None,
+        PipelineRunOptions::default(),
     )
     .await
 }
@@ -455,6 +460,7 @@ pub async fn run_pipeline_audited(
         &mut reflexion,
         &mut learning,
         Some(audit),
+        PipelineRunOptions::default(),
     )
     .await
 }
@@ -466,8 +472,32 @@ pub async fn resume_pipeline_audited(
     session_id: &str,
     worktree: &Path,
     leann: Option<&LeannIntegration>,
+    reflexion: Option<&mut ReflexionInjector>,
+    learning: Option<&mut LearningIntegration>,
+) -> Result<PipelineResult> {
+    resume_pipeline_audited_with_options(
+        facade,
+        llm,
+        session_id,
+        worktree,
+        leann,
+        reflexion,
+        learning,
+        PipelineRunOptions::default(),
+    )
+    .await
+}
+
+/// Resume a verified audited bundle with explicit runner options.
+pub async fn resume_pipeline_audited_with_options(
+    facade: &dyn PipelineFacade,
+    llm: &dyn LlmClient,
+    session_id: &str,
+    worktree: &Path,
+    leann: Option<&LeannIntegration>,
     mut reflexion: Option<&mut ReflexionInjector>,
     mut learning: Option<&mut LearningIntegration>,
+    options: PipelineRunOptions,
 ) -> Result<PipelineResult> {
     let audit = PipelineAuditRun::resume(worktree, session_id)?;
     let mut session = facade.init_session(&audit.state().task).await?;
@@ -482,6 +512,7 @@ pub async fn resume_pipeline_audited(
         &mut reflexion,
         &mut learning,
         Some(audit),
+        options,
     )
     .await
 }
@@ -494,6 +525,7 @@ async fn run_pipeline_inner(
     reflexion: &mut Option<&mut ReflexionInjector>,
     learning: &mut Option<&mut LearningIntegration>,
     mut audit: Option<PipelineAuditRun>,
+    options: PipelineRunOptions,
 ) -> Result<PipelineResult> {
     tracing::info!(
         session_id = %session.id,
@@ -514,13 +546,13 @@ async fn run_pipeline_inner(
         match next {
             NextAgent::Continue(agent) => {
                 run_single_agent(
-                    facade, llm, session, leann, reflexion, learning, &mut audit, agent,
+                    facade, llm, session, leann, reflexion, learning, &mut audit, agent, options,
                 )
                 .await?;
             }
             NextAgent::ContinueWave(agents) => {
                 run_parallel_wave(
-                    facade, llm, session, leann, reflexion, learning, &mut audit, agents,
+                    facade, llm, session, leann, reflexion, learning, &mut audit, agents, options,
                 )
                 .await?;
             }
@@ -656,10 +688,6 @@ fn pipeline_attempt_retry_delay(attempt: usize) -> Duration {
     let exponent = (attempt as u32).saturating_sub(1);
     let delay_ms = 250u64.saturating_mul(2u64.saturating_pow(exponent));
     Duration::from_millis(delay_ms.min(2_000))
-}
-
-fn attempt_accepted(meets_threshold: bool, critical: bool, attempt: usize) -> bool {
-    meets_threshold || (!critical && attempt >= PIPELINE_MAX_ATTEMPTS)
 }
 
 fn quality_gate_failure(agent: &AgentInfo, score: f64, attempt: usize) -> String {

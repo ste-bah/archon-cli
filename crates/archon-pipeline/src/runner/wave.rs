@@ -1,6 +1,7 @@
 use anyhow::Result;
 use futures_util::future::join_all;
 
+use super::quality_gate::{force_acceptance_reason, quality_gate_acceptance};
 use super::support::{
     append_learning_context, log_wave_agent_completed, quality_failure_reason,
     record_reflexion_failure, reindex_modified_files,
@@ -28,6 +29,7 @@ pub(super) async fn run_parallel_wave(
     learning: &mut Option<&mut LearningIntegration>,
     audit: &mut Option<PipelineAuditRun>,
     agents: Vec<AgentInfo>,
+    options: PipelineRunOptions,
 ) -> Result<()> {
     let agents: Vec<AgentInfo> = agents
         .into_iter()
@@ -68,20 +70,34 @@ pub(super) async fn run_parallel_wave(
             let meets_threshold = quality.overall >= prepared.agent.quality_threshold;
             let failure_reason = (!meets_threshold)
                 .then(|| quality_failure_reason(&prepared.agent, quality.overall));
-            let accepted = attempt_accepted(meets_threshold, prepared.agent.critical, attempt);
+            let gate = quality_gate_acceptance(meets_threshold, &prepared.agent, attempt, options);
+            let failure_reason = if gate.force_accepted {
+                Some(force_acceptance_reason(failure_reason))
+            } else {
+                failure_reason
+            };
             if let Some(audit) = audit.as_ref() {
                 attempts.push(audit.record_attempt_completed(
                     prepared.ordinal,
                     &prepared.agent,
                     attempt,
                     &result,
-                    accepted,
+                    gate.accepted,
                     failure_reason.clone(),
                 )?);
+                if gate.force_accepted {
+                    audit.record_quality_gate_force_accepted(
+                        prepared.ordinal,
+                        &prepared.agent,
+                        attempt,
+                        quality.overall,
+                        failure_reason.as_deref().unwrap_or("force-accepted"),
+                    )?;
+                }
             }
             log_wave_agent_completed(&prepared.agent, attempt, &quality, &result);
 
-            if accepted {
+            if gate.accepted {
                 break;
             }
             if attempt >= PIPELINE_MAX_ATTEMPTS && prepared.agent.critical {

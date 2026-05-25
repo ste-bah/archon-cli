@@ -264,6 +264,27 @@ impl PipelineAuditRun {
         )
     }
 
+    pub fn record_quality_gate_force_accepted(
+        &self,
+        ordinal: usize,
+        agent: &AgentInfo,
+        attempt: usize,
+        overall: f64,
+        reason: &str,
+    ) -> Result<()> {
+        self.store.append_event(
+            &self.state.session_id,
+            PipelineEvent::QualityGateForceAccepted {
+                ordinal,
+                agent_key: agent.key.clone(),
+                attempt,
+                overall,
+                threshold: agent.quality_threshold,
+                reason: reason.to_string(),
+            },
+        )
+    }
+
     pub fn record_agent_completed(
         &mut self,
         ordinal: usize,

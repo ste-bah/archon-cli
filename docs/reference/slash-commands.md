@@ -70,7 +70,7 @@ Beyond the 81 primaries, archon-cli ships **68 built-in skills** (33 in `crates/
 | `/run-agent` | — | Invoke a custom agent by name with a task description (async via TaskService, using the active provider) |
 | `/archon-code` | — | Start the 50-agent coding pipeline on a task using the active provider |
 | `/archon-research` | — | Start the 47-agent PhD research pipeline on a topic using the active provider |
-| `/pipeline` | — | Shared pipeline control: `status`, `list`, `resume <session-id>`, `abort`, `verify`, `inspect`, `export-traces`. Use `/pipeline resume <session-id>` to continue interrupted `/archon-code` or `/archon-research` runs. |
+| `/pipeline` | — | Shared pipeline control: `status`, `list`, `resume <session-id>`, `abort`, `verify`, `inspect`, `export-traces`. Use `/pipeline resume <session-id>` to continue interrupted `/archon-code` or `/archon-research` runs; add `--force-quality-gate` only to audit and continue past a critical quality-score stop. |
 | `/managed-agents` | — | Show managed-agent (remote-registry) status |
 | `/refresh` | — | Re-scan the agent registry from disk |
 

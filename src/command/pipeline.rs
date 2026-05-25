@@ -33,9 +33,18 @@ pub async fn handle_pipeline_command(
         PipelineAction::Status { session_id } => {
             crate::command::pipeline_bundle::handle_status(&cwd, session_id).await?;
         }
-        PipelineAction::Resume { session_id } => {
-            crate::command::pipeline_bundle::handle_resume(&cwd, session_id, config, env_vars)
-                .await?;
+        PipelineAction::Resume {
+            session_id,
+            force_quality_gate,
+        } => {
+            crate::command::pipeline_bundle::handle_resume(
+                &cwd,
+                session_id,
+                config,
+                env_vars,
+                *force_quality_gate,
+            )
+            .await?;
         }
         PipelineAction::List => {
             crate::command::pipeline_bundle::handle_list(&cwd).await?;

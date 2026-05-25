@@ -61,11 +61,41 @@ fn test_pipeline_resume_parses() {
     let cli = Cli::try_parse_from(["archon", "pipeline", "resume", "abc-123"]).unwrap();
     match cli.command {
         Some(Commands::Pipeline {
-            action: PipelineAction::Resume { session_id },
+            action:
+                PipelineAction::Resume {
+                    session_id,
+                    force_quality_gate,
+                },
         }) => {
             assert_eq!(session_id, "abc-123");
+            assert!(!force_quality_gate);
         }
         other => panic!("expected Pipeline Resume, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_pipeline_resume_force_quality_gate_parses() {
+    let cli = Cli::try_parse_from([
+        "archon",
+        "pipeline",
+        "resume",
+        "abc-123",
+        "--force-quality-gate",
+    ])
+    .unwrap();
+    match cli.command {
+        Some(Commands::Pipeline {
+            action:
+                PipelineAction::Resume {
+                    session_id,
+                    force_quality_gate,
+                },
+        }) => {
+            assert_eq!(session_id, "abc-123");
+            assert!(force_quality_gate);
+        }
+        other => panic!("expected Pipeline Resume force flag, got {:?}", other),
     }
 }
 

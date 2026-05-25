@@ -10,7 +10,10 @@ use std::sync::Arc;
 use anyhow::Result;
 use archon_pipeline::audit::store::PipelineBundleStore;
 use archon_pipeline::audit::types::BundleStatus;
-use archon_pipeline::runner::{LlmClient, PipelineResult, PipelineType, resume_pipeline_audited};
+use archon_pipeline::runner::{
+    LlmClient, PipelineResult, PipelineRunOptions, PipelineType,
+    resume_pipeline_audited_with_options,
+};
 use archon_tui::app::TuiEvent;
 use archon_tui::event_channel::TuiEventSender;
 
@@ -30,11 +33,16 @@ impl CommandHandler for PipelineSlashHandler {
         match args {
             [] => emit_pipeline_usage(ctx),
             [subcommand, session_id] if subcommand == "resume" => {
-                handle_tui_resume(ctx, session_id)
+                handle_tui_resume(ctx, session_id, false)
+            }
+            [subcommand, session_id, flag]
+                if subcommand == "resume" && flag == "--force-quality-gate" =>
+            {
+                handle_tui_resume(ctx, session_id, true)
             }
             [subcommand, ..] if subcommand == "resume" => {
                 ctx.emit(TuiEvent::TextDelta(
-                    "Usage: /pipeline resume <session-id>\n".to_string(),
+                    "Usage: /pipeline resume <session-id> [--force-quality-gate]\n".to_string(),
                 ));
                 Ok(())
             }
@@ -50,14 +58,18 @@ impl CommandHandler for PipelineSlashHandler {
 fn emit_pipeline_usage(ctx: &mut CommandContext) -> Result<()> {
     ctx.emit(TuiEvent::TextDelta(
         "Usage: /pipeline <subcommand> [args]\n\
-         TUI-native: /pipeline resume <session-id>\n\
+         TUI-native: /pipeline resume <session-id> [--force-quality-gate]\n\
          Other subcommands mirror `archon pipeline ...`.\n"
             .to_string(),
     ));
     Ok(())
 }
 
-fn handle_tui_resume(ctx: &mut CommandContext, session_id: &str) -> Result<()> {
+fn handle_tui_resume(
+    ctx: &mut CommandContext,
+    session_id: &str,
+    force_quality_gate: bool,
+) -> Result<()> {
     let cwd = ctx
         .working_dir
         .clone()
@@ -66,11 +78,11 @@ fn handle_tui_resume(ctx: &mut CommandContext, session_id: &str) -> Result<()> {
     let state = match store.load_state(session_id) {
         Ok(state) => state,
         Err(_) => {
-            return crate::command::cli_mirror::spawn_cli_mirror(
-                ctx,
-                "pipeline",
-                &["resume".to_string(), session_id.to_string()],
-            );
+            let mut mirror_args = vec!["resume".to_string(), session_id.to_string()];
+            if force_quality_gate {
+                mirror_args.push("--force-quality-gate".to_string());
+            }
+            return crate::command::cli_mirror::spawn_cli_mirror(ctx, "pipeline", &mirror_args);
         }
     };
 
@@ -84,9 +96,13 @@ fn handle_tui_resume(ctx: &mut CommandContext, session_id: &str) -> Result<()> {
             emit_completed_state(&ctx.tui_tx, &cwd, &state);
             Ok(())
         }
-        BundleStatus::Failed | BundleStatus::Aborted => {
-            resume_in_process(ctx, cwd, state.pipeline_type, session_id.to_string())
-        }
+        BundleStatus::Failed | BundleStatus::Aborted => resume_in_process(
+            ctx,
+            cwd,
+            state.pipeline_type,
+            session_id.to_string(),
+            force_quality_gate,
+        ),
     }
 }
 
@@ -95,6 +111,7 @@ fn resume_in_process(
     cwd: PathBuf,
     pipeline_type: PipelineType,
     session_id: String,
+    force_quality_gate: bool,
 ) -> Result<()> {
     let llm: Arc<dyn LlmClient> = match ctx.llm_adapter.clone() {
         Some(llm) => llm,
@@ -111,6 +128,7 @@ fn resume_in_process(
     });
     let mut reflexion = loaded_config.as_ref().and_then(build_reflexion_injector);
     let tui_tx = ctx.tui_tx.clone();
+    let options = PipelineRunOptions { force_quality_gate };
 
     match pipeline_type {
         PipelineType::Coding => {
@@ -127,10 +145,11 @@ fn resume_in_process(
             let leann = ctx.leann.clone();
             let session = session_id.clone();
             let _ = tui_tx.send(TuiEvent::TextDelta(format!(
-                "Resuming coding pipeline {session} in the TUI...\n"
+                "{}\n",
+                resume_status_line("coding", &session, force_quality_gate)
             )));
             archon_observability::spawn_named("pipeline-resume-code", async move {
-                let result = resume_pipeline_audited(
+                let result = resume_pipeline_audited_with_options(
                     coding.as_ref(),
                     llm.as_ref(),
                     &session,
@@ -138,6 +157,7 @@ fn resume_in_process(
                     leann.as_deref(),
                     reflexion.as_mut(),
                     learning.as_mut(),
+                    options,
                 )
                 .await;
                 emit_resume_result(&tui_tx, &cwd, result);
@@ -160,10 +180,11 @@ fn resume_in_process(
             );
             let session = session_id.clone();
             let _ = tui_tx.send(TuiEvent::TextDelta(format!(
-                "Resuming research pipeline {session} in the TUI...\n"
+                "{}\n",
+                resume_status_line("research", &session, force_quality_gate)
             )));
             archon_observability::spawn_named("pipeline-resume-research", async move {
-                let result = resume_pipeline_audited(
+                let result = resume_pipeline_audited_with_options(
                     research.as_ref(),
                     llm.as_ref(),
                     &session,
@@ -171,6 +192,7 @@ fn resume_in_process(
                     None,
                     reflexion.as_mut(),
                     learning.as_mut(),
+                    options,
                 )
                 .await;
                 emit_resume_result(&tui_tx, &cwd, result);
@@ -183,6 +205,16 @@ fn resume_in_process(
         }
     }
     Ok(())
+}
+
+fn resume_status_line(kind: &str, session_id: &str, force_quality_gate: bool) -> String {
+    if force_quality_gate {
+        format!(
+            "Resuming {kind} pipeline {session_id} in the TUI with audited quality-gate override..."
+        )
+    } else {
+        format!("Resuming {kind} pipeline {session_id} in the TUI...")
+    }
 }
 
 trait TuiProgressFacade {

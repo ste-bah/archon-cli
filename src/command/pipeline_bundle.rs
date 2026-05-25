@@ -7,6 +7,7 @@ use archon_core::env_vars::ArchonEnvVars;
 use archon_memory::{MemoryTrait, graph::MemoryGraph};
 use archon_pipeline::audit::store::PipelineBundleStore;
 use archon_pipeline::audit::types::{BundleStatus, PipelineEvent};
+use archon_pipeline::runner::PipelineRunOptions;
 use chrono::Utc;
 
 use crate::command::pipeline_support::{
@@ -46,10 +47,12 @@ pub(crate) async fn handle_resume(
     session_id: &str,
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
+    force_quality_gate: bool,
 ) -> Result<()> {
     let bundle = PipelineBundleStore::new(cwd);
     if let Ok(manifest) = bundle.load_manifest(session_id) {
         let adapter = build_pipeline_adapter(config, env_vars, "pipeline_resume").await?;
+        let options = PipelineRunOptions { force_quality_gate };
         match manifest.pipeline_type {
             archon_pipeline::runner::PipelineType::Coding => {
                 ensure_active_provider_supports(
@@ -63,8 +66,8 @@ pub(crate) async fn handle_resume(
                     .with_context(config.context.clone());
                 let leann = init_leann(cwd).await;
                 let mut reflexion = build_reflexion_injector(config);
-                println!("Resuming audited coding pipeline...");
-                let result = archon_pipeline::runner::resume_pipeline_audited(
+                print_resume_mode("coding", force_quality_gate);
+                let result = archon_pipeline::runner::resume_pipeline_audited_with_options(
                     &facade,
                     &adapter,
                     session_id,
@@ -72,6 +75,7 @@ pub(crate) async fn handle_resume(
                     leann.as_ref(),
                     reflexion.as_mut(),
                     learning.as_mut(),
+                    options,
                 )
                 .await?;
                 print_pipeline_result(&result, cwd).await;
@@ -99,8 +103,8 @@ pub(crate) async fn handle_resume(
                 )
                 .with_models(config.models.anthropic.clone())
                 .with_context(config.context.clone());
-                println!("Resuming audited research pipeline...");
-                let result = archon_pipeline::runner::resume_pipeline_audited(
+                print_resume_mode("research", force_quality_gate);
+                let result = archon_pipeline::runner::resume_pipeline_audited_with_options(
                     &facade,
                     &adapter,
                     session_id,
@@ -108,6 +112,7 @@ pub(crate) async fn handle_resume(
                     None,
                     reflexion.as_mut(),
                     trajectory_learning.as_mut(),
+                    options,
                 )
                 .await?;
                 print_pipeline_result(&result, cwd).await;
@@ -120,6 +125,13 @@ pub(crate) async fn handle_resume(
         }
     }
     handle_legacy_resume(cwd, session_id, config, env_vars).await
+}
+
+fn print_resume_mode(kind: &str, force_quality_gate: bool) {
+    println!("Resuming audited {kind} pipeline...");
+    if force_quality_gate {
+        println!("Force-quality continuation enabled; the override will be audited.");
+    }
 }
 
 pub(crate) async fn handle_list(cwd: &Path) -> Result<()> {

@@ -33,7 +33,7 @@ subagents, coding/research pipelines, and gametheory through Codex.
 | `archon pipeline code <TASK> [--dry-run]` | Run the coding pipeline on a task using the configured provider |
 | `archon pipeline research <TOPIC> [--dry-run]` | Run the research pipeline on a topic using the configured provider |
 | `archon pipeline status <SESSION_ID>` | Show pipeline session status |
-| `archon pipeline resume <SESSION_ID>` | Resume an interrupted pipeline session |
+| `archon pipeline resume <SESSION_ID> [--force-quality-gate]` | Resume an interrupted pipeline session; the force flag audits and continues past critical quality-gate failure only |
 | `archon pipeline list` | List all pipeline sessions |
 | `archon pipeline abort <SESSION_ID>` | Abort a running pipeline session |
 | `archon pipeline verify <SESSION_ID> [--write-report]` | Verify an audited built-in pipeline bundle and optionally write `verification/report.json` |

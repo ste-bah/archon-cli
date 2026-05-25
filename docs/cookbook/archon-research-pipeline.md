@@ -44,7 +44,10 @@ for pipeline resume and verification.
 Continuation is handled by the shared pipeline control surface, not by a second
 `/archon-research` invocation. If the run is interrupted, use
 `/pipeline resume <session-id>` or `archon pipeline resume <session-id>`; the
-persisted bundle records whether the run is coding or research.
+persisted bundle records whether the run is coding or research. If the run
+stopped only because a critical agent missed its quality threshold after all
+attempts, review the attempt output and then use `--force-quality-gate`; Archon
+audits the override and continues from the next agent.
 
 Equivalent CLI invocation (same persisted state, same outputs):
 
@@ -191,6 +194,7 @@ Resumeable: yes
 ```
 > /pipeline list
 > /pipeline resume 01HYCDF3RR…
+> /pipeline resume 01HYCDF3RR… --force-quality-gate
 [recovery] verifying git working tree...
 [recovery] verifying audited bundle...
 [recovery] last completed agent: evidence-synthesizer
@@ -199,7 +203,9 @@ Resumeable: yes
 
 Resume is git-aware and verifier-gated. It refuses to continue if files under
 the pipeline's purview changed unexpectedly or if persisted prompt/output
-records fail hash verification.
+records fail hash verification. The quality-gate force flag only overrides a
+critical quality-score stop; it does not override corrupt bundles, transport
+failures, prompt-build failures, or missing artifacts.
 
 ## Inspecting after completion
 

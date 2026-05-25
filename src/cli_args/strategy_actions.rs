@@ -319,6 +319,9 @@ pub enum PipelineAction {
     Resume {
         /// Session ID to resume
         session_id: String,
+        /// Continue past a critical quality-gate failure and audit the override
+        #[arg(long)]
+        force_quality_gate: bool,
     },
     /// List all pipeline sessions
     List,

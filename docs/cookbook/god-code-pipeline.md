@@ -71,7 +71,9 @@ The handler spawns the audited pipeline async via `tokio::spawn`. Per-agent prog
 Continuation is handled by the shared pipeline control surface, not by a second
 `/archon-code` invocation. If the run is interrupted, use
 `/pipeline resume <session-id>` or `archon pipeline resume <session-id>`; the
-persisted bundle records whether the run is coding or research.
+persisted bundle records whether the run is coding or research. If a critical
+agent stops only because it missed the quality threshold after all attempts,
+use `--force-quality-gate` to audit the override and continue.
 
 Equivalent CLI invocation (same persisted state, same outputs):
 
@@ -143,9 +145,10 @@ If archon-cli crashes or you `Ctrl-C`:
 archon pipeline list                      # find your session
 archon pipeline verify <session-id>       # optional preflight
 archon pipeline resume <session-id>       # verifies bundle, then continues
+archon pipeline resume <session-id> --force-quality-gate
 ```
 
-Resume requires git working tree consistency. It also verifies the audited bundle before continuing so corrupted state, missing outputs, or mismatched hashes fail closed.
+Resume requires git working tree consistency. It also verifies the audited bundle before continuing so corrupted state, missing outputs, or mismatched hashes fail closed. The force flag only overrides a critical quality-score stop.
 
 ## Aborting
 

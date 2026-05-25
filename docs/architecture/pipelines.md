@@ -133,7 +133,12 @@ Built-in coding/research pipeline state lives in
 
 Resume is verifier-gated: `archon pipeline resume <id>` verifies the bundle,
 hydrates completed agents from the audited records, and continues from the next
-agent instead of trusting ad hoc local state.
+agent instead of trusting ad hoc local state. A failed research or coding run
+that stopped only because a critical agent missed its quality threshold can be
+continued deliberately with `--force-quality-gate`; Archon records the override
+in `audit.log`, marks the accepted attempt with a force-accepted reason, and
+then continues from the next agent. It does not override transport errors,
+bundle verification failures, missing artifacts, or prompt/build failures.
 
 ### Inspection and export
 
@@ -251,12 +256,16 @@ archon pipeline export-traces <session-id> --out traces.jsonl
 
 # Resume / abort
 archon pipeline resume <session-id>
+archon pipeline resume <session-id> --force-quality-gate
 archon pipeline abort <session-id>
 ```
 
 In the TUI, `/archon-code` and `/archon-research` start coding and research
 runs. Continuation is shared: `/pipeline resume <session-id>` resumes either
-pipeline type after verifying the audited bundle.
+pipeline type after verifying the audited bundle. Use
+`/pipeline resume <session-id> --force-quality-gate` only when you have
+reviewed the failed attempt output and want the audited bundle to continue
+despite a critical quality score miss.
 
 ## Session recovery
 
@@ -265,6 +274,7 @@ Pipeline sessions persist all state to `<workdir>/.archon/pipelines/<session-id>
 ```bash
 archon pipeline list                      # find your session
 archon pipeline resume <session-id>       # verifies bundle, then continues at the next agent
+archon pipeline resume <session-id> --force-quality-gate  # audited quality-gate override
 ```
 
 Session recovery requires the same git working tree state (file modifications

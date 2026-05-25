@@ -129,10 +129,8 @@ fn phase4_pipelines_use_provider_neutral_adapter() {
     let _ = session; // legacy binding kept above; phase4 enforcement now spans the module.
     assert!(interactive_agent.contains("build_subagent_pipeline_client("));
     assert!(interactive_agent.contains("Arc::clone(&provider)"));
-    assert!(
-        pipeline_adapter
-            .contains("ProviderLlmAdapter::new(provider).with_origin(\"tui_pipeline\")")
-    );
+    assert!(pipeline_adapter.contains("ProviderLlmAdapter::new(Arc::clone(&provider))"));
+    assert!(pipeline_adapter.contains(".with_origin(\"tui_pipeline\")"));
     assert!(!session_all.contains("tui-pipeline-device"));
 }
 

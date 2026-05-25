@@ -1,5 +1,6 @@
 use anyhow::Result;
 
+use super::quality_gate::{force_acceptance_reason, quality_gate_acceptance};
 use super::support::{
     append_learning_context, append_reflexion_context, log_agent_completed, quality_failure_reason,
     record_reflexion_failure, record_research_agent_artifacts, reindex_modified_files,
@@ -25,6 +26,7 @@ pub(super) async fn run_single_agent(
     learning: &mut Option<&mut LearningIntegration>,
     audit: &mut Option<PipelineAuditRun>,
     agent: AgentInfo,
+    options: PipelineRunOptions,
 ) -> Result<()> {
     let ordinal = session.agent_results.len();
     tracing::info!(
@@ -63,6 +65,7 @@ pub(super) async fn run_single_agent(
         &learning_ctx,
         reflexion,
         audit,
+        options,
     )
     .await?;
     let result = commit_single_agent_completion(
@@ -83,6 +86,7 @@ async fn run_agent_attempts(
     learning_ctx: &LearningContext,
     reflexion: &mut Option<&mut ReflexionInjector>,
     audit: &mut Option<PipelineAuditRun>,
+    options: PipelineRunOptions,
 ) -> Result<AgentExecutionOutcome> {
     let mut attempt = 0usize;
     let mut attempts = Vec::new();
@@ -162,22 +166,36 @@ async fn run_agent_attempts(
         result.quality = Some(quality.clone());
 
         let meets_threshold = quality.overall >= agent.quality_threshold;
-        let accepted = attempt_accepted(meets_threshold, agent.critical, attempt);
+        let gate = quality_gate_acceptance(meets_threshold, agent, attempt, options);
         let failure_reason =
             (!meets_threshold).then(|| quality_failure_reason(agent, quality.overall));
+        let failure_reason = if gate.force_accepted {
+            Some(force_acceptance_reason(failure_reason))
+        } else {
+            failure_reason
+        };
         if let Some(audit) = audit.as_ref() {
             attempts.push(audit.record_attempt_completed(
                 ordinal,
                 agent,
                 attempt,
                 &result,
-                accepted,
+                gate.accepted,
                 failure_reason.clone(),
             )?);
+            if gate.force_accepted {
+                audit.record_quality_gate_force_accepted(
+                    ordinal,
+                    agent,
+                    attempt,
+                    quality.overall,
+                    failure_reason.as_deref().unwrap_or("force-accepted"),
+                )?;
+            }
         }
         log_agent_completed(agent, attempt, &quality, &result);
 
-        if accepted {
+        if gate.accepted {
             return Ok(AgentExecutionOutcome {
                 result,
                 quality,

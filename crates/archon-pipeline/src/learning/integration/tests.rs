@@ -97,7 +97,7 @@ fn correction_cluster_persists_policy_evaluated_pending_proposal() {
     assert!(
         policy_rows
             .iter()
-            .any(|row| row.rule_name == "high_risk_requires_approval")
+            .any(|row| row.rule_name == "autonomous_disabled")
     );
 }
 

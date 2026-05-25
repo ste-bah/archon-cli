@@ -157,7 +157,7 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         tui_surface: "Direct slash handler",
         status: SurfaceStatus::Done,
         source_of_truth: "src/command/evidence_view.rs",
-        notes: "Learning view plus GNN auto-trainer status diagnostics.",
+        notes: "Learning view plus GNN auto-trainer status diagnostics; shell `learning tick` runs the autonomous governed-learning pass.",
     },
     CommandSurfaceRow {
         cli: "archon pipeline ...",
@@ -165,7 +165,7 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         tui_surface: "CLI mirror",
         status: SurfaceStatus::Done,
         source_of_truth: "src/command/registry.rs",
-        notes: "Pipeline run/status/resume/list/abort/cancel plus audited verify/inspect/export are mirrored.",
+        notes: "Pipeline run/status/resume/list/abort/cancel plus audited verify/inspect/export are mirrored; resume supports audited force-quality continuation.",
     },
     CommandSurfaceRow {
         cli: "archon pipeline code <task>",

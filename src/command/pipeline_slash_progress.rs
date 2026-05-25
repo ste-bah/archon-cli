@@ -144,6 +144,28 @@ fn emit_audit_event(tui_tx: &TuiEventSender, session_id: &str, event: PipelineEv
                 None,
             )));
         }
+        PipelineEvent::QualityGateForceAccepted {
+            ordinal,
+            agent_key,
+            attempt,
+            overall,
+            threshold,
+            reason,
+        } => {
+            let detail =
+                format!("force accepted attempt {attempt}: score {overall:.2}/{threshold:.2}");
+            let _ = tui_tx.send(TuiEvent::AgentActivity(pipeline_activity_update(
+                session_id,
+                ordinal,
+                &agent_key,
+                AgentActivityStatus::Running,
+                Some(detail),
+                None,
+            )));
+            let _ = tui_tx.send(TuiEvent::TextDelta(format!(
+                "[pipeline] {agent_key} quality gate force-accepted: {reason}\n"
+            )));
+        }
         PipelineEvent::LlmAttemptFailed {
             ordinal,
             agent_key,
