@@ -1,5 +1,7 @@
 pub mod config;
+mod cozo_guard;
 pub mod schema;
+pub mod self_model;
 pub mod situation_classifier;
 pub mod store;
 pub mod tool_use_gate;
