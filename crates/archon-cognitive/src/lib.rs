@@ -5,6 +5,8 @@ mod cozo_guard;
 mod decision_codec;
 pub mod decision_store;
 pub mod policy_gate;
+mod reflection_store;
+pub mod reflection_writer;
 pub mod schema;
 pub mod self_model;
 pub mod situation_classifier;
@@ -18,6 +20,10 @@ pub use candidate_planner::{CandidatePlanner, HeuristicWeights};
 pub use config::CognitiveConfig;
 pub use decision_store::DecisionStore;
 pub use policy_gate::{DenyReason, PolicyGate, PolicyVerdict, ProposalCheck, ProposalDenyReason};
+pub use reflection_writer::{
+    LessonSink, NoopLessonSink, OutcomeSummary, ReflectInput, ReflectionRecord,
+    ReflectionWriteOutcome, ReflectionWriter,
+};
 pub use schema::{CURRENT_SCHEMA_VERSION, cognitive_schema_version, ensure_cognitive_schema};
 pub use situation_classifier::{ClassifyInput, SituationClassifier};
 pub use store::{CognitiveStore, PersistentCognitiveStore};
