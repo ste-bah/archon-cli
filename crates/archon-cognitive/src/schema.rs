@@ -124,6 +124,35 @@ const SCHEMA_RELATIONS: &[&str] = &[
             context_json: String,
             created_at: String,
         }"#,
+    r#":create governed_proposals {
+            proposal_id: String =>
+            reflection_ids_json: String,
+            manifest_kind: String,
+            risk_level: String,
+            evidence_count: Int,
+            lesson_tag: String,
+            domain: String,
+            diff_summary: String,
+            rollback_plan: String,
+            created_at: String,
+        }"#,
+    r#":create autonomous_apply_results {
+            apply_id: String =>
+            proposal_id: String,
+            result_kind: String,
+            reason: String,
+            canary_outcome_ref: String,
+            rollback_ref: String,
+            created_at: String,
+        }"#,
+    r#":create canary_outcomes {
+            canary_id: String =>
+            proposal_id: String,
+            passed: Bool,
+            details: String,
+            snapshot_ref: String,
+            created_at: String,
+        }"#,
     r#":create cognitive_tick_audit {
             tick_id: String =>
             dead_letters_replayed: Int,

@@ -6,6 +6,8 @@ mod decision_codec;
 pub mod decision_store;
 pub mod executive_loop;
 mod executive_support;
+mod governed_apply_store;
+pub mod governed_autonomous_apply;
 pub mod policy_gate;
 mod reflection_store;
 pub mod reflection_writer;
@@ -24,6 +26,9 @@ pub use decision_store::DecisionStore;
 pub use executive_loop::{
     ActionExecution, ActionExecutor, ActionOutcome, ExecutiveLoop, ExecutiveRunOutcome,
     ExecutiveTurnInput, NoopActionExecutor, PlannedActionInput,
+};
+pub use governed_autonomous_apply::{
+    ApplyResult, BehaviourManifestKind, CanaryOutcome, GovernedAutonomousApply, Proposal,
 };
 pub use policy_gate::{DenyReason, PolicyGate, PolicyVerdict, ProposalCheck, ProposalDenyReason};
 pub use reflection_writer::{
