@@ -163,13 +163,80 @@ async fn process_message_fires_runtime_lifecycle_hooks() {
     }
     agent.set_hook_registry(registry);
 
-    agent.process_message("hello").await.unwrap();
+    agent
+        .process_message("explain this code path")
+        .await
+        .unwrap();
 
     let seen = seen.lock().unwrap();
     assert!(seen.contains(&crate::hooks::HookEvent::BeforeAgentRun));
     assert!(seen.contains(&crate::hooks::HookEvent::BeforePromptBuild));
     assert!(seen.contains(&crate::hooks::HookEvent::AfterPromptBuild));
     assert!(seen.contains(&crate::hooks::HookEvent::AfterAgentRun));
+}
+
+struct CountingLlmProvider {
+    stream_calls: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl LlmProvider for CountingLlmProvider {
+    fn name(&self) -> &str {
+        "counting"
+    }
+
+    fn models(&self) -> Vec<ModelInfo> {
+        vec![]
+    }
+
+    fn supports_feature(&self, _: ProviderFeature) -> bool {
+        false
+    }
+
+    async fn stream(
+        &self,
+        _request: LlmRequest,
+    ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
+        self.stream_calls.fetch_add(1, Ordering::SeqCst);
+        let (_tx, rx) = tokio::sync::mpsc::channel(1);
+        Ok(rx)
+    }
+
+    async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
+        unimplemented!()
+    }
+}
+
+#[tokio::test]
+async fn greeting_turn_short_circuits_before_provider_or_tools() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut agent = Agent::new(
+        Arc::new(CountingLlmProvider {
+            stream_calls: Arc::clone(&calls),
+        }),
+        ToolRegistry::new(),
+        AgentConfig::default(),
+        tx,
+        Arc::new(std::sync::RwLock::new(AgentRegistry::load(
+            &std::env::temp_dir(),
+        ))),
+    );
+
+    agent.process_message("hello").await.unwrap();
+
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    let mut saw_text = false;
+    let mut saw_tool = false;
+    while let Ok(event) = rx.try_recv() {
+        match event.inner {
+            AgentEvent::TextDelta(text) if text.contains("Hello") => saw_text = true,
+            AgentEvent::ToolCallStarted { .. } => saw_tool = true,
+            _ => {}
+        }
+    }
+    assert!(saw_text);
+    assert!(!saw_tool);
 }
 
 /// Verify that thinking blocks include the `signature` field when built

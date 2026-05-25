@@ -11,6 +11,7 @@ archon-permissions = { path = "../archon-permissions" }
 archon-context = { path = "../archon-context" }
 archon-session = { path = "../archon-session" }
 archon-consciousness = { path = "../archon-consciousness" }
+archon-cognitive = { path = "../archon-cognitive" }
 archon-memory = { path = "../archon-memory" }
 archon-leann = { path = "../archon-leann" }
 # TASK-AGS-OBS-901: `src/metrics.rs` now re-exports `ChannelMetricSink` from

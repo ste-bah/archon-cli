@@ -58,6 +58,7 @@ impl Agent {
             record_user_correction_event_callback: None,
             record_reasoning_turn_callback: None,
             reasoning_evidence_refs: Vec::new(),
+            current_situation: None,
             // TASK #245: wired by the binary at startup; default None makes
             // tests and non-interactive paths no-op.
             inner_voice_change_callback: None,

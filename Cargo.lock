@@ -337,6 +337,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "archon-cognitive"
+version = "1.3.7"
+dependencies = [
+ "blake3",
+ "chrono",
+ "cozo-ce",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "archon-completion"
 version = "1.3.7"
 dependencies = [
@@ -407,6 +422,7 @@ version = "1.3.7"
 dependencies = [
  "anyhow",
  "arc-swap",
+ "archon-cognitive",
  "archon-consciousness",
  "archon-context",
  "archon-leann",

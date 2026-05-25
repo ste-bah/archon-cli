@@ -6,6 +6,15 @@ impl Agent {
     /// Returns when the LLM produces a final text response (no more tool calls).
     pub async fn process_message(&mut self, user_input: &str) -> Result<(), AgentLoopError> {
         self.begin_process_turn(user_input).await;
+        if self.try_complete_trivial_cognitive_turn(user_input).await {
+            self.emit_activity(
+                AgentActivityKind::ParentTurnCompleted,
+                AgentActivityStatus::Completed,
+                format!("turn {} completed", self.turn_number),
+            );
+            self.fire_after_agent_run_hook("completed", None).await;
+            return Ok(());
+        }
 
         let mut agentic_iterations: u32 = 0;
         let mut reactive_overflow_retried = false;
