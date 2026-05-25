@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::CognitivePolicy;
 pub use crate::video::{
     VideoAcquirePolicy, VideoAsrPolicy, VideoFramesPolicy, VideoPolicy, VideoSummaryPolicy,
 };
@@ -15,6 +16,8 @@ pub struct EffectivePolicy {
     pub reasoning_quality: ReasoningQualityPolicy,
     pub video: VideoPolicy,
     pub docs: DocsPolicy,
+    #[serde(default)]
+    pub cognitive: CognitivePolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

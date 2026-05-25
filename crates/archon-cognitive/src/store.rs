@@ -49,7 +49,7 @@ impl PersistentCognitiveStore {
     }
 
     pub fn situation_count(&self) -> Result<usize, CognitiveError> {
-        relation_count(&self.db, "cognitive_situations", "id")
+        relation_count(&self.db, "cognitive_situations", "situation_id")
     }
 
     pub fn decision_count(&self) -> Result<usize, CognitiveError> {
@@ -73,7 +73,10 @@ impl<'a> CognitiveStore<'a> {
 
     pub fn put_situation(&self, situation: &Situation) -> Result<(), CognitiveError> {
         let mut params = BTreeMap::new();
-        params.insert("id".into(), DataValue::from(situation.id.as_str()));
+        params.insert(
+            "situation_id".into(),
+            DataValue::from(situation.id.as_str()),
+        );
         params.insert(
             "session_id".into(),
             DataValue::from(situation.session_id.as_str()),
@@ -95,10 +98,14 @@ impl<'a> CognitiveStore<'a> {
             "confidence".into(),
             DataValue::from(format!("{:?}", situation.confidence).to_ascii_lowercase()),
         );
-        params.insert("reason".into(), DataValue::from(situation.reason.as_str()));
         params.insert(
             "surface".into(),
             DataValue::from(format!("{:?}", situation.surface).to_ascii_lowercase()),
+        );
+        params.insert("evidence_refs".into(), DataValue::from("[]"));
+        params.insert(
+            "reason_summary".into(),
+            DataValue::from(situation.reason.as_str()),
         );
         params.insert(
             "created_at".into(),
@@ -107,9 +114,9 @@ impl<'a> CognitiveStore<'a> {
 
         run_script_guarded(
             self.db,
-            "?[id, session_id, turn_number, user_text_hash, kind, confidence_score, confidence, reason, surface, created_at] <- \
-                 [[$id, $session_id, $turn_number, $user_text_hash, $kind, $confidence_score, $confidence, $reason, $surface, $created_at]]
-                 :put cognitive_situations { id => session_id, turn_number, user_text_hash, kind, confidence_score, confidence, reason, surface, created_at }",
+            "?[situation_id, session_id, turn_number, user_text_hash, surface, kind, confidence_score, confidence, evidence_refs, reason_summary, created_at] <- \
+                 [[$situation_id, $session_id, $turn_number, $user_text_hash, $surface, $kind, $confidence_score, $confidence, $evidence_refs, $reason_summary, $created_at]]
+                 :put cognitive_situations { situation_id => session_id, turn_number, user_text_hash, surface, kind, confidence_score, confidence, evidence_refs, reason_summary, created_at }",
             params,
             ScriptMutability::Mutable,
             "put cognitive situation",

@@ -4,25 +4,45 @@ use cozo::{DbInstance, ScriptMutability};
 
 use crate::types::CognitiveError;
 
+pub const CURRENT_SCHEMA_VERSION: i64 = 1;
+
 pub fn ensure_cognitive_schema(db: &DbInstance) -> Result<(), CognitiveError> {
-    run_idempotent(
-        db,
-        r#":create cognitive_situations {
-            id: String =>
+    for script in SCHEMA_RELATIONS {
+        run_idempotent(db, script)?;
+    }
+    record_schema_version(db)
+}
+
+pub fn cognitive_schema_version(db: &DbInstance) -> Result<i64, CognitiveError> {
+    let rows = db
+        .run_script(
+            "?[version] := *cognitive_schema_version{version}",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .map_err(|err| CognitiveError::Schema(err.to_string()))?;
+    rows.rows
+        .first()
+        .and_then(|row| row.first())
+        .and_then(|value| value.get_int())
+        .ok_or_else(|| CognitiveError::Schema("missing cognitive schema version".into()))
+}
+
+const SCHEMA_RELATIONS: &[&str] = &[
+    r#":create cognitive_situations {
+            situation_id: String =>
             session_id: String,
             turn_number: Int,
             user_text_hash: String,
+            surface: String,
             kind: String,
             confidence_score: Float,
             confidence: String,
-            reason: String,
-            surface: String,
+            evidence_refs: String,
+            reason_summary: String,
             created_at: String,
         }"#,
-    )?;
-    run_idempotent(
-        db,
-        r#":create cognitive_tool_decisions {
+    r#":create cognitive_tool_decisions {
             id: String =>
             situation_id: String,
             session_id: String,
@@ -32,7 +52,93 @@ pub fn ensure_cognitive_schema(db: &DbInstance) -> Result<(), CognitiveError> {
             reason: String,
             created_at: String,
         }"#,
-    )
+    r#":create cognitive_action_candidates {
+            candidate_id: String =>
+            situation_id: String,
+            action_kind: String,
+            tool_name: String,
+            risk: String,
+            expected_evidence: String,
+            score: Float,
+            score_source: String,
+            rejected_reason: String,
+            created_at: String,
+        }"#,
+    r#":create cognitive_decisions {
+            decision_id: String =>
+            situation_id: String,
+            selected_candidate_id: String,
+            rejected_candidates_json: String,
+            policy_verdict_json: String,
+            verification_contract_json: String,
+            user_visible_summary: String,
+            created_at: String,
+        }"#,
+    r#":create self_model_facts {
+            fact_id: String =>
+            domain: String,
+            fact_kind: String,
+            statement: String,
+            confidence: Float,
+            evidence_count: Int,
+            last_seen_at: String,
+            expires_at: String,
+            created_at: String,
+        }"#,
+    r#":create cognitive_reflections {
+            reflection_id: String =>
+            session_id: String,
+            turn_number: Int,
+            decision_id: String,
+            outcome: String,
+            lesson: String,
+            proposed_rule_id: String,
+            created_at: String,
+        }"#,
+    r#":create cognitive_prediction_links {
+            link_id: String =>
+            prediction_id: String,
+            situation_id: String,
+            decision_id: String,
+            candidate_id: String,
+            predicted_score: Float,
+            actual_outcome: String,
+            score_delta: Float,
+            created_at: String,
+        }"#,
+    r#":create cognitive_policy_state {
+            state_id: String =>
+            rule_name: String,
+            decision: String,
+            reason: String,
+            context_json: String,
+            created_at: String,
+        }"#,
+    r#":create cognitive_tick_audit {
+            tick_id: String =>
+            dead_letters_replayed: Int,
+            proposals_evaluated: Int,
+            proposals_auto_applied: Int,
+            proposals_denied: Int,
+            self_model_updated: Bool,
+            errors_json: String,
+            duration_ms: Int,
+            created_at: String,
+        }"#,
+    r#":create cognitive_schema_version {
+            version: Int =>
+            created_at: String,
+        }"#,
+];
+
+fn record_schema_version(db: &DbInstance) -> Result<(), CognitiveError> {
+    let created_at = chrono::Utc::now().to_rfc3339();
+    let script = format!(
+        "?[version, created_at] <- [[{}, '{}']]
+         :put cognitive_schema_version {{ version => created_at }}",
+        CURRENT_SCHEMA_VERSION, created_at
+    );
+    run_idempotent(db, script.as_str())
 }
 
 fn run_idempotent(db: &DbInstance, script: &str) -> Result<(), CognitiveError> {
