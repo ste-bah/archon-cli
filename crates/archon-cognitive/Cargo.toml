@@ -8,6 +8,7 @@ blake3.workspace = true
 chrono.workspace = true
 cozo.workspace = true
 archon-reasoning-quality = { path = "../archon-reasoning-quality" }
+archon-policy = { path = "../archon-policy" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
