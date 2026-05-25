@@ -10,6 +10,7 @@ pub mod situation_classifier;
 pub mod store;
 pub mod tool_use_gate;
 pub mod types;
+pub mod verification_contracts;
 
 pub use candidate_planner::{CandidatePlanner, HeuristicWeights};
 pub use config::CognitiveConfig;
@@ -22,4 +23,8 @@ pub use types::{
     Candidate, CandidateActionKind, CandidateScore, ClassifierConfidence, CognitiveDecision,
     CognitiveError, CognitiveSurface, DecisionRecord, RejectedCandidate, RiskLevel, ScoreSource,
     Situation, SituationKind, ToolVerdict, direct_response_for,
+};
+pub use verification_contracts::{
+    ContractInput, VerificationContract, VerificationEngine, VerificationEvidence,
+    VerificationKind, VerificationRequirement, VerificationVerdict,
 };
