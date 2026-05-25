@@ -260,7 +260,7 @@ dependencies = [
 
 [[package]]
 name = "archon-bench"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "archon-core",
  "archon-pipeline",
@@ -277,7 +277,7 @@ dependencies = [
 
 [[package]]
 name = "archon-cli-workspace"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "archon-completion",
@@ -338,7 +338,7 @@ dependencies = [
 
 [[package]]
 name = "archon-completion"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "archon-learning",
@@ -358,7 +358,7 @@ dependencies = [
 
 [[package]]
 name = "archon-consciousness"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -373,7 +373,7 @@ dependencies = [
 
 [[package]]
 name = "archon-constellation"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "archon-meaning",
  "chrono",
@@ -391,7 +391,7 @@ dependencies = [
 
 [[package]]
 name = "archon-context"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "chrono",
@@ -403,7 +403,7 @@ dependencies = [
 
 [[package]]
 name = "archon-core"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -465,7 +465,7 @@ dependencies = [
 
 [[package]]
 name = "archon-docs"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "archon-llm",
@@ -494,7 +494,7 @@ dependencies = [
 
 [[package]]
 name = "archon-knowledge"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "archon-docs",
@@ -513,7 +513,7 @@ dependencies = [
 
 [[package]]
 name = "archon-leann"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -541,7 +541,7 @@ dependencies = [
 
 [[package]]
 name = "archon-learning"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "archon-policy",
@@ -557,7 +557,7 @@ dependencies = [
 
 [[package]]
 name = "archon-llm"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -600,7 +600,7 @@ dependencies = [
 
 [[package]]
 name = "archon-mcp"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "archon-tools",
@@ -630,7 +630,7 @@ dependencies = [
 
 [[package]]
 name = "archon-meaning"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "chrono",
  "cozo-ce",
@@ -645,7 +645,7 @@ dependencies = [
 
 [[package]]
 name = "archon-memory"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "chrono",
@@ -666,7 +666,7 @@ dependencies = [
 
 [[package]]
 name = "archon-observability"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "axum",
@@ -691,7 +691,7 @@ dependencies = [
 
 [[package]]
 name = "archon-permissions"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "glob",
@@ -704,7 +704,7 @@ dependencies = [
 
 [[package]]
 name = "archon-pipeline"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -742,7 +742,7 @@ dependencies = [
 
 [[package]]
 name = "archon-plugin"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -760,7 +760,7 @@ dependencies = [
 
 [[package]]
 name = "archon-policy"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "dirs",
  "serde",
@@ -771,7 +771,7 @@ dependencies = [
 
 [[package]]
 name = "archon-provenance"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "chrono",
  "cozo-ce",
@@ -786,7 +786,7 @@ dependencies = [
 
 [[package]]
 name = "archon-reasoning-quality"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "blake3",
@@ -802,7 +802,7 @@ dependencies = [
 
 [[package]]
 name = "archon-sdk"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -830,7 +830,7 @@ dependencies = [
 
 [[package]]
 name = "archon-session"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "chrono",
@@ -847,7 +847,7 @@ dependencies = [
 
 [[package]]
 name = "archon-test-support"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -861,7 +861,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tools"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "archon-leann",
@@ -903,7 +903,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tui"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -953,7 +953,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tui-test-support"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "criterion",
  "dashmap 5.5.3",
@@ -969,7 +969,7 @@ dependencies = [
 
 [[package]]
 name = "archon-video"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "archon-docs",
@@ -997,7 +997,7 @@ dependencies = [
 
 [[package]]
 name = "archon-world-model"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "anyhow",
  "archon-llm",

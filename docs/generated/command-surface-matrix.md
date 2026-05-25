@@ -20,7 +20,7 @@ Rows marked `PARTIAL` or `SHELL_ONLY` must carry an approved exception with an o
 | `archon briefing ...` | `/briefing` | CLI mirror | DONE | `src/command/reasoning.rs + src/runtime/proactive_briefing.rs` | Proactive session briefing preview is mirrored for TUI validation. | - |
 | `archon meaning ...` | `/meaning` | CLI mirror | DONE | `src/command/registry.rs` | Meaning samples, contrastive pairs, triplets, and export are mirrored. | - |
 | `archon constellation ...` | `/constellation` | CLI mirror | DONE | `src/command/registry.rs` | Centroid build, bootstrap, score, drift, and list commands are mirrored. | - |
-| `archon learning ...` | `/learning` | Direct slash handler | DONE | `src/command/evidence_view.rs` | Learning view plus GNN auto-trainer status diagnostics. | - |
+| `archon learning ...` | `/learning` | Direct slash handler | DONE | `src/command/evidence_view.rs` | Learning view plus GNN auto-trainer status diagnostics; shell `learning tick` runs the autonomous governed-learning pass. | - |
 | `archon pipeline ...` | `/pipeline` | CLI mirror | DONE | `src/command/registry.rs` | Pipeline run/status/resume/list/abort/cancel plus audited verify/inspect/export are mirrored. | - |
 | `archon pipeline code <task>` | `/archon-code` | Pipeline primary | DONE | `src/command/archon_code.rs` | The coding pipeline has a first-class TUI slash primary; continuation uses /pipeline resume <session-id>. | - |
 | `archon pipeline research <topic>` | `/archon-research` | Pipeline primary | DONE | `src/command/archon_research.rs` | The research pipeline has a first-class TUI slash primary; continuation uses /pipeline resume <session-id>. | - |

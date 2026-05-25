@@ -30,13 +30,35 @@ Related interactive status:
 /learning-status
 ```
 
+Autonomous operation uses the learning command surface:
+
+| Command | Purpose |
+|---|---|
+| `archon learning tick` | Generate proposals, dedupe them, evaluate policy, and apply any proposal whose autonomous gates pass |
+
 ## Policy gates
 
 Governed learning is default-deny for auto-apply. Policy controls whether
 low-risk updates may apply automatically and whether prompt, blocking-gate,
 network, or policy changes require explicit approval.
 
+For no-human operation, set `policy.learning.autonomous_apply = true` and choose
+an `autonomous_max_risk` ceiling. The tick still requires enough evidence and a
+low recent false-completion count, and `PolicyOverride` proposals cannot
+self-apply. Pipeline correction clusters use the same autonomous gates when the
+runtime learning stack is active.
+
 See [Policy](policy.md) for the TOML format.
+
+```mermaid
+flowchart LR
+    A["Learning events"] --> B["Proposal generator"]
+    B --> C["Duplicate guard"]
+    C --> D["Policy evaluator"]
+    D -->|Allowed| E["Apply manifest version"]
+    D -->|Denied or held| F["Leave proposal pending"]
+    D -->|PolicyOverride| F
+```
 
 ## Source of truth
 
@@ -73,6 +95,7 @@ training shapes embeddings but does not auto-apply behavioural proposals.
 archon behaviour status
 archon behaviour generate-proposals
 archon behaviour list --pending
+archon learning tick
 archon behaviour show <proposal-id>
 archon behaviour approve <proposal-id>
 archon behaviour history <manifest-kind>

@@ -19,6 +19,10 @@ enable_tier11 = true
 
 [policy.learning]
 auto_apply_low_risk = true
+autonomous_apply = true
+autonomous_max_risk = "High"
+autonomous_min_evidence = 4
+autonomous_max_recent_incidents = 2
 
 [policy.world_model]
 allow_third_party_embeddings = true
@@ -82,6 +86,10 @@ semantic_weight = 0.3
     assert!(load.policy.gametheory.enable_tier11);
     assert_eq!(load.policy.gametheory.max_agents_per_council, 8);
     assert!(load.policy.learning.auto_apply_low_risk);
+    assert!(load.policy.learning.autonomous_apply);
+    assert_eq!(load.policy.learning.autonomous_max_risk, "High");
+    assert_eq!(load.policy.learning.autonomous_min_evidence, 4);
+    assert_eq!(load.policy.learning.autonomous_max_recent_incidents, 2);
     assert!(load.policy.world_model.allow_third_party_embeddings);
     assert!(load.policy.world_model.allow_llm_labeler);
     assert!(load.policy.world_model.allow_behavior_changes);
@@ -300,6 +308,29 @@ fn high_impact_learning_changes_remain_approval_gated() {
     assert!(
         !policy
             .learning_auto_apply_decision("RetrievalProfile", "High")
+            .allowed
+    );
+}
+
+#[test]
+fn autonomous_learning_can_apply_high_risk_when_all_gates_allow() {
+    let mut policy = EffectivePolicy::default();
+    policy.learning.autonomous_apply = true;
+    policy.learning.autonomous_max_risk = "High".into();
+
+    assert!(
+        policy
+            .learning_auto_apply_decision("BehaviouralRuleAdjustment", "High")
+            .allowed
+    );
+    assert!(
+        !policy
+            .learning_auto_apply_decision("RetrievalProfile", "Critical")
+            .allowed
+    );
+    assert!(
+        !policy
+            .learning_auto_apply_decision("PolicyOverride", "Low")
             .allowed
     );
 }

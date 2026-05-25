@@ -183,6 +183,8 @@ pub enum LearningAction {
         #[command(subcommand)]
         action: LearningGnnAction,
     },
+    /// Run one autonomous governed-learning proposal/evaluation/apply pass
+    Tick,
 }
 
 #[derive(Subcommand, Debug, Clone)]

@@ -22,7 +22,14 @@ pub(super) fn build_subagent_pipeline_client(
         activity_sink: agent_config.activity_sink.clone(),
     };
     let raw: Arc<dyn archon_pipeline::runner::LlmClient> = Arc::new(
-        archon_pipeline::llm_adapter::ProviderLlmAdapter::new(provider).with_origin("tui_pipeline"),
+        archon_pipeline::llm_adapter::ProviderLlmAdapter::new(Arc::clone(&provider))
+            .with_origin("tui_pipeline"),
     );
-    Arc::new(archon_pipeline::subagent_adapter::SubagentPipelineClient::new(raw, tool_context))
+    Arc::new(
+        archon_pipeline::subagent_adapter::SubagentPipelineClient::with_provider(
+            raw,
+            tool_context,
+            provider,
+        ),
+    )
 }

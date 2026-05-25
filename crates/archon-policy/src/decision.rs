@@ -60,6 +60,9 @@ impl EffectivePolicy {
         manifest_kind: &str,
         risk_level: &str,
     ) -> PolicyDecision {
+        if self.learning.autonomous_apply {
+            return self.learning_autonomous_apply_decision(manifest_kind, risk_level);
+        }
         if !self.learning.auto_apply_low_risk {
             return PolicyDecision::deny("learning auto-apply is disabled by policy");
         }
@@ -79,6 +82,32 @@ impl EffectivePolicy {
             return PolicyDecision::deny("policy or network changes require approval by policy");
         }
         PolicyDecision::allow("low-risk auto-apply is enabled by policy")
+    }
+
+    fn learning_autonomous_apply_decision(
+        &self,
+        manifest_kind: &str,
+        risk_level: &str,
+    ) -> PolicyDecision {
+        if manifest_kind == "PolicyOverride" {
+            return PolicyDecision::deny("policy override changes cannot self-apply");
+        }
+        if manifest_kind == "PromptProfile" && self.learning.require_approval_for_prompt_changes {
+            return PolicyDecision::deny("prompt changes require approval by policy");
+        }
+        if manifest_kind == "PipelineGates" && self.learning.require_approval_for_blocking_gates {
+            return PolicyDecision::deny("blocking gate changes require approval by policy");
+        }
+        if self.learning.require_approval_for_network_changes && manifest_kind == "NetworkAccess" {
+            return PolicyDecision::deny("network changes require approval by policy");
+        }
+        if !risk_within_limit(risk_level, &self.learning.autonomous_max_risk) {
+            return PolicyDecision::deny(format!(
+                "risk {risk_level} exceeds autonomous_max_risk {}",
+                self.learning.autonomous_max_risk
+            ));
+        }
+        PolicyDecision::allow("autonomous learning apply is enabled by policy")
     }
 
     pub fn mcp_exposure_decision(&self) -> PolicyDecision {
@@ -271,6 +300,26 @@ impl EffectivePolicy {
         }
         PolicyDecision::allow("video summary is allowed by policy")
     }
+}
+
+fn risk_rank(risk: &str) -> Option<u8> {
+    match risk.to_ascii_lowercase().as_str() {
+        "low" => Some(0),
+        "medium" => Some(1),
+        "high" => Some(2),
+        "critical" => Some(3),
+        _ => None,
+    }
+}
+
+fn risk_within_limit(risk: &str, max: &str) -> bool {
+    let Some(risk) = risk_rank(risk) else {
+        return false;
+    };
+    let Some(max) = risk_rank(max) else {
+        return false;
+    };
+    risk <= max
 }
 
 fn allow_provider_mode(

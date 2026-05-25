@@ -200,8 +200,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v1.3.6** ([release notes](docs/release-notes/v1.3.6.md))
+- Current version: **v1.3.7** ([release notes](docs/release-notes/v1.3.7.md))
 - Stable release for local world-model advisory learning, first-class reasoning-quality events, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
+- v1.3.7 adds policy-gated autonomous governed learning via `archon learning tick`, provider-resolved pipeline subagent activity, and refreshed self-learning documentation.
 - v1.3.6 adds governed video evidence capture fallbacks: caption-first YouTube ingest, frame-friendly `yt-dlp` format selection, optional OpenCV frame extraction fallback, and optional RapidOCR image/frame OCR.
 - v1.3.5 hardens governed video evidence ingest: YouTube acquisition feeds local media into ASR/frame paths, `whisper-cpp` JSON segments become timecoded chunks, frame extraction uses PNG output, and setup/docs cover video dependencies across supported OS families.
 - v1.3.4 adds DeepSeek provider parity for Anthropic-compatible sessions, generic non-Claude `/model` selection, DeepSeek context/catalog coverage, and provider-aware TUI/session cost display.

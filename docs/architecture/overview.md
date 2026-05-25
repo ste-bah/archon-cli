@@ -238,6 +238,11 @@ Evidence Engine learning surfaces:
 4. **Meaning compiler** — labels, contrastive pairs, triplets, and eval datasets
 5. **Constellations** — project/domain/workflow centroids for scoring and drift detection
 
+Autonomous self-learning is policy-gated, not unconditional. `archon learning
+tick` can generate proposals, dedupe them, evaluate `[policy.learning]`, and
+apply only proposals whose risk, evidence, and recent-incident gates pass.
+Policy override proposals remain human-gated by design.
+
 ## See also
 
 - [Learning systems](learning-systems.md) — full deep dive on the 8 subsystems

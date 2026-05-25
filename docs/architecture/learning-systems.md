@@ -138,6 +138,10 @@ After rule reinforcement, the agent emits a `UserCorrected` event through
 `LearningIntegration.record_user_correction_event`. The proposal engine scans
 those events and emits a `BehaviouralRuleAdjustment` proposal when three or
 more corrections cluster on the same rule id within seven days.
+`archon learning tick` can run this loop end to end without human intervention
+when `[policy.learning].autonomous_apply = true`, but the same policy gates
+still enforce risk ceilings, evidence floors, recent-incident limits, and the
+hard rule that `PolicyOverride` proposals never self-apply.
 
 ## System details
 

@@ -77,6 +77,10 @@ impl Default for GameTheoryPolicy {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LearningPolicy {
     pub auto_apply_low_risk: bool,
+    pub autonomous_apply: bool,
+    pub autonomous_max_risk: String,
+    pub autonomous_min_evidence: usize,
+    pub autonomous_max_recent_incidents: usize,
     pub require_approval_for_prompt_changes: bool,
     pub require_approval_for_blocking_gates: bool,
     pub require_approval_for_network_changes: bool,
@@ -86,6 +90,10 @@ impl Default for LearningPolicy {
     fn default() -> Self {
         Self {
             auto_apply_low_risk: false,
+            autonomous_apply: false,
+            autonomous_max_risk: "Low".into(),
+            autonomous_min_evidence: 3,
+            autonomous_max_recent_incidents: 4,
             require_approval_for_prompt_changes: true,
             require_approval_for_blocking_gates: true,
             require_approval_for_network_changes: true,

@@ -126,6 +126,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v1.3.7](release-notes/v1.3.7.md) — Autonomous governed-learning tick, policy-gated self-application, provider-resolved pipeline subagent activity, and updated learning docs
 - [v1.3.6](release-notes/v1.3.6.md) — Video evidence capture fallbacks: caption-first ingest, frame-friendly `yt-dlp`, OpenCV frame fallback, and RapidOCR image/frame OCR
 - [v1.3.5](release-notes/v1.3.5.md) — Governed YouTube/video ingest hardening, local `whisper-cpp` ASR chunks, PNG frame extraction, frame reprocess, and cross-OS setup docs
 - [v1.3.4](release-notes/v1.3.4.md) — DeepSeek provider parity, Anthropic-compatible DeepSeek sessions, generic non-Claude model switching, and provider-aware cost display

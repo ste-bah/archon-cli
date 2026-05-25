@@ -10,6 +10,7 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 
+use archon_llm::provider::{LlmProvider, LlmRequest};
 use archon_tools::agent_tool::{SubagentRequest, run_subagent};
 use archon_tools::subagent_executor::SubagentOutcome;
 use archon_tools::tool::ToolContext;
@@ -72,11 +73,28 @@ const FULL_TOOLS: &[&str] = &[
 pub struct SubagentPipelineClient {
     fallback: Arc<dyn LlmClient>,
     context: ToolContext,
+    activity_provider: Option<Arc<dyn LlmProvider>>,
 }
 
 impl SubagentPipelineClient {
     pub fn new(fallback: Arc<dyn LlmClient>, context: ToolContext) -> Self {
-        Self { fallback, context }
+        Self {
+            fallback,
+            context,
+            activity_provider: None,
+        }
+    }
+
+    pub fn with_provider(
+        fallback: Arc<dyn LlmClient>,
+        context: ToolContext,
+        provider: Arc<dyn LlmProvider>,
+    ) -> Self {
+        Self {
+            fallback,
+            context,
+            activity_provider: Some(provider),
+        }
     }
 
     fn allowed_tools(request: &AgentExecutionRequest) -> Vec<String> {
@@ -121,6 +139,18 @@ impl SubagentPipelineClient {
 
         parts.join("\n\n")
     }
+
+    fn activity_model(&self, requested: &str) -> String {
+        let Some(provider) = &self.activity_provider else {
+            return requested.to_string();
+        };
+        let mut request = LlmRequest {
+            model: requested.to_string(),
+            ..LlmRequest::default()
+        };
+        provider.resolve_request_model(&mut request);
+        request.model
+    }
 }
 
 #[async_trait]
@@ -139,9 +169,10 @@ impl LlmClient for SubagentPipelineClient {
 
     async fn run_agent(&self, request: AgentExecutionRequest) -> Result<LlmResponse> {
         let prompt = Self::prompt_for_request(&request);
+        let activity_model = self.activity_model(&request.agent.model);
         let req = SubagentRequest {
             prompt,
-            model: Some(request.agent.model.clone()),
+            model: Some(activity_model),
             allowed_tools: Self::allowed_tools(&request),
             max_turns: SubagentRequest::DEFAULT_MAX_TURNS,
             timeout_secs: SubagentRequest::DEFAULT_TIMEOUT_SECS,
@@ -213,6 +244,62 @@ fn value_to_text(value: &serde_json::Value) -> String {
 mod tests {
     use super::*;
     use crate::runner::{AgentInfo, PipelineType};
+    use archon_llm::provider::{
+        LlmError, LlmResponse as ProviderResponse, ModelInfo, ProviderFeature,
+    };
+
+    struct NoopClient;
+
+    #[async_trait]
+    impl LlmClient for NoopClient {
+        async fn send_message(
+            &self,
+            _messages: Vec<serde_json::Value>,
+            _system: Vec<serde_json::Value>,
+            _tools: Vec<serde_json::Value>,
+            _model: &str,
+        ) -> Result<LlmResponse> {
+            Ok(LlmResponse {
+                content: String::new(),
+                tool_uses: Vec::new(),
+                tokens_in: 0,
+                tokens_out: 0,
+            })
+        }
+    }
+
+    struct AliasProvider;
+
+    #[async_trait]
+    impl LlmProvider for AliasProvider {
+        fn name(&self) -> &str {
+            "openai-codex"
+        }
+
+        fn models(&self) -> Vec<ModelInfo> {
+            vec![ModelInfo {
+                id: "gpt-5.4".into(),
+                display_name: "GPT-5.4".into(),
+                context_window: 1_050_000,
+            }]
+        }
+
+        async fn stream(
+            &self,
+            _request: LlmRequest,
+        ) -> Result<tokio::sync::mpsc::Receiver<archon_llm::streaming::StreamEvent>, LlmError>
+        {
+            Err(LlmError::Unsupported("not used".into()))
+        }
+
+        async fn complete(&self, _request: LlmRequest) -> Result<ProviderResponse, LlmError> {
+            Err(LlmError::Unsupported("not used".into()))
+        }
+
+        fn supports_feature(&self, _feature: ProviderFeature) -> bool {
+            false
+        }
+    }
 
     fn request(access: ToolAccessLevel) -> AgentExecutionRequest {
         AgentExecutionRequest {
@@ -253,5 +340,16 @@ mod tests {
         assert!(tools.contains(&"Write".to_string()));
         assert!(tools.contains(&"memory_store".to_string()));
         assert!(tools.contains(&"ApplyPatch".to_string()));
+    }
+
+    #[test]
+    fn activity_model_resolves_tier_alias_with_active_provider() {
+        let client = SubagentPipelineClient::with_provider(
+            Arc::new(NoopClient),
+            ToolContext::default(),
+            Arc::new(AliasProvider),
+        );
+
+        assert_eq!(client.activity_model("sonnet"), "gpt-5.4");
     }
 }

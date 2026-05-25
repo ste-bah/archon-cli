@@ -850,6 +850,10 @@ proposal_stale_days = 30
 #   vlm = "deny"                    # set "allow-local" for Ollama/LM Studio, "allow-cloud" for cloud VLM
 #   web_fetch = "allow-local"          # WebFetch tool enabled
 #
+#   [policy.learning]
+#   autonomous_apply = false        # set true for policy-gated no-human proposal apply
+#   autonomous_max_risk = "Low"     # raise deliberately; PolicyOverride never self-applies
+#
 #   [policy.docs.vlm]
 #   enabled = false
 #   mode = "disabled"               # "disabled" | "local" | "cloud" | "hybrid"

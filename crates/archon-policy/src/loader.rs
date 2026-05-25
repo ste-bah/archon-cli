@@ -6,6 +6,17 @@ use crate::errors::{PolicyError, Result};
 use crate::models::*;
 use crate::video::{RawVideoPolicy, apply_video};
 
+mod loader_docs;
+use loader_docs::{RawDocsPolicy, RawVlmPolicy, apply_docs, apply_legacy_vlm};
+
+macro_rules! set {
+    ($target:expr, $value:expr) => {
+        if let Some(value) = $value {
+            $target = value;
+        }
+    };
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PolicySource {
     pub label: &'static str,
@@ -110,6 +121,10 @@ struct RawGameTheoryPolicy {
 #[derive(Debug, Default, Deserialize)]
 struct RawLearningPolicy {
     auto_apply_low_risk: Option<bool>,
+    autonomous_apply: Option<bool>,
+    autonomous_max_risk: Option<String>,
+    autonomous_min_evidence: Option<usize>,
+    autonomous_max_recent_incidents: Option<usize>,
     require_approval_for_prompt_changes: Option<bool>,
     require_approval_for_blocking_gates: Option<bool>,
     require_approval_for_network_changes: Option<bool>,
@@ -146,71 +161,6 @@ struct RawReasoningQualityPolicy {
     auto_migrate_reasoning_quality: Option<bool>,
 }
 
-#[derive(Debug, Default, Deserialize)]
-struct RawDocsPolicy {
-    vlm: Option<RawVlmPolicy>,
-    pdf: Option<RawPdfPolicy>,
-    retrieval: Option<RawRetrievalPolicy>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct RawRetrievalPolicy {
-    exact_weight: Option<f64>,
-    semantic_weight: Option<f64>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct RawPdfPolicy {
-    extract_embedded_images: Option<bool>,
-    min_image_dimension: Option<u32>,
-    min_image_bytes: Option<u64>,
-    vlm_per_page_image: Option<bool>,
-    render_text_pdf_pages: Option<bool>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct RawVlmPolicy {
-    enabled: Option<bool>,
-    mode: Option<String>,
-    provider: Option<String>,
-    allow_cloud: Option<bool>,
-    require_user_confirmation_for_cloud: Option<bool>,
-    ollama: Option<RawOllamaVlmPolicy>,
-    gemini: Option<RawGeminiVlmPolicy>,
-    anthropic: Option<RawAnthropicVlmPolicy>,
-    openai_compat: Option<RawOpenAiCompatVlmPolicy>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct RawOllamaVlmPolicy {
-    endpoint: Option<String>,
-    model: Option<String>,
-    timeout_secs: Option<u64>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct RawGeminiVlmPolicy {
-    api_key_env: Option<String>,
-    model: Option<String>,
-    endpoint_base: Option<String>,
-    rpm_limit: Option<u32>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct RawAnthropicVlmPolicy {
-    model: Option<String>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct RawOpenAiCompatVlmPolicy {
-    endpoint: Option<String>,
-    model: Option<String>,
-    api_key_env: Option<String>,
-    timeout_secs: Option<u64>,
-    max_tokens: Option<u32>,
-    temperature: Option<f32>,
-}
-
 fn apply_raw(policy: &mut EffectivePolicy, root: RawPolicyRoot) {
     if let Some(raw) = root.policy {
         if let Some(network) = raw.network {
@@ -238,19 +188,11 @@ fn apply_raw(policy: &mut EffectivePolicy, root: RawPolicyRoot) {
             apply_video(&mut policy.video, video);
         }
         if let Some(docs) = raw.docs {
-            if let Some(vlm) = docs.vlm {
-                apply_vlm(&mut policy.docs.vlm, vlm);
-            }
-            if let Some(pdf) = docs.pdf {
-                apply_pdf(&mut policy.docs.pdf, pdf);
-            }
-            if let Some(retrieval) = docs.retrieval {
-                apply_retrieval(&mut policy.docs.retrieval, retrieval);
-            }
+            apply_docs(&mut policy.docs, docs);
         }
     }
     if let Some(legacy_vlm) = root.vlm {
-        apply_vlm(&mut policy.docs.vlm, legacy_vlm);
+        apply_legacy_vlm(&mut policy.docs.vlm, legacy_vlm);
     }
 }
 
@@ -300,18 +242,26 @@ fn apply_gametheory(policy: &mut GameTheoryPolicy, raw: RawGameTheoryPolicy) {
 }
 
 fn apply_learning(policy: &mut LearningPolicy, raw: RawLearningPolicy) {
-    if let Some(value) = raw.auto_apply_low_risk {
-        policy.auto_apply_low_risk = value;
-    }
-    if let Some(value) = raw.require_approval_for_prompt_changes {
-        policy.require_approval_for_prompt_changes = value;
-    }
-    if let Some(value) = raw.require_approval_for_blocking_gates {
-        policy.require_approval_for_blocking_gates = value;
-    }
-    if let Some(value) = raw.require_approval_for_network_changes {
-        policy.require_approval_for_network_changes = value;
-    }
+    set!(policy.auto_apply_low_risk, raw.auto_apply_low_risk);
+    set!(policy.autonomous_apply, raw.autonomous_apply);
+    set!(policy.autonomous_max_risk, raw.autonomous_max_risk);
+    set!(policy.autonomous_min_evidence, raw.autonomous_min_evidence);
+    set!(
+        policy.autonomous_max_recent_incidents,
+        raw.autonomous_max_recent_incidents
+    );
+    set!(
+        policy.require_approval_for_prompt_changes,
+        raw.require_approval_for_prompt_changes
+    );
+    set!(
+        policy.require_approval_for_blocking_gates,
+        raw.require_approval_for_blocking_gates
+    );
+    set!(
+        policy.require_approval_for_network_changes,
+        raw.require_approval_for_network_changes
+    );
 }
 
 fn apply_world_model(policy: &mut WorldModelPolicy, raw: RawWorldModelPolicy) {
@@ -377,116 +327,5 @@ fn apply_reasoning_quality(policy: &mut ReasoningQualityPolicy, raw: RawReasonin
     }
     if let Some(value) = raw.auto_migrate_reasoning_quality {
         policy.auto_migrate_reasoning_quality = value;
-    }
-}
-
-fn apply_vlm(policy: &mut VlmPolicy, raw: RawVlmPolicy) {
-    if let Some(value) = raw.enabled {
-        policy.enabled = value;
-    }
-    if let Some(value) = raw.mode {
-        policy.mode = value;
-    }
-    if let Some(value) = raw.provider {
-        policy.provider = value;
-    }
-    if let Some(value) = raw.allow_cloud {
-        policy.allow_cloud = value;
-    }
-    if let Some(value) = raw.require_user_confirmation_for_cloud {
-        policy.require_user_confirmation_for_cloud = value;
-    }
-    if let Some(value) = raw.ollama {
-        apply_ollama_vlm(&mut policy.ollama, value);
-    }
-    if let Some(value) = raw.gemini {
-        apply_gemini_vlm(&mut policy.gemini, value);
-    }
-    if let Some(value) = raw.anthropic {
-        apply_anthropic_vlm(&mut policy.anthropic, value);
-    }
-    if let Some(value) = raw.openai_compat {
-        apply_openai_compat_vlm(&mut policy.openai_compat, value);
-    }
-}
-
-fn apply_ollama_vlm(policy: &mut OllamaVlmPolicy, raw: RawOllamaVlmPolicy) {
-    if let Some(value) = raw.endpoint {
-        policy.endpoint = value;
-    }
-    if let Some(value) = raw.model {
-        policy.model = value;
-    }
-    if let Some(value) = raw.timeout_secs {
-        policy.timeout_secs = value;
-    }
-}
-
-fn apply_gemini_vlm(policy: &mut GeminiVlmPolicy, raw: RawGeminiVlmPolicy) {
-    if let Some(value) = raw.api_key_env {
-        policy.api_key_env = value;
-    }
-    if let Some(value) = raw.model {
-        policy.model = value;
-    }
-    if let Some(value) = raw.endpoint_base {
-        policy.endpoint_base = value;
-    }
-    if let Some(value) = raw.rpm_limit {
-        policy.rpm_limit = value;
-    }
-}
-
-fn apply_anthropic_vlm(policy: &mut AnthropicVlmPolicy, raw: RawAnthropicVlmPolicy) {
-    if let Some(value) = raw.model {
-        policy.model = value;
-    }
-}
-
-fn apply_openai_compat_vlm(policy: &mut OpenAiCompatVlmPolicy, raw: RawOpenAiCompatVlmPolicy) {
-    if let Some(value) = raw.endpoint {
-        policy.endpoint = value;
-    }
-    if let Some(value) = raw.model {
-        policy.model = value;
-    }
-    if let Some(value) = raw.api_key_env {
-        policy.api_key_env = value;
-    }
-    if let Some(value) = raw.timeout_secs {
-        policy.timeout_secs = value;
-    }
-    if let Some(value) = raw.max_tokens {
-        policy.max_tokens = value;
-    }
-    if let Some(value) = raw.temperature {
-        policy.temperature = value;
-    }
-}
-
-fn apply_pdf(policy: &mut PdfPolicy, raw: RawPdfPolicy) {
-    if let Some(value) = raw.extract_embedded_images {
-        policy.extract_embedded_images = value;
-    }
-    if let Some(value) = raw.min_image_dimension {
-        policy.min_image_dimension = value;
-    }
-    if let Some(value) = raw.min_image_bytes {
-        policy.min_image_bytes = value;
-    }
-    if let Some(value) = raw.vlm_per_page_image {
-        policy.vlm_per_page_image = value;
-    }
-    if let Some(value) = raw.render_text_pdf_pages {
-        policy.render_text_pdf_pages = value;
-    }
-}
-
-fn apply_retrieval(policy: &mut RetrievalPolicy, raw: RawRetrievalPolicy) {
-    if let Some(value) = raw.exact_weight {
-        policy.exact_weight = value;
-    }
-    if let Some(value) = raw.semantic_weight {
-        policy.semantic_weight = value;
     }
 }

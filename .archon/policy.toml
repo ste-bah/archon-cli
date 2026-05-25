@@ -58,11 +58,14 @@ allow_web_tools = true
 # ----------------------------------------------------------------------------
 # [policy.learning] — Governed learning approval gates
 # ----------------------------------------------------------------------------
-# Defaults are CONSERVATIVE. All proposals require approval until you flip
-# auto_apply_low_risk to true. The four require_approval_for_* fields stay
-# true — they cover changes that can break agents in subtle ways.
+# Defaults are CONSERVATIVE. Autonomous apply stays off until an operator opts in.
+# When enabled, the evidence/risk/incident gates below decide without a human.
 [policy.learning]
 auto_apply_low_risk = false
+autonomous_apply = false
+autonomous_max_risk = "Low"
+autonomous_min_evidence = 3
+autonomous_max_recent_incidents = 4
 require_approval_for_prompt_changes = true
 require_approval_for_blocking_gates = true
 require_approval_for_network_changes = true

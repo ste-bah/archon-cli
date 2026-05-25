@@ -1,5 +1,6 @@
 //! `archon learning` CLI handlers.
 
+mod autonomous;
 pub(crate) mod gnn;
 
 use anyhow::Result;
@@ -14,5 +15,6 @@ pub(crate) async fn handle_learning_command(
         LearningAction::Gnn {
             action: LearningGnnAction::Status,
         } => gnn::print_gnn_status(config).await,
+        LearningAction::Tick => autonomous::run_learning_tick().await,
     }
 }

@@ -42,6 +42,10 @@ allow_web_tools = false
 
 [policy.learning]
 auto_apply_low_risk = false
+autonomous_apply = false
+autonomous_max_risk = "Low"
+autonomous_min_evidence = 3
+autonomous_max_recent_incidents = 4
 require_approval_for_prompt_changes = true
 require_approval_for_blocking_gates = true
 require_approval_for_network_changes = true
@@ -192,8 +196,12 @@ English caption capture before ASR and falls back to `[policy.video.asr]` when
 captions are unavailable or unusable.
 
 Governed-learning auto-apply is denied by default. Low-risk updates can only
-auto-apply when `policy.learning.auto_apply_low_risk = true`; prompt, blocking
-gate, policy, and network changes remain approval-gated.
+auto-apply when `policy.learning.auto_apply_low_risk = true`. Fully autonomous
+apply is a separate opt-in: `policy.learning.autonomous_apply = true`, bounded
+by `autonomous_max_risk`, `autonomous_min_evidence`, and
+`autonomous_max_recent_incidents`. `PolicyOverride` changes never self-apply;
+prompt, blocking-gate, and network changes still respect their
+`require_approval_for_*` gates.
 
 The local world model is advisory by default. Third-party embeddings require
 both `[learning.world_model.embeddings].allow_third_party = true` and

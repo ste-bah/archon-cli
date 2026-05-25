@@ -18,6 +18,26 @@ use cozo::DbInstance;
 use crate::models::*;
 use crate::store;
 
+#[derive(Debug, Clone)]
+pub struct AutonomousLearningPolicy {
+    pub enabled: bool,
+    pub max_risk: RiskLevel,
+    pub min_evidence: usize,
+    pub max_recent_incidents: usize,
+}
+
+impl AutonomousLearningPolicy {
+    pub fn from_effective(policy: &archon_policy::EffectivePolicy) -> Self {
+        Self {
+            enabled: policy.learning.autonomous_apply,
+            max_risk: RiskLevel::from_str(&policy.learning.autonomous_max_risk)
+                .unwrap_or(RiskLevel::Low),
+            min_evidence: policy.learning.autonomous_min_evidence,
+            max_recent_incidents: policy.learning.autonomous_max_recent_incidents,
+        }
+    }
+}
+
 /// Run the policy engine for a proposal against the current environment.
 ///
 /// Returns the final PolicyDecision and a list of per-rule PolicyOutcome records.
@@ -122,11 +142,116 @@ pub fn evaluate_proposal_with_policy(
     policy: &archon_policy::EffectivePolicy,
     recent_incident_count: usize,
 ) -> Result<(PolicyDecision, Vec<PolicyOutcome>), crate::errors::LearningError> {
+    if policy.learning.autonomous_apply {
+        return evaluate_proposal_autonomous(
+            db,
+            proposal,
+            &AutonomousLearningPolicy::from_effective(policy),
+            recent_incident_count,
+        );
+    }
     let decision = policy.learning_auto_apply_decision(
         proposal.manifest_kind.as_str(),
         proposal.risk_level.as_str(),
     );
     evaluate_proposal(db, proposal, decision.allowed, recent_incident_count)
+}
+
+pub fn evaluate_proposal_autonomous(
+    db: &DbInstance,
+    proposal: &BehaviourProposal,
+    policy: &AutonomousLearningPolicy,
+    recent_incident_count: usize,
+) -> Result<(PolicyDecision, Vec<PolicyOutcome>), crate::errors::LearningError> {
+    let mut outcomes = Vec::new();
+
+    if proposal.manifest_kind == BehaviourManifestKind::PolicyOverride {
+        outcomes.push(record_rule(
+            db,
+            proposal,
+            "autonomous_policy_override_blocked",
+            PolicyDecision::PendingApproval,
+            "PolicyOverride manifest changes cannot be applied autonomously",
+            &serde_json::json!({ "manifest_kind": proposal.manifest_kind.as_str() }),
+        )?);
+        return Ok((PolicyDecision::PendingApproval, outcomes));
+    }
+
+    if !policy.enabled {
+        outcomes.push(record_rule(
+            db,
+            proposal,
+            "autonomous_disabled",
+            PolicyDecision::PendingApproval,
+            "autonomous learning apply is disabled by policy",
+            &serde_json::json!({ "enabled": false }),
+        )?);
+        return Ok((PolicyDecision::PendingApproval, outcomes));
+    }
+
+    if proposal.risk_level > policy.max_risk {
+        outcomes.push(record_rule(
+            db,
+            proposal,
+            "autonomous_risk_ceiling",
+            PolicyDecision::PendingApproval,
+            &format!(
+                "risk {} exceeds autonomous ceiling {}",
+                proposal.risk_level.as_str(),
+                policy.max_risk.as_str()
+            ),
+            &serde_json::json!({
+                "risk_level": proposal.risk_level.as_str(),
+                "max_risk": policy.max_risk.as_str(),
+            }),
+        )?);
+        return Ok((PolicyDecision::PendingApproval, outcomes));
+    }
+
+    if proposal.evidence_ids.len() < policy.min_evidence {
+        outcomes.push(record_rule(
+            db,
+            proposal,
+            "autonomous_evidence_floor",
+            PolicyDecision::PendingApproval,
+            "not enough evidence IDs for autonomous apply",
+            &serde_json::json!({
+                "evidence_count": proposal.evidence_ids.len(),
+                "min_evidence": policy.min_evidence,
+            }),
+        )?);
+        return Ok((PolicyDecision::PendingApproval, outcomes));
+    }
+
+    if recent_incident_count > policy.max_recent_incidents {
+        outcomes.push(record_rule(
+            db,
+            proposal,
+            "autonomous_incident_ceiling",
+            PolicyDecision::PendingApproval,
+            "recent false-completion incident count exceeds autonomous ceiling",
+            &serde_json::json!({
+                "recent_incident_count": recent_incident_count,
+                "max_recent_incidents": policy.max_recent_incidents,
+            }),
+        )?);
+        return Ok((PolicyDecision::PendingApproval, outcomes));
+    }
+
+    outcomes.push(record_rule(
+        db,
+        proposal,
+        "autonomous_apply_allowed",
+        PolicyDecision::AutoApplied,
+        "autonomous learning gates passed",
+        &serde_json::json!({
+            "risk_level": proposal.risk_level.as_str(),
+            "max_risk": policy.max_risk.as_str(),
+            "evidence_count": proposal.evidence_ids.len(),
+            "recent_incident_count": recent_incident_count,
+        }),
+    )?);
+    Ok((PolicyDecision::AutoApplied, outcomes))
 }
 
 /// Record a single policy rule evaluation and its outcome.
@@ -269,5 +394,48 @@ mod tests {
         allowed.learning.auto_apply_low_risk = true;
         let (decision, _) = evaluate_proposal_with_policy(&db, &proposal, &allowed, 0).unwrap();
         assert_eq!(decision, PolicyDecision::AutoApplied);
+    }
+
+    #[test]
+    fn autonomous_policy_can_apply_high_risk_when_explicitly_allowed() {
+        let db = test_db();
+        let mut proposal = make_proposal(
+            BehaviourManifestKind::BehaviouralRuleAdjustment,
+            RiskLevel::High,
+        );
+        proposal.evidence_ids = vec!["ev-1".into(), "ev-2".into(), "ev-3".into()];
+        let mut policy = archon_policy::EffectivePolicy::default();
+        policy.learning.autonomous_apply = true;
+        policy.learning.autonomous_max_risk = "High".into();
+        policy.learning.autonomous_min_evidence = 3;
+
+        let (decision, outcomes) =
+            evaluate_proposal_with_policy(&db, &proposal, &policy, 0).unwrap();
+
+        assert_eq!(decision, PolicyDecision::AutoApplied);
+        assert!(
+            outcomes
+                .iter()
+                .any(|o| o.rule_name == "autonomous_apply_allowed")
+        );
+    }
+
+    #[test]
+    fn autonomous_policy_blocks_when_evidence_floor_not_met() {
+        let db = test_db();
+        let proposal = make_proposal(BehaviourManifestKind::RetrievalProfile, RiskLevel::Low);
+        let mut policy = archon_policy::EffectivePolicy::default();
+        policy.learning.autonomous_apply = true;
+        policy.learning.autonomous_min_evidence = 2;
+
+        let (decision, outcomes) =
+            evaluate_proposal_with_policy(&db, &proposal, &policy, 0).unwrap();
+
+        assert_eq!(decision, PolicyDecision::PendingApproval);
+        assert!(
+            outcomes
+                .iter()
+                .any(|o| o.rule_name == "autonomous_evidence_floor")
+        );
     }
 }

@@ -1327,6 +1327,10 @@ allow_web_tools = false
 
 [policy.learning]
 auto_apply_low_risk = false
+autonomous_apply = false
+autonomous_max_risk = "Low"
+autonomous_min_evidence = 3
+autonomous_max_recent_incidents = 4
 require_approval_for_prompt_changes = true
 require_approval_for_blocking_gates = true
 require_approval_for_network_changes = true

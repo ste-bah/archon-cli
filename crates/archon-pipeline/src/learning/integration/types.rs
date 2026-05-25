@@ -11,6 +11,10 @@ pub struct LearningIntegrationConfig {
     pub route_prefix: String,
     pub enable_hyperedges: bool,
     pub hyperedge_threshold: f64,
+    pub autonomous_behaviour_apply: bool,
+    pub autonomous_max_risk: archon_learning::models::RiskLevel,
+    pub autonomous_min_evidence: usize,
+    pub autonomous_max_recent_incidents: usize,
 }
 
 impl Default for LearningIntegrationConfig {
@@ -22,6 +26,10 @@ impl Default for LearningIntegrationConfig {
             route_prefix: "pipeline/".to_string(),
             enable_hyperedges: false,
             hyperedge_threshold: 0.85,
+            autonomous_behaviour_apply: false,
+            autonomous_max_risk: archon_learning::models::RiskLevel::Low,
+            autonomous_min_evidence: 3,
+            autonomous_max_recent_incidents: 4,
         }
     }
 }

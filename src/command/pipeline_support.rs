@@ -51,7 +51,15 @@ pub(crate) fn build_interactive_learning_stack(
     db: Option<Arc<cozo::DbInstance>>,
     auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
 ) -> Option<LearningIntegration> {
-    build_learning_stack_from_db(config, db, auto_trainer, config.learning.sona.enabled)
+    let cwd = std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf());
+    let policy = load_learning_policy(&cwd);
+    build_learning_stack_from_db(
+        config,
+        db,
+        auto_trainer,
+        config.learning.sona.enabled,
+        policy.as_ref(),
+    )
 }
 
 pub(crate) fn build_reflexion_injector(config: &ArchonConfig) -> Option<ReflexionInjector> {
@@ -67,6 +75,7 @@ fn build_learning_stack_from_db(
     db: Option<Arc<cozo::DbInstance>>,
     auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
     track_trajectories: bool,
+    learning_policy: Option<&archon_policy::LearningPolicy>,
 ) -> Option<LearningIntegration> {
     let has_learning = track_trajectories
         || config.learning.reasoning_bank.enabled
@@ -80,6 +89,7 @@ fn build_learning_stack_from_db(
         track_trajectories,
         ..LearningIntegrationConfig::default()
     };
+    apply_autonomous_learning_policy(&mut integration_config, learning_policy);
     let mut learning = if let Some(db) = db.clone() {
         LearningIntegration::new_with_persistent_sona(
             db,
@@ -246,6 +256,7 @@ pub(crate) fn build_pipeline_learning_stack(
     let auto_trainer = db
         .as_ref()
         .and_then(|db| build_pipeline_auto_trainer_from_db(config, Arc::clone(db)));
+    let policy = load_learning_policy(cwd);
     let integration_config = LearningIntegrationConfig {
         track_trajectories: config.learning.sona.enabled && config.learning.sona.pipeline_recording,
         ..LearningIntegrationConfig::default()
@@ -263,8 +274,34 @@ pub(crate) fn build_pipeline_learning_stack(
         db,
         auto_trainer.clone(),
         integration_config.track_trajectories,
+        policy.as_ref(),
     );
     (learning, auto_trainer)
+}
+
+fn load_learning_policy(cwd: &Path) -> Option<archon_policy::LearningPolicy> {
+    archon_policy::load_effective_policy(cwd)
+        .map(|policy| policy.learning)
+        .map_err(|e| {
+            tracing::warn!(error = %e, "learning policy unavailable; autonomous apply disabled");
+            e
+        })
+        .ok()
+}
+
+fn apply_autonomous_learning_policy(
+    config: &mut LearningIntegrationConfig,
+    policy: Option<&archon_policy::LearningPolicy>,
+) {
+    let Some(policy) = policy else {
+        return;
+    };
+    config.autonomous_behaviour_apply = policy.autonomous_apply;
+    config.autonomous_max_risk =
+        archon_learning::models::RiskLevel::from_str(&policy.autonomous_max_risk)
+            .unwrap_or(archon_learning::models::RiskLevel::Low);
+    config.autonomous_min_evidence = policy.autonomous_min_evidence;
+    config.autonomous_max_recent_incidents = policy.autonomous_max_recent_incidents;
 }
 
 fn open_pipeline_learning_db(cwd: &Path) -> Option<Arc<cozo::DbInstance>> {

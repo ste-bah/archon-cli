@@ -147,11 +147,14 @@ fn phase3_subagents_and_team_use_active_provider() {
     let executor = read_all(&[
         "crates/archon-core/src/subagent_executor.rs",
         "crates/archon-core/src/subagent_executor/run.rs",
+        "crates/archon-core/src/subagent_executor/run_runner.rs",
     ]);
     let runner = read_all(&[
         "crates/archon-core/src/subagent.rs",
         "crates/archon-core/src/subagent/runner.rs",
         "crates/archon-core/src/subagent/runner/runtime.rs",
+        "crates/archon-core/src/subagent/runner/runtime/request_round.rs",
+        "crates/archon-core/src/subagent/runner/runtime/stream_round.rs",
     ]);
 
     assert!(team.contains("build_configured_llm_provider(config, env_vars, \"team\")"));

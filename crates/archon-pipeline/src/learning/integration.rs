@@ -3,6 +3,7 @@
 //!
 //! Implements REQ-LEARN-F09.
 
+mod autonomy;
 mod core;
 mod memory;
 mod phd;

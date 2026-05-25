@@ -385,26 +385,7 @@ impl LearningIntegration {
                 );
                 continue;
             }
-            match archon_learning::policy::evaluate_proposal(store, &proposal, false, 0) {
-                Ok((decision, _)) => {
-                    if let Err(e) = archon_learning::apply::apply_decision(
-                        store,
-                        &proposal.proposal_id,
-                        decision,
-                        None,
-                        Some("learning-integration"),
-                    ) {
-                        tracing::warn!(
-                            proposal_id = %proposal.proposal_id,
-                            "record_user_correction_event proposal policy queue failed: {e}"
-                        );
-                    }
-                }
-                Err(e) => tracing::warn!(
-                    proposal_id = %proposal.proposal_id,
-                    "record_user_correction_event proposal policy evaluation failed: {e}"
-                ),
-            }
+            super::autonomy::evaluate_and_apply_generated_proposal(store, &proposal, &self.config);
         }
     }
 
