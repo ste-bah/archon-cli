@@ -52,6 +52,14 @@ pub(crate) fn select_candidate(
     mut allowed: Vec<Candidate>,
     situation: &Situation,
 ) -> Option<Candidate> {
+    if situation.kind == SituationKind::CiDebug {
+        if let Some(position) = allowed
+            .iter()
+            .position(|candidate| candidate.action_kind == CandidateActionKind::RunSafeShellProbe)
+        {
+            return Some(allowed.remove(position));
+        }
+    }
     allowed.sort_by(|left, right| right.heuristic_score.total_cmp(&left.heuristic_score));
     allowed
         .into_iter()
@@ -77,6 +85,14 @@ pub(crate) fn build_decision(
     let mut decision = DecisionStore::decision_from_candidates(situation, &candidates)?;
     decision.selected_candidate_id = selected.id.clone();
     decision.policy_verdict = Some(serde_json::to_string(&verdict)?);
+    decision.user_visible_summary = format!(
+        "{} -> {} (risk={}, score={:.2}, evidence={})",
+        situation.kind.as_str(),
+        selected.action_kind.as_str(),
+        selected.risk_class.as_str(),
+        selected.heuristic_score,
+        selected.expected_evidence
+    );
     decision
         .rejected_alternatives
         .extend(denied.iter().map(|deny| crate::RejectedCandidate {
@@ -131,11 +147,16 @@ pub(crate) fn verification_kind(
     kind: SituationKind,
     candidate: &Candidate,
 ) -> Option<VerificationKind> {
+    if kind == SituationKind::CodeChange {
+        return Some(VerificationKind::CompletionClaim);
+    }
+    if kind == SituationKind::CiDebug {
+        return Some(VerificationKind::CiDebug);
+    }
     if candidate.risk_class < RiskLevel::Medium {
         return None;
     }
     Some(match kind {
-        SituationKind::CiDebug => VerificationKind::CiDebug,
         SituationKind::GitMutation => VerificationKind::Commit,
         SituationKind::WorldModelTask => VerificationKind::WorldModelPromotion,
         SituationKind::PipelineControl => VerificationKind::PipelineForceContinue,

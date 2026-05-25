@@ -74,6 +74,7 @@ impl<'a> CandidatePlanner<'a> {
                 let risk = adjusted_risk(*kind, memory_context, self_model);
                 let mut candidate = candidate_from_kind(situation, *kind, risk);
                 candidate.heuristic_score = score_candidate(&candidate, trust, self.weights);
+                apply_situation_priority(situation.kind, &mut candidate);
                 (index, candidate)
             })
             .collect::<Vec<_>>();
@@ -355,6 +356,20 @@ fn score_candidate(candidate: &Candidate, domain_trust: f32, weights: HeuristicW
     score += domain_trust.clamp(0.0, 1.0) * weights.prior_success_bonus;
     score -= friction(candidate.action_kind) * weights.user_friction_penalty;
     score.clamp(0.0, 1.0)
+}
+
+fn apply_situation_priority(kind: SituationKind, candidate: &mut Candidate) {
+    if !matches!(kind, SituationKind::CiDebug) {
+        return;
+    }
+    let delta = match candidate.action_kind {
+        CandidateActionKind::RunSafeShellProbe => 0.25,
+        CandidateActionKind::InspectFiles => 0.05,
+        CandidateActionKind::SearchDocs => -0.20,
+        CandidateActionKind::AnswerDirectly => -0.30,
+        _ => 0.0,
+    };
+    candidate.heuristic_score = (candidate.heuristic_score + delta).clamp(0.0, 1.0);
 }
 
 fn risk_delta(risk: RiskLevel) -> f32 {

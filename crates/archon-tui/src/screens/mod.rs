@@ -1,5 +1,6 @@
 //! Screens module index.
 
+pub mod cognitive;
 pub mod docs;
 pub(crate) mod evidence_browser;
 // TASK-#207 SLASH-FILES: file-picker overlay (3-file sub-module).

@@ -8,7 +8,7 @@ publish = false
 members = ["crates/*"]
 
 [workspace.package]
-version = "1.3.7"
+version = "1.3.8"
 edition = "2024"
 rust-version = "1.86"
 license = "MIT"
@@ -148,6 +148,7 @@ archon-provenance = { path = "crates/archon-provenance" }
 archon-video = { path = "crates/archon-video" }
 archon-pipeline = { path = "crates/archon-pipeline" }
 archon-completion = { path = "crates/archon-completion" }
+archon-cognitive = { path = "crates/archon-cognitive" }
 archon-leann = { path = "crates/archon-leann" }
 archon-tools = { path = "crates/archon-tools" }
 archon-tui = { path = "crates/archon-tui" }

@@ -25,6 +25,7 @@ export function App() {
       query.state.data?.jobs.some((job) => job.status === "running") ? 2500 : false,
   });
   const learning = useQuery({ queryKey: ["learning"], queryFn: apiClient.learningSummary });
+  const cognitive = useQuery({ queryKey: ["cognitive"], queryFn: apiClient.cognitiveSummary });
   const world = useQuery({ queryKey: ["world"], queryFn: apiClient.worldSummary });
   const pipelines = useQuery({ queryKey: ["pipelines"], queryFn: apiClient.pipelineSummary });
   const metrics = useQuery({ queryKey: ["metrics"], queryFn: apiClient.metricsSummary });
@@ -59,6 +60,7 @@ export function App() {
           corpus={corpus.data}
           ingest={ingest.data}
           learning={learning.data}
+          cognitive={cognitive.data}
           world={world.data}
           pipelines={pipelines.data}
           metrics={metrics.data}

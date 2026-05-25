@@ -34,6 +34,10 @@ impl PersistentCognitiveStore {
         &self.db_path
     }
 
+    pub fn db(&self) -> &DbInstance {
+        &self.db
+    }
+
     pub fn put_situation(&self, situation: &Situation) -> Result<(), CognitiveError> {
         CognitiveStore::from_validated(&self.db).put_situation(situation)
     }

@@ -405,6 +405,23 @@ max_per_agent = 3
 # active profile overlay stays opt-in until an operator enables it explicitly.
 active_profile_overlay_enabled = false
 
+# --- Cognitive Executive Loop (policy-governed metacognitive controller) ---
+[learning.cognitive]
+enabled = true
+max_candidates = 5
+trivial_turn_tool_policy = "none"
+record_decisions = true
+record_reflections = true
+use_world_model = true
+use_jepa = true
+use_reasoning_quality = true
+use_self_model = true
+max_pipeline_ms = 500
+situation_ttl_days = 90
+reflection_ttl_days = 180
+prediction_ttl_days = 90
+ledger_dir = ".archon/cognitive"
+
 # --- GNN Enhancer (round-trip 1536 → 1024 → 1280 → 1536 graph attention) ---
 [learning.gnn]
 enabled = true

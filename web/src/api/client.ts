@@ -3,6 +3,7 @@ import type {
   CorpusSearchResponse,
   CorpusSummary,
   CorpusSourcePreview,
+  CognitiveWebSummary,
   EvidenceGraphSummary,
   EffectiveConfigSummary,
   EffectivePolicySummary,
@@ -108,6 +109,7 @@ export const apiClient = {
   createKnowledgeBase: (request: WebKbCreateRequest) =>
     postJson<WebKbCreateResponse>("/api/ingest/kb", request),
   learningSummary: () => getJson<LearningSummary>("/api/learning/summary"),
+  cognitiveSummary: () => getJson<CognitiveWebSummary>("/api/cognitive/summary"),
   worldSummary: () => getJson<WorldInspectionSummary>("/api/world/summary"),
   pipelineSummary: () => getJson<PipelineSummary>("/api/pipelines/summary"),
   metricsSummary: () => getJson<MetricsSummary>("/api/metrics/summary"),
