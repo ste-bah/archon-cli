@@ -30,23 +30,23 @@ fn greeting_suppresses_all_tools() {
 }
 
 #[test]
-fn simple_question_allows_only_memory_recall() {
+fn simple_question_does_not_block_agent_tool_choice() {
     let memory = verdict("what did we decide?", "MemoryRecall", json!({}));
     let docs = verdict("what did we decide?", "DocSearch", json!({}));
     let bash = verdict("what did we decide?", "Bash", json!({"command": "ls"}));
     assert!(memory.is_allow());
     assert!(docs.is_allow());
-    assert!(matches!(bash, ToolVerdict::Suppress { .. }));
+    assert!(bash.is_allow());
 }
 
 #[test]
-fn ambiguous_followup_allows_read_only_discovery_tools() {
+fn ambiguous_followup_observes_without_blocking_tools() {
     let skill_list = verdict("yes", "Skill", json!({"action": "list"}));
     let read = verdict("yes", "Read", json!({"file_path": "README.md"}));
     let bash = verdict("yes", "Bash", json!({"command": "ls"}));
     assert!(skill_list.is_allow());
     assert!(read.is_allow());
-    assert!(matches!(bash, ToolVerdict::Suppress { .. }));
+    assert!(bash.is_allow());
 }
 
 #[test]
@@ -66,9 +66,9 @@ fn ambiguous_subagent_request_allows_agent_tool() {
 }
 
 #[test]
-fn ci_debug_bash_must_be_diagnostic() {
+fn ci_debug_observes_bash_without_blocking_permissions() {
     let gh = verdict("ci failed", "Bash", json!({"command": "gh run view"}));
     let shell = verdict("ci failed", "Bash", json!({"command": "npm install"}));
     assert!(gh.is_allow());
-    assert!(matches!(shell, ToolVerdict::Suppress { .. }));
+    assert!(shell.is_allow());
 }

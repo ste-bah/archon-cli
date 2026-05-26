@@ -26,7 +26,7 @@ impl ToolUseGate {
             SituationKind::Greeting => ToolVerdict::Suppress {
                 reason: "trivial turn must be answered directly without tools".to_owned(),
             },
-            SituationKind::SimpleQuestion => simple_question_verdict(input.tool_name),
+            SituationKind::SimpleQuestion => simple_question_verdict(),
             SituationKind::Ambiguous => ambiguous_verdict(input.tool_name, input.tool_input),
             SituationKind::CiDebug => ci_debug_verdict(input.tool_name, input.tool_input),
             _ => ToolVerdict::Allow {
@@ -36,15 +36,9 @@ impl ToolUseGate {
     }
 }
 
-fn simple_question_verdict(tool_name: &str) -> ToolVerdict {
-    if is_read_only_tool(tool_name) {
-        ToolVerdict::Allow {
-            reason: "simple question allows read-only retrieval tools".to_owned(),
-        }
-    } else {
-        ToolVerdict::Suppress {
-            reason: "simple question did not justify external tools".to_owned(),
-        }
+fn simple_question_verdict() -> ToolVerdict {
+    ToolVerdict::Allow {
+        reason: "simple question leaves tool choice to the active agent".to_owned(),
     }
 }
 
@@ -53,39 +47,15 @@ fn ambiguous_verdict(tool_name: &str, input: &Value) -> ToolVerdict {
         ToolVerdict::Allow {
             reason: "ambiguous turn may ask a clarification".to_owned(),
         }
-    } else if is_read_only_tool(tool_name) {
-        ToolVerdict::Allow {
-            reason: "ambiguous turn allows read-only discovery tools".to_owned(),
-        }
     } else if matches!(tool_name, "Agent" | "Task") && asks_for_subagent(input) {
         ToolVerdict::Allow {
             reason: "ambiguous turn explicitly requested subagent delegation".to_owned(),
         }
     } else {
-        ToolVerdict::Suppress {
-            reason: "ambiguous turn must clarify before tool use".to_owned(),
+        ToolVerdict::Allow {
+            reason: "ambiguous turn is observed but not blocked".to_owned(),
         }
     }
-}
-
-fn is_read_only_tool(tool_name: &str) -> bool {
-    matches!(
-        tool_name,
-        "Read"
-            | "Glob"
-            | "Grep"
-            | "LS"
-            | "Skill"
-            | "SkillAction"
-            | "DocSearch"
-            | "DocAnswer"
-            | "DocGet"
-            | "DocProvenance"
-            | "MemoryRecall"
-            | "memory_recall"
-            | "WebSearch"
-            | "WebFetch"
-    )
 }
 
 fn asks_for_subagent(input: &Value) -> bool {
@@ -110,8 +80,8 @@ fn ci_debug_verdict(tool_name: &str, input: &Value) -> ToolVerdict {
             reason: "CI debug permits gh/git diagnostics".to_owned(),
         }
     } else {
-        ToolVerdict::Suppress {
-            reason: "CI debug Bash command must be gh/git diagnostic".to_owned(),
+        ToolVerdict::Allow {
+            reason: "CI debug is observed; permissions gate owns command safety".to_owned(),
         }
     }
 }
