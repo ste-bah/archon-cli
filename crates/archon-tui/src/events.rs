@@ -19,6 +19,7 @@ pub enum ViewId {
     MemoryBrowser,
     ModelPicker,
     Status,
+    Cognitive,
     GameTheory,
     Docs,
     Learning,

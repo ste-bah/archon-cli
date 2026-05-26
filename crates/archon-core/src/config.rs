@@ -790,6 +790,7 @@ impl Default for AutoExtractionConfig {
 #[derive(Default)]
 pub struct LearningConfig {
     pub sona: SonaLearningConfig,
+    pub cognitive: archon_cognitive::CognitiveConfig,
     pub provenance: ToggleConfig,
     pub desc: ToggleConfig,
     pub gnn: GnnModelConfig,

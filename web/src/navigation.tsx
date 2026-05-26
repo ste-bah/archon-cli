@@ -1,6 +1,7 @@
 import {
   Activity,
   Brain,
+  BrainCircuit,
   ChartNoAxesCombined,
   Database,
   FileSearch,
@@ -50,6 +51,12 @@ export const navItems: NavItem[] = [
     label: "Memory",
     detail: "Learning rows, memories, and proposals",
     icon: Brain,
+  },
+  {
+    path: "/cognitive",
+    label: "Cognitive",
+    detail: "Executive loop, reflections, proposals",
+    icon: BrainCircuit,
   },
   {
     path: "/world",

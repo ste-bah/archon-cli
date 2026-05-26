@@ -55,6 +55,11 @@ export type WebUploadIntent = { fileName: string, sizeBytes: number, mimeType: s
 export type WebUploadIntentResponse = { decision: WebActionDecision, accepted: boolean, };
 
 
+export type CognitiveWebSummary = { store: PathProbe, storePresent: boolean, situationCount: number, toolDecisionCount: number, executiveDecisionCount: number, reflectionCount: number, proposalCount: number, applyResultCount: number, selfModelFactCount: number, daemon: CognitiveDaemonPreview, latestTick: CognitiveTickPreview | null, decisions: Array<CognitiveRowPreview>, reflections: Array<CognitiveRowPreview>, proposals: Array<CognitiveRowPreview>, };
+export type CognitiveRowPreview = { id: string, label: string, status: string, detail: string, createdAt: string, };
+export type CognitiveTickPreview = { tickId: string, proposalsEvaluated: number, proposalsAutoApplied: number, proposalsDenied: number, errorCount: number, durationMs: number, createdAt: string, };
+export type CognitiveDaemonPreview = { running: boolean, stale: boolean, stopRequested: boolean, ticksRun: number, pid: number | null, lastHeartbeatAt: string | null, };
+
 export type CorpusSource = { label: string, path: string, kind: string, bytes: number, excerpt: string | null, score: number, matchKind: string, };
 
 export type CorpusSummary = { roots: Array<PathProbe>, sources: Array<CorpusSource>, totalSources: number, degraded: boolean, };

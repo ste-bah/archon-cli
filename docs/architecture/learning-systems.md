@@ -7,6 +7,13 @@ Runtime wiring is deliberately fail-open: every subsystem is optional, and when
 one dependency is unavailable the pipeline continues with reduced capability
 rather than failing (`REQ-LEARN-013`).
 
+The Cognitive Executive Loop sits above these subsystems as the metacognitive
+controller. It classifies the current situation, gathers safe memory/RQ/SelfModel
+context, asks the world model or JEPA advisor for candidate-action scores when
+available, applies policy and verification gates, then stores compact decisions
+and reflections for governed learning. See
+[Cognitive Executive Loop](cognitive-executive-loop.md).
+
 The persistent runtime stack now proves the live paths for SONA, ReasoningBank,
 DESC, and Reflexion. Coding/research command surfaces build
 `LearningIntegration` plus `ReflexionInjector` in

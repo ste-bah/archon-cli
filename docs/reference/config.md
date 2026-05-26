@@ -635,6 +635,59 @@ See [Learning systems architecture](../architecture/learning-systems.md) for wha
 
 ---
 
+## `[learning.cognitive]`
+
+Policy-governed metacognitive controller that coordinates classification,
+candidate planning, SelfModel, reasoning-quality preflight, JEPA/world-model
+scoring, verification contracts, reflection, and autonomous tick maintenance.
+
+```toml
+[learning.cognitive]
+enabled = true
+max_candidates = 5
+trivial_turn_tool_policy = "none"
+record_decisions = true
+record_reflections = true
+use_world_model = true
+use_jepa = true
+use_reasoning_quality = true
+use_self_model = true
+max_pipeline_ms = 500
+situation_ttl_days = 90
+reflection_ttl_days = 180
+prediction_ttl_days = 90
+ledger_dir = ".archon/cognitive"
+
+[learning.cognitive.daemon]
+enabled = false
+interval_ms = 60000
+stale_heartbeat_ms = 120000
+run_on_start = true
+max_ticks_per_run = 0
+```
+
+| Field | Default | What / Why |
+|---|---|---|
+| `enabled` | `false` in schema, `true` in project templates | Enables the bounded executive loop. Foreground work continues if storage/scoring is unavailable. |
+| `max_candidates` | `5` | Number of action candidates to consider, clamped to 2-5. |
+| `trivial_turn_tool_policy` | `"none"` | Suppresses needless tools for greetings/trivial turns. |
+| `record_decisions` | `true` | Writes compact decision records without raw chain-of-thought. |
+| `record_reflections` | `true` | Writes safe outcome lessons. |
+| `use_world_model` | `false` in schema, template enables it | Lets promoted latent-transition models score candidates. |
+| `use_jepa` | `false` in schema, template enables it | Lets promoted JEPA models score candidates. |
+| `use_reasoning_quality` | `false` in schema, template enables it | Reads claim/evidence risk and preflight signals. |
+| `use_self_model` | `false` in schema, template enables it | Reads domain trust, failure clusters, and caution rules. |
+| `max_pipeline_ms` | `500` | Soft budget for the controller path. |
+| `ledger_dir` | `~/.local/share/archon/cognitive` | Project templates use `.archon/cognitive` so the TUI/web/CLI inspect the same workspace-local state. |
+| `daemon.enabled` | `false` | Enables the Rust background daemon commands when policy also allows them. |
+| `daemon.interval_ms` | `60000` in templates | Interval between bounded maintenance passes. |
+| `daemon.max_ticks_per_run` | `0` | `0` means keep running until `archon cognitive daemon stop`. |
+
+See [Cognitive configuration](cognitive-config.md) and
+[Cognitive Executive Loop](../architecture/cognitive-executive-loop.md).
+
+---
+
 ## `[learning.agent_evolution]`
 
 Runtime activation for governed agent profile overlays. Profile versions,

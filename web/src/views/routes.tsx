@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { Route, Routes } from "react-router-dom";
 import { ChatPage } from "./ChatPage";
+import { CognitivePage } from "./CognitivePage";
 import { CorpusPage } from "./CorpusPage";
 import { DashboardPage } from "./DashboardPage";
 import { InspectionPage } from "./InspectionPage";
@@ -13,6 +14,7 @@ import { SettingsPage } from "./SettingsPage";
 import { WorldPage } from "./WorldPage";
 import type {
   ApiStatus,
+  CognitiveWebSummary,
   CorpusSummary,
   EvidenceGraphSummary,
   EffectiveConfigSummary,
@@ -43,6 +45,7 @@ interface WorkbenchRoutesProps {
   corpus?: CorpusSummary;
   ingest?: WebIngestSummary;
   learning?: LearningSummary;
+  cognitive?: CognitiveWebSummary;
   world?: WorldInspectionSummary;
   pipelines?: PipelineSummary;
   metrics?: MetricsSummary;
@@ -62,6 +65,10 @@ export function WorkbenchRoutes(props: WorkbenchRoutesProps) {
       <Route
         path="/memory"
         element={<MemoryPage learning={props.learning} />}
+      />
+      <Route
+        path="/cognitive"
+        element={<CognitivePage cognitive={props.cognitive} />}
       />
       <Route
         path="/world"

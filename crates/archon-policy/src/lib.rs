@@ -1,5 +1,6 @@
 //! TOML policy layer for Evidence Engine gates.
 
+mod cognitive;
 pub mod decision;
 pub mod errors;
 pub mod loader;
@@ -8,6 +9,7 @@ mod video;
 
 use std::path::Path;
 
+pub use cognitive::CognitivePolicy;
 pub use errors::{PolicyError, Result};
 pub use loader::{PolicyLoad, PolicySource, load_policy_for_workspace, load_policy_from_sources};
 pub use models::*;

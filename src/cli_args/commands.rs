@@ -1,10 +1,11 @@
 use clap::Subcommand;
 
 use super::{
-    AgentAction, AuthArgs, BehaviourAction, BriefingAction, ChatArgs, CompletionAction,
-    ConstellationAction, DocsAction, GametheoryAction, KbAction, LearningAction, MeaningAction,
-    MemoryAction, PermissionsAction, PipelineAction, PluginAction, ProvAction, ProvidersAction,
-    ReasoningAction, RemoteAction, SandboxAction, SelfAction, TeamAction, VideoAction, WorldAction,
+    AgentAction, AuthArgs, BehaviourAction, BriefingAction, ChatArgs, CognitiveAction,
+    CompletionAction, ConstellationAction, DocsAction, GametheoryAction, KbAction, LearningAction,
+    MeaningAction, MemoryAction, PermissionsAction, PipelineAction, PluginAction, ProvAction,
+    ProvidersAction, ReasoningAction, RemoteAction, SandboxAction, SelfAction, TeamAction,
+    VideoAction, WorldAction,
 };
 
 #[derive(Subcommand, Debug)]
@@ -123,6 +124,11 @@ pub enum Commands {
     Reasoning {
         #[command(subcommand)]
         action: ReasoningAction,
+    },
+    /// Inspect and run the cognitive executive loop
+    Cognitive {
+        #[command(subcommand)]
+        action: CognitiveAction,
     },
     /// Preview proactive session-start briefing content
     Briefing {

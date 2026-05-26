@@ -36,6 +36,7 @@ pub(crate) async fn handle_subcommand(
         | Commands::Learning { .. }
         | Commands::World { .. }
         | Commands::Reasoning { .. }
+        | Commands::Cognitive { .. }
         | Commands::Briefing { .. }
         | Commands::Pipeline { .. }) => handle_learning_command(command, config, env_vars).await,
         command @ (Commands::RunAgentAsync { .. }
@@ -145,6 +146,9 @@ async fn handle_learning_command(
         }
         Commands::Reasoning { action } => {
             crate::command::reasoning::handle_reasoning_command(&action, config).await
+        }
+        Commands::Cognitive { action } => {
+            crate::command::cognitive::handle_cognitive_command(&action, config).await
         }
         Commands::Briefing { action } => {
             crate::command::reasoning::handle_briefing_command(&action, config).await

@@ -15,6 +15,9 @@ impl Agent {
     ) -> Option<PreflightResult> {
         let (perm_mode, checker_decision, tool_arc, mut input) =
             self.resolve_preflight_tool(tool).await?;
+        if !self.cognitive_gate_allows_tool(tool, &input).await {
+            return None;
+        }
         if !self
             .permission_allows_tool(tool, &input, &perm_mode, checker_decision)
             .await

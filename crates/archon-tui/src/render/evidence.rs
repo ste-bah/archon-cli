@@ -12,6 +12,7 @@ pub fn draw_evidence_view(frame: &mut Frame, app: &App) {
     frame.render_widget(ratatui::widgets::Clear, area);
     match view {
         EvidenceViewState::Docs(screen) => screen.render(frame, area, &app.theme),
+        EvidenceViewState::Cognitive(screen) => screen.render(frame, area, &app.theme),
         EvidenceViewState::GameTheory(screen) => screen.render(frame, area, &app.theme),
         EvidenceViewState::Learning(screen) => screen.render(frame, area, &app.theme),
         EvidenceViewState::Video(screen) => screen.render(frame, area, &app.theme),

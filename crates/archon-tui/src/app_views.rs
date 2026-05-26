@@ -8,6 +8,9 @@ impl App {
             ViewId::Docs => Some(EvidenceViewState::Docs(
                 crate::screens::docs::DocsScreen::documents(),
             )),
+            ViewId::Cognitive => Some(EvidenceViewState::Cognitive(
+                crate::screens::cognitive::CognitiveScreen::executive(),
+            )),
             ViewId::GameTheory => Some(EvidenceViewState::GameTheory(
                 crate::screens::gametheory::GameTheoryScreen::main(),
             )),
@@ -32,6 +35,18 @@ impl App {
                             title: row.title,
                             status: row.status,
                             summary: row.detail,
+                        })
+                        .collect(),
+                );
+            }
+            Some(EvidenceViewState::Cognitive(screen)) => {
+                screen.set_rows(
+                    rows.into_iter()
+                        .map(|row| crate::screens::cognitive::CognitiveRow {
+                            id: row.id,
+                            label: row.title,
+                            status: row.status,
+                            detail: row.detail,
                         })
                         .collect(),
                 );

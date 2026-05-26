@@ -8,6 +8,7 @@ use crate::command::bug::BugHandler;
 use crate::command::cancel::CancelHandler;
 use crate::command::checkpoint::CheckpointHandler;
 use crate::command::clear::ClearHandler;
+use crate::command::cognitive_view::CognitiveViewHandler;
 use crate::command::color::ColorHandler;
 use crate::command::compact::CompactHandler;
 use crate::command::config::ConfigHandler;
@@ -130,6 +131,7 @@ pub(crate) fn default_registry() -> Registry {
         Arc::new(crate::command::cli_mirror::CliMirrorHandler::archon()),
     );
     b.insert_primary("docs", Arc::new(DocsViewHandler));
+    b.insert_primary("cognitive", Arc::new(CognitiveViewHandler));
     b.insert_primary("learning", Arc::new(LearningViewHandler));
     b.insert_primary(
         "kb",

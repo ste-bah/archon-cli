@@ -50,6 +50,21 @@ require_approval_for_prompt_changes = true
 require_approval_for_blocking_gates = true
 require_approval_for_network_changes = true
 
+[policy.cognitive]
+enabled = true
+allow_autonomous_tick = true
+allow_background_daemon = false
+allow_tool_suppression = true
+allow_jepa_action_scoring = true
+allow_self_model_updates = true
+allow_autonomous_low_risk_apply = false
+max_autonomous_risk = "Low"
+require_human_for_prompt_changes = true
+require_human_for_policy_changes = true
+require_human_for_network_changes = true
+require_human_for_blocking_gate_changes = true
+store_raw_turn_text = false
+
 [policy.world_model]
 allow_third_party_embeddings = false
 allow_llm_labeler = false
@@ -131,6 +146,14 @@ scanned/image-only fallback unless explicitly enabled.
 
 Document search defaults to hybrid retrieval. `[policy.docs.retrieval]` controls
 the exact/semantic weighting used by `archon docs search --mode hybrid`.
+
+The Cognitive Executive Loop is gated by `[policy.cognitive]`. Tool suppression
+is intentionally narrow and safe. JEPA/world-model candidate scoring,
+SelfModel updates, autonomous ticks, the background daemon, and autonomous
+low-risk apply all require explicit policy. Prompt, policy, network, and
+blocking-gate changes remain human-review-required by default.
+`store_raw_turn_text = false` keeps cognitive records to hashes, labels,
+decision ids, verification contracts, and safe lessons.
 
 Video ingest is default-deny through `[policy.video]`. Enable only the source
 and processing paths you intend to use. Transcript-only ingest can run without

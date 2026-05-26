@@ -8,6 +8,7 @@ pub mod api;
 pub mod assets;
 pub mod auth;
 pub mod chat;
+pub mod cognitive;
 pub mod corpus;
 pub mod evidence;
 pub mod ingest;
@@ -338,6 +339,7 @@ fn build_app(config: &WebConfig, state: AppState) -> Router {
         .route("/api/ingest/run", post(ingest::run_handler))
         .route("/api/ingest/kb", post(ingest::create_kb_handler))
         .route("/api/learning/summary", get(inspect::learning_handler))
+        .route("/api/cognitive/summary", get(cognitive::summary_handler))
         .route("/api/world/summary", get(world::summary_handler))
         .route("/api/pipelines/summary", get(pipelines::summary_handler))
         .route("/api/metrics/summary", get(metrics::summary_handler))

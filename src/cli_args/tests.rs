@@ -1,6 +1,6 @@
 use super::{
-    AgentAction, AgentEvolveAction, Cli, Commands, GametheoryAction, ProvidersAction, WorldAction,
-    WorldGuardAction, WorldGuardPolicyAction,
+    AgentAction, AgentEvolveAction, Cli, CognitiveAction, CognitiveDaemonAction, Commands,
+    GametheoryAction, ProvidersAction, WorldAction, WorldGuardAction, WorldGuardPolicyAction,
 };
 
 #[cfg(test)]
@@ -94,6 +94,82 @@ mod remote_url_parse_tests {
     fn remote_url_absent_when_not_supplied() {
         let cli = Cli::try_parse_from(["archon"]).expect("archon with no flags must parse");
         assert!(cli.remote_url.is_none());
+    }
+}
+
+#[cfg(test)]
+mod cognitive_parse_tests {
+    use super::{Cli, CognitiveAction, CognitiveDaemonAction, Commands};
+    use clap::Parser;
+
+    #[test]
+    fn cognitive_status_json_parses() {
+        let cli = Cli::try_parse_from(["archon", "cognitive", "status", "--json"])
+            .expect("cognitive status must parse");
+
+        match cli.command {
+            Some(Commands::Cognitive {
+                action: CognitiveAction::Status { json },
+            }) => assert!(json),
+            other => panic!("expected cognitive status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cognitive_inspect_session_parses() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "cognitive",
+            "inspect",
+            "--session",
+            "session-1",
+            "--limit",
+            "3",
+        ])
+        .expect("cognitive inspect session must parse");
+
+        match cli.command {
+            Some(Commands::Cognitive {
+                action:
+                    CognitiveAction::Inspect {
+                        decision_id,
+                        session,
+                        limit,
+                        ..
+                    },
+            }) => {
+                assert!(decision_id.is_none());
+                assert_eq!(session.as_deref(), Some("session-1"));
+                assert_eq!(limit, 3);
+            }
+            other => panic!("expected cognitive inspect, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cognitive_daemon_start_parses() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "cognitive",
+            "daemon",
+            "start",
+            "--interval-ms",
+            "10000",
+            "--json",
+        ])
+        .expect("cognitive daemon start must parse");
+        match cli.command {
+            Some(Commands::Cognitive {
+                action:
+                    CognitiveAction::Daemon {
+                        action: CognitiveDaemonAction::Start { interval_ms, json },
+                    },
+            }) => {
+                assert_eq!(interval_ms, Some(10000));
+                assert!(json);
+            }
+            other => panic!("expected cognitive daemon start, got {other:?}"),
+        }
     }
 }
 

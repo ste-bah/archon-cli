@@ -54,6 +54,7 @@ impl Agent {
             format!("turn {} started", self.turn_number),
         );
         self.state.add_user_message(user_input);
+        self.classify_cognitive_situation(user_input);
         self.spawn_auto_extraction();
     }
 

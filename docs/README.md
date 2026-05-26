@@ -14,6 +14,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 - [Overview](architecture/overview.md) — workspace crates, request lifecycle, data flow
 - [Learning systems](architecture/learning-systems.md) — SONA, ReasoningBank (12 modes), GNN, CausalMemory, Provenance, DESC, Reflexion, AutoCapture, and live pipeline/GameTheory wiring
+- [Cognitive Executive Loop](architecture/cognitive-executive-loop.md) — situation classification, candidate planning, JEPA/world-model scoring, policy gates, reflection, and autonomous tick orchestration
 - [Learning systems index](architecture/learning-systems-index.md) — ownership map for memory, completion, world model, reasoning quality, and governed learning signals
 - [Reasoning quality](architecture/reasoning-quality.md) — first-class visible claim/evidence events, correction links, critic gates, and briefing warnings
 - [Local world model](architecture/world-model.md) — trace corpus, fail-open advisor, dynamic training, retention, backends
@@ -33,11 +34,12 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Reference
 
-- [Slash commands](reference/slash-commands.md) — 81 primary commands grouped by purpose
+- [Slash commands](reference/slash-commands.md) — 82 primary commands grouped by purpose
 - [Tools](reference/tools.md) — 43 built-in tools available to agents
 - [Skills](reference/skills.md) — 68 built-in skills (composable command sequences)
 - [Permissions](reference/permissions.md) — 7 permission modes, rule lists, sandboxing
 - [Configuration](reference/config.md) — `config.toml` schema, precedence, every section
+- [Cognitive configuration](reference/cognitive-config.md) — `[learning.cognitive]` and `[policy.cognitive]`
 - [CLI flags](reference/cli-flags.md) — every command-line argument
 - [Environment variables](reference/env-vars.md) — `ARCHON_*` overrides
 - [World-model backends](reference/world-model-backends.md) — CPU, CUDA, and MLX Metal support matrix
@@ -126,6 +128,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v1.3.8](release-notes/v1.3.8.md) — Cognitive Executive Loop, autonomous cognitive ticks, opt-in Rust daemon, executive-state CLI/TUI/web surfaces, and safety-gated self-model/world-model coordination
 - [v1.3.7](release-notes/v1.3.7.md) — Autonomous governed-learning tick, policy-gated self-application, provider-resolved pipeline subagent activity, and updated learning docs
 - [v1.3.6](release-notes/v1.3.6.md) — Video evidence capture fallbacks: caption-first ingest, frame-friendly `yt-dlp`, OpenCV frame fallback, and RapidOCR image/frame OCR
 - [v1.3.5](release-notes/v1.3.5.md) — Governed YouTube/video ingest hardening, local `whisper-cpp` ASR chunks, PNG frame extraction, frame reprocess, and cross-OS setup docs

@@ -32,6 +32,9 @@ pub(crate) mod chat;
 pub(crate) mod checkpoint;
 pub(crate) mod clear;
 pub(crate) mod cli_mirror;
+pub(crate) mod cognitive;
+pub(crate) mod cognitive_daemon;
+pub(crate) mod cognitive_view;
 pub(crate) mod color;
 // TASK-TUI-624: /commit AI git-commit prompt builder.
 pub(crate) mod commit;

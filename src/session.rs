@@ -115,6 +115,29 @@ fn open_governed_learning_db(working_dir: &std::path::Path) -> Option<Arc<cozo::
     }
 }
 
+fn open_cognitive_store(
+    working_dir: &std::path::Path,
+) -> Option<archon_cognitive::PersistentCognitiveStore> {
+    let root = working_dir.join(".archon").join("cognitive");
+    match archon_cognitive::PersistentCognitiveStore::open(&root) {
+        Ok(store) => {
+            tracing::info!(
+                path = %store.db_path().display(),
+                "cognitive executive store wired"
+            );
+            Some(store)
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                path = %root.display(),
+                "cognitive executive store unavailable; continuing without persistence"
+            );
+            None
+        }
+    }
+}
+
 fn configure_session_vlm_provider(working_dir: &std::path::Path) {
     match archon_policy::load_effective_policy(working_dir) {
         Ok(policy) => {

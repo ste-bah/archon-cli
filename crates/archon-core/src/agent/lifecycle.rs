@@ -58,6 +58,8 @@ impl Agent {
             record_user_correction_event_callback: None,
             record_reasoning_turn_callback: None,
             reasoning_evidence_refs: Vec::new(),
+            current_situation: None,
+            cognitive_store: None,
             // TASK #245: wired by the binary at startup; default None makes
             // tests and non-interactive paths no-op.
             inner_voice_change_callback: None,
@@ -237,6 +239,10 @@ impl Agent {
     /// Set the memory graph for per-turn injection (GAP 7) and extraction (GAP 5).
     pub fn set_memory(&mut self, memory: Arc<dyn MemoryTrait>) {
         self.memory = Some(memory);
+    }
+
+    pub fn set_cognitive_store(&mut self, store: archon_cognitive::PersistentCognitiveStore) {
+        self.cognitive_store = Some(Arc::new(std::sync::Mutex::new(store)));
     }
 
     /// Set the auto-extraction system (v0.1.23: LLM-driven fact extraction every N turns).
