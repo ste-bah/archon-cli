@@ -78,6 +78,46 @@ fn effective_policy_missing_cognitive_section_defaults() {
 }
 
 #[test]
+fn effective_policy_loads_cognitive_section() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("policy.toml");
+    std::fs::write(
+        &path,
+        r#"
+[policy.cognitive]
+enabled = true
+allow_autonomous_tick = true
+allow_background_daemon = true
+allow_tool_suppression = false
+allow_jepa_action_scoring = true
+allow_self_model_updates = true
+allow_autonomous_low_risk_apply = false
+max_autonomous_risk = "Medium"
+require_human_for_prompt_changes = true
+require_human_for_policy_changes = true
+require_human_for_network_changes = true
+require_human_for_blocking_gate_changes = true
+store_raw_turn_text = true
+"#,
+    )
+    .unwrap();
+    let load = load_policy_from_sources(&[PolicySource {
+        label: "workspace",
+        path,
+    }])
+    .expect("load policy");
+    let policy = load.policy.cognitive;
+    assert!(policy.enabled);
+    assert!(policy.can_run_daemon());
+    assert!(!policy.can_suppress_tools());
+    assert!(policy.can_use_jepa());
+    assert!(policy.can_update_self_model());
+    assert!(!policy.can_auto_apply());
+    assert_eq!(policy.max_autonomous_risk, "Medium");
+    assert!(policy.store_raw_turn_text);
+}
+
+#[test]
 fn full_policy_round_trip() {
     let policy: CognitivePolicy = toml::from_str(
         r#"

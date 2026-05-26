@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::CognitivePolicy;
 use crate::errors::{PolicyError, Result};
 use crate::models::*;
 use crate::video::{RawVideoPolicy, apply_video};
@@ -90,6 +91,7 @@ struct RawPolicy {
     world_model: Option<RawWorldModelPolicy>,
     web: Option<RawWebPolicy>,
     reasoning_quality: Option<RawReasoningQualityPolicy>,
+    cognitive: Option<RawCognitivePolicy>,
     video: Option<RawVideoPolicy>,
     docs: Option<RawDocsPolicy>,
 }
@@ -161,6 +163,23 @@ struct RawReasoningQualityPolicy {
     auto_migrate_reasoning_quality: Option<bool>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct RawCognitivePolicy {
+    enabled: Option<bool>,
+    allow_autonomous_tick: Option<bool>,
+    allow_background_daemon: Option<bool>,
+    allow_tool_suppression: Option<bool>,
+    allow_jepa_action_scoring: Option<bool>,
+    allow_self_model_updates: Option<bool>,
+    allow_autonomous_low_risk_apply: Option<bool>,
+    max_autonomous_risk: Option<String>,
+    require_human_for_prompt_changes: Option<bool>,
+    require_human_for_policy_changes: Option<bool>,
+    require_human_for_network_changes: Option<bool>,
+    require_human_for_blocking_gate_changes: Option<bool>,
+    store_raw_turn_text: Option<bool>,
+}
+
 fn apply_raw(policy: &mut EffectivePolicy, root: RawPolicyRoot) {
     if let Some(raw) = root.policy {
         if let Some(network) = raw.network {
@@ -183,6 +202,9 @@ fn apply_raw(policy: &mut EffectivePolicy, root: RawPolicyRoot) {
         }
         if let Some(reasoning_quality) = raw.reasoning_quality {
             apply_reasoning_quality(&mut policy.reasoning_quality, reasoning_quality);
+        }
+        if let Some(cognitive) = raw.cognitive {
+            apply_cognitive(&mut policy.cognitive, cognitive);
         }
         if let Some(video) = raw.video {
             apply_video(&mut policy.video, video);
@@ -328,4 +350,41 @@ fn apply_reasoning_quality(policy: &mut ReasoningQualityPolicy, raw: RawReasonin
     if let Some(value) = raw.auto_migrate_reasoning_quality {
         policy.auto_migrate_reasoning_quality = value;
     }
+}
+
+fn apply_cognitive(policy: &mut CognitivePolicy, raw: RawCognitivePolicy) {
+    set!(policy.enabled, raw.enabled);
+    set!(policy.allow_autonomous_tick, raw.allow_autonomous_tick);
+    set!(policy.allow_background_daemon, raw.allow_background_daemon);
+    set!(policy.allow_tool_suppression, raw.allow_tool_suppression);
+    set!(
+        policy.allow_jepa_action_scoring,
+        raw.allow_jepa_action_scoring
+    );
+    set!(
+        policy.allow_self_model_updates,
+        raw.allow_self_model_updates
+    );
+    set!(
+        policy.allow_autonomous_low_risk_apply,
+        raw.allow_autonomous_low_risk_apply
+    );
+    set!(policy.max_autonomous_risk, raw.max_autonomous_risk);
+    set!(
+        policy.require_human_for_prompt_changes,
+        raw.require_human_for_prompt_changes
+    );
+    set!(
+        policy.require_human_for_policy_changes,
+        raw.require_human_for_policy_changes
+    );
+    set!(
+        policy.require_human_for_network_changes,
+        raw.require_human_for_network_changes
+    );
+    set!(
+        policy.require_human_for_blocking_gate_changes,
+        raw.require_human_for_blocking_gate_changes
+    );
+    set!(policy.store_raw_turn_text, raw.store_raw_turn_text);
 }
