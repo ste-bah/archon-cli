@@ -65,11 +65,18 @@ pub(crate) fn world_model_shadow_evidence(agent_type: &str) -> serde_json::Value
 fn world_model_signals(
     agent_type: &str,
 ) -> Vec<archon_world_model::evolution::WorldModelEvolutionSignal> {
-    let rows = load_world_rows().unwrap_or_default();
+    let rows = load_world_rows_fail_open();
     archon_world_model::evolution::repeated_risk_signals(&rows, 3)
         .into_iter()
         .filter(|signal| signal.agent_type == agent_type)
         .collect()
+}
+
+fn load_world_rows_fail_open() -> Vec<archon_world_model::WorldTraceRow> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(load_world_rows))
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_default()
 }
 
 fn load_world_rows() -> Result<Vec<archon_world_model::WorldTraceRow>> {

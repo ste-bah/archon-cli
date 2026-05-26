@@ -27,7 +27,7 @@ impl ToolUseGate {
                 reason: "trivial turn must be answered directly without tools".to_owned(),
             },
             SituationKind::SimpleQuestion => simple_question_verdict(input.tool_name),
-            SituationKind::Ambiguous => ambiguous_verdict(input.tool_name),
+            SituationKind::Ambiguous => ambiguous_verdict(input.tool_name, input.tool_input),
             SituationKind::CiDebug => ci_debug_verdict(input.tool_name, input.tool_input),
             _ => ToolVerdict::Allow {
                 reason: format!("{} permits tool use", input.situation.kind.as_str()),
@@ -48,16 +48,30 @@ fn simple_question_verdict(tool_name: &str) -> ToolVerdict {
     }
 }
 
-fn ambiguous_verdict(tool_name: &str) -> ToolVerdict {
+fn ambiguous_verdict(tool_name: &str, input: &Value) -> ToolVerdict {
     if matches!(tool_name, "AskUserQuestion" | "AskUser") {
         ToolVerdict::Allow {
             reason: "ambiguous turn may ask a clarification".to_owned(),
+        }
+    } else if matches!(tool_name, "Agent" | "Task") && asks_for_subagent(input) {
+        ToolVerdict::Allow {
+            reason: "ambiguous turn explicitly requested subagent delegation".to_owned(),
         }
     } else {
         ToolVerdict::Suppress {
             reason: "ambiguous turn must clarify before tool use".to_owned(),
         }
     }
+}
+
+fn asks_for_subagent(input: &Value) -> bool {
+    let text = input
+        .get("prompt")
+        .or_else(|| input.get("description"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    text.contains("subagent") || text.contains("sub-agent")
 }
 
 fn ci_debug_verdict(tool_name: &str, input: &Value) -> ToolVerdict {

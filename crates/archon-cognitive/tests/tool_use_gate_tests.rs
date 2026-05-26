@@ -44,6 +44,16 @@ fn code_change_allows_file_tools() {
 }
 
 #[test]
+fn ambiguous_subagent_request_allows_agent_tool() {
+    let verdict = verdict(
+        "please run a subagent",
+        "Agent",
+        json!({"prompt": "run the subagent"}),
+    );
+    assert!(verdict.is_allow());
+}
+
+#[test]
 fn ci_debug_bash_must_be_diagnostic() {
     let gh = verdict("ci failed", "Bash", json!({"command": "gh run view"}));
     let shell = verdict("ci failed", "Bash", json!({"command": "npm install"}));
