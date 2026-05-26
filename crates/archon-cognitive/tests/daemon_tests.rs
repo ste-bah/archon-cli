@@ -1,7 +1,9 @@
 use archon_cognitive::{
-    CognitiveDaemon, CognitiveDaemonConfig, PersistentCognitiveStore, SituationKind,
+    CognitiveDaemon, CognitiveDaemonConfig, DaemonJob, DaemonJobReport, PersistentCognitiveStore,
+    SituationKind,
 };
 use archon_policy::CognitivePolicy;
+use std::path::PathBuf;
 
 fn policy(allow_daemon: bool) -> CognitivePolicy {
     CognitivePolicy {
@@ -72,4 +74,38 @@ fn daemon_stop_writes_stop_marker() {
     CognitiveDaemon::request_stop(dir.path()).unwrap();
     let status = CognitiveDaemon::status(dir.path(), 30_000).unwrap();
     assert!(status.stop_requested);
+}
+
+#[test]
+fn daemon_run_forever_consumes_stop_marker_on_shutdown() {
+    struct StopJob {
+        root: PathBuf,
+    }
+
+    impl DaemonJob for StopJob {
+        fn name(&self) -> &'static str {
+            "stop_job"
+        }
+
+        fn run(&mut self) -> Result<DaemonJobReport, archon_cognitive::CognitiveError> {
+            CognitiveDaemon::request_stop(&self.root)?;
+            Ok(DaemonJobReport {
+                name: self.name().into(),
+                ok: true,
+                summary: "requested stop".into(),
+            })
+        }
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = PersistentCognitiveStore::open(dir.path()).unwrap();
+    let mut daemon = CognitiveDaemon::new(dir.path(), config(), store.db(), policy(true));
+    daemon.add_job(StopJob {
+        root: dir.path().to_path_buf(),
+    });
+    let state = daemon.run_forever().unwrap();
+    assert_eq!(state.status, "stopped");
+
+    let status = CognitiveDaemon::status(dir.path(), 30_000).unwrap();
+    assert!(!status.stop_requested);
 }

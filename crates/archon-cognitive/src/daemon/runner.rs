@@ -76,6 +76,7 @@ impl<'a> CognitiveDaemon<'a> {
             self.run_jobs(&mut state)?;
         }
         state.status = "stopped".into();
+        self.paths.clear_stop()?;
         self.paths.write_state(&state)?;
         Ok(state)
     }
