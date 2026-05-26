@@ -165,7 +165,7 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         tui_surface: "Executive-state pane + CLI mirror",
         status: SurfaceStatus::Done,
         source_of_truth: "src/command/cognitive.rs + src/command/cognitive_view.rs + crates/archon-cognitive",
-        notes: "Cognitive status, tick, decision inspection, self-model, and reflections are available from shell and TUI without raw chain-of-thought.",
+        notes: "Cognitive status, tick, daemon control, decision inspection, self-model, and reflections are available from shell and TUI without raw chain-of-thought.",
     },
     CommandSurfaceRow {
         cli: "archon pipeline ...",

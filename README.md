@@ -202,7 +202,7 @@ archon-cli/
 
 - Current version: **v1.3.8** ([release notes](docs/release-notes/v1.3.8.md))
 - Stable release for local world-model advisory learning, first-class reasoning-quality events, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
-- v1.3.8 adds the Cognitive Executive Loop: situation classification, candidate planning, policy-gated JEPA/world-model scoring, compact decision/reflection ledgers, autonomous cognitive ticks, and CLI/TUI/web executive-state inspection.
+- v1.3.8 adds the Cognitive Executive Loop: situation classification, candidate planning, policy-gated JEPA/world-model scoring, compact decision/reflection ledgers, autonomous cognitive ticks, an opt-in Rust daemon, and CLI/TUI/web executive-state inspection.
 - v1.3.7 adds policy-gated autonomous governed learning via `archon learning tick`, provider-resolved pipeline subagent activity, and refreshed self-learning documentation.
 - v1.3.6 adds governed video evidence capture fallbacks: caption-first YouTube ingest, frame-friendly `yt-dlp` format selection, optional OpenCV frame extraction fallback, and optional RapidOCR image/frame OCR.
 - v1.3.5 hardens governed video evidence ingest: YouTube acquisition feeds local media into ASR/frame paths, `whisper-cpp` JSON segments become timecoded chunks, frame extraction uses PNG output, and setup/docs cover video dependencies across supported OS families.

@@ -22,6 +22,13 @@ situation_ttl_days = 90
 reflection_ttl_days = 180
 prediction_ttl_days = 90
 ledger_dir = ".archon/cognitive"
+
+[learning.cognitive.daemon]
+enabled = false
+interval_ms = 60000
+stale_heartbeat_ms = 120000
+run_on_start = true
+max_ticks_per_run = 0
 ```
 
 | Field | Default | Notes |
@@ -38,12 +45,26 @@ ledger_dir = ".archon/cognitive"
 | `max_pipeline_ms` | `500` | Bounded control-loop budget |
 | `ledger_dir` | `~/.local/share/archon/cognitive` | Project templates use `.archon/cognitive` for workspace-local inspection |
 
+## `[learning.cognitive.daemon]`
+
+The daemon is a Rust process launched by `archon cognitive daemon start`. It is
+not enabled by `allow_autonomous_tick` alone; both config and policy must opt in.
+
+| Field | Default | Notes |
+|---|---|---|
+| `enabled` | `false` | Allows daemon commands to run. Keep off unless unattended ticks are wanted |
+| `interval_ms` | `60000` in templates | Poll interval between bounded maintenance ticks |
+| `stale_heartbeat_ms` | `120000` in templates | Existing lock is considered stale after this heartbeat age |
+| `run_on_start` | `true` | Run one tick immediately after the daemon starts |
+| `max_ticks_per_run` | `0` | `0` means keep running until stopped; nonzero is useful for canaries/tests |
+
 ## `[policy.cognitive]`
 
 ```toml
 [policy.cognitive]
 enabled = true
 allow_autonomous_tick = true
+allow_background_daemon = false
 allow_tool_suppression = true
 allow_jepa_action_scoring = true
 allow_self_model_updates = true
@@ -60,6 +81,7 @@ store_raw_turn_text = false
 |---|---|---|
 | `enabled` | `false` in schema | Policy master gate |
 | `allow_autonomous_tick` | `false` in schema | Lets `archon cognitive tick` run maintenance work |
+| `allow_background_daemon` | `false` | Lets `archon cognitive daemon start/run/run-once` operate |
 | `allow_tool_suppression` | `true` | Allows harmless suppression of needless tool calls |
 | `allow_jepa_action_scoring` | `false` in schema | Lets promoted JEPA/world-model scores influence candidate ranking |
 | `allow_self_model_updates` | `false` in schema | Lets tick update SelfModel state from safe reflections |

@@ -5,6 +5,7 @@ fn default_policy_is_fail_closed_except_safe_suppression() {
     let policy = CognitivePolicy::default();
     assert!(!policy.enabled);
     assert!(!policy.allow_autonomous_tick);
+    assert!(!policy.allow_background_daemon);
     assert!(policy.allow_tool_suppression);
     assert!(!policy.allow_jepa_action_scoring);
     assert!(!policy.allow_self_model_updates);
@@ -43,8 +44,11 @@ fn convenience_methods_respect_master_switch() {
     assert!(!policy.can_use_jepa());
     assert!(!policy.can_update_self_model());
     assert!(!policy.can_auto_apply());
+    assert!(!policy.can_run_daemon());
 
     policy.enabled = true;
+    policy.allow_autonomous_tick = true;
+    policy.allow_background_daemon = true;
     policy.allow_jepa_action_scoring = true;
     policy.allow_self_model_updates = true;
     policy.allow_autonomous_low_risk_apply = true;
@@ -52,6 +56,7 @@ fn convenience_methods_respect_master_switch() {
     assert!(policy.can_use_jepa());
     assert!(policy.can_update_self_model());
     assert!(policy.can_auto_apply());
+    assert!(policy.can_run_daemon());
     assert!(policy.prompt_changes_require_human());
     assert!(policy.policy_changes_require_human());
     assert!(policy.network_changes_require_human());
@@ -78,6 +83,7 @@ fn full_policy_round_trip() {
         r#"
 enabled = true
 allow_autonomous_tick = true
+allow_background_daemon = true
 allow_tool_suppression = true
 allow_jepa_action_scoring = true
 allow_self_model_updates = true
@@ -95,6 +101,7 @@ store_raw_turn_text = false
     let decoded: CognitivePolicy = toml::from_str(encoded.as_str()).expect("decode policy");
     assert_eq!(decoded, policy);
     assert!(decoded.enabled);
+    assert!(decoded.can_run_daemon());
     assert_eq!(decoded.max_autonomous_risk, "Medium");
     assert!(decoded.validate().is_ok());
 }

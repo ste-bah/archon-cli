@@ -130,7 +130,7 @@ Each command goes through the same persisted Cozo state as its `archon X` shell 
 | `/behaviour` | — | Governed learning: `list-events`, `list-proposals`, `show`, `apply`, `approve`, `deny`, `rollback`, `history`, `generate-proposals`, `status` |
 | `/reasoning` | — | Reasoning quality: `status`, `inspect`, `claims`, `patterns`, `backfill`, `shadow-report`, `cost status`, `fixture-audit`, `migrate`, `replay-dead-letter` |
 | `/briefing` | — | Proactive briefing: `preview --task "..."` |
-| `/cognitive` | — | Cognitive Executive Loop: `open`, `status`, `tick`, `inspect`, `self-model`, `reflections` |
+| `/cognitive` | — | Cognitive Executive Loop: `open`, `status`, `tick`, `daemon`, `inspect`, `self-model`, `reflections` |
 | `/gametheory` | — | Game-theory umbrella: `run`, `classify-only`, `status`, `inspect`, `inspect-fingerprint`, `inspect-routing`, `list-runs`, `show`, `replay`, `list-agents`, `specimens` |
 | `/learning-status` | — | Status pane for the 8 learning subsystems (separate from `/behaviour status`) |
 

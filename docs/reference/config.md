@@ -657,6 +657,13 @@ situation_ttl_days = 90
 reflection_ttl_days = 180
 prediction_ttl_days = 90
 ledger_dir = ".archon/cognitive"
+
+[learning.cognitive.daemon]
+enabled = false
+interval_ms = 60000
+stale_heartbeat_ms = 120000
+run_on_start = true
+max_ticks_per_run = 0
 ```
 
 | Field | Default | What / Why |
@@ -672,6 +679,9 @@ ledger_dir = ".archon/cognitive"
 | `use_self_model` | `false` in schema, template enables it | Reads domain trust, failure clusters, and caution rules. |
 | `max_pipeline_ms` | `500` | Soft budget for the controller path. |
 | `ledger_dir` | `~/.local/share/archon/cognitive` | Project templates use `.archon/cognitive` so the TUI/web/CLI inspect the same workspace-local state. |
+| `daemon.enabled` | `false` | Enables the Rust background daemon commands when policy also allows them. |
+| `daemon.interval_ms` | `60000` in templates | Interval between bounded maintenance passes. |
+| `daemon.max_ticks_per_run` | `0` | `0` means keep running until `archon cognitive daemon stop`. |
 
 See [Cognitive configuration](cognitive-config.md) and
 [Cognitive Executive Loop](../architecture/cognitive-executive-loop.md).

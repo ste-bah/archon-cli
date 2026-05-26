@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub struct CognitivePolicy {
     pub enabled: bool,
     pub allow_autonomous_tick: bool,
+    pub allow_background_daemon: bool,
     pub allow_tool_suppression: bool,
     pub allow_jepa_action_scoring: bool,
     pub allow_self_model_updates: bool,
@@ -22,6 +23,7 @@ impl Default for CognitivePolicy {
         Self {
             enabled: false,
             allow_autonomous_tick: false,
+            allow_background_daemon: false,
             allow_tool_suppression: true,
             allow_jepa_action_scoring: false,
             allow_self_model_updates: false,
@@ -53,6 +55,10 @@ impl CognitivePolicy {
 
     pub fn can_suppress_tools(&self) -> bool {
         self.enabled && self.allow_tool_suppression
+    }
+
+    pub fn can_run_daemon(&self) -> bool {
+        self.enabled && self.allow_autonomous_tick && self.allow_background_daemon
     }
 
     pub fn can_use_jepa(&self) -> bool {

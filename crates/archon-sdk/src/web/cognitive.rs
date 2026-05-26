@@ -25,6 +25,7 @@ pub struct CognitiveWebSummary {
     pub proposal_count: u64,
     pub apply_result_count: u64,
     pub self_model_fact_count: u64,
+    pub daemon: CognitiveDaemonPreview,
     pub latest_tick: Option<CognitiveTickPreview>,
     pub decisions: Vec<CognitiveRowPreview>,
     pub reflections: Vec<CognitiveRowPreview>,
@@ -55,6 +56,18 @@ pub struct CognitiveTickPreview {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct CognitiveDaemonPreview {
+    pub running: bool,
+    pub stale: bool,
+    pub stop_requested: bool,
+    pub ticks_run: u64,
+    pub pid: Option<u32>,
+    pub last_heartbeat_at: Option<String>,
+}
+
 pub(crate) async fn summary_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if let Err(resp) = check_auth(&state, &headers) {
         return resp;
@@ -68,6 +81,7 @@ pub fn generated_typescript() -> String {
         CognitiveWebSummary::decl(&cfg),
         CognitiveRowPreview::decl(&cfg),
         CognitiveTickPreview::decl(&cfg),
+        CognitiveDaemonPreview::decl(&cfg),
     ]
     .into_iter()
     .map(|decl| format!("export {decl}"))
@@ -102,6 +116,7 @@ fn summary_for_root(cwd: &Path) -> CognitiveWebSummary {
         proposal_count: status.proposal_count as u64,
         apply_result_count: status.apply_result_count as u64,
         self_model_fact_count: status.self_model_fact_count as u64,
+        daemon: daemon_preview(&root),
         latest_tick: status.latest_tick.map(|tick| CognitiveTickPreview {
             tick_id: tick.tick_id,
             proposals_evaluated: tick.proposals_evaluated,
@@ -163,10 +178,39 @@ fn empty_summary(store: PathProbe) -> CognitiveWebSummary {
         proposal_count: 0,
         apply_result_count: 0,
         self_model_fact_count: 0,
+        daemon: daemon_preview_for_missing_store(),
         latest_tick: None,
         decisions: Vec::new(),
         reflections: Vec::new(),
         proposals: Vec::new(),
+    }
+}
+
+fn daemon_preview(root: &Path) -> CognitiveDaemonPreview {
+    match archon_cognitive::CognitiveDaemon::status(root, 120_000) {
+        Ok(status) => {
+            let state = status.state;
+            CognitiveDaemonPreview {
+                running: status.running,
+                stale: status.stale,
+                stop_requested: status.stop_requested,
+                ticks_run: state.as_ref().map(|state| state.ticks_run).unwrap_or(0),
+                pid: state.as_ref().map(|state| state.pid),
+                last_heartbeat_at: state.map(|state| state.last_heartbeat_at.to_rfc3339()),
+            }
+        }
+        Err(_) => daemon_preview_for_missing_store(),
+    }
+}
+
+fn daemon_preview_for_missing_store() -> CognitiveDaemonPreview {
+    CognitiveDaemonPreview {
+        running: false,
+        stale: false,
+        stop_requested: false,
+        ticks_run: 0,
+        pid: None,
+        last_heartbeat_at: None,
     }
 }
 

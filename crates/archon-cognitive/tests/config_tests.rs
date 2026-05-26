@@ -8,6 +8,7 @@ fn config_defaults_fail_closed() {
     assert!(!config.use_jepa);
     assert!(!config.use_reasoning_quality);
     assert!(!config.use_self_model);
+    assert!(!config.daemon.enabled);
     assert_eq!(config.max_candidates, 5);
     assert_eq!(config.trivial_turn_tool_policy, "none");
 }
@@ -62,6 +63,13 @@ situation_ttl_days = 30
 reflection_ttl_days = 60
 prediction_ttl_days = 45
 ledger_dir = "/tmp/archon-cognitive"
+
+[daemon]
+enabled = true
+interval_ms = 15000
+stale_heartbeat_ms = 60000
+run_on_start = true
+max_ticks_per_run = 2
 "#;
     let config: CognitiveConfig = toml::from_str(input).expect("parse config");
     let encoded = toml::to_string(&config).expect("serialize config");

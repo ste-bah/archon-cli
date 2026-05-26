@@ -128,7 +128,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
-- [v1.3.8](release-notes/v1.3.8.md) — Cognitive Executive Loop, autonomous cognitive ticks, executive-state CLI/TUI/web surfaces, and safety-gated self-model/world-model coordination
+- [v1.3.8](release-notes/v1.3.8.md) — Cognitive Executive Loop, autonomous cognitive ticks, opt-in Rust daemon, executive-state CLI/TUI/web surfaces, and safety-gated self-model/world-model coordination
 - [v1.3.7](release-notes/v1.3.7.md) — Autonomous governed-learning tick, policy-gated self-application, provider-resolved pipeline subagent activity, and updated learning docs
 - [v1.3.6](release-notes/v1.3.6.md) — Video evidence capture fallbacks: caption-first ingest, frame-friendly `yt-dlp`, OpenCV frame fallback, and RapidOCR image/frame OCR
 - [v1.3.5](release-notes/v1.3.5.md) — Governed YouTube/video ingest hardening, local `whisper-cpp` ASR chunks, PNG frame extraction, frame reprocess, and cross-OS setup docs

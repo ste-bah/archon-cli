@@ -9,6 +9,11 @@ Inside the TUI, use the same forms as `/cognitive ...`.
 | `archon cognitive status --json` | `/cognitive status --json` | Emit the same status as JSON |
 | `archon cognitive tick` | `/cognitive tick` | Run one bounded governed maintenance pass |
 | `archon cognitive tick --json` | `/cognitive tick --json` | Emit the tick report as JSON |
+| `archon cognitive daemon status` | `/cognitive daemon status` | Inspect background daemon state, lock path, heartbeat, and tick count |
+| `archon cognitive daemon start` | `/cognitive daemon start` | Spawn the Rust daemon as a background process |
+| `archon cognitive daemon stop` | `/cognitive daemon stop` | Request the running daemon to stop at the next safe checkpoint |
+| `archon cognitive daemon run` | `/cognitive daemon run` | Run the daemon in the foreground for supervised service managers |
+| `archon cognitive daemon run-once` | `/cognitive daemon run-once` | Run one daemon-gated pass without staying resident |
 | `archon cognitive inspect <decision-id>` | `/cognitive inspect <decision-id>` | Inspect a single executive decision |
 | `archon cognitive inspect --session <id> --limit 20` | `/cognitive inspect --session <id> --limit 20` | List recent decisions for a session |
 | `archon cognitive self-model` | `/cognitive self-model` | Show domain trust and caution rules |
@@ -33,6 +38,21 @@ archon cognitive status
 archon cognitive inspect --session <session-id> --limit 10
 archon cognitive reflections --limit 20
 archon cognitive tick
+archon cognitive daemon status
 ```
 
 Use `--json` when wiring the status into scripts or the web workbench.
+
+## Daemon safety
+
+The daemon requires all of these gates:
+
+- `[learning.cognitive.daemon].enabled = true`
+- `[policy.cognitive].enabled = true`
+- `[policy.cognitive].allow_autonomous_tick = true`
+- `[policy.cognitive].allow_background_daemon = true`
+
+It writes a lockfile and state file under `ledger_dir`, heartbeats while alive,
+and will not run heavy model training/eval inline. The daemon job list is
+implemented as a Rust trait so future maintenance jobs can be added without
+turning the cognitive tick path into a monolith.

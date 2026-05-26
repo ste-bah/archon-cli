@@ -10,6 +10,7 @@ interface CognitivePageProps {
 
 export function CognitivePage({ cognitive }: CognitivePageProps) {
   const latestTick = cognitive?.latestTick;
+  const daemon = cognitive?.daemon;
   return (
     <section className="memory-layout">
       <div className="panel panel--wide">
@@ -41,6 +42,12 @@ export function CognitivePage({ cognitive }: CognitivePageProps) {
             value={cognitive?.proposalCount ?? 0}
             detail={`${cognitive?.applyResultCount ?? 0} apply results`}
           />
+          <CognitiveMetric
+            icon={<RotateCw size={18} aria-hidden="true" />}
+            label="Daemon"
+            value={daemon?.ticksRun ?? 0}
+            detail={daemon?.running ? "running" : daemon?.stale ? "stale" : "stopped"}
+          />
         </div>
         <div className="memory-action-preview" role="status">
           <strong>Store</strong>
@@ -52,6 +59,16 @@ export function CognitivePage({ cognitive }: CognitivePageProps) {
             <span>
               {latestTick.proposalsEvaluated} evaluated, {latestTick.proposalsAutoApplied} applied,
               {latestTick.proposalsDenied} denied, {latestTick.errorCount} errors
+            </span>
+          </div>
+        )}
+        {daemon && (
+          <div className="memory-action-preview" role="status">
+            <strong>Daemon</strong>
+            <span>
+              {daemon.running ? "running" : "not running"}
+              {daemon.pid ? `, pid ${daemon.pid}` : ""}
+              {daemon.lastHeartbeatAt ? `, heartbeat ${daemon.lastHeartbeatAt}` : ""}
             </span>
           </div>
         )}

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct CognitiveConfig {
     pub enabled: bool,
+    pub daemon: CognitiveDaemonConfig,
     pub max_candidates: usize,
     pub trivial_turn_tool_policy: String,
     pub record_decisions: bool,
@@ -23,6 +24,7 @@ impl Default for CognitiveConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            daemon: CognitiveDaemonConfig::default(),
             max_candidates: 5,
             trivial_turn_tool_policy: "none".into(),
             record_decisions: true,
@@ -67,7 +69,49 @@ impl CognitiveConfig {
             "learning.cognitive.max_pipeline_ms",
             &mut warnings,
         );
+        self.daemon.validate_and_normalize(&mut warnings);
         warnings
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CognitiveDaemonConfig {
+    pub enabled: bool,
+    pub interval_ms: u64,
+    pub stale_heartbeat_ms: u64,
+    pub run_on_start: bool,
+    pub max_ticks_per_run: u64,
+}
+
+impl Default for CognitiveDaemonConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            interval_ms: 60_000,
+            stale_heartbeat_ms: 120_000,
+            run_on_start: true,
+            max_ticks_per_run: 0,
+        }
+    }
+}
+
+impl CognitiveDaemonConfig {
+    pub fn validate_and_normalize(&mut self, warnings: &mut Vec<String>) {
+        clamp_u64(
+            &mut self.interval_ms,
+            5_000,
+            3_600_000,
+            "learning.cognitive.daemon.interval_ms",
+            warnings,
+        );
+        clamp_u64(
+            &mut self.stale_heartbeat_ms,
+            30_000,
+            86_400_000,
+            "learning.cognitive.daemon.stale_heartbeat_ms",
+            warnings,
+        );
     }
 }
 

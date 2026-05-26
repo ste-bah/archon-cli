@@ -79,6 +79,7 @@ require_approval_for_network_changes = true
 [policy.cognitive]
 enabled = true
 allow_autonomous_tick = true
+allow_background_daemon = false
 allow_tool_suppression = true
 allow_jepa_action_scoring = true
 allow_self_model_updates = true

@@ -148,7 +148,7 @@ async fn handle_learning_command(
             crate::command::reasoning::handle_reasoning_command(&action, config).await
         }
         Commands::Cognitive { action } => {
-            crate::command::cognitive::handle_cognitive_command(&action).await
+            crate::command::cognitive::handle_cognitive_command(&action, config).await
         }
         Commands::Briefing { action } => {
             crate::command::reasoning::handle_briefing_command(&action, config).await

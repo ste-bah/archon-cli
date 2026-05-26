@@ -111,7 +111,7 @@ fn emit(ctx: &mut CommandContext, msg: String) -> Result<()> {
 }
 
 fn usage() -> String {
-    "Usage: /cognitive [open|view|status|tick|inspect|self-model|reflections]\n\
+    "Usage: /cognitive [open|view|status|tick|daemon|inspect|self-model|reflections]\n\
      Opens the read-only executive-state browser or mirrors `archon cognitive ...`."
         .into()
 }

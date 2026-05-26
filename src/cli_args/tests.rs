@@ -1,6 +1,6 @@
 use super::{
-    AgentAction, AgentEvolveAction, Cli, CognitiveAction, Commands, GametheoryAction,
-    ProvidersAction, WorldAction, WorldGuardAction, WorldGuardPolicyAction,
+    AgentAction, AgentEvolveAction, Cli, CognitiveAction, CognitiveDaemonAction, Commands,
+    GametheoryAction, ProvidersAction, WorldAction, WorldGuardAction, WorldGuardPolicyAction,
 };
 
 #[cfg(test)]
@@ -99,7 +99,7 @@ mod remote_url_parse_tests {
 
 #[cfg(test)]
 mod cognitive_parse_tests {
-    use super::{Cli, CognitiveAction, Commands};
+    use super::{Cli, CognitiveAction, CognitiveDaemonAction, Commands};
     use clap::Parser;
 
     #[test]
@@ -143,6 +143,32 @@ mod cognitive_parse_tests {
                 assert_eq!(limit, 3);
             }
             other => panic!("expected cognitive inspect, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cognitive_daemon_start_parses() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "cognitive",
+            "daemon",
+            "start",
+            "--interval-ms",
+            "10000",
+            "--json",
+        ])
+        .expect("cognitive daemon start must parse");
+        match cli.command {
+            Some(Commands::Cognitive {
+                action:
+                    CognitiveAction::Daemon {
+                        action: CognitiveDaemonAction::Start { interval_ms, json },
+                    },
+            }) => {
+                assert_eq!(interval_ms, Some(10000));
+                assert!(json);
+            }
+            other => panic!("expected cognitive daemon start, got {other:?}"),
         }
     }
 }

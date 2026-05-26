@@ -17,7 +17,7 @@ mod world_model_actions;
 
 pub use agent_actions::{AgentAction, AgentEvolveAction};
 pub use auth::{AuthArgs, AuthProviderKind, AuthSubcommand, ChatArgs};
-pub use cognitive_actions::CognitiveAction;
+pub use cognitive_actions::{CognitiveAction, CognitiveDaemonAction};
 pub use commands::Commands;
 pub use data_actions::{
     BehaviourAction, ConstellationAction, DocsAction, KbAction, LearningAction, LearningGnnAction,

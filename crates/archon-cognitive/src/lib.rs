@@ -4,6 +4,7 @@ pub mod cognitive_tick;
 mod cognitive_tick_store;
 pub mod config;
 mod cozo_guard;
+pub mod daemon;
 mod decision_codec;
 pub mod decision_store;
 pub mod executive_loop;
@@ -25,7 +26,11 @@ pub mod world_model_scoring;
 
 pub use candidate_planner::{CandidatePlanner, HeuristicWeights};
 pub use cognitive_tick::{CognitiveTick, TickReport};
-pub use config::CognitiveConfig;
+pub use config::{CognitiveConfig, CognitiveDaemonConfig};
+pub use daemon::{
+    CognitiveDaemon, CognitiveTickJob, DaemonJob, DaemonJobReport, DaemonPaths, DaemonState,
+    DaemonStatus,
+};
 pub use decision_store::DecisionStore;
 pub use executive_loop::{
     ActionExecution, ActionExecutor, ActionOutcome, ExecutiveLoop, ExecutiveRunOutcome,

@@ -6,10 +6,14 @@ use archon_cognitive::{
     CognitiveInspection, CognitiveInspectionStatus, CognitiveTick, DecisionRecord,
     PersistentCognitiveStore, ProposalSummary, ReflectionSummary, TickReport,
 };
+use archon_core::config::ArchonConfig;
 
 use crate::cli_args::CognitiveAction;
 
-pub(crate) async fn handle_cognitive_command(action: &CognitiveAction) -> Result<()> {
+pub(crate) async fn handle_cognitive_command(
+    action: &CognitiveAction,
+    config: &ArchonConfig,
+) -> Result<()> {
     let cwd = std::env::current_dir().context("resolve current directory")?;
     match action {
         CognitiveAction::Status { json } => {
@@ -24,6 +28,9 @@ pub(crate) async fn handle_cognitive_command(action: &CognitiveAction) -> Result
                 .unwrap_or_default();
             let report = CognitiveTick::new(bundle.store.db(), Some(policy))?.tick()?;
             print_tick(&report, *json)
+        }
+        CognitiveAction::Daemon { action } => {
+            crate::command::cognitive_daemon::handle_daemon_action(action, config, &cwd).await
         }
         CognitiveAction::Inspect {
             decision_id,
