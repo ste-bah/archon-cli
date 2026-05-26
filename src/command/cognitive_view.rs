@@ -11,7 +11,7 @@ impl CommandHandler for CognitiveViewHandler {
     fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> Result<()> {
         match args.first().map(String::as_str) {
             None | Some("open" | "view") => open_view(ctx),
-            Some("status" | "tick" | "inspect" | "self-model" | "reflections") => {
+            Some(subcommand) if mirrors_cli(subcommand) => {
                 crate::command::cli_mirror::spawn_cli_mirror(ctx, "cognitive", args)?;
             }
             Some("help") => emit(ctx, usage())?,
@@ -26,6 +26,13 @@ impl CommandHandler for CognitiveViewHandler {
     fn description(&self) -> &str {
         "Open the cognitive executive-state TUI browser"
     }
+}
+
+fn mirrors_cli(subcommand: &str) -> bool {
+    matches!(
+        subcommand,
+        "status" | "tick" | "daemon" | "inspect" | "self-model" | "reflections"
+    )
 }
 
 fn open_view(ctx: &mut CommandContext) {
@@ -114,4 +121,19 @@ fn usage() -> String {
     "Usage: /cognitive [open|view|status|tick|daemon|inspect|self-model|reflections]\n\
      Opens the read-only executive-state browser or mirrors `archon cognitive ...`."
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mirrors_cli;
+
+    #[test]
+    fn daemon_subcommand_is_mirrored_to_cli() {
+        assert!(mirrors_cli("daemon"));
+    }
+
+    #[test]
+    fn unknown_subcommand_is_not_mirrored() {
+        assert!(!mirrors_cli("nope"));
+    }
 }
