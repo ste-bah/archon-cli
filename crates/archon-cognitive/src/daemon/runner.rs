@@ -40,6 +40,10 @@ impl<'a> CognitiveDaemon<'a> {
         DaemonPaths::new(root).request_stop()
     }
 
+    pub fn add_job(&mut self, job: impl DaemonJob + 'a) {
+        self.jobs.push(Box::new(job));
+    }
+
     pub fn run_once(&mut self) -> Result<DaemonState, CognitiveError> {
         self.ensure_allowed()?;
         let _lock = DaemonLock::acquire(&self.paths, self.config.stale_heartbeat_ms)?;

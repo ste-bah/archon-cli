@@ -27,6 +27,7 @@ pub(crate) async fn handle_cognitive_command(
                 .map(|policy| policy.cognitive)
                 .unwrap_or_default();
             let report = CognitiveTick::new(bundle.store.db(), Some(policy))?.tick()?;
+            process_deferred_world_model_retry();
             print_tick(&report, *json)
         }
         CognitiveAction::Daemon { action } => {
@@ -114,6 +115,21 @@ fn open_bundle(cwd: &Path) -> Result<CognitiveBundle> {
         store,
         ledger_dir: root,
     })
+}
+
+fn process_deferred_world_model_retry() {
+    let Some(home) = dirs::home_dir() else {
+        return;
+    };
+    let root = home.join(".archon").join("world-model");
+    if let Err(error) =
+        archon_world_model::storage::deferred_retry::process_shadow_evidence_retry(root)
+    {
+        tracing::warn!(
+            error = %error,
+            "deferred world-model shadow-evidence retry failed"
+        );
+    }
 }
 
 fn print_status(status: &CognitiveInspectionStatus, json: bool) -> Result<()> {

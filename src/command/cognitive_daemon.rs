@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
-use archon_cognitive::{CognitiveDaemon, DaemonState, DaemonStatus, PersistentCognitiveStore};
+use archon_cognitive::{
+    CognitiveDaemon, CognitiveError, DaemonJob, DaemonJobReport, DaemonState, DaemonStatus,
+    PersistentCognitiveStore,
+};
 use archon_core::config::ArchonConfig;
 use serde_json::json;
 
@@ -68,6 +71,7 @@ fn run(config: &ArchonConfig, cwd: &Path, interval_ms: Option<u64>, as_json: boo
     let mut daemon_config = config.learning.cognitive.daemon.clone();
     apply_interval_override(&mut daemon_config, interval_ms);
     let mut daemon = CognitiveDaemon::new(&store_root, daemon_config, store.db(), policy);
+    add_deferred_retry_jobs(&mut daemon);
     let state = daemon.run_forever()?;
     print_state(&state, as_json)
 }
@@ -82,6 +86,7 @@ fn run_once(config: &ArchonConfig, cwd: &Path, as_json: bool) -> Result<()> {
         store.db(),
         policy,
     );
+    add_deferred_retry_jobs(&mut daemon);
     let state = daemon.run_once()?;
     print_state(&state, as_json)
 }
@@ -149,6 +154,57 @@ fn apply_interval_override(
 
 fn cognitive_root(cwd: &Path, config: &ArchonConfig) -> PathBuf {
     expand_path(cwd, &config.learning.cognitive.ledger_dir)
+}
+
+fn add_deferred_retry_jobs<'a>(daemon: &mut CognitiveDaemon<'a>) {
+    if let Ok(root) = world_model_root() {
+        daemon.add_job(WorldModelShadowRetryJob { root });
+    }
+}
+
+fn world_model_root() -> Result<PathBuf> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("home directory unavailable"))?;
+    Ok(home.join(".archon").join("world-model"))
+}
+
+struct WorldModelShadowRetryJob {
+    root: PathBuf,
+}
+
+impl DaemonJob for WorldModelShadowRetryJob {
+    fn name(&self) -> &'static str {
+        "world_model_shadow_retry"
+    }
+
+    fn run(&mut self) -> Result<DaemonJobReport, CognitiveError> {
+        use archon_world_model::storage::deferred_retry::ShadowEvidenceRetryOutcome;
+
+        let outcome =
+            archon_world_model::storage::deferred_retry::process_shadow_evidence_retry(&self.root)
+                .map_err(|error| CognitiveError::Store(format!("world-model retry: {error}")))?;
+        let summary = match outcome {
+            ShadowEvidenceRetryOutcome::NoPending => "no pending world-model retry".to_owned(),
+            ShadowEvidenceRetryOutcome::Resolved {
+                attempts,
+                rows_loaded,
+                ..
+            } => {
+                format!("resolved after {attempts} attempt(s); rows_loaded={rows_loaded}")
+            }
+            ShadowEvidenceRetryOutcome::StillPending {
+                attempts,
+                last_error,
+                ..
+            } => {
+                format!("still pending after {attempts} attempt(s): {last_error}")
+            }
+        };
+        Ok(DaemonJobReport {
+            name: self.name().into(),
+            ok: true,
+            summary,
+        })
+    }
 }
 
 fn expand_path(cwd: &Path, raw: &str) -> PathBuf {
