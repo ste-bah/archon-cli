@@ -18,6 +18,7 @@ mod agent_ledger;
 mod btw;
 mod build_agent;
 mod build_prompt;
+mod cognitive_daemon_startup;
 mod config_watcher;
 mod event_forwarder;
 mod gnn_auto_trainer_seed;

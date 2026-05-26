@@ -181,6 +181,7 @@ pub(super) async fn run(
 
     let mcp_lifecycle_tx = crate::session_loop::spawn_mcp_lifecycle_task(mcp_manager.clone());
     let input_tui_tx = tui_event_tx.clone();
+    super::cognitive_daemon_startup::ensure_for_session(config, &working_dir, &tui_event_tx);
     observability::spawn_named(
         "session-loop",
         crate::session_loop::run_session_loop(

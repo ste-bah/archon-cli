@@ -289,6 +289,7 @@ pub(crate) async fn spawn_web_session(
         });
 
     let mcp_lifecycle_tx = crate::session_loop::spawn_mcp_lifecycle_task(mcp_manager);
+    super::cognitive_daemon_startup::ensure_for_session(config, &working_dir, &tui_event_tx);
     let persist_personality = config.consciousness.persist_personality;
     let personality_history_limit = config.consciousness.personality_history_limit;
     let session_start_instant = std::time::Instant::now();

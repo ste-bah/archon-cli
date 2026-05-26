@@ -11,6 +11,14 @@ use serde_json::json;
 
 use crate::cli_args::CognitiveDaemonAction;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DaemonStartOutcome {
+    Disabled,
+    PolicyDenied(String),
+    AlreadyRunning { state_path: PathBuf },
+    Started { pid: u32, state_path: PathBuf },
+}
+
 pub(crate) async fn handle_daemon_action(
     action: &CognitiveDaemonAction,
     config: &ArchonConfig,
@@ -25,6 +33,31 @@ pub(crate) async fn handle_daemon_action(
         CognitiveDaemonAction::Stop { json } => stop(config, cwd, *json),
         CognitiveDaemonAction::Status { json } => status(config, cwd, *json),
     }
+}
+
+pub(crate) fn ensure_daemon_started(
+    config: &ArchonConfig,
+    cwd: &Path,
+) -> Result<DaemonStartOutcome> {
+    if !config.learning.cognitive.daemon.enabled {
+        return Ok(DaemonStartOutcome::Disabled);
+    }
+    if let Err(error) = ensure_daemon_policy(cwd) {
+        return Ok(DaemonStartOutcome::PolicyDenied(error.to_string()));
+    }
+    let root = cognitive_root(cwd, config);
+    let status =
+        CognitiveDaemon::status(&root, config.learning.cognitive.daemon.stale_heartbeat_ms)?;
+    if status.running {
+        return Ok(DaemonStartOutcome::AlreadyRunning {
+            state_path: status.state_path,
+        });
+    }
+    let child = spawn_daemon_child(cwd, None)?;
+    Ok(DaemonStartOutcome::Started {
+        pid: child.id(),
+        state_path: root.join("cognitive-daemon-state.json"),
+    })
 }
 
 fn start(config: &ArchonConfig, cwd: &Path, interval_ms: Option<u64>, as_json: bool) -> Result<()> {

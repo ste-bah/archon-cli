@@ -165,9 +165,9 @@ pub(crate) fn run_session_loop(
                 continue;
             }
 
-            if !slash_commands_disabled && input.starts_with('/') {
+            if !slash_commands_disabled && let Some(slash_input) = slash_input(&input) {
                 if dispatch_slash_or_skill(
-                    &input,
+                    slash_input,
                     SlashDispatchContext {
                         agent: &agent,
                         api_url: &api_url,
@@ -191,6 +191,12 @@ pub(crate) fn run_session_loop(
                 {
                     continue;
                 }
+                let _ = input_tui_tx.send(TuiEvent::TextDelta(format!(
+                    "\nUnknown slash command `{}`. Type /help for available commands.\n",
+                    slash_command_name(slash_input)
+                )));
+                let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
+                continue;
             }
 
             dispatch_user_prompt(
@@ -210,4 +216,36 @@ pub(crate) fn run_session_loop(
 
         finish_session(&agent_def, &agent, &agent_dispatcher).await;
     })
+}
+
+fn slash_input(input: &str) -> Option<&str> {
+    let trimmed = input.trim_start();
+    trimmed.starts_with('/').then_some(trimmed)
+}
+
+fn slash_command_name(input: &str) -> &str {
+    input.split_whitespace().next().unwrap_or(input)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{slash_command_name, slash_input};
+
+    #[test]
+    fn slash_input_allows_leading_whitespace() {
+        assert_eq!(
+            slash_input("  /cognitive daemon start"),
+            Some("/cognitive daemon start")
+        );
+    }
+
+    #[test]
+    fn slash_input_rejects_plain_prompt() {
+        assert_eq!(slash_input("hello /cognitive"), None);
+    }
+
+    #[test]
+    fn slash_command_name_returns_first_token() {
+        assert_eq!(slash_command_name("/cognitive daemon start"), "/cognitive");
+    }
 }
