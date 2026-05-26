@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use archon_cognitive::{
@@ -53,10 +55,15 @@ pub(crate) fn ensure_daemon_started(
             state_path: status.state_path,
         });
     }
-    let child = spawn_daemon_child(cwd, None)?;
+    let mut child = spawn_daemon_child(cwd, None)?;
+    let status = wait_for_daemon_running(
+        &root,
+        config.learning.cognitive.daemon.stale_heartbeat_ms,
+        &mut child,
+    )?;
     Ok(DaemonStartOutcome::Started {
         pid: child.id(),
-        state_path: root.join("cognitive-daemon-state.json"),
+        state_path: status.state_path,
     })
 }
 
@@ -69,22 +76,24 @@ fn start(config: &ArchonConfig, cwd: &Path, interval_ms: Option<u64>, as_json: b
     if status.running {
         anyhow::bail!("cognitive daemon is already running");
     }
-    let child = spawn_daemon_child(cwd, interval_ms)?;
+    let mut child = spawn_daemon_child(cwd, interval_ms)?;
+    let status = wait_for_daemon_running(
+        &root,
+        config.learning.cognitive.daemon.stale_heartbeat_ms,
+        &mut child,
+    )?;
     if as_json {
         println!(
             "{}",
             json!({
                 "started": true,
                 "pid": child.id(),
-                "statePath": root.join("cognitive-daemon-state.json"),
+                "statePath": status.state_path,
             })
         );
     } else {
         println!("Cognitive daemon started (pid {}).", child.id());
-        println!(
-            "State: {}",
-            root.join("cognitive-daemon-state.json").display()
-        );
+        println!("State: {}", status.state_path.display());
     }
     Ok(())
 }
@@ -157,6 +166,31 @@ fn spawn_daemon_child(cwd: &Path, interval_ms: Option<u64>) -> Result<std::proce
         command.arg("--interval-ms").arg(interval_ms.to_string());
     }
     command.spawn().context("spawn cognitive daemon")
+}
+
+fn wait_for_daemon_running(root: &Path, stale_ms: u64, child: &mut Child) -> Result<DaemonStatus> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let status = CognitiveDaemon::status(root, stale_ms)?;
+        if status.running
+            && status
+                .state
+                .as_ref()
+                .is_some_and(|state| state.pid == child.id())
+        {
+            return Ok(status);
+        }
+        if let Some(exit) = child.try_wait().context("poll cognitive daemon startup")? {
+            anyhow::bail!("cognitive daemon exited during startup with {exit}");
+        }
+        if Instant::now() >= deadline {
+            anyhow::bail!(
+                "cognitive daemon did not become ready within 5s; state path {}",
+                status.state_path.display()
+            );
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
 }
 
 fn ensure_daemon_policy(cwd: &Path) -> Result<()> {
