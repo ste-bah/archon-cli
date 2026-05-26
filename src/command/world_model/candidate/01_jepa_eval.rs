@@ -227,7 +227,8 @@ pub(super) fn render_trainer_tick(
     let store = WorldModelStore::open(root)?;
     let stats = store.cold_start_stats()?;
     let registry = ModelRegistry::open(root)?;
-    let candidate_count = registry.candidate_count()? as u64;
+    let schedule =
+        latent_training_schedule(root, stats.rows, registry.candidate_count()? as u64, last_training_age_ms)?;
     let adapter = build_embedding_adapter(config)?;
     let run = archon_world_model::trainer::run_dynamic_training_once(
         root,
@@ -239,17 +240,17 @@ pub(super) fn render_trainer_tick(
         trigger_policy,
         archon_world_model::trainer::TrainerRuntimeSnapshot {
             last_activity_age_ms: last_activity_age_ms.unwrap_or(auto.idle_required_ms),
-            last_training_age_ms,
+            last_training_age_ms: schedule.last_training_age_ms,
             battery_percent,
             unplugged,
         },
         archon_world_model::trainer::DynamicTrainerTriggerSnapshot {
             total_rows: stats.rows,
-            candidate_count,
-            new_rows_since_training: if candidate_count == 0 { stats.rows } else { 0 },
+            candidate_count: schedule.candidate_count,
+            new_rows_since_training: schedule.new_rows_since_training,
             surprises_since_training: 0,
             corrections_since_training: 0,
-            elapsed_since_training_ms: last_training_age_ms,
+            elapsed_since_training_ms: schedule.last_training_age_ms,
         },
     )?;
     let auto_promotion = run
@@ -316,23 +317,29 @@ fn render_jepa_trainer_tick(
         trigger_elapsed_ms: auto.trigger_elapsed_ms,
         first_run_threshold: auto.first_run_threshold,
     };
+    let stats = WorldModelStore::open(root)?.cold_start_stats()?;
+    let schedule = jepa_training_schedule(
+        root,
+        stats.rows,
+        jepa_candidate_count(root) as u64,
+        last_training_age_ms,
+    )?;
     let runtime = archon_world_model::trainer::TrainerRuntimeSnapshot {
         last_activity_age_ms: last_activity_age_ms.unwrap_or(auto.idle_required_ms),
-        last_training_age_ms,
+        last_training_age_ms: schedule.last_training_age_ms,
         battery_percent,
         unplugged,
     };
     let mut decision = archon_world_model::trainer::evaluate_dynamic_trainer(policy, runtime);
-    let stats = WorldModelStore::open(root)?.cold_start_stats()?;
     let trigger = archon_world_model::trainer::evaluate_trainer_trigger(
         trigger_policy,
         archon_world_model::trainer::DynamicTrainerTriggerSnapshot {
             total_rows: stats.rows,
-            candidate_count: jepa_candidate_count(root) as u64,
-            new_rows_since_training: stats.rows,
+            candidate_count: schedule.candidate_count,
+            new_rows_since_training: schedule.new_rows_since_training,
             surprises_since_training: 0,
             corrections_since_training: 0,
-            elapsed_since_training_ms: last_training_age_ms,
+            elapsed_since_training_ms: schedule.last_training_age_ms,
         },
     );
     if decision.should_train && trigger.is_none() {

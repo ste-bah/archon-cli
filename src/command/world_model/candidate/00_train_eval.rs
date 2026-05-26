@@ -13,7 +13,9 @@ use archon_world_model::jepa::{
     JepaRepresentationComparisonReport, PersistedEvalMode,
 };
 use archon_world_model::model::{CpuLatentTransitionModel, LatentTransitionExample};
-use archon_world_model::registry::{CandidateEvalRecord, JepaCandidateRecord, ModelRegistry};
+use archon_world_model::registry::{
+    CandidateEvalRecord, CpuCandidateRecord, JepaCandidateRecord, ModelRegistry,
+};
 use archon_world_model::representation::GenericEmbeddingRepresentationAdapter;
 use archon_world_model::schema::WorldLabelSet;
 use archon_world_model::storage::WorldModelStore;

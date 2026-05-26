@@ -46,6 +46,26 @@ fn jepa_trainer_tick_respects_recent_activity_gate() {
 }
 
 #[test]
+fn jepa_trainer_tick_uses_candidate_rows_for_retrain_gates() {
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let mut config = jepa_test_config();
+    config.learning.world_model.auto_trainer.first_run_threshold = 3;
+    config.learning.world_model.auto_trainer.trigger_new_rows = 1;
+
+    candidate::render_train_jepa(&config, temp.path(), true, Some(1_000)).unwrap();
+
+    let rendered =
+        candidate::render_trainer_tick(&config, temp.path(), Some(600_000), None, Some(90), false)
+            .unwrap();
+
+    assert!(rendered.contains("World Model JEPA-Inspired Trainer Tick"));
+    assert!(rendered.contains("Should train: false"));
+    assert!(rendered.contains("Decision: Throttled"));
+    assert!(rendered.contains("Trigger: none"));
+}
+
+#[test]
 fn train_writes_candidate_manifest_from_stored_rows() {
     let temp = tempfile::tempdir().unwrap();
     seed_training_rows(temp.path());
