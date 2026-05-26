@@ -61,6 +61,13 @@ fn classify_normalized(text: &str, tokens: usize) -> (SituationKind, f32, String
             "CI or GitHub Actions debugging",
         );
     }
+    if has_any(text, CODE_REVIEW) {
+        return hit(
+            SituationKind::Research,
+            0.82,
+            "codebase audit or inspection request",
+        );
+    }
     if has_any(text, PIPELINE_CONTROL) {
         return hit(
             SituationKind::PipelineControl,
@@ -192,6 +199,15 @@ const REQUEST_MARKERS: &[&str] = &[
 const HIGH_RISK: &[&str] = &["force push", "--force", "drop table", "rm -rf", "chmod 777"];
 const GIT_MUTATION: &[&str] = &["commit", "push", "merge", "rebase", "cherry-pick"];
 const CI_DEBUG: &[&str] = &["github action", "actions run", "build failed"];
+const CODE_REVIEW: &[&str] = &[
+    "audit",
+    "code review",
+    "review the code",
+    "whole repo",
+    "codebase",
+    "repo review",
+    "inspect the repo",
+];
 const PIPELINE_CONTROL: &[&str] = &["pipeline", "resume", "rewind", "quality gate"];
 const WORLD_MODEL: &[&str] = &["world model", "jepa", "train-jepa", "eval-jepa"];
 const CODE_CHANGE: &[&str] = &["fix", "implement", "patch", "refactor", "edit"];

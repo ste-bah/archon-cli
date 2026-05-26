@@ -37,9 +37,9 @@ impl ToolUseGate {
 }
 
 fn simple_question_verdict(tool_name: &str) -> ToolVerdict {
-    if matches!(tool_name, "memory_recall" | "MemoryRecall") {
+    if is_read_only_tool(tool_name) {
         ToolVerdict::Allow {
-            reason: "simple question allows targeted memory recall".to_owned(),
+            reason: "simple question allows read-only retrieval tools".to_owned(),
         }
     } else {
         ToolVerdict::Suppress {
@@ -53,6 +53,10 @@ fn ambiguous_verdict(tool_name: &str, input: &Value) -> ToolVerdict {
         ToolVerdict::Allow {
             reason: "ambiguous turn may ask a clarification".to_owned(),
         }
+    } else if is_read_only_tool(tool_name) {
+        ToolVerdict::Allow {
+            reason: "ambiguous turn allows read-only discovery tools".to_owned(),
+        }
     } else if matches!(tool_name, "Agent" | "Task") && asks_for_subagent(input) {
         ToolVerdict::Allow {
             reason: "ambiguous turn explicitly requested subagent delegation".to_owned(),
@@ -62,6 +66,26 @@ fn ambiguous_verdict(tool_name: &str, input: &Value) -> ToolVerdict {
             reason: "ambiguous turn must clarify before tool use".to_owned(),
         }
     }
+}
+
+fn is_read_only_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "Read"
+            | "Glob"
+            | "Grep"
+            | "LS"
+            | "Skill"
+            | "SkillAction"
+            | "DocSearch"
+            | "DocAnswer"
+            | "DocGet"
+            | "DocProvenance"
+            | "MemoryRecall"
+            | "memory_recall"
+            | "WebSearch"
+            | "WebFetch"
+    )
 }
 
 fn asks_for_subagent(input: &Value) -> bool {

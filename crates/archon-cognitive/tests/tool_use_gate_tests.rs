@@ -32,8 +32,20 @@ fn greeting_suppresses_all_tools() {
 #[test]
 fn simple_question_allows_only_memory_recall() {
     let memory = verdict("what did we decide?", "MemoryRecall", json!({}));
+    let docs = verdict("what did we decide?", "DocSearch", json!({}));
     let bash = verdict("what did we decide?", "Bash", json!({"command": "ls"}));
     assert!(memory.is_allow());
+    assert!(docs.is_allow());
+    assert!(matches!(bash, ToolVerdict::Suppress { .. }));
+}
+
+#[test]
+fn ambiguous_followup_allows_read_only_discovery_tools() {
+    let skill_list = verdict("yes", "Skill", json!({"action": "list"}));
+    let read = verdict("yes", "Read", json!({"file_path": "README.md"}));
+    let bash = verdict("yes", "Bash", json!({"command": "ls"}));
+    assert!(skill_list.is_allow());
+    assert!(read.is_allow());
     assert!(matches!(bash, ToolVerdict::Suppress { .. }));
 }
 

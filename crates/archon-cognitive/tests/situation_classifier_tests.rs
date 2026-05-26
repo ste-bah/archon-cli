@@ -23,6 +23,10 @@ fn classifies_all_situation_kinds() {
             SituationKind::CiDebug,
         ),
         (
+            "whole repo but don't bother running any tests",
+            SituationKind::Research,
+        ),
+        (
             "resume the failed research pipeline",
             SituationKind::PipelineControl,
         ),
