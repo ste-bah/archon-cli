@@ -962,6 +962,8 @@ retain_checkpoint_count = 5
 | Field | Default | What / Why |
 |---|---|---|
 | `enabled` | `true` | Enables local world-model corpus and advisory surfaces. |
+| `auto_promote_advisory` | `true` | Lets the background trainer eval-gate a new candidate and promote it to the active advisory pointer only when `policy.world_model.allow_behavior_changes = true` and all mandatory gates pass. JEPA uses full promotion-grade eval; quick JEPA eval is never promoted. |
+| `require_approval_for_behavior_change` | `true` | Keeps promoted advisory models from becoming behavior-changing authority without explicit operator approval. |
 | `state_dim` | `384` | Latent state size. Small enough for consumer machines. |
 | `max_prediction_latency_ms` | `100` | Advisor budget. Exceeding this must fail open. |
 | `embeddings.source` | `"local"` | Local-first embeddings. Third-party embeddings require config and policy. |

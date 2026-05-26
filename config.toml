@@ -476,6 +476,9 @@ tick_interval_ms = 60000       # background poll interval (1 minute)
 [learning.world_model]
 enabled = true
 model_kind = "latent_transition"
+# When the background trainer writes a candidate, run the relevant eval gates
+# and promote only if policy.world_model.allow_behavior_changes=true and all
+# mandatory gates pass. JEPA auto-promotion uses full promotion-grade eval.
 auto_promote_advisory = true
 require_approval_for_behavior_change = true
 state_dim = 384

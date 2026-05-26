@@ -252,6 +252,11 @@ pub(super) fn render_trainer_tick(
             elapsed_since_training_ms: last_training_age_ms,
         },
     )?;
+    let auto_promotion = run
+        .candidate_id
+        .as_deref()
+        .map(|id| render_auto_promote_transition(config, root, id))
+        .unwrap_or_else(|| "none (no candidate)".into());
 
     Ok(format!(
         "World Model Trainer Tick\n\
@@ -265,6 +270,7 @@ pub(super) fn render_trainer_tick(
          Examples: {}\n\
          Candidate: {}\n\
          Mean cosine error: {}\n\
+         Auto promotion: {}\n\
          Checkpoint: {}",
         run.decision.reason,
         run.decision.should_train,
@@ -280,6 +286,7 @@ pub(super) fn render_trainer_tick(
         run.training_mean_cosine_error
             .map(|value| format!("{value:.4}"))
             .unwrap_or_else(|| "none".into()),
+        auto_promotion,
         run.checkpoint_path
             .as_ref()
             .map(|path| path.display().to_string())
@@ -365,6 +372,10 @@ fn render_jepa_trainer_tick(
                 .path,
         );
     }
+    let auto_promotion = candidate_id
+        .as_deref()
+        .map(|id| render_auto_promote_jepa(config, root, id))
+        .unwrap_or_else(|| "none (no candidate)".into());
 
     Ok(format!(
         "World Model JEPA-Inspired Trainer Tick\n\
@@ -376,6 +387,7 @@ fn render_jepa_trainer_tick(
          Examples: {}\n\
          Candidate: {}\n\
          Loss total: {}\n\
+         Auto promotion: {}\n\
          Checkpoint: {}",
         decision.reason,
         decision.should_train,
@@ -389,6 +401,7 @@ fn render_jepa_trainer_tick(
         loss_total
             .map(|value| format!("{value:.4}"))
             .unwrap_or_else(|| "none".into()),
+        auto_promotion,
         checkpoint_path
             .as_ref()
             .map(|path| path.display().to_string())
