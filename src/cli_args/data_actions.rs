@@ -34,12 +34,16 @@ pub enum KbAction {
     Ingest {
         /// Path or URL to ingest
         source: String,
-        /// Domain tag for the ingested content
-        #[arg(long)]
-        domain: Option<String>,
+        /// Knowledge-base name to attach the ingested source to
+        #[arg(long, alias = "domain")]
+        kb: Option<String>,
     },
     /// List all nodes in the knowledge base
-    List,
+    List {
+        /// Restrict output to a named knowledge base
+        #[arg(long)]
+        kb: Option<String>,
+    },
     /// Search for nodes matching a query string
     Search {
         /// Search query
@@ -50,6 +54,9 @@ pub enum KbAction {
         /// Retrieval mode: exact, semantic, or hybrid
         #[arg(long, default_value = "hybrid")]
         mode: String,
+        /// Restrict results to a named knowledge base
+        #[arg(long)]
+        kb: Option<String>,
     },
     /// Extract claims, entities, relations, source quality and contradictions from doc chunks
     Process {
@@ -65,6 +72,9 @@ pub enum KbAction {
         /// Scan claims for contradictions
         #[arg(long)]
         contradictions: bool,
+        /// Restrict processing to a named knowledge base
+        #[arg(long)]
+        kb: Option<String>,
     },
     /// List extracted claims
     Claims,

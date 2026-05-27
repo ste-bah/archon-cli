@@ -34,6 +34,28 @@ pub fn list_doc_chunks(db: &DbInstance) -> Result<Vec<DocumentChunk>> {
     }
 }
 
+pub fn list_doc_chunks_for_kb(db: &DbInstance, kb_id: &str) -> Result<Vec<DocumentChunk>> {
+    let mut params = BTreeMap::new();
+    params.insert("kid".into(), DataValue::from(kb_id));
+    let script = r#"
+        ?[chunk_id, document_id, content, content_hash] :=
+            *doc_kb_memberships{kb_id, document_id},
+            kb_id = $kid,
+            *doc_chunks{chunk_id, document_id, content, content_hash}
+    "#;
+    match db.run_script(script, params, ScriptMutability::Immutable) {
+        Ok(result) => Ok(result
+            .rows
+            .iter()
+            .map(|row| row_to_doc_chunk(row))
+            .collect()),
+        Err(e) if relation_missing(&e.to_string()) => Ok(Vec::new()),
+        Err(e) => Err(KnowledgeError::Store(format!(
+            "list kb doc_chunks failed: {e}"
+        ))),
+    }
+}
+
 pub fn insert_claim(db: &DbInstance, claim: &ClaimRecord) -> Result<()> {
     let mut params = BTreeMap::new();
     params.insert("id".into(), DataValue::from(claim.claim_id.as_str()));

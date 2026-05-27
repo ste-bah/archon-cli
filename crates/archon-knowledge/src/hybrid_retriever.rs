@@ -32,6 +32,7 @@ pub struct SearchOptions {
     pub exact_weight: f64,
     pub semantic_weight: f64,
     pub query_embedding: Option<Vec<f32>>,
+    pub document_filter: Option<Vec<String>>,
 }
 
 impl Default for SearchOptions {
@@ -42,6 +43,7 @@ impl Default for SearchOptions {
             exact_weight: 0.55,
             semantic_weight: 0.45,
             query_embedding: None,
+            document_filter: None,
         }
     }
 }
@@ -62,7 +64,7 @@ pub fn search(
     query: &str,
     options: &SearchOptions,
 ) -> Result<Vec<KnowledgeSearchResult>> {
-    let chunks = store::list_doc_chunks(db)?;
+    let chunks = filtered_chunks(db, options)?;
     let mut scores = match options.mode {
         SearchMode::Exact => exact_results(query, &chunks),
         SearchMode::Semantic => semantic_results(db, &chunks, options)?,
@@ -125,11 +127,16 @@ fn exact_results(query: &str, chunks: &[DocumentChunk]) -> Vec<KnowledgeSearchRe
 
 fn semantic_results(
     db: &DbInstance,
-    _chunks: &[DocumentChunk],
+    chunks: &[DocumentChunk],
     options: &SearchOptions,
 ) -> Result<Vec<KnowledgeSearchResult>> {
     if let Some(query_embedding) = &options.query_embedding {
-        return hnsw_results(db, query_embedding, options.top_k);
+        let top_k = if options.document_filter.is_some() {
+            store::list_doc_chunks(db)?.len().max(options.top_k)
+        } else {
+            options.top_k
+        };
+        return hnsw_results(db, query_embedding, top_k, chunks);
     }
     Ok(Vec::new())
 }
@@ -138,6 +145,7 @@ fn hnsw_results(
     db: &DbInstance,
     query_embedding: &[f32],
     top_k: usize,
+    candidate_chunks: &[DocumentChunk],
 ) -> Result<Vec<KnowledgeSearchResult>> {
     let mut params = BTreeMap::new();
     params.insert(
@@ -160,14 +168,13 @@ fn hnsw_results(
             ScriptMutability::Immutable,
         )
         .map_err(|e| KnowledgeError::Store(format!("semantic HNSW search failed: {e}")))?;
-    let chunks = store::list_doc_chunks(db)?;
     Ok(result
         .rows
         .iter()
         .filter_map(|row| {
             let chunk_id = row.first().and_then(DataValue::get_str)?;
             let distance = row.get(1).and_then(DataValue::get_float).unwrap_or(1.0);
-            let chunk = chunks.iter().find(|c| c.chunk_id == chunk_id)?;
+            let chunk = candidate_chunks.iter().find(|c| c.chunk_id == chunk_id)?;
             Some(KnowledgeSearchResult {
                 artifact_id: chunk.chunk_id.clone(),
                 document_id: chunk.document_id.clone(),
@@ -178,6 +185,17 @@ fn hnsw_results(
                 source_kind: "doc_chunk".into(),
             })
         })
+        .collect())
+}
+
+fn filtered_chunks(db: &DbInstance, options: &SearchOptions) -> Result<Vec<DocumentChunk>> {
+    let chunks = store::list_doc_chunks(db)?;
+    let Some(filter) = &options.document_filter else {
+        return Ok(chunks);
+    };
+    Ok(chunks
+        .into_iter()
+        .filter(|chunk| filter.iter().any(|id| id == &chunk.document_id))
         .collect())
 }
 

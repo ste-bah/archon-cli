@@ -19,6 +19,7 @@ pub fn ensure_doc_schema(db: &DbInstance) -> Result<()> {
     ensure_doc_pdf_metrics(db)?;
     ensure_doc_provenance_edges(db)?;
     ensure_doc_processing_jobs(db)?;
+    ensure_doc_kb_memberships(db)?;
     Ok(())
 }
 
@@ -193,6 +194,17 @@ fn ensure_doc_processing_jobs(db: &DbInstance) -> Result<()> {
             started_at: String,
             completed_at: String default "",
             error_message: String default "",
+        }"#,
+    )
+}
+
+fn ensure_doc_kb_memberships(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create doc_kb_memberships {
+            kb_id: String,
+            document_id: String =>
+            assigned_at: String,
         }"#,
     )
 }

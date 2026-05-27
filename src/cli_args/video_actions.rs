@@ -20,6 +20,9 @@ pub enum VideoAction {
         /// Enable frame VLM descriptions
         #[arg(long)]
         vlm: bool,
+        /// Knowledge-base name to attach the video evidence to
+        #[arg(long)]
+        kb: Option<String>,
         /// Register metadata and provided transcript without media acquisition
         #[arg(long)]
         metadata_only: bool,

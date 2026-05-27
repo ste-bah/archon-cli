@@ -1,4 +1,4 @@
-use archon_docs::models::ChunkArtifact;
+use archon_docs::models::{ChunkArtifact, DocumentStatus, SourceDocument};
 use archon_knowledge::hybrid_retriever::{SearchMode, SearchOptions};
 use archon_knowledge::schema::{
     ClaimPolarity, ClaimRecord, ContradictionRecord, EntityRecord, RelationRecord,
@@ -30,6 +30,21 @@ fn insert_chunk(db: &DbInstance, id: &str, doc: &str, content: &str) {
         embedding_status: "pending".into(),
     };
     archon_docs::store::insert_chunk(db, &chunk).unwrap();
+}
+
+fn insert_source(db: &DbInstance, doc: &str) {
+    archon_docs::store::insert_doc_source(
+        db,
+        &SourceDocument {
+            document_id: doc.into(),
+            source_path: format!("/tmp/{doc}.md"),
+            media_type: "text/markdown".into(),
+            content_hash: format!("hash-{doc}"),
+            discovered_at: "2026-05-27T00:00:00Z".into(),
+            status: DocumentStatus::Ingested,
+        },
+    )
+    .unwrap();
 }
 
 #[test]
@@ -136,6 +151,53 @@ fn exact_search_finds_known_chunk() {
 }
 
 #[test]
+fn exact_search_respects_document_filter() {
+    let db = db_with_doc_schema();
+    insert_chunk(&db, "c1", "doc-1", "Elliott wave invalidation rules.");
+    insert_chunk(&db, "c2", "doc-2", "Elliott wave unrelated archive.");
+    let engine = engine(db);
+    let results = engine
+        .search(
+            "Elliott wave",
+            &SearchOptions {
+                mode: SearchMode::Exact,
+                top_k: 5,
+                document_filter: Some(vec!["doc-1".into()]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].document_id, "doc-1");
+}
+
+#[test]
+fn process_kb_only_reads_attached_documents() {
+    let db = db_with_doc_schema();
+    insert_source(&db, "doc-1");
+    insert_source(&db, "doc-2");
+    archon_docs::store::assign_document_to_kb(&db, "trading", "doc-1").unwrap();
+    insert_chunk(&db, "c1", "doc-1", "The scorecard is safe.");
+    insert_chunk(&db, "c2", "doc-2", "The unrelated policy is safe.");
+    let engine = engine(db);
+
+    let report = engine
+        .process_kb(
+            "trading",
+            ProcessOptions {
+                claims: true,
+                entities: false,
+                relations: false,
+                contradictions: false,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(report.chunks_seen, 1);
+    assert_eq!(engine.claims().unwrap().len(), 1);
+}
+
+#[test]
 fn hybrid_search_uses_exact_when_no_embedding_is_available() {
     let db = db_with_doc_schema();
     insert_chunk(
@@ -192,6 +254,31 @@ fn semantic_search_finds_vector_indexed_chunk() {
         .unwrap();
     assert_eq!(results[0].artifact_id, "c1");
     assert!(results[0].semantic_score > 0.9);
+}
+
+#[test]
+fn semantic_search_respects_document_filter() {
+    let db = db_with_doc_schema();
+    archon_docs::schema::ensure_vec_schema(&db, 2).unwrap();
+    insert_chunk(&db, "c1", "doc-1", "Filtered vector chunk.");
+    insert_chunk(&db, "c2", "doc-2", "Closer global vector chunk.");
+    archon_docs::store::insert_chunk_embedding(&db, "c1", &[0.8, 0.2], "test").unwrap();
+    archon_docs::store::insert_chunk_embedding(&db, "c2", &[1.0, 0.0], "test").unwrap();
+    let engine = engine(db);
+    let results = engine
+        .search(
+            "vector",
+            &SearchOptions {
+                mode: SearchMode::Semantic,
+                top_k: 1,
+                query_embedding: Some(vec![1.0, 0.0]),
+                document_filter: Some(vec!["doc-1".into()]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].document_id, "doc-1");
 }
 
 #[test]

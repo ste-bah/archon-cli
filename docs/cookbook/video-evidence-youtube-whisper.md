@@ -138,6 +138,12 @@ Inside the TUI, run the video ingest directly:
 /video ingest "https://youtu.be/s4s25rep8JM?si=mmb41i3lqQRLKRjz" --frames hybrid --asr whisper-cpp --yes
 ```
 
+To attach the YouTube evidence to an existing named KB, add `--kb <name>`:
+
+```text
+/video ingest "https://youtu.be/s4s25rep8JM?si=mmb41i3lqQRLKRjz" --kb trading-elliott-wave --frames hybrid --asr whisper-cpp --yes
+```
+
 What happens:
 
 1. Archon checks project policy.
@@ -176,6 +182,8 @@ After ingest, index and query the evidence:
 /docs search "phrase from the video" --mode hybrid --debug
 /docs answer "What did the speaker say about the architecture?"
 /kb process --claims --entities --relations
+/kb process --kb trading-elliott-wave --claims --entities --relations
+/kb search --kb trading-elliott-wave "phrase from the video"
 ```
 
 The answer path can cite `video@MM:SS` when timestamp provenance exists.

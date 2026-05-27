@@ -23,13 +23,14 @@ Inside the TUI, use the mirrored slash form:
 ```text
 /video ingest ./lecture.mp4 --transcript ./lecture.vtt --frames none
 /video ingest "https://youtu.be/abc123" --frames hybrid --asr whisper-cpp --yes
+/video ingest "https://youtu.be/abc123" --kb trading-elliott-wave --frames hybrid --asr whisper-cpp --yes
 /video inspect <video-id>
 ```
 
 The TUI slash command is a CLI mirror: flags such as `--frames`, `--asr`,
-`--metadata-only`, `--vlm`, and `--yes` are passed through to the same handler as
-`archon video ingest`. In a shell, quote video URLs that contain `&` or other
-shell metacharacters; inside the TUI, quote URLs with spaces only.
+`--metadata-only`, `--vlm`, `--kb`, and `--yes` are passed through to the same
+handler as `archon video ingest`. In a shell, quote video URLs that contain `&`
+or other shell metacharacters; inside the TUI, quote URLs with spaces only.
 
 ## Transcript-Only Workflow
 
@@ -104,6 +105,15 @@ that with `ARCHON_YTDLP_VIDEO_FORMAT` when you need a different local policy.
 If `[policy.video].allow_caption_capture = true`, Archon first tries to capture
 English VTT captions with `yt-dlp`. Captions become timecoded transcript chunks.
 If no usable captions exist, it falls back to the configured ASR provider.
+
+To add the YouTube evidence to an existing KB, include `--kb <name>` on ingest
+and then process or search that bucket:
+
+```bash
+archon video ingest "https://youtu.be/abc123" --kb trading-elliott-wave --frames hybrid --asr whisper-cpp --yes
+archon kb process --kb trading-elliott-wave --claims --entities --relations
+archon kb search --kb trading-elliott-wave "wave count invalidation"
+```
 
 ## Policy-Gated Acquisition
 

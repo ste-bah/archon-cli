@@ -60,7 +60,7 @@ async fn kb_stats_on_empty_db() {
 
 #[tokio::test]
 async fn kb_list_on_empty_db() {
-    let result = run_kb_with_temp_store(cli_args::KbAction::List).await;
+    let result = run_kb_with_temp_store(cli_args::KbAction::List { kb: None }).await;
     assert!(result.is_ok(), "list on empty DB must succeed");
 }
 
@@ -70,6 +70,7 @@ async fn kb_search_on_empty_db_returns_no_matches() {
         query: "nonexistent".into(),
         limit: 10,
         mode: "exact".into(),
+        kb: None,
     })
     .await;
     assert!(result.is_ok(), "search on empty DB must succeed");

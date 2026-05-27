@@ -89,6 +89,19 @@ impl KnowledgeEngine {
 
     pub fn process_documents(&self, options: ProcessOptions) -> Result<ProcessReport> {
         let chunks = store::list_doc_chunks(&self.db)?;
+        self.process_chunks(chunks, options)
+    }
+
+    pub fn process_kb(&self, kb_id: &str, options: ProcessOptions) -> Result<ProcessReport> {
+        let chunks = store::list_doc_chunks_for_kb(&self.db, kb_id)?;
+        self.process_chunks(chunks, options)
+    }
+
+    pub fn process_chunks(
+        &self,
+        chunks: Vec<store::DocumentChunk>,
+        options: ProcessOptions,
+    ) -> Result<ProcessReport> {
         let mut report = ProcessReport {
             chunks_seen: chunks.len(),
             ..ProcessReport::default()

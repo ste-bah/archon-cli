@@ -24,15 +24,31 @@ pub async fn handle_kb_command(action: KbAction) -> Result<()> {
     let engine = archon_knowledge::KnowledgeEngine::new(db.clone())?;
 
     match action {
-        KbAction::Ingest { source, domain: _ } => ingest_source(&db, &source).await,
-        KbAction::List => list_chunks(&db).await,
-        KbAction::Search { query, limit, mode } => search(&engine, &query, limit, &mode).await,
+        KbAction::Ingest { source, kb } => ingest_source(&db, &source, kb.as_deref()).await,
+        KbAction::List { kb } => list_chunks(&db, kb.as_deref()).await,
+        KbAction::Search {
+            query,
+            limit,
+            mode,
+            kb,
+        } => search(&engine, &query, limit, &mode, kb.as_deref()).await,
         KbAction::Process {
             claims,
             entities,
             relations,
             contradictions,
-        } => process(&engine, claims, entities, relations, contradictions).await,
+            kb,
+        } => {
+            process(
+                &engine,
+                claims,
+                entities,
+                relations,
+                contradictions,
+                kb.as_deref(),
+            )
+            .await
+        }
         KbAction::Claims => print_claims(&engine).await,
         KbAction::Entities => print_entities(&engine).await,
         KbAction::Relations => print_relations(&engine).await,
@@ -41,9 +57,11 @@ pub async fn handle_kb_command(action: KbAction) -> Result<()> {
     }
 }
 
-async fn ingest_source(db: &DbInstance, source: &str) -> Result<()> {
+async fn ingest_source(db: &DbInstance, source: &str, kb: Option<&str>) -> Result<()> {
     if source.starts_with("http://") || source.starts_with("https://") {
-        return crate::command::kb_url::ingest_url(db, source).await;
+        let document_id = crate::command::kb_url::ingest_url(db, source).await?;
+        attach_to_kb(db, kb, &document_id)?;
+        return Ok(());
     }
     let path = PathBuf::from(source);
     if !path.exists() {
@@ -54,17 +72,26 @@ async fn ingest_source(db: &DbInstance, source: &str) -> Result<()> {
         println!("Ingested: {} sources", result.sources_registered);
         println!("Skipped duplicates: {}", result.sources_skipped_duplicate);
         println!("Failed: {}", result.sources_failed);
+        if let Some(kb_id) = normalize_kb_id(kb) {
+            let assigned = attach_path_documents_to_kb(db, &kb_id, &path)?;
+            println!("KB: {kb_id} ({assigned} document(s) attached)");
+        }
     } else {
         let result = archon_docs::ingest::ingest_file(db, &path).await?;
         let chunks = archon_docs::store::list_chunks_for_doc(db, &result.document_id)?;
         println!("Ingested: {}", result.document_id);
         println!("Chunks: {}", chunks.len());
+        attach_to_kb(db, kb, &result.document_id)?;
     }
     Ok(())
 }
 
-async fn list_chunks(db: &DbInstance) -> Result<()> {
-    let chunks = archon_knowledge::store::list_doc_chunks(db)?;
+async fn list_chunks(db: &DbInstance, kb: Option<&str>) -> Result<()> {
+    let chunks = if let Some(kb_id) = normalize_kb_id(kb) {
+        archon_knowledge::store::list_doc_chunks_for_kb(db, &kb_id)?
+    } else {
+        archon_knowledge::store::list_doc_chunks(db)?
+    };
     for chunk in &chunks {
         println!(
             "{}  {}  {}",
@@ -83,10 +110,15 @@ async fn process(
     entities: bool,
     relations: bool,
     contradictions: bool,
+    kb: Option<&str>,
 ) -> Result<()> {
     let opts =
         archon_knowledge::ProcessOptions::from_flags(claims, entities, relations, contradictions);
-    let report = engine.process_documents(opts)?;
+    let report = if let Some(kb_id) = normalize_kb_id(kb) {
+        engine.process_kb(&kb_id, opts)?
+    } else {
+        engine.process_documents(opts)?
+    };
     println!("Knowledge process complete");
     println!("Chunks seen: {}", report.chunks_seen);
     println!("Claims: {}", report.claims_created);
@@ -102,8 +134,9 @@ async fn search(
     query: &str,
     limit: usize,
     mode: &str,
+    kb: Option<&str>,
 ) -> Result<()> {
-    let options = search_options_for_cli(engine.db(), query, limit, mode)?;
+    let options = search_options_for_cli(engine.db(), query, limit, mode, kb)?;
     let results = engine.search(query, &options)?;
     for result in &results {
         println!(
@@ -124,6 +157,7 @@ fn search_options_for_cli(
     query: &str,
     limit: usize,
     mode: &str,
+    kb: Option<&str>,
 ) -> Result<archon_knowledge::hybrid_retriever::SearchOptions> {
     let parsed_mode = archon_knowledge::hybrid_retriever::SearchMode::parse(mode)?;
     let query_embedding = if parsed_mode == archon_knowledge::hybrid_retriever::SearchMode::Exact {
@@ -135,12 +169,55 @@ fn search_options_for_cli(
     if mode != parsed_mode {
         eprintln!("Warning: semantic KB search unavailable; using exact-only results.");
     }
+    let document_filter = kb_document_filter(db, kb)?;
     Ok(archon_knowledge::hybrid_retriever::SearchOptions {
         mode,
         top_k: limit,
         query_embedding,
+        document_filter,
         ..Default::default()
     })
+}
+
+fn kb_document_filter(db: &DbInstance, kb: Option<&str>) -> Result<Option<Vec<String>>> {
+    let Some(kb_id) = normalize_kb_id(kb) else {
+        return Ok(None);
+    };
+    let document_ids = archon_docs::store::list_kb_document_ids(db, &kb_id)?;
+    if document_ids.is_empty() {
+        eprintln!("Warning: knowledge base `{kb_id}` has no attached documents.");
+    }
+    Ok(Some(document_ids))
+}
+
+fn attach_to_kb(db: &DbInstance, kb: Option<&str>, document_id: &str) -> Result<()> {
+    if let Some(kb_id) = normalize_kb_id(kb) {
+        archon_docs::store::assign_document_to_kb(db, &kb_id, document_id)?;
+        println!("KB: {kb_id}");
+    }
+    Ok(())
+}
+
+fn attach_path_documents_to_kb(
+    db: &DbInstance,
+    kb_id: &str,
+    path: &std::path::Path,
+) -> Result<usize> {
+    let prefix = path.to_string_lossy();
+    let mut assigned = 0;
+    for doc in archon_docs::store::list_doc_sources(db)? {
+        if doc.source_path.starts_with(prefix.as_ref()) {
+            archon_docs::store::assign_document_to_kb(db, kb_id, &doc.document_id)?;
+            assigned += 1;
+        }
+    }
+    Ok(assigned)
+}
+
+fn normalize_kb_id(kb: Option<&str>) -> Option<String> {
+    kb.map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
 }
 
 fn effective_search_mode(
@@ -307,7 +384,7 @@ mod tests {
     #[test]
     fn exact_search_options_do_not_require_embedding_provider() {
         let db = test_db();
-        let options = search_options_for_cli(&db, "plugin", 3, "exact").unwrap();
+        let options = search_options_for_cli(&db, "plugin", 3, "exact", None).unwrap();
         assert_eq!(
             options.mode,
             archon_knowledge::hybrid_retriever::SearchMode::Exact

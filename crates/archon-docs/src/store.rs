@@ -142,6 +142,46 @@ pub fn update_doc_status(
 }
 
 // ---------------------------------------------------------------------------
+// Knowledge-base membership
+// ---------------------------------------------------------------------------
+
+pub fn assign_document_to_kb(db: &DbInstance, kb_id: &str, document_id: &str) -> Result<()> {
+    if get_doc_source(db, document_id)?.is_none() {
+        anyhow::bail!("document not found: {document_id}");
+    }
+    let mut params = BTreeMap::new();
+    params.insert("kid".into(), DataValue::from(kb_id));
+    params.insert("did".into(), DataValue::from(document_id));
+    let assigned_at = chrono::Utc::now().to_rfc3339();
+    params.insert("ts".into(), DataValue::from(assigned_at.as_str()));
+    db.run_script(
+        "?[kb_id, document_id, assigned_at] <- [[$kid, $did, $ts]] \
+         :put doc_kb_memberships { kb_id, document_id => assigned_at }",
+        params,
+        ScriptMutability::Mutable,
+    )
+    .map_err(|e| anyhow::anyhow!("assign document to kb failed: {e}"))?;
+    Ok(())
+}
+
+pub fn list_kb_document_ids(db: &DbInstance, kb_id: &str) -> Result<Vec<String>> {
+    let mut params = BTreeMap::new();
+    params.insert("kid".into(), DataValue::from(kb_id));
+    let result = db
+        .run_script(
+            "?[document_id] := *doc_kb_memberships{kb_id, document_id}, kb_id = $kid",
+            params,
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("list kb documents failed: {e}"))?;
+    Ok(result
+        .rows
+        .iter()
+        .filter_map(|row| row.first()?.get_str().map(ToString::to_string))
+        .collect())
+}
+
+// ---------------------------------------------------------------------------
 // OcrRun
 // ---------------------------------------------------------------------------
 

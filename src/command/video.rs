@@ -19,6 +19,7 @@ pub async fn handle_video_command(action: VideoAction) -> Result<()> {
             frames,
             asr,
             vlm,
+            kb,
             metadata_only,
             yes,
         } => {
@@ -41,6 +42,10 @@ pub async fn handle_video_command(action: VideoAction) -> Result<()> {
                 &db,
             )
             .await?;
+            if let Some(kb_id) = normalize_kb_id(kb.as_deref()) {
+                archon_docs::store::assign_document_to_kb(&db, &kb_id, &result.document_id)?;
+                println!("KB: {kb_id}");
+            }
             if result.was_new {
                 println!(
                     "Ingested video: {} ({} chunk(s))",
@@ -96,6 +101,12 @@ pub async fn handle_video_command(action: VideoAction) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn normalize_kb_id(kb: Option<&str>) -> Option<String> {
+    kb.map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
 }
 
 fn configure_video_vlm_if_needed(

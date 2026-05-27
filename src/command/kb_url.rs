@@ -1,7 +1,7 @@
 use anyhow::Result;
 use cozo::DbInstance;
 
-pub(crate) async fn ingest_url(db: &DbInstance, source: &str) -> Result<()> {
+pub(crate) async fn ingest_url(db: &DbInstance, source: &str) -> Result<String> {
     let response = reqwest::get(source).await?;
     let status = response.status();
     if !status.is_success() {
@@ -24,7 +24,7 @@ pub(crate) async fn ingest_url(db: &DbInstance, source: &str) -> Result<()> {
         )
         .await?;
         print_file_result(db, &result)?;
-        return Ok(());
+        return Ok(result.document_id);
     }
 
     anyhow::bail!(

@@ -128,6 +128,10 @@ archon video ingest "https://www.youtube.com/watch?v=abc123" \
 # YouTube URL with governed local download and whisper-cpp ASR
 archon video ingest "https://youtu.be/abc123" --frames hybrid --asr whisper-cpp --yes
 
+# Add YouTube evidence to a named KB bucket
+archon video ingest "https://youtu.be/abc123" --kb trading-elliott-wave --frames hybrid --asr whisper-cpp --yes
+archon kb process --kb trading-elliott-wave --claims --entities --relations
+
 # Frame extraction for charts, diagrams, and slides
 archon video ingest ./market-review.mp4 --frames hybrid --vlm --yes
 archon video transcript <video-id> --format vtt

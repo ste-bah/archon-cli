@@ -12,10 +12,10 @@ Current `archon kb --help` surface:
 
 | Command | Purpose | Important flags |
 |---|---|---|
-| `ingest <source>` | Ingest a file, URL, or directory into the KB | `--domain` |
-| `list` | List all nodes | none |
-| `search <query>` | Search nodes | `--limit`, `--mode exact|semantic|hybrid` |
-| `process` | Extract structured intelligence from doc chunks | `--claims`, `--entities`, `--relations`, `--contradictions` |
+| `ingest <source>` | Ingest a file, URL, or directory into the KB | `--kb`, `--domain` alias |
+| `list` | List all nodes | `--kb` |
+| `search <query>` | Search nodes | `--limit`, `--mode exact|semantic|hybrid`, `--kb` |
+| `process` | Extract structured intelligence from doc chunks | `--claims`, `--entities`, `--relations`, `--contradictions`, `--kb` |
 | `claims` | List extracted claims | none |
 | `entities` | List extracted entities | none |
 | `relations` | List inferred relations | none |
@@ -33,6 +33,28 @@ supported document media: plain text, Markdown, HTML, JSON, XML, YAML, TOML,
 PDF, PNG, JPEG, and TIFF. The URL remains the stored source path while fetched
 bytes are passed through the same hashing, duplicate detection, OCR/PDF/image/VLM
 policy gates, chunking, indexing, and provenance rows.
+
+## Named KB Buckets
+
+Use `--kb <name>` to attach ingested sources to a durable KB bucket. The bucket
+is a grouping over existing evidence documents, so it works for PDFs, images,
+Markdown, text, URLs, and video evidence without duplicating chunks.
+
+```bash
+archon kb ingest ./research-pack --kb trading-elliott-wave
+archon video ingest "https://youtu.be/abc123" --kb trading-elliott-wave --frames hybrid --asr whisper-cpp --yes
+archon kb process --kb trading-elliott-wave --claims --entities --relations --contradictions
+archon kb search --kb trading-elliott-wave "wave 3 invalidation" --mode hybrid
+```
+
+Inside the TUI, use the same slash forms:
+
+```text
+/kb ingest ./research-pack --kb trading-elliott-wave
+/video ingest "https://youtu.be/abc123" --kb trading-elliott-wave --frames hybrid --asr whisper-cpp --yes
+/kb process --kb trading-elliott-wave --claims --entities --relations --contradictions
+/kb search --kb trading-elliott-wave "wave 3 invalidation" --mode hybrid
+```
 
 ## Full State Verification
 
