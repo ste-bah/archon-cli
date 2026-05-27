@@ -52,6 +52,7 @@ pub(crate) mod dispatcher;
 pub(crate) mod docs;
 #[cfg(test)]
 pub(crate) mod docs_drift;
+pub(crate) mod docs_reprocess;
 pub(crate) mod doctor;
 pub(crate) mod effort;
 pub(crate) mod errors;
@@ -79,6 +80,7 @@ pub(crate) mod hooks;
 pub(crate) mod ide_stdio;
 pub(crate) mod kb;
 pub(crate) mod kb_ingest_output;
+pub(crate) mod kb_reprocess;
 pub(crate) mod kb_url;
 pub(crate) mod learning;
 pub(crate) mod learning_status;

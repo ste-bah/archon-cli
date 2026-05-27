@@ -54,6 +54,7 @@ pub async fn handle_kb_command(action: KbAction) -> Result<()> {
             )
             .await
         }
+        KbAction::Reprocess { kb } => crate::command::kb_reprocess::handle_reprocess(&kb).await,
         KbAction::Claims => print_claims(&engine).await,
         KbAction::Entities => print_entities(&engine).await,
         KbAction::Relations => print_relations(&engine).await,

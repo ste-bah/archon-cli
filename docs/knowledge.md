@@ -43,6 +43,7 @@ Markdown, text, URLs, and video evidence without duplicating chunks.
 ```bash
 archon kb ingest ./research-pack --kb trading-elliott-wave
 archon video ingest "https://youtu.be/abc123" --kb trading-elliott-wave --frames hybrid --asr whisper-cpp --yes
+archon kb reprocess --kb trading-elliott-wave
 archon kb process --kb trading-elliott-wave --claims --entities --relations --contradictions
 archon kb search --kb trading-elliott-wave "wave 3 invalidation" --mode hybrid
 ```
@@ -52,9 +53,15 @@ Inside the TUI, use the same slash forms:
 ```text
 /kb ingest ./research-pack --kb trading-elliott-wave
 /video ingest "https://youtu.be/abc123" --kb trading-elliott-wave --frames hybrid --asr whisper-cpp --yes
+/kb reprocess --kb trading-elliott-wave
 /kb process --kb trading-elliott-wave --claims --entities --relations --contradictions
 /kb search --kb trading-elliott-wave "wave 3 invalidation" --mode hybrid
 ```
+
+`kb reprocess` repairs every document currently attached to the bucket. It keeps
+the membership rows and document IDs, but refreshes generated OCR, PDF-image,
+VLM-description, chunk, embedding, and provenance rows using the current project
+policy.
 
 ## Full State Verification
 

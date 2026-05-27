@@ -490,6 +490,7 @@ fn known_vars_contains_all_documented_vars() {
         "ARCHON_CONFIG_DIR",
         "ARCHON_CONSTELLATION_DB_PATH",
         "ARCHON_DATA_DIR",
+        "ARCHON_DOCS_DB_PATH",
         "ARCHON_KB_DB_PATH",
         "ARCHON_MEANING_DB_PATH",
         "ARCHON_PROV_DB_PATH",

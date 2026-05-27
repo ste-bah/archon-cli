@@ -16,6 +16,7 @@ pub mod inspect;
 pub mod ocr;
 pub mod pdf;
 pub mod provenance;
+pub mod reprocess;
 pub mod status;
 
 pub mod answer;

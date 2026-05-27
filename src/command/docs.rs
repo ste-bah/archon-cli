@@ -33,6 +33,9 @@ fn open_db() -> Result<DbInstance> {
 pub async fn handle_docs_command(action: DocsAction) -> Result<()> {
     match action {
         DocsAction::Ingest { path } => handle_ingest(&path).await,
+        DocsAction::Reprocess { target } => {
+            crate::command::docs_reprocess::handle_reprocess(&target).await
+        }
         DocsAction::List => handle_list().await,
         DocsAction::Show { document_id } => handle_show(&document_id).await,
         DocsAction::Status => handle_status().await,

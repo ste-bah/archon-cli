@@ -13,6 +13,7 @@ Current `archon docs --help` surface:
 | Command | Purpose | Notes |
 |---|---|---|
 | `ingest <path>` | Ingest a file or directory | creates document, page/chunk/OCR/provenance state |
+| `reprocess <target>` | Re-run OCR/VLM/image enrichment | target is a document ID, source path, or source path prefix |
 | `list` | List ingested documents | reads persisted document rows |
 | `show <document-id>` | Show document metadata | one document |
 | `status` | Show document status summary | row counts and processing status |
@@ -62,6 +63,30 @@ archon docs provenance <chunk-or-answer-id>
 For PDFs, `status` and `inspect` also show embedded images extracted, images
 skipped by the icon/decorator filter, image OCR runs/failures, image VLM
 descriptions/failures, and rendered page fallback counts.
+
+## Repair Existing Evidence
+
+If policy changes after ingest, or an older binary skipped an enrichment path,
+use reprocess instead of ingesting the same file again. Ingest deduplicates by
+content hash; reprocess preserves the existing document ID and KB memberships,
+clears generated page/chunk/OCR/VLM rows for the document, then reruns the
+policy-aware pipeline.
+
+```bash
+archon docs reprocess <document-id>
+archon docs reprocess ./assets/research-paper/trading/trading-elliott-wave
+```
+
+Inside the TUI:
+
+```text
+/docs reprocess <document-id>
+/docs reprocess ./assets/research-paper/trading/trading-elliott-wave
+```
+
+Reprocess is intentionally in-place. If the source file content has changed,
+Archon rejects the repair and asks you to ingest the changed file as a new
+document so provenance does not silently mutate.
 
 ## Video Sources
 

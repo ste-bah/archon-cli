@@ -190,7 +190,7 @@ fn emit(ctx: &mut CommandContext, msg: String) -> Result<()> {
 
 fn docs_usage() -> String {
     format!(
-        "/docs subcommands: {}\n\nUsage:\n  /docs open\n  /docs ingest <path>\n  /docs list\n  /docs status\n  /docs show <document-id>\n  /docs inspect <document-id>\n  /docs chunks <document-id>\n  /docs search <query> [--mode hybrid|exact|semantic] [--debug]\n  /docs answer <question>\n  /docs provenance <chunk-or-artifact-id>\n  /docs index [--all]\n  /docs model-status\n",
+        "/docs subcommands: {}\n\nUsage:\n  /docs open\n  /docs ingest <path>\n  /docs reprocess <document-id-or-path-prefix>\n  /docs list\n  /docs status\n  /docs show <document-id>\n  /docs inspect <document-id>\n  /docs chunks <document-id>\n  /docs search <query> [--mode hybrid|exact|semantic] [--debug]\n  /docs answer <question>\n  /docs provenance <chunk-or-artifact-id>\n  /docs index [--all]\n  /docs model-status\n",
         DOCS_SUBCOMMANDS.join(", ")
     )
 }

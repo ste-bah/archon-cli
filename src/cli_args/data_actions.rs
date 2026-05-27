@@ -76,6 +76,12 @@ pub enum KbAction {
         #[arg(long)]
         kb: Option<String>,
     },
+    /// Re-run OCR/VLM/image enrichment for every document in a knowledge base
+    Reprocess {
+        /// Knowledge-base name to reprocess
+        #[arg(long, alias = "domain")]
+        kb: String,
+    },
     /// List extracted claims
     Claims,
     /// List extracted entities
@@ -94,6 +100,11 @@ pub enum DocsAction {
     Ingest {
         /// Path to file or directory to ingest
         path: String,
+    },
+    /// Re-run OCR/VLM/image enrichment for an existing document ID or source path/prefix
+    Reprocess {
+        /// Document ID, source path, or source path prefix
+        target: String,
     },
     /// List all ingested documents
     List,
