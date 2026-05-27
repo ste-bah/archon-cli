@@ -6,6 +6,7 @@ use anyhow::Result;
 use cozo::DbInstance;
 
 use crate::cli_args::KbAction;
+use crate::command::kb_ingest_output::{print_directory_result, print_file_result};
 
 fn kb_db_path() -> PathBuf {
     crate::command::store_paths::evidence_db_path(&["ARCHON_KB_DB_PATH"])
@@ -22,9 +23,13 @@ fn open_db() -> Result<DbInstance> {
 pub async fn handle_kb_command(action: KbAction) -> Result<()> {
     let db = open_db()?;
     let engine = archon_knowledge::KnowledgeEngine::new(db.clone())?;
+    let policy = load_policy();
 
     match action {
-        KbAction::Ingest { source, kb } => ingest_source(&db, &source, kb.as_deref()).await,
+        KbAction::Ingest { source, kb } => {
+            let vlm_report = archon_docs::vlm::factory::configure_registered_provider(&policy);
+            ingest_source(&db, &source, kb.as_deref(), &policy, &vlm_report).await
+        }
         KbAction::List { kb } => list_chunks(&db, kb.as_deref()).await,
         KbAction::Search {
             query,
@@ -57,9 +62,23 @@ pub async fn handle_kb_command(action: KbAction) -> Result<()> {
     }
 }
 
-async fn ingest_source(db: &DbInstance, source: &str, kb: Option<&str>) -> Result<()> {
+fn load_policy() -> archon_policy::EffectivePolicy {
+    std::env::current_dir()
+        .ok()
+        .and_then(|cwd| archon_policy::load_effective_policy(&cwd).ok())
+        .unwrap_or_default()
+}
+
+async fn ingest_source(
+    db: &DbInstance,
+    source: &str,
+    kb: Option<&str>,
+    policy: &archon_policy::EffectivePolicy,
+    vlm_report: &archon_docs::vlm::factory::VlmProviderInitReport,
+) -> Result<()> {
     if source.starts_with("http://") || source.starts_with("https://") {
-        let document_id = crate::command::kb_url::ingest_url(db, source).await?;
+        let document_id =
+            crate::command::kb_url::ingest_url(db, source, policy, vlm_report).await?;
         attach_to_kb(db, kb, &document_id)?;
         return Ok(());
     }
@@ -68,19 +87,15 @@ async fn ingest_source(db: &DbInstance, source: &str, kb: Option<&str>) -> Resul
         anyhow::bail!("Path does not exist: {source}");
     }
     if path.is_dir() {
-        let result = archon_docs::ingest::ingest_directory(db, &path).await?;
-        println!("Ingested: {} sources", result.sources_registered);
-        println!("Skipped duplicates: {}", result.sources_skipped_duplicate);
-        println!("Failed: {}", result.sources_failed);
+        let result = archon_docs::ingest::ingest_directory_with_policy(db, &path, policy).await?;
+        print_directory_result(&result, vlm_report);
         if let Some(kb_id) = normalize_kb_id(kb) {
             let assigned = attach_path_documents_to_kb(db, &kb_id, &path)?;
             println!("KB: {kb_id} ({assigned} document(s) attached)");
         }
     } else {
-        let result = archon_docs::ingest::ingest_file(db, &path).await?;
-        let chunks = archon_docs::store::list_chunks_for_doc(db, &result.document_id)?;
-        println!("Ingested: {}", result.document_id);
-        println!("Chunks: {}", chunks.len());
+        let result = archon_docs::ingest::ingest_file_with_policy(db, &path, policy).await?;
+        print_file_result(db, &result, vlm_report)?;
         attach_to_kb(db, kb, &result.document_id)?;
     }
     Ok(())

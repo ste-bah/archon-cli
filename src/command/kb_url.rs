@@ -1,7 +1,14 @@
 use anyhow::Result;
 use cozo::DbInstance;
 
-pub(crate) async fn ingest_url(db: &DbInstance, source: &str) -> Result<String> {
+use crate::command::kb_ingest_output::print_file_result;
+
+pub(crate) async fn ingest_url(
+    db: &DbInstance,
+    source: &str,
+    policy: &archon_policy::EffectivePolicy,
+    vlm_report: &archon_docs::vlm::factory::VlmProviderInitReport,
+) -> Result<String> {
     let response = reqwest::get(source).await?;
     let status = response.status();
     if !status.is_success() {
@@ -11,19 +18,15 @@ pub(crate) async fn ingest_url(db: &DbInstance, source: &str) -> Result<String> 
     let bytes = response.bytes().await?;
 
     if archon_docs::ingest::is_supported_media_type(&media_type) {
-        let policy = std::env::current_dir()
-            .ok()
-            .and_then(|cwd| archon_policy::load_effective_policy(&cwd).ok())
-            .unwrap_or_default();
         let result = archon_docs::ingest_bytes::ingest_bytes_source_with_policy(
             db,
             source,
             &media_type,
             &bytes,
-            &policy,
+            policy,
         )
         .await?;
-        print_file_result(db, &result)?;
+        print_file_result(db, &result, vlm_report)?;
         return Ok(result.document_id);
     }
 
@@ -31,27 +34,6 @@ pub(crate) async fn ingest_url(db: &DbInstance, source: &str) -> Result<String> 
         "KB URL ingest does not support media type `{media_type}` from {source}. \
          Supported URL media includes text, Markdown, HTML, JSON, XML, YAML, TOML, PDF, PNG, JPEG, and TIFF."
     );
-}
-
-fn print_file_result(
-    db: &DbInstance,
-    result: &archon_docs::ingest::IngestFileResult,
-) -> Result<()> {
-    let chunks = archon_docs::store::list_chunks_for_doc(db, &result.document_id)?;
-    if result.was_new {
-        println!("Ingested: {}", result.document_id);
-    } else {
-        println!("Skipped duplicate: true");
-        println!("Ingested: {}", result.document_id);
-    }
-    println!("Chunks: {}", chunks.len());
-    if result.pipeline_failed {
-        println!("Warning: processing failed; document status is Failed");
-    }
-    for warning in &result.warnings {
-        println!("Warning: {warning}");
-    }
-    Ok(())
 }
 
 fn resolve_url_media_type(source: &str, headers: &reqwest::header::HeaderMap) -> String {
