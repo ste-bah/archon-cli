@@ -462,8 +462,9 @@ fn doctor_shows_unset_for_missing_vars() {
 fn known_vars_list_has_correct_count() {
     // 4 auth + 12 codex + 4 model/behavior + 4 feature control
     // + 1 memory/embedding + 7 debugging + 6 paths
-    // + 4 OCR/video helper tuning + 11 tool binary overrides + 1 telemetry = 54
-    assert_eq!(KNOWN_ARCHON_VARS.len(), 54);
+    // + 1 memory/embedding + 7 debugging + 7 paths
+    // + 4 OCR/video helper tuning + 11 tool binary overrides + 1 telemetry = 55
+    assert_eq!(KNOWN_ARCHON_VARS.len(), 55);
 }
 
 #[test]

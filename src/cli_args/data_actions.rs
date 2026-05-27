@@ -81,6 +81,9 @@ pub enum KbAction {
         /// Knowledge-base name to reprocess
         #[arg(long, alias = "domain")]
         kb: String,
+        /// Do not run semantic indexing after reprocess; run `docs index` later
+        #[arg(long)]
+        defer_index: bool,
     },
     /// List extracted claims
     Claims,
@@ -105,6 +108,9 @@ pub enum DocsAction {
     Reprocess {
         /// Document ID, source path, or source path prefix
         target: String,
+        /// Do not run semantic indexing after reprocess; run `docs index` later
+        #[arg(long)]
+        defer_index: bool,
     },
     /// List all ingested documents
     List,

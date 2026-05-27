@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-pub(crate) async fn handle_reprocess(kb: &str) -> Result<()> {
+pub(crate) async fn handle_reprocess(kb: &str, defer_index: bool) -> Result<()> {
     let db = crate::command::docs_reprocess::open_docs_db()?;
     let document_ids = archon_docs::store::list_kb_document_ids(&db, kb)?;
     if document_ids.is_empty() {
@@ -22,6 +22,7 @@ pub(crate) async fn handle_reprocess(kb: &str) -> Result<()> {
         &vlm_report,
         &docs,
         "knowledge-base",
+        !defer_index,
     )
     .await
 }

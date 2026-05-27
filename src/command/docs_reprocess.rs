@@ -22,13 +22,23 @@ pub(crate) fn load_policy() -> archon_policy::EffectivePolicy {
         .unwrap_or_default()
 }
 
-pub(crate) async fn handle_reprocess(target: &str) -> Result<()> {
+pub(crate) async fn handle_reprocess(target: &str, defer_index: bool) -> Result<()> {
     let db = open_docs_db()?;
-    let _ = archon_docs::embed::init_default_provider();
+    if !defer_index {
+        let _ = archon_docs::embed::init_default_provider();
+    }
     let policy = load_policy();
     let vlm_report = vlm_factory::configure_registered_provider(&policy);
     let docs = resolve_target_documents(&db, target)?;
-    reprocess_documents(&db, &policy, &vlm_report, &docs, "document evidence").await
+    reprocess_documents(
+        &db,
+        &policy,
+        &vlm_report,
+        &docs,
+        "document evidence",
+        !defer_index,
+    )
+    .await
 }
 
 pub(crate) async fn reprocess_documents(
@@ -37,6 +47,7 @@ pub(crate) async fn reprocess_documents(
     vlm_report: &VlmProviderInitReport,
     docs: &[SourceDocument],
     label: &str,
+    index_after: bool,
 ) -> Result<()> {
     if docs.is_empty() {
         anyhow::bail!("no documents matched for reprocess");
@@ -63,7 +74,13 @@ pub(crate) async fn reprocess_documents(
         }
     }
 
-    crate::command::evidence_index::index_pending_evidence(db, label);
+    if index_after {
+        crate::command::evidence_index::index_pending_evidence(db, label);
+    } else {
+        println!(
+            "Deferred semantic indexing; run `archon docs index` when reprocessing is complete."
+        );
+    }
     if failed > 0 {
         anyhow::bail!("reprocess completed with {failed} failed document(s)");
     }
