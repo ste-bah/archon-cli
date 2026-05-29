@@ -10,7 +10,7 @@
 /// production code should call `resolve_anthropic_model(alias, &cfg)` instead
 /// of reading this constant directly.
 pub const KNOWN_SHORTCUTS: &[(&str, &str)] = &[
-    ("opus", "claude-opus-4-7"),
+    ("opus", "claude-opus-4-8"),
     ("sonnet", "claude-sonnet-4-6"),
     ("haiku", "claude-haiku-4-5-20251001"),
 ];
@@ -18,10 +18,11 @@ pub const KNOWN_SHORTCUTS: &[(&str, &str)] = &[
 /// Full Anthropic model identifiers accepted without shortcut expansion.
 ///
 /// Used by `validate_model_name` to accept literal IDs as well as shortcuts.
-/// Keep `claude-opus-4-6` listed so existing TUI sessions, snapshots, and
-/// memory references that pinned the previous Opus generation still validate
-/// rather than erroring on input.
+/// Keep earlier Opus generations listed so existing TUI sessions, snapshots,
+/// and memory references that pinned older models still validate rather than
+/// erroring on input.
 pub const KNOWN_MODEL_IDS: &[&str] = &[
+    "claude-opus-4-8",
     "claude-opus-4-7",
     "claude-opus-4-6",
     "claude-sonnet-4-6",
@@ -128,7 +129,7 @@ fn closest_match<'a>(
 ///
 /// Accepts:
 /// - Shortcut names: `opus`, `sonnet`, `haiku` (case-insensitive)
-/// - Full model IDs: `claude-opus-4-6`, etc. (case-insensitive)
+/// - Full model IDs: `claude-opus-4-8`, etc. (case-insensitive)
 ///
 /// On failure, suggests the closest match if edit distance <= 2.
 pub fn validate_model_name(input: &str) -> Result<String, String> {

@@ -72,6 +72,7 @@ min_image_dimension = 256
 min_image_bytes = 8192
 vlm_per_page_image = true
 render_text_pdf_pages = false
+image_enrichment_workers = 4
 
 [policy.docs.retrieval]
 exact_weight = 0.7
@@ -129,6 +130,7 @@ semantic_weight = 0.3
     assert_eq!(load.policy.docs.pdf.min_image_bytes, 8192);
     assert!(load.policy.docs.pdf.vlm_per_page_image);
     assert!(!load.policy.docs.pdf.render_text_pdf_pages);
+    assert_eq!(load.policy.docs.pdf.image_enrichment_workers, 4);
     assert_eq!(load.policy.docs.retrieval.exact_weight, 0.7);
     assert_eq!(load.policy.docs.retrieval.semantic_weight, 0.3);
 }
@@ -412,6 +414,7 @@ fn repository_policy_template_parses_all_vlm_provider_fields() {
     assert_eq!(load.policy.docs.pdf.min_image_bytes, 4096);
     assert!(load.policy.docs.pdf.vlm_per_page_image);
     assert!(!load.policy.docs.pdf.render_text_pdf_pages);
+    assert_eq!(load.policy.docs.pdf.image_enrichment_workers, 1);
     assert_eq!(load.policy.docs.retrieval.exact_weight, 0.45);
     assert_eq!(load.policy.docs.retrieval.semantic_weight, 0.55);
     assert!(!load.policy.web.allow_mutating_actions);
@@ -430,4 +433,5 @@ fn pdf_policy_defaults_to_embedded_extraction_without_page_rendering() {
     assert_eq!(policy.docs.pdf.min_image_bytes, 4096);
     assert!(policy.docs.pdf.vlm_per_page_image);
     assert!(!policy.docs.pdf.render_text_pdf_pages);
+    assert_eq!(policy.docs.pdf.image_enrichment_workers, 1);
 }

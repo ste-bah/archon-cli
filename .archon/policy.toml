@@ -187,6 +187,7 @@ min_image_dimension = 200
 min_image_bytes = 4096
 vlm_per_page_image = true
 render_text_pdf_pages = false
+image_enrichment_workers = 1
 
 # ----------------------------------------------------------------------------
 # [policy.docs.retrieval] — Hybrid search weighting

@@ -6,6 +6,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::errors::DocsError;
+use crate::vlm::retry::{RateLimitRetry, retry_vlm_transient};
 use crate::vlm::{IMAGE_DESCRIPTION_PROMPT, VlmDescriptionProvider};
 
 pub const DEFAULT_OLLAMA_ENDPOINT: &str = "http://localhost:11434";
@@ -113,6 +114,18 @@ impl OllamaVlmProvider {
 
 impl VlmDescriptionProvider for OllamaVlmProvider {
     fn describe_image(
+        &self,
+        image_bytes: &[u8],
+        prompt: Option<&str>,
+    ) -> Result<String, DocsError> {
+        retry_vlm_transient(RateLimitRetry::vlm_default(Duration::from_secs(5)), || {
+            self.describe_image_once(image_bytes, prompt)
+        })
+    }
+}
+
+impl OllamaVlmProvider {
+    fn describe_image_once(
         &self,
         image_bytes: &[u8],
         prompt: Option<&str>,

@@ -180,8 +180,9 @@ Cloud VLM/summary providers require the matching cloud policy gates.
 
 Local image OCR defaults to Tesseract. Set `ARCHON_OCR_ENGINE=rapidocr` to try
 RapidOCR first, or leave it unset to use RapidOCR only as a fallback if
-Tesseract fails. RapidOCR requires Python plus `rapidocr_onnxruntime` or
-`rapidocr`; OpenCV frame fallback requires `opencv-python`.
+Tesseract fails. RapidOCR requires Python plus `rapidocr`; the older
+`rapidocr_onnxruntime` package is still accepted for legacy environments.
+OpenCV frame fallback requires `opencv-python`.
 
 ## Policy Configuration Reference
 

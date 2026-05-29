@@ -66,7 +66,7 @@ pub struct AnthropicAliasMap {
 impl Default for AnthropicAliasMap {
     fn default() -> Self {
         Self {
-            opus: "claude-opus-4-7".into(),
+            opus: "claude-opus-4-8".into(),
             sonnet: "claude-sonnet-4-6".into(),
             haiku: "claude-haiku-4-5-20251001".into(),
         }
@@ -117,6 +117,11 @@ impl LlmProvider for AnthropicProvider {
 
     fn models(&self) -> Vec<ModelInfo> {
         vec![
+            ModelInfo {
+                id: "claude-opus-4-8".into(),
+                display_name: "Claude Opus 4.8".into(),
+                context_window: 0,
+            },
             ModelInfo {
                 id: "claude-opus-4-7".into(),
                 display_name: "Claude Opus 4.7".into(),

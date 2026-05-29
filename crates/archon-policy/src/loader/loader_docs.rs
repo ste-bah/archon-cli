@@ -59,6 +59,7 @@ struct RawPdfPolicy {
     min_image_bytes: Option<u64>,
     vlm_per_page_image: Option<bool>,
     render_text_pdf_pages: Option<bool>,
+    image_enrichment_workers: Option<u32>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -178,6 +179,9 @@ fn apply_pdf(policy: &mut PdfPolicy, raw: RawPdfPolicy) {
     }
     if let Some(value) = raw.render_text_pdf_pages {
         policy.render_text_pdf_pages = value;
+    }
+    if let Some(value) = raw.image_enrichment_workers {
+        policy.image_enrichment_workers = value.clamp(1, 16);
     }
 }
 

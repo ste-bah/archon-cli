@@ -266,7 +266,7 @@ Full 47-agent pipeline on a moderate topic with a 50-source KB:
 - ~200-400k input tokens (heavy due to KB context injection per agent)
 - ~30-60k output tokens
 - Sonnet 4.6: $8-20
-- Opus 4.7 (heavy phases only): $20-50
+- Opus 4.8 (heavy phases only): $20-50
 
 Set a budget cap before starting:
 

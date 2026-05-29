@@ -50,8 +50,11 @@ packages. Install them into the Python environment used to start Archon when
 you want RapidOCR frame OCR or OpenCV frame extraction fallback:
 
 ```bash
-python3 -m pip install rapidocr_onnxruntime opencv-python
+python3 -m pip install rapidocr opencv-python
 ```
+
+`rapidocr_onnxruntime` is also supported for older environments, but the current
+RapidOCR package is the preferred install path.
 
 ### Ubuntu / Debian / WSL2-Ubuntu
 

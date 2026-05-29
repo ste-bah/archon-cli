@@ -59,7 +59,7 @@ Each document lands in `<workdir>/.archon/research/<target>/<document>.md`. The 
 
 Full 22-document package: ~50-80k input tokens, ~30-50k output tokens. Depending on model:
 - Sonnet 4.6: ~$1-2
-- Opus 4.7: ~$8-15
+- Opus 4.8: ~$8-15
 - Haiku 4.5: ~$0.10-0.30 (lower quality)
 
 Set a hard limit:

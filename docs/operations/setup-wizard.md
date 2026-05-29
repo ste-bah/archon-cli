@@ -30,7 +30,7 @@ One of: `auto`, `local`, `openai`. Written to `[memory]`.
 
 ### 6. Model and effort
 
-Model: `claude-sonnet-4-6`, `claude-opus-4-7`, or `claude-haiku-4-5`. Effort: `high`, `medium`, or `low`. Written to `[api]`.
+Model: `claude-sonnet-4-6`, `claude-opus-4-8`, or `claude-haiku-4-5`. Effort: `high`, `medium`, or `low`. Written to `[api]`.
 
 ### 7. Output paths
 

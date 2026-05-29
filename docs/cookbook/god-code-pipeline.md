@@ -164,7 +164,7 @@ Full 50-agent pipeline on a moderate task (e.g., new feature spanning 3 crates):
 - ~150-300k input tokens (heavy due to L0-L3 layered context)
 - ~20-50k output tokens
 - Sonnet 4.6: $5-15
-- Opus 4.7 (heavy phases only): $15-40
+- Opus 4.8 (heavy phases only): $15-40
 
 Set a hard limit:
 ```bash

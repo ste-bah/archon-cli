@@ -2,7 +2,6 @@
 //! plain-text files, and image OCR through a local `tesseract` binary.
 
 use async_trait::async_trait;
-use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -11,6 +10,7 @@ use super::provider::{OcrExtractResult, OcrProvider, OcrRequest};
 use super::rapid;
 use crate::errors::DocsError;
 use crate::models::PageOffset;
+use crate::tool_path::command_path;
 
 /// A local-first OCR provider that extracts native text from PDFs via
 /// `pdftotext`, falls back to rendering scanned pages via `pdftoppm`, OCRs
@@ -208,7 +208,7 @@ async fn extract_scanned_pdf(
 
     let mut pages = Vec::with_capacity(page_images.len());
     for image in &page_images {
-        match extract_image_with_tesseract(image, None).await {
+        match extract_image_local(image, None).await {
             Ok(page) => pages.push(page.full_text),
             Err(e) => {
                 let _ = fs::remove_dir_all(&render_dir);
@@ -276,10 +276,6 @@ fn with_native_error(message: &str, native_error: Option<String>) -> String {
         Some(error) if !error.trim().is_empty() => format!("{message}; native extraction: {error}"),
         _ => message.to_string(),
     }
-}
-
-fn command_path(default: &str, env_key: &str) -> OsString {
-    std::env::var_os(env_key).unwrap_or_else(|| OsString::from(default))
 }
 
 /// Split text at form-feed characters (\x0C) to determine page boundaries.

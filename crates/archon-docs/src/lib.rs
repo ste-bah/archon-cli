@@ -15,9 +15,12 @@ pub mod ingest_text;
 pub mod inspect;
 pub mod ocr;
 pub mod pdf;
+mod pdf_image_enrichment;
+mod pdf_image_progress;
 pub mod provenance;
 pub mod reprocess;
 pub mod status;
+mod tool_path;
 
 pub mod answer;
 pub mod answer_timecode;

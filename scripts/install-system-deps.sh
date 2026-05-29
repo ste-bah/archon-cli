@@ -6,9 +6,9 @@
 # helpers (`ffmpeg`, `ffprobe`, `yt-dlp`, and `whisper-cli` where packaged),
 # and optional Docker/OpenShell sandbox runtime dependencies.
 #
-# Does NOT install Rust, VLM/Whisper model files, cloud OCR keys, provider
-# credentials, or enable sandbox backends in config.toml. OpenShell gateway
-# setup is opt-in.
+# Does NOT install Rust, Python RapidOCR/OpenCV packages, VLM/Whisper model
+# files, cloud OCR keys, provider credentials, or enable sandbox backends in
+# config.toml. OpenShell gateway setup is opt-in.
 #
 # Usage:
 #   sudo scripts/install-system-deps.sh         # install everything
@@ -427,6 +427,7 @@ if [ "$DRY_RUN" = false ]; then
     echo "  2. Build archon-cli: cargo build --release --bin archon"
     echo "  3. Initialise a project: ./scripts/archon-init.sh --target /path/to/project"
     echo "  4. For local video ASR, download a whisper.cpp model and set [policy.video.asr].model"
+    echo "     Optional RapidOCR/OpenCV fallback: python3 -m pip install rapidocr opencv-python"
     if [ "$WITH_DOCKER" = true ]; then
         echo "  5. Enable Docker sandboxing by setting [sandbox].backend=\"docker\" and [sandbox.docker].enabled=true"
     fi

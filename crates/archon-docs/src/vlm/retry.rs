@@ -43,6 +43,34 @@ pub fn retry_rate_limited<T>(
     unreachable!("retry loop returns on every operation result")
 }
 
+pub fn retry_vlm_transient<T>(
+    config: RateLimitRetry,
+    mut operation: impl FnMut() -> Result<T, DocsError>,
+) -> Result<T, DocsError> {
+    for attempt in 0..config.max_attempts {
+        match operation() {
+            Ok(value) => return Ok(value),
+            Err(error) if is_retryable_vlm_error(&error) && attempt + 1 < config.max_attempts => {
+                std::thread::sleep(config.delay_for_attempt(attempt));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    unreachable!("retry loop returns on every operation result")
+}
+
+fn is_retryable_vlm_error(error: &DocsError) -> bool {
+    match error {
+        DocsError::VlmTimeout { .. } | DocsError::VlmRateLimit { .. } => true,
+        DocsError::VlmProvider {
+            status_code: Some(status),
+            ..
+        } => (500..=599).contains(status),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -58,5 +86,29 @@ mod tests {
         assert_eq!(retry.delay_for_attempt(1), Duration::from_secs(20));
         assert_eq!(retry.delay_for_attempt(2), Duration::from_secs(30));
         assert_eq!(retry.delay_for_attempt(3), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn transient_vlm_errors_are_retried() {
+        let mut attempts = 0;
+        let retry = RateLimitRetry {
+            max_attempts: 3,
+            base_delay: Duration::from_millis(0),
+            max_delay: Duration::from_millis(0),
+        };
+
+        let result = retry_vlm_transient(retry, || {
+            attempts += 1;
+            if attempts < 3 {
+                return Err(DocsError::VlmTimeout {
+                    provider: "ollama".into(),
+                    message: "slow local model".into(),
+                });
+            }
+            Ok("described")
+        });
+
+        assert_eq!(result.unwrap(), "described");
+        assert_eq!(attempts, 3);
     }
 }

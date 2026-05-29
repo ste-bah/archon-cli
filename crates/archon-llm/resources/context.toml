@@ -6,6 +6,17 @@
 #   <workspace>/.archon/context.toml
 #   <workspace>/.archon/context.local.toml
 
+[providers.anthropic.models."claude-opus-4-8"]
+context_window = 1_000_000
+max_output_tokens = 128_000
+source = "anthropic-docs"
+
+[providers.anthropic.models."claude-opus-4-8".variants.claude_code]
+context_window = 1_000_000
+max_output_tokens = 128_000
+requires_identity = "spoof"
+source = "anthropic-docs"
+
 [providers.anthropic.models."claude-opus-4-7"]
 context_window = 1_000_000
 source = "claude-support-paid-chat"

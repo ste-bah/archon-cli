@@ -123,7 +123,7 @@ pub struct AnthropicModelsConfig {
 impl Default for AnthropicModelsConfig {
     fn default() -> Self {
         Self {
-            opus: "claude-opus-4-7".into(),
+            opus: "claude-opus-4-8".into(),
             sonnet: "claude-sonnet-4-6".into(),
             haiku: "claude-haiku-4-5-20251001".into(),
         }
@@ -193,7 +193,7 @@ impl OpenAiCodexModelsConfig {
 ///
 /// Aliases recognised: `opus`, `sonnet`, `haiku` (case-insensitive). Anything
 /// else is returned as-is so literal model IDs (e.g. `claude-sonnet-4-6`,
-/// `claude-opus-4-7`) work without the resolver rejecting them.
+/// `claude-opus-4-8`) work without the resolver rejecting them.
 pub fn resolve_anthropic_model(alias_or_id: &str, cfg: &AnthropicModelsConfig) -> String {
     match alias_or_id.trim().to_lowercase().as_str() {
         "opus" => cfg.opus.clone(),

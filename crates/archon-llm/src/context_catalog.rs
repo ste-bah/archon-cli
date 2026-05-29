@@ -276,15 +276,22 @@ mod tests {
     fn anthropic_claude_code_variant_uses_one_million_for_opus() {
         let catalog = ContextCatalog::bundled();
 
-        let base = catalog
+        let previous = catalog
             .lookup("anthropic", "claude-opus-4-7", &[], None)
+            .expect("previous opus entry");
+        assert_eq!(previous.context_window, 1_000_000);
+
+        let base = catalog
+            .lookup("anthropic", "claude-opus-4-8", &[], None)
             .expect("opus entry");
         let claude_code = catalog
-            .lookup("anthropic", "claude-opus-4-7", &[], Some("spoof"))
+            .lookup("anthropic", "claude-opus-4-8", &[], Some("spoof"))
             .expect("opus claude code entry");
 
         assert_eq!(base.context_window, 1_000_000);
+        assert_eq!(base.max_output_tokens, Some(128_000));
         assert_eq!(claude_code.context_window, 1_000_000);
+        assert_eq!(claude_code.max_output_tokens, Some(128_000));
     }
 
     #[test]

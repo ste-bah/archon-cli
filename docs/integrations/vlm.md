@@ -172,6 +172,7 @@ min_image_dimension = 200
 min_image_bytes = 4096
 vlm_per_page_image = true
 render_text_pdf_pages = false
+image_enrichment_workers = 1
 ```
 
 `extract_embedded_images = false` reverts PDFs to text-layer/scanned fallback
@@ -179,6 +180,10 @@ behaviour. `vlm_per_page_image = true` still respects `[policy.docs.vlm]`;
 it does not bypass cloud gates. `render_text_pdf_pages = false` avoids costly
 duplicate processing for native-text PDFs. Turn it on for bad OCR overlays
 where you want every page visually re-described.
+`image_enrichment_workers` controls bounded image OCR/VLM parallelism inside a
+single PDF. The default `1` is safest. Use `2-4` for large chart-heavy books
+when provider quota permits it; Archon still writes results back to the
+document store serially to reduce CozoDB lock contention.
 
 For long books, cloud VLM providers can create one VLM call per extracted chart
 or rendered page. Local Ollama keeps that private and free; Gemini/Anthropic

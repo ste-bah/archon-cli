@@ -34,6 +34,12 @@ pub(crate) async fn apply_vlm_description(
     })?;
 
     match vlm_result {
+        Err(
+            e @ (DocsError::VlmAuthentication { .. }
+            | DocsError::VlmProvider { .. }
+            | DocsError::VlmRateLimit { .. }
+            | DocsError::VlmTimeout { .. }),
+        ) => return Err(e),
         Err(e) => {
             outcome
                 .warnings
@@ -70,7 +76,7 @@ pub(crate) async fn apply_vlm_description(
     Ok(())
 }
 
-fn persist_vlm_description(
+pub(crate) fn persist_vlm_description(
     db: &DbInstance,
     document_id: &str,
     page_ids: &[String],

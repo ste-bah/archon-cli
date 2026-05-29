@@ -46,7 +46,7 @@ Write to `[memory]` section.
 
 ### 6. Model
 
-Ask: "Default model? (claude-sonnet-4-6 | claude-opus-4-7 | claude-haiku-4-5)"
+Ask: "Default model? (claude-sonnet-4-6 | claude-opus-4-8 | claude-haiku-4-5)"
 
 Ask: "Effort level? (high | medium | low)"
 

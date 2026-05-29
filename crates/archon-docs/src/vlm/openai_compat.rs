@@ -170,9 +170,10 @@ impl OpenAiCompatVlmProvider {
             return Err(self.auth_error(status, "chat completions endpoint rejected credentials"));
         }
         if !status.is_success() {
+            let body = response.text().unwrap_or_else(|e| e.to_string());
             return Err(DocsError::VlmProvider {
                 provider: "openai-compat".into(),
-                message: format!("chat completions failed with HTTP {status}"),
+                message: format!("chat completions failed with HTTP {status}: {body}"),
                 status_code: Some(status.as_u16()),
             });
         }

@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -10,6 +9,7 @@ use tokio::process::Command;
 use crate::errors::DocsError;
 use crate::hash::sha256_hex;
 use crate::models::PageOffset;
+use crate::tool_path::command_path;
 
 #[derive(Clone, Debug)]
 pub struct PdfExtractResult {
@@ -407,10 +407,6 @@ fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
         return Some((width, height));
     }
     None
-}
-
-fn command_path(default: &str, env_key: &str) -> OsString {
-    std::env::var_os(env_key).unwrap_or_else(|| OsString::from(default))
 }
 
 fn compute_pdf_page_offsets(text: &str) -> Vec<PageOffset> {

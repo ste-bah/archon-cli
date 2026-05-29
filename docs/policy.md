@@ -122,6 +122,7 @@ min_image_dimension = 200
 min_image_bytes = 4096
 vlm_per_page_image = true
 render_text_pdf_pages = false
+image_enrichment_workers = 1
 
 [policy.docs.retrieval]
 exact_weight = 0.45
@@ -143,6 +144,9 @@ PDF image extraction is enabled by default through `[policy.docs.pdf]`, but VLM
 calls for those extracted images still require the normal VLM gates.
 `render_text_pdf_pages = false` means full-page rendering is only used for
 scanned/image-only fallback unless explicitly enabled.
+`image_enrichment_workers` is clamped to `1..16` and controls OCR/VLM image
+workers inside one PDF. Leave it at `1` for conservative runs; use `2-4` only
+when the VLM provider quota can absorb concurrent calls.
 
 Document search defaults to hybrid retrieval. `[policy.docs.retrieval]` controls
 the exact/semantic weighting used by `archon docs search --mode hybrid`.

@@ -351,7 +351,7 @@ BATTLE_OF_THE_SEXES          payoffs.zero_sum=false  actors.count=2  …
 Full pipeline on a moderate strategic question, 7 enabled specialists, 50-source KB pack:
 
 - Tier 1 + routing: ~$0.02
-- 7 specialists: ~$3-12 (Sonnet 4.6) / ~$8-30 (Opus 4.7 on heavy specialists only)
+- 7 specialists: ~$3-12 (Sonnet 4.6) / ~$8-30 (Opus 4.8 on heavy specialists only)
 - Report assembly: ~$0.10-0.30
 - **Total: ~$3-15** typical, ~$30 worst-case
 

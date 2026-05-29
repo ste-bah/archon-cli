@@ -103,7 +103,7 @@ Install or configure:
 - `whisper-cli` from whisper.cpp for local ASR
 - a local Whisper model such as `ggml-small.en.bin`
 - optional `opencv-python` for frame fallback on awkward YouTube codecs
-- optional `rapidocr_onnxruntime` for local chart/text OCR fallback
+- optional `rapidocr` for local chart/text OCR fallback
 
 From the repo clone, the cross-OS dependency installer handles the packaged
 tools:

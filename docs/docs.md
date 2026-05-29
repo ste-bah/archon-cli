@@ -219,6 +219,7 @@ min_image_dimension = 200
 min_image_bytes = 4096
 vlm_per_page_image = true
 render_text_pdf_pages = false
+image_enrichment_workers = 1
 ```
 
 When enabled, VLM descriptions are stored in `doc_image_descriptions`, chunked into normal `doc_chunks`, and indexed by the existing text embedding backend. If an image embedding model is unavailable, ingest still succeeds; visual search works through the description chunks.

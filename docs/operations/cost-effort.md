@@ -82,7 +82,7 @@ Not recommended for:
 ```bash
 archon --model claude-haiku-4-5    # Override default
 archon --model claude-sonnet-4-6
-archon --model claude-opus-4-7
+archon --model claude-opus-4-8
 ```
 
 In session: `/model <name>` or `/model` to list.
@@ -95,7 +95,7 @@ The selected model overrides effort defaults — `--model claude-haiku-4-5 --eff
 |---|---|
 | Fastest, cheapest | `--fast --model claude-haiku-4-5` |
 | Balanced | `--effort medium --model claude-sonnet-4-6` (default) |
-| Maximum quality | `--effort high --model claude-opus-4-7` |
+| Maximum quality | `--effort high --model claude-opus-4-8` |
 | Pipeline runs | `--effort high` (each pipeline agent picks its own model) |
 
 ## Per-session cost in the TUI

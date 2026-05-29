@@ -20,6 +20,7 @@ This page explains every section. Each table tells you **what** the field does, 
 
 - [`[api]`](#api) — Anthropic API + model defaults
 - [`[llm]`](#llm) — provider routing
+- [`[models.anthropic]`](#modelsanthropic) — Anthropic model aliases
 - [`[models.openai-codex]`](#modelsopenai-codex) — Codex model aliases
 - [`[providers.openai-codex]`](#providersopenai-codex) — Codex OAuth spoof manifest controls
 - [`[identity]`](#identity) — Claude Code spoofing
@@ -77,8 +78,8 @@ max_retries = 3
 
 | Field | Default | What / Why |
 |---|---|---|
-| `default_model` | `"claude-sonnet-4-6"` | Model used for the main agent. Options: `claude-haiku-4-5-20251001` (fast/cheap), `claude-sonnet-4-6` (balanced), `claude-opus-4-7` (highest quality). Anthropic-compatible providers can use their own model IDs such as `deepseek-v4-pro[1m]`. Override per-session with `--model <NAME>` or `/model` slash command. |
-| `thinking_budget` | `16384` | Max tokens of "extended thinking" the model can use per turn. `0` disables extended thinking. Higher = more thorough reasoning but slower + costs more. Only Sonnet 4.6 and Opus 4.7 support extended thinking; Haiku ignores this. |
+| `default_model` | `"claude-sonnet-4-6"` | Model used for the main agent. Options: `claude-haiku-4-5-20251001` (fast/cheap), `claude-sonnet-4-6` (balanced), `claude-opus-4-8` (highest quality). Earlier Opus IDs such as `claude-opus-4-7` remain valid as literal pins. Anthropic-compatible providers can use their own model IDs such as `deepseek-v4-pro[1m]`. Override per-session with `--model <NAME>` or `/model` slash command. |
+| `thinking_budget` | `16384` | Max tokens of "extended thinking" the model can use per turn. `0` disables extended thinking. Higher = more thorough reasoning but slower + costs more. Sonnet 4.6 and Opus 4.8 use adaptive thinking; Haiku ignores this. |
 | `default_effort` | `"high"` | Reasoning effort: `"low"`, `"medium"`, `"high"`. Maps to thinking budget tiers. `low` is best for quick lookups, `high` for code generation. Override with `--effort` or `/effort`. |
 | `max_retries` | `3` | HTTP retry attempts on transient failures (5xx, network errors). Each retry uses exponential backoff. Set higher for unreliable networks; never set 0 (rate-limit hiccups become hard failures). |
 | `base_url` | unset | Override API endpoint or base URL. Values ending in `/messages` are used as-is; base URLs such as `https://api.deepseek.com/anthropic` are expanded to `/v1/messages`. See [Local LLMs and proxies](#local-llms-and-proxies). |
@@ -110,6 +111,31 @@ active provider through the shared `LlmProvider` path. There is deliberately no
 separate `[self_calibration]` provider block: switch retrospectives between
 Anthropic, Codex OAuth, OpenAI-compatible, or local providers by changing
 `[llm].provider` and the matching provider credentials.
+
+---
+
+## `[models.anthropic]`
+
+Anthropic model aliases used by chat defaults, interactive sessions,
+subagents, and provider-neutral agent definitions. Agents should prefer
+semantic aliases such as `opus`, `sonnet`, and `haiku`; Archon resolves them
+through this table at runtime.
+
+```toml
+[models.anthropic]
+opus = "claude-opus-4-8"
+sonnet = "claude-sonnet-4-6"
+haiku = "claude-haiku-4-5-20251001"
+```
+
+| Field | Default | What / Why |
+|---|---|---|
+| `opus` | `"claude-opus-4-8"` | Highest-quality Anthropic tier. Use this for heavyweight research, code audit, long-running subagents, and final synthesis. Older Opus IDs such as `claude-opus-4-7` and `claude-opus-4-6` remain accepted as literal pins. |
+| `sonnet` | `"claude-sonnet-4-6"` | Balanced Anthropic tier for general work, normal chat, and most subagents. |
+| `haiku` | `"claude-haiku-4-5-20251001"` | Fast/cheap Anthropic tier for lightweight decomposition, routing, and extraction. |
+
+`/model opus` resolves through this table in Anthropic sessions. Literal model
+IDs such as `/model claude-opus-4-8` also validate directly.
 
 ---
 
@@ -480,15 +506,17 @@ source = "operator"
 ```
 
 Conditional variants can raise the limit only when a provider identity or beta
-header is active. Paid-plan Claude Sonnet 4.6 and Opus 4.7 base entries are
+header is active. Paid-plan Claude Sonnet 4.6 and Opus 4.8 base entries are
 1M-token entries; Claude Code identity variants are kept explicit too:
 
 ```toml
-[providers.anthropic.models."claude-opus-4-7"]
+[providers.anthropic.models."claude-opus-4-8"]
 context_window = 1_000_000
+max_output_tokens = 128_000
 
-[providers.anthropic.models."claude-opus-4-7".variants.claude_code]
+[providers.anthropic.models."claude-opus-4-8".variants.claude_code]
 context_window = 1_000_000
+max_output_tokens = 128_000
 requires_identity = "spoof"
 ```
 
@@ -1440,6 +1468,7 @@ min_image_dimension = 200
 min_image_bytes = 4096
 vlm_per_page_image = true
 render_text_pdf_pages = false
+image_enrichment_workers = 1
 
 [policy.docs.retrieval]
 exact_weight = 0.45
@@ -1481,7 +1510,11 @@ stores redacted excerpts, hashes, and entity keys only.
 PDF ingest uses `[policy.docs.pdf]` to decide whether to extract embedded
 images with `pdfimages`, the minimum size filter for icons/decorations, whether
 PDF-derived images should receive VLM descriptions, and whether native-text PDFs
-should also be rendered page-by-page.
+should also be rendered page-by-page. `image_enrichment_workers` controls
+bounded OCR/VLM image enrichment parallelism inside a single PDF. Keep it at `1`
+for the safest default; use `2-4` when a configured VLM provider can tolerate
+concurrent calls. Archon still serializes document-store writes after worker
+results to avoid CozoDB lock contention.
 
 See [Policy](../policy.md) and [VLM Image Descriptions](../integrations/vlm.md) for the full operator guide.
 

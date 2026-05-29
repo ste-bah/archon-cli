@@ -19,7 +19,7 @@
 # [api] — Anthropic API + model defaults
 # ----------------------------------------------------------------------------
 [api]
-# Model to use. Options: claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5-20251001
+# Model to use. Options: claude-sonnet-4-6, claude-opus-4-8, claude-opus-4-7, claude-haiku-4-5-20251001
 default_model = "claude-sonnet-4-6"
 # Extended-thinking token budget (0 = disabled)
 thinking_budget = 16384
@@ -92,7 +92,7 @@ provider = "anthropic"
 #   haiku  → fast/cheap        (Anthropic: haiku, Codex: mini)
 
 [models.anthropic]
-opus = "claude-opus-4-7"
+opus = "claude-opus-4-8"
 sonnet = "claude-sonnet-4-6"
 haiku = "claude-haiku-4-5-20251001"
 
@@ -913,6 +913,7 @@ proposal_stale_days = 30
 #   min_image_bytes = 4096
 #   vlm_per_page_image = true
 #   render_text_pdf_pages = false
+#   image_enrichment_workers = 1
 #
 #   [policy.docs.retrieval]
 #   exact_weight = 0.45

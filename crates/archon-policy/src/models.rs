@@ -250,6 +250,7 @@ pub struct PdfPolicy {
     pub min_image_bytes: u64,
     pub vlm_per_page_image: bool,
     pub render_text_pdf_pages: bool,
+    pub image_enrichment_workers: u32,
 }
 
 impl Default for PdfPolicy {
@@ -260,6 +261,7 @@ impl Default for PdfPolicy {
             min_image_bytes: 4096,
             vlm_per_page_image: true,
             render_text_pdf_pages: false,
+            image_enrichment_workers: 1,
         }
     }
 }

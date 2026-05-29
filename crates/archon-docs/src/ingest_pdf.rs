@@ -1,19 +1,16 @@
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::Path;
 
 use cozo::DbInstance;
 
 use crate::errors::DocsError;
-use crate::hash::{sha256_hex, sha256_str};
+use crate::hash::sha256_str;
 use crate::ingest::PipelineOutcome;
 use crate::ingest_artifacts::{index_chunks_if_provider_available, persist_text_artifact_chunks};
-use crate::ingest_multimodal::apply_vlm_description;
-use crate::models::{OcrStatus, PageArtifact, PageOffset, PdfIngestMetrics, ProvenanceEdgeType};
-use crate::ocr::local::LocalOcrProvider;
-use crate::ocr::provider::{self as ocr_provider, OcrProvider, OcrRequest};
-use crate::pdf::{self, PdfImage};
-use crate::provenance::{build_doc_lineage_edges, make_edge};
+use crate::models::{OcrStatus, PageArtifact, PdfIngestMetrics};
+use crate::pdf;
+use crate::pdf_image_enrichment::enrich_pdf_images;
+use crate::provenance::build_doc_lineage_edges;
 use crate::store;
 
 pub(crate) async fn run_pdf_ingest_pipeline(
@@ -95,86 +92,31 @@ pub(crate) async fn run_pdf_ingest_pipeline(
         .embedded_images
         .iter()
         .chain(extract_result.rendered_pages.iter())
+        .cloned()
         .collect::<Vec<_>>();
-    let pdf_image_count = pdf_images.len();
     if policy.docs.pdf.vlm_per_page_image
         && policy.docs.vlm.provider != "ollama"
         && policy.docs.vlm.provider != "disabled"
     {
         tracing::info!(
-            images = pdf_image_count,
+            images = pdf_images.len(),
             provider = %policy.docs.vlm.provider,
             "PDF ingest will trigger VLM calls for extracted page images"
         );
     }
-
-    for image in pdf_images {
-        mark_page_image_metadata(db, &mut pages_by_number, image)?;
-        let page_ids_for_image = image
-            .source_pages
-            .iter()
-            .filter_map(|page| page_ids_by_number.get(page).cloned())
-            .collect::<Vec<_>>();
-        if page_ids_for_image.is_empty() {
-            outcome.warnings.push(format!(
-                "PDF image on page {} skipped: no page artifact exists",
-                image.source_page
-            ));
-            continue;
-        }
-
-        match extract_image_ocr_text(image).await {
-            Ok(Some(text)) => {
-                outcome.pdf_image_ocr_runs += 1;
-                outcome.warnings.push(format!(
-                    "PDF image OCR ok on page {} ({} bytes)",
-                    image.source_page,
-                    text.len()
-                ));
-                persist_image_ocr_chunks(
-                    db,
-                    document_id,
-                    image.source_page,
-                    &page_ids_for_image,
-                    &text,
-                )?;
-                outcome.pdf_embedded_images_extracted = outcome
-                    .pdf_embedded_images_extracted
-                    .max(extract_result.embedded_images.len());
-            }
-            Ok(None) => {}
-            Err(e) => {
-                outcome.pdf_image_ocr_failures += 1;
-                outcome.warnings.push(format!(
-                    "PDF image OCR failed on page {}: {e}",
-                    image.source_page
-                ));
-            }
-        }
-
-        if policy.docs.pdf.vlm_per_page_image {
-            let before = outcome.vlm_descriptions;
-            let warning_count = outcome.warnings.len();
-            apply_vlm_description(
-                db,
-                document_id,
-                &image.bytes,
-                policy,
-                &page_ids_for_image,
-                &mut outcome,
-            )
-            .await?;
-            if outcome.vlm_descriptions == before
-                && outcome.warnings.len() > warning_count
-                && outcome
-                    .warnings
-                    .last()
-                    .is_some_and(|warning| warning.contains("failed"))
-            {
-                outcome.pdf_image_vlm_failures += 1;
-            }
-        }
-    }
+    enrich_pdf_images(
+        db,
+        document_id,
+        &pdf_images,
+        policy,
+        &page_ids_by_number,
+        &mut pages_by_number,
+        &mut outcome,
+    )
+    .await?;
+    outcome.pdf_embedded_images_extracted = outcome
+        .pdf_embedded_images_extracted
+        .max(extract_result.embedded_images.len());
 
     outcome.pdf_embedded_images_skipped_filter = extract_result.embedded_images_skipped_filter;
     let metrics = PdfIngestMetrics {
@@ -192,100 +134,4 @@ pub(crate) async fn run_pdf_ingest_pipeline(
     })?;
 
     Ok(outcome)
-}
-
-fn persist_image_ocr_chunks(
-    db: &DbInstance,
-    document_id: &str,
-    source_page: u32,
-    page_ids: &[String],
-    text: &str,
-) -> Result<(), DocsError> {
-    if text.trim().is_empty() {
-        return Ok(());
-    }
-    let artifact_id = format!("pdf-image-ocr-{}", uuid::Uuid::new_v4());
-    let page_offsets = vec![PageOffset {
-        page: source_page,
-        char_start: 0,
-        char_end: text.len(),
-    }];
-    let chunks = persist_text_artifact_chunks(
-        db,
-        document_id,
-        &artifact_id,
-        "pdf_image_ocr_text",
-        text,
-        &page_offsets,
-        Some(&artifact_id),
-    )?;
-    for chunk in &chunks {
-        for page_id in page_ids {
-            store::insert_provenance_edge(
-                db,
-                &make_edge(&chunk.chunk_id, page_id, ProvenanceEdgeType::ExtractedFrom),
-            )
-            .map_err(|e| DocsError::Storage {
-                message: e.to_string(),
-            })?;
-        }
-    }
-    index_chunks_if_provider_available(db, &chunks);
-    Ok(())
-}
-
-async fn extract_image_ocr_text(image: &PdfImage) -> Result<Option<String>, DocsError> {
-    let ext = match image.mime {
-        "image/jpeg" => "jpg",
-        _ => "png",
-    };
-    let dir = std::env::temp_dir().join(format!("archon-pdf-image-ocr-{}", uuid::Uuid::new_v4()));
-    fs::create_dir_all(&dir)?;
-    let path = dir.join(format!("image.{ext}"));
-    fs::write(&path, &image.bytes)?;
-    let local_provider = LocalOcrProvider;
-    let configured_provider = ocr_provider::get_provider();
-    let provider: &dyn OcrProvider = configured_provider.as_deref().unwrap_or(&local_provider);
-    let result = provider
-        .extract(OcrRequest {
-            file_path: path.to_string_lossy().to_string(),
-            document_id: "pdf-image".into(),
-            ocr_run_id: format!("ocr-image-{}", uuid::Uuid::new_v4()),
-            page_range: None,
-            language_hint: None,
-        })
-        .await;
-    let _ = fs::remove_dir_all(&dir);
-    result.map(|ocr| {
-        if ocr.full_text.trim().is_empty() {
-            None
-        } else {
-            Some(ocr.full_text)
-        }
-    })
-}
-
-fn mark_page_image_metadata(
-    db: &DbInstance,
-    pages_by_number: &mut BTreeMap<u32, PageArtifact>,
-    image: &PdfImage,
-) -> Result<(), DocsError> {
-    let image_hash = sha256_hex(&image.bytes);
-    for page_number in &image.source_pages {
-        if let Some(page) = pages_by_number.get_mut(page_number)
-            && page.image_hash.is_none()
-        {
-            page.image_hash = Some(image_hash.clone());
-            if image.width > 0 {
-                page.width = Some(image.width as f32);
-            }
-            if image.height > 0 {
-                page.height = Some(image.height as f32);
-            }
-            store::insert_page(db, page).map_err(|e| DocsError::Storage {
-                message: e.to_string(),
-            })?;
-        }
-    }
-    Ok(())
 }

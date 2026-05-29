@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn adaptive_for_opus() {
         assert_eq!(
-            select_thinking_mode("claude-opus-4-7", 0),
+            select_thinking_mode("claude-opus-4-8", 0),
             ThinkingMode::Adaptive,
         );
     }
