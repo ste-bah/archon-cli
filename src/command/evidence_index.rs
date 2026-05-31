@@ -13,14 +13,18 @@ pub(crate) fn index_pending_evidence(db: &DbInstance, label: &str) {
     }
 
     println!("Indexing {pending} pending {label} chunk(s) for semantic search...");
-    if archon_docs::embed::get_provider().is_none()
-        && let Err(e) = archon_docs::embed::init_default_provider()
-    {
+    if let Err(e) = crate::command::docs_embedding::init_embedding(db) {
         println!("Warning: {label} semantic indexing skipped: {e}");
         return;
     }
+    if archon_docs::embed::get_provider().is_none() {
+        let detail = archon_docs::embed::last_init_error()
+            .unwrap_or_else(|| "no embedding provider configured".into());
+        println!("Warning: {label} semantic indexing skipped: {detail}");
+        return;
+    }
 
-    match archon_docs::retrieval::index_pending_chunks(db) {
+    match archon_docs::indexing::index_chunks(db, &archon_docs::indexing::IndexOptions::default()) {
         Ok(result) => {
             if result.indexed > 0 {
                 println!("Indexed {label}: {} chunk(s)", result.indexed);

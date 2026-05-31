@@ -52,7 +52,10 @@ pub(crate) mod dispatcher;
 pub(crate) mod docs;
 #[cfg(test)]
 pub(crate) mod docs_drift;
+pub(crate) mod docs_embedding;
+pub(crate) mod docs_index;
 pub(crate) mod docs_reprocess;
+pub(crate) mod docs_status;
 pub(crate) mod doctor;
 pub(crate) mod effort;
 pub(crate) mod errors;

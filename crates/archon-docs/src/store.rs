@@ -877,6 +877,43 @@ pub fn insert_chunk_embedding(
     Ok(())
 }
 
+pub struct ChunkEmbeddingInput<'a> {
+    pub chunk_id: &'a str,
+    pub embedding: &'a [f32],
+}
+
+/// Store embeddings for multiple chunks in one Cozo mutation.
+pub fn insert_chunk_embeddings(
+    db: &DbInstance,
+    rows: &[ChunkEmbeddingInput<'_>],
+    provider: &str,
+) -> Result<()> {
+    if rows.is_empty() {
+        return Ok(());
+    }
+
+    let mut params = BTreeMap::new();
+    params.insert("prov".into(), DataValue::from(provider));
+    let mut tuples = Vec::with_capacity(rows.len());
+    for (index, row) in rows.iter().enumerate() {
+        let cid_key = format!("cid{index}");
+        let emb_key = format!("emb{index}");
+        let arr = ndarray::Array1::from_vec(row.embedding.to_vec());
+        params.insert(cid_key.clone(), DataValue::from(row.chunk_id));
+        params.insert(emb_key.clone(), DataValue::Vec(Vector::F32(arr)));
+        tuples.push(format!("[${cid_key}, ${emb_key}, $prov]"));
+    }
+
+    let script = format!(
+        "?[chunk_id, embedding, provider] <- [{}]\n\
+         :put vec_text_chunks {{ chunk_id => embedding, provider }}",
+        tuples.join(", ")
+    );
+    db.run_script(&script, params, ScriptMutability::Mutable)
+        .map_err(|e| anyhow::anyhow!("bulk insert chunk embeddings failed: {e}"))?;
+    Ok(())
+}
+
 /// Read back a stored embedding for a chunk. Returns None if not found.
 pub fn get_chunk_embedding(db: &DbInstance, chunk_id: &str) -> Result<Option<Vec<f32>>> {
     let mut params = BTreeMap::new();
@@ -917,6 +954,51 @@ pub fn update_chunk_embedding_status(db: &DbInstance, chunk_id: &str, status: &s
         chunk.embedding_status = status.to_string();
         insert_chunk(db, &chunk)?;
     }
+    Ok(())
+}
+
+/// Update embedding_status for multiple already-loaded chunks in one mutation.
+pub fn update_chunk_embedding_statuses(
+    db: &DbInstance,
+    chunks: &[&ChunkArtifact],
+    status: &str,
+) -> Result<()> {
+    if chunks.is_empty() {
+        return Ok(());
+    }
+
+    let mut params = BTreeMap::new();
+    params.insert("status".into(), DataValue::from(status));
+    let mut tuples = Vec::with_capacity(chunks.len());
+    for (index, chunk) in chunks.iter().enumerate() {
+        let cid = format!("cid{index}");
+        let did = format!("did{index}");
+        let aid = format!("aid{index}");
+        let cix = format!("cix{index}");
+        let ps = format!("ps{index}");
+        let pe = format!("pe{index}");
+        let txt = format!("txt{index}");
+        let hash = format!("hash{index}");
+        params.insert(cid.clone(), DataValue::from(chunk.chunk_id.as_str()));
+        params.insert(did.clone(), DataValue::from(chunk.document_id.as_str()));
+        params.insert(aid.clone(), DataValue::from(chunk.artifact_id.as_str()));
+        params.insert(cix.clone(), DataValue::from(chunk.chunk_index as i64));
+        params.insert(ps.clone(), DataValue::from(chunk.page_start as i64));
+        params.insert(pe.clone(), DataValue::from(chunk.page_end as i64));
+        params.insert(txt.clone(), DataValue::from(chunk.content.as_str()));
+        params.insert(hash.clone(), DataValue::from(chunk.content_hash.as_str()));
+        tuples.push(format!(
+            "[${cid}, ${did}, ${aid}, ${cix}, ${ps}, ${pe}, ${txt}, ${hash}, $status]"
+        ));
+    }
+
+    let script = format!(
+        "?[chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status] <- [{}]\n\
+         :put doc_chunks {{ chunk_id => document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status }}",
+        tuples.join(", ")
+    );
+    db.run_script(&script, params, ScriptMutability::Mutable)
+        .map_err(|e| anyhow::anyhow!("bulk update chunk embedding status failed: {e}"))?;
     Ok(())
 }
 
@@ -1278,6 +1360,66 @@ mod tests {
 
         let count = count_embeddings(&db).unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_bulk_vector_and_status_updates() {
+        let db = test_db();
+        crate::schema::ensure_doc_schema(&db).unwrap();
+        crate::schema::ensure_vec_schema(&db, 3).unwrap();
+
+        let chunk_a = ChunkArtifact {
+            chunk_id: "bulk-chunk-a".into(),
+            document_id: "bulk-doc".into(),
+            artifact_id: "art-1".into(),
+            chunk_index: 0,
+            page_start: 1,
+            page_end: 1,
+            content: "alpha".into(),
+            content_hash: "hash-a".into(),
+            embedding_status: "pending".into(),
+        };
+        let chunk_b = ChunkArtifact {
+            chunk_id: "bulk-chunk-b".into(),
+            document_id: "bulk-doc".into(),
+            artifact_id: "art-1".into(),
+            chunk_index: 1,
+            page_start: 1,
+            page_end: 1,
+            content: "beta".into(),
+            content_hash: "hash-b".into(),
+            embedding_status: "pending".into(),
+        };
+        insert_chunk(&db, &chunk_a).unwrap();
+        insert_chunk(&db, &chunk_b).unwrap();
+
+        let emb_a = vec![1.0_f32, 0.0, 0.0];
+        let emb_b = vec![0.0_f32, 1.0, 0.0];
+        insert_chunk_embeddings(
+            &db,
+            &[
+                ChunkEmbeddingInput {
+                    chunk_id: &chunk_a.chunk_id,
+                    embedding: &emb_a,
+                },
+                ChunkEmbeddingInput {
+                    chunk_id: &chunk_b.chunk_id,
+                    embedding: &emb_b,
+                },
+            ],
+            "bulk-provider",
+        )
+        .unwrap();
+        update_chunk_embedding_statuses(&db, &[&chunk_a, &chunk_b], "indexed").unwrap();
+
+        assert_eq!(count_embeddings(&db).unwrap(), 2);
+        assert_eq!(count_pending_chunks(&db).unwrap(), 0);
+        let chunks = list_chunks_for_doc(&db, "bulk-doc").unwrap();
+        assert!(
+            chunks
+                .iter()
+                .all(|chunk| chunk.embedding_status == "indexed")
+        );
     }
 
     #[test]

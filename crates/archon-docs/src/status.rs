@@ -44,23 +44,44 @@ pub fn get_status_summary(db: &DbInstance) -> Result<DocStatusSummary> {
             DocumentStatus::Processed => summary.processed += 1,
             DocumentStatus::Failed => summary.failed += 1,
         }
-        let chunks = store::list_chunks_for_doc(db, &doc.document_id)?;
-        summary.total_chunks += chunks.len();
-        let pages = store::list_pages_for_doc(db, &doc.document_id)?;
-        summary.total_pages += pages.len();
-        if let Some(metrics) = store::get_pdf_metrics(db, &doc.document_id)? {
-            summary.pdf_embedded_images_extracted += metrics.embedded_images_extracted as usize;
-            summary.pdf_embedded_images_skipped_filter +=
-                metrics.embedded_images_skipped_filter as usize;
-            summary.pdf_image_ocr_runs += metrics.image_ocr_runs as usize;
-            summary.pdf_image_ocr_failures += metrics.image_ocr_failures as usize;
-            summary.pdf_image_vlm_descriptions += metrics.image_vlm_descriptions as usize;
-            summary.pdf_image_vlm_failures += metrics.image_vlm_failures as usize;
-            summary.pdf_pages_rendered += metrics.pages_rendered as usize;
-        }
     }
 
+    summary.total_chunks = store::count_chunks(db)?;
+    summary.total_pages = count_pages(db)?;
+    for metrics in store::list_pdf_metrics(db)? {
+        summary.pdf_embedded_images_extracted += metrics.embedded_images_extracted as usize;
+        summary.pdf_embedded_images_skipped_filter +=
+            metrics.embedded_images_skipped_filter as usize;
+        summary.pdf_image_ocr_runs += metrics.image_ocr_runs as usize;
+        summary.pdf_image_ocr_failures += metrics.image_ocr_failures as usize;
+        summary.pdf_image_vlm_descriptions += metrics.image_vlm_descriptions as usize;
+        summary.pdf_image_vlm_failures += metrics.image_vlm_failures as usize;
+        summary.pdf_pages_rendered += metrics.pages_rendered as usize;
+    }
     Ok(summary)
+}
+
+fn count_pages(db: &DbInstance) -> Result<usize> {
+    let result = db.run_script(
+        "?[count(page_id)] := *doc_pages{page_id}",
+        Default::default(),
+        cozo::ScriptMutability::Immutable,
+    );
+    match result {
+        Ok(result) => Ok(result
+            .rows
+            .first()
+            .and_then(|row| row.first())
+            .and_then(|value| value.get_int())
+            .unwrap_or(0) as usize),
+        Err(e)
+            if e.to_string()
+                .contains(crate::errors::COZO_RELATION_NOT_FOUND) =>
+        {
+            Ok(0)
+        }
+        Err(e) => Err(anyhow::anyhow!("count pages failed: {e}")),
+    }
 }
 
 impl Default for DocStatusSummary {

@@ -557,171 +557,26 @@ fn hnsw_search(
     Ok(search_results)
 }
 
-/// Index a chunk: embed its content and store the vector.
-/// On success, sets embedding_status to "indexed". On failure, sets it to "failed".
+pub use crate::indexing::IndexResult;
+
 pub fn index_chunk(db: &DbInstance, chunk: &ChunkArtifact) -> Result<(), DocsError> {
-    let provider = get_provider().ok_or_else(|| DocsError::ModelNotConfigured {
-        message: "no embedding provider configured".into(),
-    })?;
-
-    crate::schema::ensure_vec_schema(db, provider.dimension()).map_err(|e| {
-        DocsError::Retrieval {
-            message: format!("failed to ensure vec schema: {e}"),
-        }
-    })?;
-
-    match provider.embed_chunks(&[chunk.content.clone()]) {
-        Ok(vectors) => {
-            let embedding = vectors
-                .into_iter()
-                .next()
-                .ok_or_else(|| DocsError::Embedding {
-                    message: "embed_chunks returned empty".into(),
-                })?;
-            match store::insert_chunk_embedding(
-                db,
-                &chunk.chunk_id,
-                &embedding,
-                provider.backend_name(),
-            ) {
-                Ok(()) => {
-                    let _ = store::update_chunk_embedding_status(db, &chunk.chunk_id, "indexed");
-                    Ok(())
-                }
-                Err(e) => {
-                    let _ = store::update_chunk_embedding_status(db, &chunk.chunk_id, "failed");
-                    Err(DocsError::Retrieval {
-                        message: e.to_string(),
-                    })
-                }
-            }
-        }
-        Err(e) => {
-            let _ = store::update_chunk_embedding_status(db, &chunk.chunk_id, "failed");
-            Err(e)
-        }
-    }
-}
-
-/// Result of an indexing operation with per-outcome counts.
-#[derive(Clone, Debug, Default)]
-pub struct IndexResult {
-    /// Chunks successfully embedded and stored.
-    pub indexed: usize,
-    /// Chunks where embedding or storage failed.
-    pub failed: usize,
-    /// Chunks skipped because they were already indexed.
-    pub skipped: usize,
-}
-
-/// Filter for selecting which chunks to index.
-#[derive(Clone, Copy, Debug)]
-enum ChunkFilter {
-    /// Only chunks with embedding_status = "pending".
-    OnlyPending,
-    /// All chunks regardless of status.
-    All,
-}
-
-/// Shared indexing loop: fetch chunks matching `filter`, embed, store, update status.
-fn index_chunks_matching(db: &DbInstance, filter: ChunkFilter) -> Result<IndexResult, DocsError> {
-    let provider = get_provider().ok_or_else(|| DocsError::ModelNotConfigured {
-        message: "no embedding provider configured".into(),
-    })?;
-
-    crate::schema::ensure_vec_schema(db, provider.dimension()).map_err(|e| {
-        DocsError::Retrieval {
-            message: format!("failed to ensure vec schema: {e}"),
-        }
-    })?;
-
-    let (script, error_label) = match filter {
-        ChunkFilter::OnlyPending => (
-            "?[chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status] \
-             := *doc_chunks{chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status}, \
-             embedding_status = \"pending\"",
-            "list pending chunks failed",
-        ),
-        ChunkFilter::All => (
-            "?[chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status] \
-             := *doc_chunks{chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status}",
-            "list all chunks failed",
-        ),
-    };
-
-    let result = db
-        .run_script(script, Default::default(), ScriptMutability::Immutable)
-        .map_err(|e| DocsError::Retrieval {
-            message: format!("{error_label}: {e}"),
-        })?;
-
-    let mut indexed = 0;
-    let mut failed = 0;
-    let mut skipped = 0;
-    for row in &result.rows {
-        let chunk = ChunkArtifact {
-            chunk_id: row[0].get_str().unwrap_or("").to_string(),
-            document_id: row[1].get_str().unwrap_or("").to_string(),
-            artifact_id: row[2].get_str().unwrap_or("").to_string(),
-            chunk_index: row[3].get_int().unwrap_or(0) as u32,
-            page_start: row[4].get_int().unwrap_or(0) as u32,
-            page_end: row[5].get_int().unwrap_or(0) as u32,
-            content: row[6].get_str().unwrap_or("").to_string(),
-            content_hash: row[7].get_str().unwrap_or("").to_string(),
-            embedding_status: row[8].get_str().unwrap_or("pending").to_string(),
-        };
-
-        // Skip already-indexed chunks when reindexing all
-        if matches!(filter, ChunkFilter::All) && chunk.embedding_status == "indexed" {
-            skipped += 1;
-            continue;
-        }
-
-        match provider.embed_chunks(&[chunk.content.clone()]) {
-            Ok(vectors) => {
-                if let Some(embedding) = vectors.into_iter().next() {
-                    if store::insert_chunk_embedding(
-                        db,
-                        &chunk.chunk_id,
-                        &embedding,
-                        provider.backend_name(),
-                    )
-                    .is_ok()
-                    {
-                        let _ =
-                            store::update_chunk_embedding_status(db, &chunk.chunk_id, "indexed");
-                        indexed += 1;
-                    } else {
-                        let _ = store::update_chunk_embedding_status(db, &chunk.chunk_id, "failed");
-                        failed += 1;
-                    }
-                } else {
-                    let _ = store::update_chunk_embedding_status(db, &chunk.chunk_id, "failed");
-                    failed += 1;
-                }
-            }
-            Err(_) => {
-                let _ = store::update_chunk_embedding_status(db, &chunk.chunk_id, "failed");
-                failed += 1;
-            }
-        }
-    }
-
-    Ok(IndexResult {
-        indexed,
-        failed,
-        skipped,
-    })
+    crate::indexing::index_chunk(db, chunk)
 }
 
 /// Index all chunks with embedding_status = "pending".
 pub fn index_pending_chunks(db: &DbInstance) -> Result<IndexResult, DocsError> {
-    index_chunks_matching(db, ChunkFilter::OnlyPending)
+    crate::indexing::index_chunks(db, &crate::indexing::IndexOptions::default())
 }
 
 /// Re-index all chunks regardless of status (useful after model swap).
 pub fn reindex_all(db: &DbInstance) -> Result<IndexResult, DocsError> {
-    index_chunks_matching(db, ChunkFilter::All)
+    crate::indexing::index_chunks(
+        db,
+        &crate::indexing::IndexOptions {
+            all: true,
+            ..Default::default()
+        },
+    )
 }
 
 #[cfg(test)]
@@ -1325,7 +1180,7 @@ mod tests {
     }
 
     #[test]
-    fn test_reindex_all_counts_skipped() {
+    fn test_reindex_all_indexes_everything() {
         let db = test_db();
         setup_with_provider(&db, 4);
 
@@ -1358,8 +1213,8 @@ mod tests {
         store::insert_chunk(&db, &chunk_pending).unwrap();
 
         let result = reindex_all(&db).unwrap();
-        assert_eq!(result.indexed, 1, "pending chunk should be indexed");
+        assert_eq!(result.indexed, 2, "all chunks should be re-indexed");
         assert_eq!(result.failed, 0);
-        assert_eq!(result.skipped, 1, "already-indexed chunk should be skipped");
+        assert_eq!(result.skipped, 0);
     }
 }

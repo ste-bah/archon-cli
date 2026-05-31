@@ -25,7 +25,7 @@ pub(crate) fn load_policy() -> archon_policy::EffectivePolicy {
 pub(crate) async fn handle_reprocess(target: &str, defer_index: bool) -> Result<()> {
     let db = open_docs_db()?;
     if !defer_index {
-        let _ = archon_docs::embed::init_default_provider();
+        let _ = crate::command::docs_embedding::init_embedding(&db);
     }
     let policy = load_policy();
     let vlm_report = vlm_factory::configure_registered_provider(&policy);

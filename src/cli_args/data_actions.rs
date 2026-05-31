@@ -157,6 +157,15 @@ pub enum DocsAction {
         /// Re-index all chunks regardless of status
         #[arg(long)]
         all: bool,
+        /// Restrict indexing to one document ID
+        #[arg(long, alias = "doc")]
+        document: Option<String>,
+        /// Number of chunks to embed per provider request
+        #[arg(long, default_value_t = 64)]
+        batch_size: usize,
+        /// Maximum candidate chunks to process in this run
+        #[arg(long)]
+        limit: Option<usize>,
     },
     /// Report embedding model and backend status
     ModelStatus,

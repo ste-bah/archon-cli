@@ -8,12 +8,10 @@ use anyhow::Result;
 use cozo::DbInstance;
 
 use archon_docs::answer;
-use archon_docs::embed;
 use archon_docs::ingest;
 use archon_docs::inspect;
 use archon_docs::retrieval;
 use archon_docs::schema::ensure_doc_schema;
-use archon_docs::status;
 use archon_docs::store;
 use archon_docs::vlm::factory::{self as vlm_factory, VlmProviderInitStatus};
 
@@ -23,7 +21,7 @@ fn docs_db_path() -> PathBuf {
     crate::command::store_paths::evidence_db_path(&["ARCHON_DOCS_DB_PATH"])
 }
 
-fn open_db() -> Result<DbInstance> {
+pub(crate) fn open_db() -> Result<DbInstance> {
     let db_path = docs_db_path();
     let db = crate::command::store_paths::open_sqlite_db(&db_path, "document")?;
     ensure_doc_schema(&db)?;
@@ -39,7 +37,7 @@ pub async fn handle_docs_command(action: DocsAction) -> Result<()> {
         } => crate::command::docs_reprocess::handle_reprocess(&target, defer_index).await,
         DocsAction::List => handle_list().await,
         DocsAction::Show { document_id } => handle_show(&document_id).await,
-        DocsAction::Status => handle_status().await,
+        DocsAction::Status => crate::command::docs_status::handle_status(open_db()?).await,
         DocsAction::Chunks { document_id } => handle_chunks(&document_id).await,
         DocsAction::Inspect { document_id } => handle_inspect(&document_id).await,
         DocsAction::Search { query, mode, debug } => handle_search(&query, &mode, debug).await,
@@ -47,14 +45,24 @@ pub async fn handle_docs_command(action: DocsAction) -> Result<()> {
         DocsAction::Provenance { chunk_or_answer_id } => {
             handle_provenance(&chunk_or_answer_id).await
         }
-        DocsAction::Index { all } => handle_index(all).await,
-        DocsAction::ModelStatus => handle_model_status().await,
+        DocsAction::Index {
+            all,
+            document,
+            batch_size,
+            limit,
+        } => {
+            crate::command::docs_index::handle_index(all, document, batch_size, limit, open_db()?)
+                .await
+        }
+        DocsAction::ModelStatus => {
+            crate::command::docs_embedding::handle_model_status(open_db()?).await
+        }
     }
 }
 
 async fn handle_ingest(path_str: &str) -> Result<()> {
     let db = open_db()?;
-    let _ = init_embedding(&db); // Eager indexing if model is available
+    let _ = crate::command::docs_embedding::init_embedding(&db);
     let policy = std::env::current_dir()
         .ok()
         .and_then(|cwd| archon_policy::load_effective_policy(&cwd).ok())
@@ -217,38 +225,6 @@ async fn handle_show(document_id: &str) -> Result<()> {
     Ok(())
 }
 
-async fn handle_status() -> Result<()> {
-    let db = open_db()?;
-    let summary = status::get_status_summary(&db)?;
-    println!("Total sources:   {}", summary.total_sources);
-    println!("  Discovered:    {}", summary.discovered);
-    println!("  Ingesting:     {}", summary.ingesting);
-    println!("  Ingested:      {}", summary.ingested);
-    println!("  Processing:    {}", summary.processing);
-    println!("  Processed:     {}", summary.processed);
-    println!("  Failed:        {}", summary.failed);
-    println!("Total chunks:    {}", summary.total_chunks);
-    println!("Total pages:     {}", summary.total_pages);
-    println!(
-        "PDF images:      {} extracted",
-        summary.pdf_embedded_images_extracted
-    );
-    println!(
-        "PDF image skips: {} filtered",
-        summary.pdf_embedded_images_skipped_filter
-    );
-    println!(
-        "PDF image OCR:   {} run(s), {} failed",
-        summary.pdf_image_ocr_runs, summary.pdf_image_ocr_failures
-    );
-    println!(
-        "PDF image VLM:   {} description(s), {} failed",
-        summary.pdf_image_vlm_descriptions, summary.pdf_image_vlm_failures
-    );
-    println!("PDF rendered:    {} page(s)", summary.pdf_pages_rendered);
-    Ok(())
-}
-
 async fn handle_chunks(document_id: &str) -> Result<()> {
     let db = open_db()?;
     let chunks = archon_docs::store::list_chunks_for_doc(&db, document_id)?;
@@ -277,28 +253,10 @@ async fn handle_inspect(document_id: &str) -> Result<()> {
     Ok(())
 }
 
-// ── Phase 2: retrieval, answer, provenance, model-status ──────────────
-
-fn init_embedding(_db: &cozo::DbInstance) -> Result<()> {
-    if embed::get_provider().is_none() {
-        match embed::init_default_provider() {
-            Ok(()) => {
-                let provider = embed::get_provider().expect("just set");
-                tracing::info!(
-                    "embedding provider initialised: {}",
-                    provider.backend_name()
-                );
-            }
-            Err(e) => {
-                tracing::warn!("embedding provider not available: {e}");
-            }
-        }
-    }
-    Ok(())
-}
+// ── Phase 2: retrieval, answer, provenance ──────────────
 
 async fn ensure_search_ready(db: &cozo::DbInstance) -> Result<()> {
-    init_embedding(db)?;
+    crate::command::docs_embedding::init_embedding(db)?;
     Ok(())
 }
 
@@ -489,201 +447,6 @@ async fn handle_provenance(chunk_or_answer_id: &str) -> Result<()> {
     }
 
     Ok(())
-}
-
-async fn handle_model_status() -> Result<()> {
-    let db = open_db()?;
-
-    // Attempt provider init
-    let init_start = std::time::Instant::now();
-    if embed::get_provider().is_none() {
-        let _ = embed::init_default_provider();
-    }
-    let init_elapsed = init_start.elapsed();
-
-    match embed::get_provider() {
-        Some(provider) => {
-            println!("Backend:       {}", provider.backend_name());
-            println!("Model name:    BGE-base-en-v1.5");
-            println!("Dimension:     {}", provider.dimension());
-
-            // Report init result
-            println!("Init result:   ok (took {}ms)", init_elapsed.as_millis());
-
-            // Smoke embed test
-            let smoke_start = std::time::Instant::now();
-            match provider.embed_query("hello") {
-                Ok(v) => {
-                    println!(
-                        "Smoke embed:   ok (dim={}, took {}ms)",
-                        v.len(),
-                        smoke_start.elapsed().as_millis()
-                    );
-                }
-                Err(e) => {
-                    println!("Smoke embed:   failed: {}", e);
-                    let fastembed_dir = dirs::data_dir()
-                        .unwrap_or_else(|| std::path::PathBuf::from("."))
-                        .join("archon")
-                        .join("fastembed");
-                    println!(
-                        "Hint: Cache may be corrupt. Try: rm -rf {}",
-                        fastembed_dir.display()
-                    );
-                }
-            }
-
-            // Vectors stored (read-only)
-            match archon_docs::store::count_embeddings(&db) {
-                Ok(count) => println!("Vectors:       {} indexed", count),
-                Err(e) => println!("Vectors:       unable to query — {}", e),
-            }
-
-            // Pending chunks (read-only)
-            match archon_docs::store::count_pending_chunks(&db) {
-                Ok(count) => println!("Pending:       {} chunks", count),
-                Err(e) => println!("Pending:       unable to query — {}", e),
-            }
-
-            // HNSW index check (read-only — uses Cozo ::relations system query)
-            match check_hnsw_index(&db, provider.dimension()) {
-                Ok(true) => println!("HNSW index:    present"),
-                Ok(false) => println!(
-                    "HNSW index:    not yet created (will be created on first ingest with provider)"
-                ),
-                Err(e) => println!("HNSW index:    unable to check — {}", e),
-            }
-            println!("pdfimages:     {}", pdfimages_status());
-        }
-        None => {
-            println!("Backend:       not-configured");
-            println!("Dimension:     n/a");
-            println!(
-                "Init result:   failed (took {}ms)",
-                init_elapsed.as_millis()
-            );
-            println!();
-            println!("No embedding model is configured. To enable local embeddings:");
-            println!("  1. Ensure the fastembed model is available (BGE-base-en-v1.5 quantized).");
-            println!("  2. On first run, the model will be downloaded automatically.");
-            println!("  3. Set ARCHON_EMBEDDING_MODEL_PATH to override the model location.");
-
-            let fastembed_dir = dirs::data_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join("archon")
-                .join("fastembed");
-            println!("  4. Cache dir: {}", fastembed_dir.display());
-            println!("pdfimages:     {}", pdfimages_status());
-            println!();
-            println!("Search and answer commands will return structured errors until");
-            println!("a model is configured.");
-        }
-    }
-
-    match std::env::current_dir()
-        .map_err(anyhow::Error::from)
-        .and_then(|cwd| archon_policy::load_policy_for_workspace(&cwd).map_err(anyhow::Error::from))
-    {
-        Ok(load) => {
-            let decision = load.policy.docs_vlm_decision();
-            println!();
-            println!(
-                "VLM policy:    {} ({})",
-                if decision.allowed {
-                    "allowed"
-                } else {
-                    "denied"
-                },
-                decision.reason
-            );
-            let (configured_provider, configured_model) =
-                vlm_factory::default_provider_summary(&load.policy);
-            println!(
-                "VLM config:    provider={} model={}",
-                configured_provider,
-                if configured_model.is_empty() {
-                    "n/a"
-                } else {
-                    &configured_model
-                }
-            );
-            let report = vlm_factory::diagnostic_report(&load.policy);
-            println!(
-                "VLM provider:  {}",
-                match report.status {
-                    VlmProviderInitStatus::Registered =>
-                        format!("ok — {}/{} reachable", report.provider, report.model),
-                    VlmProviderInitStatus::Disabled => format!("disabled — {}", report.message),
-                    VlmProviderInitStatus::Skipped => format!(
-                        "skipped — {}/{}: {}",
-                        report.provider, report.model, report.message
-                    ),
-                }
-            );
-        }
-        Err(e) => println!("VLM policy:    unable to load policy — {e}"),
-    }
-
-    Ok(())
-}
-
-fn pdfimages_status() -> String {
-    let bin = std::env::var_os("ARCHON_PDFIMAGES_BIN").unwrap_or_else(|| "pdfimages".into());
-    let display = std::path::PathBuf::from(&bin).display().to_string();
-    match std::process::Command::new(&bin).arg("-v").output() {
-        Ok(output) if output.status.success() || !output.stderr.is_empty() => {
-            format!("available ({display})")
-        }
-        Ok(output) => format!(
-            "missing or unhealthy ({display}) status={:?}",
-            output.status.code()
-        ),
-        Err(e) => format!("missing ({display}) — {e}"),
-    }
-}
-
-async fn handle_index(force_all: bool) -> Result<()> {
-    let db = open_db()?;
-    init_embedding(&db)?;
-
-    let result = if force_all {
-        retrieval::reindex_all(&db).map_err(|e| anyhow::anyhow!("reindex failed: {e}"))?
-    } else {
-        retrieval::index_pending_chunks(&db).map_err(|e| anyhow::anyhow!("index failed: {e}"))?
-    };
-
-    println!("Indexed: {} chunks", result.indexed);
-    if result.failed > 0 {
-        println!(
-            "Failed:  {} chunks (use 'archon docs model-status' for diagnostics)",
-            result.failed
-        );
-    }
-    if result.skipped > 0 {
-        println!("Skipped: {} chunks (already indexed)", result.skipped);
-    }
-    Ok(())
-}
-
-/// Check if vec_text_chunks relation exists without creating it.
-/// Uses a lightweight query against the relation and catches "not found" errors.
-fn check_hnsw_index(db: &cozo::DbInstance, _dim: usize) -> Result<bool> {
-    match db.run_script(
-        "?[count(chunk_id)] := *vec_text_chunks{chunk_id}",
-        Default::default(),
-        cozo::ScriptMutability::Immutable,
-    ) {
-        Ok(_) => Ok(true),
-        Err(e) => {
-            if e.to_string()
-                .contains(archon_docs::errors::COZO_RELATION_NOT_FOUND)
-            {
-                Ok(false)
-            } else {
-                Err(anyhow::anyhow!("failed to query vec_text_chunks: {e}"))
-            }
-        }
-    }
 }
 
 fn print_citation_chain(db: &DbInstance, chunk_id: &str) -> Result<()> {

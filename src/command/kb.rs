@@ -250,14 +250,18 @@ fn effective_search_mode(
 }
 
 fn query_embedding_for_search(db: &DbInstance, query: &str) -> Option<Vec<f32>> {
-    if archon_docs::embed::get_provider().is_none()
-        && let Err(e) = archon_docs::embed::init_default_provider()
-    {
+    if let Err(e) = crate::command::docs_embedding::init_embedding(db) {
         eprintln!("Warning: semantic embedding provider unavailable: {e}");
         return None;
     }
+    if archon_docs::embed::get_provider().is_none() {
+        let detail = archon_docs::embed::last_init_error()
+            .unwrap_or_else(|| "no embedding provider configured".into());
+        eprintln!("Warning: semantic embedding provider unavailable: {detail}");
+        return None;
+    }
     let provider = archon_docs::embed::get_provider()?;
-    match archon_docs::retrieval::index_pending_chunks(db) {
+    match archon_docs::indexing::index_chunks(db, &archon_docs::indexing::IndexOptions::default()) {
         Ok(indexed) => {
             if indexed.failed > 0 {
                 eprintln!(

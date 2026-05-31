@@ -549,7 +549,7 @@ hybrid_alpha = 0.3
 |---|---|---|
 | `enabled` | `true` | Master switch for the memory graph. Disable for ephemeral / stateless sessions. |
 | `db_path` | unset | Override CozoDB file path. Default: `~/.local/share/archon/memory.db`. Use to share a memory graph across multiple archon-cli installations or to keep memory on faster storage. |
-| `embedding_provider` | `"auto"` | `"auto"` uses OpenAI if `OPENAI_API_KEY` (or `ARCHON_MEMORY_OPENAIKEY`) is set, else falls back to local fastembed. `"local"` forces local (768-dim BGE-base-en-v1.5, no network). `"openai"` forces OpenAI (1536-dim text-embedding-3-small, requires API key). Local is fine for most use cases. |
+| `embedding_provider` | `"auto"` | `"auto"` uses OpenAI if `OPENAI_API_KEY` (or `ARCHON_MEMORY_OPENAIKEY`) is set, else falls back to local fastembed. `"local"` forces local (768-dim BGE-base-en-v1.5, no network). `"openai"` forces OpenAI-compatible embeddings (1536-dim `text-embedding-3-small` by default, requires API key). Docs semantic indexing follows this setting unless `ARCHON_DOCS_EMBEDDING_PROVIDER` overrides it. |
 | `hybrid_alpha` | `0.3` | Hybrid search blend: `0.0` = pure vector, `1.0` = pure keyword (BM25). `0.3` = 70% vector / 30% keyword. Lower for semantic precision, higher for exact-term matching. |
 
 ---

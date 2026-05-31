@@ -253,6 +253,7 @@ archon docs ingest .archon/docs/inbox
 archon docs status
 archon docs inspect <document-id>
 archon docs index --all
+archon docs index --document <document-id> --batch-size 64
 archon docs search "known phrase" --mode hybrid --debug
 ```
 

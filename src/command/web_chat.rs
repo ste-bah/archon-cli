@@ -67,7 +67,7 @@ impl WebChatBridge {
     ) -> Result<(String, Vec<WebChatAttachment>)> {
         let db = open_docs_db()?;
         let policy = archon_policy::load_effective_policy(&self.cwd).unwrap_or_default();
-        let _ = archon_docs::embed::init_default_provider();
+        let _ = crate::command::docs_embedding::init_embedding(&db);
         let vlm_report = archon_docs::vlm::factory::configure_registered_provider(&policy);
 
         let mut stored = Vec::new();

@@ -10,7 +10,13 @@
 | `ANTHROPIC_AUTH_TOKEN` | Legacy bearer token alias |
 | `OPENAI_API_KEY` | OpenAI API key for embeddings, LLM provider, and STT |
 | `GOOGLE_API_KEY` | Google Generative Language API key for Gemini VLM image descriptions |
-| `ARCHON_MEMORY_OPENAIKEY` | Alias for `OPENAI_API_KEY` (memory embeddings only) |
+| `ARCHON_MEMORY_OPENAIKEY` | Alias for `OPENAI_API_KEY` for memory and docs embeddings |
+| `ARCHON_DOCS_EMBEDDING_PROVIDER` | Docs semantic indexing provider: `auto`, `local`, `openai`, or `disabled` |
+| `ARCHON_DOCS_OPENAIKEY` | OpenAI-compatible key used only for docs embeddings |
+| `ARCHON_DOCS_EMBEDDING_BASE_URL` | OpenAI-compatible `/v1` base URL for docs embeddings |
+| `ARCHON_DOCS_EMBEDDING_MODEL` | Docs embedding model, default `text-embedding-3-small` for OpenAI-compatible providers |
+| `ARCHON_DOCS_EMBEDDING_TIMEOUT_SECS` | Per-request timeout for docs OpenAI-compatible embeddings |
+| `ARCHON_DOCS_EMBEDDING_LOAD_TIMEOUT_SECS` | Local fastembed model-load timeout before docs indexing fails fast |
 | `ARCHON_CODEX_DISABLED` | Disable Codex provider resolution when set to `1`, `true`, or `yes` |
 | `ARCHON_CODEX_BASE_URL` | Override Codex backend URL for local mocks or diagnostics |
 | `ARCHON_CODEX_APP_SERVER_URL` | Override configured Codex app-server WebSocket endpoint for local diagnostics |
@@ -79,10 +85,14 @@ For Apple Silicon Homebrew installs, common values are
 ## Resolution order for OpenAI key
 
 1. `OPENAI_API_KEY` env (all features)
-2. `ARCHON_MEMORY_OPENAIKEY` env (memory embeddings only)
-3. `[llm.openai] api_key` in config
+2. `ARCHON_DOCS_OPENAIKEY` env (docs embeddings only)
+3. `ARCHON_MEMORY_OPENAIKEY` env (memory and docs embeddings)
+4. `[llm.openai] api_key` in config
 
-If none are set, archon uses local fastembed for embeddings (no network calls) and disables OpenAI-dependent features.
+Docs indexing follows `[memory].embedding_provider` unless
+`ARCHON_DOCS_EMBEDDING_PROVIDER` is set. If no key is available, `auto` uses
+local fastembed. `docs index` counts candidates before loading local fastembed,
+so an empty index pass exits quickly.
 
 ## Resolution order for Gemini VLM key
 

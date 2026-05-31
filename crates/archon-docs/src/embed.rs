@@ -6,7 +6,9 @@
 
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::Duration;
 
+pub use crate::embed_config::{EmbeddingProviderConfig, EmbeddingProviderSelection};
 use crate::errors::DocsError;
 
 // ---------------------------------------------------------------------------
@@ -62,10 +64,15 @@ pub struct FastembedProvider {
     model: Mutex<Option<fastembed::TextEmbedding>>,
     cache_dir: PathBuf,
     model_name: String,
+    load_timeout: Duration,
 }
 
 impl FastembedProvider {
     pub fn new() -> Result<Self, DocsError> {
+        Self::with_load_timeout(crate::embed_config::default_load_timeout())
+    }
+
+    pub fn with_load_timeout(load_timeout: Duration) -> Result<Self, DocsError> {
         let cache_dir = dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("archon")
@@ -77,6 +84,7 @@ impl FastembedProvider {
             model: Mutex::new(None),
             cache_dir,
             model_name: "BGE-base-en-v1.5".into(),
+            load_timeout,
         })
     }
 
@@ -91,13 +99,7 @@ impl FastembedProvider {
                 cache_dir = %self.cache_dir.display(),
                 "loading local embedding model BGE-base-en-v1.5"
             );
-            let options = fastembed::InitOptions::new(fastembed::EmbeddingModel::BGEBaseENV15)
-                .with_cache_dir(self.cache_dir.clone())
-                .with_show_download_progress(false);
-            let model =
-                fastembed::TextEmbedding::try_new(options).map_err(|e| DocsError::Embedding {
-                    message: format!("failed to load fastembed model: {e}"),
-                })?;
+            let model = load_fastembed_with_timeout(self.cache_dir.clone(), self.load_timeout)?;
             *guard = Some(model);
         }
         Ok(guard)
@@ -177,7 +179,7 @@ fn l2_norm(v: &[f32]) -> f32 {
     sum_sq.sqrt().max(1e-12)
 }
 
-fn normalise(v: &[f32]) -> Vec<f32> {
+pub(crate) fn normalise(v: &[f32]) -> Vec<f32> {
     let norm = l2_norm(v);
     v.iter().map(|x| x / norm).collect()
 }
@@ -249,21 +251,91 @@ pub fn last_init_error() -> Option<String> {
 
 /// Initialise the default fastembed provider.
 pub fn init_default_provider() -> Result<(), DocsError> {
-    match FastembedProvider::new() {
-        Ok(provider) => {
-            // Success: clear any stale error.
+    init_provider(EmbeddingProviderConfig::from_env())
+}
+
+pub fn init_provider(config: EmbeddingProviderConfig) -> Result<(), DocsError> {
+    let result = match config.selection.clone() {
+        EmbeddingProviderSelection::Disabled => Err(DocsError::ModelNotConfigured {
+            message: "docs embedding provider disabled".into(),
+        }),
+        EmbeddingProviderSelection::OpenAiCompatible => init_openai_compatible_provider(&config),
+        EmbeddingProviderSelection::Local => init_fastembed_provider(config.local_load_timeout),
+        EmbeddingProviderSelection::Auto => match config.openai_api_key {
+            Some(_) => init_openai_compatible_provider(&config),
+            None => init_fastembed_provider(config.local_load_timeout),
+        },
+    };
+    record_init_result(result)
+}
+
+fn init_fastembed_provider(load_timeout: Duration) -> Result<(), DocsError> {
+    FastembedProvider::with_load_timeout(load_timeout).map(|provider| {
+        let _ = try_set_provider(Box::new(provider));
+    })
+}
+
+fn init_openai_compatible_provider(config: &EmbeddingProviderConfig) -> Result<(), DocsError> {
+    let key = config
+        .openai_api_key
+        .clone()
+        .ok_or_else(|| DocsError::ModelNotConfigured {
+            message: "OpenAI-compatible docs embedding provider needs an API key".into(),
+        })?;
+    let provider = crate::embed_openai::OpenAiCompatEmbeddingProvider::new(
+        key,
+        config.openai_base_url.clone(),
+        config.openai_model.clone(),
+        config.openai_timeout,
+    )?;
+    let _ = try_set_provider(Box::new(provider));
+    Ok(())
+}
+
+fn record_init_result(result: Result<(), DocsError>) -> Result<(), DocsError> {
+    match result {
+        Ok(()) => {
             if let Ok(mut guard) = LAST_INIT_ERROR.write() {
                 *guard = None;
             }
-            let _ = try_set_provider(Box::new(provider));
             Ok(())
         }
-        Err(e) => {
+        Err(error) => {
             if let Ok(mut guard) = LAST_INIT_ERROR.write() {
-                *guard = Some(e.to_string());
+                *guard = Some(error.to_string());
             }
-            Err(e)
+            Err(error)
         }
+    }
+}
+
+fn load_fastembed_with_timeout(
+    cache_dir: PathBuf,
+    timeout: Duration,
+) -> Result<fastembed::TextEmbedding, DocsError> {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let options = fastembed::InitOptions::new(fastembed::EmbeddingModel::BGEBaseENV15)
+            .with_cache_dir(cache_dir)
+            .with_show_download_progress(false);
+        let result = fastembed::TextEmbedding::try_new(options);
+        let _ = tx.send(result);
+    });
+
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(model)) => Ok(model),
+        Ok(Err(error)) => Err(DocsError::Embedding {
+            message: format!("failed to load fastembed model: {error}"),
+        }),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(DocsError::Embedding {
+            message: format!(
+                "timed out loading fastembed model after {}s",
+                timeout.as_secs()
+            ),
+        }),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(DocsError::Embedding {
+            message: "fastembed model loader thread exited without a result".into(),
+        }),
     }
 }
 

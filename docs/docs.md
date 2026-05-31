@@ -77,6 +77,8 @@ archon docs reprocess <document-id>
 archon docs reprocess ./assets/research-paper/trading/trading-elliott-wave
 archon docs reprocess <document-id> --defer-index
 archon docs index
+archon docs index --document <document-id> --batch-size 64
+archon docs index --all --limit 500
 ```
 
 Inside the TUI:
@@ -86,6 +88,7 @@ Inside the TUI:
 /docs reprocess ./assets/research-paper/trading/trading-elliott-wave
 /docs reprocess <document-id> --defer-index
 /docs index
+/docs index --document <document-id> --batch-size 64
 ```
 
 Reprocess is intentionally in-place. If the source file content has changed,
@@ -95,6 +98,16 @@ document so provenance does not silently mutate.
 Use `--defer-index` for large repair batches. Each document is refreshed in
 place, but the expensive global semantic indexing pass is left for one explicit
 `docs index` run after the batch completes.
+
+`docs index` first counts candidate chunks before loading an embedding model. If
+there is no work, it exits without touching fastembed or a cloud endpoint.
+`--document <id>` scopes a retry to one source, `--batch-size` controls provider
+request size, and `--limit` lets you resume very large repairs in explicit
+slices. When `--limit` is omitted for normal pending indexing, Archon processes
+the backlog in bounded 1024-chunk windows instead of loading the full corpus at
+once. Long indexing runs print flushed progress for candidate loading, each
+window, bulk vector storage, failures, and elapsed time from the terminal or TUI
+transcript.
 
 ## Video Sources
 
@@ -117,6 +130,7 @@ Then index and search:
 
 ```bash
 archon docs index --all
+archon docs index --document <video-document-id>
 archon docs search "known phrase from the fixture" --mode exact --debug
 archon docs search "similar meaning query" --mode semantic --debug
 archon docs search "mixed phrase and concept" --mode hybrid --debug

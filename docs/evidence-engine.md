@@ -58,6 +58,7 @@ CLI form (e.g., scripted from a shell):
 ```bash
 archon docs ingest ./policy-pack
 archon docs index --all
+archon docs index --document <document-id> --batch-size 64
 archon kb process --claims --entities --contradictions
 archon gametheory run "Assess the incentive structure of this plugin marketplace design" --budget 20 --max-concurrent 4
 archon meaning build --from gametheory-runs
@@ -69,11 +70,18 @@ TUI form (same flow, driven from inside an interactive session):
 ```
 > /docs ingest ./policy-pack
 > /docs index --all
+> /docs index --document <document-id> --batch-size 64
 > /kb process --claims --entities --contradictions
 > /gametheory run "Assess the incentive structure of this plugin marketplace design" --budget 20 --max-concurrent 4
 > /meaning build --from gametheory-runs
 > /constellation build --target strategic-workflow
 ```
+
+`docs index` reports candidate counting, embedding provider loading, candidate
+loading, per-window and per-batch start/finish counts, bulk vector storage,
+failures, skipped rows, and elapsed time. Normal pending indexing automatically
+uses bounded 1024-chunk windows when `--limit` is omitted, so large repairs do
+not need to materialize the whole backlog before progress starts.
 
 Every stage should leave physical evidence behind. Use the inspection commands
 instead of trusting return values:
