@@ -173,7 +173,7 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         tui_surface: "CLI mirror",
         status: SurfaceStatus::Done,
         source_of_truth: "src/command/registry.rs",
-        notes: "Pipeline run/status/resume/list/abort/cancel plus audited verify/inspect/export are mirrored; resume supports audited force-quality continuation.",
+        notes: "Pipeline run/status/resume/list/abort/cancel plus audited verify/inspect/export are mirrored; resume supports audited force-quality continuation and rewind quarantines contaminated completed records before TUI resume.",
     },
     CommandSurfaceRow {
         cli: "archon pipeline code <task>",
