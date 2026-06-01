@@ -29,5 +29,22 @@ pub(crate) async fn handle_status(db: DbInstance) -> Result<()> {
         summary.pdf_image_vlm_descriptions, summary.pdf_image_vlm_failures
     );
     println!("PDF rendered:    {} page(s)", summary.pdf_pages_rendered);
+    match archon_docs::index_queue::stats(&db) {
+        Ok(queue) => {
+            println!("Index queue:");
+            println!("  Pending:     {}", queue.pending);
+            println!("  Leased:      {}", queue.leased);
+            println!("  Indexed:     {}", queue.indexed);
+            println!("  Failed:      {}", queue.failed);
+        }
+        Err(e) => println!("Index queue:   unavailable — {e}"),
+    }
+    match archon_docs::index_jobs::summary(&db) {
+        Ok(jobs) => println!(
+            "Index jobs:     {} running, {} paused, {} completed, {} failed, {} cancelled",
+            jobs.running, jobs.paused, jobs.completed, jobs.failed, jobs.cancelled
+        ),
+        Err(e) => println!("Index jobs:    unavailable — {e}"),
+    }
     Ok(())
 }

@@ -319,9 +319,9 @@ fn reference_entry_count(refs: &str) -> usize {
         .count()
 }
 
-pub fn fallback_hld_reference() -> String {
-    "GSS / GKB Architecture Team. (2020). *HLD - Match Scoring* \
-     [Internal high-level design document]. Global Screening / GKB."
+pub fn fallback_reference_note() -> String {
+    "Primary references unavailable from the citation reconciler; use accepted \
+     source manifests and verified source outputs for manual reference repair."
         .to_string()
 }
 

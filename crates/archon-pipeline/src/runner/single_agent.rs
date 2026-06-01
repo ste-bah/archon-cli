@@ -1,6 +1,8 @@
 use anyhow::Result;
 
-use super::quality_gate::{force_acceptance_reason, quality_gate_acceptance};
+use super::quality_gate::{
+    force_acceptance_reason, has_non_bypassable_quality_failure, quality_gate_acceptance,
+};
 use super::support::{
     append_learning_context, append_reflexion_context, log_agent_completed, quality_failure_reason,
     record_reflexion_failure, record_research_agent_artifacts, reindex_modified_files,
@@ -166,7 +168,12 @@ async fn run_agent_attempts(
         result.quality = Some(quality.clone());
 
         let meets_threshold = quality.overall >= agent.quality_threshold;
-        let gate = quality_gate_acceptance(meets_threshold, agent, attempt, options);
+        let effective_options = if has_non_bypassable_quality_failure(&quality) {
+            PipelineRunOptions::default()
+        } else {
+            options
+        };
+        let gate = quality_gate_acceptance(meets_threshold, agent, attempt, effective_options);
         let failure_reason =
             (!meets_threshold).then(|| quality_failure_reason(agent, quality.overall));
         let failure_reason = if gate.force_accepted {

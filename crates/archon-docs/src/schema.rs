@@ -20,6 +20,8 @@ pub fn ensure_doc_schema(db: &DbInstance) -> Result<()> {
     ensure_doc_provenance_edges(db)?;
     ensure_doc_processing_jobs(db)?;
     ensure_doc_kb_memberships(db)?;
+    ensure_doc_index_queue(db)?;
+    ensure_doc_index_jobs(db)?;
     Ok(())
 }
 
@@ -27,13 +29,20 @@ pub fn ensure_doc_schema(db: &DbInstance) -> Result<()> {
 /// `dim` must be the dimension from the embedding provider.
 pub fn ensure_vec_schema(db: &DbInstance, dim: usize) -> Result<()> {
     ensure_vec_text_chunks(db, dim)?;
+    ensure_vec_text_embedding_cache(db, dim)?;
     ensure_vec_page_images(db, dim)?;
     Ok(())
 }
 
 /// Run a `:create` script, ignoring "already exists" errors only.
 fn run_create(db: &DbInstance, script: &str) -> Result<()> {
-    match db.run_script(script, Default::default(), ScriptMutability::Mutable) {
+    match crate::cozo_retry::run_script_guarded(
+        db,
+        script,
+        Default::default(),
+        ScriptMutability::Mutable,
+        "schema creation",
+    ) {
         Ok(_) => Ok(()),
         Err(e) => {
             let msg = e.to_string();
@@ -209,6 +218,46 @@ fn ensure_doc_kb_memberships(db: &DbInstance) -> Result<()> {
     )
 }
 
+fn ensure_doc_index_queue(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create doc_index_queue {
+            chunk_id: String =>
+            document_id: String,
+            content_hash: String,
+            priority: Int default 0,
+            status: String default "pending",
+            attempt_count: Int default 0,
+            lease_owner: String default "",
+            lease_expires_at: String default "",
+            last_error: String default "",
+            created_at: String,
+            updated_at: String,
+        }"#,
+    )
+}
+
+fn ensure_doc_index_jobs(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create doc_index_jobs {
+            job_id: String =>
+            scope: String,
+            document_id: String default "",
+            provider: String default "",
+            dimension: Int default 0,
+            status: String,
+            started_at: String,
+            completed_at: String default "",
+            leased: Int default 0,
+            indexed: Int default 0,
+            failed: Int default 0,
+            skipped: Int default 0,
+            last_error: String default "",
+        }"#,
+    )
+}
+
 fn ensure_vec_text_chunks(db: &DbInstance, dim: usize) -> Result<()> {
     // Create the stored relation with runtime dimension
     let create_rel = format!(
@@ -235,6 +284,19 @@ fn ensure_vec_text_chunks(db: &DbInstance, dim: usize) -> Result<()> {
     run_create(db, &create_idx)?;
 
     Ok(())
+}
+
+fn ensure_vec_text_embedding_cache(db: &DbInstance, dim: usize) -> Result<()> {
+    let create_rel = format!(
+        ":create vec_text_embedding_cache {{
+            provider: String,
+            content_hash: String
+            =>
+            chunk_id: String,
+            embedding: <F32; {dim}>
+        }}"
+    );
+    run_create(db, &create_rel)
 }
 
 fn ensure_vec_page_images(db: &DbInstance, dim: usize) -> Result<()> {

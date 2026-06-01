@@ -5,7 +5,12 @@ pub mod schema;
 pub mod store;
 
 pub mod chunking;
+mod cozo_retry;
 pub mod indexing;
+mod indexing_adaptive;
+mod indexing_cache;
+mod indexing_options;
+mod indexing_parallel;
 mod indexing_progress;
 mod indexing_result;
 mod indexing_store;
@@ -25,12 +30,23 @@ pub mod provenance;
 pub mod reprocess;
 pub mod status;
 mod tool_path;
+pub mod vector_migration;
+pub mod vector_store;
 
 pub mod answer;
 pub mod answer_timecode;
 pub mod embed;
 mod embed_config;
+mod embed_fastembed;
 mod embed_openai;
+pub mod index_jobs;
+pub mod index_queue;
+#[cfg(test)]
+mod index_queue_tests;
 pub mod rerank;
 pub mod retrieval;
 pub mod vlm;
+
+pub fn configure_cozo_write_lock_for_db(path: impl AsRef<std::path::Path>) {
+    cozo_retry::configure_write_lock_for_db(path);
+}

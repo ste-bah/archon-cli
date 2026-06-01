@@ -48,6 +48,7 @@ archon-cli specific overrides:
 | `skills/<name>/SKILL.md` or `skills/<name>.md` | Project-local user-authored skills |
 | `plugins/` | Project-local plugins |
 | `pipelines/<session-id>/` | Audited built-in pipeline bundle: manifest, checksum state, audit log, prompts, agent records, outputs, verification reports, exports |
+| `doc-vector-store/` | RocksDB raw document embeddings, content-hash embedding cache, and compacted Rust-HNSW snapshots |
 | `plugin-artifacts/`, `artifacts/`, `runs/` | Optional plugin and run artifacts discoverable by world-model backfill |
 | `settings.json` | Hooks definitions (alternative to TOML) |
 | `lsp.toml` | LSP server overrides |

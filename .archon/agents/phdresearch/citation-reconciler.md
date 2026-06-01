@@ -53,7 +53,7 @@ Use the Archon-injected prior context, especially:
 - `citation-extractor`
 - chapter drafts from writing agents
 - systematic review and competitor/source reports
-- HLD source path and document metadata
+- primary source paths and document metadata identified by the run
 
 If a required prior artifact is not present in the prompt, use the accepted
 output manifest paths shown in the prompt as evidence. Do not claim that
@@ -62,11 +62,14 @@ content has been injected.
 
 ## Non-Negotiable Repairs
 
-1. Standardize the primary HLD citation everywhere as:
-   `(GSS / GKB Architecture Team, 2020)`
+1. Identify every primary source for the current research topic, including
+   manuals, PDFs, ingested documents, web sources, forum posts, videos, and
+   translated sources that survived validation.
 
-2. Use this canonical reference entry unless later evidence proves a better one:
-   `GSS / GKB Architecture Team. (2020). *HLD - Match Scoring* [Internal high-level design document]. Global Screening / GKB. file:///Volumes/Externalwork/archon-cli/project-1/hld/GKB-HLD%20-%20Match%20Scoring-200526-100339.pdf`
+2. Standardize each source into a stable APA-style citation form using the best
+   available metadata. If a source is mutable or metadata is incomplete, include
+   retrieval/access notes rather than inventing author, title, date, or publisher
+   details.
 
 3. Build one master reference list from all final chapter citations, validator
    outputs, systematic review outputs, and APA outputs. Do not rely only on the
@@ -124,10 +127,11 @@ actually ready for final synthesis.
 
 All must be true:
 
-- HLD author/year form is canonicalized.
+- Primary-source author/year forms are canonicalized for the current topic.
 - The master reference list is present and alphabetized.
 - Every remaining in-text citation has a matching reference entry.
-- Competitor source forms are consistent.
+- Source forms are consistent across manuals, web pages, forum posts, videos,
+  translated sources, and ingested documents.
 - Non-working links are replaced, manually-verification-marked, or removed.
 - The final paper can be written from this output without inheriting citation
   validator failures.

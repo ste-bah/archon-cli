@@ -5,6 +5,7 @@ use crate::models::ProvenanceEdgeType;
 
 #[cfg(unix)]
 #[tokio::test]
+#[serial_test::serial(docs_global_state)]
 async fn test_pdf_ingest_persists_embedded_image_ocr_and_vlm_description() {
     reset_multimodal_test_providers();
     crate::ocr::provider::set_provider(Box::new(MockOcrProvider {
@@ -69,6 +70,7 @@ async fn test_pdf_ingest_persists_embedded_image_ocr_and_vlm_description() {
 
 #[cfg(unix)]
 #[tokio::test]
+#[serial_test::serial(docs_global_state)]
 async fn test_pdf_ingest_scanned_rendered_pages_get_vlm_descriptions() {
     reset_multimodal_test_providers();
     crate::ocr::provider::set_provider(Box::new(MockOcrProvider {
@@ -115,6 +117,7 @@ async fn test_pdf_ingest_scanned_rendered_pages_get_vlm_descriptions() {
 
 #[cfg(unix)]
 #[tokio::test]
+#[serial_test::serial(docs_global_state)]
 async fn test_pdf_single_image_vlm_failure_does_not_fail_document() {
     reset_multimodal_test_providers();
     crate::ocr::provider::set_provider(Box::new(MockOcrProvider {
@@ -168,6 +171,7 @@ async fn test_pdf_single_image_vlm_failure_does_not_fail_document() {
 
 #[cfg(unix)]
 #[tokio::test]
+#[serial_test::serial(docs_global_state)]
 async fn test_pdf_shared_xobject_image_has_edges_to_each_source_page() {
     reset_multimodal_test_providers();
     crate::ocr::provider::set_provider(Box::new(MockOcrProvider {
@@ -227,6 +231,7 @@ async fn test_pdf_shared_xobject_image_has_edges_to_each_source_page() {
 }
 
 #[tokio::test]
+#[serial_test::serial(docs_global_state)]
 async fn test_ingest_pipeline_failure_sets_failed_status() {
     let db = test_db();
     let dir = tempfile::tempdir().unwrap();

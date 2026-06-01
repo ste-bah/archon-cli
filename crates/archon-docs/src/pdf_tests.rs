@@ -83,6 +83,7 @@ fn image_filter_keeps_chart_size() {
 }
 
 #[tokio::test]
+#[serial_test::serial(docs_global_state)]
 async fn extract_pdf_unified_text_only_pdf_returns_empty_image_list() {
     let temp = tempfile::tempdir().unwrap();
     let pdf = temp.path().join("text.pdf");
@@ -108,6 +109,7 @@ async fn extract_pdf_unified_text_only_pdf_returns_empty_image_list() {
 }
 
 #[tokio::test]
+#[serial_test::serial(docs_global_state)]
 async fn extract_pdf_unified_mixed_pdf_returns_text_and_images() {
     let temp = tempfile::tempdir().unwrap();
     let pdf = temp.path().join("mixed.pdf");
@@ -141,6 +143,7 @@ async fn extract_pdf_unified_mixed_pdf_returns_text_and_images() {
 }
 
 #[tokio::test]
+#[serial_test::serial(docs_global_state)]
 async fn extract_pdf_unified_image_only_pdf_falls_back_to_render() {
     let temp = tempfile::tempdir().unwrap();
     let pdf = temp.path().join("scan.pdf");
@@ -173,6 +176,7 @@ async fn extract_pdf_unified_image_only_pdf_falls_back_to_render() {
 }
 
 #[tokio::test]
+#[serial_test::serial(docs_global_state)]
 async fn pdfimages_missing_falls_back_to_text_only_with_warning() {
     let temp = tempfile::tempdir().unwrap();
     let pdf = temp.path().join("text.pdf");

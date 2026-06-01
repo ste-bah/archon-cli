@@ -64,9 +64,8 @@ impl ResearchRlm {
             return String::new();
         }
 
-        let fallback_entries;
-        let entries = if self.entries.is_empty() {
-            fallback_entries = entries_from_session(session);
+        let fallback_entries = entries_from_session(session);
+        let entries = if fallback_entries.len() > self.entries.len() {
             fallback_entries.as_slice()
         } else {
             self.entries.as_slice()

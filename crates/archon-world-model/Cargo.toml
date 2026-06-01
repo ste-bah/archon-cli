@@ -19,6 +19,7 @@ tracing.workspace = true
 candle-core = { version = "0.10.2", optional = true }
 chrono.workspace = true
 cozo.workspace = true
+archon-cozo = { path = "../archon-cozo" }
 hex.workspace = true
 regex.workspace = true
 safetensors = "0.7.0"

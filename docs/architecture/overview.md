@@ -114,6 +114,13 @@ graph TB
 
 The remaining crates are internal helpers and test/observability support.
 
+Document intelligence uses split persistence: CozoDB remains the source of
+truth for source documents, chunks, provenance, queue rows, jobs, and statuses;
+raw document embeddings are stored in a RocksDB vector store under
+`.archon/doc-vector-store`; Rust-HNSW snapshots are compacted from those raw
+vectors for semantic retrieval. Legacy Cozo vectors can be migrated into the
+RocksDB store without re-embedding.
+
 ## Evidence Engine Flow
 
 The Evidence Engine adds a durable reasoning loop on top of the agent loop:
@@ -122,7 +129,10 @@ The Evidence Engine adds a durable reasoning loop on top of the agent loop:
 flowchart LR
     INPUT["Files, images, PDFs, prompts, code, user feedback"] --> INGEST["Ingest / Capture"]
     INGEST --> DOCROWS["Document rows<br/>pages, chunks, OCR, hashes"]
+    DOCROWS --> VECSTORE["RocksDB raw vectors<br/>content-hash cache"]
+    VECSTORE --> HNSW["Rust-HNSW snapshot<br/>vector-compact"]
     DOCROWS --> RETRIEVE["Exact + semantic + hybrid retrieval"]
+    HNSW --> RETRIEVE
     DOCROWS --> KBROWS["Knowledge rows<br/>claims, entities, relations, contradictions"]
     RETRIEVE --> AGENTS["Agents / pipelines / game theory"]
     KBROWS --> AGENTS

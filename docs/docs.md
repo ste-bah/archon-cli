@@ -23,6 +23,9 @@ Current `archon docs --help` surface:
 | `answer <query>` | Answer using document evidence | uses retrieved chunks |
 | `provenance <chunk-or-answer-id>` | Show provenance chain | chunk or answer component |
 | `index` | Embed and store vectors | `--all` re-indexes all chunks |
+| `vector-status` | Show vector store state | legacy Cozo rows, RocksDB rows, HNSW snapshot |
+| `vector-migrate` | Copy legacy vectors to RocksDB | resumable with `--after` |
+| `vector-compact` | Build Rust-HNSW snapshot | uses RocksDB raw vectors |
 | `model-status` | Report embedding backend | useful before ingest/index |
 
 ## Add Documents And Images
@@ -79,6 +82,17 @@ archon docs reprocess <document-id> --defer-index
 archon docs index
 archon docs index --document <document-id> --batch-size 64
 archon docs index --all --limit 500
+archon docs index-status
+archon docs index-retry-failed --limit 500
+archon docs index-pause <job-id>
+archon docs index-resume <job-id>
+archon docs index-cancel <job-id>
+archon docs index-daemon start --batch-size 64 --window-size 1024
+archon docs index-daemon status
+archon docs index-daemon stop
+archon docs vector-status
+archon docs vector-migrate --limit 1000 --batch-size 250
+archon docs vector-compact
 ```
 
 Inside the TUI:
@@ -89,6 +103,16 @@ Inside the TUI:
 /docs reprocess <document-id> --defer-index
 /docs index
 /docs index --document <document-id> --batch-size 64
+/docs index-status
+/docs index-retry-failed --limit 500
+/docs index-pause <job-id>
+/docs index-resume <job-id>
+/docs index-cancel <job-id>
+/docs index-daemon start
+/docs index-daemon status
+/docs vector-status
+/docs vector-migrate --limit 1000 --batch-size 250
+/docs vector-compact
 ```
 
 Reprocess is intentionally in-place. If the source file content has changed,
@@ -103,11 +127,53 @@ place, but the expensive global semantic indexing pass is left for one explicit
 there is no work, it exits without touching fastembed or a cloud endpoint.
 `--document <id>` scopes a retry to one source, `--batch-size` controls provider
 request size, and `--limit` lets you resume very large repairs in explicit
-slices. When `--limit` is omitted for normal pending indexing, Archon processes
-the backlog in bounded 1024-chunk windows instead of loading the full corpus at
-once. Long indexing runs print flushed progress for candidate loading, each
-window, bulk vector storage, failures, and elapsed time from the terminal or TUI
-transcript.
+slices. Normal pending indexing is backed by durable `doc_index_queue` and
+`doc_index_jobs` records: ingest enqueues pending chunks, index workers lease
+bounded windows, failed rows remain visible, and `index-retry-failed` moves
+failed rows back to pending. When `--limit` is omitted, Archon processes the
+queue in bounded 1024-chunk windows instead of loading the full corpus at once.
+Long indexing runs print flushed progress for queueing, leasing, bulk vector
+storage, failures, and elapsed time from the terminal or TUI transcript.
+Batch size adapts during the run: fast, healthy batches grow within bounded
+limits, while provider errors shrink the next request. Duplicate chunk text
+reuses an existing same-provider vector by content hash and records the chunk as
+indexed without a second model call.
+Embedding can run with an in-process worker pool while keeping one durable
+writer. Set `ARCHON_DOCS_INDEX_EMBEDDING_WORKERS=2` and
+`ARCHON_DOCS_INDEX_MAX_IN_FLIGHT_BATCHES=2` for a conservative first pass; keep
+`ARCHON_DOCS_INDEX_WRITER_BATCH_SIZE=256` unless RocksDB write latency says
+otherwise. Local fastembed only uses more than one worker when Archon starts
+multiple model instances, controlled by `ARCHON_DOCS_FASTEMBED_INSTANCES`
+(default: the requested worker count, capped at 4). Do not launch multiple
+`docs index` processes for parallelism: the single foreground/daemon process
+owns Cozo leases and serializes RocksDB/Cozo writes so queue rows are not
+double-claimed.
+The daemon form runs the same foreground index path in a separate Rust process,
+with its pid in `.archon/run/docs-index-daemon.pid` and output in
+`.archon/logs/docs-index-daemon.log`.
+
+## Vector Store Migration
+
+New semantic indexing writes raw embeddings to `.archon/doc-vector-store`
+using RocksDB. Cozo remains the source of truth for documents, chunks, jobs,
+provenance, and statuses; raw vectors move out of the hot Cozo write path so
+large indexing runs avoid Cozo/HNSW lock contention. Rust-HNSW snapshots are
+built separately from the RocksDB raw-vector store.
+
+Existing vectors are not thrown away. Migrate legacy Cozo vector rows in safe
+slices:
+
+```bash
+archon docs vector-status
+archon docs vector-migrate --limit 1000 --batch-size 250
+archon docs vector-migrate --after <last-chunk-id> --limit 1000
+archon docs vector-compact
+```
+
+`vector-migrate` skips rows already present in RocksDB and prints a resume hint
+with the last scanned chunk id. `vector-compact` builds the Rust-HNSW snapshot
+for retrieval from the migrated or newly indexed vectors. Legacy Cozo vector
+writes are opt-in only via `ARCHON_DOCS_LEGACY_COZO_VECTOR_WRITE=1`.
 
 ## Video Sources
 
@@ -187,6 +253,9 @@ Interactive sessions expose the document evidence browser through `/docs`:
 | `/docs inspect <document-id>` | Inspect a document |
 | `/docs chunks <document-id>` | List persisted chunks |
 | `/docs provenance <chunk-or-artifact-id>` | Show incoming/outgoing provenance edges |
+| `/docs vector-status` | Show legacy Cozo, RocksDB, and Rust-HNSW vector state |
+| `/docs vector-migrate` | Copy existing Cozo vectors into RocksDB without re-embedding |
+| `/docs vector-compact` | Build a Rust-HNSW snapshot from RocksDB vectors |
 | `/docs model-status` | Show embedding backend/vector state |
 
 The read-side slash commands inspect the same Cozo source of truth as

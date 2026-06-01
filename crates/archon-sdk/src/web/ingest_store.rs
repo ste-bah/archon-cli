@@ -11,8 +11,9 @@ use super::{
     WebRuntimePaths,
     api::EffectivePolicySummary,
     ingest::{
-        WebDocStoreItem, WebIngestJob, WebIngestSummary, WebKbCreateRequest, WebKnowledgeBaseItem,
-        WebKnowledgeStats, WebVideoStoreItem, ingest_allowed,
+        WebDocStoreItem, WebIndexFailureItem, WebIndexJobItem, WebIndexQueueSummary, WebIngestJob,
+        WebIngestSummary, WebKbCreateRequest, WebKnowledgeBaseItem, WebKnowledgeStats,
+        WebVideoStoreItem, ingest_allowed,
     },
     inspect::PathProbe,
 };
@@ -32,25 +33,49 @@ pub(crate) fn summary(
         documents = doc_items(&db, &mut warnings);
         videos = video_items(&db, &mut warnings);
         knowledge_stats = kb_stats(&db, &mut warnings);
+        let index_queue = index_queue_summary(&db, &mut warnings);
+        let index_jobs = index_jobs(&db, &mut warnings);
+        let index_failures = index_failures(&db, &mut warnings);
+        return WebIngestSummary {
+            allowed,
+            policy_reason,
+            stores: stores(paths, db_path),
+            documents,
+            videos,
+            knowledge_bases: knowledge_bases(paths),
+            kb_stats: knowledge_stats,
+            jobs,
+            index_queue,
+            index_jobs,
+            index_failures,
+            warnings,
+        };
     } else {
         warnings.push("document store is not readable right now".into());
     }
     WebIngestSummary {
         allowed,
         policy_reason,
-        stores: vec![
-            probe("document store", db_path),
-            probe("project docs", paths.cwd.join(".archon/docs")),
-            probe("project kb", paths.cwd.join(".archon/kb")),
-            probe("video artifacts", paths.cwd.join(".archon/video-artifacts")),
-        ],
+        stores: stores(paths, db_path),
         documents,
         videos,
         knowledge_bases: knowledge_bases(paths),
         kb_stats: knowledge_stats,
         jobs,
+        index_queue: WebIndexQueueSummary::default(),
+        index_jobs: Vec::new(),
+        index_failures: Vec::new(),
         warnings,
     }
+}
+
+fn stores(paths: &WebRuntimePaths, db_path: PathBuf) -> Vec<PathProbe> {
+    vec![
+        probe("document store", db_path),
+        probe("project docs", paths.cwd.join(".archon/docs")),
+        probe("project kb", paths.cwd.join(".archon/kb")),
+        probe("video artifacts", paths.cwd.join(".archon/video-artifacts")),
+    ]
 }
 
 pub(crate) fn create_kb(
@@ -173,6 +198,91 @@ fn kb_stats(db: &DbInstance, warnings: &mut Vec<String>) -> WebKnowledgeStats {
         warnings.push("knowledge graph relations are empty or not initialized yet".into());
     }
     stats
+}
+
+fn index_queue_summary(db: &DbInstance, warnings: &mut Vec<String>) -> WebIndexQueueSummary {
+    let summary = WebIndexQueueSummary {
+        pending: count_index_status(db, "pending"),
+        leased: count_index_status(db, "leased"),
+        indexed: count_index_status(db, "indexed"),
+        failed: count_index_status(db, "failed"),
+    };
+    if summary == WebIndexQueueSummary::default() {
+        warnings.push("semantic index queue is empty or not initialized yet".into());
+    }
+    summary
+}
+
+fn index_jobs(db: &DbInstance, warnings: &mut Vec<String>) -> Vec<WebIndexJobItem> {
+    match db.run_script(
+        "?[job_id, scope, provider, status, started_at, leased, indexed, failed, skipped, last_error] :=
+            *doc_index_jobs{job_id, scope, provider, status, started_at, leased, indexed, failed, skipped, last_error}
+         :order -started_at :limit 8",
+        BTreeMap::new(),
+        ScriptMutability::Immutable,
+    ) {
+        Ok(result) => result.rows.iter().map(|row| index_job_from_row(row)).collect(),
+        Err(err) => {
+            warnings.push(format!("index job listing failed: {err}"));
+            Vec::new()
+        }
+    }
+}
+
+fn index_failures(db: &DbInstance, warnings: &mut Vec<String>) -> Vec<WebIndexFailureItem> {
+    match db.run_script(
+        "?[chunk_id, document_id, attempt_count, last_error, updated_at] :=
+            *doc_index_queue{chunk_id, document_id, status, attempt_count, last_error, updated_at},
+            status = \"failed\"
+         :order -updated_at :limit 8",
+        BTreeMap::new(),
+        ScriptMutability::Immutable,
+    ) {
+        Ok(result) => result
+            .rows
+            .iter()
+            .map(|row| index_failure_from_row(row))
+            .collect(),
+        Err(err) => {
+            warnings.push(format!("index failure listing failed: {err}"));
+            Vec::new()
+        }
+    }
+}
+
+fn count_index_status(db: &DbInstance, status: &str) -> u64 {
+    let mut params = BTreeMap::new();
+    params.insert("status".into(), DataValue::from(status));
+    run_count(
+        db,
+        "?[count(chunk_id)] := *doc_index_queue{chunk_id, status}, status = $status",
+        params,
+    )
+}
+
+fn index_job_from_row(row: &[DataValue]) -> WebIndexJobItem {
+    WebIndexJobItem {
+        job_id: str_cell(row, 0),
+        scope: str_cell(row, 1),
+        provider: str_cell(row, 2),
+        status: str_cell(row, 3),
+        started_at: str_cell(row, 4),
+        leased: int_cell(row, 5),
+        indexed: int_cell(row, 6),
+        failed: int_cell(row, 7),
+        skipped: int_cell(row, 8),
+        last_error: str_cell(row, 9),
+    }
+}
+
+fn index_failure_from_row(row: &[DataValue]) -> WebIndexFailureItem {
+    WebIndexFailureItem {
+        chunk_id: str_cell(row, 0),
+        document_id: str_cell(row, 1),
+        attempt_count: int_cell(row, 2),
+        last_error: str_cell(row, 3),
+        updated_at: str_cell(row, 4),
+    }
 }
 
 fn count_by_doc(db: &DbInstance, relation: &str, key: &str, document_id: &str) -> u64 {

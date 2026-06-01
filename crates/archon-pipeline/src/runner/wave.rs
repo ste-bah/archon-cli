@@ -1,7 +1,9 @@
 use anyhow::Result;
 use futures_util::future::join_all;
 
-use super::quality_gate::{force_acceptance_reason, quality_gate_acceptance};
+use super::quality_gate::{
+    force_acceptance_reason, has_non_bypassable_quality_failure, quality_gate_acceptance,
+};
 use super::support::{
     append_learning_context, log_wave_agent_completed, quality_failure_reason,
     record_reflexion_failure, reindex_modified_files,
@@ -70,7 +72,17 @@ pub(super) async fn run_parallel_wave(
             let meets_threshold = quality.overall >= prepared.agent.quality_threshold;
             let failure_reason = (!meets_threshold)
                 .then(|| quality_failure_reason(&prepared.agent, quality.overall));
-            let gate = quality_gate_acceptance(meets_threshold, &prepared.agent, attempt, options);
+            let effective_options = if has_non_bypassable_quality_failure(&quality) {
+                PipelineRunOptions::default()
+            } else {
+                options
+            };
+            let gate = quality_gate_acceptance(
+                meets_threshold,
+                &prepared.agent,
+                attempt,
+                effective_options,
+            );
             let failure_reason = if gate.force_accepted {
                 Some(force_acceptance_reason(failure_reason))
             } else {

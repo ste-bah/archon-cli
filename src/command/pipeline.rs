@@ -46,6 +46,23 @@ pub async fn handle_pipeline_command(
             )
             .await?;
         }
+        PipelineAction::Rewind {
+            session_id,
+            to_agent,
+            to_ordinal,
+            keep_agents,
+            reason,
+        } => {
+            crate::command::pipeline_rewind::handle_rewind(
+                &cwd,
+                session_id,
+                to_agent.as_deref(),
+                *to_ordinal,
+                *keep_agents,
+                reason,
+            )
+            .await?;
+        }
         PipelineAction::List => {
             crate::command::pipeline_bundle::handle_list(&cwd).await?;
         }

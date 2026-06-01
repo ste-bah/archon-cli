@@ -34,6 +34,9 @@ subagents, coding/research pipelines, and gametheory through Codex.
 | `archon pipeline research <TOPIC> [--dry-run]` | Run the research pipeline on a topic using the configured provider |
 | `archon pipeline status <SESSION_ID>` | Show pipeline session status |
 | `archon pipeline resume <SESSION_ID> [--force-quality-gate]` | Resume an interrupted pipeline session; the force flag audits and continues past critical quality-gate failure only |
+| `archon pipeline rewind <SESSION_ID> --to-agent <KEY>` | Quarantine completed audited agent records from `<KEY>` onward so the next resume re-runs them |
+| `archon pipeline rewind <SESSION_ID> --to-ordinal <N>` | Rewind to an accepted agent ordinal when the agent key is unavailable |
+| `archon pipeline rewind <SESSION_ID> --keep-agents <N>` | Low-level rewind form that keeps exactly `N` completed agent records |
 | `archon pipeline list` | List all pipeline sessions |
 | `archon pipeline abort <SESSION_ID>` | Abort a running pipeline session |
 | `archon pipeline verify <SESSION_ID> [--write-report]` | Verify an audited built-in pipeline bundle and optionally write `verification/report.json` |

@@ -23,12 +23,6 @@ fn reconciler_failure(output: &str) -> Option<String> {
     if !lower.contains("master reference list") {
         return Some("citation reconciler must emit a master reference list".into());
     }
-    if !lower.contains("gss / gkb architecture team")
-        || !lower.contains("hld - match scoring")
-        || !lower.contains("2020")
-    {
-        return Some("citation reconciler must canonicalize the primary HLD source".into());
-    }
     None
 }
 
@@ -54,7 +48,7 @@ fn file_length_failure(output: &str) -> Option<String> {
 
 fn final_paper_failure(output: &str) -> Option<String> {
     let lower = normalized(output);
-    if contains_failure_marker(&lower) || lower.contains("gkb hld, 2026") {
+    if contains_failure_marker(&lower) {
         return Some("final paper still contains unresolved citation failure language".into());
     }
     if word_count(output) < FINAL_PAPER_MIN_WORDS {
@@ -92,9 +86,9 @@ fn contains_failure_marker(lower: &str) -> bool {
         "invalid cross-reference integrity",
         "unresolved orphaned in-text citations",
         "remaining orphaned in-text citations",
-        "unresolved hld author/year mismatch",
     ];
     MARKERS.iter().any(|marker| lower.contains(marker))
+        || (lower.contains("unresolved") && lower.contains("author/year mismatch"))
 }
 
 fn normalized(output: &str) -> String {
@@ -136,19 +130,18 @@ mod tests {
         let output = "# Citation Repair\n\
             **Citation Repair Status**: PASS\n\
             ## Master Reference List\n\
-            GSS / GKB Architecture Team. (2020). *HLD - Match Scoring*.";
+            Boris FX. (2026). *Sequoia user manual*.";
         assert!(hard_failure("citation-reconciler", output).is_none());
     }
 
     #[test]
-    fn reconciler_can_mention_repaired_bad_hld_citation() {
+    fn reconciler_can_note_removed_topic_specific_citation() {
         let output = "# Citation Repair\n\
             **Citation Repair Status**: PASS\n\
             ## Master Reference List\n\
-            GSS / GKB Architecture Team. (2020). *HLD - Match Scoring*.\n\
+            Boris FX. (2026). *Sequoia user manual*.\n\
             ## Removed or Downgraded Citations\n\
-            `(GKB HLD, 2026)` was removed and replaced with \
-            `(GSS / GKB Architecture Team, 2020)`.";
+            An unsupported forum citation was removed from the final reference list.";
         assert!(hard_failure("citation-reconciler", output).is_none());
     }
 
@@ -156,15 +149,6 @@ mod tests {
     fn final_paper_rejects_unresolved_gate_language() {
         let output = "# Paper\n\n## References\n\nCitation integrity status: FAIL";
         assert!(hard_failure("chapter-synthesizer", output).is_some());
-    }
-
-    #[test]
-    fn final_paper_rejects_bad_hld_citation() {
-        let filler = "word ".repeat(6_100);
-        let output = format!(
-            "# Paper\n\n## Abstract\n\n{filler}\n\n## Introduction\n\n(GKB HLD, 2026)\n\n## References"
-        );
-        assert!(hard_failure("chapter-synthesizer", &output).is_some());
     }
 
     #[test]

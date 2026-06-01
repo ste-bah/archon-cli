@@ -42,7 +42,7 @@ This matrix is not a replacement for the final PRD §5 integration transcript. I
 | REQ-DOCS-005 | DONE | `crates/archon-docs/src/chunk.rs`, `crates/archon-docs/src/store.rs` | Page boundaries and offsets are persisted. |
 | REQ-DOCS-006 | DONE | `crates/archon-docs/src/ingest.rs`, `crates/archon-docs/src/store.rs` | Chunk IDs and page ranges persist in `doc_chunks`. |
 | REQ-DOCS-007 | DONE | `crates/archon-docs/src/embed.rs`, `crates/archon-docs/src/retrieval.rs` | Chunks embed through configured provider with explicit missing-provider errors. |
-| REQ-DOCS-008 | DONE | `crates/archon-docs/src/schema.rs`, `crates/archon-docs/src/retrieval.rs` | Cozo HNSW vector schema/search is wired. |
+| REQ-DOCS-008 | DONE | `crates/archon-docs/src/vector_store.rs`, `crates/archon-docs/src/vector_migration.rs`, `crates/archon-docs/src/retrieval.rs` | RocksDB raw-vector storage, legacy Cozo vector migration, and Rust-HNSW snapshot search are wired. |
 | REQ-DOCS-009 | DONE | `crates/archon-docs/src/schema.rs`, `crates/archon-docs/src/retrieval.rs`, `src/command/docs.rs` | Exact, semantic, and hybrid modes exist with FTS and weighted scoring. |
 | REQ-DOCS-010 | DONE | `crates/archon-docs/src/answer.rs`, `src/command/docs.rs` | Answers persist citation provenance edges from answer to cited chunks. |
 | REQ-DOCS-011 | PARTIAL | `src/command/docs.rs`, `crates/archon-docs/src/retrieval.rs` | Search debug shows norms/scores/provenance; answer-specific debug mode still needs final proof. |

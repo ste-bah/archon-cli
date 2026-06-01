@@ -9,14 +9,10 @@ pub mod jsonl;
 pub mod retention;
 
 use std::collections::HashSet;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
-use std::thread;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
-use cozo::DbInstance;
+use cozo::{DbInstance, ScriptMutability};
 
 use crate::schema::WorldTraceRow;
 use crate::trace::ColdStartStats;
@@ -37,7 +33,6 @@ pub struct WorldModelStore {
 }
 
 const COZO_LOCK_RETRY_DELAYS_MS: [u64; 7] = [25, 50, 100, 200, 400, 800, 1_600];
-static COZO_PANIC_HOOK_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 impl WorldModelStore {
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
@@ -51,13 +46,17 @@ impl WorldModelStore {
         std::fs::create_dir_all(root.join("ledgers"))?;
 
         let db_path = root.join("world-model.db");
-        let db = retry_cozo_lock("open world-model Cozo store", || {
-            let db = DbInstance::new("sqlite", &db_path, "")
-                .map_err(|e| anyhow::anyhow!("open world-model Cozo store failed: {e}"))?;
-            cozo_store::ensure_schema(&db)?;
-            Ok(db)
-        })
-        .with_context(|| format!("world-model Cozo store at {}", db_path.display()))?;
+        let config = cozo_config(&db_path);
+        let db_path_str = db_path.to_string_lossy().to_string();
+        let db =
+            archon_cozo::open_sqlite_guarded(&db_path_str, "open world-model Cozo store", &config)
+                .with_context(|| format!("world-model Cozo store at {}", db_path.display()))?;
+        archon_cozo::run_guarded(
+            "ensure world-model Cozo schema",
+            ScriptMutability::Mutable,
+            &config,
+            || cozo_store::ensure_schema(&db),
+        )?;
 
         Ok(Self { root, db_path, db })
     }
@@ -73,7 +72,12 @@ impl WorldModelStore {
     ) -> Result<PersistSummary> {
         retention::apply_retention(&self.root, policy)?;
         let ledger_path = jsonl::append_rows(&self.root, rows)?;
-        let cozo_rows = cozo_store::put_rows(&self.db, rows)?;
+        let cozo_rows = archon_cozo::run_guarded(
+            "persist world-model rows",
+            ScriptMutability::Mutable,
+            &self.cozo_config(),
+            || cozo_store::put_rows(&self.db, rows),
+        )?;
 
         Ok(PersistSummary {
             jsonl_rows: rows.len(),
@@ -84,81 +88,44 @@ impl WorldModelStore {
     }
 
     pub fn cold_start_stats(&self) -> Result<ColdStartStats> {
-        cozo_store::cold_start_stats(&self.db)
+        archon_cozo::run_guarded(
+            "load world-model cold-start stats",
+            ScriptMutability::Immutable,
+            &self.cozo_config(),
+            || cozo_store::cold_start_stats(&self.db),
+        )
     }
 
     pub fn load_rows(&self) -> Result<Vec<WorldTraceRow>> {
-        retry_cozo_lock("load world-model rows", || cozo_store::all_rows(&self.db))
+        archon_cozo::run_guarded(
+            "load world-model rows",
+            ScriptMutability::Immutable,
+            &self.cozo_config(),
+            || cozo_store::all_rows(&self.db),
+        )
     }
 
     pub fn row_ids(&self) -> Result<HashSet<String>> {
-        cozo_store::row_ids(&self.db)
+        archon_cozo::run_guarded(
+            "load world-model row ids",
+            ScriptMutability::Immutable,
+            &self.cozo_config(),
+            || cozo_store::row_ids(&self.db),
+        )
+    }
+
+    fn cozo_config(&self) -> archon_cozo::CozoGuardConfig {
+        cozo_config(&self.db_path)
     }
 }
 
-fn retry_cozo_lock<T>(operation: &'static str, mut run: impl FnMut() -> Result<T>) -> Result<T> {
-    for attempt in 0..=COZO_LOCK_RETRY_DELAYS_MS.len() {
-        match catch_cozo_operation(operation, &mut run) {
-            Ok(value) => return Ok(value),
-            Err(error)
-                if is_cozo_lock_error(&error) && attempt < COZO_LOCK_RETRY_DELAYS_MS.len() =>
-            {
-                let delay = COZO_LOCK_RETRY_DELAYS_MS[attempt];
-                tracing::warn!(
-                    operation,
-                    attempt = attempt + 1,
-                    delay_ms = delay,
-                    error = %error,
-                    "world-model Cozo store locked; retrying"
-                );
-                thread::sleep(Duration::from_millis(delay));
-            }
-            Err(error) => return Err(error),
-        }
-    }
-    unreachable!("retry loop returns from all terminal paths")
-}
-
-fn catch_cozo_operation<T>(
-    operation: &'static str,
-    run: &mut impl FnMut() -> Result<T>,
-) -> Result<T> {
-    let hook_lock = COZO_PANIC_HOOK_LOCK.get_or_init(|| Mutex::new(()));
-    let _guard = hook_lock.lock().expect("cozo panic hook lock poisoned");
-    let hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
-    let result = catch_unwind(AssertUnwindSafe(run));
-    std::panic::set_hook(hook);
-
-    match result {
-        Ok(result) => result,
-        Err(payload) => Err(anyhow::anyhow!(
-            "{operation} panicked: {}",
-            panic_payload_message(payload)
-        )),
-    }
-}
-
-fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
-    if let Some(message) = payload.downcast_ref::<String>() {
-        message.clone()
-    } else if let Some(message) = payload.downcast_ref::<&str>() {
-        (*message).to_owned()
-    } else {
-        "unknown panic payload".to_owned()
-    }
-}
-
-fn is_cozo_lock_error(error: &anyhow::Error) -> bool {
-    is_cozo_lock_message(&format!("{error:#}"))
-}
-
-fn is_cozo_lock_message(message: &str) -> bool {
-    let message = message.to_ascii_lowercase();
-    message.contains("database is locked")
-        || message.contains("database table is locked")
-        || message.contains("sqlite_busy")
-        || message.contains("locked (code 5)")
+fn cozo_config(db_path: &Path) -> archon_cozo::CozoGuardConfig {
+    let mut config = archon_cozo::CozoGuardConfig::for_db_path(db_path);
+    config.max_attempts = COZO_LOCK_RETRY_DELAYS_MS.len() + 1;
+    config.initial_backoff = std::time::Duration::from_millis(COZO_LOCK_RETRY_DELAYS_MS[0]);
+    config.max_backoff =
+        std::time::Duration::from_millis(*COZO_LOCK_RETRY_DELAYS_MS.last().unwrap_or(&1_600));
+    config
 }
 
 #[cfg(test)]
@@ -218,25 +185,64 @@ mod tests {
 
     #[test]
     fn cozo_lock_classifier_matches_sqlite_lock_messages() {
-        assert!(is_cozo_lock_message("database is locked (code 5)"));
-        assert!(is_cozo_lock_message(
+        assert!(archon_cozo::is_retryable_cozo_error(
+            "database is locked (code 5)"
+        ));
+        assert!(archon_cozo::is_retryable_cozo_error(
             "called Result::unwrap() on an Err value: database is locked"
         ));
-        assert!(!is_cozo_lock_message("permission denied"));
+        assert!(!archon_cozo::is_retryable_cozo_error("permission denied"));
     }
 
     #[test]
-    fn retry_cozo_lock_retries_transient_lock_errors() {
+    fn guarded_cozo_retries_transient_lock_errors() {
         let mut attempts = 0;
+        let config = archon_cozo::CozoGuardConfig {
+            initial_backoff: std::time::Duration::from_millis(1),
+            max_backoff: std::time::Duration::from_millis(1),
+            ..Default::default()
+        };
 
-        let value = retry_cozo_lock("test cozo retry", || {
-            attempts += 1;
-            if attempts == 1 {
-                Err(anyhow::anyhow!("database is locked (code 5)"))
-            } else {
+        let value = archon_cozo::run_guarded(
+            "test cozo retry",
+            cozo::ScriptMutability::Mutable,
+            &config,
+            || {
+                attempts += 1;
+                if attempts == 1 {
+                    Err(anyhow::anyhow!("database is locked (code 5)"))
+                } else {
+                    Ok("ready")
+                }
+            },
+        )
+        .unwrap();
+
+        assert_eq!(value, "ready");
+        assert_eq!(attempts, 2);
+    }
+
+    #[test]
+    fn guarded_cozo_retries_transient_lock_panics() {
+        let mut attempts = 0;
+        let config = archon_cozo::CozoGuardConfig {
+            initial_backoff: std::time::Duration::from_millis(1),
+            max_backoff: std::time::Duration::from_millis(1),
+            ..Default::default()
+        };
+
+        let value = archon_cozo::run_guarded(
+            "test cozo retry",
+            cozo::ScriptMutability::Mutable,
+            &config,
+            || {
+                attempts += 1;
+                if attempts == 1 {
+                    panic!("database is locked");
+                }
                 Ok("ready")
-            }
-        })
+            },
+        )
         .unwrap();
 
         assert_eq!(value, "ready");
@@ -244,33 +250,29 @@ mod tests {
     }
 
     #[test]
-    fn retry_cozo_lock_retries_transient_lock_panics() {
+    fn guarded_cozo_does_not_retry_non_lock_errors() {
         let mut attempts = 0;
-
-        let value = retry_cozo_lock("test cozo retry", || {
-            attempts += 1;
-            if attempts == 1 {
-                panic!("database is locked");
-            }
-            Ok("ready")
-        })
-        .unwrap();
-
-        assert_eq!(value, "ready");
-        assert_eq!(attempts, 2);
-    }
-
-    #[test]
-    fn retry_cozo_lock_does_not_retry_non_lock_errors() {
-        let mut attempts = 0;
-
-        let error = retry_cozo_lock("test cozo retry", || -> Result<()> {
-            attempts += 1;
-            Err(anyhow::anyhow!("permission denied"))
-        })
+        let error = archon_cozo::run_guarded(
+            "test cozo retry",
+            cozo::ScriptMutability::Mutable,
+            &archon_cozo::CozoGuardConfig::default(),
+            || -> Result<()> {
+                attempts += 1;
+                Err(anyhow::anyhow!("permission denied"))
+            },
+        )
         .unwrap_err();
 
         assert!(error.to_string().contains("permission denied"));
         assert_eq!(attempts, 1);
+    }
+
+    #[test]
+    fn world_model_config_uses_db_sidecar_lock() {
+        let config = cozo_config(Path::new("/tmp/world-model.db"));
+        assert_eq!(
+            config.write_lock_path.unwrap(),
+            PathBuf::from("/tmp/world-model.db.archon-cozo-write.lock")
+        );
     }
 }

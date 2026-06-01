@@ -344,6 +344,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial(docs_global_state)]
     async fn test_scanned_pdf_fallback_renders_pages_and_ocr_source_of_truth() {
         let temp = tempfile::tempdir().unwrap();
         let log = temp.path().join("commands.log");

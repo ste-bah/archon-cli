@@ -3,4 +3,5 @@ pub struct IndexResult {
     pub indexed: usize,
     pub failed: usize,
     pub skipped: usize,
+    pub cache_hits: usize,
 }

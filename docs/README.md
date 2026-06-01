@@ -92,6 +92,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Memory-driven coding](cookbook/memory-driven-coding.md) — using SONA + ReasoningBank to inform decisions
 - [Coding pipeline (`/archon-code`)](cookbook/god-code-pipeline.md) — 50-agent coding workflow end-to-end inside the TUI
 - [Research pipeline (`/archon-research`)](cookbook/archon-research-pipeline.md) — 47-agent PhD research workflow end-to-end inside the TUI
+- [Pipeline rewind](cookbook/pipeline-rewind.md) — audited recovery when accepted pipeline outputs are contaminated and must be regenerated
 - [Game-theory pipeline (`/gametheory`)](cookbook/gametheory-pipeline.md) — Tier 1 classify → route → specialists → report end-to-end inside the TUI
 - [Trading and asset analysis with `/gametheory`](cookbook/trading-with-gametheory.md) — applying the game-theory pipeline to pre-trade assessment, post-event decomposition, counterparty analysis, strategy-viability tests, and macro reaction-function modelling
 - [World-model and JEPA training](cookbook/world-model-dynamic-training.md) — fresh setup, readiness checks, training, eval, promotion, and idle-aware trainer behavior
@@ -128,6 +129,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v1.3.9](release-notes/v1.3.9.md) — RocksDB document vector store, resumable legacy-vector migration, Rust-HNSW compaction, durable index queue/daemon controls, and vector diagnostics
 - [v1.3.8](release-notes/v1.3.8.md) — Cognitive Executive Loop, autonomous cognitive ticks, opt-in Rust daemon, executive-state CLI/TUI/web surfaces, and safety-gated self-model/world-model coordination
 - [v1.3.7](release-notes/v1.3.7.md) — Autonomous governed-learning tick, policy-gated self-application, provider-resolved pipeline subagent activity, and updated learning docs
 - [v1.3.6](release-notes/v1.3.6.md) — Video evidence capture fallbacks: caption-first ingest, frame-friendly `yt-dlp`, OpenCV frame fallback, and RapidOCR image/frame OCR

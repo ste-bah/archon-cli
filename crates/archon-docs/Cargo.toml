@@ -15,6 +15,7 @@ base64.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 uuid = { workspace = true, features = ["v4"] }
 sha2.workspace = true
+blake3.workspace = true
 hex.workspace = true
 chrono.workspace = true
 cozo.workspace = true
@@ -23,10 +24,14 @@ walkdir = "2"
 fastembed.workspace = true
 ndarray.workspace = true
 dirs.workspace = true
+hnsw_rs.workspace = true
+rust-rocksdb.workspace = true
 archon-policy = { path = "../archon-policy" }
 archon-provenance = { path = "../archon-provenance" }
 archon-llm = { path = "../archon-llm" }
+archon-cozo = { path = "../archon-cozo" }
 tempfile.workspace = true
 
 [dev-dependencies]
+serial_test.workspace = true
 wiremock.workspace = true

@@ -12,6 +12,7 @@ pub enum EmbeddingProviderSelection {
 pub struct EmbeddingProviderConfig {
     pub selection: EmbeddingProviderSelection,
     pub local_load_timeout: Duration,
+    pub local_instances: usize,
     pub openai_api_key: Option<String>,
     pub openai_base_url: Option<String>,
     pub openai_model: Option<String>,
@@ -35,6 +36,7 @@ impl EmbeddingProviderConfig {
         Self {
             selection,
             local_load_timeout: default_load_timeout(),
+            local_instances: local_fastembed_instances(),
             openai_api_key: docs_openai_key(),
             openai_base_url: env_nonempty("ARCHON_DOCS_EMBEDDING_BASE_URL")
                 .or_else(|| env_nonempty("OPENAI_BASE_URL")),
@@ -46,6 +48,13 @@ impl EmbeddingProviderConfig {
 
 pub(crate) fn default_load_timeout() -> Duration {
     Duration::from_secs(env_u64("ARCHON_DOCS_EMBEDDING_LOAD_TIMEOUT_SECS", 180))
+}
+
+fn local_fastembed_instances() -> usize {
+    env_usize("ARCHON_DOCS_FASTEMBED_INSTANCES")
+        .or_else(|| env_usize("ARCHON_DOCS_INDEX_EMBEDDING_WORKERS"))
+        .unwrap_or(1)
+        .clamp(1, 4)
 }
 
 fn docs_openai_key() -> Option<String> {
@@ -63,4 +72,8 @@ fn env_u64(name: &str, default: u64) -> u64 {
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(default)
+}
+
+fn env_usize(name: &str) -> Option<usize> {
+    std::env::var(name).ok()?.parse().ok()
 }

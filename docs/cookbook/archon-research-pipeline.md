@@ -49,6 +49,19 @@ stopped only because a critical agent missed its quality threshold after all
 attempts, review the attempt output and then use `--force-quality-gate`; Archon
 audits the override and continues from the next agent.
 
+If a completed writer, reviewer, citation, or synthesis output is wrong, do not
+resume over it and do not launch another `/archon-research` for the same work.
+Rewind the existing audited research bundle to the earliest bad accepted agent
+first:
+
+```text
+> /pipeline rewind <session-id> --to-agent conclusion-writer --reason "bad accepted output"
+> /pipeline resume <session-id>
+```
+
+Rewind quarantines active audited agent records from that point onward, then the
+TUI-aware resume path regenerates them and shows renewed Agent Activity rows.
+
 Equivalent CLI invocation (same persisted state, same outputs):
 
 ```bash
@@ -195,6 +208,7 @@ Resumeable: yes
 > /pipeline list
 > /pipeline resume 01HYCDF3RR…
 > /pipeline resume 01HYCDF3RR… --force-quality-gate
+> /pipeline rewind 01HYCDF3RR… --to-agent conclusion-writer
 [recovery] verifying git working tree...
 [recovery] verifying audited bundle...
 [recovery] last completed agent: evidence-synthesizer
@@ -290,6 +304,7 @@ A project-local agent definition takes precedence over the built-in. Useful when
 
 - [PRD-driven development](prd-driven-development.md) — `/to-prd` → `/prd-to-spec` → `/spec-to-tasks` → `/archon-code`
 - [Coding pipeline (`/archon-code`)](god-code-pipeline.md) — sibling 50-agent pipeline for code instead of prose
+- [Pipeline rewind](pipeline-rewind.md) — audited cleanup when accepted downstream outputs are contaminated
 - [Game-theory pipeline (`/gametheory`)](gametheory-pipeline.md) — sibling pipeline for strategic situation analysis (Tier 1 fingerprint → routing → specialists → report)
 - [Real-world Evidence Engine](real-world-evidence-engine.md) — composing docs + KB + research + provenance + governed learning
 - [Pipelines architecture](../architecture/pipelines.md)

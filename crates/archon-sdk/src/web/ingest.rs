@@ -30,6 +30,9 @@ pub struct WebIngestSummary {
     pub knowledge_bases: Vec<WebKnowledgeBaseItem>,
     pub kb_stats: WebKnowledgeStats,
     pub jobs: Vec<WebIngestJob>,
+    pub index_queue: WebIndexQueueSummary,
+    pub index_jobs: Vec<WebIndexJobItem>,
+    pub index_failures: Vec<WebIndexFailureItem>,
     pub warnings: Vec<String>,
 }
 
@@ -84,6 +87,43 @@ pub struct WebKnowledgeStats {
     pub entities: u64,
     pub relations: u64,
     pub contradictions: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct WebIndexQueueSummary {
+    pub pending: u64,
+    pub leased: u64,
+    pub indexed: u64,
+    pub failed: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct WebIndexJobItem {
+    pub job_id: String,
+    pub status: String,
+    pub scope: String,
+    pub provider: String,
+    pub leased: i64,
+    pub indexed: i64,
+    pub failed: i64,
+    pub skipped: i64,
+    pub started_at: String,
+    pub last_error: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct WebIndexFailureItem {
+    pub chunk_id: String,
+    pub document_id: String,
+    pub attempt_count: i64,
+    pub last_error: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
@@ -268,6 +308,9 @@ pub fn generated_typescript() -> String {
         exported(WebVideoStoreItem::decl(&cfg)),
         exported(WebKnowledgeBaseItem::decl(&cfg)),
         exported(WebKnowledgeStats::decl(&cfg)),
+        exported(WebIndexQueueSummary::decl(&cfg)),
+        exported(WebIndexJobItem::decl(&cfg)),
+        exported(WebIndexFailureItem::decl(&cfg)),
         exported(WebIngestJob::decl(&cfg)),
         exported(WebIngestRunRequest::decl(&cfg)),
         exported(WebIngestRunResponse::decl(&cfg)),

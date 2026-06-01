@@ -4,6 +4,7 @@ use super::*;
 use crate::embed;
 
 #[tokio::test]
+#[serial_test::serial(docs_global_state)]
 async fn test_ingest_indexes_chunks_when_provider_set() {
     let db = test_db();
     let dir = tempfile::tempdir().unwrap();
@@ -37,11 +38,12 @@ async fn test_ingest_indexes_chunks_when_provider_set() {
             chunk.chunk_id, chunk.embedding_status
         );
     }
-    let count = store::count_embeddings(&db).unwrap();
+    let count = store::count_indexed_chunks(&db).unwrap();
     assert_eq!(count, chunks.len(), "all chunks should have embeddings");
 }
 
 #[tokio::test]
+#[serial_test::serial(docs_global_state)]
 async fn test_image_embedding_stored_when_provider_is_multimodal() {
     reset_multimodal_test_providers();
     crate::ocr::provider::set_provider(Box::new(MockOcrProvider {
@@ -60,11 +62,12 @@ async fn test_image_embedding_stored_when_provider_is_multimodal() {
 
     let chunks = store::list_chunks_for_doc(&db, &r.document_id).unwrap();
     assert!(!chunks.is_empty());
-    assert_eq!(store::count_embeddings(&db).unwrap(), chunks.len());
+    assert_eq!(store::count_indexed_chunks(&db).unwrap(), chunks.len());
     reset_multimodal_test_providers();
 }
 
 #[tokio::test]
+#[serial_test::serial(docs_global_state)]
 async fn test_ingest_succeeds_without_provider() {
     let db = test_db();
     let dir = tempfile::tempdir().unwrap();
@@ -90,6 +93,7 @@ async fn test_ingest_succeeds_without_provider() {
 }
 
 #[tokio::test]
+#[serial_test::serial(docs_global_state)]
 async fn test_second_ingest_indexes_new_chunks() {
     let db = test_db();
     embed::set_provider(Box::new(IndexingMockProvider {
@@ -105,7 +109,7 @@ async fn test_second_ingest_indexes_new_chunks() {
     assert!(r_a.was_new);
 
     let chunks_a = store::list_chunks_for_doc(&db, &r_a.document_id).unwrap();
-    let count_after_a = store::count_embeddings(&db).unwrap();
+    let count_after_a = store::count_indexed_chunks(&db).unwrap();
     assert_eq!(count_after_a, chunks_a.len());
 
     // Doc B
@@ -119,7 +123,7 @@ async fn test_second_ingest_indexes_new_chunks() {
     assert!(r_b.was_new);
 
     let chunks_b = store::list_chunks_for_doc(&db, &r_b.document_id).unwrap();
-    let count_after_b = store::count_embeddings(&db).unwrap();
+    let count_after_b = store::count_indexed_chunks(&db).unwrap();
     assert_eq!(
         count_after_b,
         chunks_a.len() + chunks_b.len(),
@@ -132,6 +136,7 @@ async fn test_second_ingest_indexes_new_chunks() {
 }
 
 #[tokio::test]
+#[serial_test::serial(docs_global_state)]
 async fn test_index_failure_marks_chunk_failed() {
     let db = test_db();
     let dir = tempfile::tempdir().unwrap();

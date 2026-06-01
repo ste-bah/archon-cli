@@ -323,6 +323,23 @@ pub enum PipelineAction {
         #[arg(long)]
         force_quality_gate: bool,
     },
+    /// Rewind an audited pipeline so resume re-runs from a chosen agent
+    Rewind {
+        /// Session ID to rewind
+        session_id: String,
+        /// Re-run this agent on next resume
+        #[arg(long, conflicts_with_all = ["to_ordinal", "keep_agents"])]
+        to_agent: Option<String>,
+        /// Re-run this ordinal on next resume
+        #[arg(long, conflicts_with_all = ["to_agent", "keep_agents"])]
+        to_ordinal: Option<usize>,
+        /// Keep exactly this many completed agents
+        #[arg(long, conflicts_with_all = ["to_agent", "to_ordinal"])]
+        keep_agents: Option<usize>,
+        /// Audited reason for the rewind
+        #[arg(long, default_value = "operator requested pipeline rewind")]
+        reason: String,
+    },
     /// List all pipeline sessions
     List,
     /// Abort a running pipeline session

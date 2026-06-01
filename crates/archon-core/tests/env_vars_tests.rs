@@ -460,11 +460,7 @@ fn doctor_shows_unset_for_missing_vars() {
 
 #[test]
 fn known_vars_list_has_correct_count() {
-    // 4 auth + 12 codex + 4 model/behavior + 4 feature control
-    // + 1 memory/embedding + 7 debugging + 6 paths
-    // + 1 memory/embedding + 7 debugging + 7 paths
-    // + 4 OCR/video helper tuning + 11 tool binary overrides + 1 telemetry = 55
-    assert_eq!(KNOWN_ARCHON_VARS.len(), 55);
+    assert_eq!(KNOWN_ARCHON_VARS.len(), 67);
 }
 
 #[test]
@@ -482,6 +478,12 @@ fn known_vars_contains_all_documented_vars() {
         "ARCHON_DISABLE_HOOKS",
         "ARCHON_DISABLE_MEMORY",
         "ARCHON_DISABLE_PERSONALITY",
+        "ARCHON_DOCS_FASTEMBED_INSTANCES",
+        "ARCHON_DOCS_INDEX_EMBEDDING_WORKERS",
+        "ARCHON_DOCS_INDEX_MAX_IN_FLIGHT_BATCHES",
+        "ARCHON_DOCS_INDEX_WRITER_BATCH_SIZE",
+        "ARCHON_DOCS_LEGACY_COZO_VECTOR_WRITE",
+        "ARCHON_DOC_VECTOR_STORE_DIR",
         "ARCHON_MEMORY_OPENAIKEY",
         "ARCHON_DEBUG",
         "ARCHON_DEBUG_LOG_DIR",

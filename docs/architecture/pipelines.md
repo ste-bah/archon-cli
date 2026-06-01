@@ -129,6 +129,7 @@ Built-in coding/research pipeline state lives in
 | `exports/final-paper.md` | Research pipeline final paper normalized to the canonical APA 7 Markdown structure |
 | `exports/final-paper.pdf` | Research pipeline final paper rendered as a page-numbered PDF artifact |
 | `verification/` | Optional verifier reports written by `archon pipeline verify --write-report` |
+| `rewound/` | Quarantined audited agent records from pipeline rewind operations |
 | `exports/` | Operator-chosen trace export destination when writing into the bundle |
 
 Resume is verifier-gated: `archon pipeline resume <id>` verifies the bundle,
@@ -139,6 +140,13 @@ continued deliberately with `--force-quality-gate`; Archon records the override
 in `audit.log`, marks the accepted attempt with a force-accepted reason, and
 then continues from the next agent. It does not override transport errors,
 bundle verification failures, missing artifacts, or prompt/build failures.
+
+If completed outputs themselves are bad, do not force-resume. Use
+`archon pipeline rewind <id> --to-agent <key>` to quarantine the bad agent and
+all downstream completed records, then resume so those agents are regenerated.
+Rewind moves the stale agent records, their primary prompt/output/attempt
+artifacts, and stale final research exports into `rewound/`, then removes those
+records from the active completed set before resume.
 
 ### Inspection and export
 
@@ -257,6 +265,7 @@ archon pipeline export-traces <session-id> --out traces.jsonl
 # Resume / abort
 archon pipeline resume <session-id>
 archon pipeline resume <session-id> --force-quality-gate
+archon pipeline rewind <session-id> --to-agent <agent-key>
 archon pipeline abort <session-id>
 ```
 
@@ -267,6 +276,12 @@ pipeline type after verifying the audited bundle. Use
 reviewed the failed attempt output and want the audited bundle to continue
 despite a critical quality score miss.
 
+When accepted downstream outputs are contaminated, use
+`/pipeline rewind <session-id> --to-agent <agent-key>` first, then
+`/pipeline resume <session-id>`. The rewind command performs a quick audited
+state mutation and prints the result in the transcript; the following TUI resume
+uses the in-process path, so regenerated agents appear in Agent Activity.
+
 ## Session recovery
 
 Pipeline sessions persist all state to `<workdir>/.archon/pipelines/<session-id>/`. If archon-cli crashes or you `Ctrl-C` mid-run:
@@ -275,12 +290,17 @@ Pipeline sessions persist all state to `<workdir>/.archon/pipelines/<session-id>
 archon pipeline list                      # find your session
 archon pipeline resume <session-id>       # verifies bundle, then continues at the next agent
 archon pipeline resume <session-id> --force-quality-gate  # audited quality-gate override
+archon pipeline rewind <session-id> --to-agent conclusion-writer  # re-run this agent and later agents
 ```
 
 Session recovery requires the same git working tree state (file modifications
 mid-pipeline can interfere). The recovery layer verifies the audited bundle
 before continuing, including state checksums, audit JSONL, prompt records, agent
 records, accepted outputs, and attempt-output hashes.
+
+For contaminated outputs, rewind to the earliest bad accepted agent rather than
+the final failed agent. See the [pipeline rewind cookbook](../cookbook/pipeline-rewind.md)
+for the operator flow and TUI commands.
 
 ## Agent loop (single agent, not pipeline)
 
@@ -339,6 +359,7 @@ Modes:
 ## See also
 
 - [Learning systems](learning-systems.md) — the 8 subsystems that pipelines integrate with
+- [Pipeline rewind cookbook](../cookbook/pipeline-rewind.md) — audited recovery for poisoned pipeline outputs
 - [god-code cookbook](../cookbook/god-code-pipeline.md) — full coding-pipeline walkthrough
 - [Custom agents](../cookbook/custom-agent-workflows.md) — writing your own agents
 - [Adding an agent](../development/adding-an-agent.md) — agent definition format

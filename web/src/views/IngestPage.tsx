@@ -4,6 +4,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 import { StatusPill } from "../components/StatusPill";
 import type {
+  WebIndexFailureItem,
+  WebIndexJobItem,
   WebDocStoreItem,
   WebIngestJob,
   WebIngestSummary,
@@ -205,6 +207,11 @@ export function IngestPage({ ingest }: IngestPageProps) {
         />
         <Jobs jobs={ingest?.jobs ?? []} warnings={ingest?.warnings ?? []} />
       </div>
+      <IndexingPanel
+        queue={ingest?.indexQueue}
+        jobs={ingest?.indexJobs ?? []}
+        failures={ingest?.indexFailures ?? []}
+      />
     </section>
   );
 }
@@ -300,6 +307,82 @@ function Jobs({ jobs, warnings }: { jobs: WebIngestJob[]; warnings: string[] }) 
             </div>
             <StatusPill tone={job.status === "failed" ? "warn" : job.status === "completed" ? "good" : "muted"}>{job.status}</StatusPill>
             {(job.stdoutTail || job.stderrTail) && <pre>{job.stdoutTail || job.stderrTail}</pre>}
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+function IndexingPanel({
+  queue,
+  jobs,
+  failures,
+}: {
+  queue?: WebIngestSummary["indexQueue"];
+  jobs: WebIndexJobItem[];
+  failures: WebIndexFailureItem[];
+}) {
+  const totalQueued = (queue?.pending ?? 0) + (queue?.leased ?? 0) + (queue?.failed ?? 0);
+  return (
+    <div className="panel ingest-indexing">
+      <div className="panel-heading">
+        <div>
+          <span className="eyebrow">Semantic index</span>
+          <h3>Queue and worker state</h3>
+        </div>
+        <StatusPill tone={totalQueued > 0 ? "warn" : "good"}>{totalQueued} active</StatusPill>
+      </div>
+      <div className="ingest-index-metrics">
+        <Metric icon={<Database size={18} />} label="pending" value={queue?.pending ?? 0} />
+        <Metric icon={<RefreshCw size={18} />} label="leased" value={queue?.leased ?? 0} />
+        <Metric icon={<Database size={18} />} label="indexed" value={queue?.indexed ?? 0} />
+        <Metric icon={<RefreshCw size={18} />} label="failed" value={queue?.failed ?? 0} />
+      </div>
+      <div className="ingest-index-grid">
+        <IndexJobs jobs={jobs} />
+        <IndexFailures failures={failures} />
+      </div>
+    </div>
+  );
+}
+
+function IndexJobs({ jobs }: { jobs: WebIndexJobItem[] }) {
+  return (
+    <div>
+      <h4>Recent index jobs</h4>
+      {jobs.length === 0 ? (
+        <p className="summary">No semantic index jobs yet.</p>
+      ) : (
+        jobs.map((job) => (
+          <div key={job.jobId} className="ingest-job">
+            <div>
+              <strong>{job.status} · {job.scope}</strong>
+              <small>{job.provider} · {job.indexed} indexed · {job.failed} failed</small>
+            </div>
+            <StatusPill tone={job.status === "failed" ? "warn" : "muted"}>{job.leased} leased</StatusPill>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+function IndexFailures({ failures }: { failures: WebIndexFailureItem[] }) {
+  return (
+    <div>
+      <h4>Failed queue rows</h4>
+      {failures.length === 0 ? (
+        <p className="summary">No failed queue rows.</p>
+      ) : (
+        failures.map((failure) => (
+          <div key={failure.chunkId} className="ingest-job">
+            <div>
+              <strong>{failure.chunkId}</strong>
+              <small>{failure.documentId} · attempts {failure.attemptCount}</small>
+            </div>
+            <StatusPill tone="warn">failed</StatusPill>
+            <pre>{failure.lastError || "No error stored."}</pre>
           </div>
         ))
       )}

@@ -110,6 +110,11 @@ pub enum PipelineEvent {
     RunResumed {
         completed_agent_count: usize,
     },
+    RunRewound {
+        from_completed_agent_count: usize,
+        to_completed_agent_count: usize,
+        reason: String,
+    },
     AgentPlanned {
         ordinal: usize,
         agent_key: String,

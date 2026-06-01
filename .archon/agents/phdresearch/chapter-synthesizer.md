@@ -74,7 +74,7 @@ Before writing, locate the accepted `citation-reconciler` output in the injected
 context. Treat it as the authoritative source for:
 
 - allowed in-text citation forms
-- the canonical HLD citation
+- canonical primary-source citations for the current topic
 - the master APA reference list
 - removed or downgraded citations
 - source verification decisions
@@ -83,10 +83,9 @@ Do not resurrect citations that the reconciler removed or downgraded. Do not use
 the earlier citation validator or APA specialist reports as the final reference
 list when the reconciler output is present.
 
-The primary HLD must be cited as `(GSS / GKB Architecture Team, 2020)` with
-page numbers for page-specific claims. The final paper must not contain
-`GKB HLD, 2026`, `NEEDS REVISION BEFORE PUBLICATION`, `citation integrity
-status: FAIL`, or unresolved orphan-citation language.
+The final paper must not contain `NEEDS REVISION BEFORE PUBLICATION`,
+`citation integrity status: FAIL`, unresolved orphan-citation language, or
+topic-specific placeholder citations that were removed by the reconciler.
 
 ## ABSOLUTE PROHIBITIONS (NEVER INCLUDE)
 
@@ -150,7 +149,7 @@ You will receive:
 ### 1. Paper and Chapter Structure
 ```yaml
 paper:
-  title: "GKB Match Scoring and Research Disposition Algorithms"
+  title: "[Current Research Topic]"
   wordTarget: 12000
   sections:
     - id: "1"

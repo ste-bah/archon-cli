@@ -415,14 +415,17 @@ pub fn insert_chunk(db: &DbInstance, chunk: &ChunkArtifact) -> Result<()> {
         DataValue::from(chunk.embedding_status.as_str()),
     );
 
-    db.run_script(
+    crate::cozo_retry::run_script_guarded(
+        db,
         "?[chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status] \
          <- [[$cid, $did, $aid, $idx, $ps, $pe, $content, $hash, $estatus]] \
          :put doc_chunks { chunk_id => document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status }",
         params,
         ScriptMutability::Mutable,
+        "insert doc_chunks",
     )
     .map_err(|e| anyhow::anyhow!("insert doc_chunks failed: {e}"))?;
+    crate::index_queue::enqueue_pending_chunk(db, chunk, 0)?;
     Ok(())
 }
 
@@ -462,13 +465,14 @@ pub fn get_chunk_by_id(db: &DbInstance, chunk_id: &str) -> Result<Option<ChunkAr
     let mut params = BTreeMap::new();
     params.insert("cid".into(), DataValue::from(chunk_id));
 
-    let result = db
-        .run_script(
+    let result = crate::cozo_retry::run_script_guarded(
+            db,
             "?[chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status] \
              := *doc_chunks{chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status}, \
              chunk_id = $cid",
             params,
             ScriptMutability::Immutable,
+            "get chunk by id",
         )
         .map_err(|e| anyhow::anyhow!("get chunk by id failed: {e}"))?;
 
@@ -867,11 +871,13 @@ pub fn insert_chunk_embedding(
     params.insert("emb".into(), DataValue::Vec(Vector::F32(arr)));
     params.insert("prov".into(), DataValue::from(provider));
 
-    db.run_script(
+    crate::cozo_retry::run_script_guarded(
+        db,
         "?[chunk_id, embedding, provider] <- [[$cid, $emb, $prov]]
          :put vec_text_chunks { chunk_id => embedding, provider }",
         params,
         ScriptMutability::Mutable,
+        "insert chunk embedding",
     )
     .map_err(|e| anyhow::anyhow!("insert chunk embedding failed: {e}"))?;
     Ok(())
@@ -909,8 +915,14 @@ pub fn insert_chunk_embeddings(
          :put vec_text_chunks {{ chunk_id => embedding, provider }}",
         tuples.join(", ")
     );
-    db.run_script(&script, params, ScriptMutability::Mutable)
-        .map_err(|e| anyhow::anyhow!("bulk insert chunk embeddings failed: {e}"))?;
+    crate::cozo_retry::run_script_guarded(
+        db,
+        &script,
+        params,
+        ScriptMutability::Mutable,
+        "bulk insert chunk embeddings",
+    )
+    .map_err(|e| anyhow::anyhow!("bulk insert chunk embeddings failed: {e}"))?;
     Ok(())
 }
 
@@ -919,13 +931,14 @@ pub fn get_chunk_embedding(db: &DbInstance, chunk_id: &str) -> Result<Option<Vec
     let mut params = BTreeMap::new();
     params.insert("cid".into(), DataValue::from(chunk_id));
 
-    let result = db
-        .run_script(
-            "?[embedding] := *vec_text_chunks{chunk_id, embedding}, chunk_id = $cid",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("get chunk embedding failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[embedding] := *vec_text_chunks{chunk_id, embedding}, chunk_id = $cid",
+        params,
+        ScriptMutability::Immutable,
+        "get chunk embedding",
+    )
+    .map_err(|e| anyhow::anyhow!("get chunk embedding failed: {e}"))?;
 
     if result.rows.is_empty() {
         return Ok(None);
@@ -997,8 +1010,14 @@ pub fn update_chunk_embedding_statuses(
          :put doc_chunks {{ chunk_id => document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status }}",
         tuples.join(", ")
     );
-    db.run_script(&script, params, ScriptMutability::Mutable)
-        .map_err(|e| anyhow::anyhow!("bulk update chunk embedding status failed: {e}"))?;
+    crate::cozo_retry::run_script_guarded(
+        db,
+        &script,
+        params,
+        ScriptMutability::Mutable,
+        "bulk update chunk embedding status",
+    )
+    .map_err(|e| anyhow::anyhow!("bulk update chunk embedding status failed: {e}"))?;
     Ok(())
 }
 
@@ -1026,6 +1045,21 @@ pub fn count_pending_chunks(db: &DbInstance) -> Result<usize> {
             ScriptMutability::Immutable,
         )
         .map_err(|e| anyhow::anyhow!("count pending chunks failed: {e}"))?;
+    if result.rows.is_empty() {
+        return Ok(0);
+    }
+    Ok(result.rows[0][0].get_int().unwrap_or(0) as usize)
+}
+
+/// Count chunks with embedding_status = "indexed".
+pub fn count_indexed_chunks(db: &DbInstance) -> Result<usize> {
+    let result = db
+        .run_script(
+            "?[count(chunk_id)] := *doc_chunks{chunk_id, embedding_status}, embedding_status = \"indexed\"",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("count indexed chunks failed: {e}"))?;
     if result.rows.is_empty() {
         return Ok(0);
     }

@@ -167,8 +167,95 @@ pub enum DocsAction {
         #[arg(long)]
         limit: Option<usize>,
     },
+    /// Show durable semantic-index queue counts
+    IndexStatus,
+    /// Requeue failed semantic-index chunks
+    IndexRetryFailed {
+        /// Maximum failed queue rows to retry
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// Pause an index job after its current window
+    IndexPause {
+        /// Index job ID
+        job_id: String,
+    },
+    /// Resume a paused index job marker
+    IndexResume {
+        /// Index job ID
+        job_id: String,
+    },
+    /// Cancel an index job and leave queue work retryable
+    IndexCancel {
+        /// Index job ID
+        job_id: String,
+    },
+    /// Manage the background semantic-index worker
+    IndexDaemon {
+        #[command(subcommand)]
+        action: DocsIndexDaemonAction,
+    },
+    /// Show Cozo/RocksDB/Rust-HNSW vector backend status
+    VectorStatus,
+    /// Migrate existing Cozo vectors into the RocksDB raw-vector store
+    VectorMigrate {
+        /// Maximum legacy vector rows to migrate in this run
+        #[arg(long)]
+        limit: Option<usize>,
+        /// RocksDB write batch size
+        #[arg(long, default_value_t = 1024)]
+        batch_size: usize,
+        /// Resume after this chunk id
+        #[arg(long)]
+        after: Option<String>,
+    },
+    /// Build a Rust-HNSW snapshot from RocksDB raw vectors
+    VectorCompact {
+        /// Provider/backend name to compact
+        #[arg(long)]
+        provider: Option<String>,
+        /// Embedding dimension; defaults to the active provider dimension
+        #[arg(long)]
+        dimension: Option<usize>,
+        /// Maximum raw vectors to include
+        #[arg(long)]
+        limit: Option<usize>,
+    },
     /// Report embedding model and backend status
     ModelStatus,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum DocsIndexDaemonAction {
+    /// Start a background docs index worker for the current project
+    Start {
+        /// Number of chunks to embed per provider request
+        #[arg(long, default_value_t = 64)]
+        batch_size: usize,
+        /// Maximum queued chunks to drain per daemon pass
+        #[arg(long, default_value_t = 1024)]
+        window_size: usize,
+        /// Seconds to wait between empty queue polls
+        #[arg(long, default_value_t = 30)]
+        poll_secs: u64,
+    },
+    /// Stop the background docs index worker for the current project
+    Stop,
+    /// Show daemon pid/log status for the current project
+    Status,
+    /// Internal foreground loop used by `start`
+    #[command(hide = true)]
+    Run {
+        /// Number of chunks to embed per provider request
+        #[arg(long, default_value_t = 64)]
+        batch_size: usize,
+        /// Maximum queued chunks to drain per daemon pass
+        #[arg(long, default_value_t = 1024)]
+        window_size: usize,
+        /// Seconds to wait between empty queue polls
+        #[arg(long, default_value_t = 30)]
+        poll_secs: u64,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]

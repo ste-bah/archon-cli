@@ -123,6 +123,10 @@ impl LocalEmbeddingProvider for OpenAiCompatEmbeddingProvider {
     fn backend_name(&self) -> &'static str {
         "openai-compatible"
     }
+
+    fn max_embedding_workers(&self) -> usize {
+        32
+    }
 }
 
 fn embed_batches(

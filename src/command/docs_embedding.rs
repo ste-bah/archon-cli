@@ -90,12 +90,27 @@ fn print_configured_status(
     }
 
     match archon_docs::store::count_embeddings(db) {
-        Ok(count) => println!("Vectors:       {} indexed", count),
+        Ok(count) => println!("Cozo vectors:  {} legacy indexed", count),
         Err(e) => println!("Vectors:       unable to query — {}", e),
     }
+    print_vector_store_status(provider);
     match archon_docs::store::count_pending_chunks(db) {
         Ok(count) => println!("Pending:       {} chunks", count),
         Err(e) => println!("Pending:       unable to query — {}", e),
+    }
+    match archon_docs::index_queue::stats(db) {
+        Ok(queue) => println!(
+            "Index queue:   {} pending, {} leased, {} failed",
+            queue.pending, queue.leased, queue.failed
+        ),
+        Err(e) => println!("Index queue:   unable to query — {}", e),
+    }
+    match archon_docs::index_jobs::summary(db) {
+        Ok(jobs) => println!(
+            "Index jobs:    {} running, {} paused, {} completed, {} failed, {} cancelled",
+            jobs.running, jobs.paused, jobs.completed, jobs.failed, jobs.cancelled
+        ),
+        Err(e) => println!("Index jobs:    unable to query — {}", e),
     }
     match check_hnsw_index(db) {
         Ok(true) => println!("HNSW index:    present"),
@@ -103,6 +118,29 @@ fn print_configured_status(
         Err(e) => println!("HNSW index:    unable to check — {}", e),
     }
     println!("pdfimages:     {}", pdfimages_status());
+}
+
+fn print_vector_store_status(provider: &dyn LocalEmbeddingProvider) {
+    match archon_docs::vector_store::DocVectorStore::open_default() {
+        Ok(store) => {
+            match store.stats(Some(provider.backend_name())) {
+                Ok(stats) => println!(
+                    "RocksDB vecs:  {} raw, {} cache",
+                    stats.raw_vectors, stats.cache_entries
+                ),
+                Err(e) => println!("RocksDB vecs:  unable to query — {e}"),
+            }
+            match store.latest_hnsw_manifest(provider.backend_name()) {
+                Ok(Some(manifest)) => println!(
+                    "Rust HNSW:     {} vectors, dim {}",
+                    manifest.vector_count, manifest.dimension
+                ),
+                Ok(None) => println!("Rust HNSW:     not built"),
+                Err(e) => println!("Rust HNSW:     unable to query — {e}"),
+            }
+        }
+        Err(e) => println!("RocksDB vecs:  unavailable — {e}"),
+    }
 }
 
 fn print_missing_status(init_elapsed: std::time::Duration) {

@@ -75,7 +75,7 @@ export type CorpusPreviewQuery = { path: string, };
 export type CorpusSourcePreview = { source: CorpusSource, content: string, lineCount: number, truncated: boolean, previewAvailable: boolean, policyReason: string, };
 
 
-export type WebIngestSummary = { allowed: boolean, policyReason: string, stores: Array<PathProbe>, documents: Array<WebDocStoreItem>, videos: Array<WebVideoStoreItem>, knowledgeBases: Array<WebKnowledgeBaseItem>, kbStats: WebKnowledgeStats, jobs: Array<WebIngestJob>, warnings: Array<string>, };
+export type WebIngestSummary = { allowed: boolean, policyReason: string, stores: Array<PathProbe>, documents: Array<WebDocStoreItem>, videos: Array<WebVideoStoreItem>, knowledgeBases: Array<WebKnowledgeBaseItem>, kbStats: WebKnowledgeStats, jobs: Array<WebIngestJob>, indexQueue: WebIndexQueueSummary, indexJobs: Array<WebIndexJobItem>, indexFailures: Array<WebIndexFailureItem>, warnings: Array<string>, };
 
 export type WebDocStoreItem = { documentId: string, sourcePath: string, mediaType: string, status: string, chunks: number, pages: number, artifacts: number, ocrRuns: number, discoveredAt: string, };
 
@@ -84,6 +84,12 @@ export type WebVideoStoreItem = { videoId: string, documentId: string, title: st
 export type WebKnowledgeBaseItem = { name: string, scope: string, path: string, files: number, bytes: number, exists: boolean, };
 
 export type WebKnowledgeStats = { chunks: number, claims: number, entities: number, relations: number, contradictions: number, };
+
+export type WebIndexQueueSummary = { pending: number, leased: number, indexed: number, failed: number, };
+
+export type WebIndexJobItem = { jobId: string, status: string, scope: string, provider: string, leased: number, indexed: number, failed: number, skipped: number, startedAt: string, lastError: string, };
+
+export type WebIndexFailureItem = { chunkId: string, documentId: string, attemptCount: number, lastError: string, updatedAt: string, };
 
 export type WebIngestJob = { jobId: string, label: string, target: string, command: string, status: string, startedAtMs: number, finishedAtMs: number | null, exitCode: number | null, stdoutTail: string, stderrTail: string, };
 

@@ -91,7 +91,7 @@ fn final_result_preserves_dynamic_chapters_over_short_combiner() {
     assert!(output.contains("Smith, J. (2024). Screening systems."));
     assert!(!output.contains("Bad source."));
     assert!(!output.contains("Tiny summary"));
-    assert!(output.contains("## Appendix A: Primary Architecture Source Register"));
+    assert!(output.contains("## Appendix A: Primary Source Register"));
     assert!(output.contains("## Appendix B: Locked Chapter Architecture"));
     assert!(output.contains("| 2 | Architecture | 3000 | Components |"));
 }

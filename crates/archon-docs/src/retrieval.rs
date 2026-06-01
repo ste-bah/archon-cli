@@ -1,8 +1,9 @@
-//! CozoDB HNSW retrieval for document chunks.
+//! Document retrieval for chunks.
 //!
-//! Provides the search pipeline: embed query → HNSW nearest-neighbour →
-//! resolve chunks from doc_chunks → optional reranking → results with
-//! provenance.
+//! Provides the search pipeline: embed query → Rust-HNSW nearest-neighbour
+//! over RocksDB raw vectors → resolve chunks from doc_chunks → optional
+//! reranking → results with provenance. Legacy Cozo HNSW remains as a fallback
+//! while older vector rows are migrated.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -12,6 +13,7 @@ use crate::embed::get_provider;
 use crate::errors::DocsError;
 use crate::models::ChunkArtifact;
 use crate::store;
+use crate::vector_store::DocVectorStore;
 
 /// A single search result with chunk content and relevance metadata.
 #[derive(Clone, Debug)]
@@ -136,7 +138,7 @@ pub fn search_with_mode(
     mode: SearchMode,
     weights: RetrievalWeights,
 ) -> Result<SearchResults, DocsError> {
-    let total = store::count_embeddings(db).map_err(|e| DocsError::Retrieval {
+    let total = store::count_indexed_chunks(db).map_err(|e| DocsError::Retrieval {
         message: e.to_string(),
     })?;
     let total_chunks = store::count_chunks(db).map_err(|e| DocsError::Retrieval {
@@ -226,9 +228,10 @@ fn semantic_search_with_norm(
         message: "no embedding provider configured. Run 'archon docs model-status' for details."
             .into(),
     })?;
+    let provider_name = provider.backend_name();
     let query_vec = provider.embed_query(query)?;
     let query_embedding_norm = l2_norm(&query_vec);
-    let results = hnsw_search(db, &query_vec, top_k)?;
+    let results = hnsw_search(db, provider_name, &query_vec, top_k)?;
     Ok(SemanticSearch {
         results,
         query_embedding_norm,
@@ -487,8 +490,57 @@ fn chunk_from_row(row: &[DataValue]) -> ChunkArtifact {
     }
 }
 
-/// Low-level HNSW search against vec_text_chunks.
+/// Low-level HNSW search. RocksDB raw vectors are authoritative for new
+/// indexes; legacy Cozo HNSW is used only when the RocksDB store has no rows
+/// for the active provider.
 fn hnsw_search(
+    db: &DbInstance,
+    provider_name: &str,
+    query_vec: &[f32],
+    top_k: usize,
+) -> Result<Vec<SearchResult>, DocsError> {
+    if let Some(results) = rocksdb_hnsw_search(db, provider_name, query_vec, top_k)? {
+        return Ok(results);
+    }
+    legacy_cozo_hnsw_search(db, query_vec, top_k)
+}
+
+fn rocksdb_hnsw_search(
+    db: &DbInstance,
+    provider_name: &str,
+    query_vec: &[f32],
+    top_k: usize,
+) -> Result<Option<Vec<SearchResult>>, DocsError> {
+    let vector_store = match DocVectorStore::open_default() {
+        Ok(store) => store,
+        Err(error) => {
+            tracing::warn!(%error, "RocksDB vector store unavailable; trying legacy Cozo HNSW");
+            return Ok(None);
+        }
+    };
+    let raw_count = vector_store
+        .count_vectors(Some(provider_name))
+        .map_err(|e| DocsError::Retrieval {
+            message: format!("RocksDB vector count failed: {e}"),
+        })?;
+    if raw_count == 0 {
+        return Ok(None);
+    }
+    let hits = vector_store
+        .search_in_memory(provider_name, query_vec, top_k, 50, None)
+        .map_err(|e| DocsError::Retrieval {
+            message: format!("Rust-HNSW search failed: {e}"),
+        })?;
+    let mut search_results = resolve_vector_hits(
+        db,
+        hits.into_iter()
+            .map(|hit| (hit.chunk_id, f64::from(hit.distance))),
+    )?;
+    sort_by_distance(&mut search_results);
+    Ok(Some(search_results))
+}
+
+fn legacy_cozo_hnsw_search(
     db: &DbInstance,
     query_vec: &[f32],
     top_k: usize,
@@ -514,11 +566,26 @@ fn hnsw_search(
             message: format!("HNSW search failed: {e}"),
         })?;
 
-    let mut search_results = Vec::with_capacity(result.rows.len());
-    for row in &result.rows {
-        let chunk_id = row[0].get_str().unwrap_or("").to_string();
-        let distance = row[1].get_float().unwrap_or(1.0);
+    let mut search_results = resolve_vector_hits(
+        db,
+        result.rows.iter().map(|row| {
+            (
+                row[0].get_str().unwrap_or("").to_string(),
+                row[1].get_float().unwrap_or(1.0),
+            )
+        }),
+    )?;
+    sort_by_distance(&mut search_results);
 
+    Ok(search_results)
+}
+
+fn resolve_vector_hits(
+    db: &DbInstance,
+    hits: impl IntoIterator<Item = (String, f64)>,
+) -> Result<Vec<SearchResult>, DocsError> {
+    let mut search_results = Vec::new();
+    for (chunk_id, distance) in hits {
         let chunk = match store::get_chunk_by_id(db, &chunk_id).map_err(|e| DocsError::Retrieval {
             message: e.to_string(),
         }) {
@@ -546,15 +613,15 @@ fn hnsw_search(
             semantic_score,
         });
     }
+    Ok(search_results)
+}
 
-    // HNSW returns approximate nearest neighbours; sort by distance ascending
+fn sort_by_distance(search_results: &mut [SearchResult]) {
     search_results.sort_by(|a, b| {
         a.distance
             .partial_cmp(&b.distance)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-
-    Ok(search_results)
 }
 
 pub use crate::indexing::IndexResult;
@@ -715,6 +782,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(docs_global_state)]
     fn test_search_empty_corpus() {
         let db = test_db();
         setup_with_provider(&db, 4);
@@ -725,6 +793,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(docs_global_state)]
     fn test_exact_search_finds_quoted_string() {
         let db = test_db();
         crate::schema::ensure_doc_schema(&db).unwrap();
@@ -756,6 +825,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(docs_global_state)]
     fn test_exact_no_hit_reports_persisted_chunk_count() {
         let db = test_db();
         crate::schema::ensure_doc_schema(&db).unwrap();
@@ -780,6 +850,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(docs_global_state)]
     fn test_semantic_search_finds_synonym() {
         let db = test_db();
         crate::schema::ensure_doc_schema(&db).unwrap();
@@ -810,6 +881,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(docs_global_state)]
     fn test_hybrid_outperforms_either_alone_on_fixture() {
         let db = test_db();
         crate::schema::ensure_doc_schema(&db).unwrap();
@@ -854,6 +926,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(docs_global_state)]
     fn test_hybrid_propagates_real_embedding_errors() {
         let db = test_db();
         crate::schema::ensure_doc_schema(&db).unwrap();
@@ -861,7 +934,7 @@ mod tests {
         crate::embed::set_provider(Box::new(SynonymProvider));
         let chunk = insert_test_chunk(&db, "chunk-vectorized", "A car market fixture.");
         index_chunk(&db, &chunk).unwrap();
-        assert_eq!(store::count_embeddings(&db).unwrap(), 1);
+        assert_eq!(store::count_indexed_chunks(&db).unwrap(), 1);
 
         crate::embed::set_provider(Box::new(FailingQueryProvider));
         let err = search_with_mode(
@@ -879,6 +952,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(docs_global_state)]
     fn test_search_surfaces_failed_indexing() {
         let db = test_db();
         setup_with_provider(&db, 4);
@@ -923,6 +997,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(docs_global_state)]
     fn test_index_and_search_known_chunk() {
         let db = test_db();
         setup_with_provider(&db, 4);
@@ -942,7 +1017,7 @@ mod tests {
         store::insert_chunk(&db, &chunk).unwrap();
         index_chunk(&db, &chunk).unwrap();
 
-        let count = store::count_embeddings(&db).unwrap();
+        let count = store::count_indexed_chunks(&db).unwrap();
         assert_eq!(count, 1);
 
         // Search with the same text should return the chunk
@@ -954,6 +1029,7 @@ mod tests {
     // ── HIGH #3: Search does not mutate ──────────────────────────────
 
     #[test]
+    #[serial_test::serial(docs_global_state)]
     fn test_search_does_not_mutate() {
         let db = test_db();
         setup_with_provider(&db, 4);
@@ -998,6 +1074,7 @@ mod tests {
     // ── HIGH #3: Index only pending ──────────────────────────────────
 
     #[test]
+    #[serial_test::serial(docs_global_state)]
     fn test_index_pending_command_indexes_pending_only() {
         let db = test_db();
         setup_with_provider(&db, 4);
@@ -1048,13 +1125,16 @@ mod tests {
         let done_after = store::get_chunk_by_id(&db, "chunk-done").unwrap().unwrap();
         assert_eq!(done_after.embedding_status, "indexed");
 
-        // Only one embedding stored
-        assert_eq!(store::count_embeddings(&db).unwrap(), 1);
+        // Only the pending chunk should get a new RocksDB vector.
+        let vector_store = crate::vector_store::DocVectorStore::open_default().unwrap();
+        assert!(vector_store.has_vector("mock", "chunk-pending").unwrap());
+        assert!(!vector_store.has_vector("mock", "chunk-done").unwrap());
     }
 
     // ── MEDIUM #4: get_chunk_by_id roundtrip ─────────────────────────
 
     #[test]
+    #[serial_test::serial(docs_global_state)]
     fn test_get_chunk_by_id_roundtrip() {
         let db = test_db();
         crate::schema::ensure_doc_schema(&db).unwrap();
@@ -1132,6 +1212,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(docs_global_state)]
     fn test_index_result_counts_indexed_and_failed() {
         let db = test_db();
         crate::schema::ensure_doc_schema(&db).unwrap();
@@ -1180,6 +1261,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(docs_global_state)]
     fn test_reindex_all_indexes_everything() {
         let db = test_db();
         setup_with_provider(&db, 4);

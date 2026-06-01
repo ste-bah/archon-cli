@@ -12,7 +12,7 @@ transient model output.
 
 | Layer | Crate or module | Source of truth | Main commands |
 |---|---|---|---|
-| Document intelligence | `archon-docs` | document, page, chunk, OCR, embedding, retrieval and provenance Cozo rows | `archon docs ...` |
+| Document intelligence | `archon-docs` | document/page/chunk/OCR/provenance Cozo rows, RocksDB raw vectors, Rust-HNSW snapshots | `archon docs ...` |
 | Knowledge extraction | `archon-knowledge` | claims, entities, relations, source quality, contradictions | `archon kb ...` |
 | Provenance | `archon-provenance` plus document provenance | chain hashes and artifact lineage rows | `archon prov ...`, `archon docs provenance` |
 | Game-theory pipeline | `archon-pipeline::gametheory` | `gt_runs`, fingerprints, routing, specialist outputs, sections, reports, checkpoints | `archon gametheory ...`, `/gametheory ...`, `GameTheory*` tools |
@@ -33,8 +33,11 @@ flowchart TB
 
     FILES --> DOCS["Document Intelligence"]
     IMAGES --> DOCS
+    DOCS --> VECS["RocksDB Raw Vectors"]
+    VECS --> HNSW["Rust-HNSW Snapshot"]
     DOCS --> KB["Knowledge Extraction"]
     DOCS --> RET["Hybrid Retrieval"]
+    HNSW --> RET
     DOCS --> PROV["Document Provenance"]
 
     KB --> GT["Game-Theory Pipeline"]
@@ -59,6 +62,12 @@ CLI form (e.g., scripted from a shell):
 archon docs ingest ./policy-pack
 archon docs index --all
 archon docs index --document <document-id> --batch-size 64
+archon docs index-status
+archon docs index-retry-failed --limit 500
+archon docs index-daemon start
+archon docs vector-status
+archon docs vector-migrate --limit 1000 --batch-size 250
+archon docs vector-compact
 archon kb process --claims --entities --contradictions
 archon gametheory run "Assess the incentive structure of this plugin marketplace design" --budget 20 --max-concurrent 4
 archon meaning build --from gametheory-runs
@@ -71,6 +80,10 @@ TUI form (same flow, driven from inside an interactive session):
 > /docs ingest ./policy-pack
 > /docs index --all
 > /docs index --document <document-id> --batch-size 64
+> /docs index-status
+> /docs index-retry-failed --limit 500
+> /docs index-daemon status
+> /docs vector-status
 > /kb process --claims --entities --contradictions
 > /gametheory run "Assess the incentive structure of this plugin marketplace design" --budget 20 --max-concurrent 4
 > /meaning build --from gametheory-runs
@@ -80,8 +93,41 @@ TUI form (same flow, driven from inside an interactive session):
 `docs index` reports candidate counting, embedding provider loading, candidate
 loading, per-window and per-batch start/finish counts, bulk vector storage,
 failures, skipped rows, and elapsed time. Normal pending indexing automatically
-uses bounded 1024-chunk windows when `--limit` is omitted, so large repairs do
-not need to materialize the whole backlog before progress starts.
+uses a durable `doc_index_queue` and bounded 1024-chunk leases when `--limit`
+is omitted, so large repairs do not need to materialize the whole backlog
+before progress starts. `docs index-status` shows pending/leased/indexed/failed
+queue rows plus running/completed/failed job records; `docs index-retry-failed`
+requeues failed rows without re-ingesting sources.
+`docs index-daemon start` drains the same queue in a background Rust process;
+manual `docs index` remains available and does not require the daemon.
+Use `docs index-pause <job-id>`, `docs index-resume <job-id>`, and
+`docs index-cancel <job-id>` to control durable job state. Paused or cancelled
+jobs release leased rows back to pending so a later foreground or daemon run can
+continue without reprocessing the original documents.
+
+The indexer uses adaptive batch sizing by default and a content-hash embedding
+cache. Cache hits copy an already stored vector for identical chunk text under
+the same provider, update the queue row to indexed, and avoid another embedding
+request.
+
+For higher throughput, keep a single `docs index` process and increase the
+in-process embedding pool instead of starting multiple CLIs. The queue
+coordinator leases chunks from Cozo, embedding workers process bounded batches,
+and the writer path remains single-threaded for RocksDB vector writes and Cozo
+status updates. Use `ARCHON_DOCS_INDEX_EMBEDDING_WORKERS=2`,
+`ARCHON_DOCS_INDEX_MAX_IN_FLIGHT_BATCHES=2`, and
+`ARCHON_DOCS_INDEX_WRITER_BATCH_SIZE=256` as a conservative starting point.
+Local fastembed can run true parallel batches only when multiple model
+instances are enabled with `ARCHON_DOCS_FASTEMBED_INSTANCES`; otherwise the
+provider cap keeps it at one worker. OpenAI-compatible embedding providers can
+benefit from concurrent HTTP calls without extra local model instances.
+
+Document metadata, chunks, queue rows, and provenance stay in Cozo. New raw
+embedding writes go to `.archon/doc-vector-store` in RocksDB, and
+`docs vector-compact` builds a Rust-HNSW search snapshot from that raw-vector
+store. Existing Cozo vector rows can be migrated without re-embedding using
+`docs vector-migrate`; the command is resumable and skips rows already present
+in RocksDB.
 
 Every stage should leave physical evidence behind. Use the inspection commands
 instead of trusting return values:

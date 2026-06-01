@@ -182,6 +182,30 @@ export async function mockApi(page: Page) {
       jobs: [
         ingestJob("job-1", "design.pdf", "docs", "archon docs ingest /repo/hld/design.pdf", "completed"),
       ],
+      indexQueue: { pending: 12, leased: 4, indexed: 68, failed: 1 },
+      indexJobs: [
+        {
+          jobId: "idx-1",
+          status: "running",
+          scope: "pending",
+          provider: "fastembed",
+          leased: 16,
+          indexed: 68,
+          failed: 1,
+          skipped: 0,
+          startedAt: "2026-05-31T10:00:00Z",
+          lastError: "",
+        },
+      ],
+      indexFailures: [
+        {
+          chunkId: "chunk-failed-1",
+          documentId: "doc-2",
+          attemptCount: 2,
+          lastError: "provider timeout",
+          updatedAt: "2026-05-31T10:05:00Z",
+        },
+      ],
       warnings: [],
     },
     "/api/learning/summary": {

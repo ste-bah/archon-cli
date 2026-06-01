@@ -1,7 +1,3 @@
-//! Document management CLI handler.
-//!
-//! Wires `archon docs` subcommands to the archon-docs crate.
-
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -23,6 +19,7 @@ fn docs_db_path() -> PathBuf {
 
 pub(crate) fn open_db() -> Result<DbInstance> {
     let db_path = docs_db_path();
+    archon_docs::configure_cozo_write_lock_for_db(&db_path);
     let db = crate::command::store_paths::open_sqlite_db(&db_path, "document")?;
     ensure_doc_schema(&db)?;
     Ok(db)
@@ -54,6 +51,40 @@ pub async fn handle_docs_command(action: DocsAction) -> Result<()> {
             crate::command::docs_index::handle_index(all, document, batch_size, limit, open_db()?)
                 .await
         }
+        DocsAction::IndexStatus => crate::command::docs_index::handle_index_status(open_db()?),
+        DocsAction::IndexRetryFailed { limit } => {
+            crate::command::docs_index::handle_index_retry_failed(open_db()?, limit)
+        }
+        DocsAction::IndexPause { job_id } => {
+            crate::command::docs_index::handle_index_pause(open_db()?, &job_id)
+        }
+        DocsAction::IndexResume { job_id } => {
+            crate::command::docs_index::handle_index_resume(open_db()?, &job_id)
+        }
+        DocsAction::IndexCancel { job_id } => {
+            crate::command::docs_index::handle_index_cancel(open_db()?, &job_id)
+        }
+        DocsAction::IndexDaemon { action } => {
+            crate::command::docs_index_daemon::handle_index_daemon(action).await
+        }
+        DocsAction::VectorStatus => crate::command::docs_vector::handle_vector_status(open_db()?),
+        DocsAction::VectorMigrate {
+            limit,
+            batch_size,
+            after,
+        } => {
+            crate::command::docs_vector::handle_vector_migrate(open_db()?, limit, batch_size, after)
+        }
+        DocsAction::VectorCompact {
+            provider,
+            dimension,
+            limit,
+        } => crate::command::docs_vector::handle_vector_compact(
+            open_db()?,
+            provider,
+            dimension,
+            limit,
+        ),
         DocsAction::ModelStatus => {
             crate::command::docs_embedding::handle_model_status(open_db()?).await
         }

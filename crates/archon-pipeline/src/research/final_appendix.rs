@@ -15,16 +15,16 @@ pub fn appendices(session: &PipelineSession, structure: &ChapterStructure) -> St
 
 fn primary_source_appendix(session: &PipelineSession) -> String {
     let source_path = extract_source_path(&session.task)
-        .unwrap_or_else(|| "GKB-HLD - Match Scoring-200526-100339.pdf".to_string());
+        .unwrap_or_else(|| "No explicit primary source path detected in the request.".to_string());
     format!(
-        "## Appendix A: Primary Architecture Source Register\n\n\
+        "## Appendix A: Primary Source Register\n\n\
          | Field | Description |\n\
          |---|---|\n\
-         | Primary source | GKB Match Scoring High-Level Design PDF |\n\
+         | Primary source | Current research task primary source set |\n\
          | Source path | `{source_path}` |\n\
-         | Role in study | Primary architecture evidence for the GKB match scoring baseline, component boundaries, invocation patterns, configuration lifecycle, deployment assumptions, and audit/versioning concerns. |\n\
-         | Evidence boundary | Treated as design evidence, not as production telemetry, benchmark evidence, security certification, or proof of regulatory approval. |\n\
-         | Citation form | GSS / GKB Architecture Team. (2020). *HLD - Match Scoring* [Internal high-level design document]. Global Screening / GKB. |"
+         | Role in study | Primary evidence identified by the request and validated by the pipeline. |\n\
+         | Evidence boundary | Treated according to source type: manuals and documents establish documented behaviour, forum posts establish practitioner testimony, vendor pages establish vendor claims, and translated sources require translation caution. |\n\
+         | Citation form | Use the master reference list produced by the citation reconciler. |"
     )
 }
 
@@ -54,15 +54,12 @@ fn chapter_map_appendix(structure: &ChapterStructure) -> String {
 fn evidence_controls_appendix() -> String {
     "## Appendix C: Evidence, Citation, and Claim Controls\n\n\
      This appendix defines the evidence controls applied during final assembly. \
-     The HLD is the controlling source for internal GKB architecture claims. \
-     Academic, standards, regulatory, architecture, and vendor sources support \
-     broader claims about matching algorithms, software architecture, governance, \
-     model risk, security, scalability, and market positioning. Vendor sources are \
-     used as vendor-positioning evidence only. The paper does not claim empirical \
-     GKB superiority, quantified false-positive reduction, production scalability, \
-     or model validation without benchmark data, production telemetry, or formal \
-     validation evidence. All bibliography entries are consolidated into the single \
-     References section before these appendices."
+     Primary documents are controlling only for their documented scope. Public \
+     forum posts and community comments are practitioner testimony, not universal \
+     consensus. Vendor sources are used as vendor-positioning or product-behaviour \
+     evidence only. Negative search findings mean no high-confidence evidence was \
+     recovered, not that evidence cannot exist. All bibliography entries are \
+     consolidated into the single References section before these appendices."
         .to_string()
 }
 

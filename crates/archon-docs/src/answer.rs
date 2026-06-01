@@ -307,6 +307,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(docs_global_state)]
     fn test_answer_empty_corpus() {
         let db = test_db();
         setup(&db);
@@ -317,6 +318,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(docs_global_state)]
     fn test_answer_with_citations() {
         let db = test_db();
         setup(&db);
@@ -343,6 +345,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(docs_global_state)]
     fn test_answer_citation_snippet_is_unicode_safe() {
         let db = test_db();
         setup(&db);
@@ -375,6 +378,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(docs_global_state)]
     fn test_answer_provenance_edges_are_persisted() {
         let db = test_db();
         setup(&db);
@@ -427,6 +431,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(docs_global_state)]
     fn test_answer_citations_resolve() {
         let db = test_db();
         setup(&db);

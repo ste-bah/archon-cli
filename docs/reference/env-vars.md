@@ -17,6 +17,12 @@
 | `ARCHON_DOCS_EMBEDDING_MODEL` | Docs embedding model, default `text-embedding-3-small` for OpenAI-compatible providers |
 | `ARCHON_DOCS_EMBEDDING_TIMEOUT_SECS` | Per-request timeout for docs OpenAI-compatible embeddings |
 | `ARCHON_DOCS_EMBEDDING_LOAD_TIMEOUT_SECS` | Local fastembed model-load timeout before docs indexing fails fast |
+| `ARCHON_DOCS_FASTEMBED_INSTANCES` | Number of local fastembed model instances for true local parallel indexing; default follows requested docs index workers and is capped at `4` |
+| `ARCHON_DOCS_INDEX_EMBEDDING_WORKERS` | Number of in-process embedding worker batches for `docs index`; default is provider-aware (`1` local fastembed, `2` OpenAI-compatible) |
+| `ARCHON_DOCS_INDEX_MAX_IN_FLIGHT_BATCHES` | Backpressure limit for concurrent embedding batches; defaults to the effective worker count |
+| `ARCHON_DOCS_INDEX_WRITER_BATCH_SIZE` | Maximum vector rows per single-writer RocksDB/Cozo status flush; default `256` |
+| `ARCHON_DOC_VECTOR_STORE_DIR` | Override the RocksDB raw-vector store path; default is `<workspace>/.archon/doc-vector-store` |
+| `ARCHON_DOCS_LEGACY_COZO_VECTOR_WRITE` | Opt-in compatibility flag to also write new docs embeddings to legacy Cozo `vec_text_chunks` |
 | `ARCHON_CODEX_DISABLED` | Disable Codex provider resolution when set to `1`, `true`, or `yes` |
 | `ARCHON_CODEX_BASE_URL` | Override Codex backend URL for local mocks or diagnostics |
 | `ARCHON_CODEX_APP_SERVER_URL` | Override configured Codex app-server WebSocket endpoint for local diagnostics |

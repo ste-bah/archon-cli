@@ -258,7 +258,7 @@ fn combiner_prompt(
          section at the end, and appendices after References. Do not include memory notes, \
          pipeline status, artifact lists, QA verdicts, or file paths.\n\n\
          Style override:\n{}\n\nLocked architecture:\n{}\n\nChapter outputs:\n{}\n\n\
-         Authoritative references:\n{}\n\nAppendix requirement: include Appendix A for the primary HLD architecture source.",
+         Authoritative references:\n{}\n\nAppendix requirement: include Appendix A for the primary source register.",
         style_prompt.unwrap_or("UK English academic prose."),
         chapter_plan(&structure),
         dynamic_chapter_outputs(session),
@@ -352,7 +352,7 @@ fn reference_context(session: &PipelineSession) -> String {
         .map(|(agent, result)| (agent.key.as_str(), result.output.as_str()))
         .collect::<Vec<_>>();
     final_steps::best_reference_section(&outputs)
-        .unwrap_or_else(final_steps::fallback_hld_reference)
+        .unwrap_or_else(final_steps::fallback_reference_note)
 }
 
 fn abstract_context(session: &PipelineSession) -> String {
@@ -361,10 +361,7 @@ fn abstract_context(session: &PipelineSession) -> String {
         .iter()
         .find(|(agent, _)| agent.key == "abstract-writer")
         .and_then(|(_, result)| final_steps::extract_abstract_section(&result.output))
-        .unwrap_or_else(|| {
-            "This paper examines GKB match scoring and proprietary disposition algorithm design."
-                .into()
-        })
+        .unwrap_or_else(|| format!("This paper examines {}.", session.task))
 }
 
 fn dynamic_chapter_outputs(session: &PipelineSession) -> String {

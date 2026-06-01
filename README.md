@@ -160,7 +160,7 @@ The docs are organised by user goal:
 | **Security** | [`docs/security/`](docs/security/) — tool preflight, sandboxing, Docker, SSH, OpenShell |
 | **Reference** | [`docs/reference/`](docs/reference/) — slash commands, tools, skills, permissions, config schema, CLI flags, env vars |
 | **Integrations** | [`docs/integrations/`](docs/integrations/) — MCP, plugins, hooks, identity spoofing, VLM image descriptions, LSP, IDE extensions |
-| **Cookbook** | [`docs/cookbook/`](docs/cookbook/) — real-world evidence workflows, YouTube/video evidence, strategic engagement, memory-driven coding, god-code pipeline, custom agents |
+| **Cookbook** | [`docs/cookbook/`](docs/cookbook/) — real-world evidence workflows, YouTube/video evidence, strategic engagement, memory-driven coding, pipeline rewind, god-code pipeline, custom agents |
 | **Operations** | [`docs/operations/`](docs/operations/) — sessions, web workbench, TUI, cost, compaction, cron, remote control, troubleshooting, data locations |
 | **Development** | [`docs/development/`](docs/development/) — contributing, dev flow gates, adding tools/skills/agents, release process |
 | **Release notes** | [`docs/release-notes/`](docs/release-notes/) — per-version changelogs |
@@ -204,8 +204,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v1.3.8** ([release notes](docs/release-notes/v1.3.8.md))
+- Current version: **v1.3.9** ([release notes](docs/release-notes/v1.3.9.md))
 - Stable release for local world-model advisory learning, first-class reasoning-quality events, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
+- v1.3.9 moves document embeddings out of the hot Cozo write path into a RocksDB raw-vector store, adds resumable legacy-vector migration, Rust-HNSW compaction, durable index-queue/daemon controls, and clearer vector-status diagnostics.
 - v1.3.8 adds the Cognitive Executive Loop: situation classification, candidate planning, policy-gated JEPA/world-model scoring, compact decision/reflection ledgers, autonomous cognitive ticks, an opt-in Rust daemon, CLI/TUI/web executive-state inspection, and Opus-tier alias support for `claude-opus-4-8`.
 - v1.3.7 adds policy-gated autonomous governed learning via `archon learning tick`, provider-resolved pipeline subagent activity, and refreshed self-learning documentation.
 - v1.3.6 adds governed video evidence capture fallbacks: caption-first YouTube ingest, frame-friendly `yt-dlp` format selection, optional OpenCV frame extraction fallback, and optional RapidOCR image/frame OCR.

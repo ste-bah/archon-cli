@@ -22,7 +22,10 @@ export function App() {
     queryKey: ["ingest"],
     queryFn: apiClient.ingestSummary,
     refetchInterval: (query) =>
-      query.state.data?.jobs.some((job) => job.status === "running") ? 2500 : false,
+      query.state.data?.jobs.some((job) => job.status === "running")
+      || query.state.data?.indexJobs.some((job) => job.status === "running")
+        ? 2500
+        : false,
   });
   const learning = useQuery({ queryKey: ["learning"], queryFn: apiClient.learningSummary });
   const cognitive = useQuery({ queryKey: ["cognitive"], queryFn: apiClient.cognitiveSummary });

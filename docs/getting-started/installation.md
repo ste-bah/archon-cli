@@ -254,6 +254,8 @@ archon docs status
 archon docs inspect <document-id>
 archon docs index --all
 archon docs index --document <document-id> --batch-size 64
+archon docs index-status
+archon docs index-daemon status
 archon docs search "known phrase" --mode hybrid --debug
 ```
 

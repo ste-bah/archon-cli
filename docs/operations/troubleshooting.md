@@ -99,6 +99,28 @@ If verification fails, inspect
 restore the missing/corrupt artifact, export with `--include-unverified` for
 incident review, or abort the session and restart.
 
+### Pipeline resumed but downstream output is bad
+
+If a completed agent output is wrong, a normal resume will keep treating it as
+completed. Rewind to the first bad accepted agent, then resume:
+
+```bash
+archon pipeline inspect <session-id>
+archon pipeline rewind <session-id> --to-agent <agent-key> --reason "bad accepted output"
+archon pipeline resume <session-id>
+```
+
+In the TUI, use the same slash surface:
+
+```text
+> /pipeline inspect <session-id>
+> /pipeline rewind <session-id> --to-agent <agent-key> --reason "bad accepted output"
+> /pipeline resume <session-id>
+```
+
+See the [pipeline rewind cookbook](../cookbook/pipeline-rewind.md) for picking
+the rewind point and verifying the regenerated bundle.
+
 ## MCP
 
 ### MCP server not connecting

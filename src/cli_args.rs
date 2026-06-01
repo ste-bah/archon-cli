@@ -20,9 +20,9 @@ pub use auth::{AuthArgs, AuthProviderKind, AuthSubcommand, ChatArgs};
 pub use cognitive_actions::{CognitiveAction, CognitiveDaemonAction};
 pub use commands::Commands;
 pub use data_actions::{
-    BehaviourAction, ConstellationAction, DocsAction, KbAction, LearningAction, LearningGnnAction,
-    MeaningAction, MemoryAction, PluginAction, ProvAction, RemoteAction, RetrospectiveAnalyzerArg,
-    SelfAction, SelfPlansAction, SelfTrustAction,
+    BehaviourAction, ConstellationAction, DocsAction, DocsIndexDaemonAction, KbAction,
+    LearningAction, LearningGnnAction, MeaningAction, MemoryAction, PluginAction, ProvAction,
+    RemoteAction, RetrospectiveAnalyzerArg, SelfAction, SelfPlansAction, SelfTrustAction,
 };
 pub use permissions_actions::PermissionsAction;
 pub use reasoning_actions::{BriefingAction, ReasoningAction, ReasoningCostAction};

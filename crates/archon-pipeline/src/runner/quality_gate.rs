@@ -1,4 +1,4 @@
-use super::{AgentInfo, PIPELINE_MAX_ATTEMPTS};
+use super::{AgentInfo, PIPELINE_MAX_ATTEMPTS, QualityScore};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PipelineRunOptions {
@@ -34,6 +34,10 @@ pub(super) fn force_acceptance_reason(base_reason: Option<String>) -> String {
     }
 }
 
+pub(super) fn has_non_bypassable_quality_failure(quality: &QualityScore) -> bool {
+    quality.overall == 0.0 && quality.dimensions.contains_key("citation_gate")
+}
+
 pub(super) fn attempt_accepted(meets_threshold: bool, critical: bool, attempt: usize) -> bool {
     meets_threshold || (!critical && attempt >= PIPELINE_MAX_ATTEMPTS)
 }
@@ -42,6 +46,7 @@ pub(super) fn attempt_accepted(meets_threshold: bool, critical: bool, attempt: u
 mod tests {
     use super::*;
     use crate::runner::ToolAccessLevel;
+    use std::collections::HashMap;
 
     fn critical_agent() -> AgentInfo {
         AgentInfo {
@@ -81,5 +86,14 @@ mod tests {
         let decision = quality_gate_acceptance(false, &agent, 1, options);
         assert!(!decision.accepted);
         assert!(!decision.force_accepted);
+    }
+
+    #[test]
+    fn semantic_citation_gate_failure_is_non_bypassable() {
+        let quality = QualityScore {
+            overall: 0.0,
+            dimensions: HashMap::from([("citation_gate".to_string(), 0.0)]),
+        };
+        assert!(has_non_bypassable_quality_failure(&quality));
     }
 }

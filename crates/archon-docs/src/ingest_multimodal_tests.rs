@@ -2,6 +2,7 @@ use super::test_support::*;
 use super::*;
 
 #[tokio::test]
+#[serial_test::serial(docs_global_state)]
 async fn test_ingest_image_runs_ocr_and_persists_rows() {
     reset_multimodal_test_providers();
     crate::ocr::provider::set_provider(Box::new(MockOcrProvider {
@@ -62,6 +63,7 @@ async fn test_ingest_image_runs_ocr_and_persists_rows() {
 }
 
 #[tokio::test]
+#[serial_test::serial(docs_global_state)]
 async fn test_vlm_disabled_by_default_does_not_describe_image() {
     reset_multimodal_test_providers();
     crate::ocr::provider::set_provider(Box::new(MockOcrProvider {
@@ -85,6 +87,7 @@ async fn test_vlm_disabled_by_default_does_not_describe_image() {
 }
 
 #[tokio::test]
+#[serial_test::serial(docs_global_state)]
 async fn test_vlm_enabled_adds_description_to_image_chunks() {
     reset_multimodal_test_providers();
     crate::ocr::provider::set_provider(Box::new(MockOcrProvider {
@@ -125,6 +128,7 @@ async fn test_vlm_enabled_adds_description_to_image_chunks() {
 }
 
 #[tokio::test]
+#[serial_test::serial(docs_global_state)]
 async fn test_vlm_provider_failure_warns_but_keeps_ocr_ingest() {
     reset_multimodal_test_providers();
     crate::ocr::provider::set_provider(Box::new(MockOcrProvider {

@@ -141,6 +141,7 @@ fn clear_generated_evidence(
 }
 
 fn remove_generated_rows(db: &DbInstance, document_id: &str) -> Result<(), DocsError> {
+    crate::index_queue::remove_document_queue_rows(db, document_id).map_err(storage)?;
     let params = params(document_id);
     run_rm_optional(
         db,
