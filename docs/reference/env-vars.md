@@ -100,6 +100,18 @@ Docs indexing follows `[memory].embedding_provider` unless
 local fastembed. `docs index` counts candidates before loading local fastembed,
 so an empty index pass exits quickly.
 
+For large local document indexing on a Mac, export the indexing profile before
+starting `archon` or the TUI so child commands inherit it:
+
+```bash
+export ARCHON_DOCS_EMBEDDING_PROVIDER=local
+export ARCHON_DOCS_EMBEDDING_LOAD_TIMEOUT_SECS=1800
+export ARCHON_DOCS_INDEX_EMBEDDING_WORKERS=2
+export ARCHON_DOCS_FASTEMBED_INSTANCES=2
+export ARCHON_DOCS_INDEX_MAX_IN_FLIGHT_BATCHES=2
+export ARCHON_DOCS_INDEX_WRITER_BATCH_SIZE=256
+```
+
 ## Resolution order for Gemini VLM key
 
 1. The env var named by `[policy.docs.vlm.gemini] api_key_env` (default: `GOOGLE_API_KEY`)

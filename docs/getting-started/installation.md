@@ -259,6 +259,18 @@ archon docs index-daemon status
 archon docs search "known phrase" --mode hybrid --debug
 ```
 
+For large local indexing runs, export the local embedding profile before
+starting `archon` or the TUI so index commands inherit it:
+
+```bash
+export ARCHON_DOCS_EMBEDDING_PROVIDER=local
+export ARCHON_DOCS_EMBEDDING_LOAD_TIMEOUT_SECS=1800
+export ARCHON_DOCS_INDEX_EMBEDDING_WORKERS=2
+export ARCHON_DOCS_FASTEMBED_INSTANCES=2
+export ARCHON_DOCS_INDEX_MAX_IN_FLIGHT_BATCHES=2
+export ARCHON_DOCS_INDEX_WRITER_BATCH_SIZE=256
+```
+
 Inside the TUI:
 
 ```text
