@@ -168,7 +168,16 @@ jobs:
         # --test-threads=1 here previously timed out the ubuntu test step
         # at 64+ minutes (commit 3fded2c). Job timeout-minutes:30 above
         # bounds future regressions.
-        run: cargo nextest run --workspace --no-fail-fast
+        # Emit a heartbeat so GitHub does not kill long, quiet nextest
+        # phases as an apparent no-output hang.
+        run: |
+          cargo nextest run --workspace --no-fail-fast &
+          nextest_pid=$!
+          while kill -0 "$nextest_pid" 2>/dev/null; do
+            sleep 60
+            echo "nextest still running..."
+          done
+          wait "$nextest_pid"
 
       - name: Run doctests
         shell: bash
