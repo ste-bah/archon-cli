@@ -44,7 +44,7 @@ jobs:
   build-and-test:
     name: build + test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Per-OS timeout (#237). Linux + macOS use 30 min.
+    # Per-OS timeout (#237). Linux + macOS use 45 min.
     #
     # #244 Windows CI DISABLED: removed windows runner from the build+test
     # matrix entirely. The BASH_FUNC_* env-var bug on the windows-latest
@@ -66,7 +66,11 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         include:
           - os: ubuntu-latest
-            timeout-override: 30
+            # Ubuntu now needs more than 30 minutes after the RocksDB/HNSW
+            # index path expanded workspace test/build time. Keep parity with
+            # macOS so nextest and doctests can finish instead of being
+            # cancelled mid-step.
+            timeout-override: 45
           - os: macos-latest
             # macOS runners are noticeably slower than ubuntu for this
             # workspace: no mold linker, slower disk, and `cargo nextest
@@ -166,8 +170,8 @@ jobs:
         # (small RAM, prior crash incidents on parallel rustc/test
         # binaries). It does NOT apply to CI runners. Forcing
         # --test-threads=1 here previously timed out the ubuntu test step
-        # at 64+ minutes (commit 3fded2c). Job timeout-minutes:30 above
-        # bounds future regressions.
+        # at 64+ minutes (commit 3fded2c). Job timeout-minutes still bounds
+        # future regressions while allowing current workspace tests to finish.
         # Emit a heartbeat so GitHub does not kill long, quiet nextest
         # phases as an apparent no-output hang.
         run: |
