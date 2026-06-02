@@ -110,6 +110,7 @@ pub(crate) fn render_gnn_status_with_durable(
     } else {
         "config fallback"
     };
+    let daemon_status = daemon_status_line(config);
 
     format!(
         "GNN Auto-Trainer Status\n\
@@ -128,8 +129,38 @@ pub(crate) fn render_gnn_status_with_durable(
          New-memory gate:   {new_memory_gate}\n\
          Correction gate:   {correction_gate}\n\
          Elapsed gate:      {elapsed_gate}\n\
-         Throttle gate:     {throttle_gate}"
+         Throttle gate:     {throttle_gate}\n\
+         Daemon trainer:    {daemon_status}"
     )
+}
+
+fn daemon_status_line(config: &archon_core::config::ArchonConfig) -> String {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let root = expand_path(&cwd, &config.learning.cognitive.ledger_dir);
+    crate::command::cognitive_daemon_learning_ledger::latest_for_job(&root, "gnn_auto_trainer")
+        .map(|event| {
+            format!(
+                "{} {} — {}",
+                event.created_at.to_rfc3339(),
+                event.status,
+                event.summary
+            )
+        })
+        .unwrap_or_else(|| "no daemon trainer tick recorded".into())
+}
+
+fn expand_path(cwd: &std::path::Path, raw: &str) -> std::path::PathBuf {
+    if let Some(stripped) = raw.strip_prefix("~/")
+        && let Some(home) = std::env::var_os("HOME")
+    {
+        return std::path::PathBuf::from(home).join(stripped);
+    }
+    let path = std::path::PathBuf::from(raw);
+    if path.is_absolute() {
+        path
+    } else {
+        cwd.join(path)
+    }
 }
 
 fn gate(value: u64, threshold: u64) -> String {

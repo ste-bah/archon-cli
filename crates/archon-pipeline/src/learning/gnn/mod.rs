@@ -6,6 +6,7 @@
 
 mod accessors;
 pub mod auto_trainer;
+pub mod auto_trainer_one_shot;
 // Reference: auto_trainer_runtime.rs (build/spawn helpers used by session.rs + pipeline.rs)
 pub mod auto_trainer_runtime;
 pub mod backprop;

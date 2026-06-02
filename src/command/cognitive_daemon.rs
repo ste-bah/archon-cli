@@ -114,6 +114,12 @@ fn run(config: &ArchonConfig, cwd: &Path, interval_ms: Option<u64>, as_json: boo
     apply_interval_override(&mut daemon_config, interval_ms);
     let mut daemon = CognitiveDaemon::new(&store_root, daemon_config, store.db(), policy);
     add_deferred_retry_jobs(&mut daemon);
+    crate::command::cognitive_daemon_learning::add_learning_jobs(
+        &mut daemon,
+        config.clone(),
+        cwd.to_path_buf(),
+        store_root.clone(),
+    );
     let state = daemon.run_forever()?;
     print_state(&state, as_json)
 }
@@ -129,6 +135,12 @@ fn run_once(config: &ArchonConfig, cwd: &Path, as_json: bool) -> Result<()> {
         policy,
     );
     add_deferred_retry_jobs(&mut daemon);
+    crate::command::cognitive_daemon_learning::add_learning_jobs(
+        &mut daemon,
+        config.clone(),
+        cwd.to_path_buf(),
+        store_root.clone(),
+    );
     let state = daemon.run_once()?;
     print_state(&state, as_json)
 }
@@ -148,7 +160,7 @@ fn status(config: &ArchonConfig, cwd: &Path, as_json: bool) -> Result<()> {
     let daemon_config = &config.learning.cognitive.daemon;
     let root = cognitive_root(cwd, config);
     let status = CognitiveDaemon::status(&root, daemon_config.stale_heartbeat_ms)?;
-    print_status(&status, as_json)
+    print_status(&status, as_json, &root)
 }
 
 fn spawn_daemon_child(cwd: &Path, interval_ms: Option<u64>) -> Result<std::process::Child> {
@@ -306,9 +318,18 @@ fn print_state(state: &DaemonState, as_json: bool) -> Result<()> {
     Ok(())
 }
 
-fn print_status(status: &DaemonStatus, as_json: bool) -> Result<()> {
+fn print_status(status: &DaemonStatus, as_json: bool, root: &Path) -> Result<()> {
     if as_json {
-        println!("{}", serde_json::to_string_pretty(status)?);
+        let mut value = serde_json::to_value(status)?;
+        if let Some(object) = value.as_object_mut() {
+            object.insert(
+                "learningJobs".into(),
+                serde_json::to_value(crate::command::cognitive_daemon_learning_ledger::latest(
+                    root, 10,
+                ))?,
+            );
+        }
+        println!("{}", serde_json::to_string_pretty(&value)?);
     } else {
         println!("Cognitive daemon");
         println!("Running: {}", status.running);
@@ -321,6 +342,10 @@ fn print_status(status: &DaemonStatus, as_json: bool) -> Result<()> {
             println!("Ticks run: {}", state.ticks_run);
             println!("Last heartbeat: {}", state.last_heartbeat_at);
         }
+        println!(
+            "{}",
+            crate::command::cognitive_daemon_learning::render_recent_summary(root)
+        );
     }
     Ok(())
 }

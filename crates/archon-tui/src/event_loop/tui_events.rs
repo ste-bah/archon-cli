@@ -389,4 +389,29 @@ mod tests {
         assert_eq!(app.status.context_tokens_used, 121_000);
         assert_eq!(app.status.context_name.as_deref(), Some("main"));
     }
+
+    #[tokio::test]
+    async fn ask_user_prompt_sets_modal_state_and_logs_question() {
+        let mut app = App::new();
+        app.ask_user_draft = "stale answer".into();
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+
+        handle_tui_event(
+            &mut app,
+            TuiEvent::AskUserPrompt {
+                question: "Choose a path".into(),
+            },
+            &tx,
+        )
+        .await;
+
+        assert_eq!(app.ask_user_prompt.as_deref(), Some("Choose a path"));
+        assert!(app.ask_user_draft.is_empty());
+        assert!(
+            app.output
+                .all_lines()
+                .iter()
+                .any(|line| line.contains("[question] Choose a path"))
+        );
+    }
 }

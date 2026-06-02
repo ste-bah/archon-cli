@@ -62,4 +62,42 @@ mod tests {
         assert_eq!(app.ask_user_draft, "y");
         assert!(app.input.text().is_empty());
     }
+
+    #[test]
+    fn returns_none_when_no_question_is_active() {
+        let mut app = App::new();
+
+        let outcome = handle_ask_user_key(&mut app, &KeyCode::Char('y'));
+
+        assert_eq!(outcome, None);
+        assert!(app.ask_user_draft.is_empty());
+    }
+
+    #[test]
+    fn escape_cancels_and_clears_draft() {
+        let mut app = App::new();
+        app.ask_user_prompt = Some("Continue?".into());
+        app.ask_user_draft = "partial".into();
+
+        let outcome = handle_ask_user_key(&mut app, &KeyCode::Esc);
+
+        assert_eq!(outcome, Some(AskUserKeyOutcome::Cancel));
+        assert!(app.ask_user_prompt.is_none());
+        assert!(app.ask_user_draft.is_empty());
+    }
+
+    #[test]
+    fn backspace_and_non_text_keys_are_handled_locally() {
+        let mut app = App::new();
+        app.ask_user_prompt = Some("Continue?".into());
+        app.ask_user_draft = "yes".into();
+
+        let backspace = handle_ask_user_key(&mut app, &KeyCode::Backspace);
+        let ignored = handle_ask_user_key(&mut app, &KeyCode::Left);
+
+        assert_eq!(backspace, Some(AskUserKeyOutcome::Handled));
+        assert_eq!(ignored, Some(AskUserKeyOutcome::Handled));
+        assert_eq!(app.ask_user_draft, "ye");
+        assert_eq!(app.ask_user_prompt.as_deref(), Some("Continue?"));
+    }
 }

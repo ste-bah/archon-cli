@@ -70,6 +70,16 @@ pub(crate) fn render_world_status_with_stats(
         } else {
             "fail-open"
         };
+    let daemon_trainer = super::latest_daemon_trainer_event()
+        .map(|event| {
+            format!(
+                "{} {} — {}",
+                event.created_at.to_rfc3339(),
+                event.status,
+                event.summary
+            )
+        })
+        .unwrap_or_else(|| "no daemon trainer tick recorded".into());
 
     format!(
         "World Model Status\n\
@@ -96,6 +106,7 @@ pub(crate) fn render_world_status_with_stats(
          Backend fallback:   {fallback}\n\
          Auto-trainer:       {auto_trainer}\n\
          Trainer status:     idle-aware\n\
+         Daemon trainer:     {daemon_trainer}\n\
          Advisor status:     {advisor_status}\n\
          Advisor mode:       advisory",
         enabled = wm.enabled,
@@ -116,6 +127,7 @@ pub(crate) fn render_world_status_with_stats(
         selected_backend = backend.selected,
         fallback = backend.fallback_reason.as_deref().unwrap_or("none"),
         auto_trainer = wm.auto_trainer.enabled,
+        daemon_trainer = daemon_trainer,
     )
 }
 
