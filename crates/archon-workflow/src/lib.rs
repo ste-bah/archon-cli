@@ -2,6 +2,7 @@
 
 pub mod command;
 pub mod config;
+pub mod context;
 pub mod error;
 pub mod events;
 pub mod executor;

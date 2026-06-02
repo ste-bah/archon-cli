@@ -306,15 +306,17 @@ fn workflow_agent(request: &StageRunRequest, model: &str) -> AgentInfo {
 }
 
 fn workflow_prompt(request: &StageRunRequest) -> String {
+    let input =
+        serde_json::to_string_pretty(&request.input).unwrap_or_else(|_| request.input.to_string());
     format!(
-        "## Workflow Task\n{}\n\n## Stage\nid: {}\nkind: {:?}\nprovider_tier: {:?}\nattempt: {}\ndepends_on: {:?}\n\n## Stage Input\n{}",
+        "## Workflow Task\n{}\n\n## Stage\nid: {}\nkind: {:?}\nprovider_tier: {:?}\nattempt: {}\ndepends_on: {:?}\n\n## Evidence Contract\nUse the `source_files`, `dependencies`, and `fanout_item` fields in the stage input as primary evidence. If required source files or upstream artifacts are absent, return a concise blocked report with `status: blocked`, the missing evidence, and do not invent findings.\n\n## Stage Input\n```json\n{}\n```",
         request.task,
         request.stage_id,
         request.stage_kind,
         request.provider_tier,
         request.attempt,
         request.depends_on,
-        request.input
+        input
     )
 }
 

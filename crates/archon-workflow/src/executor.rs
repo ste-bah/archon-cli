@@ -3,12 +3,13 @@ use futures_util::future::join_all;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::context;
 use crate::error::{WorkflowError, WorkflowResult};
 use crate::events::{WorkflowEventKind, WorkflowEventLog};
-use crate::fanout::{FanoutItem, extract_items};
+use crate::fanout::FanoutItem;
 use crate::learning::WorkflowLearningSink;
 use crate::policy::WorkflowPolicy;
-use crate::reducers::{ReducerInput, ReducerRegistry};
+use crate::reducers::ReducerRegistry;
 use crate::run::{RunStatus, StageStatus, WorkflowRun};
 use crate::runner::{StageRunOutput, StageRunRequest, WorkflowStageRunner};
 use crate::spec::{ProviderTier, StageKind, StageSpec, WorkflowSpec};
@@ -113,9 +114,8 @@ impl WorkflowExecutor {
             }
             StageKind::Fanout => self.run_fanout(run, stage),
             StageKind::Reduce => self.run_reduce(run, stage),
-            StageKind::Condition | StageKind::QualityGate => {
-                self.write_stage_artifact(run, stage, "json", "{}".to_string())
-            }
+            StageKind::QualityGate => self.run_quality_gate(run, stage),
+            StageKind::Condition => self.write_stage_artifact(run, stage, "json", "{}".to_string()),
         };
         match result {
             Ok(()) => {
@@ -196,7 +196,10 @@ impl WorkflowExecutor {
     ) -> WorkflowResult<StageRunOutput> {
         let output = match stage.kind {
             StageKind::Agent | StageKind::Tool | StageKind::HumanGate => {
-                let output = runner.run_stage(stage_request(run, stage)).await?;
+                let output = runner
+                    .run_stage(stage_request(&self.store, run, stage)?)
+                    .await?;
+                ensure_output_usable(&output.body)?;
                 self.write_stage_artifact(run, stage, &output.extension, output.body.clone())?;
                 output
             }
@@ -205,7 +208,11 @@ impl WorkflowExecutor {
                 self.run_reduce(run, stage)?;
                 StageRunOutput::markdown(format!("Reducer stage `{}` complete.", stage.id))
             }
-            StageKind::Condition | StageKind::QualityGate | StageKind::Checkpoint => {
+            StageKind::QualityGate => {
+                self.run_quality_gate(run, stage)?;
+                StageRunOutput::markdown(format!("Quality gate `{}` passed.", stage.id))
+            }
+            StageKind::Condition | StageKind::Checkpoint => {
                 self.write_stage_artifact(run, stage, "json", "{}".to_string())?;
                 StageRunOutput::markdown(format!("Checkpoint stage `{}` complete.", stage.id))
             }
@@ -214,7 +221,7 @@ impl WorkflowExecutor {
     }
 
     fn run_fanout(&self, run: &mut WorkflowRun, stage: &StageSpec) -> WorkflowResult<()> {
-        let items = extract_items(stage);
+        let items = context::fanout_items(&self.store, run, stage)?;
         let body = format!(
             "# Fan-out Summary\n\nStage `{}` processed {} item(s).\n",
             stage.id,
@@ -229,16 +236,20 @@ impl WorkflowExecutor {
         stage: &StageSpec,
         runner: &dyn WorkflowStageRunner,
     ) -> WorkflowResult<StageRunOutput> {
-        let items = extract_items(stage);
+        let items = context::fanout_items(&self.store, run, stage)?;
         let width = fanout_width(run, &self.policy);
         let mut completed = 0usize;
         for batch in items.chunks(width) {
-            let jobs = batch.iter().map(|item| {
-                let request = fanout_item_request(run, stage, item);
-                async move { runner.run_stage(request).await }
-            });
-            for result in join_all(jobs).await {
+            let mut jobs = Vec::new();
+            for item in batch {
+                let request = fanout_item_request(&self.store, run, stage, item)?;
+                let item_id = item.id.clone();
+                jobs.push(async move { (item_id, runner.run_stage(request).await) });
+            }
+            for (item_id, result) in join_all(jobs).await {
                 let output = result?;
+                ensure_output_usable(&output.body)
+                    .map_err(|err| WorkflowError::StageFailed(format!("{item_id}: {err}")))?;
                 self.write_stage_artifact(run, stage, &output.extension, output.body)?;
                 completed += 1;
             }
@@ -253,18 +264,21 @@ impl WorkflowExecutor {
         let reducer = stage
             .reducer
             .ok_or_else(|| WorkflowError::MissingReducer(stage.id.clone()))?;
-        let inputs = stage
-            .depends_on
-            .iter()
-            .map(|dep| ReducerInput {
-                stage_id: dep.clone(),
-                content: format!("Accepted artifact summary for `{dep}`."),
-                accepted: run.accepted_stage(dep),
-                failed: !run.accepted_stage(dep),
-            })
-            .collect::<Vec<_>>();
+        let inputs = context::reducer_inputs(&self.store, run, stage)?;
         let output = self.reducers.reduce(reducer, &inputs)?;
         self.write_stage_artifact(run, stage, "md", output.body)
+    }
+
+    fn run_quality_gate(&self, run: &mut WorkflowRun, stage: &StageSpec) -> WorkflowResult<()> {
+        if let Some(reason) = context::quality_gate_failure(&self.store, run, stage)? {
+            return Err(WorkflowError::StageFailed(reason));
+        }
+        self.write_stage_artifact(
+            run,
+            stage,
+            "json",
+            json!({"status": "accepted", "checked_dependencies": stage.depends_on}).to_string(),
+        )
     }
 
     fn write_stage_artifact(
@@ -335,13 +349,17 @@ fn finish_run(run: &mut WorkflowRun) {
     run.mark_updated();
 }
 
-fn stage_request(run: &WorkflowRun, stage: &StageSpec) -> StageRunRequest {
+fn stage_request(
+    store: &WorkflowStore,
+    run: &WorkflowRun,
+    stage: &StageSpec,
+) -> WorkflowResult<StageRunRequest> {
     let attempt = run
         .stages
         .get(&stage.id)
         .map(|state| state.attempt)
         .unwrap_or(1);
-    StageRunRequest {
+    Ok(StageRunRequest {
         run_id: run.id.clone(),
         stage_id: stage.id.clone(),
         stage_kind: stage.kind,
@@ -350,20 +368,20 @@ fn stage_request(run: &WorkflowRun, stage: &StageSpec) -> StageRunRequest {
         attempt,
         provider_tier: stage.provider_tier.unwrap_or(ProviderTier::Planner),
         depends_on: stage.depends_on.clone(),
-        input: stage.input.clone(),
-    }
+        input: context::stage_input(store, run, stage)?,
+    })
 }
 
-fn fanout_item_request(run: &WorkflowRun, stage: &StageSpec, item: &FanoutItem) -> StageRunRequest {
-    let mut request = stage_request(run, stage);
+fn fanout_item_request(
+    store: &WorkflowStore,
+    run: &WorkflowRun,
+    stage: &StageSpec,
+    item: &FanoutItem,
+) -> WorkflowResult<StageRunRequest> {
+    let mut request = stage_request(store, run, stage)?;
     request.stage_id = item.id.clone();
-    request.input = json!({
-        "fanout_stage": stage.id.clone(),
-        "fanout_item_id": item.id.clone(),
-        "fanout_item": item.payload.clone(),
-        "stage_input": stage.input.clone(),
-    });
-    request
+    request.input = context::fanout_input(store, run, stage, item)?;
+    Ok(request)
 }
 
 fn fanout_width(run: &WorkflowRun, policy: &WorkflowPolicy) -> usize {
@@ -377,6 +395,13 @@ fn deterministic_stage_output(stage: &StageSpec) -> String {
         stage.kind,
         stage.agent.as_deref().unwrap_or("none")
     )
+}
+
+fn ensure_output_usable(body: &str) -> WorkflowResult<()> {
+    if let Some(reason) = context::output_reports_blocked(body) {
+        return Err(WorkflowError::StageFailed(reason));
+    }
+    Ok(())
 }
 
 fn mark_started(run: &mut WorkflowRun, stage: &StageSpec) -> WorkflowResult<()> {

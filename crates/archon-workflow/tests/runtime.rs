@@ -2,7 +2,7 @@ use archon_workflow::{
     HeuristicWorkflowPlanner, LifecycleAction, LifecycleController, ProviderFamily, ProviderTier,
     ProviderTierResolver, RunStatus, StageRunOutput, StageRunRequest, StageStatus,
     TemplateRegistry, WorkflowEvent, WorkflowExecutor, WorkflowPlanner, WorkflowPolicy,
-    WorkflowStageRunner, WorkflowStore, classify_provider, stage::source_input_hash,
+    WorkflowSpec, WorkflowStageRunner, WorkflowStore, classify_provider, stage::source_input_hash,
 };
 
 #[test]
@@ -145,6 +145,103 @@ async fn live_executor_routes_fanout_through_runner() {
 }
 
 #[tokio::test]
+async fn live_executor_supplies_sources_and_dependency_artifacts() {
+    struct ContextRunner {
+        review_inputs: std::sync::Mutex<Vec<serde_json::Value>>,
+    }
+
+    #[async_trait::async_trait]
+    impl WorkflowStageRunner for ContextRunner {
+        async fn run_stage(
+            &self,
+            request: StageRunRequest,
+        ) -> archon_workflow::WorkflowResult<StageRunOutput> {
+            if request.stage_id == "discover" {
+                return Ok(StageRunOutput::markdown(
+                    r#"{"items":[{"path":"src/auth.rs","reason":"audit target"}]}"#,
+                ));
+            }
+            if request.stage_id.starts_with("review-") {
+                self.review_inputs
+                    .lock()
+                    .unwrap()
+                    .push(request.input.clone());
+                return Ok(StageRunOutput::markdown(
+                    "reviewed concrete file: input == secret and seed + 1",
+                ));
+            }
+            Ok(StageRunOutput::markdown("ok"))
+        }
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src")).unwrap();
+    std::fs::write(
+        temp.path().join("src/auth.rs"),
+        "fn check(input: &str, secret: &str, seed: u64) { let _ = input == secret; let _ = seed + 1; }",
+    )
+    .unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let executor = WorkflowExecutor::new(store.clone(), WorkflowPolicy::default());
+    let run = executor.start(audit_spec("Audit src/auth.rs")).unwrap();
+    let runner = ContextRunner {
+        review_inputs: std::sync::Mutex::new(Vec::new()),
+    };
+    let report = executor
+        .execute_with_runner(run.clone(), &runner)
+        .await
+        .unwrap();
+    assert_eq!(report.failed, 0);
+
+    let inputs = runner.review_inputs.lock().unwrap();
+    let input = serde_json::to_string_pretty(&inputs[0]).unwrap();
+    assert!(input.contains("input == secret"), "{input}");
+    assert!(input.contains("seed + 1"), "{input}");
+    assert!(input.contains("discover"), "{input}");
+    assert!(input.contains("audit target"), "{input}");
+}
+
+#[tokio::test]
+async fn blocked_fanout_output_fails_stage_instead_of_accepting() {
+    struct BlockedRunner;
+
+    #[async_trait::async_trait]
+    impl WorkflowStageRunner for BlockedRunner {
+        async fn run_stage(
+            &self,
+            request: StageRunRequest,
+        ) -> archon_workflow::WorkflowResult<StageRunOutput> {
+            if request.stage_id == "discover" {
+                return Ok(StageRunOutput::markdown(
+                    r#"{"items":[{"path":"src/auth.rs","reason":"audit target"}]}"#,
+                ));
+            }
+            Ok(StageRunOutput::markdown(
+                "status: blocked\nfindings: []\nCannot audit because source evidence is missing.",
+            ))
+        }
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src")).unwrap();
+    std::fs::write(temp.path().join("src/auth.rs"), "fn check() {}").unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let executor = WorkflowExecutor::new(store.clone(), WorkflowPolicy::default());
+    let run = executor.start(audit_spec("Audit src/auth.rs")).unwrap();
+    let report = executor
+        .execute_with_runner(run.clone(), &BlockedRunner)
+        .await
+        .unwrap();
+    assert_eq!(report.failed, 1);
+
+    let finished = store.load_state(&run.id).unwrap();
+    assert_eq!(
+        finished.stages.get("review").unwrap().status,
+        StageStatus::Failed
+    );
+}
+
+#[tokio::test]
 async fn provider_matrix_executes_code_and_research_workflows() {
     struct MatrixRunner {
         provider: &'static str,
@@ -263,4 +360,28 @@ fn event_seqs(store: &WorkflowStore, run_id: &str) -> Vec<u64> {
         .filter(|line| !line.trim().is_empty())
         .map(|line| serde_json::from_str::<WorkflowEvent>(line).unwrap().seq)
         .collect()
+}
+
+fn audit_spec(task: &str) -> WorkflowSpec {
+    WorkflowSpec::from_yaml(&format!(
+        r#"
+schema: archon.workflow.v1
+name: audit-test
+task: {task}
+stages:
+  - id: discover
+    kind: agent
+    agent: workflow-discovery
+  - id: review
+    kind: fanout
+    agent: workflow-reviewer
+    foreach: ${{discover.items}}
+    depends_on: [discover]
+  - id: synthesize
+    kind: reduce
+    reducer: evidence_weighted_report
+    depends_on: [review]
+"#
+    ))
+    .unwrap()
 }
