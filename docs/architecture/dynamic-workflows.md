@@ -74,6 +74,20 @@ Event payloads are sanitized before persistence. Provider-private reasoning
 fields such as `thinking`, `reasoning_encrypted`, OAuth tokens, API keys, and
 authorization headers are stripped.
 
+Live stage execution also has an evidence contract. Stage agents receive a
+structured input envelope with `stage_input`, upstream `dependencies`, and
+`source_files` extracted from the workflow task or stage payload. Fan-out stages
+can derive their items from upstream artifacts such as `${discover.items}`;
+payloads that name project-local files are enriched with bounded source-file
+content before the live agent runs. Reducers consume the actual accepted
+artifact content instead of placeholder summaries.
+
+If a live stage reports that it is blocked, missing evidence, unable to audit,
+or has empty findings because required file/artifact content was absent, Archon
+marks the stage failed. Quality gates inspect upstream artifacts for the same
+blocked/no-evidence signals, so hollow live runs cannot pass merely because an
+agent returned a polite report.
+
 ## Command surface
 
 Shell:

@@ -164,6 +164,26 @@ Forced acceptance writes an audit event and keeps the stage out of durable
 memory unless it already has accepted artifacts. Use restart for bad work; use
 force-accept only for reviewed work that failed a conservative gate.
 
+## Check evidence plumbing
+
+Live workflows should not ask reviewers to audit from a task string alone. When
+a task or discovered fan-out item references a project-local file, Archon adds a
+bounded `source_files` entry to the stage input before calling the live agent.
+When a stage depends on earlier work, the live agent receives those dependency
+artifacts in the same input envelope.
+
+If a stage says it is blocked, cannot audit, has no source content, has missing
+evidence, or returns empty findings because the evidence is absent, Archon fails
+that stage. Restart the stage after fixing the source/discovery problem:
+
+```text
+/workflow restart-agent <run-id> <stage-id>
+/workflow resume <run-id>
+```
+
+Use `force-accept` only after independently checking the missing evidence or
+reviewing the artifact manually.
+
 ## Recover after interruption
 
 If Archon exits mid-run:

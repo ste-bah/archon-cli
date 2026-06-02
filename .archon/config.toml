@@ -210,7 +210,7 @@ personality_history_limit = 50
 # ----------------------------------------------------------------------------
 [tools]
 # Seconds before a Bash command is killed
-bash_timeout = 120
+bash_timeout = 86400
 # Max bytes of Bash stdout/stderr captured
 bash_max_output = 102400
 # Max concurrent tool calls (1..=16)

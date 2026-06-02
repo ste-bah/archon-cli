@@ -9,7 +9,7 @@ use archon_tui::{AgentDispatcher, app::TuiEvent};
 
 use crate::cli_args::Cli;
 
-const WEB_TURN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+const WEB_TURN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(86400);
 
 pub(crate) struct WebSessionHandle {
     input_tx: tokio::sync::mpsc::Sender<String>,
