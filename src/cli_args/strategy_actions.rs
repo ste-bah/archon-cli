@@ -399,11 +399,26 @@ pub enum PipelineAction {
 pub enum WorkflowAction {
     /// Create a workflow spec without executing it
     Plan {
+        /// Validate an existing workflow spec file instead of planning from text
+        #[arg(long, value_name = "PATH")]
+        spec_file: Option<std::path::PathBuf>,
+        /// Use the configured provider for planning instead of deterministic smoke mode
+        #[arg(long)]
+        live: bool,
         /// Natural-language task
         task: Vec<String>,
     },
     /// Create and execute a workflow
     Run {
+        /// Execute an existing workflow spec file instead of planning from text
+        #[arg(long, value_name = "PATH")]
+        spec_file: Option<std::path::PathBuf>,
+        /// Execute a saved project workflow template
+        #[arg(long = "from-template", value_name = "NAME")]
+        from_template: Option<String>,
+        /// Use the configured provider for live stage agents
+        #[arg(long)]
+        live: bool,
         /// Natural-language task
         task: Vec<String>,
     },
@@ -414,6 +429,9 @@ pub enum WorkflowAction {
     },
     /// Resume a paused or failed workflow
     Resume {
+        /// Use the configured provider for live stage agents
+        #[arg(long)]
+        live: bool,
         /// Workflow run ID
         run_id: String,
     },

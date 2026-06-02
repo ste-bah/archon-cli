@@ -58,7 +58,7 @@ impl WorkflowExecutor {
 
     pub fn execute(&self, mut run: WorkflowRun) -> WorkflowResult<ExecutionReport> {
         let ordered = ordered_stages(&run.spec)?;
-        let mut seq = 2;
+        let mut seq = self.store.next_event_seq(&run.id)?;
         for stage in ordered {
             if !stage_ready(&run, &stage) {
                 continue;
@@ -77,7 +77,7 @@ impl WorkflowExecutor {
         runner: &dyn WorkflowStageRunner,
     ) -> WorkflowResult<ExecutionReport> {
         let ordered = ordered_stages(&run.spec)?;
-        let mut seq = 2;
+        let mut seq = self.store.next_event_seq(&run.id)?;
         for stage in ordered {
             if !stage_ready(&run, &stage) {
                 continue;

@@ -81,8 +81,11 @@ Shell:
 ```bash
 archon workflow plan "Audit this repository deeply"
 archon workflow run "Audit this repository deeply"
+archon workflow run --live "Audit this repository deeply"
+archon workflow run --spec-file workflow.yaml --live
+archon workflow run --from-template repo-deep-audit --live
 archon workflow status <run-id>
-archon workflow resume <run-id>
+archon workflow resume <run-id> --live
 archon workflow restart-agent <run-id> <stage-id>
 archon workflow force-accept <run-id> <stage-id> "audit rationale"
 archon workflow save <run-id> repo-deep-audit
@@ -94,6 +97,8 @@ TUI:
 ```text
 /workflow plan Audit this repository deeply
 /workflow run Audit this repository deeply
+/workflow run --spec-file workflow.yaml
+/workflow run --from-template repo-deep-audit
 /workflow status <run-id>
 /workflow resume <run-id>
 /workflow restart-agent <run-id> <stage-id>
@@ -108,7 +113,12 @@ it locally, and attempts one schema repair before falling back to the heuristic
 planner. `run` and `resume` execute workflow stages through the same in-process
 adapter so Agent Activity shows the run id, stage/agent name, status, provider
 tier detail, and resolved model alias. Shell commands keep the deterministic
-offline execution path for smoke tests and scripted inspection.
+offline execution path for smoke tests and scripted inspection unless `--live`
+is passed. In live shell mode, Archon builds the configured provider-neutral
+pipeline adapter and runs stages as real LLM-backed agents. Saved templates are
+reusable with `archon workflow run --from-template <name>` or
+`/workflow run --from-template <name>`. Existing YAML specs are reusable with
+`--spec-file`; validation still rejects hard-coded `provider` or `model` fields.
 
 `/workflow list` opens the Dynamic Workflows TUI view with recent durable runs.
 `/workflow status <run-id>` opens the same view scoped to stage rows, including

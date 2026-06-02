@@ -1,8 +1,8 @@
 use archon_workflow::{
     HeuristicWorkflowPlanner, LifecycleAction, LifecycleController, ProviderFamily, ProviderTier,
     ProviderTierResolver, RunStatus, StageRunOutput, StageRunRequest, StageStatus,
-    TemplateRegistry, WorkflowExecutor, WorkflowPlanner, WorkflowPolicy, WorkflowStageRunner,
-    WorkflowStore, classify_provider, stage::source_input_hash,
+    TemplateRegistry, WorkflowEvent, WorkflowExecutor, WorkflowPlanner, WorkflowPolicy,
+    WorkflowStageRunner, WorkflowStore, classify_provider, stage::source_input_hash,
 };
 
 #[test]
@@ -56,6 +56,32 @@ fn planner_executor_lifecycle_and_template_work() {
     let saved = registry.save("repo-audit", &spec).unwrap();
     assert!(saved.sanitized);
     assert!(registry.load("repo-audit").is_ok());
+}
+
+#[test]
+fn resume_keeps_event_sequence_monotonic() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(temp.path().join("workflows"));
+    let spec = HeuristicWorkflowPlanner
+        .plan("Audit this repo with subagents")
+        .unwrap();
+    let executor = WorkflowExecutor::new(store.clone(), WorkflowPolicy::default());
+    let run = executor.start(spec).unwrap();
+    let first = executor.execute(run.clone()).unwrap();
+    assert_eq!(first.failed, 0);
+
+    LifecycleController::new(store.clone())
+        .apply(&run.id, LifecycleAction::RestartStage("review".into()))
+        .unwrap();
+    let rewound = store.load_state(&run.id).unwrap();
+    let resumed = executor.execute(rewound).unwrap();
+    assert_eq!(resumed.failed, 0);
+
+    let seqs = event_seqs(&store, &run.id);
+    assert!(
+        seqs.windows(2).all(|pair| pair[1] > pair[0]),
+        "event seqs must increase strictly: {seqs:?}"
+    );
 }
 
 #[tokio::test]
@@ -228,4 +254,13 @@ fn crash_after_artifact_write_resumes_without_duplicate_acceptance() {
     let discover_state = finished.stages.get("discover").unwrap();
     assert_eq!(discover_state.status, StageStatus::Accepted);
     assert_eq!(discover_state.artifacts.len(), 1);
+}
+
+fn event_seqs(store: &WorkflowStore, run_id: &str) -> Vec<u64> {
+    std::fs::read_to_string(store.events_path(run_id))
+        .unwrap()
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str::<WorkflowEvent>(line).unwrap().seq)
+        .collect()
 }

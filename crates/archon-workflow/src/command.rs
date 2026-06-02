@@ -7,8 +7,17 @@ pub enum CommandAction {
     Plan {
         task: String,
     },
+    PlanSpec {
+        path: String,
+    },
     Run {
         task: String,
+    },
+    RunSpec {
+        path: String,
+    },
+    RunTemplate {
+        name: String,
     },
     Status {
         run_id: String,
@@ -52,11 +61,16 @@ impl WorkflowCommand {
         };
         let tail = &args[1..];
         let action = match first.as_str() {
-            "plan" => CommandAction::Plan {
-                task: join_task(tail)?,
+            "plan" => parse_plan(tail)?,
+            "plan-spec" => CommandAction::PlanSpec {
+                path: required(tail, 0, "spec file")?,
             },
-            "run" => CommandAction::Run {
-                task: join_task(tail)?,
+            "run" => parse_run(tail)?,
+            "run-spec" => CommandAction::RunSpec {
+                path: required(tail, 0, "spec file")?,
+            },
+            "run-template" | "from-template" => CommandAction::RunTemplate {
+                name: required(tail, 0, "template name")?,
             },
             "status" => CommandAction::Status {
                 run_id: required(tail, 0, "run id")?,
@@ -92,6 +106,37 @@ impl WorkflowCommand {
     }
 }
 
+fn parse_plan(args: &[String]) -> WorkflowResult<CommandAction> {
+    if flag(args, "--spec-file") {
+        return Ok(CommandAction::PlanSpec {
+            path: required(args, 1, "spec file")?,
+        });
+    }
+    Ok(CommandAction::Plan {
+        task: join_task(args)?,
+    })
+}
+
+fn parse_run(args: &[String]) -> WorkflowResult<CommandAction> {
+    if flag(args, "--spec-file") {
+        return Ok(CommandAction::RunSpec {
+            path: required(args, 1, "spec file")?,
+        });
+    }
+    if flag(args, "--from-template") {
+        return Ok(CommandAction::RunTemplate {
+            name: required(args, 1, "template name")?,
+        });
+    }
+    Ok(CommandAction::Run {
+        task: join_task(args)?,
+    })
+}
+
+fn flag(args: &[String], expected: &str) -> bool {
+    args.first().is_some_and(|value| value == expected)
+}
+
 fn join_task(args: &[String]) -> WorkflowResult<String> {
     let task = args.join(" ");
     if task.trim().is_empty() {
@@ -115,4 +160,37 @@ fn required_tail(args: &[String], start: usize, label: &str) -> WorkflowResult<S
         return Err(WorkflowError::SpecInvalid(format!("missing {label}")));
     }
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CommandAction, WorkflowCommand};
+
+    fn parse(args: &[&str]) -> CommandAction {
+        WorkflowCommand::parse(&args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>())
+            .unwrap()
+            .action
+    }
+
+    #[test]
+    fn parses_spec_and_template_entry_points() {
+        assert_eq!(
+            parse(&["plan", "--spec-file", "workflow.yaml"]),
+            CommandAction::PlanSpec {
+                path: "workflow.yaml".into()
+            }
+        );
+        assert_eq!(
+            parse(&["run", "--spec-file", "workflow.yaml"]),
+            CommandAction::RunSpec {
+                path: "workflow.yaml".into()
+            }
+        );
+        assert_eq!(
+            parse(&["run", "--from-template", "repo-audit"]),
+            CommandAction::RunTemplate {
+                name: "repo-audit".into()
+            }
+        );
+    }
 }

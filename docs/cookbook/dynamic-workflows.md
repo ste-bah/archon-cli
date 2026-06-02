@@ -40,6 +40,7 @@ safety properties before running:
 
 ```bash
 archon workflow run "Audit this repository deeply. Use critics and produce a report."
+archon workflow run --live "Audit this repository deeply. Use critics and produce a report."
 ```
 
 Inside the TUI:
@@ -51,6 +52,8 @@ Inside the TUI:
 The run is written to `.archon/workflows/<run-id>/`. The parent transcript gets
 compact progress instead of raw agent dumps. TUI runs use the active provider
 configured for the session and emit workflow-scoped rows in Agent Activity.
+Shell runs without `--live` use deterministic smoke execution for cheap
+orchestration tests; pass `--live` when you want real LLM-backed stage agents.
 
 ## Real-world example: repository audit
 
@@ -105,13 +108,14 @@ Good workflow outputs here are not just prose. Inspect artifacts for:
 archon workflow list
 archon workflow status <run-id>
 archon workflow resume <run-id>
+archon workflow resume <run-id> --live
 ```
 
 If a single stage output is bad, rewind only that stage:
 
 ```bash
 archon workflow restart-agent <run-id> <stage-id>
-archon workflow resume <run-id>
+archon workflow resume <run-id> --live
 ```
 
 Inside the TUI, use the same arguments after `/workflow`.
@@ -214,6 +218,23 @@ After a good run:
 
 ```text
 /workflow save <run-id> repo-deep-audit
+/workflow run --from-template repo-deep-audit
+```
+
+Shell:
+
+```bash
+archon workflow save <run-id> repo-deep-audit
+archon workflow run --from-template repo-deep-audit --live
+```
+
+Saved templates are sanitized before storage: stage-level `provider` and
+`model` fields are removed so reuse remains provider-neutral. You can also run
+an inspected YAML spec directly:
+
+```bash
+archon workflow plan --spec-file workflow.yaml
+archon workflow run --spec-file workflow.yaml --live
 ```
 
 Saved templates remove run ids, provider-private payloads, credentials, stale

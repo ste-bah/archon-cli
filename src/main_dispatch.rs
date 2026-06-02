@@ -157,7 +157,9 @@ async fn handle_learning_command(
         Commands::Pipeline { action } => {
             crate::command::pipeline::handle_pipeline_command(&action, config, env_vars).await
         }
-        Commands::Workflow { action } => crate::command::workflow::handle_workflow_command(&action),
+        Commands::Workflow { action } => {
+            crate::command::workflow::handle_workflow_command(&action, config, env_vars).await
+        }
         _ => unreachable!("learning command routed to wrong dispatcher"),
     }
 }

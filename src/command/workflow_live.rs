@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
+use archon_core::config::ArchonConfig;
+use archon_core::env_vars::ArchonEnvVars;
 use archon_pipeline::runner::{
     AgentExecutionRequest, AgentInfo, LlmClient, PipelineType, ToolAccessLevel,
 };
@@ -14,12 +16,17 @@ use archon_workflow::{
     WorkflowStageRunner, WorkflowStore,
 };
 
-use crate::command::workflow::run_action;
+use crate::command::pipeline_support::build_pipeline_adapter;
+use crate::command::workflow::{load_spec_file, load_template_spec, run_action};
 
 pub(crate) fn should_spawn_live(action: &CommandAction) -> bool {
     matches!(
         action,
-        CommandAction::Plan { .. } | CommandAction::Run { .. } | CommandAction::Resume { .. }
+        CommandAction::Plan { .. }
+            | CommandAction::Run { .. }
+            | CommandAction::RunSpec { .. }
+            | CommandAction::RunTemplate { .. }
+            | CommandAction::Resume { .. }
     )
 }
 
@@ -43,6 +50,18 @@ pub(crate) fn spawn_live_workflow(
     });
 }
 
+pub(crate) async fn run_live_cli_action(
+    cwd: &Path,
+    action: CommandAction,
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+) -> Result<String> {
+    let adapter = build_pipeline_adapter(config, env_vars, "workflow_cli").await?;
+    let llm: Arc<dyn LlmClient> = Arc::new(adapter);
+    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(128);
+    run_live_action(cwd, action, llm, tui_tx).await
+}
+
 async fn run_live_action(
     cwd: &Path,
     action: CommandAction,
@@ -60,8 +79,19 @@ async fn run_live_action(
             let spec = plan_live(&task, llm, tui_tx).await?;
             return Ok(spec.to_yaml()?);
         }
+        CommandAction::PlanSpec { path } => return Ok(load_spec_file(cwd, &path)?.to_yaml()?),
         CommandAction::Run { task } => {
             let spec = plan_live(&task, llm, tui_tx).await?;
+            let run = executor.start(spec)?;
+            executor.execute_with_runner(run, &runner).await?
+        }
+        CommandAction::RunSpec { path } => {
+            let spec = load_spec_file(cwd, &path)?;
+            let run = executor.start(spec)?;
+            executor.execute_with_runner(run, &runner).await?
+        }
+        CommandAction::RunTemplate { name } => {
+            let spec = load_template_spec(cwd, &name)?;
             let run = executor.start(spec)?;
             executor.execute_with_runner(run, &runner).await?
         }
@@ -141,7 +171,16 @@ async fn repair_plan(
 fn live_start_message(action: &CommandAction) -> String {
     match action {
         CommandAction::Plan { task } => format!("Planning dynamic workflow for task: {task}\n"),
+        CommandAction::PlanSpec { path } => {
+            format!("Validating dynamic workflow spec: {path}\n")
+        }
         CommandAction::Run { task } => format!("Starting dynamic workflow for task: {task}\n"),
+        CommandAction::RunSpec { path } => {
+            format!("Starting dynamic workflow from spec: {path}\n")
+        }
+        CommandAction::RunTemplate { name } => {
+            format!("Starting dynamic workflow from template: {name}\n")
+        }
         CommandAction::Resume { run_id } => {
             format!("Resuming dynamic workflow {run_id} with the active TUI provider...\n")
         }
@@ -208,7 +247,7 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             "stage complete",
         );
         let mut output = StageRunOutput::markdown(response.content);
-        output.resolved_model = Some(model);
+        output.resolved_model = Some(format!("tier-alias:{model}"));
         output.tokens_in = response.tokens_in;
         output.tokens_out = response.tokens_out;
         Ok(output)
@@ -243,7 +282,7 @@ impl PipelineWorkflowRunner {
                 parent_id: None,
                 artifact_id: None,
                 provider: Some("active-provider".to_string()),
-                model: Some(model.to_string()),
+                model: Some(format!("tier-alias:{model}")),
                 cost_usd: None,
             }));
     }

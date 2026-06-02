@@ -1,16 +1,19 @@
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
+use archon_core::config::ArchonConfig;
+use archon_core::env_vars::ArchonEnvVars;
 use archon_tui::app::{EvidenceRowPayload, TuiEvent, ViewId};
 use archon_workflow::{
-    CommandAction, HeuristicWorkflowPlanner, LifecycleAction, LifecycleController, RunStatus,
-    TemplateRegistry, WorkflowCommand, WorkflowExecutor, WorkflowPlanner, WorkflowPolicy,
-    WorkflowStore,
+    CommandAction, ExecutionReport, HeuristicWorkflowPlanner, LifecycleAction, LifecycleController,
+    RunStatus, TemplateRegistry, WorkflowCommand, WorkflowExecutor, WorkflowPlanner,
+    WorkflowPolicy, WorkflowSpec, WorkflowStore,
 };
 
 use crate::cli_args::WorkflowAction;
 use crate::command::registry::{CommandContext, CommandHandler};
-use crate::command::workflow_live::{should_spawn_live, spawn_live_workflow};
+use crate::command::workflow_live::{run_live_cli_action, should_spawn_live, spawn_live_workflow};
 
 pub(crate) struct WorkflowHandler;
 
@@ -44,27 +47,70 @@ impl CommandHandler for WorkflowHandler {
     }
 }
 
-pub(crate) fn handle_workflow_command(action: &WorkflowAction) -> Result<()> {
+pub(crate) async fn handle_workflow_command(
+    action: &WorkflowAction,
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+) -> Result<()> {
     let cwd = std::env::current_dir()?;
-    let output = run_action(&cwd, cli_action(action)?)?;
+    let (action, mode) = cli_action(action)?;
+    let output = match mode {
+        CliExecutionMode::Deterministic => run_action(&cwd, action)?,
+        CliExecutionMode::Live => run_live_cli_action(&cwd, action, config, env_vars).await?,
+    };
     println!("{output}");
     Ok(())
 }
 
-fn cli_action(action: &WorkflowAction) -> Result<CommandAction> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CliExecutionMode {
+    Deterministic,
+    Live,
+}
+
+fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMode)> {
     let converted = match action {
-        WorkflowAction::Plan { task } => CommandAction::Plan {
-            task: task_string(task)?,
-        },
-        WorkflowAction::Run { task } => CommandAction::Run {
-            task: task_string(task)?,
-        },
+        WorkflowAction::Plan {
+            spec_file,
+            live,
+            task,
+        } => {
+            if let Some(path) = spec_file {
+                ensure_no_task(task, "--spec-file")?;
+                return Ok((
+                    CommandAction::PlanSpec {
+                        path: path.display().to_string(),
+                    },
+                    CliExecutionMode::Deterministic,
+                ));
+            }
+            return Ok((
+                CommandAction::Plan {
+                    task: task_string(task)?,
+                },
+                mode(*live),
+            ));
+        }
+        WorkflowAction::Run {
+            spec_file,
+            from_template,
+            live,
+            task,
+        } => {
+            let action = run_cli_action(spec_file.as_ref(), from_template.as_ref(), task)?;
+            return Ok((action, mode(*live)));
+        }
         WorkflowAction::Status { run_id } => CommandAction::Status {
             run_id: run_id.clone(),
         },
-        WorkflowAction::Resume { run_id } => CommandAction::Resume {
-            run_id: run_id.clone(),
-        },
+        WorkflowAction::Resume { live, run_id } => {
+            return Ok((
+                CommandAction::Resume {
+                    run_id: run_id.clone(),
+                },
+                mode(*live),
+            ));
+        }
         WorkflowAction::Pause { run_id } => CommandAction::Pause {
             run_id: run_id.clone(),
         },
@@ -90,7 +136,7 @@ fn cli_action(action: &WorkflowAction) -> Result<CommandAction> {
         },
         WorkflowAction::List => CommandAction::List,
     };
-    Ok(converted)
+    Ok((converted, CliExecutionMode::Deterministic))
 }
 
 pub(super) fn run_action(cwd: &Path, action: CommandAction) -> Result<String> {
@@ -98,25 +144,25 @@ pub(super) fn run_action(cwd: &Path, action: CommandAction) -> Result<String> {
     let planner = HeuristicWorkflowPlanner;
     let text = match action {
         CommandAction::Plan { task } => planner.plan(&task)?.to_yaml()?,
+        CommandAction::PlanSpec { path } => load_spec_file(cwd, &path)?.to_yaml()?,
         CommandAction::Run { task } => {
             let spec = planner.plan(&task)?;
-            let executor = WorkflowExecutor::new(store.clone(), WorkflowPolicy::default());
-            let run = executor.start(spec)?;
-            let report = executor.execute(run)?;
-            format!(
-                "Workflow complete: {} (completed {}, failed {}, skipped {})",
-                report.run_id, report.completed, report.failed, report.skipped
-            )
+            deterministic_text("Workflow complete", execute_spec(&store, spec)?)
+        }
+        CommandAction::RunSpec { path } => {
+            let spec = load_spec_file(cwd, &path)?;
+            deterministic_text("Workflow complete", execute_spec(&store, spec)?)
+        }
+        CommandAction::RunTemplate { name } => {
+            let spec = load_template_spec(cwd, &name)?;
+            deterministic_text("Workflow complete", execute_spec(&store, spec)?)
         }
         CommandAction::Status { run_id } => status_text(&store.load_state(&run_id)?),
         CommandAction::Resume { run_id } => {
             let run = store.load_state(&run_id)?;
             let executor = WorkflowExecutor::new(store.clone(), WorkflowPolicy::default());
             let report = executor.execute(run)?;
-            format!(
-                "Workflow resumed: {} (completed {}, failed {}, skipped {})",
-                report.run_id, report.completed, report.failed, report.skipped
-            )
+            deterministic_text("Workflow resumed", report)
         }
         CommandAction::Pause { run_id } => lifecycle(&store, &run_id, LifecycleAction::Pause)?,
         CommandAction::Cancel { run_id } => lifecycle(&store, &run_id, LifecycleAction::Cancel)?,
@@ -145,6 +191,29 @@ pub(super) fn run_action(cwd: &Path, action: CommandAction) -> Result<String> {
         CommandAction::List => list_text(&store)?,
     };
     Ok(text)
+}
+
+pub(crate) fn load_spec_file(cwd: &Path, path: &str) -> Result<WorkflowSpec> {
+    let path = resolve_input_path(cwd, path);
+    let raw = fs::read_to_string(&path)?;
+    WorkflowSpec::from_yaml(&raw).map_err(Into::into)
+}
+
+pub(crate) fn load_template_spec(cwd: &Path, name: &str) -> Result<WorkflowSpec> {
+    Ok(TemplateRegistry::project(cwd).load(name)?.spec)
+}
+
+fn execute_spec(store: &WorkflowStore, spec: WorkflowSpec) -> Result<ExecutionReport> {
+    let executor = WorkflowExecutor::new(store.clone(), WorkflowPolicy::default());
+    let run = executor.start(spec)?;
+    executor.execute(run).map_err(Into::into)
+}
+
+fn deterministic_text(label: &str, report: ExecutionReport) -> String {
+    format!(
+        "{label} (deterministic CLI smoke mode; pass --live or use TUI /workflow for LLM-backed agents): {} (completed {}, failed {}, skipped {})",
+        report.run_id, report.completed, report.failed, report.skipped
+    )
 }
 
 fn emit_workflow_rows(
@@ -244,10 +313,60 @@ fn list_text(store: &WorkflowStore) -> Result<String> {
     Ok(runs.iter().map(status_text).collect::<Vec<_>>().join("\n"))
 }
 
+fn mode(live: bool) -> CliExecutionMode {
+    if live {
+        CliExecutionMode::Live
+    } else {
+        CliExecutionMode::Deterministic
+    }
+}
+
+fn run_cli_action(
+    spec_file: Option<&PathBuf>,
+    from_template: Option<&String>,
+    task: &[String],
+) -> Result<CommandAction> {
+    let selected =
+        spec_file.is_some() as u8 + from_template.is_some() as u8 + (!task.is_empty()) as u8;
+    if selected > 1 {
+        return Err(anyhow!(
+            "use exactly one of task text, --spec-file, or --from-template"
+        ));
+    }
+    if let Some(path) = spec_file {
+        return Ok(CommandAction::RunSpec {
+            path: path.display().to_string(),
+        });
+    }
+    if let Some(name) = from_template {
+        return Ok(CommandAction::RunTemplate { name: name.clone() });
+    }
+    Ok(CommandAction::Run {
+        task: task_string(task)?,
+    })
+}
+
+fn ensure_no_task(task: &[String], flag: &str) -> Result<()> {
+    if task.is_empty() {
+        Ok(())
+    } else {
+        Err(anyhow!("{flag} cannot be combined with task text"))
+    }
+}
+
 fn task_string(parts: &[String]) -> Result<String> {
     let task = parts.join(" ");
     if task.trim().is_empty() {
         return Err(anyhow!("workflow task is required"));
     }
     Ok(task)
+}
+
+fn resolve_input_path(cwd: &Path, path: &str) -> PathBuf {
+    let path = Path::new(path);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    }
 }
