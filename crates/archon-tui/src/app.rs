@@ -44,6 +44,7 @@ pub struct AppConfig {
     pub splash: Option<SplashConfig>,
     pub btw_tx: Option<tokio::sync::mpsc::Sender<String>>,
     pub permission_tx: Option<tokio::sync::mpsc::Sender<bool>>,
+    pub ask_user_tx: Option<tokio::sync::mpsc::Sender<String>>,
     pub context_window: u64,
     pub context_source: Option<String>,
     pub context_threshold: f32,
@@ -124,6 +125,9 @@ pub struct App {
     pub btw_overlay: Option<String>,
     /// Pending permission prompt — tool name waiting for y/n.
     pub permission_prompt: Option<String>,
+    /// Pending AskUserQuestion prompt and draft answer.
+    pub ask_user_prompt: Option<String>,
+    pub ask_user_draft: String,
     /// Session name (shown right-aligned on input line after /rename).
     pub session_name: Option<String>,
     /// Active session picker modal (shown by /resume).
@@ -169,6 +173,8 @@ impl Default for App {
             pending_input: Vec::new(),
             btw_overlay: None,
             permission_prompt: None,
+            ask_user_prompt: None,
+            ask_user_draft: String::new(),
             session_name: None,
             session_picker: None,
             mcp_manager: None,
@@ -198,6 +204,7 @@ impl App {
 
     pub fn input_accepts_paste(&self) -> bool {
         self.permission_prompt.is_none()
+            && self.ask_user_prompt.is_none()
             && self.btw_overlay.is_none()
             && self.session_picker.is_none()
             && self.mcp_manager.is_none()

@@ -20,7 +20,7 @@ fn empty_toml_produces_valid_defaults() {
     assert!(config.identity.custom.is_none());
 
     // ToolsConfig defaults
-    assert_eq!(config.tools.bash_timeout, 120);
+    assert_eq!(config.tools.bash_timeout, 86400);
     assert_eq!(config.tools.bash_max_output, 102400);
     assert_eq!(config.tools.max_concurrency, 4);
 
@@ -87,7 +87,7 @@ max_retries = 5
 
     // Other sections keep full defaults
     assert_eq!(config.identity.mode, "clean");
-    assert_eq!(config.tools.bash_timeout, 120);
+    assert_eq!(config.tools.bash_timeout, 86400);
     assert_eq!(config.permissions.mode, "default");
 
     validate(&config).expect("partial config should pass validation");

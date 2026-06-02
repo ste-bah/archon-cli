@@ -84,6 +84,7 @@ async fn app_run_drives_session_end_to_end() {
         splash: None,
         btw_tx: None,
         permission_tx: None,
+        ask_user_tx: None,
         context_window: 0,
         context_source: None,
         context_threshold: 0.80,

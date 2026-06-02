@@ -362,6 +362,9 @@ pub enum TuiEvent {
         tool: String,
         description: String,
     },
+    AskUserPrompt {
+        question: String,
+    },
     SessionRenamed(String),
     PermissionModeChanged(String),
     ShowSessionPicker(Vec<SessionPickerEntry>),
@@ -369,45 +372,25 @@ pub enum TuiEvent {
     SetTheme(String),
     ShowMcpManager(Vec<McpServerEntry>),
     UpdateMcpManager(Vec<McpServerEntry>),
-    /// TASK-TUI-620: open the message-selector overlay with a pre-computed
-    /// list of MessageSummary entries. Follow-up ticket wires input/render;
-    /// for now the event only sets `app.message_selector`.
+    /// Open the message-selector overlay with pre-computed rows.
     ShowMessageSelector(Vec<MessageSummary>),
-    /// TASK-TUI-627: open the skills-menu overlay with a pre-computed
-    /// list of SkillEntry. Input/render routing deferred to TUI-627-followup.
+    /// Open the skills-menu overlay with pre-computed rows.
     ShowSkillsMenu(Vec<SkillEntry>),
-    /// TASK-#207 SLASH-FILES: open the file-picker overlay with a
-    /// pre-walked initial listing of the working directory. The
-    /// event-loop handler constructs `FilePicker::new(root, entries)`
-    /// where `root` is the picker's clamp-anchor (passed via the
-    /// first entry's parent — see `event_loop/tui_events.rs` for the
-    /// resolution path).
+    /// Open the file-picker overlay with a pre-walked listing.
     ShowFilePicker {
         /// Original working directory (the picker's ascent-clamp root).
         root: std::path::PathBuf,
-        /// Pre-walked initial listing of `root`. Empty Vec is
-        /// acceptable (rendered as `(empty directory)`).
+        /// Pre-walked initial listing of `root`.
         entries: Vec<FileEntry>,
     },
-    /// TASK-#208 SLASH-SEARCH: open the search-results overlay with
-    /// the original query string and a list of matched paths. The
-    /// event-loop handler constructs `SearchResults::new(query,
-    /// entries)` and assigns to `app.search_results`.
+    /// Open the search-results overlay with matched paths.
     ShowSearchResults {
         /// The original query the user supplied to `/search <query>`.
-        /// Used for the case-insensitive highlight match in the
-        /// rendered rows.
         query: String,
-        /// The matched file paths (cap'd at the slash handler's
-        /// `max_results` ceiling).
+        /// The matched file paths.
         entries: Vec<FileEntry>,
     },
-    /// TASK-AGS-822: open an overlay view identified by `ViewId`.
-    /// Emitted by the slash-command dispatcher in response to
-    /// view-opening commands (`/tasks`, `/settings`, `/context`,
-    /// `/memory`, `/model`, `/status`). Clustered here with the other
-    /// overlay-opening variants (`ShowSessionPicker`, `ShowMcpManager`)
-    /// so future readers locate overlay events in one place.
+    /// Open an overlay view identified by `ViewId`.
     OpenView(ViewId),
     /// Open an Evidence Engine overlay with rows loaded by the slash handler
     /// from the authoritative store.
@@ -463,6 +446,7 @@ impl TuiEvent {
             Self::ModelChanged(_) => "ModelChanged",
             Self::BtwResponse(_) => "BtwResponse",
             Self::PermissionPrompt { .. } => "PermissionPrompt",
+            Self::AskUserPrompt { .. } => "AskUserPrompt",
             Self::SessionRenamed(_) => "SessionRenamed",
             Self::PermissionModeChanged(_) => "PermissionModeChanged",
             Self::ShowSessionPicker(_) => "ShowSessionPicker",

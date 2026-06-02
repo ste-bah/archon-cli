@@ -1,34 +1,14 @@
-//! Keyboard / mouse / resize `crossterm` event dispatch extracted from
-//! `run_inner`.
-//!
-//! Relocated from `src/event_loop.rs` (L372-L648 inclusive — the full
-//! `match event::read()? { ... }` body) per REM-2g (split plan section
-//! 3.3, docs/rem-2-split-plan.md).
-//!
-//! Behavioral equivalence note: the original block is a single `match` on
-//! `Event::Mouse | Event::Key | Event::Resize | _` running inside the outer
-//! `loop { ... }` of `run_inner`. Inside `Event::Key`, overlay branches
-//! terminate with `continue;` to re-enter the outer loop. In the extracted
-//! `handle_key_event` function, `continue;` is converted to `return;` —
-//! semantically identical because the caller's next action is always the
-//! outer `loop` top (render + poll). No branches of the original rely on
-//! `continue` advancing internal state other than via `&mut app`.
-//!
-//! The `#[allow(clippy::cognitive_complexity)]` on the original `run_inner`
-//! is replicated here because this function inherits the keyboard-branch
-//! complexity.
+//! Keyboard / mouse / resize `crossterm` event dispatch for the TUI loop.
 
 use crossterm::event::{Event, KeyCode, KeyModifiers, MouseEventKind};
 
 use crate::app::{App, McpManagerView, should_process_key_event};
 use crate::vim::{VimAction, VimState};
 
+use super::ask_user::{AskUserKeyOutcome, handle_ask_user_key};
 use super::{mcp_action_count, mcp_actions_for};
 
-/// Handle a single `crossterm::Event` against the running `App`.
-///
-/// Caller is responsible for checking `event::poll` beforehand; this
-/// function assumes an event is already available and has been read.
+/// Handle one already-polled `crossterm::Event` against the running `App`.
 #[allow(clippy::cognitive_complexity)]
 pub(super) async fn handle_key_event(
     app: &mut App,
@@ -36,6 +16,7 @@ pub(super) async fn handle_key_event(
     input_tx: &tokio::sync::mpsc::Sender<String>,
     btw_tx: Option<&tokio::sync::mpsc::Sender<String>>,
     permission_tx: Option<&tokio::sync::mpsc::Sender<bool>>,
+    ask_user_tx: Option<&tokio::sync::mpsc::Sender<String>>,
     keymap: &crate::keybindings::KeyMap,
 ) {
     match event {
@@ -255,6 +236,25 @@ pub(super) async fn handle_key_event(
                     }
                     _ => return, // swallow other keys during permission prompt
                 }
+            }
+            // Handle AskUserQuestion — free-form answer, Enter submits.
+            if let Some(outcome) = handle_ask_user_key(app, &key.code) {
+                match outcome {
+                    AskUserKeyOutcome::Handled => {}
+                    AskUserKeyOutcome::Submit(answer) => {
+                        if let Some(tx) = ask_user_tx {
+                            let _ = tx.send(answer.clone()).await;
+                        }
+                        app.output.append_line(&format!("[answered] {answer}"));
+                    }
+                    AskUserKeyOutcome::Cancel => {
+                        if let Some(tx) = ask_user_tx {
+                            let _ = tx.send(String::new()).await;
+                        }
+                        app.output.append_line("[question cancelled]");
+                    }
+                }
+                return;
             }
             // Dismiss /btw overlay on any of Esc/Enter/Space
             if app.btw_overlay.is_some() {
@@ -488,7 +488,9 @@ pub(super) async fn handle_key_event(
             crate::layout::handle_resize(cols, rows);
         }
         Event::Paste(text) => {
-            if app.input_accepts_paste() {
+            if app.ask_user_prompt.is_some() {
+                app.ask_user_draft.push_str(&text);
+            } else if app.input_accepts_paste() {
                 app.input.inject_text(&text);
             }
         }

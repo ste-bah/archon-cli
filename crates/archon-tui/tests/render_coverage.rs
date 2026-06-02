@@ -221,6 +221,20 @@ fn input_permission_prompt_renders_yn() {
 }
 
 #[test]
+fn input_ask_user_prompt_renders_question_and_draft() {
+    let mut app = App::new();
+    app.show_splash = false;
+    app.ask_user_prompt = Some("Choose a strategy".into());
+    app.ask_user_draft = "direct authoring".into();
+    let rendered = render_once(&mut app);
+    assert!(
+        rendered.contains("Choose a strategy"),
+        "buffer:\n{rendered}"
+    );
+    assert!(rendered.contains("direct authoring"), "buffer:\n{rendered}");
+}
+
+#[test]
 fn input_vim_mode_shows_mode_indicator() {
     let mut app = App::new();
     app.show_splash = false;

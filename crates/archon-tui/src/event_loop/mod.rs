@@ -69,6 +69,7 @@ use crate::app::{App, AppConfig, TuiEvent};
 use crate::event_channel::TuiEventReceiver;
 use crate::task_dispatch::{AgentDispatcher, AgentRouter, CancelOutcome, TurnRunner};
 
+mod ask_user;
 mod input;
 mod tui_events;
 
@@ -198,6 +199,7 @@ where
         splash,
         btw_tx,
         permission_tx,
+        ask_user_tx,
         context_window,
         context_source,
         context_threshold,
@@ -281,6 +283,7 @@ where
                 &input_tx,
                 btw_tx.as_ref(),
                 permission_tx.as_ref(),
+                ask_user_tx.as_ref(),
                 &keymap,
             )
             .await;

@@ -14,6 +14,7 @@ const WEB_TURN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(864
 pub(crate) struct WebSessionHandle {
     input_tx: tokio::sync::mpsc::Sender<String>,
     permission_tx: tokio::sync::mpsc::Sender<bool>,
+    ask_user_tx: tokio::sync::mpsc::Sender<String>,
     event_rx: tokio::sync::Mutex<TuiEventReceiver>,
     last_assistant_response: Arc<tokio::sync::Mutex<String>>,
     cancel_handle: Arc<std::sync::Mutex<Option<Arc<crate::agent_handle::AgentHandle>>>>,
@@ -82,6 +83,13 @@ impl WebSessionHandle {
                 anyhow::bail!(
                     "permission required for {tool}: {description}. \
                      Change permissions in the TUI or config before retrying from web chat"
+                );
+            }
+            TuiEvent::AskUserPrompt { question } => {
+                let _ = self.ask_user_tx.send(String::new()).await;
+                anyhow::bail!(
+                    "AskUserQuestion requires an interactive TUI answer: {question}. \
+                     Retry this task in the TUI so Archon can ask for input."
                 );
             }
             TuiEvent::Done => return Ok(true),
@@ -198,6 +206,7 @@ pub(crate) async fn spawn_web_session(
 
     let super::interactive_finish::FinishState {
         perm_prompt_tx,
+        ask_user_tx,
         show_thinking,
         session_stats_shared,
         last_assistant_response_shared,
@@ -351,6 +360,7 @@ pub(crate) async fn spawn_web_session(
     Ok(Arc::new(WebSessionHandle {
         input_tx: user_input_tx,
         permission_tx: perm_prompt_tx,
+        ask_user_tx,
         event_rx: tokio::sync::Mutex::new(tui_event_rx),
         last_assistant_response: last_assistant_response_shared,
         cancel_handle,

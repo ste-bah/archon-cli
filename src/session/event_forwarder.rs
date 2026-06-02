@@ -145,6 +145,7 @@ pub(super) fn spawn_agent_event_forwarder(
                         .await;
                         TuiEvent::PermissionPrompt { tool, description }
                     }
+                    AgentEvent::AskUser { question } => TuiEvent::AskUserPrompt { question },
                     AgentEvent::PermissionGranted { tool } => {
                         record_permission(
                             permission_events_db.as_ref(),

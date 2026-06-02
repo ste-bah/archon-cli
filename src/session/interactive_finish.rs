@@ -10,6 +10,7 @@ use archon_tui::event_channel::TuiEventSender;
 
 pub(super) struct FinishState {
     pub perm_prompt_tx: tokio::sync::mpsc::Sender<bool>,
+    pub ask_user_tx: tokio::sync::mpsc::Sender<String>,
     pub show_thinking: Arc<AtomicBool>,
     pub session_stats_shared: Arc<tokio::sync::Mutex<SessionStats>>,
     pub last_assistant_response_shared: Arc<tokio::sync::Mutex<String>>,
@@ -163,6 +164,8 @@ pub(super) async fn finish(
 
     let (perm_prompt_tx, perm_prompt_rx) = tokio::sync::mpsc::channel::<bool>(1);
     agent.permission_response_rx = Some(Arc::new(tokio::sync::Mutex::new(perm_prompt_rx)));
+    let (ask_user_tx, ask_user_rx) = tokio::sync::mpsc::channel::<String>(1);
+    agent.ask_user_response_rx = Some(Arc::new(tokio::sync::Mutex::new(ask_user_rx)));
 
     if let Some(messages) = resume_messages {
         let count = messages.len();
@@ -244,6 +247,7 @@ pub(super) async fn finish(
 
     FinishState {
         perm_prompt_tx,
+        ask_user_tx,
         show_thinking,
         session_stats_shared,
         last_assistant_response_shared,

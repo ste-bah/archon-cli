@@ -88,6 +88,11 @@ pub(super) async fn handle_tui_event(
         } => {
             app.permission_prompt = Some(tool);
         }
+        TuiEvent::AskUserPrompt { question } => {
+            app.ask_user_prompt = Some(question.clone());
+            app.ask_user_draft.clear();
+            app.output.append_line(&format!("[question] {question}"));
+        }
         TuiEvent::SessionRenamed(name) => {
             app.session_name = Some(name);
         }

@@ -391,6 +391,7 @@ pub(crate) async fn run_interactive_session(
 
     let interactive_finish::FinishState {
         perm_prompt_tx,
+        ask_user_tx,
         show_thinking,
         session_stats_shared,
         last_assistant_response_shared,
@@ -464,6 +465,7 @@ pub(crate) async fn run_interactive_session(
         user_input_tx,
         user_input_rx,
         perm_prompt_tx,
+        ask_user_tx,
         btw_system_prompt,
         active_model,
         auto_capture,

@@ -109,6 +109,8 @@ pub(crate) fn input_prefix(app: &App) -> String {
 pub(crate) fn input_display_text(app: &App) -> String {
     if let Some(ref tool) = app.permission_prompt {
         format!("Allow {tool}? [y/n]")
+    } else if let Some(ref question) = app.ask_user_prompt {
+        format!("{question}\n> {}", app.ask_user_draft)
     } else if let Some(ref vim) = app.vim_state {
         let mode_indicator = vim.mode_display();
         let display_line = vim.text().lines().last().unwrap_or("").to_string();
@@ -125,7 +127,7 @@ pub(crate) fn input_text_before_cursor(app: &App) -> String {
 }
 
 pub(crate) fn input_scroll_y(app: &App, area: Rect) -> u16 {
-    if app.permission_prompt.is_some() || app.vim_state.is_some() {
+    if app.permission_prompt.is_some() || app.ask_user_prompt.is_some() || app.vim_state.is_some() {
         return 0;
     }
     let visible_rows = area.height.saturating_sub(1);
@@ -179,6 +181,15 @@ pub fn draw_input_area(frame: &mut Frame, app: &App, area: Rect) {
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
             )
+    } else if let Some(ref question) = app.ask_user_prompt {
+        Paragraph::new(format!("{question}\n> {}", app.ask_user_draft))
+            .wrap(Wrap { trim: false })
+            .block(
+                Block::default()
+                    .borders(Borders::TOP)
+                    .border_style(Style::default().fg(Color::Yellow)),
+            )
+            .style(Style::default().fg(Color::Yellow))
     } else if let Some(ref vim) = app.vim_state {
         let mode_indicator = vim.mode_display();
         let vim_text = vim.text();
