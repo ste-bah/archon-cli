@@ -241,6 +241,16 @@ pub fn create_default_registry(
     registry.register(Box::new(archon_tools::file_read::ReadTool));
     registry.register(Box::new(archon_tools::file_write::WriteTool));
     registry.register(Box::new(archon_tools::file_edit::EditTool));
+    registry.register(Box::new(archon_tools::large_edit::LargeEditBeginTool));
+    registry.register(Box::new(archon_tools::large_edit::LargeEditInsertAfterTool));
+    registry.register(Box::new(
+        archon_tools::large_edit::LargeEditReplaceSectionTool,
+    ));
+    registry.register(Box::new(
+        archon_tools::large_edit::LargeEditDeleteSectionTool,
+    ));
+    registry.register(Box::new(archon_tools::large_edit::LargeEditCommitTool));
+    registry.register(Box::new(archon_tools::large_edit::LargeEditAbortTool));
     // TASK-P0-B.5 (#183): ApplyPatch registered next to EditTool for
     // topical locality — both are filesystem-mutating edit tools.
     registry.register(Box::new(archon_tools::apply_patch::ApplyPatchTool));
@@ -389,6 +399,24 @@ mod tests {
         assert!(names.contains(&"Read"), "missing Read tool");
         assert!(names.contains(&"Write"), "missing Write tool");
         assert!(names.contains(&"Edit"), "missing Edit tool");
+        assert!(names.contains(&"LargeEditBegin"), "missing LargeEditBegin");
+        assert!(
+            names.contains(&"LargeEditInsertAfter"),
+            "missing LargeEditInsertAfter"
+        );
+        assert!(
+            names.contains(&"LargeEditReplaceSection"),
+            "missing LargeEditReplaceSection"
+        );
+        assert!(
+            names.contains(&"LargeEditDeleteSection"),
+            "missing LargeEditDeleteSection"
+        );
+        assert!(
+            names.contains(&"LargeEditCommit"),
+            "missing LargeEditCommit"
+        );
+        assert!(names.contains(&"LargeEditAbort"), "missing LargeEditAbort");
         assert!(names.contains(&"Glob"), "missing Glob tool");
         assert!(names.contains(&"Grep"), "missing Grep tool");
         assert!(names.contains(&"Bash"), "missing Bash tool");

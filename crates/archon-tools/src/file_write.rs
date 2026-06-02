@@ -7,6 +7,9 @@ use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
 pub struct WriteTool;
 
+const LARGE_REWRITE_MAX_BYTES: usize = 64 * 1024;
+const LARGE_REWRITE_MAX_LINES: usize = 300;
+
 #[async_trait::async_trait]
 impl Tool for WriteTool {
     fn name(&self) -> &str {
@@ -82,6 +85,10 @@ impl Tool for WriteTool {
             Err(e) => return ToolResult::error(e),
         };
 
+        if let Err(message) = reject_large_existing_rewrite(&path, &content) {
+            return ToolResult::error(message);
+        }
+
         // Create parent directories
         if let Some(parent) = path.parent()
             && !parent.exists()
@@ -98,6 +105,43 @@ impl Tool for WriteTool {
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
         PermissionLevel::Risky
+    }
+}
+
+fn reject_large_existing_rewrite(path: &std::path::Path, content: &str) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let existing = fs::read(path).map_err(|e| {
+        format!(
+            "Failed to inspect existing file before Write '{}': {e}",
+            path.display()
+        )
+    })?;
+    let existing_lines = byte_line_count(&existing);
+    let incoming_lines = byte_line_count(content.as_bytes());
+    let large_existing =
+        existing.len() > LARGE_REWRITE_MAX_BYTES || existing_lines > LARGE_REWRITE_MAX_LINES;
+    let large_incoming =
+        content.len() > LARGE_REWRITE_MAX_BYTES || incoming_lines > LARGE_REWRITE_MAX_LINES;
+    if large_existing || large_incoming {
+        return Err(format!(
+            "Write refuses large full-file rewrites for existing files (existing: {} bytes/{existing_lines} lines, incoming: {} bytes/{incoming_lines} lines). \
+             Use LargeEditBegin, LargeEditReplaceSection/LargeEditInsertAfter/LargeEditDeleteSection, then LargeEditCommit so Archon edits by anchors in small transactional chunks.",
+            existing.len(),
+            content.len()
+        ));
+    }
+
+    Ok(())
+}
+
+fn byte_line_count(bytes: &[u8]) -> usize {
+    if bytes.is_empty() {
+        0
+    } else {
+        bytes.iter().filter(|byte| **byte == b'\n').count() + 1
     }
 }
 

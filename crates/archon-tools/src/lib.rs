@@ -1,3 +1,4 @@
+pub(crate) mod agent_mutation_guard;
 pub mod apply_patch;
 pub mod ask_user;
 // TASK-AGS-104: relocated from archon-core to break the
@@ -21,6 +22,7 @@ pub mod file_write;
 pub mod gametheory;
 pub mod glob_tool;
 pub mod grep;
+pub mod large_edit;
 pub mod monitor;
 pub(crate) mod path_guard;
 pub mod plan_mode;

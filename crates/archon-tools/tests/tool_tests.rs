@@ -237,6 +237,49 @@ async fn write_tool_overwrites_existing() {
     cleanup(&ctx);
 }
 
+#[tokio::test]
+async fn write_tool_rejects_large_existing_full_file_rewrite() {
+    let ctx = test_ctx();
+    let file = ctx.working_dir.join("large-existing.md");
+    let original = (0..320)
+        .map(|idx| format!("line {idx}\n"))
+        .collect::<String>();
+    fs::write(&file, &original).expect("write");
+
+    let result = WriteTool
+        .execute(
+            json!({
+                "file_path": file.to_str().unwrap(),
+                "content": original.replace("line 0", "changed")
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(result.is_error, "large rewrite must be refused");
+    assert!(result.content.contains("LargeEditBegin"));
+    assert_eq!(fs::read_to_string(&file).expect("read"), original);
+    cleanup(&ctx);
+}
+
+#[tokio::test]
+async fn write_tool_allows_small_binary_existing_file_overwrite() {
+    let ctx = test_ctx();
+    let file = ctx.working_dir.join("binary.dat");
+    fs::write(&file, [0xff, 0x00, 0xfe]).expect("write");
+
+    let result = WriteTool
+        .execute(
+            json!({ "file_path": file.to_str().unwrap(), "content": "text replacement" }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error, "{}", result.content);
+    assert_eq!(fs::read_to_string(&file).expect("read"), "text replacement");
+    cleanup(&ctx);
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn write_tool_rejects_symlinked_file_escape() {

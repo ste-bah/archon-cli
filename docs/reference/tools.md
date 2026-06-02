@@ -16,12 +16,28 @@ Permission level is per-tool:
 | Tool | Permission | Purpose |
 |---|---|---|
 | `Read` | Safe | Read files with pagination (image/PDF, Jupyter notebooks supported) |
-| `Write` | Risky | Write files (creates parent dirs, overwrites existing) |
+| `Write` | Risky | Write small/new files. Refuses large full-file rewrites of existing files; use `LargeEdit*` for those. |
 | `Edit` | Risky | Exact-string replacement edits |
+| `LargeEditBegin` | Risky | Start a transactional staged edit for an existing large file |
+| `LargeEditInsertAfter` | Risky | Insert a content chunk after an anchor line in the staged file |
+| `LargeEditReplaceSection` | Risky | Replace a staged section by start anchor and optional end anchor |
+| `LargeEditDeleteSection` | Risky | Delete a staged section by start anchor and optional end anchor |
+| `LargeEditCommit` | Risky | Atomically commit the staged file if the original file hash still matches |
+| `LargeEditAbort` | Risky | Remove a staged large edit without changing the target file |
 | `ApplyPatch` | Risky | Apply a unified-diff patch to an absolute file path |
 | `Glob` | Safe | Fast file pattern matching (sorted by mtime) |
 | `Grep` | Safe | Ripgrep-backed regex search (content / files-with-matches / count modes) |
 | `Bash` | Variable | Execute shell command (classified at dispatch) |
+
+Large file edits should follow this protocol:
+
+```text
+LargeEditBegin -> LargeEditReplaceSection/InsertAfter/DeleteSection -> LargeEditCommit
+```
+
+`LargeEditCommit` compares the target file's current hash to the hash captured
+by `LargeEditBegin`. If another process changed the file, commit fails and the
+staged copy remains available for review or `LargeEditAbort`.
 
 ## Shell & observability
 
@@ -47,6 +63,12 @@ Permission level is per-tool:
 | `AskUserQuestion` | Safe | Blocking user confirmation (structured choices) |
 
 > *In `default` permission mode the `Agent` tool is auto-approved (PRD-AGENTS-001 Option B); dangerous downstream tools (Bash/Write/Edit) inherit gating from the parent's mode. See [Permissions](permissions.md).
+
+For mutating subagent tasks, pass `expected_target_files` with the files that
+must change. Foreground subagents are snapshot-hashed before launch and the
+Agent result fails if those files are unchanged after completion. Explicit
+background subagents reject `expected_target_files` because Archon cannot
+verify the mutation before returning.
 
 ## Planning & isolation
 

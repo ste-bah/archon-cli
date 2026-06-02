@@ -7,6 +7,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, warn};
 use uuid::Uuid;
 
+use crate::agent_mutation_guard::{snapshot_expected_targets, verify_expected_mutations};
 use crate::background_agents::{
     AgentStatus, BACKGROUND_AGENTS, BackgroundAgentHandle, RegistryError, new_result_slot,
 };
@@ -494,6 +495,11 @@ impl Tool for AgentTool {
                     "type": "string",
                     "enum": ["none", "worktree"],
                     "description": "Optional isolation mode. Use 'none' or omit this field for normal/read-only subagents. Use 'worktree' only when isolated file edits are required."
+                },
+                "expected_target_files": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Optional file paths that must be changed by a foreground mutating subagent. Archon snapshots these paths before launch and fails the Agent result if they are unchanged after completion."
                 }
             }
         })
@@ -519,6 +525,10 @@ impl Tool for AgentTool {
             Ok(req) => req,
             Err(e) => return ToolResult::error(e.to_string()),
         };
+        let expected_target_files = match expected_target_files(&input) {
+            Ok(paths) => paths,
+            Err(e) => return ToolResult::error(e.to_string()),
+        };
 
         let agent_id: Uuid = Uuid::new_v4();
         let subagent_id = agent_id.to_string();
@@ -536,6 +546,19 @@ impl Tool for AgentTool {
             }
         };
         let classification = exec.classify(&request);
+        if !expected_target_files.is_empty()
+            && matches!(classification, SubagentClassification::ExplicitBackground)
+        {
+            return ToolResult::error(
+                "expected_target_files can only be verified for foreground subagents; \
+                 remove run_in_background or omit expected_target_files",
+            );
+        }
+        let expected_mutations =
+            match snapshot_expected_targets(&expected_target_files, request.cwd.as_deref(), ctx) {
+                Ok(snapshots) => snapshots,
+                Err(err) => return ToolResult::error(err),
+            };
 
         // TASK-AGS-107: if the parent agent has a cancel_parent token,
         // create a child so cancelling the parent (Ctrl+C) cascades to
@@ -724,7 +747,14 @@ impl Tool for AgentTool {
         };
 
         match outcome {
-            SubagentOutcome::Completed(text) => ToolResult::success(text),
+            SubagentOutcome::Completed(text) => {
+                match verify_expected_mutations(&expected_mutations) {
+                    Ok(()) => ToolResult::success(text),
+                    Err(err) => {
+                        ToolResult::error(format!("[subagent_expected_mutation_missing] {err}"))
+                    }
+                }
+            }
             SubagentOutcome::Failed(err) => {
                 error!(
                     subagent_id = %subagent_id,
@@ -741,6 +771,13 @@ impl Tool for AgentTool {
                 // on the auto-background marker still pass.
                 let ms = exec.auto_background_ms();
                 let secs = if ms == 0 { 120 } else { ms / 1000 };
+                if !expected_mutations.is_empty() {
+                    return ToolResult::error(format!(
+                        "[subagent_mutation_unverified] Subagent '{subagent_id}' \
+                         auto-backgrounded after {secs}s before expected file mutations could be verified. \
+                         It is still running; inspect it with SendMessage before trusting the edit."
+                    ));
+                }
                 ToolResult::success(format!(
                     "Subagent '{subagent_id}' auto-backgrounded after {secs}s. Still running — \
                      use SendMessage to check status."
@@ -760,6 +797,32 @@ impl Tool for AgentTool {
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
         PermissionLevel::Risky
     }
+}
+
+fn expected_target_files(input: &serde_json::Value) -> Result<Vec<String>, AgentToolError> {
+    let Some(value) = input.get("expected_target_files") else {
+        return Ok(Vec::new());
+    };
+    let Some(array) = value.as_array() else {
+        return Err(AgentToolError::InvalidInput(
+            "expected_target_files must be an array of strings".into(),
+        ));
+    };
+    array
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(ToOwned::to_owned)
+                .ok_or_else(|| {
+                    AgentToolError::InvalidInput(
+                        "expected_target_files must contain only non-empty strings".into(),
+                    )
+                })
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------

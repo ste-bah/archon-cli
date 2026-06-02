@@ -38,13 +38,22 @@ pub(crate) fn parse_pending_tool_input(
     }
 
     serde_json::from_str(trimmed).map_err(|err| {
-        format!(
+        let mut message = format!(
             "Tool '{tool_name}' ({tool_id}) produced malformed JSON input \
              at line {}, column {}: {err}. Input preview: {}",
             err.line(),
             err.column(),
             input_preview(trimmed),
-        )
+        );
+        if tool_name == "Write" {
+            message.push_str(
+                ". Recovery hint: do not retry a large full-file Write. \
+                 For existing large files, use LargeEditBegin plus \
+                 LargeEditReplaceSection/LargeEditInsertAfter/LargeEditDeleteSection, \
+                 then LargeEditCommit.",
+            );
+        }
+        message
     })
 }
 
@@ -113,6 +122,7 @@ mod tests {
             .unwrap_err();
         assert!(err.contains("malformed JSON input"));
         assert!(err.contains("file_path"));
+        assert!(err.contains("LargeEditBegin"));
     }
 
     #[test]
