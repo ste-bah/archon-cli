@@ -45,6 +45,7 @@ pub struct WorkflowRunLearningSummary {
     pub status: RunStatus,
     pub records: usize,
     pub durable_records: usize,
+    pub adapter_records: usize,
     pub proposal_records: usize,
 }
 
@@ -69,22 +70,23 @@ impl WorkflowLearningSink {
             .filter(|record| record.durable)
             .cloned()
             .collect::<Vec<_>>();
+        let proposals = proposal_records(&durable);
+        let adapters = adapter_records(&durable);
         write_jsonl(&learning_dir.join("durable-memory.jsonl"), &durable)?;
         write_jsonl(
             &learning_dir.join("world-traces.jsonl"),
             &trace_records(&durable),
         )?;
-        write_jsonl(
-            &learning_dir.join("governed-proposals.jsonl"),
-            &proposal_records(&durable),
-        )?;
+        write_jsonl(&learning_dir.join("governed-proposals.jsonl"), &proposals)?;
+        write_adapter_files(&learning_dir, &adapters)?;
 
         Ok(WorkflowRunLearningSummary {
             run_id: run.id.clone(),
             status: run.status.clone(),
             records: records.len(),
             durable_records: durable.len(),
-            proposal_records: proposal_records(&durable).len(),
+            adapter_records: adapters.len(),
+            proposal_records: proposals.len(),
         })
     }
 }
@@ -161,6 +163,80 @@ fn proposal_records(records: &[WorkflowLearningRecord]) -> Vec<serde_json::Value
             })
         })
         .collect()
+}
+
+fn adapter_records(records: &[WorkflowLearningRecord]) -> Vec<serde_json::Value> {
+    records
+        .iter()
+        .flat_map(|record| {
+            adapter_targets().into_iter().map(move |target| {
+                serde_json::json!({
+                    "target": target.name,
+                    "adapter": target.file_stem,
+                    "run_id": record.run_id,
+                    "stage_id": record.stage_id,
+                    "workflow": record.name,
+                    "trace_ref": &record.trace_ref,
+                    "artifact_refs": &record.artifact_refs,
+                    "surface": "dynamic_workflow",
+                    "verification": &record.verification,
+                    "ts": record.ts,
+                })
+            })
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AdapterTarget {
+    name: &'static str,
+    file_stem: &'static str,
+}
+
+fn adapter_targets() -> Vec<AdapterTarget> {
+    vec![
+        AdapterTarget {
+            name: "SONA",
+            file_stem: "sona",
+        },
+        AdapterTarget {
+            name: "RLM",
+            file_stem: "rlm",
+        },
+        AdapterTarget {
+            name: "Reflexion",
+            file_stem: "reflexion",
+        },
+        AdapterTarget {
+            name: "ReasoningBank",
+            file_stem: "reasoning-bank",
+        },
+        AdapterTarget {
+            name: "JEPA",
+            file_stem: "jepa",
+        },
+        AdapterTarget {
+            name: "WorldModel",
+            file_stem: "world-model",
+        },
+    ]
+}
+
+fn write_adapter_files(dir: &Path, records: &[serde_json::Value]) -> WorkflowResult<()> {
+    for target in adapter_targets() {
+        let values = records
+            .iter()
+            .filter(|record| {
+                record.get("adapter").and_then(|value| value.as_str()) == Some(target.file_stem)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        write_jsonl(
+            &dir.join(format!("adapter-{}.jsonl", target.file_stem)),
+            &values,
+        )?;
+    }
+    write_jsonl(&dir.join("adapter-records.jsonl"), records)
 }
 
 fn write_jsonl<T: Serialize>(path: &Path, values: &[T]) -> WorkflowResult<()> {

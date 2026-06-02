@@ -304,6 +304,7 @@ impl WorkflowExecutor {
                     json!({
                         "records": summary.records,
                         "durable_records": summary.durable_records,
+                        "adapter_records": summary.adapter_records,
                         "proposal_records": summary.proposal_records,
                     }),
                 )?;

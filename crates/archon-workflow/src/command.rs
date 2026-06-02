@@ -4,14 +4,37 @@ use crate::error::{WorkflowError, WorkflowResult};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandAction {
-    Plan { task: String },
-    Run { task: String },
-    Status { run_id: String },
-    Resume { run_id: String },
-    Pause { run_id: String },
-    Cancel { run_id: String },
-    RestartAgent { run_id: String, stage_id: String },
-    Save { run_id: String, name: String },
+    Plan {
+        task: String,
+    },
+    Run {
+        task: String,
+    },
+    Status {
+        run_id: String,
+    },
+    Resume {
+        run_id: String,
+    },
+    Pause {
+        run_id: String,
+    },
+    Cancel {
+        run_id: String,
+    },
+    RestartAgent {
+        run_id: String,
+        stage_id: String,
+    },
+    ForceAccept {
+        run_id: String,
+        stage_id: String,
+        rationale: String,
+    },
+    Save {
+        run_id: String,
+        name: String,
+    },
     List,
 }
 
@@ -51,6 +74,11 @@ impl WorkflowCommand {
                 run_id: required(tail, 0, "run id")?,
                 stage_id: required(tail, 1, "stage id")?,
             },
+            "force-accept" | "force-continue" => CommandAction::ForceAccept {
+                run_id: required(tail, 0, "run id")?,
+                stage_id: required(tail, 1, "stage id")?,
+                rationale: required_tail(tail, 2, "rationale")?,
+            },
             "save" => CommandAction::Save {
                 run_id: required(tail, 0, "run id")?,
                 name: required(tail, 1, "template name")?,
@@ -79,4 +107,12 @@ fn required(args: &[String], idx: usize, label: &str) -> WorkflowResult<String> 
         .filter(|value| !value.trim().is_empty())
         .cloned()
         .ok_or_else(|| WorkflowError::SpecInvalid(format!("missing {label}")))
+}
+
+fn required_tail(args: &[String], start: usize, label: &str) -> WorkflowResult<String> {
+    let value = args.get(start..).unwrap_or_default().join(" ");
+    if value.trim().is_empty() {
+        return Err(WorkflowError::SpecInvalid(format!("missing {label}")));
+    }
+    Ok(value)
 }

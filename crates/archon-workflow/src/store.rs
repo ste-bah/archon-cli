@@ -122,6 +122,15 @@ impl WorkflowStore {
         Ok(())
     }
 
+    pub fn next_event_seq(&self, run_id: &str) -> WorkflowResult<u64> {
+        let path = self.events_path(run_id);
+        if !path.exists() {
+            return Ok(1);
+        }
+        let raw = fs::read_to_string(&path).map_err(|e| WorkflowError::io(&path, e))?;
+        Ok(raw.lines().filter(|line| !line.trim().is_empty()).count() as u64 + 1)
+    }
+
     pub fn write_artifact(
         &self,
         run_id: &str,

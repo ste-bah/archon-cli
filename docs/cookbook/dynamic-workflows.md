@@ -130,6 +130,10 @@ The web workbench also has a **Workflows** page. Start the web UI, open
 
 The backing endpoint is `GET /api/workflows/summary`.
 
+The page also opens run detail, follows `GET /api/workflows/<run-id>/stream`
+for live sanitized events, and submits policy-gated controls through
+`POST /api/workflows/control`.
+
 ## Restart bad output
 
 If one stage produced garbage, do not rerun the whole workflow:
@@ -143,6 +147,18 @@ If one stage produced garbage, do not rerun the whole workflow:
 `restart-agent` rewinds that stage and downstream dependent state while keeping
 accepted upstream work. Use this when a reviewer hallucinated, a source scan was
 too shallow, or the reducer produced a weak synthesis.
+
+If a failed quality gate is acceptable and you want to continue without
+rewriting the stage, force-accept it with a rationale:
+
+```text
+/workflow force-accept <run-id> <stage-id> accepted after manual source check
+/workflow resume <run-id>
+```
+
+Forced acceptance writes an audit event and keeps the stage out of durable
+memory unless it already has accepted artifacts. Use restart for bad work; use
+force-accept only for reviewed work that failed a conservative gate.
 
 ## Recover after interruption
 
@@ -177,6 +193,20 @@ ls .archon/workflows/<run-id>/learning
 `records.jsonl` contains every stage outcome. `durable-memory.jsonl` contains
 only accepted stages with artifacts. This separation is intentional: failed,
 forced, or unverified stages stay auditable without poisoning durable learning.
+
+Direct handoff files are also written for learning consumers:
+
+```text
+adapter-sona.jsonl
+adapter-rlm.jsonl
+adapter-reflexion.jsonl
+adapter-reasoning-bank.jsonl
+adapter-jepa.jsonl
+adapter-world-model.jsonl
+```
+
+These records give each subsystem a direct workflow trace to consume without
+parsing the generic audit ledger.
 
 ## Save and reuse a workflow
 

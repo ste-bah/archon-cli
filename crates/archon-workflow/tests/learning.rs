@@ -31,6 +31,7 @@ fn accepted_artifacts_feed_durable_learning_records() {
     .unwrap();
     assert!(durable.contains("\"durable\":true"));
     assert!(!durable.contains("thinking"));
+    assert!(summary.adapter_records >= summary.durable_records * 6);
 }
 
 #[test]
@@ -50,4 +51,33 @@ fn failed_and_forced_outputs_are_not_durable() {
         .unwrap();
     assert_eq!(plan.verification, Verification::Failed);
     assert!(!plan.durable);
+}
+
+#[test]
+fn direct_learning_adapter_files_are_written() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(temp.path().join("workflows"));
+    let spec = HeuristicWorkflowPlanner
+        .plan("Research a topic with a final report")
+        .unwrap();
+    let executor = WorkflowExecutor::new(store.clone(), WorkflowPolicy::default());
+    let run = executor.start(spec).unwrap();
+    let report = executor.execute(run.clone()).unwrap();
+    assert_eq!(report.failed, 0);
+
+    let learning_dir = store.run_dir(&run.id).join("learning");
+    for file in [
+        "adapter-sona.jsonl",
+        "adapter-rlm.jsonl",
+        "adapter-reflexion.jsonl",
+        "adapter-reasoning-bank.jsonl",
+        "adapter-jepa.jsonl",
+        "adapter-world-model.jsonl",
+    ] {
+        let body = std::fs::read_to_string(learning_dir.join(file)).unwrap();
+        assert!(
+            body.contains("dynamic_workflow"),
+            "{file} missing workflow trace"
+        );
+    }
 }

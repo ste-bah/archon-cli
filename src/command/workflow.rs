@@ -75,6 +75,15 @@ fn cli_action(action: &WorkflowAction) -> Result<CommandAction> {
             run_id: run_id.clone(),
             stage_id: stage_id.clone(),
         },
+        WorkflowAction::ForceAccept {
+            run_id,
+            stage_id,
+            rationale,
+        } => CommandAction::ForceAccept {
+            run_id: run_id.clone(),
+            stage_id: stage_id.clone(),
+            rationale: task_string(rationale)?,
+        },
         WorkflowAction::Save { run_id, name } => CommandAction::Save {
             run_id: run_id.clone(),
             name: name.clone(),
@@ -114,6 +123,20 @@ pub(super) fn run_action(cwd: &Path, action: CommandAction) -> Result<String> {
         CommandAction::RestartAgent { run_id, stage_id } => {
             lifecycle(&store, &run_id, LifecycleAction::RestartStage(stage_id))?
         }
+        CommandAction::ForceAccept {
+            run_id,
+            stage_id,
+            rationale,
+        } => lifecycle(
+            &store,
+            &run_id,
+            LifecycleAction::ForceAcceptStage {
+                stage_id,
+                forced_by: "workflow-command".to_string(),
+                rationale,
+                source: "cli_or_tui".to_string(),
+            },
+        )?,
         CommandAction::Save { run_id, name } => {
             let run = store.load_state(&run_id)?;
             let template = TemplateRegistry::project(cwd).save(&name, &run.spec)?;

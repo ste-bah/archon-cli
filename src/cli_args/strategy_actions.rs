@@ -435,6 +435,16 @@ pub enum WorkflowAction {
         /// Stage ID to rewind
         stage_id: String,
     },
+    /// Force-accept a failed stage with an audit rationale
+    #[command(name = "force-accept", alias = "force-continue")]
+    ForceAccept {
+        /// Workflow run ID
+        run_id: String,
+        /// Stage ID to force accept
+        stage_id: String,
+        /// Human rationale written to the audit log
+        rationale: Vec<String>,
+    },
     /// Save a sanitized reusable template
     Save {
         /// Workflow run ID

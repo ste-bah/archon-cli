@@ -26,16 +26,13 @@ export type WebLiveSnapshot = { events: Array<WebLiveEvent>, nextCursor: number,
 
 export type WebLiveCursorExpired = { cursorExpired: boolean, oldestAvailableCursor: number, recovery: string, };
 
-
 export type WebActionRequest = { actionId: string, actionKind: string, dryRun: boolean, payloadSummary: string, confirmationToken: string | null, };
 
 export type WebActionAuditRow = { actionId: string, actionKind: string, allowed: boolean, dryRun: boolean, policyReason: string, createdAtMs: number, };
 
 export type WebActionResponse = { decision: WebActionDecision, audit: WebActionAuditRow, };
 
-
 export type WebAuthSession = { authenticated: boolean, authRequired: boolean, transport: string, cookieMode: boolean, csrfRequired: boolean, serverSideLogoutSupported: boolean, logoutMessage: string, };
-
 
 export type WebChatAttachment = { fileName: string, sizeBytes: number, mimeType: string, accepted: boolean, policyReason: string, dataBase64: string | null, storedPath: string | null, };
 
@@ -47,13 +44,11 @@ export type WebChatHistoryMessage = { id: string, role: string, title: string, b
 
 export type WebChatHistoryResponse = { messages: Array<WebChatHistoryMessage>, storedPath: string, truncated: boolean, };
 
-
 export type WebUploadPolicy = { enabled: boolean, maxFiles: number, maxBytesPerFile: number, acceptedMimeTypes: Array<string>, policyReason: string, };
 
 export type WebUploadIntent = { fileName: string, sizeBytes: number, mimeType: string, };
 
 export type WebUploadIntentResponse = { decision: WebActionDecision, accepted: boolean, };
-
 
 export type CognitiveWebSummary = { store: PathProbe, storePresent: boolean, situationCount: number, toolDecisionCount: number, executiveDecisionCount: number, reflectionCount: number, proposalCount: number, applyResultCount: number, selfModelFactCount: number, daemon: CognitiveDaemonPreview, latestTick: CognitiveTickPreview | null, decisions: Array<CognitiveRowPreview>, reflections: Array<CognitiveRowPreview>, proposals: Array<CognitiveRowPreview>, };
 export type CognitiveRowPreview = { id: string, label: string, status: string, detail: string, createdAt: string, };
@@ -73,7 +68,6 @@ export type CorpusChunkHit = { sourceLabel: string, sourcePath: string, chunkLab
 export type CorpusPreviewQuery = { path: string, };
 
 export type CorpusSourcePreview = { source: CorpusSource, content: string, lineCount: number, truncated: boolean, previewAvailable: boolean, policyReason: string, };
-
 
 export type WebIngestSummary = { allowed: boolean, policyReason: string, stores: Array<PathProbe>, documents: Array<WebDocStoreItem>, videos: Array<WebVideoStoreItem>, knowledgeBases: Array<WebKnowledgeBaseItem>, kbStats: WebKnowledgeStats, jobs: Array<WebIngestJob>, indexQueue: WebIndexQueueSummary, indexJobs: Array<WebIndexJobItem>, indexFailures: Array<WebIndexFailureItem>, warnings: Array<string>, };
 
@@ -101,7 +95,6 @@ export type WebKbCreateRequest = { name: string, scope: string, description: str
 
 export type WebKbCreateResponse = { accepted: boolean, decision: WebActionDecision, knowledgeBase: WebKnowledgeBaseItem | null, };
 
-
 export type PathProbe = { label: string, path: string, exists: boolean, files: number, bytes: number, };
 
 export type LearningSummary = { stores: Array<PathProbe>, signals: Array<LearningSignalItem>, memories: Array<LearningRowPreview>, learningEvents: Array<LearningRowPreview>, proposals: Array<LearningRowPreview>, trustDeltas: Array<LearningRowPreview>, recentSessions: Array<string>, sessionCount: number, reasoningStorePresent: boolean, };
@@ -111,7 +104,6 @@ export type LearningSignalItem = { label: string, kind: string, status: string, 
 export type LearningRowPreview = { label: string, kind: string, status: string, detail: string, path: string, };
 
 export type SettingsSummary = { themeModes: Array<string>, densityModes: Array<string>, policyEditingEnabled: boolean, directFilesystemOpenEnabled: boolean, };
-
 
 export type MetricsSummary = { logs: Array<PathProbe>, budgets: Array<PathProbe>, webBundleFiles: number, webBundleBytes: number, stores: Array<MetricStoreHealth>, performance: Array<MetricValue>, queues: Array<MetricValue>, recentEvents: Array<MetricEventPreview>, providerMetrics: Array<ProviderRuntimeMetric>, providerEvents: Array<ProviderRuntimeEventPreview>, };
 
@@ -125,7 +117,6 @@ export type ProviderRuntimeMetric = { providerId: string, requestCount: number, 
 
 export type ProviderRuntimeEventPreview = { providerId: string, modelId: string, eventType: string, severity: string, message: string, createdAt: string, };
 
-
 export type PipelineSummary = { definitions: Array<PathProbe>, sessionCount: number, recentSessions: Array<string>, artifactRoots: Array<PathProbe>, stages: Array<PipelineStageSummary>, agents: Array<PipelineAgentSummary>, runs: Array<PipelineRunSummary>, outputs: Array<PipelineOutputSummary>, liveEvents: Array<PipelineLiveEventPreview>, };
 
 export type PipelineStageSummary = { label: string, family: string, status: string, agentCount: number, };
@@ -138,7 +129,6 @@ export type PipelineOutputSummary = { label: string, kind: string, path: string,
 
 export type PipelineLiveEventPreview = { sessionId: string, eventType: string, status: string, summary: string, path: string, };
 
-
 export type WorkflowWebSummary = { root: string, runs: Array<WorkflowRunSummary>, events: Array<WorkflowEventPreview>, controls: Array<WorkflowControlPreview>, };
 
 export type WorkflowRunSummary = { id: string, name: string, status: string, stageCount: number, acceptedCount: number, failedCount: number, artifactCount: number, updatedAt: string, };
@@ -147,13 +137,21 @@ export type WorkflowEventPreview = { runId: string, seq: number, kind: string, s
 
 export type WorkflowControlPreview = { action: string, enabled: boolean, policyReason: string, };
 
+export type WorkflowRunDetail = { summary: WorkflowRunSummary, stages: Array<WorkflowStageView>, artifacts: Array<WorkflowArtifactView>, events: Array<WorkflowEventPreview>, };
+
+export type WorkflowStageView = { id: string, status: string, attempt: number, artifacts: number, error: string | null, };
+
+export type WorkflowArtifactView = { id: string, path: string, producingStage: string, contentHash: string, };
+
+export type WorkflowControlRequest = { runId: string, action: string, stageId: string | null, rationale: string | null, confirmationToken: string | null, };
+
+export type WorkflowControlResponse = { allowed: boolean, policyReason: string, run: WorkflowRunSummary | null, };
 
 export type WebThemeProfile = { themeMode: string, densityMode: string, accentId: string, accentHex: string, accentStrongHex: string, updatedAtMs: number, };
 
 export type WebThemeProfileEnvelope = { profile: WebThemeProfile, storagePath: string, persisted: boolean, exportJson: string, };
 
 export type WebThemeProfileSaveRequest = { profile: WebThemeProfile, };
-
 
 export type WorldInspectionSummary = { root: PathProbe, ledgers: Array<PathProbe>, dbPresent: boolean, candidateCount: number, reasoningRootPresent: boolean, artifacts: Array<WorldModelArtifact>, advisorEvents: Array<WorldAdvisorEventPreview>, signals: Array<WorldModelSignal>, candidates: Array<WorldModelRowPreview>, reasoningEvents: Array<WorldModelRowPreview>, shadowReports: Array<WorldModelRowPreview>, predictions: Array<WorldPredictionPreview>, jepa: JepaInspectionSummary, };
 
@@ -168,7 +166,6 @@ export type WorldModelSignal = { label: string, status: string, detail: string, 
 export type WorldModelRowPreview = { label: string, kind: string, status: string, detail: string, path: string, };
 
 export type WorldPredictionPreview = { label: string, surface: string, status: string, detail: string, sessionId: string, };
-
 
 export type EvidenceGraphNode = { id: string, label: string, kind: string, detail: string, count: number, };
 

@@ -173,7 +173,7 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         tui_surface: "CLI mirror",
         status: SurfaceStatus::Done,
         source_of_truth: "src/command/workflow.rs + crates/archon-workflow",
-        notes: "Dynamic workflow plan, run, status, resume, pause, cancel, restart-agent, save, and list operations are mirrored.",
+        notes: "Dynamic workflow plan, run, status, resume, pause, cancel, restart-agent, force-accept, save, and list operations are mirrored.",
     },
     CommandSurfaceRow {
         cli: "archon pipeline ...",

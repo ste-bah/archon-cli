@@ -344,6 +344,16 @@ fn build_app(config: &WebConfig, state: AppState) -> Router {
         .route("/api/world/summary", get(world::summary_handler))
         .route("/api/pipelines/summary", get(pipelines::summary_handler))
         .route("/api/workflows/summary", get(workflows::summary_handler))
+        .route("/api/workflows/control", post(workflows::control_handler))
+        .route("/api/workflows/{run_id}", get(workflows::detail_handler))
+        .route(
+            "/api/workflows/{run_id}/events",
+            get(workflows::events_handler),
+        )
+        .route(
+            "/api/workflows/{run_id}/stream",
+            get(workflows::stream_handler),
+        )
         .route("/api/metrics/summary", get(metrics::summary_handler))
         .route("/api/evidence/graph", get(evidence::graph_handler))
         .route("/api/settings/summary", get(inspect::settings_handler))

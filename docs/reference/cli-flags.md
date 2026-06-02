@@ -49,6 +49,7 @@ subagents, coding/research pipelines, and gametheory through Codex.
 | `archon workflow status <RUN_ID>` | Show dynamic workflow status and stage counts |
 | `archon workflow resume <RUN_ID>` | Resume a dynamic workflow from durable state |
 | `archon workflow restart-agent <RUN_ID> <STAGE_ID>` | Rewind one workflow stage/agent before resume |
+| `archon workflow force-accept <RUN_ID> <STAGE_ID> <RATIONALE>` | Audit and continue past a reviewed failed stage without marking it clean durable memory |
 | `archon workflow save <RUN_ID> <NAME>` | Save a sanitized reusable workflow template |
 | `archon workflow list` | List dynamic workflow runs |
 | `archon self retrospective <SESSION_ID> [--analyzer hybrid\|heuristic\|llm]` | Extract evidence-backed lessons from a session activity log |

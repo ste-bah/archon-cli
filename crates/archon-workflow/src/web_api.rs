@@ -124,6 +124,34 @@ pub fn event_previews(
     Ok(events)
 }
 
+pub fn event_previews_after(
+    store: &WorkflowStore,
+    run_id: &str,
+    after_seq: u64,
+    limit: usize,
+) -> WorkflowResult<Vec<WorkflowEventPreview>> {
+    let mut events = read_events(store, run_id)?
+        .into_iter()
+        .filter(|event| event.seq > after_seq)
+        .filter(|event| !is_tool_noise(event))
+        .map(|event| {
+            let status = status_label(&event.kind).to_string();
+            let summary = event_summary(&event);
+            WorkflowEventPreview {
+                run_id: event.run_id,
+                seq: event.seq,
+                kind: event.kind,
+                status,
+                summary,
+                created_at: event.ts.to_rfc3339(),
+            }
+        })
+        .collect::<Vec<_>>();
+    events.sort_by(|a, b| a.seq.cmp(&b.seq));
+    events.truncate(limit);
+    Ok(events)
+}
+
 pub fn artifact_views(run: &WorkflowRun) -> Vec<WorkflowArtifactView> {
     run.stages
         .values()

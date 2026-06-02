@@ -84,6 +84,7 @@ archon workflow run "Audit this repository deeply"
 archon workflow status <run-id>
 archon workflow resume <run-id>
 archon workflow restart-agent <run-id> <stage-id>
+archon workflow force-accept <run-id> <stage-id> "audit rationale"
 archon workflow save <run-id> repo-deep-audit
 archon workflow list
 ```
@@ -96,6 +97,7 @@ TUI:
 /workflow status <run-id>
 /workflow resume <run-id>
 /workflow restart-agent <run-id> <stage-id>
+/workflow force-accept <run-id> <stage-id> audit rationale
 /workflow save <run-id> repo-deep-audit
 /workflow list
 ```
@@ -118,11 +120,20 @@ The web workbench exposes a dedicated **Workflows** page backed by:
 
 ```text
 GET /api/workflows/summary
+GET /api/workflows/<run-id>
+GET /api/workflows/<run-id>/events?after=<seq>
+GET /api/workflows/<run-id>/stream
+POST /api/workflows/control
 ```
 
-The response lists durable runs, accepted/failed stage counts, artifact counts,
-sanitized recent events, and policy-gated controls. Raw tool output and
-provider-private reasoning fields are not returned.
+The page lists durable runs, opens stage/artifact detail, follows sanitized
+events through SSE, and submits policy-gated lifecycle controls. `resume`,
+`pause`, `cancel`, `restart-stage`, and `force-accept` all go through the same
+server-side lifecycle controller as the CLI/TUI. Forced acceptance requires an
+explicit rationale and writes a durable `forced_accepted` audit event; it does
+not turn the stage into durable memory.
+
+Raw tool output and provider-private reasoning fields are not returned.
 
 ## Learning records
 
@@ -138,16 +149,24 @@ The ledger files are:
 - `durable-memory.jsonl` — accepted stages with artifacts only
 - `world-traces.jsonl` — trace references for world-model/JEPA consumers
 - `governed-proposals.jsonl` — proposal records only; no auto-apply
+- `adapter-sona.jsonl`
+- `adapter-rlm.jsonl`
+- `adapter-reflexion.jsonl`
+- `adapter-reasoning-bank.jsonl`
+- `adapter-jepa.jsonl`
+- `adapter-world-model.jsonl`
+- `adapter-records.jsonl` — combined direct handoff records
 
 Failed, forced, skipped, or still-running stages are recorded for audit but are
 not treated as durable memory.
 
 ## Current integration status
 
-The first implementation provides the provider-neutral crate, spec validation,
+The implementation provides the provider-neutral crate, spec validation,
 durable store, event sanitization, deterministic shell executor, live TUI
-planner and runner through the active LLM adapter, lifecycle commands, template
-sanitizer, TUI workflow view, web workflow page/API, and learning ledgers.
+planner and runner through the active LLM adapter, lifecycle commands, forced
+acceptance audit, template sanitizer, TUI workflow view, web workflow
+SSE/control API, and direct learning adapter records.
 
 The static `/archon-code`, `/archon-research`, and `/gametheory` paths remain
 the production subagent-backed pipelines. Dynamic workflows are the new runtime

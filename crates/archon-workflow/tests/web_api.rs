@@ -55,3 +55,32 @@ fn event_previews_hide_tool_noise_and_private_payloads() {
     assert!(!raw.contains("secret"));
     assert!(!raw.contains("spam"));
 }
+
+#[test]
+fn event_previews_after_returns_incremental_sanitized_events() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(temp.path().join("workflows"));
+    let spec = HeuristicWorkflowPlanner.plan("Research topic").unwrap();
+    let run = store.create_run(spec).unwrap();
+    let log = WorkflowEventLog::new(store.clone());
+    log.emit(
+        &run.id,
+        1,
+        WorkflowEventKind::StageStarted,
+        json!({"stage": "discover"}),
+    )
+    .unwrap();
+    log.emit(
+        &run.id,
+        2,
+        WorkflowEventKind::StageCompleted,
+        json!({"stage": "discover", "thinking": "private"}),
+    )
+    .unwrap();
+
+    let events = web_api::event_previews_after(&store, &run.id, 1, 10).unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].seq, 2);
+    assert_eq!(events[0].summary, "discover");
+    assert!(!serde_json::to_string(&events).unwrap().contains("private"));
+}

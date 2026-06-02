@@ -339,6 +339,7 @@ pub fn generated_typescript() -> String {
         super::world::generated_typescript(),
         super::evidence::generated_typescript(),
     ])
+    .map(|decl| decl.trim_end().to_string())
     .collect::<Vec<_>>()
     .join("\n\n")
         + "\n"
