@@ -35,3 +35,16 @@ mcp__memorygraph__: crates/archon-tools/src/memory.rs
 # very regression guard that protects D8 fail the D8-enforcing CI
 # step. (TASK-AGS-010, 2026-04-11.)
 mcp__memorygraph__: crates/archon-core/tests/preserve_d8_save_agent_memory.rs
+
+# REQ-FOR-PRESERVE-D8 — preserve_cozodb_memory_persist_gate.rs is a
+# TUI integration regression guard whose prose explicitly distinguishes
+# archon-cli's embedded CozoDB memory from the banned outer MCP
+# MemoryGraph namespace. These are negative documentation references
+# in the gate itself, not imports or tool invocations.
+mcp__memorygraph__: crates/archon-tui/tests/preserve_cozodb_memory_persist_gate.rs
+
+# REQ-FOR-PRESERVE-D8 — /mcp status tests use a synthetic snapshot that
+# includes old outer MCP tool names so the TUI can display arbitrary MCP
+# server inventories without reintroducing those tools into archon-cli's
+# own memory path.
+mcp__memorygraph__: src/command/mcp.rs

@@ -29,7 +29,7 @@ pub use reasoning_actions::{BriefingAction, ReasoningAction, ReasoningCostAction
 pub use root::Cli;
 pub use strategy_actions::{
     CompletionAction, GametheoryAction, PipelineAction, ProviderProfilesAction, ProvidersAction,
-    SandboxAction, TeamAction,
+    SandboxAction, TeamAction, WorkflowAction,
 };
 pub use video_actions::VideoAction;
 pub use world_model_actions::{WorldAction, WorldGuardAction, WorldGuardPolicyAction};

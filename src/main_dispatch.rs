@@ -38,7 +38,8 @@ pub(crate) async fn handle_subcommand(
         | Commands::Reasoning { .. }
         | Commands::Cognitive { .. }
         | Commands::Briefing { .. }
-        | Commands::Pipeline { .. }) => handle_learning_command(command, config, env_vars).await,
+        | Commands::Pipeline { .. }
+        | Commands::Workflow { .. }) => handle_learning_command(command, config, env_vars).await,
         command @ (Commands::RunAgentAsync { .. }
         | Commands::TaskStatus { .. }
         | Commands::TaskResult { .. }
@@ -156,6 +157,7 @@ async fn handle_learning_command(
         Commands::Pipeline { action } => {
             crate::command::pipeline::handle_pipeline_command(&action, config, env_vars).await
         }
+        Commands::Workflow { action } => crate::command::workflow::handle_workflow_command(&action),
         _ => unreachable!("learning command routed to wrong dispatcher"),
     }
 }

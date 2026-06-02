@@ -20,6 +20,9 @@ impl App {
             ViewId::Video => Some(EvidenceViewState::Video(
                 crate::screens::video::VideoScreen::sources(),
             )),
+            ViewId::Workflow => Some(EvidenceViewState::Workflow(
+                crate::screens::workflow::WorkflowScreen::runs(),
+            )),
             _ => None,
         };
     }
@@ -81,6 +84,18 @@ impl App {
                         .map(|row| crate::screens::video::VideoSourceItem {
                             video_id: row.id,
                             title: row.title,
+                            status: row.status,
+                            detail: row.detail,
+                        })
+                        .collect(),
+                );
+            }
+            Some(EvidenceViewState::Workflow(screen)) => {
+                screen.set_rows(
+                    rows.into_iter()
+                        .map(|row| crate::screens::workflow::WorkflowRow {
+                            id: row.id,
+                            label: row.title,
                             status: row.status,
                             detail: row.detail,
                         })

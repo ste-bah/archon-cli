@@ -31,6 +31,7 @@ export function App() {
   const cognitive = useQuery({ queryKey: ["cognitive"], queryFn: apiClient.cognitiveSummary });
   const world = useQuery({ queryKey: ["world"], queryFn: apiClient.worldSummary });
   const pipelines = useQuery({ queryKey: ["pipelines"], queryFn: apiClient.pipelineSummary });
+  const workflows = useQuery({ queryKey: ["workflows"], queryFn: apiClient.workflowSummary });
   const metrics = useQuery({ queryKey: ["metrics"], queryFn: apiClient.metricsSummary });
   const evidence = useQuery({ queryKey: ["evidence"], queryFn: apiClient.evidenceGraph });
   const settings = useQuery({ queryKey: ["settings"], queryFn: apiClient.settingsSummary });
@@ -66,6 +67,7 @@ export function App() {
           cognitive={cognitive.data}
           world={world.data}
           pipelines={pipelines.data}
+          workflows={workflows.data}
           metrics={metrics.data}
           evidence={evidence.data}
           settings={settings.data}

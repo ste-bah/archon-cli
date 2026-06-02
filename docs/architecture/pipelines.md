@@ -7,6 +7,12 @@ completion integrity, and governed learning. The built-in coding/research
 pipelines write audited run bundles that can be verified, inspected, exported,
 and resumed safely.
 
+Dynamic workflows are a separate provider-neutral generated-workflow layer. Use
+`/workflow` or `archon workflow ...` for ad hoc generated plans that need
+durable state and reducers but do not yet belong to `/archon-code`,
+`/archon-research`, or `/gametheory`. See
+[Dynamic workflows](dynamic-workflows.md).
+
 ```mermaid
 flowchart TB
     USER["User task"] --> CHOOSE{"Pipeline type"}

@@ -660,8 +660,9 @@ mod tests {
     /// subcommands and slash mirrors) → 78 (v0.1.40 Codex auth: /auth
     /// + /chat primaries for the OpenAI-Codex provider surface) → 80
     /// (v1.2.0 reasoning quality: /reasoning + /briefing) → 81
-    /// (v1.3.3 video evidence: /video) → 82 (PRD-008 cognitive loop: /cognitive).
-    const EXPECTED_PRIMARY_COUNT: usize = 82;
+    /// (v1.3.3 video evidence: /video) → 82 (PRD-008 cognitive loop: /cognitive)
+    /// → 83 (PRD-009 dynamic workflows: /workflow).
+    const EXPECTED_PRIMARY_COUNT: usize = 83;
 
     /// Drain every currently-queued event from `rx` using `try_recv`
     /// until the channel reports empty, returning the drained events

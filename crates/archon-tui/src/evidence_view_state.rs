@@ -7,6 +7,7 @@ pub enum EvidenceViewState {
     GameTheory(crate::screens::gametheory::GameTheoryScreen),
     Learning(crate::screens::learning::LearningScreen),
     Video(crate::screens::video::VideoScreen),
+    Workflow(crate::screens::workflow::WorkflowScreen),
 }
 
 impl EvidenceViewState {
@@ -17,6 +18,7 @@ impl EvidenceViewState {
             Self::GameTheory(_) => ViewId::GameTheory,
             Self::Learning(_) => ViewId::Learning,
             Self::Video(_) => ViewId::Video,
+            Self::Workflow(_) => ViewId::Workflow,
         }
     }
 }

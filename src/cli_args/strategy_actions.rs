@@ -394,3 +394,54 @@ pub enum PipelineAction {
         id: String,
     },
 }
+
+#[derive(Subcommand, Debug)]
+pub enum WorkflowAction {
+    /// Create a workflow spec without executing it
+    Plan {
+        /// Natural-language task
+        task: Vec<String>,
+    },
+    /// Create and execute a workflow
+    Run {
+        /// Natural-language task
+        task: Vec<String>,
+    },
+    /// Show a workflow run status
+    Status {
+        /// Workflow run ID
+        run_id: String,
+    },
+    /// Resume a paused or failed workflow
+    Resume {
+        /// Workflow run ID
+        run_id: String,
+    },
+    /// Pause a workflow
+    Pause {
+        /// Workflow run ID
+        run_id: String,
+    },
+    /// Cancel a workflow
+    Cancel {
+        /// Workflow run ID
+        run_id: String,
+    },
+    /// Restart one stage/agent without rewinding the whole workflow
+    #[command(name = "restart-agent")]
+    RestartAgent {
+        /// Workflow run ID
+        run_id: String,
+        /// Stage ID to rewind
+        stage_id: String,
+    },
+    /// Save a sanitized reusable template
+    Save {
+        /// Workflow run ID
+        run_id: String,
+        /// Template name
+        name: String,
+    },
+    /// List workflow runs
+    List,
+}

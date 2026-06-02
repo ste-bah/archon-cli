@@ -43,6 +43,7 @@ pub struct WebFeatureSummary {
     pub reasoning_quality: bool,
     pub corpus: bool,
     pub pipelines: bool,
+    pub workflows: bool,
     pub metrics: bool,
 }
 
@@ -206,6 +207,7 @@ impl WebFeatureSummary {
             reasoning_quality: true,
             corpus: true,
             pipelines: true,
+            workflows: true,
             metrics: true,
         }
     }
@@ -219,6 +221,7 @@ impl WebStoreStatus {
             Self::from_path("world-model", paths.world_model_root.clone()),
             Self::from_path("corpus", paths.cwd.join(".archon/docs")),
             Self::from_path("pipelines", paths.archon_home.join("pipelines")),
+            Self::from_path("workflows", paths.cwd.join(".archon").join("workflows")),
             Self::embedded_assets(),
         ]
     }
@@ -331,6 +334,7 @@ pub fn generated_typescript() -> String {
         super::inspect::generated_typescript(),
         super::metrics::generated_typescript(),
         super::pipelines::generated_typescript(),
+        super::workflows::generated_typescript(),
         super::settings::generated_typescript(),
         super::world::generated_typescript(),
         super::evidence::generated_typescript(),

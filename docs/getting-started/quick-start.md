@@ -99,6 +99,6 @@ If you see structured JSON output, the install is healthy.
 - [Installation](installation.md) — full build details for every OS, OS-specific dependencies, common build problems
 - [First run](first-run.md) — what data archon writes to disk, where logs go, common gotchas
 - [Web workbench](../operations/web-workbench.md) — browser tabs, data sources, action safety, and setup
-- [Slash commands reference](../reference/slash-commands.md) — the 82 primary commands
+- [Slash commands reference](../reference/slash-commands.md) — the 83 primary commands
 - [Sandboxing](../security/sandboxing.md) — optional Docker, SSH, and OpenShell isolation
 - [Cookbook](../cookbook/) — task-oriented walkthroughs

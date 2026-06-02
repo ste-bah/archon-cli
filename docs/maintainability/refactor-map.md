@@ -24,7 +24,7 @@ This map assigns each oversized subsystem to a reviewable refactor group. The or
 | 9 | Memory, learning and GNN | `learning/gnn/trainer.rs`, `auto_trainer.rs`, `integration.rs` | GNN weights, Adam state, training runs, correction events |
 | 3 | Core agent and subagent runtime | `agent.rs`, `subagent.rs`, `subagent_executor.rs` | Agent launch, cancellation, event streaming |
 | 4 | Core agents, hooks, config, and patterns | `agents/loader.rs`, `agents/memory.rs`, `hooks/registry.rs`, `config.rs` | Agent discovery/load, memory prompts, hook summaries, config reload |
-| 5 | Command surface and CLI registry | `src/command/registry.rs`, `src/cli_args.rs` | 82 primary commands, aliases, help output, slash mirror |
+| 5 | Command surface and CLI registry | `src/command/registry.rs`, `src/cli_args.rs` | 83 primary commands, aliases, help output, slash mirror |
 | 6 | Session startup and loop | `src/session.rs`, `src/session_loop/mod.rs`, `src/main.rs` | TUI/headless startup, shutdown, provider and auto-trainer wiring |
 | 7 | Document retrieval and store | `archon-docs/src/retrieval.rs`, `store.rs` | Cozo doc rows, search order, VLM/image ingest |
 | 8 | Pipeline runtime, coding and research | coding, research, executor, runner, KB modules | `/archon-code`, `/archon-research`, quality gates, pipeline persistence |

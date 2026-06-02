@@ -20,6 +20,7 @@ pub mod metrics;
 pub mod pipelines;
 pub mod settings;
 pub mod uploads;
+pub mod workflows;
 pub mod world;
 mod world_jepa;
 
@@ -342,6 +343,7 @@ fn build_app(config: &WebConfig, state: AppState) -> Router {
         .route("/api/cognitive/summary", get(cognitive::summary_handler))
         .route("/api/world/summary", get(world::summary_handler))
         .route("/api/pipelines/summary", get(pipelines::summary_handler))
+        .route("/api/workflows/summary", get(workflows::summary_handler))
         .route("/api/metrics/summary", get(metrics::summary_handler))
         .route("/api/evidence/graph", get(evidence::graph_handler))
         .route("/api/settings/summary", get(inspect::settings_handler))

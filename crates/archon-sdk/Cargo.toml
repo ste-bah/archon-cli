@@ -18,6 +18,7 @@ archon-cognitive = { path = "../archon-cognitive" }
 archon-llm = { path = "../archon-llm" }
 archon-learning = { path = "../archon-learning" }
 archon-tools = { path = "../archon-tools" }
+archon-workflow = { path = "../archon-workflow" }
 
 serde.workspace = true
 serde_json.workspace = true

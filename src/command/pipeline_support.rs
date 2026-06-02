@@ -199,6 +199,7 @@ async fn completion_summary(
         archon_pipeline::runner::PipelineType::Learning => "learning",
         archon_pipeline::runner::PipelineType::Kb => "kb",
         archon_pipeline::runner::PipelineType::GameTheory => "gametheory",
+        archon_pipeline::runner::PipelineType::Workflow => "workflow",
     };
     let (agent_key, model) = result
         .agent_results

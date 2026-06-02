@@ -25,8 +25,10 @@ import type {
   SettingsSummary,
   WebUploadPolicy,
   WebIngestSummary,
+  WorkflowWebSummary,
   WorldInspectionSummary,
 } from "../api/generated/web";
+import { WorkflowPage } from "./WorkflowPage";
 
 const EvidenceGraphPage = lazy(() =>
   import("./EvidenceGraphPage").then((module) => ({
@@ -48,6 +50,7 @@ interface WorkbenchRoutesProps {
   cognitive?: CognitiveWebSummary;
   world?: WorldInspectionSummary;
   pipelines?: PipelineSummary;
+  workflows?: WorkflowWebSummary;
   metrics?: MetricsSummary;
   evidence?: EvidenceGraphSummary;
   settings?: SettingsSummary;
@@ -81,6 +84,10 @@ export function WorkbenchRoutes(props: WorkbenchRoutesProps) {
       <Route
         path="/pipelines"
         element={<PipelinePage pipelines={props.pipelines} />}
+      />
+      <Route
+        path="/workflows"
+        element={<WorkflowPage workflows={props.workflows} />}
       />
       <Route
         path="/metrics"

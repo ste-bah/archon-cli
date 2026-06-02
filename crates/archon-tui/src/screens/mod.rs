@@ -24,3 +24,4 @@ pub mod task_overlay;
 pub mod theme_screen;
 pub mod video;
 pub mod voice_capture;
+pub mod workflow;

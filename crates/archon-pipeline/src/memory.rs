@@ -58,6 +58,7 @@ fn pipeline_type_tag(pt: &PipelineType) -> &'static str {
         PipelineType::Learning => "learning",
         PipelineType::Kb => "kb",
         PipelineType::GameTheory => "gametheory",
+        PipelineType::Workflow => "workflow",
     }
 }
 

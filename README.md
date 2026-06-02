@@ -204,8 +204,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v1.3.9** ([release notes](docs/release-notes/v1.3.9.md))
+- Current version: **v1.3.10** ([release notes](docs/release-notes/v1.3.10.md))
 - Stable release for local world-model advisory learning, first-class reasoning-quality events, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
+- v1.3.10 adds provider-neutral dynamic workflows: `/workflow` planning/running/resume controls, durable workflow bundles, live TUI activity rows, web workflow inspection, learning ledgers, sanitized events, reusable templates, and workflow docs.
 - v1.3.9 moves document embeddings out of the hot Cozo write path into a RocksDB raw-vector store, adds resumable legacy-vector migration, Rust-HNSW compaction, durable index-queue/daemon controls, and clearer vector-status diagnostics.
 - v1.3.8 adds the Cognitive Executive Loop: situation classification, candidate planning, policy-gated JEPA/world-model scoring, compact decision/reflection ledgers, autonomous cognitive ticks, an opt-in Rust daemon, CLI/TUI/web executive-state inspection, and Opus-tier alias support for `claude-opus-4-8`.
 - v1.3.7 adds policy-gated autonomous governed learning via `archon learning tick`, provider-resolved pipeline subagent activity, and refreshed self-learning documentation.

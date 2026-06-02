@@ -44,6 +44,7 @@ pub enum PipelineType {
     Learning,
     Kb,
     GameTheory,
+    Workflow,
 }
 
 /// Determines what tools an agent is allowed to invoke.

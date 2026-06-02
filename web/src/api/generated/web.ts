@@ -2,7 +2,7 @@ export type ApiStatus = { status: string, version: string, web: WebRuntimeStatus
 
 export type WebRuntimeStatus = { bindAddress: string, port: number, authRequired: boolean, maxBodyBytes: number, devMode: boolean, assetMode: string, };
 
-export type WebFeatureSummary = { chat: boolean, uploads: boolean, memoryLearning: boolean, worldModel: boolean, reasoningQuality: boolean, corpus: boolean, pipelines: boolean, metrics: boolean, };
+export type WebFeatureSummary = { chat: boolean, uploads: boolean, memoryLearning: boolean, worldModel: boolean, reasoningQuality: boolean, corpus: boolean, pipelines: boolean, workflows: boolean, metrics: boolean, };
 
 export type WebStoreStatus = { name: string, status: string, detail: string, };
 
@@ -139,6 +139,15 @@ export type PipelineOutputSummary = { label: string, kind: string, path: string,
 export type PipelineLiveEventPreview = { sessionId: string, eventType: string, status: string, summary: string, path: string, };
 
 
+export type WorkflowWebSummary = { root: string, runs: Array<WorkflowRunSummary>, events: Array<WorkflowEventPreview>, controls: Array<WorkflowControlPreview>, };
+
+export type WorkflowRunSummary = { id: string, name: string, status: string, stageCount: number, acceptedCount: number, failedCount: number, artifactCount: number, updatedAt: string, };
+
+export type WorkflowEventPreview = { runId: string, seq: number, kind: string, status: string, summary: string, createdAt: string, };
+
+export type WorkflowControlPreview = { action: string, enabled: boolean, policyReason: string, };
+
+
 export type WebThemeProfile = { themeMode: string, densityMode: string, accentId: string, accentHex: string, accentStrongHex: string, updatedAtMs: number, };
 
 export type WebThemeProfileEnvelope = { profile: WebThemeProfile, storagePath: string, persisted: boolean, exportJson: string, };
@@ -166,4 +175,3 @@ export type EvidenceGraphNode = { id: string, label: string, kind: string, detai
 export type EvidenceGraphEdge = { id: string, source: string, target: string, label: string, };
 
 export type EvidenceGraphSummary = { nodeBudget: number, edgeBudget: number, sourceCount: number, relationCount: number, degraded: boolean, nodes: Array<EvidenceGraphNode>, edges: Array<EvidenceGraphEdge>, };
-

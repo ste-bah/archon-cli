@@ -60,4 +60,13 @@ if [ "$HITS" -gt 0 ]; then
 fi
 printf 'check-banned-imports: clean (%d patterns, %d allowlisted, %d scan roots)\n' \
   "$NP" "$ALLOWED" "${#SCAN_ROOTS[@]}" >&2
+
+if [ -d "crates/archon-workflow" ]; then
+  WF_PAT='archon_llm::providers|providers::(anthropic|bedrock|codex|deepseek|gemini|local|openai|vertex)|oauth_codex'
+  WF_HITS=$(LC_ALL=C grep -rnE --exclude-dir=target -- "$WF_PAT" crates/archon-workflow/src 2>/dev/null | LC_ALL=C sort || true)
+  if [ -n "$WF_HITS" ]; then
+    printf '%s\n' "$WF_HITS" | sed 's/^/BANNED archon-workflow provider-specific import: /'
+    exit 1
+  fi
+fi
 exit 0

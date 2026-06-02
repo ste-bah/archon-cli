@@ -10,6 +10,7 @@ import {
   PackagePlus,
   Network,
   MessageSquare,
+  Workflow,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -75,6 +76,12 @@ export const navItems: NavItem[] = [
     label: "Pipelines",
     detail: "Stages, agents, artifacts, output",
     icon: GitBranch,
+  },
+  {
+    path: "/workflows",
+    label: "Workflows",
+    detail: "Dynamic plans, stages, artifacts, events",
+    icon: Workflow,
   },
   {
     path: "/metrics",

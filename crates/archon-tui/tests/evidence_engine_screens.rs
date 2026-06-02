@@ -3,6 +3,7 @@ use archon_tui::screens::gametheory::{
     GameTheoryRow, GameTheoryScreen, GameTheoryStore, GameTheoryView,
 };
 use archon_tui::screens::learning::{LearningRow, LearningScreen, LearningStore, LearningView};
+use archon_tui::screens::workflow::{WorkflowRow, WorkflowScreen, WorkflowStore, WorkflowView};
 use archon_tui::theme::intj_theme;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -78,20 +79,42 @@ impl LearningStore for FixtureStore {
     }
 }
 
+impl WorkflowStore for FixtureStore {
+    fn load_rows(&self, view: &WorkflowView) -> Vec<WorkflowRow> {
+        match view {
+            WorkflowView::Runs => vec![WorkflowRow {
+                id: "wf-run".into(),
+                label: "Dynamic audit".into(),
+                status: "completed".into(),
+                detail: "4/4 accepted".into(),
+            }],
+            WorkflowView::RunDetail { run_id } => vec![WorkflowRow {
+                id: run_id.clone(),
+                label: "quality-gate".into(),
+                status: "failed".into(),
+                detail: "failure remains inspectable".into(),
+            }],
+        }
+    }
+}
+
 #[test]
 fn gametheory_docs_and_learning_screens_load_source_rows() {
     let store = FixtureStore;
     let mut gt = GameTheoryScreen::run_detail("gt-source");
     let mut docs = DocsScreen::evidence();
     let mut learning = LearningScreen::incidents();
+    let mut workflow = WorkflowScreen::run_detail("wf-source");
 
     gt.load_from(&store);
     docs.load_from(&store);
     learning.load_from(&store);
+    workflow.load_from(&store);
 
     assert_eq!(gt.selected().unwrap().id, "gt-source");
     assert_eq!(docs.selected().unwrap().status, "verified");
     assert_eq!(learning.selected().unwrap().kind, "false-completion");
+    assert_eq!(workflow.selected().unwrap().status, "failed");
 }
 
 #[test]
@@ -116,6 +139,12 @@ fn evidence_engine_screens_render_source_rows_to_buffer() {
     let learning_rendered = render_screen(|frame| learning.render(frame, frame.area(), &theme));
     assert!(learning_rendered.contains("Completion Incidents"));
     assert!(learning_rendered.contains("claim mismatch"));
+
+    let mut workflow = WorkflowScreen::run_detail("wf-source");
+    workflow.load_from(&store);
+    let workflow_rendered = render_screen(|frame| workflow.render(frame, frame.area(), &theme));
+    assert!(workflow_rendered.contains("Workflow wf-source"));
+    assert!(workflow_rendered.contains("failure remains inspectable"));
 }
 
 fn render_screen(render: impl FnOnce(&mut ratatui::Frame)) -> String {

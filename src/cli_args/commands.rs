@@ -5,7 +5,7 @@ use super::{
     CompletionAction, ConstellationAction, DocsAction, GametheoryAction, KbAction, LearningAction,
     MeaningAction, MemoryAction, PermissionsAction, PipelineAction, PluginAction, ProvAction,
     ProvidersAction, ReasoningAction, RemoteAction, SandboxAction, SelfAction, TeamAction,
-    VideoAction, WorldAction,
+    VideoAction, WorkflowAction, WorldAction,
 };
 
 #[derive(Subcommand, Debug)]
@@ -70,6 +70,11 @@ pub enum Commands {
     Pipeline {
         #[command(subcommand)]
         action: PipelineAction,
+    },
+    /// Plan, run, resume, and inspect provider-neutral dynamic workflows
+    Workflow {
+        #[command(subcommand)]
+        action: WorkflowAction,
     },
     /// Start the browser-based web UI on localhost
     Web {

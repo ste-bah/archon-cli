@@ -19,6 +19,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Reasoning quality](architecture/reasoning-quality.md) — first-class visible claim/evidence events, correction links, critic gates, and briefing warnings
 - [Local world model](architecture/world-model.md) — trace corpus, fail-open advisor, dynamic training, retention, backends
 - [Pipelines](architecture/pipelines.md) — `/archon-code` (50 agents), `/archon-research` (47 agents / 8 phases), audited bundles, resume verification, agent loop, subagent spawning
+- [Dynamic workflows](architecture/dynamic-workflows.md) — provider-neutral generated workflow specs, durable runs, live TUI execution, web workflow view, learning ledgers, resume/restart, and template saving
 - [Evidence Engine](evidence-engine.md) — documents, knowledge, provenance, game theory, completion integrity, governed learning, meaning, constellations
 
 ## Evidence Engine
@@ -34,7 +35,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Reference
 
-- [Slash commands](reference/slash-commands.md) — 82 primary commands grouped by purpose
+- [Slash commands](reference/slash-commands.md) — 83 primary commands grouped by purpose
 - [Tools](reference/tools.md) — 43 built-in tools available to agents
 - [Skills](reference/skills.md) — 68 built-in skills (composable command sequences)
 - [Permissions](reference/permissions.md) — 7 permission modes, rule lists, sandboxing
@@ -93,6 +94,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Coding pipeline (`/archon-code`)](cookbook/god-code-pipeline.md) — 50-agent coding workflow end-to-end inside the TUI
 - [Research pipeline (`/archon-research`)](cookbook/archon-research-pipeline.md) — 47-agent PhD research workflow end-to-end inside the TUI
 - [Pipeline rewind](cookbook/pipeline-rewind.md) — audited recovery when accepted pipeline outputs are contaminated and must be regenerated
+- [Dynamic workflows](cookbook/dynamic-workflows.md) — plan, run, resume, restart-agent, and save generated provider-neutral workflows
 - [Game-theory pipeline (`/gametheory`)](cookbook/gametheory-pipeline.md) — Tier 1 classify → route → specialists → report end-to-end inside the TUI
 - [Trading and asset analysis with `/gametheory`](cookbook/trading-with-gametheory.md) — applying the game-theory pipeline to pre-trade assessment, post-event decomposition, counterparty analysis, strategy-viability tests, and macro reaction-function modelling
 - [World-model and JEPA training](cookbook/world-model-dynamic-training.md) — fresh setup, readiness checks, training, eval, promotion, and idle-aware trainer behavior
@@ -129,6 +131,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v1.3.10](release-notes/v1.3.10.md) — Provider-neutral dynamic workflows, durable workflow bundles, live TUI Agent Activity, web Workflows page, learning ledgers, and `/workflow` CLI/TUI control
 - [v1.3.9](release-notes/v1.3.9.md) — RocksDB document vector store, resumable legacy-vector migration, Rust-HNSW compaction, durable index queue/daemon controls, and vector diagnostics
 - [v1.3.8](release-notes/v1.3.8.md) — Cognitive Executive Loop, autonomous cognitive ticks, opt-in Rust daemon, executive-state CLI/TUI/web surfaces, and safety-gated self-model/world-model coordination
 - [v1.3.7](release-notes/v1.3.7.md) — Autonomous governed-learning tick, policy-gated self-application, provider-resolved pipeline subagent activity, and updated learning docs

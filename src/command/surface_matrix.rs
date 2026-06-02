@@ -168,6 +168,14 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         notes: "Cognitive status, tick, daemon control, decision inspection, self-model, and reflections are available from shell and TUI without raw chain-of-thought.",
     },
     CommandSurfaceRow {
+        cli: "archon workflow ...",
+        slash_primary: Some("workflow"),
+        tui_surface: "CLI mirror",
+        status: SurfaceStatus::Done,
+        source_of_truth: "src/command/workflow.rs + crates/archon-workflow",
+        notes: "Dynamic workflow plan, run, status, resume, pause, cancel, restart-agent, save, and list operations are mirrored.",
+    },
+    CommandSurfaceRow {
         cli: "archon pipeline ...",
         slash_primary: Some("pipeline"),
         tui_surface: "CLI mirror",

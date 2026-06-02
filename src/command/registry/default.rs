@@ -48,6 +48,7 @@ use crate::command::thinking::ThinkingHandler;
 use crate::command::usage::UsageHandler;
 use crate::command::vim::VimHandler;
 use crate::command::voice::VoiceHandler;
+use crate::command::workflow::WorkflowHandler;
 
 pub(crate) fn default_registry() -> Registry {
     let mut b = RegistryBuilder::new();
@@ -223,6 +224,7 @@ pub(crate) fn default_registry() -> Registry {
     // Deliverable C: /archon-code + /archon-research TUI primaries.
     b.insert_primary("archon-code", Arc::new(ArchonCodeHandler));
     b.insert_primary("archon-research", Arc::new(ArchonResearchHandler));
+    b.insert_primary("workflow", Arc::new(WorkflowHandler));
     // TASK-AGS-805: /cancel primary (aliases: stop, abort).
     b.insert_primary("cancel", Arc::new(CancelHandler::new()));
     // TASK-AGS-816: NEW /voice primary (gap-fix Q4=A, no aliases).

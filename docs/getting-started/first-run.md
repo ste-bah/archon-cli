@@ -38,7 +38,7 @@ Project-local config layers on top of user config — see [Configuration](../ref
 In the TUI:
 
 ```
-/help                  # list all 82 primary slash commands
+/help                  # list all 83 primary slash commands
 /setup-archon-skills   # interactive 8-prompt config wizard
 /status                # session info: model, effort, tokens used
 /cost                  # estimated session cost
@@ -104,7 +104,7 @@ If any step errors out, see [Troubleshooting](../operations/troubleshooting.md).
 
 ## Next steps
 
-- [Slash commands reference](../reference/slash-commands.md) — full 82-command catalogue
+- [Slash commands reference](../reference/slash-commands.md) — full 83-command catalogue
 - [Configuration](../reference/config.md) — every config section explained
 - [Web workbench](../operations/web-workbench.md) — browser UI setup, tabs, and safety model
 - [Cookbook](../cookbook/) — task-oriented walkthroughs (god-code pipeline, memory-driven coding, etc.)
