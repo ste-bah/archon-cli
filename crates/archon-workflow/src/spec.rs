@@ -1,9 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 
 use crate::error::{WorkflowError, WorkflowResult};
 use crate::generated::normalize_generated_spec;
+use crate::spec_deser::{
+    deserialize_learning_hooks, deserialize_permissions, deserialize_provider_tiers,
+    deserialize_quality_gates,
+};
 
 pub const WORKFLOW_SCHEMA: &str = "archon.workflow.v1";
 
@@ -146,8 +150,8 @@ pub struct WorkflowSpec {
     pub stages: Vec<StageSpec>,
     #[serde(default)]
     pub artifact_policy: ArtifactPolicy,
-    #[serde(default)]
-    pub permissions: BTreeMap<String, bool>,
+    #[serde(default, deserialize_with = "deserialize_permissions")]
+    pub permissions: BTreeMap<String, serde_json::Value>,
     #[serde(default, deserialize_with = "deserialize_quality_gates")]
     pub quality_gates: BTreeMap<String, serde_json::Value>,
     #[serde(default, deserialize_with = "deserialize_learning_hooks")]
@@ -160,144 +164,6 @@ fn default_max_parallelism() -> u32 {
 
 fn default_max_agents() -> u32 {
     200
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum ProviderTierInput {
-    Text(String),
-    Map(BTreeMap<String, serde_json::Value>),
-}
-
-fn deserialize_provider_tiers<'de, D>(
-    deserializer: D,
-) -> Result<BTreeMap<ProviderTier, String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let Some(input) =
-        Option::<BTreeMap<ProviderTier, ProviderTierInput>>::deserialize(deserializer)?
-    else {
-        return Ok(BTreeMap::new());
-    };
-    Ok(input
-        .into_iter()
-        .map(|(tier, value)| (tier, normalize_provider_tier(value)))
-        .collect())
-}
-
-fn normalize_provider_tier(value: ProviderTierInput) -> String {
-    match value {
-        ProviderTierInput::Text(value) => value,
-        ProviderTierInput::Map(values) => {
-            for key in ["provider", "model", "family"] {
-                let Some(value) = values.get(key).and_then(serde_json::Value::as_str) else {
-                    continue;
-                };
-                if has_text(value) && !is_neutral_tier_hint(value) {
-                    return format!("hardcoded:{key}:{value}");
-                }
-            }
-            values
-                .get("tier")
-                .and_then(serde_json::Value::as_str)
-                .filter(|value| is_neutral_tier_hint(value))
-                .unwrap_or("auto")
-                .to_string()
-        }
-    }
-}
-
-fn deserialize_learning_hooks<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let Some(input) = Option::<serde_json::Value>::deserialize(deserializer)? else {
-        return Ok(Vec::new());
-    };
-    let mut hooks = Vec::new();
-    collect_learning_hooks(&input, &mut hooks);
-    hooks.sort();
-    hooks.dedup();
-    Ok(hooks)
-}
-
-fn deserialize_quality_gates<'de, D>(
-    deserializer: D,
-) -> Result<BTreeMap<String, serde_json::Value>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let Some(input) = Option::<serde_json::Value>::deserialize(deserializer)? else {
-        return Ok(BTreeMap::new());
-    };
-    Ok(normalize_quality_gates(input))
-}
-
-fn normalize_quality_gates(input: serde_json::Value) -> BTreeMap<String, serde_json::Value> {
-    match input {
-        serde_json::Value::Object(values) => values.into_iter().collect(),
-        serde_json::Value::Array(values) => values
-            .into_iter()
-            .enumerate()
-            .map(|(idx, value)| (quality_gate_key(idx, &value), value))
-            .collect(),
-        _ => BTreeMap::new(),
-    }
-}
-
-fn quality_gate_key(idx: usize, value: &serde_json::Value) -> String {
-    value
-        .as_object()
-        .and_then(|object| {
-            ["id", "name", "stage", "gate"]
-                .into_iter()
-                .find_map(|key| object.get(key).and_then(serde_json::Value::as_str))
-        })
-        .filter(|value| has_text(value))
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("gate-{}", idx + 1))
-}
-
-fn collect_learning_hooks(value: &serde_json::Value, hooks: &mut Vec<String>) {
-    match value {
-        serde_json::Value::String(value) => hooks.extend(
-            value
-                .split(',')
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string),
-        ),
-        serde_json::Value::Array(values) => {
-            for value in values {
-                collect_learning_hooks(value, hooks);
-            }
-        }
-        serde_json::Value::Object(values) => {
-            for (key, value) in values {
-                if learning_hook_enabled(value) {
-                    hooks.push(key.clone());
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-fn learning_hook_enabled(value: &serde_json::Value) -> bool {
-    match value {
-        serde_json::Value::Bool(value) => *value,
-        serde_json::Value::Null => false,
-        serde_json::Value::String(value) => !matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "" | "false" | "off" | "no"
-        ),
-        serde_json::Value::Object(values) => values
-            .get("enabled")
-            .map(learning_hook_enabled)
-            .unwrap_or(true),
-        _ => true,
-    }
 }
 
 impl WorkflowSpec {

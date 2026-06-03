@@ -5,8 +5,24 @@ use serde_json::Value;
 use crate::spec::{ProviderTier, RetryPolicy, StageKind, StageSpec, WorkflowSpec};
 
 pub fn normalize_generated_spec(spec: &mut WorkflowSpec) {
+    normalize_under_specified_stages(spec);
     infer_dependencies_from_io(spec);
     promote_quality_gate_entries(spec);
+}
+
+fn normalize_under_specified_stages(spec: &mut WorkflowSpec) {
+    for stage in &mut spec.stages {
+        let missing_tool = stage.kind == StageKind::Tool && !has_text(stage.tool.as_deref());
+        let missing_condition =
+            stage.kind == StageKind::Condition && !has_text(stage.condition.as_deref());
+        if missing_tool || missing_condition {
+            let original = format!("{:?}", stage.kind);
+            stage.kind = StageKind::Agent;
+            stage
+                .extra
+                .insert("normalized_from_kind".into(), Value::String(original));
+        }
+    }
 }
 
 fn infer_dependencies_from_io(spec: &mut WorkflowSpec) {
@@ -29,6 +45,10 @@ fn infer_dependencies_from_io(spec: &mut WorkflowSpec) {
             }
         }
     }
+}
+
+fn has_text(value: Option<&str>) -> bool {
+    value.is_some_and(|value| !value.trim().is_empty())
 }
 
 fn text_values(value: Option<&Value>) -> Vec<String> {

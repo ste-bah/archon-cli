@@ -181,6 +181,79 @@ fn provider_tiers_reject_hardcoded_provider_maps() {
 }
 
 #[test]
+fn provider_tiers_accept_llm_sequence_of_names() {
+    let yaml = valid_yaml().replace(
+        "provider_tiers:\n  planner: auto\n  critic: auto\n  reducer: auto",
+        "provider_tiers:\n  - planner\n  - critic\n  - reducer",
+    );
+    let spec = WorkflowSpec::from_yaml(&yaml).unwrap();
+    assert_eq!(
+        spec.provider_tiers.get(&ProviderTier::Planner).unwrap(),
+        "auto"
+    );
+    assert_eq!(
+        spec.provider_tiers.get(&ProviderTier::Critic).unwrap(),
+        "auto"
+    );
+    assert_eq!(
+        spec.provider_tiers.get(&ProviderTier::Reducer).unwrap(),
+        "auto"
+    );
+}
+
+#[test]
+fn provider_tiers_accept_llm_sequence_of_single_key_maps() {
+    let yaml = valid_yaml().replace(
+        "provider_tiers:\n  planner: auto\n  critic: auto\n  reducer: auto",
+        "provider_tiers:\n  - planner:\n      provider: auto\n      model: auto\n  - critic: auto\n  - reducer:\n      provider: default",
+    );
+    let spec = WorkflowSpec::from_yaml(&yaml).unwrap();
+    assert_eq!(
+        spec.provider_tiers.get(&ProviderTier::Planner).unwrap(),
+        "auto"
+    );
+    assert_eq!(
+        spec.provider_tiers.get(&ProviderTier::Critic).unwrap(),
+        "auto"
+    );
+    assert_eq!(
+        spec.provider_tiers.get(&ProviderTier::Reducer).unwrap(),
+        "auto"
+    );
+}
+
+#[test]
+fn provider_tiers_accept_llm_sequence_of_named_maps() {
+    let yaml = valid_yaml().replace(
+        "provider_tiers:\n  planner: auto\n  critic: auto\n  reducer: auto",
+        "provider_tiers:\n  - tier: planner\n    provider: auto\n    model: auto\n  - name: critic\n    value: auto\n  - id: reducer\n    alias: default",
+    );
+    let spec = WorkflowSpec::from_yaml(&yaml).unwrap();
+    assert_eq!(
+        spec.provider_tiers.get(&ProviderTier::Planner).unwrap(),
+        "auto"
+    );
+    assert_eq!(
+        spec.provider_tiers.get(&ProviderTier::Critic).unwrap(),
+        "auto"
+    );
+    assert_eq!(
+        spec.provider_tiers.get(&ProviderTier::Reducer).unwrap(),
+        "default"
+    );
+}
+
+#[test]
+fn provider_tiers_reject_hardcoded_provider_sequence_maps() {
+    let yaml = valid_yaml().replace(
+        "provider_tiers:\n  planner: auto\n  critic: auto\n  reducer: auto",
+        "provider_tiers:\n  - tier: critic\n    provider: anthropic\n    model: claude-opus-4-8",
+    );
+    let err = WorkflowSpec::from_yaml(&yaml).unwrap_err();
+    assert!(matches!(err, WorkflowError::HardcodedModel(_)));
+}
+
+#[test]
 fn quality_gates_accept_llm_sequence_shape() {
     let yaml = format!(
         "{}\nquality_gates:\n  - id: final-review\n    threshold: 0.8\n  - name: evidence-check\n    require_sources: true\n",
@@ -189,6 +262,27 @@ fn quality_gates_accept_llm_sequence_shape() {
     let spec = WorkflowSpec::from_yaml(&yaml).unwrap();
     assert!(spec.quality_gates.contains_key("final-review"));
     assert!(spec.quality_gates.contains_key("evidence-check"));
+}
+
+#[test]
+fn permissions_accept_llm_metadata_values() {
+    let yaml = format!(
+        "{}\npermissions:\n  default_working_dir: /Volumes/Externalwork/archon-cli/archon-cli\n  allow_writes: true\n  allowed_paths:\n    - /Volumes/Externalwork/archon-cli/archon-cli\n",
+        valid_yaml()
+    );
+    let spec = WorkflowSpec::from_yaml(&yaml).unwrap();
+    assert_eq!(
+        spec.permissions
+            .get("default_working_dir")
+            .and_then(serde_json::Value::as_str),
+        Some("/Volumes/Externalwork/archon-cli/archon-cli")
+    );
+    assert_eq!(
+        spec.permissions
+            .get("allow_writes")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
 }
 
 #[test]
@@ -250,4 +344,30 @@ quality_gates:
     assert_eq!(gate.depends_on, vec!["discovery"]);
     assert_eq!(gate.provider_tier, Some(ProviderTier::Critic));
     assert!(gate.extra.contains_key("criteria"));
+}
+
+#[test]
+fn generated_specs_normalize_missing_tool_and_condition_stages() {
+    let yaml = r#"
+schema: archon.workflow.v1
+name: generated-under-specified
+task: Build an underspecified plan.
+stages:
+  - id: write_progress
+    kind: tool
+    task: Write compact progress.
+  - id: decide_next
+    kind: condition
+    task: Decide whether more work is needed.
+"#;
+    let spec = WorkflowSpec::from_generated_yaml(yaml, "Fallback task").unwrap();
+    assert_eq!(spec.stages[0].kind, archon_workflow::StageKind::Agent);
+    assert_eq!(spec.stages[1].kind, archon_workflow::StageKind::Agent);
+    assert_eq!(
+        spec.stages[0]
+            .extra
+            .get("normalized_from_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("Tool")
+    );
 }

@@ -45,8 +45,11 @@ provider/model at runtime.
 
 Generated plans may include a concise per-stage `task` objective. Provider tier
 entries may be either `critic: auto` or neutral map form such as
-`critic: { provider: auto, model: auto }`; concrete provider/model names remain
-invalid in generated specs. Live generated specs are also normalized before
+`critic: { provider: auto, model: auto }`; generated lists such as
+`provider_tiers: [planner, researcher, critic]` and named list entries such as
+`{ tier: critic, provider: auto, model: auto }` are normalized too. Concrete
+provider/model names remain invalid in generated specs. Live generated specs are
+also normalized before
 validation: `inputs`/`outputs` metadata can infer missing `depends_on` edges,
 top-level `quality_gates` entries can be promoted into executable
 `quality_gate` stages, missing agent names fall back to the stage id, missing
@@ -77,7 +80,7 @@ Dynamic workflow validation rejects:
 - unknown dependencies
 - dependency cycles
 - hard-coded provider or model fields
-- hard-coded provider/model values inside generated provider-tier maps
+- hard-coded provider/model values inside generated provider-tier maps or lists
 - policy-denied dangerous tool stages
 
 Event payloads are sanitized before persistence. Provider-private reasoning

@@ -19,6 +19,7 @@ mod request;
 pub mod run;
 pub mod runner;
 pub mod spec;
+mod spec_deser;
 pub mod stage;
 pub mod store;
 pub mod template;
