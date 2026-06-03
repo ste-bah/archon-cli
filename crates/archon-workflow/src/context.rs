@@ -198,13 +198,12 @@ fn dependency_artifacts(
     run: &WorkflowRun,
     stage_id: &str,
 ) -> WorkflowResult<Vec<Value>> {
-    Ok(run
-        .stages
+    run.stages
         .get(stage_id)
         .into_iter()
         .flat_map(|stage| &stage.artifacts)
         .map(|artifact| artifact_value(store, run, artifact))
-        .collect::<WorkflowResult<Vec<_>>>()?)
+        .collect::<WorkflowResult<Vec<_>>>()
 }
 
 fn artifact_value(
@@ -300,7 +299,7 @@ fn source_file_items(stage: &StageSpec, files: Vec<Value>) -> Option<Vec<FanoutI
 fn parse_items(body: &str) -> Option<Vec<Value>> {
     candidate_documents(body)
         .into_iter()
-        .find_map(|candidate| parse_items_doc(candidate))
+        .find_map(parse_items_doc)
 }
 
 fn parse_items_doc(body: &str) -> Option<Vec<Value>> {
@@ -337,12 +336,11 @@ fn enrich_payload(project_root: &Path, payload: Value) -> Value {
     if let Some(path) = payload.as_str() {
         return read_source_file(project_root, path).unwrap_or_else(|| json!({"value": path}));
     }
-    if let Some(path) = payload.get("path").and_then(Value::as_str) {
-        if payload.get("content").is_none() {
-            if let Some(file) = read_source_file(project_root, path) {
-                return merge_payload(payload, file);
-            }
-        }
+    if let Some(path) = payload.get("path").and_then(Value::as_str)
+        && payload.get("content").is_none()
+        && let Some(file) = read_source_file(project_root, path)
+    {
+        return merge_payload(payload, file);
     }
     payload
 }

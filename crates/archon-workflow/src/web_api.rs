@@ -119,7 +119,7 @@ pub fn event_previews(
             }
         })
         .collect::<Vec<_>>();
-    events.sort_by(|a, b| b.seq.cmp(&a.seq));
+    events.sort_by_key(|event| std::cmp::Reverse(event.seq));
     events.truncate(limit);
     Ok(events)
 }
@@ -147,7 +147,7 @@ pub fn event_previews_after(
             }
         })
         .collect::<Vec<_>>();
-    events.sort_by(|a, b| a.seq.cmp(&b.seq));
+    events.sort_by_key(|event| event.seq);
     events.truncate(limit);
     Ok(events)
 }

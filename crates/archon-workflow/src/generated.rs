@@ -38,10 +38,11 @@ fn infer_dependencies_from_io(spec: &mut WorkflowSpec) {
             continue;
         }
         for input in text_values(stage.extra.get("inputs")) {
-            if let Some(dep) = producers.get(&input) {
-                if dep != &stage.id && !stage.depends_on.contains(dep) {
-                    stage.depends_on.push(dep.clone());
-                }
+            if let Some(dep) = producers.get(&input)
+                && dep != &stage.id
+                && !stage.depends_on.contains(dep)
+            {
+                stage.depends_on.push(dep.clone());
             }
         }
     }
