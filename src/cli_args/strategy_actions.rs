@@ -445,9 +445,19 @@ pub enum WorkflowAction {
         /// Workflow run ID
         run_id: String,
     },
-    /// Restart one stage/agent without rewinding the whole workflow
+    /// Restart a single agent/item without rewinding the whole stage
     #[command(name = "restart-agent")]
     RestartAgent {
+        /// Workflow run ID
+        run_id: String,
+        /// Stage ID to rewind
+        stage_id: String,
+        /// Optional fan-out item id; when set, only this item is rewound
+        item: Option<String>,
+    },
+    /// Restart an entire stage and its transitive dependents
+    #[command(name = "restart-stage")]
+    RestartStage {
         /// Workflow run ID
         run_id: String,
         /// Stage ID to rewind

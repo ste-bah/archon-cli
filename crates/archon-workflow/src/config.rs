@@ -18,6 +18,8 @@ pub struct WorkflowConfig {
     pub allow_generated_workflow_specs: bool,
     #[serde(default = "default_allow_templates")]
     pub allow_saved_templates: bool,
+    #[serde(default = "default_local_provider_max_agents")]
+    pub local_provider_max_agents: u32,
     #[serde(default)]
     pub provider_tiers: BTreeMap<ProviderTier, String>,
 }
@@ -31,6 +33,7 @@ impl Default for WorkflowConfig {
             default_artifact_retention_days: default_retention(),
             allow_generated_workflow_specs: true,
             allow_saved_templates: true,
+            local_provider_max_agents: default_local_provider_max_agents(),
             provider_tiers: default_provider_tiers(),
         }
     }
@@ -58,6 +61,11 @@ fn default_allow_generated() -> bool {
 
 fn default_allow_templates() -> bool {
     true
+}
+
+/// OQ-DWF-003 provisional default: conservative cap for local-only providers.
+fn default_local_provider_max_agents() -> u32 {
+    4
 }
 
 pub fn default_provider_tiers() -> BTreeMap<ProviderTier, String> {

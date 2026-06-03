@@ -117,7 +117,16 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
         WorkflowAction::Cancel { run_id } => CommandAction::Cancel {
             run_id: run_id.clone(),
         },
-        WorkflowAction::RestartAgent { run_id, stage_id } => CommandAction::RestartAgent {
+        WorkflowAction::RestartAgent {
+            run_id,
+            stage_id,
+            item,
+        } => CommandAction::RestartAgent {
+            run_id: run_id.clone(),
+            stage_id: stage_id.clone(),
+            item: item.clone(),
+        },
+        WorkflowAction::RestartStage { run_id, stage_id } => CommandAction::RestartStage {
             run_id: run_id.clone(),
             stage_id: stage_id.clone(),
         },
@@ -166,7 +175,19 @@ pub(super) fn run_action(cwd: &Path, action: CommandAction) -> Result<String> {
         }
         CommandAction::Pause { run_id } => lifecycle(&store, &run_id, LifecycleAction::Pause)?,
         CommandAction::Cancel { run_id } => lifecycle(&store, &run_id, LifecycleAction::Cancel)?,
-        CommandAction::RestartAgent { run_id, stage_id } => {
+        CommandAction::RestartAgent {
+            run_id,
+            stage_id,
+            item,
+        } => match item {
+            Some(item_id) => lifecycle(
+                &store,
+                &run_id,
+                LifecycleAction::RestartItem { stage_id, item_id },
+            )?,
+            None => lifecycle(&store, &run_id, LifecycleAction::RestartStage(stage_id))?,
+        },
+        CommandAction::RestartStage { run_id, stage_id } => {
             lifecycle(&store, &run_id, LifecycleAction::RestartStage(stage_id))?
         }
         CommandAction::ForceAccept {

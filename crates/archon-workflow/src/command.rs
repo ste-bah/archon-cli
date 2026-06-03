@@ -34,6 +34,11 @@ pub enum CommandAction {
     RestartAgent {
         run_id: String,
         stage_id: String,
+        item: Option<String>,
+    },
+    RestartStage {
+        run_id: String,
+        stage_id: String,
     },
     ForceAccept {
         run_id: String,
@@ -85,7 +90,12 @@ impl WorkflowCommand {
             "cancel" => CommandAction::Cancel {
                 run_id: required(tail, 0, "run id")?,
             },
-            "restart-agent" | "restart-stage" => CommandAction::RestartAgent {
+            "restart-agent" => CommandAction::RestartAgent {
+                run_id: required(tail, 0, "run id")?,
+                stage_id: required(tail, 1, "stage id")?,
+                item: optional(tail, 2),
+            },
+            "restart-stage" => CommandAction::RestartStage {
                 run_id: required(tail, 0, "run id")?,
                 stage_id: required(tail, 1, "stage id")?,
             },
@@ -162,6 +172,13 @@ fn required(args: &[String], idx: usize, label: &str) -> WorkflowResult<String> 
         .filter(|value| !value.trim().is_empty())
         .cloned()
         .ok_or_else(|| WorkflowError::SpecInvalid(format!("missing {label}")))
+}
+
+fn optional(args: &[String], idx: usize) -> Option<String> {
+    args.get(idx)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 fn required_tail(args: &[String], start: usize, label: &str) -> WorkflowResult<String> {

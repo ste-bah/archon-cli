@@ -14,6 +14,10 @@ pub enum LifecycleAction {
     Pause,
     Cancel,
     RestartStage(String),
+    RestartItem {
+        stage_id: String,
+        item_id: String,
+    },
     ForceAcceptStage {
         stage_id: String,
         forced_by: String,
@@ -66,6 +70,13 @@ fn apply_action(
                 json!({"action": "restart_stage", "stage": stage_id}),
             ))
         }
+        LifecycleAction::RestartItem { stage_id, item_id } => {
+            rewind_item(run, &stage_id, &item_id)?;
+            Ok((
+                WorkflowEventKind::Resumed,
+                json!({"action": "restart_item", "stage": stage_id, "item": item_id}),
+            ))
+        }
         LifecycleAction::ForceAcceptStage {
             stage_id,
             forced_by,
@@ -85,6 +96,47 @@ fn apply_action(
             ))
         }
     }
+}
+
+fn rewind_item(run: &mut WorkflowRun, stage_id: &str, item_id: &str) -> WorkflowResult<()> {
+    if !run.stages.contains_key(stage_id) {
+        return Err(WorkflowError::SpecInvalid(format!(
+            "unknown stage {stage_id}"
+        )));
+    }
+    let item = run
+        .items
+        .get(item_id)
+        .ok_or_else(|| WorkflowError::SpecInvalid(format!("unknown item {item_id}")))?;
+    if item.stage_id != stage_id {
+        return Err(WorkflowError::SpecInvalid(format!(
+            "item {item_id} does not belong to stage {stage_id}"
+        )));
+    }
+    // Per-item rewind: drop only this item and re-open its owning stage plus
+    // transitive dependents. Sibling accepted items are preserved so they are
+    // served from cache on the next run (AC-US3-02, EC-DWF-18).
+    run.items.remove(item_id);
+    let rewind_ids = dependent_stage_ids(run, stage_id);
+    for id in &rewind_ids {
+        if let Some(state) = run.stages.get_mut(id) {
+            state.status = StageStatus::Pending;
+            state.error = None;
+            state.started_at = None;
+            state.completed_at = None;
+            state.quality_score = None;
+            // Dependent stages (not the item's own stage) are fully reset.
+            if id != stage_id {
+                state.artifacts.clear();
+            }
+        }
+    }
+    // Drop items belonging to dependent stages (but not siblings in this stage).
+    run.items.retain(|_, item| {
+        item.stage_id == stage_id || !rewind_ids.contains(item.stage_id.as_str())
+    });
+    run.status = RunStatus::Running;
+    Ok(())
 }
 
 fn rewind_stage(run: &mut WorkflowRun, stage_id: &str) -> WorkflowResult<()> {

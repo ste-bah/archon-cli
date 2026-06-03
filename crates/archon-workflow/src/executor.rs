@@ -254,7 +254,7 @@ impl WorkflowExecutor {
     ) -> WorkflowResult<StageRunOutput> {
         let items = context::fanout_items(&self.store, run, stage)?;
         let width = fanout::width(run, &self.policy);
-        let max_agents = run.spec.max_agents.min(self.policy.max_agents_per_run) as usize;
+        let max_agents = self.stage_max_agents(run, stage);
         if items.len() > max_agents {
             return Err(WorkflowError::PolicyDenied(format!(
                 "fan-out item count {} exceeds max_agents {max_agents}",
@@ -330,6 +330,19 @@ impl WorkflowExecutor {
             "Fan-out stage `{}` completed {} item(s), failed {} item(s), width {}.",
             stage.id, completed, failed, width
         )))
+    }
+
+    /// Effective fan-out agent cap for a stage. Local-only provider tiers are
+    /// capped by `local_provider_max_agents` (OQ-DWF-003 / EC-DWF-21) so that
+    /// Ollama/LM Studio style backends are not overwhelmed by wide fan-out.
+    fn stage_max_agents(&self, run: &WorkflowRun, stage: &StageSpec) -> usize {
+        let base = run.spec.max_agents.min(self.policy.max_agents_per_run);
+        let effective = if stage.provider_tier == Some(crate::spec::ProviderTier::Local) {
+            base.min(self.policy.local_provider_max_agents)
+        } else {
+            base
+        };
+        effective as usize
     }
 
     fn run_reduce(&self, run: &mut WorkflowRun, stage: &StageSpec) -> WorkflowResult<()> {
