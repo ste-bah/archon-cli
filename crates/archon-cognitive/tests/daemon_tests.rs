@@ -1,9 +1,10 @@
 use archon_cognitive::{
-    CognitiveDaemon, CognitiveDaemonConfig, DaemonJob, DaemonJobReport, PersistentCognitiveStore,
-    SituationKind,
+    CognitiveDaemon, CognitiveDaemonConfig, DaemonJob, DaemonJobReport, DaemonPaths, DaemonState,
+    PersistentCognitiveStore, SituationKind,
 };
 use archon_policy::CognitivePolicy;
 use std::path::PathBuf;
+use std::time::Duration;
 
 fn policy(allow_daemon: bool) -> CognitivePolicy {
     CognitivePolicy {
@@ -45,6 +46,21 @@ fn daemon_status_is_not_running_without_state() {
 }
 
 #[test]
+fn daemon_status_treats_dead_pid_lock_as_stale() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = DaemonPaths::new(dir.path());
+    let mut state = DaemonState::new();
+    state.pid = u32::MAX;
+    paths.write_state(&state).unwrap();
+    std::fs::write(&paths.lock_path, "dead\n").unwrap();
+
+    let status = CognitiveDaemon::status(dir.path(), 30_000).unwrap();
+
+    assert!(!status.running);
+    assert!(status.stale);
+}
+
+#[test]
 fn daemon_run_once_requires_daemon_policy() {
     let dir = tempfile::tempdir().unwrap();
     let store = PersistentCognitiveStore::open(dir.path()).unwrap();
@@ -62,6 +78,8 @@ fn daemon_run_once_records_tick_state() {
     let state = daemon.run_once().unwrap();
     assert_eq!(state.ticks_run, 1);
     assert_eq!(state.status, "stopped");
+    assert!(state.current_job.is_none());
+    assert!(state.tick_started_at.is_none());
 
     let status = CognitiveDaemon::status(dir.path(), 30_000).unwrap();
     assert!(!status.running);
@@ -108,4 +126,61 @@ fn daemon_run_forever_consumes_stop_marker_on_shutdown() {
 
     let status = CognitiveDaemon::status(dir.path(), 30_000).unwrap();
     assert!(!status.stop_requested);
+}
+
+#[test]
+fn daemon_heartbeats_while_job_blocks() {
+    struct SlowJob;
+
+    impl DaemonJob for SlowJob {
+        fn name(&self) -> &'static str {
+            "slow_job"
+        }
+
+        fn run(&mut self) -> Result<DaemonJobReport, archon_cognitive::CognitiveError> {
+            std::thread::sleep(Duration::from_millis(1_800));
+            Ok(DaemonJobReport {
+                name: self.name().into(),
+                ok: true,
+                summary: "slept".into(),
+            })
+        }
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+    let thread_root = root.clone();
+    let handle = std::thread::spawn(move || {
+        let store = PersistentCognitiveStore::open(&thread_root).unwrap();
+        let mut daemon_config = config();
+        daemon_config.stale_heartbeat_ms = 1_000;
+        let mut daemon =
+            CognitiveDaemon::new(&thread_root, daemon_config, store.db(), policy(true));
+        daemon.add_job(SlowJob);
+        daemon.run_once().unwrap();
+    });
+
+    let started = wait_for_job(&root, "slow_job");
+    std::thread::sleep(Duration::from_millis(1_200));
+    let updated = CognitiveDaemon::status(&root, 1_000)
+        .unwrap()
+        .state
+        .unwrap()
+        .last_heartbeat_at;
+
+    handle.join().unwrap();
+
+    assert!(updated > started);
+}
+
+fn wait_for_job(root: &std::path::Path, name: &str) -> chrono::DateTime<chrono::Utc> {
+    for _ in 0..20 {
+        if let Some(state) = CognitiveDaemon::status(root, 1_000).unwrap().state {
+            if state.current_job.as_deref() == Some(name) {
+                return state.last_heartbeat_at;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    panic!("job {name} did not start");
 }

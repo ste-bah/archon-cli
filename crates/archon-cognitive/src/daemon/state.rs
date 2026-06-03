@@ -11,9 +11,13 @@ pub struct DaemonState {
     pub started_at: DateTime<Utc>,
     pub last_heartbeat_at: DateTime<Utc>,
     pub last_tick_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub tick_started_at: Option<DateTime<Utc>>,
     pub ticks_run: u64,
     pub last_error: Option<String>,
     pub status: String,
+    #[serde(default)]
+    pub current_job: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,9 +46,11 @@ impl DaemonState {
             started_at: now,
             last_heartbeat_at: now,
             last_tick_at: None,
+            tick_started_at: None,
             ticks_run: 0,
             last_error: None,
             status: "running".into(),
+            current_job: None,
         }
     }
 
@@ -52,12 +58,25 @@ impl DaemonState {
         self.last_heartbeat_at = Utc::now();
     }
 
+    pub fn record_job_start(&mut self, job: impl Into<String>) {
+        let now = Utc::now();
+        if self.tick_started_at.is_none() {
+            self.tick_started_at = Some(now);
+        }
+        self.current_job = Some(job.into());
+        self.status = "running".into();
+        self.last_heartbeat_at = now;
+    }
+
     pub fn record_tick(&mut self, error: Option<String>) {
         let now = Utc::now();
         self.ticks_run = self.ticks_run.saturating_add(1);
         self.last_tick_at = Some(now);
+        self.tick_started_at = None;
         self.last_heartbeat_at = now;
         self.last_error = error;
+        self.current_job = None;
+        self.status = "running".into();
     }
 }
 
@@ -110,7 +129,7 @@ pub fn status_for(paths: &DaemonPaths, stale_ms: u64) -> Result<DaemonStatus, Co
     let state = paths.read_state()?;
     let stale = state
         .as_ref()
-        .is_some_and(|state| heartbeat_is_stale(state, stale_ms));
+        .is_some_and(|state| heartbeat_is_stale(state, stale_ms) || !is_pid_alive(state.pid));
     Ok(DaemonStatus {
         running: paths.lock_path.exists() && !stale,
         stale,
@@ -126,4 +145,18 @@ pub fn heartbeat_is_stale(state: &DaemonState, stale_ms: u64) -> bool {
         .signed_duration_since(state.last_heartbeat_at)
         .num_milliseconds();
     elapsed > stale_ms as i64
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_pid_alive(pid: u32) -> bool {
+    if pid == 0 || pid > i32::MAX as u32 {
+        return false;
+    }
+    // SAFETY: kill(pid, 0) sends no signal; it only checks process existence.
+    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+}
+
+#[cfg(target_os = "windows")]
+fn is_pid_alive(_pid: u32) -> bool {
+    false
 }

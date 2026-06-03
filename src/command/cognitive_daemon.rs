@@ -340,6 +340,12 @@ fn print_status(status: &DaemonStatus, as_json: bool, root: &Path) -> Result<()>
         if let Some(state) = &status.state {
             println!("PID: {}", state.pid);
             println!("Ticks run: {}", state.ticks_run);
+            if let Some(job) = &state.current_job {
+                println!("Current job: {job}");
+            }
+            if let Some(started) = state.tick_started_at {
+                println!("Tick started: {started}");
+            }
             println!("Last heartbeat: {}", state.last_heartbeat_at);
         }
         println!(

@@ -63,7 +63,6 @@ pub(crate) fn latest_for_job(root: &Path, job: &str) -> Option<LearningDaemonEve
     latest(root, 256).into_iter().find(|event| event.job == job)
 }
 
-#[cfg(test)]
 pub(crate) fn latest_training_counts(root: &Path, job: &str) -> Option<(u64, u64)> {
     latest(root, 512)
         .into_iter()
@@ -81,18 +80,32 @@ pub(crate) fn latest_training_counts(root: &Path, job: &str) -> Option<(u64, u64
         })
 }
 
-pub(crate) fn latest_count_checkpoint(root: &Path, job: &str) -> Option<(u64, u64)> {
-    latest(root, 512)
-        .into_iter()
-        .find(|event| {
-            event.job == job && event.total_memories.is_some() && event.total_corrections.is_some()
-        })
-        .map(|event| {
-            (
-                event.total_memories.unwrap_or_default(),
-                event.total_corrections.unwrap_or_default(),
-            )
-        })
+pub(crate) fn training_summary(root: &Path, job: &str) -> TrainingSummary {
+    let mut summary = TrainingSummary::default();
+    for event in latest(root, 512) {
+        if event.job != job {
+            continue;
+        }
+        summary.attempt_count += 1;
+        if summary.latest_attempt.is_none() {
+            summary.latest_attempt = Some(event.clone());
+        }
+        if event.trained {
+            summary.training_count += 1;
+            if summary.latest_training.is_none() {
+                summary.latest_training = Some(event);
+            }
+        }
+    }
+    summary
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TrainingSummary {
+    pub training_count: u64,
+    pub attempt_count: u64,
+    pub latest_training: Option<LearningDaemonEvent>,
+    pub latest_attempt: Option<LearningDaemonEvent>,
 }
 
 pub(crate) fn render_summary(root: &Path) -> String {
@@ -158,5 +171,38 @@ mod tests {
         .unwrap();
 
         assert_eq!(latest_training_counts(temp.path(), "gnn"), Some((10, 2)));
+    }
+
+    #[test]
+    fn training_summary_counts_only_trained_events() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut trained = LearningDaemonEvent::new("gnn", "trained", "ok");
+        trained.trained = true;
+        trained.run_id = Some("run-1".into());
+        append(temp.path(), &trained).unwrap();
+        append(
+            temp.path(),
+            &LearningDaemonEvent::new("gnn", "skipped", "throttled"),
+        )
+        .unwrap();
+
+        let summary = training_summary(temp.path(), "gnn");
+
+        assert_eq!(summary.training_count, 1);
+        assert_eq!(summary.attempt_count, 2);
+        assert_eq!(
+            summary
+                .latest_attempt
+                .as_ref()
+                .map(|event| event.status.as_str()),
+            Some("skipped")
+        );
+        assert_eq!(
+            summary
+                .latest_training
+                .as_ref()
+                .and_then(|event| event.run_id.as_deref()),
+            Some("run-1")
+        );
     }
 }

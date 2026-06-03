@@ -364,6 +364,7 @@ dependencies = [
  "blake3",
  "chrono",
  "cozo-ce",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",

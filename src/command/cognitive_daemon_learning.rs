@@ -114,7 +114,7 @@ impl GnnAutoTrainerJob {
         };
         let counts = durable_memory_counts(&memory);
         let stats = training_run_stats(&db);
-        let checkpoint = ledger::latest_count_checkpoint(&self.cognitive_root, self.name());
+        let checkpoint = ledger::latest_training_counts(&self.cognitive_root, self.name());
         let snapshot = DurableTrainerSnapshot {
             total_memories: counts.0,
             total_corrections: counts.1,

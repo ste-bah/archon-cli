@@ -24,6 +24,7 @@ pub(crate) fn render_gnn_status_with_durable(
 ) -> String {
     let at = &config.learning.gnn.auto_trainer;
     let enabled = config.learning.gnn.enabled && live.map(|s| s.enabled).unwrap_or(at.enabled);
+    let daemon = daemon_gnn_status(config);
     let total_memories = live
         .map(|s| s.total_memories)
         .or_else(|| durable.map(|s| s.total_memories))
@@ -32,18 +33,28 @@ pub(crate) fn render_gnn_status_with_durable(
         .map(|s| s.total_corrections)
         .or_else(|| durable.map(|s| s.total_corrections))
         .unwrap_or(0);
-    let training_count = live.map(|s| s.training_count).unwrap_or(0);
-    let no_data_count = live.map(|s| s.no_data_count).unwrap_or(0);
+    let training_count = live
+        .map(|s| s.training_count)
+        .unwrap_or(daemon.training_count);
+    let no_data_count = live
+        .map(|s| s.no_data_count)
+        .unwrap_or(daemon.no_data_count);
     let memories_since = live
         .map(|s| s.memories_since_last_train)
+        .or_else(|| daemon.memories_since_last_training(total_memories))
         .or_else(|| durable.map(|s| s.total_memories))
         .unwrap_or(0);
     let corrections_since = live
         .map(|s| s.corrections_since_last_train)
+        .or_else(|| daemon.corrections_since_last_training(total_corrections))
         .or_else(|| durable.map(|s| s.total_corrections))
         .unwrap_or(0);
-    let seconds_since_last = live.and_then(|s| s.seconds_since_last_train);
-    let seconds_since_last_attempt = live.and_then(|s| s.seconds_since_last_attempt);
+    let seconds_since_last = live
+        .and_then(|s| s.seconds_since_last_train)
+        .or(daemon.seconds_since_last_training);
+    let seconds_since_last_attempt = live
+        .and_then(|s| s.seconds_since_last_attempt)
+        .or(daemon.seconds_since_last_attempt);
     let in_progress = live.map(|s| s.training_in_progress).unwrap_or(false);
     let last_sources = live.and_then(|s| s.last_outcome.as_ref().map(|o| o.data_sources.clone()));
     let last_no_data_reason = live.and_then(|s| s.last_no_data_reason.as_deref());
@@ -105,12 +116,14 @@ pub(crate) fn render_gnn_status_with_durable(
     let last_no_data = last_no_data_reason.unwrap_or("none");
     let status_source = if live.is_some() {
         "live auto-trainer"
+    } else if durable.is_some() && daemon.attempt_count > 0 {
+        "durable memory graph + daemon ledger"
     } else if durable.is_some() {
         "durable memory graph"
     } else {
         "config fallback"
     };
-    let daemon_status = daemon_status_line(config);
+    let daemon_status = daemon.status_line;
 
     format!(
         "GNN Auto-Trainer Status\n\
@@ -147,6 +160,61 @@ fn daemon_status_line(config: &archon_core::config::ArchonConfig) -> String {
             )
         })
         .unwrap_or_else(|| "no daemon trainer tick recorded".into())
+}
+
+#[derive(Debug, Clone)]
+struct DaemonGnnStatus {
+    training_count: u64,
+    no_data_count: u64,
+    attempt_count: u64,
+    seconds_since_last_training: Option<u64>,
+    seconds_since_last_attempt: Option<u64>,
+    memories_at_last_training: Option<u64>,
+    corrections_at_last_training: Option<u64>,
+    status_line: String,
+}
+
+impl DaemonGnnStatus {
+    fn memories_since_last_training(&self, total_memories: u64) -> Option<u64> {
+        self.memories_at_last_training
+            .map(|last| total_memories.saturating_sub(last))
+    }
+
+    fn corrections_since_last_training(&self, total_corrections: u64) -> Option<u64> {
+        self.corrections_at_last_training
+            .map(|last| total_corrections.saturating_sub(last))
+    }
+}
+
+fn daemon_gnn_status(config: &archon_core::config::ArchonConfig) -> DaemonGnnStatus {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let root = expand_path(&cwd, &config.learning.cognitive.ledger_dir);
+    let summary = crate::command::cognitive_daemon_learning_ledger::training_summary(
+        &root,
+        "gnn_auto_trainer",
+    );
+    let latest_training = summary.latest_training.as_ref();
+    let latest_attempt = summary.latest_attempt.as_ref();
+    DaemonGnnStatus {
+        training_count: summary.training_count,
+        no_data_count: crate::command::cognitive_daemon_learning_ledger::latest(&root, 512)
+            .into_iter()
+            .filter(|event| event.job == "gnn_auto_trainer" && event.status == "no_data")
+            .count() as u64,
+        attempt_count: summary.attempt_count,
+        seconds_since_last_training: latest_training.map(|event| seconds_since(event.created_at)),
+        seconds_since_last_attempt: latest_attempt.map(|event| seconds_since(event.created_at)),
+        memories_at_last_training: latest_training.and_then(|event| event.total_memories),
+        corrections_at_last_training: latest_training.and_then(|event| event.total_corrections),
+        status_line: daemon_status_line(config),
+    }
+}
+
+fn seconds_since(then: chrono::DateTime<chrono::Utc>) -> u64 {
+    chrono::Utc::now()
+        .signed_duration_since(then)
+        .num_seconds()
+        .max(0) as u64
 }
 
 fn expand_path(cwd: &std::path::Path, raw: &str) -> std::path::PathBuf {
