@@ -61,6 +61,23 @@ fn daemon_status_treats_dead_pid_lock_as_stale() {
 }
 
 #[test]
+fn daemon_run_once_clears_fresh_dead_pid_lock() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = DaemonPaths::new(dir.path());
+    let mut state = DaemonState::new();
+    state.pid = u32::MAX;
+    paths.write_state(&state).unwrap();
+    std::fs::write(&paths.lock_path, "pid=4294967295\n").unwrap();
+
+    let store = PersistentCognitiveStore::open(dir.path()).unwrap();
+    let mut daemon = CognitiveDaemon::new(dir.path(), config(), store.db(), policy(true));
+    let state = daemon.run_once().unwrap();
+
+    assert_eq!(state.ticks_run, 1);
+    assert!(!paths.lock_path.exists());
+}
+
+#[test]
 fn daemon_run_once_requires_daemon_policy() {
     let dir = tempfile::tempdir().unwrap();
     let store = PersistentCognitiveStore::open(dir.path()).unwrap();

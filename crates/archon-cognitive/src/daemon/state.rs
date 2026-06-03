@@ -148,7 +148,7 @@ pub fn heartbeat_is_stale(state: &DaemonState, stale_ms: u64) -> bool {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn is_pid_alive(pid: u32) -> bool {
+pub(crate) fn is_pid_alive(pid: u32) -> bool {
     if pid == 0 || pid > i32::MAX as u32 {
         return false;
     }
@@ -157,6 +157,6 @@ fn is_pid_alive(pid: u32) -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn is_pid_alive(_pid: u32) -> bool {
+pub(crate) fn is_pid_alive(_pid: u32) -> bool {
     false
 }

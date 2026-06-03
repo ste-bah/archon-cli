@@ -1,10 +1,10 @@
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::context;
 use crate::error::{WorkflowError, WorkflowResult};
 use crate::events::{WorkflowEventKind, WorkflowEventLog};
+use crate::exec_state::{finish_run, mark_finished, mark_started, pause_for_human_gate, report};
 use crate::fanout;
 use crate::learning::WorkflowLearningSink;
 use crate::policy::WorkflowPolicy;
@@ -65,6 +65,9 @@ impl WorkflowExecutor {
                 continue;
             }
             self.run_stage(&mut run, &stage, &mut seq)?;
+            if !matches!(run.status, RunStatus::Running) {
+                break;
+            }
         }
         finish_run(&mut run);
         self.record_learning(&run, &mut seq)?;
@@ -85,6 +88,9 @@ impl WorkflowExecutor {
             }
             self.run_stage_with_runner(&mut run, &stage, &mut seq, runner)
                 .await?;
+            if !matches!(run.status, RunStatus::Running) {
+                break;
+            }
         }
         finish_run(&mut run);
         self.record_learning(&run, &mut seq)?;
@@ -108,14 +114,19 @@ impl WorkflowExecutor {
             json!({"stage": stage.id, "kind": format!("{:?}", stage.kind)}),
         )?;
         *seq += 1;
+        if stage.kind == StageKind::HumanGate {
+            pause_for_human_gate(run, stage, seq, &log)?;
+            return self.store.save_state(run);
+        }
         let result = match stage.kind {
-            StageKind::Agent | StageKind::Tool | StageKind::Checkpoint | StageKind::HumanGate => {
+            StageKind::Agent | StageKind::Tool | StageKind::Checkpoint => {
                 self.write_stage_artifact(run, stage, "md", deterministic_stage_output(stage))
             }
             StageKind::Fanout => self.run_fanout(run, stage),
             StageKind::Reduce => self.run_reduce(run, stage),
             StageKind::QualityGate => self.run_quality_gate(run, stage),
             StageKind::Condition => self.write_stage_artifact(run, stage, "json", "{}".to_string()),
+            StageKind::HumanGate => unreachable!("human gates pause before dispatch"),
         };
         match result {
             Ok(()) => {
@@ -158,6 +169,10 @@ impl WorkflowExecutor {
             json!({"stage": stage.id, "kind": format!("{:?}", stage.kind), "agent": stage.agent}),
         )?;
         *seq += 1;
+        if stage.kind == StageKind::HumanGate {
+            pause_for_human_gate(run, stage, seq, &log)?;
+            return self.store.save_state(run);
+        }
         let result = self.dispatch_stage_with_runner(run, stage, runner).await;
         match result {
             Ok(output) => {
@@ -195,7 +210,7 @@ impl WorkflowExecutor {
         runner: &dyn WorkflowStageRunner,
     ) -> WorkflowResult<StageRunOutput> {
         let output = match stage.kind {
-            StageKind::Agent | StageKind::Tool | StageKind::HumanGate => {
+            StageKind::Agent | StageKind::Tool => {
                 let output = runner
                     .run_stage(stage_request(&self.store, run, stage)?)
                     .await?;
@@ -216,6 +231,7 @@ impl WorkflowExecutor {
                 self.write_stage_artifact(run, stage, "json", "{}".to_string())?;
                 StageRunOutput::markdown(format!("Checkpoint stage `{}` complete.", stage.id))
             }
+            StageKind::HumanGate => unreachable!("human gates pause before dispatch"),
         };
         Ok(output)
     }
@@ -404,17 +420,6 @@ impl WorkflowExecutor {
     }
 }
 
-fn finish_run(run: &mut WorkflowRun) {
-    if run.stages.values().all(|stage| stage.is_terminal()) {
-        run.status = if run.stages.values().any(|s| s.status == StageStatus::Failed) {
-            RunStatus::Failed
-        } else {
-            RunStatus::Completed
-        };
-    }
-    run.mark_updated();
-}
-
 fn deterministic_stage_output(stage: &StageSpec) -> String {
     format!(
         "# Stage {}\n\nKind: `{:?}`\nAgent: `{}`\n",
@@ -429,58 +434,4 @@ fn ensure_output_usable(body: &str) -> WorkflowResult<()> {
         return Err(WorkflowError::StageFailed(reason));
     }
     Ok(())
-}
-
-fn mark_started(run: &mut WorkflowRun, stage: &StageSpec) -> WorkflowResult<()> {
-    let state = run
-        .stage_mut(&stage.id)
-        .ok_or_else(|| WorkflowError::SpecInvalid(format!("missing stage {}", stage.id)))?;
-    state.status = StageStatus::Running;
-    state.attempt += 1;
-    state.started_at = Some(Utc::now());
-    state.error = None;
-    run.mark_updated();
-    Ok(())
-}
-
-fn mark_finished(
-    run: &mut WorkflowRun,
-    stage: &StageSpec,
-    status: StageStatus,
-    error: Option<String>,
-) -> WorkflowResult<()> {
-    let state = run
-        .stage_mut(&stage.id)
-        .ok_or_else(|| WorkflowError::SpecInvalid(format!("missing stage {}", stage.id)))?;
-    state.status = status;
-    state.completed_at = Some(Utc::now());
-    state.error = error;
-    run.mark_updated();
-    Ok(())
-}
-
-fn report(run: &WorkflowRun) -> ExecutionReport {
-    ExecutionReport {
-        run_id: run.id.clone(),
-        completed: run
-            .stages
-            .values()
-            .filter(|s| {
-                matches!(
-                    s.status,
-                    StageStatus::Accepted | StageStatus::ForcedAccepted
-                )
-            })
-            .count(),
-        failed: run
-            .stages
-            .values()
-            .filter(|s| s.status == StageStatus::Failed)
-            .count(),
-        skipped: run
-            .stages
-            .values()
-            .filter(|s| s.status == StageStatus::Skipped)
-            .count(),
-    }
 }

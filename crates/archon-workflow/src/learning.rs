@@ -122,9 +122,10 @@ fn verification_for(status: StageStatus) -> Verification {
         StageStatus::Accepted => Verification::Accepted,
         StageStatus::ForcedAccepted => Verification::Forced,
         StageStatus::Failed => Verification::Failed,
-        StageStatus::Pending | StageStatus::Running | StageStatus::Skipped => {
-            Verification::Unverified
-        }
+        StageStatus::Pending
+        | StageStatus::Running
+        | StageStatus::Paused
+        | StageStatus::Skipped => Verification::Unverified,
     }
 }
 

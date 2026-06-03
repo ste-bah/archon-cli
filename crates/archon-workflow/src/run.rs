@@ -23,6 +23,7 @@ pub enum RunStatus {
 pub enum StageStatus {
     Pending,
     Running,
+    Paused,
     Accepted,
     Failed,
     Skipped,
