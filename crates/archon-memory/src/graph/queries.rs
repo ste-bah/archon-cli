@@ -44,7 +44,7 @@ impl MemoryGraph {
             .filter_map(|raw| raw_to_memory(raw).ok())
             .collect();
         // Sort descending by created_at (newest first)
-        memories.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        memories.sort_by_key(|b| std::cmp::Reverse(b.created_at));
         memories.truncate(limit);
         Ok(memories)
     }
