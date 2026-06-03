@@ -187,6 +187,7 @@ globset.workspace = true
 strsim.workspace = true
 thiserror.workspace = true
 cozo.workspace = true
+libc = "0.2"
 # TASK #246: panic_save terminal restore (Show + LeaveAlternateScreen + disable_raw_mode)
 crossterm.workspace = true
 

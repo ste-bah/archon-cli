@@ -174,11 +174,31 @@ fn spawn_daemon_child(cwd: &Path, interval_ms: Option<u64>) -> Result<std::proce
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    detach_daemon_child(&mut command);
     if let Some(interval_ms) = interval_ms {
         command.arg("--interval-ms").arg(interval_ms.to_string());
     }
     command.spawn().context("spawn cognitive daemon")
 }
+
+#[cfg(unix)]
+fn detach_daemon_child(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+
+    // SAFETY: pre_exec runs after fork and before exec. setsid is async-signal-safe
+    // and detaches the daemon from the launcher's process group/session.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn detach_daemon_child(_command: &mut Command) {}
 
 fn wait_for_daemon_running(root: &Path, stale_ms: u64, child: &mut Child) -> Result<DaemonStatus> {
     let deadline = Instant::now() + Duration::from_secs(5);
