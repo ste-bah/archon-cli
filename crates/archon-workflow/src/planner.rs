@@ -51,6 +51,7 @@ impl WorkflowPlanner for HeuristicWorkflowPlanner {
                 StageSpec {
                     id: "quality".to_string(),
                     kind: StageKind::QualityGate,
+                    task: None,
                     agent: None,
                     foreach: None,
                     reducer: None,
@@ -62,6 +63,7 @@ impl WorkflowPlanner for HeuristicWorkflowPlanner {
                     input: serde_json::json!({"threshold": 0.50}),
                     model: None,
                     provider: None,
+                    extra: BTreeMap::new(),
                 },
             ],
             artifact_policy: ArtifactPolicy::default(),
@@ -78,6 +80,7 @@ fn agent(id: &str, agent: &str, tier: ProviderTier, depends_on: Vec<&str>) -> St
     StageSpec {
         id: id.to_string(),
         kind: StageKind::Agent,
+        task: None,
         agent: Some(agent.to_string()),
         foreach: None,
         reducer: None,
@@ -89,6 +92,7 @@ fn agent(id: &str, agent: &str, tier: ProviderTier, depends_on: Vec<&str>) -> St
         input: serde_json::Value::Object(Default::default()),
         model: None,
         provider: None,
+        extra: BTreeMap::new(),
     }
 }
 
@@ -109,6 +113,7 @@ fn reduce(id: &str, reducer: ReducerKind, tier: ProviderTier, depends_on: Vec<&s
     StageSpec {
         id: id.to_string(),
         kind: StageKind::Reduce,
+        task: None,
         agent: None,
         foreach: None,
         reducer: Some(reducer),
@@ -120,6 +125,7 @@ fn reduce(id: &str, reducer: ReducerKind, tier: ProviderTier, depends_on: Vec<&s
         input: serde_json::Value::Object(Default::default()),
         model: None,
         provider: None,
+        extra: BTreeMap::new(),
     }
 }
 

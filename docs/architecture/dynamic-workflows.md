@@ -43,6 +43,16 @@ Provider-specific model IDs are not allowed inside stages. A stage may request
 a capability tier, but the active provider configuration resolves the concrete
 provider/model at runtime.
 
+Generated plans may include a concise per-stage `task` objective. Provider tier
+entries may be either `critic: auto` or neutral map form such as
+`critic: { provider: auto, model: auto }`; concrete provider/model names remain
+invalid in generated specs. Live generated specs are also normalized before
+validation: `inputs`/`outputs` metadata can infer missing `depends_on` edges,
+top-level `quality_gates` entries can be promoted into executable
+`quality_gate` stages, missing agent names fall back to the stage id, missing
+fan-out `foreach` values run as a single item, and missing reducer kinds default
+to `evidence_weighted_report`.
+
 ## Durable state
 
 Each run lives under:
@@ -66,8 +76,8 @@ Dynamic workflow validation rejects:
 - unknown stage kinds
 - unknown dependencies
 - dependency cycles
-- fan-out stages without a downstream reducer
 - hard-coded provider or model fields
+- hard-coded provider/model values inside generated provider-tier maps
 - policy-denied dangerous tool stages
 
 Event payloads are sanitized before persistence. Provider-private reasoning

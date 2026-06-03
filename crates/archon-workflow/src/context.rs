@@ -22,6 +22,9 @@ pub fn stage_input(
     stage: &StageSpec,
 ) -> WorkflowResult<Value> {
     Ok(json!({
+        "workflow_task": run.spec.task,
+        "stage_task": stage.task,
+        "stage_extra": stage.extra,
         "stage_input": stage.input,
         "dependencies": dependency_context(store, run, &stage.depends_on)?,
         "source_files": source_files(store, run, stage)?,

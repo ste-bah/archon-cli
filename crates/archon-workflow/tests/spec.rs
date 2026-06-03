@@ -61,13 +61,13 @@ fn dependency_cycle_rejected() {
 }
 
 #[test]
-fn missing_reducer_rejected() {
+fn fanout_without_downstream_reducer_is_allowed() {
     let bad = valid_yaml().replace(
         "  - id: synthesize\n    kind: reduce\n    reducer: evidence_weighted_report\n    depends_on: [review]\n",
         "",
     );
-    let err = WorkflowSpec::from_yaml(&bad).unwrap_err();
-    assert!(matches!(err, WorkflowError::MissingReducer(_)));
+    let spec = WorkflowSpec::from_yaml(&bad).unwrap();
+    assert_eq!(spec.stages.len(), 2);
 }
 
 #[test]
@@ -101,4 +101,153 @@ fn learning_hooks_accept_llm_map_shape() {
     );
     let spec = WorkflowSpec::from_yaml(&yaml).unwrap();
     assert_eq!(spec.learning_hooks, vec!["reasoning_bank", "sona"]);
+}
+
+#[test]
+fn learning_hooks_accept_llm_metadata_shapes() {
+    let yaml = format!(
+        "{}\nlearning_hooks:\n  sona:\n    enabled: true\n    mode: direct\n  reasoning_bank:\n    enabled: true\n  reflexion:\n    enabled: false\n",
+        valid_yaml()
+    );
+    let spec = WorkflowSpec::from_yaml(&yaml).unwrap();
+    assert_eq!(spec.learning_hooks, vec!["reasoning_bank", "sona"]);
+}
+
+#[test]
+fn stage_task_is_allowed_for_llm_generated_plans() {
+    let yaml = valid_yaml().replace(
+        "agent: codebase-analyzer",
+        "task: Discover repo modules and summarize implementation risks.\n    agent: codebase-analyzer",
+    );
+    let spec = WorkflowSpec::from_yaml(&yaml).unwrap();
+    assert_eq!(
+        spec.stages[0].task.as_deref(),
+        Some("Discover repo modules and summarize implementation risks.")
+    );
+}
+
+#[test]
+fn stage_extra_metadata_is_preserved_for_llm_generated_plans() {
+    let yaml = valid_yaml().replace(
+        "agent: codebase-analyzer",
+        "agent: codebase-analyzer\n    outputs:\n      - module list\n      - risk summary",
+    );
+    let spec = WorkflowSpec::from_yaml(&yaml).unwrap();
+    assert!(spec.stages[0].extra.contains_key("outputs"));
+}
+
+#[test]
+fn agent_name_is_optional_for_generated_agent_stages() {
+    let yaml = valid_yaml().replace("    agent: codebase-analyzer\n", "");
+    let spec = WorkflowSpec::from_yaml(&yaml).unwrap();
+    assert_eq!(spec.stages[0].agent, None);
+}
+
+#[test]
+fn fanout_foreach_is_optional_for_single_item_generated_stages() {
+    let yaml = valid_yaml().replace("    foreach: \"${discover.modules}\"\n", "");
+    let spec = WorkflowSpec::from_yaml(&yaml).unwrap();
+    assert_eq!(spec.stages[1].foreach, None);
+}
+
+#[test]
+fn reducer_kind_is_optional_for_generated_reduce_stages() {
+    let yaml = valid_yaml().replace("    reducer: evidence_weighted_report\n", "");
+    let spec = WorkflowSpec::from_yaml(&yaml).unwrap();
+    assert_eq!(spec.stages[2].reducer, None);
+}
+
+#[test]
+fn provider_tiers_accept_llm_map_shape_when_neutral() {
+    let yaml = valid_yaml().replace(
+        "critic: auto",
+        "critic:\n    provider: auto\n    model: auto",
+    );
+    let spec = WorkflowSpec::from_yaml(&yaml).unwrap();
+    assert_eq!(
+        spec.provider_tiers.get(&ProviderTier::Critic).unwrap(),
+        "auto"
+    );
+}
+
+#[test]
+fn provider_tiers_reject_hardcoded_provider_maps() {
+    let yaml = valid_yaml().replace(
+        "critic: auto",
+        "critic:\n    provider: anthropic\n    model: claude-opus-4-8",
+    );
+    let err = WorkflowSpec::from_yaml(&yaml).unwrap_err();
+    assert!(matches!(err, WorkflowError::HardcodedModel(_)));
+}
+
+#[test]
+fn quality_gates_accept_llm_sequence_shape() {
+    let yaml = format!(
+        "{}\nquality_gates:\n  - id: final-review\n    threshold: 0.8\n  - name: evidence-check\n    require_sources: true\n",
+        valid_yaml()
+    );
+    let spec = WorkflowSpec::from_yaml(&yaml).unwrap();
+    assert!(spec.quality_gates.contains_key("final-review"));
+    assert!(spec.quality_gates.contains_key("evidence-check"));
+}
+
+#[test]
+fn generated_specs_can_use_fallback_task() {
+    let yaml = valid_yaml().replace("task: Audit this repository deeply.\n", "");
+    let spec = WorkflowSpec::from_generated_yaml(&yaml, "Fallback task").unwrap();
+    assert_eq!(spec.task, "Fallback task");
+    assert!(WorkflowSpec::from_yaml(&yaml).is_err());
+}
+
+#[test]
+fn generated_specs_infer_dependencies_from_io_metadata() {
+    let yaml = r#"
+schema: archon.workflow.v1
+name: generated-chain
+task: Build a generated chain.
+stages:
+  - id: discovery
+    kind: agent
+    outputs: [findings]
+  - id: review
+    kind: fanout
+    inputs: [findings]
+    outputs: [reviewed]
+  - id: synthesis
+    kind: reduce
+    inputs: [reviewed]
+"#;
+    let spec = WorkflowSpec::from_generated_yaml(yaml, "Fallback task").unwrap();
+    assert_eq!(spec.stages[1].depends_on, vec!["discovery"]);
+    assert_eq!(spec.stages[2].depends_on, vec!["review"]);
+}
+
+#[test]
+fn generated_specs_promote_top_level_quality_gates_to_stages() {
+    let yaml = r#"
+schema: archon.workflow.v1
+name: generated-gate
+task: Build a generated gate.
+stages:
+  - id: discovery
+    kind: agent
+quality_gates:
+  final_gate:
+    id: final_gate
+    task: Check the synthesis before acceptance.
+    depends_on: [discovery]
+    provider_tier: critic
+    criteria:
+      - no unsupported claims
+"#;
+    let spec = WorkflowSpec::from_generated_yaml(yaml, "Fallback task").unwrap();
+    let gate = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "final_gate")
+        .unwrap();
+    assert_eq!(gate.kind, archon_workflow::StageKind::QualityGate);
+    assert_eq!(gate.depends_on, vec!["discovery"]);
+    assert_eq!(gate.provider_tier, Some(ProviderTier::Critic));
+    assert!(gate.extra.contains_key("criteria"));
 }

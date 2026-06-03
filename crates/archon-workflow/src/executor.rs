@@ -12,7 +12,7 @@ use crate::reducers::ReducerRegistry;
 use crate::request::{fanout_item_request, stage_request};
 use crate::run::{RunStatus, StageStatus, WorkflowRun};
 use crate::runner::{StageRunOutput, WorkflowStageRunner};
-use crate::spec::{StageKind, StageSpec, WorkflowSpec};
+use crate::spec::{ReducerKind, StageKind, StageSpec, WorkflowSpec};
 use crate::stage::{ordered_stages, source_input_hash, stage_ready};
 use crate::store::WorkflowStore;
 
@@ -317,9 +317,7 @@ impl WorkflowExecutor {
     }
 
     fn run_reduce(&self, run: &mut WorkflowRun, stage: &StageSpec) -> WorkflowResult<()> {
-        let reducer = stage
-            .reducer
-            .ok_or_else(|| WorkflowError::MissingReducer(stage.id.clone()))?;
+        let reducer = stage.reducer.unwrap_or(ReducerKind::EvidenceWeightedReport);
         let inputs = context::reducer_inputs(&self.store, run, stage)?;
         let output = self.reducers.reduce(reducer, &inputs)?;
         self.write_stage_artifact(run, stage, "md", output.body)

@@ -7,6 +7,7 @@ pub mod error;
 pub mod events;
 pub mod executor;
 pub mod fanout;
+mod generated;
 pub mod learning;
 pub mod lifecycle;
 pub mod planner;

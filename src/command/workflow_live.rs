@@ -43,7 +43,9 @@ pub(crate) fn spawn_live_workflow(
                 let _ = tui_tx.send(TuiEvent::TextDelta(text));
             }
             Err(err) => {
-                let _ = tui_tx.send(TuiEvent::Error(format!("Workflow failed: {err}")));
+                let message = format!("Workflow failed: {err}");
+                let _ = tui_tx.send(TuiEvent::TextDelta(format!("{message}\n")));
+                let _ = tui_tx.send(TuiEvent::Error(message));
             }
         }
     });
@@ -138,7 +140,7 @@ async fn llm_plan(task: &str, llm: Arc<dyn LlmClient>) -> Result<WorkflowSpec> {
         )
         .await?;
     let raw = extract_yaml(&response.content);
-    match WorkflowSpec::from_yaml(&raw) {
+    match WorkflowSpec::from_generated_yaml(&raw, task) {
         Ok(spec) => Ok(spec),
         Err(err) => repair_plan(task, &raw, err.to_string(), llm).await,
     }
@@ -164,7 +166,7 @@ async fn repair_plan(
             tier_model_alias(ProviderTier::Planner),
         )
         .await?;
-    WorkflowSpec::from_yaml(&extract_yaml(&response.content)).map_err(Into::into)
+    WorkflowSpec::from_generated_yaml(&extract_yaml(&response.content), task).map_err(Into::into)
 }
 
 fn live_start_message(action: &CommandAction) -> String {
@@ -331,7 +333,7 @@ fn workflow_prompt(request: &StageRunRequest) -> String {
 
 fn planner_prompt(task: &str) -> String {
     format!(
-        "Create an archon.workflow.v1 YAML plan for this task:\n\n{task}\n\nRules:\n- Use schema: archon.workflow.v1.\n- Use stage kinds: agent, fanout, reduce, tool, checkpoint, quality_gate, human_gate.\n- Use provider_tier aliases only: planner, researcher, coder, critic, cheap, vision, local, reducer.\n- Do not set stage.provider or stage.model.\n- Include at least discovery, fanout/review, reduce/synthesis, and quality gate stages.\n- Keep max_parallelism <= 8 and max_agents <= 200.\n- Add learning_hooks for sona, reasoning_bank, and world_model.\n- Return YAML only."
+        "Create an archon.workflow.v1 YAML plan for this task:\n\n{task}\n\nRules:\n- Use schema: archon.workflow.v1.\n- Use stage kinds: agent, fanout, reduce, tool, checkpoint, quality_gate, human_gate.\n- Use provider_tier aliases only: planner, researcher, coder, critic, cheap, vision, local, reducer.\n- Do not set stage.provider or stage.model.\n- You may set stage.task for the concise objective of that stage.\n- Include at least discovery, fanout/review, reduce/synthesis, and quality gate stages.\n- Keep max_parallelism <= 8 and max_agents <= 200.\n- Add learning_hooks for sona, reasoning_bank, and world_model.\n- Return YAML only."
     )
 }
 
@@ -407,7 +409,10 @@ mod tests {
 schema: archon.workflow.v1
 name: invalid-live-plan
 task: implement a real task
-learning_hooks: 7
+provider_tiers:
+  critic:
+    provider: anthropic
+    model: claude-opus-4-8
 stages:
   - id: discover
     kind: agent

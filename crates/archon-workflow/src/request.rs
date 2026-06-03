@@ -21,7 +21,7 @@ pub(crate) fn stage_request(
         stage_id: stage.id.clone(),
         stage_kind: stage.kind,
         agent: stage.agent.clone(),
-        task: run.spec.task.clone(),
+        task: stage.task.clone().unwrap_or_else(|| run.spec.task.clone()),
         attempt,
         provider_tier: stage.provider_tier.unwrap_or(ProviderTier::Planner),
         depends_on: stage.depends_on.clone(),
