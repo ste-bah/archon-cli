@@ -101,6 +101,12 @@ impl WorkflowPolicy {
         if stage.kind == StageKind::Fanout && !self.allow_parallel_agents {
             return PolicyDecision::Deny("parallel fan-out denied by policy".into());
         }
+        if stage.kind == StageKind::Implementation && self.require_human_for_dangerous_tools {
+            return PolicyDecision::RequireHuman(format!(
+                "implementation stage '{}' is write-capable and requires human approval",
+                stage.id
+            ));
+        }
         if stage.kind == StageKind::Tool {
             let tool = stage.tool.as_deref().unwrap_or_default();
             if is_dangerous_tool(tool) && self.require_human_for_dangerous_tools {

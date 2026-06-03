@@ -35,6 +35,7 @@ pub enum StageKind {
     Checkpoint,
     QualityGate,
     HumanGate,
+    Implementation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,6 +131,14 @@ pub struct StageSpec {
     pub model: Option<String>,
     #[serde(default)]
     pub provider: Option<String>,
+    /// Files an `implementation` stage must mutate for acceptance (Phase B).
+    /// Non-empty only for `StageKind::Implementation`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub expected_target_files: Vec<String>,
+    /// Shell command that must exit 0 for an `implementation` stage to be
+    /// accepted (Phase B acceptance binding).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verify_command: Option<String>,
     #[serde(default, flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, serde_json::Value>,
 }
@@ -243,6 +252,14 @@ impl WorkflowSpec {
                 StageKind::Reduce => {}
                 StageKind::Condition => require(stage, stage.condition.as_deref(), "condition")?,
                 StageKind::Tool => require(stage, stage.tool.as_deref(), "tool")?,
+                StageKind::Implementation => {
+                    if stage.expected_target_files.iter().all(|f| !has_text(f)) {
+                        return Err(WorkflowError::SpecInvalid(format!(
+                            "implementation stage '{}' requires at least one expected_target_files entry",
+                            stage.id
+                        )));
+                    }
+                }
                 StageKind::Checkpoint | StageKind::QualityGate | StageKind::HumanGate => {}
             }
         }

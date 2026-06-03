@@ -120,6 +120,8 @@ fn quality_gate_stage(key: &str, value: &Value, existing: &BTreeSet<String>) -> 
         input: Value::Null,
         model: None,
         provider: None,
+        expected_target_files: Vec::new(),
+        verify_command: None,
         extra,
     })
 }

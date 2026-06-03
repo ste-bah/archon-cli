@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::acceptance::{self, AcceptanceOutcome};
 use crate::context;
 use crate::error::{WorkflowError, WorkflowResult};
 use crate::events::{WorkflowEventKind, WorkflowEventLog};
@@ -126,6 +127,10 @@ impl WorkflowExecutor {
             StageKind::Reduce => self.run_reduce(run, stage),
             StageKind::QualityGate => self.run_quality_gate(run, stage),
             StageKind::Condition => self.write_stage_artifact(run, stage, "json", "{}".to_string()),
+            StageKind::Implementation => Err(WorkflowError::StageFailed(format!(
+                "implementation stage '{}' requires a live stage runner",
+                stage.id
+            ))),
             StageKind::HumanGate => unreachable!("human gates pause before dispatch"),
         };
         match result {
@@ -218,6 +223,10 @@ impl WorkflowExecutor {
                 self.write_stage_artifact(run, stage, &output.extension, output.body.clone())?;
                 output
             }
+            StageKind::Implementation => {
+                self.run_implementation_with_runner(run, stage, runner)
+                    .await?
+            }
             StageKind::Fanout => self.run_fanout_with_runner(run, stage, runner).await?,
             StageKind::Reduce => {
                 self.run_reduce(run, stage)?;
@@ -233,6 +242,47 @@ impl WorkflowExecutor {
             }
             StageKind::HumanGate => unreachable!("human gates pause before dispatch"),
         };
+        Ok(output)
+    }
+
+    /// Execute a write-capable implementation stage with acceptance binding
+    /// (Phase B). The stage is accepted only when every `expected_target_files`
+    /// entry was mutated AND the `verify_command` (if any) exits 0; otherwise
+    /// the artifact is recorded as not-accepted and the stage fails.
+    async fn run_implementation_with_runner(
+        &self,
+        run: &mut WorkflowRun,
+        stage: &StageSpec,
+        runner: &dyn WorkflowStageRunner,
+    ) -> WorkflowResult<StageRunOutput> {
+        let root = run.root.clone();
+        let before = acceptance::snapshot_targets(&root, &stage.expected_target_files);
+        let output = runner
+            .run_stage(stage_request(&self.store, run, stage)?)
+            .await?;
+        ensure_output_usable(&output.body)?;
+        let after = acceptance::snapshot_targets(&root, &stage.expected_target_files);
+        let outcome = acceptance::evaluate(
+            &root,
+            &stage.expected_target_files,
+            &before,
+            &after,
+            stage.verify_command.as_deref(),
+        );
+        let accepted = outcome.is_accepted();
+        self.write_stage_artifact_with_acceptance(
+            run,
+            stage,
+            &output.extension,
+            output.body.clone(),
+            accepted,
+        )?;
+        if let AcceptanceOutcome::Rejected(reason) = outcome {
+            return Err(WorkflowError::StageFailed(format!(
+                "implementation stage '{}' rejected: {reason}",
+                stage.id
+            )));
+        }
         Ok(output)
     }
 

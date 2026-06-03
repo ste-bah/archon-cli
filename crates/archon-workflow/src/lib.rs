@@ -1,5 +1,6 @@
 //! Provider-neutral dynamic workflow runtime for Archon.
 
+pub mod acceptance;
 pub mod command;
 pub mod config;
 pub mod context;
@@ -27,6 +28,7 @@ pub mod template;
 pub mod tui_events;
 pub mod web_api;
 
+pub use acceptance::{AcceptanceOutcome, TargetFingerprints};
 pub use command::{CommandAction, WorkflowCommand};
 pub use config::WorkflowConfig;
 pub use error::{WorkflowError, WorkflowResult};

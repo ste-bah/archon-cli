@@ -63,6 +63,8 @@ impl WorkflowPlanner for HeuristicWorkflowPlanner {
                     input: serde_json::json!({"threshold": 0.50}),
                     model: None,
                     provider: None,
+                    expected_target_files: Vec::new(),
+                    verify_command: None,
                     extra: BTreeMap::new(),
                 },
             ],
@@ -92,6 +94,8 @@ fn agent(id: &str, agent: &str, tier: ProviderTier, depends_on: Vec<&str>) -> St
         input: serde_json::Value::Object(Default::default()),
         model: None,
         provider: None,
+        expected_target_files: Vec::new(),
+        verify_command: None,
         extra: BTreeMap::new(),
     }
 }
@@ -125,6 +129,8 @@ fn reduce(id: &str, reducer: ReducerKind, tier: ProviderTier, depends_on: Vec<&s
         input: serde_json::Value::Object(Default::default()),
         model: None,
         provider: None,
+        expected_target_files: Vec::new(),
+        verify_command: None,
         extra: BTreeMap::new(),
     }
 }

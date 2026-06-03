@@ -312,7 +312,11 @@ fn workflow_agent(request: &StageRunRequest, model: &str) -> AgentInfo {
         critical: matches!(request.stage_kind, StageKind::QualityGate),
         parallelizable: matches!(request.stage_kind, StageKind::Fanout),
         quality_threshold: 0.5,
-        tool_access_level: ToolAccessLevel::ReadOnly,
+        tool_access_level: if matches!(request.stage_kind, StageKind::Implementation) {
+            ToolAccessLevel::Full
+        } else {
+            ToolAccessLevel::ReadOnly
+        },
     }
 }
 
@@ -345,6 +349,15 @@ fn repair_prompt(task: &str, invalid_yaml: &str, error: &str) -> String {
 
 fn allowed_tools(request: &StageRunRequest) -> Vec<String> {
     match request.stage_kind {
+        StageKind::Implementation => vec![
+            "Read",
+            "Grep",
+            "Glob",
+            "Write",
+            "Edit",
+            "ApplyPatch",
+            "Bash",
+        ],
         StageKind::Tool => vec!["Read", "Grep", "Glob", "DocSearch", "DocGet"],
         _ => vec![
             "Read",
