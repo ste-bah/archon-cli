@@ -10,7 +10,14 @@ pub fn ensure_cognitive_schema(db: &DbInstance) -> Result<(), CognitiveError> {
     for script in SCHEMA_RELATIONS {
         run_idempotent(db, script)?;
     }
-    record_schema_version(db)
+    record_schema_version(db).or_else(|error| {
+        if is_schema_version_relation_error(&error) {
+            repair_schema_version_relation(db)?;
+            record_schema_version(db)
+        } else {
+            Err(error)
+        }
+    })
 }
 
 pub fn cognitive_schema_version(db: &DbInstance) -> Result<i64, CognitiveError> {
@@ -164,11 +171,13 @@ const SCHEMA_RELATIONS: &[&str] = &[
             duration_ms: Int,
             created_at: String,
         }"#,
-    r#":create cognitive_schema_version {
-            version: Int =>
-            created_at: String,
-        }"#,
+    SCHEMA_VERSION_RELATION,
 ];
+
+const SCHEMA_VERSION_RELATION: &str = r#":create cognitive_schema_version {
+        version: Int =>
+        created_at: String,
+    }"#;
 
 fn record_schema_version(db: &DbInstance) -> Result<(), CognitiveError> {
     let created_at = chrono::Utc::now().to_rfc3339();
@@ -178,6 +187,21 @@ fn record_schema_version(db: &DbInstance) -> Result<(), CognitiveError> {
         CURRENT_SCHEMA_VERSION, created_at
     );
     run_idempotent(db, script.as_str())
+}
+
+fn repair_schema_version_relation(db: &DbInstance) -> Result<(), CognitiveError> {
+    run_idempotent(db, "{::remove cognitive_schema_version}")?;
+    run_idempotent(db, SCHEMA_VERSION_RELATION)
+}
+
+fn is_schema_version_relation_error(error: &CognitiveError) -> bool {
+    matches!(
+        error,
+        CognitiveError::Schema(message)
+            if message.contains("cognitive_schema_version")
+                || message.contains("required column created_at not found")
+                || message.contains("when executing against relation")
+    )
 }
 
 fn run_idempotent(db: &DbInstance, script: &str) -> Result<(), CognitiveError> {

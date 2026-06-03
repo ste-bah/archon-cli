@@ -113,34 +113,67 @@ pub fn quality_gate_failure(
 
 pub fn output_reports_blocked(body: &str) -> Option<String> {
     let lower = body.to_ascii_lowercase();
-    let rejection = lower.contains("verdict: reject")
-        || lower.contains("verdict — reject")
-        || lower.contains("verdict - reject")
-        || lower.contains("reject — do not sign off")
-        || lower.contains("reject - do not sign off")
-        || lower.contains("do not sign off")
-        || lower.contains("sign-off is not warranted")
-        || lower.contains("\"verdict\":\"reject\"")
-        || lower.contains("\"status\":\"rejected\"");
-    let blocked = lower.contains("\"status\":\"blocked\"")
-        || lower.contains("status: blocked")
-        || lower.contains("blocked");
-    let no_evidence = lower.contains("findings: []")
-        || lower.contains("\"findings\":[]")
-        || lower.contains("cannot audit")
+    let rejection = reports_reject_verdict(&lower);
+    let blocked = reports_explicit_blocked_status(&lower);
+    let empty_findings = lower.contains("findings: []") || lower.contains("\"findings\":[]");
+    let audit_impossible = lower.contains("cannot audit")
         || lower.contains("could not audit")
         || lower.contains("can't audit")
-        || lower.contains("no source")
+        || lower.contains("unable to audit")
+        || lower.contains("missing required evidence")
+        || lower.contains("missing source evidence")
+        || lower.contains("source evidence is missing")
+        || lower.contains("source files are missing")
+        || lower.contains("source files or upstream artifacts are absent")
+        || lower.contains("no source evidence")
+        || lower.contains("no source files")
         || lower.contains("no file content")
-        || lower.contains("insufficient context")
-        || lower.contains("missing evidence");
+        || lower.contains("insufficient context");
     if rejection {
         return Some("agent output declares reject/do-not-sign-off verdict".to_string());
     }
-    blocked
-        .then_some(no_evidence)
-        .filter(|value| *value)
-        .map(|_| "agent output declares blocked or missing evidence".to_string())
+    if blocked || (empty_findings && audit_impossible) {
+        return Some("agent output declares blocked or missing evidence".to_string());
+    }
+    None
+}
+
+fn reports_reject_verdict(lower: &str) -> bool {
+    if lower.contains("\"verdict\":\"reject\"")
+        || lower.contains("\"verdict\": \"reject\"")
+        || lower.contains("\"status\":\"rejected\"")
+        || lower.contains("\"status\": \"rejected\"")
+    {
+        return true;
+    }
+    lower.lines().any(|line| {
+        let normalized = normalized_status_line(line);
+        normalized.starts_with("verdict:reject")
+            || normalized.starts_with("verdict-reject")
+            || normalized.starts_with("verdict—reject")
+            || normalized.starts_with("status:rejected")
+            || normalized.starts_with("status=rejected")
+    })
+}
+
+fn reports_explicit_blocked_status(lower: &str) -> bool {
+    if lower.contains("\"status\":\"blocked\"") || lower.contains("\"status\": \"blocked\"") {
+        return true;
+    }
+    lower.lines().any(|line| {
+        let normalized = normalized_status_line(line);
+        normalized.starts_with("status:blocked")
+            || normalized.starts_with("-status:blocked")
+            || normalized.starts_with("status=blocked")
+    })
+}
+
+fn normalized_status_line(line: &str) -> String {
+    line.trim()
+        .trim_start_matches('#')
+        .chars()
+        .filter(|ch| !matches!(ch, '*' | '_' | '`' | ' '))
+        .collect::<String>()
 }
 
 fn dependency_context(

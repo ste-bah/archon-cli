@@ -40,3 +40,21 @@ fn schema_is_idempotent_and_tracks_version() {
         CURRENT_SCHEMA_VERSION
     );
 }
+
+#[test]
+fn schema_repairs_legacy_version_relation_shape() {
+    let db = DbInstance::new("mem", "", "").expect("mem db");
+    db.run_script(
+        ":create cognitive_schema_version { version: Int }",
+        Default::default(),
+        ScriptMutability::Mutable,
+    )
+    .expect("legacy schema relation");
+
+    ensure_cognitive_schema(&db).expect("schema repair");
+
+    assert_eq!(
+        cognitive_schema_version(&db).expect("schema version"),
+        CURRENT_SCHEMA_VERSION
+    );
+}
