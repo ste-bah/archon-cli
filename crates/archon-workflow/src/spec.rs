@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::error::{WorkflowError, WorkflowResult};
 
@@ -145,7 +145,7 @@ pub struct WorkflowSpec {
     pub permissions: BTreeMap<String, bool>,
     #[serde(default)]
     pub quality_gates: BTreeMap<String, serde_json::Value>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_learning_hooks")]
     pub learning_hooks: Vec<String>,
 }
 
@@ -155,6 +155,39 @@ fn default_max_parallelism() -> u32 {
 
 fn default_max_agents() -> u32 {
     200
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum LearningHooksInput {
+    List(Vec<String>),
+    Map(BTreeMap<String, bool>),
+    Text(String),
+}
+
+fn deserialize_learning_hooks<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let Some(input) = Option::<LearningHooksInput>::deserialize(deserializer)? else {
+        return Ok(Vec::new());
+    };
+    let mut hooks = match input {
+        LearningHooksInput::List(values) => values,
+        LearningHooksInput::Map(values) => values
+            .into_iter()
+            .filter_map(|(key, enabled)| enabled.then_some(key))
+            .collect(),
+        LearningHooksInput::Text(value) => value
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .collect(),
+    };
+    hooks.sort();
+    hooks.dedup();
+    Ok(hooks)
 }
 
 impl WorkflowSpec {

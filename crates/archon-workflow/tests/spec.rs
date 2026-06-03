@@ -92,3 +92,13 @@ fn valid_repo_audit_spec_parses() {
         Some(ReducerKind::EvidenceWeightedReport)
     );
 }
+
+#[test]
+fn learning_hooks_accept_llm_map_shape() {
+    let yaml = format!(
+        "{}\nlearning_hooks:\n  sona: true\n  reasoning_bank: true\n  reflexion: false\n",
+        valid_yaml()
+    );
+    let spec = WorkflowSpec::from_yaml(&yaml).unwrap();
+    assert_eq!(spec.learning_hooks, vec!["reasoning_bank", "sona"]);
+}

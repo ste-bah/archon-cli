@@ -242,6 +242,46 @@ async fn blocked_fanout_output_fails_stage_instead_of_accepting() {
 }
 
 #[tokio::test]
+async fn reject_verdict_fails_quality_gate() {
+    struct RejectRunner;
+
+    #[async_trait::async_trait]
+    impl WorkflowStageRunner for RejectRunner {
+        async fn run_stage(
+            &self,
+            request: StageRunRequest,
+        ) -> archon_workflow::WorkflowResult<StageRunOutput> {
+            if request.stage_id == "discover" {
+                return Ok(StageRunOutput::markdown(
+                    r#"{"items":[{"path":"src/auth.rs","reason":"audit target"}]}"#,
+                ));
+            }
+            Ok(StageRunOutput::markdown(
+                "verdict: REJECT — DO NOT SIGN OFF\n\nBlocking findings remain.",
+            ))
+        }
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src")).unwrap();
+    std::fs::write(temp.path().join("src/auth.rs"), "fn check() {}").unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let executor = WorkflowExecutor::new(store.clone(), WorkflowPolicy::default());
+    let run = executor.start(audit_spec("Audit src/auth.rs")).unwrap();
+    let report = executor
+        .execute_with_runner(run.clone(), &RejectRunner)
+        .await
+        .unwrap();
+    assert_eq!(report.failed, 1);
+
+    let finished = store.load_state(&run.id).unwrap();
+    assert_eq!(
+        finished.stages.get("review").unwrap().status,
+        StageStatus::Failed
+    );
+}
+
+#[tokio::test]
 async fn provider_matrix_executes_code_and_research_workflows() {
     struct MatrixRunner {
         provider: &'static str,
@@ -318,6 +358,19 @@ fn force_accept_records_audited_lifecycle_event() {
     let events = std::fs::read_to_string(store.events_path(&run.id)).unwrap();
     assert!(events.contains("forced_accepted"));
     assert!(events.contains("known acceptable fixture"));
+}
+
+#[test]
+fn template_save_rejects_embedded_secret_text() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut spec = HeuristicWorkflowPlanner.plan("Research a topic").unwrap();
+    spec.stages[0].input = serde_json::json!({
+        "note": "Authorization: Bearer should-not-be-saved"
+    });
+    let err = TemplateRegistry::new(temp.path().join("templates"))
+        .save("unsafe", &spec)
+        .unwrap_err();
+    assert!(err.to_string().contains("credential-like"));
 }
 
 #[test]

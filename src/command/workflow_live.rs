@@ -11,9 +11,8 @@ use archon_tui::app::TuiEvent;
 use archon_tui::event_channel::TuiEventSender;
 use archon_tui::events::{AgentActivityRole, AgentActivityStatus, AgentActivityUpdate};
 use archon_workflow::{
-    CommandAction, HeuristicWorkflowPlanner, ProviderTier, StageKind, StageRunOutput,
-    StageRunRequest, WorkflowExecutor, WorkflowPlanner, WorkflowPolicy, WorkflowSpec,
-    WorkflowStageRunner, WorkflowStore,
+    CommandAction, ProviderTier, StageKind, StageRunOutput, StageRunRequest, WorkflowExecutor,
+    WorkflowPolicy, WorkflowSpec, WorkflowStageRunner, WorkflowStore,
 };
 
 use crate::command::pipeline_support::build_pipeline_adapter;
@@ -116,9 +115,9 @@ async fn plan_live(
         Ok(spec) => Ok(spec),
         Err(err) => {
             let _ = tui_tx.send(TuiEvent::TextDelta(format!(
-                "Workflow planner fell back to heuristic plan after validation failure: {err}\n"
+                "Workflow planner failed validation; live mode will not fall back to a deterministic smoke plan: {err}\n"
             )));
-            HeuristicWorkflowPlanner.plan(task).map_err(Into::into)
+            Err(err)
         }
     }
 }
@@ -199,11 +198,17 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
         &self,
         request: StageRunRequest,
     ) -> archon_workflow::WorkflowResult<StageRunOutput> {
-        let model = tier_model_alias(request.provider_tier).to_string();
-        let agent = workflow_agent(&request, &model);
+        let model_alias = tier_model_alias(request.provider_tier).to_string();
+        let resolved_model = self.llm.resolve_model_alias(&model_alias);
+        let provider_id = self
+            .llm
+            .provider_id()
+            .unwrap_or_else(|| "active-provider".to_string());
+        let agent = workflow_agent(&request, &model_alias);
         self.emit_activity(
             &request,
-            &model,
+            &provider_id,
+            &resolved_model,
             AgentActivityStatus::Running,
             "stage running",
         );
@@ -233,7 +238,8 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             Err(err) => {
                 self.emit_activity(
                     &request,
-                    &model,
+                    &provider_id,
+                    &resolved_model,
                     AgentActivityStatus::Failed,
                     "stage failed",
                 );
@@ -242,12 +248,14 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
         };
         self.emit_activity(
             &request,
-            &model,
+            &provider_id,
+            &resolved_model,
             AgentActivityStatus::Complete,
             "stage complete",
         );
         let mut output = StageRunOutput::markdown(response.content);
-        output.resolved_model = Some(format!("tier-alias:{model}"));
+        output.provider_id = Some(provider_id);
+        output.resolved_model = Some(resolved_model);
         output.tokens_in = response.tokens_in;
         output.tokens_out = response.tokens_out;
         Ok(output)
@@ -258,6 +266,7 @@ impl PipelineWorkflowRunner {
     fn emit_activity(
         &self,
         request: &StageRunRequest,
+        provider_id: &str,
         model: &str,
         status: AgentActivityStatus,
         detail: &str,
@@ -281,8 +290,8 @@ impl PipelineWorkflowRunner {
                 run_id: Some(request.run_id.clone()),
                 parent_id: None,
                 artifact_id: None,
-                provider: Some("active-provider".to_string()),
-                model: Some(format!("tier-alias:{model}")),
+                provider: Some(provider_id.to_string()),
+                model: Some(model.to_string()),
                 cost_usd: None,
             }));
     }
@@ -375,7 +384,42 @@ fn tier_model_alias(tier: ProviderTier) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_yaml;
+    use std::sync::Arc;
+
+    use anyhow::Result;
+    use archon_pipeline::runner::{LlmClient, LlmResponse};
+
+    use super::{extract_yaml, plan_live};
+
+    struct InvalidPlanner;
+
+    #[async_trait::async_trait]
+    impl LlmClient for InvalidPlanner {
+        async fn send_message(
+            &self,
+            _messages: Vec<serde_json::Value>,
+            _system: Vec<serde_json::Value>,
+            _tools: Vec<serde_json::Value>,
+            _model: &str,
+        ) -> Result<LlmResponse> {
+            Ok(LlmResponse {
+                content: r#"
+schema: archon.workflow.v1
+name: invalid-live-plan
+task: implement a real task
+learning_hooks: 7
+stages:
+  - id: discover
+    kind: agent
+    provider_tier: planner
+"#
+                .to_string(),
+                tool_uses: Vec::new(),
+                tokens_in: 0,
+                tokens_out: 0,
+            })
+        }
+    }
 
     #[test]
     fn extract_yaml_accepts_plain_or_fenced_output() {
@@ -387,5 +431,14 @@ mod tests {
             extract_yaml("schema: archon.workflow.v1\n"),
             "schema: archon.workflow.v1"
         );
+    }
+
+    #[tokio::test]
+    async fn live_planner_validation_failure_does_not_fallback_to_smoke_plan() {
+        let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
+        let err = plan_live("implement the whole PRD", Arc::new(InvalidPlanner), tui_tx)
+            .await
+            .expect_err("invalid live plans must fail instead of using heuristic fallback");
+        assert!(!err.to_string().is_empty());
     }
 }

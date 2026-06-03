@@ -54,6 +54,7 @@ pub struct WorkflowCommand {
 
 impl WorkflowCommand {
     pub fn parse(args: &[String]) -> WorkflowResult<Self> {
+        let args = without_live_flag(args);
         let Some(first) = args.first() else {
             return Ok(Self {
                 action: CommandAction::List,
@@ -107,30 +108,39 @@ impl WorkflowCommand {
 }
 
 fn parse_plan(args: &[String]) -> WorkflowResult<CommandAction> {
-    if flag(args, "--spec-file") {
+    let args = without_live_flag(args);
+    if flag(&args, "--spec-file") {
         return Ok(CommandAction::PlanSpec {
-            path: required(args, 1, "spec file")?,
+            path: required(&args, 1, "spec file")?,
         });
     }
     Ok(CommandAction::Plan {
-        task: join_task(args)?,
+        task: join_task(&args)?,
     })
 }
 
 fn parse_run(args: &[String]) -> WorkflowResult<CommandAction> {
-    if flag(args, "--spec-file") {
+    let args = without_live_flag(args);
+    if flag(&args, "--spec-file") {
         return Ok(CommandAction::RunSpec {
-            path: required(args, 1, "spec file")?,
+            path: required(&args, 1, "spec file")?,
         });
     }
-    if flag(args, "--from-template") {
+    if flag(&args, "--from-template") {
         return Ok(CommandAction::RunTemplate {
-            name: required(args, 1, "template name")?,
+            name: required(&args, 1, "template name")?,
         });
     }
     Ok(CommandAction::Run {
-        task: join_task(args)?,
+        task: join_task(&args)?,
     })
+}
+
+fn without_live_flag(args: &[String]) -> Vec<String> {
+    args.iter()
+        .filter(|arg| arg.as_str() != "--live")
+        .cloned()
+        .collect()
 }
 
 fn flag(args: &[String], expected: &str) -> bool {
@@ -190,6 +200,28 @@ mod tests {
             parse(&["run", "--from-template", "repo-audit"]),
             CommandAction::RunTemplate {
                 name: "repo-audit".into()
+            }
+        );
+    }
+
+    #[test]
+    fn strips_live_flag_from_tui_slash_arguments() {
+        assert_eq!(
+            parse(&["run", "--live", "Implement", "PRD-009"]),
+            CommandAction::Run {
+                task: "Implement PRD-009".into()
+            }
+        );
+        assert_eq!(
+            parse(&["run", "--live", "--spec-file", "workflow.yaml"]),
+            CommandAction::RunSpec {
+                path: "workflow.yaml".into()
+            }
+        );
+        assert_eq!(
+            parse(&["--live", "run", "Implement", "PRD-009"]),
+            CommandAction::Run {
+                task: "Implement PRD-009".into()
             }
         );
     }

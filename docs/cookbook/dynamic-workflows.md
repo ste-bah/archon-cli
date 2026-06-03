@@ -28,8 +28,9 @@ Inside the TUI:
 
 Planning prints the `WorkflowSpec` YAML and does not execute any stages. In the
 TUI, planning uses the active provider, validates the generated schema, and
-falls back to the heuristic planner if repair fails. Check for the important
-safety properties before running:
+attempts one schema repair. If the live plan still fails validation, Archon
+stops instead of falling back to the deterministic smoke planner. Check for the
+important safety properties before running:
 
 - no hard-coded provider/model fields
 - fan-out stages have a reducer

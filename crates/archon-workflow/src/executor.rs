@@ -1,18 +1,18 @@
 use chrono::Utc;
-use futures_util::future::join_all;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::context;
 use crate::error::{WorkflowError, WorkflowResult};
 use crate::events::{WorkflowEventKind, WorkflowEventLog};
-use crate::fanout::FanoutItem;
+use crate::fanout;
 use crate::learning::WorkflowLearningSink;
 use crate::policy::WorkflowPolicy;
 use crate::reducers::ReducerRegistry;
+use crate::request::{fanout_item_request, stage_request};
 use crate::run::{RunStatus, StageStatus, WorkflowRun};
-use crate::runner::{StageRunOutput, StageRunRequest, WorkflowStageRunner};
-use crate::spec::{ProviderTier, StageKind, StageSpec, WorkflowSpec};
+use crate::runner::{StageRunOutput, WorkflowStageRunner};
+use crate::spec::{StageKind, StageSpec, WorkflowSpec};
 use crate::stage::{ordered_stages, source_input_hash, stage_ready};
 use crate::store::WorkflowStore;
 
@@ -237,26 +237,82 @@ impl WorkflowExecutor {
         runner: &dyn WorkflowStageRunner,
     ) -> WorkflowResult<StageRunOutput> {
         let items = context::fanout_items(&self.store, run, stage)?;
-        let width = fanout_width(run, &self.policy);
-        let mut completed = 0usize;
-        for batch in items.chunks(width) {
-            let mut jobs = Vec::new();
-            for item in batch {
-                let request = fanout_item_request(&self.store, run, stage, item)?;
-                let item_id = item.id.clone();
-                jobs.push(async move { (item_id, runner.run_stage(request).await) });
-            }
-            for (item_id, result) in join_all(jobs).await {
-                let output = result?;
-                ensure_output_usable(&output.body)
-                    .map_err(|err| WorkflowError::StageFailed(format!("{item_id}: {err}")))?;
-                self.write_stage_artifact(run, stage, &output.extension, output.body)?;
-                completed += 1;
+        let width = fanout::width(run, &self.policy);
+        let max_agents = run.spec.max_agents.min(self.policy.max_agents_per_run) as usize;
+        if items.len() > max_agents {
+            return Err(WorkflowError::PolicyDenied(format!(
+                "fan-out item count {} exceeds max_agents {max_agents}",
+                items.len()
+            )));
+        }
+        let requests = items
+            .iter()
+            .filter(|item| !fanout::accepted_item_cached(run, &item.id))
+            .map(|item| {
+                Ok((
+                    item.id.clone(),
+                    fanout_item_request(&self.store, run, stage, item)?,
+                ))
+            })
+            .collect::<WorkflowResult<Vec<_>>>()?;
+        let mut completed = items.len().saturating_sub(requests.len());
+        let mut failed = 0usize;
+        let results = fanout::run_items_with_runner(
+            requests,
+            runner,
+            width,
+            max_agents,
+            stage.retry.max_attempts,
+        )
+        .await?;
+        for (item_id, result) in results {
+            match result {
+                Ok(output) => {
+                    ensure_output_usable(&output.body)
+                        .map_err(|err| WorkflowError::StageFailed(format!("{item_id}: {err}")))?;
+                    let artifact = self.write_stage_artifact_with_acceptance(
+                        run,
+                        stage,
+                        &output.extension,
+                        output.body,
+                        true,
+                    )?;
+                    fanout::record_item(
+                        run,
+                        stage,
+                        item_id,
+                        StageStatus::Accepted,
+                        Some(artifact),
+                        None,
+                    );
+                    completed += 1;
+                }
+                Err(err) => {
+                    let body = format!(
+                        "# Fan-out Item Failed\n\nitem: `{item_id}`\nstatus: failed\nerror: {err}\n"
+                    );
+                    let artifact =
+                        self.write_stage_artifact_with_acceptance(run, stage, "md", body, false)?;
+                    fanout::record_item(
+                        run,
+                        stage,
+                        item_id,
+                        StageStatus::Failed,
+                        Some(artifact),
+                        Some(err.to_string()),
+                    );
+                    failed += 1;
+                }
             }
         }
+        if completed == 0 && failed > 0 {
+            return Err(WorkflowError::StageFailed(format!(
+                "all {failed} fan-out item(s) failed"
+            )));
+        }
         Ok(StageRunOutput::markdown(format!(
-            "Fan-out stage `{}` completed {} item(s) with width {}.",
-            stage.id, completed, width
+            "Fan-out stage `{}` completed {} item(s), failed {} item(s), width {}.",
+            stage.id, completed, failed, width
         )))
     }
 
@@ -288,6 +344,18 @@ impl WorkflowExecutor {
         extension: &str,
         body: String,
     ) -> WorkflowResult<()> {
+        self.write_stage_artifact_with_acceptance(run, stage, extension, body, true)?;
+        Ok(())
+    }
+
+    fn write_stage_artifact_with_acceptance(
+        &self,
+        run: &mut WorkflowRun,
+        stage: &StageSpec,
+        extension: &str,
+        body: String,
+        accepted: bool,
+    ) -> WorkflowResult<crate::run::ArtifactRef> {
         let input_hash = source_input_hash(stage);
         let mut artifact = self.store.write_artifact(
             &run.id,
@@ -296,12 +364,12 @@ impl WorkflowExecutor {
             extension,
             body.as_bytes(),
         )?;
-        artifact.accepted = true;
+        artifact.accepted = accepted;
         let state = run
             .stage_mut(&stage.id)
             .ok_or_else(|| WorkflowError::SpecInvalid(format!("missing stage {}", stage.id)))?;
-        state.artifacts.push(artifact);
-        Ok(())
+        state.artifacts.push(artifact.clone());
+        Ok(artifact)
     }
 
     fn record_learning(&self, run: &WorkflowRun, seq: &mut u64) -> WorkflowResult<()> {
@@ -347,45 +415,6 @@ fn finish_run(run: &mut WorkflowRun) {
         };
     }
     run.mark_updated();
-}
-
-fn stage_request(
-    store: &WorkflowStore,
-    run: &WorkflowRun,
-    stage: &StageSpec,
-) -> WorkflowResult<StageRunRequest> {
-    let attempt = run
-        .stages
-        .get(&stage.id)
-        .map(|state| state.attempt)
-        .unwrap_or(1);
-    Ok(StageRunRequest {
-        run_id: run.id.clone(),
-        stage_id: stage.id.clone(),
-        stage_kind: stage.kind,
-        agent: stage.agent.clone(),
-        task: run.spec.task.clone(),
-        attempt,
-        provider_tier: stage.provider_tier.unwrap_or(ProviderTier::Planner),
-        depends_on: stage.depends_on.clone(),
-        input: context::stage_input(store, run, stage)?,
-    })
-}
-
-fn fanout_item_request(
-    store: &WorkflowStore,
-    run: &WorkflowRun,
-    stage: &StageSpec,
-    item: &FanoutItem,
-) -> WorkflowResult<StageRunRequest> {
-    let mut request = stage_request(store, run, stage)?;
-    request.stage_id = item.id.clone();
-    request.input = context::fanout_input(store, run, stage, item)?;
-    Ok(request)
-}
-
-fn fanout_width(run: &WorkflowRun, policy: &WorkflowPolicy) -> usize {
-    run.spec.max_parallelism.min(policy.max_parallelism).max(1) as usize
 }
 
 fn deterministic_stage_output(stage: &StageSpec) -> String {

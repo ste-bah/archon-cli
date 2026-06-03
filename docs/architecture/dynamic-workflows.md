@@ -123,10 +123,11 @@ TUI:
 
 When invoked from the TUI, `plan`, `run`, and `resume` use the active TUI LLM
 adapter. `plan` asks the active provider for `archon.workflow.v1` YAML, validates
-it locally, and attempts one schema repair before falling back to the heuristic
+it locally, and attempts one schema repair. If the live plan still fails
+validation, the command fails instead of falling back to the deterministic smoke
 planner. `run` and `resume` execute workflow stages through the same in-process
 adapter so Agent Activity shows the run id, stage/agent name, status, provider
-tier detail, and resolved model alias. Shell commands keep the deterministic
+tier detail, and resolved provider model. Shell commands keep the deterministic
 offline execution path for smoke tests and scripted inspection unless `--live`
 is passed. In live shell mode, Archon builds the configured provider-neutral
 pipeline adapter and runs stages as real LLM-backed agents. Saved templates are

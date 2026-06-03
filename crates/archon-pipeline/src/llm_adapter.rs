@@ -89,12 +89,13 @@ impl ProviderLlmAdapter {
     }
 
     fn model_for_provider(&self, requested: &str) -> String {
-        // Tier aliases (`"sonnet"`, `"opus"`, `"haiku"`) get resolved by the
-        // active provider via `LlmProvider::resolve_alias(..)`. Anthropic maps
-        // them to its `claude-*` namespace; Codex maps to `gpt-*`; local /
-        // OpenAI-compat returns `None` for pass-through.
-        if let Some(resolved) = self.provider.resolve_alias(requested) {
-            return resolved;
+        let mut request = LlmRequest {
+            model: requested.to_string(),
+            ..LlmRequest::default()
+        };
+        self.provider.resolve_request_model(&mut request);
+        if request.model != requested {
+            return request.model;
         }
 
         // Legacy compatibility: an explicit `claude-*` literal coming through
@@ -119,6 +120,14 @@ impl ProviderLlmAdapter {
 
 #[async_trait]
 impl LlmClient for ProviderLlmAdapter {
+    fn provider_id(&self) -> Option<String> {
+        Some(self.provider.name().to_string())
+    }
+
+    fn resolve_model_alias(&self, model: &str) -> String {
+        self.model_for_provider(model)
+    }
+
     async fn send_message(
         &self,
         messages: Vec<serde_json::Value>,
@@ -360,6 +369,33 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
         assert_eq!(model.as_deref(), Some("gpt-5.4"));
+    }
+
+    #[tokio::test]
+    async fn provider_adapter_resolves_tier_alias_to_provider_default() {
+        let provider = Arc::new(FakeProvider {
+            name: "deepseek",
+            model: "deepseek-chat",
+            context_window: 123_456,
+            seen_model: std::sync::Mutex::new(None),
+            seen_messages: std::sync::Mutex::new(Vec::new()),
+        });
+        let seen = Arc::clone(&provider);
+        let adapter = ProviderLlmAdapter::new(provider);
+
+        let _ = adapter
+            .send_message(Vec::new(), Vec::new(), Vec::new(), "sonnet")
+            .await
+            .expect("fake provider response");
+
+        assert_eq!(adapter.provider_id().as_deref(), Some("deepseek"));
+        assert_eq!(adapter.resolve_model_alias("sonnet"), "deepseek-chat");
+        let model = seen
+            .seen_model
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        assert_eq!(model.as_deref(), Some("deepseek-chat"));
     }
 
     #[tokio::test]

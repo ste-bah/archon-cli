@@ -328,6 +328,14 @@ pub struct AgentExecutionRequest {
 /// live in `archon-llm`; the pipeline crate depends only on this trait.
 #[async_trait]
 pub trait LlmClient: Send + Sync {
+    fn provider_id(&self) -> Option<String> {
+        None
+    }
+
+    fn resolve_model_alias(&self, model: &str) -> String {
+        model.to_string()
+    }
+
     async fn send_message(
         &self,
         messages: Vec<serde_json::Value>,

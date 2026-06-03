@@ -110,6 +110,15 @@ pub fn quality_gate_failure(
 
 pub fn output_reports_blocked(body: &str) -> Option<String> {
     let lower = body.to_ascii_lowercase();
+    let rejection = lower.contains("verdict: reject")
+        || lower.contains("verdict — reject")
+        || lower.contains("verdict - reject")
+        || lower.contains("reject — do not sign off")
+        || lower.contains("reject - do not sign off")
+        || lower.contains("do not sign off")
+        || lower.contains("sign-off is not warranted")
+        || lower.contains("\"verdict\":\"reject\"")
+        || lower.contains("\"status\":\"rejected\"");
     let blocked = lower.contains("\"status\":\"blocked\"")
         || lower.contains("status: blocked")
         || lower.contains("blocked");
@@ -122,6 +131,9 @@ pub fn output_reports_blocked(body: &str) -> Option<String> {
         || lower.contains("no file content")
         || lower.contains("insufficient context")
         || lower.contains("missing evidence");
+    if rejection {
+        return Some("agent output declares reject/do-not-sign-off verdict".to_string());
+    }
     blocked
         .then_some(no_evidence)
         .filter(|value| *value)
