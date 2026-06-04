@@ -80,21 +80,11 @@ impl WorldAdvisorUnavailable {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct WorldAdvisorConfig {
     pub thresholds: ColdStartThresholds,
     pub active_model_id: Option<String>,
     pub training_in_progress: bool,
-}
-
-impl Default for WorldAdvisorConfig {
-    fn default() -> Self {
-        Self {
-            thresholds: ColdStartThresholds::default(),
-            active_model_id: None,
-            training_in_progress: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

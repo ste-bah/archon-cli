@@ -215,6 +215,7 @@ pub enum RuntimeEvalMode {
 /// Legacy is NOT runtime-selectable — it is serde-deserialization only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum PersistedEvalMode {
     Quick,
     Full,
@@ -222,15 +223,10 @@ pub enum PersistedEvalMode {
     /// Deserialisation-only sentinel. Records with this mode are NON-PROMOTABLE.
     /// Never set at runtime — only appears on pre-schema legacy on-disk records.
     #[serde(other)]
+    #[default]
     Legacy,
 }
 
-impl Default for PersistedEvalMode {
-    fn default() -> Self {
-        // serde(default) — legacy records fail all promotion checks
-        Self::Legacy
-    }
-}
 
 impl From<RuntimeEvalMode> for PersistedEvalMode {
     fn from(m: RuntimeEvalMode) -> Self {

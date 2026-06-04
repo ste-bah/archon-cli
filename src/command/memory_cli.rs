@@ -57,7 +57,7 @@ async fn handle_reindex(all: bool) -> Result<()> {
 
     // Wire up an embedding provider — same code path as session bootstrap.
     let embed_cfg = archon_memory::embedding::EmbeddingConfig {
-        provider: config.memory.embedding_provider.clone(),
+        provider: config.memory.embedding_provider,
         hybrid_alpha: config.memory.hybrid_alpha,
     };
     let provider = archon_memory::embedding::create_provider(&embed_cfg)

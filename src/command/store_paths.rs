@@ -43,13 +43,7 @@ pub(crate) fn session_db_path(config: &ArchonConfig) -> PathBuf {
     std::env::var_os(SESSION_DB_ENV)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .or_else(|| {
-            config
-                .session
-                .db_path
-                .as_ref()
-                .map(|path| PathBuf::from(path))
-        })
+        .or_else(|| config.session.db_path.as_ref().map(PathBuf::from))
         .unwrap_or_else(archon_session::storage::default_db_path)
 }
 

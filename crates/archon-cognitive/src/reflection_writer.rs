@@ -128,10 +128,10 @@ impl<'a, S: LessonSink> ReflectionWriter<'a, S> {
         if let Err(error) = append_ledger(&self.ledger_dir, &reflection) {
             degraded.push(format!("reflection_ledger_write_failed:{error}"));
         }
-        if reflection.should_propose {
-            if let Err(error) = self.lesson_sink.promote_lesson(&reflection) {
-                degraded.push(format!("lesson_promotion_failed:{error}"));
-            }
+        if reflection.should_propose
+            && let Err(error) = self.lesson_sink.promote_lesson(&reflection)
+        {
+            degraded.push(format!("lesson_promotion_failed:{error}"));
         }
         Ok(ReflectionWriteOutcome {
             reflection: Some(reflection),

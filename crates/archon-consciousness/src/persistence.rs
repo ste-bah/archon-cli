@@ -173,7 +173,7 @@ pub fn prune_snapshots(graph: &dyn MemoryTrait, limit: u32) -> Result<usize, Per
     }
 
     // Sort by created_at ascending (oldest first).
-    memories.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+    memories.sort_by_key(|a| a.created_at);
 
     let to_delete = count - limit;
     let mut deleted = 0;

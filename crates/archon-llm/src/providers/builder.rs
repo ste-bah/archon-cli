@@ -68,35 +68,6 @@ pub fn build_llm_provider(
     build_llm_provider_with_policy(cfg, http, policy)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn codex_builder_outer_retry_is_single_attempt() {
-        let policy = RetryPolicy {
-            max_attempts: 5,
-            ..RetryPolicy::default()
-        };
-
-        let effective = effective_retry_policy("openai-codex", policy);
-
-        assert_eq!(effective.max_attempts, 1);
-    }
-
-    #[test]
-    fn non_codex_builder_keeps_wrapper_retry_policy() {
-        let policy = RetryPolicy {
-            max_attempts: 4,
-            ..RetryPolicy::default()
-        };
-
-        let effective = effective_retry_policy("openai", policy);
-
-        assert_eq!(effective.max_attempts, 4);
-    }
-}
-
 /// Variant of `build_llm_provider` that accepts an explicit `RetryPolicy`,
 /// for call sites that want to override the default (tests, retries
 /// disabled, custom backoff). The returned provider is still wrapped in
@@ -295,5 +266,34 @@ fn dispatch_native(
                 "unknown native provider id `{other}` — native_registry and dispatch_native are out of sync"
             ),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codex_builder_outer_retry_is_single_attempt() {
+        let policy = RetryPolicy {
+            max_attempts: 5,
+            ..RetryPolicy::default()
+        };
+
+        let effective = effective_retry_policy("openai-codex", policy);
+
+        assert_eq!(effective.max_attempts, 1);
+    }
+
+    #[test]
+    fn non_codex_builder_keeps_wrapper_retry_policy() {
+        let policy = RetryPolicy {
+            max_attempts: 4,
+            ..RetryPolicy::default()
+        };
+
+        let effective = effective_retry_policy("openai", policy);
+
+        assert_eq!(effective.max_attempts, 4);
     }
 }

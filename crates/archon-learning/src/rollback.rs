@@ -122,7 +122,7 @@ pub fn rollback_to_version_with_auto_apply(
 
     let version_id = format!(
         "bmv-{}",
-        uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+        &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
     );
     let version_number = current_head
         .as_ref()
@@ -211,7 +211,7 @@ fn create_rollback_proposal(
     let proposal = BehaviourProposal {
         proposal_id: format!(
             "bp-{}",
-            uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+            &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
         ),
         workspace_id: workspace_id.to_string(),
         manifest_kind: manifest_kind.clone(),

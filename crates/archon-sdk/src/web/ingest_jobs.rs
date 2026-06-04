@@ -70,7 +70,7 @@ pub(crate) async fn start_job(
             stored.finished_at_ms = Some(now_ms());
             live.record(
                 "web.ingest.finished",
-                &format!("{}: {status}", stored.command),
+                format!("{}: {status}", stored.command),
             );
         }
     });
@@ -124,10 +124,11 @@ async fn run_archon_command(cwd: &Path, args: &[String]) -> std::io::Result<std:
 }
 
 fn push_opt(args: &mut Vec<String>, flag: &str, value: Option<&str>) {
-    if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-        if value != "disabled" && value != "none" {
-            args.extend([flag.into(), value.into()]);
-        }
+    if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty())
+        && value != "disabled"
+        && value != "none"
+    {
+        args.extend([flag.into(), value.into()]);
     }
 }
 

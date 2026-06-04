@@ -9,17 +9,13 @@ use crate::model::CpuLatentTransitionModel;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum BackendKind {
+    #[default]
     Auto,
     Cpu,
     Metal,
     Cuda,
-}
-
-impl Default for BackendKind {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 impl fmt::Display for BackendKind {

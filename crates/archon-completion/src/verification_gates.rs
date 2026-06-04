@@ -127,7 +127,7 @@ impl VerificationGate for EvidenceBackedGate {
                     .iter()
                     .all(|evidence| evidence.status == EvidenceStatus::Missing)
             {
-                missing.push(required_kind.clone());
+                missing.push(*required_kind);
                 continue;
             }
 
@@ -135,7 +135,7 @@ impl VerificationGate for EvidenceBackedGate {
                 .iter()
                 .any(|evidence| evidence.status == EvidenceStatus::Failed)
             {
-                failed.push(required_kind.clone());
+                failed.push(*required_kind);
                 continue;
             }
 
@@ -143,7 +143,7 @@ impl VerificationGate for EvidenceBackedGate {
                 .iter()
                 .any(|evidence| evidence.status == EvidenceStatus::Passed)
             {
-                non_passed.push(required_kind.clone());
+                non_passed.push(*required_kind);
             }
         }
 

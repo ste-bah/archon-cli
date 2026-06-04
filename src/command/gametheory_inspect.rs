@@ -172,15 +172,15 @@ pub(crate) fn render_inspect_artifact(db: &DbInstance, artifact_id: &str) -> Res
     if let Some(run_id) = artifact_id.strip_prefix("final-report:") {
         return render_final_report(db, run_id);
     }
-    if let Some(rest) = artifact_id.strip_prefix("specialist:") {
-        if let Some((run_id, agent_key)) = rest.split_once(':') {
-            return render_specialist(db, run_id, agent_key);
-        }
+    if let Some(rest) = artifact_id.strip_prefix("specialist:")
+        && let Some((run_id, agent_key)) = rest.split_once(':')
+    {
+        return render_specialist(db, run_id, agent_key);
     }
-    if let Some(rest) = artifact_id.strip_prefix("section:") {
-        if let Some((run_id, section_id)) = rest.split_once(':') {
-            return render_section(db, run_id, section_id);
-        }
+    if let Some(rest) = artifact_id.strip_prefix("section:")
+        && let Some((run_id, section_id)) = rest.split_once(':')
+    {
+        return render_section(db, run_id, section_id);
     }
     if load_run_row(db, artifact_id)?.is_some() {
         return render_show(db, artifact_id);
@@ -204,7 +204,7 @@ pub(crate) fn render_list_agents(tier: Option<u8>) -> Result<String> {
 
     let mut agents: Vec<_> = gametheory::registry::GAMETHEORY_AGENTS
         .iter()
-        .filter(|agent| tier.map_or(true, |wanted| agent.tier == wanted))
+        .filter(|agent| tier.is_none_or(|wanted| agent.tier == wanted))
         .collect();
     agents.sort_by_key(|agent| (agent.tier, agent.key));
 

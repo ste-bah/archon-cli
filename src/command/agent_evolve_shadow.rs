@@ -136,14 +136,14 @@ fn average_score(rows: &[&AgentPerformanceLedgerRecord]) -> f64 {
 }
 
 fn row_score(row: &AgentPerformanceLedgerRecord) -> f64 {
-    let base = row
-        .quality_score
-        .or(row.completion_rate)
-        .unwrap_or_else(|| match row.completion_status.as_str() {
-            "succeeded" | "success" => 1.0,
-            "failed" | "failure" | "cancelled" | "canceled" | "timed_out" | "timeout" => 0.0,
-            _ => 0.5,
-        });
+    let base =
+        row.quality_score
+            .or(row.completion_rate)
+            .unwrap_or(match row.completion_status.as_str() {
+                "succeeded" | "success" => 1.0,
+                "failed" | "failure" | "cancelled" | "canceled" | "timed_out" | "timeout" => 0.0,
+                _ => 0.5,
+            });
     let penalty = if row.gate_failed.is_some() || row.test_failed {
         0.15
     } else if row.provider_incident_id.is_some() {

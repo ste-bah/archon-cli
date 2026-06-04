@@ -42,16 +42,16 @@ pub(crate) fn record_runtime_outcome(
     let mut evidence_refs = bundle_id
         .map(|id| vec![format!("bundle:{id}")])
         .unwrap_or_default();
-    if let Some(prediction) = &record.prediction {
-        if let Ok((updated, _)) = super::predict::record_outcome_for_prediction(
+    if let Some(prediction) = &record.prediction
+        && let Ok((updated, _)) = super::predict::record_outcome_for_prediction(
             config,
             &root,
             &prediction.prediction_id,
             actual_summary,
-        ) {
-            latent_surprise = updated.latent_surprise;
-            evidence_refs.extend(updated.evidence_refs);
-        }
+        )
+    {
+        latent_surprise = updated.latent_surprise;
+        evidence_refs.extend(updated.evidence_refs);
     }
     let outcome_id = format!(
         "{}:{}",
@@ -111,16 +111,16 @@ pub(crate) fn record_runtime_guardrail_outcome(
     if let Some(bundle_id) = bundle_id {
         evidence_refs.push(format!("bundle:{bundle_id}"));
     }
-    if let Some(prediction) = &record.prediction {
-        if let Ok((updated, _)) = super::predict::record_outcome_for_prediction(
+    if let Some(prediction) = &record.prediction
+        && let Ok((updated, _)) = super::predict::record_outcome_for_prediction(
             config,
             &root,
             &prediction.prediction_id,
             &outcome.actual_summary,
-        ) {
-            latent_surprise = updated.latent_surprise;
-            evidence_refs.extend(updated.evidence_refs);
-        }
+        )
+    {
+        latent_surprise = updated.latent_surprise;
+        evidence_refs.extend(updated.evidence_refs);
     }
     evidence_refs.sort();
     evidence_refs.dedup();

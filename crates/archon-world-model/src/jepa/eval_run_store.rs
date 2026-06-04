@@ -137,13 +137,12 @@ impl JepaEvalRunStore {
                 if stem.ends_with(".tmp") {
                     continue;
                 }
-                if let Ok(json) = std::fs::read_to_string(&path) {
-                    if let Ok(r) =
+                if let Ok(json) = std::fs::read_to_string(&path)
+                    && let Ok(r) =
                         serde_json::from_str::<crate::jepa::JepaEvalRunRecord>(&json)
                     {
                         records.push(r);
                     }
-                }
             }
         }
         records.sort_by_key(|r| std::cmp::Reverse(r.started_at));

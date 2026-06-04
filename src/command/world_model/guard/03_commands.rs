@@ -261,7 +261,7 @@ pub(crate) fn render_guard_replay_outcomes(
     let outcomes = archon_world_model::guardrail::load_guardrail_outcomes(root)?;
     let count = outcomes
         .iter()
-        .filter(|outcome| session.map_or(true, |session| outcome.action_id.contains(session)))
+        .filter(|outcome| session.is_none_or(|session| outcome.action_id.contains(session)))
         .count();
     Ok(format!(
         "World Model Guardrail Replay\n\

@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
     gametheory_tool_executor::install(config.clone(), env_vars.clone());
 
     // TODO(TUI-330): app::TuiEvent moves to archon_tui::events::TuiEvent
-    let voice_event_rx = crate::command::tui_helpers::setup_voice_pipeline(&config).await;
+    let voice_event_rx = crate::command::tui_helpers::setup_voice_pipeline(config).await;
 
     if main_modes::handle_subcommand_if_present(
         &mut cli,

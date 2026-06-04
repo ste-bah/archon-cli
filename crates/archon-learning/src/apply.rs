@@ -60,7 +60,7 @@ fn apply_pending_approval(
     let approval = BehaviourApproval {
         approval_id: format!(
             "ba-{}",
-            uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+            &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
         ),
         proposal_id: proposal.proposal_id.clone(),
         approver: approver.unwrap_or("system").to_string(),
@@ -364,7 +364,7 @@ fn create_manifest_version(
 ) -> Result<BehaviourManifestVersion, LearningError> {
     let version_id = format!(
         "bmv-{}",
-        uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+        &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
     );
     let version_number = next_version_number(db, proposal.manifest_kind.as_str())?;
     let created_at = chrono::Utc::now().to_rfc3339();

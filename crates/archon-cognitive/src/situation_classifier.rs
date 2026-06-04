@@ -130,7 +130,7 @@ fn is_greeting(text: &str, tokens: usize) -> bool {
     if tokens > 5 || looks_substantive(text) {
         return false;
     }
-    GREETINGS.iter().any(|candidate| text == *candidate)
+    GREETINGS.contains(&text)
 }
 
 fn looks_substantive(text: &str) -> bool {

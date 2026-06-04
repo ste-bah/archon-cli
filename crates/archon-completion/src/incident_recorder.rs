@@ -22,11 +22,11 @@ pub fn record_false_completion(
     let now = chrono::Utc::now().to_rfc3339();
     let incident_id = format!(
         "inc-{}",
-        uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+        &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
     );
     let learning_event_id = format!(
         "le-{}",
-        uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+        &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
     );
 
     // Compute severity based on claim kind and evidence gap

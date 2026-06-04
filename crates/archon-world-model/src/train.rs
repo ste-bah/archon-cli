@@ -42,17 +42,13 @@ impl Default for TrainingConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum TrainingStatus {
+    #[default]
     NotStarted,
     CandidateWritten,
     Rejected,
     Promoted,
-}
-
-impl Default for TrainingStatus {
-    fn default() -> Self {
-        Self::NotStarted
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

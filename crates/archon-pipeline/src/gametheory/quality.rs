@@ -130,7 +130,7 @@ mod tests {
     fn test_citation_detection() {
         assert!(check_citation_count("gt-test", "see [^1] for details").passed);
         assert!(check_citation_count("gt-test", "doi: 10.1234/foo").passed);
-        assert!(check_citation_count("gt-test", "no citations here").passed == false);
+        assert!(!check_citation_count("gt-test", "no citations here").passed);
     }
 
     #[test]

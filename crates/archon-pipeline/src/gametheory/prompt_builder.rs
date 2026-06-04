@@ -97,14 +97,15 @@ pub fn build_specialist_prompt_with_template(
     }
 
     // Part 5: Task
-    parts.push(format!(
+    parts.push(
         "## Task\n\nAnalyze the situation above through your specialist lens. \
          Produce a structured analysis with:\n\
          1. Key findings\n\
          2. Evidence and reasoning\n\
          3. Confidence assessment\n\
          4. Recommendations (if applicable)"
-    ));
+            .to_string(),
+    );
 
     parts.join("\n\n")
 }

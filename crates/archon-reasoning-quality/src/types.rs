@@ -197,6 +197,7 @@ impl Default for ReasoningQualityEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct ReasoningTurnInput {
     pub session_id: String,
     pub turn_number: u64,
@@ -205,18 +206,4 @@ pub struct ReasoningTurnInput {
     pub cwd: Option<String>,
     pub workspace_root: Option<String>,
     pub store_raw_text: bool,
-}
-
-impl Default for ReasoningTurnInput {
-    fn default() -> Self {
-        Self {
-            session_id: String::new(),
-            turn_number: 0,
-            assistant_text: String::new(),
-            evidence_refs: Vec::new(),
-            cwd: None,
-            workspace_root: None,
-            store_raw_text: false,
-        }
-    }
 }

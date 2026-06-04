@@ -15,7 +15,7 @@ pub fn assemble_report(
 ) -> Result<CompletionReport, EvidenceEngineError> {
     let report_id = format!(
         "rep-{}",
-        uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+        &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
     );
 
     // Collect failed gates
@@ -116,7 +116,7 @@ fn build_calibrated_summary(
                 text = claim.claim_text,
             ));
         }
-        summary.push_str("\n");
+        summary.push('\n');
     }
 
     // Evidence section
@@ -136,7 +136,7 @@ fn build_calibrated_summary(
             }
             summary.push('\n');
         }
-        summary.push_str("\n");
+        summary.push('\n');
     }
 
     // Gate results section
@@ -151,7 +151,7 @@ fn build_calibrated_summary(
                 gate.gate_name, gate.explanation,
             ));
         }
-        summary.push_str("\n");
+        summary.push('\n');
     }
 
     // Downgrade unsupported claims in the calibrated rewrite
@@ -185,13 +185,13 @@ fn build_calibrated_summary(
         }
     }
 
-    if let Some(hint) = original_hint {
-        if *final_state != CompletionState::Verified {
-            summary.push_str(&format!(
-                "\nOriginal answer claimed completion, but evidence does not fully support it. "
-            ));
-            summary.push_str(&format!("Original text: \"{}\"\n", hint));
-        }
+    if let Some(hint) = original_hint
+        && *final_state != CompletionState::Verified
+    {
+        summary.push_str(
+            "\nOriginal answer claimed completion, but evidence does not fully support it. ",
+        );
+        summary.push_str(&format!("Original text: \"{}\"\n", hint));
     }
 
     summary

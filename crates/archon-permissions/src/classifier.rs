@@ -135,11 +135,11 @@ pub fn classify_command(
 
     // Check quoted arguments in bash/sh -c forms, including common flag groups
     // like `bash -lc "..."`.
-    if let Some(inner) = extract_shell_c_command(trimmed) {
-        if !inner.is_empty() {
-            let inner_class = classify_command(inner, user_safe, user_risky, user_dangerous);
-            return worse(CommandClass::Risky, inner_class);
-        }
+    if let Some(inner) = extract_shell_c_command(trimmed)
+        && !inner.is_empty()
+    {
+        let inner_class = classify_command(inner, user_safe, user_risky, user_dangerous);
+        return worse(CommandClass::Risky, inner_class);
     }
 
     classify_single_command(trimmed, user_safe, user_risky, user_dangerous)

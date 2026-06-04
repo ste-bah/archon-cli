@@ -106,10 +106,10 @@ pub fn cold_start_stats(db: &DbInstance) -> Result<ColdStartStats> {
         if let Some(session_id) = row[0].get_str() {
             sessions.insert(session_id.to_string());
         }
-        if let Some(created_at) = row[1].get_str() {
-            if let Ok(date_time) = DateTime::parse_from_rfc3339(created_at) {
-                observed_days.insert(date_time.with_timezone(&Utc).date_naive());
-            }
+        if let Some(created_at) = row[1].get_str()
+            && let Ok(date_time) = DateTime::parse_from_rfc3339(created_at)
+        {
+            observed_days.insert(date_time.with_timezone(&Utc).date_naive());
         }
     }
 

@@ -36,7 +36,9 @@ pub struct EmbeddingRef {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum WorldTraceSource {
+    #[default]
     ActivityEvent,
     PipelineBundle,
     ProviderRuntime,
@@ -50,14 +52,9 @@ pub enum WorldTraceSource {
     ReasoningQuality,
 }
 
-impl Default for WorldTraceSource {
-    fn default() -> Self {
-        Self::ActivityEvent
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum WorldActionKind {
     AgentAttempt,
     ProviderCall,
@@ -67,17 +64,13 @@ pub enum WorldActionKind {
     Verification,
     Retry,
     Resume,
+    #[default]
     Unknown,
-}
-
-impl Default for WorldActionKind {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct WorldLabelSet {
     pub success: Option<bool>,
     pub failure: bool,
@@ -90,24 +83,9 @@ pub struct WorldLabelSet {
     pub slow_run: bool,
 }
 
-impl Default for WorldLabelSet {
-    fn default() -> Self {
-        Self {
-            success: None,
-            failure: false,
-            retry: false,
-            provider_incident: false,
-            verification_needed: false,
-            user_correction: false,
-            plan_drift: false,
-            high_cost: false,
-            slow_run: false,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct ScalarFeatures {
     pub cost_usd: Option<f64>,
     pub duration_ms: Option<u64>,
@@ -116,20 +94,6 @@ pub struct ScalarFeatures {
     pub tokens_out: Option<u64>,
     pub quality_overall: Option<f64>,
     pub provider_cooldown_ms: Option<u64>,
-}
-
-impl Default for ScalarFeatures {
-    fn default() -> Self {
-        Self {
-            cost_usd: None,
-            duration_ms: None,
-            attempt_index: None,
-            tokens_in: None,
-            tokens_out: None,
-            quality_overall: None,
-            provider_cooldown_ms: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

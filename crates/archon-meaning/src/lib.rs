@@ -94,15 +94,15 @@ fn persist_build(
     for sample in samples {
         insert_sample(db, sample)?;
     }
-    let pairs = contrastive::build_pairs(&samples, &now);
+    let pairs = contrastive::build_pairs(samples, now);
     for pair in &pairs {
         insert_pair(db, pair)?;
     }
-    let triplets = triplets::build_triplets(&pairs, &now);
+    let triplets = triplets::build_triplets(&pairs, now);
     for triplet in &triplets {
         insert_triplet(db, triplet)?;
     }
-    let dataset = eval_dataset_builder::build_dataset(&samples, &triplets, &now);
+    let dataset = eval_dataset_builder::build_dataset(samples, &triplets, now);
     insert_dataset(db, &dataset)?;
     Ok(BuildReport {
         events_seen,

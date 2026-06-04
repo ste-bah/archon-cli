@@ -265,7 +265,7 @@ fn record_rule(
 ) -> Result<PolicyOutcome, crate::errors::LearningError> {
     let decision_id = format!(
         "bpd-{}",
-        uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+        &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
     );
     let created_at = chrono::Utc::now().to_rfc3339();
 

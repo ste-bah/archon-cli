@@ -62,10 +62,10 @@ impl LlmProvider for CodexNamedMockProvider {
             .push(request);
 
         let turn = self.call_count.fetch_add(1, Ordering::SeqCst) + 1;
-        if turn == 1 {
-            if let Some(barrier) = &self.first_turn_barrier {
-                barrier.wait().await;
-            }
+        if turn == 1
+            && let Some(barrier) = &self.first_turn_barrier
+        {
+            barrier.wait().await;
         }
 
         let events = if turn == 1 {

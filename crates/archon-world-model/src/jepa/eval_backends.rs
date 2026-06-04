@@ -57,7 +57,7 @@ impl JepaEvalRuntime for CpuEvalRuntime {
     /// The semantic predictor lives in the trained JEPA model; eval-time
     /// prediction here is the parity-reference path only.
     fn predict_batch(&self, batch: &[Vec<f32>]) -> Result<Vec<Vec<f32>>> {
-        Ok(batch.iter().cloned().collect())
+        Ok(batch.to_vec())
     }
 
     /// CPU self-parity: trivially perfect since reference and test are both

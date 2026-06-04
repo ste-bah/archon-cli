@@ -1464,7 +1464,7 @@ mod tests {
         crate::schema::ensure_vec_schema(&db, 4).unwrap();
 
         // Embedding with L2 norm = 5.0 (3-4-5 triangle in 2D plus zeros)
-        let emb = vec![3.0_f32, 4.0_f32, 0.0, 0.0];
+        let emb = [3.0_f32, 4.0_f32, 0.0, 0.0];
         // Normalise before storing (caller responsibility)
         let norm = (emb.iter().map(|x| x * x).sum::<f32>()).sqrt();
         let normalized: Vec<f32> = emb.iter().map(|x| x / norm).collect();

@@ -99,10 +99,10 @@ fn decision_for_action(
     }
     if requires_confirmation
         && !request.dry_run
-        && !request
+        && request
             .confirmation_token
             .as_deref()
-            .is_some_and(|token| !token.trim().is_empty())
+            .is_none_or(|token| token.trim().is_empty())
     {
         return denied(
             requires_confirmation,

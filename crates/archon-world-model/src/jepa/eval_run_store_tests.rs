@@ -106,7 +106,7 @@ mod tests_eval_run_store {
         record.pid = 999_999;
         // Set updated_at far in the past so heartbeat_age > stale_heartbeat_ms=0.
         record.updated_at =
-            chrono::DateTime::from_timestamp(0, 0).unwrap_or_else(|| Utc::now());
+            chrono::DateTime::from_timestamp(0, 0).unwrap_or_else(Utc::now);
         store.write_run(&record).unwrap();
 
         // budget_ms=0 (unlimited) + stale_heartbeat_ms=0 (immediate expiry).

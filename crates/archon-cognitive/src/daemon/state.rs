@@ -38,6 +38,12 @@ pub struct DaemonPaths {
     pub stop_path: PathBuf,
 }
 
+impl Default for DaemonState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DaemonState {
     pub fn new() -> Self {
         let now = Utc::now();

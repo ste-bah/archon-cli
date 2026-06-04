@@ -149,10 +149,10 @@ fn strategy_metadata(
         "direct_fallback_used": direct_fallback_used,
         "app_server_discovery_timeout_ms": config.app_server_discovery_timeout_ms,
     });
-    if let Some(object) = metadata.as_object_mut() {
-        if let Some(discovery_metadata) = discovery.metadata(config).as_object() {
-            object.extend(discovery_metadata.clone());
-        }
+    if let Some(object) = metadata.as_object_mut()
+        && let Some(discovery_metadata) = discovery.metadata(config).as_object()
+    {
+        object.extend(discovery_metadata.clone());
     }
     metadata
 }

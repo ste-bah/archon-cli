@@ -307,10 +307,10 @@ impl DaemonJob for WorldModelShadowRetryJob {
 }
 
 fn expand_path(cwd: &Path, raw: &str) -> PathBuf {
-    if let Some(stripped) = raw.strip_prefix("~/") {
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(stripped);
-        }
+    if let Some(stripped) = raw.strip_prefix("~/")
+        && let Some(home) = std::env::var_os("HOME")
+    {
+        return PathBuf::from(home).join(stripped);
     }
     let path = PathBuf::from(raw);
     if path.is_absolute() {

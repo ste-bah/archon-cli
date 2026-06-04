@@ -285,7 +285,7 @@ fn interesting_event(event: &archon_observability::AgentActivityEvent) -> bool {
 fn parse_candidate_envelope(text: &str) -> anyhow::Result<LlmCandidateEnvelope> {
     let trimmed = strip_json_fence(text.trim());
     serde_json::from_str(trimmed)
-        .or_else(|_| extract_json_object(trimmed).and_then(|body| serde_json::from_str(body)))
+        .or_else(|_| extract_json_object(trimmed).and_then(serde_json::from_str))
         .map_err(|error| anyhow::anyhow!("parse llm retrospective JSON: {error}"))
 }
 

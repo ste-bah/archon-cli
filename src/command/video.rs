@@ -120,10 +120,10 @@ fn configure_video_vlm_if_needed(
 }
 
 fn print_vlm_init_warning_if_needed(report: &Option<vlm_factory::VlmProviderInitReport>) {
-    if let Some(report) = report {
-        if matches!(report.status, VlmProviderInitStatus::Skipped) {
-            println!("Warning: video frame VLM unavailable: {}", report.message);
-        }
+    if let Some(report) = report
+        && matches!(report.status, VlmProviderInitStatus::Skipped)
+    {
+        println!("Warning: video frame VLM unavailable: {}", report.message);
     }
 }
 

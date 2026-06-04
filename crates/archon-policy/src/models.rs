@@ -104,7 +104,7 @@ impl Default for LearningPolicy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct WorldModelPolicy {
     pub allow_third_party_embeddings: bool,
     pub allow_llm_labeler: bool,
@@ -126,19 +126,6 @@ pub struct WorldModelPolicy {
     /// Fail-closed default: false. T023 wires the gate before spawn_background_worker.
     #[serde(default)]
     pub allow_eval_background_jobs: bool,
-}
-
-impl Default for WorldModelPolicy {
-    fn default() -> Self {
-        Self {
-            allow_third_party_embeddings: false,
-            allow_llm_labeler: false,
-            allow_behavior_changes: false,
-            allow_embedding_cache: false,              // fail-closed
-            allow_world_model_raw_text_storage: false, // fail-closed
-            allow_eval_background_jobs: false,         // fail-closed
-        }
-    }
 }
 
 #[cfg(test)]
@@ -188,25 +175,13 @@ allow_behavior_changes = false
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct WebPolicy {
     pub allow_mutating_actions: bool,
     pub allow_file_uploads: bool,
     pub allow_pipeline_controls: bool,
     pub allow_model_training_actions: bool,
     pub allow_corpus_open_paths: bool,
-}
-
-impl Default for WebPolicy {
-    fn default() -> Self {
-        Self {
-            allow_mutating_actions: false,
-            allow_file_uploads: false,
-            allow_pipeline_controls: false,
-            allow_model_training_actions: false,
-            allow_corpus_open_paths: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

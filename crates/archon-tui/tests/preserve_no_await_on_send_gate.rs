@@ -324,7 +324,7 @@ fn scan_file(path: &Path) -> Vec<Offender> {
 
     // De-duplicate by line (a defensive measure — the forward scan
     // shouldn't produce duplicates, but cheap to be safe).
-    offenders.sort_by(|a, b| a.line.cmp(&b.line));
+    offenders.sort_by_key(|a| a.line);
     offenders.dedup_by(|a, b| a.line == b.line);
     offenders
 }

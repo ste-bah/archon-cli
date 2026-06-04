@@ -250,10 +250,10 @@ fn render_row<'a>(row: &AgentActivityRow, theme: &Theme, width: usize) -> Line<'
         AgentActivityStatus::Cancelled => ("cancel", Color::DarkGray),
     };
     let mut detail = row.detail.clone().unwrap_or_default();
-    if let Some(tool) = &row.current_tool {
-        if !detail.starts_with(tool) {
-            detail = format!("{detail} tool={tool}");
-        }
+    if let Some(tool) = &row.current_tool
+        && !detail.starts_with(tool)
+    {
+        detail = format!("{detail} tool={tool}");
     }
     if let Some(run_id) = &row.run_id {
         detail = format!("{detail} run={run_id}");

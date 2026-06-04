@@ -115,7 +115,7 @@ pub fn extract_claims(text: &str, run_id: &str) -> Vec<CompletionClaim> {
 
                 let claim_id = format!(
                     "cl-{}",
-                    uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+                    &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
                 );
 
                 claims.push(CompletionClaim {
@@ -125,7 +125,7 @@ pub fn extract_claims(text: &str, run_id: &str) -> Vec<CompletionClaim> {
                     model: None,
                     task_type: "pipeline-output".into(),
                     claim_text: m.as_str().to_string(),
-                    claim_kind: pattern.kind.clone(),
+                    claim_kind: pattern.kind,
                     required_evidence: pattern.required_evidence.clone(),
                     linked_evidence_ids: vec![],
                     verified: false,
@@ -169,7 +169,7 @@ mod tests {
             Documentation is complete.";
 
         let claims = extract_claims(text, "run-1");
-        let kinds: Vec<CompletionClaimKind> = claims.iter().map(|c| c.claim_kind.clone()).collect();
+        let kinds: Vec<CompletionClaimKind> = claims.iter().map(|c| c.claim_kind).collect();
         assert!(
             kinds.contains(&CompletionClaimKind::TestsPass),
             "must detect TestsPass"

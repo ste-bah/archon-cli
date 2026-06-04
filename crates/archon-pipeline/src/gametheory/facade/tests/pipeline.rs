@@ -57,7 +57,7 @@ fn test_full_pipeline_produces_report() {
             cozo::ScriptMutability::Immutable,
         )
         .unwrap();
-    assert!(routing_rows.rows.len() >= 1);
+    assert!(!routing_rows.rows.is_empty());
 
     let mut params = std::collections::BTreeMap::new();
     params.insert("rid".into(), cozo::DataValue::from(r.run_id.as_str()));

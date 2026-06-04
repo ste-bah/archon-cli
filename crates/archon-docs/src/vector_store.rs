@@ -256,13 +256,13 @@ pub fn default_store_dir() -> PathBuf {
     }
     #[cfg(test)]
     {
-        return std::env::temp_dir()
+        std::env::temp_dir()
             .join(format!("archon-{DEFAULT_STORE_DIR}-tests"))
             .join(format!(
                 "test-{}-{}",
                 std::process::id(),
                 test_thread_suffix()
-            ));
+            ))
     }
     #[cfg(not(test))]
     {

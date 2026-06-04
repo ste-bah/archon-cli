@@ -335,6 +335,60 @@ fn is_tier_model_alias(model: &str) -> bool {
     )
 }
 
+// ---------------------------------------------------------------------------
+// ProviderRegistry
+// ---------------------------------------------------------------------------
+
+/// Registry of all configured LLM providers, keyed by their `name()`.
+pub struct ProviderRegistry {
+    providers: HashMap<String, Box<dyn LlmProvider>>,
+}
+
+impl ProviderRegistry {
+    /// Create an empty registry.
+    pub fn new() -> Self {
+        Self {
+            providers: HashMap::new(),
+        }
+    }
+
+    /// Register a provider. Replaces any existing provider with the same name.
+    pub fn register(&mut self, provider: Box<dyn LlmProvider>) {
+        let key = provider.name().to_string();
+        self.providers.insert(key, provider);
+    }
+
+    /// Look up a provider by name. Returns `None` if not registered.
+    pub fn get(&self, name: &str) -> Option<&dyn LlmProvider> {
+        self.providers.get(name).map(|p| p.as_ref())
+    }
+
+    /// Return the provider for the given config name, or a descriptive `Err`
+    /// listing all available providers.
+    pub fn active(&self, config_provider: &str) -> Result<&dyn LlmProvider, LlmError> {
+        self.get(config_provider).ok_or_else(|| {
+            let available: Vec<&str> = self.providers.keys().map(|s| s.as_str()).collect();
+            let mut sorted = available;
+            sorted.sort_unstable();
+            LlmError::ProviderNotFound {
+                name: config_provider.to_string(),
+                available: sorted.join(", "),
+            }
+        })
+    }
+
+    /// Iterate over all registered providers.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &dyn LlmProvider)> {
+        self.providers.iter().map(|(k, v)| (k.as_str(), v.as_ref()))
+    }
+}
+
+impl Default for ProviderRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -394,59 +448,5 @@ mod tests {
         };
         provider.resolve_request_model(&mut request);
         assert_eq!(request.model, "provider-default");
-    }
-}
-
-// ---------------------------------------------------------------------------
-// ProviderRegistry
-// ---------------------------------------------------------------------------
-
-/// Registry of all configured LLM providers, keyed by their `name()`.
-pub struct ProviderRegistry {
-    providers: HashMap<String, Box<dyn LlmProvider>>,
-}
-
-impl ProviderRegistry {
-    /// Create an empty registry.
-    pub fn new() -> Self {
-        Self {
-            providers: HashMap::new(),
-        }
-    }
-
-    /// Register a provider. Replaces any existing provider with the same name.
-    pub fn register(&mut self, provider: Box<dyn LlmProvider>) {
-        let key = provider.name().to_string();
-        self.providers.insert(key, provider);
-    }
-
-    /// Look up a provider by name. Returns `None` if not registered.
-    pub fn get(&self, name: &str) -> Option<&dyn LlmProvider> {
-        self.providers.get(name).map(|p| p.as_ref())
-    }
-
-    /// Return the provider for the given config name, or a descriptive `Err`
-    /// listing all available providers.
-    pub fn active(&self, config_provider: &str) -> Result<&dyn LlmProvider, LlmError> {
-        self.get(config_provider).ok_or_else(|| {
-            let available: Vec<&str> = self.providers.keys().map(|s| s.as_str()).collect();
-            let mut sorted = available;
-            sorted.sort_unstable();
-            LlmError::ProviderNotFound {
-                name: config_provider.to_string(),
-                available: sorted.join(", "),
-            }
-        })
-    }
-
-    /// Iterate over all registered providers.
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &dyn LlmProvider)> {
-        self.providers.iter().map(|(k, v)| (k.as_str(), v.as_ref()))
-    }
-}
-
-impl Default for ProviderRegistry {
-    fn default() -> Self {
-        Self::new()
     }
 }

@@ -73,7 +73,7 @@ fn translate_learn_event_row(row: &[DataValue]) -> LearningEvent {
     LearningEvent {
         event_id: format!(
             "lev-{}",
-            uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+            &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
         ),
         workspace_id: row
             .get(1)

@@ -77,13 +77,13 @@ pub(super) fn recall_prior_context_for_agent(
             }
         }
 
-        if key_parts.is_empty() {
-            if let Some(leann) = memory_ctx.leann_searcher.as_ref() {
-                let fallback = leann.search(memory_key);
-                if !fallback.trim().is_empty() {
-                    leann_hits += 1;
-                    key_parts.push(fallback);
-                }
+        if key_parts.is_empty()
+            && let Some(leann) = memory_ctx.leann_searcher.as_ref()
+        {
+            let fallback = leann.search(memory_key);
+            if !fallback.trim().is_empty() {
+                leann_hits += 1;
+                key_parts.push(fallback);
             }
         }
 

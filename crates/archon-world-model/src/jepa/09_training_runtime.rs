@@ -33,14 +33,13 @@ fn train_jepa_candidate_with_backend_status(
         return train_jepa_candidate_cpu(rows, config, status);
     }
 
-    if !allow_cpu_fallback {
-        if let Some(reason) = status.fallback_reason.as_deref() {
+    if !allow_cpu_fallback
+        && let Some(reason) = status.fallback_reason.as_deref() {
             bail!(
                 "JepaBackendProbeFailed: requested JEPA backend {} unavailable: {reason}",
                 status.selected
             );
         }
-    }
 
     if status.selected == BackendKind::Cuda {
         #[cfg(feature = "cuda")]
@@ -265,14 +264,13 @@ pub fn validate_jepa_backend_execution(metadata: &JepaTraceModelMetadata) -> Res
         );
     }
 
-    if matches!(metadata.backend, BackendKind::Cuda | BackendKind::Metal) {
-        if !report.native_stage_proof_passes() {
+    if matches!(metadata.backend, BackendKind::Cuda | BackendKind::Metal)
+        && !report.native_stage_proof_passes() {
             bail!(
                 "JepaBackendNativeStageFailed: jepa {:?} candidate is missing native backend execution proof",
                 metadata.backend
             );
         }
-    }
 
     if metadata.backend == BackendKind::Cpu
         && matches!(

@@ -100,7 +100,7 @@ impl CommandHandler for ResumeHandler {
             // 2a. No-arg path: show interactive session picker.
             //     Shipped behaviour at slash.rs:662-692.
             let query = archon_session::search::SessionSearchQuery::default();
-            match archon_session::search::search_sessions(&store, &query) {
+            match archon_session::search::search_sessions(store, &query) {
                 Ok(results) => {
                     if results.is_empty() {
                         ctx.emit(TuiEvent::TextDelta(
@@ -129,7 +129,7 @@ impl CommandHandler for ResumeHandler {
         } else {
             // 2b. Named-arg path: resolve by name or ID prefix.
             //     Shipped behaviour at slash.rs:694-716.
-            match archon_session::naming::resolve_by_name(&store, arg) {
+            match archon_session::naming::resolve_by_name(store, arg) {
                 Ok(Some(meta)) => {
                     ctx.emit(TuiEvent::TextDelta(format!(
                         "\nSession found: {}\nRestart with: \

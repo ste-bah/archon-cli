@@ -144,15 +144,11 @@ mod tests {
         let mut saw_event = false;
         while let Ok(ev) = rx.try_recv() {
             match ev {
-                TuiEvent::TextDelta(text) => {
-                    if text.contains("Voice configuration:") {
-                        saw_event = true;
-                    }
+                TuiEvent::TextDelta(text) if text.contains("Voice configuration:") => {
+                    saw_event = true;
                 }
-                TuiEvent::Error(text) => {
-                    if text.contains("Failed to load config for /voice") {
-                        saw_event = true;
-                    }
+                TuiEvent::Error(text) if text.contains("Failed to load config for /voice") => {
+                    saw_event = true;
                 }
                 _ => {}
             }
@@ -249,15 +245,11 @@ mod tests {
             let mut saw_event = false;
             while let Ok(ev) = rx.try_recv() {
                 match ev {
-                    TuiEvent::TextDelta(text) => {
-                        if text.contains("Restart required") {
-                            saw_event = true;
-                        }
+                    TuiEvent::TextDelta(text) if text.contains("Restart required") => {
+                        saw_event = true;
                     }
-                    TuiEvent::Error(text) => {
-                        if text.contains("Failed to persist voice config") {
-                            saw_event = true;
-                        }
+                    TuiEvent::Error(text) if text.contains("Failed to persist voice config") => {
+                        saw_event = true;
                     }
                     _ => {}
                 }

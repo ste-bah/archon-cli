@@ -26,15 +26,15 @@ pub fn redact_text(text: &str, config: &RedactionConfig) -> String {
         return truncate(text, config.max_excerpt_chars);
     }
     let mut out = text.to_string();
-    if let Some(home) = &config.home_dir {
-        if !home.is_empty() {
-            out = out.replace(home, "$HOME");
-        }
+    if let Some(home) = &config.home_dir
+        && !home.is_empty()
+    {
+        out = out.replace(home, "$HOME");
     }
-    if let Some(root) = &config.workspace_root {
-        if !root.is_empty() {
-            out = out.replace(root, "$WORKSPACE");
-        }
+    if let Some(root) = &config.workspace_root
+        && !root.is_empty()
+    {
+        out = out.replace(root, "$WORKSPACE");
     }
     out = replace_regex(&out, r#"https?://[^\s)>"]+"#, "[url-redacted]");
     out = replace_regex(

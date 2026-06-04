@@ -81,6 +81,15 @@ pub fn apply_diff(
     Ok(new_content)
 }
 
+/// Check whether a given version is the current head for its kind.
+pub fn is_current_head(db: &DbInstance, version: &BehaviourManifestVersion) -> Result<bool> {
+    let latest = store::get_latest_manifest_version(db, version.manifest_kind.as_str())?;
+    match latest {
+        Some(latest) => Ok(latest.version_id == version.version_id),
+        None => Ok(false),
+    }
+}
+
 #[cfg(test)]
 mod apply_diff_tests {
     use super::apply_diff;
@@ -180,14 +189,5 @@ mod apply_diff_tests {
         ]"#;
         let result = apply_diff(&current, diff, new.clone()).unwrap();
         assert_eq!(result, new);
-    }
-}
-
-/// Check whether a given version is the current head for its kind.
-pub fn is_current_head(db: &DbInstance, version: &BehaviourManifestVersion) -> Result<bool> {
-    let latest = store::get_latest_manifest_version(db, version.manifest_kind.as_str())?;
-    match latest {
-        Some(latest) => Ok(latest.version_id == version.version_id),
-        None => Ok(false),
     }
 }

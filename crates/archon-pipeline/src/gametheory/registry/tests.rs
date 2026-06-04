@@ -397,10 +397,10 @@ fn test_yaml_conditions_parse() {
 
     for tier in &spec.tiers {
         for agent in &tier.agents {
-            if let Some(ref cond) = agent.condition {
-                if let Err(e) = crate::gametheory::routing::parse_condition(cond) {
-                    failed.push((agent.key.clone(), cond.clone(), e));
-                }
+            if let Some(ref cond) = agent.condition
+                && let Err(e) = crate::gametheory::routing::parse_condition(cond)
+            {
+                failed.push((agent.key.clone(), cond.clone(), e));
             }
         }
     }

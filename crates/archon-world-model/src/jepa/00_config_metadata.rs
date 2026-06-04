@@ -74,7 +74,7 @@ impl JepaTrainingConfig {
             bail!("jepa context_window_rows and target_window_rows must be greater than zero");
         }
         if self.prediction_horizons.is_empty()
-            || self.prediction_horizons.iter().any(|horizon| *horizon == 0)
+            || self.prediction_horizons.contains(&0)
         {
             bail!("jepa prediction_horizons must contain positive horizons");
         }

@@ -389,10 +389,8 @@ mod tests {
                     assert_eq!(s, &expected);
                     saw_model_changed = true;
                 }
-                TuiEvent::TextDelta(msg) => {
-                    if msg.contains("Model switched to claude-opus-4-8") {
-                        saw_text_delta = true;
-                    }
+                TuiEvent::TextDelta(msg) if msg.contains("Model switched to claude-opus-4-8") => {
+                    saw_text_delta = true;
                 }
                 _ => {}
             }

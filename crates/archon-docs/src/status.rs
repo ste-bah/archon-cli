@@ -7,7 +7,7 @@ use crate::models::{DocumentStatus, ProcessingJob};
 use crate::store;
 
 /// Summary status for all documents in the system.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct DocStatusSummary {
     pub total_sources: usize,
     pub discovered: usize,
@@ -81,29 +81,6 @@ fn count_pages(db: &DbInstance) -> Result<usize> {
             Ok(0)
         }
         Err(e) => Err(anyhow::anyhow!("count pages failed: {e}")),
-    }
-}
-
-impl Default for DocStatusSummary {
-    fn default() -> Self {
-        Self {
-            total_sources: 0,
-            discovered: 0,
-            ingesting: 0,
-            ingested: 0,
-            processing: 0,
-            processed: 0,
-            failed: 0,
-            total_chunks: 0,
-            total_pages: 0,
-            pdf_embedded_images_extracted: 0,
-            pdf_embedded_images_skipped_filter: 0,
-            pdf_image_ocr_runs: 0,
-            pdf_image_ocr_failures: 0,
-            pdf_image_vlm_descriptions: 0,
-            pdf_image_vlm_failures: 0,
-            pdf_pages_rendered: 0,
-        }
     }
 }
 

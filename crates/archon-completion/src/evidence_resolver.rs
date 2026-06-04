@@ -78,7 +78,7 @@ fn missing_evidence_record(run_id: &str, kind: EvidenceKind, summary: &str) -> C
     CompletionEvidence {
         evidence_id: format!(
             "ev-{}",
-            uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+            &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
         ),
         run_id: run_id.to_string(),
         evidence_kind: kind,
@@ -148,7 +148,7 @@ fn find_ingestion_evidence(db: &DbInstance, run_id: &str) -> Result<Vec<Completi
         evidence.push(CompletionEvidence {
             evidence_id: format!(
                 "ev-{}",
-                uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+                &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
             ),
             run_id: run_id.to_string(),
             evidence_kind: EvidenceKind::IngestionJob,
@@ -229,7 +229,7 @@ fn find_citation_evidence(db: &DbInstance, run_id: &str) -> Result<Vec<Completio
     Ok(vec![CompletionEvidence {
         evidence_id: format!(
             "ev-{}",
-            uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+            &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
         ),
         run_id: run_id.to_string(),
         evidence_kind: EvidenceKind::CitationTrace,
@@ -297,7 +297,7 @@ fn find_persisted_evidence(
 
     Ok(kinds
         .iter()
-        .map(|kind| missing_evidence_record(run_id, kind.clone(), missing_summary))
+        .map(|kind| missing_evidence_record(run_id, *kind, missing_summary))
         .collect())
 }
 
@@ -340,12 +340,12 @@ fn find_gate_evidence(db: &DbInstance, run_id: &str) -> Result<Vec<CompletionEvi
         let created_at = row[5]
             .get_str()
             .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| "");
+            .unwrap_or("");
         let now = chrono::Utc::now().to_rfc3339();
         evidence.push(CompletionEvidence {
             evidence_id: format!(
                 "ev-{}",
-                uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+                &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
             ),
             run_id: run_id.to_string(),
             evidence_kind: EvidenceKind::GateResult,

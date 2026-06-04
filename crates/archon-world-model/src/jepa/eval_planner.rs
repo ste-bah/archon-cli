@@ -139,11 +139,10 @@ impl JepaEvalPlanner {
         }
 
         // 6. Checkpoint file size gate (candidate.checkpoint.path — JepaCheckpointRecord.path)
-        if let Ok(meta) = std::fs::metadata(&candidate.checkpoint.path) {
-            if meta.len() > config.max_checkpoint_mb * 1024 * 1024 {
+        if let Ok(meta) = std::fs::metadata(&candidate.checkpoint.path)
+            && meta.len() > config.max_checkpoint_mb * 1024 * 1024 {
                 failures.push("checkpoint_size".into());
             }
-        }
 
         TierGateResult::with_failures(failures)
     }

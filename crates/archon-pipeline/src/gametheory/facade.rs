@@ -110,7 +110,7 @@ async fn classify_internal(
     llm: Option<&dyn LlmClient>,
     memory_ctx: &GameTheoryMemoryContext,
     allow_keyword_fallback: bool,
-    mut learning: Option<&mut LearningIntegration>,
+    learning: Option<&mut LearningIntegration>,
 ) -> Result<(GameTheoryFingerprint, Vec<MemoryRecallAudit>), GameTheoryError> {
     let situation = situation.trim();
     if situation.is_empty() {
@@ -123,7 +123,7 @@ async fn classify_internal(
 
     let run_id = format!(
         "gt-{}",
-        uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+        &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
     );
     let now = Utc::now().to_rfc3339();
 
@@ -137,16 +137,7 @@ async fn classify_internal(
     // Attempt real Tier 1 classification, fall back to keyword analysis
     let mut memory_audits = Vec::new();
     let fingerprint = if let Some(llm_client) = llm {
-        match execute_tier1_real(
-            llm_client,
-            &run_id,
-            situation,
-            &now,
-            memory_ctx,
-            learning.as_deref_mut(),
-        )
-        .await
-        {
+        match execute_tier1_real(llm_client, &run_id, situation, &now, memory_ctx, learning).await {
             Ok((fp, audits)) => {
                 memory_audits.extend(audits);
                 fp
@@ -374,7 +365,7 @@ pub async fn run_full_pipeline_with_learning_options(
         &analysis_situation,
         &memory_ctx,
         &options,
-        learning.as_deref_mut(),
+        learning,
     )
     .await?;
     memory_recall.extend(specialist_outcome.memory_audits.clone());

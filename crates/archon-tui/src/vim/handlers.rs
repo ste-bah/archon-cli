@@ -102,15 +102,13 @@ impl VimState {
                     self.replace_char(c);
                     return VimAction::Redraw;
                 }
-                'g' => {
-                    if c == 'g' {
-                        // gg — move to first line
-                        self.cursor_row = 0;
-                        self.clamp_col();
-                        return VimAction::None;
-                    }
-                    // Unknown g-command — drop and fall through
+                'g' if c == 'g' => {
+                    // gg — move to first line
+                    self.cursor_row = 0;
+                    self.clamp_col();
+                    return VimAction::None;
                 }
+                // Unknown g-command — drop and fall through
                 _ if c == op => {
                     // dd, yy — line-wise operations
                     match op {

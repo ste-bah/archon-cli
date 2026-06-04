@@ -4,7 +4,6 @@ use std::time::Duration;
 use serde_json::json;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
-use tokio_util::sync::CancellationToken;
 
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
@@ -152,10 +151,7 @@ impl Tool for BashTool {
         let timeout_dur = Duration::from_millis(timeout_ms);
         // Fall back to a fresh (never-cancelled) token when there's no parent
         // chain, so the `select!` arm shape stays uniform.
-        let cancel_token = ctx
-            .cancel_parent
-            .clone()
-            .unwrap_or_else(CancellationToken::new);
+        let cancel_token = ctx.cancel_parent.clone().unwrap_or_default();
 
         enum BashOutcome {
             Done((Vec<u8>, Vec<u8>, std::io::Result<std::process::ExitStatus>)),

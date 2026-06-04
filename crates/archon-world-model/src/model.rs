@@ -6,16 +6,12 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ModelPrecision {
+    #[default]
     Fp32,
     Fp16,
     Int8,
-}
-
-impl Default for ModelPrecision {
-    fn default() -> Self {
-        Self::Fp32
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

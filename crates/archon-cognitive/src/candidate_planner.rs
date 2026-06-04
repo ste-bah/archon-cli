@@ -79,7 +79,7 @@ impl<'a> CandidatePlanner<'a> {
             })
             .collect::<Vec<_>>();
 
-        candidates.sort_by(|left, right| compare_candidates(left, right));
+        candidates.sort_by(compare_candidates);
         if trust < 0.3 {
             promote_low_trust_candidates(&mut candidates);
         }

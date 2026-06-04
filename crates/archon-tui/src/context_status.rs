@@ -8,10 +8,10 @@ pub fn update_actor_context_name(status: &mut StatusBar, update: &AgentActivityU
         | AgentActivityStatus::WaitingForTool => {}
         AgentActivityStatus::Complete
         | AgentActivityStatus::Failed
-        | AgentActivityStatus::Cancelled => {
-            if status.context_name.as_deref() == Some(update.name.as_str()) {
-                status.context_name = Some("main".to_string());
-            }
+        | AgentActivityStatus::Cancelled
+            if status.context_name.as_deref() == Some(update.name.as_str()) =>
+        {
+            status.context_name = Some("main".to_string());
         }
         _ => {}
     }

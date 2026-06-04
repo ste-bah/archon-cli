@@ -52,13 +52,12 @@ pub(crate) fn select_candidate(
     mut allowed: Vec<Candidate>,
     situation: &Situation,
 ) -> Option<Candidate> {
-    if situation.kind == SituationKind::CiDebug {
-        if let Some(position) = allowed
+    if situation.kind == SituationKind::CiDebug
+        && let Some(position) = allowed
             .iter()
             .position(|candidate| candidate.action_kind == CandidateActionKind::RunSafeShellProbe)
-        {
-            return Some(allowed.remove(position));
-        }
+    {
+        return Some(allowed.remove(position));
     }
     allowed.sort_by(|left, right| right.heuristic_score.total_cmp(&left.heuristic_score));
     allowed

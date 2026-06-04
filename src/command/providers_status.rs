@@ -99,7 +99,7 @@ fn local_provider_statuses(
 
     descriptors
         .into_iter()
-        .filter(|descriptor| provider_filter.map_or(true, |filter| descriptor.id == filter))
+        .filter(|descriptor| provider_filter.is_none_or(|filter| descriptor.id == filter))
         .map(|descriptor| status_from_descriptor(descriptor, env, config))
         .collect()
 }

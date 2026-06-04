@@ -110,10 +110,8 @@ impl MarkdownRenderer {
                     .push(Span::styled(code.to_string(), style));
             }
 
-            Event::HardBreak | Event::SoftBreak => {
-                if !self.in_code_block {
-                    self.flush_line();
-                }
+            Event::HardBreak | Event::SoftBreak if !self.in_code_block => {
+                self.flush_line();
             }
 
             // Ignore HTML, footnotes, task-list markers, etc.
@@ -183,21 +181,19 @@ impl MarkdownRenderer {
             Tag::TableRow => {
                 self.table_row_cells.clear();
             }
-            Tag::TableCell => {
+            Tag::TableCell
                 // Start collecting cell content into current_spans.
                 // We'll transfer to table_row_cells on TagEnd::TableCell.
-                if self.in_table_head {
+                if self.in_table_head => {
                     let mut style = self.current_style();
                     style.add_modifier |= Modifier::BOLD;
                     self.style_stack.push(style);
                 }
-            }
-            Tag::Paragraph => {
+            Tag::Paragraph
                 // Separate paragraphs with a blank line when there is prior content.
-                if !self.lines.is_empty() || !self.current_spans.is_empty() {
+                if (!self.lines.is_empty() || !self.current_spans.is_empty()) => {
                     self.flush_line();
                 }
-            }
             _ => {}
         }
     }

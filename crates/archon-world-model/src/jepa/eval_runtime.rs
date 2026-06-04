@@ -166,7 +166,7 @@ impl BackendRuntimeResolver {
                 fallback = "cpu",
                 "CUDA backend not compiled; falling back to CPU (allowed because not required)"
             );
-            return Self::resolve_cpu(metadata.latent_dim, resolver_config.parity_floor);
+            Self::resolve_cpu(metadata.latent_dim, resolver_config.parity_floor)
         }
 
         #[cfg(feature = "cuda")]

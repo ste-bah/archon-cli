@@ -33,24 +33,13 @@ impl Default for EvalConfig {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct PromotionGateReport {
     pub cosine_error_improved: bool,
     pub surprise_ks_passed: bool,
     pub counterfactual_ndcg_passed: bool,
     pub brier_improved: bool,
     pub no_critical_regression: bool,
-}
-
-impl Default for PromotionGateReport {
-    fn default() -> Self {
-        Self {
-            cosine_error_improved: false,
-            surprise_ks_passed: false,
-            counterfactual_ndcg_passed: false,
-            brier_improved: false,
-            no_critical_regression: false,
-        }
-    }
 }
 
 impl PromotionGateReport {

@@ -416,7 +416,7 @@ fn required_action_passed(
     required: GuardrailRequiredAction,
     latest_by_kind: &BTreeMap<String, &VerificationOutcome>,
 ) -> bool {
-    required_action_kind_keys(required).into_iter().any(|key| {
+    required_action_kind_keys(required).iter().any(|key| {
         latest_by_kind
             .get(*key)
             .is_some_and(|outcome| verification_satisfies_required_action(outcome))

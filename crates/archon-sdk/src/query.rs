@@ -171,22 +171,18 @@ async fn run_query(
                 tool_use_id: _,
                 tool_name: _,
                 ..
-            } => {
-                if block_type == ContentBlockType::Text {
-                    text_buf.clear();
-                }
+            } if block_type == ContentBlockType::Text => {
+                text_buf.clear();
             }
             StreamEvent::TextDelta { text, .. } => {
                 text_buf.push_str(&text);
             }
-            StreamEvent::ContentBlockStop { .. } => {
-                if !text_buf.is_empty() {
-                    let _ = tx
-                        .send(Ok(SdkMessage::AssistantMessage {
-                            content: std::mem::take(&mut text_buf),
-                        }))
-                        .await;
-                }
+            StreamEvent::ContentBlockStop { .. } if !text_buf.is_empty() => {
+                let _ = tx
+                    .send(Ok(SdkMessage::AssistantMessage {
+                        content: std::mem::take(&mut text_buf),
+                    }))
+                    .await;
             }
             StreamEvent::MessageDelta {
                 stop_reason: sr,

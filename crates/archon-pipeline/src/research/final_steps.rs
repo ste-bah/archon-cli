@@ -274,10 +274,8 @@ fn collect_reference_section(output: &str, master: bool) -> Option<String> {
         if collecting && markdown_heading_title(trimmed).is_some() {
             break;
         }
-        if collecting {
-            if !trimmed.is_empty() && !trimmed.starts_with('|') {
-                refs.push(trimmed.trim_start_matches("- ").to_string());
-            }
+        if collecting && !trimmed.is_empty() && !trimmed.starts_with('|') {
+            refs.push(trimmed.trim_start_matches("- ").to_string());
         }
     }
     let refs = refs.join("\n\n");

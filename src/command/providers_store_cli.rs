@@ -12,12 +12,12 @@ use cozo::DbInstance;
 
 pub(crate) fn render_provider_limits(provider_filter: Option<&str>) -> Result<String> {
     let db = open_learning_db()?;
-    Ok(render_provider_limits_from_db(&db, provider_filter)?)
+    render_provider_limits_from_db(&db, provider_filter)
 }
 
 pub(crate) fn render_provider_profiles(provider_filter: Option<&str>) -> Result<String> {
     let db = open_learning_db()?;
-    Ok(render_provider_profiles_from_db(&db, provider_filter)?)
+    render_provider_profiles_from_db(&db, provider_filter)
 }
 
 pub(crate) fn render_provider_profile_inspect(profile_id: &str) -> Result<String> {

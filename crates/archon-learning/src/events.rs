@@ -20,7 +20,7 @@ pub fn new_event(
 ) -> LearningEvent {
     let event_id = format!(
         "lev-{}",
-        uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+        &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
     );
     LearningEvent {
         event_id,

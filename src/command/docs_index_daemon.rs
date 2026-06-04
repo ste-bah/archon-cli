@@ -25,10 +25,10 @@ pub(crate) async fn handle_index_daemon(action: DocsIndexDaemonAction) -> Result
 }
 
 fn start(batch_size: usize, window_size: usize, poll_secs: u64) -> Result<()> {
-    if let Some(pid) = read_pid()? {
-        if process_running(pid) {
-            anyhow::bail!("docs index daemon already running with pid {pid}");
-        }
+    if let Some(pid) = read_pid()?
+        && process_running(pid)
+    {
+        anyhow::bail!("docs index daemon already running with pid {pid}");
     }
     fs::create_dir_all(run_dir())?;
     fs::create_dir_all(log_dir())?;

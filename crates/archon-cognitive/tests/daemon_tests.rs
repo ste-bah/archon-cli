@@ -192,10 +192,10 @@ fn daemon_heartbeats_while_job_blocks() {
 
 fn wait_for_job(root: &std::path::Path, name: &str) -> chrono::DateTime<chrono::Utc> {
     for _ in 0..20 {
-        if let Some(state) = CognitiveDaemon::status(root, 1_000).unwrap().state {
-            if state.current_job.as_deref() == Some(name) {
-                return state.last_heartbeat_at;
-            }
+        if let Some(state) = CognitiveDaemon::status(root, 1_000).unwrap().state
+            && state.current_job.as_deref() == Some(name)
+        {
+            return state.last_heartbeat_at;
         }
         std::thread::sleep(Duration::from_millis(100));
     }

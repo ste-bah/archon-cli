@@ -94,14 +94,14 @@ fn check_source_contradictions(
             let proposal = BehaviourProposal {
                 proposal_id: format!(
                     "bp-{}",
-                    uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+                    &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
                 ),
                 workspace_id: source_events[0].workspace_id.clone(),
                 manifest_kind: BehaviourManifestKind::SourceQualityProfile,
                 current_version: "unresolved".to_string(),
                 proposed_version: format!(
                     "v-{}",
-                    uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string()
+                    &uuid::Uuid::new_v4().to_string().replace('-', "")[..8]
                 ),
                 diff: format!(
                     "--- SourceQualityProfile: {source}\n\
@@ -154,14 +154,14 @@ fn check_gate_failures(
             let proposal = BehaviourProposal {
                 proposal_id: format!(
                     "bp-{}",
-                    uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+                    &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
                 ),
                 workspace_id: gate_events[0].workspace_id.clone(),
                 manifest_kind: BehaviourManifestKind::PipelineGates,
                 current_version: "unresolved".to_string(),
                 proposed_version: format!(
                     "v-{}",
-                    uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string()
+                    &uuid::Uuid::new_v4().to_string().replace('-', "")[..8]
                 ),
                 diff: format!(
                     "--- PipelineGates: {gate}\n\
@@ -219,14 +219,14 @@ fn check_user_correction_clusters(
             BehaviourProposal {
                 proposal_id: format!(
                     "bp-{}",
-                    uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+                    &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
                 ),
                 workspace_id: rule_events[0].workspace_id.clone(),
                 manifest_kind: BehaviourManifestKind::BehaviouralRuleAdjustment,
                 current_version: "unresolved".to_string(),
                 proposed_version: format!(
                     "v-{}",
-                    uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string()
+                    &uuid::Uuid::new_v4().to_string().replace('-', "")[..8]
                 ),
                 diff: format!(
                     "--- BehaviouralRule: {rule_id}\n\

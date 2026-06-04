@@ -243,47 +243,6 @@ fn spawn_metrics_exporter(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn active_session_model_uses_configured_codex_default_when_claude_default_would_leak() {
-        let mut config = archon_core::config::ArchonConfig::default();
-        config.llm.provider = "openai-codex".into();
-        config.api.default_model = "claude-sonnet-4-6".into();
-        config.models.openai_codex.default = "gpt-codex-default".into();
-
-        assert_eq!(active_session_model(&config), "gpt-codex-default");
-    }
-
-    #[test]
-    fn active_session_model_uses_configured_codex_mini_for_haiku_default() {
-        let mut config = archon_core::config::ArchonConfig::default();
-        config.llm.provider = "openai-codex".into();
-        config.api.default_model = "claude-haiku-4-5-20251001".into();
-        config.models.openai_codex.mini = "gpt-codex-mini".into();
-
-        assert_eq!(active_session_model(&config), "gpt-codex-mini");
-    }
-
-    #[test]
-    fn active_session_model_preserves_explicit_codex_model_override() {
-        let mut config = archon_core::config::ArchonConfig::default();
-        config.llm.provider = "openai-codex".into();
-        config.api.default_model = "gpt-5.4-codex-test".into();
-
-        assert_eq!(active_session_model(&config), "gpt-5.4-codex-test");
-    }
-
-    #[test]
-    fn active_session_model_preserves_anthropic_default() {
-        let config = archon_core::config::ArchonConfig::default();
-
-        assert_eq!(active_session_model(&config), config.api.default_model);
-    }
-}
-
 pub(crate) async fn run_interactive_session(
     config: &archon_core::config::ArchonConfig,
     session_id: &str,
@@ -471,4 +430,45 @@ pub(crate) async fn run_interactive_session(
         auto_capture,
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn active_session_model_uses_configured_codex_default_when_claude_default_would_leak() {
+        let mut config = archon_core::config::ArchonConfig::default();
+        config.llm.provider = "openai-codex".into();
+        config.api.default_model = "claude-sonnet-4-6".into();
+        config.models.openai_codex.default = "gpt-codex-default".into();
+
+        assert_eq!(active_session_model(&config), "gpt-codex-default");
+    }
+
+    #[test]
+    fn active_session_model_uses_configured_codex_mini_for_haiku_default() {
+        let mut config = archon_core::config::ArchonConfig::default();
+        config.llm.provider = "openai-codex".into();
+        config.api.default_model = "claude-haiku-4-5-20251001".into();
+        config.models.openai_codex.mini = "gpt-codex-mini".into();
+
+        assert_eq!(active_session_model(&config), "gpt-codex-mini");
+    }
+
+    #[test]
+    fn active_session_model_preserves_explicit_codex_model_override() {
+        let mut config = archon_core::config::ArchonConfig::default();
+        config.llm.provider = "openai-codex".into();
+        config.api.default_model = "gpt-5.4-codex-test".into();
+
+        assert_eq!(active_session_model(&config), "gpt-5.4-codex-test");
+    }
+
+    #[test]
+    fn active_session_model_preserves_anthropic_default() {
+        let config = archon_core::config::ArchonConfig::default();
+
+        assert_eq!(active_session_model(&config), config.api.default_model);
+    }
 }

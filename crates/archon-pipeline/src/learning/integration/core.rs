@@ -229,10 +229,7 @@ impl LearningIntegration {
             return;
         }
 
-        let traj_id = match self.active_trajectories.remove(agent_name) {
-            Some(id) => Some(id),
-            None => None,
-        };
+        let traj_id = self.active_trajectories.remove(agent_name);
 
         if let Some(ref mut sona) = self.sona
             && let Some(traj_id) = traj_id.clone()

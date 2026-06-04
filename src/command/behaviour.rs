@@ -222,8 +222,8 @@ fn cmd_history(db: &DbInstance, kind: &str) -> Result<()> {
 
     println!("Version history for {kind}:");
     println!(
-        "{:<25} {:<8} {:<20} {:<8} {:<10} {}",
-        "version_id", "v#", "created_by", "parent", "rollback", "created_at"
+        "{:<25} {:<8} {:<20} {:<8} {:<10} created_at",
+        "version_id", "v#", "created_by", "parent", "rollback"
     );
     for v in &versions {
         println!(
