@@ -312,7 +312,7 @@ fn has_text(value: &str) -> bool {
     !value.trim().is_empty()
 }
 
-fn is_neutral_tier_hint(value: &str) -> bool {
+pub(crate) fn is_neutral_tier_hint(value: &str) -> bool {
     matches!(
         value.trim().to_ascii_lowercase().as_str(),
         "" | "auto" | "default" | "inherit" | "active"

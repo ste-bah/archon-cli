@@ -347,6 +347,39 @@ quality_gates:
 }
 
 #[test]
+fn generated_specs_neutralize_hardcoded_provider_tiers() {
+    // Reproduces the live planner failure: the LLM emits a top-level
+    // provider_tiers map pinned to a concrete provider/model. That map is
+    // never read at runtime, so a generated spec must neutralize it rather
+    // than abort with HardcodedModel.
+    let yaml = r#"
+schema: archon.workflow.v1
+name: generated-tiers
+task: Implement the decomposed PRD.
+provider_tiers:
+  planner:
+    provider: anthropic
+    model: claude-opus-4-8
+  researcher: auto
+stages:
+  - id: discovery
+    kind: agent
+    provider_tier: planner
+"#;
+    let spec = WorkflowSpec::from_generated_yaml(yaml, "Fallback task").unwrap();
+    // Non-neutral entry dropped; neutral hint preserved.
+    assert!(!spec.provider_tiers.contains_key(&ProviderTier::Planner));
+    assert_eq!(
+        spec.provider_tiers
+            .get(&ProviderTier::Researcher)
+            .map(String::as_str),
+        Some("auto")
+    );
+    // A user-authored spec with the same violation must still be rejected.
+    assert!(WorkflowSpec::from_yaml(yaml).is_err());
+}
+
+#[test]
 fn generated_specs_normalize_missing_tool_and_condition_stages() {
     let yaml = r#"
 schema: archon.workflow.v1

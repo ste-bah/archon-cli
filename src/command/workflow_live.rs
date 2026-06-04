@@ -337,7 +337,7 @@ fn workflow_prompt(request: &StageRunRequest) -> String {
 
 fn planner_prompt(task: &str) -> String {
     format!(
-        "Create an archon.workflow.v1 YAML plan for this task:\n\n{task}\n\nRules:\n- Use schema: archon.workflow.v1.\n- Use stage kinds: agent, fanout, reduce, tool, checkpoint, quality_gate, human_gate.\n- Use provider_tier aliases only: planner, researcher, coder, critic, cheap, vision, local, reducer.\n- Do not set stage.provider or stage.model.\n- You may set stage.task for the concise objective of that stage.\n- Include at least discovery, fanout/review, reduce/synthesis, and quality gate stages.\n- Keep max_parallelism <= 8 and max_agents <= 200.\n- Add learning_hooks for sona, reasoning_bank, and world_model.\n- Return YAML only."
+        "Create an archon.workflow.v1 YAML plan for this task:\n\n{task}\n\nRules:\n- Use schema: archon.workflow.v1.\n- Use stage kinds: agent, fanout, reduce, tool, checkpoint, quality_gate, human_gate.\n- Use provider_tier aliases only: planner, researcher, coder, critic, cheap, vision, local, reducer.\n- Do not set stage.provider or stage.model.\n- Do not emit a top-level provider_tiers map with concrete provider or model names; omit it or use only neutral hints (auto, default, inherit, active).\n- You may set stage.task for the concise objective of that stage.\n- Include at least discovery, fanout/review, reduce/synthesis, and quality gate stages.\n- Keep max_parallelism <= 8 and max_agents <= 200.\n- Add learning_hooks for sona, reasoning_bank, and world_model.\n- Return YAML only."
     )
 }
 
@@ -418,18 +418,20 @@ mod tests {
             _model: &str,
         ) -> Result<LlmResponse> {
             Ok(LlmResponse {
+                // Genuinely unrecoverable: a stage pins a concrete model, which
+                // validate_stage_fields rejects and the normalizer does not
+                // touch. (A non-neutral top-level provider_tiers map is now
+                // neutralized during generation, so it can no longer stand in
+                // for an invalid plan here.)
                 content: r#"
 schema: archon.workflow.v1
 name: invalid-live-plan
 task: implement a real task
-provider_tiers:
-  critic:
-    provider: anthropic
-    model: claude-opus-4-8
 stages:
   - id: discover
     kind: agent
     provider_tier: planner
+    model: claude-opus-4-8
 "#
                 .to_string(),
                 tool_uses: Vec::new(),

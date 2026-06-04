@@ -5,9 +5,22 @@ use serde_json::Value;
 use crate::spec::{ProviderTier, RetryPolicy, StageKind, StageSpec, WorkflowSpec};
 
 pub fn normalize_generated_spec(spec: &mut WorkflowSpec) {
+    neutralize_provider_tiers(spec);
     normalize_under_specified_stages(spec);
     infer_dependencies_from_io(spec);
     promote_quality_gate_entries(spec);
+}
+
+/// Planner LLMs routinely emit a top-level `provider_tiers` map pinned to a
+/// concrete provider/model (e.g. `planner: {provider: anthropic, model: ...}`).
+/// That map is never consulted at runtime — stage execution resolves models from
+/// each stage's `provider_tier` alias — yet a non-neutral value trips the strict
+/// `HardcodedModel` guard and aborts the whole plan. Since this is *generated*
+/// output (not a user-authored spec), drop any non-neutral entry so the plan
+/// stays provider-neutral and valid instead of failing recoverable input.
+fn neutralize_provider_tiers(spec: &mut WorkflowSpec) {
+    spec.provider_tiers
+        .retain(|_, value| crate::spec::is_neutral_tier_hint(value));
 }
 
 fn normalize_under_specified_stages(spec: &mut WorkflowSpec) {
