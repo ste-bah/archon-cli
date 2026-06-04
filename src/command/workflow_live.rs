@@ -196,6 +196,14 @@ struct PipelineWorkflowRunner {
 
 #[async_trait::async_trait]
 impl WorkflowStageRunner for PipelineWorkflowRunner {
+    fn max_concurrency(&self) -> Option<usize> {
+        // The TUI/live runner routes each fan-out item through a subagent
+        // manager with a hard concurrency cap that *rejects* overflow. Clamp
+        // fan-out width to that cap so extra items wait for a slot instead of
+        // failing with "max concurrent subagents reached".
+        Some(archon_core::subagent::SubagentManager::DEFAULT_MAX_CONCURRENT)
+    }
+
     async fn run_stage(
         &self,
         request: StageRunRequest,

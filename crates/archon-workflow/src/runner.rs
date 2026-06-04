@@ -46,6 +46,18 @@ impl StageRunOutput {
 #[async_trait]
 pub trait WorkflowStageRunner: Send + Sync {
     async fn run_stage(&self, request: StageRunRequest) -> WorkflowResult<StageRunOutput>;
+
+    /// Maximum number of stages this runner can execute concurrently, when the
+    /// runner is backed by a bounded resource (e.g. a subagent manager with a
+    /// hard concurrency cap that *rejects* — rather than queues — overflow).
+    ///
+    /// Fan-out scheduling clamps its semaphore width to this value so the
+    /// number of in-flight items never exceeds what the runner can accept.
+    /// Returning `None` (the default) means "no runner-imposed limit"; only the
+    /// spec/policy `max_parallelism` applies.
+    fn max_concurrency(&self) -> Option<usize> {
+        None
+    }
 }
 
 #[derive(Debug, Default)]

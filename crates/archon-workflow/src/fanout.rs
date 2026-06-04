@@ -93,6 +93,24 @@ pub(crate) fn width(run: &WorkflowRun, policy: &WorkflowPolicy) -> usize {
     run.spec.max_parallelism.min(policy.max_parallelism).max(1) as usize
 }
 
+/// Fan-out semaphore width clamped to the runner's concurrency capacity.
+///
+/// The spec/policy `max_parallelism` sets the desired width, but a live runner
+/// backed by a bounded subagent manager rejects work beyond its hard cap. When
+/// the runner advertises a finite capacity we clamp to it so overflow items
+/// wait on the semaphore instead of being hard-rejected as terminal failures.
+pub(crate) fn runner_clamped_width(
+    run: &WorkflowRun,
+    policy: &WorkflowPolicy,
+    runner_capacity: Option<usize>,
+) -> usize {
+    let base = width(run, policy);
+    match runner_capacity {
+        Some(cap) => base.min(cap.max(1)),
+        None => base,
+    }
+}
+
 pub(crate) fn accepted_item_cached(run: &WorkflowRun, item_id: &str) -> bool {
     run.items
         .get(item_id)
