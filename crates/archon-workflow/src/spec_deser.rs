@@ -63,7 +63,14 @@ fn provider_tiers_from_value(input: Value) -> Result<BTreeMap<ProviderTier, Stri
         Value::Null => {}
         Value::Object(values) => {
             for (key, value) in values {
-                let tier = parse_provider_tier(&key)?;
+                // Skip unrecognized tier keys rather than aborting the whole
+                // plan. Generated plans occasionally emit advisory keys (e.g.
+                // `hint`) that are not real tiers; the provider_tiers map is
+                // advisory and not consulted at runtime, so dropping unknown
+                // keys is safe and keeps recoverable input usable.
+                let Ok(tier) = parse_provider_tier(&key) else {
+                    continue;
+                };
                 tiers.insert(tier, normalize_provider_tier(&value));
             }
         }
@@ -87,18 +94,22 @@ fn collect_provider_tier_entry(
 ) -> Result<(), String> {
     match value {
         Value::String(name) => {
-            tiers.insert(parse_provider_tier(&name)?, "auto".into());
+            if let Ok(tier) = parse_provider_tier(&name) {
+                tiers.insert(tier, "auto".into());
+            }
         }
         Value::Object(values) => {
             if let Some(name) = named_tier(&values) {
-                tiers.insert(
-                    parse_provider_tier(name)?,
-                    normalize_provider_tier_map(&values),
-                );
+                if let Ok(tier) = parse_provider_tier(name) {
+                    tiers.insert(tier, normalize_provider_tier_map(&values));
+                }
                 return Ok(());
             }
             for (key, value) in values {
-                tiers.insert(parse_provider_tier(&key)?, normalize_provider_tier(&value));
+                let Ok(tier) = parse_provider_tier(&key) else {
+                    continue;
+                };
+                tiers.insert(tier, normalize_provider_tier(&value));
             }
         }
         other => {

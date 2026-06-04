@@ -380,6 +380,28 @@ stages:
 }
 
 #[test]
+fn provider_tiers_skip_unknown_keys_instead_of_aborting() {
+    // Reproduces the live failure "unknown provider tier 'hint'": a generated
+    // plan emitted a non-tier key. The advisory provider_tiers map must drop
+    // unknown keys rather than fail the whole parse.
+    let yaml = r#"
+schema: archon.workflow.v1
+name: generated-unknown-tier
+task: Implement the decomposed PRD.
+provider_tiers:
+  hint: auto
+  planner: auto
+stages:
+  - id: discovery
+    kind: agent
+    provider_tier: planner
+"#;
+    let spec = WorkflowSpec::from_yaml(yaml).unwrap();
+    assert!(spec.provider_tiers.contains_key(&ProviderTier::Planner));
+    assert_eq!(spec.provider_tiers.len(), 1);
+}
+
+#[test]
 fn generated_specs_normalize_missing_tool_and_condition_stages() {
     let yaml = r#"
 schema: archon.workflow.v1
