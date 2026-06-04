@@ -6,6 +6,7 @@ use crate::context;
 use crate::error::{WorkflowError, WorkflowResult};
 use crate::events::{WorkflowEventKind, WorkflowEventLog};
 use crate::exec_state::{finish_run, mark_finished, mark_started, pause_for_human_gate, report};
+use crate::executor_output::{deterministic_stage_output, ensure_output_usable};
 use crate::fanout;
 use crate::learning::WorkflowLearningSink;
 use crate::policy::WorkflowPolicy;
@@ -481,29 +482,4 @@ impl WorkflowExecutor {
         }
         Ok(())
     }
-}
-
-fn deterministic_stage_output(stage: &StageSpec) -> String {
-    // A stage that declares itself a structured fan-out items producer must emit
-    // a parseable `items:` document even in the deterministic (no-live-runner)
-    // path, otherwise downstream foreach fan-outs would fail-fast with no items.
-    if crate::spec::stage_declares_items_producer(stage) {
-        return format!(
-            r#"{{"items":[{{"stage":"{}","deterministic":true}}]}}"#,
-            stage.id
-        );
-    }
-    format!(
-        "# Stage {}\n\nKind: `{:?}`\nAgent: `{}`\n",
-        stage.id,
-        stage.kind,
-        stage.agent.as_deref().unwrap_or("none")
-    )
-}
-
-fn ensure_output_usable(body: &str) -> WorkflowResult<()> {
-    if let Some(reason) = context::output_reports_blocked(body) {
-        return Err(WorkflowError::StageFailed(reason));
-    }
-    Ok(())
 }
