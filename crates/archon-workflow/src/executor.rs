@@ -484,6 +484,15 @@ impl WorkflowExecutor {
 }
 
 fn deterministic_stage_output(stage: &StageSpec) -> String {
+    // A stage that declares itself a structured fan-out items producer must emit
+    // a parseable `items:` document even in the deterministic (no-live-runner)
+    // path, otherwise downstream foreach fan-outs would fail-fast with no items.
+    if crate::spec::stage_declares_items_producer(stage) {
+        return format!(
+            r#"{{"items":[{{"stage":"{}","deterministic":true}}]}}"#,
+            stage.id
+        );
+    }
     format!(
         "# Stage {}\n\nKind: `{:?}`\nAgent: `{}`\n",
         stage.id,

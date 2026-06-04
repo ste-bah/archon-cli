@@ -29,7 +29,7 @@ impl WorkflowPlanner for HeuristicWorkflowPlanner {
             max_agents: 200,
             provider_tiers,
             stages: vec![
-                agent(
+                items_producer(
                     "discover",
                     "workflow-discovery",
                     ProviderTier::Planner,
@@ -98,6 +98,21 @@ fn agent(id: &str, agent: &str, tier: ProviderTier, depends_on: Vec<&str>) -> St
         verify_command: None,
         extra: BTreeMap::new(),
     }
+}
+
+/// Like [`agent`] but advertises `outputs: [items]` so it satisfies the
+/// structured fan-out producer contract enforced by `validate_fanout_contracts`.
+fn items_producer(
+    id: &str,
+    agent_name: &str,
+    tier: ProviderTier,
+    depends_on: Vec<&str>,
+) -> StageSpec {
+    let mut stage = agent(id, agent_name, tier, depends_on);
+    stage
+        .extra
+        .insert("outputs".to_string(), serde_json::json!(["items"]));
+    stage
 }
 
 fn fanout(

@@ -16,10 +16,11 @@ stages:
     kind: agent
     agent: codebase-analyzer
     provider_tier: planner
+    outputs: [items]
   - id: review
     kind: fanout
     agent: code-reviewer
-    foreach: "${discover.modules}"
+    foreach: "${discover.items}"
     provider_tier: critic
     depends_on: [discover]
   - id: synthesize
@@ -145,7 +146,7 @@ fn agent_name_is_optional_for_generated_agent_stages() {
 
 #[test]
 fn fanout_foreach_is_optional_for_single_item_generated_stages() {
-    let yaml = valid_yaml().replace("    foreach: \"${discover.modules}\"\n", "");
+    let yaml = valid_yaml().replace("    foreach: \"${discover.items}\"\n", "");
     let spec = WorkflowSpec::from_yaml(&yaml).unwrap();
     assert_eq!(spec.stages[1].foreach, None);
 }
@@ -425,4 +426,132 @@ stages:
             .and_then(serde_json::Value::as_str),
         Some("Tool")
     );
+}
+
+#[test]
+fn fanout_over_token_bridges_to_foreach_when_producer_declares_items() {
+    // Reproduces the live failure (run wf-f28e3ce2): the planner emitted a
+    // decorative `fanout: {over: ordered_workstreams}` block with foreach=null.
+    // The generated normalizer must bridge `over` to a real
+    // `foreach: ${producer.items}` when the token resolves to an upstream stage
+    // that advertises it via `outputs`, and add the depends_on edge.
+    let yaml = r#"
+schema: archon.workflow.v1
+name: generated-fanout-bridge
+task: Implement the decomposed PRD.
+stages:
+  - id: build-dependency-dag
+    kind: agent
+    provider_tier: planner
+    outputs: [task_dag, ordered_workstreams]
+  - id: implement-workstreams
+    kind: fanout
+    provider_tier: coder
+    depends_on: [build-dependency-dag]
+    fanout:
+      over: ordered_workstreams
+      respect_dependencies: task_dag
+"#;
+    let spec = WorkflowSpec::from_generated_yaml(yaml, "Fallback task").unwrap();
+    let fanout = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "implement-workstreams")
+        .unwrap();
+    assert_eq!(
+        fanout.foreach.as_deref(),
+        Some("${build-dependency-dag.items}")
+    );
+    assert!(
+        fanout
+            .depends_on
+            .contains(&"build-dependency-dag".to_string())
+    );
+    // The bridge also records `items` on the producer so the plan satisfies the
+    // producer side of the contract end to end.
+    let producer = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "build-dependency-dag")
+        .unwrap();
+    let outputs: Vec<String> = match producer.extra.get("outputs") {
+        Some(serde_json::Value::Array(values)) => values
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
+        _ => Vec::new(),
+    };
+    assert!(outputs.iter().any(|o| o == "items"), "outputs={outputs:?}");
+}
+
+#[test]
+fn fanout_with_unresolvable_over_token_is_rejected() {
+    // A decorative fan-out whose `over` token resolves to no structured-items
+    // producer cannot be bridged and must be rejected, not silently collapsed
+    // to a single synthetic item at runtime.
+    let yaml = r#"
+schema: archon.workflow.v1
+name: generated-fanout-unresolvable
+task: Implement the decomposed PRD.
+stages:
+  - id: build-dependency-dag
+    kind: agent
+    provider_tier: planner
+  - id: implement-workstreams
+    kind: fanout
+    provider_tier: coder
+    depends_on: [build-dependency-dag]
+    fanout:
+      over: ordered_workstreams
+"#;
+    let err = WorkflowSpec::from_generated_yaml(yaml, "Fallback task").unwrap_err();
+    assert!(
+        matches!(err, WorkflowError::InvalidFanout(_)),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn fanout_foreach_without_items_accessor_is_rejected() {
+    // A fan-out must iterate via the `.items` accessor; other accessors are
+    // never resolved by the runtime.
+    let bad = valid_yaml().replace("${discover.items}", "${discover.modules}");
+    let err = WorkflowSpec::from_yaml(&bad).unwrap_err();
+    assert!(
+        matches!(err, WorkflowError::InvalidFanout(_)),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn fanout_foreach_producer_without_items_declaration_is_rejected() {
+    // The producer side of the contract: a foreach source that does not declare
+    // `outputs: [items]` (or `produces: items`) is rejected.
+    let bad = valid_yaml().replace("    outputs: [items]\n", "");
+    let err = WorkflowSpec::from_yaml(&bad).unwrap_err();
+    assert!(
+        matches!(err, WorkflowError::InvalidFanout(_)),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn bare_fanout_without_iteration_remains_valid() {
+    // The single-item case: a fan-out with neither foreach nor decorative
+    // iteration keys is still a valid spec.
+    let yaml = r#"
+schema: archon.workflow.v1
+name: bare-fanout
+task: Single item fanout.
+stages:
+  - id: discover
+    kind: agent
+    provider_tier: planner
+  - id: review
+    kind: fanout
+    provider_tier: critic
+    depends_on: [discover]
+"#;
+    let spec = WorkflowSpec::from_yaml(yaml).unwrap();
+    assert!(spec.stages[1].foreach.is_none());
 }

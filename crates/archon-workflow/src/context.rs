@@ -53,8 +53,18 @@ pub fn fanout_items(
     if stage.input.get("items").and_then(Value::as_array).is_some() {
         return Ok(extract_items(stage));
     }
-    if let Some(items) = dependency_items(store, run, stage)? {
-        return Ok(items);
+    // A fan-out that declares iteration intent via `foreach: ${producer.items}`
+    // must resolve to real structured items from its producer. If it does not,
+    // fail fast instead of collapsing to a single synthetic item that the agent
+    // would (correctly) reject as missing evidence.
+    if let Some(dep) = foreach_dependency(stage) {
+        return match dependency_items(store, run, stage)? {
+            Some(items) => Ok(items),
+            None => Err(WorkflowError::InvalidFanout(format!(
+                "fanout stage '{}' declares `foreach` over '{dep}' but that producer emitted no parseable non-empty `items:` structure",
+                stage.id
+            ))),
+        };
     }
     let files = source_files(store, run, stage)?;
     if let Some(items) = source_file_items(stage, files) {

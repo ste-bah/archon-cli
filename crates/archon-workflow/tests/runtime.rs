@@ -293,8 +293,19 @@ async fn provider_matrix_executes_code_and_research_workflows() {
             &self,
             request: StageRunRequest,
         ) -> archon_workflow::WorkflowResult<StageRunOutput> {
+            // The `discover` stage is the structured fan-out items producer, so
+            // it must emit a parseable `items:` document for the downstream
+            // foreach fan-out to iterate over.
+            let body = if request.stage_id == "discover" {
+                format!(
+                    r#"{{"items":[{{"provider":"{}","unit":"a"}},{{"provider":"{}","unit":"b"}}]}}"#,
+                    self.provider, self.provider
+                )
+            } else {
+                format!("{} handled {}", self.provider, request.stage_id)
+            };
             Ok(StageRunOutput {
-                body: format!("{} handled {}", self.provider, request.stage_id),
+                body,
                 extension: "md".into(),
                 provider_id: Some(self.provider.into()),
                 resolved_model: Some(format!("{}-test-model", self.provider)),
@@ -425,6 +436,7 @@ stages:
   - id: discover
     kind: agent
     agent: workflow-discovery
+    outputs: [items]
   - id: review
     kind: fanout
     agent: workflow-reviewer
@@ -437,4 +449,48 @@ stages:
 "#
     ))
     .unwrap()
+}
+
+#[tokio::test]
+async fn declared_foreach_fanout_with_no_items_fails_fast() {
+    // When a fan-out declares `foreach: ${discover.items}` but the producer
+    // emits no parseable, non-empty `items:` structure, the runtime must fail
+    // fast instead of collapsing to one synthetic item that the agent would
+    // (correctly) reject as missing evidence.
+    struct EmptyItemsRunner;
+
+    #[async_trait::async_trait]
+    impl WorkflowStageRunner for EmptyItemsRunner {
+        async fn run_stage(
+            &self,
+            request: StageRunRequest,
+        ) -> archon_workflow::WorkflowResult<StageRunOutput> {
+            if request.stage_id == "discover" {
+                // No `items:` document at all — just prose.
+                return Ok(StageRunOutput::markdown(
+                    "Discovery complete. No structured items emitted.",
+                ));
+            }
+            Ok(StageRunOutput::markdown("review body"))
+        }
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let executor = WorkflowExecutor::new(store.clone(), WorkflowPolicy::default());
+    let run = executor.start(audit_spec("Audit with no items")).unwrap();
+    let report = executor
+        .execute_with_runner(run.clone(), &EmptyItemsRunner)
+        .await
+        .unwrap();
+    assert_eq!(
+        report.failed, 1,
+        "fanout must fail when producer emits no items"
+    );
+
+    let finished = store.load_state(&run.id).unwrap();
+    assert_eq!(
+        finished.stages.get("review").unwrap().status,
+        StageStatus::Failed
+    );
 }

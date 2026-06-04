@@ -200,6 +200,90 @@ impl WorkflowSpec {
         self.validate_top_level()?;
         self.validate_stage_fields()?;
         self.validate_dependencies()?;
+        self.validate_fanout_contracts()?;
+        Ok(())
+    }
+
+    /// Enforce the structured fan-out contract on both sides:
+    /// - consumer: a fan-out that declares iteration intent must use
+    ///   `foreach: ${producer.items}` (the `.items` accessor is mandatory),
+    /// - producer: the referenced stage must be an explicit `depends_on`
+    ///   dependency that declares `outputs: [items]` (or `produces: items`).
+    ///
+    /// A decorative `fanout`/`over`/`respect_dependencies` block with no
+    /// resolvable `foreach` is rejected outright so this class of plan cannot
+    /// run and silently collapse to one synthetic item. A bare fan-out with no
+    /// iteration intent at all remains valid as the single-item case.
+    fn validate_fanout_contracts(&self) -> WorkflowResult<()> {
+        let producers: HashSet<&str> = self
+            .stages
+            .iter()
+            .filter(|stage| stage_declares_items_producer(stage))
+            .map(|stage| stage.id.as_str())
+            .collect();
+        for stage in &self.stages {
+            if stage.kind != StageKind::Fanout {
+                continue;
+            }
+            if stage
+                .input
+                .get("items")
+                .and_then(serde_json::Value::as_array)
+                .is_some()
+            {
+                // Inline literal items are a complete, self-contained source.
+                continue;
+            }
+            match stage
+                .foreach
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+            {
+                Some(foreach) => self.validate_fanout_foreach(stage, foreach, &producers)?,
+                None => {
+                    if has_decorative_fanout_keys(stage) {
+                        return Err(WorkflowError::InvalidFanout(format!(
+                            "stage '{}' declares fan-out intent (fanout/over/respect_dependencies) but no `foreach: ${{<producer>.items}}`; bridge it to a real structured-items producer",
+                            stage.id
+                        )));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_fanout_foreach(
+        &self,
+        stage: &StageSpec,
+        foreach: &str,
+        producers: &HashSet<&str>,
+    ) -> WorkflowResult<()> {
+        let Some((dep, accessor)) = parse_foreach_accessor(foreach) else {
+            return Err(WorkflowError::InvalidFanout(format!(
+                "stage '{}' has malformed foreach '{foreach}'; expected `${{<producer>.items}}`",
+                stage.id
+            )));
+        };
+        if accessor != "items" {
+            return Err(WorkflowError::InvalidFanout(format!(
+                "stage '{}' foreach must use the `.items` accessor (got `.{accessor}`)",
+                stage.id
+            )));
+        }
+        if !stage.depends_on.iter().any(|d| d == dep) {
+            return Err(WorkflowError::InvalidFanout(format!(
+                "stage '{}' foreach references '{dep}' which is not in its depends_on",
+                stage.id
+            )));
+        }
+        if !producers.contains(dep) {
+            return Err(WorkflowError::InvalidFanout(format!(
+                "stage '{}' foreach source '{dep}' does not declare a structured items producer (add `outputs: [items]` or `produces: items`)",
+                stage.id
+            )));
+        }
         Ok(())
     }
 
@@ -310,6 +394,54 @@ impl WorkflowSpec {
 
 fn has_text(value: &str) -> bool {
     !value.trim().is_empty()
+}
+
+/// A stage promises structured fan-out items when it declares
+/// `outputs: [..., items, ...]` or `produces: items` in its generated extra
+/// metadata. This is the producer side of the fan-out contract.
+pub(crate) fn stage_declares_items_producer(stage: &StageSpec) -> bool {
+    if extra_list_contains(stage, "outputs", "items") {
+        return true;
+    }
+    matches!(
+        stage
+            .extra
+            .get("produces")
+            .and_then(serde_json::Value::as_str),
+        Some(value) if value.trim().eq_ignore_ascii_case("items")
+    )
+}
+
+fn extra_list_contains(stage: &StageSpec, key: &str, needle: &str) -> bool {
+    match stage.extra.get(key) {
+        Some(serde_json::Value::Array(values)) => values
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .any(|value| value.trim().eq_ignore_ascii_case(needle)),
+        Some(serde_json::Value::String(value)) => value.trim().eq_ignore_ascii_case(needle),
+        _ => false,
+    }
+}
+
+/// True when a stage carries decorative iteration metadata
+/// (`fanout`/`over`/`respect_dependencies`) without a usable `foreach`.
+pub(crate) fn has_decorative_fanout_keys(stage: &StageSpec) -> bool {
+    ["fanout", "over", "respect_dependencies"]
+        .iter()
+        .any(|key| stage.extra.contains_key(*key))
+}
+
+/// Parse `${producer.accessor}` into (`producer`, `accessor`). Returns `None`
+/// for any other shape (including a bare `${producer}` with no accessor).
+pub(crate) fn parse_foreach_accessor(foreach: &str) -> Option<(&str, &str)> {
+    let inner = foreach.trim().strip_prefix("${")?.strip_suffix('}')?;
+    let (stage, accessor) = inner.split_once('.')?;
+    let stage = stage.trim();
+    let accessor = accessor.trim();
+    if stage.is_empty() || accessor.is_empty() {
+        return None;
+    }
+    Some((stage, accessor))
 }
 
 pub(crate) fn is_neutral_tier_hint(value: &str) -> bool {

@@ -18,6 +18,8 @@ pub enum WorkflowError {
     MissingReducer(String),
     #[error("hard-coded provider/model is forbidden on stage '{0}'")]
     HardcodedModel(String),
+    #[error("invalid fan-out contract: {0}")]
+    InvalidFanout(String),
     #[error("stage '{stage}' requires field '{field}'")]
     MissingStageField { stage: String, field: &'static str },
     #[error("duplicate stage id '{0}'")]

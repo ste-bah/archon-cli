@@ -23,6 +23,7 @@ stages:
   - id: discover
     kind: agent
     agent: workflow-discovery
+    outputs: [items]
   - id: review
     kind: fanout
     agent: workflow-reviewer
