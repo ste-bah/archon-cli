@@ -12,6 +12,7 @@ use crate::policy::WorkflowPolicy;
 use crate::request::fanout_item_request;
 use crate::run::{StageStatus, WorkflowRun};
 use crate::runner::{StageRunOutput, WorkflowStageRunner};
+use crate::source_context;
 use crate::spec::{ProviderTier, StageKind, StageSpec};
 use crate::store::WorkflowStore;
 
@@ -28,7 +29,7 @@ pub(crate) async fn run_fanout_with_runner(
     runner: &dyn WorkflowStageRunner,
 ) -> WorkflowResult<StageRunOutput> {
     let items = context::fanout_items(store, run, stage)?;
-    let item_kind = stage.item_kind.unwrap_or(stage.kind);
+    let item_kind = stage.effective_item_kind();
     let implementation_items = item_kind == StageKind::Implementation;
     let width = if implementation_items {
         1
@@ -56,7 +57,7 @@ pub(crate) async fn run_fanout_with_runner(
         .collect::<Vec<_>>();
     for item in &pending_items {
         if implementation_items {
-            match item_acceptance(run, stage, item) {
+            match item_acceptance(store, run, stage, item) {
                 Ok(binding) => {
                     acceptances.insert(item.id.clone(), binding);
                 }
@@ -170,9 +171,10 @@ fn record_implementation_success(
         record_output_failure(store, run, stage, item_id.clone(), output, error.clone())?;
         return Err(WorkflowError::StageFailed(format!("{item_id}: {error}")));
     }
-    let after = acceptance::snapshot_targets(&run.root, &binding.targets);
+    let root = source_context::effective_root(store, run);
+    let after = acceptance::snapshot_targets(&root, &binding.targets);
     let outcome = acceptance::evaluate(
-        &run.root,
+        &root,
         &binding.targets,
         &binding.before,
         &after,
@@ -305,6 +307,7 @@ fn record_output_failure(
 }
 
 fn item_acceptance(
+    store: &WorkflowStore,
     run: &WorkflowRun,
     stage: &StageSpec,
     item: &FanoutItem,
@@ -316,7 +319,8 @@ fn item_acceptance(
             item.id
         )));
     }
-    let before = acceptance::snapshot_targets(&run.root, &targets);
+    let root = source_context::effective_root(store, run);
+    let before = acceptance::snapshot_targets(&root, &targets);
     Ok(ItemAcceptance { targets, before })
 }
 

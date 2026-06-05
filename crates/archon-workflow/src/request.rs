@@ -37,7 +37,7 @@ pub(crate) fn fanout_item_request(
 ) -> WorkflowResult<StageRunRequest> {
     let mut request = stage_request(store, run, stage)?;
     request.stage_id = item.id.clone();
-    request.stage_kind = stage.item_kind.unwrap_or(stage.kind);
+    request.stage_kind = stage.effective_item_kind();
     request.input = context::fanout_input(store, run, stage, item)?;
     Ok(request)
 }

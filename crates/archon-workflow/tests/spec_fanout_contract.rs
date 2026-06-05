@@ -87,6 +87,63 @@ stages:
 }
 
 #[test]
+fn generated_implementation_fanout_gets_item_kind() {
+    let yaml = r#"
+schema: archon.workflow.v1
+name: generated-implementation-fanout
+task: Implement the decomposed PRD.
+stages:
+  - id: task_inventory
+    kind: agent
+    outputs: [items]
+  - id: implement_task
+    kind: fanout
+    task: Implement only the missing work for each item and modify repository files directly.
+    provider_tier: coder
+    foreach: "${task_inventory.items}"
+    depends_on: [task_inventory]
+"#;
+    let spec = WorkflowSpec::from_generated_yaml(yaml, "Fallback task").unwrap();
+    let stage = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "implement_task")
+        .unwrap();
+    assert_eq!(
+        stage.item_kind,
+        Some(archon_workflow::StageKind::Implementation)
+    );
+    assert_eq!(
+        stage.effective_item_kind(),
+        archon_workflow::StageKind::Implementation
+    );
+}
+
+#[test]
+fn user_authored_implementation_fanout_without_item_kind_is_rejected() {
+    let yaml = r#"
+schema: archon.workflow.v1
+name: missing-item-kind
+task: Implement the decomposed PRD.
+stages:
+  - id: task_inventory
+    kind: agent
+    outputs: [items]
+  - id: implement_task
+    kind: fanout
+    task: Implement only the missing work for each item.
+    provider_tier: coder
+    foreach: "${task_inventory.items}"
+    depends_on: [task_inventory]
+"#;
+    let err = WorkflowSpec::from_yaml(yaml).unwrap_err();
+    assert!(
+        err.to_string().contains("item_kind: implementation"),
+        "got {err:?}"
+    );
+}
+
+#[test]
 fn fanout_with_unresolvable_over_token_is_rejected() {
     // A decorative fan-out whose `over` token resolves to no structured-items
     // producer cannot be bridged and must be rejected, not silently collapsed

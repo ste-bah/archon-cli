@@ -329,6 +329,9 @@ impl WorkflowSpec {
                     stage.id
                 )));
             }
+            if let Some(error) = crate::spec_inference::missing_item_kind_error(stage) {
+                return Err(WorkflowError::SpecInvalid(error));
+            }
             match stage.kind {
                 StageKind::Agent => {}
                 StageKind::Fanout => {

@@ -8,8 +8,20 @@ pub fn normalize_generated_spec(spec: &mut WorkflowSpec) {
     neutralize_provider_tiers(spec);
     normalize_under_specified_stages(spec);
     bridge_decorative_fanouts(spec);
+    infer_implementation_fanouts(spec);
     infer_dependencies_from_io(spec);
     promote_quality_gate_entries(spec);
+}
+
+fn infer_implementation_fanouts(spec: &mut WorkflowSpec) {
+    for stage in &mut spec.stages {
+        if stage.infers_implementation_fanout()
+            && (has_usable_foreach(stage)
+                || stage.input.get("items").and_then(Value::as_array).is_some())
+        {
+            stage.item_kind = Some(StageKind::Implementation);
+        }
+    }
 }
 
 /// Planner LLMs frequently describe a fan-out with a decorative block

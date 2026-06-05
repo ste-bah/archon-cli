@@ -1,7 +1,4 @@
-use std::collections::BTreeSet;
-use std::fs::{self, File};
-use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::fs;
 
 use serde_json::{Value, json};
 
@@ -9,25 +6,26 @@ use crate::error::{WorkflowError, WorkflowResult};
 use crate::fanout::{FanoutItem, extract_items};
 use crate::reducers::ReducerInput;
 use crate::run::{ArtifactRef, WorkflowRun};
+use crate::source_context;
 use crate::spec::StageSpec;
 use crate::store::WorkflowStore;
 
 const MAX_ARTIFACT_CHARS: usize = 32_000;
-const MAX_SOURCE_BYTES: usize = 64 * 1024;
-const MAX_SOURCE_FILES: usize = 8;
 
 pub fn stage_input(
     store: &WorkflowStore,
     run: &WorkflowRun,
     stage: &StageSpec,
 ) -> WorkflowResult<Value> {
+    let root = source_context::effective_root(store, run);
     Ok(json!({
         "workflow_task": run.spec.task,
         "stage_task": stage.task,
         "stage_extra": stage.extra,
         "stage_input": stage.input,
+        "target_repository_root": root.display().to_string(),
         "dependencies": dependency_context(store, run, &stage.depends_on)?,
-        "source_files": source_files(store, run, stage)?,
+        "source_files": source_context::stage_source_files(store, run, stage),
     }))
 }
 
@@ -37,11 +35,20 @@ pub fn fanout_input(
     stage: &StageSpec,
     item: &FanoutItem,
 ) -> WorkflowResult<Value> {
+    let context = stage_input(store, run, stage)?;
+    let sources = source_context::fanout_source_files(store, run, stage, item, &context);
     Ok(json!({
+        "workflow_task": run.spec.task,
+        "stage_task": stage.task,
+        "stage_extra": stage.extra,
+        "stage_input": stage.input,
+        "target_repository_root": source_context::effective_root(store, run).display().to_string(),
+        "dependencies": context.get("dependencies").cloned().unwrap_or_else(|| json!([])),
+        "source_files": sources,
         "fanout_stage": stage.id,
         "fanout_item_id": item.id,
         "fanout_item": item.payload,
-        "context": stage_input(store, run, stage)?,
+        "context": context,
     }))
 }
 
@@ -66,7 +73,7 @@ pub fn fanout_items(
             ))),
         };
     }
-    let files = source_files(store, run, stage)?;
+    let files = source_context::stage_source_files(store, run, stage);
     if let Some(items) = source_file_items(stage, files) {
         return Ok(items);
     }
@@ -256,7 +263,6 @@ fn dependency_items(
     let Some(dep) = foreach_dependency(stage) else {
         return Ok(None);
     };
-    let project_root = project_root(store);
     for body in dependency_bodies(store, run, &dep)? {
         if let Some(items) = parse_items(&body) {
             let items = items
@@ -264,7 +270,7 @@ fn dependency_items(
                 .enumerate()
                 .map(|(idx, payload)| FanoutItem {
                     id: format!("{}-{idx}", stage.id),
-                    payload: enrich_payload(&project_root, payload),
+                    payload: source_context::enrich_payload(store, run, payload),
                 })
                 .collect::<Vec<_>>();
             if !items.is_empty() {
@@ -273,24 +279,6 @@ fn dependency_items(
         }
     }
     Ok(None)
-}
-
-fn source_files(
-    store: &WorkflowStore,
-    run: &WorkflowRun,
-    stage: &StageSpec,
-) -> WorkflowResult<Vec<Value>> {
-    let project_root = project_root(store);
-    let mut candidates = BTreeSet::new();
-    for candidate in path_candidates(&run.spec.task) {
-        candidates.insert(candidate);
-    }
-    collect_value_paths(&stage.input, &mut candidates);
-    Ok(candidates
-        .into_iter()
-        .filter_map(|candidate| read_source_file(&project_root, &candidate))
-        .take(MAX_SOURCE_FILES)
-        .collect())
 }
 
 fn source_file_items(stage: &StageSpec, files: Vec<Value>) -> Option<Vec<FanoutItem>> {
@@ -340,106 +328,6 @@ fn foreach_dependency(stage: &StageSpec) -> Option<String> {
     let foreach = stage.foreach.as_deref()?.trim();
     let inner = foreach.strip_prefix("${")?.strip_suffix('}')?;
     inner.split('.').next().map(str::to_string)
-}
-
-fn enrich_payload(project_root: &Path, payload: Value) -> Value {
-    if let Some(path) = payload.as_str() {
-        return read_source_file(project_root, path).unwrap_or_else(|| json!({"value": path}));
-    }
-    if let Some(path) = payload.get("path").and_then(Value::as_str)
-        && payload.get("content").is_none()
-        && let Some(file) = read_source_file(project_root, path)
-    {
-        return merge_payload(payload, file);
-    }
-    payload
-}
-
-fn merge_payload(mut payload: Value, file: Value) -> Value {
-    if let (Some(dst), Some(src)) = (payload.as_object_mut(), file.as_object()) {
-        for (key, value) in src {
-            dst.entry(key.clone()).or_insert_with(|| value.clone());
-        }
-    }
-    payload
-}
-
-fn collect_value_paths(value: &Value, out: &mut BTreeSet<String>) {
-    match value {
-        Value::String(text) => {
-            for candidate in path_candidates(text) {
-                out.insert(candidate);
-            }
-        }
-        Value::Array(items) => items.iter().for_each(|item| collect_value_paths(item, out)),
-        Value::Object(map) => map.values().for_each(|item| collect_value_paths(item, out)),
-        _ => {}
-    }
-}
-
-fn path_candidates(text: &str) -> Vec<String> {
-    text.split(|ch: char| !(ch.is_ascii_alphanumeric() || "/._-~".contains(ch)))
-        .filter(|part| looks_like_path(part))
-        .map(|part| part.trim_matches('.').to_string())
-        .collect()
-}
-
-fn looks_like_path(text: &str) -> bool {
-    !text.starts_with("http")
-        && (text.contains('/') || text.contains('\\'))
-        && [".rs", ".toml", ".md", ".json", ".yaml", ".yml", ".txt"]
-            .iter()
-            .any(|ext| text.ends_with(ext))
-}
-
-fn read_source_file(project_root: &Path, path: &str) -> Option<Value> {
-    let raw = Path::new(path);
-    let path = if raw.is_absolute() {
-        raw.to_path_buf()
-    } else {
-        project_root.join(raw)
-    };
-    let canonical = path.canonicalize().ok()?;
-    let root = project_root.canonicalize().ok()?;
-    if !canonical.starts_with(&root) || !canonical.is_file() {
-        return None;
-    }
-    let metadata = canonical.metadata().ok()?;
-    let mut file = File::open(&canonical).ok()?;
-    let mut bytes = Vec::new();
-    file.by_ref()
-        .take(MAX_SOURCE_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)
-        .ok()?;
-    let truncated = bytes.len() > MAX_SOURCE_BYTES || metadata.len() > MAX_SOURCE_BYTES as u64;
-    bytes.truncate(MAX_SOURCE_BYTES);
-    let content = String::from_utf8_lossy(&bytes).to_string();
-    Some(json!({
-        "path": path.strip_prefix(project_root).unwrap_or(&path).display().to_string(),
-        "absolute_path": canonical.display().to_string(),
-        "bytes": metadata.len(),
-        "truncated": truncated,
-        "content": content,
-    }))
-}
-
-fn project_root(store: &WorkflowStore) -> PathBuf {
-    let root = store.root();
-    if root.file_name().is_some_and(|name| name == "workflows")
-        && root
-            .parent()
-            .and_then(Path::file_name)
-            .is_some_and(|name| name == ".archon")
-    {
-        return root
-            .parent()
-            .and_then(Path::parent)
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| root.to_path_buf());
-    }
-    root.parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| root.to_path_buf())
 }
 
 fn truncate_chars(body: &str, limit: usize) -> String {

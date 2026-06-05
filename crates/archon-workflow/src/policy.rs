@@ -121,8 +121,7 @@ impl WorkflowPolicy {
 }
 
 fn stage_write_capable(stage: &StageSpec) -> bool {
-    stage.kind == StageKind::Implementation
-        || (stage.kind == StageKind::Fanout && stage.item_kind == Some(StageKind::Implementation))
+    stage.write_capable()
 }
 
 fn is_dangerous_tool(tool: &str) -> bool {

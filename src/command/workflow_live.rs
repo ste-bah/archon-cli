@@ -345,7 +345,7 @@ fn workflow_prompt(request: &StageRunRequest) -> String {
     let input =
         serde_json::to_string_pretty(&request.input).unwrap_or_else(|_| request.input.to_string());
     format!(
-        "## Workflow Task\n{}\n\n## Stage\nid: {}\nkind: {:?}\nprovider_tier: {:?}\nattempt: {}\ndepends_on: {:?}\n\n## Evidence Contract\nUse the `source_files`, `dependencies`, and `fanout_item` fields in the stage input as primary evidence. If required source files or upstream artifacts are absent, return a concise blocked report with `status: blocked`, the missing evidence, and do not invent findings.\n\n## Stage Input\n```json\n{}\n```",
+        "## Workflow Task\n{}\n\n## Stage\nid: {}\nkind: {:?}\nprovider_tier: {:?}\nattempt: {}\ndepends_on: {:?}\n\n## Evidence Contract\nUse the `target_repository_root`, `source_files`, `dependencies`, and `fanout_item` fields in the stage input as primary evidence. For implementation stages, resolve relative target paths against `target_repository_root` and modify the repository files directly with the available tools. A `source_files` entry with `exists:false` is valid greenfield evidence for a declared target file; do not block only because that target does not exist yet. If required task files, source files, or upstream artifacts are absent, return a concise blocked report with `status: blocked`, the missing evidence, and do not invent findings.\n\n## Stage Input\n```json\n{}\n```",
         request.task,
         request.stage_id,
         request.stage_kind,
@@ -377,6 +377,12 @@ fn allowed_tools(request: &StageRunRequest) -> Vec<String> {
             "Write",
             "Edit",
             "ApplyPatch",
+            "LargeEditBegin",
+            "LargeEditInsertAfter",
+            "LargeEditReplaceSection",
+            "LargeEditDeleteSection",
+            "LargeEditCommit",
+            "LargeEditAbort",
             "Bash",
         ],
         StageKind::Tool => vec!["Read", "Grep", "Glob", "DocSearch", "DocGet"],

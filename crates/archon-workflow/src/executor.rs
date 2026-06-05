@@ -15,6 +15,7 @@ use crate::reducers::ReducerRegistry;
 use crate::request::stage_request;
 use crate::run::{RunStatus, StageStatus, WorkflowRun};
 use crate::runner::{StageRunOutput, WorkflowStageRunner};
+use crate::source_context;
 use crate::spec::{ReducerKind, StageKind, StageSpec, WorkflowSpec};
 use crate::stage::{ordered_stages, stage_ready};
 use crate::store::WorkflowStore;
@@ -295,7 +296,7 @@ impl WorkflowExecutor {
         stage: &StageSpec,
         runner: &dyn WorkflowStageRunner,
     ) -> WorkflowResult<StageRunOutput> {
-        let root = run.root.clone();
+        let root = source_context::effective_root(&self.store, run);
         let before = acceptance::snapshot_targets(&root, &stage.expected_target_files);
         let request = stage_request(&self.store, run, stage)?;
         persistence::record_prompt(&self.store, &request)?;
