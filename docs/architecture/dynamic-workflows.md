@@ -36,7 +36,7 @@ A workflow plan is YAML with:
 - `max_parallelism` and `max_agents`
 - provider tiers such as `planner`, `critic`, and `reducer`
 - stages of kind `agent`, `fanout`, `reduce`, `condition`, `tool`,
-  `checkpoint`, `quality_gate`, or `human_gate`
+  `checkpoint`, `quality_gate`, `human_gate`, or `implementation`
 - artifact, permission, quality-gate, and learning-hook metadata
 
 Provider-specific model IDs are not allowed inside stages. A stage may request
@@ -55,6 +55,13 @@ top-level `quality_gates` entries can be promoted into executable
 `quality_gate` stages, missing agent names fall back to the stage id, missing
 fan-out `foreach` values run as a single item, and missing reducer kinds default
 to `evidence_weighted_report`.
+
+Write-capable generated plans must use a typed implementation contract. Known
+single-stage edits use `kind: implementation` with `expected_target_files`.
+Per-task fan-out edits use `kind: fanout` with `item_kind: implementation`; each
+item must carry `target_files`, and the runtime grants write tools to each item
+only after binding acceptance to those target files. A text-only fan-out cannot
+stand in for implementation.
 
 ## Durable state
 
@@ -82,6 +89,7 @@ Dynamic workflow validation rejects:
 - hard-coded provider or model fields
 - hard-coded provider/model values inside generated provider-tier maps or lists
 - policy-denied dangerous tool stages
+- implementation fan-out stages without inline items or `foreach`
 
 Event payloads are sanitized before persistence. Provider-private reasoning
 fields such as `thinking`, `reasoning_encrypted`, OAuth tokens, API keys, and

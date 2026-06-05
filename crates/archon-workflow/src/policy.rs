@@ -101,9 +101,9 @@ impl WorkflowPolicy {
         if stage.kind == StageKind::Fanout && !self.allow_parallel_agents {
             return PolicyDecision::Deny("parallel fan-out denied by policy".into());
         }
-        if stage.kind == StageKind::Implementation && self.require_human_for_dangerous_tools {
+        if stage_write_capable(stage) && self.require_human_for_dangerous_tools {
             return PolicyDecision::RequireHuman(format!(
-                "implementation stage '{}' is write-capable and requires human approval",
+                "stage '{}' is write-capable and requires human approval",
                 stage.id
             ));
         }
@@ -118,6 +118,11 @@ impl WorkflowPolicy {
         }
         PolicyDecision::Allow
     }
+}
+
+fn stage_write_capable(stage: &StageSpec) -> bool {
+    stage.kind == StageKind::Implementation
+        || (stage.kind == StageKind::Fanout && stage.item_kind == Some(StageKind::Implementation))
 }
 
 fn is_dangerous_tool(tool: &str) -> bool {

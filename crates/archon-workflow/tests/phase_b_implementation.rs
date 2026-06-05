@@ -210,3 +210,93 @@ async fn implementation_start_denied_under_default_policy() {
         "default policy should deny start: {err}"
     );
 }
+
+#[tokio::test]
+async fn implementation_fanout_mutates_each_item_target() {
+    struct FanoutImplRunner;
+
+    #[async_trait::async_trait]
+    impl WorkflowStageRunner for FanoutImplRunner {
+        async fn run_stage(
+            &self,
+            request: StageRunRequest,
+        ) -> archon_workflow::WorkflowResult<StageRunOutput> {
+            assert_eq!(request.stage_kind, StageKind::Implementation);
+            let target = request.input["fanout_item"]["target_files"][0]
+                .as_str()
+                .unwrap();
+            std::fs::write(target, format!("changed by {}", request.stage_id)).unwrap();
+            Ok(StageRunOutput::markdown("implemented fanout item"))
+        }
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let target = temp.path().join("fanout.txt");
+    std::fs::write(&target, "before").unwrap();
+    let spec = WorkflowSpec::from_yaml(&format!(
+        r#"
+schema: archon.workflow.v1
+name: fanout-implementation
+task: implement each item
+stages:
+  - id: implement_task
+    kind: fanout
+    item_kind: implementation
+    provider_tier: coder
+    input:
+      items:
+        - task_id: T001
+          target_files: ["{}"]
+"#,
+        target.display()
+    ))
+    .unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let executor = WorkflowExecutor::new(store.clone(), permissive_policy());
+    let run = executor.start(spec).unwrap();
+    let report = executor
+        .execute_with_runner(run.clone(), &FanoutImplRunner)
+        .await
+        .unwrap();
+    assert_eq!(report.failed, 0);
+
+    let state = store.load_state(&run.id).unwrap();
+    assert_eq!(
+        state.stages.get("implement_task").unwrap().status,
+        StageStatus::Accepted
+    );
+    assert!(
+        std::fs::read_to_string(&target)
+            .unwrap()
+            .contains("changed")
+    );
+}
+
+#[test]
+fn implementation_fanout_is_write_gated_by_default_policy() {
+    let spec = WorkflowSpec::from_yaml(
+        r#"
+schema: archon.workflow.v1
+name: fanout-implementation-gate
+task: implement each item
+stages:
+  - id: implement_task
+    kind: fanout
+    item_kind: implementation
+    input:
+      items:
+        - target_files: ["out.txt"]
+"#,
+    )
+    .unwrap();
+    let stage = spec
+        .stages
+        .iter()
+        .find(|s| s.id == "implement_task")
+        .unwrap();
+    let decision = WorkflowPolicy::default().stage_decision(stage);
+    assert!(
+        matches!(decision, PolicyDecision::RequireHuman(_)),
+        "implementation fanout must be write gated: {decision:?}"
+    );
+}

@@ -239,6 +239,15 @@ async fn blocked_fanout_output_fails_stage_instead_of_accepting() {
         finished.stages.get("review").unwrap().status,
         StageStatus::Failed
     );
+    let output_path = store
+        .run_dir(&run.id)
+        .join("agent-outputs")
+        .join("review")
+        .join("review-0.json");
+    assert!(
+        output_path.exists(),
+        "blocked fanout output must be persisted for inspection"
+    );
 }
 
 #[tokio::test]

@@ -131,24 +131,14 @@ pub struct StageSpec {
     pub model: Option<String>,
     #[serde(default)]
     pub provider: Option<String>,
-    /// Files an `implementation` stage must mutate for acceptance (Phase B).
-    /// Non-empty only for `StageKind::Implementation`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub expected_target_files: Vec<String>,
-    /// Shell command that must exit 0 for an `implementation` stage to be
-    /// accepted (Phase B acceptance binding).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verify_command: Option<String>,
-    /// Stage-level fan-out parallelism override (Fanout stages only).
-    ///
-    /// When set, this caps the concurrent fan-out width for THIS stage,
-    /// further clamped by the run-level `spec.max_parallelism`, the policy
-    /// ceiling, and any runner concurrency capacity. When `None`, the stage
-    /// inherits the run-level `spec.max_parallelism`. Previously a planner that
-    /// set `max_parallelism` on a stage had it silently swallowed by `extra`
-    /// and ignored; this field makes it authoritative.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_parallelism: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_kind: Option<StageKind>,
     #[serde(default, flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, serde_json::Value>,
 }
@@ -214,16 +204,6 @@ impl WorkflowSpec {
         Ok(())
     }
 
-    /// Enforce the structured fan-out contract on both sides:
-    /// - consumer: a fan-out that declares iteration intent must use
-    ///   `foreach: ${producer.items}` (the `.items` accessor is mandatory),
-    /// - producer: the referenced stage must be an explicit `depends_on`
-    ///   dependency that declares `outputs: [items]` (or `produces: items`).
-    ///
-    /// A decorative `fanout`/`over`/`respect_dependencies` block with no
-    /// resolvable `foreach` is rejected outright so this class of plan cannot
-    /// run and silently collapse to one synthetic item. A bare fan-out with no
-    /// iteration intent at all remains valid as the single-item case.
     fn validate_fanout_contracts(&self) -> WorkflowResult<()> {
         let producers: HashSet<&str> = self
             .stages
@@ -341,8 +321,31 @@ impl WorkflowSpec {
             {
                 return Err(WorkflowError::HardcodedModel(stage.id.clone()));
             }
+            if let Some(item_kind) = stage.item_kind
+                && (stage.kind != StageKind::Fanout || item_kind != StageKind::Implementation)
+            {
+                return Err(WorkflowError::SpecInvalid(format!(
+                    "stage '{}' item_kind is only supported as `implementation` on fanout stages",
+                    stage.id
+                )));
+            }
             match stage.kind {
-                StageKind::Agent | StageKind::Fanout => {}
+                StageKind::Agent => {}
+                StageKind::Fanout => {
+                    if stage.item_kind == Some(StageKind::Implementation)
+                        && stage.foreach.as_deref().is_none_or(|v| !has_text(v))
+                        && stage
+                            .input
+                            .get("items")
+                            .and_then(serde_json::Value::as_array)
+                            .is_none()
+                    {
+                        return Err(WorkflowError::SpecInvalid(format!(
+                            "implementation fanout stage '{}' requires inline items or foreach",
+                            stage.id
+                        )));
+                    }
+                }
                 StageKind::Reduce => {}
                 StageKind::Condition => require(stage, stage.condition.as_deref(), "condition")?,
                 StageKind::Tool => require(stage, stage.tool.as_deref(), "tool")?,
@@ -406,9 +409,6 @@ fn has_text(value: &str) -> bool {
     !value.trim().is_empty()
 }
 
-/// A stage promises structured fan-out items when it declares
-/// `outputs: [..., items, ...]` or `produces: items` in its generated extra
-/// metadata. This is the producer side of the fan-out contract.
 pub(crate) fn stage_declares_items_producer(stage: &StageSpec) -> bool {
     if extra_list_contains(stage, "outputs", "items") {
         return true;
@@ -433,16 +433,12 @@ fn extra_list_contains(stage: &StageSpec, key: &str, needle: &str) -> bool {
     }
 }
 
-/// True when a stage carries decorative iteration metadata
-/// (`fanout`/`over`/`respect_dependencies`) without a usable `foreach`.
 pub(crate) fn has_decorative_fanout_keys(stage: &StageSpec) -> bool {
     ["fanout", "over", "respect_dependencies"]
         .iter()
         .any(|key| stage.extra.contains_key(*key))
 }
 
-/// Parse `${producer.accessor}` into (`producer`, `accessor`). Returns `None`
-/// for any other shape (including a bare `${producer}` with no accessor).
 pub(crate) fn parse_foreach_accessor(foreach: &str) -> Option<(&str, &str)> {
     let inner = foreach.trim().strip_prefix("${")?.strip_suffix('}')?;
     let (stage, accessor) = inner.split_once('.')?;

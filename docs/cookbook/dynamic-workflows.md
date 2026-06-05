@@ -269,6 +269,8 @@ Before running a generated workflow against real tools or a large repo, confirm:
 - no `provider` or `model` fields are hard-coded in stages
 - `max_parallelism` is sane for the active provider
 - fan-out stages have a downstream reducer
+- repository-changing stages use `kind: implementation` or
+  `item_kind: implementation` with concrete `target_files`
 - tool stages do not request dangerous commands without a policy gate
 - expected artifacts are stored rather than dumped into chat
 - failed or forced stages are visible in `status` before accepting output
