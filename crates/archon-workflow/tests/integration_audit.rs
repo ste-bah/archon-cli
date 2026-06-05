@@ -108,6 +108,29 @@ async fn audit_workflow_runs_end_to_end_through_provider_abstraction() {
             "stage {stage} must be accepted"
         );
     }
+
+    // PRD-009/T030/T033/T060: runtime audit records are inspectable in the
+    // durable run layout, not only in state.json.
+    for path in [
+        "prompts/discover/discover.json",
+        "agent-outputs/discover/discover.json",
+        "prompts/review/review-0.json",
+        "agent-outputs/review/review-0.json",
+        "artifacts/review/review-0.md",
+        "artifacts/review/review-0.meta.json",
+        "reducers/report.json",
+        "quality/quality.json",
+        "learning/records.jsonl",
+        "learning/adapter-jepa.jsonl",
+        "learning/adapter-world-model.jsonl",
+    ] {
+        assert!(
+            store.run_dir(&run_id).join(path).exists(),
+            "missing workflow audit record {path}"
+        );
+    }
+    assert_json_clean(&store, &run_id, "agent-outputs/discover/discover.json");
+    assert_json_clean(&store, &run_id, "prompts/discover/discover.json");
 }
 
 #[test]
@@ -180,4 +203,13 @@ async fn audit_workflow_runs_under_all_six_provider_families() {
             .unwrap();
         assert_eq!(report.failed, 0, "{provider} audit must succeed");
     }
+}
+
+fn assert_json_clean(store: &WorkflowStore, run_id: &str, path: &str) {
+    let body = std::fs::read_to_string(store.run_dir(run_id).join(path)).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert!(
+        !contains_forbidden_field(&value),
+        "{path} leaked private fields"
+    );
 }

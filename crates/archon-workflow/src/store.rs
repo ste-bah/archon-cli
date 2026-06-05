@@ -1,6 +1,6 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -24,6 +24,18 @@ struct RunManifest {
     name: String,
     created_at: String,
     schema: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ArtifactSidecar<'a> {
+    id: &'a str,
+    path: String,
+    content_hash: &'a str,
+    producing_stage: &'a str,
+    artifact_key: &'a str,
+    source_input_hash: &'a str,
+    accepted: bool,
+    created_at: String,
 }
 
 #[derive(Debug, Clone)]
@@ -157,6 +169,74 @@ impl WorkflowStore {
         })
     }
 
+    pub fn write_named_artifact(
+        &self,
+        run_id: &str,
+        producing_stage: &str,
+        artifact_key: &str,
+        source_input_hash: &str,
+        extension: &str,
+        bytes: &[u8],
+        accepted: bool,
+    ) -> WorkflowResult<ArtifactRef> {
+        let content_hash = blake3::hash(bytes).to_hex().to_string();
+        let safe_stage = safe_path_component(producing_stage);
+        let safe_key = safe_path_component(artifact_key);
+        let safe_ext = extension.trim_start_matches('.').trim();
+        let suffix = if safe_ext.is_empty() { "bin" } else { safe_ext };
+        let id = format!("{safe_stage}-{safe_key}-{}", &content_hash[..12]);
+        let rel = PathBuf::from("artifacts")
+            .join(&safe_stage)
+            .join(format!("{safe_key}.{suffix}"));
+        self.write_run_file(run_id, &rel, bytes)?;
+        let artifact = ArtifactRef {
+            id,
+            path: rel,
+            content_hash,
+            producing_stage: producing_stage.to_string(),
+            source_input_hash: source_input_hash.to_string(),
+            accepted,
+        };
+        let meta_rel = PathBuf::from("artifacts")
+            .join(&safe_stage)
+            .join(format!("{safe_key}.meta.json"));
+        let sidecar = ArtifactSidecar {
+            id: &artifact.id,
+            path: artifact.path.display().to_string(),
+            content_hash: &artifact.content_hash,
+            producing_stage,
+            artifact_key,
+            source_input_hash,
+            accepted,
+            created_at: Utc::now().to_rfc3339(),
+        };
+        self.write_run_json(run_id, &meta_rel, &sidecar)?;
+        Ok(artifact)
+    }
+
+    pub fn write_run_json<T: Serialize>(
+        &self,
+        run_id: &str,
+        relative_path: impl AsRef<Path>,
+        value: &T,
+    ) -> WorkflowResult<()> {
+        let bytes = serde_json::to_vec_pretty(value)?;
+        self.write_run_file(run_id, relative_path.as_ref(), &bytes)
+    }
+
+    pub fn write_run_file(
+        &self,
+        run_id: &str,
+        relative_path: impl AsRef<Path>,
+        bytes: &[u8],
+    ) -> WorkflowResult<()> {
+        let relative_path = relative_path.as_ref();
+        validate_run_relative_path(relative_path)?;
+        let target = self.run_dir(run_id).join(relative_path);
+        let tmp = target.with_extension("tmp");
+        write_atomic(&tmp, &target, bytes)
+    }
+
     pub fn validate_for_reuse(
         &self,
         run: &WorkflowRun,
@@ -206,6 +286,37 @@ impl WorkflowStore {
         let body = run.spec.to_yaml()?;
         write_atomic(&tmp, &path, body.as_bytes())
     }
+}
+
+pub(crate) fn safe_path_component(value: &str) -> String {
+    let mut out = String::new();
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() {
+        "unnamed".into()
+    } else {
+        out
+    }
+}
+
+fn validate_run_relative_path(path: &Path) -> WorkflowResult<()> {
+    if path.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
+        return Err(WorkflowError::SpecInvalid(format!(
+            "workflow run path must be relative and stay inside run dir: {}",
+            path.display()
+        )));
+    }
+    Ok(())
 }
 
 fn write_atomic(tmp: &Path, target: &Path, bytes: &[u8]) -> WorkflowResult<()> {

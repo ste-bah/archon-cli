@@ -5,6 +5,7 @@ use serde_json::json;
 
 use crate::error::{WorkflowError, WorkflowResult};
 use crate::events::{WorkflowEventKind, WorkflowEventLog};
+use crate::persistence;
 use crate::run::{RunStatus, StageStatus, WorkflowRun};
 use crate::store::WorkflowStore;
 
@@ -38,11 +39,46 @@ impl LifecycleController {
 
     pub fn apply(&self, run_id: &str, action: LifecycleAction) -> WorkflowResult<WorkflowRun> {
         let mut run = self.store.load_state(run_id)?;
+        let forced_record = forced_accept_record(&action);
         let event = apply_action(&mut run, action)?;
         run.updated_at = Utc::now();
         self.store.save_state(&run)?;
+        if let Some(record) = forced_record {
+            persistence::record_forced_accept(
+                &self.store,
+                &run.id,
+                &record.stage_id,
+                &record.forced_by,
+                &record.rationale,
+                &record.source,
+            )?;
+        }
         emit_lifecycle_event(&self.store, &run.id, event)?;
         Ok(run)
+    }
+}
+
+struct ForcedAcceptRecord {
+    stage_id: String,
+    forced_by: String,
+    rationale: String,
+    source: String,
+}
+
+fn forced_accept_record(action: &LifecycleAction) -> Option<ForcedAcceptRecord> {
+    match action {
+        LifecycleAction::ForceAcceptStage {
+            stage_id,
+            forced_by,
+            rationale,
+            source,
+        } => Some(ForcedAcceptRecord {
+            stage_id: stage_id.clone(),
+            forced_by: forced_by.clone(),
+            rationale: rationale.clone(),
+            source: source.clone(),
+        }),
+        _ => None,
     }
 }
 

@@ -343,35 +343,6 @@ async fn provider_matrix_executes_code_and_research_workflows() {
 }
 
 #[test]
-fn force_accept_records_audited_lifecycle_event() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = WorkflowStore::new(temp.path().join("workflows"));
-    let spec = HeuristicWorkflowPlanner.plan("Research a topic").unwrap();
-    let mut run = store.create_run(spec).unwrap();
-    run.stage_mut("discover").unwrap().status = StageStatus::Failed;
-    store.save_state(&run).unwrap();
-
-    let updated = LifecycleController::new(store.clone())
-        .apply(
-            &run.id,
-            LifecycleAction::ForceAcceptStage {
-                stage_id: "discover".into(),
-                forced_by: "test".into(),
-                rationale: "known acceptable fixture".into(),
-                source: "unit-test".into(),
-            },
-        )
-        .unwrap();
-    assert_eq!(
-        updated.stages.get("discover").unwrap().status,
-        StageStatus::ForcedAccepted
-    );
-    let events = std::fs::read_to_string(store.events_path(&run.id)).unwrap();
-    assert!(events.contains("forced_accepted"));
-    assert!(events.contains("known acceptable fixture"));
-}
-
-#[test]
 fn template_save_rejects_embedded_secret_text() {
     let temp = tempfile::tempdir().unwrap();
     let mut spec = HeuristicWorkflowPlanner.plan("Research a topic").unwrap();

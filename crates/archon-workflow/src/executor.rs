@@ -6,16 +6,17 @@ use crate::context;
 use crate::error::{WorkflowError, WorkflowResult};
 use crate::events::{WorkflowEventKind, WorkflowEventLog};
 use crate::exec_state::{finish_run, mark_finished, mark_started, pause_for_human_gate, report};
+use crate::executor_fanout;
 use crate::executor_output::{deterministic_stage_output, ensure_output_usable};
-use crate::fanout;
-use crate::learning::WorkflowLearningSink;
+use crate::learning::record_workflow_learning;
+use crate::persistence;
 use crate::policy::WorkflowPolicy;
 use crate::reducers::ReducerRegistry;
-use crate::request::{fanout_item_request, stage_request};
+use crate::request::stage_request;
 use crate::run::{RunStatus, StageStatus, WorkflowRun};
 use crate::runner::{StageRunOutput, WorkflowStageRunner};
 use crate::spec::{ReducerKind, StageKind, StageSpec, WorkflowSpec};
-use crate::stage::{ordered_stages, source_input_hash, stage_ready};
+use crate::stage::{ordered_stages, stage_ready};
 use crate::store::WorkflowStore;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,7 +73,7 @@ impl WorkflowExecutor {
             }
         }
         finish_run(&mut run);
-        self.record_learning(&run, &mut seq)?;
+        record_workflow_learning(&self.store, &run, &mut seq)?;
         self.store.save_state(&run)?;
         Ok(report(&run))
     }
@@ -95,7 +96,7 @@ impl WorkflowExecutor {
             }
         }
         finish_run(&mut run);
-        self.record_learning(&run, &mut seq)?;
+        record_workflow_learning(&self.store, &run, &mut seq)?;
         self.store.save_state(&run)?;
         Ok(report(&run))
     }
@@ -122,12 +123,21 @@ impl WorkflowExecutor {
         }
         let result = match stage.kind {
             StageKind::Agent | StageKind::Tool | StageKind::Checkpoint => {
-                self.write_stage_artifact(run, stage, "md", deterministic_stage_output(stage))
+                persistence::write_attached_stage_artifact(
+                    &self.store,
+                    run,
+                    stage,
+                    &stage.id,
+                    "md",
+                    deterministic_stage_output(stage),
+                    true,
+                )
+                .map(|_| ())
             }
             StageKind::Fanout => self.run_fanout(run, stage),
             StageKind::Reduce => self.run_reduce(run, stage),
             StageKind::QualityGate => self.run_quality_gate(run, stage),
-            StageKind::Condition => self.write_stage_artifact(run, stage, "json", "{}".to_string()),
+            StageKind::Condition => self.write_condition_artifact(run, stage).map(|_| ()),
             StageKind::Implementation => Err(WorkflowError::StageFailed(format!(
                 "implementation stage '{}' requires a live stage runner",
                 stage.id
@@ -145,6 +155,7 @@ impl WorkflowExecutor {
                 )?;
             }
             Err(err) => {
+                self.record_runner_failure_if_missing(run, stage, &err)?;
                 mark_finished(run, stage, StageStatus::Failed, Some(err.to_string()))?;
                 log.emit(
                     &run.id,
@@ -196,6 +207,7 @@ impl WorkflowExecutor {
                 mark_finished(run, stage, StageStatus::Accepted, None)?;
             }
             Err(err) => {
+                self.record_runner_failure_if_missing(run, stage, &err)?;
                 mark_finished(run, stage, StageStatus::Failed, Some(err.to_string()))?;
                 log.emit(
                     &run.id,
@@ -217,18 +229,45 @@ impl WorkflowExecutor {
     ) -> WorkflowResult<StageRunOutput> {
         let output = match stage.kind {
             StageKind::Agent | StageKind::Tool => {
-                let output = runner
-                    .run_stage(stage_request(&self.store, run, stage)?)
-                    .await?;
+                let request = stage_request(&self.store, run, stage)?;
+                persistence::record_prompt(&self.store, &request)?;
+                let output = runner.run_stage(request).await?;
                 ensure_output_usable(&output.body)?;
-                self.write_stage_artifact(run, stage, &output.extension, output.body.clone())?;
+                let artifact = persistence::write_attached_stage_artifact(
+                    &self.store,
+                    run,
+                    stage,
+                    &stage.id,
+                    &output.extension,
+                    output.body.clone(),
+                    true,
+                )?;
+                persistence::record_agent_output(
+                    &self.store,
+                    &run.id,
+                    &stage.id,
+                    &stage.id,
+                    Some(&output),
+                    Some(&artifact),
+                    true,
+                    None,
+                )?;
                 output
             }
             StageKind::Implementation => {
                 self.run_implementation_with_runner(run, stage, runner)
                     .await?
             }
-            StageKind::Fanout => self.run_fanout_with_runner(run, stage, runner).await?,
+            StageKind::Fanout => {
+                executor_fanout::run_fanout_with_runner(
+                    &self.store,
+                    &self.policy,
+                    run,
+                    stage,
+                    runner,
+                )
+                .await?
+            }
             StageKind::Reduce => {
                 self.run_reduce(run, stage)?;
                 StageRunOutput::markdown(format!("Reducer stage `{}` complete.", stage.id))
@@ -238,7 +277,7 @@ impl WorkflowExecutor {
                 StageRunOutput::markdown(format!("Quality gate `{}` passed.", stage.id))
             }
             StageKind::Condition | StageKind::Checkpoint => {
-                self.write_stage_artifact(run, stage, "json", "{}".to_string())?;
+                self.write_condition_artifact(run, stage)?;
                 StageRunOutput::markdown(format!("Checkpoint stage `{}` complete.", stage.id))
             }
             StageKind::HumanGate => unreachable!("human gates pause before dispatch"),
@@ -258,9 +297,9 @@ impl WorkflowExecutor {
     ) -> WorkflowResult<StageRunOutput> {
         let root = run.root.clone();
         let before = acceptance::snapshot_targets(&root, &stage.expected_target_files);
-        let output = runner
-            .run_stage(stage_request(&self.store, run, stage)?)
-            .await?;
+        let request = stage_request(&self.store, run, stage)?;
+        persistence::record_prompt(&self.store, &request)?;
+        let output = runner.run_stage(request).await?;
         ensure_output_usable(&output.body)?;
         let after = acceptance::snapshot_targets(&root, &stage.expected_target_files);
         let outcome = acceptance::evaluate(
@@ -271,19 +310,41 @@ impl WorkflowExecutor {
             stage.verify_command.as_deref(),
         );
         let accepted = outcome.is_accepted();
-        self.write_stage_artifact_with_acceptance(
+        let artifact = persistence::write_attached_stage_artifact(
+            &self.store,
             run,
             stage,
+            &stage.id,
             &output.extension,
             output.body.clone(),
             accepted,
         )?;
         if let AcceptanceOutcome::Rejected(reason) = outcome {
+            persistence::record_agent_output(
+                &self.store,
+                &run.id,
+                &stage.id,
+                &stage.id,
+                Some(&output),
+                Some(&artifact),
+                false,
+                Some(&reason),
+            )?;
             return Err(WorkflowError::StageFailed(format!(
                 "implementation stage '{}' rejected: {reason}",
                 stage.id
             )));
         }
+        persistence::record_agent_output(
+            &self.store,
+            &run.id,
+            &stage.id,
+            &stage.id,
+            Some(&output),
+            Some(&artifact),
+            true,
+            None,
+        )?;
         Ok(output)
     }
 
@@ -294,193 +355,111 @@ impl WorkflowExecutor {
             stage.id,
             items.len()
         );
-        self.write_stage_artifact(run, stage, "md", body)
-    }
-
-    async fn run_fanout_with_runner(
-        &self,
-        run: &mut WorkflowRun,
-        stage: &StageSpec,
-        runner: &dyn WorkflowStageRunner,
-    ) -> WorkflowResult<StageRunOutput> {
-        let items = context::fanout_items(&self.store, run, stage)?;
-        let width =
-            fanout::runner_clamped_width(run, &self.policy, stage, runner.max_concurrency());
-        let max_agents = self.stage_max_agents(run, stage);
-        if items.len() > max_agents {
-            return Err(WorkflowError::PolicyDenied(format!(
-                "fan-out item count {} exceeds max_agents {max_agents}",
-                items.len()
-            )));
-        }
-        let requests = items
-            .iter()
-            .filter(|item| !fanout::accepted_item_cached(run, &item.id))
-            .map(|item| {
-                Ok((
-                    item.id.clone(),
-                    fanout_item_request(&self.store, run, stage, item)?,
-                ))
-            })
-            .collect::<WorkflowResult<Vec<_>>>()?;
-        let mut completed = items.len().saturating_sub(requests.len());
-        let mut failed = 0usize;
-        let results = fanout::run_items_with_runner(
-            requests,
-            runner,
-            width,
-            max_agents,
-            stage.retry.max_attempts,
+        persistence::write_attached_stage_artifact(
+            &self.store,
+            run,
+            stage,
+            &stage.id,
+            "md",
+            body,
+            true,
         )
-        .await?;
-        for (item_id, result) in results {
-            match result {
-                Ok(output) => {
-                    ensure_output_usable(&output.body)
-                        .map_err(|err| WorkflowError::StageFailed(format!("{item_id}: {err}")))?;
-                    let artifact = self.write_stage_artifact_with_acceptance(
-                        run,
-                        stage,
-                        &output.extension,
-                        output.body,
-                        true,
-                    )?;
-                    fanout::record_item(
-                        run,
-                        stage,
-                        item_id,
-                        StageStatus::Accepted,
-                        Some(artifact),
-                        None,
-                    );
-                    completed += 1;
-                }
-                Err(err) => {
-                    let body = format!(
-                        "# Fan-out Item Failed\n\nitem: `{item_id}`\nstatus: failed\nerror: {err}\n"
-                    );
-                    let artifact =
-                        self.write_stage_artifact_with_acceptance(run, stage, "md", body, false)?;
-                    fanout::record_item(
-                        run,
-                        stage,
-                        item_id,
-                        StageStatus::Failed,
-                        Some(artifact),
-                        Some(err.to_string()),
-                    );
-                    failed += 1;
-                }
-            }
-        }
-        if completed == 0 && failed > 0 {
-            return Err(WorkflowError::StageFailed(format!(
-                "all {failed} fan-out item(s) failed"
-            )));
-        }
-        Ok(StageRunOutput::markdown(format!(
-            "Fan-out stage `{}` completed {} item(s), failed {} item(s), width {}.",
-            stage.id, completed, failed, width
-        )))
-    }
-
-    /// Effective fan-out agent cap for a stage. Local-only provider tiers are
-    /// capped by `local_provider_max_agents` (OQ-DWF-003 / EC-DWF-21) so that
-    /// Ollama/LM Studio style backends are not overwhelmed by wide fan-out.
-    fn stage_max_agents(&self, run: &WorkflowRun, stage: &StageSpec) -> usize {
-        let base = run.spec.max_agents.min(self.policy.max_agents_per_run);
-        let effective = if stage.provider_tier == Some(crate::spec::ProviderTier::Local) {
-            base.min(self.policy.local_provider_max_agents)
-        } else {
-            base
-        };
-        effective as usize
+        .map(|_| ())
     }
 
     fn run_reduce(&self, run: &mut WorkflowRun, stage: &StageSpec) -> WorkflowResult<()> {
         let reducer = stage.reducer.unwrap_or(ReducerKind::EvidenceWeightedReport);
         let inputs = context::reducer_inputs(&self.store, run, stage)?;
         let output = self.reducers.reduce(reducer, &inputs)?;
-        self.write_stage_artifact(run, stage, "md", output.body)
+        let artifact = persistence::write_attached_stage_artifact(
+            &self.store,
+            run,
+            stage,
+            &stage.id,
+            "md",
+            output.body.clone(),
+            true,
+        )?;
+        persistence::record_reducer(
+            &self.store,
+            &run.id,
+            stage,
+            reducer,
+            &inputs,
+            &output,
+            &artifact,
+        )
     }
 
     fn run_quality_gate(&self, run: &mut WorkflowRun, stage: &StageSpec) -> WorkflowResult<()> {
         if let Some(reason) = context::quality_gate_failure(&self.store, run, stage)? {
+            persistence::record_quality(
+                &self.store,
+                &run.id,
+                stage,
+                "failed",
+                Some(&reason),
+                None,
+            )?;
             return Err(WorkflowError::StageFailed(reason));
         }
-        self.write_stage_artifact(
+        let artifact = persistence::write_attached_stage_artifact(
+            &self.store,
             run,
             stage,
+            &stage.id,
             "json",
             json!({"status": "accepted", "checked_dependencies": stage.depends_on}).to_string(),
+            true,
+        )?;
+        persistence::record_quality(
+            &self.store,
+            &run.id,
+            stage,
+            "accepted",
+            None,
+            Some(&artifact),
         )
     }
 
-    fn write_stage_artifact(
+    fn write_condition_artifact(
         &self,
         run: &mut WorkflowRun,
         stage: &StageSpec,
-        extension: &str,
-        body: String,
-    ) -> WorkflowResult<()> {
-        self.write_stage_artifact_with_acceptance(run, stage, extension, body, true)?;
-        Ok(())
-    }
-
-    fn write_stage_artifact_with_acceptance(
-        &self,
-        run: &mut WorkflowRun,
-        stage: &StageSpec,
-        extension: &str,
-        body: String,
-        accepted: bool,
     ) -> WorkflowResult<crate::run::ArtifactRef> {
-        let input_hash = source_input_hash(stage);
-        let mut artifact = self.store.write_artifact(
-            &run.id,
+        persistence::write_attached_stage_artifact(
+            &self.store,
+            run,
+            stage,
             &stage.id,
-            &input_hash,
-            extension,
-            body.as_bytes(),
-        )?;
-        artifact.accepted = accepted;
-        let state = run
-            .stage_mut(&stage.id)
-            .ok_or_else(|| WorkflowError::SpecInvalid(format!("missing stage {}", stage.id)))?;
-        state.artifacts.push(artifact.clone());
-        Ok(artifact)
+            "json",
+            "{}".to_string(),
+            true,
+        )
     }
 
-    fn record_learning(&self, run: &WorkflowRun, seq: &mut u64) -> WorkflowResult<()> {
-        if !matches!(run.status, RunStatus::Completed | RunStatus::Failed) {
+    fn record_runner_failure_if_missing(
+        &self,
+        run: &WorkflowRun,
+        stage: &StageSpec,
+        err: &WorkflowError,
+    ) -> WorkflowResult<()> {
+        if !matches!(
+            stage.kind,
+            StageKind::Agent | StageKind::Tool | StageKind::Implementation
+        ) || persistence::agent_output_exists(&self.store, &run.id, &stage.id, &stage.id)
+        {
             return Ok(());
         }
-        let log = WorkflowEventLog::new(self.store.clone());
-        match WorkflowLearningSink::new(self.store.clone()).record(run) {
-            Ok(summary) => {
-                log.emit(
-                    &run.id,
-                    *seq,
-                    WorkflowEventKind::LearningRecorded,
-                    json!({
-                        "records": summary.records,
-                        "durable_records": summary.durable_records,
-                        "adapter_records": summary.adapter_records,
-                        "proposal_records": summary.proposal_records,
-                    }),
-                )?;
-                *seq += 1;
-            }
-            Err(err) => {
-                log.emit(
-                    &run.id,
-                    *seq,
-                    WorkflowEventKind::LearningRecorded,
-                    json!({"status": "degraded", "error_class": err.to_string()}),
-                )?;
-                *seq += 1;
-            }
-        }
-        Ok(())
+        persistence::record_agent_output(
+            &self.store,
+            &run.id,
+            &stage.id,
+            &stage.id,
+            None,
+            None,
+            false,
+            Some(&err.to_string()),
+        )
     }
 }
