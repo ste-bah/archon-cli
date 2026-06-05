@@ -794,6 +794,18 @@ max_concurrent = 4
 timeout_secs = 300
 max_retries = 2
 
+# ----------------------------------------------------------------------------
+# [subagent] — Subagent execution concurrency
+# ----------------------------------------------------------------------------
+# max_concurrent is the authoritative cap on how many subagents run at once.
+# It is the single source of truth for live (subagent-backed) workflow fan-out
+# width: the fan-out scheduler clamps its semaphore to this value so overflow
+# items wait for a slot instead of being hard-rejected. This is DISTINCT from
+# [orchestrator] max_concurrent, which governs the separate team/orchestrator
+# agent pool.
+[subagent]
+max_concurrent = 4
+
 
 # ----------------------------------------------------------------------------
 # [voice] — Speech-to-text input

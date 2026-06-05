@@ -263,6 +263,14 @@ impl SubagentExecutor for AgentSubagentExecutor {
         self.classify_request(request)
     }
 
+    fn max_concurrency(&self) -> Option<usize> {
+        // Authoritative cap the session `SubagentManager` was constructed with
+        // (config.subagent.max_concurrent, threaded via AgentConfig). Fan-out
+        // schedulers clamp to this so overflow items wait for a slot instead of
+        // being hard-rejected with `SubagentError::MaxConcurrent`.
+        Some(self.agent_config.max_subagent_concurrency)
+    }
+
     async fn run_to_completion(
         &self,
         subagent_id: String,

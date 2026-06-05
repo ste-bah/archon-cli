@@ -164,6 +164,11 @@ pub struct AgentConfig {
     pub activity_sink: Option<Arc<dyn AgentActivitySink>>,
     /// Context window and auto-compaction settings threaded from config.
     pub context: crate::config::ContextConfig,
+    /// Authoritative maximum concurrent subagents, threaded from
+    /// `config.subagent.max_concurrent`. Used to construct the session
+    /// [`crate::subagent::SubagentManager`] so the live fan-out cap is
+    /// configurable rather than a hardcoded constant.
+    pub max_subagent_concurrency: usize,
 }
 
 impl AgentConfig {
@@ -224,6 +229,7 @@ impl Default for AgentConfig {
             sandbox: None,
             activity_sink: None,
             context: crate::config::ContextConfig::default(),
+            max_subagent_concurrency: crate::subagent::SubagentManager::DEFAULT_MAX_CONCURRENT,
         }
     }
 }

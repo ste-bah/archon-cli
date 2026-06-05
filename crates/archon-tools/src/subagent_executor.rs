@@ -181,6 +181,18 @@ pub trait SubagentExecutor: Send + Sync {
     /// so the tool can fork between the immediate-return background
     /// path and the await-outcome foreground path.
     fn classify(&self, request: &SubagentRequest) -> SubagentClassification;
+
+    /// Authoritative maximum number of concurrently running subagents this
+    /// executor will admit, or `None` when unbounded.
+    ///
+    /// Fan-out schedulers query this to clamp their semaphore so they never
+    /// admit more work than the backing [`SubagentManager`] accepts (overflow
+    /// would otherwise be hard-rejected as a terminal failure). The default is
+    /// `None`; the live `AgentSubagentExecutor` overrides it with its manager's
+    /// configured cap.
+    fn max_concurrency(&self) -> Option<usize> {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------

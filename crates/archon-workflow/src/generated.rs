@@ -240,6 +240,7 @@ fn quality_gate_stage(key: &str, value: &Value, existing: &BTreeSet<String>) -> 
         provider: None,
         expected_target_files: Vec::new(),
         verify_command: None,
+        max_parallelism: None,
         extra,
     })
 }

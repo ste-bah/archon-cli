@@ -161,6 +161,15 @@ impl SubagentManager {
         }
     }
 
+    /// The configured maximum number of concurrently running subagents.
+    ///
+    /// This is the authoritative live cap that `register` enforces. Fan-out
+    /// schedulers query it (via the executor) to clamp their semaphore so they
+    /// never admit more work than the manager will accept.
+    pub fn max_concurrent(&self) -> usize {
+        self.max_concurrent
+    }
+
     /// Register a new subagent request.  Returns the UUID assigned.
     pub fn register(&mut self, request: SubagentRequest) -> Result<String, SubagentError> {
         self.register_with_id(Uuid::new_v4().to_string(), request)

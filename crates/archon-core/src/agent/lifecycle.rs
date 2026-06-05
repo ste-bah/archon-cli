@@ -16,6 +16,7 @@ impl Agent {
                     .join("settings.json"),
                 config.working_dir.join(".archon").join("settings.json"),
             ));
+        let max_subagent_concurrency = config.max_subagent_concurrency;
         Self {
             client,
             registry,
@@ -32,7 +33,7 @@ impl Agent {
             auto_extractor: None,
             auto_extraction_tasks: Vec::new(),
             auto_evaluator: None,
-            subagent_manager: Arc::new(Mutex::new(SubagentManager::default())),
+            subagent_manager: Arc::new(Mutex::new(SubagentManager::new(max_subagent_concurrency))),
             show_thinking: Arc::new(AtomicBool::new(true)),
             session_stats: Arc::new(Mutex::new(SessionStats::default())),
             hook_registry: None,

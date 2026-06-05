@@ -73,6 +73,9 @@ pub struct ArchonConfig {
     /// Sandbox backend configuration.
     #[serde(default)]
     pub sandbox: crate::sandbox::SandboxConfig,
+    /// Subagent execution configuration (authoritative fan-out concurrency cap).
+    #[serde(default)]
+    pub subagent: SubagentConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -644,6 +647,29 @@ impl Default for ToolsConfig {
             bash_timeout: 86400,
             bash_max_output: 102400,
             max_concurrency: 4,
+        }
+    }
+}
+
+/// Subagent execution configuration.
+///
+/// `max_concurrent` is the authoritative cap on how many subagents the
+/// [`crate::subagent::SubagentManager`] runs concurrently. It is the single
+/// source of truth for fan-out width in live (subagent-backed) workflows: the
+/// fan-out scheduler clamps its semaphore to this value so overflow items wait
+/// for a slot instead of being hard-rejected. Distinct from
+/// `[orchestrator] max_concurrent`, which governs the separate team/orchestrator
+/// agent pool.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SubagentConfig {
+    pub max_concurrent: usize,
+}
+
+impl Default for SubagentConfig {
+    fn default() -> Self {
+        Self {
+            max_concurrent: crate::subagent::SubagentManager::DEFAULT_MAX_CONCURRENT,
         }
     }
 }

@@ -304,7 +304,8 @@ impl WorkflowExecutor {
         runner: &dyn WorkflowStageRunner,
     ) -> WorkflowResult<StageRunOutput> {
         let items = context::fanout_items(&self.store, run, stage)?;
-        let width = fanout::runner_clamped_width(run, &self.policy, runner.max_concurrency());
+        let width =
+            fanout::runner_clamped_width(run, &self.policy, stage, runner.max_concurrency());
         let max_agents = self.stage_max_agents(run, stage);
         if items.len() > max_agents {
             return Err(WorkflowError::PolicyDenied(format!(

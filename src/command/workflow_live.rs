@@ -197,11 +197,18 @@ struct PipelineWorkflowRunner {
 #[async_trait::async_trait]
 impl WorkflowStageRunner for PipelineWorkflowRunner {
     fn max_concurrency(&self) -> Option<usize> {
-        // The TUI/live runner routes each fan-out item through a subagent
-        // manager with a hard concurrency cap that *rejects* overflow. Clamp
-        // fan-out width to that cap so extra items wait for a slot instead of
-        // failing with "max concurrent subagents reached".
-        Some(archon_core::subagent::SubagentManager::DEFAULT_MAX_CONCURRENT)
+        // The TUI/live runner routes each fan-out item through the process
+        // subagent executor, whose `SubagentManager` has a hard concurrency cap
+        // that *rejects* overflow. Query the live executor's authoritative cap
+        // (derived from config.subagent.max_concurrent) so fan-out width clamps
+        // to it and extra items wait for a slot instead of failing with "max
+        // concurrent subagents reached". Falls back to the default constant when
+        // no executor is installed (e.g. CLI paths before session bootstrap).
+        let from_executor = archon_tools::subagent_executor::get_subagent_executor()
+            .and_then(|exec| exec.max_concurrency());
+        Some(
+            from_executor.unwrap_or(archon_core::subagent::SubagentManager::DEFAULT_MAX_CONCURRENT),
+        )
     }
 
     async fn run_stage(

@@ -65,6 +65,7 @@ impl WorkflowPlanner for HeuristicWorkflowPlanner {
                     provider: None,
                     expected_target_files: Vec::new(),
                     verify_command: None,
+                    max_parallelism: None,
                     extra: BTreeMap::new(),
                 },
             ],
@@ -96,6 +97,7 @@ fn agent(id: &str, agent: &str, tier: ProviderTier, depends_on: Vec<&str>) -> St
         provider: None,
         expected_target_files: Vec::new(),
         verify_command: None,
+        max_parallelism: None,
         extra: BTreeMap::new(),
     }
 }
@@ -146,6 +148,7 @@ fn reduce(id: &str, reducer: ReducerKind, tier: ProviderTier, depends_on: Vec<&s
         provider: None,
         expected_target_files: Vec::new(),
         verify_command: None,
+        max_parallelism: None,
         extra: BTreeMap::new(),
     }
 }

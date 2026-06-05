@@ -139,6 +139,16 @@ pub struct StageSpec {
     /// accepted (Phase B acceptance binding).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verify_command: Option<String>,
+    /// Stage-level fan-out parallelism override (Fanout stages only).
+    ///
+    /// When set, this caps the concurrent fan-out width for THIS stage,
+    /// further clamped by the run-level `spec.max_parallelism`, the policy
+    /// ceiling, and any runner concurrency capacity. When `None`, the stage
+    /// inherits the run-level `spec.max_parallelism`. Previously a planner that
+    /// set `max_parallelism` on a stage had it silently swallowed by `extra`
+    /// and ignored; this field makes it authoritative.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_parallelism: Option<u32>,
     #[serde(default, flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, serde_json::Value>,
 }
