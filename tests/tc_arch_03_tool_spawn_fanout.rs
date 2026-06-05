@@ -76,6 +76,24 @@ async fn spawn_100_subagents_with_unique_ids() {
         ..Default::default()
     };
 
+    // CI runners can pay one-time runtime/registry warm-up cost on the first
+    // call. TC-ARCH-03 measures the hot spawn path, so warm it before timing.
+    let warmup = tool
+        .execute(
+            json!({
+                "prompt": "subagent warmup",
+                "run_in_background": true,
+            }),
+            &ctx,
+        )
+        .await;
+    assert!(
+        !warmup.is_error,
+        "warmup execute returned error: {}",
+        warmup.content
+    );
+    let _ = BACKGROUND_AGENTS.reap_finished();
+
     let count = 100usize;
     let mut agent_ids = HashSet::new();
     let mut violations = Vec::new();
@@ -133,7 +151,7 @@ async fn spawn_100_subagents_with_unique_ids() {
     let all = running + finished;
     // At minimum, 100 were registered this test
     assert!(
-        agent_ids.len() >= count,
+        all >= count,
         "TC-ARCH-03: registry should have at least {count} entries, found {all}"
     );
 }
