@@ -124,6 +124,7 @@ async fn run_agent_attempts(
                 session_id: session.id.clone(),
                 pipeline_type: session.pipeline_type.clone(),
                 task: session.task.clone(),
+                cwd: None,
                 ordinal,
                 attempt,
                 agent: agent.clone(),

@@ -126,11 +126,12 @@ impl AgentSubagentExecutor {
                 .as_ref()
                 .map(|d| d.agent_type == "fork")
                 .unwrap_or(false);
+        let extra_dirs = child_extra_dirs(parent_ctx, &working_dir);
         ToolContext {
             working_dir,
             session_id: self.session_id.clone(),
             mode,
-            extra_dirs: vec![],
+            extra_dirs,
             in_fork,
             nested: false,
             cancel_parent: parent_ctx.cancel_parent.clone(),
@@ -211,5 +212,68 @@ impl AgentSubagentExecutor {
         if let Some(tracker) = mgr.get_progress_tracker_arc(manager_id) {
             runner.set_progress_tracker(tracker);
         }
+    }
+}
+
+fn child_extra_dirs(
+    parent_ctx: &ToolContext,
+    child_working_dir: &std::path::Path,
+) -> Vec<std::path::PathBuf> {
+    let mut dirs = Vec::new();
+    if !parent_ctx.working_dir.as_os_str().is_empty()
+        && parent_ctx.working_dir.as_path() != child_working_dir
+    {
+        dirs.push(parent_ctx.working_dir.clone());
+    }
+    for extra_dir in &parent_ctx.extra_dirs {
+        let resolved = if extra_dir.is_absolute() {
+            extra_dir.clone()
+        } else {
+            parent_ctx.working_dir.join(extra_dir)
+        };
+        if !dirs.contains(&resolved) && resolved.as_path() != child_working_dir {
+            dirs.push(resolved);
+        }
+    }
+    dirs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::child_extra_dirs;
+    use archon_tools::tool::ToolContext;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn child_extra_dirs_preserve_parent_project_when_cwd_changes() {
+        let parent = ToolContext {
+            working_dir: PathBuf::from("/project-1"),
+            extra_dirs: vec![PathBuf::from("assets"), PathBuf::from("/shared")],
+            ..ToolContext::default()
+        };
+
+        let dirs = child_extra_dirs(&parent, Path::new("/repo"));
+
+        assert_eq!(
+            dirs,
+            vec![
+                PathBuf::from("/project-1"),
+                PathBuf::from("/project-1/assets"),
+                PathBuf::from("/shared"),
+            ]
+        );
+    }
+
+    #[test]
+    fn child_extra_dirs_do_not_duplicate_child_working_dir() {
+        let parent = ToolContext {
+            working_dir: PathBuf::from("/repo"),
+            extra_dirs: vec![PathBuf::from("/repo")],
+            ..ToolContext::default()
+        };
+
+        let dirs = child_extra_dirs(&parent, Path::new("/repo"));
+
+        assert!(dirs.is_empty());
     }
 }

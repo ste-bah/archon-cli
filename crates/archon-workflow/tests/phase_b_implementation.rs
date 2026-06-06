@@ -1,9 +1,4 @@
 //! Phase B tests for PRD-009 write-capable implementation stages.
-//!
-//! Acceptance binding contract: an `implementation` stage is accepted ONLY when
-//! every `expected_target_files` entry is mutated AND the `verify_command`
-//! exits 0. Otherwise the stage fails and its artifact is recorded as
-//! not-accepted. The stage is also write-gated by policy.
 
 use std::path::PathBuf;
 
@@ -95,7 +90,7 @@ async fn implementation_accepted_when_target_mutated_and_verify_passes() {
 }
 
 #[tokio::test]
-async fn implementation_rejected_when_target_not_mutated() {
+async fn implementation_accepts_existing_target_without_forced_mutation() {
     let temp = tempfile::tempdir().unwrap();
     let target = temp.path().join("out.txt");
     std::fs::write(&target, "before").unwrap();
@@ -105,12 +100,39 @@ async fn implementation_rejected_when_target_not_mutated() {
         .start(impl_spec(target.to_str().unwrap(), Some("true")))
         .unwrap();
     let run_id = run.id.clone();
-    // content: None -> runner does NOT touch the target file.
     let runner = ImplRunner {
         target: target.clone(),
         content: None,
     };
-    // Stage failures are recorded as StageStatus::Failed (not propagated as Err).
+    executor.execute_with_runner(run, &runner).await.unwrap();
+
+    let state = store.load_state(&run_id).unwrap();
+    let stage = state.stages.get("implement").unwrap();
+    assert_eq!(
+        stage.status,
+        StageStatus::Accepted,
+        "existing unchanged target should be accepted for idempotent workflows"
+    );
+    assert!(
+        stage.artifacts.iter().any(|a| a.accepted),
+        "artifact must be recorded accepted"
+    );
+}
+
+#[tokio::test]
+async fn implementation_rejected_when_target_remains_missing() {
+    let temp = tempfile::tempdir().unwrap();
+    let target = temp.path().join("out.txt");
+    let store = WorkflowStore::project(temp.path());
+    let executor = WorkflowExecutor::new(store.clone(), permissive_policy());
+    let run = executor
+        .start(impl_spec(target.to_str().unwrap(), Some("true")))
+        .unwrap();
+    let run_id = run.id.clone();
+    let runner = ImplRunner {
+        target: target.clone(),
+        content: None,
+    };
     executor.execute_with_runner(run, &runner).await.unwrap();
 
     let state = store.load_state(&run_id).unwrap();
@@ -118,11 +140,11 @@ async fn implementation_rejected_when_target_not_mutated() {
     assert_eq!(
         stage.status,
         StageStatus::Failed,
-        "unmutated target must reject the stage"
+        "missing target must reject the stage"
     );
     assert!(
         stage.artifacts.iter().all(|a| !a.accepted),
-        "artifact must be recorded not-accepted"
+        "artifact must be recorded not-accepted when target remains missing"
     );
 }
 

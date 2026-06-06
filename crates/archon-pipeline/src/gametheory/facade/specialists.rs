@@ -336,6 +336,7 @@ async fn execute_specialist_call(
             session_id: run_id.to_string(),
             pipeline_type: PipelineType::GameTheory,
             task: situation.to_string(),
+            cwd: None,
             ordinal: 0,
             attempt: 1,
             agent: AgentInfo {

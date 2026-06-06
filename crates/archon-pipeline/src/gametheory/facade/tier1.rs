@@ -144,6 +144,7 @@ async fn execute_tier1_agent(
             session_id: run_id.to_string(),
             pipeline_type: PipelineType::GameTheory,
             task: situation.to_string(),
+            cwd: None,
             ordinal: 0,
             attempt: 1,
             agent: AgentInfo {

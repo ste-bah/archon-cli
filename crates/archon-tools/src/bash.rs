@@ -3,7 +3,8 @@ use std::time::Duration;
 
 use serde_json::json;
 use tokio::io::AsyncReadExt;
-use tokio::process::Command;
+use tokio::process::{Child, Command};
+use tokio::task::JoinHandle;
 
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
@@ -153,38 +154,29 @@ impl Tool for BashTool {
         // chain, so the `select!` arm shape stays uniform.
         let cancel_token = ctx.cancel_parent.clone().unwrap_or_default();
 
+        let stdout_task = spawn_pipe_reader(child.stdout.take());
+        let stderr_task = spawn_pipe_reader(child.stderr.take());
+
         enum BashOutcome {
-            Done((Vec<u8>, Vec<u8>, std::io::Result<std::process::ExitStatus>)),
+            Done(std::io::Result<std::process::ExitStatus>),
             Timeout,
             Cancelled,
         }
 
-        let work = tokio::time::timeout(timeout_dur, async {
-            let mut stdout_buf = Vec::new();
-            let mut stderr_buf = Vec::new();
-
-            if let Some(mut stdout) = child.stdout.take() {
-                let _ = stdout.read_to_end(&mut stdout_buf).await;
-            }
-            if let Some(mut stderr) = child.stderr.take() {
-                let _ = stderr.read_to_end(&mut stderr_buf).await;
-            }
-
-            let status = child.wait().await;
-            (stdout_buf, stderr_buf, status)
-        });
+        let work = tokio::time::timeout(timeout_dur, child.wait());
 
         let outcome = tokio::select! {
             biased;
             _ = cancel_token.cancelled() => BashOutcome::Cancelled,
             res = work => match res {
-                Ok(triple) => BashOutcome::Done(triple),
+                Ok(status) => BashOutcome::Done(status),
                 Err(_) => BashOutcome::Timeout,
             }
         };
 
         match outcome {
-            BashOutcome::Done((stdout_buf, stderr_buf, status)) => {
+            BashOutcome::Done(status) => {
+                let (stdout_buf, stderr_buf) = join_output(stdout_task, stderr_task).await;
                 let exit_code = status.as_ref().ok().and_then(|s| s.code()).unwrap_or(-1);
 
                 let mut output = String::new();
@@ -217,15 +209,13 @@ impl Tool for BashTool {
                 }
             }
             BashOutcome::Timeout => {
-                // Timeout -- kill the process group
-                let _ = child.kill().await;
+                terminate_child(&mut child, "timeout").await;
+                let _ = join_output(stdout_task, stderr_task).await;
                 ToolResult::error(format!("Command timed out after {}ms", timeout_ms))
             }
             BashOutcome::Cancelled => {
-                // Parent cancelled (Ctrl+C / double-Esc / /cancel) — kill the
-                // process group and reap so the child doesn't become a zombie.
-                let _ = child.kill().await;
-                let _ = child.wait().await;
+                terminate_child(&mut child, "parent cancellation").await;
+                let _ = join_output(stdout_task, stderr_task).await;
                 tracing::info!("bash: command cancelled by parent CancellationToken");
                 ToolResult::error("Command cancelled by user".to_string())
             }
@@ -241,6 +231,65 @@ impl Tool for BashTool {
             archon_permissions::classifier::CommandClass::Risky => PermissionLevel::Risky,
             archon_permissions::classifier::CommandClass::Dangerous => PermissionLevel::Dangerous,
         }
+    }
+}
+
+fn spawn_pipe_reader<T>(pipe: Option<T>) -> JoinHandle<Vec<u8>>
+where
+    T: tokio::io::AsyncRead + Unpin + Send + 'static,
+{
+    tokio::spawn(async move {
+        let mut buffer = Vec::new();
+        if let Some(mut pipe) = pipe {
+            let _ = pipe.read_to_end(&mut buffer).await;
+        }
+        buffer
+    })
+}
+
+async fn join_output(
+    stdout_task: JoinHandle<Vec<u8>>,
+    stderr_task: JoinHandle<Vec<u8>>,
+) -> (Vec<u8>, Vec<u8>) {
+    let stdout = stdout_task.await.unwrap_or_default();
+    let stderr = stderr_task.await.unwrap_or_default();
+    (stdout, stderr)
+}
+
+async fn terminate_child(child: &mut Child, reason: &str) {
+    let pid = child.id();
+    #[cfg(unix)]
+    if let Some(pid) = pid {
+        signal_process_group(pid, libc::SIGTERM);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = child.kill().await;
+    }
+
+    if tokio::time::timeout(Duration::from_millis(500), child.wait())
+        .await
+        .is_ok()
+    {
+        return;
+    }
+
+    #[cfg(unix)]
+    if let Some(pid) = pid {
+        signal_process_group(pid, libc::SIGKILL);
+    }
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+    tracing::info!(reason, "bash: terminated process group");
+}
+
+#[cfg(unix)]
+fn signal_process_group(pid: u32, signal: libc::c_int) {
+    let pgid = -(pid as libc::pid_t);
+    // SAFETY: `kill` is called with a process-group id derived from the child
+    // pid returned by std/tokio after a successful spawn.
+    unsafe {
+        libc::kill(pgid, signal);
     }
 }
 
@@ -318,5 +367,55 @@ mod tests {
 
         assert!(!result.is_error, "{}", result.content);
         assert_eq!(result.content, "--- one ---\ntwo\n");
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn timeout_kills_background_process_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("child.pid");
+        let tool = BashTool {
+            timeout_secs: 1,
+            max_output_bytes: 1024,
+        };
+        let result = tool
+            .execute(
+                json!({
+                    "command": format!("sleep 30 & echo $! > {}; wait", pid_file.display()),
+                    "timeout": 100
+                }),
+                &ToolContext {
+                    working_dir: dir.path().to_path_buf(),
+                    ..ToolContext::default()
+                },
+            )
+            .await;
+
+        assert!(result.is_error, "command should time out");
+        let pid = std::fs::read_to_string(&pid_file)
+            .unwrap()
+            .trim()
+            .to_string();
+        for _ in 0..20 {
+            if !process_exists(&pid) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let _ = std::process::Command::new("kill")
+            .arg("-9")
+            .arg(&pid)
+            .status();
+        panic!("background sleep process survived Bash timeout: pid={pid}");
+    }
+
+    #[cfg(unix)]
+    fn process_exists(pid: &str) -> bool {
+        std::process::Command::new("kill")
+            .arg("-0")
+            .arg(pid)
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
     }
 }

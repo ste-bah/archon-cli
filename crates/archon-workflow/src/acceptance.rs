@@ -1,13 +1,14 @@
 //! Phase B implementation-stage acceptance binding.
 //!
 //! An `implementation` stage is accepted ONLY when both conditions hold:
-//!   1. every declared `expected_target_files` entry changed on disk during the
-//!      stage (content fingerprint differs, including create/delete), AND
+//!   1. every declared `expected_target_files` entry exists after the stage, AND
 //!   2. the stage `verify_command` (when present) exits with status 0.
 //!
 //! This is the structural guard that makes a write-capable stage trustworthy:
-//! a stage that claims success without mutating its targets — or whose
-//! verification fails — is rejected rather than silently accepted.
+//! a stage that leaves declared targets missing — or whose verification fails —
+//! is rejected rather than silently accepted. Existing unchanged targets are
+//! allowed so resumed/idempotent workflows can report already-satisfied work
+//! without being forced to touch files pointlessly.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -44,13 +45,20 @@ pub fn snapshot_targets(root: &Path, targets: &[String]) -> TargetFingerprints {
         .collect()
 }
 
-/// Targets are considered mutated when every entry's fingerprint differs
-/// between `before` and `after`. A target whose fingerprint is unchanged
-/// (including one that stayed absent) fails the mutation requirement.
-pub fn unmutated_targets(before: &TargetFingerprints, after: &TargetFingerprints) -> Vec<String> {
-    before
+/// Targets that still do not exist after execution.
+pub fn missing_targets(after: &TargetFingerprints) -> Vec<String> {
+    after
+        .iter()
+        .filter(|(_, fingerprint)| fingerprint.is_none())
+        .map(|(target, _)| target.clone())
+        .collect()
+}
+
+/// Targets whose fingerprints changed during execution.
+pub fn mutated_targets(before: &TargetFingerprints, after: &TargetFingerprints) -> Vec<String> {
+    after
         .keys()
-        .filter(|target| before.get(*target) == after.get(*target))
+        .filter(|target| before.get(*target) != after.get(*target))
         .cloned()
         .collect()
 }
@@ -86,21 +94,21 @@ pub fn run_verify_command(root: &Path, command: Option<&str>) -> Result<(), Stri
 pub fn evaluate(
     root: &Path,
     targets: &[String],
-    before: &TargetFingerprints,
+    _before: &TargetFingerprints,
     after: &TargetFingerprints,
     verify_command: Option<&str>,
 ) -> AcceptanceOutcome {
-    let unmutated = unmutated_targets(before, after);
-    if !unmutated.is_empty() {
-        return AcceptanceOutcome::Rejected(format!(
-            "expected_target_files not modified: {}",
-            unmutated.join(", ")
-        ));
-    }
     if targets.is_empty() {
         return AcceptanceOutcome::Rejected(
             "implementation stage declared no expected_target_files".to_string(),
         );
+    }
+    let missing = missing_targets(after);
+    if !missing.is_empty() {
+        return AcceptanceOutcome::Rejected(format!(
+            "expected_target_files missing after implementation: {}",
+            missing.join(", ")
+        ));
     }
     match run_verify_command(root, verify_command) {
         Ok(()) => AcceptanceOutcome::Accepted,
@@ -128,15 +136,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unmutated_targets_detects_unchanged_and_missing() {
+    fn target_fingerprint_helpers_detect_missing_and_mutated() {
         let mut before = TargetFingerprints::new();
         before.insert("a".into(), Some("h1".into()));
         before.insert("b".into(), None);
+        before.insert("c".into(), Some("h3".into()));
         let mut after = TargetFingerprints::new();
         after.insert("a".into(), Some("h1".into())); // unchanged
         after.insert("b".into(), Some("h2".into())); // created
-        let unmutated = unmutated_targets(&before, &after);
-        assert_eq!(unmutated, vec!["a".to_string()]);
+        after.insert("c".into(), None); // missing after execution
+        let mutated = mutated_targets(&before, &after);
+        let missing = missing_targets(&after);
+        assert_eq!(mutated, vec!["b".to_string(), "c".to_string()]);
+        assert_eq!(missing, vec!["c".to_string()]);
     }
 
     #[test]
@@ -160,5 +172,29 @@ mod tests {
         let after = TargetFingerprints::new();
         let outcome = evaluate(&root, &[], &before, &after, None);
         assert!(!outcome.is_accepted());
+    }
+
+    #[test]
+    fn evaluate_accepts_existing_unchanged_targets_for_idempotent_work() {
+        let root = std::env::temp_dir();
+        let mut before = TargetFingerprints::new();
+        before.insert("Cargo.toml".into(), Some("h1".into()));
+        let mut after = TargetFingerprints::new();
+        after.insert("Cargo.toml".into(), Some("h1".into()));
+        let outcome = evaluate(&root, &["Cargo.toml".into()], &before, &after, None);
+        assert!(outcome.is_accepted());
+    }
+
+    #[test]
+    fn evaluate_rejects_targets_still_missing_after_execution() {
+        let root = std::env::temp_dir();
+        let mut before = TargetFingerprints::new();
+        before.insert("src/new.rs".into(), None);
+        let after = before.clone();
+        let outcome = evaluate(&root, &["src/new.rs".into()], &before, &after, None);
+        assert_eq!(
+            outcome.reason(),
+            Some("expected_target_files missing after implementation: src/new.rs")
+        );
     }
 }

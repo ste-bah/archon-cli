@@ -86,6 +86,7 @@ pub mod cartographer;
 pub mod leann_find_similar;
 pub mod leann_search;
 pub mod learning;
+pub mod trading;
 
 // Stubs for tools implemented in later tasks
 pub mod agent {}

@@ -151,6 +151,15 @@ impl SubagentPipelineClient {
         provider.resolve_request_model(&mut request);
         request.model
     }
+
+    fn cwd_for_request(&self, request: &AgentExecutionRequest) -> String {
+        request
+            .cwd
+            .as_ref()
+            .unwrap_or(&self.context.working_dir)
+            .display()
+            .to_string()
+    }
 }
 
 #[async_trait]
@@ -178,7 +187,7 @@ impl LlmClient for SubagentPipelineClient {
             timeout_secs: SubagentRequest::DEFAULT_TIMEOUT_SECS,
             subagent_type: Some(request.agent.key.clone()),
             run_in_background: false,
-            cwd: Some(self.context.working_dir.display().to_string()),
+            cwd: Some(self.cwd_for_request(&request)),
             isolation: None,
         };
 
@@ -306,6 +315,7 @@ mod tests {
             session_id: "s".into(),
             pipeline_type: PipelineType::Coding,
             task: "task".into(),
+            cwd: None,
             ordinal: 1,
             attempt: 1,
             agent: AgentInfo {
@@ -351,5 +361,20 @@ mod tests {
         );
 
         assert_eq!(client.activity_model("sonnet"), "gpt-5.4");
+    }
+
+    #[test]
+    fn request_cwd_overrides_parent_context() {
+        let client = SubagentPipelineClient::new(
+            Arc::new(NoopClient),
+            ToolContext {
+                working_dir: "/project/root".into(),
+                ..ToolContext::default()
+            },
+        );
+        let mut request = request(ToolAccessLevel::Full);
+        request.cwd = Some("/target/repo".into());
+
+        assert_eq!(client.cwd_for_request(&request), "/target/repo");
     }
 }

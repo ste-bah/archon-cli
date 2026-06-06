@@ -935,6 +935,7 @@ dependencies = [
  "dirs",
  "git2",
  "glob",
+ "libc",
  "lsp-types",
  "once_cell",
  "petgraph",
@@ -961,6 +962,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "archon-trading"
+version = "1.3.10"
+dependencies = [
+ "anyhow",
+ "archon-core",
+ "archon-cozo",
+ "archon-mcp",
+ "blake3",
+ "cozo-ce",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "tempfile",
+]
+
+[[package]]
 name = "archon-tui"
 version = "1.3.10"
 dependencies = [
@@ -972,6 +989,7 @@ dependencies = [
  "archon-permissions",
  "archon-session",
  "archon-tools",
+ "archon-trading",
  "async-trait",
  "axum",
  "chrono",

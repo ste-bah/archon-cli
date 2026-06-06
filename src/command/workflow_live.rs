@@ -18,6 +18,14 @@ use archon_workflow::{
 use crate::command::pipeline_support::build_pipeline_adapter;
 use crate::command::workflow::{load_spec_file, load_template_spec, run_action};
 
+#[cfg(test)]
+#[path = "workflow_live_tests.rs"]
+mod tests;
+#[path = "workflow_live_prompt.rs"]
+mod workflow_live_prompt;
+
+use workflow_live_prompt::{planner_prompt, repair_prompt, workflow_prompt};
+
 pub(crate) fn should_spawn_live(action: &CommandAction) -> bool {
     matches!(
         action,
@@ -241,6 +249,7 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
                 session_id: request.run_id.clone(),
                 pipeline_type: PipelineType::Workflow,
                 task: request.task.clone(),
+                cwd: request_target_repository_root(&request),
                 ordinal: request.attempt as usize,
                 attempt: request.attempt as usize,
                 agent,
@@ -283,6 +292,15 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
         output.tokens_out = response.tokens_out;
         Ok(output)
     }
+}
+
+fn request_target_repository_root(request: &StageRunRequest) -> Option<PathBuf> {
+    request
+        .input
+        .get("target_repository_root")
+        .and_then(|value| value.as_str())
+        .filter(|path| !path.trim().is_empty())
+        .map(PathBuf::from)
 }
 
 impl PipelineWorkflowRunner {
@@ -333,7 +351,9 @@ fn workflow_agent(request: &StageRunRequest, model: &str) -> AgentInfo {
         critical: matches!(request.stage_kind, StageKind::QualityGate),
         parallelizable: matches!(request.stage_kind, StageKind::Fanout),
         quality_threshold: 0.5,
-        tool_access_level: if matches!(request.stage_kind, StageKind::Implementation) {
+        tool_access_level: if matches!(request.stage_kind, StageKind::Implementation)
+            || command_execution_stage(request)
+        {
             ToolAccessLevel::Full
         } else {
             ToolAccessLevel::ReadOnly
@@ -341,35 +361,8 @@ fn workflow_agent(request: &StageRunRequest, model: &str) -> AgentInfo {
     }
 }
 
-fn workflow_prompt(request: &StageRunRequest) -> String {
-    let input =
-        serde_json::to_string_pretty(&request.input).unwrap_or_else(|_| request.input.to_string());
-    format!(
-        "## Workflow Task\n{}\n\n## Stage\nid: {}\nkind: {:?}\nprovider_tier: {:?}\nattempt: {}\ndepends_on: {:?}\n\n## Evidence Contract\nUse the `target_repository_root`, `source_files`, `dependencies`, and `fanout_item` fields in the stage input as primary evidence. For implementation stages, resolve relative target paths against `target_repository_root` and modify the repository files directly with the available tools. A `source_files` entry with `exists:false` is valid greenfield evidence for a declared target file; do not block only because that target does not exist yet. If required task files, source files, or upstream artifacts are absent, return a concise blocked report with `status: blocked`, the missing evidence, and do not invent findings.\n\n## Stage Input\n```json\n{}\n```",
-        request.task,
-        request.stage_id,
-        request.stage_kind,
-        request.provider_tier,
-        request.attempt,
-        request.depends_on,
-        input
-    )
-}
-
-fn planner_prompt(task: &str) -> String {
-    format!(
-        "Create an archon.workflow.v1 YAML plan for this task:\n\n{task}\n\nRules:\n- Use schema: archon.workflow.v1.\n- Use stage kinds: agent, fanout, reduce, tool, checkpoint, quality_gate, human_gate, implementation.\n- Use provider_tier aliases only: planner, researcher, coder, critic, cheap, vision, local, reducer.\n- Do not set stage.provider or stage.model.\n- Omit the top-level provider_tiers map entirely. If you must include it, map only real tier names (planner, researcher, coder, critic, cheap, vision, local, reducer) to the literal value auto, and never to a provider or model name.\n- You may set stage.task for the concise objective of that stage.\n- Include at least discovery, fanout/review, reduce/synthesis, and quality gate stages.\n- Fan-out contract (MANDATORY): a `kind: fanout` stage that iterates over upstream items MUST set `foreach: ${{<producer-stage-id>.items}}` where `<producer-stage-id>` is one of its `depends_on` stages. Do NOT use a decorative `fanout: {{over: ...}}` block to express iteration; `over`/`respect_dependencies` are never executed and will be rejected.\n- The producer stage referenced by `foreach` MUST be an upstream stage that emits a structured items document and declares `outputs: [items]`. Its agent task MUST instruct it to return a JSON/YAML object of the exact form `{{\"items\": [ {{...}}, {{...}} ]}}` (one object per work unit, e.g. per task or per wave). Without a real items producer the fan-out cannot run.\n- If the requested workflow must modify repository files, do NOT use a text-only agent/fanout as the final implementation. Use `kind: implementation` with `expected_target_files` for known files, or use `kind: fanout` plus `item_kind: implementation` when iterating task items. Each implementation fanout item MUST include a non-empty `target_files` array.\n- Implementation stages and implementation fanout items are write-capable and must be followed by focused tests and an adversarial quality gate. Set `verify_command` when a focused verification command is knowable.\n- Keep max_parallelism <= 8 and max_agents <= 200.\n- Add learning_hooks for sona, reasoning_bank, and world_model.\n- Return YAML only."
-    )
-}
-
-fn repair_prompt(task: &str, invalid_yaml: &str, error: &str) -> String {
-    format!(
-        "The workflow YAML failed validation.\n\nTask:\n{task}\n\nError:\n{error}\n\nInvalid YAML:\n```yaml\n{invalid_yaml}\n```\n\nReturn repaired archon.workflow.v1 YAML only."
-    )
-}
-
 fn allowed_tools(request: &StageRunRequest) -> Vec<String> {
-    match request.stage_kind {
+    let tools = match request.stage_kind {
         StageKind::Implementation => vec![
             "Read",
             "Grep",
@@ -385,6 +378,9 @@ fn allowed_tools(request: &StageRunRequest) -> Vec<String> {
             "LargeEditAbort",
             "Bash",
         ],
+        _ if command_execution_stage(request) => {
+            vec!["Read", "Grep", "Glob", "Bash", "DocSearch", "DocGet"]
+        }
         StageKind::Tool => vec!["Read", "Grep", "Glob", "DocSearch", "DocGet"],
         _ => vec![
             "Read",
@@ -395,10 +391,66 @@ fn allowed_tools(request: &StageRunRequest) -> Vec<String> {
             "DocSearch",
             "DocGet",
         ],
+    };
+    tools.into_iter().map(str::to_string).collect()
+}
+
+fn command_execution_stage(request: &StageRunRequest) -> bool {
+    if stage_extra_requests_bash(request) {
+        return true;
     }
-    .into_iter()
-    .map(str::to_string)
-    .collect()
+    let haystack = format!(
+        "{}\n{}\n{}",
+        request.stage_id,
+        request.task,
+        request
+            .input
+            .get("stage_task")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+    )
+    .to_ascii_lowercase();
+    [
+        "focused_test",
+        "focused-test",
+        "focused test",
+        "cargo test",
+        "test command",
+        "run tests",
+        "verification",
+        "verify",
+        "quality gate",
+        "cargo check",
+        "cargo build",
+        "cargo fmt",
+        "rustfmt",
+        "clippy",
+        "lint",
+    ]
+    .iter()
+    .any(|needle| haystack.contains(needle))
+}
+
+fn stage_extra_requests_bash(request: &StageRunRequest) -> bool {
+    let Some(extra) = request.input.get("stage_extra") else {
+        return false;
+    };
+    ["allowed_tools", "tools", "required_tools"]
+        .iter()
+        .filter_map(|key| extra.get(*key))
+        .flat_map(text_values)
+        .any(|tool| tool.eq_ignore_ascii_case("bash") || tool.eq_ignore_ascii_case("shell"))
+}
+
+fn text_values(value: &serde_json::Value) -> Vec<&str> {
+    match value {
+        serde_json::Value::String(value) => vec![value.as_str()],
+        serde_json::Value::Array(values) => values
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn extract_yaml(content: &str) -> String {
@@ -421,71 +473,5 @@ fn tier_model_alias(tier: ProviderTier) -> &'static str {
         | ProviderTier::Researcher
         | ProviderTier::Coder
         | ProviderTier::Vision => "sonnet",
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use anyhow::Result;
-    use archon_pipeline::runner::{LlmClient, LlmResponse};
-
-    use super::{extract_yaml, plan_live};
-
-    struct InvalidPlanner;
-
-    #[async_trait::async_trait]
-    impl LlmClient for InvalidPlanner {
-        async fn send_message(
-            &self,
-            _messages: Vec<serde_json::Value>,
-            _system: Vec<serde_json::Value>,
-            _tools: Vec<serde_json::Value>,
-            _model: &str,
-        ) -> Result<LlmResponse> {
-            Ok(LlmResponse {
-                // Genuinely unrecoverable: a stage pins a concrete model, which
-                // validate_stage_fields rejects and the normalizer does not
-                // touch. (A non-neutral top-level provider_tiers map is now
-                // neutralized during generation, so it can no longer stand in
-                // for an invalid plan here.)
-                content: r#"
-schema: archon.workflow.v1
-name: invalid-live-plan
-task: implement a real task
-stages:
-  - id: discover
-    kind: agent
-    provider_tier: planner
-    model: claude-opus-4-8
-"#
-                .to_string(),
-                tool_uses: Vec::new(),
-                tokens_in: 0,
-                tokens_out: 0,
-            })
-        }
-    }
-
-    #[test]
-    fn extract_yaml_accepts_plain_or_fenced_output() {
-        assert_eq!(
-            extract_yaml("```yaml\nschema: archon.workflow.v1\n```\n"),
-            "schema: archon.workflow.v1"
-        );
-        assert_eq!(
-            extract_yaml("schema: archon.workflow.v1\n"),
-            "schema: archon.workflow.v1"
-        );
-    }
-
-    #[tokio::test]
-    async fn live_planner_validation_failure_does_not_fallback_to_smoke_plan() {
-        let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
-        let err = plan_live("implement the whole PRD", Arc::new(InvalidPlanner), tui_tx)
-            .await
-            .expect_err("invalid live plans must fail instead of using heuristic fallback");
-        assert!(!err.to_string().is_empty());
     }
 }

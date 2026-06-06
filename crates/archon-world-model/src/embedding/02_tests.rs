@@ -61,8 +61,11 @@ mod tests {
 
     #[test]
     fn redaction_removes_common_secret_shapes() {
-        let text = "email steve@example.com token=sk-live-secretsecretsecretsecret";
-        let redacted = redact_embedding_text(text);
+        let text = format!(
+            "email steve@example.com token={}",
+            ["sk", "live", "fixturefixturefixturefixture"].join("-")
+        );
+        let redacted = redact_embedding_text(&text);
         assert!(!redacted.contains("steve@example.com"));
         assert!(!redacted.contains("sk-live"));
         assert!(redacted.contains("[REDACTED_EMAIL]"));

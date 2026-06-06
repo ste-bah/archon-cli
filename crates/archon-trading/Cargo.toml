@@ -1,0 +1,20 @@
+[package]
+name = "archon-trading"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+archon-cozo = { path = "../archon-cozo" }
+archon-core = { path = "../archon-core" }
+archon-mcp = { path = "../archon-mcp" }
+anyhow.workspace = true
+serde.workspace = true
+blake3.workspace = true
+cozo.workspace = true
+
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+serial_test.workspace = true

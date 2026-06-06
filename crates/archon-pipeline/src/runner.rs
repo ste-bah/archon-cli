@@ -315,6 +315,7 @@ pub struct AgentExecutionRequest {
     pub session_id: String,
     pub pipeline_type: PipelineType,
     pub task: String,
+    pub cwd: Option<PathBuf>,
     pub ordinal: usize,
     pub attempt: usize,
     pub agent: AgentInfo,

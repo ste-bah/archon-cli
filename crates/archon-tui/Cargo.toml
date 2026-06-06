@@ -29,6 +29,7 @@ archon-permissions = { path = "../archon-permissions" }
 # The in-tree src/observability_tracing.rs now re-exports from here so the
 # archon_tui::observability public surface stays byte-identical for callers.
 archon-observability = { path = "../archon-observability" }
+archon-trading = { path = "../archon-trading" }
 cpal = { workspace = true, optional = true }
 futures-util = { workspace = true }
 # OBS-901 (Stage 10): promoted to workspace.dependencies so

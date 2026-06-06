@@ -75,6 +75,7 @@ pub mod prompt_input;
 pub mod render;
 pub mod screens;
 pub mod terminal;
+pub mod trading;
 pub mod virtual_list;
 
 // Stubs for later phases
