@@ -1,0 +1,90 @@
+{
+  "strategy_id": "btc-demo-sma",
+  "account_id": "paper-to-live-demo-account",
+  "broker_id": "demo-broker",
+  "kill_switch_validated": true,
+  "policy": {
+    "version_hash": "stale-demo-hash",
+    "thresholds": {
+      "max_order_notional_pct": 2.0,
+      "max_strategy_exposure_pct": 10.0,
+      "max_account_exposure_pct": 50.0,
+      "max_symbol_concentration_pct": 15.0,
+      "max_daily_loss_pct": 2.0,
+      "max_strategy_drawdown_pct": 10.0,
+      "pilot_max_drawdown_pct": 10.0,
+      "max_open_orders": 20,
+      "max_order_rate_per_min": 5,
+      "min_liquidity_ratio": 20.0,
+      "max_spread_bps": 25.0,
+      "max_slippage_bps": 50.0,
+      "stale_data_max_seconds": 3,
+      "broker_health_timeout_seconds": 3,
+      "kill_switch_cancel_seconds": 2,
+      "max_leverage": 1.0,
+      "halt_after_consecutive_losses": 3,
+      "cooldown_minutes_after_halt": 60,
+      "max_correlated_exposure_pct": 25.0,
+      "manual_approval_notional_pct": 0.0
+    },
+    "promotion": {
+      "paper_min_closed_trades": 200,
+      "paper_min_calendar_days": 60,
+      "paper_min_regimes": 2,
+      "phase5_min_months": 6,
+      "phase5_min_zero_halt_sessions": 30
+    },
+    "capital": {
+      "paper_sim_capital": 100000.0,
+      "pilot_capital_max_usd": 1000.0,
+      "pilot_capital_max_equity_pct": 1.0,
+      "per_order_manual_approval_required": true
+    }
+  },
+  "production_evidence": {
+    "backtest_approved": true,
+    "paper_approved": true,
+    "risk_approved": true,
+    "postmortem_approved": true
+  },
+  "certification_report": {
+    "adapter_name": "demo-broker",
+    "passed": true,
+    "checks": [
+      {
+        "id": "REQ-TERM-006:manifest",
+        "passed": true
+      },
+      {
+        "id": "REQ-TERM-006:submit-cancel-replace-ledger",
+        "passed": true
+      },
+      {
+        "id": "REQ-TERM-006:health",
+        "passed": true
+      },
+      {
+        "id": "NFR-001:pre-trade-p99",
+        "passed": true
+      },
+      {
+        "id": "NFR-002:in-app",
+        "passed": true
+      },
+      {
+        "id": "NFR-002:out-of-band",
+        "passed": true
+      }
+    ],
+    "pre_trade_p99_ms": 10
+  },
+  "approval": {
+    "request_id": "live-demo-approval",
+    "maker": "alice",
+    "checker": "bob",
+    "action": "enable-live-pilot",
+    "approved": true,
+    "rationale": "fixture only; stale policy hash should block"
+  },
+  "compliance_jurisdiction": "UK"
+}

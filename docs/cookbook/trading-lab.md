@@ -13,7 +13,43 @@ implemented `archon-trading` primitives. Live trading remains gated and disabled
 unless your policy, broker adapter, certification, and maker-checker evidence
 all say it is allowed.
 
-## Phase -1: Sanity Check the Trading Surface
+## Copy-Paste Fixture Pack
+
+Use the fixture pack when you want to test the command surface before wiring
+real data or a real broker sandbox:
+
+```bash
+PROJECT=/tmp/archon-trading-lab-example
+mkdir -p "$PROJECT"
+
+archon trading spec validate \
+  --spec examples/trading-lab/strategy-spec.json
+
+archon trading data ingest-ohlcv \
+  --target "$PROJECT" \
+  --source examples/trading-lab/ohlcv-btc-1d.csv \
+  --format csv \
+  --dataset-id btc-1d-demo \
+  --version 2026-06-06 \
+  --provider manual-fixture \
+  --symbol BTCUSD
+
+archon trading backtest run-ohlcv \
+  --target "$PROJECT" \
+  --config examples/trading-lab/backtest-config.json \
+  --dataset-id btc-1d-demo \
+  --version 2026-06-06 \
+  --quantity 0.01 \
+  --strategy-rules examples/trading-lab/strategy-rules.json
+```
+
+The full fixture directory is
+[`examples/trading-lab/`](../../examples/trading-lab/README.md). It includes
+sample StrategySpec, OHLCV CSV, fill inputs, deterministic custom strategy
+rules, paper order/account/market files, OpenBB request metadata, promotion
+evidence, and an intentionally blocked live-enable request.
+
+## Phase -2: Sanity Check the Trading Surface
 
 Before building a strategy, verify that the command surface is available. Shell
 and TUI paths are mirrors:
@@ -488,6 +524,24 @@ chart-native prototypes. The native backtester uses this JSON rule contract so
 the replay is deterministic, inspectable, and not dependent on executing Pine
 or arbitrary user code.
 
+Ready-to-run fixtures:
+
+```bash
+archon trading backtest run \
+  --config examples/trading-lab/backtest-config.json \
+  --fills examples/trading-lab/fills.json \
+  --dataset-status healthy \
+  --source native-harness
+
+archon trading backtest run-ohlcv \
+  --target "$PROJECT" \
+  --config examples/trading-lab/backtest-config.json \
+  --dataset-id btc-1d-demo \
+  --version 2026-06-06 \
+  --quantity 0.01 \
+  --strategy-rules examples/trading-lab/strategy-rules.json
+```
+
 ## Phase 6: Paper Trade
 
 Paper trading uses the same order-intent and risk-governor path as live trading.
@@ -522,6 +576,18 @@ archon trading paper submit \
 archon trading paper sample \
   --sample paper-sample.json \
   --out paper-sample-gate.json
+```
+
+Ready-to-run fixture commands:
+
+```bash
+archon trading paper submit \
+  --intent examples/trading-lab/paper-order-intent.json \
+  --account examples/trading-lab/paper-account.json \
+  --market examples/trading-lab/paper-market.json
+
+archon trading paper sample \
+  --sample examples/trading-lab/paper-sample.json
 ```
 
 If TradingView MCP is installed and TradingView Desktop is running with CDP,
@@ -606,6 +672,16 @@ archon trading promote check \
   --out promotion-report.json
 ```
 
+The example fixture spec is at `Research`, so it demonstrates the first
+evidence-backed promotion step:
+
+```bash
+archon trading promote check \
+  --spec examples/trading-lab/strategy-spec.json \
+  --target backtest \
+  --evidence examples/trading-lab/promotion-evidence.json
+```
+
 ## Phase 9: Live Readiness
 
 Live trading is disabled by default. That is correct.
@@ -653,6 +729,18 @@ archon trading live phase5-check \
 ```
 
 These commands evaluate gates and plans. They do not submit broker orders.
+
+To see fail-closed behavior with a real JSON shape:
+
+```bash
+archon trading live enable-check \
+  --request examples/trading-lab/live-enable-request.blocked.json
+```
+
+That fixture intentionally uses a stale risk-policy hash and should be
+rejected. Replace it only after generating a fresh policy hash, attaching a
+real dry-run certification report, and collecting distinct maker/checker
+approval.
 
 ## Day-One Example: Elliott Wave KB to Paper Candidate
 

@@ -1,0 +1,80 @@
+{
+  "spec_f01_instrument_universe": [
+    {
+      "symbol": "BTCUSD",
+      "venue": "DEMO",
+      "asset_class": "crypto"
+    }
+  ],
+  "spec_f02_timeframe_session": {
+    "timeframe": "1D",
+    "session_hours": "24x7"
+  },
+  "spec_f03_market_regime_assumptions": [
+    "trend regime required",
+    "avoid high-volatility liquidation cascades"
+  ],
+  "spec_f04_data_dependencies": [
+    {
+      "dataset_id": "btc-1d-demo",
+      "version": "2026-06-06"
+    }
+  ],
+  "spec_f05_entry_exit_rules": {
+    "rules": [
+      "enter long when close is above SMA(3) and daily change is positive",
+      "exit when close falls below SMA(3)"
+    ]
+  },
+  "spec_f06_indicator_formulas": {
+    "formulas": [
+      "sma3 = sma(close, 3)",
+      "change_pct = (close - prev_close) / prev_close * 100"
+    ]
+  },
+  "spec_f07_position_sizing": {
+    "model": "fixed_fractional",
+    "max_risk_pct": "1"
+  },
+  "spec_f08_stops": {
+    "stop_rules": [
+      "stop if close is below the last swing low"
+    ],
+    "take_profit_rules": [
+      "partial at 2R"
+    ],
+    "trailing_rules": [
+      "trail after first target"
+    ],
+    "max_strategy_drawdown_pct": 8.0
+  },
+  "spec_f09_invalidation_rules": {
+    "rules": [
+      "volatility regime flips to extreme",
+      "data snapshot is stale"
+    ]
+  },
+  "spec_f10_no_trade_conditions": {
+    "rules": [
+      "missing OHLCV data",
+      "spread/slippage above policy"
+    ]
+  },
+  "spec_f11_cost_assumptions": {
+    "slippage_bps": 5,
+    "fee_bps": 2
+  },
+  "spec_f12_benchmark": {
+    "symbol": "BTCUSD",
+    "source": "manual-fixture"
+  },
+  "spec_f13_expected_failure_modes": [
+    "trend whipsaw",
+    "weekend liquidity gap",
+    "overfit SMA length"
+  ],
+  "spec_f14_data_quality_tolerances_ms": {
+    "btc-1d-demo": 5000
+  },
+  "spec_f15_promotion_status": "Research"
+}

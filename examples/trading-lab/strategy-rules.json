@@ -1,0 +1,44 @@
+{
+  "name": "close_above_sma3_exit_below_sma3",
+  "entry": [
+    {
+      "left": {
+        "kind": "field",
+        "field": "close"
+      },
+      "op": "gt",
+      "right": {
+        "kind": "indicator",
+        "indicator": "sma",
+        "len": 3
+      }
+    },
+    {
+      "left": {
+        "kind": "indicator",
+        "indicator": "change_pct",
+        "len": null
+      },
+      "op": "gt",
+      "right": {
+        "kind": "constant",
+        "value": 0.0
+      }
+    }
+  ],
+  "exit": [
+    {
+      "left": {
+        "kind": "field",
+        "field": "close"
+      },
+      "op": "lt",
+      "right": {
+        "kind": "indicator",
+        "indicator": "sma",
+        "len": 3
+      }
+    }
+  ],
+  "min_hold_bars": 1
+}

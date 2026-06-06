@@ -1,0 +1,12 @@
+{
+  "symbol": "BTCUSD",
+  "provider_symbol": "BTC-USD",
+  "timezone": "UTC",
+  "adjustment": "raw",
+  "coverage_start": "2026-05-25T00:00:00Z",
+  "coverage_end": "2026-06-05T00:00:00Z",
+  "expected_bars": "12",
+  "observed_bars": "12",
+  "missing_bars": "0",
+  "license": "research"
+}

@@ -1,0 +1,16 @@
+{
+  "strategy_id": "btc-demo-sma",
+  "instrument": "BTCUSD",
+  "side": "Buy",
+  "order_type": "Market",
+  "quantity": 0.01,
+  "prices": {
+    "reference": 106500.0,
+    "limit": null,
+    "stop": null
+  },
+  "tif": "Day",
+  "mode": "Paper",
+  "governor_required": true,
+  "source": "Manual"
+}

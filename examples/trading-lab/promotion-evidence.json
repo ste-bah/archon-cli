@@ -1,0 +1,24 @@
+[
+  {
+    "evidence_id": "bt-oos-demo",
+    "strategy_id": "btc-demo-sma",
+    "kind": "OutOfSample",
+    "persisted": true,
+    "exploratory": false,
+    "source": "InternalReplay",
+    "dataset_degraded": false,
+    "dataset_checksum": "fixture-btc-1d-20260606",
+    "config_hash": "demo-config-hash"
+  },
+  {
+    "evidence_id": "bt-wf-demo",
+    "strategy_id": "btc-demo-sma",
+    "kind": "WalkForward",
+    "persisted": true,
+    "exploratory": false,
+    "source": "InternalReplay",
+    "dataset_degraded": false,
+    "dataset_checksum": "fixture-btc-1d-20260606",
+    "config_hash": "demo-config-hash"
+  }
+]

@@ -1,0 +1,9 @@
+{
+  "closed_trades": 200,
+  "calendar_days": 60,
+  "regime_ids": [
+    1,
+    2
+  ],
+  "postmortem_ready": true
+}

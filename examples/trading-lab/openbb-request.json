@@ -1,0 +1,15 @@
+{
+  "provider": "YFinance",
+  "allowlist_data_type": "Ohlcv",
+  "lake_data_type": "Ohlcv",
+  "endpoint": "/api/v1/equity/price/historical",
+  "params": {
+    "symbol": "BTC-USD",
+    "start_date": "2026-05-25",
+    "end_date": "2026-06-05",
+    "interval": "1d"
+  },
+  "creds_profile_ref": "none",
+  "cache_key": "yfinance:BTC-USD:1d:2026-05-25:2026-06-05",
+  "schema_version": "openbb-request-v1"
+}

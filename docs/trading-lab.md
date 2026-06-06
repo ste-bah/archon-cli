@@ -85,6 +85,13 @@ archon trading dispatch kb --action write-kb --persona per07-observer
 archon trading kill --actor operator --reason "manual halt" --working-orders 0
 ```
 
+Runnable sample inputs live in
+[`examples/trading-lab/`](../examples/trading-lab/README.md). They cover a
+valid 15-field StrategySpec, OHLCV CSV ingest, fill and candle backtests,
+custom deterministic strategy rules, paper account/market/order files, OpenBB
+request/metadata/quality shapes, promotion evidence, and a blocked
+live-enable request.
+
 The second dispatch should be accepted. The third should be refused because
 `PER-07` is read-only. This is intentional: the command exists partly so users
 can verify the policy fences before building richer trading workflows.

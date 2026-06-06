@@ -1,0 +1,8 @@
+{
+  "event_window_active": false,
+  "realized_vol": 0.01,
+  "median_vol": 0.01,
+  "data_age_seconds": 1,
+  "broker_healthy": true,
+  "broker_last_seen_seconds": 1
+}

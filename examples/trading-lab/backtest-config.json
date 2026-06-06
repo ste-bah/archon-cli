@@ -1,0 +1,14 @@
+{
+  "strategy_id": "btc-demo-sma",
+  "snapshot_checksum": "fixture-btc-1d-20260606",
+  "starting_equity": 100000.0,
+  "fee_per_share": 0.0,
+  "spread_bps": 2.0,
+  "slippage_bps": 5.0,
+  "market_impact_bps": 1.0,
+  "latency_ms": 25,
+  "partial_fill_ratio": 1.0,
+  "unavailable_liquidity_ratio": 0.0,
+  "monte_carlo_seed": 42,
+  "parameter_set_id": "sma-demo-v1"
+}
