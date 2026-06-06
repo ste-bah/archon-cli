@@ -126,7 +126,10 @@ impl DatasetRegistry {
     ) -> Result<(), DataLakeError> {
         let mut present = BTreeSet::new();
         for dataset in self.datasets.values() {
-            if dataset.status == DatasetStatus::Degraded && !dataset.metadata.optional {
+            if dataset.status == DatasetStatus::Degraded {
+                if dataset.metadata.optional {
+                    continue;
+                }
                 return Err(DataLakeError::DegradedDataset);
             }
             present.insert(dataset.metadata.data_type);
@@ -296,6 +299,25 @@ mod tests {
         assert_eq!(
             registry.promotion_ready(&[InstrumentClass::Crypto], false),
             Err(DataLakeError::DegradedDataset)
+        );
+    }
+
+    #[test]
+    fn degraded_optional_dataset_does_not_satisfy_mandatory_promotion_data() {
+        let mut registry = DatasetRegistry::default();
+        let mut degraded = metadata(DataType::Ohlcv);
+        degraded.optional = true;
+        degraded.gaps = GapSummary {
+            missing_bars: 2,
+            expected_bars: 100,
+        };
+        registry.register(degraded).unwrap();
+        assert_eq!(
+            registry.promotion_ready(&[InstrumentClass::Crypto], false),
+            Err(DataLakeError::MissingMandatoryData(vec![
+                DataType::Ohlcv,
+                DataType::Funding,
+            ]))
         );
     }
 

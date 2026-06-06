@@ -166,7 +166,7 @@ impl OpenBbGateway {
         timestamp: String,
     ) -> Result<GovernedDataset, OpenBbError> {
         let (route, response) = priority_fetch(transport, request, mode)?;
-        enforce_gates(&response.quality, mode)?;
+        enforce_gates(&response.quality)?;
         let provenance = provenance(request, &response, route, license_tier, timestamp);
         self.provenance_log.push(provenance.clone());
         let dataset = self.persist_to_lake(request, response, provenance)?;
@@ -198,7 +198,8 @@ impl OpenBbGateway {
             .register(metadata.clone())
             .map_err(|_| OpenBbError::LakeRejected)?;
         Ok(GovernedDataset {
-            promotion_eligible: provenance.license_tier != LicenseTier::ResearchOnly,
+            promotion_eligible: provenance.license_tier != LicenseTier::ResearchOnly
+                && response.quality.promotion_safe(),
             provenance,
             metadata,
             body: response.body,
@@ -224,7 +225,7 @@ fn priority_fetch<T: OpenBbTransport>(
     }
 }
 
-fn enforce_gates(quality: &DataQuality, mode: AccessMode) -> Result<(), OpenBbError> {
+fn enforce_gates(quality: &DataQuality) -> Result<(), OpenBbError> {
     let failed = if !quality.complete {
         Some("ERR-OPENBB-INCOMPLETE")
     } else if !quality.licensed {
@@ -240,12 +241,21 @@ fn enforce_gates(quality: &DataQuality, mode: AccessMode) -> Result<(), OpenBbEr
     } else {
         None
     };
-    match (failed, mode) {
-        (Some(gate), AccessMode::LiveRequired) => Err(OpenBbError::GateFailed(gate)),
-        (Some("ERR-OPENBB-UNLICENSED"), AccessMode::Research) => {
-            Err(OpenBbError::GateFailed("ERR-OPENBB-UNLICENSED"))
-        }
-        _ => Ok(()),
+    if let Some(gate) = failed {
+        Err(OpenBbError::GateFailed(gate))
+    } else {
+        Ok(())
+    }
+}
+
+impl DataQuality {
+    fn promotion_safe(&self) -> bool {
+        self.complete
+            && self.licensed
+            && self.timestamp_fresh
+            && self.survivorship_adjusted
+            && self.corporate_actions_adjusted
+            && self.reproducible
     }
 }
 
@@ -320,6 +330,13 @@ fn reject_secret_material(creds_profile_ref: &str) -> Result<(), OpenBbError> {
         || lower.contains("token=")
         || lower.contains("apikey=")
         || lower.contains("api_key=")
+        || lower.contains("password=")
+        || lower.contains("pwd=")
+        || lower.contains("authorization")
+        || lower.contains("bearer ")
+        || lower.contains("private key")
+        || lower.starts_with("sk-")
+        || lower.starts_with("pk_")
         || creds_profile_ref.len() > 128;
     if creds_profile_ref.trim().is_empty() || looks_secret {
         Err(OpenBbError::SecretMaterialRejected)

@@ -43,9 +43,16 @@ pub struct LedgerRecord {
     pub account: Value,
     pub tax: TaxFields,
     pub artefact_hashes: Vec<String>,
+    pub artefact_manifest: Vec<ArtefactDigest>,
     pub maker_checker: Option<MakerCheckerApproval>,
     pub signature: String,
     pub retain_until_year: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtefactDigest {
+    pub class: String,
+    pub hash: String,
 }
 
 #[derive(Debug, Clone)]
@@ -88,7 +95,7 @@ impl AuditLedger {
             .create(true)
             .append(true)
             .open(&path)
-            .and_then(|file| file.sync_all())
+            .and_then(|file| file.sync_data())
             .map_err(|err| AuditLedgerError::Io(err.to_string()))?;
         Ok(Self { path })
     }
@@ -169,7 +176,8 @@ impl AuditLedger {
             .map_err(|err| AuditLedgerError::Io(err.to_string()))?;
         file.write_all(&encoded)
             .and_then(|_| file.write_all(b"\n"))
-            .and_then(|_| file.sync_all())
+            .and_then(|_| file.flush())
+            .and_then(|_| file.sync_data())
             .map_err(|err| AuditLedgerError::Io(err.to_string()))?;
         Ok(record)
     }
@@ -196,6 +204,14 @@ impl NewLedgerRecord {
                 .iter()
                 .map(|bytes| blake3_hex(bytes))
                 .collect(),
+            artefact_manifest: self
+                .artefacts
+                .iter()
+                .map(|bytes| ArtefactDigest {
+                    class: "attached_evidence".to_string(),
+                    hash: blake3_hex(bytes),
+                })
+                .collect(),
             maker_checker: self.maker_checker,
             signature: String::new(),
             retain_until_year: current_year() + RETENTION_YEARS,
@@ -205,12 +221,16 @@ impl NewLedgerRecord {
 
 impl LedgerRecord {
     fn redact(&mut self) {
+        redact_string(&mut self.actor);
+        redact_string(&mut self.strategy_id);
+        redact_string(&mut self.policy_version);
         redact_value(&mut self.risk_decision);
         redact_value(&mut self.order_intent);
         redact_value(&mut self.broker_response);
         redact_value(&mut self.account);
-        if is_secret_like(&self.actor) {
-            self.actor = "[REDACTED]".to_string();
+        redact_tax(&mut self.tax);
+        if let Some(approval) = &mut self.maker_checker {
+            redact_approval(approval);
         }
     }
 }
@@ -267,6 +287,26 @@ fn redact_map(map: &mut Map<String, Value>) {
     }
 }
 
+fn redact_tax(tax: &mut TaxFields) {
+    redact_string(&mut tax.jurisdiction);
+    redact_string(&mut tax.account_type);
+    redact_string(&mut tax.tax_lot_method);
+}
+
+fn redact_approval(approval: &mut MakerCheckerApproval) {
+    redact_string(&mut approval.request_id);
+    redact_string(&mut approval.maker);
+    redact_string(&mut approval.checker);
+    redact_string(&mut approval.action);
+    redact_string(&mut approval.rationale);
+}
+
+fn redact_string(text: &mut String) {
+    if is_secret_like(text) {
+        *text = "[REDACTED]".to_string();
+    }
+}
+
 fn is_secret_key(key: &str) -> bool {
     let lowered = key.to_ascii_lowercase();
     [
@@ -275,6 +315,9 @@ fn is_secret_key(key: &str) -> bool {
         "password",
         "api_key",
         "apikey",
+        "authorization",
+        "bearer",
+        "pwd",
         "credential",
     ]
     .iter()
@@ -282,7 +325,18 @@ fn is_secret_key(key: &str) -> bool {
 }
 
 fn is_secret_like(text: &str) -> bool {
-    text.starts_with("sk-") || text.starts_with("pk_") || text.contains("BEGIN PRIVATE KEY")
+    let lowered = text.to_ascii_lowercase();
+    text.starts_with("sk-")
+        || text.starts_with("pk_")
+        || text.contains("BEGIN PRIVATE KEY")
+        || lowered.starts_with("bearer ")
+        || lowered.contains("secret=")
+        || lowered.contains("token=")
+        || lowered.contains("password=")
+        || lowered.contains("pwd=")
+        || lowered.contains("api_key=")
+        || lowered.contains("apikey=")
+        || lowered.contains("authorization:")
 }
 
 fn ensure_retention(record: &LedgerRecord) -> Result<(), AuditLedgerError> {

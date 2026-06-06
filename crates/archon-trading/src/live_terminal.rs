@@ -1,51 +1,18 @@
 use crate::TradingError;
-use crate::adapters::broker::{
-    BrokerAdapter, BrokerError, BrokerHealth, BrokerOrderStatus, BrokerResponse,
-};
+use crate::adapters::broker::{BrokerAdapter, BrokerError, BrokerResponse};
 use crate::audit_ledger::{AuditLedger, NewLedgerRecord, OrderStatus, TaxFields};
 use crate::order_intent::{GatedOrderIntent, OrderIntent, TradingMode, pre_trade_gate};
 use crate::risk_governor::{
     AccountState, MarketState, RiskDecisionStatus, RiskGovernor, RiskGovernorError,
 };
 use crate::risk_policy::RiskPolicy;
-use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-const HEALTH_TIMEOUT_SECONDS: u64 = 3;
-const HALT_DEADLINE_MS: u128 = 1_000;
+#[path = "live_terminal_model.rs"]
+mod model;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ExecLedgerEntry {
-    pub client_order_id: String,
-    pub timestamp_unix_ms: u128,
-    pub status: OrderStatus,
-    pub intent: OrderIntent,
-    pub broker_order_id: Option<String>,
-    pub broker_message: String,
-    pub immutable_hash: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TerminalHealthDecision {
-    pub healthy: bool,
-    pub halt_required: bool,
-    pub auto_resume_allowed: bool,
-    pub poll_interval_ms: u64,
-    pub halt_deadline_ms: u128,
-    pub reason: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LiveTerminalError {
-    NonLiveIntent,
-    Risk(String),
-    RiskRejected(Option<&'static str>),
-    UnsupportedOrderType,
-    BrokerReject(String),
-    Audit(String),
-    HealthHalt(String),
-}
+pub use model::{ExecLedgerEntry, LiveTerminalError, TerminalHealthDecision};
+use model::{health_decision, normalize_status};
 
 pub struct LiveTerminal<A: BrokerAdapter> {
     adapter: A,
@@ -220,70 +187,16 @@ impl<A: BrokerAdapter> LiveTerminal<A> {
             status: entry.status,
             risk_decision: json!({"live_terminal": true}),
             order_intent: json!(&entry.intent),
-            broker_response: json!({"broker_order_id": entry.broker_order_id, "message": entry.broker_message}),
+            broker_response: json!({
+                "broker_order_id": entry.broker_order_id,
+                "message": entry.broker_message,
+                "filled_quantity": entry.filled_quantity
+            }),
             account: json!({"mode": "live", "adapter": self.adapter.name()}),
             tax: TaxFields::default(),
             artefacts: vec![entry.immutable_hash.as_bytes().to_vec()],
             maker_checker: None,
         }
-    }
-}
-
-impl ExecLedgerEntry {
-    fn new(
-        client_order_id: &str,
-        status: OrderStatus,
-        intent: &OrderIntent,
-        response: Option<BrokerResponse>,
-        message: &str,
-    ) -> Self {
-        Self {
-            client_order_id: client_order_id.to_string(),
-            timestamp_unix_ms: now_ms(),
-            status,
-            intent: intent.clone(),
-            broker_order_id: response.map(|value| value.broker_order_id),
-            broker_message: message.to_string(),
-            immutable_hash: String::new(),
-        }
-    }
-}
-
-impl TerminalHealthDecision {
-    fn halt(reason: String) -> Self {
-        Self {
-            healthy: false,
-            halt_required: true,
-            auto_resume_allowed: false,
-            poll_interval_ms: 1_000,
-            halt_deadline_ms: HALT_DEADLINE_MS,
-            reason,
-        }
-    }
-}
-
-fn health_decision(health: BrokerHealth) -> TerminalHealthDecision {
-    if !health.healthy || health.last_seen_seconds > HEALTH_TIMEOUT_SECONDS {
-        return TerminalHealthDecision::halt(health.message);
-    }
-    TerminalHealthDecision {
-        healthy: true,
-        halt_required: false,
-        auto_resume_allowed: false,
-        poll_interval_ms: 1_000,
-        halt_deadline_ms: HALT_DEADLINE_MS,
-        reason: health.message,
-    }
-}
-
-fn normalize_status(status: BrokerOrderStatus) -> OrderStatus {
-    match status {
-        BrokerOrderStatus::Requested => OrderStatus::Requested,
-        BrokerOrderStatus::Accepted => OrderStatus::Accepted,
-        BrokerOrderStatus::Partial => OrderStatus::Partial,
-        BrokerOrderStatus::Filled => OrderStatus::Filled,
-        BrokerOrderStatus::Rejected => OrderStatus::Rejected,
-        BrokerOrderStatus::Cancelled => OrderStatus::Cancelled,
     }
 }
 
@@ -308,12 +221,6 @@ fn risk_error_message(error: RiskGovernorError) -> LiveTerminalError {
 fn entry_hash(entry: &ExecLedgerEntry) -> String {
     let encoded = serde_json::to_vec(entry).unwrap_or_default();
     blake3::hash(&encoded).to_hex().to_string()
-}
-
-fn now_ms() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_millis())
 }
 
 #[cfg(test)]

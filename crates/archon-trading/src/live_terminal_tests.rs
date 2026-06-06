@@ -1,5 +1,8 @@
 use super::*;
-use crate::adapters::broker::{BrokerOrder, BrokerPosition, CapabilityManifest};
+use crate::adapters::broker::{
+    BrokerAdapter, BrokerError, BrokerHealth, BrokerOrder, BrokerOrderStatus, BrokerPosition,
+    BrokerResponse, CapabilityManifest,
+};
 use crate::order_intent::{OrderPrices, OrderSide, OrderType};
 
 struct FakeBroker {
@@ -188,6 +191,7 @@ fn ec_trl_26_partial_reject_cancel_are_distinct_immutable_records() {
             OrderStatus::Cancelled
         ]
     );
+    assert_eq!(terminal.ledger()[1].filled_quantity, Some(0.5));
     assert!(
         terminal
             .ledger()

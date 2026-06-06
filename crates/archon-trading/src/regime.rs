@@ -111,16 +111,18 @@ fn realized_vol_at(returns: &[f64], session_index: usize, window: usize) -> Opti
 fn is_boundary(previous: Option<f64>, current: Option<f64>) -> bool {
     match (previous, current) {
         (Some(previous), Some(current)) if previous == 0.0 => current > 0.0,
-        (Some(previous), Some(current)) => {
-            boundary_bps(previous, current) >= REGIME_BOUNDARY_CHANGE_BPS
-        }
+        (Some(previous), Some(current)) => boundary_ratio(previous, current) >= 0.5,
         _ => false,
     }
 }
 
+#[cfg(test)]
 fn boundary_bps(previous: f64, current: f64) -> i64 {
-    let scaled = ((current - previous).abs() / previous) * 10_000.0;
-    scaled.round() as i64
+    (boundary_ratio(previous, current) * 10_000.0).floor() as i64
+}
+
+fn boundary_ratio(previous: f64, current: f64) -> f64 {
+    (current - previous).abs() / previous
 }
 
 #[cfg(test)]
@@ -151,6 +153,17 @@ mod tests {
         let labels = classify_return_regimes(&returns).expect("valid returns");
 
         assert!(labels.iter().all(|label| label.regime_id == 0));
+    }
+
+    #[test]
+    fn boundary_is_not_rounded_up_at_just_below_fifty_percent() {
+        let mut returns = vec![0.01; 20];
+        returns.extend([0.0149995; 20]);
+
+        let labels = classify_return_regimes(&returns).expect("valid returns");
+
+        assert!(labels.iter().all(|label| label.regime_id == 0));
+        assert_eq!(boundary_bps(0.01, 0.0149995), 4_999);
     }
 
     #[test]

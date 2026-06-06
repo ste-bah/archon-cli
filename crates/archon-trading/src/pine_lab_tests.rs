@@ -132,8 +132,15 @@ fn ac_023_registry_stores_only_compiled_v6_scripts() {
     .scripts
     .remove(0);
     let mut registry = PineScriptRegistry::default();
+    let mut forged_script = script.clone();
+    forged_script.source.push_str("\n// changed after compile");
     assert_eq!(
-        registry.register_compiled(script.clone(), "agent", "reviewed", false),
+        registry.register_compiled(
+            forged_script,
+            "agent",
+            "reviewed",
+            PineCompileProof::from_compiled_script(&script)
+        ),
         Err(PineLabError::CompileFailed)
     );
     let adapter = TradingViewMcpAdapter::new(TvMcpConfig::pinned("vendor@abcdef1")).unwrap();

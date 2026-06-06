@@ -3,7 +3,20 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const PINNED_NUMERIC_LIB_VERSION: &str = "archon-trading-fixed-f64-v1";
-pub const REPORT_METRIC_COUNT: usize = 11;
+pub const REPORT_METRIC_KEYS: [&str; 11] = [
+    "net_profit",
+    "gross_profit",
+    "gross_loss",
+    "max_drawdown",
+    "sharpe",
+    "sortino",
+    "profit_factor",
+    "win_rate",
+    "trade_count",
+    "avg_trade",
+    "cost_total",
+];
+pub const REPORT_METRIC_COUNT: usize = REPORT_METRIC_KEYS.len();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EvidenceSource {
@@ -226,7 +239,7 @@ pub fn validate_robustness(results: &[RobustnessResult]) -> Result<(), BacktestE
 }
 
 pub fn validate_report_metrics(metrics: &BTreeMap<String, f64>) -> Result<(), BacktestError> {
-    for key in report_metric_keys() {
+    for key in REPORT_METRIC_KEYS {
         match metrics.get(key) {
             Some(value) if value.is_finite() => {}
             _ => return Err(BacktestError::MissingReportMetric(key)),
@@ -361,22 +374,6 @@ fn validate_ratio(value: f64, field: &'static str) -> Result<(), BacktestError> 
     } else {
         Err(BacktestError::InvalidConfig(field))
     }
-}
-
-fn report_metric_keys() -> [&'static str; REPORT_METRIC_COUNT] {
-    [
-        "net_profit",
-        "gross_profit",
-        "gross_loss",
-        "max_drawdown",
-        "sharpe",
-        "sortino",
-        "profit_factor",
-        "win_rate",
-        "trade_count",
-        "avg_trade",
-        "cost_total",
-    ]
 }
 
 fn sum(values: &[f64]) -> f64 {

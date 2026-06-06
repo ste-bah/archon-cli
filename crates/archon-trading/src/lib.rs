@@ -1,8 +1,7 @@
 //! Provider-neutral Trading Research & Execution Lab primitives.
 //!
-//! This crate is scaffolded as a home for the TRL workstream.  Downstream tasks
-//! replace these module stubs with focused implementations while preserving the
-//! shared error-code contract below.
+//! This crate contains the TRL workstream modules while preserving the shared
+//! provider-neutral error-code contract below.
 
 pub mod adapters {
     pub mod broker;
@@ -45,7 +44,6 @@ pub enum TradingError {
     PineCrossSymbol,
     PolicyDenied,
     RiskReject(&'static str),
-    UnimplementedModule(&'static str),
 }
 
 impl TradingError {
@@ -61,7 +59,6 @@ impl TradingError {
             Self::PineCrossSymbol => "ERR-PINE-CROSS-SYMBOL",
             Self::PolicyDenied => "ERR-POLICY-DENIED",
             Self::RiskReject(code) => code,
-            Self::UnimplementedModule(_) => "ERR-TRL-MODULE-NOT-IMPLEMENTED",
         }
     }
 }
@@ -70,7 +67,6 @@ impl std::fmt::Display for TradingError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::RiskReject(control) => write!(formatter, "risk rejected by {control}"),
-            Self::UnimplementedModule(module) => write!(formatter, "{module} is not implemented"),
             other => formatter.write_str(other.code()),
         }
     }
@@ -99,10 +95,6 @@ mod tests {
             (
                 TradingError::RiskReject("RISK-REJECT-REQ-RISK-001"),
                 "RISK-REJECT-REQ-RISK-001",
-            ),
-            (
-                TradingError::UnimplementedModule("risk_governor"),
-                "ERR-TRL-MODULE-NOT-IMPLEMENTED",
             ),
         ];
 

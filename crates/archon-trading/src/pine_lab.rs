@@ -62,6 +62,12 @@ pub struct RegisteredPineScript {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PineCompileProof {
+    source_hash: String,
+    docs_checked_before_code: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PineLabError {
     SpecInvalid(Vec<&'static str>),
     UnapprovedStatus,
@@ -82,10 +88,10 @@ impl PineScriptRegistry {
         script: GeneratedPineScript,
         author_agent: impl Into<String>,
         review_status: impl Into<String>,
-        compile_passed: bool,
+        proof: PineCompileProof,
     ) -> Result<RegisteredPineScript, PineLabError> {
         reject_v5(&script.source)?;
-        if !compile_passed {
+        if !proof.accepts(&script) {
             return Err(PineLabError::CompileFailed);
         }
         let content_hash = blake3::hash(script.source.as_bytes()).to_hex().to_string();
@@ -109,6 +115,20 @@ impl PineScriptRegistry {
 
     pub fn len(&self) -> usize {
         self.records.len()
+    }
+}
+
+impl PineCompileProof {
+    pub(crate) fn from_compiled_script(script: &GeneratedPineScript) -> Self {
+        Self {
+            source_hash: blake3::hash(script.source.as_bytes()).to_hex().to_string(),
+            docs_checked_before_code: true,
+        }
+    }
+
+    fn accepts(&self, script: &GeneratedPineScript) -> bool {
+        self.docs_checked_before_code
+            && self.source_hash == blake3::hash(script.source.as_bytes()).to_hex().to_string()
     }
 }
 
@@ -149,7 +169,8 @@ pub fn compile_and_register<T: TvMcpTransport>(
     adapter
         .pine_compile_check(transport, &script.source)
         .map_err(PineLabError::TvMcp)?;
-    registry.register_compiled(script, author_agent, review_status, true)
+    let proof = PineCompileProof::from_compiled_script(&script);
+    registry.register_compiled(script, author_agent, review_status, proof)
 }
 
 pub fn pine_alert_to_non_authoritative_intent(
@@ -212,8 +233,14 @@ fn build_script(
     symbol: &str,
     variant: ScriptVariant,
 ) -> Result<GeneratedPineScript, PineLabError> {
-    let formulas = spec.spec_f06_indicator_formulas.as_ref().unwrap();
-    let rules = spec.spec_f05_entry_exit_rules.as_ref().unwrap();
+    let formulas = spec
+        .spec_f06_indicator_formulas
+        .as_ref()
+        .ok_or_else(|| PineLabError::SpecInvalid(vec!["SPEC-F06"]))?;
+    let rules = spec
+        .spec_f05_entry_exit_rules
+        .as_ref()
+        .ok_or_else(|| PineLabError::SpecInvalid(vec!["SPEC-F05"]))?;
     reject_cross_symbol_rules(&rules.rules)?;
     let inputs = configurable_inputs(spec);
     let source = render_script(

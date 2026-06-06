@@ -75,6 +75,7 @@ pub struct WorldModelSignal {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LearningGate {
+    blocked_gated_attempts: Vec<String>,
     blocked_live_limit_attempts: Vec<String>,
     blocked_order_attempts: Vec<String>,
 }
@@ -110,15 +111,23 @@ impl LearningGate {
     }
 
     pub fn approve_gated(
-        &self,
+        &mut self,
         action: GatedLearningAction,
         approval: Option<&MakerCheckerApproval>,
     ) -> Result<LearningDecision, LearningError> {
-        let approval = approval.ok_or(LearningError::MakerCheckerRequired)?;
-        approval
-            .verify_pair()
-            .map_err(LearningError::MakerCheckerInvalid)?;
+        let Some(approval) = approval else {
+            self.blocked_gated_attempts
+                .push(format!("{action:?}:missing_maker_checker"));
+            return Err(LearningError::MakerCheckerRequired);
+        };
+        approval.verify_pair().map_err(|err| {
+            self.blocked_gated_attempts
+                .push(format!("{action:?}:invalid_maker_checker"));
+            LearningError::MakerCheckerInvalid(err)
+        })?;
         if !approval_matches(action, &approval.action) {
+            self.blocked_gated_attempts
+                .push(format!("{action:?}:approval_action_mismatch"));
             return Err(LearningError::MakerCheckerRequired);
         }
         Ok(LearningDecision::allow(
@@ -157,6 +166,10 @@ impl LearningGate {
 
     pub fn blocked_live_limit_attempts(&self) -> &[String] {
         &self.blocked_live_limit_attempts
+    }
+
+    pub fn blocked_gated_attempts(&self) -> &[String] {
+        &self.blocked_gated_attempts
     }
 
     pub fn blocked_order_attempts(&self) -> &[String] {
@@ -242,8 +255,14 @@ fn looks_like_order(recommendation: &str) -> bool {
     let text = recommendation.to_ascii_lowercase();
     text.contains("submit order")
         || text.contains("place order")
+        || text.contains("route market order")
+        || text.contains("enter position")
+        || text.contains("go long")
+        || text.contains("go short")
         || text.contains("buy ")
         || text.contains("sell ")
+        || text.contains("long ")
+        || text.contains("short ")
 }
 
 #[cfg(test)]
@@ -265,16 +284,17 @@ mod tests {
 
     #[test]
     fn gated_actions_fail_closed_without_approval() {
-        let gate = LearningGate::default();
+        let mut gate = LearningGate::default();
         let error = gate
             .approve_gated(GatedLearningAction::PromoteToLive, None)
             .unwrap_err();
         assert_eq!(error, LearningError::MakerCheckerRequired);
+        assert_eq!(gate.blocked_gated_attempts().len(), 1);
     }
 
     #[test]
     fn gated_actions_require_matching_maker_checker_pair() {
-        let gate = LearningGate::default();
+        let mut gate = LearningGate::default();
         let approval = MakerCheckerApproval::new(
             "learn-1",
             "maker",
@@ -319,7 +339,7 @@ mod tests {
                 WorldModelAction::RecommendReview,
                 "strategy-a",
                 0.9,
-                "submit order to buy SPY",
+                "go long SPY with a market order",
             )
             .unwrap_err();
         assert_eq!(error, LearningError::WorldModelOrderBlocked);

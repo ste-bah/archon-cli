@@ -48,6 +48,7 @@ pub struct SampleGateDecision {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaperTerminalError {
     NonPaperIntent,
+    FillWithoutAcceptedOrder,
     Risk(String),
     RiskRejected(Option<&'static str>),
     Audit(String),
@@ -138,6 +139,9 @@ impl PaperTerminal {
         intent: &OrderIntent,
         fill: PaperFill,
     ) -> Result<(), PaperTerminalError> {
+        if !self.order_can_fill(order_id) {
+            return Err(PaperTerminalError::FillWithoutAcceptedOrder);
+        }
         self.record_status(order_id, OrderStatus::Filled, intent, Some(fill), "filled")
     }
 
@@ -162,7 +166,7 @@ impl PaperTerminal {
         }
         SampleGateDecision {
             allowed: missing.is_empty(),
-            binding_condition: missing.first().copied(),
+            binding_condition: self.binding_condition(sample, &missing),
             missing_conditions: missing,
         }
     }
@@ -175,6 +179,50 @@ impl PaperTerminal {
         let order_id = format!("paper-{}", self.next_order);
         self.next_order += 1;
         order_id
+    }
+
+    fn order_can_fill(&self, order_id: &str) -> bool {
+        self.ledger
+            .iter()
+            .rev()
+            .find(|entry| entry.order_id == order_id)
+            .is_some_and(|entry| {
+                matches!(entry.status, OrderStatus::Accepted | OrderStatus::Partial)
+            })
+    }
+
+    fn binding_condition(
+        &self,
+        sample: &PaperSample,
+        missing: &[&'static str],
+    ) -> Option<&'static str> {
+        missing
+            .iter()
+            .copied()
+            .max_by_key(|condition| self.binding_score(sample, condition))
+    }
+
+    fn binding_score(&self, sample: &PaperSample, condition: &str) -> u32 {
+        let promotion = &self.policy.promotion;
+        match condition {
+            "min_regimes" => {
+                let missing = promotion
+                    .paper_min_regimes
+                    .saturating_sub(sample.regime_ids.len() as u32);
+                10_000 + missing
+            }
+            "min_calendar_days" => {
+                1_000
+                    + promotion
+                        .paper_min_calendar_days
+                        .saturating_sub(sample.calendar_days)
+            }
+            "min_closed_trades" => promotion
+                .paper_min_closed_trades
+                .saturating_sub(sample.closed_trades),
+            "postmortem_required" => 1,
+            _ => 0,
+        }
     }
 
     fn record_status(
@@ -234,6 +282,9 @@ impl std::fmt::Display for PaperTerminalError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NonPaperIntent => formatter.write_str("paper terminal rejects non-paper intent"),
+            Self::FillWithoutAcceptedOrder => {
+                formatter.write_str("paper fill requires an accepted order")
+            }
             Self::Risk(message) => {
                 write!(formatter, "paper terminal risk governor error: {message}")
             }
@@ -341,8 +392,27 @@ mod tests {
         let blocked = terminal.evaluate_sample_gate(&short);
 
         assert!(!blocked.allowed);
-        assert_eq!(blocked.binding_condition, Some("min_closed_trades"));
+        assert_eq!(blocked.binding_condition, Some("min_regimes"));
         assert_eq!(blocked.missing_conditions.len(), 4);
+    }
+
+    #[test]
+    fn fill_requires_existing_accepted_order() {
+        let mut terminal = terminal();
+        let fill = PaperFill {
+            quantity: 1.0,
+            price: 10.0,
+            slippage_bps: 0.0,
+            latency_ms: 0,
+            realized_pnl: 0.0,
+            position_after: 1.0,
+        };
+
+        let error = terminal
+            .record_fill("paper-404", &OrderIntent::default(), fill)
+            .expect_err("unknown order cannot be filled");
+
+        assert_eq!(error, PaperTerminalError::FillWithoutAcceptedOrder);
     }
 
     #[test]
