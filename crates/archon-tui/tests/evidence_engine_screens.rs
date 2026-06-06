@@ -3,6 +3,9 @@ use archon_tui::screens::gametheory::{
     GameTheoryRow, GameTheoryScreen, GameTheoryStore, GameTheoryView,
 };
 use archon_tui::screens::learning::{LearningRow, LearningScreen, LearningStore, LearningView};
+use archon_tui::screens::video::{
+    FrameGroupItem, TranscriptSegmentItem, VideoScreen, VideoSourceItem,
+};
 use archon_tui::screens::workflow::{WorkflowRow, WorkflowScreen, WorkflowStore, WorkflowView};
 use archon_tui::theme::intj_theme;
 use ratatui::Terminal;
@@ -147,8 +150,42 @@ fn evidence_engine_screens_render_source_rows_to_buffer() {
     assert!(workflow_rendered.contains("failure remains inspectable"));
 }
 
+#[test]
+fn video_screen_renders_sources_progress_frames_and_summary() {
+    let theme = intj_theme();
+    let mut video = VideoScreen::sources();
+    video.set_source_rows(vec![VideoSourceItem {
+        video_id: "video-1".into(),
+        title: "Trading lecture".into(),
+        status: "indexed".into(),
+        detail: "transcript and frames".into(),
+    }]);
+    video.set_transcript_segments(vec![TranscriptSegmentItem {
+        start_ms: 12_000,
+        end_ms: 15_000,
+        text: "Impulse wave starts here".into(),
+        speaker: Some("analyst".into()),
+    }]);
+    video.set_frame_rows(vec![FrameGroupItem {
+        start_ms: 18_000,
+        end_ms: 21_000,
+        image_path: "frames/chart-001.jpg".into(),
+        detail: "chart annotation".into(),
+    }]);
+    video.on_progress(7, "OCR batch complete".into(), "processing".into());
+    video.set_summary("Elliott wave setup with visual evidence");
+
+    let rendered = render_screen(|frame| video.render(frame, frame.area(), &theme));
+
+    assert!(rendered.contains("Trading lecture"));
+    assert!(rendered.contains("processing"));
+    assert!(rendered.contains("Impulse wave"));
+    assert!(rendered.contains("frames/chart-001"));
+    assert!(rendered.contains("Elliott wave setup"));
+}
+
 fn render_screen(render: impl FnOnce(&mut ratatui::Frame)) -> String {
-    let backend = TestBackend::new(96, 12);
+    let backend = TestBackend::new(96, 20);
     let mut terminal = Terminal::new(backend).expect("build TestBackend terminal");
     terminal.draw(render).expect("draw evidence screen");
     buffer_to_string(&terminal)
