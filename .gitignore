@@ -63,6 +63,7 @@ hello.txt
 !/docs/tui-modularization-report.md
 # Exception: user-facing documentation tree (README split, v0.1.28+).
 !/docs/README.md
+!/docs/trading-lab.md
 !/docs/getting-started/
 !/docs/getting-started/**
 !/docs/reference/

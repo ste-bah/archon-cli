@@ -153,6 +153,7 @@ The docs are organised by user goal:
 | **Getting started** | [`docs/getting-started/`](docs/getting-started/) — install, first run, quick start |
 | **Architecture** | [`docs/architecture/`](docs/architecture/) — overview, learning systems, pipelines, Evidence Engine diagrams |
 | **Evidence Engine** | [`docs/evidence-engine.md`](docs/evidence-engine.md) — documents, KB, provenance, game theory, completion integrity, governed learning |
+| **Trading Lab** | [`docs/trading-lab.md`](docs/trading-lab.md) and [`docs/cookbook/trading-lab.md`](docs/cookbook/trading-lab.md) — governed trading research, strategy specs, Pine prototypes, deterministic backtests, paper/live gates, and risk/audit controls |
 | **Providers** | [`docs/providers/`](docs/providers/) — provider runtime, Codex app-server, Claude Code spoofing, auth profiles, cloud/local providers |
 | **Agents & learning** | [`docs/agents/`](docs/agents/) and [`docs/learning/`](docs/learning/) — governed agent evolution, memory promotion, permission governance |
 | **World model** | [`docs/architecture/world-model.md`](docs/architecture/world-model.md) — local trace corpus, advisory predictions, training backends, retention |
@@ -204,8 +205,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v1.3.10** ([release notes](docs/release-notes/v1.3.10.md))
+- Current version: **v1.3.11** ([release notes](docs/release-notes/v1.3.11.md))
 - Stable release for local world-model advisory learning, first-class reasoning-quality events, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
+- v1.3.11 adds the governed Trading Lab substrate: strategy specs, Pine prototypes, data/backtest/paper/live gates, risk/audit controls, learning hooks, and detailed user/cookbook documentation.
 - v1.3.10 adds provider-neutral dynamic workflows: `/workflow` planning/running/resume controls, durable workflow bundles, live TUI activity rows, web workflow inspection, learning ledgers, sanitized events, reusable templates, and workflow docs.
 - v1.3.9 moves document embeddings out of the hot Cozo write path into a RocksDB raw-vector store, adds resumable legacy-vector migration, Rust-HNSW compaction, durable index-queue/daemon controls, and clearer vector-status diagnostics.
 - v1.3.8 adds the Cognitive Executive Loop: situation classification, candidate planning, policy-gated JEPA/world-model scoring, compact decision/reflection ledgers, autonomous cognitive ticks, an opt-in Rust daemon, CLI/TUI/web executive-state inspection, and Opus-tier alias support for `claude-opus-4-8`.
