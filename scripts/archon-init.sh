@@ -77,6 +77,7 @@ mkdir -p "$ARCHON_DIR/templates"
 mkdir -p "$ARCHON_DIR/adr"
 mkdir -p "$ARCHON_DIR/context"
 mkdir -p "$ARCHON_DIR/specs"
+mkdir -p "$ARCHON_DIR/tools"
 mkdir -p "$ARCHON_DIR/docs"
 mkdir -p "$ARCHON_DIR/docs/inbox"
 mkdir -p "$ARCHON_DIR/docs/images"
@@ -106,6 +107,11 @@ if [ -n "$ARCHON_CLI_REPO" ]; then
     if [ "$NO_AGENTS" = false ] && [ -d "$ARCHON_CLI_REPO/.archon/agents/gametheory" ]; then
         mkdir -p "$ARCHON_DIR/agents/gametheory"
         cp -r "$ARCHON_CLI_REPO/.archon/agents/gametheory/." "$ARCHON_DIR/agents/gametheory/" 2>/dev/null || true
+    fi
+    if [ -f "$ARCHON_CLI_REPO/scripts/setup-trading-tools.sh" ]; then
+        mkdir -p "$TARGET/scripts"
+        cp "$ARCHON_CLI_REPO/scripts/setup-trading-tools.sh" "$TARGET/scripts/setup-trading-tools.sh" 2>/dev/null || true
+        chmod +x "$TARGET/scripts/setup-trading-tools.sh" 2>/dev/null || true
     fi
 fi
 
@@ -259,6 +265,7 @@ echo "  .archon/templates/"
 echo "  .archon/adr/"
 echo "  .archon/context/"
 echo "  .archon/specs/"
+echo "  .archon/tools/"
 echo "  .archon/docs/inbox/"
 echo "  .archon/docs/images/"
 echo "  .archon/evidence/"

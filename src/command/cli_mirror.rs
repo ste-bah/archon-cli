@@ -146,6 +146,7 @@ mod tests {
             "briefing",
             "auth",
             "chat",
+            "trading",
         ] {
             assert!(
                 registry.is_primary(primary),

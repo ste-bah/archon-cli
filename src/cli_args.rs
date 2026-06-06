@@ -12,6 +12,8 @@ mod permissions_actions;
 mod reasoning_actions;
 mod root;
 mod strategy_actions;
+mod trading_actions;
+mod trading_market_actions;
 mod video_actions;
 mod world_model_actions;
 
@@ -30,6 +32,16 @@ pub use root::Cli;
 pub use strategy_actions::{
     CompletionAction, GametheoryAction, PipelineAction, ProviderProfilesAction, ProvidersAction,
     SandboxAction, TeamAction, WorkflowAction,
+};
+pub use trading_actions::{
+    TradingCliAction, TradingCliCommand, TradingCliLiveAction, TradingCliOpenBbAction,
+    TradingCliOpenBbMode, TradingCliPaperAction, TradingCliPersona, TradingCliPineAction,
+    TradingCliPromoteAction, TradingCliPromotionStatus, TradingCliSpecAction,
+    TradingCliToolsAction, TradingCliTvAction, TradingCliVerb, TradingCliWorkflowAction,
+};
+pub use trading_market_actions::{
+    TradingCliBacktestAction, TradingCliBacktestSource, TradingCliDataAction,
+    TradingCliDatasetStatus, TradingCliOhlcvFormat, TradingCliOhlcvRule,
 };
 pub use video_actions::VideoAction;
 pub use world_model_actions::{WorldAction, WorldGuardAction, WorldGuardPolicyAction};

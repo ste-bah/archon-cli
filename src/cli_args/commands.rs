@@ -5,7 +5,7 @@ use super::{
     CompletionAction, ConstellationAction, DocsAction, GametheoryAction, KbAction, LearningAction,
     MeaningAction, MemoryAction, PermissionsAction, PipelineAction, PluginAction, ProvAction,
     ProvidersAction, ReasoningAction, RemoteAction, SandboxAction, SelfAction, TeamAction,
-    VideoAction, WorkflowAction, WorldAction,
+    TradingCliAction, VideoAction, WorkflowAction, WorldAction,
 };
 
 #[derive(Subcommand, Debug)]
@@ -238,6 +238,11 @@ pub enum Commands {
     Video {
         #[command(subcommand)]
         action: VideoAction,
+    },
+    /// Governed trading research and execution-lab controls
+    Trading {
+        #[command(subcommand)]
+        action: TradingCliAction,
     },
     /// Inspect and export provenance traces
     Prov {

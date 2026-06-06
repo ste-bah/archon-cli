@@ -85,6 +85,22 @@ pipelines, and world-model state:
 This opens `http://localhost:8421` by default. Use `--no-open` when running on
 a remote box or in WSL where you want to open the URL manually.
 
+## Optional Trading Lab Tools
+
+TradingView MCP and OpenBB are not required for ordinary Archon use. For the
+Trading Lab workflow, install the extra Node/Python prerequisites and then set
+up the project-local tools:
+
+```bash
+scripts/install-system-deps.sh --with-trading-tools
+scripts/setup-trading-tools.sh --target ~/projects/my-archon-project
+"$ARCHON_BIN" trading tools status --target ~/projects/my-archon-project
+```
+
+This writes the project `.mcp.json`, installs
+`tradesdontlie/tradingview-mcp` under `.archon/tools/`, and creates an OpenBB
+virtualenv under `.archon/tools/openbb-venv`.
+
 ## Smoke test
 
 Non-interactive print mode, useful for CI:
@@ -99,6 +115,6 @@ If you see structured JSON output, the install is healthy.
 - [Installation](installation.md) — full build details for every OS, OS-specific dependencies, common build problems
 - [First run](first-run.md) — what data archon writes to disk, where logs go, common gotchas
 - [Web workbench](../operations/web-workbench.md) — browser tabs, data sources, action safety, and setup
-- [Slash commands reference](../reference/slash-commands.md) — the 83 primary commands
+- [Slash commands reference](../reference/slash-commands.md) — the 84 primary commands
 - [Sandboxing](../security/sandboxing.md) — optional Docker, SSH, and OpenShell isolation
 - [Cookbook](../cookbook/) — task-oriented walkthroughs

@@ -17,6 +17,7 @@
 #   sudo scripts/install-system-deps.sh --with-docker
 #   sudo scripts/install-system-deps.sh --with-openshell
 #   sudo scripts/install-system-deps.sh --with-sandbox   # Docker + OpenShell
+#   sudo scripts/install-system-deps.sh --with-trading-tools
 #   scripts/install-system-deps.sh --with-openshell --setup-openshell-gateway
 #
 # OpenShell extras follow NVIDIA's current support matrix: Debian/Ubuntu Linux
@@ -39,6 +40,7 @@ CHECK_ONLY=false
 WITH_DOCKER=false
 WITH_OPENSHELL=false
 SETUP_OPENSHELL_GATEWAY=false
+WITH_TRADING_TOOLS=false
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -46,6 +48,7 @@ while [ $# -gt 0 ]; do
         --check)                    CHECK_ONLY=true ;;
         --with-docker)              WITH_DOCKER=true ;;
         --with-openshell)           WITH_OPENSHELL=true ;;
+        --with-trading-tools)       WITH_TRADING_TOOLS=true ;;
         --setup-openshell-gateway|--start-openshell-gateway)
             WITH_OPENSHELL=true
             SETUP_OPENSHELL_GATEWAY=true
@@ -109,6 +112,7 @@ PKG_OCR=""
 PKG_VIDEO=""
 PKG_DOCKER=""
 PKG_OPENSHELL_PREREQ=""
+PKG_TRADING_TOOLS=""
 CHECK_WHISPER_CLI=false
 PKG_MGR=""
 PKG_INSTALL_CMD=""
@@ -125,6 +129,7 @@ case "$DISTRO_ID" in
         PKG_VIDEO="ffmpeg yt-dlp"
         PKG_DOCKER="docker.io"
         PKG_OPENSHELL_PREREQ="curl"
+        PKG_TRADING_TOOLS="nodejs npm python3 python3-venv"
         ;;
     fedora|rhel|rocky|almalinux|centos)
         PKG_MGR="dnf"
@@ -136,6 +141,7 @@ case "$DISTRO_ID" in
         PKG_VIDEO="ffmpeg-free yt-dlp"
         PKG_DOCKER="moby-engine docker-cli"
         PKG_OPENSHELL_PREREQ="curl"
+        PKG_TRADING_TOOLS="nodejs npm python3"
         ;;
     arch|manjaro|endeavouros|garuda)
         PKG_MGR="pacman"
@@ -148,6 +154,7 @@ case "$DISTRO_ID" in
         CHECK_WHISPER_CLI=true
         PKG_DOCKER="docker"
         PKG_OPENSHELL_PREREQ="curl"
+        PKG_TRADING_TOOLS="nodejs npm python python-virtualenv"
         ;;
     opensuse-tumbleweed|opensuse-leap|opensuse|sles|sled)
         # OpenSUSE / SLE family. The poppler CLI utilities ship under
@@ -163,6 +170,7 @@ case "$DISTRO_ID" in
         PKG_VIDEO="ffmpeg yt-dlp"
         PKG_DOCKER="docker"
         PKG_OPENSHELL_PREREQ="curl"
+        PKG_TRADING_TOOLS="nodejs npm python3 python3-virtualenv"
         ;;
     alpine)
         # Alpine — common in containers. Note busybox `sh` already; the
@@ -177,6 +185,7 @@ case "$DISTRO_ID" in
         PKG_VIDEO="ffmpeg yt-dlp"
         PKG_DOCKER="docker"
         PKG_OPENSHELL_PREREQ="curl"
+        PKG_TRADING_TOOLS="nodejs npm python3 py3-virtualenv"
         ;;
     macos)
         PKG_MGR="brew"
@@ -191,6 +200,7 @@ case "$DISTRO_ID" in
         CHECK_WHISPER_CLI=true
         PKG_DOCKER=""
         PKG_OPENSHELL_PREREQ=""
+        PKG_TRADING_TOOLS="node python"
         ;;
     *)
         echo "install-system-deps.sh: unsupported OS (uname=$UNAME_S, distro=$DISTRO_ID)" >&2
@@ -260,6 +270,13 @@ if [ "$CHECK_ONLY" = true ]; then
     if [ "$SETUP_OPENSHELL_GATEWAY" = true ] && ! openshell status >/dev/null 2>&1; then
         MISSING="$MISSING openshell-gateway"
     fi
+    if [ "$WITH_TRADING_TOOLS" = true ]; then
+        for bin in node npm python3; do
+            if ! command -v "$bin" >/dev/null 2>&1; then
+                MISSING="$MISSING $bin"
+            fi
+        done
+    fi
     # gcc OR cc satisfies the C compiler requirement
     if ! command -v gcc >/dev/null 2>&1 && ! command -v cc >/dev/null 2>&1; then
         :  # already in MISSING
@@ -291,6 +308,9 @@ if [ "$CHECK_ONLY" = true ]; then
     fi
     if [ "$SETUP_OPENSHELL_GATEWAY" = true ]; then
         PRESENT="$PRESENT, openshell-gateway"
+    fi
+    if [ "$WITH_TRADING_TOOLS" = true ]; then
+        PRESENT="$PRESENT, node, npm, python3"
     fi
     echo "install-system-deps.sh: all requested binaries present ($PRESENT)"
     exit 0
@@ -328,6 +348,9 @@ fi
 if [ "$WITH_OPENSHELL" = true ]; then
     ALL_PKGS="$ALL_PKGS $PKG_OPENSHELL_PREREQ"
 fi
+if [ "$WITH_TRADING_TOOLS" = true ]; then
+    ALL_PKGS="$ALL_PKGS $PKG_TRADING_TOOLS"
+fi
 # Trim leading space if PKG_BUILD was empty (macOS case)
 ALL_PKGS=$(echo "$ALL_PKGS" | sed 's/^ *//')
 
@@ -343,6 +366,7 @@ run() {
 
 echo "install-system-deps.sh: detected $OS_FAMILY/$DISTRO_ID, package manager: $PKG_MGR"
 echo "install-system-deps.sh: sandbox extras: docker=$WITH_DOCKER openshell=$WITH_OPENSHELL"
+echo "install-system-deps.sh: trading tools deps: $WITH_TRADING_TOOLS"
 if [ "$SETUP_OPENSHELL_GATEWAY" = true ]; then
     echo "install-system-deps.sh: OpenShell gateway setup requested"
 fi
@@ -413,6 +437,9 @@ if [ "$DRY_RUN" = false ]; then
     if [ "$WITH_OPENSHELL" = true ]; then
         VERIFY_BINS="$VERIFY_BINS openshell"
     fi
+    if [ "$WITH_TRADING_TOOLS" = true ]; then
+        VERIFY_BINS="$VERIFY_BINS node npm python3"
+    fi
     for bin in $VERIFY_BINS; do
         if command -v "$bin" >/dev/null 2>&1; then
             VERSION=$("$bin" --version 2>&1 | head -n 1 || echo "(version check failed)")
@@ -428,6 +455,7 @@ if [ "$DRY_RUN" = false ]; then
     echo "  3. Initialise a project: ./scripts/archon-init.sh --target /path/to/project"
     echo "  4. For local video ASR, download a whisper.cpp model and set [policy.video.asr].model"
     echo "     Optional RapidOCR/OpenCV fallback: python3 -m pip install rapidocr opencv-python"
+    echo "     Optional Trading Lab tools: scripts/setup-trading-tools.sh --target /path/to/project"
     if [ "$WITH_DOCKER" = true ]; then
         echo "  5. Enable Docker sandboxing by setting [sandbox].backend=\"docker\" and [sandbox.docker].enabled=true"
     fi

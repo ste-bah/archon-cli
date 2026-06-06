@@ -8,12 +8,16 @@ pub mod adapters {
     pub mod openbb;
     pub mod openbb_allowlist;
     pub mod tv_mcp;
+    pub mod tv_paper;
 }
 
 pub mod agent_policy;
 pub mod audit_ledger;
 pub mod backtest;
+pub mod candle_backtest;
+pub mod custom_strategy;
 pub mod data_lake;
+pub mod data_store;
 pub mod dryrun_cert;
 pub mod kb;
 pub mod kill_switch;
@@ -21,6 +25,7 @@ pub mod learning_hooks;
 pub mod live_enablement;
 pub mod live_terminal;
 pub mod maker_checker;
+pub mod ohlcv;
 pub mod order_intent;
 pub mod paper_terminal;
 pub mod pine_lab;

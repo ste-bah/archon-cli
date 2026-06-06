@@ -27,7 +27,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Document intelligence](docs.md) — ingest, OCR/VLM policy, embeddings, exact/semantic/hybrid retrieval
 - [Video evidence](video.md) — transcript/ASR ingest, frame OCR/VLM, timecode citations, KB consumption
 - [Knowledge base](knowledge.md) — claims, entities, relations, source quality, contradictions
-- [Trading Lab](trading-lab.md) — governed trading research, strategy specs, Pine prototypes, deterministic backtests, paper/live gates, risk controls, and audit ledgers
+- [Trading Lab](trading-lab.md) — governed trading research, strategy specs, Pine prototypes, persistent OHLCV data, deterministic fill/candle/custom-rule backtests, TradingView replay-paper evidence, workflow specs, paper/live gates, risk controls, and audit ledgers
 - [Game theory](gametheory.md) — CLI, `/gametheory` slash command, tools, persisted run state
 - [Completion integrity](completion-integrity.md) — claims, evidence, incidents, trust scoring
 - [Governed learning](governed-learning.md) — learning events, proposals, manifests, approval gates
@@ -36,7 +36,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Reference
 
-- [Slash commands](reference/slash-commands.md) — 83 primary commands grouped by purpose
+- [Slash commands](reference/slash-commands.md) — 84 primary commands grouped by purpose
 - [Tools](reference/tools.md) — 43 built-in tools available to agents
 - [Skills](reference/skills.md) — 68 built-in skills (composable command sequences)
 - [Permissions](reference/permissions.md) — 7 permission modes, rule lists, sandboxing
@@ -96,7 +96,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Research pipeline (`/archon-research`)](cookbook/archon-research-pipeline.md) — 47-agent PhD research workflow end-to-end inside the TUI
 - [Pipeline rewind](cookbook/pipeline-rewind.md) — audited recovery when accepted pipeline outputs are contaminated and must be regenerated
 - [Dynamic workflows](cookbook/dynamic-workflows.md) — plan, run, resume, restart-agent, and save generated provider-neutral workflows
-- [Trading Lab](cookbook/trading-lab.md) — build trading KBs, create 15-field strategy specs, generate Pine variants, validate data/backtests, paper trade, postmortem, and review live-readiness gates
+- [Trading Lab](cookbook/trading-lab.md) — build trading KBs, create 15-field strategy specs, ingest OHLCV datasets, generate Pine variants, run fill/candle/custom-rule backtests, paper trade, mirror replay evidence through TradingView MCP, generate Trading Lab workflow specs, postmortem, and review live-readiness gates
 - [Game-theory pipeline (`/gametheory`)](cookbook/gametheory-pipeline.md) — Tier 1 classify → route → specialists → report end-to-end inside the TUI
 - [Trading and asset analysis with `/gametheory`](cookbook/trading-with-gametheory.md) — applying the game-theory pipeline to pre-trade assessment, post-event decomposition, counterparty analysis, strategy-viability tests, and macro reaction-function modelling
 - [World-model and JEPA training](cookbook/world-model-dynamic-training.md) — fresh setup, readiness checks, training, eval, promotion, and idle-aware trainer behavior
@@ -133,7 +133,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
-- [v1.3.11](release-notes/v1.3.11.md) — Governed Trading Lab substrate with strategy specs, Pine prototypes, data/backtest/paper/live gates, risk/audit controls, learning hooks, and user/cookbook documentation
+- [v1.3.11](release-notes/v1.3.11.md) — Governed Trading Lab substrate with strategy specs, Pine prototypes, persistent OHLCV data, fill/candle/custom-rule backtests, paper/live gates, TradingView replay-paper evidence, workflow specs, risk/audit controls, learning hooks, and user/cookbook documentation
 - [v1.3.10](release-notes/v1.3.10.md) — Provider-neutral dynamic workflows, durable workflow bundles, live TUI Agent Activity, web Workflows page, learning ledgers, and `/workflow` CLI/TUI control
 - [v1.3.9](release-notes/v1.3.9.md) — RocksDB document vector store, resumable legacy-vector migration, Rust-HNSW compaction, durable index queue/daemon controls, and vector diagnostics
 - [v1.3.8](release-notes/v1.3.8.md) — Cognitive Executive Loop, autonomous cognitive ticks, opt-in Rust daemon, executive-state CLI/TUI/web surfaces, and safety-gated self-model/world-model coordination

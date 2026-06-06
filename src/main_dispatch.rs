@@ -53,6 +53,7 @@ pub(crate) async fn handle_subcommand(
         command @ (Commands::Kb { .. }
         | Commands::Docs { .. }
         | Commands::Video { .. }
+        | Commands::Trading { .. }
         | Commands::Prov { .. }
         | Commands::Meaning { .. }
         | Commands::Constellation { .. }
@@ -244,6 +245,7 @@ async fn handle_data_command(command: Commands) -> Result<()> {
         Commands::Kb { action } => crate::command::kb::handle_kb_command(action).await,
         Commands::Docs { action } => crate::command::docs::handle_docs_command(action).await,
         Commands::Video { action } => crate::command::video::handle_video_command(action).await,
+        Commands::Trading { action } => crate::command::trading::handle_trading_command(&action),
         Commands::Prov { action } => crate::command::prov::handle_prov_command(action).await,
         Commands::Meaning { action } => {
             crate::command::meaning::handle_meaning_command(action).await

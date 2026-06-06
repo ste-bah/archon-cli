@@ -130,9 +130,42 @@ Two built-in tools query MCP server resources directly:
 | `mcp-server-github` | GitHub API | from your package manager |
 | `mcp-server-postgres` | Postgres queries | `npx -y @modelcontextprotocol/server-postgres` |
 | `mcp-server-puppeteer` | Browser automation | `npx -y @modelcontextprotocol/server-puppeteer` |
+| `tradingview` | Local TradingView Desktop chart/Pine tooling | `scripts/setup-trading-tools.sh --target <project>` |
 | `memorygraph` | archon-cli's own MCP server | bundled |
 
 See the [MCP server registry](https://modelcontextprotocol.io/registry) for the full ecosystem.
+
+## TradingView MCP
+
+The Trading Lab setup script installs
+[`tradesdontlie/tradingview-mcp`](https://github.com/tradesdontlie/tradingview-mcp)
+under `<project>/.archon/tools/tradingview-mcp` and writes a project-local
+`.mcp.json` entry named `tradingview`:
+
+```json
+{
+  "mcpServers": {
+    "tradingview": {
+      "command": "node",
+      "args": ["/path/to/project/.archon/tools/tradingview-mcp/src/server.js"]
+    }
+  }
+}
+```
+
+After restarting the TUI, connected tools are exposed as
+`mcp__tradingview__tv_health_check`, `mcp__tradingview__pine_check`,
+`mcp__tradingview__pine_set_source`, and so on. The setup script marks
+read-only/chart-inspection tools safe and Pine/chart mutation tools risky.
+
+TradingView Desktop must be running with CDP enabled, usually through:
+
+```bash
+scripts/start-tradingview-cdp.sh 9222
+```
+
+See the [Trading Lab cookbook](../cookbook/trading-lab.md) for the full
+TradingView/OpenBB setup path.
 
 ## Debugging MCP
 

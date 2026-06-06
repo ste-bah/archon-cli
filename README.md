@@ -7,8 +7,8 @@
 A strategic engineering CLI built in Rust. Self-learning agent platform with
 persistent memory, multi-agent pipelines, Evidence Engine provenance, document
 intelligence, governed learning, local world-model advisory learning,
-reasoning-quality events, and identity-aware Anthropic/Codex provider
-integration.
+reasoning-quality events, Trading Lab data/backtest controls, and
+identity-aware Anthropic/Codex provider integration.
 
 > **Documentation has moved.** This README is now a landing page. The full structured docs live in [`docs/`](docs/README.md) — start there.
 
@@ -153,7 +153,7 @@ The docs are organised by user goal:
 | **Getting started** | [`docs/getting-started/`](docs/getting-started/) — install, first run, quick start |
 | **Architecture** | [`docs/architecture/`](docs/architecture/) — overview, learning systems, pipelines, Evidence Engine diagrams |
 | **Evidence Engine** | [`docs/evidence-engine.md`](docs/evidence-engine.md) — documents, KB, provenance, game theory, completion integrity, governed learning |
-| **Trading Lab** | [`docs/trading-lab.md`](docs/trading-lab.md) and [`docs/cookbook/trading-lab.md`](docs/cookbook/trading-lab.md) — governed trading research, strategy specs, Pine prototypes, deterministic backtests, paper/live gates, and risk/audit controls |
+| **Trading Lab** | [`docs/trading-lab.md`](docs/trading-lab.md) and [`docs/cookbook/trading-lab.md`](docs/cookbook/trading-lab.md) — governed trading research, strategy specs, Pine prototypes, deterministic backtests, TradingView replay-paper evidence, workflow specs, paper/live gates, and risk/audit controls |
 | **Providers** | [`docs/providers/`](docs/providers/) — provider runtime, Codex app-server, Claude Code spoofing, auth profiles, cloud/local providers |
 | **Agents & learning** | [`docs/agents/`](docs/agents/) and [`docs/learning/`](docs/learning/) — governed agent evolution, memory promotion, permission governance |
 | **World model** | [`docs/architecture/world-model.md`](docs/architecture/world-model.md) — local trace corpus, advisory predictions, training backends, retention |

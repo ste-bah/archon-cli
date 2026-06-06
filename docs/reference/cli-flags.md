@@ -55,6 +55,12 @@ subagents, coding/research pipelines, and gametheory through Codex.
 | `archon workflow force-accept <RUN_ID> <STAGE_ID> <RATIONALE>` | Audit and continue past a reviewed failed stage without marking it clean durable memory |
 | `archon workflow save <RUN_ID> <NAME>` | Save a sanitized reusable workflow template |
 | `archon workflow list` | List dynamic workflow runs |
+| `archon trading data ingest-ohlcv --source <CSV_OR_JSON> --format csv\|json --dataset-id <ID> --version <VERSION> --provider <NAME> --symbol <SYMBOL>` | Persist OHLCV market data under `.archon/trading-lab/data` with normalized JSONL, raw source, metadata, checksum, and registry entry |
+| `archon trading data list\|show\|status\|export-ohlcv` | Inspect or export the persistent Trading Lab market-data registry |
+| `archon trading openbb fetch --request <JSON> --metadata <JSON> --quality <JSON> [--store-ohlcv --response-format json\|csv]` | Fetch through OpenBB and optionally persist parseable OHLCV responses into the Trading Lab data lake |
+| `archon trading backtest run-ohlcv --config <JSON> --dataset-id <ID> --version <VERSION> --quantity <N> [--rule close-momentum\|sma-cross] [--strategy-rules <JSON>]` | Run deterministic candle backtests from stored OHLCV; `--strategy-rules` supplies custom entry/exit conditions over fields and indicators |
+| `archon trading workflow plan --idea <TEXT> --repository <PATH> [--prd <PATH>] [--tasks <PATH>] [--kb <NAME>] [--tradingview-replay] --out <PATH>` | Generate a provider-neutral Trading Lab workflow spec with structured implementation work items |
+| `archon trading paper tradingview-replay-submit --intent <JSON> --adapter-pin <PIN> --write-tier-enabled --sandbox-certified --approval-id <ID> --maker <ID> --checker <ID> --rationale <TEXT>` | Risk-gate a paper market order and mirror it into TradingView replay mode; no broker order is submitted |
 | `archon self retrospective <SESSION_ID> [--analyzer hybrid\|heuristic\|llm]` | Extract evidence-backed lessons from a session activity log |
 | `archon self trust status` | Show domain-scoped self-calibration trust scores |
 | `archon self plans inspect <SESSION_ID>` | Compare a stored session plan with recorded step outcomes |

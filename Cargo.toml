@@ -47,6 +47,7 @@ grep-regex = "0.1"
 regex = "1"
 jsonschema = "0.28"
 chrono = { version = "0.4", features = ["serde"] }
+csv = "1"
 dirs = "6"
 fastembed = { version = "4", default-features = false, features = ["ort-download-binaries", "hf-hub-rustls-tls"] }
 getrandom = { version = "0.3", features = ["std"] }
@@ -153,6 +154,7 @@ archon-completion = { path = "crates/archon-completion" }
 archon-cognitive = { path = "crates/archon-cognitive" }
 archon-leann = { path = "crates/archon-leann" }
 archon-tools = { path = "crates/archon-tools" }
+archon-trading = { path = "crates/archon-trading" }
 archon-tui = { path = "crates/archon-tui" }
 archon-learning = { path = "crates/archon-learning" }
 archon-observability = { path = "crates/archon-observability" }

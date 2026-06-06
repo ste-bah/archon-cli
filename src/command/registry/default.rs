@@ -149,6 +149,13 @@ pub(crate) fn default_registry() -> Registry {
         )),
     );
     b.insert_primary(
+        "trading",
+        Arc::new(crate::command::cli_mirror::CliMirrorHandler::prefixed(
+            "trading",
+            "Run governed Trading Lab controls from inside the TUI",
+        )),
+    );
+    b.insert_primary(
         "prov",
         Arc::new(crate::command::cli_mirror::CliMirrorHandler::prefixed(
             "prov",

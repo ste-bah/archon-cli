@@ -176,6 +176,19 @@ pub(crate) mod surface_matrix;
 pub(crate) mod summary;
 pub(crate) mod task;
 pub(crate) mod team;
+pub(crate) mod trading;
+pub(crate) mod trading_backtest;
+pub(crate) mod trading_data;
+pub(crate) mod trading_io;
+pub(crate) mod trading_live;
+pub(crate) mod trading_openbb;
+pub(crate) mod trading_paper;
+pub(crate) mod trading_pine;
+pub(crate) mod trading_promote;
+pub(crate) mod trading_spec;
+pub(crate) mod trading_tools;
+pub(crate) mod trading_tv;
+pub(crate) mod trading_workflow;
 // TASK-TUI-623: /tag session tag toggle.
 pub(crate) mod tag;
 // TASK-TUI-621: hidden stub `/teleport` command (no is_visible() on

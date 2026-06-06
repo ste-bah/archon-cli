@@ -1,6 +1,7 @@
 use super::{
     AgentAction, AgentEvolveAction, Cli, CognitiveAction, CognitiveDaemonAction, Commands,
-    GametheoryAction, ProvidersAction, WorldAction, WorldGuardAction, WorldGuardPolicyAction,
+    GametheoryAction, ProvidersAction, TradingCliAction, TradingCliCommand, TradingCliPersona,
+    TradingCliVerb, WorldAction, WorldGuardAction, WorldGuardPolicyAction,
 };
 
 #[cfg(test)]
@@ -286,6 +287,481 @@ mod world_guard_parse_tests {
             }
             other => panic!("expected world guard skip-verification, got {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod trading_parse_tests {
+    use super::{
+        Cli, Commands, TradingCliAction, TradingCliCommand, TradingCliPersona, TradingCliVerb,
+    };
+    use crate::cli_args::{
+        TradingCliBacktestAction, TradingCliDataAction, TradingCliOpenBbAction,
+        TradingCliOpenBbMode, TradingCliPaperAction, TradingCliPineAction, TradingCliPromoteAction,
+        TradingCliPromotionStatus, TradingCliToolsAction, TradingCliTvAction,
+        TradingCliWorkflowAction,
+    };
+    use clap::Parser;
+
+    #[test]
+    fn trading_dispatch_parses_fenced_backtest() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "trading",
+            "dispatch",
+            "backtest",
+            "--action",
+            "run-backtest",
+            "--persona",
+            "per05-execution-agent",
+        ])
+        .expect("trading dispatch must parse");
+
+        match cli.command {
+            Some(Commands::Trading {
+                action:
+                    TradingCliAction::Dispatch {
+                        command,
+                        action,
+                        persona,
+                        maker_checker_approved,
+                        live_policy_enabled,
+                    },
+            }) => {
+                assert_eq!(command, TradingCliCommand::Backtest);
+                assert_eq!(action, TradingCliVerb::RunBacktest);
+                assert_eq!(persona, TradingCliPersona::Per05ExecutionAgent);
+                assert!(!maker_checker_approved);
+                assert!(!live_policy_enabled);
+            }
+            other => panic!("expected trading dispatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trading_kill_parses_operator_reason() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "trading",
+            "kill",
+            "--actor",
+            "operator",
+            "--reason",
+            "manual halt",
+            "--working-orders",
+            "2",
+        ])
+        .expect("trading kill must parse");
+
+        match cli.command {
+            Some(Commands::Trading {
+                action:
+                    TradingCliAction::Kill {
+                        actor,
+                        reason,
+                        working_orders,
+                    },
+            }) => {
+                assert_eq!(actor, "operator");
+                assert_eq!(reason, "manual halt");
+                assert_eq!(working_orders, 2);
+            }
+            other => panic!("expected trading kill, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trading_tools_status_parses_target() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "trading",
+            "tools",
+            "status",
+            "--target",
+            "/tmp/project",
+        ])
+        .expect("trading tools status must parse");
+
+        match cli.command {
+            Some(Commands::Trading {
+                action:
+                    TradingCliAction::Tools {
+                        action: TradingCliToolsAction::Status { target },
+                    },
+            }) => {
+                assert_eq!(target.unwrap(), std::path::PathBuf::from("/tmp/project"));
+            }
+            other => panic!("expected trading tools status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trading_tv_cli_parses_trailing_args() {
+        let cli = Cli::try_parse_from([
+            "archon", "trading", "tv", "cli", "--", "pine", "analyze", "--file", "x.pine",
+        ])
+        .expect("trading tv cli must parse");
+
+        match cli.command {
+            Some(Commands::Trading {
+                action:
+                    TradingCliAction::Tv {
+                        action: TradingCliTvAction::Cli { args, .. },
+                    },
+            }) => {
+                assert_eq!(args, vec!["pine", "analyze", "--file", "x.pine"]);
+            }
+            other => panic!("expected trading tv cli, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trading_pine_generate_parses_paths() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "trading",
+            "pine",
+            "generate",
+            "--strategy-id",
+            "strat-1",
+            "--spec",
+            "spec.json",
+            "--out",
+            "pine-out",
+        ])
+        .expect("trading pine generate must parse");
+
+        match cli.command {
+            Some(Commands::Trading {
+                action:
+                    TradingCliAction::Pine {
+                        action:
+                            TradingCliPineAction::Generate {
+                                strategy_id,
+                                spec,
+                                out,
+                            },
+                    },
+            }) => {
+                assert_eq!(strategy_id, "strat-1");
+                assert_eq!(spec, std::path::PathBuf::from("spec.json"));
+                assert_eq!(out, std::path::PathBuf::from("pine-out"));
+            }
+            other => panic!("expected trading pine generate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trading_openbb_status_parses() {
+        let cli = Cli::try_parse_from(["archon", "trading", "openbb", "status"])
+            .expect("trading openbb status must parse");
+
+        match cli.command {
+            Some(Commands::Trading {
+                action:
+                    TradingCliAction::Openbb {
+                        action: TradingCliOpenBbAction::Status { target },
+                    },
+            }) => {
+                assert!(target.is_none());
+            }
+            other => panic!("expected trading openbb status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trading_openbb_fetch_parses_governed_inputs() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "trading",
+            "openbb",
+            "fetch",
+            "--request",
+            "request.json",
+            "--metadata",
+            "metadata.json",
+            "--quality",
+            "quality.json",
+            "--mode",
+            "live-required",
+            "--out",
+            "dataset.json",
+        ])
+        .expect("trading openbb fetch must parse");
+
+        match cli.command {
+            Some(Commands::Trading {
+                action:
+                    TradingCliAction::Openbb {
+                        action:
+                            TradingCliOpenBbAction::Fetch {
+                                request,
+                                metadata,
+                                quality,
+                                mode,
+                                out,
+                                ..
+                            },
+                    },
+            }) => {
+                assert_eq!(request, std::path::PathBuf::from("request.json"));
+                assert_eq!(metadata, std::path::PathBuf::from("metadata.json"));
+                assert_eq!(quality, std::path::PathBuf::from("quality.json"));
+                assert_eq!(mode, TradingCliOpenBbMode::LiveRequired);
+                assert_eq!(out.unwrap(), std::path::PathBuf::from("dataset.json"));
+            }
+            other => panic!("expected trading openbb fetch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trading_core_actions_parse() {
+        assert!(matches!(
+            Cli::try_parse_from([
+                "archon",
+                "trading",
+                "spec",
+                "validate",
+                "--spec",
+                "spec.json",
+            ])
+            .expect("spec validate parses")
+            .command,
+            Some(Commands::Trading {
+                action: TradingCliAction::Spec { .. }
+            })
+        ));
+
+        assert!(matches!(
+            Cli::try_parse_from([
+                "archon",
+                "trading",
+                "backtest",
+                "run",
+                "--config",
+                "config.json",
+                "--fills",
+                "fills.json",
+            ])
+            .expect("backtest run parses")
+            .command,
+            Some(Commands::Trading {
+                action: TradingCliAction::Backtest { .. }
+            })
+        ));
+
+        assert!(matches!(
+            Cli::try_parse_from([
+                "archon",
+                "trading",
+                "paper",
+                "sample",
+                "--sample",
+                "paper-sample.json",
+            ])
+            .expect("paper sample parses")
+            .command,
+            Some(Commands::Trading {
+                action: TradingCliAction::Paper { .. }
+            })
+        ));
+    }
+
+    #[test]
+    fn trading_data_and_ohlcv_backtest_parse() {
+        let ingest = Cli::try_parse_from([
+            "archon",
+            "trading",
+            "data",
+            "ingest-ohlcv",
+            "--source",
+            "candles.csv",
+            "--format",
+            "csv",
+            "--dataset-id",
+            "btc-1d",
+            "--version",
+            "v1",
+            "--provider",
+            "openbb",
+            "--symbol",
+            "BTCUSD",
+        ])
+        .expect("data ingest parses");
+        assert!(matches!(
+            ingest.command,
+            Some(Commands::Trading {
+                action: TradingCliAction::Data {
+                    action: TradingCliDataAction::IngestOhlcv { .. }
+                }
+            })
+        ));
+
+        let backtest = Cli::try_parse_from([
+            "archon",
+            "trading",
+            "backtest",
+            "run-ohlcv",
+            "--config",
+            "backtest.json",
+            "--dataset-id",
+            "btc-1d",
+            "--version",
+            "v1",
+            "--quantity",
+            "1",
+            "--strategy-rules",
+            "rules.json",
+        ])
+        .expect("OHLCV backtest parses");
+        assert!(matches!(
+            backtest.command,
+            Some(Commands::Trading {
+                action: TradingCliAction::Backtest {
+                    action: TradingCliBacktestAction::RunOhlcv { .. }
+                }
+            })
+        ));
+    }
+
+    #[test]
+    fn trading_paper_tradingview_replay_submit_parses() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "trading",
+            "paper",
+            "tradingview-replay-submit",
+            "--intent",
+            "intent.json",
+            "--adapter-pin",
+            "tradesdontlie@abcdef1",
+            "--write-tier-enabled",
+            "--sandbox-certified",
+            "--approval-id",
+            "r1",
+            "--maker",
+            "alice",
+            "--checker",
+            "bob",
+            "--rationale",
+            "approved",
+        ])
+        .expect("TradingView replay submit parses");
+
+        match cli.command {
+            Some(Commands::Trading {
+                action:
+                    TradingCliAction::Paper {
+                        action:
+                            TradingCliPaperAction::TradingviewReplaySubmit {
+                                adapter_pin,
+                                write_tier_enabled,
+                                sandbox_certified,
+                                ..
+                            },
+                    },
+            }) => {
+                assert_eq!(adapter_pin, "tradesdontlie@abcdef1");
+                assert!(write_tier_enabled);
+                assert!(sandbox_certified);
+            }
+            other => panic!("expected trading paper replay submit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trading_workflow_plan_parses() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "trading",
+            "workflow",
+            "plan",
+            "--idea",
+            "BTC Elliott Wave strategy",
+            "--repository",
+            "/tmp/repo",
+            "--tasks",
+            "/tmp/tasks",
+            "--kb",
+            "trading-elliott-wave",
+            "--tradingview-replay",
+            "--out",
+            "trading-workflow.yaml",
+        ])
+        .expect("trading workflow plan parses");
+
+        match cli.command {
+            Some(Commands::Trading {
+                action:
+                    TradingCliAction::Workflow {
+                        action:
+                            TradingCliWorkflowAction::Plan {
+                                idea,
+                                kb,
+                                tradingview_replay,
+                                ..
+                            },
+                    },
+            }) => {
+                assert_eq!(idea, "BTC Elliott Wave strategy");
+                assert_eq!(kb, vec!["trading-elliott-wave"]);
+                assert!(tradingview_replay);
+            }
+            other => panic!("expected trading workflow plan, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trading_promotion_and_live_actions_parse() {
+        let promote = Cli::try_parse_from([
+            "archon",
+            "trading",
+            "promote",
+            "check",
+            "--spec",
+            "spec.json",
+            "--target",
+            "paper",
+            "--evidence",
+            "evidence.json",
+        ])
+        .expect("promote check parses");
+
+        match promote.command {
+            Some(Commands::Trading {
+                action:
+                    TradingCliAction::Promote {
+                        action:
+                            TradingCliPromoteAction::Check {
+                                target, evidence, ..
+                            },
+                    },
+            }) => {
+                assert_eq!(target, TradingCliPromotionStatus::Paper);
+                assert_eq!(evidence, std::path::PathBuf::from("evidence.json"));
+            }
+            other => panic!("expected trading promote check, got {other:?}"),
+        }
+
+        assert!(matches!(
+            Cli::try_parse_from([
+                "archon",
+                "trading",
+                "live",
+                "pilot",
+                "--strategy-id",
+                "strat-1",
+                "--account-equity",
+                "10000",
+                "--requested-capital",
+                "500",
+            ])
+            .expect("live pilot parses")
+            .command,
+            Some(Commands::Trading {
+                action: TradingCliAction::Live { .. }
+            })
+        ));
     }
 }
 

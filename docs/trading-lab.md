@@ -18,7 +18,7 @@ Every step should leave evidence that can be replayed, audited, and rejected.
 ## Current Status
 
 The implementation currently provides the core crate, tests, command/tool
-facade primitives, and a TUI panel model:
+facade primitives, a user-facing command surface, and a TUI panel model:
 
 | Layer | Status | Notes |
 |---|---|---|
@@ -26,11 +26,83 @@ facade primitives, and a TUI panel model:
 | Backtest and NFR tests | Implemented | `cargo test -p archon-trading` covers the core invariants |
 | Agent/tool dispatch facade | Implemented | `crates/archon-tools/src/trading` has policy-fenced command routing primitives |
 | TUI trading panel model | Implemented | `crates/archon-tui/src/trading` renders status, ledger, risk rows, and kill button model |
-| User-facing `/trading` slash command | Not yet wired | Use workflows, `/docs`, `/kb`, `/archon-research`, and development APIs for now |
+| User-facing `archon trading` and `/trading` command | Implemented | Setup/status, TradingView MCP CLI pass-through, Pine generation/checks, governed OpenBB fetches, spec validation, native backtests, paper checks, TradingView replay-paper submit, Trading Lab workflow spec generation, promotion checks, live-readiness gates, route inspection, fenced dispatch checks, and out-of-band kill controls |
 | Real broker live trading | Disabled by design | Live enablement requires explicit policy, certification, evidence, and maker-checker approval |
 
 If you are a user trying this today, treat the Trading Lab as a governed
-research and validation system. Do not expect a one-command trading terminal yet.
+research and validation system. The command surface proves routes and gates; it
+does not turn Archon into a one-command broker terminal.
+
+## Command Surface
+
+The shell and TUI paths use the same implementation:
+
+```text
+archon trading status
+/trading status
+```
+
+Available subcommands:
+
+| Command | Purpose |
+|---|---|
+| `status` | Show Trading Lab readiness and live-trading safety state |
+| `routes` | Show which crate module owns each command family |
+| `setup` | Run project-local TradingView MCP/OpenBB setup via `scripts/setup-trading-tools.sh` |
+| `tools status` | Inspect project-local Node/Python, TradingView MCP, OpenBB, and `.mcp.json` readiness |
+| `tv status` / `tv launch` / `tv cli` | Use the installed TradingView MCP CLI from `.archon/tools/tradingview-mcp` |
+| `pine generate` / `pine analyze` / `pine check` | Generate Pine v6 files from StrategySpec JSON and validate them through TradingView MCP helpers |
+| `openbb status` / `openbb fetch` | Inspect the OpenBB runtime and fetch governed datasets through explicit metadata/quality gates |
+| `spec validate` | Validate a StrategySpec JSON file and emit a content hash |
+| `backtest run` | Run the native deterministic backtest harness from config/fill JSON |
+| `data status` / `data ingest-ohlcv` / `data list` / `data show` / `data export-ohlcv` | Persist, inspect, and export versioned OHLCV datasets under `.archon/trading-lab/data` |
+| `backtest run-ohlcv` | Run deterministic candle backtests from stored OHLCV datasets with built-in or custom strategy rules |
+| `paper submit` / `paper sample` | Submit paper order intents through the risk governor and evaluate paper-sample gates |
+| `promote check` | Evaluate one-step promotion gates from spec and evidence JSON |
+| `live enable-check` / `live pilot` / `live phase5-check` | Evaluate live-readiness gates and pilot limits without broker submission |
+| `dispatch` | Exercise command/action/persona gates without placing orders |
+| `kill` | Trigger the out-of-band kill-switch path and show its receipt |
+
+Examples:
+
+```text
+archon trading routes
+archon trading setup --target /path/to/project
+archon trading tools status --target /path/to/project
+archon trading tv status --target /path/to/project
+archon trading pine generate --strategy-id demo --spec strategy-spec.json --out ./pine
+archon trading spec validate --spec strategy-spec.json
+archon trading data ingest-ohlcv --source candles.csv --format csv --dataset-id btc-1d --version v1 --provider openbb --symbol BTCUSD
+archon trading data list
+archon trading backtest run --config backtest.json --fills fills.json
+archon trading backtest run-ohlcv --config backtest.json --dataset-id btc-1d --version v1 --quantity 1 --strategy-rules strategy-rules.json
+archon trading paper sample --sample paper-sample.json
+archon trading promote check --spec strategy-spec.json --target paper --evidence evidence.json
+archon trading live enable-check --request live-enable.json
+archon trading openbb fetch --request request.json --metadata metadata.json --quality quality.json --store-ohlcv --response-format json
+archon trading dispatch backtest --action run-backtest --persona per05-execution-agent
+archon trading dispatch kb --action write-kb --persona per07-observer
+archon trading kill --actor operator --reason "manual halt" --working-orders 0
+```
+
+The second dispatch should be accepted. The third should be refused because
+`PER-07` is read-only. This is intentional: the command exists partly so users
+can verify the policy fences before building richer trading workflows.
+
+Live dispatch checks remain fail-closed unless explicit policy and
+maker-checker flags are present:
+
+```text
+archon trading dispatch live \
+  --action submit-live-order \
+  --persona per01-human-governor \
+  --maker-checker-approved \
+  --live-policy-enabled
+```
+
+This is a route/policy probe only. The dedicated `spec`, `backtest`, `paper`,
+`promote`, `live`, `pine`, and `openbb` subcommands run the Trading Lab domain
+paths. Broker orders are never submitted by default.
 
 ## Mental Model
 
@@ -120,6 +192,12 @@ Important safety constraints:
   Pine.
 
 TradingView MCP is represented by `archon-trading::adapters::tv_mcp`.
+The project setup script installs the concrete
+[`tradesdontlie/tradingview-mcp`](https://github.com/tradesdontlie/tradingview-mcp)
+package under `.archon/tools/tradingview-mcp`, adds a project-local
+`.mcp.json` entry named `tradingview`, and exposes the same tools to agents as
+`mcp__tradingview__<tool>`.
+
 It has two tiers:
 
 | Tier | Default | Examples |
@@ -128,6 +206,12 @@ It has two tiers:
 | Write | disabled | chart deploy, alert setup, terminal interaction |
 
 Write-tier operations require sandbox certification and maker-checker approval.
+`archon-trading::adapters::tv_paper` adds the supported paper/replay bridge:
+Archon first runs the internal paper Risk Governor, then calls the TradingView
+MCP replay-trade path for market buy/sell evidence. It rejects live intents and
+non-market replay orders. TradingView MCP does not execute broker trades; it
+controls the local TradingView Desktop chart/editor through the CDP port you
+explicitly launch.
 
 ### OpenBB and Market Data
 
@@ -153,6 +237,9 @@ pairs. `archon-trading::adapters::openbb` enforces:
 - required vs optional flag
 
 Degraded optional datasets do not satisfy mandatory promotion data.
+The setup script installs OpenBB into `.archon/tools/openbb-venv` and provides
+`scripts/start-openbb-api.sh`, which starts `openbb-api` on `127.0.0.1:6900`
+unless `OPENBB_HOST` or `OPENBB_PORT` override it.
 
 ### Backtest Harness
 
@@ -199,6 +286,25 @@ need maker-checker approval and audit logging.
 
 `archon-trading::paper_terminal` uses the same order-intent and governor path as
 live trading, but records paper execution evidence.
+
+The CLI can also mirror an approved paper order into TradingView replay mode:
+
+```bash
+archon trading paper tradingview-replay-submit \
+  --target /path/to/project \
+  --intent order-intent.json \
+  --adapter-pin tradesdontlie@abcdef1 \
+  --write-tier-enabled \
+  --sandbox-certified \
+  --approval-id tv-replay-1 \
+  --maker alice \
+  --checker bob \
+  --rationale "sandbox replay test"
+```
+
+That command does not place a broker order. It fails closed unless the
+OrderIntent is `Paper`, the order type is `Market`, the internal risk gate
+accepts it, and the TradingView write-tier requirements are satisfied.
 
 Promotion from paper requires a sample gate:
 
@@ -297,7 +403,11 @@ matrix for agents:
 | `live` | `archon_trading::live_enablement` |
 | `promote` | `archon_trading::promotion` |
 
-This is not currently exposed as a primary `/trading` command.
+The primary `/trading` command mirrors the shell `archon trading ...` surface,
+including setup/status helpers, TradingView MCP CLI pass-through, Pine
+generation/checks, governed OpenBB fetches, native backtests, paper-order
+checks, promotion checks, live-readiness gates, dispatch fences, and
+kill-switch checks.
 
 ## What You Can Do Today
 
@@ -310,8 +420,26 @@ Use the Trading Lab today as a source-backed research and validation workflow:
 4. Generate Pine Script indicator/strategy variants through the Pine Lab path.
 5. Use approved data snapshots and the backtest harness for deterministic
    evidence.
-6. Use paper-terminal evidence and postmortems before promotion.
-7. Treat live enablement as a future gated operation, not a default path.
+6. Use paper-terminal evidence, optional TradingView replay evidence, and
+   postmortems before promotion.
+7. Evaluate live-readiness gates explicitly; broker submission remains
+   fail-closed unless a certified adapter and policy allow it.
+
+To generate a provider-neutral dynamic workflow for this lifecycle:
+
+```bash
+archon trading workflow plan \
+  --idea "BTC Elliott Wave volatility-regime swing strategy" \
+  --repository /Volumes/Externalwork/archon-cli/archon-cli \
+  --prd /Volumes/Externalwork/archon-cli/project-1/prds/archon-trading-research-execution-lab/PRD.md \
+  --tasks /Volumes/Externalwork/archon-cli/project-1/tasks/PRD-TRADING-LAB-001 \
+  --kb trading-elliott-wave \
+  --kb trading-risk-management \
+  --tradingview-replay \
+  --out /Volumes/Externalwork/archon-cli/project-1/trading-lab-workflow.yaml
+
+archon workflow run --spec-file /Volumes/Externalwork/archon-cli/project-1/trading-lab-workflow.yaml --live
+```
 
 See the detailed cookbook: [Trading Lab cookbook](cookbook/trading-lab.md).
 

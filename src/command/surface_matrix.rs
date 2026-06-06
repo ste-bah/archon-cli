@@ -176,6 +176,14 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         notes: "Dynamic workflow plan, run, spec-file, template, status, resume, pause, cancel, restart-agent, force-accept, save, and list operations are mirrored.",
     },
     CommandSurfaceRow {
+        cli: "archon trading ...",
+        slash_primary: Some("trading"),
+        tui_surface: "CLI mirror",
+        status: SurfaceStatus::Done,
+        source_of_truth: "src/command/trading.rs + crates/archon-tools/src/trading",
+        notes: "Trading Lab status, route inspection, fenced dispatch checks, and the out-of-band kill path are mirrored; live trading remains policy gated.",
+    },
+    CommandSurfaceRow {
         cli: "archon pipeline ...",
         slash_primary: Some("pipeline"),
         tui_surface: "CLI mirror",
@@ -422,6 +430,7 @@ mod tests {
             "archon auth ...",
             "archon chat --provider <id> <prompt>",
             "archon providers ...",
+            "archon trading ...",
         ];
 
         let rows: HashSet<_> = command_surface_rows().iter().map(|row| row.cli).collect();

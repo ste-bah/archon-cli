@@ -5,13 +5,91 @@ exists today. The important thing to understand up front:
 
 ```text
 The Trading Lab is a governed research and validation system.
-It is not yet a one-command trading terminal.
+It is not an LLM trade-clicker.
 ```
 
 You use it with Archon's document store, KB, research/workflow systems, and the
 implemented `archon-trading` primitives. Live trading remains gated and disabled
 unless your policy, broker adapter, certification, and maker-checker evidence
 all say it is allowed.
+
+## Phase -1: Sanity Check the Trading Surface
+
+Before building a strategy, verify that the command surface is available. Shell
+and TUI paths are mirrors:
+
+```text
+archon trading status
+/trading status
+```
+
+Check the module routes:
+
+```text
+archon trading routes
+/trading routes
+```
+
+Exercise the policy fences without placing any order:
+
+```text
+archon trading dispatch backtest --action run-backtest --persona per05-execution-agent
+archon trading dispatch kb --action write-kb --persona per07-observer
+```
+
+The backtest dispatch should be accepted. The observer KB write should be
+refused because observer personas are read-only. That refusal is a successful
+safety check. `dispatch` only probes fences; the dedicated commands below run
+the real spec, backtest, paper, promotion, live-readiness, Pine, and OpenBB
+paths.
+
+The out-of-band kill path can also be checked without a broker:
+
+```text
+archon trading kill --actor operator --reason "manual halt" --working-orders 0
+```
+
+## Phase -1: Install Trading Tools
+
+Install Node/Python prerequisites when needed:
+
+```text
+scripts/install-system-deps.sh --with-trading-tools
+```
+
+Then set up the project-local tools:
+
+```text
+scripts/setup-trading-tools.sh --target /Volumes/Externalwork/archon-cli/project-1
+archon trading tools status --target /Volumes/Externalwork/archon-cli/project-1
+```
+
+The setup script installs:
+
+- `tradesdontlie/tradingview-mcp` into `.archon/tools/tradingview-mcp`
+- OpenBB into `.archon/tools/openbb-venv`
+- a project `.mcp.json` entry named `tradingview`
+- `scripts/start-tradingview-cdp.sh`
+- `scripts/start-openbb-api.sh`
+
+Launch TradingView Desktop with CDP enabled:
+
+```text
+scripts/start-tradingview-cdp.sh 9222
+archon trading tv status --target /Volumes/Externalwork/archon-cli/project-1
+```
+
+Inside the TUI, restart the session after changing `.mcp.json`, then use
+`/mcp` to confirm the `tradingview` MCP server is connected. Its tools appear
+as `mcp__tradingview__tv_health_check`, `mcp__tradingview__pine_check`, and so
+on.
+
+Start OpenBB when you need the local REST API:
+
+```text
+scripts/start-openbb-api.sh
+archon trading openbb status --target /Volumes/Externalwork/archon-cli/project-1
+```
 
 ## What You Are Building Toward
 
@@ -71,6 +149,27 @@ Check that retrieval works before you ask Archon to build strategy specs:
 
 Use `/archon-research` or `/workflow` to turn source material into a structured
 thesis. Keep the prompt evidence-focused.
+
+For a full provider-neutral workflow spec that can implement decomposed tasks
+or create lifecycle artifacts, generate the workflow first:
+
+```text
+archon trading workflow plan \
+  --idea "Elliott Wave + volatility regime BTC swing strategy" \
+  --repository /Volumes/Externalwork/archon-cli/archon-cli \
+  --prd /Volumes/Externalwork/archon-cli/project-1/prds/archon-trading-research-execution-lab/PRD.md \
+  --tasks /Volumes/Externalwork/archon-cli/project-1/tasks/PRD-TRADING-LAB-001 \
+  --kb trading-elliott-wave \
+  --kb trading-risk-management \
+  --tradingview-replay \
+  --out /Volumes/Externalwork/archon-cli/project-1/trading-lab-workflow.yaml
+
+archon workflow run --spec-file /Volumes/Externalwork/archon-cli/project-1/trading-lab-workflow.yaml --live
+```
+
+When `--tasks` is supplied, Archon reads every `TASK*.md` file and emits a
+structured implementation fanout item with that task's declared `target_files`.
+That avoids the broken single generic fanout item failure mode.
 
 Example TUI prompt:
 
@@ -162,6 +261,7 @@ Ask Archon to validate the spec against the 15 fields before doing anything
 else:
 
 ```text
+archon trading spec validate --spec strategy-spec.json --out spec-validation.json
 /workflow run Validate this trading strategy spec against the Trading Lab 15-field contract. Identify missing fields, type errors, unsupported evidence, contradiction risks, and promotion blockers. Do not write code.
 ```
 
@@ -232,6 +332,61 @@ OpenBB can be used as a data gateway only for provider/data-type pairs that are
 allowed by the OpenBB allowlist. Do not pass API keys or credentials as dataset
 parameters; the adapter rejects secret-looking fields.
 
+Useful commands:
+
+```text
+archon trading openbb status --target /Volumes/Externalwork/archon-cli/project-1
+scripts/start-openbb-api.sh
+archon trading openbb fetch \
+  --request openbb-request.json \
+  --metadata openbb-metadata.json \
+  --quality openbb-quality.json \
+  --mode research \
+  --store-ohlcv \
+  --response-format json \
+  --out governed-dataset.json
+```
+
+`openbb-request.json` is an `OpenBbRequest`; `openbb-metadata.json` is a string
+map with fields such as `symbol`, `provider_symbol`, `timezone`, `adjustment`,
+`coverage_start`, `coverage_end`, `expected_bars`, `observed_bars`, and
+`missing_bars`; `openbb-quality.json` is a `DataQuality` object. Use
+`--mode live-required` when a live gate must fail closed without fresh governed
+data.
+
+When `--store-ohlcv` is set, Archon parses the OpenBB response body and stores
+the normalized candles in the Trading Lab data lake. For downloaded or
+third-party files, store OHLCV data manually before using it in native candle
+backtests:
+
+```text
+archon trading data ingest-ohlcv \
+  --source btc-1d.csv \
+  --format csv \
+  --dataset-id btc-1d \
+  --version 2026-06-06 \
+  --provider openbb \
+  --symbol BTCUSD \
+  --timezone UTC \
+  --adjustment raw
+
+archon trading data list
+archon trading data show --dataset-id btc-1d --version 2026-06-06
+```
+
+Archon stores this under:
+
+```text
+.archon/trading-lab/data/registry.json
+.archon/trading-lab/data/datasets/<dataset-id>/<version>/metadata.json
+.archon/trading-lab/data/datasets/<dataset-id>/<version>/ohlcv.jsonl
+.archon/trading-lab/data/datasets/<dataset-id>/<version>/raw.csv
+```
+
+`StrategySpec.spec_f04_data_dependencies` should reference the same
+`dataset_id` and `version`, so strategy specs point at replayable data rather
+than loose files.
+
 ## Phase 5: Run Deterministic Backtests
 
 Backtests must be replayable from:
@@ -265,6 +420,74 @@ Backtest evidence is not accepted for promotion if:
 - it uses research-only data
 - it uses degraded datasets
 
+Run the native harness with:
+
+```text
+archon trading backtest run \
+  --config backtest-config.json \
+  --fills fills.json \
+  --dataset-status healthy \
+  --source native-harness \
+  --out backtest-report.json
+```
+
+Use `--exploratory` for experiments that must not become promotion evidence.
+
+For candle-based tests, run against a stored OHLCV dataset:
+
+```text
+archon trading backtest run-ohlcv \
+  --config backtest-config.json \
+  --dataset-id btc-1d \
+  --version 2026-06-06 \
+  --quantity 1 \
+  --rule sma-cross \
+  --fast-len 20 \
+  --slow-len 50 \
+  --out candle-backtest-report.json
+```
+
+For custom strategies, give Archon a deterministic rule file instead of
+executing arbitrary code:
+
+```json
+{
+  "name": "close_above_sma20_exit_below_sma20",
+  "entry": [
+    {
+      "left": { "kind": "field", "field": "close" },
+      "op": "gt",
+      "right": { "kind": "indicator", "indicator": "sma", "len": 20 }
+    }
+  ],
+  "exit": [
+    {
+      "left": { "kind": "field", "field": "close" },
+      "op": "lt",
+      "right": { "kind": "indicator", "indicator": "sma", "len": 20 }
+    }
+  ],
+  "min_hold_bars": 1
+}
+```
+
+Then run:
+
+```text
+archon trading backtest run-ohlcv \
+  --config backtest-config.json \
+  --dataset-id btc-1d \
+  --version 2026-06-06 \
+  --quantity 1 \
+  --strategy-rules strategy-rules.json \
+  --out custom-candle-backtest-report.json
+```
+
+Pine generation is still useful for TradingView visual validation, alerts, and
+chart-native prototypes. The native backtester uses this JSON rule contract so
+the replay is deterministic, inspectable, and not dependent on executing Pine
+or arbitrary user code.
+
 ## Phase 6: Paper Trade
 
 Paper trading uses the same order-intent and risk-governor path as live trading.
@@ -285,6 +508,44 @@ regimes, and postmortem readiness.
 
 The gate reports the longest binding missing condition. If it says
 `min_regimes`, adding more trades in the same regime will not help.
+
+Useful paper commands:
+
+```text
+archon trading paper submit \
+  --intent paper-order-intent.json \
+  --account paper-account.json \
+  --market paper-market.json \
+  --audit paper-audit.jsonl \
+  --out paper-submit-report.json
+
+archon trading paper sample \
+  --sample paper-sample.json \
+  --out paper-sample-gate.json
+```
+
+If TradingView MCP is installed and TradingView Desktop is running with CDP,
+you can mirror an accepted paper market order into TradingView replay mode:
+
+```text
+archon trading paper tradingview-replay-submit \
+  --target /Volumes/Externalwork/archon-cli/project-1 \
+  --intent paper-order-intent.json \
+  --account paper-account.json \
+  --market paper-market.json \
+  --audit paper-audit.jsonl \
+  --adapter-pin tradesdontlie@abcdef1 \
+  --write-tier-enabled \
+  --sandbox-certified \
+  --approval-id tv-replay-1 \
+  --maker alice \
+  --checker bob \
+  --rationale "sandbox replay test" \
+  --out tradingview-replay-report.json
+```
+
+This is replay/paper evidence. It rejects live intents, rejects non-market
+replay orders, and does not submit a broker order.
 
 ## Phase 7: Write Postmortems
 
@@ -335,6 +596,16 @@ Promotion to `live-pilot` needs a valid 15-field spec, accepted OOS and
 walk-forward evidence, healthy required data, a passed paper sample gate,
 postmortem evidence, maker-checker approval, and a live enablement gate.
 
+Run a promotion gate with:
+
+```text
+archon trading promote check \
+  --spec strategy-spec.json \
+  --target paper \
+  --evidence promotion-evidence.json \
+  --out promotion-report.json
+```
+
 ## Phase 9: Live Readiness
 
 Live trading is disabled by default. That is correct.
@@ -362,6 +633,27 @@ Dry-run certification checks:
 
 If any check fails, do not enable live.
 
+Useful live-readiness commands:
+
+```text
+archon trading live enable-check \
+  --request live-enable-request.json \
+  --out live-enable-report.json
+
+archon trading live pilot \
+  --strategy-id btc-elliott-vol-regime-v1 \
+  --account-equity 10000 \
+  --requested-capital 500 \
+  --out pilot-plan.json
+
+archon trading live phase5-check \
+  --spec strategy-spec.json \
+  --evidence phase5-evidence.json \
+  --out phase5-report.json
+```
+
+These commands evaluate gates and plans. They do not submit broker orders.
+
 ## Day-One Example: Elliott Wave KB to Paper Candidate
 
 This runbook uses the Elliott Wave material you ingested and produces a
@@ -386,6 +678,20 @@ paper-trading candidate without pretending it is validated.
 
 ```text
 /workflow run Convert the Elliott Wave strategy candidate into a Trading Lab 15-field strategy spec. Require objective entry/exit rules. If Elliott labels are subjective, mark them as a failure mode and require a confirmation filter.
+```
+
+Or generate a complete workflow spec and run it:
+
+```text
+archon trading workflow plan \
+  --idea "Elliott Wave BTC paper candidate" \
+  --repository /Volumes/Externalwork/archon-cli/archon-cli \
+  --kb trading-elliott-wave \
+  --kb trading-backtesting \
+  --tradingview-replay \
+  --out elliott-wave-paper-workflow.yaml
+
+archon workflow run --spec-file elliott-wave-paper-workflow.yaml --live
 ```
 
 4. Generate Pine variants:
@@ -451,10 +757,8 @@ need maker-checker and audit.
 
 ### "Where is the `/trading` command?"
 
-There is no primary `/trading` command yet. The implemented pieces are the
-`archon-trading` crate, `archon-tools` trading dispatch primitives, and TUI
-render model. Use `/docs`, `/kb`, `/archon-research`, `/workflow`, and the
-library/tool facade until the full end-user command is wired.
+`/trading` mirrors `archon trading ...` in the TUI. Use `archon trading status`
+or `/trading status` to inspect the current command surface.
 
 ### "Can I connect a real broker now?"
 

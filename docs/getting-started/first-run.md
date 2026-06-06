@@ -38,7 +38,7 @@ Project-local config layers on top of user config — see [Configuration](../ref
 In the TUI:
 
 ```
-/help                  # list all 83 primary slash commands
+/help                  # list all 84 primary slash commands
 /setup-archon-skills   # interactive 8-prompt config wizard
 /status                # session info: model, effort, tokens used
 /cost                  # estimated session cost
