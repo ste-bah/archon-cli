@@ -12,6 +12,9 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  CARGO_HTTP_MULTIPLEXING: "false"
+  CARGO_HTTP_TIMEOUT: "120"
+  CARGO_NET_RETRY: "10"
 
 permissions:
   contents: write
@@ -118,6 +121,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: release-${{ matrix.target }}
+
+      - name: Fetch dependencies with retry
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if cargo fetch --target "${{ matrix.target }}"; then
+              exit 0
+            fi
+            echo "cargo fetch failed on attempt ${attempt}; retrying..."
+            sleep $((attempt * 10))
+          done
+          cargo fetch --target "${{ matrix.target }}"
 
       - name: Build release binary
         run: cargo build --release --bin archon --target ${{ matrix.target }}
