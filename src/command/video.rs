@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
 use archon_docs::vlm::factory::{self as vlm_factory, VlmProviderInitStatus};
@@ -7,6 +7,12 @@ use cozo::{DataValue, DbInstance, ScriptMutability};
 use crate::cli_args::VideoAction;
 
 pub async fn handle_video_command(action: VideoAction) -> Result<()> {
+    let result = handle_video_command_inner(action).await;
+    archon_docs::vlm::clear_provider_blocking_safe().await;
+    result
+}
+
+async fn handle_video_command_inner(action: VideoAction) -> Result<()> {
     let db = open_db()?;
     let policy = std::env::current_dir()
         .ok()
@@ -27,7 +33,7 @@ pub async fn handle_video_command(action: VideoAction) -> Result<()> {
             if vlm {
                 policy.video.frames.vlm = true;
             }
-            let vlm_report = configure_video_vlm_if_needed(&policy);
+            let vlm_report = configure_video_vlm_if_needed(&policy).await;
             let result = archon_video::ingest::ingest_video(
                 archon_video::ingest::IngestOpts {
                     source,
@@ -84,7 +90,7 @@ pub async fn handle_video_command(action: VideoAction) -> Result<()> {
             if vlm {
                 policy.video.frames.vlm = true;
             }
-            let vlm_report = configure_video_vlm_if_needed(&policy);
+            let vlm_report = configure_video_vlm_if_needed(&policy).await;
             reprocess_video(
                 &db,
                 &policy,
@@ -103,20 +109,33 @@ pub async fn handle_video_command(action: VideoAction) -> Result<()> {
     Ok(())
 }
 
+fn video_db_path() -> PathBuf {
+    crate::command::store_paths::evidence_db_path(&["ARCHON_VIDEO_DB_PATH"])
+}
+
+fn open_db() -> Result<DbInstance> {
+    let db_path = video_db_path();
+    archon_docs::configure_cozo_write_lock_for_db(&db_path);
+    let db = crate::command::store_paths::open_sqlite_db(&db_path, "video")?;
+    archon_docs::schema::ensure_doc_schema(&db)?;
+    archon_video::schema::create_video_schema(&db)?;
+    Ok(db)
+}
+
 fn normalize_kb_id(kb: Option<&str>) -> Option<String> {
     kb.map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
 }
 
-fn configure_video_vlm_if_needed(
+async fn configure_video_vlm_if_needed(
     policy: &archon_policy::EffectivePolicy,
 ) -> Option<vlm_factory::VlmProviderInitReport> {
-    policy
-        .video
-        .frames
-        .vlm
-        .then(|| vlm_factory::configure_registered_provider(policy))
+    if policy.video.frames.vlm {
+        Some(vlm_factory::configure_registered_provider_blocking_safe(policy).await)
+    } else {
+        None
+    }
 }
 
 fn print_vlm_init_warning_if_needed(report: &Option<vlm_factory::VlmProviderInitReport>) {
@@ -275,13 +294,6 @@ fn show_summary(db: &DbInstance, video_id: &str) -> Result<()> {
         println!("{}", chunk.content);
     }
     Ok(())
-}
-
-fn open_db() -> Result<DbInstance> {
-    let db = crate::command::store_paths::open_evidence_db("video", &["ARCHON_VIDEO_DB_PATH"])?;
-    archon_docs::schema::ensure_doc_schema(&db)?;
-    archon_video::schema::create_video_schema(&db)?;
-    Ok(db)
 }
 
 fn list_videos(db: &DbInstance) -> Result<()> {

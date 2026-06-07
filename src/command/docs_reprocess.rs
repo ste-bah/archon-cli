@@ -23,12 +23,18 @@ pub(crate) fn load_policy() -> archon_policy::EffectivePolicy {
 }
 
 pub(crate) async fn handle_reprocess(target: &str, defer_index: bool) -> Result<()> {
+    let result = handle_reprocess_inner(target, defer_index).await;
+    archon_docs::vlm::clear_provider_blocking_safe().await;
+    result
+}
+
+async fn handle_reprocess_inner(target: &str, defer_index: bool) -> Result<()> {
     let db = open_docs_db()?;
     if !defer_index {
         let _ = crate::command::docs_embedding::init_embedding(&db);
     }
     let policy = load_policy();
-    let vlm_report = vlm_factory::configure_registered_provider(&policy);
+    let vlm_report = vlm_factory::configure_registered_provider_blocking_safe(&policy).await;
     let docs = resolve_target_documents(&db, target)?;
     reprocess_documents(
         &db,

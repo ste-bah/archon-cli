@@ -142,7 +142,8 @@ fn open_cognitive_store(
 fn configure_session_vlm_provider(working_dir: &std::path::Path) {
     match archon_policy::load_effective_policy(working_dir) {
         Ok(policy) => {
-            let report = archon_docs::vlm::factory::configure_registered_provider(&policy);
+            let report =
+                archon_docs::vlm::factory::configure_registered_provider_thread_safe(&policy);
             match report.status {
                 archon_docs::vlm::factory::VlmProviderInitStatus::Registered => tracing::info!(
                     provider = %report.provider,

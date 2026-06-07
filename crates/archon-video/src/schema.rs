@@ -92,7 +92,13 @@ pub fn create_video_schema(db: &DbInstance) -> Result<()> {
 }
 
 fn run_create(db: &DbInstance, script: &str) -> Result<()> {
-    match db.run_script(script, Default::default(), ScriptMutability::Mutable) {
+    match archon_docs::run_cozo_script_guarded(
+        db,
+        script,
+        Default::default(),
+        ScriptMutability::Mutable,
+        "create video schema",
+    ) {
         Ok(_) => Ok(()),
         Err(e) => {
             let msg = e.to_string();

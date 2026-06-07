@@ -68,7 +68,8 @@ impl WebChatBridge {
         let db = open_docs_db()?;
         let policy = archon_policy::load_effective_policy(&self.cwd).unwrap_or_default();
         let _ = crate::command::docs_embedding::init_embedding(&db);
-        let vlm_report = archon_docs::vlm::factory::configure_registered_provider(&policy);
+        let vlm_report =
+            archon_docs::vlm::factory::configure_registered_provider_blocking_safe(&policy).await;
 
         let mut stored = Vec::new();
         for attachment in &request.attachments {
@@ -129,6 +130,7 @@ impl WebChatBridge {
                 }
             }
         }
+        archon_docs::vlm::clear_provider_blocking_safe().await;
         Ok((prompt, ledger_attachments))
     }
 }

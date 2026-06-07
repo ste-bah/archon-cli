@@ -14,6 +14,7 @@ fn kb_db_path() -> PathBuf {
 
 fn open_db() -> Result<DbInstance> {
     let db_path = kb_db_path();
+    archon_docs::configure_cozo_write_lock_for_db(&db_path);
     let db = crate::command::store_paths::open_sqlite_db(&db_path, "knowledge")?;
     archon_docs::schema::ensure_doc_schema(&db)?;
     archon_knowledge::schema::ensure_knowledge_schema(&db)?;
@@ -27,8 +28,12 @@ pub async fn handle_kb_command(action: KbAction) -> Result<()> {
 
     match action {
         KbAction::Ingest { source, kb } => {
-            let vlm_report = archon_docs::vlm::factory::configure_registered_provider(&policy);
-            ingest_source(&db, &source, kb.as_deref(), &policy, &vlm_report).await
+            let vlm_report =
+                archon_docs::vlm::factory::configure_registered_provider_blocking_safe(&policy)
+                    .await;
+            let result = ingest_source(&db, &source, kb.as_deref(), &policy, &vlm_report).await;
+            archon_docs::vlm::clear_provider_blocking_safe().await;
+            result
         }
         KbAction::List { kb } => list_chunks(&db, kb.as_deref()).await,
         KbAction::Search {

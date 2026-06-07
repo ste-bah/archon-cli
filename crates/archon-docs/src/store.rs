@@ -26,12 +26,14 @@ pub fn insert_doc_source(db: &DbInstance, doc: &SourceDocument) -> Result<()> {
     params.insert("dat".into(), DataValue::from(doc.discovered_at.as_str()));
     params.insert("status".into(), DataValue::from(status_str(&doc.status)));
 
-    db.run_script(
+    crate::cozo_retry::run_script_guarded(
+        db,
         "?[document_id, source_path, media_type, content_hash, discovered_at, status] \
          <- [[$did, $path, $mtype, $hash, $dat, $status]] \
          :put doc_sources { document_id => source_path, media_type, content_hash, discovered_at, status }",
         params,
         ScriptMutability::Mutable,
+        "insert doc_sources",
     )
     .map_err(|e| anyhow::anyhow!("insert doc_sources failed: {e}"))?;
     Ok(())
@@ -154,11 +156,13 @@ pub fn assign_document_to_kb(db: &DbInstance, kb_id: &str, document_id: &str) ->
     params.insert("did".into(), DataValue::from(document_id));
     let assigned_at = chrono::Utc::now().to_rfc3339();
     params.insert("ts".into(), DataValue::from(assigned_at.as_str()));
-    db.run_script(
+    crate::cozo_retry::run_script_guarded(
+        db,
         "?[kb_id, document_id, assigned_at] <- [[$kid, $did, $ts]] \
          :put doc_kb_memberships { kb_id, document_id => assigned_at }",
         params,
         ScriptMutability::Mutable,
+        "assign document to kb",
     )
     .map_err(|e| anyhow::anyhow!("assign document to kb failed: {e}"))?;
     Ok(())
@@ -205,12 +209,14 @@ pub fn insert_ocr_run(db: &DbInstance, run: &OcrRun) -> Result<()> {
         DataValue::from(run.duration_ms.unwrap_or(0) as i64),
     );
 
-    db.run_script(
+    crate::cozo_retry::run_script_guarded(
+        db,
         "?[ocr_run_id, document_id, provider, mode, status, started_at, completed_at, duration_ms] \
          <- [[$oid, $did, $prov, $mode, $status, $sat, $cat, $dur]] \
          :put doc_ocr_runs { ocr_run_id => document_id, provider, mode, status, started_at, completed_at, duration_ms }",
         params,
         ScriptMutability::Mutable,
+        "insert doc_ocr_runs",
     )
     .map_err(|e| anyhow::anyhow!("insert doc_ocr_runs failed: {e}"))?;
     Ok(())
@@ -349,12 +355,14 @@ pub fn insert_page(db: &DbInstance, page: &PageArtifact) -> Result<()> {
         DataValue::from(page.provenance_record_id.as_str()),
     );
 
-    db.run_script(
+    crate::cozo_retry::run_script_guarded(
+        db,
         "?[page_id, document_id, page_number, text_hash, image_hash, width, height, provenance_record_id] \
          <- [[$pid, $did, $pnum, $thash, $ihash, $w, $h, $prov]] \
          :put doc_pages { page_id => document_id, page_number, text_hash, image_hash, width, height, provenance_record_id }",
         params,
         ScriptMutability::Mutable,
+        "insert doc_pages",
     )
     .map_err(|e| anyhow::anyhow!("insert doc_pages failed: {e}"))?;
     Ok(())
@@ -521,12 +529,14 @@ pub fn insert_image_description(db: &DbInstance, desc: &ImageDescription) -> Res
     params.insert("created".into(), DataValue::from(desc.created_at.as_str()));
     params.insert("cost".into(), DataValue::from(desc.cost_usd));
 
-    db.run_script(
+    crate::cozo_retry::run_script_guarded(
+        db,
         "?[artifact_id, document_id, page_number, provider, model, description, created_at, cost_usd] \
          <- [[$aid, $did, $page, $provider, $model, $desc, $created, $cost]] \
          :put doc_image_descriptions { artifact_id => document_id, page_number, provider, model, description, created_at, cost_usd }",
         params,
         ScriptMutability::Mutable,
+        "insert doc_image_descriptions",
     )
     .map_err(|e| anyhow::anyhow!("insert doc_image_descriptions failed: {e}"))?;
     Ok(())
@@ -623,12 +633,14 @@ pub fn upsert_pdf_metrics(db: &DbInstance, metrics: &PdfIngestMetrics) -> Result
         DataValue::from(metrics.pages_rendered as i64),
     );
 
-    db.run_script(
+    crate::cozo_retry::run_script_guarded(
+        db,
         "?[document_id, embedded_images_extracted, embedded_images_skipped_filter, image_ocr_runs, image_ocr_failures, image_vlm_descriptions, image_vlm_failures, pages_rendered] \
          <- [[$did, $extracted, $skipped, $ocr_runs, $ocr_failures, $vlm_descriptions, $vlm_failures, $rendered]] \
          :put doc_pdf_metrics { document_id => embedded_images_extracted, embedded_images_skipped_filter, image_ocr_runs, image_ocr_failures, image_vlm_descriptions, image_vlm_failures, pages_rendered }",
         params,
         ScriptMutability::Mutable,
+        "upsert doc_pdf_metrics",
     )
     .map_err(|e| anyhow::anyhow!("upsert doc_pdf_metrics failed: {e}"))?;
     Ok(())
@@ -699,12 +711,14 @@ pub fn insert_artifact(db: &DbInstance, art: &ArtifactRecord) -> Result<()> {
         DataValue::from(art.provenance_record_id.as_str()),
     );
 
-    db.run_script(
+    crate::cozo_retry::run_script_guarded(
+        db,
         "?[artifact_id, document_id, artifact_type, content_hash, created_at, provenance_record_id] \
          <- [[$aid, $did, $atype, $hash, $cat, $prov]] \
          :put doc_artifacts { artifact_id => document_id, artifact_type, content_hash, created_at, provenance_record_id }",
         params,
         ScriptMutability::Mutable,
+        "insert doc_artifacts",
     )
     .map_err(|e| anyhow::anyhow!("insert doc_artifacts failed: {e}"))?;
     Ok(())
@@ -754,12 +768,14 @@ pub fn insert_provenance_edge(db: &DbInstance, edge: &ProvenanceEdge) -> Result<
     );
     params.insert("cat".into(), DataValue::from(edge.created_at.as_str()));
 
-    db.run_script(
+    crate::cozo_retry::run_script_guarded(
+        db,
         "?[edge_id, from_artifact_id, to_artifact_id, edge_type, created_at] \
          <- [[$eid, $from, $to, $etype, $cat]] \
          :put doc_provenance_edges { edge_id => from_artifact_id, to_artifact_id, edge_type, created_at }",
         params,
         ScriptMutability::Mutable,
+        "insert doc_provenance_edges",
     )
     .map_err(|e| anyhow::anyhow!("insert provenance edge failed: {e}"))?;
     Ok(())
@@ -842,12 +858,14 @@ pub fn insert_processing_job(db: &DbInstance, job: &ProcessingJob) -> Result<()>
         DataValue::from(job.error_message.as_deref().unwrap_or("")),
     );
 
-    db.run_script(
+    crate::cozo_retry::run_script_guarded(
+        db,
         "?[job_id, document_id, job_type, status, started_at, completed_at, error_message] \
          <- [[$jid, $did, $jtype, $status, $sat, $cat, $err]] \
          :put doc_processing_jobs { job_id => document_id, job_type, status, started_at, completed_at, error_message }",
         params,
         ScriptMutability::Mutable,
+        "insert doc_processing_jobs",
     )
     .map_err(|e| anyhow::anyhow!("insert processing job failed: {e}"))?;
     Ok(())
@@ -1130,11 +1148,13 @@ pub fn insert_page_image_embedding(
     params.insert("emb".into(), DataValue::Vec(Vector::F32(arr)));
     params.insert("prov".into(), DataValue::from(provider));
 
-    db.run_script(
+    crate::cozo_retry::run_script_guarded(
+        db,
         "?[page_id, embedding, provider] <- [[$pid, $emb, $prov]]
          :put vec_page_images { page_id => embedding, provider }",
         params,
         ScriptMutability::Mutable,
+        "insert page image embedding",
     )
     .map_err(|e| anyhow::anyhow!("insert page image embedding failed: {e}"))?;
     Ok(())

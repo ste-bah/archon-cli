@@ -81,6 +81,66 @@ pub fn configure_registered_provider(
     }
 }
 
+pub async fn configure_registered_provider_blocking_safe(
+    policy: &archon_policy::EffectivePolicy,
+) -> VlmProviderInitReport {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        let policy = policy.clone();
+        let fallback_provider = policy.docs.vlm.provider.clone();
+        let fallback_model = configured_model_label(&policy);
+        match tokio::task::spawn_blocking(move || configure_registered_provider(&policy)).await {
+            Ok(report) => report,
+            Err(e) => VlmProviderInitReport::skipped(
+                fallback_provider,
+                fallback_model,
+                format!("VLM provider initialization task failed: {e}"),
+            ),
+        }
+    } else {
+        configure_registered_provider(policy)
+    }
+}
+
+pub fn configure_registered_provider_thread_safe(
+    policy: &archon_policy::EffectivePolicy,
+) -> VlmProviderInitReport {
+    if tokio::runtime::Handle::try_current().is_err() {
+        return configure_registered_provider(policy);
+    }
+
+    let policy = policy.clone();
+    let fallback_provider = policy.docs.vlm.provider.clone();
+    let fallback_model = configured_model_label(&policy);
+    match std::thread::Builder::new()
+        .name("archon-vlm-init".into())
+        .spawn(move || configure_registered_provider(&policy))
+    {
+        Ok(handle) => match handle.join() {
+            Ok(report) => report,
+            Err(_) => VlmProviderInitReport::skipped(
+                fallback_provider,
+                fallback_model,
+                "VLM provider initialization thread panicked",
+            ),
+        },
+        Err(e) => VlmProviderInitReport::skipped(
+            fallback_provider,
+            fallback_model,
+            format!("VLM provider initialization thread failed: {e}"),
+        ),
+    }
+}
+
+fn configured_model_label(policy: &archon_policy::EffectivePolicy) -> String {
+    match policy.docs.vlm.provider.as_str() {
+        "ollama" => policy.docs.vlm.ollama.model.clone(),
+        "gemini" => policy.docs.vlm.gemini.model.clone(),
+        "anthropic" => policy.docs.vlm.anthropic.model.clone(),
+        "openai-compat" => policy.docs.vlm.openai_compat.model.clone(),
+        _ => String::new(),
+    }
+}
+
 pub fn diagnostic_report(policy: &archon_policy::EffectivePolicy) -> VlmProviderInitReport {
     let decision = policy.docs_vlm_decision();
     if !decision.allowed {

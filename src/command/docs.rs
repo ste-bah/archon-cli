@@ -92,13 +92,19 @@ pub async fn handle_docs_command(action: DocsAction) -> Result<()> {
 }
 
 async fn handle_ingest(path_str: &str) -> Result<()> {
+    let result = handle_ingest_inner(path_str).await;
+    archon_docs::vlm::clear_provider_blocking_safe().await;
+    result
+}
+
+async fn handle_ingest_inner(path_str: &str) -> Result<()> {
     let db = open_db()?;
     let _ = crate::command::docs_embedding::init_embedding(&db);
     let policy = std::env::current_dir()
         .ok()
         .and_then(|cwd| archon_policy::load_effective_policy(&cwd).ok())
         .unwrap_or_default();
-    let vlm_report = vlm_factory::configure_registered_provider(&policy);
+    let vlm_report = vlm_factory::configure_registered_provider_blocking_safe(&policy).await;
     let path = PathBuf::from(path_str);
 
     if !path.exists() {

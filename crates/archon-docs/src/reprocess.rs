@@ -283,10 +283,16 @@ fn run_rm(
     params: BTreeMap<String, DataValue>,
     label: &str,
 ) -> Result<(), DocsError> {
-    db.run_script(script, params, ScriptMutability::Mutable)
-        .map_err(|e| DocsError::Storage {
-            message: format!("delete {label} rows failed: {e}"),
-        })?;
+    crate::cozo_retry::run_script_guarded(
+        db,
+        script,
+        params,
+        ScriptMutability::Mutable,
+        &format!("delete {label} rows"),
+    )
+    .map_err(|e| DocsError::Storage {
+        message: format!("delete {label} rows failed: {e}"),
+    })?;
     Ok(())
 }
 
@@ -296,7 +302,13 @@ fn run_rm_optional(
     params: BTreeMap<String, DataValue>,
     label: &str,
 ) -> Result<(), DocsError> {
-    match db.run_script(script, params, ScriptMutability::Mutable) {
+    match crate::cozo_retry::run_script_guarded(
+        db,
+        script,
+        params,
+        ScriptMutability::Mutable,
+        &format!("delete {label} rows"),
+    ) {
         Ok(_) => Ok(()),
         Err(e) if e.to_string().contains(COZO_RELATION_NOT_FOUND) => Ok(()),
         Err(e) => Err(DocsError::Storage {

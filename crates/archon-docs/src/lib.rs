@@ -50,3 +50,13 @@ pub mod vlm;
 pub fn configure_cozo_write_lock_for_db(path: impl AsRef<std::path::Path>) {
     cozo_retry::configure_write_lock_for_db(path);
 }
+
+pub fn run_cozo_script_guarded(
+    db: &cozo::DbInstance,
+    script: &str,
+    params: std::collections::BTreeMap<String, cozo::DataValue>,
+    mutability: cozo::ScriptMutability,
+    context: &str,
+) -> anyhow::Result<cozo::NamedRows> {
+    cozo_retry::run_script_guarded(db, script, params, mutability, context)
+}

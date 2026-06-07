@@ -172,6 +172,53 @@ async fn test_pdf_single_image_vlm_failure_does_not_fail_document() {
 #[cfg(unix)]
 #[tokio::test]
 #[serial_test::serial(docs_global_state)]
+async fn test_pdf_vlm_provider_empty_response_retries_without_failing_document() {
+    reset_multimodal_test_providers();
+    crate::ocr::provider::set_provider(Box::new(MockOcrProvider { text: "chart OCR" }));
+    crate::vlm::set_provider(Box::new(ProviderErrorThenOkVlmProvider {
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    }));
+    let policy = vlm_enabled_policy();
+    let db = test_db();
+    let dir = tempfile::tempdir().unwrap();
+    let pdf = dir.path().join("provider-empty-retry.pdf");
+    fs::write(&pdf, b"%PDF provider retry chart").unwrap();
+    let pdftotext = dir.path().join("pdftotext");
+    let pdfimages = dir.path().join("pdfimages");
+    let pdftoppm = dir.path().join("pdftoppm");
+    let chart = dir.path().join("chart.bin");
+    fs::write(&chart, png_bytes(800, 600, 8192)).unwrap();
+    write_executable(&pdftotext, "#!/usr/bin/env bash\necho 'body text'\n");
+    write_executable(
+        &pdfimages,
+        &format!(
+            "#!/usr/bin/env bash\n\
+             if [ \"$1\" = \"-list\" ]; then\n\
+               echo '  1 0 image 800 600 rgb 3 8 image no 12 0 72 72 8K 1%'\n\
+               exit 0\n\
+             fi\n\
+             cp '{}' \"${{@: -1}}-000.png\"\n",
+            chart.display()
+        ),
+    );
+    write_executable(&pdftoppm, "#!/usr/bin/env bash\nexit 99\n");
+    set_pdf_command_env(&pdftotext, &pdfimages, &pdftoppm);
+    let _guard = PdfCommandEnvGuard;
+
+    let result = ingest_file_with_policy(&db, &pdf, &policy).await.unwrap();
+    assert!(!result.pipeline_failed);
+    assert_eq!(result.pdf_image_vlm_failures, 0);
+    assert_eq!(result.vlm_descriptions, 1);
+    let doc = store::get_doc_source(&db, &result.document_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(doc.status, DocumentStatus::Ingested);
+    reset_multimodal_test_providers();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[serial_test::serial(docs_global_state)]
 async fn test_pdf_shared_xobject_image_has_edges_to_each_source_page() {
     reset_multimodal_test_providers();
     crate::ocr::provider::set_provider(Box::new(MockOcrProvider {

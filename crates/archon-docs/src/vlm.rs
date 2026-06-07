@@ -135,6 +135,14 @@ pub fn clear_provider() {
     }
 }
 
+pub async fn clear_provider_blocking_safe() {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        let _ = tokio::task::spawn_blocking(clear_provider).await;
+    } else {
+        clear_provider();
+    }
+}
+
 pub fn describe_registered_image(
     policy: &archon_policy::EffectivePolicy,
     image_bytes: &[u8],
@@ -246,5 +254,15 @@ mod tests {
         policy.workers.vlm = "allow-local".into();
         let description = describe_image_with_policy(&policy, &MockVlm, b"image").unwrap();
         assert_eq!(description, "5 bytes described");
+    }
+
+    #[tokio::test]
+    async fn blocking_safe_clear_removes_registered_provider() {
+        clear_provider();
+        set_provider(Box::new(MockVlm));
+
+        clear_provider_blocking_safe().await;
+
+        assert!(get_registered_provider().is_none());
     }
 }

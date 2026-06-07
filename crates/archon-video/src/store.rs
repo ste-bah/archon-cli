@@ -106,11 +106,13 @@ pub fn insert_video_source(db: &DbInstance, source: &VideoSource) -> Result<()> 
         ],
     );
     p.insert("dur".into(), DataValue::from(source.duration_ms));
-    db.run_script(
+    archon_docs::run_cozo_script_guarded(
+        db,
         "?[video_id, document_id, source_kind, source_url, local_path, title, channel_or_author, duration_ms, published_at, license, source_hash, ingest_status, policy_snapshot_json, created_at, updated_at] <- [[$vid, $did, $kind, $url, $path, $title, $author, $dur, $pub, $lic, $hash, $status, $policy, $cat, $uat]]
          :put video_sources { video_id => document_id, source_kind, source_url, local_path, title, channel_or_author, duration_ms, published_at, license, source_hash, ingest_status, policy_snapshot_json, created_at, updated_at }",
         p,
         ScriptMutability::Mutable,
+        "insert video_sources",
     )
     .map_err(|e| anyhow::anyhow!("insert video_sources failed: {e}"))?;
     Ok(())
@@ -184,11 +186,13 @@ pub fn insert_video_track(db: &DbInstance, track: &VideoTrack) -> Result<()> {
     );
     p.insert("warn".into(), DataValue::from(track.warning_count));
     p.insert("err".into(), DataValue::from(track.error_count));
-    db.run_script(
+    archon_docs::run_cozo_script_guarded(
+        db,
         "?[track_id, video_id, track_kind, provider, model, status, warning_count, error_count, created_at, updated_at] <- [[$tid, $vid, $kind, $prov, $model, $status, $warn, $err, $cat, $uat]]
          :put video_tracks { track_id => video_id, track_kind, provider, model, status, warning_count, error_count, created_at, updated_at }",
         p,
         ScriptMutability::Mutable,
+        "insert video_tracks",
     )
     .map_err(|e| anyhow::anyhow!("insert video_tracks failed: {e}"))?;
     Ok(())
@@ -252,11 +256,13 @@ pub fn insert_transcript_segment(db: &DbInstance, segment: &TranscriptSegment) -
     p.insert("start".into(), DataValue::from(segment.start_ms));
     p.insert("end".into(), DataValue::from(segment.end_ms));
     p.insert("conf".into(), DataValue::from(segment.confidence));
-    db.run_script(
+    archon_docs::run_cozo_script_guarded(
+        db,
         "?[segment_id, video_id, track_id, start_ms, end_ms, speaker, text, confidence, source_method, chunk_id, created_at] <- [[$sid, $vid, $tid, $start, $end, $speaker, $text, $conf, $method, $cid, $cat]]
          :put video_transcript_segments { segment_id => video_id, track_id, start_ms, end_ms, speaker, text, confidence, source_method, chunk_id, created_at }",
         p,
         ScriptMutability::Mutable,
+        "insert video_transcript_segments",
     )
     .map_err(|e| anyhow::anyhow!("insert video_transcript_segments failed: {e}"))?;
     Ok(())
@@ -308,11 +314,13 @@ pub fn insert_frame_description(db: &DbInstance, frame: &FrameDescription) -> Re
     p.insert("ts".into(), DataValue::from(frame.timestamp_ms));
     p.insert("te".into(), DataValue::from(frame.timestamp_end_ms));
     p.insert("cost".into(), DataValue::from(frame.cost_usd));
-    db.run_script(
+    archon_docs::run_cozo_script_guarded(
+        db,
         "?[frame_id, video_id, track_id, timestamp_ms, timestamp_end_ms, frame_hash, perceptual_hash, image_artifact_id, ocr_text, vlm_description, provider, model, cost_usd, chunk_id, dedupe_group_id, status, warning, created_at] <- [[$fid, $vid, $tid, $ts, $te, $hash, $phash, $artifact, $ocr, $vlm, $prov, $model, $cost, $cid, $dgid, $status, $warning, $cat]]
          :put video_frame_descriptions { frame_id => video_id, track_id, timestamp_ms, timestamp_end_ms, frame_hash, perceptual_hash, image_artifact_id, ocr_text, vlm_description, provider, model, cost_usd, chunk_id, dedupe_group_id, status, warning, created_at }",
         p,
         ScriptMutability::Mutable,
+        "insert video_frame_descriptions",
     )
     .map_err(|e| anyhow::anyhow!("insert video_frame_descriptions failed: {e}"))?;
     Ok(())
@@ -389,11 +397,13 @@ pub fn insert_chunk_timeref(db: &DbInstance, timeref: &ChunkTimeRef) -> Result<(
     );
     p.insert("start".into(), DataValue::from(timeref.timestamp_start_ms));
     p.insert("end".into(), DataValue::from(timeref.timestamp_end_ms));
-    db.run_script(
+    archon_docs::run_cozo_script_guarded(
+        db,
         "?[chunk_id, video_id, track_id, timestamp_start_ms, timestamp_end_ms, created_at] <- [[$cid, $vid, $tid, $start, $end, $cat]]
          :put video_chunk_timeref { chunk_id => video_id, track_id, timestamp_start_ms, timestamp_end_ms, created_at }",
         p,
         ScriptMutability::Mutable,
+        "insert video_chunk_timeref",
     )
     .map_err(|e| anyhow::anyhow!("insert video_chunk_timeref failed: {e}"))?;
     Ok(())

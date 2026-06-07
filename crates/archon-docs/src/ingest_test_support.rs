@@ -138,6 +138,27 @@ impl crate::vlm::VlmDescriptionProvider for FailsOnceVlmProvider {
     }
 }
 
+pub(super) struct ProviderErrorThenOkVlmProvider {
+    pub(super) calls: std::sync::atomic::AtomicUsize,
+}
+
+impl crate::vlm::VlmDescriptionProvider for ProviderErrorThenOkVlmProvider {
+    fn describe_image(
+        &self,
+        _image_bytes: &[u8],
+        _prompt: Option<&str>,
+    ) -> Result<String, DocsError> {
+        if self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+            return Err(DocsError::VlmProvider {
+                provider: "openai-compat".into(),
+                message: "chat completions response did not contain text".into(),
+                status_code: None,
+            });
+        }
+        Ok("chart description after retry".into())
+    }
+}
+
 pub(super) fn reset_multimodal_test_providers() {
     crate::ocr::provider::clear_provider();
     crate::vlm::clear_provider();
