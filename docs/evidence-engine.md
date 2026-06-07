@@ -129,6 +129,15 @@ store. Existing Cozo vector rows can be migrated without re-embedding using
 `docs vector-migrate`; the command is resumable and skips rows already present
 in RocksDB.
 
+Hybrid retrieval is staged so common questions do not always pay the semantic
+startup cost. Archon first sanitizes the user query into Cozo FTS-safe terms
+and tries exact evidence. When enough strong lexical hits are available, it
+returns those cited chunks immediately. Specific definition-style questions can
+also short-circuit on one clear lexical hit, which keeps large KB answers fast
+without disabling semantic fallback for ambiguous or weak lexical results. If a
+definition-style query has a minor typo, hybrid tries a narrow relaxed exact
+retry before paying the semantic startup cost.
+
 Every stage should leave physical evidence behind. Use the inspection commands
 instead of trusting return values:
 

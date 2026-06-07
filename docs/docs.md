@@ -227,7 +227,7 @@ was actually stored.
 |---|---|
 | `exact` | Uses full-text/exact content matching where available |
 | `semantic` | Uses embedding/HNSW vector similarity |
-| `hybrid` | Combines exact and semantic scores using policy weights |
+| `hybrid` | Runs safe exact/FTS first, then semantic only when lexical evidence is not already strong enough |
 
 Hybrid is the default:
 
@@ -239,6 +239,20 @@ archon docs search "policy marketplace incentives" --mode hybrid --debug
 
 `--debug` prints retrieval internals such as query embedding norm, raw scores,
 rerank scores when present, and citation/provenance chains.
+
+Hybrid retrieval is staged for large corpora. User questions are normalized
+before Cozo FTS so punctuation such as `?`, commas, and parentheses cannot
+make the lexical stage fail. If the exact stage returns enough high-confidence
+evidence, including a specific definition-style hit such as "what do you know
+about the Hybrid System", Archon returns those cited chunks immediately instead
+of loading the semantic vector path. Definition-style queries also get a narrow
+relaxed exact retry before semantic fallback, so minor misses such as `systm`
+can still hit strong `system` evidence. If exact evidence is weak, sparse, or
+unavailable, hybrid falls through to embedding/HNSW retrieval and fuses the
+scores as before.
+
+For diagnostics, set `ARCHON_DOCS_HYBRID_ALWAYS_SEMANTIC=1` to force hybrid
+search to run semantic retrieval even when exact evidence is already strong.
 
 ## Slash commands
 

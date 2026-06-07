@@ -46,6 +46,11 @@ pub mod index_queue;
 mod index_queue_tests;
 pub mod rerank;
 pub mod retrieval;
+mod retrieval_exact;
+mod retrieval_query;
+mod retrieval_semantic;
+#[cfg(test)]
+mod retrieval_tests;
 pub mod vlm;
 
 pub fn configure_cozo_write_lock_for_db(path: impl AsRef<std::path::Path>) {

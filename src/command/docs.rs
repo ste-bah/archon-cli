@@ -292,14 +292,8 @@ async fn handle_inspect(document_id: &str) -> Result<()> {
 
 // ── Phase 2: retrieval, answer, provenance ──────────────
 
-async fn ensure_search_ready(db: &cozo::DbInstance) -> Result<()> {
-    crate::command::docs_embedding::init_embedding(db)?;
-    Ok(())
-}
-
 async fn handle_search(query: &str, mode: &str, debug: bool) -> Result<()> {
     let db = open_db()?;
-    ensure_search_ready(&db).await?;
     let mode = retrieval::SearchMode::parse(mode).map_err(|e| anyhow::anyhow!("{e}"))?;
     let policy = std::env::current_dir()
         .ok()
@@ -388,7 +382,6 @@ async fn handle_search(query: &str, mode: &str, debug: bool) -> Result<()> {
 
 async fn handle_answer(query: &str) -> Result<()> {
     let db = open_db()?;
-    ensure_search_ready(&db).await?;
 
     match answer::answer(&db, query, 5) {
         Ok(ans) => {

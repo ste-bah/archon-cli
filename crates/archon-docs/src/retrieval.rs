@@ -1,22 +1,24 @@
 //! Document retrieval for chunks.
 //!
-//! Provides the search pipeline: embed query → Rust-HNSW nearest-neighbour
-//! over RocksDB raw vectors → resolve chunks from doc_chunks → optional
-//! reranking → results with provenance. Legacy Cozo HNSW remains as a fallback
-//! while older vector rows are migrated.
+//! Provides the search pipeline: exact/FTS retrieval, semantic Rust-HNSW
+//! retrieval over RocksDB raw vectors, and hybrid score fusion.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
-use cozo::{DataValue, DbInstance, ScriptMutability, Vector};
+use cozo::DbInstance;
 
-use crate::embed::get_provider;
 use crate::errors::DocsError;
 use crate::models::ChunkArtifact;
+use crate::retrieval_exact::{
+    ExactFallback, exact_search, expanded_top_k, relaxed_exact_search, score_exact_for_candidates,
+};
+use crate::retrieval_query::safe_fts_query;
+use crate::retrieval_semantic::semantic_search_with_norm;
 use crate::store;
-use crate::vector_store::DocVectorStore;
 
-const EXACT_CANDIDATE_MULTIPLIER: usize = 3;
-const EXACT_SCAN_FALLBACK_MAX_CHUNKS: usize = 2_000;
+const HYBRID_EXACT_SHORTCUT_MIN_RESULTS: usize = 3;
+const HYBRID_EXACT_SHORTCUT_SCORE: f64 = 0.75;
+const HYBRID_EXACT_SHORTCUT_MIN_TERMS: usize = 2;
 
 /// A single search result with chunk content and relevance metadata.
 #[derive(Clone, Debug)]
@@ -106,10 +108,7 @@ impl RetrievalWeights {
     }
 }
 
-/// Search for chunks similar to `query` using HNSW vector search.
-///
-/// If no embedding provider is configured, returns `DocsError::ModelNotConfigured`.
-/// If no chunks are indexed, returns an empty result set.
+/// Search for chunks similar to `query`.
 pub fn search(db: &DbInstance, query: &str, top_k: usize) -> Result<SearchResults, DocsError> {
     search_with_mode(
         db,
@@ -141,33 +140,10 @@ pub fn search_with_mode(
     mode: SearchMode,
     weights: RetrievalWeights,
 ) -> Result<SearchResults, DocsError> {
-    let total = store::count_indexed_chunks(db).map_err(|e| DocsError::Retrieval {
-        message: e.to_string(),
-    })?;
-    let total_chunks = store::count_chunks(db).map_err(|e| DocsError::Retrieval {
-        message: e.to_string(),
-    })?;
-
+    let total = count_indexed(db)?;
+    let total_chunks = count_chunks(db)?;
     if matches!(mode, SearchMode::Semantic) && total == 0 {
-        let failed_count = store::count_failed_chunks(db).map_err(|e| DocsError::Retrieval {
-            message: e.to_string(),
-        })?;
-        if failed_count > 0 {
-            return Err(DocsError::Embedding {
-                message: format!(
-                    "{failed_count} chunks failed indexing. Run 'archon docs model-status' for diagnostics."
-                ),
-            });
-        }
-        return Ok(SearchResults {
-            results: Vec::new(),
-            query: query.to_string(),
-            query_embedding_norm: None,
-            total_chunks,
-            total_indexed_chunks: 0,
-            mode,
-            warnings: Vec::new(),
-        });
+        return empty_or_failed_result(db, query, mode, total_chunks);
     }
 
     let mut warnings = Vec::new();
@@ -179,31 +155,19 @@ pub fn search_with_mode(
             query_embedding_norm = Some(semantic.query_embedding_norm);
             semantic.results
         }
-        SearchMode::Hybrid => {
-            let semantic_norm = &mut query_embedding_norm;
-            hybrid_search(
-                db,
-                query,
-                top_k,
-                weights,
-                total,
-                total_chunks,
-                &mut warnings,
-                semantic_norm,
-            )?
-        }
+        SearchMode::Hybrid => hybrid_search(
+            db,
+            query,
+            top_k,
+            weights,
+            total,
+            total_chunks,
+            &mut warnings,
+            &mut query_embedding_norm,
+        )?,
     };
     if !matches!(mode, SearchMode::Exact) && total == 0 && results.is_empty() {
-        let failed_count = store::count_failed_chunks(db).map_err(|e| DocsError::Retrieval {
-            message: e.to_string(),
-        })?;
-        if failed_count > 0 {
-            return Err(DocsError::Embedding {
-                message: format!(
-                    "{failed_count} chunks failed indexing. Run 'archon docs model-status' for diagnostics."
-                ),
-            });
-        }
+        fail_if_indexing_failed(db)?;
     }
 
     Ok(SearchResults {
@@ -217,107 +181,48 @@ pub fn search_with_mode(
     })
 }
 
-#[derive(Debug)]
-struct SemanticSearch {
-    results: Vec<SearchResult>,
-    query_embedding_norm: f64,
-}
-
-fn semantic_search_with_norm(
-    db: &DbInstance,
-    query: &str,
-    top_k: usize,
-) -> Result<SemanticSearch, DocsError> {
-    let provider = get_provider().ok_or_else(|| DocsError::ModelNotConfigured {
-        message: "no embedding provider configured. Run 'archon docs model-status' for details."
-            .into(),
-    })?;
-    let provider_name = provider.backend_name();
-    let query_vec = provider.embed_query(query)?;
-    let query_embedding_norm = l2_norm(&query_vec);
-    let results = hnsw_search(db, provider_name, &query_vec, top_k)?;
-    Ok(SemanticSearch {
-        results,
-        query_embedding_norm,
+fn count_indexed(db: &DbInstance) -> Result<usize, DocsError> {
+    store::count_indexed_chunks(db).map_err(|e| DocsError::Retrieval {
+        message: e.to_string(),
     })
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ExactFallback {
-    Strict,
-    BestEffort,
+fn count_chunks(db: &DbInstance) -> Result<usize, DocsError> {
+    store::count_chunks(db).map_err(|e| DocsError::Retrieval {
+        message: e.to_string(),
+    })
 }
 
-fn exact_search(
+fn empty_or_failed_result(
     db: &DbInstance,
     query: &str,
-    top_k: usize,
+    mode: SearchMode,
     total_chunks: usize,
-    fallback: ExactFallback,
-) -> Result<Vec<SearchResult>, DocsError> {
-    let needle = normalize_exact_query(query);
-    if needle.is_empty() || top_k == 0 {
-        return Ok(Vec::new());
-    }
-
-    let candidate_limit = expanded_top_k(top_k);
-    match fts_search(db, &needle, candidate_limit) {
-        Ok(results) if !results.is_empty() => return rank_exact_results(results, top_k),
-        Ok(_) => {}
-        Err(e) => {
-            if total_chunks > EXACT_SCAN_FALLBACK_MAX_CHUNKS && fallback == ExactFallback::Strict {
-                return Err(DocsError::Retrieval {
-                    message: format!(
-                        "FTS search failed and exact scan fallback is capped at {EXACT_SCAN_FALLBACK_MAX_CHUNKS} chunks: {e}"
-                    ),
-                });
-            }
-            tracing::warn!(error = %e, "Cozo FTS search failed; using bounded exact fallback");
-        }
-    }
-
-    if total_chunks > EXACT_SCAN_FALLBACK_MAX_CHUNKS {
-        tracing::warn!(
-            total_chunks,
-            max_fallback_chunks = EXACT_SCAN_FALLBACK_MAX_CHUNKS,
-            "skipping unbounded exact scan fallback"
-        );
-        return Ok(Vec::new());
-    }
-
-    let scan_results = scan_exact_matches(db, &needle, candidate_limit, total_chunks)?;
-    rank_exact_results(scan_results, top_k)
+) -> Result<SearchResults, DocsError> {
+    fail_if_indexing_failed(db)?;
+    Ok(SearchResults {
+        results: Vec::new(),
+        query: query.to_string(),
+        query_embedding_norm: None,
+        total_chunks,
+        total_indexed_chunks: 0,
+        mode,
+        warnings: Vec::new(),
+    })
 }
 
-fn rank_exact_results(
-    results: Vec<SearchResult>,
-    top_k: usize,
-) -> Result<Vec<SearchResult>, DocsError> {
-    let mut merged: HashMap<String, SearchResult> = HashMap::new();
-    for result in results {
-        merged
-            .entry(result.chunk_id.clone())
-            .and_modify(|existing| {
-                if result.exact_score > existing.exact_score {
-                    existing.exact_score = result.exact_score;
-                    existing.score = result.score;
-                    existing.distance = result.distance;
-                }
-            })
-            .or_insert(result);
+fn fail_if_indexing_failed(db: &DbInstance) -> Result<(), DocsError> {
+    let failed_count = store::count_failed_chunks(db).map_err(|e| DocsError::Retrieval {
+        message: e.to_string(),
+    })?;
+    if failed_count == 0 {
+        return Ok(());
     }
-    let mut results: Vec<SearchResult> = merged.into_values().collect();
-    results.sort_by(|a, b| {
-        b.exact_score
-            .partial_cmp(&a.exact_score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    results.truncate(top_k);
-    Ok(results)
-}
-
-fn expanded_top_k(top_k: usize) -> usize {
-    top_k.saturating_mul(EXACT_CANDIDATE_MULTIPLIER).max(top_k)
+    Err(DocsError::Embedding {
+        message: format!(
+            "{failed_count} chunks failed indexing. Run 'archon docs model-status' for diagnostics."
+        ),
+    })
 }
 
 fn hybrid_search(
@@ -333,37 +238,134 @@ fn hybrid_search(
     if top_k == 0 {
         return Ok(Vec::new());
     }
-    let exact = exact_search(
+    let mut exact = exact_search(
         db,
         query,
         expanded_top_k(top_k),
         total_chunks,
         ExactFallback::BestEffort,
     )?;
-    let semantic = if total_indexed_chunks == 0 {
-        warnings.push("semantic retrieval skipped: no indexed vectors".into());
-        Vec::new()
-    } else {
-        match semantic_search_with_norm(db, query, top_k.saturating_mul(3).max(top_k)) {
-            Ok(semantic) => {
-                *query_embedding_norm = Some(semantic.query_embedding_norm);
-                semantic.results
-            }
-            Err(DocsError::ModelNotConfigured { message }) => {
-                warnings.push(format!(
-                    "semantic retrieval skipped: no embedding provider configured ({message})"
-                ));
-                Vec::new()
-            }
-            Err(e) => return Err(e),
-        }
-    };
-
-    let weights = weights.normalized();
-    let mut merged: HashMap<String, SearchResult> = HashMap::new();
-    for result in exact {
-        merged.insert(result.chunk_id.clone(), result);
+    if exact.is_empty() && is_definition_query(query) {
+        exact = relaxed_exact_search(db, query, expanded_top_k(top_k))?;
     }
+    if should_use_exact_only(query, &exact, top_k) {
+        warnings.push(
+            "semantic retrieval skipped: high-confidence lexical evidence was sufficient".into(),
+        );
+        return Ok(exact.into_iter().take(top_k).collect());
+    }
+
+    let semantic = semantic_or_warning(db, query, top_k, total_indexed_chunks, warnings)?;
+    if let Some(norm) = semantic.as_ref().map(|search| search.query_embedding_norm) {
+        *query_embedding_norm = Some(norm);
+    }
+    Ok(fuse_results(
+        query,
+        exact,
+        semantic.map(|search| search.results).unwrap_or_default(),
+        weights,
+        top_k,
+    ))
+}
+
+fn should_use_exact_only(query: &str, results: &[SearchResult], top_k: usize) -> bool {
+    if std::env::var_os("ARCHON_DOCS_HYBRID_ALWAYS_SEMANTIC").is_some() {
+        return false;
+    }
+    if results.is_empty() {
+        return false;
+    }
+    if has_specific_exact_hit(query, results) {
+        return true;
+    }
+    let required = top_k.min(HYBRID_EXACT_SHORTCUT_MIN_RESULTS);
+    required > 0
+        && results.len() >= required
+        && results
+            .iter()
+            .take(required)
+            .all(|result| result.exact_score >= HYBRID_EXACT_SHORTCUT_SCORE)
+}
+
+fn has_specific_exact_hit(query: &str, results: &[SearchResult]) -> bool {
+    let terms = shortcut_terms(query);
+    let definition_query = is_definition_query(query);
+    if terms.len() < 3 && !(definition_query && terms.len() >= HYBRID_EXACT_SHORTCUT_MIN_TERMS) {
+        return false;
+    }
+    let threshold = required_term_matches(definition_query, terms.len());
+    results
+        .iter()
+        .take(HYBRID_EXACT_SHORTCUT_MIN_RESULTS)
+        .any(|result| matched_term_count(&result.content, &terms) >= threshold)
+}
+
+fn shortcut_terms(query: &str) -> Vec<String> {
+    safe_fts_query(query)
+        .split_whitespace()
+        .filter(|term| term.len() > 1)
+        .take(8)
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn required_term_matches(definition_query: bool, term_count: usize) -> usize {
+    if definition_query && term_count == HYBRID_EXACT_SHORTCUT_MIN_TERMS {
+        return 1;
+    }
+    term_count.min(4)
+}
+
+fn is_definition_query(query: &str) -> bool {
+    let lower = query.to_lowercase();
+    lower.contains("what is")
+        || lower.contains("what do you know")
+        || lower.contains("tell me about")
+        || lower.contains("explain")
+}
+
+fn matched_term_count(content: &str, terms: &[String]) -> usize {
+    let lower = content.to_lowercase();
+    terms
+        .iter()
+        .filter(|term| lower.contains(term.as_str()))
+        .count()
+}
+
+fn semantic_or_warning(
+    db: &DbInstance,
+    query: &str,
+    top_k: usize,
+    total_indexed_chunks: usize,
+    warnings: &mut Vec<String>,
+) -> Result<Option<crate::retrieval_semantic::SemanticSearch>, DocsError> {
+    if total_indexed_chunks == 0 {
+        warnings.push("semantic retrieval skipped: no indexed vectors".into());
+        return Ok(None);
+    }
+    match semantic_search_with_norm(db, query, top_k.saturating_mul(3).max(top_k)) {
+        Ok(semantic) => Ok(Some(semantic)),
+        Err(DocsError::ModelNotConfigured { message }) => {
+            warnings.push(format!(
+                "semantic retrieval skipped: no embedding provider configured ({message})"
+            ));
+            Ok(None)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn fuse_results(
+    query: &str,
+    exact: Vec<SearchResult>,
+    semantic: Vec<SearchResult>,
+    weights: RetrievalWeights,
+    top_k: usize,
+) -> Vec<SearchResult> {
+    let mut merged: HashMap<String, SearchResult> = exact
+        .into_iter()
+        .map(|result| (result.chunk_id.clone(), result))
+        .collect();
     for semantic_result in semantic {
         merged
             .entry(semantic_result.chunk_id.clone())
@@ -375,7 +377,7 @@ fn hybrid_search(
     }
 
     score_exact_for_candidates(query, &mut merged);
-
+    let weights = weights.normalized();
     let mut results: Vec<SearchResult> = merged
         .into_values()
         .map(|mut result| {
@@ -390,319 +392,7 @@ fn hybrid_search(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     results.truncate(top_k);
-    Ok(results)
-}
-
-fn fts_search(db: &DbInstance, query: &str, top_k: usize) -> Result<Vec<SearchResult>, DocsError> {
-    let mut params = BTreeMap::new();
-    params.insert("query".to_string(), DataValue::from(query));
-    params.insert("k".to_string(), DataValue::from(top_k as i64));
-
-    let script = "?[score, chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status] := \
-        ~doc_chunks:chunk_content_fts {chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status | \
-            query: $query, \
-            k: $k, \
-            score_kind: 'tf_idf', \
-            bind_score: score \
-        } \
-        :order -score";
-
-    let result = db
-        .run_script(script, params, ScriptMutability::Immutable)
-        .map_err(|e| DocsError::Retrieval {
-            message: format!("FTS search failed: {e}"),
-        })?;
-
-    let max_score = result
-        .rows
-        .iter()
-        .filter_map(|row| row[0].get_float())
-        .fold(0.0_f64, f64::max);
-    let denom = max_score.max(1e-9);
-
-    Ok(result
-        .rows
-        .iter()
-        .map(|row| {
-            let raw_score = row[0].get_float().unwrap_or(0.0);
-            let chunk = chunk_from_row(&row[1..]);
-            exact_result_from_chunk(chunk, (raw_score / denom).clamp(0.0, 1.0))
-        })
-        .collect())
-}
-
-fn scan_exact_matches(
-    db: &DbInstance,
-    query: &str,
-    top_k: usize,
-    max_chunks: usize,
-) -> Result<Vec<SearchResult>, DocsError> {
-    let query_lower = query.to_lowercase();
-    let query_terms = exact_query_terms(&query_lower);
-    let mut scored: Vec<(ChunkArtifact, f64)> = list_chunks_for_exact_fallback(db, max_chunks)?
-        .into_iter()
-        .filter_map(|chunk| {
-            exact_content_score(&query_lower, &query_terms, &chunk.content)
-                .map(|score| (chunk, score))
-        })
-        .collect();
-    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    scored.truncate(top_k);
-    Ok(scored
-        .into_iter()
-        .map(|(chunk, score)| exact_result_from_chunk(chunk, score))
-        .collect())
-}
-
-fn list_chunks_for_exact_fallback(
-    db: &DbInstance,
-    max_chunks: usize,
-) -> Result<Vec<ChunkArtifact>, DocsError> {
-    if max_chunks == 0 {
-        return Ok(Vec::new());
-    }
-    let mut params = BTreeMap::new();
-    params.insert("limit".to_string(), DataValue::from(max_chunks as i64));
-    let result = db
-        .run_script(
-            "?[chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status] \
-             := *doc_chunks{chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status} \
-             :limit $limit",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| DocsError::Retrieval {
-            message: format!("list chunks for bounded exact fallback failed: {e}"),
-        })?;
-    Ok(result.rows.iter().map(|row| chunk_from_row(row)).collect())
-}
-
-fn score_exact_for_candidates(query: &str, candidates: &mut HashMap<String, SearchResult>) {
-    let query_lower = normalize_exact_query(query).to_lowercase();
-    let query_terms = exact_query_terms(&query_lower);
-    for result in candidates.values_mut() {
-        if let Some(score) = exact_content_score(&query_lower, &query_terms, &result.content)
-            && score > result.exact_score
-        {
-            result.exact_score = score;
-        }
-    }
-}
-
-fn exact_query_terms(query_lower: &str) -> Vec<&str> {
-    query_lower.split_whitespace().collect()
-}
-
-fn exact_content_score(query_lower: &str, query_terms: &[&str], content: &str) -> Option<f64> {
-    let content_lower = content.to_lowercase();
-    let count = content_lower.matches(query_lower).count();
-    let matched_terms = query_terms
-        .iter()
-        .filter(|term| content_lower.contains(**term))
-        .count();
-    if count == 0 && matched_terms == 0 {
-        return None;
-    }
-    let term_score = if query_terms.is_empty() {
-        0.0
-    } else {
-        matched_terms as f64 / query_terms.len() as f64
-    };
-    let occurrence_score = (count as f64 / 3.0).min(1.0);
-    let score = if count == 0 {
-        term_score * 0.7
-    } else {
-        (term_score + occurrence_score) / 2.0
-    };
-    Some(score.clamp(0.0, 1.0))
-}
-
-fn normalize_exact_query(query: &str) -> String {
-    let trimmed = query.trim();
-    trimmed
-        .strip_prefix('"')
-        .and_then(|s| s.strip_suffix('"'))
-        .or_else(|| {
-            trimmed
-                .strip_prefix('\'')
-                .and_then(|s| s.strip_suffix('\''))
-        })
-        .unwrap_or(trimmed)
-        .trim()
-        .to_string()
-}
-
-fn l2_norm(values: &[f32]) -> f64 {
-    values
-        .iter()
-        .map(|value| {
-            let value = f64::from(*value);
-            value * value
-        })
-        .sum::<f64>()
-        .sqrt()
-}
-
-fn exact_result_from_chunk(chunk: ChunkArtifact, score: f64) -> SearchResult {
-    SearchResult {
-        chunk_id: chunk.chunk_id,
-        document_id: chunk.document_id,
-        content: chunk.content,
-        page_start: chunk.page_start,
-        page_end: chunk.page_end,
-        distance: 1.0 - score,
-        score,
-        exact_score: score,
-        semantic_score: 0.0,
-    }
-}
-
-fn chunk_from_row(row: &[DataValue]) -> ChunkArtifact {
-    ChunkArtifact {
-        chunk_id: row[0].get_str().unwrap_or("").to_string(),
-        document_id: row[1].get_str().unwrap_or("").to_string(),
-        artifact_id: row[2].get_str().unwrap_or("").to_string(),
-        chunk_index: row[3].get_int().unwrap_or(0) as u32,
-        page_start: row[4].get_int().unwrap_or(0) as u32,
-        page_end: row[5].get_int().unwrap_or(0) as u32,
-        content: row[6].get_str().unwrap_or("").to_string(),
-        content_hash: row[7].get_str().unwrap_or("").to_string(),
-        embedding_status: row[8].get_str().unwrap_or("pending").to_string(),
-    }
-}
-
-/// Low-level HNSW search. RocksDB raw vectors are authoritative for new
-/// indexes; legacy Cozo HNSW is used only when the RocksDB store has no rows
-/// for the active provider.
-fn hnsw_search(
-    db: &DbInstance,
-    provider_name: &str,
-    query_vec: &[f32],
-    top_k: usize,
-) -> Result<Vec<SearchResult>, DocsError> {
-    if let Some(results) = rocksdb_hnsw_search(db, provider_name, query_vec, top_k)? {
-        return Ok(results);
-    }
-    legacy_cozo_hnsw_search(db, query_vec, top_k)
-}
-
-fn rocksdb_hnsw_search(
-    db: &DbInstance,
-    provider_name: &str,
-    query_vec: &[f32],
-    top_k: usize,
-) -> Result<Option<Vec<SearchResult>>, DocsError> {
-    let vector_store = match DocVectorStore::open_default() {
-        Ok(store) => store,
-        Err(error) => {
-            tracing::warn!(%error, "RocksDB vector store unavailable; trying legacy Cozo HNSW");
-            return Ok(None);
-        }
-    };
-    let raw_count = vector_store
-        .count_vectors(Some(provider_name))
-        .map_err(|e| DocsError::Retrieval {
-            message: format!("RocksDB vector count failed: {e}"),
-        })?;
-    if raw_count == 0 {
-        return Ok(None);
-    }
-    let hits = vector_store
-        .search_in_memory(provider_name, query_vec, top_k, 50, None)
-        .map_err(|e| DocsError::Retrieval {
-            message: format!("Rust-HNSW search failed: {e}"),
-        })?;
-    let mut search_results = resolve_vector_hits(
-        db,
-        hits.into_iter()
-            .map(|hit| (hit.chunk_id, f64::from(hit.distance))),
-    )?;
-    sort_by_distance(&mut search_results);
-    Ok(Some(search_results))
-}
-
-fn legacy_cozo_hnsw_search(
-    db: &DbInstance,
-    query_vec: &[f32],
-    top_k: usize,
-) -> Result<Vec<SearchResult>, DocsError> {
-    let arr = ndarray::Array1::from_vec(query_vec.to_vec());
-
-    let mut params = BTreeMap::new();
-    params.insert("query".to_string(), DataValue::Vec(Vector::F32(arr)));
-    params.insert("k".to_string(), DataValue::from(top_k as i64));
-
-    let script = "?[chunk_id, distance] := ~vec_text_chunks:chunk_embedding_idx{
-            chunk_id,
-            |
-            query: $query,
-            k: $k,
-            ef: 50,
-            bind_distance: distance
-        }";
-
-    let result = db
-        .run_script(script, params, ScriptMutability::Immutable)
-        .map_err(|e| DocsError::Retrieval {
-            message: format!("HNSW search failed: {e}"),
-        })?;
-
-    let mut search_results = resolve_vector_hits(
-        db,
-        result.rows.iter().map(|row| {
-            (
-                row[0].get_str().unwrap_or("").to_string(),
-                row[1].get_float().unwrap_or(1.0),
-            )
-        }),
-    )?;
-    sort_by_distance(&mut search_results);
-
-    Ok(search_results)
-}
-
-fn resolve_vector_hits(
-    db: &DbInstance,
-    hits: impl IntoIterator<Item = (String, f64)>,
-) -> Result<Vec<SearchResult>, DocsError> {
-    let mut search_results = Vec::new();
-    for (chunk_id, distance) in hits {
-        let chunk = match store::get_chunk_by_id(db, &chunk_id).map_err(|e| DocsError::Retrieval {
-            message: e.to_string(),
-        }) {
-            Ok(Some(c)) => c,
-            Ok(None) => {
-                tracing::warn!(chunk_id = %chunk_id, "HNSW returned chunk_id not found in doc_chunks");
-                continue;
-            }
-            Err(e) => {
-                tracing::warn!(chunk_id = %chunk_id, error = %e, "failed to resolve chunk");
-                continue;
-            }
-        };
-
-        let semantic_score = 1.0 - distance / 2.0;
-        search_results.push(SearchResult {
-            score: semantic_score,
-            distance,
-            chunk_id,
-            document_id: chunk.document_id,
-            content: chunk.content,
-            page_start: chunk.page_start,
-            page_end: chunk.page_end,
-            exact_score: 0.0,
-            semantic_score,
-        });
-    }
-    Ok(search_results)
-}
-
-fn sort_by_distance(search_results: &mut [SearchResult]) {
-    search_results.sort_by(|a, b| {
-        a.distance
-            .partial_cmp(&b.distance)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    results
 }
 
 pub use crate::indexing::IndexResult;
@@ -725,679 +415,4 @@ pub fn reindex_all(db: &DbInstance) -> Result<IndexResult, DocsError> {
             ..Default::default()
         },
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::embed::LocalEmbeddingProvider;
-
-    fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-retrieval-{}.db", uuid::Uuid::new_v4());
-        DbInstance::new("sqlite", &path, "").unwrap()
-    }
-
-    /// Deterministic mock provider for tests (avoids loading fastembed).
-    struct MockProvider {
-        dim: usize,
-    }
-
-    impl LocalEmbeddingProvider for MockProvider {
-        fn embed_chunks(&self, chunks: &[String]) -> Result<Vec<Vec<f32>>, DocsError> {
-            Ok(chunks
-                .iter()
-                .enumerate()
-                .map(|(i, c)| {
-                    // Simple hash-based embedding: use byte values as seed
-                    let mut v = vec![0.0_f32; self.dim];
-                    for (j, b) in c.bytes().enumerate() {
-                        v[j % self.dim] = (b as f32) / 255.0;
-                    }
-                    // Add a per-chunk offset so different chunks get different vectors
-                    v[0] = (i as f32 + 1.0) * 0.5;
-                    // L2-normalise
-                    let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-12);
-                    v.iter_mut().for_each(|x| *x /= norm);
-                    v
-                })
-                .collect())
-        }
-
-        fn embed_query(&self, query: &str) -> Result<Vec<f32>, DocsError> {
-            let chunks = vec![query.to_string()];
-            let mut results = self.embed_chunks(&chunks)?;
-            Ok(results.remove(0))
-        }
-
-        fn dimension(&self) -> usize {
-            self.dim
-        }
-
-        fn backend_name(&self) -> &'static str {
-            "mock"
-        }
-    }
-
-    struct SynonymProvider;
-
-    impl LocalEmbeddingProvider for SynonymProvider {
-        fn embed_chunks(&self, chunks: &[String]) -> Result<Vec<Vec<f32>>, DocsError> {
-            Ok(chunks.iter().map(|text| fixture_vector(text)).collect())
-        }
-
-        fn embed_query(&self, query: &str) -> Result<Vec<f32>, DocsError> {
-            Ok(fixture_vector(query))
-        }
-
-        fn dimension(&self) -> usize {
-            4
-        }
-
-        fn backend_name(&self) -> &'static str {
-            "mock-synonym"
-        }
-    }
-
-    struct FailingQueryProvider;
-
-    impl LocalEmbeddingProvider for FailingQueryProvider {
-        fn embed_chunks(&self, chunks: &[String]) -> Result<Vec<Vec<f32>>, DocsError> {
-            Ok(chunks.iter().map(|text| fixture_vector(text)).collect())
-        }
-
-        fn embed_query(&self, _query: &str) -> Result<Vec<f32>, DocsError> {
-            Err(DocsError::Embedding {
-                message: "synthetic query embedding failure".into(),
-            })
-        }
-
-        fn dimension(&self) -> usize {
-            4
-        }
-
-        fn backend_name(&self) -> &'static str {
-            "mock-query-failure"
-        }
-    }
-
-    fn fixture_vector(text: &str) -> Vec<f32> {
-        let lower = text.to_lowercase();
-        let raw = if lower.contains("exact_only") {
-            vec![-1.0, 0.0, 0.0, 0.0]
-        } else if lower.contains("hybrid_target") {
-            vec![0.8, 0.6, 0.0, 0.0]
-        } else if lower.contains("car")
-            || lower.contains("automobile")
-            || lower.contains("vehicle")
-            || lower.contains("market signal")
-            || lower.contains("pure_semantic")
-        {
-            vec![1.0, 0.0, 0.0, 0.0]
-        } else {
-            vec![0.0, 1.0, 0.0, 0.0]
-        };
-        let norm = raw.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-12);
-        raw.into_iter().map(|x| x / norm).collect()
-    }
-
-    fn setup_with_provider(db: &DbInstance, dim: usize) {
-        crate::schema::ensure_doc_schema(db).unwrap();
-        crate::schema::ensure_vec_schema(db, dim).unwrap();
-        crate::embed::set_provider(Box::new(MockProvider { dim }));
-    }
-
-    fn insert_test_chunk(db: &DbInstance, chunk_id: &str, content: &str) -> ChunkArtifact {
-        let chunk = ChunkArtifact {
-            chunk_id: chunk_id.into(),
-            document_id: format!("doc-{chunk_id}"),
-            artifact_id: format!("art-{chunk_id}"),
-            chunk_index: 0,
-            page_start: 1,
-            page_end: 1,
-            content: content.into(),
-            content_hash: format!("hash-{chunk_id}"),
-            embedding_status: "pending".into(),
-        };
-        store::insert_chunk(db, &chunk).unwrap();
-        chunk
-    }
-
-    #[test]
-    #[serial_test::serial(docs_global_state)]
-    fn test_search_empty_corpus() {
-        let db = test_db();
-        setup_with_provider(&db, 4);
-
-        let results = search(&db, "test query", 5).unwrap();
-        assert!(results.results.is_empty());
-        assert_eq!(results.total_indexed_chunks, 0);
-    }
-
-    #[test]
-    #[serial_test::serial(docs_global_state)]
-    fn test_exact_search_finds_quoted_string() {
-        let db = test_db();
-        crate::schema::ensure_doc_schema(&db).unwrap();
-        insert_test_chunk(
-            &db,
-            "chunk-quoted-hit",
-            "The audit contains the exact phrase blue falcon protocol.",
-        );
-        insert_test_chunk(
-            &db,
-            "chunk-quoted-miss",
-            "The audit contains unrelated policy text.",
-        );
-
-        let results = search_with_mode(
-            &db,
-            "\"blue falcon protocol\"",
-            5,
-            SearchMode::Exact,
-            RetrievalWeights::default(),
-        )
-        .unwrap();
-
-        assert_eq!(results.mode, SearchMode::Exact);
-        assert!(!results.results.is_empty());
-        assert_eq!(results.results[0].chunk_id, "chunk-quoted-hit");
-        assert!(results.results[0].exact_score > 0.0);
-        assert_eq!(results.results[0].semantic_score, 0.0);
-    }
-
-    #[test]
-    #[serial_test::serial(docs_global_state)]
-    fn test_exact_no_hit_reports_persisted_chunk_count() {
-        let db = test_db();
-        crate::schema::ensure_doc_schema(&db).unwrap();
-        insert_test_chunk(
-            &db,
-            "chunk-existing",
-            "Stored evidence about unrelated incentives.",
-        );
-
-        let results = search_with_mode(
-            &db,
-            "\"missing phrase\"",
-            5,
-            SearchMode::Exact,
-            RetrievalWeights::default(),
-        )
-        .unwrap();
-
-        assert!(results.results.is_empty());
-        assert_eq!(results.total_chunks, 1);
-        assert_eq!(results.total_indexed_chunks, 0);
-    }
-
-    #[test]
-    #[serial_test::serial(docs_global_state)]
-    fn test_exact_scan_fallback_is_bounded() {
-        let db = test_db();
-        crate::schema::ensure_doc_schema(&db).unwrap();
-        for index in 0..5 {
-            insert_test_chunk(
-                &db,
-                &format!("chunk-bounded-{index}"),
-                &format!("bounded fallback fixture {index}"),
-            );
-        }
-
-        let rows = list_chunks_for_exact_fallback(&db, 2).unwrap();
-        assert_eq!(rows.len(), 2);
-
-        let no_rows = list_chunks_for_exact_fallback(&db, 0).unwrap();
-        assert!(no_rows.is_empty());
-    }
-
-    #[test]
-    #[serial_test::serial(docs_global_state)]
-    fn test_semantic_search_finds_synonym() {
-        let db = test_db();
-        crate::schema::ensure_doc_schema(&db).unwrap();
-        crate::schema::ensure_vec_schema(&db, 4).unwrap();
-        crate::embed::set_provider(Box::new(SynonymProvider));
-        let car = insert_test_chunk(
-            &db,
-            "chunk-car",
-            "A car accelerates quickly through the junction.",
-        );
-        let fruit = insert_test_chunk(&db, "chunk-fruit", "Bananas ripen in warm storage rooms.");
-        index_chunk(&db, &car).unwrap();
-        index_chunk(&db, &fruit).unwrap();
-
-        let results = search_with_mode(
-            &db,
-            "automobile",
-            2,
-            SearchMode::Semantic,
-            RetrievalWeights::default(),
-        )
-        .unwrap();
-
-        assert_eq!(results.mode, SearchMode::Semantic);
-        assert_eq!(results.results[0].chunk_id, "chunk-car");
-        assert!(results.results[0].semantic_score > 0.9);
-        assert!(results.query_embedding_norm.unwrap_or(0.0) > 0.0);
-    }
-
-    #[test]
-    #[serial_test::serial(docs_global_state)]
-    fn test_hybrid_outperforms_either_alone_on_fixture() {
-        let db = test_db();
-        crate::schema::ensure_doc_schema(&db).unwrap();
-        crate::schema::ensure_vec_schema(&db, 4).unwrap();
-        crate::embed::set_provider(Box::new(SynonymProvider));
-        let exact_only = insert_test_chunk(
-            &db,
-            "chunk-exact",
-            "EXACT_ONLY market signal market signal unrelated ledger note.",
-        );
-        let semantic_only = insert_test_chunk(
-            &db,
-            "chunk-semantic",
-            "PURE_SEMANTIC vehicle coalition dynamics with no query terms.",
-        );
-        let hybrid_target = insert_test_chunk(
-            &db,
-            "chunk-hybrid",
-            "HYBRID_TARGET market cooperative transport alignment.",
-        );
-        index_chunk(&db, &exact_only).unwrap();
-        index_chunk(&db, &semantic_only).unwrap();
-        index_chunk(&db, &hybrid_target).unwrap();
-
-        let weights = RetrievalWeights {
-            exact: 0.5,
-            semantic: 0.5,
-        };
-        let exact = search_with_mode(&db, "market signal", 3, SearchMode::Exact, weights).unwrap();
-        let semantic =
-            search_with_mode(&db, "market signal", 3, SearchMode::Semantic, weights).unwrap();
-        let hybrid =
-            search_with_mode(&db, "market signal", 3, SearchMode::Hybrid, weights).unwrap();
-
-        assert_eq!(exact.results[0].chunk_id, "chunk-exact");
-        assert_eq!(semantic.results[0].chunk_id, "chunk-semantic");
-        assert_eq!(hybrid.results[0].chunk_id, "chunk-hybrid");
-        assert!(hybrid.query_embedding_norm.unwrap_or(0.0) > 0.0);
-        assert!(hybrid.results[0].exact_score > 0.0);
-        assert!(hybrid.results[0].semantic_score > 0.0);
-        assert!(hybrid.results[0].score > hybrid.results[1].score);
-    }
-
-    #[test]
-    #[serial_test::serial(docs_global_state)]
-    fn test_hybrid_propagates_real_embedding_errors() {
-        let db = test_db();
-        crate::schema::ensure_doc_schema(&db).unwrap();
-        crate::schema::ensure_vec_schema(&db, 4).unwrap();
-        crate::embed::set_provider(Box::new(SynonymProvider));
-        let chunk = insert_test_chunk(&db, "chunk-vectorized", "A car market fixture.");
-        index_chunk(&db, &chunk).unwrap();
-        assert_eq!(store::count_indexed_chunks(&db).unwrap(), 1);
-
-        crate::embed::set_provider(Box::new(FailingQueryProvider));
-        let err = search_with_mode(
-            &db,
-            "automobile",
-            5,
-            SearchMode::Hybrid,
-            RetrievalWeights::default(),
-        )
-        .unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("synthetic query embedding failure")
-        );
-    }
-
-    #[test]
-    #[serial_test::serial(docs_global_state)]
-    fn test_search_surfaces_failed_indexing() {
-        let db = test_db();
-        setup_with_provider(&db, 4);
-
-        // Insert chunks with embedding_status = "failed" — no embeddings indexed
-        let chunk1 = ChunkArtifact {
-            chunk_id: "failed-chunk-a".into(),
-            document_id: "doc-failed".into(),
-            artifact_id: "art-1".into(),
-            chunk_index: 0,
-            page_start: 1,
-            page_end: 1,
-            content: "content a".into(),
-            content_hash: "hash-a".into(),
-            embedding_status: "failed".into(),
-        };
-        let chunk2 = ChunkArtifact {
-            chunk_id: "failed-chunk-b".into(),
-            document_id: "doc-failed".into(),
-            artifact_id: "art-1".into(),
-            chunk_index: 1,
-            page_start: 1,
-            page_end: 1,
-            content: "content b".into(),
-            content_hash: "hash-b".into(),
-            embedding_status: "failed".into(),
-        };
-        store::insert_chunk(&db, &chunk1).unwrap();
-        store::insert_chunk(&db, &chunk2).unwrap();
-
-        // No embeddings exist -> total == 0, but failed_count == 2
-        let err = search(&db, "test query", 5).unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            msg.contains("2 chunks failed"),
-            "expected '2 chunks failed', got: {msg}"
-        );
-        assert!(
-            msg.contains("archon docs model-status"),
-            "expected diagnostic hint, got: {msg}"
-        );
-    }
-
-    #[test]
-    #[serial_test::serial(docs_global_state)]
-    fn test_index_and_search_known_chunk() {
-        let db = test_db();
-        setup_with_provider(&db, 4);
-
-        // Insert a chunk into doc_chunks
-        let chunk = ChunkArtifact {
-            chunk_id: "chunk-search-1".into(),
-            document_id: "doc-search".into(),
-            artifact_id: "art-1".into(),
-            chunk_index: 0,
-            page_start: 1,
-            page_end: 1,
-            content: "The quick brown fox jumps over the lazy dog".into(),
-            content_hash: "abc".into(),
-            embedding_status: "pending".into(),
-        };
-        store::insert_chunk(&db, &chunk).unwrap();
-        index_chunk(&db, &chunk).unwrap();
-
-        let count = store::count_indexed_chunks(&db).unwrap();
-        assert_eq!(count, 1);
-
-        // Search with the same text should return the chunk
-        let results = search(&db, "quick brown fox", 5).unwrap();
-        assert!(!results.results.is_empty(), "search should return results");
-        assert_eq!(results.total_indexed_chunks, 1);
-    }
-
-    // ── HIGH #3: Search does not mutate ──────────────────────────────
-
-    #[test]
-    #[serial_test::serial(docs_global_state)]
-    fn test_search_does_not_mutate() {
-        let db = test_db();
-        setup_with_provider(&db, 4);
-
-        let chunk = ChunkArtifact {
-            chunk_id: "chunk-no-mutate".into(),
-            document_id: "doc-no-mutate".into(),
-            artifact_id: "art-1".into(),
-            chunk_index: 0,
-            page_start: 1,
-            page_end: 1,
-            content: "content for non-mutating search test".into(),
-            content_hash: "h1".into(),
-            embedding_status: "pending".into(),
-        };
-        store::insert_chunk(&db, &chunk).unwrap();
-
-        let count_before = store::count_embeddings(&db).unwrap();
-        assert_eq!(count_before, 0);
-
-        let results = search(&db, "test query", 5).unwrap();
-        assert!(
-            !results.results.is_empty(),
-            "hybrid search can return exact matches without indexing"
-        );
-        assert_eq!(results.total_indexed_chunks, 0);
-        assert_eq!(results.results[0].chunk_id, "chunk-no-mutate");
-
-        // Verify no mutation occurred
-        let count_after = store::count_embeddings(&db).unwrap();
-        assert_eq!(count_after, 0, "search must not create embeddings");
-
-        let chunk_after = store::get_chunk_by_id(&db, "chunk-no-mutate")
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            chunk_after.embedding_status, "pending",
-            "search must not change embedding status"
-        );
-    }
-
-    // ── HIGH #3: Index only pending ──────────────────────────────────
-
-    #[test]
-    #[serial_test::serial(docs_global_state)]
-    fn test_index_pending_command_indexes_pending_only() {
-        let db = test_db();
-        setup_with_provider(&db, 4);
-
-        // Insert a chunk that's already "indexed" (but without actual embedding)
-        let chunk_done = ChunkArtifact {
-            chunk_id: "chunk-done".into(),
-            document_id: "doc-mixed".into(),
-            artifact_id: "art-1".into(),
-            chunk_index: 0,
-            page_start: 1,
-            page_end: 1,
-            content: "already done chunk".into(),
-            content_hash: "hd".into(),
-            embedding_status: "indexed".into(),
-        };
-        store::insert_chunk(&db, &chunk_done).unwrap();
-
-        // Insert a pending chunk
-        let chunk_pending = ChunkArtifact {
-            chunk_id: "chunk-pending".into(),
-            document_id: "doc-mixed".into(),
-            artifact_id: "art-2".into(),
-            chunk_index: 1,
-            page_start: 1,
-            page_end: 1,
-            content: "pending chunk for indexing".into(),
-            content_hash: "hp".into(),
-            embedding_status: "pending".into(),
-        };
-        store::insert_chunk(&db, &chunk_pending).unwrap();
-
-        let result = index_pending_chunks(&db).unwrap();
-        assert_eq!(
-            result.indexed, 1,
-            "only the pending chunk should be indexed"
-        );
-        assert_eq!(result.failed, 0);
-        assert_eq!(result.skipped, 0);
-
-        // Verify pending → indexed
-        let pending_after = store::get_chunk_by_id(&db, "chunk-pending")
-            .unwrap()
-            .unwrap();
-        assert_eq!(pending_after.embedding_status, "indexed");
-
-        // Verify done chunk unchanged
-        let done_after = store::get_chunk_by_id(&db, "chunk-done").unwrap().unwrap();
-        assert_eq!(done_after.embedding_status, "indexed");
-
-        // Only the pending chunk should get a new RocksDB vector.
-        let vector_store = crate::vector_store::DocVectorStore::open_default().unwrap();
-        assert!(vector_store.has_vector("mock", "chunk-pending").unwrap());
-        assert!(!vector_store.has_vector("mock", "chunk-done").unwrap());
-    }
-
-    // ── MEDIUM #4: get_chunk_by_id roundtrip ─────────────────────────
-
-    #[test]
-    #[serial_test::serial(docs_global_state)]
-    fn test_get_chunk_by_id_roundtrip() {
-        let db = test_db();
-        crate::schema::ensure_doc_schema(&db).unwrap();
-
-        let chunk = ChunkArtifact {
-            chunk_id: "chunk-roundtrip-1".into(),
-            document_id: "doc-roundtrip".into(),
-            artifact_id: "art-1".into(),
-            chunk_index: 2,
-            page_start: 5,
-            page_end: 7,
-            content: "roundtrip test content".into(),
-            content_hash: "rthash".into(),
-            embedding_status: "pending".into(),
-        };
-        store::insert_chunk(&db, &chunk).unwrap();
-
-        let found = store::get_chunk_by_id(&db, "chunk-roundtrip-1")
-            .unwrap()
-            .unwrap();
-        assert_eq!(found.chunk_id, chunk.chunk_id);
-        assert_eq!(found.document_id, chunk.document_id);
-        assert_eq!(found.content, chunk.content);
-        assert_eq!(found.page_start, 5);
-        assert_eq!(found.page_end, 7);
-        assert_eq!(found.chunk_index, 2);
-        assert_eq!(found.content_hash, "rthash");
-        assert_eq!(found.embedding_status, "pending");
-
-        let not_found = store::get_chunk_by_id(&db, "no-such-chunk").unwrap();
-        assert!(not_found.is_none());
-    }
-
-    // ── #6: IndexResult breakdown ──────────────────────────────────────
-
-    struct SelectiveMockProvider {
-        dim: usize,
-    }
-
-    impl LocalEmbeddingProvider for SelectiveMockProvider {
-        fn embed_chunks(&self, chunks: &[String]) -> Result<Vec<Vec<f32>>, DocsError> {
-            chunks
-                .iter()
-                .map(|c| {
-                    if c.contains("FAIL") {
-                        Err(DocsError::Embedding {
-                            message: "simulated embed failure".into(),
-                        })
-                    } else {
-                        let mut v = vec![0.0_f32; self.dim];
-                        for (j, b) in c.bytes().enumerate() {
-                            v[j % self.dim] = (b as f32) / 255.0;
-                        }
-                        let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-12);
-                        v.iter_mut().for_each(|x| *x /= norm);
-                        Ok(v)
-                    }
-                })
-                .collect()
-        }
-
-        fn embed_query(&self, query: &str) -> Result<Vec<f32>, DocsError> {
-            let chunks = vec![query.to_string()];
-            let results = self.embed_chunks(&chunks)?;
-            Ok(results.into_iter().next().unwrap_or(vec![0.0; self.dim]))
-        }
-
-        fn dimension(&self) -> usize {
-            self.dim
-        }
-
-        fn backend_name(&self) -> &'static str {
-            "selective-mock"
-        }
-    }
-
-    #[test]
-    #[serial_test::serial(docs_global_state)]
-    fn test_index_result_counts_indexed_and_failed() {
-        let db = test_db();
-        crate::schema::ensure_doc_schema(&db).unwrap();
-        crate::embed::clear_provider();
-        crate::embed::set_provider(Box::new(SelectiveMockProvider { dim: 4 }));
-
-        // Chunk that will succeed
-        let chunk_ok = ChunkArtifact {
-            chunk_id: "chunk-ok".into(),
-            document_id: "doc-result".into(),
-            artifact_id: "art-1".into(),
-            chunk_index: 0,
-            page_start: 1,
-            page_end: 1,
-            content: "normal content".into(),
-            content_hash: "h1".into(),
-            embedding_status: "pending".into(),
-        };
-        store::insert_chunk(&db, &chunk_ok).unwrap();
-
-        // Chunk that will fail embedding (content contains "FAIL")
-        let chunk_fail = ChunkArtifact {
-            chunk_id: "chunk-fail".into(),
-            document_id: "doc-result".into(),
-            artifact_id: "art-2".into(),
-            chunk_index: 1,
-            page_start: 2,
-            page_end: 2,
-            content: "content with FAIL trigger".into(),
-            content_hash: "h2".into(),
-            embedding_status: "pending".into(),
-        };
-        store::insert_chunk(&db, &chunk_fail).unwrap();
-
-        let result = index_pending_chunks(&db).unwrap();
-        assert_eq!(result.indexed, 1, "one chunk should succeed");
-        assert_eq!(result.failed, 1, "one chunk should fail");
-        assert_eq!(
-            result.skipped, 0,
-            "no chunks should be skipped in pending-only mode"
-        );
-
-        // Verify the failed chunk's status was updated
-        let failed_after = store::get_chunk_by_id(&db, "chunk-fail").unwrap().unwrap();
-        assert_eq!(failed_after.embedding_status, "failed");
-    }
-
-    #[test]
-    #[serial_test::serial(docs_global_state)]
-    fn test_reindex_all_indexes_everything() {
-        let db = test_db();
-        setup_with_provider(&db, 4);
-
-        // Insert a chunk already marked "indexed"
-        let chunk_indexed = ChunkArtifact {
-            chunk_id: "chunk-indexed".into(),
-            document_id: "doc-skip".into(),
-            artifact_id: "art-1".into(),
-            chunk_index: 0,
-            page_start: 1,
-            page_end: 1,
-            content: "already indexed".into(),
-            content_hash: "hi".into(),
-            embedding_status: "indexed".into(),
-        };
-        store::insert_chunk(&db, &chunk_indexed).unwrap();
-
-        // Insert a pending chunk
-        let chunk_pending = ChunkArtifact {
-            chunk_id: "chunk-pending2".into(),
-            document_id: "doc-skip".into(),
-            artifact_id: "art-2".into(),
-            chunk_index: 1,
-            page_start: 2,
-            page_end: 2,
-            content: "pending work".into(),
-            content_hash: "hp".into(),
-            embedding_status: "pending".into(),
-        };
-        store::insert_chunk(&db, &chunk_pending).unwrap();
-
-        let result = reindex_all(&db).unwrap();
-        assert_eq!(result.indexed, 2, "all chunks should be re-indexed");
-        assert_eq!(result.failed, 0);
-        assert_eq!(result.skipped, 0);
-    }
 }

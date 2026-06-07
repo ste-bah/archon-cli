@@ -82,22 +82,61 @@ doc_tool!(
     status_args,
     PermissionLevel::Safe
 );
-doc_tool!(
-    DocSearch,
-    "DocSearch",
-    "Search document chunks with exact, semantic, or hybrid retrieval.",
-    search_schema,
-    search_args,
-    PermissionLevel::Safe
-);
-doc_tool!(
-    DocAnswer,
-    "DocAnswer",
-    "Answer a question using document evidence and citations.",
-    query_schema,
-    answer_args,
-    PermissionLevel::Safe
-);
+pub struct DocSearch;
+
+#[async_trait]
+impl Tool for DocSearch {
+    fn name(&self) -> &str {
+        "DocSearch"
+    }
+
+    fn description(&self) -> &str {
+        "Search document chunks with exact, semantic, or hybrid retrieval."
+    }
+
+    fn input_schema(&self) -> Value {
+        search_schema()
+    }
+
+    async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+        match search_args(&input) {
+            Ok(args) => crate::docs_runtime::run_search(args, ctx).await,
+            Err(e) => ToolResult::error(e),
+        }
+    }
+
+    fn permission_level(&self, _input: &Value) -> PermissionLevel {
+        PermissionLevel::Safe
+    }
+}
+
+pub struct DocAnswer;
+
+#[async_trait]
+impl Tool for DocAnswer {
+    fn name(&self) -> &str {
+        "DocAnswer"
+    }
+
+    fn description(&self) -> &str {
+        "Answer a question using document evidence and citations."
+    }
+
+    fn input_schema(&self) -> Value {
+        query_schema()
+    }
+
+    async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+        match answer_args(&input) {
+            Ok(args) => crate::docs_runtime::run_answer(args, ctx).await,
+            Err(e) => ToolResult::error(e),
+        }
+    }
+
+    fn permission_level(&self, _input: &Value) -> PermissionLevel {
+        PermissionLevel::Safe
+    }
+}
 doc_tool!(
     DocProvenance,
     "DocProvenance",

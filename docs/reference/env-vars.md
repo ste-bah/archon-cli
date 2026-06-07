@@ -21,6 +21,7 @@
 | `ARCHON_DOCS_INDEX_EMBEDDING_WORKERS` | Number of in-process embedding worker batches for `docs index`; default is provider-aware (`1` local fastembed, `2` OpenAI-compatible) |
 | `ARCHON_DOCS_INDEX_MAX_IN_FLIGHT_BATCHES` | Backpressure limit for concurrent embedding batches; defaults to the effective worker count |
 | `ARCHON_DOCS_INDEX_WRITER_BATCH_SIZE` | Maximum vector rows per single-writer RocksDB/Cozo status flush; default `256` |
+| `ARCHON_DOCS_HYBRID_ALWAYS_SEMANTIC` | Force hybrid docs search/answer to run semantic retrieval even when sanitized exact/FTS evidence is already strong; useful for diagnostics |
 | `ARCHON_DOC_VECTOR_STORE_DIR` | Override the RocksDB raw-vector store path; default is `<workspace>/.archon/doc-vector-store` |
 | `ARCHON_DOCS_LEGACY_COZO_VECTOR_WRITE` | Opt-in compatibility flag to also write new docs embeddings to legacy Cozo `vec_text_chunks` |
 | `ARCHON_CODEX_DISABLED` | Disable Codex provider resolution when set to `1`, `true`, or `yes` |

@@ -8,9 +8,12 @@ archon-permissions = { path = "../archon-permissions" }
 archon-memory = { path = "../archon-memory" }
 archon-leann = { path = "../archon-leann" }
 archon-observability = { path = "../archon-observability" }
+archon-docs = { path = "../archon-docs" }
+archon-policy = { path = "../archon-policy" }
 async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+cozo.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 anyhow.workspace = true

@@ -15,6 +15,7 @@ pub mod bash;
 pub mod concurrency;
 pub mod config_tool;
 pub mod docs;
+pub(crate) mod docs_runtime;
 pub mod evidence_cli;
 pub mod file_edit;
 pub mod file_read;

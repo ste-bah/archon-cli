@@ -112,6 +112,11 @@ verify the mutation before returning.
 | `DocInspect` | Safe | Inspect pages, chunks, OCR runs, and provenance for a document |
 | `DocModelStatus` | Safe | Show embedding backend/vector status |
 
+`DocSearch` and `DocAnswer` run through Archon's in-process document runtime
+during agent turns, so normal chat retrieval does not spawn a fresh `archon`
+child process for every question. Other document tools remain CLI-backed where
+they need the full command surface.
+
 ## Game theory
 
 | Tool | Permission | Purpose |

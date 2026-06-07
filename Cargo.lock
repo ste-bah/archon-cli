@@ -924,13 +924,16 @@ name = "archon-tools"
 version = "1.3.11"
 dependencies = [
  "anyhow",
+ "archon-docs",
  "archon-leann",
  "archon-memory",
  "archon-observability",
  "archon-permissions",
+ "archon-policy",
  "async-lsp",
  "async-trait",
  "chrono",
+ "cozo-ce",
  "cron",
  "dashmap 6.1.0",
  "dirs",
