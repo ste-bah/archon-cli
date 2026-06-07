@@ -32,8 +32,7 @@ pub(crate) use status::render_world_status;
 #[cfg(test)]
 pub(super) use status::render_world_status_with_stats;
 pub(crate) use trainer_runtime::{
-    latest_daemon_trainer_event, run_daemon_trainer_tick, run_daemon_trainer_tick_controlled,
-    schedule_dynamic_trainer_tick,
+    latest_daemon_trainer_event, run_daemon_trainer_tick_controlled, schedule_dynamic_trainer_tick,
 };
 
 include!("world_model/root/00_dispatch.rs");
