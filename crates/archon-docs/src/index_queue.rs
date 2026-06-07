@@ -63,10 +63,12 @@ pub fn backfill_pending_chunks(
 }
 
 pub fn count_pending(db: &DbInstance, document_id: Option<&str>) -> Result<usize> {
+    prune_orphaned_queue_rows(db)?;
     count_status(db, STATUS_PENDING, document_id)
 }
 
 pub fn stats(db: &DbInstance) -> Result<IndexQueueStats> {
+    prune_orphaned_queue_rows(db)?;
     Ok(IndexQueueStats {
         pending: count_status(db, STATUS_PENDING, None)?,
         leased: count_status(db, STATUS_LEASED, None)?,
@@ -86,6 +88,7 @@ pub fn lease_pending_chunks(
         return Ok(Vec::new());
     }
     reset_expired_leases(db)?;
+    prune_orphaned_queue_rows(db)?;
     let rows = list_pending_queue_rows(db, document_id, Some(limit))?;
     let expires_at =
         (chrono::Utc::now() + chrono::Duration::seconds(lease_secs as i64)).to_rfc3339();
@@ -169,6 +172,19 @@ pub fn remove_document_queue_rows(db: &DbInstance, document_id: &str) -> Result<
     )
     .map_err(|e| anyhow::anyhow!("remove document queue rows failed: {e}"))?;
     Ok(())
+}
+
+pub fn prune_orphaned_queue_rows(db: &DbInstance) -> Result<usize> {
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[chunk_id] := *doc_index_queue{chunk_id}, not *doc_chunks{chunk_id}
+         :rm doc_index_queue { chunk_id }",
+        BTreeMap::new(),
+        ScriptMutability::Mutable,
+        "prune orphaned doc index queue rows",
+    )
+    .map_err(|e| anyhow::anyhow!("prune orphaned doc index queue rows failed: {e}"))?;
+    Ok(result.rows.len())
 }
 
 fn mark_chunks(

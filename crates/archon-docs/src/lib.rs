@@ -26,6 +26,7 @@ pub mod ocr;
 pub mod pdf;
 mod pdf_image_enrichment;
 mod pdf_image_progress;
+mod pdf_image_vlm;
 pub mod provenance;
 pub mod reprocess;
 pub mod status;

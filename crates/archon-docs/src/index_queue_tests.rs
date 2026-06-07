@@ -2,7 +2,7 @@ use cozo::DbInstance;
 
 use crate::index_queue::{
     count_pending, failed_rows, lease_pending_chunks, mark_chunks_failed, mark_chunks_indexed,
-    remove_document_queue_rows, retry_failed, stats,
+    prune_orphaned_queue_rows, remove_document_queue_rows, retry_failed, stats,
 };
 use crate::models::ChunkArtifact;
 use crate::schema::ensure_doc_schema;
@@ -81,4 +81,25 @@ fn document_queue_rows_can_be_removed() {
     store::insert_chunk(&db, &chunk("chunk-a")).unwrap();
     remove_document_queue_rows(&db, "doc-a").unwrap();
     assert_eq!(stats(&db).unwrap().pending, 0);
+}
+
+#[test]
+fn orphaned_queue_rows_are_pruned_before_counting_or_leasing() {
+    let db = test_db();
+    store::insert_chunk(&db, &chunk("chunk-a")).unwrap();
+    db.run_script(
+        "?[chunk_id] <- [[\"chunk-a\"]]
+         :rm doc_chunks { chunk_id }",
+        Default::default(),
+        cozo::ScriptMutability::Mutable,
+    )
+    .unwrap();
+
+    assert_eq!(prune_orphaned_queue_rows(&db).unwrap(), 1);
+    assert_eq!(count_pending(&db, None).unwrap(), 0);
+    assert!(
+        lease_pending_chunks(&db, "worker-a", 10, 60, None)
+            .unwrap()
+            .is_empty()
+    );
 }
