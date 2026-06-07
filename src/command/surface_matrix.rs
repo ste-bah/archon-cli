@@ -180,8 +180,8 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         slash_primary: Some("trading"),
         tui_surface: "CLI mirror",
         status: SurfaceStatus::Done,
-        source_of_truth: "src/command/trading.rs + crates/archon-tools/src/trading",
-        notes: "Trading Lab status, route inspection, fenced dispatch checks, and the out-of-band kill path are mirrored; live trading remains policy gated.",
+        source_of_truth: "src/command/trading.rs + src/command/trading_* + crates/archon-tools/src/trading + crates/archon-trading",
+        notes: "Trading Lab setup/status, TradingView MCP CLI pass-through, Pine generation/checks, governed OpenBB fetches, persistent OHLCV data ingest/list/show/export, native fill and candle backtests, custom deterministic strategy-rule backtests, paper-order checks, TradingView replay-paper submit, workflow spec generation, promotion checks, live-readiness gates, route inspection, fenced dispatch checks, and the out-of-band kill path are mirrored; broker submission remains fail-closed unless separately certified and policy enabled.",
     },
     CommandSurfaceRow {
         cli: "archon pipeline ...",
