@@ -7,6 +7,7 @@ use crate::tool::{ToolContext, ToolResult};
 
 const DOCS_DB_ENV: &str = "ARCHON_DOCS_DB_PATH";
 const EVIDENCE_DB_ENV: &str = "ARCHON_EVIDENCE_DB_PATH";
+const DOC_GET_CHUNK_PREVIEW_LIMIT: usize = 5;
 
 pub(crate) async fn run_search(args: Vec<String>, ctx: &ToolContext) -> ToolResult {
     let parsed = match SearchArgs::parse(args) {
@@ -25,6 +26,29 @@ pub(crate) async fn run_search(args: Vec<String>, ctx: &ToolContext) -> ToolResu
     match retrieval::search_with_policy(&db, &parsed.query, 10, mode, &policy) {
         Ok(results) => ToolResult::success(format_search_results(&db, &results, parsed.debug)),
         Err(error) => ToolResult::error(format_search_error(error)),
+    }
+}
+
+pub(crate) async fn run_list(limit: usize, ctx: &ToolContext) -> ToolResult {
+    let db = match open_docs_db(ctx) {
+        Ok(db) => db,
+        Err(error) => return ToolResult::error(error),
+    };
+    match archon_docs::store::list_doc_sources(&db) {
+        Ok(docs) => ToolResult::success(format_doc_list(&docs, limit)),
+        Err(error) => ToolResult::error(format!("list documents failed: {error}")),
+    }
+}
+
+pub(crate) async fn run_get(document_id: String, ctx: &ToolContext) -> ToolResult {
+    let db = match open_docs_db(ctx) {
+        Ok(db) => db,
+        Err(error) => return ToolResult::error(error),
+    };
+    match archon_docs::store::get_doc_source(&db, &document_id) {
+        Ok(Some(doc)) => ToolResult::success(format_doc_get(&db, &doc)),
+        Ok(None) => ToolResult::error(format!("document not found: {document_id}")),
+        Err(error) => ToolResult::error(format!("get document failed: {error}")),
     }
 }
 
@@ -125,6 +149,60 @@ fn load_policy(ctx: &ToolContext) -> archon_policy::EffectivePolicy {
     archon_policy::load_effective_policy(&working_dir(ctx)).unwrap_or_default()
 }
 
+fn format_doc_list(docs: &[archon_docs::models::SourceDocument], limit: usize) -> String {
+    if docs.is_empty() {
+        return "No documents ingested.".into();
+    }
+    let shown = docs.len().min(limit);
+    let mut out = format!(
+        "{} document(s), showing {shown}. Use DocSearch for content questions; use DocGet with a document_id for one document.\n",
+        docs.len()
+    );
+    for doc in docs.iter().take(shown) {
+        out.push_str(&format!(
+            "  {}  {:?}  {}  [{}]\n",
+            doc.document_id,
+            doc.status,
+            compact_path(&doc.source_path),
+            short_hash(&doc.content_hash)
+        ));
+    }
+    if docs.len() > shown {
+        out.push_str(&format!(
+            "... {} more omitted. Call DocList with a higher limit up to 50 only for inventory work.",
+            docs.len() - shown
+        ));
+    }
+    out.trim_end().to_string()
+}
+
+fn format_doc_get(db: &DbInstance, doc: &archon_docs::models::SourceDocument) -> String {
+    let chunks = archon_docs::store::list_chunks_for_doc(db, &doc.document_id).unwrap_or_default();
+    let mut out = format!(
+        "Document: {}\nStatus: {:?}\nSource: {}\nMedia: {}\nHash: {}\nDiscovered: {}\nChunks: {}\n",
+        doc.document_id,
+        doc.status,
+        doc.source_path,
+        doc.media_type,
+        short_hash(&doc.content_hash),
+        doc.discovered_at,
+        chunks.len()
+    );
+    for chunk in chunks.iter().take(DOC_GET_CHUNK_PREVIEW_LIMIT) {
+        out.push_str(&format!(
+            "  chunk {} pages {}-{} embed={}\n",
+            chunk.chunk_id, chunk.page_start, chunk.page_end, chunk.embedding_status
+        ));
+    }
+    if chunks.len() > DOC_GET_CHUNK_PREVIEW_LIMIT {
+        out.push_str(&format!(
+            "  ... {} more chunks omitted. Use DocSearch for relevant content.",
+            chunks.len() - DOC_GET_CHUNK_PREVIEW_LIMIT
+        ));
+    }
+    out.trim_end().to_string()
+}
+
 fn format_search_results(
     db: &DbInstance,
     results: &retrieval::SearchResults,
@@ -218,6 +296,26 @@ fn preview(content: &str) -> String {
         return content.to_string();
     }
     format!("{preview}...")
+}
+
+fn compact_path(path: &str) -> String {
+    const MAX: usize = 96;
+    if path.chars().count() <= MAX {
+        return path.to_string();
+    }
+    let tail: String = path
+        .chars()
+        .rev()
+        .take(MAX.saturating_sub(3))
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    format!("...{tail}")
+}
+
+fn short_hash(hash: &str) -> &str {
+    &hash[..12.min(hash.len())]
 }
 
 fn format_search_error(error: archon_docs::errors::DocsError) -> String {

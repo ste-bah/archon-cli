@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability};
@@ -62,7 +63,7 @@ pub fn insert_provider_runtime_event(
     );
     params.insert("created".into(), DataValue::from(event.created_at.as_str()));
 
-    run_script_guarded(
+    archon_cozo::run_script_guarded(
         db,
         "?[event_id, provider_id, profile_id, model_id, runtime_mode, \
          event_type, severity, reason_code, message, retry_count, \
@@ -77,9 +78,19 @@ pub fn insert_provider_runtime_event(
         params,
         ScriptMutability::Mutable,
         "insert provider_runtime_events failed",
+        &provider_event_insert_config(),
     )?;
 
     Ok(())
+}
+
+fn provider_event_insert_config() -> archon_cozo::CozoGuardConfig {
+    archon_cozo::CozoGuardConfig {
+        max_attempts: 3,
+        initial_backoff: Duration::from_millis(20),
+        max_backoff: Duration::from_millis(80),
+        write_lock_path: None,
+    }
 }
 
 pub fn get_provider_runtime_event(

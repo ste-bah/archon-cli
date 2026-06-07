@@ -103,8 +103,8 @@ verify the mutation before returning.
 | Tool | Permission | Purpose |
 |---|---|---|
 | `DocIngest` | Risky | Ingest a file or directory into the document evidence store |
-| `DocList` | Safe | List ingested documents |
-| `DocGet` | Safe | Show a document by id |
+| `DocList` | Safe | List a compact document inventory |
+| `DocGet` | Safe | Show compact document metadata by id |
 | `DocStatus` | Safe | Show document processing/indexing status |
 | `DocSearch` | Safe | Search chunks with exact, semantic, or hybrid retrieval |
 | `DocAnswer` | Safe | Answer from document evidence with citations |
@@ -112,10 +112,11 @@ verify the mutation before returning.
 | `DocInspect` | Safe | Inspect pages, chunks, OCR runs, and provenance for a document |
 | `DocModelStatus` | Safe | Show embedding backend/vector status |
 
-`DocSearch` and `DocAnswer` run through Archon's in-process document runtime
-during agent turns, so normal chat retrieval does not spawn a fresh `archon`
-child process for every question. Other document tools remain CLI-backed where
-they need the full command surface.
+`DocList`, `DocGet`, `DocSearch`, and `DocAnswer` run through Archon's
+in-process document runtime during agent turns, so normal chat retrieval does
+not spawn a fresh `archon` child process for every question. `DocList` is capped
+to a compact inventory by default; agents should use `DocSearch` for content
+questions instead of dumping the corpus into the model context.
 
 ## Game theory
 

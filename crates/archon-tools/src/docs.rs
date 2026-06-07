@@ -58,22 +58,61 @@ doc_tool!(
     ingest_args,
     PermissionLevel::Risky
 );
-doc_tool!(
-    DocList,
-    "DocList",
-    "List ingested documents.",
-    empty_schema,
-    list_args,
-    PermissionLevel::Safe
-);
-doc_tool!(
-    DocGet,
-    "DocGet",
-    "Show document metadata by id.",
-    document_schema,
-    get_args,
-    PermissionLevel::Safe
-);
+pub struct DocList;
+
+#[async_trait]
+impl Tool for DocList {
+    fn name(&self) -> &str {
+        "DocList"
+    }
+
+    fn description(&self) -> &str {
+        "List a compact document inventory. Use DocSearch, not DocList, for content questions."
+    }
+
+    fn input_schema(&self) -> Value {
+        list_schema()
+    }
+
+    async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+        match list_limit(&input) {
+            Ok(limit) => crate::docs_runtime::run_list(limit, ctx).await,
+            Err(e) => ToolResult::error(e),
+        }
+    }
+
+    fn permission_level(&self, _input: &Value) -> PermissionLevel {
+        PermissionLevel::Safe
+    }
+}
+
+pub struct DocGet;
+
+#[async_trait]
+impl Tool for DocGet {
+    fn name(&self) -> &str {
+        "DocGet"
+    }
+
+    fn description(&self) -> &str {
+        "Show compact document metadata by id. Use DocSearch for document content."
+    }
+
+    fn input_schema(&self) -> Value {
+        document_schema()
+    }
+
+    async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+        match document_id(&input) {
+            Ok(document_id) => crate::docs_runtime::run_get(document_id, ctx).await,
+            Err(e) => ToolResult::error(e),
+        }
+    }
+
+    fn permission_level(&self, _input: &Value) -> PermissionLevel {
+        PermissionLevel::Safe
+    }
+}
 doc_tool!(
     DocStatus,
     "DocStatus",
@@ -170,14 +209,6 @@ fn ingest_args(input: &Value) -> Result<Vec<String>, String> {
     ])
 }
 
-fn list_args(_input: &Value) -> Result<Vec<String>, String> {
-    Ok(vec!["docs".into(), "list".into()])
-}
-
-fn get_args(input: &Value) -> Result<Vec<String>, String> {
-    Ok(vec!["docs".into(), "show".into(), document_id(input)?])
-}
-
 fn status_args(_input: &Value) -> Result<Vec<String>, String> {
     Ok(vec!["docs".into(), "status".into()])
 }
@@ -224,6 +255,10 @@ fn document_id(input: &Value) -> Result<String, String> {
     evidence_cli::required_string(input, "document_id")
 }
 
+fn list_limit(input: &Value) -> Result<usize, String> {
+    Ok(evidence_cli::opt_usize(input, "limit", 25)?.clamp(1, 50))
+}
+
 fn empty_schema() -> Value {
     evidence_cli::object_schema(json!({}), &[])
 }
@@ -236,6 +271,13 @@ fn document_schema() -> Value {
     evidence_cli::object_schema(
         json!({ "document_id": { "type": "string" } }),
         &["document_id"],
+    )
+}
+
+fn list_schema() -> Value {
+    evidence_cli::object_schema(
+        json!({ "limit": { "type": "integer", "minimum": 1, "maximum": 50 } }),
+        &[],
     )
 }
 
@@ -280,7 +322,13 @@ mod tests {
 
     #[test]
     fn test_doc_get_rejects_empty_id() {
-        let err = get_args(&json!({ "document_id": " " })).unwrap_err();
+        let err = document_id(&json!({ "document_id": " " })).unwrap_err();
         assert!(err.contains("document_id is required"));
+    }
+
+    #[test]
+    fn test_doc_list_limit_is_capped() {
+        assert_eq!(list_limit(&json!({ "limit": 500 })).unwrap(), 50);
+        assert_eq!(list_limit(&json!({ "limit": 0 })).unwrap(), 1);
     }
 }
