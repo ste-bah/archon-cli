@@ -2,18 +2,35 @@ pub fn build_jepa_training_examples(
     rows: &[WorldTraceRow],
     config: &JepaTrainingConfig,
 ) -> Result<Vec<JepaTrainingExample>> {
+    build_jepa_training_examples_controlled(rows, config, None)
+}
+
+pub fn build_jepa_training_examples_controlled(
+    rows: &[WorldTraceRow],
+    config: &JepaTrainingConfig,
+    should_stop: Option<&dyn Fn() -> bool>,
+) -> Result<Vec<JepaTrainingExample>> {
     config.validate()?;
     let builder = TraceWindowBuilder::new(rows);
     let mut examples = Vec::new();
     for horizon in &config.prediction_horizons {
+        check_jepa_stop(should_stop, "jepa transition scan")?;
         let transitions = builder.adjacent_transitions(
             config.context_window_rows,
             config.target_window_rows,
             *horizon,
         )?;
         examples.extend(transitions.into_iter().map(JepaTrainingExample::from));
+        check_jepa_stop(should_stop, "jepa transition append")?;
     }
     Ok(examples)
+}
+
+fn check_jepa_stop(should_stop: Option<&dyn Fn() -> bool>, stage: &str) -> Result<()> {
+    if should_stop.is_some_and(|check| check()) {
+        bail!("jepa training stopped or timed out during {stage}");
+    }
+    Ok(())
 }
 
 pub fn mask_jepa_training_examples(
@@ -222,4 +239,3 @@ fn jacobi_symmetric_eigenvalues(mut matrix: Vec<Vec<f64>>) -> Vec<f64> {
         .map(|(idx, row)| row[idx])
         .collect()
 }
-

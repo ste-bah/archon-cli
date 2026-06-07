@@ -169,6 +169,32 @@ pub fn run_dynamic_training_once(
     runtime: TrainerRuntimeSnapshot,
     triggers: DynamicTrainerTriggerSnapshot,
 ) -> Result<DynamicTrainerRunReport> {
+    run_dynamic_training_once_controlled(
+        root,
+        state_dim,
+        backend,
+        allow_cpu_fallback,
+        adapter,
+        policy,
+        trigger_policy,
+        runtime,
+        triggers,
+        None,
+    )
+}
+
+pub fn run_dynamic_training_once_controlled(
+    root: &Path,
+    state_dim: usize,
+    backend: BackendKind,
+    allow_cpu_fallback: bool,
+    adapter: &dyn WorldEmbeddingAdapter,
+    policy: DynamicTrainerPolicy,
+    trigger_policy: DynamicTrainerTriggerPolicy,
+    runtime: TrainerRuntimeSnapshot,
+    triggers: DynamicTrainerTriggerSnapshot,
+    should_stop: Option<&dyn Fn() -> bool>,
+) -> Result<DynamicTrainerRunReport> {
     let mut decision = evaluate_dynamic_trainer(policy, runtime);
     let trigger = evaluate_trainer_trigger(trigger_policy, triggers);
     if !decision.should_train {
@@ -179,13 +205,17 @@ pub fn run_dynamic_training_once(
         return Ok(report(decision, None, 0, 0, None, None, None));
     }
 
+    check_training_stop(should_stop, "world-model row load")?;
     let rows = WorldModelStore::open(root)?.load_rows()?;
-    let examples = crate::train::examples_from_rows_with_adapter(&rows, adapter)?;
+    check_training_stop(should_stop, "world-model example build")?;
+    let examples =
+        crate::train::examples_from_rows_with_adapter_controlled(&rows, adapter, should_stop)?;
     if examples.is_empty() {
         decision = decision_with_reason(policy, TrainerDecisionReason::NotEnoughRows);
         return Ok(report(decision, trigger, rows.len(), 0, None, None, None));
     }
 
+    check_training_stop(should_stop, "world-model candidate train")?;
     let started = std::time::Instant::now();
     let (model, outcome) = crate::train::train_candidate_with_backend_or_cpu_fallback(
         state_dim,
@@ -196,6 +226,7 @@ pub fn run_dynamic_training_once(
     if started.elapsed().as_millis() > u128::from(policy.max_runtime_ms) {
         bail!("world-model training exceeded max_runtime_ms");
     }
+    check_training_stop(should_stop, "world-model candidate write")?;
     let registry = ModelRegistry::open(root)?;
     let path = registry.write_candidate(&model, &outcome)?;
     Ok(report(
@@ -207,6 +238,13 @@ pub fn run_dynamic_training_once(
         Some(path),
         Some(outcome.training_mean_cosine_error),
     ))
+}
+
+fn check_training_stop(should_stop: Option<&dyn Fn() -> bool>, stage: &str) -> Result<()> {
+    if should_stop.is_some_and(|check| check()) {
+        bail!("world-model training stopped or timed out during {stage}");
+    }
+    Ok(())
 }
 
 fn decision(

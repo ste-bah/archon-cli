@@ -59,9 +59,8 @@ pub async fn run(config: AppConfig) -> Result<(), io::Error> {
     // Setup terminal - TerminalGuard handles raw mode, alternate screen, and cursor hide.
     // Its Drop will restore the terminal on function exit.
     let _guard = TerminalGuard::enter()?;
-    // Keep normal terminal text selection available by default. Operators who
-    // prefer mouse-wheel events inside the TUI can opt into capture with
-    // ARCHON_TUI_MOUSE_CAPTURE=1.
+    // Keep normal terminal text selection available by default, but auto-capture
+    // on WSL because alternate-screen scrollback is unreliable there.
     let mouse_capture = crate::terminal::mouse_capture_enabled();
     if mouse_capture {
         io::stdout().execute(EnableMouseCapture)?;

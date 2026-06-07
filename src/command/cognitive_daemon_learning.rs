@@ -21,6 +21,7 @@ pub(crate) fn add_learning_jobs<'a>(
         daemon.add_job(WorldModelTrainerJob {
             config: config.clone(),
             cognitive_root: cognitive_root.clone(),
+            stop_path: cognitive_root.join("cognitive-daemon.stop"),
         });
     }
     if gnn_job_enabled(&config) {
@@ -59,6 +60,7 @@ fn gnn_job_enabled(config: &ArchonConfig) -> bool {
 struct WorldModelTrainerJob {
     config: ArchonConfig,
     cognitive_root: PathBuf,
+    stop_path: PathBuf,
 }
 
 impl DaemonJob for WorldModelTrainerJob {
@@ -67,7 +69,12 @@ impl DaemonJob for WorldModelTrainerJob {
     }
 
     fn run(&mut self) -> Result<DaemonJobReport, CognitiveError> {
-        match crate::command::world_model::run_daemon_trainer_tick(&self.config) {
+        let stop_path = self.stop_path.clone();
+        let stop_requested = || stop_path.exists();
+        match crate::command::world_model::run_daemon_trainer_tick_controlled(
+            &self.config,
+            &stop_requested,
+        ) {
             Ok(summary) => {
                 let event = ledger::LearningDaemonEvent::new(self.name(), "ok", &summary);
                 append_event(&self.cognitive_root, &event);

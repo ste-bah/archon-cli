@@ -14,6 +14,7 @@ include!("jepa/05_candle_training.rs");
 include!("jepa/06_mlx_runtime.rs");
 include!("jepa/07_mlx_training.rs");
 include!("jepa/08_examples_eval.rs");
+include!("jepa/09_training_entry.rs");
 include!("jepa/09_training_runtime.rs");
 include!("jepa/10_checkpoint_io.rs");
 include!("jepa/11_mask_encode_loss.rs");

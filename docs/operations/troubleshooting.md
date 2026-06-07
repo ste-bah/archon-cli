@@ -25,6 +25,22 @@ Rust toolchain too old. `rustup update stable` to get 1.85+.
 
 OOM during parallel rustc. Rebuild with `cargo build --release -j1`.
 
+### TUI mouse-wheel scrolling does not work on WSL
+
+Archon auto-enables TUI mouse capture under WSL so the wheel scrolls the
+in-app output pane instead of the unreliable alternate-screen scrollback. To
+force the behavior elsewhere:
+
+```bash
+export ARCHON_TUI_MOUSE_CAPTURE=1
+```
+
+To disable capture and prefer terminal text selection:
+
+```bash
+export ARCHON_TUI_MOUSE_CAPTURE=0
+```
+
 ### rustc ICE on `petgraph::graphmap::NeighborsDirected::next`
 
 Stale dep cache corruption (known intermittent issue). Run:

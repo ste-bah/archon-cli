@@ -53,6 +53,11 @@ The daemon requires all of these gates:
 - `[policy.cognitive].allow_background_daemon = true`
 
 It writes a lockfile and state file under `ledger_dir`, heartbeats while alive,
-and will not run heavy model training/eval inline. The daemon job list is
-implemented as a Rust trait so future maintenance jobs can be added without
-turning the cognitive tick path into a monolith.
+and records learning-job decisions in `learning-daemon-events.jsonl`. World
+model trainer progress, including JEPA backend selection, row load, example
+build, encode, fit, loss, collapse, and candidate-write stages, is recorded in
+`~/.archon/world-model/ledgers/daemon-trainer-events.jsonl` and surfaced by
+`archon cognitive daemon status`.
+
+The daemon job list is implemented as a Rust trait so future maintenance jobs
+can be added without turning the cognitive tick path into a monolith.

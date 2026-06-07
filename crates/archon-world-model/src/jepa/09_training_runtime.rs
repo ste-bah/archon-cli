@@ -1,155 +1,28 @@
-pub fn train_jepa_candidate(
-    rows: &[WorldTraceRow],
-    config: &JepaTrainingConfig,
-) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
-    train_jepa_candidate_with_backend(rows, config, BackendKind::Cpu, true)
-}
-
-pub fn train_jepa_candidate_with_backend(
-    rows: &[WorldTraceRow],
-    config: &JepaTrainingConfig,
-    requested_backend: BackendKind,
-    allow_cpu_fallback: bool,
-) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
-    let status = crate::backend::select_runtime_backend(requested_backend, allow_cpu_fallback);
-    train_jepa_candidate_with_backend_status(rows, config, status, allow_cpu_fallback)
-}
-
-#[cfg(all(test, feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
-static JEPA_TRAINING_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-fn train_jepa_candidate_with_backend_status(
-    rows: &[WorldTraceRow],
-    config: &JepaTrainingConfig,
-    status: BackendStatus,
-    allow_cpu_fallback: bool,
-) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
-    #[cfg(all(test, feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
-    let _jepa_training_test_lock = JEPA_TRAINING_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-
-    if status.selected == BackendKind::Cpu {
-        return train_jepa_candidate_cpu(rows, config, status);
-    }
-
-    if !allow_cpu_fallback
-        && let Some(reason) = status.fallback_reason.as_deref() {
-            bail!(
-                "JepaBackendProbeFailed: requested JEPA backend {} unavailable: {reason}",
-                status.selected
-            );
-        }
-
-    if status.selected == BackendKind::Cuda {
-        #[cfg(feature = "cuda")]
-        {
-            match train_jepa_candidate_with_tensor_backend(
-                rows,
-                config,
-                status.clone(),
-                CandleCudaJepaBackend,
-            ) {
-                Ok(candidate) => return Ok(candidate),
-                Err(error) if allow_cpu_fallback => {
-                    let fallback = BackendStatus::cpu_fallback(
-                        status.requested,
-                        format!("jepa_native_backend_failed:{}:{error}", status.selected),
-                    );
-                    return train_jepa_candidate_cpu(rows, config, fallback);
-                }
-                Err(error) => {
-                    bail!(
-                        "JepaBackendNativeStageFailed: native JEPA backend for {} failed; refusing to write an accelerator-labelled candidate: {error}",
-                        status.selected
-                    );
-                }
-            }
-        }
-        #[cfg(not(feature = "cuda"))]
-        {
-            if allow_cpu_fallback {
-                let fallback = BackendStatus::cpu_fallback(
-                    status.requested,
-                    "jepa_native_backend_not_compiled:cuda",
-                );
-                return train_jepa_candidate_cpu(rows, config, fallback);
-            }
-        }
-    }
-
-    if status.selected == BackendKind::Metal {
-        #[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
-        {
-            match train_jepa_candidate_with_tensor_backend(
-                rows,
-                config,
-                status.clone(),
-                MlxMetalJepaBackend,
-            ) {
-                Ok(candidate) => return Ok(candidate),
-                Err(error) if allow_cpu_fallback => {
-                    let fallback = BackendStatus::cpu_fallback(
-                        status.requested,
-                        format!("jepa_native_backend_failed:{}:{error}", status.selected),
-                    );
-                    return train_jepa_candidate_cpu(rows, config, fallback);
-                }
-                Err(error) => {
-                    bail!(
-                        "JepaBackendNativeStageFailed: native JEPA backend for {} failed; refusing to write an accelerator-labelled candidate: {error}",
-                        status.selected
-                    );
-                }
-            }
-        }
-        #[cfg(not(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64")))]
-        {
-            if allow_cpu_fallback {
-                let fallback = BackendStatus::cpu_fallback(
-                    status.requested,
-                    "jepa_native_backend_not_compiled:metal",
-                );
-                return train_jepa_candidate_cpu(rows, config, fallback);
-            }
-        }
-    }
-
-    if allow_cpu_fallback {
-        let fallback = BackendStatus::cpu_fallback(
-            status.requested,
-            format!("jepa_native_backend_not_implemented:{}", status.selected),
-        );
-        return train_jepa_candidate_cpu(rows, config, fallback);
-    }
-
-    bail!(
-        "JepaBackendNativeStageFailed: native JEPA backend for {} is not implemented; refusing to write an accelerator-labelled candidate",
-        status.selected
-    );
-}
-
-fn train_jepa_candidate_cpu(
-    rows: &[WorldTraceRow],
-    config: &JepaTrainingConfig,
-    backend_status: BackendStatus,
-) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
-    train_jepa_candidate_with_tensor_backend(rows, config, backend_status, CpuJepaBackend)
-}
-
 fn train_jepa_candidate_with_tensor_backend<B: JepaTensorBackend>(
     rows: &[WorldTraceRow],
     config: &JepaTrainingConfig,
     backend_status: BackendStatus,
     backend: B,
+    should_stop: Option<&dyn Fn() -> bool>,
+    progress: Option<&dyn Fn(&str, &str)>,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     config.validate()?;
-    let examples = build_jepa_training_examples(rows, config)?;
+    check_jepa_training_stop(should_stop, "jepa example build")?;
+    emit_jepa_progress(progress, "jepa_example_build_start", "building training examples");
+    let examples = build_jepa_training_examples_controlled(rows, config, should_stop)?;
     if examples.is_empty() {
         bail!("not enough rows to train JEPA: need future rows in the same session");
     }
+    emit_jepa_progress(
+        progress,
+        "jepa_example_build_complete",
+        &format!("built {} example(s)", examples.len()),
+    );
+    check_jepa_training_stop(should_stop, "jepa feature batch")?;
+    emit_jepa_progress(progress, "jepa_feature_batch_start", "building feature batch");
     let (masked_examples, masking) = mask_jepa_training_examples(&examples, config.mask_ratio);
     let feature_batch = JepaFeatureBatch::from_examples(&masked_examples, config.latent_dim)?;
+    emit_jepa_progress(progress, "jepa_feature_batch_complete", "feature batch ready");
 
     let context_encoder = JepaTraceEncoder::new("context", config.latent_dim);
     let action_encoder = JepaTraceEncoder::new("action", config.latent_dim);
@@ -159,11 +32,17 @@ fn train_jepa_candidate_with_tensor_backend<B: JepaTensorBackend>(
         action_encoder: action_encoder.clone(),
         target_encoder: target_encoder.clone(),
     };
+    check_jepa_training_stop(should_stop, "jepa encode")?;
+    emit_jepa_progress(progress, "jepa_encode_start", "encoding context/action/target");
     let encoded_stage = backend.encode_batch(&encoders, &feature_batch)?;
     let encoded_execution = encoded_stage.execution;
     let encoded = encoded_stage.value;
+    emit_jepa_progress(progress, "jepa_encode_complete", "encoding complete");
+    check_jepa_training_stop(should_stop, "jepa initial auxiliary fit")?;
+    emit_jepa_progress(progress, "jepa_initial_aux_start", "fitting initial aux heads");
     let initial_auxiliary_heads_stage = backend.fit_auxiliary_heads(config.latent_dim, &encoded)?;
     let initial_auxiliary_execution = initial_auxiliary_heads_stage.execution;
+    emit_jepa_progress(progress, "jepa_initial_aux_complete", "initial aux heads ready");
     let initial_model = JepaTraceModel {
         metadata: JepaTraceModelMetadata::candidate(
             config,
@@ -177,15 +56,31 @@ fn train_jepa_candidate_with_tensor_backend<B: JepaTensorBackend>(
         auxiliary_heads: initial_auxiliary_heads_stage.value,
         transition_model: None,
     };
+    check_jepa_training_stop(should_stop, "jepa initial loss eval")?;
+    emit_jepa_progress(progress, "jepa_initial_loss_start", "evaluating initial loss");
     let initial_losses_stage = backend.training_losses(&initial_model, &encoded, config)?;
     let initial_loss_execution = initial_losses_stage.execution;
     let initial_losses = initial_losses_stage.value;
+    emit_jepa_progress(
+        progress,
+        "jepa_initial_loss_complete",
+        &format!("initial_loss_total={:.4}", initial_losses.loss_total),
+    );
+    check_jepa_training_stop(should_stop, "jepa predictor fit")?;
+    emit_jepa_progress(progress, "jepa_predictor_start", "fitting predictor");
     let predictor_stage = backend.fit_predictor(config.latent_dim, &encoded)?;
     let predictor_execution = predictor_stage.execution;
+    emit_jepa_progress(progress, "jepa_predictor_complete", "predictor ready");
+    check_jepa_training_stop(should_stop, "jepa auxiliary fit")?;
+    emit_jepa_progress(progress, "jepa_aux_start", "fitting auxiliary heads");
     let auxiliary_heads_stage = backend.fit_auxiliary_heads(config.latent_dim, &encoded)?;
     let auxiliary_execution = initial_auxiliary_execution.combine(auxiliary_heads_stage.execution);
+    emit_jepa_progress(progress, "jepa_aux_complete", "auxiliary heads ready");
+    check_jepa_training_stop(should_stop, "jepa transition fit")?;
+    emit_jepa_progress(progress, "jepa_transition_start", "fitting transition model");
     let transition_model_stage = backend.fit_transition(config.latent_dim, &encoded)?;
     let transition_execution = transition_model_stage.execution;
+    emit_jepa_progress(progress, "jepa_transition_complete", "transition model ready");
     let mut metadata =
         JepaTraceModelMetadata::candidate(config, rows.len() as u64, examples.len() as u64);
     metadata.backend = backend_status.selected;
@@ -198,6 +93,8 @@ fn train_jepa_candidate_with_tensor_backend<B: JepaTensorBackend>(
         auxiliary_heads: auxiliary_heads_stage.value,
         transition_model: Some(transition_model_stage.value),
     };
+    check_jepa_training_stop(should_stop, "jepa final loss eval")?;
+    emit_jepa_progress(progress, "jepa_final_loss_start", "evaluating final loss");
     let losses_stage = backend.training_losses(&model, &encoded, config)?;
     let loss_execution = initial_loss_execution.combine(losses_stage.execution);
     let runtime_execution = if backend_status.selected == BackendKind::Cpu {
@@ -234,13 +131,28 @@ fn train_jepa_candidate_with_tensor_backend<B: JepaTensorBackend>(
     validate_jepa_backend_execution(&model.metadata)?;
     model.validate_finite()?;
     let losses = losses_stage.value;
-    let progress = JepaTrainingProgress {
+    emit_jepa_progress(
+        progress,
+        "jepa_final_loss_complete",
+        &format!("final_loss_total={:.4}", losses.loss_total),
+    );
+    let training_progress = JepaTrainingProgress {
         initial_loss_total: initial_losses.loss_total,
         final_loss_total: losses.loss_total,
         improved: losses.loss_total <= initial_losses.loss_total,
     };
+    check_jepa_training_stop(should_stop, "jepa collapse eval")?;
+    emit_jepa_progress(progress, "jepa_collapse_start", "checking representation collapse");
     let collapse = backend.collapse_report(&encoded, config)?;
     let horizon = horizon_report_for_model(&model, &encoded, config.horizon_consistency_tol)?;
+    emit_jepa_progress(
+        progress: training_progress,
+        "jepa_training_complete",
+        &format!(
+            "model_id={} examples={} loss_total={:.4}",
+            model.metadata.model_id, model.metadata.example_count, losses.loss_total
+        ),
+    );
     let outcome = JepaTrainingOutcome {
         status: TrainingStatus::CandidateWritten,
         metadata: model.metadata.clone(),
@@ -253,6 +165,14 @@ fn train_jepa_candidate_with_tensor_backend<B: JepaTensorBackend>(
     };
     Ok((model, outcome))
 }
+
+fn check_jepa_training_stop(should_stop: Option<&dyn Fn() -> bool>, stage: &str) -> Result<()> {
+    if should_stop.is_some_and(|check| check()) {
+        bail!("jepa training stopped or timed out during {stage}");
+    }
+    Ok(())
+}
+
 
 pub fn validate_jepa_backend_execution(metadata: &JepaTraceModelMetadata) -> Result<()> {
     let report = &metadata.backend_execution;

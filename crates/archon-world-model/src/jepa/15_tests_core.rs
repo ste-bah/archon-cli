@@ -15,6 +15,22 @@
     }
 
     #[test]
+    fn controlled_jepa_example_build_stops_before_transition_scan() {
+        let config = JepaTrainingConfig {
+            latent_dim: 8,
+            context_window_rows: 2,
+            target_window_rows: 1,
+            prediction_horizons: vec![1],
+            ..JepaTrainingConfig::default()
+        };
+
+        let error =
+            build_jepa_training_examples_controlled(&rows(), &config, Some(&|| true)).unwrap_err();
+
+        assert!(error.to_string().contains("stopped or timed out"));
+    }
+
+    #[test]
     fn masking_uses_typed_sentinels_without_touching_target() {
         let config = JepaTrainingConfig {
             latent_dim: 8,

@@ -348,6 +348,10 @@ fn print_status(status: &DaemonStatus, as_json: bool, root: &Path) -> Result<()>
                     root, 10,
                 ))?,
             );
+            object.insert(
+                "worldModelTrainer".into(),
+                serde_json::to_value(crate::command::world_model::latest_daemon_trainer_event())?,
+            );
         }
         println!("{}", serde_json::to_string_pretty(&value)?);
     } else {
@@ -372,6 +376,14 @@ fn print_status(status: &DaemonStatus, as_json: bool, root: &Path) -> Result<()>
             "{}",
             crate::command::cognitive_daemon_learning::render_recent_summary(root)
         );
+        if let Some(event) = crate::command::world_model::latest_daemon_trainer_event() {
+            println!(
+                "World-model trainer: {} — {} ({})",
+                event.status,
+                event.summary,
+                event.created_at.to_rfc3339()
+            );
+        }
     }
     Ok(())
 }

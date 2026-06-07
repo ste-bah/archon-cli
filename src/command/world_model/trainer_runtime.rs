@@ -1,5 +1,6 @@
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -24,15 +25,37 @@ pub(crate) fn schedule_dynamic_trainer_tick(config: archon_core::config::ArchonC
 pub(crate) fn run_daemon_trainer_tick(
     config: &archon_core::config::ArchonConfig,
 ) -> Result<String> {
+    run_daemon_trainer_tick_controlled(config, &|| false)
+}
+
+pub(crate) fn run_daemon_trainer_tick_controlled(
+    config: &archon_core::config::ArchonConfig,
+    stop_requested: &dyn Fn() -> bool,
+) -> Result<String> {
     let root = super::world_model_root()?;
     let auto = &config.learning.world_model.auto_trainer;
-    let rendered = super::candidate::render_trainer_tick(
+    let max_runtime_ms = trainer_runtime_limit_ms(config);
+    let started = Instant::now();
+    let should_stop = || {
+        stop_requested()
+            || (max_runtime_ms > 0 && started.elapsed().as_millis() >= u128::from(max_runtime_ms))
+    };
+    let progress = |stage: &str, detail: &str| {
+        let summary = format!("{stage}: {detail}");
+        if let Err(error) = append_event(&root, "progress", &summary) {
+            tracing::warn!(error = %error, stage, "daemon trainer progress append failed");
+        }
+        tracing::info!(stage, detail, "world-model daemon trainer progress");
+    };
+    let rendered = super::candidate::render_trainer_tick_observed(
         config,
         &root,
         Some(auto.idle_required_ms),
         None,
         None,
         false,
+        Some(&should_stop),
+        Some(&progress),
     );
     match rendered {
         Ok(output) => {
@@ -45,6 +68,16 @@ pub(crate) fn run_daemon_trainer_tick(
             append_event(&root, "failed", &summary)?;
             Err(error)
         }
+    }
+}
+
+fn trainer_runtime_limit_ms(config: &archon_core::config::ArchonConfig) -> u64 {
+    if config.learning.world_model.jepa.enabled
+        || config.learning.world_model.model_kind == archon_world_model::jepa::JEPA_MODEL_KIND
+    {
+        config.learning.world_model.jepa.max_runtime_ms
+    } else {
+        config.learning.world_model.auto_trainer.max_runtime_ms
     }
 }
 

@@ -120,6 +120,9 @@ impl<'a> CognitiveDaemon<'a> {
     ) -> Result<Vec<DaemonJobReport>, CognitiveError> {
         let mut reports = Vec::with_capacity(self.jobs.len());
         for job in self.jobs.iter_mut() {
+            if self.paths.stop_path.exists() {
+                break;
+            }
             state.record_job_start(job.name());
             self.paths.write_state(state)?;
             let heartbeat = HeartbeatGuard::start(

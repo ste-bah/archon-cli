@@ -18,14 +18,29 @@ pub struct TerminalGuard {
 }
 
 pub fn mouse_capture_enabled() -> bool {
-    std::env::var("ARCHON_TUI_MOUSE_CAPTURE")
-        .map(|value| {
-            matches!(
-                value.as_str(),
-                "1" | "true" | "TRUE" | "on" | "ON" | "yes" | "YES"
-            )
-        })
-        .unwrap_or(false)
+    let explicit = std::env::var("ARCHON_TUI_MOUSE_CAPTURE").ok();
+    mouse_capture_policy(explicit.as_deref(), running_under_wsl())
+}
+
+fn mouse_capture_policy(explicit: Option<&str>, is_wsl: bool) -> bool {
+    match explicit
+        .map(str::trim)
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("1" | "true" | "on" | "yes") => true,
+        Some("0" | "false" | "off" | "no") => false,
+        Some(_) => false,
+        None => is_wsl,
+    }
+}
+
+fn running_under_wsl() -> bool {
+    std::env::var_os("WSL_INTEROP").is_some()
+        || std::env::var_os("WSL_DISTRO_NAME").is_some()
+        || std::fs::read_to_string("/proc/version")
+            .map(|version| version.to_ascii_lowercase().contains("microsoft"))
+            .unwrap_or(false)
 }
 
 impl TerminalGuard {
@@ -136,5 +151,19 @@ mod tests {
         if guard_result.is_ok() {
             drop(guard_result.unwrap());
         }
+    }
+
+    #[test]
+    fn mouse_capture_defaults_to_wsl() {
+        assert!(mouse_capture_policy(None, true));
+        assert!(!mouse_capture_policy(None, false));
+    }
+
+    #[test]
+    fn mouse_capture_env_overrides_wsl_detection() {
+        assert!(!mouse_capture_policy(Some("0"), true));
+        assert!(!mouse_capture_policy(Some("off"), true));
+        assert!(mouse_capture_policy(Some("1"), false));
+        assert!(mouse_capture_policy(Some("yes"), false));
     }
 }

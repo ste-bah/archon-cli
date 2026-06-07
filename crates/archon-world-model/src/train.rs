@@ -132,6 +132,14 @@ pub fn examples_from_rows_with_adapter(
     rows: &[WorldTraceRow],
     adapter: &dyn WorldEmbeddingAdapter,
 ) -> Result<Vec<LatentTransitionExample>> {
+    examples_from_rows_with_adapter_controlled(rows, adapter, None)
+}
+
+pub fn examples_from_rows_with_adapter_controlled(
+    rows: &[WorldTraceRow],
+    adapter: &dyn WorldEmbeddingAdapter,
+    should_stop: Option<&dyn Fn() -> bool>,
+) -> Result<Vec<LatentTransitionExample>> {
     let mut sorted = rows.to_vec();
     sorted.sort_by(|left, right| {
         left.session_id
@@ -142,21 +150,35 @@ pub fn examples_from_rows_with_adapter(
 
     let mut examples = Vec::new();
     for window in sorted.windows(2) {
+        check_training_stop(should_stop, "latent example scan")?;
         let current = &window[0];
         let next = &window[1];
         if current.session_id != next.session_id {
             continue;
         }
 
+        check_training_stop(should_stop, "latent state embedding")?;
+        let state = embed_row(adapter, &sorted, current, "state")?;
+        check_training_stop(should_stop, "latent action embedding")?;
+        let action = embed_row(adapter, &sorted, current, "action")?;
+        check_training_stop(should_stop, "latent target embedding")?;
+        let next_state = embed_row(adapter, &sorted, next, "next_state")?;
         examples.push(LatentTransitionExample {
-            state: embed_row(adapter, &sorted, current, "state")?,
-            action: embed_row(adapter, &sorted, current, "action")?,
-            next_state: embed_row(adapter, &sorted, next, "next_state")?,
+            state,
+            action,
+            next_state,
             labels: next.labels.clone(),
         });
     }
 
     Ok(examples)
+}
+
+fn check_training_stop(should_stop: Option<&dyn Fn() -> bool>, stage: &str) -> Result<()> {
+    if should_stop.is_some_and(|check| check()) {
+        anyhow::bail!("world-model training stopped or timed out during {stage}");
+    }
+    Ok(())
 }
 
 pub fn examples_from_rows_with_representation_adapter(
@@ -320,5 +342,19 @@ mod tests {
         assert_eq!(examples[0].state.len(), 4);
         assert_eq!(examples[0].action.len(), 4);
         assert_eq!(examples[0].next_state.len(), 4);
+    }
+
+    #[test]
+    fn controlled_example_build_stops_before_embedding() {
+        let first = WorldTraceRow::new("session-1", WorldActionKind::ToolCall).with_row_id("r1");
+        let second =
+            WorldTraceRow::new("session-1", WorldActionKind::Verification).with_row_id("r2");
+        let adapter = DeterministicHashEmbeddingAdapter::new(4).unwrap();
+
+        let error =
+            examples_from_rows_with_adapter_controlled(&[first, second], &adapter, Some(&|| true))
+                .unwrap_err();
+
+        assert!(error.to_string().contains("stopped or timed out"));
     }
 }
