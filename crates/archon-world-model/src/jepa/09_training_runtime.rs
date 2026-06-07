@@ -146,7 +146,7 @@ fn train_jepa_candidate_with_tensor_backend<B: JepaTensorBackend>(
     let collapse = backend.collapse_report(&encoded, config)?;
     let horizon = horizon_report_for_model(&model, &encoded, config.horizon_consistency_tol)?;
     emit_jepa_progress(
-        progress: training_progress,
+        progress,
         "jepa_training_complete",
         &format!(
             "model_id={} examples={} loss_total={:.4}",
@@ -158,7 +158,7 @@ fn train_jepa_candidate_with_tensor_backend<B: JepaTensorBackend>(
         metadata: model.metadata.clone(),
         initial_losses,
         losses,
-        progress,
+        progress: training_progress,
         masking,
         collapse,
         horizon,
