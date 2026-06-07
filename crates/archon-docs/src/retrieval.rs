@@ -15,6 +15,9 @@ use crate::models::ChunkArtifact;
 use crate::store;
 use crate::vector_store::DocVectorStore;
 
+const EXACT_CANDIDATE_MULTIPLIER: usize = 3;
+const EXACT_SCAN_FALLBACK_MAX_CHUNKS: usize = 2_000;
+
 /// A single search result with chunk content and relevance metadata.
 #[derive(Clone, Debug)]
 pub struct SearchResult {
@@ -170,7 +173,7 @@ pub fn search_with_mode(
     let mut warnings = Vec::new();
     let mut query_embedding_norm = None;
     let results = match mode {
-        SearchMode::Exact => exact_search(db, query, top_k)?,
+        SearchMode::Exact => exact_search(db, query, top_k, total_chunks, ExactFallback::Strict)?,
         SearchMode::Semantic => {
             let semantic = semantic_search_with_norm(db, query, top_k)?;
             query_embedding_norm = Some(semantic.query_embedding_norm);
@@ -184,6 +187,7 @@ pub fn search_with_mode(
                 top_k,
                 weights,
                 total,
+                total_chunks,
                 &mut warnings,
                 semantic_norm,
             )?
@@ -238,26 +242,59 @@ fn semantic_search_with_norm(
     })
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExactFallback {
+    Strict,
+    BestEffort,
+}
+
 fn exact_search(
     db: &DbInstance,
     query: &str,
     top_k: usize,
+    total_chunks: usize,
+    fallback: ExactFallback,
 ) -> Result<Vec<SearchResult>, DocsError> {
     let needle = normalize_exact_query(query);
     if needle.is_empty() || top_k == 0 {
         return Ok(Vec::new());
     }
 
-    let fts_results = match fts_search(db, &needle, top_k.saturating_mul(3).max(top_k)) {
-        Ok(results) => results,
+    let candidate_limit = expanded_top_k(top_k);
+    match fts_search(db, &needle, candidate_limit) {
+        Ok(results) if !results.is_empty() => return rank_exact_results(results, top_k),
+        Ok(_) => {}
         Err(e) => {
-            tracing::warn!(error = %e, "Cozo FTS search failed; falling back to exact scan");
-            Vec::new()
+            if total_chunks > EXACT_SCAN_FALLBACK_MAX_CHUNKS && fallback == ExactFallback::Strict {
+                return Err(DocsError::Retrieval {
+                    message: format!(
+                        "FTS search failed and exact scan fallback is capped at {EXACT_SCAN_FALLBACK_MAX_CHUNKS} chunks: {e}"
+                    ),
+                });
+            }
+            tracing::warn!(error = %e, "Cozo FTS search failed; using bounded exact fallback");
         }
-    };
-    let scan_results = scan_exact_matches(db, &needle, top_k.saturating_mul(3).max(top_k))?;
+    }
+
+    if total_chunks > EXACT_SCAN_FALLBACK_MAX_CHUNKS {
+        tracing::warn!(
+            total_chunks,
+            max_fallback_chunks = EXACT_SCAN_FALLBACK_MAX_CHUNKS,
+            "skipping unbounded exact scan fallback"
+        );
+        return Ok(Vec::new());
+    }
+
+    let scan_results = scan_exact_matches(db, &needle, candidate_limit, total_chunks)?;
+    rank_exact_results(scan_results, top_k)
+}
+
+fn rank_exact_results(
+    results: Vec<SearchResult>,
+    top_k: usize,
+) -> Result<Vec<SearchResult>, DocsError> {
     let mut merged: HashMap<String, SearchResult> = HashMap::new();
-    for result in fts_results.into_iter().chain(scan_results) {
+    for result in results {
         merged
             .entry(result.chunk_id.clone())
             .and_modify(|existing| {
@@ -279,19 +316,30 @@ fn exact_search(
     Ok(results)
 }
 
+fn expanded_top_k(top_k: usize) -> usize {
+    top_k.saturating_mul(EXACT_CANDIDATE_MULTIPLIER).max(top_k)
+}
+
 fn hybrid_search(
     db: &DbInstance,
     query: &str,
     top_k: usize,
     weights: RetrievalWeights,
     total_indexed_chunks: usize,
+    total_chunks: usize,
     warnings: &mut Vec<String>,
     query_embedding_norm: &mut Option<f64>,
 ) -> Result<Vec<SearchResult>, DocsError> {
     if top_k == 0 {
         return Ok(Vec::new());
     }
-    let exact = exact_search(db, query, top_k.saturating_mul(3).max(top_k))?;
+    let exact = exact_search(
+        db,
+        query,
+        expanded_top_k(top_k),
+        total_chunks,
+        ExactFallback::BestEffort,
+    )?;
     let semantic = if total_indexed_chunks == 0 {
         warnings.push("semantic retrieval skipped: no indexed vectors".into());
         Vec::new()
@@ -325,6 +373,8 @@ fn hybrid_search(
             })
             .or_insert(semantic_result);
     }
+
+    score_exact_for_candidates(query, &mut merged);
 
     let mut results: Vec<SearchResult> = merged
         .into_values()
@@ -385,33 +435,15 @@ fn scan_exact_matches(
     db: &DbInstance,
     query: &str,
     top_k: usize,
+    max_chunks: usize,
 ) -> Result<Vec<SearchResult>, DocsError> {
     let query_lower = query.to_lowercase();
-    let mut scored: Vec<(ChunkArtifact, f64)> = list_all_chunks(db)?
+    let query_terms = exact_query_terms(&query_lower);
+    let mut scored: Vec<(ChunkArtifact, f64)> = list_chunks_for_exact_fallback(db, max_chunks)?
         .into_iter()
         .filter_map(|chunk| {
-            let content_lower = chunk.content.to_lowercase();
-            let count = content_lower.matches(&query_lower).count();
-            let compact_query = query_lower.split_whitespace().collect::<Vec<_>>();
-            let matched_terms = compact_query
-                .iter()
-                .filter(|term| content_lower.contains(**term))
-                .count();
-            if count == 0 && matched_terms == 0 {
-                return None;
-            }
-            let term_score = if compact_query.is_empty() {
-                0.0
-            } else {
-                matched_terms as f64 / compact_query.len() as f64
-            };
-            let occurrence_score = (count as f64 / 3.0).min(1.0);
-            let score = if count == 0 {
-                term_score * 0.7
-            } else {
-                (term_score + occurrence_score) / 2.0
-            };
-            Some((chunk, score.clamp(0.0, 1.0)))
+            exact_content_score(&query_lower, &query_terms, &chunk.content)
+                .map(|score| (chunk, score))
         })
         .collect();
     scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -422,18 +454,67 @@ fn scan_exact_matches(
         .collect())
 }
 
-fn list_all_chunks(db: &DbInstance) -> Result<Vec<ChunkArtifact>, DocsError> {
+fn list_chunks_for_exact_fallback(
+    db: &DbInstance,
+    max_chunks: usize,
+) -> Result<Vec<ChunkArtifact>, DocsError> {
+    if max_chunks == 0 {
+        return Ok(Vec::new());
+    }
+    let mut params = BTreeMap::new();
+    params.insert("limit".to_string(), DataValue::from(max_chunks as i64));
     let result = db
         .run_script(
             "?[chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status] \
-             := *doc_chunks{chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status}",
-            Default::default(),
+             := *doc_chunks{chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status} \
+             :limit $limit",
+            params,
             ScriptMutability::Immutable,
         )
         .map_err(|e| DocsError::Retrieval {
-            message: format!("list chunks for exact search failed: {e}"),
+            message: format!("list chunks for bounded exact fallback failed: {e}"),
         })?;
     Ok(result.rows.iter().map(|row| chunk_from_row(row)).collect())
+}
+
+fn score_exact_for_candidates(query: &str, candidates: &mut HashMap<String, SearchResult>) {
+    let query_lower = normalize_exact_query(query).to_lowercase();
+    let query_terms = exact_query_terms(&query_lower);
+    for result in candidates.values_mut() {
+        if let Some(score) = exact_content_score(&query_lower, &query_terms, &result.content)
+            && score > result.exact_score
+        {
+            result.exact_score = score;
+        }
+    }
+}
+
+fn exact_query_terms(query_lower: &str) -> Vec<&str> {
+    query_lower.split_whitespace().collect()
+}
+
+fn exact_content_score(query_lower: &str, query_terms: &[&str], content: &str) -> Option<f64> {
+    let content_lower = content.to_lowercase();
+    let count = content_lower.matches(query_lower).count();
+    let matched_terms = query_terms
+        .iter()
+        .filter(|term| content_lower.contains(**term))
+        .count();
+    if count == 0 && matched_terms == 0 {
+        return None;
+    }
+    let term_score = if query_terms.is_empty() {
+        0.0
+    } else {
+        matched_terms as f64 / query_terms.len() as f64
+    };
+    let occurrence_score = (count as f64 / 3.0).min(1.0);
+    let score = if count == 0 {
+        term_score * 0.7
+    } else {
+        (term_score + occurrence_score) / 2.0
+    };
+    Some(score.clamp(0.0, 1.0))
 }
 
 fn normalize_exact_query(query: &str) -> String {
@@ -847,6 +928,26 @@ mod tests {
         assert!(results.results.is_empty());
         assert_eq!(results.total_chunks, 1);
         assert_eq!(results.total_indexed_chunks, 0);
+    }
+
+    #[test]
+    #[serial_test::serial(docs_global_state)]
+    fn test_exact_scan_fallback_is_bounded() {
+        let db = test_db();
+        crate::schema::ensure_doc_schema(&db).unwrap();
+        for index in 0..5 {
+            insert_test_chunk(
+                &db,
+                &format!("chunk-bounded-{index}"),
+                &format!("bounded fallback fixture {index}"),
+            );
+        }
+
+        let rows = list_chunks_for_exact_fallback(&db, 2).unwrap();
+        assert_eq!(rows.len(), 2);
+
+        let no_rows = list_chunks_for_exact_fallback(&db, 0).unwrap();
+        assert!(no_rows.is_empty());
     }
 
     #[test]
