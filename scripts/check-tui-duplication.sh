@@ -25,8 +25,9 @@ mkdir -p "$REPORT_DIR"
 # --reporters json outputs to <output>/jscpd-report.json
 # --threshold sets the percentage ceiling
 # --min-lines minimum clone length
-npx jscpd \
-  --pattern "**/*.rs" \
+JSCPD_PACKAGE="${JSCPD_PACKAGE:-jscpd@5.0.4}"
+npx --yes --package "$JSCPD_PACKAGE" jscpd \
+  --format rust \
   --min-lines "$MIN_LINES" \
   --threshold "$THRESHOLD" \
   --reporters json \
