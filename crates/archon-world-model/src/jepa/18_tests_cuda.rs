@@ -21,7 +21,8 @@
             fallback_reason: None,
         };
         let (model, outcome) =
-            train_jepa_candidate_with_backend_status(&rows(), &config, status, false).unwrap();
+            train_jepa_candidate_with_backend_status(&rows(), &config, status, false, None, None)
+                .unwrap();
         let examples = build_jepa_training_examples(&rows(), &config).unwrap();
         (model, outcome, examples)
     }
@@ -169,12 +170,18 @@
         };
 
         let (model, outcome) =
-            train_jepa_candidate_with_backend_status(&validation_rows(520), &config, status, false)
-                .unwrap();
+            train_jepa_candidate_with_backend_status(
+                &validation_rows(520),
+                &config,
+                status,
+                false,
+                None,
+                None,
+            )
+            .unwrap();
 
         assert_eq!(model.metadata.backend, BackendKind::Cuda);
         assert!(outcome.metadata.backend_execution.validation_example_count >= 512);
         assert_eq!(outcome.metadata.backend_execution.host_fallback_count, 0);
         assert!(jepa_backend_promotion_gate(&model.metadata, 512, 512));
     }
-

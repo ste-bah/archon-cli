@@ -134,7 +134,8 @@
             BackendStatus::cpu_fallback(BackendKind::Cuda, "cuda_probe_failed:not_compiled");
 
         let (model, outcome) =
-            train_jepa_candidate_with_backend_status(&rows(), &config, status, true).unwrap();
+            train_jepa_candidate_with_backend_status(&rows(), &config, status, true, None, None)
+                .unwrap();
 
         assert_eq!(model.metadata.backend, BackendKind::Cpu);
         assert_eq!(
@@ -175,12 +176,20 @@
         };
 
         let error =
-            train_jepa_candidate_with_backend_status(&rows(), &config, status.clone(), false)
+            train_jepa_candidate_with_backend_status(
+                &rows(),
+                &config,
+                status.clone(),
+                false,
+                None,
+                None,
+            )
                 .unwrap_err();
         assert!(error.to_string().contains("JepaBackendNativeStageFailed"));
 
         let (model, outcome) =
-            train_jepa_candidate_with_backend_status(&rows(), &config, status, true).unwrap();
+            train_jepa_candidate_with_backend_status(&rows(), &config, status, true, None, None)
+                .unwrap();
         assert_eq!(model.metadata.backend, BackendKind::Cpu);
         assert_eq!(
             outcome.metadata.backend_execution.selected_backend,
@@ -216,12 +225,20 @@
         };
 
         let error =
-            train_jepa_candidate_with_backend_status(&rows(), &config, status.clone(), false)
+            train_jepa_candidate_with_backend_status(
+                &rows(),
+                &config,
+                status.clone(),
+                false,
+                None,
+                None,
+            )
                 .unwrap_err();
         assert!(error.to_string().contains("JepaBackendNativeStageFailed"));
 
         let (model, outcome) =
-            train_jepa_candidate_with_backend_status(&rows(), &config, status, true).unwrap();
+            train_jepa_candidate_with_backend_status(&rows(), &config, status, true, None, None)
+                .unwrap();
         assert_eq!(model.metadata.backend, BackendKind::Cpu);
         assert_eq!(
             outcome.metadata.backend_execution.selected_backend,
@@ -260,7 +277,8 @@
         };
 
         let (model, outcome) =
-            train_jepa_candidate_with_backend_status(&rows(), &config, status, false).unwrap();
+            train_jepa_candidate_with_backend_status(&rows(), &config, status, false, None, None)
+                .unwrap();
 
         assert_eq!(model.metadata.backend, BackendKind::Cuda);
         assert_eq!(
