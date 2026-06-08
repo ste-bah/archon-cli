@@ -71,6 +71,7 @@ use crate::task_dispatch::{AgentDispatcher, AgentRouter, CancelOutcome, TurnRunn
 
 mod ask_user;
 mod input;
+mod mouse;
 mod tui_events;
 
 /// Configuration passed to [`run_event_loop`]. Field order and types

@@ -94,18 +94,18 @@ impl CachedEmbeddingAdapter {
         Ok((record.key == key).then_some(record.vector))
     }
 
-    fn write_cached(
+    fn write_cached_record(
         &self,
         key: &str,
         request: &EmbeddingRequest,
         vector: &EmbeddingVector,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         if !self.config.cache_enabled {
-            return Ok(());
+            return Ok(false);
         }
         // Policy gate: resolved at construction. When false, skip persistence (read-through only).
         if !self.allow_cache {
-            return Ok(());
+            return Ok(false);
         }
         let text_hash = {
             let mut h = Sha256::new();
@@ -125,7 +125,14 @@ impl CachedEmbeddingAdapter {
             source_hash: request.source_hash.clone(),
         };
         std::fs::write(path, serde_json::to_vec_pretty(&record)?)?;
-        // Reuse existing prune_cache — do NOT add a duplicate prune_if_needed() function.
+        Ok(true)
+    }
+
+    fn prune_cached_records(&self) -> Result<()> {
+        if !self.config.cache_enabled || !self.allow_cache {
+            return Ok(());
+        }
+        // Keep the existing pruning implementation centralized; callers decide cadence.
         prune_cache(&self.config.cache_dir, self.config.cache_max_bytes)?;
         Ok(())
     }
@@ -158,7 +165,9 @@ impl WorldEmbeddingAdapter for CachedEmbeddingAdapter {
             return Ok(vector);
         }
         let vector = self.inner.embed(&request)?;
-        self.write_cached(&key, &request, &vector)?;
+        if self.write_cached_record(&key, &request, &vector)? {
+            self.prune_cached_records()?;
+        }
         Ok(vector)
     }
 
@@ -197,10 +206,18 @@ impl WorldEmbeddingAdapter for CachedEmbeddingAdapter {
             let miss_requests: Vec<EmbeddingRequest> =
                 miss_indices.iter().map(|&i| effective[i].clone()).collect();
             let miss_vectors = self.inner.embed_batch(&miss_requests)?;
+            let mut wrote_any = false;
             for (slot, &orig_idx) in miss_indices.iter().enumerate() {
                 let vector = miss_vectors[slot].clone();
-                let _ = self.write_cached(&keys[orig_idx], &effective[orig_idx], &vector);
+                if let Ok(true) =
+                    self.write_cached_record(&keys[orig_idx], &effective[orig_idx], &vector)
+                {
+                    wrote_any = true;
+                }
                 results[orig_idx] = Some(vector);
+            }
+            if wrote_any {
+                let _ = self.prune_cached_records();
             }
         }
 

@@ -336,6 +336,35 @@ mod tests {
     }
 
     #[test]
+    fn cached_embed_batch_prunes_after_writing_misses() {
+        let temp = tempfile::tempdir().unwrap();
+        let cache_dir = temp.path().join("cache");
+        let batch_calls = Arc::new(AtomicUsize::new(0));
+        let adapter = CachedEmbeddingAdapter::new(
+            Box::new(BatchCountingAdapter {
+                batch_calls: Arc::clone(&batch_calls),
+            }),
+            EmbeddingCacheConfig {
+                cache_dir: cache_dir.clone(),
+                cache_enabled: true,
+                cache_max_bytes: 1,
+                redact_before_embedding: false,
+                eval_schema_version: 1,
+            },
+            true,
+        );
+        let requests = make_batch_requests(&["prune-a", "prune-b", "prune-c"]);
+
+        let result = adapter.embed_batch(&requests).unwrap();
+        assert_eq!(result.len(), 3);
+        assert_eq!(batch_calls.load(Ordering::SeqCst), 1);
+        assert!(
+            cache_files(&cache_dir).unwrap().is_empty(),
+            "batch writes must still prune the cache after all misses are stored"
+        );
+    }
+
+    #[test]
     fn cached_embed_batch_hits_skip_inner() {
         let temp = tempfile::tempdir().unwrap();
         let batch_calls = Arc::new(AtomicUsize::new(0));

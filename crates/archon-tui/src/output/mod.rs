@@ -12,6 +12,7 @@
 mod buffer;
 mod render_cache;
 mod sanitize;
+mod scroll;
 mod thinking;
 mod tool_output;
 

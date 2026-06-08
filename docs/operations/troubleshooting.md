@@ -28,8 +28,9 @@ OOM during parallel rustc. Rebuild with `cargo build --release -j1`.
 ### TUI mouse-wheel scrolling does not work on WSL
 
 Archon auto-enables TUI mouse capture under WSL so the wheel scrolls the
-in-app output pane instead of the unreliable alternate-screen scrollback. To
-force the behavior elsewhere:
+in-app output pane instead of the unreliable alternate-screen scrollback.
+You can also drag or click the in-app scrollbar on the right edge of the
+output pane. To force the behavior elsewhere:
 
 ```bash
 export ARCHON_TUI_MOUSE_CAPTURE=1

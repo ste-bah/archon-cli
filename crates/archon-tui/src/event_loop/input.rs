@@ -1,6 +1,6 @@
 //! Keyboard / mouse / resize `crossterm` event dispatch for the TUI loop.
 
-use crossterm::event::{Event, KeyCode, KeyModifiers, MouseEventKind};
+use crossterm::event::{Event, KeyCode, KeyModifiers};
 
 use crate::app::{App, McpManagerView, should_process_key_event};
 use crate::vim::{VimAction, VimState};
@@ -20,17 +20,7 @@ pub(super) async fn handle_key_event(
     keymap: &crate::keybindings::KeyMap,
 ) {
     match event {
-        Event::Mouse(mouse) => match mouse.kind {
-            MouseEventKind::ScrollUp if app.activity_stream.is_foreground() => {
-                app.activity_stream.scroll_up();
-            }
-            MouseEventKind::ScrollDown if app.activity_stream.is_foreground() => {
-                app.activity_stream.scroll_down();
-            }
-            MouseEventKind::ScrollUp => app.output.scroll_up(3),
-            MouseEventKind::ScrollDown => app.output.scroll_down(3),
-            _ => {}
-        },
+        Event::Mouse(mouse) => super::mouse::handle_mouse_event(app, mouse),
         Event::Key(key) => {
             // Windows emits both Press and Release for each keystroke;
             // process only Press and Repeat to avoid double input.
