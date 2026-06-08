@@ -114,6 +114,9 @@ Default shortcuts:
 - `Esc` — vim normal mode (when vim_mode = true)
 - `Tab` — slash command autocomplete
 - `Up` / `Down` — history navigation
+- `PageUp` / `PageDown` — scroll output
+- `Ctrl-Up` / `Ctrl-Down` — scroll output on WSL/Windows terminals
+- `Ctrl-Left` / `Ctrl-Right` — jump output to top/bottom
 
 ## See also
 

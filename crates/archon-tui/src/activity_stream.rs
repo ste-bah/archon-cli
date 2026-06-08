@@ -319,7 +319,7 @@ pub fn draw_activity_overlay(frame: &mut Frame, app: &App) {
     let area = overlay_area(frame.area());
     frame.render_widget(Clear, area);
     let block = Block::default()
-        .title(" Agent Activity  PgUp/PgDn scroll  Ctrl+End follow  Ctrl+B background ")
+        .title(" Agent Activity  PgUp/PgDn or Ctrl+Up/Down scroll  Ctrl+End follow  Ctrl+B background ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border_active));
     frame.render_widget(block, area);

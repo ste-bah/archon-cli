@@ -19,13 +19,13 @@ pub enum Action {
     HistoryUp,
     /// Down arrow = navigate history down or select next suggestion.
     HistoryDown,
-    /// PageUp = scroll output up by a page.
+    /// PageUp / Ctrl+Up = scroll output up by a page.
     ScrollUp,
-    /// PageDown = scroll output down by a page.
+    /// PageDown / Ctrl+Down = scroll output down by a page.
     ScrollDown,
-    /// Ctrl+Home = scroll to top of output.
+    /// Ctrl+Home / Ctrl+Left = scroll to top of output.
     ScrollTop,
-    /// Ctrl+End = scroll to bottom of output.
+    /// Ctrl+End / Ctrl+Right = scroll to bottom of output.
     ScrollBottom,
     /// `/` = open a slash command (the slash is included in the payload).
     SlashCommand(String),
@@ -116,7 +116,15 @@ impl Default for KeyMap {
             Action::ScrollUp,
         );
         bindings.insert(
+            KeyEvent::new(KeyCode::Up, KeyModifiers::CONTROL),
+            Action::ScrollUp,
+        );
+        bindings.insert(
             KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
+            Action::ScrollDown,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::Down, KeyModifiers::CONTROL),
             Action::ScrollDown,
         );
         bindings.insert(
@@ -124,7 +132,15 @@ impl Default for KeyMap {
             Action::ScrollTop,
         );
         bindings.insert(
+            KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL),
+            Action::ScrollTop,
+        );
+        bindings.insert(
             KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL),
+            Action::ScrollBottom,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL),
             Action::ScrollBottom,
         );
 
@@ -273,10 +289,24 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_up_scrolls_up_for_wsl_terminals() {
+        let km = KeyMap::default();
+        let key = KeyEvent::new(KeyCode::Up, KeyModifiers::CONTROL);
+        assert_eq!(km.resolve(key), Some(&Action::ScrollUp));
+    }
+
+    #[test]
     fn page_down_scrolls_down() {
         let km = KeyMap::default();
         let pgdn = KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE);
         assert_eq!(km.resolve(pgdn), Some(&Action::ScrollDown));
+    }
+
+    #[test]
+    fn ctrl_down_scrolls_down_for_wsl_terminals() {
+        let km = KeyMap::default();
+        let key = KeyEvent::new(KeyCode::Down, KeyModifiers::CONTROL);
+        assert_eq!(km.resolve(key), Some(&Action::ScrollDown));
     }
 
     #[test]
@@ -287,9 +317,23 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_left_scrolls_to_top_for_wsl_terminals() {
+        let km = KeyMap::default();
+        let key = KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL);
+        assert_eq!(km.resolve(key), Some(&Action::ScrollTop));
+    }
+
+    #[test]
     fn ctrl_end_scrolls_to_bottom() {
         let km = KeyMap::default();
         let key = KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL);
+        assert_eq!(km.resolve(key), Some(&Action::ScrollBottom));
+    }
+
+    #[test]
+    fn ctrl_right_scrolls_to_bottom_for_wsl_terminals() {
+        let km = KeyMap::default();
+        let key = KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL);
         assert_eq!(km.resolve(key), Some(&Action::ScrollBottom));
     }
 

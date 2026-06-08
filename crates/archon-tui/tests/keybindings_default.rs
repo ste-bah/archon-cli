@@ -23,6 +23,27 @@ fn page_up_scrolls_up() {
 }
 
 #[test]
+fn ctrl_arrows_scroll_output_for_wsl_terminals() {
+    let km = KeyMap::default();
+    assert_eq!(
+        km.resolve(KeyEvent::new(KeyCode::Up, KeyModifiers::CONTROL)),
+        Some(&Action::ScrollUp)
+    );
+    assert_eq!(
+        km.resolve(KeyEvent::new(KeyCode::Down, KeyModifiers::CONTROL)),
+        Some(&Action::ScrollDown)
+    );
+    assert_eq!(
+        km.resolve(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL)),
+        Some(&Action::ScrollTop)
+    );
+    assert_eq!(
+        km.resolve(KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL)),
+        Some(&Action::ScrollBottom)
+    );
+}
+
+#[test]
 fn slash_opens_command() {
     let km = KeyMap::default();
     let slash = KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE);

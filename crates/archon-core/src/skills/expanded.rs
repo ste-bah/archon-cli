@@ -492,7 +492,9 @@ expanded_skill!(
              Esc       — Dismiss suggestions / double-tap to cancel\n\
              Tab       — Accept autocomplete suggestion\n\
              Up/Down   — History navigation\n\
-             PageUp/Dn — Scroll output\n\n\
+             PageUp/Dn — Scroll output\n\
+             Ctrl+Up/Dn — Scroll output on WSL/Windows terminals\n\
+             Ctrl+Left/Right — Jump output to top/bottom\n\n\
              Vim mode (set [tui] vim_mode = true):\n\
              i/a/I/A   — Enter insert mode\n\
              Esc       — Normal mode\n\
