@@ -158,14 +158,14 @@ pub(super) async fn build(
     };
 
     let learning_cozo_db = {
-        let db_path = crate::command::store_paths::evidence_db_path_for_dir(
-            &working_dir,
-            &["ARCHON_LEARNING_DB_PATH"],
-        );
+        let db_path = crate::command::store_paths::learning_db_path_for_dir(&working_dir);
         if let Some(parent) = db_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        match cozo::DbInstance::new("sqlite", db_path.to_str().unwrap_or(""), "") {
+        match archon_learning::cozo_guard::open_sqlite_guarded(
+            db_path.to_str().unwrap_or(""),
+            "open interactive learning db",
+        ) {
             Ok(db) => {
                 if let Err(e) = archon_pipeline::learning::schema::initialize_learning_schemas(&db)
                 {

@@ -91,7 +91,7 @@ fn record_provider_fallback_decision(
 }
 
 fn open_learning_db() -> Result<DbInstance> {
-    let path = crate::command::store_paths::evidence_db_path(&["ARCHON_LEARNING_DB_PATH"]);
+    let path = crate::command::store_paths::learning_db_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

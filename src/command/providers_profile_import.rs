@@ -235,7 +235,7 @@ fn profile_status(profile: &ProviderAuthProfileRecord) -> &'static str {
 }
 
 fn open_learning_db() -> Result<DbInstance> {
-    crate::command::store_paths::open_evidence_db("learning", &["ARCHON_LEARNING_DB_PATH"])
+    crate::command::store_paths::open_learning_db("learning")
 }
 
 fn secret_fingerprint(value: &str) -> String {

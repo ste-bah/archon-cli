@@ -103,9 +103,7 @@ fn bool_score(value: bool) -> f64 {
 }
 
 fn learning_db_path() -> Result<std::path::PathBuf> {
-    Ok(crate::command::store_paths::evidence_db_path(&[
-        "ARCHON_LEARNING_DB_PATH",
-    ]))
+    Ok(crate::command::store_paths::learning_db_path())
 }
 
 fn open_learning_db(path: &std::path::Path) -> Result<DbInstance> {

@@ -46,7 +46,7 @@ flowchart TB
 |---|---|---|
 | Reasoning Quality | `~/.archon/reasoning-quality/` | JSONL events plus Cozo indexes; raw text off by default. |
 | World Model | `~/.archon/world-model/` | JSONL rotates at 500 MB, raw rows 90 days, summaries retained. |
-| Learning | `~/.archon/learning.db` | Cozo governed-learning events and proposals. |
+| Learning | `<workspace>/.archon/learning-state.db` | Cozo governed-learning events and proposals. |
 | Self-trust | `.archon/self-calibration/trust/self-trust.json` | Small JSON counters, file-locked updates. |
 | Sessions | `~/.archon/sessions/` | Session transcripts and activity logs. |
 

@@ -254,6 +254,8 @@ fn provider_runtime_records(
 
 fn learning_db_candidates(cwd: &Path, paths: &WebRuntimePaths) -> Vec<PathBuf> {
     let mut candidates = vec![
+        cwd.join(".archon/learning-state.db"),
+        paths.archon_data.join("learning-state.db"),
         paths.archon_data.join("learning.db"),
         cwd.join(".archon/learning.db"),
     ];

@@ -78,8 +78,9 @@ pub(crate) struct SlashCommandContext {
     ///
     /// Governed writer census: permission events, permission-denial ledger
     /// signals, agent performance ledger, provider incident ledger, sandbox
-    /// audit/runtime events, and reasoning-quality runtime rows must use this
-    /// handle rather than the project `.archon/learning.db` handle above.
+    /// audit/runtime events, and reasoning-quality runtime rows use this
+    /// handle. It defaults to the session learning store, not the shared docs
+    /// evidence DB, so an idle TUI does not pin the document/video store open.
     pub(crate) governed_learning_db: Option<Arc<cozo::DbInstance>>,
     /// GNN auto-trainer Arc — Some when the background loop is running.
     /// `/learning-status` reads live state from this; None means the trainer

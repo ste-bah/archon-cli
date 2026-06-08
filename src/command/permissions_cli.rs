@@ -227,8 +227,7 @@ fn format_counts(counts: &BTreeMap<String, usize>) -> String {
 }
 
 fn open_learning_db() -> Result<DbInstance> {
-    let db =
-        crate::command::store_paths::open_evidence_db("learning", &["ARCHON_LEARNING_DB_PATH"])?;
+    let db = crate::command::store_paths::open_learning_db("learning")?;
     archon_learning::schema::ensure_learning_schema(&db)?;
     Ok(db)
 }

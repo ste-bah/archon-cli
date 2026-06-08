@@ -445,8 +445,7 @@ fn event_type_for(category: &str) -> archon_learning::models::LearningEventType 
 }
 
 fn open_learning_db() -> Result<DbInstance> {
-    let db =
-        crate::command::store_paths::open_evidence_db("learning", &["ARCHON_LEARNING_DB_PATH"])?;
+    let db = crate::command::store_paths::open_learning_db("learning")?;
     archon_learning::schema::ensure_learning_schema(&db)?;
     Ok(db)
 }

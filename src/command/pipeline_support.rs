@@ -306,8 +306,7 @@ fn apply_autonomous_learning_policy(
 }
 
 fn open_pipeline_learning_db(cwd: &Path) -> Option<Arc<cozo::DbInstance>> {
-    let db_path =
-        crate::command::store_paths::evidence_db_path_for_dir(cwd, &["ARCHON_LEARNING_DB_PATH"]);
+    let db_path = crate::command::store_paths::learning_db_path_for_dir(cwd);
     open_pipeline_learning_db_at(cwd, &db_path)
 }
 
@@ -391,15 +390,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pipeline_learning_schema_can_share_sqlite_evidence_store() {
+    fn pipeline_learning_schema_defaults_to_project_learning_store() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let db_path = temp.path().join(".archon").join("archon-data.db");
-        let db = open_pipeline_learning_db_at(temp.path(), &db_path).expect("pipeline db");
+        let db = open_pipeline_learning_db(temp.path()).expect("pipeline db");
 
         archon_learning::schema::ensure_learning_schema(db.as_ref())
             .expect("governed learning schema");
 
-        assert!(db_path.exists());
-        assert!(!temp.path().join(".archon").join("learning.db").exists());
+        assert!(
+            temp.path()
+                .join(".archon")
+                .join("learning-state.db")
+                .exists()
+        );
+        assert!(!temp.path().join(".archon").join("archon-data.db").exists());
     }
 }

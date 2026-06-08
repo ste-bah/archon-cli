@@ -84,10 +84,7 @@ fn session_sandbox_backend(
 }
 
 fn open_governed_learning_db(working_dir: &std::path::Path) -> Option<Arc<cozo::DbInstance>> {
-    let db_path = std::env::var_os("ARCHON_LEARNING_DB_PATH")
-        .or_else(|| std::env::var_os("ARCHON_EVIDENCE_DB_PATH"))
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| working_dir.join(".archon").join("archon-data.db"));
+    let db_path = crate::command::store_paths::learning_db_path_for_dir(working_dir);
     if let Some(parent) = db_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }

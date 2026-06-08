@@ -17,7 +17,7 @@ pub(crate) async fn run_learning_tick() -> Result<()> {
 }
 
 fn learning_db_path() -> PathBuf {
-    crate::command::store_paths::evidence_db_path(&["ARCHON_LEARNING_DB_PATH"])
+    crate::command::store_paths::learning_db_path()
 }
 
 fn open_learning_db(path: &Path) -> Result<DbInstance> {

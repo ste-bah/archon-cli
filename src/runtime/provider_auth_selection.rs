@@ -48,7 +48,7 @@ pub(crate) fn select_provider_auth_profile_from_db(
 }
 
 pub(crate) fn selected_provider_auth_profile_id(provider_id: &str) -> Option<String> {
-    let path = crate::command::store_paths::evidence_db_path(&["ARCHON_LEARNING_DB_PATH"]);
+    let path = crate::command::store_paths::learning_db_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok()?;
     }

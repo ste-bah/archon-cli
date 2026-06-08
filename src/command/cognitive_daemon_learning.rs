@@ -180,8 +180,7 @@ struct TrainingRunStats {
 }
 
 fn open_learning_db(cwd: &Path) -> anyhow::Result<Arc<cozo::DbInstance>> {
-    let path =
-        crate::command::store_paths::evidence_db_path_for_dir(cwd, &["ARCHON_LEARNING_DB_PATH"]);
+    let path = crate::command::store_paths::learning_db_path_for_dir(cwd);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

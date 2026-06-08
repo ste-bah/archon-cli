@@ -219,7 +219,7 @@ pub(crate) fn maybe_migrate_legacy_pipeline_learning(
     target_path: &Path,
     target: &DbInstance,
 ) -> Result<Option<PipelineLearningMigrationReport>> {
-    if evidence_db_override_is_set() {
+    if learning_db_override_is_set() {
         return Ok(None);
     }
 
@@ -288,10 +288,8 @@ pub(crate) fn maybe_migrate_legacy_pipeline_learning_with_log(
     }
 }
 
-fn evidence_db_override_is_set() -> bool {
-    ["ARCHON_LEARNING_DB_PATH", "ARCHON_EVIDENCE_DB_PATH"]
-        .iter()
-        .any(|key| std::env::var_os(key).is_some_and(|value| !value.is_empty()))
+fn learning_db_override_is_set() -> bool {
+    std::env::var_os("ARCHON_LEARNING_DB_PATH").is_some_and(|value| !value.is_empty())
 }
 
 fn legacy_pipeline_learning_path(cwd: &Path) -> PathBuf {
@@ -396,7 +394,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn migrates_legacy_rocksdb_rows_into_sqlite_evidence_store_once() {
+    fn migrates_legacy_rocksdb_rows_into_sqlite_learning_store_once() {
         let temp = tempfile::tempdir().expect("tempdir");
         let cwd = temp.path();
         let source_path = legacy_pipeline_learning_path(cwd);

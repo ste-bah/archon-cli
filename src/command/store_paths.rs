@@ -12,6 +12,7 @@ use archon_core::config::ArchonConfig;
 use cozo::DbInstance;
 
 pub(crate) const EVIDENCE_DB_ENV: &str = "ARCHON_EVIDENCE_DB_PATH";
+pub(crate) const LEARNING_DB_ENV: &str = "ARCHON_LEARNING_DB_PATH";
 pub(crate) const SESSION_DB_ENV: &str = "ARCHON_SESSION_DB_PATH";
 
 pub(crate) fn project_archon_dir_for(cwd: &Path) -> PathBuf {
@@ -37,6 +38,21 @@ pub(crate) fn evidence_db_path(overrides: &[&str]) -> PathBuf {
 
 pub(crate) fn open_evidence_db(label: &str, overrides: &[&str]) -> Result<DbInstance> {
     open_sqlite_db(&evidence_db_path(overrides), label)
+}
+
+pub(crate) fn learning_db_path_for_dir(cwd: &Path) -> PathBuf {
+    std::env::var_os(LEARNING_DB_ENV)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| project_archon_dir_for(cwd).join("learning-state.db"))
+}
+
+pub(crate) fn learning_db_path() -> PathBuf {
+    learning_db_path_for_dir(&std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+}
+
+pub(crate) fn open_learning_db(label: &str) -> Result<DbInstance> {
+    open_sqlite_db(&learning_db_path(), label)
 }
 
 pub(crate) fn session_db_path(config: &ArchonConfig) -> PathBuf {

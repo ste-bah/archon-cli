@@ -99,7 +99,14 @@ fn learning_summary(paths: &WebRuntimePaths) -> LearningSummary {
     let recent_sessions = recent_dir_names(&sessions, 12);
     LearningSummary {
         stores: vec![
-            probe("local learning db", paths.cwd.join(".archon/learning.db")),
+            probe(
+                "local learning-state db",
+                paths.cwd.join(".archon/learning-state.db"),
+            ),
+            probe(
+                "legacy local learning db",
+                paths.cwd.join(".archon/learning.db"),
+            ),
             probe("session activity", sessions),
             probe("memory database", paths.memory_db.clone()),
             probe("reasoning quality", paths.reasoning_quality_root.clone()),

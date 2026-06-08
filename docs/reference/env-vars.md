@@ -44,7 +44,7 @@
 | `ARCHON_EVIDENCE_DB_PATH` | Override the shared project evidence store; otherwise evidence surfaces use `<workspace>/.archon/archon-data.db` |
 | `ARCHON_COMPLETION_DB_PATH` | Override completion evidence store path only; otherwise `ARCHON_EVIDENCE_DB_PATH` or the shared project evidence store is used |
 | `ARCHON_DOCS_DB_PATH` | Override docs evidence store path only; otherwise `ARCHON_EVIDENCE_DB_PATH` or the shared project evidence store is used |
-| `ARCHON_LEARNING_DB_PATH` | Override governed/pipeline-learning evidence store path only; otherwise `ARCHON_EVIDENCE_DB_PATH` or the shared project evidence store is used. Setting this disables automatic migration from legacy `<workspace>/.archon/learning.db` |
+| `ARCHON_LEARNING_DB_PATH` | Override governed/pipeline-learning store path only; otherwise learning telemetry uses `<workspace>/.archon/learning-state.db` so idle TUI sessions do not pin the shared docs/video evidence DB |
 | `ARCHON_SESSION_DB_PATH` | Override session database path; otherwise `[session].db_path`, then platform data dir + `archon/sessions/sessions.db` |
 | `ARCHON_SESSIONS_DIR` | Override session directory |
 | `ARCHON_NO_TUI` | Force headless mode |

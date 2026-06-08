@@ -179,16 +179,15 @@ when you intentionally want to split a surface into a separate store:
 | Meaning | `ARCHON_MEANING_DB_PATH`, then `ARCHON_KB_DB_PATH`, then shared evidence store |
 | Constellation | `ARCHON_CONSTELLATION_DB_PATH`, then `ARCHON_MEANING_DB_PATH`, then `ARCHON_KB_DB_PATH`, then shared evidence store |
 | Completion integrity | `ARCHON_COMPLETION_DB_PATH`, then shared evidence store |
-| Game-theory and governed learning | `ARCHON_LEARNING_DB_PATH`, then shared evidence store |
+| Game-theory and governed learning | `ARCHON_LEARNING_DB_PATH`, then `<workspace>/.archon/learning-state.db` |
 | Policy | `/etc/archon/policy.toml`, `~/.archon/policy.toml`, `<workspace>/.archon/policy.toml` |
 
-On startup, pipeline learning also checks for the legacy project-local RocksDB
-store at `<workspace>/.archon/learning.db`. If the shared evidence store is
-using the default path, Archon copies legacy SONA/GNN rows into
-`<workspace>/.archon/archon-data.db` once and writes
-`<workspace>/.archon/learning.db.migrated-to-archon-data`. Explicit
-`ARCHON_LEARNING_DB_PATH` or `ARCHON_EVIDENCE_DB_PATH` overrides disable this
-automatic migration.
+Interactive sessions keep governed and pipeline-learning handles on
+`<workspace>/.archon/learning-state.db` by default. This prevents an idle TUI
+from holding the same Cozo/SQLite file used by docs, videos, embeddings, and
+other evidence writers. The `learning-state.db` name also avoids colliding with
+legacy RocksDB directories named `learning.db`. Set `ARCHON_LEARNING_DB_PATH`
+only when you intentionally want to move learning telemetry elsewhere.
 
 ## Project Initialisation
 
