@@ -45,7 +45,10 @@ pub enum ResponseInputItem {
     #[serde(rename = "function_call_output")]
     FunctionCallOutput { call_id: String, output: String },
     #[serde(rename = "reasoning")]
-    Reasoning { encrypted_content: String },
+    Reasoning {
+        encrypted_content: String,
+        summary: Vec<ReasoningSummaryPart>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -253,7 +256,7 @@ pub enum ResponseOutputItem {
     Unknown,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReasoningSummaryPart {
     #[serde(rename = "type")]
     pub kind: String,

@@ -7,7 +7,8 @@
     "input": [
       {
         "type": "reasoning",
-        "encrypted_content": "{{REASONING_ENCRYPTED}}"
+        "encrypted_content": "{{REASONING_ENCRYPTED}}",
+        "summary": []
       },
       {
         "type": "message",

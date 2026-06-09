@@ -74,6 +74,7 @@ pub fn messages_to_responses_input(req: &LlmRequest) -> Result<Vec<ResponseInput
             index,
             ResponseInputItem::Reasoning {
                 encrypted_content: blob,
+                summary: Vec::new(),
             },
         );
     }

@@ -17,8 +17,9 @@ fn request_reasoning_round_trips_through_stream_event() {
     assert!(matches!(
         input[0],
         ResponseInputItem::Reasoning {
-            ref encrypted_content
-        } if encrypted_content == "opaque"
+            ref encrypted_content,
+            ref summary,
+        } if encrypted_content == "opaque" && summary.is_empty()
     ));
 
     let events = process_responses_stream(vec![

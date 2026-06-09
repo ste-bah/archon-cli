@@ -75,10 +75,12 @@ fn request_serializes_reasoning_input_item() {
         0,
         ResponseInputItem::Reasoning {
             encrypted_content: "opaque".into(),
+            summary: Vec::new(),
         },
     );
 
     let value = serde_json::to_value(req).expect("serialize");
     assert_eq!(value["input"][0]["type"], "reasoning");
     assert_eq!(value["input"][0]["encrypted_content"], "opaque");
+    assert_eq!(value["input"][0]["summary"], serde_json::json!([]));
 }
