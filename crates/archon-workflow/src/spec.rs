@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{WorkflowError, WorkflowResult};
-use crate::generated::normalize_generated_spec;
+use crate::generated::{normalize_generated_spec, sanitize_generated_value};
 use crate::spec_deser::{
     deserialize_learning_hooks, deserialize_permissions, deserialize_provider_tiers,
     deserialize_quality_gates,
@@ -183,7 +183,9 @@ impl WorkflowSpec {
     }
 
     pub fn from_generated_yaml(input: &str, fallback_task: &str) -> WorkflowResult<Self> {
-        let mut spec: Self = serde_yaml_ng::from_str(input)?;
+        let mut value: serde_json::Value = serde_yaml_ng::from_str(input)?;
+        sanitize_generated_value(&mut value);
+        let mut spec: Self = serde_json::from_value(value)?;
         if spec.task.trim().is_empty() {
             spec.task = fallback_task.to_string();
         }

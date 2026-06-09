@@ -6,6 +6,85 @@ use crate::spec::{
     ProviderTier, RetryPolicy, StageKind, StageSpec, WorkflowSpec, has_decorative_fanout_keys,
 };
 
+pub(crate) fn sanitize_generated_value(value: &mut Value) {
+    let Some(stages) = value.get_mut("stages").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for stage in stages {
+        sanitize_stage_provider_tier(stage);
+    }
+}
+
+fn sanitize_stage_provider_tier(stage: &mut Value) {
+    let Some(object) = stage.as_object_mut() else {
+        return;
+    };
+    let Some(raw) = object.get("provider_tier") else {
+        return;
+    };
+    if valid_provider_tier_value(raw) {
+        return;
+    }
+    let tier = raw
+        .as_str()
+        .and_then(stage_provider_tier_alias)
+        .unwrap_or_else(|| inferred_stage_provider_tier(object));
+    object.insert("provider_tier".into(), Value::String(tier.into()));
+}
+
+fn valid_provider_tier_value(value: &Value) -> bool {
+    value.as_str().is_some_and(|tier| {
+        serde_json::from_value::<ProviderTier>(Value::String(tier.into())).is_ok()
+    })
+}
+
+fn stage_provider_tier_alias(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "executor" | "execution" | "implementer" | "implementation" | "developer" | "engineer"
+        | "builder" | "writer" | "patcher" => Some("coder"),
+        "reviewer" | "auditor" | "skeptic" | "qa" | "quality" | "verifier" => Some("critic"),
+        "synthesizer" | "synthesis" | "summarizer" | "reporter" => Some("reducer"),
+        "research" | "analyst" | "analysis" | "investigator" => Some("researcher"),
+        "orchestrator" | "coordinator" => Some("planner"),
+        "fast" | "low_cost" => Some("cheap"),
+        _ => None,
+    }
+}
+
+fn inferred_stage_provider_tier(object: &serde_json::Map<String, Value>) -> &'static str {
+    let text = format!(
+        "{} {} {}",
+        object.get("id").and_then(Value::as_str).unwrap_or_default(),
+        object
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        object
+            .get("task")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    )
+    .to_ascii_lowercase();
+    if contains_any(
+        &text,
+        &["implement", "remediate", "repair", "edit", "patch", "code"],
+    ) {
+        "coder"
+    } else if contains_any(&text, &["review", "audit", "quality", "critic", "verify"]) {
+        "critic"
+    } else if contains_any(&text, &["reduce", "synthesis", "synthesize", "report"]) {
+        "reducer"
+    } else if contains_any(&text, &["research", "investigate", "evidence"]) {
+        "researcher"
+    } else {
+        "planner"
+    }
+}
+
+fn contains_any(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
+}
+
 pub fn normalize_generated_spec(spec: &mut WorkflowSpec) {
     neutralize_provider_tiers(spec);
     normalize_under_specified_stages(spec);

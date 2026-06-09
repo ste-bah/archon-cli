@@ -427,3 +427,54 @@ stages:
         Some("Tool")
     );
 }
+
+#[test]
+fn generated_specs_normalize_unknown_stage_provider_tier_aliases() {
+    // Reproduces live planner output that used provider_tier: executor. Stage
+    // provider_tier is strongly typed, so this must be sanitized before normal
+    // generated-spec deserialization and validation.
+    let yaml = r#"
+schema: archon.workflow.v1
+name: generated-unknown-stage-tier
+task: Implement the decomposed PRD.
+stages:
+  - id: discover
+    kind: agent
+    provider_tier: planner
+  - id: implement_t001
+    kind: implementation
+    provider_tier: executor
+    target_files:
+      - crates/example/src/lib.rs
+    depends_on: [discover]
+"#;
+    let spec = WorkflowSpec::from_generated_yaml(yaml, "Fallback task").unwrap();
+    let stage = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "implement_t001")
+        .unwrap();
+    assert_eq!(stage.provider_tier, Some(ProviderTier::Coder));
+    assert_eq!(
+        stage.expected_target_files,
+        vec!["crates/example/src/lib.rs".to_string()]
+    );
+    assert!(WorkflowSpec::from_yaml(yaml).is_err());
+}
+
+#[test]
+fn generated_specs_infer_malformed_stage_provider_tier() {
+    let yaml = r#"
+schema: archon.workflow.v1
+name: generated-malformed-stage-tier
+task: Review the implementation.
+stages:
+  - id: adversarial_review
+    kind: agent
+    provider_tier:
+      role: reviewer
+"#;
+    let spec = WorkflowSpec::from_generated_yaml(yaml, "Fallback task").unwrap();
+    assert_eq!(spec.stages[0].provider_tier, Some(ProviderTier::Critic));
+    assert!(WorkflowSpec::from_yaml(yaml).is_err());
+}
