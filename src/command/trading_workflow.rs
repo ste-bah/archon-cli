@@ -1,12 +1,16 @@
 use anyhow::{Context, Result, anyhow};
 use archon_workflow::{
-    ArtifactPolicy, ProviderTier, RetryPolicy, StageKind, StageSpec, WorkflowSpec,
+    ArtifactPolicy, ProviderTier, ReducerKind, RetryPolicy, StageKind, StageSpec, WorkflowSpec,
 };
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::cli_args::TradingCliWorkflowAction;
+
+#[cfg(test)]
+#[path = "trading_workflow_tests.rs"]
+mod tests;
 
 pub(crate) fn render_workflow(action: &TradingCliWorkflowAction) -> Result<String> {
     match action {
@@ -99,7 +103,12 @@ fn build_spec(input: WorkflowPlanInput<'_>, items: Vec<Value>) -> Result<Workflo
                     "tasks": path_value(input.tasks)
                 }),
             ),
-            quality_gate(),
+            remediation_inventory(input),
+            remediation_fanout(),
+            post_remediation_tests(input),
+            post_remediation_review(input),
+            acceptance_report(),
+            quality_gate("acceptance-report"),
         ],
         artifact_policy: ArtifactPolicy::default(),
         permissions: permissions(input.repository),
@@ -164,17 +173,115 @@ fn implementation_fanout(items: Vec<Value>) -> StageSpec {
     stage
 }
 
-fn quality_gate() -> StageSpec {
+fn quality_gate(depends_on: &str) -> StageSpec {
     let mut gate = stage(
         "trading-lab-quality",
         StageKind::QualityGate,
         ProviderTier::Critic,
-        vec!["adversarial-review"],
-        "Reject if implementation evidence, tests, docs, or safety gates are missing.".into(),
+        vec![depends_on],
+        "Reject if post-remediation evidence, tests, docs, or safety gates are missing.".into(),
         json!({ "threshold": 0.75 }),
     );
     gate.agent = None;
     gate
+}
+
+fn remediation_inventory(input: WorkflowPlanInput<'_>) -> StageSpec {
+    let mut stage = stage(
+        "remediation-inventory",
+        StageKind::Agent,
+        ProviderTier::Critic,
+        vec!["adversarial-review"],
+        format!(
+            "Read the adversarial review and emit a JSON/YAML object of the exact form {{\"items\": [...]}}. Create one item per failed, unverifiable, timeout, file-size, provider-neutrality, missing-test, or residual blocker. Each item must include finding_id, related_task_id, target_files, failure, required_fix, and required_tests. If there are no blockers, emit exactly {{\"items\": []}}. Use PRD {}, tasks {}, and repository evidence; do not invent target files.",
+            path_label(input.prd),
+            path_label(input.tasks)
+        ),
+        json!({
+            "repository": input.repository.display().to_string(),
+            "prd": path_value(input.prd),
+            "tasks": path_value(input.tasks)
+        }),
+    );
+    stage.extra.insert("outputs".into(), json!(["items"]));
+    stage
+        .extra
+        .insert("deterministic_empty_items".into(), json!(true));
+    stage
+}
+
+fn remediation_fanout() -> StageSpec {
+    let mut stage = stage(
+        "remediate-failed-findings",
+        StageKind::Fanout,
+        ProviderTier::Coder,
+        vec!["remediation-inventory"],
+        "For each remediation item, inspect the cited failure, edit only target_files, add or update required focused tests, and report exact files changed. Do not broaden scope beyond the finding. If no remediation items exist, this stage is a no-op.".into(),
+        json!({ "allow_empty_items": true }),
+    );
+    stage.foreach = Some("${remediation-inventory.items}".into());
+    stage.item_kind = Some(StageKind::Implementation);
+    stage.max_parallelism = Some(1);
+    stage.retry.max_attempts = 1;
+    stage.extra.insert("allow_empty_items".into(), json!(true));
+    stage
+}
+
+fn post_remediation_tests(input: WorkflowPlanInput<'_>) -> StageSpec {
+    let mut stage = stage(
+        "post-remediation-focused-tests",
+        StageKind::Agent,
+        ProviderTier::Coder,
+        vec!["remediate-failed-findings", "remediation-inventory"],
+        "Run the focused tests and checks required by the remediation items. If no remediation items exist, verify that the initial adversarial review was clean. Return structured status: verified only when commands pass; failed, failed_timeout, or unverifiable when they do not. Include exact commands and output summaries.".into(),
+        json!({
+            "repository": input.repository.display().to_string(),
+            "prd": path_value(input.prd),
+            "tasks": path_value(input.tasks)
+        }),
+    );
+    stage.extra.insert(
+        "allowed_tools".into(),
+        json!(["Read", "Grep", "Glob", "Bash"]),
+    );
+    stage
+}
+
+fn post_remediation_review(input: WorkflowPlanInput<'_>) -> StageSpec {
+    stage(
+        "post-remediation-adversarial-review",
+        StageKind::Agent,
+        ProviderTier::Critic,
+        vec![
+            "adversarial-review",
+            "remediation-inventory",
+            "remediate-failed-findings",
+            "post-remediation-focused-tests",
+        ],
+        "Re-run adversarial verification against the original findings and remediated code. Return status: verified only if every blocker is fixed or no remediation was needed. Return status: failed or unverifiable with concrete file/test evidence for any remaining blocker. Do not quote stale failed JSON as the current status unless the failure still exists.".into(),
+        json!({
+            "repository": input.repository.display().to_string(),
+            "prd": path_value(input.prd),
+            "tasks": path_value(input.tasks)
+        }),
+    )
+}
+
+fn acceptance_report() -> StageSpec {
+    let mut stage = stage(
+        "acceptance-report",
+        StageKind::Reduce,
+        ProviderTier::Reducer,
+        vec![
+            "post-remediation-focused-tests",
+            "post-remediation-adversarial-review",
+        ],
+        "Synthesize final acceptance from post-remediation test and review evidence only. Preserve remaining blockers; do not claim completion when any current evidence reports failed, timeout, or unverifiable status.".into(),
+        json!({}),
+    );
+    stage.agent = None;
+    stage.reducer = Some(ReducerKind::EvidenceWeightedReport);
+    stage
 }
 
 fn work_items(input: WorkflowPlanInput<'_>) -> Result<Vec<Value>> {

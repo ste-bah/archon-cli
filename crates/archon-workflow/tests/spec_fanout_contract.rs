@@ -120,6 +120,111 @@ stages:
 }
 
 #[test]
+fn generated_write_workflow_gets_remediation_loop_before_quality_gate() {
+    let yaml = r#"
+schema: archon.workflow.v1
+name: generated-write-without-repair
+task: Implement the decomposed PRD.
+stages:
+  - id: task_inventory
+    kind: agent
+    outputs: [items]
+  - id: implement_task
+    kind: fanout
+    task: Implement only the missing work for each item and modify repository files directly.
+    provider_tier: coder
+    foreach: "${task_inventory.items}"
+    depends_on: [task_inventory]
+  - id: adversarial_review
+    kind: agent
+    provider_tier: critic
+    depends_on: [implement_task]
+  - id: final_synthesis
+    kind: reduce
+    depends_on: [adversarial_review]
+  - id: quality_gate
+    kind: quality_gate
+    depends_on: [final_synthesis]
+"#;
+    let spec = WorkflowSpec::from_generated_yaml(yaml, "Fallback task").unwrap();
+    let ids = spec
+        .stages
+        .iter()
+        .map(|stage| stage.id.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        ids.windows(6).any(|window| {
+            window
+                == [
+                    "remediation-inventory",
+                    "remediate-failed-findings",
+                    "post-remediation-focused-tests",
+                    "post-remediation-adversarial-review",
+                    "post-remediation-acceptance-report",
+                    "quality_gate",
+                ]
+        }),
+        "ids={ids:?}"
+    );
+    let repair = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "remediate-failed-findings")
+        .unwrap();
+    assert_eq!(
+        repair.foreach.as_deref(),
+        Some("${remediation-inventory.items}")
+    );
+    assert_eq!(
+        repair.item_kind,
+        Some(archon_workflow::StageKind::Implementation)
+    );
+    assert_eq!(
+        repair
+            .extra
+            .get("allow_empty_items")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    let inventory = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "remediation-inventory")
+        .unwrap();
+    assert_eq!(
+        inventory.depends_on,
+        vec![
+            "final_synthesis".to_string(),
+            "adversarial_review".to_string()
+        ]
+    );
+    let post_review = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "post-remediation-adversarial-review")
+        .unwrap();
+    assert!(
+        post_review
+            .depends_on
+            .contains(&"remediation-inventory".to_string())
+    );
+    assert!(
+        post_review
+            .depends_on
+            .contains(&"adversarial_review".to_string())
+    );
+    let gate = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "quality_gate")
+        .unwrap();
+    assert_eq!(
+        gate.depends_on,
+        vec!["post-remediation-acceptance-report".to_string()]
+    );
+}
+
+#[test]
 fn generated_non_fanout_stage_drops_invalid_item_kind() {
     // Reproduces live planner output that attached `item_kind: implementation`
     // to a read-only review/agent stage. User-authored specs stay strict, but

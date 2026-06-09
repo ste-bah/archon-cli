@@ -13,6 +13,9 @@ use crate::spec::StageSpec;
 /// downstream `foreach` fan-outs would fail-fast with no items.
 pub(crate) fn deterministic_stage_output(stage: &StageSpec) -> String {
     if crate::spec::stage_declares_items_producer(stage) {
+        if deterministic_empty_items(stage) {
+            return r#"{"items":[]}"#.to_string();
+        }
         return format!(
             r#"{{"items":[{{"stage":"{}","deterministic":true}}]}}"#,
             stage.id
@@ -24,6 +27,15 @@ pub(crate) fn deterministic_stage_output(stage: &StageSpec) -> String {
         stage.kind,
         stage.agent.as_deref().unwrap_or("none")
     )
+}
+
+fn deterministic_empty_items(stage: &StageSpec) -> bool {
+    stage
+        .extra
+        .get("deterministic_empty_items")
+        .or_else(|| stage.input.get("deterministic_empty_items"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
 }
 
 /// Reject a stage output body that self-reports a blocked / missing-evidence

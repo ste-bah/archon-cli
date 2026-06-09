@@ -5,6 +5,13 @@ use archon_workflow::{
     WorkflowSpec, WorkflowStageRunner, WorkflowStore, classify_provider, stage::source_input_hash,
 };
 
+fn write_permissive_policy() -> WorkflowPolicy {
+    WorkflowPolicy {
+        require_human_for_dangerous_tools: false,
+        ..WorkflowPolicy::default()
+    }
+}
+
 #[test]
 fn provider_tiers_cover_supported_families() {
     for (input, family) in [
@@ -287,6 +294,111 @@ async fn reject_verdict_fails_quality_gate() {
     assert_eq!(
         finished.stages.get("review").unwrap().status,
         StageStatus::Failed
+    );
+}
+
+#[tokio::test]
+async fn failed_verification_output_fails_quality_gate_not_review_stage() {
+    struct FailedFindingRunner;
+
+    #[async_trait::async_trait]
+    impl WorkflowStageRunner for FailedFindingRunner {
+        async fn run_stage(
+            &self,
+            _request: StageRunRequest,
+        ) -> archon_workflow::WorkflowResult<StageRunOutput> {
+            Ok(StageRunOutput::markdown(
+                r#"{"unit_id":"VU-1","status":"failed","summary":"real blocker"}"#,
+            ))
+        }
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let executor = WorkflowExecutor::new(store.clone(), WorkflowPolicy::default());
+    let spec = WorkflowSpec::from_yaml(
+        r#"
+schema: archon.workflow.v1
+name: failed-verification-gate
+task: Check failed verification behavior.
+stages:
+  - id: review
+    kind: agent
+    agent: critic
+  - id: quality
+    kind: quality_gate
+    depends_on: [review]
+"#,
+    )
+    .unwrap();
+    let run = executor.start(spec).unwrap();
+    let report = executor
+        .execute_with_runner(run.clone(), &FailedFindingRunner)
+        .await
+        .unwrap();
+    assert_eq!(report.failed, 1);
+
+    let finished = store.load_state(&run.id).unwrap();
+    assert_eq!(
+        finished.stages.get("review").unwrap().status,
+        StageStatus::Accepted
+    );
+    assert_eq!(
+        finished.stages.get("quality").unwrap().status,
+        StageStatus::Failed
+    );
+}
+
+#[tokio::test]
+async fn remediation_fanout_allows_empty_items_when_explicit() {
+    struct EmptyInventoryRunner;
+
+    #[async_trait::async_trait]
+    impl WorkflowStageRunner for EmptyInventoryRunner {
+        async fn run_stage(
+            &self,
+            request: StageRunRequest,
+        ) -> archon_workflow::WorkflowResult<StageRunOutput> {
+            if request.stage_id == "inventory" {
+                return Ok(StageRunOutput::markdown(r#"{"items":[]}"#));
+            }
+            Ok(StageRunOutput::markdown("unexpected remediation item"))
+        }
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let executor = WorkflowExecutor::new(store.clone(), write_permissive_policy());
+    let spec = WorkflowSpec::from_yaml(
+        r#"
+schema: archon.workflow.v1
+name: empty-remediation
+task: No-op clean remediation.
+stages:
+  - id: inventory
+    kind: agent
+    agent: critic
+    outputs: [items]
+  - id: remediate
+    kind: fanout
+    foreach: "${inventory.items}"
+    item_kind: implementation
+    allow_empty_items: true
+    depends_on: [inventory]
+"#,
+    )
+    .unwrap();
+    let run = executor.start(spec).unwrap();
+    let report = executor
+        .execute_with_runner(run.clone(), &EmptyInventoryRunner)
+        .await
+        .unwrap();
+    assert_eq!(report.failed, 0);
+
+    let finished = store.load_state(&run.id).unwrap();
+    assert_eq!(
+        finished.stages.get("remediate").unwrap().status,
+        StageStatus::Accepted
     );
 }
 

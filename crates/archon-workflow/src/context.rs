@@ -65,10 +65,15 @@ pub fn fanout_items(
     // fail fast instead of collapsing to a single synthetic item that the agent
     // would (correctly) reject as missing evidence.
     if let Some(dep) = foreach_dependency(stage) {
+        let allow_empty = fanout_allows_empty_items(stage);
         return match dependency_items(store, run, stage)? {
-            Some(items) => Ok(items),
+            Some(items) if !items.is_empty() || allow_empty => Ok(items),
+            Some(_) => Err(WorkflowError::InvalidFanout(format!(
+                "fanout stage '{}' declares `foreach` over '{dep}' but that producer emitted an empty `items:` list",
+                stage.id
+            ))),
             None => Err(WorkflowError::InvalidFanout(format!(
-                "fanout stage '{}' declares `foreach` over '{dep}' but that producer emitted no parseable non-empty `items:` structure",
+                "fanout stage '{}' declares `foreach` over '{dep}' but that producer emitted no parseable `items:` structure",
                 stage.id
             ))),
         };
@@ -117,6 +122,11 @@ pub fn quality_gate_failure(
                     "dependency `{dep}` reported blocked: {reason}"
                 )));
             }
+            if let Some(reason) = output_reports_failed_verification(&body) {
+                return Ok(Some(format!(
+                    "dependency `{dep}` reported failed verification: {reason}"
+                )));
+            }
         }
     }
     if saw_artifact {
@@ -155,6 +165,12 @@ pub fn output_reports_blocked(body: &str) -> Option<String> {
     None
 }
 
+pub fn output_reports_failed_verification(body: &str) -> Option<String> {
+    let lower = body.to_ascii_lowercase();
+    (json_reports_failed_verification(body) || reports_failed_verification_status(&lower))
+        .then(|| "agent output declares failed or unverifiable verification status".to_string())
+}
+
 fn reports_reject_verdict(lower: &str) -> bool {
     if lower.contains("\"verdict\":\"reject\"")
         || lower.contains("\"verdict\": \"reject\"")
@@ -185,11 +201,127 @@ fn reports_explicit_blocked_status(lower: &str) -> bool {
     })
 }
 
+fn reports_failed_verification_status(lower: &str) -> bool {
+    contains_blocking_structured_field(lower)
+        || lower.lines().any(|line| {
+            let normalized = normalized_status_line(line);
+            starts_with_blocking_status_field(&normalized)
+        })
+}
+
+fn json_reports_failed_verification(body: &str) -> bool {
+    serde_json::from_str::<Value>(body)
+        .ok()
+        .is_some_and(|value| value_reports_failed_verification(&value))
+}
+
+fn value_reports_failed_verification(value: &Value) -> bool {
+    match value {
+        Value::Object(fields) => fields.iter().any(|(field, value)| {
+            (is_verification_status_field(field) && value_is_blocking_status(value))
+                || value_reports_failed_verification(value)
+        }),
+        Value::Array(values) => values.iter().any(value_reports_failed_verification),
+        _ => false,
+    }
+}
+
+fn is_verification_status_field(field: &str) -> bool {
+    matches!(
+        field,
+        "status"
+            | "verification_status"
+            | "overall_status"
+            | "overall_result"
+            | "result"
+            | "final_status"
+    )
+}
+
+fn value_is_blocking_status(value: &Value) -> bool {
+    value
+        .as_str()
+        .map(normalized_status_value)
+        .is_some_and(|value| starts_with_blocking_status_value(&value))
+}
+
+fn contains_blocking_structured_field(lower: &str) -> bool {
+    const FIELDS: &[&str] = &[
+        "status",
+        "verification_status",
+        "overall_status",
+        "overall_result",
+        "result",
+        "final_status",
+    ];
+    const VALUES: &[&str] = &[
+        "failed",
+        "failure",
+        "failed_timeout",
+        "failed_validation_timeout",
+        "completed_with_residual_failure",
+        "partial_pass_with_timeout_residual",
+        "unverifiable",
+        "not_verified",
+        "not_fully_verified",
+    ];
+    FIELDS.iter().any(|field| {
+        VALUES.iter().any(|value| {
+            lower.contains(&format!("\"{field}\":\"{value}\""))
+                || lower.contains(&format!("\"{field}\": \"{value}\""))
+        })
+    })
+}
+
+fn starts_with_blocking_status_field(normalized: &str) -> bool {
+    const FIELDS: &[&str] = &[
+        "status",
+        "verificationstatus",
+        "overallstatus",
+        "overallresult",
+        "result",
+        "finalstatus",
+    ];
+    FIELDS.iter().any(|field| {
+        [":", "="].iter().any(|sep| {
+            let prefix = format!("{field}{sep}");
+            normalized
+                .strip_prefix(&prefix)
+                .or_else(|| normalized.strip_prefix(&format!("-{prefix}")))
+                .is_some_and(starts_with_blocking_status_value)
+        })
+    })
+}
+
+fn starts_with_blocking_status_value(value: &str) -> bool {
+    [
+        "failed",
+        "failure",
+        "failedtimeout",
+        "failedvalidationtimeout",
+        "completedwithresidualfailure",
+        "partialpasswithtimeoutresidual",
+        "unverifiable",
+        "notverified",
+        "notfullyverified",
+    ]
+    .iter()
+    .any(|blocking| value.starts_with(blocking))
+}
+
+fn normalized_status_value(value: &str) -> String {
+    value
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|ch| !matches!(ch, '*' | '_' | '`' | ' ' | '-' | '"' | '\'' | ','))
+        .collect()
+}
+
 fn normalized_status_line(line: &str) -> String {
     line.trim()
         .trim_start_matches('#')
         .chars()
-        .filter(|ch| !matches!(ch, '*' | '_' | '`' | ' '))
+        .filter(|ch| !matches!(ch, '*' | '_' | '`' | ' ' | '"' | '\'' | ','))
         .collect::<String>()
 }
 
@@ -273,12 +405,19 @@ fn dependency_items(
                     payload: source_context::enrich_payload(store, run, payload),
                 })
                 .collect::<Vec<_>>();
-            if !items.is_empty() {
-                return Ok(Some(items));
-            }
+            return Ok(Some(items));
         }
     }
     Ok(None)
+}
+
+fn fanout_allows_empty_items(stage: &StageSpec) -> bool {
+    stage
+        .extra
+        .get("allow_empty_items")
+        .or_else(|| stage.input.get("allow_empty_items"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn source_file_items(stage: &StageSpec, files: Vec<Value>) -> Option<Vec<FanoutItem>> {
