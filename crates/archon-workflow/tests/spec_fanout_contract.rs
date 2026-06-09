@@ -120,6 +120,62 @@ stages:
 }
 
 #[test]
+fn generated_non_fanout_stage_drops_invalid_item_kind() {
+    // Reproduces live planner output that attached `item_kind: implementation`
+    // to a read-only review/agent stage. User-authored specs stay strict, but
+    // generated plans should repair the invalid field instead of aborting.
+    let yaml = r#"
+schema: archon.workflow.v1
+name: generated-invalid-item-kind
+task: Review the workflow outputs.
+stages:
+  - id: discover
+    kind: agent
+    outputs: [items]
+  - id: fanout_review
+    kind: agent
+    item_kind: implementation
+    task: Review the discovered items and summarize risks.
+    depends_on: [discover]
+"#;
+    let spec = WorkflowSpec::from_generated_yaml(yaml, "Fallback task").unwrap();
+    let stage = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "fanout_review")
+        .unwrap();
+    assert_eq!(stage.kind, archon_workflow::StageKind::Agent);
+    assert_eq!(stage.item_kind, None);
+}
+
+#[test]
+fn generated_foreach_agent_is_promoted_to_fanout() {
+    let yaml = r#"
+schema: archon.workflow.v1
+name: generated-foreach-agent
+task: Review each discovered item.
+stages:
+  - id: discover
+    kind: agent
+    outputs: [items]
+  - id: fanout_review
+    kind: agent
+    foreach: "${discover.items}"
+    task: Review each discovered item.
+    provider_tier: critic
+    depends_on: [discover]
+"#;
+    let spec = WorkflowSpec::from_generated_yaml(yaml, "Fallback task").unwrap();
+    let stage = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "fanout_review")
+        .unwrap();
+    assert_eq!(stage.kind, archon_workflow::StageKind::Fanout);
+    assert_eq!(stage.foreach.as_deref(), Some("${discover.items}"));
+}
+
+#[test]
 fn user_authored_implementation_fanout_without_item_kind_is_rejected() {
     let yaml = r#"
 schema: archon.workflow.v1

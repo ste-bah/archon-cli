@@ -2,15 +2,43 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value;
 
-use crate::spec::{ProviderTier, RetryPolicy, StageKind, StageSpec, WorkflowSpec};
+use crate::spec::{
+    ProviderTier, RetryPolicy, StageKind, StageSpec, WorkflowSpec, has_decorative_fanout_keys,
+};
 
 pub fn normalize_generated_spec(spec: &mut WorkflowSpec) {
     neutralize_provider_tiers(spec);
     normalize_under_specified_stages(spec);
+    normalize_generated_fanout_shapes(spec);
     bridge_decorative_fanouts(spec);
+    normalize_generated_item_kinds(spec);
     infer_implementation_fanouts(spec);
     infer_dependencies_from_io(spec);
     promote_quality_gate_entries(spec);
+}
+
+fn normalize_generated_fanout_shapes(spec: &mut WorkflowSpec) {
+    for stage in &mut spec.stages {
+        if stage.kind == StageKind::Fanout || !has_fanout_shape(stage) {
+            continue;
+        }
+        let original = format!("{:?}", stage.kind);
+        stage.kind = StageKind::Fanout;
+        stage
+            .extra
+            .insert("normalized_from_kind".into(), Value::String(original));
+    }
+}
+
+fn normalize_generated_item_kinds(spec: &mut WorkflowSpec) {
+    for stage in &mut spec.stages {
+        match (stage.kind, stage.item_kind) {
+            (StageKind::Fanout, Some(StageKind::Implementation)) => {}
+            (StageKind::Implementation, Some(_)) => stage.item_kind = None,
+            (_, Some(_)) => stage.item_kind = None,
+            (_, None) => {}
+        }
+    }
 }
 
 fn infer_implementation_fanouts(spec: &mut WorkflowSpec) {
@@ -109,6 +137,12 @@ fn has_usable_foreach(stage: &StageSpec) -> bool {
         .as_deref()
         .map(str::trim)
         .is_some_and(|value| !value.is_empty())
+}
+
+fn has_fanout_shape(stage: &StageSpec) -> bool {
+    has_usable_foreach(stage)
+        || stage.input.get("items").and_then(Value::as_array).is_some()
+        || has_decorative_fanout_keys(stage)
 }
 
 /// Extract the `over` token from a decorative fan-out, whether it sits inside a
