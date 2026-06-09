@@ -14,6 +14,7 @@ pub fn normalize_generated_spec(spec: &mut WorkflowSpec) {
     normalize_generated_item_kinds(spec);
     infer_implementation_fanouts(spec);
     infer_dependencies_from_io(spec);
+    normalize_targetless_implementation_stages(spec);
     promote_quality_gate_entries(spec);
     ensure_generated_remediation_loop(spec);
 }
@@ -211,6 +212,71 @@ fn infer_dependencies_from_io(spec: &mut WorkflowSpec) {
             }
         }
     }
+}
+
+fn normalize_targetless_implementation_stages(spec: &mut WorkflowSpec) {
+    let mut existing = spec
+        .stages
+        .iter()
+        .map(|stage| stage.id.clone())
+        .collect::<BTreeSet<_>>();
+    let mut normalized = Vec::with_capacity(spec.stages.len());
+
+    for mut stage in std::mem::take(&mut spec.stages) {
+        if stage.kind != StageKind::Implementation || has_declared_targets(&stage) {
+            normalized.push(stage);
+            continue;
+        }
+
+        if let Some(targets) = loose_target_files(&stage) {
+            stage.expected_target_files = targets;
+            normalized.push(stage);
+            continue;
+        }
+
+        let inventory_id = unique_stage_id(&format!("{}-target-inventory", stage.id), &existing);
+        existing.insert(inventory_id.clone());
+        let inventory = implementation_target_inventory_stage(&inventory_id, &stage);
+        stage.extra.insert(
+            "normalized_from_kind".into(),
+            Value::String("Implementation".into()),
+        );
+        stage.kind = StageKind::Fanout;
+        stage.foreach = Some(format!("${{{inventory_id}.items}}"));
+        stage.item_kind = Some(StageKind::Implementation);
+        stage.max_parallelism.get_or_insert(1);
+        if !stage.depends_on.contains(&inventory_id) {
+            stage.depends_on.insert(0, inventory_id.clone());
+        }
+        normalized.push(inventory);
+        normalized.push(stage);
+    }
+
+    spec.stages = normalized;
+}
+
+fn has_declared_targets(stage: &StageSpec) -> bool {
+    stage
+        .expected_target_files
+        .iter()
+        .any(|target| has_text(Some(target)))
+}
+
+fn loose_target_files(stage: &StageSpec) -> Option<Vec<String>> {
+    let mut targets = Vec::new();
+    for key in [
+        "target_files",
+        "target_file",
+        "target_path",
+        "expected_target_files",
+    ] {
+        targets.extend(text_values(stage.extra.get(key)));
+        targets.extend(text_values(stage.input.get(key)));
+    }
+    targets.retain(|target| !target.trim().is_empty());
+    targets.sort();
+    targets.dedup();
+    (!targets.is_empty()).then_some(targets)
 }
 
 fn has_text(value: Option<&str>) -> bool {
@@ -444,6 +510,30 @@ fn generated_stage(
         item_kind: None,
         extra: BTreeMap::new(),
     }
+}
+
+fn implementation_target_inventory_stage(id: &str, original: &StageSpec) -> StageSpec {
+    let mut stage = generated_stage(
+        id,
+        StageKind::Agent,
+        ProviderTier::Coder,
+        original.depends_on.clone(),
+        &format!(
+            "Inspect the task evidence for implementation stage `{}` and emit a structured target inventory. Return exactly {{\"items\": [...]}}. Each item must include a non-empty target_files array, the task to perform, and required_tests. Do not edit files in this inventory stage. If no concrete repository target files can be determined, emit {{\"items\": []}} so the implementation fan-out fails fast instead of applying unsafe writes.",
+            original.id
+        ),
+    );
+    stage.input = serde_json::json!({
+        "implementation_stage_id": original.id.clone(),
+        "implementation_task": original.task.clone(),
+        "implementation_input": original.input.clone(),
+        "implementation_extra": original.extra.clone(),
+    });
+    stage.extra.insert(
+        "outputs".into(),
+        Value::Array(vec![Value::String("items".into())]),
+    );
+    stage
 }
 
 fn remediation_inventory_stage(id: &str, depends_on: Vec<String>) -> StageSpec {

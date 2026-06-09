@@ -225,6 +225,95 @@ stages:
 }
 
 #[test]
+fn generated_targetless_implementation_stage_becomes_inventory_fanout() {
+    // Reproduces live planner output that emitted `kind: implementation`
+    // without `expected_target_files`. Generated plans should not fail
+    // validation, but they also must not fake write targets. The safe repair is
+    // an inventory stage that emits concrete `target_files`, followed by an
+    // implementation fan-out over those items.
+    let yaml = r#"
+schema: archon.workflow.v1
+name: generated-targetless-implementation
+task: Implement the decomposed PRD.
+stages:
+  - id: discover
+    kind: agent
+  - id: implement_t001
+    kind: implementation
+    task: Implement TASK-TDL-001.
+    provider_tier: coder
+    depends_on: [discover]
+  - id: focused_tests
+    kind: agent
+    depends_on: [implement_t001]
+"#;
+    let spec = WorkflowSpec::from_generated_yaml(yaml, "Fallback task").unwrap();
+    let inventory = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "implement_t001-target-inventory")
+        .unwrap();
+    assert_eq!(inventory.kind, archon_workflow::StageKind::Agent);
+    let outputs = inventory
+        .extra
+        .get("outputs")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        outputs.iter().any(|value| value.as_str() == Some("items")),
+        "outputs={outputs:?}"
+    );
+
+    let implementation = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "implement_t001")
+        .unwrap();
+    assert_eq!(implementation.kind, archon_workflow::StageKind::Fanout);
+    assert_eq!(
+        implementation.item_kind,
+        Some(archon_workflow::StageKind::Implementation)
+    );
+    assert_eq!(
+        implementation.foreach.as_deref(),
+        Some("${implement_t001-target-inventory.items}")
+    );
+    assert!(
+        implementation
+            .depends_on
+            .contains(&"implement_t001-target-inventory".to_string())
+    );
+}
+
+#[test]
+fn generated_implementation_stage_accepts_loose_target_files_key() {
+    let yaml = r#"
+schema: archon.workflow.v1
+name: generated-loose-target-files
+task: Implement a known file.
+stages:
+  - id: implement_known
+    kind: implementation
+    task: Implement a known file.
+    provider_tier: coder
+    target_files:
+      - crates/example/src/lib.rs
+"#;
+    let spec = WorkflowSpec::from_generated_yaml(yaml, "Fallback task").unwrap();
+    let stage = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "implement_known")
+        .unwrap();
+    assert_eq!(stage.kind, archon_workflow::StageKind::Implementation);
+    assert_eq!(
+        stage.expected_target_files,
+        vec!["crates/example/src/lib.rs".to_string()]
+    );
+}
+
+#[test]
 fn generated_non_fanout_stage_drops_invalid_item_kind() {
     // Reproduces live planner output that attached `item_kind: implementation`
     // to a read-only review/agent stage. User-authored specs stay strict, but
