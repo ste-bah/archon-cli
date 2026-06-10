@@ -211,6 +211,7 @@ pub(crate) mod web;
 pub(crate) mod web_chat;
 pub(crate) mod workflow;
 pub(crate) mod workflow_live;
+pub(crate) mod workflow_world_learning;
 pub(crate) mod world_model;
 
 // TASK-AGS-800 (Stage 6, Q1=A): spec-name discoverability shim.

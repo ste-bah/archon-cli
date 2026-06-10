@@ -46,6 +46,7 @@ pub enum WorldTraceSource {
     Conversation,
     AgentTranscript,
     AgentOutput,
+    Workflow,
     Retrospective,
     Memory,
     AgentEvolution,

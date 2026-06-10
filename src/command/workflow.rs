@@ -14,6 +14,7 @@ use archon_workflow::{
 use crate::cli_args::WorkflowAction;
 use crate::command::registry::{CommandContext, CommandHandler};
 use crate::command::workflow_live::{run_live_cli_action, should_spawn_live, spawn_live_workflow};
+use crate::command::workflow_world_learning;
 
 pub(crate) struct WorkflowHandler;
 
@@ -156,22 +157,41 @@ pub(super) fn run_action(cwd: &Path, action: CommandAction) -> Result<String> {
         CommandAction::PlanSpec { path } => load_spec_file(cwd, &path)?.to_yaml()?,
         CommandAction::Run { task } => {
             let spec = planner.plan(&task)?;
-            deterministic_text("Workflow complete", execute_spec(&store, spec)?)
+            let report = execute_spec(&store, spec)?;
+            deterministic_text(
+                "Workflow complete",
+                report.clone(),
+                workflow_world_learning::record_report(&store, &report),
+            )
         }
         CommandAction::RunSpec { path } => {
             let spec = load_spec_file(cwd, &path)?;
-            deterministic_text("Workflow complete", execute_spec(&store, spec)?)
+            let report = execute_spec(&store, spec)?;
+            deterministic_text(
+                "Workflow complete",
+                report.clone(),
+                workflow_world_learning::record_report(&store, &report),
+            )
         }
         CommandAction::RunTemplate { name } => {
             let spec = load_template_spec(cwd, &name)?;
-            deterministic_text("Workflow complete", execute_spec(&store, spec)?)
+            let report = execute_spec(&store, spec)?;
+            deterministic_text(
+                "Workflow complete",
+                report.clone(),
+                workflow_world_learning::record_report(&store, &report),
+            )
         }
         CommandAction::Status { run_id } => status_text(&store.load_state(&run_id)?),
         CommandAction::Resume { run_id } => {
             let run = store.load_state(&run_id)?;
             let executor = WorkflowExecutor::new(store.clone(), WorkflowPolicy::default());
             let report = executor.execute(run)?;
-            deterministic_text("Workflow resumed", report)
+            deterministic_text(
+                "Workflow resumed",
+                report.clone(),
+                workflow_world_learning::record_report(&store, &report),
+            )
         }
         CommandAction::Pause { run_id } => lifecycle(&store, &run_id, LifecycleAction::Pause)?,
         CommandAction::Cancel { run_id } => lifecycle(&store, &run_id, LifecycleAction::Cancel)?,
@@ -230,11 +250,12 @@ fn execute_spec(store: &WorkflowStore, spec: WorkflowSpec) -> Result<ExecutionRe
     executor.execute(run).map_err(Into::into)
 }
 
-fn deterministic_text(label: &str, report: ExecutionReport) -> String {
+fn deterministic_text(label: &str, report: ExecutionReport, learning_note: String) -> String {
     format!(
         "{label} (deterministic CLI smoke mode; pass --live or use TUI /workflow for LLM-backed agents): {} (completed {}, failed {}, skipped {})",
         report.run_id, report.completed, report.failed, report.skipped
-    )
+    ) + "\n"
+        + learning_note.as_str()
 }
 
 fn emit_workflow_rows(

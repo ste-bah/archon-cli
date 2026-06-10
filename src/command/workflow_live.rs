@@ -18,6 +18,7 @@ use archon_workflow::{
 
 use crate::command::pipeline_support::build_pipeline_adapter;
 use crate::command::workflow::{load_spec_file, load_template_spec, run_action};
+use crate::command::workflow_world_learning;
 
 #[cfg(test)]
 #[path = "workflow_live_tests.rs"]
@@ -26,6 +27,8 @@ mod tests;
 mod workflow_agent_select;
 #[path = "workflow_live_prompt.rs"]
 mod workflow_live_prompt;
+#[path = "workflow_live_retry.rs"]
+mod workflow_live_retry;
 
 use workflow_agent_select::select_workflow_agent_key;
 use workflow_live_prompt::{planner_prompt, repair_prompt, workflow_prompt};
@@ -125,10 +128,12 @@ async fn run_live_action(
         }
         other => return run_action(cwd, other),
     };
+    let learning_note = workflow_world_learning::record_report(&store, &report);
     Ok(format!(
         "Workflow complete: {} (completed {}, failed {}, skipped {})",
         report.run_id, report.completed, report.failed, report.skipped
-    ))
+    ) + "\n"
+        + learning_note.as_str())
 }
 
 async fn plan_live(
@@ -221,13 +226,8 @@ struct PipelineWorkflowRunner {
 #[async_trait::async_trait]
 impl WorkflowStageRunner for PipelineWorkflowRunner {
     fn max_concurrency(&self) -> Option<usize> {
-        // The TUI/live runner routes each fan-out item through the process
-        // subagent executor, whose `SubagentManager` has a hard concurrency cap
-        // that *rejects* overflow. Query the live executor's authoritative cap
-        // (derived from config.subagent.max_concurrent) so fan-out width clamps
-        // to it and extra items wait for a slot instead of failing with "max
-        // concurrent subagents reached". Falls back to the default constant when
-        // no executor is installed (e.g. CLI paths before session bootstrap).
+        // Clamp fan-out to the live subagent manager cap so extra items wait
+        // instead of failing with "max concurrent subagents reached".
         let from_executor = archon_tools::subagent_executor::get_subagent_executor()
             .and_then(|exec| exec.max_concurrency());
         Some(
@@ -255,29 +255,41 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             AgentActivityStatus::Running,
             "stage running",
         );
-        let response = self
-            .llm
-            .run_agent(AgentExecutionRequest {
-                session_id: request.run_id.clone(),
-                pipeline_type: PipelineType::Workflow,
-                task: request.task.clone(),
-                cwd: request_target_repository_root(&request),
-                ordinal: request.attempt as usize,
-                attempt: request.attempt as usize,
-                agent,
-                messages: vec![serde_json::json!({
-                    "role": "user",
-                    "content": workflow_prompt(&request),
-                })],
-                system: vec![serde_json::json!({
-                    "type": "text",
-                    "text": "You are an Archon dynamic workflow stage agent. Return only useful public output for the stage artifact. Do not include private reasoning, hidden chain-of-thought, credentials, or provider internals.",
-                })],
-                tools: Vec::new(),
-                allowed_tools: allowed_tools(&request),
-            })
-            .await;
-        let response = match response {
+        let agent_request = AgentExecutionRequest {
+            session_id: request.run_id.clone(),
+            pipeline_type: PipelineType::Workflow,
+            task: request.task.clone(),
+            cwd: request_target_repository_root(&request),
+            ordinal: request.attempt as usize,
+            attempt: request.attempt as usize,
+            agent,
+            messages: vec![serde_json::json!({
+                "role": "user",
+                "content": workflow_prompt(&request),
+            })],
+            system: vec![serde_json::json!({
+                "type": "text",
+                "text": "You are an Archon dynamic workflow stage agent. Return only useful public output for the stage artifact. Do not include private reasoning, hidden chain-of-thought, credentials, or provider internals.",
+            })],
+            tools: Vec::new(),
+            allowed_tools: allowed_tools(&request),
+        };
+        let response = match workflow_live_retry::run_agent_with_transient_retry(
+            &self.llm,
+            agent_request,
+            |attempt| {
+                self.emit_activity(
+                    &request,
+                    &agent_name,
+                    &provider_id,
+                    &resolved_model,
+                    AgentActivityStatus::Running,
+                    &format!("stage retrying after transient provider error ({attempt}/3)"),
+                );
+            },
+        )
+        .await
+        {
             Ok(response) => response,
             Err(err) => {
                 self.emit_activity(
@@ -288,7 +300,7 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
                     AgentActivityStatus::Failed,
                     "stage failed",
                 );
-                return Err(archon_workflow::WorkflowError::StageFailed(err.to_string()));
+                return Err(err);
             }
         };
         self.emit_activity(

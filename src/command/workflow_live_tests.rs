@@ -1,16 +1,24 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
-use archon_pipeline::runner::{LlmClient, LlmResponse};
+use archon_pipeline::runner::{AgentExecutionRequest, LlmClient, LlmResponse};
+use archon_workflow::WorkflowStageRunner;
 use serde_json::json;
 
+use super::workflow_live_retry::transient_live_agent_error;
 use super::{
-    ProviderTier, StageKind, StageRunRequest, allowed_tools, extract_yaml, plan_live,
-    request_target_repository_root,
+    PipelineWorkflowRunner, ProviderTier, StageKind, StageRunRequest, allowed_tools, extract_yaml,
+    plan_live, request_target_repository_root,
 };
 
 struct InvalidPlanner;
+
+struct FlakyAgentClient {
+    calls: AtomicUsize,
+    first_error: &'static str,
+}
 
 #[async_trait::async_trait]
 impl LlmClient for InvalidPlanner {
@@ -42,6 +50,32 @@ stages:
     }
 }
 
+#[async_trait::async_trait]
+impl LlmClient for FlakyAgentClient {
+    async fn send_message(
+        &self,
+        _messages: Vec<serde_json::Value>,
+        _system: Vec<serde_json::Value>,
+        _tools: Vec<serde_json::Value>,
+        _model: &str,
+    ) -> Result<LlmResponse> {
+        anyhow::bail!("test should use run_agent");
+    }
+
+    async fn run_agent(&self, _request: AgentExecutionRequest) -> Result<LlmResponse> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst);
+        if call == 0 {
+            anyhow::bail!(self.first_error);
+        }
+        Ok(LlmResponse {
+            content: "status: completed".to_string(),
+            tool_uses: Vec::new(),
+            tokens_in: 1,
+            tokens_out: 1,
+        })
+    }
+}
+
 fn request(input: serde_json::Value) -> StageRunRequest {
     StageRunRequest {
         run_id: "wf-test".into(),
@@ -53,6 +87,15 @@ fn request(input: serde_json::Value) -> StageRunRequest {
         provider_tier: ProviderTier::Coder,
         depends_on: Vec::new(),
         input,
+    }
+}
+
+fn runner(llm: Arc<dyn LlmClient>) -> PipelineWorkflowRunner {
+    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
+    PipelineWorkflowRunner {
+        llm,
+        tui_tx,
+        agent_names: Vec::new(),
     }
 }
 
@@ -127,4 +170,53 @@ async fn live_planner_validation_failure_does_not_fallback_to_smoke_plan() {
         .await
         .expect_err("invalid live plans must fail instead of using heuristic fallback");
     assert!(!err.to_string().is_empty());
+}
+
+#[tokio::test]
+async fn workflow_live_retries_transient_agent_decode_errors() {
+    let client = Arc::new(FlakyAgentClient {
+        calls: AtomicUsize::new(0),
+        first_error: "HTTP error: http_error: HTTP error: error decoding response body",
+    });
+    let stage_runner = runner(client.clone());
+
+    let output = stage_runner
+        .run_stage(request(json!({
+            "target_repository_root": "/tmp/target-repo",
+        })))
+        .await
+        .expect("transient provider decode failures should retry and recover");
+
+    assert_eq!(output.body, "status: completed");
+    assert_eq!(client.calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn workflow_live_does_not_retry_permission_errors() {
+    let client = Arc::new(FlakyAgentClient {
+        calls: AtomicUsize::new(0),
+        first_error: "bypassPermissions requires --allow-dangerously-skip-permissions flag",
+    });
+    let stage_runner = runner(client.clone());
+
+    let err = stage_runner
+        .run_stage(request(json!({})))
+        .await
+        .expect_err("permission/config failures are not transport transients");
+
+    assert!(
+        err.to_string()
+            .contains("bypassPermissions requires --allow-dangerously-skip-permissions")
+    );
+    assert_eq!(client.calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn transient_classifier_matches_provider_decode_but_not_permission_errors() {
+    assert!(transient_live_agent_error(
+        "HTTP error: http_error: HTTP error: error decoding response body"
+    ));
+    assert!(!transient_live_agent_error(
+        "bypassPermissions requires --allow-dangerously-skip-permissions flag"
+    ));
 }

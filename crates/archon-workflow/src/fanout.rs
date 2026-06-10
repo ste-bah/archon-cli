@@ -178,4 +178,13 @@ fn retryable_error(err: &WorkflowError) -> bool {
         || text.contains("rate limit")
         || text.contains("timeout")
         || text.contains("temporar")
+        || text.contains("error decoding response body")
+        || text.contains("error sending request")
+        || text.contains("request failed")
+        || text.contains("connection reset")
+        || text.contains("connection closed")
+        || text.contains("broken pipe")
+        || text.contains("502")
+        || text.contains("503")
+        || text.contains("504")
 }
