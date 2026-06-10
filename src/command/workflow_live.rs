@@ -419,6 +419,9 @@ fn command_execution_stage(request: &StageRunRequest) -> bool {
     if stage_extra_requests_bash(request) {
         return true;
     }
+    if command_execution_stage_id(&request.stage_id) {
+        return true;
+    }
     let haystack = format!(
         "{}\n{}\n{}",
         request.stage_id,
@@ -430,13 +433,32 @@ fn command_execution_stage(request: &StageRunRequest) -> bool {
             .unwrap_or_default()
     )
     .to_ascii_lowercase();
+    command_execution_text(&haystack)
+}
+
+fn command_execution_stage_id(stage_id: &str) -> bool {
+    let id = stage_id.to_ascii_lowercase().replace('-', "_");
+    id.ends_with("_tests")
+        || id.contains("_post_tests")
+        || id.contains("_focused_tests")
+        || id.contains("_verification")
+}
+
+fn command_execution_text(haystack: &str) -> bool {
     [
         "focused_test",
         "focused-test",
         "focused test",
+        "focused tests",
+        "post-remediation tests",
+        "post remediation tests",
         "cargo test",
         "test command",
+        "test execution",
+        "test evidence",
         "run tests",
+        "run focused",
+        "tests and checks",
         "verification",
         "verify",
         "quality gate",

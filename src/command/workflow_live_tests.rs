@@ -149,6 +149,22 @@ fn focused_test_workflow_stages_can_execute_commands_without_write_tools() {
 }
 
 #[test]
+fn post_remediation_test_stages_can_execute_commands_without_write_tools() {
+    let req = StageRunRequest {
+        stage_id: "wave2_post_tests".into(),
+        stage_kind: StageKind::Agent,
+        task: "Run focused post-remediation tests for T010/T020/T030 and capture exact commands/results.".into(),
+        ..request(json!({}))
+    };
+    let tools = allowed_tools(&req);
+
+    assert!(tools.contains(&"Bash".to_string()));
+    assert!(tools.contains(&"Read".to_string()));
+    assert!(!tools.contains(&"Write".to_string()));
+    assert!(!tools.contains(&"Edit".to_string()));
+}
+
+#[test]
 fn explicit_stage_extra_can_request_bash() {
     let req = StageRunRequest {
         stage_id: "validate".into(),
