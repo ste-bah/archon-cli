@@ -287,6 +287,61 @@ stages:
 }
 
 #[test]
+fn generated_agent_named_implement_becomes_write_capable() {
+    // Reproduces a live generated plan where wave implementation stages were
+    // emitted as plain agents. They must not execute as read-only/text-only
+    // stages; generated normalization promotes them into the same target
+    // inventory + implementation fan-out path as targetless implementation
+    // stages.
+    let yaml = r#"
+schema: archon.workflow.v1
+name: generated-agent-implementation-wave
+task: Implement the decomposed PRD.
+stages:
+  - id: implementation_plan
+    kind: agent
+    task: Produce an ordered implementation plan.
+  - id: wave1_implement
+    kind: agent
+    task: Implement only missing T001 work. Run focused T001 tests only.
+    depends_on: [implementation_plan]
+  - id: wave1_review
+    kind: agent
+    task: Perform read-only adversarial review for T001.
+    depends_on: [wave1_implement]
+"#;
+    let spec = WorkflowSpec::from_generated_yaml(yaml, "Fallback task").unwrap();
+    let inventory = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "wave1_implement-target-inventory")
+        .unwrap();
+    assert_eq!(inventory.kind, archon_workflow::StageKind::Agent);
+
+    let implementation = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "wave1_implement")
+        .unwrap();
+    assert_eq!(implementation.kind, archon_workflow::StageKind::Fanout);
+    assert_eq!(
+        implementation.item_kind,
+        Some(archon_workflow::StageKind::Implementation)
+    );
+    assert_eq!(
+        implementation.foreach.as_deref(),
+        Some("${wave1_implement-target-inventory.items}")
+    );
+
+    let plan = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "implementation_plan")
+        .unwrap();
+    assert_eq!(plan.kind, archon_workflow::StageKind::Agent);
+}
+
+#[test]
 fn generated_implementation_stage_accepts_loose_target_files_key() {
     let yaml = r#"
 schema: archon.workflow.v1

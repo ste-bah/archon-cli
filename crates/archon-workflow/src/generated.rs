@@ -88,6 +88,7 @@ fn contains_any(text: &str, needles: &[&str]) -> bool {
 pub fn normalize_generated_spec(spec: &mut WorkflowSpec) {
     neutralize_provider_tiers(spec);
     normalize_under_specified_stages(spec);
+    promote_generated_implementation_agents(spec);
     normalize_generated_fanout_shapes(spec);
     bridge_decorative_fanouts(spec);
     normalize_generated_item_kinds(spec);
@@ -268,6 +269,59 @@ fn normalize_under_specified_stages(spec: &mut WorkflowSpec) {
                 .insert("normalized_from_kind".into(), Value::String(original));
         }
     }
+}
+
+fn promote_generated_implementation_agents(spec: &mut WorkflowSpec) {
+    for stage in &mut spec.stages {
+        if stage.kind != StageKind::Agent || !agent_stage_implements_repo(stage) {
+            continue;
+        }
+        stage.kind = StageKind::Implementation;
+        stage.provider_tier.get_or_insert(ProviderTier::Coder);
+        stage
+            .extra
+            .insert("normalized_from_kind".into(), Value::String("Agent".into()));
+    }
+}
+
+fn agent_stage_implements_repo(stage: &StageSpec) -> bool {
+    let id = stage.id.to_ascii_lowercase();
+    let task = stage
+        .task
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if contains_any(
+        &id,
+        &[
+            "review",
+            "audit",
+            "test",
+            "verify",
+            "plan",
+            "inventory",
+            "discover",
+            "synthesis",
+            "report",
+            "quality",
+        ],
+    ) || task.starts_with("perform read-only")
+        || task.starts_with("produce an ordered implementation plan")
+    {
+        return false;
+    }
+    id == "implement"
+        || id.starts_with("implement_")
+        || id.starts_with("implement-")
+        || id.ends_with("_implement")
+        || id.ends_with("-implement")
+        || id.contains("_implement_")
+        || id.contains("-implement-")
+        || task.starts_with("implement ")
+        || task.contains("implement only")
+        || task.contains("implement missing")
+        || task.contains("modify repository")
+        || task.contains("modify the repository")
 }
 
 fn infer_dependencies_from_io(spec: &mut WorkflowSpec) {
