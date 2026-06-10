@@ -296,7 +296,7 @@ impl WorkflowExecutor {
         stage: &StageSpec,
         runner: &dyn WorkflowStageRunner,
     ) -> WorkflowResult<StageRunOutput> {
-        let root = source_context::effective_root(&self.store, run);
+        let root = source_context::implementation_root(&self.store, run)?;
         let before = acceptance::snapshot_targets(&root, &stage.expected_target_files);
         let request = stage_request(&self.store, run, stage)?;
         persistence::record_prompt(&self.store, &request)?;

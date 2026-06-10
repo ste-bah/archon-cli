@@ -27,6 +27,7 @@ mod source_context;
 pub mod spec;
 mod spec_deser;
 mod spec_inference;
+mod spec_policy;
 pub mod stage;
 pub mod store;
 pub mod template;

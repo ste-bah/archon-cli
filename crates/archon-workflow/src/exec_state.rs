@@ -65,6 +65,9 @@ pub(crate) fn mark_finished(
     state.status = status;
     state.completed_at = Some(Utc::now());
     state.error = error;
+    if status == StageStatus::Failed {
+        run.status = RunStatus::Failed;
+    }
     run.mark_updated();
     Ok(())
 }

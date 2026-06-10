@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
+use crate::error::{WorkflowError, WorkflowResult};
 use crate::fanout::FanoutItem;
 use crate::run::WorkflowRun;
 use crate::spec::StageSpec;
@@ -95,9 +96,66 @@ pub(crate) fn effective_root(store: &WorkflowStore, run: &WorkflowRun) -> PathBu
         .unwrap_or_else(|| store_project_root(store))
 }
 
+pub(crate) fn implementation_root(
+    store: &WorkflowStore,
+    run: &WorkflowRun,
+) -> WorkflowResult<PathBuf> {
+    if let Some(root) = run
+        .spec
+        .target_repository_root
+        .as_deref()
+        .map(str::trim)
+        .filter(|root| !root.is_empty())
+    {
+        let path = Path::new(root);
+        return repository_root_for_path(path).ok_or_else(|| {
+            WorkflowError::SpecInvalid(format!(
+                "target_repository_root '{}' is not inside a Git/Cargo repository",
+                path.display()
+            ))
+        });
+    }
+    repository_source_roots(store, run)
+        .into_iter()
+        .next()
+        .ok_or_else(|| {
+            WorkflowError::SpecInvalid(
+                "implementation stage requires a target_repository_root or discoverable Git/Cargo repository path in the workflow spec".into(),
+            )
+        })
+}
+
 fn source_roots(store: &WorkflowStore, run: &WorkflowRun) -> Vec<PathBuf> {
-    let mut roots = repository_roots(&run.spec.task);
+    let mut roots = repository_source_roots(store, run);
+    if let Some(root) = run
+        .spec
+        .target_repository_root
+        .as_deref()
+        .map(str::trim)
+        .filter(|root| !root.is_empty())
+        .and_then(|root| repository_root_for_path(Path::new(root)))
+    {
+        roots.insert(0, root);
+    }
     roots.push(store_project_root(store));
+    dedupe_paths(&mut roots);
+    roots
+}
+
+fn repository_source_roots(_store: &WorkflowStore, run: &WorkflowRun) -> Vec<PathBuf> {
+    let mut roots = repository_roots(&run.spec.task);
+    for stage in &run.spec.stages {
+        if let Some(task) = &stage.task {
+            roots.extend(repository_roots(task));
+        }
+        collect_repository_roots_from_value(&stage.input, &mut roots);
+        for value in stage.extra.values() {
+            collect_repository_roots_from_value(value, &mut roots);
+        }
+        for target in &stage.expected_target_files {
+            roots.extend(repository_roots(target));
+        }
+    }
     dedupe_paths(&mut roots);
     roots
 }
@@ -107,10 +165,23 @@ fn repository_roots(text: &str) -> Vec<PathBuf> {
         .map(|part| part.trim_matches(|ch: char| matches!(ch, '.' | ',' | ':' | ';' | '"' | '\'')))
         .filter(|part| part.starts_with('/') || part.starts_with('~'))
         .map(PathBuf::from)
-        .filter(|path| {
-            path.is_dir() && (path.join(".git").is_dir() || path.join("Cargo.toml").is_file())
-        })
+        .filter_map(|path| repository_root_for_path(&path))
         .collect()
+}
+
+fn repository_root_for_path(path: &Path) -> Option<PathBuf> {
+    let mut cursor = if path.is_dir() {
+        Some(path)
+    } else {
+        path.parent()
+    };
+    while let Some(dir) = cursor {
+        if dir.join(".git").is_dir() || dir.join("Cargo.toml").is_file() {
+            return Some(dir.to_path_buf());
+        }
+        cursor = dir.parent();
+    }
+    None
 }
 
 fn store_project_root(store: &WorkflowStore) -> PathBuf {
@@ -207,6 +278,19 @@ fn collect_value_paths(value: &Value, out: &mut BTreeSet<String>) {
         }
         Value::Array(items) => items.iter().for_each(|item| collect_value_paths(item, out)),
         Value::Object(map) => map.values().for_each(|item| collect_value_paths(item, out)),
+        _ => {}
+    }
+}
+
+fn collect_repository_roots_from_value(value: &Value, out: &mut Vec<PathBuf>) {
+    match value {
+        Value::String(text) => out.extend(repository_roots(text)),
+        Value::Array(items) => items
+            .iter()
+            .for_each(|item| collect_repository_roots_from_value(item, out)),
+        Value::Object(map) => map
+            .values()
+            .for_each(|item| collect_repository_roots_from_value(item, out)),
         _ => {}
     }
 }

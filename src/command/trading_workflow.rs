@@ -78,6 +78,7 @@ fn build_spec(input: WorkflowPlanInput<'_>, items: Vec<Value>) -> Result<Workflo
         schema: "archon.workflow.v1".into(),
         name: "trading-lab-end-to-end".into(),
         task: root_task(input),
+        target_repository_root: Some(input.repository.display().to_string()),
         max_parallelism: 4,
         max_agents: 64,
         provider_tiers: tiers,

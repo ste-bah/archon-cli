@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use serde_json::Value;
 
@@ -17,6 +18,7 @@ use crate::spec::{ProviderTier, StageKind, StageSpec};
 use crate::store::WorkflowStore;
 
 struct ItemAcceptance {
+    root: PathBuf,
     targets: Vec<String>,
     before: TargetFingerprints,
 }
@@ -171,7 +173,7 @@ fn record_implementation_success(
         record_output_failure(store, run, stage, item_id.clone(), output, error.clone())?;
         return Err(WorkflowError::StageFailed(format!("{item_id}: {error}")));
     }
-    let root = source_context::effective_root(store, run);
+    let root = binding.root;
     let after = acceptance::snapshot_targets(&root, &binding.targets);
     let outcome = acceptance::evaluate(
         &root,
@@ -319,9 +321,13 @@ fn item_acceptance(
             item.id
         )));
     }
-    let root = source_context::effective_root(store, run);
+    let root = source_context::implementation_root(store, run)?;
     let before = acceptance::snapshot_targets(&root, &targets);
-    Ok(ItemAcceptance { targets, before })
+    Ok(ItemAcceptance {
+        root,
+        targets,
+        before,
+    })
 }
 
 fn item_target_files(stage: &StageSpec, payload: &Value) -> Vec<String> {

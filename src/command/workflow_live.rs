@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
+use archon_core::agents::AgentRegistry;
 use archon_core::config::ArchonConfig;
 use archon_core::env_vars::ArchonEnvVars;
 use archon_pipeline::runner::{
@@ -21,9 +22,12 @@ use crate::command::workflow::{load_spec_file, load_template_spec, run_action};
 #[cfg(test)]
 #[path = "workflow_live_tests.rs"]
 mod tests;
+#[path = "workflow_agent_select.rs"]
+mod workflow_agent_select;
 #[path = "workflow_live_prompt.rs"]
 mod workflow_live_prompt;
 
+use workflow_agent_select::select_workflow_agent_key;
 use workflow_live_prompt::{planner_prompt, repair_prompt, workflow_prompt};
 
 pub(crate) fn should_spawn_live(action: &CommandAction) -> bool {
@@ -88,6 +92,11 @@ async fn run_live_action(
     let runner = PipelineWorkflowRunner {
         llm: llm.clone(),
         tui_tx: tui_tx.clone(),
+        agent_names: AgentRegistry::load(cwd)
+            .available_agent_names()
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
     };
     let report = match action {
         CommandAction::Plan { task } => {
@@ -206,6 +215,7 @@ fn live_start_message(action: &CommandAction) -> String {
 struct PipelineWorkflowRunner {
     llm: Arc<dyn LlmClient>,
     tui_tx: TuiEventSender,
+    agent_names: Vec<String>,
 }
 
 #[async_trait::async_trait]
@@ -235,9 +245,11 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             .llm
             .provider_id()
             .unwrap_or_else(|| "active-provider".to_string());
-        let agent = workflow_agent(&request, &model_alias);
+        let agent = workflow_agent(&request, &model_alias, &self.agent_names);
+        let agent_name = agent.key.clone();
         self.emit_activity(
             &request,
+            &agent_name,
             &provider_id,
             &resolved_model,
             AgentActivityStatus::Running,
@@ -270,6 +282,7 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             Err(err) => {
                 self.emit_activity(
                     &request,
+                    &agent_name,
                     &provider_id,
                     &resolved_model,
                     AgentActivityStatus::Failed,
@@ -280,6 +293,7 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
         };
         self.emit_activity(
             &request,
+            &agent_name,
             &provider_id,
             &resolved_model,
             AgentActivityStatus::Complete,
@@ -307,20 +321,17 @@ impl PipelineWorkflowRunner {
     fn emit_activity(
         &self,
         request: &StageRunRequest,
+        agent_name: &str,
         provider_id: &str,
         model: &str,
         status: AgentActivityStatus,
         detail: &str,
     ) {
-        let name = request
-            .agent
-            .clone()
-            .unwrap_or_else(|| request.stage_id.clone());
         let _ = self
             .tui_tx
             .send(TuiEvent::AgentActivity(AgentActivityUpdate {
                 id: format!("workflow:{}:{}", request.run_id, request.stage_id),
-                name,
+                name: agent_name.to_string(),
                 role: AgentActivityRole::Subagent,
                 status,
                 current_tool: None,
@@ -338,11 +349,8 @@ impl PipelineWorkflowRunner {
     }
 }
 
-fn workflow_agent(request: &StageRunRequest, model: &str) -> AgentInfo {
-    let key = request
-        .agent
-        .clone()
-        .unwrap_or_else(|| format!("workflow-{}", request.stage_id));
+fn workflow_agent(request: &StageRunRequest, model: &str, agent_names: &[String]) -> AgentInfo {
+    let key = select_workflow_agent_key(request, agent_names);
     AgentInfo {
         display_name: key.replace('-', " "),
         key,

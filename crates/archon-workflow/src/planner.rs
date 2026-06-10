@@ -25,6 +25,7 @@ impl WorkflowPlanner for HeuristicWorkflowPlanner {
             schema: WORKFLOW_SCHEMA.to_string(),
             name: slug_name(task),
             task: task.to_string(),
+            target_repository_root: None,
             max_parallelism: 8,
             max_agents: 200,
             provider_tiers,
