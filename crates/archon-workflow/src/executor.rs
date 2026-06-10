@@ -233,7 +233,28 @@ impl WorkflowExecutor {
                 let request = stage_request(&self.store, run, stage)?;
                 persistence::record_prompt(&self.store, &request)?;
                 let output = runner.run_stage(request).await?;
-                ensure_output_usable(&output.body)?;
+                if let Err(err) = ensure_output_usable(&output.body) {
+                    let artifact = persistence::write_attached_stage_artifact(
+                        &self.store,
+                        run,
+                        stage,
+                        &stage.id,
+                        &output.extension,
+                        output.body.clone(),
+                        false,
+                    )?;
+                    persistence::record_agent_output(
+                        &self.store,
+                        &run.id,
+                        &stage.id,
+                        &stage.id,
+                        Some(&output),
+                        Some(&artifact),
+                        false,
+                        Some(&err.to_string()),
+                    )?;
+                    return Err(err);
+                }
                 let artifact = persistence::write_attached_stage_artifact(
                     &self.store,
                     run,
@@ -301,7 +322,28 @@ impl WorkflowExecutor {
         let request = stage_request(&self.store, run, stage)?;
         persistence::record_prompt(&self.store, &request)?;
         let output = runner.run_stage(request).await?;
-        ensure_output_usable(&output.body)?;
+        if let Err(err) = ensure_output_usable(&output.body) {
+            let artifact = persistence::write_attached_stage_artifact(
+                &self.store,
+                run,
+                stage,
+                &stage.id,
+                &output.extension,
+                output.body.clone(),
+                false,
+            )?;
+            persistence::record_agent_output(
+                &self.store,
+                &run.id,
+                &stage.id,
+                &stage.id,
+                Some(&output),
+                Some(&artifact),
+                false,
+                Some(&err.to_string()),
+            )?;
+            return Err(err);
+        }
         let after = acceptance::snapshot_targets(&root, &stage.expected_target_files);
         let outcome = acceptance::evaluate(
             &root,

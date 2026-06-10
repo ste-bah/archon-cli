@@ -193,20 +193,43 @@ fn reports_explicit_blocked_status(lower: &str) -> bool {
     if lower.contains("\"status\":\"blocked\"") || lower.contains("\"status\": \"blocked\"") {
         return true;
     }
-    lower.lines().any(|line| {
+    let lines: Vec<_> = lower.lines().collect();
+    lines.iter().enumerate().any(|(idx, line)| {
         let normalized = normalized_status_line(line);
         normalized.starts_with("status:blocked")
             || normalized.starts_with("-status:blocked")
             || normalized.starts_with("status=blocked")
+            || (normalized == "status" && next_line_is_blocked(&lines, idx))
     })
 }
 
+fn next_line_is_blocked(lines: &[&str], idx: usize) -> bool {
+    lines
+        .iter()
+        .skip(idx + 1)
+        .map(|line| normalized_status_value(line.trim()))
+        .find(|line| !line.is_empty())
+        .is_some_and(|line| line.starts_with("blocked"))
+}
+
 fn reports_failed_verification_status(lower: &str) -> bool {
+    let lines: Vec<_> = lower.lines().collect();
     contains_blocking_structured_field(lower)
-        || lower.lines().any(|line| {
+        || lines.iter().enumerate().any(|(idx, line)| {
             let normalized = normalized_status_line(line);
             starts_with_blocking_status_field(&normalized)
+                || (is_verification_status_heading(&normalized)
+                    && next_line_has_blocking_status(&lines, idx))
         })
+}
+
+fn next_line_has_blocking_status(lines: &[&str], idx: usize) -> bool {
+    lines
+        .iter()
+        .skip(idx + 1)
+        .map(|line| normalized_status_value(line.trim()))
+        .find(|line| !line.is_empty())
+        .is_some_and(|line| starts_with_blocking_status_value(&line))
 }
 
 fn json_reports_failed_verification(body: &str) -> bool {
@@ -291,6 +314,18 @@ fn starts_with_blocking_status_field(normalized: &str) -> bool {
                 .is_some_and(starts_with_blocking_status_value)
         })
     })
+}
+
+fn is_verification_status_heading(normalized: &str) -> bool {
+    matches!(
+        normalized,
+        "status"
+            | "verificationstatus"
+            | "overallstatus"
+            | "overallresult"
+            | "result"
+            | "finalstatus"
+    )
 }
 
 fn starts_with_blocking_status_value(value: &str) -> bool {

@@ -258,6 +258,53 @@ async fn blocked_fanout_output_fails_stage_instead_of_accepting() {
 }
 
 #[tokio::test]
+async fn blocked_agent_output_is_persisted_for_inspection() {
+    struct BlockedRunner;
+
+    #[async_trait::async_trait]
+    impl WorkflowStageRunner for BlockedRunner {
+        async fn run_stage(
+            &self,
+            _request: StageRunRequest,
+        ) -> archon_workflow::WorkflowResult<StageRunOutput> {
+            Ok(StageRunOutput::markdown(
+                "status: blocked\nfindings: []\nCannot run tests because source evidence is missing.",
+            ))
+        }
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let executor = WorkflowExecutor::new(store.clone(), WorkflowPolicy::default());
+    let spec = WorkflowSpec::from_yaml(
+        r#"
+schema: archon.workflow.v1
+name: blocked-agent-output
+task: Run focused tests
+stages:
+  - id: focused_tests
+    kind: agent
+    task: Run focused tests and report exact commands.
+"#,
+    )
+    .unwrap();
+    let run = executor.start(spec).unwrap();
+    let report = executor
+        .execute_with_runner(run.clone(), &BlockedRunner)
+        .await
+        .unwrap();
+    assert_eq!(report.failed, 1);
+
+    let output_path = store
+        .run_dir(&run.id)
+        .join("agent-outputs")
+        .join("focused_tests")
+        .join("focused_tests.json");
+    let output = std::fs::read_to_string(output_path).unwrap();
+    assert!(output.contains("Cannot run tests because source evidence is missing"));
+}
+
+#[tokio::test]
 async fn reject_verdict_fails_quality_gate() {
     struct RejectRunner;
 

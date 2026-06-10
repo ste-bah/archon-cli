@@ -13,6 +13,12 @@ fn explicit_blocked_status_is_blocked() {
 }
 
 #[test]
+fn markdown_status_heading_with_blocked_value_is_blocked() {
+    let body = "### Status\n`blocked`\n\nNo command-execution tool was available.";
+    assert!(output_reports_blocked(body).is_some());
+}
+
+#[test]
 fn empty_findings_with_audit_impossible_is_blocked() {
     let body = "findings: []\nCannot audit because source evidence is missing.";
     assert!(output_reports_blocked(body).is_some());
@@ -71,6 +77,12 @@ fn unverifiable_verification_status_is_blocked() {
         )
         .is_some()
     );
+}
+
+#[test]
+fn markdown_verification_heading_with_failed_value_is_blocked() {
+    let body = "### Verification Status\n`unverifiable`\n\nNo fresh test evidence exists.";
+    assert!(output_reports_failed_verification(body).is_some());
 }
 
 #[test]
