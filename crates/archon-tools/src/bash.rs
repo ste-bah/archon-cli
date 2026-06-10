@@ -88,7 +88,7 @@ impl Tool for BashTool {
                 },
                 "timeout": {
                     "type": "integer",
-                    "description": "Optional timeout in milliseconds"
+                    "description": "Optional timeout in milliseconds. Leave unset unless the user or task explicitly requests a per-command timeout; otherwise the configured tools.bash_timeout applies."
                 }
             },
             "required": ["command"]

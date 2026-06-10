@@ -10,7 +10,7 @@ use serde_json::json;
 use super::workflow_live_retry::transient_live_agent_error;
 use super::{
     PipelineWorkflowRunner, ProviderTier, StageKind, StageRunRequest, allowed_tools, extract_yaml,
-    plan_live, request_target_repository_root,
+    plan_live, request_target_repository_root, workflow_prompt,
 };
 
 struct InvalidPlanner;
@@ -162,6 +162,21 @@ fn post_remediation_test_stages_can_execute_commands_without_write_tools() {
     assert!(tools.contains(&"Read".to_string()));
     assert!(!tools.contains(&"Write".to_string()));
     assert!(!tools.contains(&"Edit".to_string()));
+}
+
+#[test]
+fn command_stage_prompt_uses_configured_bash_timeout() {
+    let req = StageRunRequest {
+        stage_id: "wave2_post_tests".into(),
+        stage_kind: StageKind::Agent,
+        task: "Run focused post-remediation tests for T010/T020/T030 and capture exact commands/results.".into(),
+        ..request(json!({}))
+    };
+    let prompt = workflow_prompt(&req);
+
+    assert!(prompt.contains("rely on the configured `tools.bash_timeout`"));
+    assert!(prompt.contains("Do not set a Bash `timeout` field"));
+    assert!(prompt.contains("Do not mark timed-out commands as completed or verified"));
 }
 
 #[test]
