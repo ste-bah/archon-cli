@@ -145,7 +145,8 @@ impl Tool for BashTool {
         );
 
         // Build sanitized environment
-        let env_vars = sanitized_env();
+        let mut env_vars = sanitized_env();
+        ensure_env_default(&mut env_vars, "CARGO_INCREMENTAL", "0");
 
         if let Some(sandbox) = &ctx.sandbox
             && let Some(result) = sandbox
@@ -262,8 +263,6 @@ impl Tool for BashTool {
     fn permission_level(&self, input: &serde_json::Value) -> PermissionLevel {
         let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
 
-        // Use the permission classifier
-        let command = command_with_compat_prelude(command);
         match archon_permissions::classifier::classify_command(&command, &[], &[], &[]) {
             archon_permissions::classifier::CommandClass::Safe => PermissionLevel::Safe,
             archon_permissions::classifier::CommandClass::Risky => PermissionLevel::Risky,
@@ -366,6 +365,12 @@ pub fn sanitized_env() -> Vec<(String, String)> {
     }
 
     env
+}
+
+fn ensure_env_default(env: &mut Vec<(String, String)>, key: &str, value: &str) {
+    if !env.iter().any(|(existing, _)| existing == key) {
+        env.push((key.to_string(), value.to_string()));
+    }
 }
 
 #[cfg(test)]

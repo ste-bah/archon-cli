@@ -7,6 +7,10 @@ use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
 pub struct GrepTool;
 
+const MAX_SEARCH_FILES: usize = 20_000;
+const MAX_RESULTS: usize = 2_000;
+const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
+
 #[async_trait::async_trait]
 impl Tool for GrepTool {
     fn name(&self) -> &str {
@@ -80,12 +84,26 @@ impl Tool for GrepTool {
 
         let glob_filter = input.get("glob").and_then(|v| v.as_str());
 
-        // Collect files to search
-        let files = collect_files(&search_path, glob_filter);
+        // Collect files to search. Use the same bounded walker for glob and
+        // non-glob searches so filters like `*` do not traverse target/.
+        let (files, file_limit_hit) = match collect_files(&search_path, glob_filter) {
+            Ok(result) => result,
+            Err(err) => return ToolResult::error(err),
+        };
 
         let mut results: Vec<String> = Vec::new();
+        let mut result_limit_hit = false;
+        let mut skipped_large = 0usize;
 
         for file_path in &files {
+            if results.len() >= MAX_RESULTS {
+                result_limit_hit = true;
+                break;
+            }
+            if file_too_large(file_path) {
+                skipped_large += 1;
+                continue;
+            }
             let content = match fs::read_to_string(file_path) {
                 Ok(c) => c,
                 Err(_) => continue, // skip binary/unreadable files
@@ -112,6 +130,10 @@ impl Tool for GrepTool {
                 }
                 _ => {
                     for (line_num, line) in &matches {
+                        if results.len() >= MAX_RESULTS {
+                            result_limit_hit = true;
+                            break;
+                        }
                         results.push(format!("{path_str}:{}:{}", line_num + 1, line));
                     }
                 }
@@ -119,9 +141,18 @@ impl Tool for GrepTool {
         }
 
         if results.is_empty() {
-            ToolResult::success("No matches found")
+            let mut message = "No matches found".to_string();
+            append_limits(
+                &mut message,
+                file_limit_hit,
+                result_limit_hit,
+                skipped_large,
+            );
+            ToolResult::success(message)
         } else {
-            ToolResult::success(results.join("\n"))
+            let mut output = results.join("\n");
+            append_limits(&mut output, file_limit_hit, result_limit_hit, skipped_large);
+            ToolResult::success(output)
         }
     }
 
@@ -131,56 +162,116 @@ impl Tool for GrepTool {
 }
 
 /// Recursively collect files from a path, optionally filtering by glob pattern.
-fn collect_files(path: &Path, glob_filter: Option<&str>) -> Vec<std::path::PathBuf> {
+fn collect_files(
+    path: &Path,
+    glob_filter: Option<&str>,
+) -> Result<(Vec<std::path::PathBuf>, bool), String> {
     let mut files = Vec::new();
 
     if path.is_file() {
         files.push(path.to_path_buf());
-        return files;
+        return Ok((files, false));
     }
 
     if !path.is_dir() {
-        return files;
+        return Ok((files, false));
     }
 
-    // Use glob if a filter is provided, otherwise walk recursively
-    if let Some(filter) = glob_filter {
-        let pattern = path.join("**").join(filter);
-        if let Ok(entries) = glob::glob(&pattern.to_string_lossy()) {
-            for entry in entries.flatten() {
-                if entry.is_file() {
-                    files.push(entry);
-                }
-            }
-        }
-    } else {
-        walk_dir(path, &mut files);
-    }
+    let matcher = match glob_filter {
+        Some(filter) => Some(glob::Pattern::new(filter).map_err(|e| format!("{e}"))?),
+        None => None,
+    };
+    let limit_hit = walk_dir(path, path, matcher.as_ref(), &mut files);
 
-    files
+    Ok((files, limit_hit))
 }
 
-fn walk_dir(dir: &Path, files: &mut Vec<std::path::PathBuf>) {
+fn walk_dir(
+    base: &Path,
+    dir: &Path,
+    matcher: Option<&glob::Pattern>,
+    files: &mut Vec<std::path::PathBuf>,
+) -> bool {
     let entries = match fs::read_dir(dir) {
         Ok(e) => e,
-        Err(_) => return,
+        Err(_) => return false,
     };
 
     for entry in entries.flatten() {
+        if files.len() >= MAX_SEARCH_FILES {
+            return true;
+        }
         let path = entry.path();
         if path.is_file() {
-            files.push(path);
+            if matches_glob(base, &path, matcher) {
+                files.push(path);
+            }
         } else if path.is_dir() {
-            // Skip hidden directories and common noise
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            if !name_str.starts_with('.')
-                && name_str != "node_modules"
-                && name_str != "target"
-                && name_str != "__pycache__"
+            if !skip_dir(&entry.file_name().to_string_lossy())
+                && walk_dir(base, &path, matcher, files)
             {
-                walk_dir(&path, files);
+                return true;
             }
         }
+    }
+    false
+}
+
+fn skip_dir(name: &str) -> bool {
+    name.starts_with('.')
+        || matches!(
+            name,
+            "node_modules"
+                | "target"
+                | "__pycache__"
+                | "dist"
+                | "build"
+                | "coverage"
+                | ".next"
+                | ".turbo"
+                | ".venv"
+        )
+}
+
+fn matches_glob(base: &Path, path: &Path, matcher: Option<&glob::Pattern>) -> bool {
+    let Some(pattern) = matcher else {
+        return true;
+    };
+    let rel = path.strip_prefix(base).unwrap_or(path);
+    pattern.matches_path(rel)
+        || path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| pattern.matches(name))
+}
+
+fn file_too_large(path: &Path) -> bool {
+    fs::metadata(path)
+        .map(|metadata| metadata.len() > MAX_FILE_BYTES)
+        .unwrap_or(false)
+}
+
+fn append_limits(
+    output: &mut String,
+    file_limit_hit: bool,
+    result_limit_hit: bool,
+    skipped_large: usize,
+) {
+    let mut notes = Vec::new();
+    if file_limit_hit {
+        notes.push(format!("file scan capped at {MAX_SEARCH_FILES} files"));
+    }
+    if result_limit_hit {
+        notes.push(format!("results capped at {MAX_RESULTS} matches"));
+    }
+    if skipped_large > 0 {
+        notes.push(format!(
+            "skipped {skipped_large} file(s) over {MAX_FILE_BYTES} bytes"
+        ));
+    }
+    if !notes.is_empty() {
+        output.push_str("\n\n[grep truncated: ");
+        output.push_str(&notes.join("; "));
+        output.push(']');
     }
 }

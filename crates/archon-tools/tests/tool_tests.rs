@@ -700,6 +700,58 @@ async fn grep_tool_count_mode() {
 }
 
 #[tokio::test]
+async fn grep_tool_glob_matches_nested_files() {
+    let ctx = test_ctx();
+    let src = ctx.working_dir.join("src");
+    fs::create_dir_all(&src).expect("mkdir");
+    fs::write(src.join("nested.rs"), "needle").expect("write");
+    fs::write(ctx.working_dir.join("notes.txt"), "needle").expect("write");
+
+    let result = GrepTool
+        .execute(
+            json!({
+                "pattern": "needle",
+                "path": ctx.working_dir.to_str().unwrap(),
+                "glob": "*.rs",
+                "output_mode": "content"
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error, "{}", result.content);
+    assert!(result.content.contains("nested.rs"));
+    assert!(!result.content.contains("notes.txt"));
+    cleanup(&ctx);
+}
+
+#[tokio::test]
+async fn grep_tool_glob_skips_target_directory() {
+    let ctx = test_ctx();
+    let target = ctx.working_dir.join("target/debug");
+    fs::create_dir_all(&target).expect("mkdir target");
+    fs::write(ctx.working_dir.join("kept.txt"), "needle").expect("write kept");
+    fs::write(target.join("ignored.txt"), "needle").expect("write ignored");
+
+    let result = GrepTool
+        .execute(
+            json!({
+                "pattern": "needle",
+                "path": ctx.working_dir.to_str().unwrap(),
+                "glob": "*",
+                "output_mode": "content"
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error, "{}", result.content);
+    assert!(result.content.contains("kept.txt"));
+    assert!(!result.content.contains("ignored.txt"));
+    cleanup(&ctx);
+}
+
+#[tokio::test]
 async fn grep_tool_invalid_regex() {
     let ctx = test_ctx();
     let result = GrepTool
