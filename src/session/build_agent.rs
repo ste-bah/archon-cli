@@ -45,7 +45,7 @@ pub(super) async fn build_session_agent(
     super::configure_session_vlm_provider(&working_dir);
     let leann_index = super::init_leann_index(&working_dir);
     let mut registry = create_default_registry(working_dir.clone(), leann_index);
-    registry.register(Box::new(archon_tools::bash::BashTool {
+    registry.replace(Box::new(archon_tools::bash::BashTool {
         timeout_secs: config.tools.bash_timeout,
         max_output_bytes: config.tools.bash_max_output,
     }));

@@ -13,6 +13,11 @@ fn test_ctx() -> ToolContext {
     }
 }
 
+#[test]
+fn bash_default_timeout_matches_config_default() {
+    assert_eq!(BashTool::default().timeout_secs, 86_400);
+}
+
 #[cfg(not(target_os = "windows"))]
 #[tokio::test]
 async fn bash_echo_hello() {
@@ -54,6 +59,56 @@ async fn bash_timeout() {
         "should mention timeout: {}",
         result.content
     );
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tokio::test]
+async fn workflow_bash_does_not_shorten_configured_timeout() {
+    let tool = BashTool {
+        timeout_secs: 1,
+        max_output_bytes: 102400,
+    };
+    let ctx = ToolContext {
+        session_id: "wf-test-run".into(),
+        ..test_ctx()
+    };
+    let result = tool
+        .execute(
+            json!({ "command": "sleep 0.05; echo workflow-timeout-ok", "timeout": 1 }),
+            &ctx,
+        )
+        .await;
+    assert!(
+        !result.is_error,
+        "workflow Bash should use configured timeout when model supplies a shorter timeout: {}",
+        result.content
+    );
+    assert!(result.content.contains("workflow-timeout-ok"));
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tokio::test]
+async fn workflow_bash_ignores_shell_timeout_wrapper() {
+    let tool = BashTool {
+        timeout_secs: 1,
+        max_output_bytes: 102400,
+    };
+    let ctx = ToolContext {
+        session_id: "wf-test-run".into(),
+        ..test_ctx()
+    };
+    let result = tool
+        .execute(
+            json!({ "command": "timeout 1ms sh -c 'sleep 0.05; echo shell-timeout-ignored'" }),
+            &ctx,
+        )
+        .await;
+    assert!(
+        !result.is_error,
+        "workflow Bash should ignore shell timeout wrappers and rely on configured timeout: {}",
+        result.content
+    );
+    assert!(result.content.contains("shell-timeout-ignored"));
 }
 
 #[cfg(not(target_os = "windows"))]

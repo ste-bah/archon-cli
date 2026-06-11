@@ -334,6 +334,9 @@ fn is_verification_status_heading(normalized: &str) -> bool {
 }
 
 fn starts_with_blocking_status_value(value: &str) -> bool {
+    if value.contains("timeout") || value.contains("timedout") {
+        return true;
+    }
     [
         "failed",
         "failure",

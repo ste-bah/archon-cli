@@ -67,6 +67,7 @@ fn failed_timeout_status_is_blocked() {
     assert!(output_reports_failed_verification(r#"{"status":"failed_timeout"}"#).is_some());
     assert!(output_reports_failed_verification("status: failed_validation_timeout").is_some());
     assert!(output_reports_failed_verification("status: completed_with_timeouts").is_some());
+    assert!(output_reports_failed_verification("status: completed_with_test_timeouts").is_some());
     assert!(output_reports_failed_verification(r#"{ "status": "timed_out" }"#).is_some());
 }
 

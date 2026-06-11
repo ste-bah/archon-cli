@@ -176,6 +176,7 @@ fn command_stage_prompt_uses_configured_bash_timeout() {
 
     assert!(prompt.contains("rely on the configured `tools.bash_timeout`"));
     assert!(prompt.contains("Do not set a Bash `timeout` field"));
+    assert!(prompt.contains("do not wrap commands with shell-level `timeout`/`gtimeout`"));
     assert!(prompt.contains("Do not mark timed-out commands as completed or verified"));
 }
 

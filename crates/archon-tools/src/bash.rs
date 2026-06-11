@@ -39,6 +39,8 @@ const PASSTHROUGH_VARS: &[&str] = &[
     "TEMP",
 ];
 
+const DEFAULT_BASH_TIMEOUT_SECS: u64 = 86_400;
+
 const BASH_COMPAT_PRELUDE: &str = r#"
 printf() {
     if [ "${1-}" = "-v" ]; then
@@ -54,6 +56,41 @@ printf() {
 }
 "#;
 
+const SHELL_TIMEOUT_PRELUDE: &str = r#"
+timeout() {
+    while [ "$#" -gt 0 ]; do
+        case "${1-}" in
+            --) shift; break ;;
+            -k|--kill-after|-s|--signal)
+                shift
+                if [ "$#" -gt 0 ]; then shift; fi
+                ;;
+            --foreground|--preserve-status|-v|--verbose)
+                shift
+                ;;
+            -*)
+                shift
+                ;;
+            *[0-9]s|*[0-9]m|*[0-9]h|*[0-9]d|[0-9]*|[0-9]*.*)
+                shift
+                break
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+    if [ "$#" -eq 0 ]; then
+        return 125
+    fi
+    "$@"
+}
+
+gtimeout() {
+    timeout "$@"
+}
+"#;
+
 pub struct BashTool {
     pub timeout_secs: u64,
     pub max_output_bytes: usize,
@@ -62,7 +99,7 @@ pub struct BashTool {
 impl Default for BashTool {
     fn default() -> Self {
         Self {
-            timeout_secs: 120,
+            timeout_secs: DEFAULT_BASH_TIMEOUT_SECS,
             max_output_bytes: 102400,
         }
     }
@@ -88,7 +125,7 @@ impl Tool for BashTool {
                 },
                 "timeout": {
                     "type": "integer",
-                    "description": "Optional timeout in milliseconds. Leave unset unless the user or task explicitly requests a per-command timeout; otherwise the configured tools.bash_timeout applies."
+                    "description": "Optional timeout in milliseconds. Leave unset unless the user or task explicitly requests a longer per-command timeout; shorter values do not undercut the configured tools.bash_timeout."
                 }
             },
             "required": ["command"]
@@ -102,10 +139,10 @@ impl Tool for BashTool {
         };
         let command = command_with_compat_prelude(command);
 
-        let timeout_ms = input
-            .get("timeout")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(self.timeout_secs * 1000);
+        let timeout_ms = effective_timeout_ms(
+            input.get("timeout").and_then(|v| v.as_u64()),
+            self.timeout_secs * 1000,
+        );
 
         // Build sanitized environment
         let env_vars = sanitized_env();
@@ -226,12 +263,20 @@ impl Tool for BashTool {
         let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
 
         // Use the permission classifier
-        match archon_permissions::classifier::classify_command(command, &[], &[], &[]) {
+        let command = command_with_compat_prelude(command);
+        match archon_permissions::classifier::classify_command(&command, &[], &[], &[]) {
             archon_permissions::classifier::CommandClass::Safe => PermissionLevel::Safe,
             archon_permissions::classifier::CommandClass::Risky => PermissionLevel::Risky,
             archon_permissions::classifier::CommandClass::Dangerous => PermissionLevel::Dangerous,
         }
     }
+}
+
+fn effective_timeout_ms(requested_ms: Option<u64>, configured_ms: u64) -> u64 {
+    let Some(requested_ms) = requested_ms else {
+        return configured_ms;
+    };
+    requested_ms.max(configured_ms)
 }
 
 fn spawn_pipe_reader<T>(pipe: Option<T>) -> JoinHandle<Vec<u8>>
@@ -294,7 +339,7 @@ fn signal_process_group(pid: u32, signal: libc::c_int) {
 }
 
 fn command_with_compat_prelude(command: &str) -> String {
-    format!("{BASH_COMPAT_PRELUDE}\n{command}")
+    format!("{BASH_COMPAT_PRELUDE}\n{SHELL_TIMEOUT_PRELUDE}\n{command}")
 }
 
 /// Build a sanitized environment map.

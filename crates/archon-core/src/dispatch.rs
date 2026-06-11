@@ -30,6 +30,15 @@ impl ToolRegistry {
         self.tools.insert(name, Arc::from(tool));
     }
 
+    /// Replace an existing tool registration or insert it if absent.
+    pub fn replace(&mut self, tool: Box<dyn Tool>) {
+        let name = tool.name().to_string();
+        if self.tools.contains_key(&name) {
+            tracing::debug!(tool = %name, "replacing tool registration");
+        }
+        self.tools.insert(name, Arc::from(tool));
+    }
+
     /// Get a tool by name.
     pub fn get(&self, name: &str) -> Option<&dyn Tool> {
         self.tools.get(name).map(|t| &**t)
@@ -387,7 +396,46 @@ pub fn create_default_registry(
 mod tests {
     use super::*;
     use archon_observability::{AgentActivityKind, InMemoryActivitySink};
-    use archon_tools::tool::AgentMode;
+    use archon_tools::tool::{AgentMode, PermissionLevel};
+
+    struct ReplaceTestTool(&'static str);
+
+    #[async_trait::async_trait]
+    impl Tool for ReplaceTestTool {
+        fn name(&self) -> &str {
+            "ReplaceTest"
+        }
+
+        fn description(&self) -> &str {
+            self.0
+        }
+
+        fn input_schema(&self) -> serde_json::Value {
+            serde_json::json!({ "type": "object" })
+        }
+
+        async fn execute(&self, _input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
+            ToolResult::success(self.0)
+        }
+
+        fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
+            PermissionLevel::Safe
+        }
+    }
+
+    #[test]
+    fn replace_overwrites_existing_tool_registration() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(ReplaceTestTool("first")));
+        registry.replace(Box::new(ReplaceTestTool("second")));
+
+        let definition = registry
+            .tool_definitions()
+            .into_iter()
+            .find(|tool| tool["name"] == "ReplaceTest")
+            .expect("replacement tool should be registered");
+        assert_eq!(definition["description"], "second");
+    }
 
     #[test]
     fn default_registry_has_all_tools() {
