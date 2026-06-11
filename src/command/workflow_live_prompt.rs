@@ -1,8 +1,8 @@
 use archon_workflow::StageRunRequest;
 
-use super::command_execution_stage;
+use super::workflow_live_runner::command_execution_stage;
 
-pub(super) fn workflow_prompt(request: &StageRunRequest) -> String {
+pub(crate) fn workflow_prompt(request: &StageRunRequest) -> String {
     let input =
         serde_json::to_string_pretty(&request.input).unwrap_or_else(|_| request.input.to_string());
     let command_guidance = if command_execution_stage(request) {

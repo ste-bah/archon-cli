@@ -211,7 +211,7 @@ pub(crate) fn allowed_tools(request: &StageRunRequest) -> Vec<String> {
     tools.into_iter().map(str::to_string).collect()
 }
 
-fn command_execution_stage(request: &StageRunRequest) -> bool {
+pub(crate) fn command_execution_stage(request: &StageRunRequest) -> bool {
     if stage_extra_requests_bash(request) {
         return true;
     }

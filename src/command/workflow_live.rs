@@ -28,12 +28,8 @@ mod workflow_live_retry;
 #[path = "workflow_live_runner.rs"]
 mod workflow_live_runner;
 
-pub(crate) use workflow_live_prompt::workflow_prompt;
 use workflow_live_prompt::{planner_prompt, repair_prompt};
-pub(crate) use workflow_live_runner::{
-    PipelineWorkflowRunner, allowed_tools, extract_yaml, request_target_repository_root,
-    tier_model_alias,
-};
+use workflow_live_runner::{PipelineWorkflowRunner, extract_yaml, tier_model_alias};
 
 pub(crate) fn should_spawn_live(action: &CommandAction) -> bool {
     matches!(
