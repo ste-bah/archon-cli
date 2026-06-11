@@ -4,6 +4,7 @@ pub mod acceptance;
 pub mod command;
 pub mod config;
 pub mod context;
+mod context_output;
 pub mod error;
 pub mod events;
 mod exec_state;
