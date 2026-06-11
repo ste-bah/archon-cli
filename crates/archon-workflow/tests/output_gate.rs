@@ -13,6 +13,12 @@ fn explicit_blocked_status_is_blocked() {
 }
 
 #[test]
+fn inline_blocked_status_after_prose_is_blocked() {
+    let body = "Running focused checks in the target repository.status: blocked\n\nmissing_evidence:\n- No tool execution results are available in this stage attempt.";
+    assert!(output_reports_blocked(body).is_some());
+}
+
+#[test]
 fn markdown_status_heading_with_blocked_value_is_blocked() {
     let body = "### Status\n`blocked`\n\nNo command-execution tool was available.";
     assert!(output_reports_blocked(body).is_some());
@@ -74,6 +80,8 @@ fn failed_timeout_status_is_blocked() {
 #[test]
 fn unverifiable_verification_status_is_blocked() {
     assert!(output_reports_failed_verification("verification_status: unverifiable").is_some());
+    assert!(output_reports_failed_verification("status: partial_success").is_some());
+    assert!(output_reports_failed_verification("result: blocked").is_some());
     assert!(
         output_reports_failed_verification(
             r#"{"overall_result":"partial_pass_with_timeout_residual"}"#

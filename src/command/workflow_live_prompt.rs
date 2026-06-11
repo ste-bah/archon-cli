@@ -6,7 +6,7 @@ pub(crate) fn workflow_prompt(request: &StageRunRequest) -> String {
     let input =
         serde_json::to_string_pretty(&request.input).unwrap_or_else(|_| request.input.to_string());
     let command_guidance = if command_execution_stage(request) {
-        "\nFor verification, focused-test, lint, build, or check stages, use Bash to run the relevant command when it is available. Do not set a Bash `timeout` field and do not wrap commands with shell-level `timeout`/`gtimeout` unless the workflow stage explicitly provides a timeout; rely on the configured `tools.bash_timeout`. Report exact commands and pass/fail output. Do not return `status: blocked` merely because a command is expensive; run the focused command or report the concrete execution failure. Do not mark timed-out commands as completed or verified."
+        "\nFor verification, focused-test, lint, build, or check stages, you MUST invoke Bash at least once before returning. Do not set a Bash `timeout` field and do not wrap commands with shell-level `timeout`/`gtimeout` unless the workflow stage explicitly provides a timeout; rely on the configured `tools.bash_timeout`. Report exact commands, working directory, exit status, and pass/fail output. If Bash is unavailable or the command cannot be executed, return `status: failed` with the concrete execution failure. Do not return `status: blocked` merely because a command is expensive; run the focused command or report the concrete execution failure. Do not mark timed-out commands as completed or verified."
     } else {
         ""
     };

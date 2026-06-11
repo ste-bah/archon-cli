@@ -17,7 +17,10 @@ pub fn output_reports_blocked(body: &str) -> Option<String> {
         || lower.contains("no source evidence")
         || lower.contains("no source files")
         || lower.contains("no file content")
-        || lower.contains("insufficient context");
+        || lower.contains("insufficient context")
+        || lower.contains("no tool execution results are available")
+        || lower.contains("cannot truthfully report pass/fail")
+        || lower.contains("without executing the commands");
     if rejection {
         return Some("agent output declares reject/do-not-sign-off verdict".to_string());
     }
@@ -61,6 +64,8 @@ fn reports_explicit_blocked_status(lower: &str) -> bool {
         normalized.starts_with("status:blocked")
             || normalized.starts_with("-status:blocked")
             || normalized.starts_with("status=blocked")
+            || normalized.contains("status:blocked")
+            || normalized.contains("status=blocked")
             || (normalized == "status" && next_line_is_blocked(&lines, idx))
     })
 }
@@ -154,6 +159,9 @@ fn contains_blocking_structured_field(lower: &str) -> bool {
         "unverifiable",
         "not_verified",
         "not_fully_verified",
+        "blocked",
+        "partial_success",
+        "partial_failure",
     ];
     FIELDS.iter().any(|field| {
         VALUES.iter().any(|value| {
@@ -214,6 +222,9 @@ fn starts_with_blocking_status_value(value: &str) -> bool {
         "unverifiable",
         "notverified",
         "notfullyverified",
+        "blocked",
+        "partialsuccess",
+        "partialfailure",
     ]
     .iter()
     .any(|blocking| value.starts_with(blocking))
