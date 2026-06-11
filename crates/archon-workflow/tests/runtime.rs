@@ -338,7 +338,7 @@ async fn reject_verdict_fails_quality_gate() {
 }
 
 #[tokio::test]
-async fn failed_verification_output_fails_quality_gate_not_review_stage() {
+async fn failed_verification_output_fails_producing_stage() {
     struct FailedFindingRunner;
 
     #[async_trait::async_trait]
@@ -381,11 +381,11 @@ stages:
     let finished = store.load_state(&run.id).unwrap();
     assert_eq!(
         finished.stages.get("review").unwrap().status,
-        StageStatus::Accepted
+        StageStatus::Failed
     );
     assert_eq!(
         finished.stages.get("quality").unwrap().status,
-        StageStatus::Failed
+        StageStatus::Pending
     );
 }
 
