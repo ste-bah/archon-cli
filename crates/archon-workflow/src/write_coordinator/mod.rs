@@ -6,11 +6,15 @@
 //! modules added by later tasks.
 
 pub mod config;
+pub mod worktree_isolation;
 pub mod write_plan;
 
 use std::path::{Path, PathBuf};
 
 pub use config::WriteCoordinatorConfig;
+pub use worktree_isolation::{
+    CanonicalBaseline, FileMeta, IsolationError, ItemWorkspace, WorkspaceStatus,
+};
 pub use write_plan::{
     NormalizedPath, ResourceKey, TargetFilesSource, WritePlan, WritePlanError,
 };

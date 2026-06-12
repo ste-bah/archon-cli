@@ -97,7 +97,95 @@ stages:
         .unwrap_or_else(|err| fail(&format!("baseline id rejected: {err}")));
     println!("write_plan smoke: provenance={source:?}, conflict-detection OK");
 
+    smoke_worktree_isolation();
+
     println!("write_coordinator smoke: OK");
+}
+
+/// TASK-WC-003 — build a throwaway git repo, isolate an item, prove the dirty
+/// overlay reproduces, mutation detection fires, and cleanup removes the tree.
+fn smoke_worktree_isolation() {
+    use std::collections::BTreeSet;
+    use archon_workflow::WriteCoordinatorConfig;
+    use archon_workflow::write_coordinator::worktree_isolation::{
+        WorkspaceStatus, capture_canonical_baseline, cleanup_workspace,
+        create_item_workspace, detect_canonical_mutation,
+    };
+    use archon_workflow::write_coordinator::write_plan::{TargetFilesSource, normalize_target};
+    use archon_workflow::write_coordinator::{ItemId, WritePlan};
+
+    fn git(args: &[&str], cwd: &Path) {
+        let out = std::process::Command::new("git")
+            .current_dir(cwd)
+            .args(args)
+            .output()
+            .unwrap_or_else(|e| fail(&format!("git spawn: {e}")));
+        if !out.status.success() {
+            fail(&format!(
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            ));
+        }
+    }
+
+    let dir = std::env::temp_dir().join(format!("wc-smoke-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src")).unwrap_or_else(|e| fail(&format!("mkdir: {e}")));
+    let root = dir.as_path();
+    git(&["init", "-q", "-b", "main"], root);
+    git(&["config", "user.name", "smoke"], root);
+    git(&["config", "user.email", "smoke@local"], root);
+    std::fs::write(root.join("src/lib.rs"), "// committed\n").unwrap();
+    git(&["add", "src/lib.rs"], root);
+    git(&["commit", "-q", "-m", "init"], root);
+    // Dirty tracked overlay + an undeclared secret that must NOT leak.
+    std::fs::write(root.join("src/lib.rs"), "// dirty edit\n").unwrap();
+    std::fs::write(root.join(".env"), "SECRET=leakme\n").unwrap();
+
+    let target = normalize_target("src/lib.rs", root)
+        .unwrap_or_else(|e| fail(&format!("normalize target: {e}")));
+    let plan = WritePlan {
+        run_id: "smoke".into(),
+        stage_id: "impl".into(),
+        item_id: ItemId::from("impl-0"),
+        canonical_root: root.to_path_buf(),
+        isolated_root: root.join(".archon/wc/smoke/impl-0"),
+        target_files: vec![target],
+        target_files_source: TargetFilesSource::Item,
+        read_context_files: vec![],
+        verify_inputs: vec![],
+        baseline_id: "git:HEAD".into(),
+        workspace_boundary_required: true,
+        resource_keys: BTreeSet::new(),
+    };
+    let cfg = WriteCoordinatorConfig::default();
+    let baseline = capture_canonical_baseline(root, &plan, &[], &cfg)
+        .unwrap_or_else(|e| fail(&format!("capture: {e}")));
+    if baseline.untracked_files.contains_key(".env") {
+        fail("SECRET .env leaked into baseline");
+    }
+    let ws = create_item_workspace(root, &plan, &baseline)
+        .unwrap_or_else(|e| fail(&format!("workspace: {e}")));
+    let overlay = std::fs::read_to_string(plan.isolated_root.join("src/lib.rs")).unwrap();
+    if overlay != "// dirty edit\n" {
+        fail("dirty overlay did not reproduce in isolated worktree");
+    }
+    if plan.isolated_root.join(".env").exists() {
+        fail("SECRET .env leaked into isolated worktree");
+    }
+
+    std::fs::write(root.join("src/lib.rs"), "// mutated behind back\n").unwrap();
+    match detect_canonical_mutation(root, &baseline, &plan.target_files, &[]) {
+        Err(_) => println!("worktree smoke: mutation detected, baseline_commit={}", ws.baseline_commit),
+        Ok(()) => fail("canonical mutation was NOT detected"),
+    }
+    cleanup_workspace(root, &plan.isolated_root, WorkspaceStatus::Succeeded, &cfg)
+        .unwrap_or_else(|e| fail(&format!("cleanup: {e}")));
+    if plan.isolated_root.exists() {
+        fail("cleanup did not remove isolated worktree");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    println!("worktree smoke: isolation + overlay + secret-block + cleanup OK");
 }
 
 fn fail(msg: &str) -> ! {
