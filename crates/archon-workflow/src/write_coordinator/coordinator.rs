@@ -12,16 +12,15 @@ use std::sync::Arc;
 use serde_json::json;
 use tokio::sync::Semaphore;
 
+pub use super::WriteBoundaryProbe;
 use super::conflict_graph::{WaveCaps, build_schedule};
-use super::patch_apply::{
-    ApplyRecord, VerifyResult, apply_wave, run_wave_verify, with_repo_lock,
-};
+use super::patch_apply::{ApplyRecord, VerifyResult, apply_wave, run_wave_verify, with_repo_lock};
 use super::patch_manifest::{
     ManifestStatus, PatchManifest, capture_patch, persist_manifest, validate_patch,
 };
 use super::worktree_isolation::{
-    CanonicalBaseline, ItemWorkspace, WorkspaceStatus, capture_canonical_baseline, cleanup_workspace,
-    create_item_workspace, detect_canonical_mutation,
+    CanonicalBaseline, ItemWorkspace, WorkspaceStatus, capture_canonical_baseline,
+    cleanup_workspace, create_item_workspace, detect_canonical_mutation,
 };
 use super::write_plan::{
     NormalizedPath, TargetFilesSource, WritePlan, normalize_target, resource_keys_for_targets,
@@ -29,7 +28,6 @@ use super::write_plan::{
 use super::{
     ItemId, SerialFallbackReason, WaveId, WriteCoordinatorConfig, WriteCoordinatorRuntime,
 };
-pub use super::WriteBoundaryProbe;
 
 use crate::fanout::FanoutItem;
 use crate::policy::WorkflowPolicy;
@@ -152,13 +150,25 @@ pub async fn run_coordinated_implementation_fanout(
         .map_err(FanoutError::Schedule)?;
     let plan_by_id: BTreeMap<&str, &WritePlan> =
         plans.iter().map(|p| (p.item_id.as_str(), p)).collect();
-    let input_by_id: BTreeMap<&str, &PlanInput> =
-        plans_input.iter().map(|p| (p.item.id.as_str(), p)).collect();
+    let input_by_id: BTreeMap<&str, &PlanInput> = plans_input
+        .iter()
+        .map(|p| (p.item.id.as_str(), p))
+        .collect();
 
     let mut outcome = CoordinatedOutcome::new(run_id, stage_id);
     for wave in &schedule.waves {
-        process_wave(ctx, &canonical, cfg, runner, wave, &plan_by_id, &input_by_id, &caps, &mut outcome)
-            .await?;
+        process_wave(
+            ctx,
+            &canonical,
+            cfg,
+            runner,
+            wave,
+            &plan_by_id,
+            &input_by_id,
+            &caps,
+            &mut outcome,
+        )
+        .await?;
     }
     Ok(outcome)
 }
@@ -296,7 +306,12 @@ fn build_item_request(
     if !req.input.is_object() {
         req.input = json!({});
     }
-    let declared: Vec<String> = it.plan.target_files.iter().map(NormalizedPath::as_str).collect();
+    let declared: Vec<String> = it
+        .plan
+        .target_files
+        .iter()
+        .map(NormalizedPath::as_str)
+        .collect();
     let obj = req.input.as_object_mut().expect("input is object");
     obj.insert(
         "target_repository_root".into(),
@@ -331,12 +346,16 @@ fn capture_and_validate(
     for it in items {
         let captured = capture_patch(&it.workspace, &it.plan.target_files, &it.baseline)
             .map_err(FanoutError::Patch)?;
-        validate_patch(&captured, it.plan, cfg, "implemented")
-            .map_err(FanoutError::Patch)?;
+        validate_patch(&captured, it.plan, cfg, "implemented").map_err(FanoutError::Patch)?;
         records.push(PlanRecord {
             item_id: it.plan.item_id.clone(),
             wave_id,
-            target_files: it.plan.target_files.iter().map(NormalizedPath::as_str).collect(),
+            target_files: it
+                .plan
+                .target_files
+                .iter()
+                .map(NormalizedPath::as_str)
+                .collect(),
             changed_files: captured.changed_files.clone(),
             post_hashes: captured.post_hashes.clone(),
             patch_bytes_len: captured.patch_bytes.len(),
@@ -401,12 +420,17 @@ fn apply_and_verify(
 
 fn record_applied(apply_record: &ApplyRecord, outcome: &mut CoordinatedOutcome) {
     for item in &apply_record.items_applied {
-        outcome.item_status.insert(item.clone(), ManifestStatus::Applied);
-    }
-    for (item, reason) in &apply_record.items_failed {
         outcome
             .item_status
-            .insert(item.clone(), ManifestStatus::Failed { reason: reason.clone() });
+            .insert(item.clone(), ManifestStatus::Applied);
+    }
+    for (item, reason) in &apply_record.items_failed {
+        outcome.item_status.insert(
+            item.clone(),
+            ManifestStatus::Failed {
+                reason: reason.clone(),
+            },
+        );
     }
 }
 
@@ -436,12 +460,22 @@ fn finalize_failed_wave(
         outcome.plans.push(PlanRecord {
             item_id: it.plan.item_id.clone(),
             wave_id: wave.wave_id,
-            target_files: it.plan.target_files.iter().map(NormalizedPath::as_str).collect(),
+            target_files: it
+                .plan
+                .target_files
+                .iter()
+                .map(NormalizedPath::as_str)
+                .collect(),
             changed_files: vec![],
             post_hashes: BTreeMap::new(),
             patch_bytes_len: 0,
         });
-        let _ = cleanup_workspace(canonical, &it.plan.isolated_root, WorkspaceStatus::Failed, cfg);
+        let _ = cleanup_workspace(
+            canonical,
+            &it.plan.isolated_root,
+            WorkspaceStatus::Failed,
+            cfg,
+        );
     }
     outcome.waves.push(WaveOutcome {
         wave_id: wave.wave_id,

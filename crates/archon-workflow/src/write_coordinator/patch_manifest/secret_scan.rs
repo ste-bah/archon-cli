@@ -13,7 +13,10 @@ fn secret_regexes() -> &'static [(Regex, &'static str)] {
             (r"sk-ant-[A-Za-z0-9_-]{40,}", "anthropic_api_key"),
             (r"sk-[A-Za-z0-9]{32,}", "openai_api_key"),
             (r"ghp_[A-Za-z0-9]{36}", "github_pat"),
-            (r"xoxb-[0-9]{10,}-[0-9]{10,}-[A-Za-z0-9]{24,}", "slack_bot_token"),
+            (
+                r"xoxb-[0-9]{10,}-[0-9]{10,}-[A-Za-z0-9]{24,}",
+                "slack_bot_token",
+            ),
             (r"AKIA[0-9A-Z]{16}", "aws_access_key"),
             (
                 r"-----BEGIN (RSA|OPENSSH|DSA|EC|PGP) PRIVATE KEY-----",
@@ -22,7 +25,12 @@ fn secret_regexes() -> &'static [(Regex, &'static str)] {
         ];
         specs
             .iter()
-            .map(|(pat, rule)| (Regex::new(pat).expect("static secret regex compiles"), *rule))
+            .map(|(pat, rule)| {
+                (
+                    Regex::new(pat).expect("static secret regex compiles"),
+                    *rule,
+                )
+            })
             .collect()
     })
 }

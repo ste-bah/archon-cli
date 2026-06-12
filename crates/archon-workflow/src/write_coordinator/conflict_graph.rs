@@ -175,7 +175,13 @@ pub fn build_schedule(
     }
     let ordered = kahn_topo_sort(plans, deps)?;
     let graph = build_conflict_graph(&ordered);
-    Ok(place_waves(stage_id, &ordered, deps, &graph, caps.effective()))
+    Ok(place_waves(
+        stage_id,
+        &ordered,
+        deps,
+        &graph,
+        caps.effective(),
+    ))
 }
 
 /// Place items into the earliest legal wave (PRD §10.2). Pure adjacency lookup.
@@ -194,7 +200,11 @@ fn place_waves(
             .and_then(|ds| ds.iter().filter_map(|d| placement.get(d)).copied().max())
             .map(|w| w + 1)
             .unwrap_or(0);
-        let neighbors = graph.adjacency.get(&plan.item_id).cloned().unwrap_or_default();
+        let neighbors = graph
+            .adjacency
+            .get(&plan.item_id)
+            .cloned()
+            .unwrap_or_default();
         let mut target = dep_floor;
         loop {
             if target == waves.len() {
@@ -252,7 +262,12 @@ fn kahn_topo_sort(
     detect_cycle(plans, deps)?;
     let mut indegree: BTreeMap<&str, usize> = plans
         .iter()
-        .map(|p| (p.item_id.as_str(), deps.get(&p.item_id).map_or(0, BTreeSet::len)))
+        .map(|p| {
+            (
+                p.item_id.as_str(),
+                deps.get(&p.item_id).map_or(0, BTreeSet::len),
+            )
+        })
         .collect();
     let mut placed: BTreeSet<&str> = BTreeSet::new();
     let mut result = Vec::with_capacity(plans.len());
@@ -274,7 +289,10 @@ fn kahn_topo_sort(
         placed.insert(next.item_id.as_str());
         result.push(next.clone());
         for plan in plans {
-            if deps.get(&plan.item_id).is_some_and(|t| t.contains(&next.item_id)) {
+            if deps
+                .get(&plan.item_id)
+                .is_some_and(|t| t.contains(&next.item_id))
+            {
                 *indegree.get_mut(plan.item_id.as_str()).unwrap() -= 1;
             }
         }

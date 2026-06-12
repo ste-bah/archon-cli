@@ -1,10 +1,10 @@
 //! Aggregated error type for the coordinated fanout flow.
 
+use super::super::conflict_graph::ScheduleError;
 use super::super::patch_apply::ApplyError;
 use super::super::patch_manifest::PatchError;
 use super::super::worktree_isolation::IsolationError;
 use super::super::write_plan::WritePlanError;
-use super::super::conflict_graph::ScheduleError;
 
 #[derive(Debug)]
 pub enum FanoutError {

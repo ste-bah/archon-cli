@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use super::*;
-use crate::write_coordinator::write_plan::{NormalizedPath, ResourceKey, TargetFilesSource};
 use crate::write_coordinator::ItemId;
+use crate::write_coordinator::write_plan::{NormalizedPath, ResourceKey, TargetFilesSource};
 
 /// Minimal WritePlan with explicit resource keys + provenance.
 fn plan(id: &str, keys: &[ResourceKey], source: TargetFilesSource) -> WritePlan {
@@ -35,8 +35,7 @@ impl NormalizedPathStub {
     fn new(id: &str) -> NormalizedPath {
         let dir = std::env::temp_dir().join(format!("cg-{}-{}", std::process::id(), id));
         std::fs::create_dir_all(&dir).expect("tempdir");
-        crate::write_coordinator::write_plan::normalize_target("f.rs", &dir)
-            .expect("normalize")
+        crate::write_coordinator::write_plan::normalize_target("f.rs", &dir).expect("normalize")
     }
 }
 
@@ -160,7 +159,11 @@ fn stage_level_items_serialize_even_when_keys_disjoint() {
         plan("b", &[file_key("b.rs")], TargetFilesSource::StageLevel),
     ];
     let s = build_schedule("impl", &plans, &no_deps(), &caps(4)).expect("schedule");
-    assert_eq!(s.waves.len(), 2, "StageLevel items must serialize per PRD 8.1");
+    assert_eq!(
+        s.waves.len(),
+        2,
+        "StageLevel items must serialize per PRD 8.1"
+    );
 }
 
 #[test]

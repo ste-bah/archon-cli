@@ -2,12 +2,15 @@
 
 use std::collections::BTreeMap;
 
+use archon_workflow::WorkflowStore;
 use archon_workflow::classify_resume;
 use archon_workflow::events::WorkflowEventKind;
 use archon_workflow::events::write_coordination_events::{
     WriteCoordinationConflictKind, build_write_coordination_events, serial_fallback_reason_str,
 };
 use archon_workflow::learning::record_write_coordination_outcome;
+use archon_workflow::write_coordinator::ManifestStatus;
+use archon_workflow::write_coordinator::SerialFallbackReason;
 use archon_workflow::write_coordinator::coordinator::{
     CoordinatedOutcome, PlanRecord, WaveOutcome,
 };
@@ -16,9 +19,6 @@ use archon_workflow::write_coordinator::patch_manifest::{
     PATCH_MANIFEST_SCHEMA, PatchManifest, persist_manifest_status_update,
 };
 use archon_workflow::write_coordinator::status::render_compact;
-use archon_workflow::write_coordinator::ManifestStatus;
-use archon_workflow::write_coordinator::SerialFallbackReason;
-use archon_workflow::WorkflowStore;
 
 fn plan(item: &str, wave: u32) -> PlanRecord {
     PlanRecord {
@@ -103,15 +103,26 @@ fn write_coordination_events_fallback_once() {
     };
     let events = build_write_coordination_events(&outcome).unwrap();
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0].0, WorkflowEventKind::WriteCoordinationSerialFallback);
+    assert_eq!(
+        events[0].0,
+        WorkflowEventKind::WriteCoordinationSerialFallback
+    );
     assert_eq!(events[0].1["fallback"], "boundary_unavailable");
 }
 
 #[test]
 fn event_payload_fields_pass_sanitizer() {
     const FORBIDDEN: &[&str] = &[
-        "thinking", "reasoning", "reasoning_encrypted", "encrypted_reasoning", "oauth_token",
-        "access_token", "refresh_token", "api_key", "authorization", "raw_text",
+        "thinking",
+        "reasoning",
+        "reasoning_encrypted",
+        "encrypted_reasoning",
+        "oauth_token",
+        "access_token",
+        "refresh_token",
+        "api_key",
+        "authorization",
+        "raw_text",
     ];
     let events = build_write_coordination_events(&applied_outcome()).unwrap();
     for (_, detail) in &events {
@@ -131,8 +142,14 @@ fn event_payload_fields_pass_sanitizer() {
 
 #[test]
 fn serial_fallback_reason_strings() {
-    assert_eq!(serial_fallback_reason_str(SerialFallbackReason::FeatureDisabled), "feature_disabled");
-    assert_eq!(serial_fallback_reason_str(SerialFallbackReason::NonGitRoot), "non_git_root");
+    assert_eq!(
+        serial_fallback_reason_str(SerialFallbackReason::FeatureDisabled),
+        "feature_disabled"
+    );
+    assert_eq!(
+        serial_fallback_reason_str(SerialFallbackReason::NonGitRoot),
+        "non_git_root"
+    );
     assert_eq!(
         serial_fallback_reason_str(SerialFallbackReason::BoundaryUnavailable),
         "boundary_unavailable"
@@ -144,8 +161,14 @@ fn conflict_kind_has_eight_variants() {
     // Compile-time enumeration of all 8 (exhaustive match) proves the count.
     use WriteCoordinationConflictKind::*;
     let all = [
-        StaleBaseline, PatchApplyConflict, SecretDetected, UndeclaredWrite, FileTooLarge,
-        PatchTooLarge, OutputNotUsable, ConflictGraphViolation,
+        StaleBaseline,
+        PatchApplyConflict,
+        SecretDetected,
+        UndeclaredWrite,
+        FileTooLarge,
+        PatchTooLarge,
+        OutputNotUsable,
+        ConflictGraphViolation,
     ];
     assert_eq!(all.len(), 8);
 }
@@ -162,10 +185,16 @@ fn learning_record_is_metadata_only() {
     let text = std::fs::read_to_string(&path).unwrap();
     // No diff-line bytes embedded.
     for needle in ["+++", "--- ", "\n+ ", "\n- "] {
-        assert!(!text.contains(needle), "learning row leaked diff bytes: {needle}");
+        assert!(
+            !text.contains(needle),
+            "learning row leaked diff bytes: {needle}"
+        );
     }
     // blake3 hashes are allowed and present.
-    assert!(text.contains("blake3abc123"), "blake3 hash must be recorded");
+    assert!(
+        text.contains("blake3abc123"),
+        "blake3 hash must be recorded"
+    );
     assert!(text.contains("\"item_id\":\"i0\""));
     assert!(text.contains("\"patch_byte_size\":42"));
 }
@@ -199,7 +228,12 @@ fn lifecycle_resume_write_coordination_classifies() {
         persist_manifest_status_update(run_root, "run1", "implement", &m.item_id, &m).unwrap();
     };
     seed("item-A", ManifestStatus::Applied);
-    seed("item-B", ManifestStatus::Failed { reason: "boom".into() });
+    seed(
+        "item-B",
+        ManifestStatus::Failed {
+            reason: "boom".into(),
+        },
+    );
     seed("item-C", ManifestStatus::IdempotentNoop);
     seed("item-D", ManifestStatus::Conflicted);
     let items = vec![

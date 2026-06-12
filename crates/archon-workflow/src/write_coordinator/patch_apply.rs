@@ -22,14 +22,30 @@ const TAIL_BYTES: usize = 4096;
 
 #[derive(Debug)]
 pub enum ApplyError {
-    LockTimeout { lock_path: PathBuf, waited: Duration },
+    LockTimeout {
+        lock_path: PathBuf,
+        waited: Duration,
+    },
     LockIo(std::io::Error),
     GitMissing,
-    ConflictGraphViolation { conflicting_paths: Vec<String> },
-    PatchApplyConflict { item: ItemId, stderr: String },
-    StaleBaseline { item: ItemId, path: String },
-    VerifyFailed { exit: i32, stderr_tail: String },
-    PersistFailed { source: std::io::Error },
+    ConflictGraphViolation {
+        conflicting_paths: Vec<String>,
+    },
+    PatchApplyConflict {
+        item: ItemId,
+        stderr: String,
+    },
+    StaleBaseline {
+        item: ItemId,
+        path: String,
+    },
+    VerifyFailed {
+        exit: i32,
+        stderr_tail: String,
+    },
+    PersistFailed {
+        source: std::io::Error,
+    },
     Isolation(IsolationError),
     UnknownItem(ItemId),
 }
@@ -38,12 +54,18 @@ impl std::fmt::Display for ApplyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::LockTimeout { lock_path, waited } => {
-                write!(f, "repo write lock timeout after {waited:?} at {lock_path:?}")
+                write!(
+                    f,
+                    "repo write lock timeout after {waited:?} at {lock_path:?}"
+                )
             }
             Self::LockIo(e) => write!(f, "lock io error: {e}"),
             Self::GitMissing => write!(f, "git executable not found"),
             Self::ConflictGraphViolation { conflicting_paths } => {
-                write!(f, "conflict graph violation: overlapping paths {conflicting_paths:?}")
+                write!(
+                    f,
+                    "conflict graph violation: overlapping paths {conflicting_paths:?}"
+                )
             }
             Self::PatchApplyConflict { item, stderr } => {
                 write!(f, "patch apply conflict for '{item}': {stderr}")
@@ -181,7 +203,15 @@ pub fn apply_wave(
         verify_result: None,
     };
     for &i in &order {
-        apply_one(canonical_root, &manifests[i], pre_hashes_by_item, run_root, run_id, stage_id, &mut rec)?;
+        apply_one(
+            canonical_root,
+            &manifests[i],
+            pre_hashes_by_item,
+            run_root,
+            run_id,
+            stage_id,
+            &mut rec,
+        )?;
     }
     rec.completed_at = SystemTime::now();
     persist_record(run_root, stage_id, wave_id, &rec)?;
@@ -229,7 +259,10 @@ fn apply_one(
         return Ok(());
     }
     let patch_str = m.patch_path.to_string_lossy().into_owned();
-    match run_git(&["apply", "--3way", "--whitespace=nowarn", &patch_str], canonical_root) {
+    match run_git(
+        &["apply", "--3way", "--whitespace=nowarn", &patch_str],
+        canonical_root,
+    ) {
         Ok(_) => {
             updated.post_hashes = hash_targets(canonical_root, &m.declared_target_files);
             updated.status = ManifestStatus::Applied;
@@ -263,7 +296,9 @@ fn stale_target(
         .filter(|t| m.changed_files.iter().any(|c| c == *t))
         .find(|t| {
             let now = hash_file(&canonical_root.join(t));
-            expected.get(t.as_str()).is_some_and(|exp| now.as_deref() != Some(exp))
+            expected
+                .get(t.as_str())
+                .is_some_and(|exp| now.as_deref() != Some(exp))
         })
         .cloned()
 }
@@ -300,8 +335,11 @@ fn persist_status(
     item_id: &ItemId,
     manifest: &PatchManifest,
 ) -> Result<(), ApplyError> {
-    persist_manifest_status_update(run_root, run_id, stage_id, item_id, manifest)
-        .map_err(|e| ApplyError::PersistFailed { source: persist_io(e) })
+    persist_manifest_status_update(run_root, run_id, stage_id, item_id, manifest).map_err(|e| {
+        ApplyError::PersistFailed {
+            source: persist_io(e),
+        }
+    })
 }
 
 /// MUST be invoked from inside the SAME `with_repo_lock` closure that called
@@ -406,8 +444,7 @@ fn stage_dir(run_root: &Path, stage_id: &str) -> PathBuf {
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ApplyError> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|source| ApplyError::PersistFailed { source })?;
+        std::fs::create_dir_all(parent).map_err(|source| ApplyError::PersistFailed { source })?;
     }
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, bytes).map_err(|source| ApplyError::PersistFailed { source })?;

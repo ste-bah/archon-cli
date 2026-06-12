@@ -40,7 +40,10 @@ fn main() {
     match resolve_write_coordinator_runtime(&non_git, &wc) {
         WriteCoordinatorRuntime::Disabled {
             reason: SerialFallbackReason::NonGitRoot,
-        } => println!("runtime resolved: Disabled(NonGitRoot) for {}", non_git.display()),
+        } => println!(
+            "runtime resolved: Disabled(NonGitRoot) for {}",
+            non_git.display()
+        ),
         other => fail(&format!("expected Disabled(NonGitRoot), got {other:?}")),
     }
 
@@ -107,10 +110,9 @@ stages:
 
 /// TASK-WC-006 — apply a captured patch to canonical under the repo write lock.
 fn smoke_patch_apply() {
-    use std::collections::BTreeMap;
     use archon_workflow::WriteCoordinatorConfig;
     use archon_workflow::write_coordinator::patch_apply::{
-        apply_wave, resume_status, run_wave_verify, with_repo_lock, ApplyResumeStatus,
+        ApplyResumeStatus, apply_wave, resume_status, run_wave_verify, with_repo_lock,
     };
     use archon_workflow::write_coordinator::patch_manifest::{
         ManifestStatus, PatchManifest, capture_patch, persist_manifest,
@@ -120,6 +122,7 @@ fn smoke_patch_apply() {
     };
     use archon_workflow::write_coordinator::write_plan::{TargetFilesSource, normalize_target};
     use archon_workflow::write_coordinator::{ItemId, WritePlan};
+    use std::collections::BTreeMap;
 
     fn git(args: &[&str], cwd: &Path) {
         let out = std::process::Command::new("git")
@@ -128,7 +131,10 @@ fn smoke_patch_apply() {
             .output()
             .unwrap_or_else(|e| fail(&format!("git spawn: {e}")));
         if !out.status.success() {
-            fail(&format!("git {args:?}: {}", String::from_utf8_lossy(&out.stderr)));
+            fail(&format!(
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            ));
         }
     }
 
@@ -166,8 +172,15 @@ fn smoke_patch_apply() {
     let captured = capture_patch(&ws, &plan.target_files, &baseline)
         .unwrap_or_else(|e| fail(&format!("capture: {e}")));
     let run_root = root.join(".archon/workflows/run1");
-    persist_manifest(&run_root, "run1", "impl", &plan.item_id, &captured, ManifestStatus::PendingApply)
-        .unwrap_or_else(|e| fail(&format!("persist: {e}")));
+    persist_manifest(
+        &run_root,
+        "run1",
+        "impl",
+        &plan.item_id,
+        &captured,
+        ManifestStatus::PendingApply,
+    )
+    .unwrap_or_else(|e| fail(&format!("persist: {e}")));
     let json = std::fs::read_to_string(
         run_root.join("write-coordination/stages/impl/manifests/impl-0.json"),
     )
@@ -184,7 +197,10 @@ fn smoke_patch_apply() {
     .unwrap_or_else(|e| fail(&format!("apply under lock: {e}")));
     let (rec, verify) = result;
     if rec.items_applied != ["impl-0"] {
-        fail(&format!("unexpected items_applied: {:?}", rec.items_applied));
+        fail(&format!(
+            "unexpected items_applied: {:?}",
+            rec.items_applied
+        ));
     }
     if std::fs::read_to_string(root.join("src/lib.rs")).unwrap() != "// applied\n" {
         fail("patch was not applied to canonical");
@@ -201,7 +217,6 @@ fn smoke_patch_apply() {
 
 /// TASK-WC-005 — capture a real patch, validate it, and persist the manifest.
 fn smoke_patch_manifest() {
-    use std::collections::BTreeSet;
     use archon_workflow::WriteCoordinatorConfig;
     use archon_workflow::write_coordinator::patch_manifest::{
         ManifestStatus, capture_patch, persist_manifest, validate_patch,
@@ -211,6 +226,7 @@ fn smoke_patch_manifest() {
     };
     use archon_workflow::write_coordinator::write_plan::{TargetFilesSource, normalize_target};
     use archon_workflow::write_coordinator::{ItemId, WritePlan};
+    use std::collections::BTreeSet;
 
     fn git(args: &[&str], cwd: &Path) {
         let out = std::process::Command::new("git")
@@ -219,7 +235,10 @@ fn smoke_patch_manifest() {
             .output()
             .unwrap_or_else(|e| fail(&format!("git spawn: {e}")));
         if !out.status.success() {
-            fail(&format!("git {args:?}: {}", String::from_utf8_lossy(&out.stderr)));
+            fail(&format!(
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            ));
         }
     }
 
@@ -234,8 +253,8 @@ fn smoke_patch_manifest() {
     git(&["add", "src/lib.rs"], root);
     git(&["commit", "-q", "-m", "init"], root);
 
-    let target = normalize_target("src/lib.rs", root)
-        .unwrap_or_else(|e| fail(&format!("normalize: {e}")));
+    let target =
+        normalize_target("src/lib.rs", root).unwrap_or_else(|e| fail(&format!("normalize: {e}")));
     let plan = WritePlan {
         run_id: "smoke".into(),
         stage_id: "impl".into(),
@@ -260,7 +279,10 @@ fn smoke_patch_manifest() {
     let captured = capture_patch(&ws, &plan.target_files, &baseline)
         .unwrap_or_else(|e| fail(&format!("capture: {e}")));
     if captured.changed_files != ["src/lib.rs"] {
-        fail(&format!("unexpected changed_files: {:?}", captured.changed_files));
+        fail(&format!(
+            "unexpected changed_files: {:?}",
+            captured.changed_files
+        ));
     }
     validate_patch(&captured, &plan, &cfg, "Implemented the change.")
         .unwrap_or_else(|e| fail(&format!("validate: {e}")));
@@ -292,7 +314,6 @@ fn smoke_patch_manifest() {
 
 /// TASK-WC-004 — schedule disjoint vs overlapping items into waves.
 fn smoke_conflict_graph(repo_root: &Path) {
-    use std::collections::BTreeMap;
     use archon_workflow::write_coordinator::conflict_graph::{
         WaveCaps, build_schedule, schedule_summary,
     };
@@ -300,6 +321,7 @@ fn smoke_conflict_graph(repo_root: &Path) {
         ResourceKey, TargetFilesSource, normalize_target,
     };
     use archon_workflow::write_coordinator::{ItemId, WritePlan};
+    use std::collections::BTreeMap;
 
     let mk = |id: &str, key: ResourceKey| {
         let target = normalize_target("crates/archon-workflow/src/lib.rs", repo_root)
@@ -326,10 +348,9 @@ fn smoke_conflict_graph(repo_root: &Path) {
         mk("c", ResourceKey::File("src/a.rs".into())),
     ];
     let caps = WaveCaps::from_sources(8, 4, None, None, None);
-    let schedule =
-        build_schedule("impl", &plans, &BTreeMap::new(), &caps).unwrap_or_else(|e| {
-            fail(&format!("build_schedule: {e}"));
-        });
+    let schedule = build_schedule("impl", &plans, &BTreeMap::new(), &caps).unwrap_or_else(|e| {
+        fail(&format!("build_schedule: {e}"));
+    });
     let summary = schedule_summary(&schedule);
     // a and b disjoint -> wave 0; c overlaps a -> wave 1.
     if schedule.waves.len() != 2 {
@@ -342,21 +363,25 @@ fn smoke_conflict_graph(repo_root: &Path) {
         "conflict_graph smoke: {} waves, max_width {}, widths {:?}",
         summary.wave_count,
         summary.max_width,
-        schedule.waves.iter().map(|w| w.items.len()).collect::<Vec<_>>()
+        schedule
+            .waves
+            .iter()
+            .map(|w| w.items.len())
+            .collect::<Vec<_>>()
     );
 }
 
 /// TASK-WC-003 — build a throwaway git repo, isolate an item, prove the dirty
 /// overlay reproduces, mutation detection fires, and cleanup removes the tree.
 fn smoke_worktree_isolation() {
-    use std::collections::BTreeSet;
     use archon_workflow::WriteCoordinatorConfig;
     use archon_workflow::write_coordinator::worktree_isolation::{
-        WorkspaceStatus, capture_canonical_baseline, cleanup_workspace,
-        create_item_workspace, detect_canonical_mutation,
+        WorkspaceStatus, capture_canonical_baseline, cleanup_workspace, create_item_workspace,
+        detect_canonical_mutation,
     };
     use archon_workflow::write_coordinator::write_plan::{TargetFilesSource, normalize_target};
     use archon_workflow::write_coordinator::{ItemId, WritePlan};
+    use std::collections::BTreeSet;
 
     fn git(args: &[&str], cwd: &Path) {
         let out = std::process::Command::new("git")
@@ -420,7 +445,10 @@ fn smoke_worktree_isolation() {
 
     std::fs::write(root.join("src/lib.rs"), "// mutated behind back\n").unwrap();
     match detect_canonical_mutation(root, &baseline, &plan.target_files, &[]) {
-        Err(_) => println!("worktree smoke: mutation detected, baseline_commit={}", ws.baseline_commit),
+        Err(_) => println!(
+            "worktree smoke: mutation detected, baseline_commit={}",
+            ws.baseline_commit
+        ),
         Ok(()) => fail("canonical mutation was NOT detected"),
     }
     cleanup_workspace(root, &plan.isolated_root, WorkspaceStatus::Succeeded, &cfg)

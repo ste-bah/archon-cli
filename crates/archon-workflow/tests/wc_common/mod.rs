@@ -7,8 +7,7 @@ use std::sync::Arc;
 
 use archon_workflow::fanout::FanoutItem;
 use archon_workflow::write_coordinator::coordinator::{
-    CoordinatedOutcome, FanoutCtx, FanoutError, PlanInput,
-    run_coordinated_implementation_fanout,
+    CoordinatedOutcome, FanoutCtx, FanoutError, PlanInput, run_coordinated_implementation_fanout,
 };
 use archon_workflow::write_coordinator::{
     WriteBoundaryProbe, WriteCoordinatorConfig, resolve_write_coordinator_runtime,
@@ -80,10 +79,16 @@ impl WorkflowStageRunner for MockAgentRunner {
         &self,
         request: StageRunRequest,
     ) -> archon_workflow::WorkflowResult<StageRunOutput> {
-        let root = request.input["target_repository_root"].as_str().unwrap_or(".");
+        let root = request.input["target_repository_root"]
+            .as_str()
+            .unwrap_or(".");
         let declared: Vec<String> = request.input["write_coordination"]["declared_target_files"]
             .as_array()
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
             .unwrap_or_default();
         let body = (self.action)(Path::new(root), &request.stage_id, &declared);
         Ok(StageRunOutput::markdown(body))
@@ -96,7 +101,11 @@ pub fn git(args: &[&str], cwd: &Path) {
         .args(args)
         .output()
         .expect("git runs");
-    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 /// A canonical git repo with one committed `src/seed.rs`.
@@ -196,7 +205,12 @@ pub fn run_coordinated(
     let run_root = store.run_dir(&run.id);
     let runtime = resolve_write_coordinator_runtime(canonical, cfg);
     let outcome = {
-        let stage = run.spec.stages.iter().find(|s| s.id == "implement").unwrap();
+        let stage = run
+            .spec
+            .stages
+            .iter()
+            .find(|s| s.id == "implement")
+            .unwrap();
         let ctx = FanoutCtx {
             store: &store,
             run: &run,

@@ -5,8 +5,8 @@
 //! (worktree isolation, conflict graph, patch capture/apply) lives in sibling
 //! modules added by later tasks.
 
-pub mod conflict_graph;
 pub mod config;
+pub mod conflict_graph;
 pub mod coordinator;
 pub mod patch_apply;
 pub mod patch_manifest;
@@ -16,26 +16,17 @@ pub mod write_plan;
 
 use std::path::{Path, PathBuf};
 
-pub use conflict_graph::{
-    Schedule, ScheduleError, ScheduleSummary, Wave, WaveCaps,
-};
-pub use coordinator::{
-    CoordinatedOutcome, FanoutError, PlanRecord, WaveOutcome,
-    run_coordinated_implementation_fanout,
-};
 pub use config::WriteCoordinatorConfig;
-pub use patch_apply::{
-    ApplyError, ApplyRecord, ApplyResumeStatus, VerifyResult, with_repo_lock,
+pub use conflict_graph::{Schedule, ScheduleError, ScheduleSummary, Wave, WaveCaps};
+pub use coordinator::{
+    CoordinatedOutcome, FanoutError, PlanRecord, WaveOutcome, run_coordinated_implementation_fanout,
 };
-pub use patch_manifest::{
-    CapturedPatch, ManifestStatus, PatchError, PatchManifest,
-};
+pub use patch_apply::{ApplyError, ApplyRecord, ApplyResumeStatus, VerifyResult, with_repo_lock};
+pub use patch_manifest::{CapturedPatch, ManifestStatus, PatchError, PatchManifest};
 pub use worktree_isolation::{
     CanonicalBaseline, FileMeta, IsolationError, ItemWorkspace, WorkspaceStatus,
 };
-pub use write_plan::{
-    NormalizedPath, ResourceKey, TargetFilesSource, WritePlan, WritePlanError,
-};
+pub use write_plan::{NormalizedPath, ResourceKey, TargetFilesSource, WritePlan, WritePlanError};
 
 /// Canonical fan-out item identifier (matches `FanoutItem.id`).
 pub type ItemId = String;

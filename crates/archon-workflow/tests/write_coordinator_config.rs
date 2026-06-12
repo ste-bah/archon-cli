@@ -84,7 +84,11 @@ fn resolve_returns_enabled_for_git_dir_root() {
 fn resolve_returns_enabled_for_git_file_root() {
     // Linked worktrees have a `.git` FILE pointing at the real gitdir.
     let dir = tempfile::tempdir().expect("tempdir");
-    fs::write(dir.path().join(".git"), "gitdir: /elsewhere/.git/worktrees/x\n").expect("write");
+    fs::write(
+        dir.path().join(".git"),
+        "gitdir: /elsewhere/.git/worktrees/x\n",
+    )
+    .expect("write");
     let cfg = WriteCoordinatorConfig::default();
     assert!(matches!(
         resolve_write_coordinator_runtime(dir.path(), &cfg),
@@ -110,9 +114,7 @@ fn resolve_returns_feature_disabled_even_with_git_root() {
 
 #[test]
 fn validate_errs_when_items_declare_no_targets_and_fail_on_undeclared_write() {
-    let yaml = impl_fanout_yaml(
-        "        - name: alpha\n        - name: beta",
-    );
+    let yaml = impl_fanout_yaml("        - name: alpha\n        - name: beta");
     let spec = WorkflowSpec::from_yaml(&yaml).expect("base spec valid");
     let cfg = WriteCoordinatorConfig::default();
     let err = spec
@@ -129,9 +131,7 @@ fn validate_errs_when_items_declare_no_targets_and_fail_on_undeclared_write() {
 
 #[test]
 fn validate_ok_when_fail_on_undeclared_write_disabled() {
-    let yaml = impl_fanout_yaml(
-        "        - name: alpha\n        - name: beta",
-    );
+    let yaml = impl_fanout_yaml("        - name: alpha\n        - name: beta");
     let spec = WorkflowSpec::from_yaml(&yaml).expect("base spec valid");
     let cfg = WriteCoordinatorConfig {
         fail_on_undeclared_write: false,
@@ -185,9 +185,7 @@ stages:
 
 #[test]
 fn validate_skips_everything_when_coordinator_disabled() {
-    let yaml = impl_fanout_yaml(
-        "        - name: alpha",
-    );
+    let yaml = impl_fanout_yaml("        - name: alpha");
     let spec = WorkflowSpec::from_yaml(&yaml).expect("base spec valid");
     let cfg = WriteCoordinatorConfig {
         enabled: false,

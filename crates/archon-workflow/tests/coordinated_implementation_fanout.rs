@@ -23,11 +23,23 @@ fn cfg() -> archon_workflow::write_coordinator::WriteCoordinatorConfig {
 fn ac_wc_001_two_disjoint_files_one_wave() {
     let repo = init_git_repo();
     let targets: &[(&str, &[&str])] = &[("a", &["src/a.rs"]), ("b", &["src/b.rs"])];
-    let h = run_coordinated(repo.path(), targets, &MockAgentRunner::writing("// w\n"), &cfg()).unwrap();
+    let h = run_coordinated(
+        repo.path(),
+        targets,
+        &MockAgentRunner::writing("// w\n"),
+        &cfg(),
+    )
+    .unwrap();
     assert_eq!(h.outcome.waves.len(), 1);
     assert_eq!(h.outcome.waves[0].items.len(), 2);
-    assert_eq!(h.outcome.item_status.get("implement-0"), Some(&ManifestStatus::Applied));
-    assert_eq!(h.outcome.item_status.get("implement-1"), Some(&ManifestStatus::Applied));
+    assert_eq!(
+        h.outcome.item_status.get("implement-0"),
+        Some(&ManifestStatus::Applied)
+    );
+    assert_eq!(
+        h.outcome.item_status.get("implement-1"),
+        Some(&ManifestStatus::Applied)
+    );
     assert!(repo.path().join("src/a.rs").exists());
     assert!(repo.path().join("src/b.rs").exists());
 }
@@ -36,7 +48,13 @@ fn ac_wc_001_two_disjoint_files_one_wave() {
 fn ac_wc_002_two_overlapping_files_serialize() {
     let repo = init_git_repo();
     let targets: &[(&str, &[&str])] = &[("a", &["src/a.rs"]), ("b", &["src/a.rs"])];
-    let h = run_coordinated(repo.path(), targets, &MockAgentRunner::writing("// w\n"), &cfg()).unwrap();
+    let h = run_coordinated(
+        repo.path(),
+        targets,
+        &MockAgentRunner::writing("// w\n"),
+        &cfg(),
+    )
+    .unwrap();
     assert_eq!(h.outcome.waves.len(), 2, "overlapping targets serialize");
     assert_eq!(h.outcome.waves[0].items, vec!["implement-0".to_string()]);
     assert_eq!(h.outcome.waves[1].items, vec!["implement-1".to_string()]);
@@ -54,10 +72,22 @@ fn ac_wc_003_undeclared_write_contained() {
         format!("implemented {item}")
     });
     let targets: &[(&str, &[&str])] = &[("a", &["src/a.rs"])];
-    let h = run_coordinated(repo.path(), targets, &MockAgentRunner::with_action(action), &cfg()).unwrap();
-    assert_eq!(h.outcome.item_status.get("implement-0"), Some(&ManifestStatus::Applied));
+    let h = run_coordinated(
+        repo.path(),
+        targets,
+        &MockAgentRunner::with_action(action),
+        &cfg(),
+    )
+    .unwrap();
+    assert_eq!(
+        h.outcome.item_status.get("implement-0"),
+        Some(&ManifestStatus::Applied)
+    );
     // The undeclared write never reaches canonical (scoped capture + declared-only apply).
-    assert!(!repo.path().join("src/SNEAKY.rs").exists(), "undeclared write must not reach canonical");
+    assert!(
+        !repo.path().join("src/SNEAKY.rs").exists(),
+        "undeclared write must not reach canonical"
+    );
     assert!(repo.path().join("src/a.rs").exists());
 }
 
@@ -73,10 +103,24 @@ fn ac_wc_004_direct_canonical_mutation_fails_wave() {
         format!("tampered {item}")
     });
     let targets: &[(&str, &[&str])] = &[("a", &["src/a.rs"])];
-    let h = run_coordinated(repo.path(), targets, &MockAgentRunner::with_action(action), &cfg()).unwrap();
+    let h = run_coordinated(
+        repo.path(),
+        targets,
+        &MockAgentRunner::with_action(action),
+        &cfg(),
+    )
+    .unwrap();
     assert_eq!(h.outcome.waves.len(), 1);
-    assert!(h.outcome.waves[0].failure.as_deref().is_some_and(|f| f.contains("CanonicalMutation")));
-    assert_ne!(h.outcome.item_status.get("implement-0"), Some(&ManifestStatus::Applied));
+    assert!(
+        h.outcome.waves[0]
+            .failure
+            .as_deref()
+            .is_some_and(|f| f.contains("CanonicalMutation"))
+    );
+    assert_ne!(
+        h.outcome.item_status.get("implement-0"),
+        Some(&ManifestStatus::Applied)
+    );
 }
 
 #[test]
@@ -94,9 +138,17 @@ fn ac_wc_005_dirty_tracked_baseline_reproduced() {
         format!("implemented {item}")
     });
     let targets: &[(&str, &[&str])] = &[("a", &["src/seed.rs"])];
-    let _ = run_coordinated(repo.path(), targets, &MockAgentRunner::with_action(action), &cfg());
+    let _ = run_coordinated(
+        repo.path(),
+        targets,
+        &MockAgentRunner::with_action(action),
+        &cfg(),
+    );
     let observed = seen.lock().unwrap().clone().expect("agent ran");
-    assert!(observed.contains("DIRTY"), "isolated worktree must reproduce dirty tracked content, saw: {observed}");
+    assert!(
+        observed.contains("DIRTY"),
+        "isolated worktree must reproduce dirty tracked content, saw: {observed}"
+    );
 }
 
 #[test]
@@ -113,27 +165,51 @@ fn ac_wc_006_declared_untracked_target_reproduced() {
         format!("implemented {item}")
     });
     let targets: &[(&str, &[&str])] = &[("a", &["src/untracked.rs"])];
-    let _ = run_coordinated(repo.path(), targets, &MockAgentRunner::with_action(action), &cfg());
+    let _ = run_coordinated(
+        repo.path(),
+        targets,
+        &MockAgentRunner::with_action(action),
+        &cfg(),
+    );
     let observed = seen.lock().unwrap().clone().expect("agent ran");
-    assert!(observed.contains("UNTRACKED"), "isolated worktree must reproduce declared untracked content");
+    assert!(
+        observed.contains("UNTRACKED"),
+        "isolated worktree must reproduce declared untracked content"
+    );
 }
 
 #[test]
 fn ac_wc_007_persistence_layout() {
     let repo = init_git_repo();
     let targets: &[(&str, &[&str])] = &[("a", &["src/a.rs"])];
-    let h = run_coordinated(repo.path(), targets, &MockAgentRunner::writing("// w\n"), &cfg()).unwrap();
+    let h = run_coordinated(
+        repo.path(),
+        targets,
+        &MockAgentRunner::writing("// w\n"),
+        &cfg(),
+    )
+    .unwrap();
     let stage_root = h.run_root.join("write-coordination/stages/implement");
-    assert!(stage_root.join("manifests/implement-0.json").exists(), "manifest json");
-    assert!(stage_root.join("patches/implement-0.patch").exists(), "patch file");
+    assert!(
+        stage_root.join("manifests/implement-0.json").exists(),
+        "manifest json"
+    );
+    assert!(
+        stage_root.join("patches/implement-0.patch").exists(),
+        "patch file"
+    );
     assert!(stage_root.join("apply/0.json").exists(), "apply record");
-    assert!(stage_root.join("tests/0.json").exists(), "wave verify record");
+    assert!(
+        stage_root.join("tests/0.json").exists(),
+        "wave verify record"
+    );
 }
 
 #[test]
 fn ac_wc_008_cross_process_repo_lock() {
     if std::env::var("ARCHON_WC_LOCK_SUBPROCESS").as_deref() == Ok("hold") {
-        let canonical = std::path::PathBuf::from(std::env::var("ARCHON_WC_LOCK_CANONICAL").unwrap());
+        let canonical =
+            std::path::PathBuf::from(std::env::var("ARCHON_WC_LOCK_CANONICAL").unwrap());
         with_repo_lock(&canonical, || {
             std::thread::sleep(Duration::from_secs(3));
             Ok::<_, ApplyError>(())
@@ -154,7 +230,10 @@ fn ac_wc_008_cross_process_repo_lock() {
     let start = Instant::now();
     with_repo_lock(repo.path(), || Ok::<_, ApplyError>(())).unwrap();
     let waited = start.elapsed();
-    assert!(waited >= Duration::from_secs(2), "parent acquired lock without waiting: {waited:?}");
+    assert!(
+        waited >= Duration::from_secs(2),
+        "parent acquired lock without waiting: {waited:?}"
+    );
     child.wait().unwrap();
 }
 
@@ -163,8 +242,16 @@ fn ac_wc_009_status_displays_coordinator_state() {
     use archon_workflow::write_coordinator::status::{read_status, render_compact};
     let repo = init_git_repo();
     let targets: &[(&str, &[&str])] = &[("a", &["src/a.rs"]), ("b", &["src/b.rs"])];
-    let h = run_coordinated(repo.path(), targets, &MockAgentRunner::writing("// w\n"), &cfg()).unwrap();
-    let status = read_status(&h.store, &h.run_id, "implement").unwrap().expect("status present");
+    let h = run_coordinated(
+        repo.path(),
+        targets,
+        &MockAgentRunner::writing("// w\n"),
+        &cfg(),
+    )
+    .unwrap();
+    let status = read_status(&h.store, &h.run_id, "implement")
+        .unwrap()
+        .expect("status present");
     let block = render_compact(&status);
     assert_eq!(block.lines().count(), 6);
     assert!(block.starts_with("write_coordination: enabled\n"));
@@ -204,7 +291,11 @@ fn ac_wc_010_resume_skips_accepted() {
     }
     let items = vec!["a".to_string(), "b".to_string()];
     let c = classify_resume(dir.path(), "implement", &items);
-    assert_eq!(c.skip, vec!["a".to_string(), "b".to_string()], "accepted items are skipped");
+    assert_eq!(
+        c.skip,
+        vec!["a".to_string(), "b".to_string()],
+        "accepted items are skipped"
+    );
     assert!(c.reexecute.is_empty(), "no accepted item is re-applied");
 }
 
@@ -212,8 +303,17 @@ fn ac_wc_010_resume_skips_accepted() {
 fn ac_wc_011_non_git_root_serial_fallback() {
     let dir = init_plain_dir();
     let targets: &[(&str, &[&str])] = &[("a", &["src/a.rs"])];
-    let h = run_coordinated(dir.path(), targets, &MockAgentRunner::writing("// w\n"), &cfg()).unwrap();
-    assert_eq!(h.outcome.serial_fallback, Some(SerialFallbackReason::NonGitRoot));
+    let h = run_coordinated(
+        dir.path(),
+        targets,
+        &MockAgentRunner::writing("// w\n"),
+        &cfg(),
+    )
+    .unwrap();
+    assert_eq!(
+        h.outcome.serial_fallback,
+        Some(SerialFallbackReason::NonGitRoot)
+    );
     assert!(h.outcome.waves.is_empty());
 }
 
@@ -229,19 +329,33 @@ fn ac_wc_012_non_implementation_fanout_untouched() {
     )
     .unwrap();
     // Boundary-unavailable runner forces serial fallback; no coordinated apply ran.
-    assert_eq!(h.outcome.serial_fallback, Some(SerialFallbackReason::BoundaryUnavailable));
-    assert!(!h.run_root.join("write-coordination").exists(), "no coordinator artifacts written");
+    assert_eq!(
+        h.outcome.serial_fallback,
+        Some(SerialFallbackReason::BoundaryUnavailable)
+    );
+    assert!(
+        !h.run_root.join("write-coordination").exists(),
+        "no coordinator artifacts written"
+    );
 }
 
 #[test]
 fn ac_wc_013_subagent_concurrency_cap_respected() {
     let repo = init_git_repo();
-    let targets: &[(&str, &[&str])] =
-        &[("a", &["src/a.rs"]), ("b", &["src/b.rs"]), ("c", &["src/c.rs"]), ("d", &["src/d.rs"])];
+    let targets: &[(&str, &[&str])] = &[
+        ("a", &["src/a.rs"]),
+        ("b", &["src/b.rs"]),
+        ("c", &["src/c.rs"]),
+        ("d", &["src/d.rs"]),
+    ];
     let runner = MockAgentRunner::writing("// w\n").cap(2);
     let h = run_coordinated(repo.path(), targets, &runner, &cfg()).unwrap();
     // 4 disjoint items, cap 2 -> 2 waves of 2 (width capped, not 4-wide).
-    assert_eq!(h.outcome.waves.len(), 2, "cap 2 splits 4 disjoint items into 2 waves");
+    assert_eq!(
+        h.outcome.waves.len(),
+        2,
+        "cap 2 splits 4 disjoint items into 2 waves"
+    );
     for wave in &h.outcome.waves {
         assert!(wave.items.len() <= 2, "no wave exceeds the cap");
     }
@@ -264,12 +378,22 @@ fn ac_wc_014_file_size_byte_budget() {
     // limit - 1 and exactly limit succeed (check is strictly greater-than).
     for ok_size in [limit as usize - 1, limit as usize] {
         let repo = init_git_repo();
-        run_coordinated(repo.path(), targets, &MockAgentRunner::with_action(make(ok_size)), &c)
-            .unwrap_or_else(|e| panic!("size {ok_size} should apply: {e}"));
+        run_coordinated(
+            repo.path(),
+            targets,
+            &MockAgentRunner::with_action(make(ok_size)),
+            &c,
+        )
+        .unwrap_or_else(|e| panic!("size {ok_size} should apply: {e}"));
     }
     // limit + 1 is rejected with FileTooLarge.
     let repo = init_git_repo();
-    match run_coordinated(repo.path(), targets, &MockAgentRunner::with_action(make(limit as usize + 1)), &c) {
+    match run_coordinated(
+        repo.path(),
+        targets,
+        &MockAgentRunner::with_action(make(limit as usize + 1)),
+        &c,
+    ) {
         Ok(_) => panic!("oversize file must be rejected"),
         Err(FanoutError::Patch(PatchError::FileTooLarge { .. })) => {}
         Err(e) => panic!("expected FileTooLarge, got {e}"),

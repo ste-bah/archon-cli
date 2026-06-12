@@ -23,7 +23,11 @@ fn git(args: &[&str], cwd: &Path) {
         .args(args)
         .output()
         .expect("git runs");
-    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 /// A runner that writes the declared targets into the isolated workspace it is
@@ -46,7 +50,10 @@ impl WorkflowStageRunner for WritingRunner {
         &self,
         request: StageRunRequest,
     ) -> archon_workflow::WorkflowResult<StageRunOutput> {
-        self.record_inputs.lock().unwrap().push(request.input.clone());
+        self.record_inputs
+            .lock()
+            .unwrap()
+            .push(request.input.clone());
         let root = request.input["target_repository_root"].as_str().unwrap();
         let declared = request.input["write_coordination"]["declared_target_files"]
             .as_array()
@@ -58,7 +65,10 @@ impl WorkflowStageRunner for WritingRunner {
             // wave produces a non-empty patch.
             std::fs::write(p, format!("{}// {}\n", self.content, request.stage_id)).unwrap();
         }
-        Ok(StageRunOutput::markdown(format!("implemented {}", request.stage_id)))
+        Ok(StageRunOutput::markdown(format!(
+            "implemented {}",
+            request.stage_id
+        )))
     }
 }
 
@@ -84,7 +94,10 @@ impl WorkflowStageRunner for CanonicalMutatingRunner {
         std::fs::write(Path::new(root).join("src/a.rs"), "// isolated\n").unwrap();
         // Mutate the canonical declared target behind the coordinator's back.
         std::fs::write(self.canonical.join("src/a.rs"), "// CANONICAL TAMPER\n").unwrap();
-        Ok(StageRunOutput::markdown(format!("tampered {}", request.stage_id)))
+        Ok(StageRunOutput::markdown(format!(
+            "tampered {}",
+            request.stage_id
+        )))
     }
 }
 
@@ -98,7 +111,10 @@ impl WorkflowStageRunner for NoBoundaryRunner {
         &self,
         request: StageRunRequest,
     ) -> archon_workflow::WorkflowResult<StageRunOutput> {
-        Ok(StageRunOutput::markdown(format!("noop {}", request.stage_id)))
+        Ok(StageRunOutput::markdown(format!(
+            "noop {}",
+            request.stage_id
+        )))
     }
 }
 
@@ -153,7 +169,12 @@ fn ctx_for<'a>(
     policy: &'a WorkflowPolicy,
     run_root: std::path::PathBuf,
 ) -> FanoutCtx<'a> {
-    let stage = run.spec.stages.iter().find(|s| s.id == "implement").unwrap();
+    let stage = run
+        .spec
+        .stages
+        .iter()
+        .find(|s| s.id == "implement")
+        .unwrap();
     FanoutCtx {
         store,
         run,
@@ -194,9 +215,14 @@ fn two_disjoint_items_apply_in_one_wave() {
     let canonical = canonical_repo();
     let targets: &[(&str, &[&str])] = &[("a", &["src/a.rs"]), ("b", &["src/b.rs"])];
     let store = WorkflowStore::project(canonical.path());
-    let policy = WorkflowPolicy { require_human_for_dangerous_tools: false, ..WorkflowPolicy::default() };
+    let policy = WorkflowPolicy {
+        require_human_for_dangerous_tools: false,
+        ..WorkflowPolicy::default()
+    };
     let executor = WorkflowExecutor::new(store.clone(), policy.clone());
-    let run = executor.start(impl_fanout_spec(canonical.path(), targets)).unwrap();
+    let run = executor
+        .start(impl_fanout_spec(canonical.path(), targets))
+        .unwrap();
     let cfg = WriteCoordinatorConfig::default();
     let runtime = resolve_write_coordinator_runtime(canonical.path(), &cfg);
     let run_root = canonical.path().join(".archon/workflows").join(&run.id);
@@ -223,15 +249,28 @@ fn two_disjoint_items_apply_in_one_wave() {
         outcome.item_status.get("implement-1"),
         Some(&ManifestStatus::Applied)
     );
-    assert!(std::fs::read_to_string(canonical.path().join("src/a.rs")).unwrap().contains("// written"));
-    assert!(std::fs::read_to_string(canonical.path().join("src/b.rs")).unwrap().contains("// written"));
+    assert!(
+        std::fs::read_to_string(canonical.path().join("src/a.rs"))
+            .unwrap()
+            .contains("// written")
+    );
+    assert!(
+        std::fs::read_to_string(canonical.path().join("src/b.rs"))
+            .unwrap()
+            .contains("// written")
+    );
     // input rewrite assertions.
     let inputs = runner.record_inputs.lock().unwrap();
     let any_isolated = inputs.iter().any(|v| {
-        v["target_repository_root"].as_str().is_some_and(|s| s.contains(".archon"))
+        v["target_repository_root"]
+            .as_str()
+            .is_some_and(|s| s.contains(".archon"))
             && v["write_coordination"]["enabled"] == serde_json::json!(true)
     });
-    assert!(any_isolated, "input must carry isolated root + write_coordination.enabled");
+    assert!(
+        any_isolated,
+        "input must carry isolated root + write_coordination.enabled"
+    );
 }
 
 #[test]
@@ -239,9 +278,14 @@ fn overlapping_items_serialize_into_two_waves() {
     let canonical = canonical_repo();
     let targets: &[(&str, &[&str])] = &[("a", &["src/a.rs"]), ("b", &["src/a.rs"])];
     let store = WorkflowStore::project(canonical.path());
-    let policy = WorkflowPolicy { require_human_for_dangerous_tools: false, ..WorkflowPolicy::default() };
+    let policy = WorkflowPolicy {
+        require_human_for_dangerous_tools: false,
+        ..WorkflowPolicy::default()
+    };
     let executor = WorkflowExecutor::new(store.clone(), policy.clone());
-    let run = executor.start(impl_fanout_spec(canonical.path(), targets)).unwrap();
+    let run = executor
+        .start(impl_fanout_spec(canonical.path(), targets))
+        .unwrap();
     let cfg = WriteCoordinatorConfig::default();
     let runtime = resolve_write_coordinator_runtime(canonical.path(), &cfg);
     let run_root = canonical.path().join(".archon/workflows").join(&run.id);
@@ -266,9 +310,14 @@ fn boundary_unavailable_forces_serial_fallback() {
     let canonical = canonical_repo();
     let targets: &[(&str, &[&str])] = &[("a", &["src/a.rs"])];
     let store = WorkflowStore::project(canonical.path());
-    let policy = WorkflowPolicy { require_human_for_dangerous_tools: false, ..WorkflowPolicy::default() };
+    let policy = WorkflowPolicy {
+        require_human_for_dangerous_tools: false,
+        ..WorkflowPolicy::default()
+    };
     let executor = WorkflowExecutor::new(store.clone(), policy.clone());
-    let run = executor.start(impl_fanout_spec(canonical.path(), targets)).unwrap();
+    let run = executor
+        .start(impl_fanout_spec(canonical.path(), targets))
+        .unwrap();
     let cfg = WriteCoordinatorConfig::default();
     let runtime = resolve_write_coordinator_runtime(canonical.path(), &cfg);
     let run_root = canonical.path().join(".archon/workflows").join(&run.id);
@@ -282,7 +331,10 @@ fn boundary_unavailable_forces_serial_fallback() {
         &runner,
     ))
     .expect("returns fallback signal");
-    assert_eq!(outcome.serial_fallback, Some(SerialFallbackReason::BoundaryUnavailable));
+    assert_eq!(
+        outcome.serial_fallback,
+        Some(SerialFallbackReason::BoundaryUnavailable)
+    );
     assert!(outcome.waves.is_empty());
 }
 
@@ -291,9 +343,14 @@ fn canonical_mutation_fails_wave() {
     let canonical = canonical_repo();
     let targets: &[(&str, &[&str])] = &[("a", &["src/a.rs"])];
     let store = WorkflowStore::project(canonical.path());
-    let policy = WorkflowPolicy { require_human_for_dangerous_tools: false, ..WorkflowPolicy::default() };
+    let policy = WorkflowPolicy {
+        require_human_for_dangerous_tools: false,
+        ..WorkflowPolicy::default()
+    };
     let executor = WorkflowExecutor::new(store.clone(), policy.clone());
-    let run = executor.start(impl_fanout_spec(canonical.path(), targets)).unwrap();
+    let run = executor
+        .start(impl_fanout_spec(canonical.path(), targets))
+        .unwrap();
     let cfg = WriteCoordinatorConfig::default();
     let runtime = resolve_write_coordinator_runtime(canonical.path(), &cfg);
     let run_root = canonical.path().join(".archon/workflows").join(&run.id);
@@ -311,10 +368,16 @@ fn canonical_mutation_fails_wave() {
     .expect("coordinated fanout");
     assert_eq!(outcome.waves.len(), 1);
     assert!(
-        outcome.waves[0].failure.as_deref().is_some_and(|f| f.contains("CanonicalMutation")),
+        outcome.waves[0]
+            .failure
+            .as_deref()
+            .is_some_and(|f| f.contains("CanonicalMutation")),
         "wave must fail with canonical mutation, got {:?}",
         outcome.waves[0].failure
     );
     // The tampered file is a declared target; no patch from the failed wave applied.
-    assert_ne!(outcome.item_status.get("implement-0"), Some(&ManifestStatus::Applied));
+    assert_ne!(
+        outcome.item_status.get("implement-0"),
+        Some(&ManifestStatus::Applied)
+    );
 }

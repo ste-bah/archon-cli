@@ -66,8 +66,7 @@ fn clean_repo_creates_workspace_with_baseline_commit() {
     let repo = canonical_repo();
     let root = repo.path();
     let plan = plan_for(root, &["src/lib.rs"]);
-    let baseline =
-        capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
+    let baseline = capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
     let ws = create_item_workspace(root, &plan, &baseline).expect("workspace");
     assert!(plan.isolated_root.join("src/lib.rs").exists());
     assert_eq!(
@@ -83,8 +82,7 @@ fn dirty_tracked_overlay_visible_in_isolated() {
     let root = repo.path();
     std::fs::write(root.join("src/lib.rs"), "// edited dirty\n").expect("edit");
     let plan = plan_for(root, &["src/lib.rs"]);
-    let baseline =
-        capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
+    let baseline = capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
     create_item_workspace(root, &plan, &baseline).expect("workspace");
     assert_eq!(
         std::fs::read_to_string(plan.isolated_root.join("src/lib.rs")).unwrap(),
@@ -99,8 +97,7 @@ fn declared_untracked_target_copied_and_captured() {
     let root = repo.path();
     std::fs::write(root.join("src/new.rs"), "// brand new\n").expect("write");
     let plan = plan_for(root, &["src/new.rs"]);
-    let baseline =
-        capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
+    let baseline = capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
     assert!(baseline.untracked_files.contains_key("src/new.rs"));
     create_item_workspace(root, &plan, &baseline).expect("workspace");
     assert_eq!(
@@ -116,8 +113,7 @@ fn undeclared_untracked_file_never_read_or_copied() {
     std::fs::write(root.join("src/new.rs"), "// declared\n").expect("write");
     std::fs::write(root.join(".env"), "SECRET=hunter2\n").expect("write secret");
     let plan = plan_for(root, &["src/new.rs"]);
-    let baseline =
-        capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
+    let baseline = capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
     assert!(
         !baseline.untracked_files.contains_key(".env"),
         "secret untracked file must NOT be read into memory"
@@ -136,8 +132,8 @@ fn verify_input_untracked_copied_and_captured() {
     std::fs::write(root.join("fixture.json"), "{\"k\":1}\n").expect("write");
     let plan = plan_for(root, &["src/lib.rs"]);
     let verify_inputs = vec![np("fixture.json", root)];
-    let baseline = capture_canonical_baseline(root, &plan, &verify_inputs, &default_cfg())
-        .expect("capture");
+    let baseline =
+        capture_canonical_baseline(root, &plan, &verify_inputs, &default_cfg()).expect("capture");
     assert!(baseline.verify_input_meta.contains_key("fixture.json"));
     assert!(baseline.untracked_files.contains_key("fixture.json"));
     create_item_workspace(root, &plan, &baseline).expect("workspace");
@@ -169,8 +165,7 @@ fn debug_redacts_untracked_bytes() {
     let root = repo.path();
     std::fs::write(root.join("src/new.rs"), "TOPSECRETMARKER\n").expect("write");
     let plan = plan_for(root, &["src/new.rs"]);
-    let baseline =
-        capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
+    let baseline = capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
     let dbg = format!("{baseline:?}");
     assert!(
         !dbg.contains("TOPSECRETMARKER"),
@@ -184,8 +179,7 @@ fn mutation_of_declared_target_detected() {
     let repo = canonical_repo();
     let root = repo.path();
     let plan = plan_for(root, &["src/lib.rs"]);
-    let baseline =
-        capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
+    let baseline = capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
     std::fs::write(root.join("src/lib.rs"), "// mutated behind our back\n").expect("mutate");
     match detect_canonical_mutation(root, &baseline, &plan.target_files, &[]) {
         Err(IsolationError::CanonicalMutation { path }) => assert_eq!(path, "src/lib.rs"),
@@ -198,8 +192,7 @@ fn mutation_of_undeclared_file_ignored() {
     let repo = canonical_repo();
     let root = repo.path();
     let plan = plan_for(root, &["src/lib.rs"]);
-    let baseline =
-        capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
+    let baseline = capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
     std::fs::write(root.join("unrelated.txt"), "changed\n").expect("write");
     detect_canonical_mutation(root, &baseline, &plan.target_files, &[])
         .expect("undeclared change is out of scope");
@@ -210,12 +203,16 @@ fn cleanup_succeeded_removes_worktree() {
     let repo = canonical_repo();
     let root = repo.path();
     let plan = plan_for(root, &["src/lib.rs"]);
-    let baseline =
-        capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
+    let baseline = capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
     create_item_workspace(root, &plan, &baseline).expect("workspace");
     assert!(plan.isolated_root.exists());
-    cleanup_workspace(root, &plan.isolated_root, WorkspaceStatus::Succeeded, &default_cfg())
-        .expect("cleanup");
+    cleanup_workspace(
+        root,
+        &plan.isolated_root,
+        WorkspaceStatus::Succeeded,
+        &default_cfg(),
+    )
+    .expect("cleanup");
     assert!(
         !plan.isolated_root.exists(),
         "succeeded + retain=false must remove the worktree"
@@ -227,15 +224,13 @@ fn cleanup_failed_retained_keeps_worktree() {
     let repo = canonical_repo();
     let root = repo.path();
     let plan = plan_for(root, &["src/lib.rs"]);
-    let baseline =
-        capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
+    let baseline = capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
     create_item_workspace(root, &plan, &baseline).expect("workspace");
     let cfg = WriteCoordinatorConfig {
         retain_failed_worktrees: true,
         ..default_cfg()
     };
-    cleanup_workspace(root, &plan.isolated_root, WorkspaceStatus::Failed, &cfg)
-        .expect("cleanup");
+    cleanup_workspace(root, &plan.isolated_root, WorkspaceStatus::Failed, &cfg).expect("cleanup");
     assert!(
         plan.isolated_root.exists(),
         "failed + retain=true must keep the worktree"

@@ -12,10 +12,7 @@ impl WorkflowSpec {
     /// Only inline `input.items` are checked — foreach items materialize at
     /// runtime from a producer stage, so undeclared writes there are caught by
     /// the patch-manifest validation instead of failing every foreach spec.
-    pub fn validate_write_coordination(
-        &self,
-        cfg: &WriteCoordinatorConfig,
-    ) -> WorkflowResult<()> {
+    pub fn validate_write_coordination(&self, cfg: &WriteCoordinatorConfig) -> WorkflowResult<()> {
         if !cfg.enabled || !cfg.fail_on_undeclared_write {
             return Ok(());
         }

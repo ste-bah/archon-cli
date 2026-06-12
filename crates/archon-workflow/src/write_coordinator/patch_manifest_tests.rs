@@ -119,7 +119,10 @@ fn staged_and_unstaged_single_hunk() {
     let captured = capture_patch(&ws, &plan.target_files, &baseline).expect("capture");
     let text = String::from_utf8_lossy(&captured.patch_bytes);
     let hunks = text.matches("@@ ").count();
-    assert_eq!(hunks, 1, "combined change must yield exactly one hunk, not double-counted");
+    assert_eq!(
+        hunks, 1,
+        "combined change must yield exactly one hunk, not double-counted"
+    );
 }
 
 #[test]
@@ -142,7 +145,11 @@ fn rename_recorded_as_delete_plus_create() {
     git(&["mv", "src/lib.rs", "src/renamed.rs"], &plan.isolated_root);
     let captured = capture_patch(&ws, &plan.target_files, &baseline).expect("capture");
     assert!(captured.deleted_files.contains(&"src/lib.rs".to_string()));
-    assert!(captured.created_files.contains(&"src/renamed.rs".to_string()));
+    assert!(
+        captured
+            .created_files
+            .contains(&"src/renamed.rs".to_string())
+    );
     assert_eq!(captured.post_hashes.get("src/lib.rs").unwrap(), "deleted");
 }
 
@@ -265,8 +272,11 @@ fn symlink_escape_rejected() {
     let canonical = tempfile::tempdir().expect("canonical");
     let isolated = tempfile::tempdir().expect("isolated");
     let outside = tempfile::tempdir().expect("outside");
-    std::os::unix::fs::symlink(outside.path().join("secret"), isolated.path().join("link.txt"))
-        .expect("symlink");
+    std::os::unix::fs::symlink(
+        outside.path().join("secret"),
+        isolated.path().join("link.txt"),
+    )
+    .expect("symlink");
     let mut plan = plan_for(canonical.path(), &["link.txt"]);
     plan.isolated_root = isolated.path().to_path_buf();
     let captured = manual_capture(b"+x\n", &["link.txt"]);

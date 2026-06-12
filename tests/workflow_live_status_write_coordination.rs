@@ -3,15 +3,23 @@
 
 use std::process::Command;
 
+use archon_workflow::WorkflowStore;
 use archon_workflow::write_coordinator::patch_apply::{ApplyRecord, VerifyResult};
 use archon_workflow::write_coordinator::status::{
     coordinated_stage_ids, read_status, render_compact,
 };
-use archon_workflow::WorkflowStore;
 
 fn git(args: &[&str], cwd: &std::path::Path) {
-    let out = Command::new("git").current_dir(cwd).args(args).output().expect("git");
-    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    let out = Command::new("git")
+        .current_dir(cwd)
+        .args(args)
+        .output()
+        .expect("git");
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 /// Seed a persisted apply record under the store run dir and assert the compact
@@ -39,12 +47,18 @@ fn workflow_live_status_write_coordination_renders() {
             duration_ms: 1,
         }),
     };
-    std::fs::write(apply_dir.join("0.json"), serde_json::to_vec_pretty(&record).unwrap()).unwrap();
+    std::fs::write(
+        apply_dir.join("0.json"),
+        serde_json::to_vec_pretty(&record).unwrap(),
+    )
+    .unwrap();
 
     let stages = coordinated_stage_ids(&store, run_id);
     assert!(stages.contains(&"implement".to_string()));
 
-    let status = read_status(&store, run_id, "implement").unwrap().expect("status");
+    let status = read_status(&store, run_id, "implement")
+        .unwrap()
+        .expect("status");
     let block = render_compact(&status);
     assert_eq!(block.lines().count(), 6, "got: {block}");
     assert!(block.starts_with("write_coordination: enabled\n"));

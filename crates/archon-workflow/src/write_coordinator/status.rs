@@ -147,6 +147,9 @@ mod tests {
         s.fallback_reason = Some("boundary_unavailable".into());
         let out = render_compact(&s);
         assert_eq!(out.lines().count(), 1);
-        assert_eq!(out, "write_coordination: serial_fallback (boundary_unavailable)\n");
+        assert_eq!(
+            out,
+            "write_coordination: serial_fallback (boundary_unavailable)\n"
+        );
     }
 }

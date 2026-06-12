@@ -66,5 +66,5 @@ pub use store::WorkflowStore;
 pub use template::{SavedWorkflowTemplate, TemplateRegistry};
 pub use write_coordinator::{
     ItemId, ResourceKey, SerialFallbackReason, TargetFilesSource, WaveId, WriteBoundaryProbe,
-    WritePlan, WriteCoordinatorConfig, WriteCoordinatorRuntime,
+    WriteCoordinatorConfig, WriteCoordinatorRuntime, WritePlan,
 };

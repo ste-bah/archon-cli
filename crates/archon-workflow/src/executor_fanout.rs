@@ -148,9 +148,9 @@ async fn try_coordinated_implementation(
     items: &[FanoutItem],
 ) -> WorkflowResult<Option<StageRunOutput>> {
     use crate::write_coordinator::WriteCoordinatorConfig;
+    use crate::write_coordinator::coordinator::run_coordinated_implementation_fanout;
     use crate::write_coordinator::coordinator::{FanoutCtx, PlanInput};
     use crate::write_coordinator::resolve_write_coordinator_runtime;
-    use crate::write_coordinator::coordinator::run_coordinated_implementation_fanout;
 
     let cfg = WriteCoordinatorConfig::default();
     let Some(canonical) = run

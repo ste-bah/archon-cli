@@ -3,7 +3,6 @@
 use super::*;
 use serde_json::json;
 
-
 fn root() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::create_dir_all(dir.path().join("src")).expect("mkdir src");
@@ -164,8 +163,7 @@ fn symlink_loop_terminates_with_error() {
 #[test]
 fn allows_symlink_staying_inside() {
     let r = root();
-    std::os::unix::fs::symlink(r.path().join("src"), r.path().join("alias"))
-        .expect("symlink");
+    std::os::unix::fs::symlink(r.path().join("src"), r.path().join("alias")).expect("symlink");
     let n = normalize_target("alias/lib.rs", r.path()).expect("inside symlink ok");
     assert_eq!(n.as_str(), "src/lib.rs");
 }
@@ -173,7 +171,10 @@ fn allows_symlink_staying_inside() {
 #[test]
 fn case_fold_macos_like_but_not_linux() {
     assert_eq!(fold_case_for_os("Src/.Git/HEAD", "macos"), "src/.git/head");
-    assert_eq!(fold_case_for_os("Src/.Git/HEAD", "windows"), "src/.git/head");
+    assert_eq!(
+        fold_case_for_os("Src/.Git/HEAD", "windows"),
+        "src/.git/head"
+    );
     assert_eq!(fold_case_for_os("Src/.Git/HEAD", "linux"), "Src/.Git/HEAD");
 }
 
@@ -226,7 +227,10 @@ fn keys_conflict_file_dir_matrix() {
     assert!(!keys_conflict(&File("a/b".into()), &File("a/c".into())));
     assert!(keys_conflict(&File("a/b".into()), &Dir("a".into())));
     assert!(!keys_conflict(&File("a/b".into()), &Dir("c".into())));
-    assert!(!keys_conflict(&File("ab/x".into()), &Dir("a".into())), "no prefix false-positive");
+    assert!(
+        !keys_conflict(&File("ab/x".into()), &Dir("a".into())),
+        "no prefix false-positive"
+    );
     assert!(keys_conflict(&Dir("a/b".into()), &Dir("a".into())));
     assert!(!keys_conflict(&Dir("a".into()), &Dir("b".into())));
 }
@@ -243,8 +247,14 @@ fn keys_conflict_glob_matrix() {
         &File("crates/bar/src/lib.rs".into())
     ));
     assert!(keys_conflict(&Glob("src/*".into()), &Dir("src".into())));
-    assert!(keys_conflict(&Glob("src/a*".into()), &Glob("src/ab*".into())));
-    assert!(!keys_conflict(&Glob("src/a*".into()), &Glob("docs/b*".into())));
+    assert!(keys_conflict(
+        &Glob("src/a*".into()),
+        &Glob("src/ab*".into())
+    ));
+    assert!(!keys_conflict(
+        &Glob("src/a*".into()),
+        &Glob("docs/b*".into())
+    ));
 }
 
 #[test]
@@ -265,8 +275,7 @@ fn resource_keys_include_created_parent_dirs_only() {
     let r = root();
     let existing = normalize_target("src/other.rs", r.path()).expect("ok");
     let fresh = normalize_target("new/sub/file.rs", r.path()).expect("ok");
-    let keys =
-        resource_keys_for_targets(&[existing, fresh], r.path(), &[]).expect("keys ok");
+    let keys = resource_keys_for_targets(&[existing, fresh], r.path(), &[]).expect("keys ok");
     assert!(keys.contains(&ResourceKey::File("src/other.rs".into())));
     assert!(keys.contains(&ResourceKey::File("new/sub/file.rs".into())));
     assert!(keys.contains(&ResourceKey::Dir("new".into())));
@@ -280,8 +289,7 @@ fn resource_keys_include_created_parent_dirs_only() {
 #[test]
 fn declared_globs_become_glob_keys_and_malformed_errs() {
     let r = root();
-    let keys = resource_keys_for_targets(&[], r.path(), &["src/gen_*.rs".into()])
-        .expect("glob ok");
+    let keys = resource_keys_for_targets(&[], r.path(), &["src/gen_*.rs".into()]).expect("glob ok");
     assert!(keys.contains(&ResourceKey::Glob("src/gen_*.rs".into())));
     assert!(matches!(
         resource_keys_for_targets(&[], r.path(), &["src/[bad".into()]),
@@ -298,4 +306,3 @@ fn baseline_id_prefixes() {
         Err(WritePlanError::InvalidBaselineId(_))
     ));
 }
-

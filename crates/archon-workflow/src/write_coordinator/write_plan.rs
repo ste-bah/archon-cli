@@ -133,8 +133,8 @@ fn realpath_within(canonical_root: &Path, rel: &Path) -> Result<PathBuf, WritePl
             rel.to_string_lossy().into_owned(),
         ));
     }
-    let root = std::fs::canonicalize(canonical_root)
-        .unwrap_or_else(|_| canonical_root.to_path_buf());
+    let root =
+        std::fs::canonicalize(canonical_root).unwrap_or_else(|_| canonical_root.to_path_buf());
     let resolved = resolve_abs(&root.join(rel), 0)?;
     let final_rel = resolved
         .strip_prefix(&root)
@@ -149,7 +149,9 @@ fn realpath_within(canonical_root: &Path, rel: &Path) -> Result<PathBuf, WritePl
 /// fully-resolved result so a chained symlink cannot smuggle an escape past it.
 fn resolve_abs(path: &Path, depth: u32) -> Result<PathBuf, WritePlanError> {
     if depth > MAX_SYMLINK_DEPTH {
-        return Err(WritePlanError::SymlinkEscape(path.to_string_lossy().into_owned()));
+        return Err(WritePlanError::SymlinkEscape(
+            path.to_string_lossy().into_owned(),
+        ));
     }
     let mut acc = PathBuf::new();
     for comp in path.components() {

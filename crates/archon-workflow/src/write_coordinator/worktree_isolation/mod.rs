@@ -98,14 +98,17 @@ pub fn capture_canonical_baseline(
 ) -> Result<CanonicalBaseline, IsolationError> {
     let tracked_diff_binary = run_git(&["diff", "--binary", "HEAD", "--"], canonical_root)?.stdout;
 
-    let declared: Vec<String> = plan.target_files.iter().map(NormalizedPath::as_str).collect();
+    let declared: Vec<String> = plan
+        .target_files
+        .iter()
+        .map(NormalizedPath::as_str)
+        .collect();
     let verify: Vec<String> = verify_inputs.iter().map(NormalizedPath::as_str).collect();
     let mut wanted: std::collections::BTreeSet<&str> =
         declared.iter().map(String::as_str).collect();
     wanted.extend(verify.iter().map(String::as_str));
 
-    let untracked_files =
-        capture_untracked(canonical_root, &wanted, cfg.max_file_bytes)?;
+    let untracked_files = capture_untracked(canonical_root, &wanted, cfg.max_file_bytes)?;
 
     let mut declared_target_meta = BTreeMap::new();
     for path in &declared {
@@ -130,8 +133,11 @@ fn capture_untracked(
     wanted: &std::collections::BTreeSet<&str>,
     max_file_bytes: u64,
 ) -> Result<BTreeMap<String, Vec<u8>>, IsolationError> {
-    let listing =
-        run_git(&["ls-files", "--others", "--exclude-standard", "-z"], canonical_root)?.stdout;
+    let listing = run_git(
+        &["ls-files", "--others", "--exclude-standard", "-z"],
+        canonical_root,
+    )?
+    .stdout;
     let mut untracked = BTreeMap::new();
     for raw in listing.split(|byte| *byte == 0) {
         if raw.is_empty() {
@@ -161,8 +167,11 @@ pub fn create_item_workspace(
         std::fs::create_dir_all(parent)?;
     }
     let isolated_str = plan.isolated_root.to_string_lossy().into_owned();
-    run_git(&["worktree", "add", "--detach", &isolated_str, "HEAD"], canonical_root)
-        .map_err(|err| IsolationError::WorktreeAddFailed(err.to_string()))?;
+    run_git(
+        &["worktree", "add", "--detach", &isolated_str, "HEAD"],
+        canonical_root,
+    )
+    .map_err(|err| IsolationError::WorktreeAddFailed(err.to_string()))?;
     let isolated = plan.isolated_root.as_path();
 
     if !baseline.tracked_diff_binary.is_empty() {
@@ -197,7 +206,9 @@ pub fn create_item_workspace(
     .map_err(|err| IsolationError::BaselineCommitFailed(err.to_string()))?;
 
     let baseline_commit = run_git(&["rev-parse", "HEAD"], isolated)?;
-    let baseline_commit = String::from_utf8_lossy(&baseline_commit.stdout).trim().to_string();
+    let baseline_commit = String::from_utf8_lossy(&baseline_commit.stdout)
+        .trim()
+        .to_string();
     Ok(ItemWorkspace {
         plan: plan.clone(),
         baseline_commit,
@@ -270,7 +281,10 @@ pub fn cleanup_workspace(
     };
     if should_remove {
         let isolated_str = isolated_root.to_string_lossy().into_owned();
-        run_git(&["worktree", "remove", "--force", &isolated_str], canonical_root)?;
+        run_git(
+            &["worktree", "remove", "--force", &isolated_str],
+            canonical_root,
+        )?;
         run_git(&["worktree", "prune"], canonical_root)?;
     } else if status == WorkspaceStatus::Succeeded {
         // Retained-success: still clear stale admin entries; never touches a

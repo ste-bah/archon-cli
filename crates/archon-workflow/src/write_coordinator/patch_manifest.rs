@@ -100,16 +100,26 @@ pub fn capture_patch(
     for target in declared_targets {
         let rel = target.as_str();
         if isolated.join(&rel).exists() && !is_tracked(isolated, &rel) {
-            run_git(&["add", "--intent-to-add", &rel], isolated)
-                .map_err(|e| PatchError::GitDiffFailed { stderr: e.to_string() })?;
+            run_git(&["add", "--intent-to-add", &rel], isolated).map_err(|e| {
+                PatchError::GitDiffFailed {
+                    stderr: e.to_string(),
+                }
+            })?;
             intent_added.push(rel);
         }
     }
     // Step 2: ONE git diff for the apply patch (combined staged + unstaged;
     // never also --cached). --no-renames keeps a rename as delete+add so the
     // patch and the path accounting agree.
-    let targets: Vec<String> = declared_targets.iter().map(NormalizedPath::as_str).collect();
-    let patch_bytes = run_diff(isolated, &["diff", "--binary", "--no-renames", "HEAD", "--"], &targets)?;
+    let targets: Vec<String> = declared_targets
+        .iter()
+        .map(NormalizedPath::as_str)
+        .collect();
+    let patch_bytes = run_diff(
+        isolated,
+        &["diff", "--binary", "--no-renames", "HEAD", "--"],
+        &targets,
+    )?;
     // Step 3: derive paths from `--name-status -z` — NUL-separated, so paths
     // with spaces survive; status letters are authoritative for create/delete.
     let status_bytes = run_diff(
@@ -138,7 +148,9 @@ fn run_diff(isolated: &Path, prefix: &[&str], targets: &[String]) -> Result<Vec<
     let mut args: Vec<&str> = prefix.to_vec();
     args.extend(targets.iter().map(String::as_str));
     Ok(run_git(&args, isolated)
-        .map_err(|e| PatchError::GitDiffFailed { stderr: e.to_string() })?
+        .map_err(|e| PatchError::GitDiffFailed {
+            stderr: e.to_string(),
+        })?
         .stdout)
 }
 
@@ -216,17 +228,21 @@ pub fn validate_patch(
     if captured.patch_bytes.is_empty() {
         let idempotent = serde_json::from_str::<serde_json::Value>(agent_output_body)
             .ok()
-            .and_then(|v| v.get("idempotent_noop").and_then(serde_json::Value::as_bool))
+            .and_then(|v| {
+                v.get("idempotent_noop")
+                    .and_then(serde_json::Value::as_bool)
+            })
             .unwrap_or(false);
         if !(idempotent && captured.pre_hashes == captured.post_hashes) {
             return Err(PatchError::EmptyPatch);
         }
     }
     // VAL-WC-008 reuse the canonical output-usability gate.
-    crate::executor_output::ensure_output_usable(agent_output_body)
-        .map_err(|e| PatchError::OutputNotUsable {
+    crate::executor_output::ensure_output_usable(agent_output_body).map_err(|e| {
+        PatchError::OutputNotUsable {
             detail: e.to_string(),
-        })?;
+        }
+    })?;
     // VAL-WC-004 deferred to patch_apply.rs (TASK-WC-006).
     Ok(())
 }
@@ -261,8 +277,10 @@ fn validate_size_budget(
 
 /// VAL-WC-001/002/003: declared, in-repo, no workspace-side symlink escape.
 fn validate_changed_file(file: &str, plan: &WritePlan) -> Result<(), PatchError> {
-    let normalized = normalize_target(file, &plan.canonical_root)
-        .map_err(|_| PatchError::UndeclaredWrite { path: file.to_string() })?;
+    let normalized =
+        normalize_target(file, &plan.canonical_root).map_err(|_| PatchError::UndeclaredWrite {
+            path: file.to_string(),
+        })?;
     if !plan.target_files.contains(&normalized) {
         return Err(PatchError::UndeclaredWrite {
             path: file.to_string(),
@@ -273,8 +291,9 @@ fn validate_changed_file(file: &str, plan: &WritePlan) -> Result<(), PatchError>
         .map(|m| m.file_type().is_symlink())
         .unwrap_or(false);
     if is_symlink {
-        let link = std::fs::read_link(&workspace_path)
-            .map_err(|_| PatchError::SymlinkEscape { path: file.to_string() })?;
+        let link = std::fs::read_link(&workspace_path).map_err(|_| PatchError::SymlinkEscape {
+            path: file.to_string(),
+        })?;
         let resolved = if link.is_absolute() {
             link
         } else {
