@@ -99,8 +99,100 @@ stages:
 
     smoke_worktree_isolation();
     smoke_conflict_graph(root);
+    smoke_patch_manifest();
 
     println!("write_coordinator smoke: OK");
+}
+
+/// TASK-WC-005 — capture a real patch, validate it, and persist the manifest.
+fn smoke_patch_manifest() {
+    use std::collections::BTreeSet;
+    use archon_workflow::WriteCoordinatorConfig;
+    use archon_workflow::write_coordinator::patch_manifest::{
+        ManifestStatus, capture_patch, persist_manifest, validate_patch,
+    };
+    use archon_workflow::write_coordinator::worktree_isolation::{
+        capture_canonical_baseline, create_item_workspace,
+    };
+    use archon_workflow::write_coordinator::write_plan::{TargetFilesSource, normalize_target};
+    use archon_workflow::write_coordinator::{ItemId, WritePlan};
+
+    fn git(args: &[&str], cwd: &Path) {
+        let out = std::process::Command::new("git")
+            .current_dir(cwd)
+            .args(args)
+            .output()
+            .unwrap_or_else(|e| fail(&format!("git spawn: {e}")));
+        if !out.status.success() {
+            fail(&format!("git {args:?}: {}", String::from_utf8_lossy(&out.stderr)));
+        }
+    }
+
+    let dir = std::env::temp_dir().join(format!("wc-pm-smoke-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    let root = dir.as_path();
+    git(&["init", "-q", "-b", "main"], root);
+    git(&["config", "user.name", "smoke"], root);
+    git(&["config", "user.email", "smoke@local"], root);
+    std::fs::write(root.join("src/lib.rs"), "// committed\n").unwrap();
+    git(&["add", "src/lib.rs"], root);
+    git(&["commit", "-q", "-m", "init"], root);
+
+    let target = normalize_target("src/lib.rs", root)
+        .unwrap_or_else(|e| fail(&format!("normalize: {e}")));
+    let plan = WritePlan {
+        run_id: "smoke".into(),
+        stage_id: "impl".into(),
+        item_id: ItemId::from("impl-0"),
+        canonical_root: root.to_path_buf(),
+        isolated_root: root.join(".archon/wc/smoke/impl-0"),
+        target_files: vec![target],
+        target_files_source: TargetFilesSource::Item,
+        read_context_files: vec![],
+        verify_inputs: vec![],
+        baseline_id: "git:HEAD".into(),
+        workspace_boundary_required: true,
+        resource_keys: BTreeSet::new(),
+    };
+    let cfg = WriteCoordinatorConfig::default();
+    let baseline = capture_canonical_baseline(root, &plan, &[], &cfg)
+        .unwrap_or_else(|e| fail(&format!("baseline: {e}")));
+    let ws = create_item_workspace(root, &plan, &baseline)
+        .unwrap_or_else(|e| fail(&format!("workspace: {e}")));
+    // Agent edits the declared target inside the isolated workspace.
+    std::fs::write(plan.isolated_root.join("src/lib.rs"), "// agent edit\n").unwrap();
+    let captured = capture_patch(&ws, &plan.target_files, &baseline)
+        .unwrap_or_else(|e| fail(&format!("capture: {e}")));
+    if captured.changed_files != ["src/lib.rs"] {
+        fail(&format!("unexpected changed_files: {:?}", captured.changed_files));
+    }
+    validate_patch(&captured, &plan, &cfg, "Implemented the change.")
+        .unwrap_or_else(|e| fail(&format!("validate: {e}")));
+    // An undeclared write must be rejected.
+    let mut bad = captured.clone();
+    bad.changed_files = vec!["src/evil.rs".into()];
+    if validate_patch(&bad, &plan, &cfg, "ok").is_ok() {
+        fail("undeclared write was NOT rejected");
+    }
+    let run_root = root.join(".archon/workflows/smoke");
+    let manifest_path = persist_manifest(
+        &run_root,
+        "smoke",
+        "impl",
+        &plan.item_id,
+        &captured,
+        ManifestStatus::PendingApply,
+    )
+    .unwrap_or_else(|e| fail(&format!("persist: {e}")));
+    if !manifest_path.exists() {
+        fail("manifest not persisted");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    println!(
+        "patch_manifest smoke: captured 1 file, validated, undeclared-rejected, manifest at {}",
+        manifest_path.display()
+    );
 }
 
 /// TASK-WC-004 — schedule disjoint vs overlapping items into waves.

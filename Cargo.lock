@@ -1088,6 +1088,7 @@ dependencies = [
  "futures-util",
  "globset",
  "hex",
+ "regex",
  "serde",
  "serde_json",
  "serde_yaml_ng",
