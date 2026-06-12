@@ -1683,6 +1683,37 @@ mode = "plan"               # remote sessions are read-only by default
 
 ---
 
+## `[workflow.write_coordinator]` (PRD-012 — Parallel Implementation Fanout)
+
+Controls the Write Coordinator that runs implementation fan-out items in
+isolated git worktrees and applies their patches back under a repository write
+lock. See [Workflow Write Coordinator](../operations/workflow-write-coordinator.md)
+for the full operational model. All keys default, so a config without this block
+behaves as if every default were set.
+
+```toml
+[workflow.write_coordinator]
+enabled = true
+retain_success_worktrees = false
+retain_failed_worktrees = true
+max_patch_bytes = 10485760
+max_file_bytes = 1048576
+fail_on_undeclared_write = true
+allow_dirty_canonical_repo = true
+```
+
+| Field | Default | What / Why |
+|---|---|---|
+| `enabled` | `true` | Master switch. When `false`, implementation fan-out stays serial (`serial_fallback (feature_disabled)`). |
+| `retain_success_worktrees` | `false` | Keep per-item worktrees after a successful apply (debugging aid). |
+| `retain_failed_worktrees` | `true` | Keep per-item worktrees after a failed item so the failure can be triaged. |
+| `max_patch_bytes` | `10485760` | Reject a single item's patch larger than this many bytes (`WC-ERR-PATCH-TOO-LARGE`). Runtime byte budget, not the 500-line code-hygiene rule. |
+| `max_file_bytes` | `1048576` | Reject any single changed/untracked file larger than this many bytes (`WC-ERR-FILE-TOO-LARGE`). |
+| `fail_on_undeclared_write` | `true` | Reject pre-launch when an implementation fan-out item declares no per-item targets (`WC-ERR-MISSING-TARGETS`). Set `false` to allow them at the cost of forced serial scheduling. |
+| `allow_dirty_canonical_repo` | `true` | Allow coordination even when the canonical repo has uncommitted changes (they are reproduced in each item's worktree). |
+
+---
+
 ## See also
 
 - [Environment variables](env-vars.md) — `ARCHON_*` and `ANTHROPIC_*` overrides

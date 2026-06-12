@@ -112,3 +112,4 @@ OAuth tokens are tied to the device that originated them but may continue functi
 - [Configuration](../reference/config.md) — config file precedence
 - [Session management](session-management.md) — session storage details
 - [Troubleshooting](troubleshooting.md) — common path-related issues
+- [Workflow Write Coordinator](workflow-write-coordinator.md) — `.archon/workflows/<run-id>/write-coordination/` layout

@@ -237,6 +237,55 @@ Opens a GitHub issue prefilled with:
 - Recent log excerpt (sanitized for credentials)
 - Active config (sanitized)
 
+## Write Coordinator Errors (PRD-012)
+
+These surface from parallel implementation fan-out. The full model is in
+[Workflow Write Coordinator](workflow-write-coordinator.md).
+
+- **WC-ERR-MISSING-TARGETS** — an implementation fan-out item declared no
+  `target_files`. Add them to the spec item:
+
+  ```yaml
+  items:
+    - name: alpha
+      target_files: ["src/alpha.rs"]
+  ```
+
+- **WC-ERR-INVALID-TARGET-PATH** — a target path was absolute, escaped the repo,
+  or had `..`/empty segments. Use a clean relative path under the canonical root
+  (e.g. `crates/foo/src/lib.rs`).
+- **WC-ERR-BOUNDARY-UNAVAILABLE** — the tool runner cannot confine writes to the
+  isolated workspace. The run falls back to serial automatically; no action
+  needed unless you expected parallelism (check the runner supports the
+  workspace boundary).
+- **WC-ERR-BASELINE-REPRODUCTION** — the dirty canonical state could not be
+  applied to the item worktree. Commit or stash the conflicting tracked changes,
+  then re-run.
+- **WC-ERR-CANONICAL-MUTATION** — an agent wrote directly to the canonical repo
+  instead of its isolated workspace. Verify the file tool honours
+  `target_repository_root`; the wave is failed and no patch is applied.
+- **WC-ERR-UNDECLARED-WRITE** — the captured patch touched a path outside the
+  declared targets. Expand `target_files` or split the item.
+- **WC-ERR-STALE-BASELINE** — a declared target changed under coordination
+  (another wave or external process). Restart the stage.
+- **WC-ERR-PATCH-APPLY-CONFLICT** — `git apply --3way` failed. The coordinator
+  runs `git checkout HEAD -- <paths>` automatically to clean up; resolve the
+  conflict manually or split the item.
+- **WC-ERR-WAVE-VERIFY** — the wave verify command failed after apply, so
+  canonical now holds the partial state. Investigate
+  `<run_root>/write-coordination/stages/<stage>/tests/<wave>.json`.
+- **WC-ERR-SECRET-DETECTED** — the patch contained a credential-like string
+  matching an anchored rule (`anthropic_api_key`, `openai_api_key`, `github_pat`,
+  `slack_bot_token`, `aws_access_key`, `private_key_pem`). Remove the secret and
+  retry.
+- **WC-ERR-FILE-TOO-LARGE** — a file exceeds `max_file_bytes` (a runtime byte
+  budget, not the 500-line code-hygiene rule). Raise the limit or split the file.
+- **WC-ERR-PATCH-TOO-LARGE** — the patch exceeds `max_patch_bytes`. Raise the
+  limit or split the item.
+- **WC-ERR-CONFLICT-GRAPH-VIOLATION** — the scheduler produced a wave with
+  overlapping declared targets. This should not happen; file a bug with the
+  `ApplyRecord` from `apply/<wave>.json`.
+
 ## See also
 
 - [Logs and observability](data-locations.md) — where everything lives
