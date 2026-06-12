@@ -1085,6 +1085,7 @@ dependencies = [
  "async-trait",
  "blake3",
  "chrono",
+ "fd-lock",
  "futures-util",
  "globset",
  "hex",

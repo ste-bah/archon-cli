@@ -7,6 +7,7 @@
 
 pub mod conflict_graph;
 pub mod config;
+pub mod patch_apply;
 pub mod patch_manifest;
 pub mod worktree_isolation;
 pub mod write_plan;
@@ -17,6 +18,9 @@ pub use conflict_graph::{
     Schedule, ScheduleError, ScheduleSummary, Wave, WaveCaps,
 };
 pub use config::WriteCoordinatorConfig;
+pub use patch_apply::{
+    ApplyError, ApplyRecord, ApplyResumeStatus, VerifyResult, with_repo_lock,
+};
 pub use patch_manifest::{
     CapturedPatch, ManifestStatus, PatchError, PatchManifest,
 };

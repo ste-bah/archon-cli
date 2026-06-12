@@ -100,8 +100,103 @@ stages:
     smoke_worktree_isolation();
     smoke_conflict_graph(root);
     smoke_patch_manifest();
+    smoke_patch_apply();
 
     println!("write_coordinator smoke: OK");
+}
+
+/// TASK-WC-006 — apply a captured patch to canonical under the repo write lock.
+fn smoke_patch_apply() {
+    use std::collections::BTreeMap;
+    use archon_workflow::WriteCoordinatorConfig;
+    use archon_workflow::write_coordinator::patch_apply::{
+        apply_wave, resume_status, run_wave_verify, with_repo_lock, ApplyResumeStatus,
+    };
+    use archon_workflow::write_coordinator::patch_manifest::{
+        ManifestStatus, PatchManifest, capture_patch, persist_manifest,
+    };
+    use archon_workflow::write_coordinator::worktree_isolation::{
+        capture_canonical_baseline, create_item_workspace,
+    };
+    use archon_workflow::write_coordinator::write_plan::{TargetFilesSource, normalize_target};
+    use archon_workflow::write_coordinator::{ItemId, WritePlan};
+
+    fn git(args: &[&str], cwd: &Path) {
+        let out = std::process::Command::new("git")
+            .current_dir(cwd)
+            .args(args)
+            .output()
+            .unwrap_or_else(|e| fail(&format!("git spawn: {e}")));
+        if !out.status.success() {
+            fail(&format!("git {args:?}: {}", String::from_utf8_lossy(&out.stderr)));
+        }
+    }
+
+    let dir = std::env::temp_dir().join(format!("wc-apply-smoke-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    let root = dir.as_path();
+    git(&["init", "-q", "-b", "main"], root);
+    git(&["config", "user.name", "smoke"], root);
+    git(&["config", "user.email", "smoke@local"], root);
+    std::fs::write(root.join("src/lib.rs"), "// committed\n").unwrap();
+    git(&["add", "src/lib.rs"], root);
+    git(&["commit", "-q", "-m", "init"], root);
+
+    let plan = WritePlan {
+        run_id: "run1".into(),
+        stage_id: "impl".into(),
+        item_id: ItemId::from("impl-0"),
+        canonical_root: root.to_path_buf(),
+        isolated_root: root.join(".archon/wc/run1/impl-0"),
+        target_files: vec![normalize_target("src/lib.rs", root).unwrap()],
+        target_files_source: TargetFilesSource::Item,
+        read_context_files: vec![],
+        verify_inputs: vec![],
+        baseline_id: "git:HEAD".into(),
+        workspace_boundary_required: true,
+        resource_keys: Default::default(),
+    };
+    let cfg = WriteCoordinatorConfig::default();
+    let baseline = capture_canonical_baseline(root, &plan, &[], &cfg)
+        .unwrap_or_else(|e| fail(&format!("baseline: {e}")));
+    let ws = create_item_workspace(root, &plan, &baseline)
+        .unwrap_or_else(|e| fail(&format!("workspace: {e}")));
+    std::fs::write(plan.isolated_root.join("src/lib.rs"), "// applied\n").unwrap();
+    let captured = capture_patch(&ws, &plan.target_files, &baseline)
+        .unwrap_or_else(|e| fail(&format!("capture: {e}")));
+    let run_root = root.join(".archon/workflows/run1");
+    persist_manifest(&run_root, "run1", "impl", &plan.item_id, &captured, ManifestStatus::PendingApply)
+        .unwrap_or_else(|e| fail(&format!("persist: {e}")));
+    let json = std::fs::read_to_string(
+        run_root.join("write-coordination/stages/impl/manifests/impl-0.json"),
+    )
+    .unwrap();
+    let manifest: PatchManifest = serde_json::from_str(&json).unwrap();
+    let mut pre = BTreeMap::new();
+    pre.insert(plan.item_id.clone(), captured.pre_hashes.clone());
+
+    let result = with_repo_lock(root, || {
+        let rec = apply_wave(root, &[manifest], &pre, 0, &run_root, "run1", "impl")?;
+        let verify = run_wave_verify(root, Some("true"), 0, &run_root, "impl")?;
+        Ok((rec, verify))
+    })
+    .unwrap_or_else(|e| fail(&format!("apply under lock: {e}")));
+    let (rec, verify) = result;
+    if rec.items_applied != ["impl-0"] {
+        fail(&format!("unexpected items_applied: {:?}", rec.items_applied));
+    }
+    if std::fs::read_to_string(root.join("src/lib.rs")).unwrap() != "// applied\n" {
+        fail("patch was not applied to canonical");
+    }
+    if verify.exit != 0 {
+        fail("verify command failed");
+    }
+    if resume_status(&plan.item_id, &run_root, "impl") != ApplyResumeStatus::Applied {
+        fail("resume_status not Applied after apply");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    println!("patch_apply smoke: applied under lock, verify exit 0, resume=Applied");
 }
 
 /// TASK-WC-005 — capture a real patch, validate it, and persist the manifest.

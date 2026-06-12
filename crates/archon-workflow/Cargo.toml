@@ -9,6 +9,7 @@ archon-llm = { path = "../archon-llm" }
 async-trait.workspace = true
 blake3.workspace = true
 chrono.workspace = true
+fd-lock.workspace = true
 futures-util.workspace = true
 globset.workspace = true
 hex.workspace = true
