@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::spec::ProviderTier;
+use crate::write_coordinator::WriteCoordinatorConfig;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowConfig {
@@ -22,6 +23,8 @@ pub struct WorkflowConfig {
     pub local_provider_max_agents: u32,
     #[serde(default)]
     pub provider_tiers: BTreeMap<ProviderTier, String>,
+    #[serde(default)]
+    pub write_coordinator: WriteCoordinatorConfig,
 }
 
 impl Default for WorkflowConfig {
@@ -35,6 +38,7 @@ impl Default for WorkflowConfig {
             allow_saved_templates: true,
             local_provider_max_agents: default_local_provider_max_agents(),
             provider_tiers: default_provider_tiers(),
+            write_coordinator: WriteCoordinatorConfig::default(),
         }
     }
 }

@@ -29,11 +29,13 @@ pub mod spec;
 mod spec_deser;
 mod spec_inference;
 mod spec_policy;
+mod spec_write_coordination;
 pub mod stage;
 pub mod store;
 pub mod template;
 pub mod tui_events;
 pub mod web_api;
+pub mod write_coordinator;
 
 pub use acceptance::{AcceptanceOutcome, TargetFingerprints};
 pub use command::{CommandAction, WorkflowCommand};
@@ -62,3 +64,6 @@ pub use spec::{
 };
 pub use store::WorkflowStore;
 pub use template::{SavedWorkflowTemplate, TemplateRegistry};
+pub use write_coordinator::{
+    ItemId, SerialFallbackReason, WaveId, WriteCoordinatorConfig, WriteCoordinatorRuntime,
+};

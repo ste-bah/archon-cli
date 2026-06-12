@@ -20,6 +20,10 @@ pub enum WorkflowError {
     HardcodedModel(String),
     #[error("invalid fan-out contract: {0}")]
     InvalidFanout(String),
+    #[error(
+        "implementation fanout stage '{stage}' item '{item}' declares no per-item target_files; required while [workflow.write_coordinator] fail_on_undeclared_write = true"
+    )]
+    ImplementationFanoutMissingPerItemTargets { stage: String, item: String },
     #[error("stage '{stage}' requires field '{field}'")]
     MissingStageField { stage: String, field: &'static str },
     #[error("duplicate stage id '{0}'")]
