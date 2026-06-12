@@ -7,6 +7,7 @@
 
 pub mod conflict_graph;
 pub mod config;
+pub mod coordinator;
 pub mod patch_apply;
 pub mod patch_manifest;
 pub mod worktree_isolation;
@@ -16,6 +17,9 @@ use std::path::{Path, PathBuf};
 
 pub use conflict_graph::{
     Schedule, ScheduleError, ScheduleSummary, Wave, WaveCaps,
+};
+pub use coordinator::{
+    CoordinatedOutcome, FanoutError, run_coordinated_implementation_fanout,
 };
 pub use config::WriteCoordinatorConfig;
 pub use patch_apply::{
@@ -36,6 +40,18 @@ pub type ItemId = String;
 
 /// Canonical wave index within a coordinated implementation fanout.
 pub type WaveId = u32;
+
+/// Whether a tool runner can confine an agent's file writes to a given
+/// workspace boundary. Default `false` (safe → serial fallback); concrete
+/// runners that enforce the boundary override to `true`. Defined as a trait
+/// with a default body (not a blanket impl) so per-runner `true` overrides are
+/// coherent. It is a supertrait of `WorkflowStageRunner` so the boundary can be
+/// probed through a `&dyn WorkflowStageRunner`.
+pub trait WriteBoundaryProbe {
+    fn supports_workspace_boundary(&self) -> bool {
+        false
+    }
+}
 
 /// Why the coordinator fell back to serial execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

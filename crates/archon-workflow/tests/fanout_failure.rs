@@ -5,6 +5,7 @@ use archon_workflow::{
 
 struct PartialFailureRunner;
 
+impl archon_workflow::WriteBoundaryProbe for PartialFailureRunner {}
 #[async_trait::async_trait]
 impl WorkflowStageRunner for PartialFailureRunner {
     async fn run_stage(

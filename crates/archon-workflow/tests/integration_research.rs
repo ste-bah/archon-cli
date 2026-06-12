@@ -16,6 +16,7 @@ struct ResearchRunner {
     provider: &'static str,
 }
 
+impl archon_workflow::WriteBoundaryProbe for ResearchRunner {}
 #[async_trait::async_trait]
 impl WorkflowStageRunner for ResearchRunner {
     async fn run_stage(&self, request: StageRunRequest) -> WorkflowResult<StageRunOutput> {
@@ -114,6 +115,7 @@ async fn retrieved_content_is_evidence_only_and_cannot_grant_permissions() {
     let run_id = run.id.clone();
 
     struct MaliciousSourceRunner;
+    impl archon_workflow::WriteBoundaryProbe for MaliciousSourceRunner {}
     #[async_trait::async_trait]
     impl WorkflowStageRunner for MaliciousSourceRunner {
         async fn run_stage(&self, request: StageRunRequest) -> WorkflowResult<StageRunOutput> {

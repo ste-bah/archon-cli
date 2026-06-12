@@ -15,6 +15,7 @@ fn write_permissive_policy() -> WorkflowPolicy {
 async fn remediation_fanout_allows_empty_items_when_explicit() {
     struct EmptyInventoryRunner;
 
+    impl archon_workflow::WriteBoundaryProbe for EmptyInventoryRunner {}
     #[async_trait::async_trait]
     impl WorkflowStageRunner for EmptyInventoryRunner {
         async fn run_stage(
@@ -70,6 +71,7 @@ async fn provider_matrix_executes_code_and_research_workflows() {
         provider: &'static str,
     }
 
+    impl archon_workflow::WriteBoundaryProbe for MatrixRunner {}
     #[async_trait::async_trait]
     impl WorkflowStageRunner for MatrixRunner {
         async fn run_stage(

@@ -88,6 +88,7 @@ fn resume_keeps_event_sequence_monotonic() {
 async fn live_executor_routes_fanout_through_runner() {
     struct CaptureRunner;
 
+    impl archon_workflow::WriteBoundaryProbe for CaptureRunner {}
     #[async_trait::async_trait]
     impl WorkflowStageRunner for CaptureRunner {
         async fn run_stage(
@@ -150,6 +151,7 @@ async fn live_executor_supplies_sources_and_dependency_artifacts() {
         review_inputs: std::sync::Mutex<Vec<serde_json::Value>>,
     }
 
+    impl archon_workflow::WriteBoundaryProbe for ContextRunner {}
     #[async_trait::async_trait]
     impl WorkflowStageRunner for ContextRunner {
         async fn run_stage(
@@ -205,6 +207,7 @@ async fn live_executor_supplies_sources_and_dependency_artifacts() {
 async fn blocked_fanout_output_fails_stage_instead_of_accepting() {
     struct BlockedRunner;
 
+    impl archon_workflow::WriteBoundaryProbe for BlockedRunner {}
     #[async_trait::async_trait]
     impl WorkflowStageRunner for BlockedRunner {
         async fn run_stage(
@@ -254,6 +257,7 @@ async fn blocked_fanout_output_fails_stage_instead_of_accepting() {
 async fn blocked_agent_output_is_persisted_for_inspection() {
     struct BlockedRunner;
 
+    impl archon_workflow::WriteBoundaryProbe for BlockedRunner {}
     #[async_trait::async_trait]
     impl WorkflowStageRunner for BlockedRunner {
         async fn run_stage(
@@ -301,6 +305,7 @@ stages:
 async fn reject_verdict_fails_quality_gate() {
     struct RejectRunner;
 
+    impl archon_workflow::WriteBoundaryProbe for RejectRunner {}
     #[async_trait::async_trait]
     impl WorkflowStageRunner for RejectRunner {
         async fn run_stage(
@@ -341,6 +346,7 @@ async fn reject_verdict_fails_quality_gate() {
 async fn failed_verification_output_fails_producing_stage() {
     struct FailedFindingRunner;
 
+    impl archon_workflow::WriteBoundaryProbe for FailedFindingRunner {}
     #[async_trait::async_trait]
     impl WorkflowStageRunner for FailedFindingRunner {
         async fn run_stage(
@@ -431,6 +437,7 @@ async fn declared_foreach_fanout_with_no_items_fails_fast() {
     // (correctly) reject as missing evidence.
     struct EmptyItemsRunner;
 
+    impl archon_workflow::WriteBoundaryProbe for EmptyItemsRunner {}
     #[async_trait::async_trait]
     impl WorkflowStageRunner for EmptyItemsRunner {
         async fn run_stage(

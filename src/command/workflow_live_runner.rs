@@ -9,6 +9,7 @@ use archon_tui::event_channel::TuiEventSender;
 use archon_tui::events::{AgentActivityRole, AgentActivityStatus, AgentActivityUpdate};
 use archon_workflow::{
     ProviderTier, StageKind, StageRunOutput, StageRunRequest, WorkflowStageRunner,
+    WriteBoundaryProbe,
 };
 
 use super::workflow_agent_select::select_workflow_agent_key;
@@ -19,6 +20,12 @@ pub(crate) struct PipelineWorkflowRunner {
     pub(crate) llm: Arc<dyn LlmClient>,
     pub(crate) tui_tx: TuiEventSender,
     pub(crate) agent_names: Vec<String>,
+}
+
+impl WriteBoundaryProbe for PipelineWorkflowRunner {
+    fn supports_workspace_boundary(&self) -> bool {
+        true
+    }
 }
 
 #[async_trait::async_trait]

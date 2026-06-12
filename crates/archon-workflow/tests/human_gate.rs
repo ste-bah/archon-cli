@@ -92,6 +92,7 @@ struct CountingRunner {
     calls: Arc<AtomicUsize>,
 }
 
+impl archon_workflow::WriteBoundaryProbe for CountingRunner {}
 #[async_trait::async_trait]
 impl WorkflowStageRunner for CountingRunner {
     async fn run_stage(&self, _: StageRunRequest) -> WorkflowResult<StageRunOutput> {

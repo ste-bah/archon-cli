@@ -9,6 +9,7 @@ struct RootAssertingRunner {
     repo: PathBuf,
 }
 
+impl archon_workflow::WriteBoundaryProbe for RootAssertingRunner {}
 #[async_trait::async_trait]
 impl WorkflowStageRunner for RootAssertingRunner {
     async fn run_stage(

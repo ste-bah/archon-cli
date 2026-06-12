@@ -33,11 +33,16 @@ pub(crate) async fn run_fanout_with_runner(
     let items = context::fanout_items(store, run, stage)?;
     let item_kind = stage.effective_item_kind();
     let implementation_items = item_kind == StageKind::Implementation;
-    let width = if implementation_items {
-        1
-    } else {
-        fanout::runner_clamped_width(run, policy, stage, runner.max_concurrency())
-    };
+    // PRD-012: try the coordinated parallel path first. It returns None when it
+    // declined (disabled / non-Git / boundary-unavailable), in which case we
+    // fall through to the existing serial implementation path (width 1).
+    if implementation_items
+        && let Some(output) =
+            try_coordinated_implementation(store, policy, run, stage, runner, &items).await?
+    {
+        return Ok(output);
+    }
+    let width = serial_or_clamped_width(implementation_items, run, policy, stage, runner);
     let max_agents = stage_max_agents(policy, run, stage);
     if items.len() > max_agents {
         return Err(WorkflowError::PolicyDenied(format!(
@@ -116,6 +121,132 @@ pub(crate) async fn run_fanout_with_runner(
         "Fan-out stage `{}` completed {} item(s), failed {} item(s), width {}.",
         stage.id, completed, failed, width
     )))
+}
+
+fn serial_or_clamped_width(
+    impl_items: bool,
+    run: &WorkflowRun,
+    policy: &WorkflowPolicy,
+    stage: &StageSpec,
+    runner: &dyn WorkflowStageRunner,
+) -> usize {
+    if impl_items {
+        1
+    } else {
+        fanout::runner_clamped_width(run, policy, stage, runner.max_concurrency())
+    }
+}
+
+/// Attempt the PRD-012 coordinated parallel implementation path. Returns
+/// `Ok(None)` to signal the caller should run the existing serial path.
+async fn try_coordinated_implementation(
+    store: &WorkflowStore,
+    policy: &WorkflowPolicy,
+    run: &mut WorkflowRun,
+    stage: &StageSpec,
+    runner: &dyn WorkflowStageRunner,
+    items: &[FanoutItem],
+) -> WorkflowResult<Option<StageRunOutput>> {
+    use crate::write_coordinator::WriteCoordinatorConfig;
+    use crate::write_coordinator::coordinator::{FanoutCtx, PlanInput};
+    use crate::write_coordinator::resolve_write_coordinator_runtime;
+    use crate::write_coordinator::coordinator::run_coordinated_implementation_fanout;
+
+    let cfg = WriteCoordinatorConfig::default();
+    let Some(canonical) = run
+        .spec
+        .target_repository_root
+        .as_deref()
+        .map(str::trim)
+        .filter(|root| !root.is_empty())
+        .map(PathBuf::from)
+    else {
+        return Ok(None);
+    };
+    let runtime = resolve_write_coordinator_runtime(&canonical, &cfg);
+    let plans_input: Vec<PlanInput> = items
+        .iter()
+        .map(|item| PlanInput {
+            item: item.clone(),
+            target_files: item_target_files(stage, &item.payload),
+        })
+        .collect();
+    let run_root = canonical
+        .join(".archon")
+        .join("workflows")
+        .join(&run.id);
+    let outcome = {
+        let ctx = FanoutCtx {
+            store,
+            run,
+            policy,
+            stage,
+            run_root,
+            item_deps: BTreeMap::new(),
+            verify_inputs: Vec::new(),
+        };
+        run_coordinated_implementation_fanout(&ctx, plans_input, &runtime, &cfg, runner)
+            .await
+            .map_err(|err| WorkflowError::StageFailed(err.to_string()))?
+    };
+    if let Some(_reason) = outcome.serial_fallback {
+        // Serial fallback chosen (disabled / non-Git / boundary-unavailable).
+        // TASK-WC-008 wires the SerialFallbackReason into the event log.
+        return Ok(None);
+    }
+    record_coordinated_outcome(store, run, stage, &outcome)?;
+    let applied = outcome
+        .item_status
+        .values()
+        .filter(|s| matches!(s, crate::write_coordinator::ManifestStatus::Applied))
+        .count();
+    Ok(Some(StageRunOutput::markdown(format!(
+        "Coordinated implementation fan-out `{}` applied {applied} item(s) across {} wave(s).",
+        stage.id,
+        outcome.waves.len()
+    ))))
+}
+
+fn record_coordinated_outcome(
+    store: &WorkflowStore,
+    run: &mut WorkflowRun,
+    stage: &StageSpec,
+    outcome: &crate::write_coordinator::CoordinatedOutcome,
+) -> WorkflowResult<()> {
+    use crate::write_coordinator::ManifestStatus;
+
+    let mut failures = Vec::new();
+    for (item_id, status) in &outcome.item_status {
+        let accepted = matches!(status, ManifestStatus::Applied);
+        let body = format!("# Coordinated item `{item_id}`\n\nstatus: {status:?}\n");
+        let artifact = persistence::write_attached_stage_artifact(
+            store, run, stage, item_id, "md", body, accepted,
+        )?;
+        let error = (!accepted).then(|| format!("{status:?}"));
+        if let Some(err) = &error {
+            failures.push(format!("{item_id}: {err}"));
+        }
+        fanout::record_item(
+            run,
+            stage,
+            item_id.clone(),
+            if accepted {
+                StageStatus::Accepted
+            } else {
+                StageStatus::Failed
+            },
+            Some(artifact),
+            error,
+        );
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(WorkflowError::StageFailed(format!(
+            "coordinated implementation fan-out failed: {}",
+            failures.join("; ")
+        )))
+    }
 }
 
 fn record_success(

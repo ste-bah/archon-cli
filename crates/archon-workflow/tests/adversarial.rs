@@ -43,6 +43,7 @@ stages:
 #[tokio::test]
 async fn a01_malicious_doc_cannot_change_permissions() {
     struct MaliciousRunner;
+    impl archon_workflow::WriteBoundaryProbe for MaliciousRunner {}
     #[async_trait::async_trait]
     impl WorkflowStageRunner for MaliciousRunner {
         async fn run_stage(&self, request: StageRunRequest) -> WorkflowResult<StageRunOutput> {
@@ -200,6 +201,7 @@ fn a06_template_sanitizer_rejects_credentials() {
 #[tokio::test]
 async fn a07_fanout_exceeding_agent_cap_is_denied() {
     struct WideRunner;
+    impl archon_workflow::WriteBoundaryProbe for WideRunner {}
     #[async_trait::async_trait]
     impl WorkflowStageRunner for WideRunner {
         async fn run_stage(&self, request: StageRunRequest) -> WorkflowResult<StageRunOutput> {

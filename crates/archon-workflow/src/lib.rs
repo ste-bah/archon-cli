@@ -65,6 +65,6 @@ pub use spec::{
 pub use store::WorkflowStore;
 pub use template::{SavedWorkflowTemplate, TemplateRegistry};
 pub use write_coordinator::{
-    ItemId, ResourceKey, SerialFallbackReason, TargetFilesSource, WaveId, WritePlan,
-    WriteCoordinatorConfig, WriteCoordinatorRuntime,
+    ItemId, ResourceKey, SerialFallbackReason, TargetFilesSource, WaveId, WriteBoundaryProbe,
+    WritePlan, WriteCoordinatorConfig, WriteCoordinatorRuntime,
 };

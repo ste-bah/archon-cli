@@ -4,6 +4,7 @@ use serde_json::Value;
 
 use crate::error::WorkflowResult;
 use crate::spec::{ProviderTier, StageKind};
+use crate::write_coordinator::WriteBoundaryProbe;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StageRunRequest {
@@ -44,7 +45,7 @@ impl StageRunOutput {
 }
 
 #[async_trait]
-pub trait WorkflowStageRunner: Send + Sync {
+pub trait WorkflowStageRunner: Send + Sync + WriteBoundaryProbe {
     async fn run_stage(&self, request: StageRunRequest) -> WorkflowResult<StageRunOutput>;
 
     /// Maximum number of stages this runner can execute concurrently, when the
@@ -62,6 +63,8 @@ pub trait WorkflowStageRunner: Send + Sync {
 
 #[derive(Debug, Default)]
 pub struct DeterministicStageRunner;
+
+impl WriteBoundaryProbe for DeterministicStageRunner {}
 
 #[async_trait]
 impl WorkflowStageRunner for DeterministicStageRunner {

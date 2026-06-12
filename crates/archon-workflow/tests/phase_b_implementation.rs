@@ -13,7 +13,7 @@ struct ImplRunner {
     target: PathBuf,
     content: Option<String>,
 }
-
+impl archon_workflow::WriteBoundaryProbe for ImplRunner {}
 #[async_trait::async_trait]
 impl WorkflowStageRunner for ImplRunner {
     async fn run_stage(
@@ -236,7 +236,7 @@ async fn implementation_start_denied_under_default_policy() {
 #[tokio::test]
 async fn implementation_fanout_mutates_each_item_target() {
     struct FanoutImplRunner;
-
+    impl archon_workflow::WriteBoundaryProbe for FanoutImplRunner {}
     #[async_trait::async_trait]
     impl WorkflowStageRunner for FanoutImplRunner {
         async fn run_stage(
@@ -297,7 +297,7 @@ stages:
 #[tokio::test]
 async fn legacy_implementation_fanout_without_item_kind_still_writes() {
     struct LegacyImplRunner;
-
+    impl archon_workflow::WriteBoundaryProbe for LegacyImplRunner {}
     #[async_trait::async_trait]
     impl WorkflowStageRunner for LegacyImplRunner {
         async fn run_stage(
@@ -360,6 +360,7 @@ async fn implementation_fanout_gets_target_repo_sources_and_greenfield_targets()
         task_file: PathBuf,
     }
 
+    impl archon_workflow::WriteBoundaryProbe for EvidenceRunner {}
     #[async_trait::async_trait]
     impl WorkflowStageRunner for EvidenceRunner {
         async fn run_stage(

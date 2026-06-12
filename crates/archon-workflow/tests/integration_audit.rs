@@ -17,6 +17,7 @@ struct AuditRunner {
     provider: &'static str,
 }
 
+impl archon_workflow::WriteBoundaryProbe for AuditRunner {}
 #[async_trait::async_trait]
 impl WorkflowStageRunner for AuditRunner {
     async fn run_stage(&self, request: StageRunRequest) -> WorkflowResult<StageRunOutput> {

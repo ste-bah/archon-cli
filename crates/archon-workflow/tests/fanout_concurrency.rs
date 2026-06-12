@@ -47,6 +47,7 @@ struct CappedRunner {
     peak: Arc<AtomicUsize>,
 }
 
+impl archon_workflow::WriteBoundaryProbe for CappedRunner {}
 #[async_trait::async_trait]
 impl WorkflowStageRunner for CappedRunner {
     fn max_concurrency(&self) -> Option<usize> {
@@ -139,6 +140,7 @@ struct PeakRunner {
     peak: Arc<AtomicUsize>,
 }
 
+impl archon_workflow::WriteBoundaryProbe for PeakRunner {}
 #[async_trait::async_trait]
 impl WorkflowStageRunner for PeakRunner {
     // No runner cap: only the stage-level max_parallelism should bound width.

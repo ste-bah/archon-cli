@@ -12,6 +12,7 @@ use archon_workflow::{
 
 struct FanoutRunner;
 
+impl archon_workflow::WriteBoundaryProbe for FanoutRunner {}
 #[async_trait::async_trait]
 impl WorkflowStageRunner for FanoutRunner {
     async fn run_stage(

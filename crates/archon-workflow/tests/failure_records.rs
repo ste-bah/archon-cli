@@ -5,6 +5,7 @@ use archon_workflow::{
 
 struct FailingRunner;
 
+impl archon_workflow::WriteBoundaryProbe for FailingRunner {}
 #[async_trait::async_trait]
 impl WorkflowStageRunner for FailingRunner {
     async fn run_stage(&self, _request: StageRunRequest) -> WorkflowResult<StageRunOutput> {
