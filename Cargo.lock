@@ -1086,6 +1086,7 @@ dependencies = [
  "blake3",
  "chrono",
  "futures-util",
+ "globset",
  "hex",
  "serde",
  "serde_json",

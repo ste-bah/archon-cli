@@ -6,10 +6,14 @@
 //! modules added by later tasks.
 
 pub mod config;
+pub mod write_plan;
 
 use std::path::{Path, PathBuf};
 
 pub use config::WriteCoordinatorConfig;
+pub use write_plan::{
+    NormalizedPath, ResourceKey, TargetFilesSource, WritePlan, WritePlanError,
+};
 
 /// Canonical fan-out item identifier (matches `FanoutItem.id`).
 pub type ItemId = String;
