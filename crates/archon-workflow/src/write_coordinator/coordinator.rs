@@ -63,23 +63,46 @@ pub struct PlanInput {
 #[derive(Debug)]
 pub struct WaveOutcome {
     pub wave_id: WaveId,
+    pub items: Vec<ItemId>,
     pub apply_record: Option<ApplyRecord>,
     pub verify: Option<VerifyResult>,
     pub failure: Option<String>,
 }
 
+/// One item's plan summary for status/events/learning (TASK-WC-008).
+#[derive(Debug, Clone)]
+pub struct PlanRecord {
+    pub item_id: ItemId,
+    pub wave_id: WaveId,
+    pub target_files: Vec<String>,
+    pub changed_files: Vec<String>,
+    pub post_hashes: BTreeMap<String, String>,
+    pub patch_bytes_len: usize,
+}
+
 #[derive(Debug, Default)]
 pub struct CoordinatedOutcome {
+    pub run_id: String,
+    pub stage_id: String,
     pub waves: Vec<WaveOutcome>,
     pub serial_fallback: Option<SerialFallbackReason>,
     pub item_status: BTreeMap<ItemId, ManifestStatus>,
+    pub plans: Vec<PlanRecord>,
 }
 
 impl CoordinatedOutcome {
-    fn fallback(reason: SerialFallbackReason) -> Self {
+    fn new(run_id: &str, stage_id: &str) -> Self {
+        Self {
+            run_id: run_id.to_string(),
+            stage_id: stage_id.to_string(),
+            ..Self::default()
+        }
+    }
+
+    fn fallback(run_id: &str, stage_id: &str, reason: SerialFallbackReason) -> Self {
         Self {
             serial_fallback: Some(reason),
-            ..Self::default()
+            ..Self::new(run_id, stage_id)
         }
     }
 }
@@ -99,14 +122,20 @@ pub async fn run_coordinated_implementation_fanout(
     cfg: &WriteCoordinatorConfig,
     runner: &dyn WorkflowStageRunner,
 ) -> Result<CoordinatedOutcome, FanoutError> {
+    let run_id = ctx.run.id.as_str();
+    let stage_id = ctx.stage.id.as_str();
     let canonical = match wc_runtime {
         WriteCoordinatorRuntime::Enabled { canonical_root } => canonical_root.clone(),
         WriteCoordinatorRuntime::Disabled { reason } => {
-            return Ok(CoordinatedOutcome::fallback(*reason));
+            return Ok(CoordinatedOutcome::fallback(run_id, stage_id, *reason));
         }
     };
     if !runner.supports_workspace_boundary() {
-        return Ok(CoordinatedOutcome::fallback(SerialFallbackReason::BoundaryUnavailable));
+        return Ok(CoordinatedOutcome::fallback(
+            run_id,
+            stage_id,
+            SerialFallbackReason::BoundaryUnavailable,
+        ));
     }
     let plans: Vec<WritePlan> = plans_input
         .iter()
@@ -126,7 +155,7 @@ pub async fn run_coordinated_implementation_fanout(
     let input_by_id: BTreeMap<&str, &PlanInput> =
         plans_input.iter().map(|p| (p.item.id.as_str(), p)).collect();
 
-    let mut outcome = CoordinatedOutcome::default();
+    let mut outcome = CoordinatedOutcome::new(run_id, stage_id);
     for wave in &schedule.waves {
         process_wave(ctx, &canonical, cfg, runner, wave, &plan_by_id, &input_by_id, &caps, &mut outcome)
             .await?;
@@ -187,13 +216,15 @@ async fn process_wave<'a>(
         finalize_failed_wave(canonical, cfg, wave, mutator, &items, outcome);
         return Ok(());
     }
-    let (manifests, pre_by_item) = capture_and_validate(ctx, cfg, &items)?;
+    let (manifests, pre_by_item, records) = capture_and_validate(ctx, cfg, wave.wave_id, &items)?;
     let (apply_record, verify) = apply_and_verify(ctx, canonical, wave, &manifests, &pre_by_item)?;
     record_applied(&apply_record, outcome);
+    outcome.plans.extend(records);
     let status = wave_status(&apply_record);
     cleanup_all(canonical, cfg, &mut items, status);
     outcome.waves.push(WaveOutcome {
         wave_id: wave.wave_id,
+        items: wave.items.clone(),
         apply_record: Some(apply_record),
         verify: Some(verify),
         failure: None,
@@ -282,20 +313,34 @@ fn build_item_request(
     req
 }
 
-type CaptureResult = (Vec<PatchManifest>, BTreeMap<ItemId, BTreeMap<String, String>>);
+type CaptureResult = (
+    Vec<PatchManifest>,
+    BTreeMap<ItemId, BTreeMap<String, String>>,
+    Vec<PlanRecord>,
+);
 
 fn capture_and_validate(
     ctx: &FanoutCtx<'_>,
     cfg: &WriteCoordinatorConfig,
+    wave_id: WaveId,
     items: &[ItemState<'_>],
 ) -> Result<CaptureResult, FanoutError> {
     let mut manifests = Vec::new();
     let mut pre_by_item = BTreeMap::new();
+    let mut records = Vec::new();
     for it in items {
         let captured = capture_patch(&it.workspace, &it.plan.target_files, &it.baseline)
             .map_err(FanoutError::Patch)?;
         validate_patch(&captured, it.plan, cfg, "implemented")
             .map_err(FanoutError::Patch)?;
+        records.push(PlanRecord {
+            item_id: it.plan.item_id.clone(),
+            wave_id,
+            target_files: it.plan.target_files.iter().map(NormalizedPath::as_str).collect(),
+            changed_files: captured.changed_files.clone(),
+            post_hashes: captured.post_hashes.clone(),
+            patch_bytes_len: captured.patch_bytes.len(),
+        });
         let json_path = persist_manifest(
             &ctx.run_root,
             &ctx.run.id,
@@ -316,7 +361,7 @@ fn capture_and_validate(
             .collect();
         pre_by_item.insert(it.plan.item_id.clone(), pre);
     }
-    Ok((manifests, pre_by_item))
+    Ok((manifests, pre_by_item, records))
 }
 
 fn load_manifest(json_path: &Path) -> Result<PatchManifest, FanoutError> {
@@ -388,10 +433,19 @@ fn finalize_failed_wave(
                 reason: "wave aborted: canonical mutation".into(),
             },
         );
+        outcome.plans.push(PlanRecord {
+            item_id: it.plan.item_id.clone(),
+            wave_id: wave.wave_id,
+            target_files: it.plan.target_files.iter().map(NormalizedPath::as_str).collect(),
+            changed_files: vec![],
+            post_hashes: BTreeMap::new(),
+            patch_bytes_len: 0,
+        });
         let _ = cleanup_workspace(canonical, &it.plan.isolated_root, WorkspaceStatus::Failed, cfg);
     }
     outcome.waves.push(WaveOutcome {
         wave_id: wave.wave_id,
+        items: wave.items.clone(),
         apply_record: None,
         verify: None,
         failure: Some(mutator.to_string()),

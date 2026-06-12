@@ -171,10 +171,9 @@ async fn try_coordinated_implementation(
             target_files: item_target_files(stage, &item.payload),
         })
         .collect();
-    let run_root = canonical
-        .join(".archon")
-        .join("workflows")
-        .join(&run.id);
+    // Persist coordinator artifacts under the workflow store's run dir so
+    // `status::read_status` (which also keys off store.run_dir) can find them.
+    let run_root = store.run_dir(&run.id);
     let outcome = {
         let ctx = FanoutCtx {
             store,
@@ -189,9 +188,11 @@ async fn try_coordinated_implementation(
             .await
             .map_err(|err| WorkflowError::StageFailed(err.to_string()))?
     };
+    // TASK-WC-008: best-effort §18 events + metadata-only learning rows.
+    let seq_base = (run.stages.len() as u64 + 1) * 100_000;
+    crate::events::write_coordination_events::emit_and_record(store, seq_base, &outcome);
     if let Some(_reason) = outcome.serial_fallback {
         // Serial fallback chosen (disabled / non-Git / boundary-unavailable).
-        // TASK-WC-008 wires the SerialFallbackReason into the event log.
         return Ok(None);
     }
     record_coordinated_outcome(store, run, stage, &outcome)?;

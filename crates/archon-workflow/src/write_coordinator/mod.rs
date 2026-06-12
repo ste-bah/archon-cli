@@ -10,6 +10,7 @@ pub mod config;
 pub mod coordinator;
 pub mod patch_apply;
 pub mod patch_manifest;
+pub mod status;
 pub mod worktree_isolation;
 pub mod write_plan;
 
@@ -19,7 +20,8 @@ pub use conflict_graph::{
     Schedule, ScheduleError, ScheduleSummary, Wave, WaveCaps,
 };
 pub use coordinator::{
-    CoordinatedOutcome, FanoutError, run_coordinated_implementation_fanout,
+    CoordinatedOutcome, FanoutError, PlanRecord, WaveOutcome,
+    run_coordinated_implementation_fanout,
 };
 pub use config::WriteCoordinatorConfig;
 pub use patch_apply::{

@@ -49,7 +49,7 @@ pub use learning::{
     Verification, WorkflowLearningRecord, WorkflowLearningSink, WorkflowRunLearningSummary,
     learning_records,
 };
-pub use lifecycle::{LifecycleAction, LifecycleController};
+pub use lifecycle::{LifecycleAction, LifecycleController, ResumeClassification, classify_resume};
 pub use planner::{HeuristicWorkflowPlanner, WorkflowPlanner};
 pub use policy::{PolicyDecision, WorkflowPolicy};
 pub use provider_tiers::{

@@ -9,6 +9,44 @@ use crate::persistence;
 use crate::run::{RunStatus, StageStatus, WorkflowRun};
 use crate::store::WorkflowStore;
 
+/// AC-WC-010 resume classification for coordinated implementation items.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ResumeClassification {
+    /// Already Applied or IdempotentNoop — skip execution + apply.
+    pub skip: Vec<String>,
+    /// Failed or PendingApply — re-execute via the coordinator.
+    pub reexecute: Vec<String>,
+    /// Conflicted — surface to the operator; do NOT auto-retry.
+    pub surfaced_conflicts: Vec<String>,
+    /// No prior manifest — a new item, run normally.
+    pub fresh: Vec<String>,
+}
+
+/// Classify each item for resume using the persisted manifest status
+/// (TASK-WC-006 `resume_status`). Pure — drives the resume decision.
+pub fn classify_resume(
+    run_root: &std::path::Path,
+    stage_id: &str,
+    item_ids: &[String],
+) -> ResumeClassification {
+    use crate::write_coordinator::patch_apply::{ApplyResumeStatus, resume_status};
+
+    let mut out = ResumeClassification::default();
+    for item in item_ids {
+        match resume_status(item, run_root, stage_id) {
+            ApplyResumeStatus::Applied | ApplyResumeStatus::IdempotentNoop => {
+                out.skip.push(item.clone());
+            }
+            ApplyResumeStatus::Failed(_) | ApplyResumeStatus::PendingApply => {
+                out.reexecute.push(item.clone());
+            }
+            ApplyResumeStatus::Conflicted => out.surfaced_conflicts.push(item.clone()),
+            ApplyResumeStatus::NotPersisted => out.fresh.push(item.clone()),
+        }
+    }
+    out
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LifecycleAction {
     Resume,

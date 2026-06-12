@@ -5,6 +5,8 @@ use serde_json::{Map, Value};
 use crate::error::WorkflowResult;
 use crate::store::WorkflowStore;
 
+pub mod write_coordination_events;
+
 const FORBIDDEN_FIELDS: &[&str] = &[
     "thinking",
     "reasoning",
@@ -32,6 +34,16 @@ pub enum WorkflowEventKind {
     Cancelled,
     Completed,
     LearningRecorded,
+    WriteCoordinationItemWritePlanCreated,
+    WriteCoordinationWaveScheduled,
+    WriteCoordinationItemWorkspaceCreated,
+    WriteCoordinationUndeclaredWriteDetected,
+    WriteCoordinationPatchCaptured,
+    WriteCoordinationPatchApplied,
+    WriteCoordinationPatchConflict,
+    WriteCoordinationWaveVerificationResult,
+    WriteCoordinationDirectCanonicalMutationDetected,
+    WriteCoordinationSerialFallback,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

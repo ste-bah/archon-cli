@@ -127,11 +127,28 @@ async fn run_live_action(
         other => return run_action(cwd, other),
     };
     let learning_note = workflow_world_learning::record_report(&store, &report);
+    let wc_blocks = write_coordination_blocks(&store, &report.run_id);
     Ok(format!(
         "Workflow complete: {} (completed {}, failed {}, skipped {})",
         report.run_id, report.completed, report.failed, report.skipped
     ) + "\n"
-        + learning_note.as_str())
+        + learning_note.as_str()
+        + wc_blocks.as_str())
+}
+
+/// TASK-WC-008: render the §17 compact write-coordination status block for
+/// every coordinated stage that left state on disk.
+fn write_coordination_blocks(store: &WorkflowStore, run_id: &str) -> String {
+    use archon_workflow::write_coordinator::status::{
+        coordinated_stage_ids, read_status, render_compact,
+    };
+    let mut out = String::new();
+    for stage_id in coordinated_stage_ids(store, run_id) {
+        if let Ok(Some(status)) = read_status(store, run_id, &stage_id) {
+            out.push_str(&render_compact(&status));
+        }
+    }
+    out
 }
 
 async fn plan_live(

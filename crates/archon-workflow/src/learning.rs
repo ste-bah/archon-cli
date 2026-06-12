@@ -261,6 +261,42 @@ fn write_jsonl<T: Serialize>(path: &Path, values: &[T]) -> WorkflowResult<()> {
     Ok(())
 }
 
+/// TASK-WC-008 — write METADATA-ONLY learning rows for a coordinated outcome.
+/// Never embeds patch bytes or diff lines; blake3 hashes + path names + sizes
+/// are allowed (§18). One row per item (carrying its wave id).
+pub fn record_write_coordination_outcome(
+    store: &WorkflowStore,
+    outcome: &crate::write_coordinator::coordinator::CoordinatedOutcome,
+) -> WorkflowResult<()> {
+    let dir = store
+        .run_dir(&outcome.run_id)
+        .join("learning")
+        .join("write-coordination");
+    std::fs::create_dir_all(&dir).map_err(|e| WorkflowError::io(&dir, e))?;
+    let rows: Vec<serde_json::Value> = outcome
+        .plans
+        .iter()
+        .map(|plan| {
+            let status = outcome
+                .item_status
+                .get(&plan.item_id)
+                .map(|s| format!("{s:?}"))
+                .unwrap_or_else(|| "Unknown".into());
+            serde_json::json!({
+                "run_id": outcome.run_id,
+                "stage_id": outcome.stage_id,
+                "item_id": plan.item_id,
+                "wave_id": plan.wave_id,
+                "status": status,
+                "changed_files": plan.changed_files,
+                "patch_byte_size": plan.patch_bytes_len,
+                "blake3_hashes": plan.post_hashes,
+            })
+        })
+        .collect();
+    write_jsonl(&dir.join("outcomes.jsonl"), &rows)
+}
+
 pub(crate) fn record_workflow_learning(
     store: &WorkflowStore,
     run: &WorkflowRun,
