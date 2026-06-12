@@ -98,8 +98,65 @@ stages:
     println!("write_plan smoke: provenance={source:?}, conflict-detection OK");
 
     smoke_worktree_isolation();
+    smoke_conflict_graph(root);
 
     println!("write_coordinator smoke: OK");
+}
+
+/// TASK-WC-004 — schedule disjoint vs overlapping items into waves.
+fn smoke_conflict_graph(repo_root: &Path) {
+    use std::collections::BTreeMap;
+    use archon_workflow::write_coordinator::conflict_graph::{
+        WaveCaps, build_schedule, schedule_summary,
+    };
+    use archon_workflow::write_coordinator::write_plan::{
+        ResourceKey, TargetFilesSource, normalize_target,
+    };
+    use archon_workflow::write_coordinator::{ItemId, WritePlan};
+
+    let mk = |id: &str, key: ResourceKey| {
+        let target = normalize_target("crates/archon-workflow/src/lib.rs", repo_root)
+            .unwrap_or_else(|e| fail(&format!("normalize: {e}")));
+        WritePlan {
+            run_id: "smoke".into(),
+            stage_id: "impl".into(),
+            item_id: ItemId::from(id),
+            canonical_root: repo_root.to_path_buf(),
+            isolated_root: repo_root.join(".archon/wc").join(id),
+            target_files: vec![target],
+            target_files_source: TargetFilesSource::Item,
+            read_context_files: vec![],
+            verify_inputs: vec![],
+            baseline_id: "git:HEAD".into(),
+            workspace_boundary_required: true,
+            resource_keys: [key].into_iter().collect(),
+        }
+    };
+
+    let plans = vec![
+        mk("a", ResourceKey::File("src/a.rs".into())),
+        mk("b", ResourceKey::File("src/b.rs".into())),
+        mk("c", ResourceKey::File("src/a.rs".into())),
+    ];
+    let caps = WaveCaps::from_sources(8, 4, None, None, None);
+    let schedule =
+        build_schedule("impl", &plans, &BTreeMap::new(), &caps).unwrap_or_else(|e| {
+            fail(&format!("build_schedule: {e}"));
+        });
+    let summary = schedule_summary(&schedule);
+    // a and b disjoint -> wave 0; c overlaps a -> wave 1.
+    if schedule.waves.len() != 2 {
+        fail(&format!("expected 2 waves, got {}", schedule.waves.len()));
+    }
+    if summary.max_width != 2 {
+        fail(&format!("expected max_width 2, got {}", summary.max_width));
+    }
+    println!(
+        "conflict_graph smoke: {} waves, max_width {}, widths {:?}",
+        summary.wave_count,
+        summary.max_width,
+        schedule.waves.iter().map(|w| w.items.len()).collect::<Vec<_>>()
+    );
 }
 
 /// TASK-WC-003 — build a throwaway git repo, isolate an item, prove the dirty

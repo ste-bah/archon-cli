@@ -5,12 +5,16 @@
 //! (worktree isolation, conflict graph, patch capture/apply) lives in sibling
 //! modules added by later tasks.
 
+pub mod conflict_graph;
 pub mod config;
 pub mod worktree_isolation;
 pub mod write_plan;
 
 use std::path::{Path, PathBuf};
 
+pub use conflict_graph::{
+    Schedule, ScheduleError, ScheduleSummary, Wave, WaveCaps,
+};
 pub use config::WriteCoordinatorConfig;
 pub use worktree_isolation::{
     CanonicalBaseline, FileMeta, IsolationError, ItemWorkspace, WorkspaceStatus,
