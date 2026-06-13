@@ -96,9 +96,10 @@ pub(crate) fn effective_root(store: &WorkflowStore, run: &WorkflowRun) -> PathBu
         .unwrap_or_else(|| store_project_root(store))
 }
 
-pub(crate) fn implementation_root(
+pub(crate) fn implementation_root_for_targets(
     store: &WorkflowStore,
     run: &WorkflowRun,
+    targets: &[String],
 ) -> WorkflowResult<PathBuf> {
     if let Some(root) = run
         .spec
@@ -118,11 +119,20 @@ pub(crate) fn implementation_root(
     repository_source_roots(store, run)
         .into_iter()
         .next()
+        .or_else(|| absolute_target_parent(targets))
         .ok_or_else(|| {
             WorkflowError::SpecInvalid(
                 "implementation stage requires a target_repository_root or discoverable Git/Cargo repository path in the workflow spec".into(),
             )
         })
+}
+
+fn absolute_target_parent(targets: &[String]) -> Option<PathBuf> {
+    targets
+        .iter()
+        .map(|target| Path::new(target.trim()))
+        .filter(|target| target.is_absolute())
+        .find_map(|target| target.parent().map(Path::to_path_buf))
 }
 
 fn source_roots(store: &WorkflowStore, run: &WorkflowRun) -> Vec<PathBuf> {
