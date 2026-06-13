@@ -255,11 +255,8 @@ pub fn detect_canonical_mutation(
     declared_targets: &[NormalizedPath],
     verify_inputs: &[NormalizedPath],
 ) -> Result<(), IsolationError> {
-    if repository_fingerprint(canonical_root)? != baseline.repo_fingerprint {
-        return Err(IsolationError::CanonicalMutation {
-            path: "<repository>".into(),
-        });
-    }
+    // Coordination owns the files declared for this item plus explicit verify
+    // inputs. Unrelated canonical edits must not poison another item.
     for path in declared_targets.iter().chain(verify_inputs.iter()) {
         let key = path.as_str();
         let Some(expected) = baseline

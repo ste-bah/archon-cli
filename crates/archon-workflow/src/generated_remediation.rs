@@ -52,7 +52,7 @@ pub(super) fn implementation_target_inventory_stage(id: &str, original: &StageSp
         ProviderTier::Coder,
         original.depends_on.clone(),
         &format!(
-            "Inspect the task evidence for implementation stage `{}` and emit a structured target inventory. Return exactly {{\"items\": [...]}}. Each item must include a non-empty target_files array, the task to perform, and required_tests. Do not edit files in this inventory stage. If no concrete repository target files can be determined, emit {{\"items\": []}} so the implementation fan-out fails fast instead of applying unsafe writes.",
+            "Inspect the task evidence for implementation stage `{}` and emit a structured target inventory. Return exactly {{\"items\": [...]}}. Each item must include a non-empty target_files array, the task to perform, and required_tests. Do not edit files in this inventory stage. Emit {{\"items\": []}} only when upstream evidence says the implementation stage has no missing work. If work remains but concrete target files cannot be determined, return a blocked explanation without an `items` array so the implementation fan-out fails fast instead of applying unsafe writes.",
             original.id
         ),
     );

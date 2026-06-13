@@ -169,6 +169,7 @@ impl WorkflowStore {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn write_named_artifact(
         &self,
         run_id: &str,

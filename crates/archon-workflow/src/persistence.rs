@@ -91,6 +91,7 @@ pub(crate) fn write_attached_stage_artifact(
     Ok(artifact)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn record_agent_output(
     store: &WorkflowStore,
     run_id: &str,

@@ -385,6 +385,9 @@ fn normalize_targetless_implementation_stages(spec: &mut WorkflowSpec) {
         stage.foreach = Some(format!("${{{inventory_id}.items}}"));
         stage.item_kind = Some(StageKind::Implementation);
         stage.max_parallelism.get_or_insert(1);
+        stage
+            .extra
+            .insert("allow_empty_items".into(), Value::Bool(true));
         if !stage.depends_on.contains(&inventory_id) {
             stage.depends_on.insert(0, inventory_id.clone());
         }

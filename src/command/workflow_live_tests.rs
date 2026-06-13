@@ -261,6 +261,16 @@ fn planner_prompt_requires_platform_aware_cargo_commands() {
 }
 
 #[test]
+fn planner_prompt_separates_report_artifacts_from_repo_implementation() {
+    let prompt = planner_prompt("Implement T140 readiness and adversarial review artifacts.");
+
+    assert!(prompt.contains("Do not model report-only"));
+    assert!(prompt.contains("external/project-artifact deliverables"));
+    assert!(prompt.contains("split it into separate stages"));
+    assert!(prompt.contains("Never let an empty implementation target inventory skip"));
+}
+
+#[test]
 fn explicit_stage_extra_can_request_bash() {
     let req = StageRunRequest {
         stage_id: "validate".into(),

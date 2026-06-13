@@ -249,6 +249,13 @@ stages:
         implementation.foreach.as_deref(),
         Some("${implement_t001-target-inventory.items}")
     );
+    assert_eq!(
+        implementation
+            .extra
+            .get("allow_empty_items")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
     assert!(
         implementation
             .depends_on
@@ -301,6 +308,13 @@ stages:
     assert_eq!(
         implementation.foreach.as_deref(),
         Some("${wave1_implement-target-inventory.items}")
+    );
+    assert_eq!(
+        implementation
+            .extra
+            .get("allow_empty_items")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
     );
 
     let plan = spec

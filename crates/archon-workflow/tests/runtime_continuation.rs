@@ -66,6 +66,59 @@ stages:
 }
 
 #[tokio::test]
+async fn generated_target_inventory_empty_items_noops_legacy_specs() {
+    struct EmptyTargetInventoryRunner;
+
+    impl archon_workflow::WriteBoundaryProbe for EmptyTargetInventoryRunner {}
+    #[async_trait::async_trait]
+    impl WorkflowStageRunner for EmptyTargetInventoryRunner {
+        async fn run_stage(
+            &self,
+            request: StageRunRequest,
+        ) -> archon_workflow::WorkflowResult<StageRunOutput> {
+            if request.stage_id == "implement-target-inventory" {
+                return Ok(StageRunOutput::markdown(r#"{"items":[]}"#));
+            }
+            Ok(StageRunOutput::markdown("unexpected implementation item"))
+        }
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let executor = WorkflowExecutor::new(store.clone(), write_permissive_policy());
+    let spec = WorkflowSpec::from_yaml(
+        r#"
+schema: archon.workflow.v1
+name: empty-generated-target-inventory
+task: No-op generated implementation.
+stages:
+  - id: implement-target-inventory
+    kind: agent
+    agent: coder
+    outputs: [items]
+  - id: implement
+    kind: fanout
+    foreach: "${implement-target-inventory.items}"
+    item_kind: implementation
+    depends_on: [implement-target-inventory]
+"#,
+    )
+    .unwrap();
+    let run = executor.start(spec).unwrap();
+    let report = executor
+        .execute_with_runner(run.clone(), &EmptyTargetInventoryRunner)
+        .await
+        .unwrap();
+    assert_eq!(report.failed, 0);
+
+    let finished = store.load_state(&run.id).unwrap();
+    assert_eq!(
+        finished.stages.get("implement").unwrap().status,
+        StageStatus::Accepted
+    );
+}
+
+#[tokio::test]
 async fn provider_matrix_executes_code_and_research_workflows() {
     struct MatrixRunner {
         provider: &'static str,

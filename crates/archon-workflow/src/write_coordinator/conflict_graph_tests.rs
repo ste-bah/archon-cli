@@ -15,7 +15,7 @@ fn plan(id: &str, keys: &[ResourceKey], source: TargetFilesSource) -> WritePlan 
         item_id: ItemId::from(id),
         canonical_root: PathBuf::from("/repo"),
         isolated_root: PathBuf::from("/repo/.archon/wc").join(id),
-        target_files: vec![NormalizedPathStub::new(id)],
+        target_files: vec![NormalizedPathStub::path(id)],
         target_files_source: source,
         read_context_files: vec![],
         verify_inputs: vec![],
@@ -32,7 +32,7 @@ fn plan(id: &str, keys: &[ResourceKey], source: TargetFilesSource) -> WritePlan 
 /// a path we know normalizes cleanly.
 struct NormalizedPathStub;
 impl NormalizedPathStub {
-    fn new(id: &str) -> NormalizedPath {
+    fn path(id: &str) -> NormalizedPath {
         let dir = std::env::temp_dir().join(format!("cg-{}-{}", std::process::id(), id));
         std::fs::create_dir_all(&dir).expect("tempdir");
         crate::write_coordinator::write_plan::normalize_target("f.rs", &dir).expect("normalize")

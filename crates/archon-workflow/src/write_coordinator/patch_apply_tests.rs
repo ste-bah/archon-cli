@@ -120,7 +120,7 @@ fn single_item_clean_apply() {
     pre_by_item.insert(m.item_id.clone(), pre);
     let rec = apply_wave(
         repo.path(),
-        &[m.clone()],
+        std::slice::from_ref(&m),
         &pre_by_item,
         0,
         &run_root_of(repo.path()),
@@ -191,7 +191,7 @@ fn stale_baseline_changed_file_fails_item() {
     std::fs::write(repo.path().join("src/lib.rs"), "// drifted\n").unwrap();
     let rec = apply_wave(
         repo.path(),
-        &[m.clone()],
+        std::slice::from_ref(&m),
         &pre_by_item,
         0,
         &run_root_of(repo.path()),
