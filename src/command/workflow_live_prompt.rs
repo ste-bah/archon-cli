@@ -26,15 +26,23 @@ const BASH_EXECUTION_GUIDANCE: &str = "For verification, focused-test, lint, bui
 
 fn command_execution_guidance() -> String {
     format!(
-        "{BASH_EXECUTION_GUIDANCE}\n\n{}",
+        "{BASH_EXECUTION_GUIDANCE}\n\n{FOCUSED_VERIFICATION_GUIDANCE}\n\n{}",
         cargo_command_policy_guidance()
     )
 }
 
+const FOCUSED_VERIFICATION_GUIDANCE: &str = concat!(
+    "Focused verification selection:\n",
+    "- For every language/build system, narrow at the test file, target, module, package, class, or test-id level before invoking the test runner.\n",
+    "- Avoid broad project/package filters that still compile or run unrelated suites before filtering. Examples to avoid when a narrower target is knowable: `cargo test -p <large-package> <filter>`, whole-repo `pytest`, root `npm test`, root `gradle test`, or all-module Maven/Gradle runs.\n",
+    "- Prefer exact commands such as Cargo `cargo test -p <pkg> --test <target> <filter>`, pytest `pytest path/to/test.py::test_name`, Gradle `./gradlew :module:test --tests ClassName.testName`, Maven `mvn -pl module -Dtest=ClassName#testName test`, npm/pnpm test-file or test-name filters, Go `go test ./pkg -run TestName`, or dotnet `dotnet test --filter Name~TestName`.\n",
+    "- Use cheap source inspection (`rg`, `ls`, manifest/build files) to identify exact targets before running Bash. If the exact target cannot be determined, report the reason and choose the narrowest command available.\n",
+);
+
 fn cargo_command_policy_guidance() -> String {
     let profile = CargoHostProfile::detect();
     format!(
-        "Cargo command policy for this host ({}):\n- Prefer focused package/test filters over workspace-wide commands.\n- Intermediate workflow test stages must not run `cargo check --workspace --tests` unless the stage or user explicitly requires it; reserve broad workspace checks for final quality gates.\n- {}\n- If upstream artifacts list stale Cargo commands that conflict with this host policy, adapt the commands and report the adaptation.",
+        "Cargo command policy for this host ({}):\n- Prefer exact package + test-target commands over workspace-wide commands.\n- Intermediate workflow test stages must not run `cargo check --workspace --tests` unless the stage or user explicitly requires it; reserve broad workspace checks for final quality gates.\n- {}\n- If upstream artifacts list stale Cargo commands that conflict with this host policy, adapt the commands and report the adaptation.",
         profile.label(),
         profile.jobs_guidance()
     )
@@ -138,8 +146,10 @@ const PLANNER_RULES: &str = concat!(
     "- The remediation inventory stage MUST depend on the first adversarial review, declare `outputs: [items]`, and emit exactly `{{\"items\": []}}` when there are no blockers. Each non-empty remediation item MUST include finding_id, related_task_id, target_files, failure, required_fix, and required_tests.\n",
     "- The remediation implementation fanout MUST set `foreach: ${{<remediation-inventory-stage>.items}}`, `item_kind: implementation`, and `allow_empty_items: true` in stage extra or input so a clean review can no-op instead of failing.\n",
     "- The final quality gate MUST depend on the post-remediation synthesis/report, not directly on the initial adversarial review; otherwise stale pre-fix failures will poison a successfully remediated run.\n",
+    "- Focused verification is language-agnostic: prefer exact test file/target/module/package/class/test-id selection for the current stack before invoking the runner. Avoid broad project/package filters that still compile or run unrelated suites before filtering.\n",
     "- Cargo verification commands MUST be platform-aware: use WSL2/low-memory `-j1` only when the current host or stage explicitly requires it. Native macOS, native Linux, and native Windows should omit `-j1`/`--jobs 1` by default or use a configured job cap.\n",
-    "- Focused test stages MUST prefer package/test filters. Do not place `cargo check --workspace --tests` in intermediate wave test stages unless the user explicitly requested that broad gate; reserve broad workspace checks for final quality gates.\n",
+    "- For Rust/Cargo specifically, prefer exact test targets such as `cargo test -p <pkg> --test <target> <filter> -- --nocapture`. Avoid broad package-filter commands such as `cargo test -p <large-package> <filter>` because Cargo still compiles and runs every integration test binary before filtering. Use cheap source inspection to identify target names.\n",
+    "- Do not place `cargo check --workspace --tests` in intermediate wave test stages unless the user explicitly requested that broad gate; reserve broad workspace checks for final quality gates.\n",
     "- Set `verify_command` when a focused verification command is knowable.\n",
     "- Keep max_parallelism <= 8 and max_agents <= 200.\n",
     "- Add learning_hooks for sona, reasoning_bank, and world_model.\n",

@@ -27,4 +27,14 @@ fn live_workflow_prompt_advertises_write_capable_contract() {
         source.contains("Never let an empty implementation target inventory skip"),
         "planner prompt must preserve required report/readiness deliverables"
     );
+    assert!(
+        source.contains("Focused verification is language-agnostic"),
+        "planner prompt must keep focused verification language-agnostic"
+    );
+    assert!(
+        source.contains("pytest path/to/test.py::test_name")
+            && source.contains("./gradlew :module:test --tests")
+            && source.contains("go test ./pkg -run TestName"),
+        "live execution prompt must give non-Cargo focused-test examples"
+    );
 }

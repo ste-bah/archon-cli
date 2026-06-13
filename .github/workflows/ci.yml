@@ -149,7 +149,13 @@ jobs:
           tool: nextest
 
       - name: Build workspace
-        run: cargo build --workspace --verbose
+        # Keep normal cargo diagnostics for real compiler failures, but avoid
+        # `--verbose`: it emits every rustc invocation and can fill the
+        # ubuntu runner log/disk before nextest gets to report failures.
+        run: |
+          df -h / "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true
+          cargo build --workspace
+          df -h / "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true
 
       - name: Run tests (nextest)
         shell: bash
@@ -173,15 +179,22 @@ jobs:
         # at 64+ minutes (commit 3fded2c). Job timeout-minutes still bounds
         # future regressions while allowing current workspace tests to finish.
         # Emit a heartbeat so GitHub does not kill long, quiet nextest
-        # phases as an apparent no-output hang.
+        # phases as an apparent no-output hang, and include disk snapshots so
+        # runner-capacity failures remain diagnosable without verbose rustc
+        # command logs.
         run: |
+          df -h / "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true
           cargo nextest run --workspace --no-fail-fast &
           nextest_pid=$!
           while kill -0 "$nextest_pid" 2>/dev/null; do
             sleep 60
             echo "nextest still running..."
+            df -h / "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true
           done
-          wait "$nextest_pid"
+          status=0
+          wait "$nextest_pid" || status=$?
+          df -h / "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true
+          exit "$status"
 
       - name: Run doctests
         shell: bash

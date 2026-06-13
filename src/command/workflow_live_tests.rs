@@ -255,6 +255,8 @@ fn command_stage_prompt_does_not_treat_wsl_jobs_as_macos_default() {
 fn planner_prompt_requires_platform_aware_cargo_commands() {
     let prompt = planner_prompt("Implement a Rust workflow task and run focused tests.");
 
+    assert!(prompt.contains("Focused verification is language-agnostic"));
+    assert!(prompt.contains("exact test file/target/module/package/class/test-id"));
     assert!(prompt.contains("Cargo verification commands MUST be platform-aware"));
     assert!(prompt.contains("Native macOS, native Linux, and native Windows"));
     assert!(prompt.contains("Do not place `cargo check --workspace --tests`"));
