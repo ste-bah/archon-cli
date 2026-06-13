@@ -9,8 +9,11 @@ checks that guard the codebase. Read them once before your first PR.
   `scripts/dev-flow-pass-gate.sh`. No exceptions.
 - Tests are written before implementation (Gate 1). Sherlock-holmes review is
   required at Gate 3 and Gate 6. No self-attestation at Gate 5 — use `--exec`.
-- `cargo` invocations on this repo MUST run with `--jobs 1` and
-  `-- --test-threads=2`. Parallel rustc / test processes crash WSL2.
+- On WSL2 or low-memory hosts, `cargo` invocations MUST use `--jobs 1`
+  and tests MUST use `-- --test-threads=2`. Parallel rustc / test
+  processes crash WSL2. Native macOS, native Linux, and native Windows
+  should omit `--jobs 1` by default unless a task explicitly sets a
+  different safe cap.
 
 ## Architectural Guidelines
 

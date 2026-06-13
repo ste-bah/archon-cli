@@ -10,7 +10,7 @@ use archon_workflow::{
 use serde_json::json;
 
 use super::plan_live;
-use super::workflow_live_prompt::workflow_prompt;
+use super::workflow_live_prompt::{planner_prompt, workflow_prompt};
 use super::workflow_live_retry::transient_live_agent_error;
 use super::workflow_live_runner::{
     PipelineWorkflowRunner, allowed_tools, extract_yaml, request_target_repository_root,
@@ -218,6 +218,46 @@ fn command_stage_prompt_uses_configured_bash_timeout() {
     assert!(prompt.contains("Do not set a Bash `timeout` field"));
     assert!(prompt.contains("do not wrap commands with shell-level `timeout`/`gtimeout`"));
     assert!(prompt.contains("Do not mark timed-out commands as completed or verified"));
+}
+
+#[test]
+fn command_stage_prompt_includes_platform_cargo_policy() {
+    let req = StageRunRequest {
+        stage_id: "wave5_tests".into(),
+        stage_kind: StageKind::Agent,
+        task: "Run focused tests for wave 5 and capture exact commands/results.".into(),
+        ..request(json!({}))
+    };
+    let prompt = workflow_prompt(&req);
+
+    assert!(prompt.contains("Cargo command policy for this host"));
+    assert!(prompt.contains("Prefer focused package/test filters"));
+    assert!(prompt.contains("reserve broad workspace checks for final quality gates"));
+    assert!(prompt.contains("adapt the commands and report the adaptation"));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn command_stage_prompt_does_not_treat_wsl_jobs_as_macos_default() {
+    let req = StageRunRequest {
+        stage_id: "focused_tests".into(),
+        stage_kind: StageKind::Agent,
+        task: "Run focused cargo tests.".into(),
+        ..request(json!({}))
+    };
+    let prompt = workflow_prompt(&req);
+
+    assert!(prompt.contains("Cargo command policy for this host (macOS)"));
+    assert!(prompt.contains("Native macOS: do not add `-j1` or `--jobs 1`"));
+}
+
+#[test]
+fn planner_prompt_requires_platform_aware_cargo_commands() {
+    let prompt = planner_prompt("Implement a Rust workflow task and run focused tests.");
+
+    assert!(prompt.contains("Cargo verification commands MUST be platform-aware"));
+    assert!(prompt.contains("Native macOS, native Linux, and native Windows"));
+    assert!(prompt.contains("Do not place `cargo check --workspace --tests`"));
 }
 
 #[test]

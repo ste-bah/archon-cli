@@ -348,17 +348,21 @@ These are pipeline agents — they run as part of `/archon-code` and `/archon-re
 
 ### Build Commands (Rust)
 
-WSL2 users MUST use `-j1` to avoid OOM:
+WSL2 users MUST use `-j1` to avoid OOM. Native macOS, native Linux, and
+native Windows should omit `-j1` by default unless a task explicitly sets a
+different safe cap:
 
 | Command | Purpose |
 |---|---|
-| `cargo build --release --bin archon -j1` | Release build |
+| `cargo build --release --bin archon` | Release build (native macOS/Linux/Windows) |
+| `cargo build --release --bin archon -j1` | Release build (WSL2) |
 | `cargo build --bin archon` | Dev build |
 | `cargo nextest run --workspace -j1 -- --test-threads=2` | Test suite (WSL2) |
 | `cargo nextest run --workspace` | Test suite (native Linux/macOS) |
 | `cargo fmt --all -- --check` | Format check |
 | `cargo clippy --workspace -- -D warnings` | Lint with warnings as errors |
-| `cargo check --workspace --tests -j1` | Compile check (no tests run) |
+| `cargo check --workspace --tests` | Compile check (native macOS/Linux/Windows) |
+| `cargo check --workspace --tests -j1` | Compile check (WSL2) |
 
 **Known cache-corruption recovery:**
 ```bash
@@ -366,7 +370,8 @@ cargo clean -p petgraph -p archon-pipeline
 cargo build --release --bin archon -j1
 ```
 
-This recovers from the rustc ICE on `petgraph::graphmap::NeighborsDirected::next` caused by stale dep metadata.
+This WSL2 recovery path handles the rustc ICE on
+`petgraph::graphmap::NeighborsDirected::next` caused by stale dep metadata.
 
 ---
 
@@ -420,7 +425,10 @@ Step 7 — cargo bench --no-run    — archon-bench compile-only check
 
 ## Cargo discipline (WSL2)
 
-`cargo` commands on archon-cli MUST use `-j1` (and `--test-threads=2` on tests). Crashed Claude Code historically (2026-04-11) due to parallel rustc processes against archon-cli's 21-crate workspace exhausting WSL2 memory.
+On WSL2, `cargo` commands on archon-cli MUST use `-j1` (and
+`--test-threads=2` on tests). Crashed Claude Code historically (2026-04-11)
+due to parallel rustc processes against archon-cli's 21-crate workspace
+exhausting WSL2 memory.
 
 | Command | Required form |
 |---|---|
@@ -437,7 +445,8 @@ ABSOLUTE RULE — when orchestrating subagent ticket execution (any executor —
 1. Independently re-read the diff (`git diff main..HEAD`)
 2. Verify scope: only the spec'd files changed; nothing leaked
 3. Run the tests independently (`cargo nextest run -p <crate> --test <name>`)
-4. Run `cargo fmt --all -- --check` and `cargo build --release --bin archon -j1`
+4. Run `cargo fmt --all -- --check` and `cargo build --release --bin archon`
+   (add `-j1` only on WSL2/low-memory hosts)
 5. Confirm fresh binary mtime + version SHA matches HEAD
 6. Approve OR reject with specific findings; never blanket-approve
 
