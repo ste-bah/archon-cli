@@ -107,3 +107,36 @@ Failed inputs: 0
     assert_eq!(output_reports_blocked(body), None);
     assert_eq!(output_reports_failed_verification(body), None);
 }
+
+#[test]
+fn non_final_attempt_failures_do_not_block_completed_json() {
+    let body = r#"
+{
+  "status": "completed",
+  "test_results": [
+    {"command": "cargo test -p archon-workflow", "result": "passed"}
+  ],
+  "non_final_attempts": [
+    {"command": "bad cargo syntax", "result": "failed_command_syntax"},
+    {"command": "bad shell quote", "result": "failed_shell_quoting"}
+  ],
+  "summary": {"focused_commands_failed": 0}
+}
+"#;
+
+    assert_eq!(output_reports_failed_verification(body), None);
+}
+
+#[test]
+fn final_failed_test_result_still_blocks_json() {
+    let body = r#"
+{
+  "status": "completed",
+  "test_results": [
+    {"command": "cargo test -p archon-workflow", "result": "failed"}
+  ]
+}
+"#;
+
+    assert!(output_reports_failed_verification(body).is_some());
+}

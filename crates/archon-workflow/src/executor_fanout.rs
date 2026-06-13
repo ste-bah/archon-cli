@@ -453,7 +453,7 @@ fn item_acceptance(
             item.id
         )));
     }
-    let root = source_context::implementation_root(store, run)?;
+    let root = source_context::implementation_root_for_targets(store, run, &targets)?;
     let before = acceptance::snapshot_targets(&root, &targets);
     Ok(ItemAcceptance {
         root,

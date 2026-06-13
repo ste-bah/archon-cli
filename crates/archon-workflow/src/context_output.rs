@@ -32,8 +32,9 @@ pub fn output_reports_blocked(body: &str) -> Option<String> {
 
 pub fn output_reports_failed_verification(body: &str) -> Option<String> {
     let lower = body.to_ascii_lowercase();
-    (json_reports_failed_verification(body) || reports_failed_verification_status(&lower))
-        .then(|| "agent output declares failed or unverifiable verification status".to_string())
+    (json_reports_failed_verification(body)
+        .unwrap_or_else(|| reports_failed_verification_status(&lower)))
+    .then(|| "agent output declares failed or unverifiable verification status".to_string())
 }
 
 fn reports_reject_verdict(lower: &str) -> bool {
@@ -99,21 +100,31 @@ fn next_line_has_blocking_status(lines: &[&str], idx: usize) -> bool {
         .is_some_and(|line| starts_with_blocking_status_value(&line))
 }
 
-fn json_reports_failed_verification(body: &str) -> bool {
+fn json_reports_failed_verification(body: &str) -> Option<bool> {
     serde_json::from_str::<Value>(body)
         .ok()
-        .is_some_and(|value| value_reports_failed_verification(&value))
+        .map(|value| value_reports_failed_verification(&value))
 }
 
 fn value_reports_failed_verification(value: &Value) -> bool {
     match value {
         Value::Object(fields) => fields.iter().any(|(field, value)| {
+            if is_non_final_attempts_field(field) {
+                return false;
+            }
             (is_verification_status_field(field) && value_is_blocking_status(value))
                 || value_reports_failed_verification(value)
         }),
         Value::Array(values) => values.iter().any(value_reports_failed_verification),
         _ => false,
     }
+}
+
+fn is_non_final_attempts_field(field: &str) -> bool {
+    matches!(
+        field,
+        "non_final_attempts" | "prior_attempts" | "previous_attempts" | "retry_history"
+    )
 }
 
 fn is_verification_status_field(field: &str) -> bool {
