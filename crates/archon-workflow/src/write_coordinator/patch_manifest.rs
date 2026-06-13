@@ -7,7 +7,7 @@
 
 mod secret_scan;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -108,6 +108,7 @@ pub fn capture_patch(
             intent_added.push(rel);
         }
     }
+    reject_undeclared_workspace_changes(isolated, &workspace.plan, declared_targets)?;
     // Step 2: ONE git diff for the apply patch (combined staged + unstaged;
     // never also --cached). --no-renames keeps a rename as delete+add so the
     // patch and the path accounting agree.
@@ -156,6 +157,55 @@ fn run_diff(isolated: &Path, prefix: &[&str], targets: &[String]) -> Result<Vec<
 
 fn is_tracked(isolated: &Path, rel: &str) -> bool {
     run_git(&["ls-files", "--error-unmatch", rel], isolated).is_ok()
+}
+
+fn reject_undeclared_workspace_changes(
+    isolated: &Path,
+    plan: &WritePlan,
+    declared_targets: &[NormalizedPath],
+) -> Result<(), PatchError> {
+    if !plan.workspace_boundary_required {
+        return Ok(());
+    }
+    let declared: BTreeSet<NormalizedPath> = declared_targets.iter().cloned().collect();
+    for path in workspace_changed_paths(isolated)? {
+        let normalized = normalize_target(&path, &plan.canonical_root)
+            .map_err(|_| PatchError::UndeclaredWrite { path: path.clone() })?;
+        if !declared.contains(&normalized) {
+            return Err(PatchError::UndeclaredWrite { path });
+        }
+    }
+    Ok(())
+}
+
+fn workspace_changed_paths(isolated: &Path) -> Result<Vec<String>, PatchError> {
+    let mut out = Vec::new();
+    let diff = run_git(
+        &["diff", "--name-only", "--no-renames", "-z", "HEAD", "--"],
+        isolated,
+    )
+    .map_err(|e| PatchError::GitDiffFailed {
+        stderr: e.to_string(),
+    })?;
+    out.extend(split_nul_paths(&diff.stdout));
+    let untracked = run_git(
+        &["ls-files", "--others", "--exclude-standard", "-z"],
+        isolated,
+    )
+    .map_err(|e| PatchError::GitDiffFailed {
+        stderr: e.to_string(),
+    })?;
+    out.extend(split_nul_paths(&untracked.stdout));
+    out.sort();
+    out.dedup();
+    Ok(out)
+}
+
+fn split_nul_paths(bytes: &[u8]) -> impl Iterator<Item = String> + '_ {
+    bytes
+        .split(|byte| *byte == 0)
+        .filter(|raw| !raw.is_empty())
+        .map(|raw| String::from_utf8_lossy(raw).into_owned())
 }
 
 type HashPair = (BTreeMap<String, String>, BTreeMap<String, String>);

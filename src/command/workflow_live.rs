@@ -9,7 +9,8 @@ use archon_pipeline::runner::LlmClient;
 use archon_tui::app::TuiEvent;
 use archon_tui::event_channel::TuiEventSender;
 use archon_workflow::{
-    CommandAction, ProviderTier, WorkflowExecutor, WorkflowPolicy, WorkflowSpec, WorkflowStore,
+    CommandAction, ProviderTier, WorkflowConfig, WorkflowExecutor, WorkflowPolicy, WorkflowSpec,
+    WorkflowStore,
 };
 
 use crate::command::pipeline_support::build_pipeline_adapter;
@@ -47,10 +48,11 @@ pub(crate) fn spawn_live_workflow(
     action: CommandAction,
     llm: Arc<dyn LlmClient>,
     tui_tx: TuiEventSender,
+    config_path: Option<PathBuf>,
 ) {
     let _ = tui_tx.send(TuiEvent::TextDelta(live_start_message(&action)));
     archon_observability::spawn_named("dynamic-workflow-run", async move {
-        let result = run_live_action(&cwd, action, llm, tui_tx.clone()).await;
+        let result = run_live_action(&cwd, action, llm, tui_tx.clone(), config_path, true).await;
         match result {
             Ok(text) => {
                 let _ = tui_tx.send(TuiEvent::TextDelta(text));
@@ -73,7 +75,12 @@ pub(crate) async fn run_live_cli_action(
     let adapter = build_pipeline_adapter(config, env_vars, "workflow_cli").await?;
     let llm: Arc<dyn LlmClient> = Arc::new(adapter);
     let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(128);
-    run_live_action(cwd, action, llm, tui_tx).await
+    let config_path = env_vars
+        .config_dir
+        .as_ref()
+        .map(|dir| dir.join("config.toml"))
+        .unwrap_or_else(archon_core::config::default_config_path);
+    run_live_action(cwd, action, llm, tui_tx, Some(config_path), false).await
 }
 
 async fn run_live_action(
@@ -81,15 +88,11 @@ async fn run_live_action(
     action: CommandAction,
     llm: Arc<dyn LlmClient>,
     tui_tx: TuiEventSender,
+    config_path: Option<PathBuf>,
+    workspace_boundary_supported: bool,
 ) -> Result<String> {
     let store = WorkflowStore::project(cwd);
-    let executor = WorkflowExecutor::new(
-        store.clone(),
-        WorkflowPolicy {
-            require_human_for_dangerous_tools: false,
-            ..WorkflowPolicy::default()
-        },
-    );
+    let executor = WorkflowExecutor::new(store.clone(), live_policy(cwd, config_path.as_deref()));
     let runner = PipelineWorkflowRunner {
         llm: llm.clone(),
         tui_tx: tui_tx.clone(),
@@ -98,6 +101,7 @@ async fn run_live_action(
             .into_iter()
             .map(str::to_string)
             .collect(),
+        workspace_boundary_supported,
     };
     let report = match action {
         CommandAction::Plan { task } => {
@@ -134,6 +138,33 @@ async fn run_live_action(
     ) + "\n"
         + learning_note.as_str()
         + wc_blocks.as_str())
+}
+
+fn live_policy(cwd: &Path, config_path: Option<&Path>) -> WorkflowPolicy {
+    WorkflowPolicy {
+        require_human_for_dangerous_tools: false,
+        ..WorkflowPolicy::from_config(&load_workflow_config(cwd, config_path))
+    }
+}
+
+fn load_workflow_config(cwd: &Path, config_path: Option<&Path>) -> WorkflowConfig {
+    use archon_core::config_layers::{deep_merge_toml, discover_config_paths};
+    let mut merged = toml::Value::Table(toml::map::Map::new());
+    for layer in discover_config_paths(config_path, cwd, None) {
+        let Ok(text) = std::fs::read_to_string(&layer.path) else {
+            continue;
+        };
+        let Ok(value) = text.parse::<toml::Value>() else {
+            continue;
+        };
+        merged = deep_merge_toml(merged, value);
+    }
+    merged
+        .get("workflow")
+        .cloned()
+        .unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()))
+        .try_into()
+        .unwrap_or_else(|_| WorkflowConfig::default())
 }
 
 /// TASK-WC-008: render the §17 compact write-coordination status block for

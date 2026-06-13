@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::WorkflowConfig;
 use crate::error::{WorkflowError, WorkflowResult};
 use crate::spec::{StageKind, StageSpec, WorkflowSpec};
+use crate::write_coordinator::WriteCoordinatorConfig;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowPolicy {
@@ -20,6 +21,8 @@ pub struct WorkflowPolicy {
     pub max_agents_per_run: u32,
     #[serde(default = "default_local_provider_max_agents")]
     pub local_provider_max_agents: u32,
+    #[serde(default)]
+    pub write_coordinator: WriteCoordinatorConfig,
     #[serde(default = "default_true")]
     pub require_human_for_dangerous_tools: bool,
     #[serde(default = "default_true")]
@@ -40,6 +43,7 @@ impl Default for WorkflowPolicy {
             max_parallelism: default_max_parallelism(),
             max_agents_per_run: default_max_agents(),
             local_provider_max_agents: default_local_provider_max_agents(),
+            write_coordinator: WriteCoordinatorConfig::default(),
             require_human_for_dangerous_tools: true,
             require_human_for_policy_mutation: true,
             require_human_for_config_mutation: true,
@@ -61,6 +65,7 @@ impl WorkflowPolicy {
     pub fn from_config(config: &WorkflowConfig) -> Self {
         Self {
             local_provider_max_agents: config.local_provider_max_agents,
+            write_coordinator: config.write_coordinator.clone(),
             ..Self::default()
         }
     }

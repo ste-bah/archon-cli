@@ -20,11 +20,12 @@ pub(crate) struct PipelineWorkflowRunner {
     pub(crate) llm: Arc<dyn LlmClient>,
     pub(crate) tui_tx: TuiEventSender,
     pub(crate) agent_names: Vec<String>,
+    pub(crate) workspace_boundary_supported: bool,
 }
 
 impl WriteBoundaryProbe for PipelineWorkflowRunner {
     fn supports_workspace_boundary(&self) -> bool {
-        true
+        self.workspace_boundary_supported
     }
 }
 
@@ -186,21 +187,7 @@ fn workflow_agent(request: &StageRunRequest, model: &str, agent_names: &[String]
 
 pub(crate) fn allowed_tools(request: &StageRunRequest) -> Vec<String> {
     let tools = match request.stage_kind {
-        StageKind::Implementation => vec![
-            "Read",
-            "Grep",
-            "Glob",
-            "Write",
-            "Edit",
-            "ApplyPatch",
-            "LargeEditBegin",
-            "LargeEditInsertAfter",
-            "LargeEditReplaceSection",
-            "LargeEditDeleteSection",
-            "LargeEditCommit",
-            "LargeEditAbort",
-            "Bash",
-        ],
+        StageKind::Implementation => implementation_tools(request),
         _ if command_execution_stage(request) => {
             vec!["Read", "Grep", "Glob", "Bash", "DocSearch", "DocGet"]
         }
@@ -216,6 +203,35 @@ pub(crate) fn allowed_tools(request: &StageRunRequest) -> Vec<String> {
         ],
     };
     tools.into_iter().map(str::to_string).collect()
+}
+
+fn implementation_tools(request: &StageRunRequest) -> Vec<&'static str> {
+    let mut tools = vec![
+        "Read",
+        "Grep",
+        "Glob",
+        "Write",
+        "Edit",
+        "ApplyPatch",
+        "LargeEditBegin",
+        "LargeEditInsertAfter",
+        "LargeEditReplaceSection",
+        "LargeEditDeleteSection",
+        "LargeEditCommit",
+        "LargeEditAbort",
+    ];
+    if !write_coordination_enabled(request) {
+        tools.push("Bash");
+    }
+    tools
+}
+
+fn write_coordination_enabled(request: &StageRunRequest) -> bool {
+    request
+        .input
+        .get("write_coordination")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
 }
 
 pub(crate) fn command_execution_stage(request: &StageRunRequest) -> bool {

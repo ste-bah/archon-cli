@@ -4,7 +4,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
 use archon_pipeline::runner::{AgentExecutionRequest, LlmClient, LlmResponse};
-use archon_workflow::{ProviderTier, StageKind, StageRunRequest, WorkflowStageRunner};
+use archon_workflow::{
+    ProviderTier, StageKind, StageRunRequest, WorkflowStageRunner, WriteBoundaryProbe,
+};
 use serde_json::json;
 
 use super::plan_live;
@@ -97,6 +99,14 @@ fn runner(llm: Arc<dyn LlmClient>) -> PipelineWorkflowRunner {
         llm,
         tui_tx,
         agent_names: Vec::new(),
+        workspace_boundary_supported: false,
+    }
+}
+
+fn boundary_runner(llm: Arc<dyn LlmClient>) -> PipelineWorkflowRunner {
+    PipelineWorkflowRunner {
+        workspace_boundary_supported: true,
+        ..runner(llm)
     }
 }
 
@@ -147,6 +157,35 @@ fn focused_test_workflow_stages_can_execute_commands_without_write_tools() {
     assert!(tools.contains(&"Read".to_string()));
     assert!(!tools.contains(&"Write".to_string()));
     assert!(!tools.contains(&"Edit".to_string()));
+}
+
+#[test]
+fn coordinated_implementation_omits_bash_for_workspace_boundary() {
+    let req = request(json!({
+        "write_coordination": true,
+        "target_repository_root": "/tmp/isolated-repo",
+    }));
+    let tools = allowed_tools(&req);
+
+    assert!(tools.contains(&"Read".to_string()));
+    assert!(tools.contains(&"Write".to_string()));
+    assert!(tools.contains(&"ApplyPatch".to_string()));
+    assert!(!tools.contains(&"Bash".to_string()));
+}
+
+#[test]
+fn serial_implementation_keeps_bash_available() {
+    let req = request(json!({}));
+    let tools = allowed_tools(&req);
+
+    assert!(tools.contains(&"Bash".to_string()));
+}
+
+#[test]
+fn workflow_live_reports_backing_workspace_boundary_support() {
+    let stage_runner = boundary_runner(Arc::new(InvalidPlanner));
+
+    assert!(stage_runner.supports_workspace_boundary());
 }
 
 #[test]

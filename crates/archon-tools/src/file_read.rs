@@ -1,8 +1,7 @@
-use std::fs;
-use std::path::Path;
-
 use serde_json::json;
+use std::fs;
 
+use crate::path_guard::resolve_existing_file_path;
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
 pub struct ReadTool;
@@ -40,19 +39,19 @@ impl Tool for ReadTool {
         })
     }
 
-    async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
+    async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::error("file_path is required and must be a string"),
         };
 
-        let path = Path::new(file_path);
-        if !path.exists() {
-            return ToolResult::error(format!("File does not exist: {file_path}"));
-        }
+        let path = match resolve_existing_file_path(file_path, ctx) {
+            Ok(path) => path,
+            Err(e) => return ToolResult::error(e),
+        };
 
         // Check if file is likely binary
-        let content = match fs::read(path) {
+        let content = match fs::read(&path) {
             Ok(bytes) => bytes,
             Err(e) => return ToolResult::error(format!("Failed to read file: {e}")),
         };

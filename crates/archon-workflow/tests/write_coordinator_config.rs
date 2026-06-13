@@ -11,7 +11,7 @@ use archon_workflow::write_coordinator::{
     SerialFallbackReason, WriteCoordinatorConfig, WriteCoordinatorRuntime,
     resolve_write_coordinator_runtime,
 };
-use archon_workflow::{WorkflowConfig, WorkflowError};
+use archon_workflow::{WorkflowConfig, WorkflowError, WorkflowPolicy};
 
 fn impl_fanout_yaml(items_yaml: &str) -> String {
     format!(
@@ -52,6 +52,16 @@ fn config_enabled_false_round_trips() {
     let reparsed: WorkflowConfig = toml::from_str(&serialized).expect("round-trips");
     assert_eq!(cfg, reparsed);
     assert!(!reparsed.write_coordinator.enabled);
+}
+
+#[test]
+fn workflow_policy_carries_write_coordinator_config() {
+    let cfg: WorkflowConfig =
+        toml::from_str("[write_coordinator]\nenabled = false\nmax_patch_bytes = 1024\n")
+            .expect("deserializes");
+    let policy = WorkflowPolicy::from_config(&cfg);
+    assert!(!policy.write_coordinator.enabled);
+    assert_eq!(policy.write_coordinator.max_patch_bytes, 1024);
 }
 
 #[test]

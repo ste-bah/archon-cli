@@ -7,20 +7,19 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::Arc;
-
-use serde_json::json;
-use tokio::sync::Semaphore;
 
 pub use super::WriteBoundaryProbe;
 use super::conflict_graph::{WaveCaps, build_schedule};
-use super::patch_apply::{ApplyRecord, VerifyResult, apply_wave, run_wave_verify, with_repo_lock};
+use super::patch_apply::{
+    ApplyRecord, ApplyResumeStatus, VerifyResult, apply_wave, resume_status, run_wave_verify,
+    with_repo_lock,
+};
 use super::patch_manifest::{
     ManifestStatus, PatchManifest, capture_patch, persist_manifest, validate_patch,
 };
 use super::worktree_isolation::{
     CanonicalBaseline, ItemWorkspace, WorkspaceStatus, capture_canonical_baseline,
-    cleanup_workspace, create_item_workspace, detect_canonical_mutation,
+    cleanup_workspace, create_item_workspace,
 };
 use super::write_plan::{
     NormalizedPath, TargetFilesSource, WritePlan, normalize_target, resource_keys_for_targets,
@@ -31,13 +30,13 @@ use super::{
 
 use crate::fanout::FanoutItem;
 use crate::policy::WorkflowPolicy;
-use crate::request::fanout_item_request;
 use crate::run::WorkflowRun;
 use crate::runner::WorkflowStageRunner;
 use crate::spec::StageSpec;
 use crate::store::WorkflowStore;
 
 mod errors;
+mod run_agents;
 pub use errors::FanoutError;
 
 /// Borrowed execution context for one implementation fanout stage.
@@ -135,6 +134,10 @@ pub async fn run_coordinated_implementation_fanout(
             SerialFallbackReason::BoundaryUnavailable,
         ));
     }
+    let (plans_input, mut outcome) = filter_resumable_items(ctx, plans_input);
+    if plans_input.is_empty() {
+        return Ok(outcome);
+    }
     let plans: Vec<WritePlan> = plans_input
         .iter()
         .map(|pi| build_write_plan(pi, &canonical, ctx))
@@ -155,7 +158,6 @@ pub async fn run_coordinated_implementation_fanout(
         .map(|p| (p.item.id.as_str(), p))
         .collect();
 
-    let mut outcome = CoordinatedOutcome::new(run_id, stage_id);
     for wave in &schedule.waves {
         process_wave(
             ctx,
@@ -171,6 +173,37 @@ pub async fn run_coordinated_implementation_fanout(
         .await?;
     }
     Ok(outcome)
+}
+
+fn filter_resumable_items(
+    ctx: &FanoutCtx<'_>,
+    plans_input: Vec<PlanInput>,
+) -> (Vec<PlanInput>, CoordinatedOutcome) {
+    let mut outcome = CoordinatedOutcome::new(&ctx.run.id, &ctx.stage.id);
+    let mut pending = Vec::new();
+    for input in plans_input {
+        match resume_status(&input.item.id, &ctx.run_root, &ctx.stage.id) {
+            ApplyResumeStatus::Applied => {
+                outcome
+                    .item_status
+                    .insert(input.item.id.clone(), ManifestStatus::Applied);
+            }
+            ApplyResumeStatus::IdempotentNoop => {
+                outcome
+                    .item_status
+                    .insert(input.item.id.clone(), ManifestStatus::IdempotentNoop);
+            }
+            ApplyResumeStatus::Conflicted => {
+                outcome
+                    .item_status
+                    .insert(input.item.id.clone(), ManifestStatus::Conflicted);
+            }
+            ApplyResumeStatus::Failed(_)
+            | ApplyResumeStatus::PendingApply
+            | ApplyResumeStatus::NotPersisted => pending.push(input),
+        }
+    }
+    (pending, outcome)
 }
 
 fn build_write_plan(
@@ -221,13 +254,24 @@ async fn process_wave<'a>(
     outcome: &mut CoordinatedOutcome,
 ) -> Result<(), FanoutError> {
     let mut items = build_wave_items(ctx, canonical, cfg, wave, plan_by_id, input_by_id)?;
-    let mutations = run_wave_agents(ctx, canonical, runner, &items, caps.effective()).await;
-    if let Some(mutator) = mutations.iter().flatten().next() {
-        finalize_failed_wave(canonical, cfg, wave, mutator, &items, outcome);
-        return Ok(());
-    }
-    let (manifests, pre_by_item, records) = capture_and_validate(ctx, cfg, wave.wave_id, &items)?;
-    let (apply_record, verify) = apply_and_verify(ctx, canonical, wave, &manifests, &pre_by_item)?;
+    let bodies =
+        match run_agents::run_wave_agents(ctx, canonical, runner, &items, caps.effective()).await {
+            Ok(bodies) => bodies,
+            Err(reason) => {
+                finalize_failed_wave(canonical, cfg, wave, &reason, &items, outcome);
+                return Ok(());
+            }
+        };
+    let (manifests, pre_by_item, records) =
+        capture_and_validate(ctx, cfg, wave.wave_id, &items, &bodies)?;
+    let (apply_record, verify) =
+        match apply_and_verify(ctx, canonical, wave, &manifests, &pre_by_item) {
+            Ok(result) => result,
+            Err(err) => {
+                finalize_failed_wave(canonical, cfg, wave, &err.to_string(), &items, outcome);
+                return Err(err);
+            }
+        };
     record_applied(&apply_record, outcome);
     outcome.plans.extend(records);
     let status = wave_status(&apply_record);
@@ -268,66 +312,6 @@ fn build_wave_items<'a>(
     Ok(items)
 }
 
-async fn run_wave_agents(
-    ctx: &FanoutCtx<'_>,
-    canonical: &Path,
-    runner: &dyn WorkflowStageRunner,
-    items: &[ItemState<'_>],
-    width: usize,
-) -> Vec<Option<String>> {
-    let sema = Arc::new(Semaphore::new(width.max(1)));
-    let futures = items.iter().map(|it| {
-        let sema = sema.clone();
-        async move {
-            let _permit = sema.acquire().await.expect("semaphore open");
-            let req = build_item_request(ctx, canonical, it);
-            let _ = runner.run_stage(req).await;
-            match detect_canonical_mutation(
-                canonical,
-                &it.baseline,
-                &it.plan.target_files,
-                &ctx.verify_inputs,
-            ) {
-                Ok(()) => None,
-                Err(err) => Some(format!("CanonicalMutation: {} ({err})", it.plan.item_id)),
-            }
-        }
-    });
-    futures_util::future::join_all(futures).await
-}
-
-fn build_item_request(
-    ctx: &FanoutCtx<'_>,
-    canonical: &Path,
-    it: &ItemState<'_>,
-) -> crate::runner::StageRunRequest {
-    let mut req = fanout_item_request(ctx.store, ctx.run, ctx.stage, &it.input.item)
-        .unwrap_or_else(|_| panic!("fanout_item_request for {}", it.plan.item_id));
-    if !req.input.is_object() {
-        req.input = json!({});
-    }
-    let declared: Vec<String> = it
-        .plan
-        .target_files
-        .iter()
-        .map(NormalizedPath::as_str)
-        .collect();
-    let obj = req.input.as_object_mut().expect("input is object");
-    obj.insert(
-        "target_repository_root".into(),
-        json!(it.plan.isolated_root.to_string_lossy()),
-    );
-    obj.insert(
-        "write_coordination".into(),
-        json!({
-            "enabled": true,
-            "canonical_repository_root": canonical.to_string_lossy(),
-            "declared_target_files": declared,
-        }),
-    );
-    req
-}
-
 type CaptureResult = (
     Vec<PatchManifest>,
     BTreeMap<ItemId, BTreeMap<String, String>>,
@@ -339,6 +323,7 @@ fn capture_and_validate(
     cfg: &WriteCoordinatorConfig,
     wave_id: WaveId,
     items: &[ItemState<'_>],
+    bodies: &run_agents::ItemRunBodies,
 ) -> Result<CaptureResult, FanoutError> {
     let mut manifests = Vec::new();
     let mut pre_by_item = BTreeMap::new();
@@ -346,7 +331,11 @@ fn capture_and_validate(
     for it in items {
         let captured = capture_patch(&it.workspace, &it.plan.target_files, &it.baseline)
             .map_err(FanoutError::Patch)?;
-        validate_patch(&captured, it.plan, cfg, "implemented").map_err(FanoutError::Patch)?;
+        let body = bodies
+            .get(&it.plan.item_id)
+            .map(String::as_str)
+            .unwrap_or("");
+        validate_patch(&captured, it.plan, cfg, body).map_err(FanoutError::Patch)?;
         records.push(PlanRecord {
             item_id: it.plan.item_id.clone(),
             wave_id,
@@ -454,7 +443,7 @@ fn finalize_failed_wave(
         outcome.item_status.insert(
             it.plan.item_id.clone(),
             ManifestStatus::Failed {
-                reason: "wave aborted: canonical mutation".into(),
+                reason: format!("wave aborted: {mutator}"),
             },
         );
         outcome.plans.push(PlanRecord {

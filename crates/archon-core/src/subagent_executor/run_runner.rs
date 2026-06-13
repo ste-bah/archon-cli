@@ -126,7 +126,11 @@ impl AgentSubagentExecutor {
                 .as_ref()
                 .map(|d| d.agent_type == "fork")
                 .unwrap_or(false);
-        let extra_dirs = child_extra_dirs(parent_ctx, &working_dir);
+        let extra_dirs = child_extra_dirs(
+            parent_ctx,
+            &working_dir,
+            prepared.isolation.as_deref() == Some("workspace-boundary"),
+        );
         ToolContext {
             working_dir,
             session_id: self.session_id.clone(),
@@ -218,7 +222,12 @@ impl AgentSubagentExecutor {
 fn child_extra_dirs(
     parent_ctx: &ToolContext,
     child_working_dir: &std::path::Path,
+    strict_workspace_boundary: bool,
 ) -> Vec<std::path::PathBuf> {
+    if strict_workspace_boundary {
+        return Vec::new();
+    }
+
     let mut dirs = Vec::new();
     if !parent_ctx.working_dir.as_os_str().is_empty()
         && parent_ctx.working_dir.as_path() != child_working_dir
@@ -252,7 +261,7 @@ mod tests {
             ..ToolContext::default()
         };
 
-        let dirs = child_extra_dirs(&parent, Path::new("/repo"));
+        let dirs = child_extra_dirs(&parent, Path::new("/repo"), false);
 
         assert_eq!(
             dirs,
@@ -272,7 +281,20 @@ mod tests {
             ..ToolContext::default()
         };
 
-        let dirs = child_extra_dirs(&parent, Path::new("/repo"));
+        let dirs = child_extra_dirs(&parent, Path::new("/repo"), false);
+
+        assert!(dirs.is_empty());
+    }
+
+    #[test]
+    fn child_extra_dirs_empty_when_strict_workspace_boundary_requested() {
+        let parent = ToolContext {
+            working_dir: PathBuf::from("/project-1"),
+            extra_dirs: vec![PathBuf::from("assets"), PathBuf::from("/shared")],
+            ..ToolContext::default()
+        };
+
+        let dirs = child_extra_dirs(&parent, Path::new("/isolated"), true);
 
         assert!(dirs.is_empty());
     }

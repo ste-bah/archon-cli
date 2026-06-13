@@ -28,6 +28,7 @@ pub struct FileMeta {
 
 /// Captured canonical state needed to reproduce the item workspace.
 pub struct CanonicalBaseline {
+    pub repo_fingerprint: String,
     pub tracked_diff_binary: Vec<u8>,
     pub untracked_files: BTreeMap<String, Vec<u8>>,
     pub declared_target_meta: BTreeMap<String, FileMeta>,
@@ -43,6 +44,7 @@ impl fmt::Debug for CanonicalBaseline {
             .map(|(path, bytes)| (path, bytes.len()))
             .collect();
         f.debug_struct("CanonicalBaseline")
+            .field("repo_fingerprint", &self.repo_fingerprint)
             .field("tracked_diff_binary_len", &self.tracked_diff_binary.len())
             .field("untracked_files(path=>len)", &untracked)
             .field("declared_target_meta", &self.declared_target_meta)
@@ -97,6 +99,7 @@ pub fn capture_canonical_baseline(
     cfg: &WriteCoordinatorConfig,
 ) -> Result<CanonicalBaseline, IsolationError> {
     let tracked_diff_binary = run_git(&["diff", "--binary", "HEAD", "--"], canonical_root)?.stdout;
+    let repo_fingerprint = repository_fingerprint(canonical_root)?;
 
     let declared: Vec<String> = plan
         .target_files
@@ -119,6 +122,7 @@ pub fn capture_canonical_baseline(
         verify_input_meta.insert(path.clone(), file_meta(&canonical_root.join(path))?);
     }
     Ok(CanonicalBaseline {
+        repo_fingerprint,
         tracked_diff_binary,
         untracked_files,
         declared_target_meta,
@@ -251,6 +255,11 @@ pub fn detect_canonical_mutation(
     declared_targets: &[NormalizedPath],
     verify_inputs: &[NormalizedPath],
 ) -> Result<(), IsolationError> {
+    if repository_fingerprint(canonical_root)? != baseline.repo_fingerprint {
+        return Err(IsolationError::CanonicalMutation {
+            path: "<repository>".into(),
+        });
+    }
     for path in declared_targets.iter().chain(verify_inputs.iter()) {
         let key = path.as_str();
         let Some(expected) = baseline
@@ -266,6 +275,34 @@ pub fn detect_canonical_mutation(
         }
     }
     Ok(())
+}
+
+fn repository_fingerprint(canonical_root: &Path) -> Result<String, IsolationError> {
+    let mut bytes = run_git(&["diff", "--binary", "HEAD", "--"], canonical_root)?.stdout;
+    let listing = run_git(
+        &["ls-files", "--others", "--exclude-standard", "-z"],
+        canonical_root,
+    )?
+    .stdout;
+    for path in split_nul_paths(&listing).filter(|path| !ignored_untracked(path)) {
+        bytes.extend_from_slice(path.as_bytes());
+        bytes.push(0);
+        let meta = file_meta(&canonical_root.join(&path))?;
+        bytes.extend_from_slice(format!("{meta:?}").as_bytes());
+        bytes.push(0);
+    }
+    Ok(blake3::hash(&bytes).to_hex().to_string())
+}
+
+fn split_nul_paths(bytes: &[u8]) -> impl Iterator<Item = String> + '_ {
+    bytes
+        .split(|byte| *byte == 0)
+        .filter(|raw| !raw.is_empty())
+        .map(|raw| String::from_utf8_lossy(raw).into_owned())
+}
+
+fn ignored_untracked(path: &str) -> bool {
+    path == ".archon" || path.starts_with(".archon/")
 }
 
 /// Remove or retain the worktree per the retention policy (§14).

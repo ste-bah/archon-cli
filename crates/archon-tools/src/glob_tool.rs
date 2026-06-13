@@ -1,5 +1,6 @@
 use serde_json::json;
 
+use crate::path_guard::resolve_existing_path;
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
 pub struct GlobTool;
@@ -37,11 +38,16 @@ impl Tool for GlobTool {
             None => return ToolResult::error("pattern is required and must be a string"),
         };
 
-        let base_dir = input
-            .get("path")
-            .and_then(|v| v.as_str())
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| ctx.working_dir.clone());
+        let base_dir = match input.get("path").and_then(|v| v.as_str()) {
+            Some(path) => match resolve_existing_path(path, ctx) {
+                Ok(path) => path,
+                Err(err) => return ToolResult::error(err),
+            },
+            None => match resolve_existing_path(".", ctx) {
+                Ok(path) => path,
+                Err(err) => return ToolResult::error(err),
+            },
+        };
 
         let full_pattern = base_dir.join(pattern);
         let pattern_str = full_pattern.to_string_lossy();

@@ -147,12 +147,11 @@ async fn try_coordinated_implementation(
     runner: &dyn WorkflowStageRunner,
     items: &[FanoutItem],
 ) -> WorkflowResult<Option<StageRunOutput>> {
-    use crate::write_coordinator::WriteCoordinatorConfig;
     use crate::write_coordinator::coordinator::run_coordinated_implementation_fanout;
     use crate::write_coordinator::coordinator::{FanoutCtx, PlanInput};
     use crate::write_coordinator::resolve_write_coordinator_runtime;
 
-    let cfg = WriteCoordinatorConfig::default();
+    let cfg = policy.write_coordinator.clone();
     let Some(canonical) = run
         .spec
         .target_repository_root
@@ -171,8 +170,6 @@ async fn try_coordinated_implementation(
             target_files: item_target_files(stage, &item.payload),
         })
         .collect();
-    // Persist coordinator artifacts under the workflow store's run dir so
-    // `status::read_status` (which also keys off store.run_dir) can find them.
     let run_root = store.run_dir(&run.id);
     let outcome = {
         let ctx = FanoutCtx {
@@ -218,7 +215,10 @@ fn record_coordinated_outcome(
 
     let mut failures = Vec::new();
     for (item_id, status) in &outcome.item_status {
-        let accepted = matches!(status, ManifestStatus::Applied);
+        let accepted = matches!(
+            status,
+            ManifestStatus::Applied | ManifestStatus::IdempotentNoop
+        );
         let body = format!("# Coordinated item `{item_id}`\n\nstatus: {status:?}\n");
         let artifact = persistence::write_attached_stage_artifact(
             store, run, stage, item_id, "md", body, accepted,

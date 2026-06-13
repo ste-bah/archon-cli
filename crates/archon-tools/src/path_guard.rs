@@ -7,13 +7,24 @@ pub(crate) fn resolve_existing_file_path(
     requested_path: &str,
     ctx: &ToolContext,
 ) -> Result<PathBuf, String> {
+    resolve_existing_path(requested_path, ctx)
+}
+
+pub(crate) fn resolve_existing_path(
+    requested_path: &str,
+    ctx: &ToolContext,
+) -> Result<PathBuf, String> {
     let anchored = anchor_requested_path(requested_path, ctx)?;
     let normalized = normalize_lexically(&anchored)?;
     let resolved = fs::canonicalize(&normalized).map_err(|e| {
-        format!(
-            "Failed to resolve file path '{}': {e}",
-            normalized.display()
-        )
+        if e.kind() == std::io::ErrorKind::NotFound {
+            format!("File does not exist: {}", normalized.display())
+        } else {
+            format!(
+                "Failed to resolve file path '{}': {e}",
+                normalized.display()
+            )
+        }
     })?;
     ensure_allowed(&resolved, ctx)?;
     Ok(resolved)

@@ -3,6 +3,7 @@ use std::path::Path;
 
 use serde_json::json;
 
+use crate::path_guard::resolve_existing_path;
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
 pub struct GrepTool;
@@ -71,11 +72,16 @@ impl Tool for GrepTool {
             }
         };
 
-        let search_path = input
-            .get("path")
-            .and_then(|v| v.as_str())
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| ctx.working_dir.clone());
+        let search_path = match input.get("path").and_then(|v| v.as_str()) {
+            Some(path) => match resolve_existing_path(path, ctx) {
+                Ok(path) => path,
+                Err(err) => return ToolResult::error(err),
+            },
+            None => match resolve_existing_path(".", ctx) {
+                Ok(path) => path,
+                Err(err) => return ToolResult::error(err),
+            },
+        };
 
         let output_mode = input
             .get("output_mode")

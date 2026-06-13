@@ -7,7 +7,6 @@ use archon_workflow::fanout::FanoutItem;
 use archon_workflow::write_coordinator::coordinator::{
     FanoutCtx, PlanInput, run_coordinated_implementation_fanout,
 };
-use archon_workflow::write_coordinator::write_plan::normalize_target;
 use archon_workflow::write_coordinator::{
     ManifestStatus, SerialFallbackReason, WriteBoundaryProbe, WriteCoordinatorConfig,
     resolve_write_coordinator_runtime,

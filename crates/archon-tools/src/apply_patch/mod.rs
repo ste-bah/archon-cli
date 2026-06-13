@@ -31,6 +31,7 @@ use std::path::Path;
 
 use serde_json::json;
 
+use crate::path_guard::resolve_write_target_path;
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
 // Re-export submodule internals at the `apply_patch` module scope so
@@ -79,7 +80,7 @@ impl Tool for ApplyPatchTool {
         })
     }
 
-    async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
+    async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
         let path_str = match input.get("path").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::error("path is required and must be a string"),
@@ -95,8 +96,12 @@ impl Tool for ApplyPatchTool {
                 "path must be absolute, got relative path: {path_str}"
             ));
         }
+        let path = match resolve_write_target_path(path_str, ctx) {
+            Ok(path) => path,
+            Err(e) => return ToolResult::error(e),
+        };
 
-        let original = match fs::read_to_string(path) {
+        let original = match fs::read_to_string(&path) {
             Ok(s) => s,
             Err(e) => return ToolResult::error(format!("Failed to read file {path_str}: {e}")),
         };
@@ -111,7 +116,7 @@ impl Tool for ApplyPatchTool {
             Err(e) => return ToolResult::error(format!("Failed to apply patch: {e}")),
         };
 
-        if let Err(e) = fs::write(path, &patched) {
+        if let Err(e) = fs::write(&path, &patched) {
             return ToolResult::error(format!("Failed to write file {path_str}: {e}"));
         }
 
@@ -363,6 +368,32 @@ mod tests {
             "unexpected content: {}",
             result.content
         );
+    }
+
+    #[tokio::test]
+    async fn execute_rejects_path_outside_allowed_roots() {
+        let allowed_dir = tempfile::tempdir().unwrap();
+        let outside_dir = tempfile::tempdir().unwrap();
+        let outside_file = outside_dir.path().join("x.txt");
+        fs::write(&outside_file, "old\n").unwrap();
+        let tool = ApplyPatchTool;
+        let result = tool
+            .execute(
+                json!({
+                    "path": outside_file.to_str().unwrap(),
+                    "patch": "--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-old\n+new\n"
+                }),
+                &ToolContext {
+                    working_dir: allowed_dir.path().to_path_buf(),
+                    session_id: "test".into(),
+                    ..Default::default()
+                },
+            )
+            .await;
+
+        assert!(result.is_error);
+        assert!(result.content.contains("outside allowed directories"));
+        assert_eq!(fs::read_to_string(outside_file).unwrap(), "old\n");
     }
 
     #[test]

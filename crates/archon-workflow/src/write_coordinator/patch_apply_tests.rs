@@ -305,9 +305,11 @@ fn failing_verify_reports_nonzero_no_rollback() {
         0,
         &run_root_of(repo.path()),
         "impl",
-    )
-    .expect("verify runs");
-    assert_eq!(verify.exit, 3);
+    );
+    match verify {
+        Err(ApplyError::VerifyFailed { exit, .. }) => assert_eq!(exit, 3),
+        other => panic!("expected VerifyFailed, got {other:?}"),
+    }
     // No rollback: the applied patch remains.
     assert_eq!(
         std::fs::read_to_string(repo.path().join("src/lib.rs")).unwrap(),

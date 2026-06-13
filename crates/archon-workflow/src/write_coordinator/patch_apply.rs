@@ -375,6 +375,12 @@ pub fn run_wave_verify(
         duration_ms,
     };
     persist_verify(run_root, stage_id, wave_id, &result)?;
+    if result.exit != 0 {
+        return Err(ApplyError::VerifyFailed {
+            exit: result.exit,
+            stderr_tail: result.stderr_tail.clone(),
+        });
+    }
     Ok(result)
 }
 

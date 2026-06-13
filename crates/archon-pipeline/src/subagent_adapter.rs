@@ -15,7 +15,7 @@ use archon_tools::agent_tool::{SubagentRequest, run_subagent};
 use archon_tools::subagent_executor::SubagentOutcome;
 use archon_tools::tool::ToolContext;
 
-use crate::runner::{AgentExecutionRequest, LlmClient, LlmResponse, ToolAccessLevel};
+use crate::runner::{AgentExecutionRequest, LlmClient, LlmResponse, PipelineType, ToolAccessLevel};
 
 const READ_ONLY_TOOLS: &[&str] = &[
     "Read",
@@ -160,6 +160,18 @@ impl SubagentPipelineClient {
             .display()
             .to_string()
     }
+
+    fn strict_workspace_boundary(
+        request: &AgentExecutionRequest,
+        allowed_tools: &[String],
+    ) -> bool {
+        request.pipeline_type == PipelineType::Workflow
+            && request.agent.tool_access_level == ToolAccessLevel::Full
+            && request.cwd.is_some()
+            && !allowed_tools
+                .iter()
+                .any(|tool| tool.eq_ignore_ascii_case("Bash"))
+    }
 }
 
 #[async_trait]
@@ -179,16 +191,18 @@ impl LlmClient for SubagentPipelineClient {
     async fn run_agent(&self, request: AgentExecutionRequest) -> Result<LlmResponse> {
         let prompt = Self::prompt_for_request(&request);
         let activity_model = self.activity_model(&request.agent.model);
+        let allowed_tools = Self::allowed_tools(&request);
+        let strict_workspace_boundary = Self::strict_workspace_boundary(&request, &allowed_tools);
         let req = SubagentRequest {
             prompt,
             model: Some(activity_model),
-            allowed_tools: Self::allowed_tools(&request),
+            allowed_tools,
             max_turns: SubagentRequest::DEFAULT_MAX_TURNS,
             timeout_secs: SubagentRequest::DEFAULT_TIMEOUT_SECS,
             subagent_type: Some(request.agent.key.clone()),
             run_in_background: false,
             cwd: Some(self.cwd_for_request(&request)),
-            isolation: None,
+            isolation: strict_workspace_boundary.then(|| "workspace-boundary".to_string()),
         };
 
         let cancel = self
@@ -376,5 +390,31 @@ mod tests {
         request.cwd = Some("/target/repo".into());
 
         assert_eq!(client.cwd_for_request(&request), "/target/repo");
+    }
+
+    #[test]
+    fn workflow_full_agent_without_bash_requests_strict_workspace_boundary() {
+        let mut request = request(ToolAccessLevel::Full);
+        request.pipeline_type = PipelineType::Workflow;
+        request.cwd = Some("/isolated/repo".into());
+        request.allowed_tools = vec!["Read".into(), "Write".into(), "Edit".into()];
+        let tools = SubagentPipelineClient::allowed_tools(&request);
+
+        assert!(SubagentPipelineClient::strict_workspace_boundary(
+            &request, &tools
+        ));
+    }
+
+    #[test]
+    fn workflow_command_agent_with_bash_does_not_request_strict_boundary() {
+        let mut request = request(ToolAccessLevel::Full);
+        request.pipeline_type = PipelineType::Workflow;
+        request.cwd = Some("/target/repo".into());
+        request.allowed_tools = vec!["Read".into(), "Bash".into()];
+        let tools = SubagentPipelineClient::allowed_tools(&request);
+
+        assert!(!SubagentPipelineClient::strict_workspace_boundary(
+            &request, &tools
+        ));
     }
 }

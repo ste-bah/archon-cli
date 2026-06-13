@@ -72,23 +72,26 @@ fn ac_wc_003_undeclared_write_contained() {
         format!("implemented {item}")
     });
     let targets: &[(&str, &[&str])] = &[("a", &["src/a.rs"])];
-    let h = run_coordinated(
+    let err = match run_coordinated(
         repo.path(),
         targets,
         &MockAgentRunner::with_action(action),
         &cfg(),
-    )
-    .unwrap();
-    assert_eq!(
-        h.outcome.item_status.get("implement-0"),
-        Some(&ManifestStatus::Applied)
-    );
-    // The undeclared write never reaches canonical (scoped capture + declared-only apply).
+    ) {
+        Ok(_) => panic!("undeclared workspace write must fail fast"),
+        Err(err) => err,
+    };
+    match err {
+        FanoutError::Patch(PatchError::UndeclaredWrite { path }) => {
+            assert_eq!(path, "src/SNEAKY.rs");
+        }
+        other => panic!("expected UndeclaredWrite, got {other}"),
+    }
     assert!(
         !repo.path().join("src/SNEAKY.rs").exists(),
         "undeclared write must not reach canonical"
     );
-    assert!(repo.path().join("src/a.rs").exists());
+    assert!(!repo.path().join("src/a.rs").exists());
 }
 
 #[test]

@@ -28,7 +28,13 @@ impl CommandHandler for WorkflowHandler {
         if should_spawn_live(&command.action)
             && let Some(llm) = ctx.llm_adapter.clone()
         {
-            spawn_live_workflow(cwd, command.action, llm, ctx.tui_tx.clone());
+            spawn_live_workflow(
+                cwd,
+                command.action,
+                llm,
+                ctx.tui_tx.clone(),
+                ctx.config_path.clone(),
+            );
             return Ok(());
         }
         if matches!(
