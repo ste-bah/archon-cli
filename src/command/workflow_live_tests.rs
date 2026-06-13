@@ -231,7 +231,7 @@ fn command_stage_prompt_includes_platform_cargo_policy() {
     let prompt = workflow_prompt(&req);
 
     assert!(prompt.contains("Cargo command policy for this host"));
-    assert!(prompt.contains("Prefer focused package/test filters"));
+    assert!(prompt.contains("Prefer exact package + test-target commands"));
     assert!(prompt.contains("reserve broad workspace checks for final quality gates"));
     assert!(prompt.contains("adapt the commands and report the adaptation"));
 }
