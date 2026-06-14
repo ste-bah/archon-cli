@@ -104,6 +104,7 @@ pub fn normalize_generated_spec(spec: &mut WorkflowSpec) {
     normalize_targetless_implementation_stages(spec);
     promote_quality_gate_entries(spec);
     ensure_generated_remediation_loop(spec);
+    crate::required_artifact_heal::ensure_required_artifact_self_heal(spec);
 }
 
 fn normalize_generated_fanout_shapes(spec: &mut WorkflowSpec) {
@@ -385,9 +386,6 @@ fn normalize_targetless_implementation_stages(spec: &mut WorkflowSpec) {
         stage.foreach = Some(format!("${{{inventory_id}.items}}"));
         stage.item_kind = Some(StageKind::Implementation);
         stage.max_parallelism.get_or_insert(1);
-        stage
-            .extra
-            .insert("allow_empty_items".into(), Value::Bool(true));
         if !stage.depends_on.contains(&inventory_id) {
             stage.depends_on.insert(0, inventory_id.clone());
         }

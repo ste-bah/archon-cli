@@ -195,6 +195,69 @@ stages:
 }
 
 #[test]
+fn generated_required_artifacts_get_self_heal_loop_before_quality_gate() {
+    let yaml = r#"
+schema: archon.workflow.v1
+name: generated-required-artifacts
+task: Build project artifacts.
+stages:
+  - id: implementation_report
+    kind: agent
+  - id: final_quality
+    kind: quality_gate
+    depends_on: [implementation_report]
+    required_artifacts:
+      - .archon/trading-lab/strategies/AHDM-v1/strategy-spec.json
+"#;
+    let spec = WorkflowSpec::from_generated_yaml(yaml, "Fallback task").unwrap();
+    let ids = spec
+        .stages
+        .iter()
+        .map(|stage| stage.id.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        ids.windows(6).any(|window| {
+            window
+                == [
+                    "required-artifact-inventory",
+                    "repair-required-artifacts",
+                    "post-artifact-repair-tests",
+                    "post-artifact-repair-review",
+                    "post-artifact-repair-report",
+                    "final_quality",
+                ]
+        }),
+        "ids={ids:?}"
+    );
+    let repair = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "repair-required-artifacts")
+        .unwrap();
+    assert_eq!(
+        repair.foreach.as_deref(),
+        Some("${required-artifact-inventory.items}")
+    );
+    assert_eq!(
+        repair.item_kind,
+        Some(archon_workflow::StageKind::Implementation)
+    );
+    assert_eq!(
+        repair
+            .extra
+            .get("allow_empty_items")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    let gate = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "final_quality")
+        .unwrap();
+    assert_eq!(gate.depends_on, vec!["post-artifact-repair-report"]);
+}
+
+#[test]
 fn generated_targetless_implementation_stage_becomes_inventory_fanout() {
     // Reproduces live planner output that emitted `kind: implementation`
     // without `expected_target_files`. Generated plans should not fail
@@ -249,12 +312,9 @@ stages:
         implementation.foreach.as_deref(),
         Some("${implement_t001-target-inventory.items}")
     );
-    assert_eq!(
-        implementation
-            .extra
-            .get("allow_empty_items")
-            .and_then(serde_json::Value::as_bool),
-        Some(true)
+    assert!(
+        implementation.extra.get("allow_empty_items").is_none(),
+        "implementation target inventory must fail on empty items unless explicitly allowed"
     );
     assert!(
         implementation
@@ -309,12 +369,9 @@ stages:
         implementation.foreach.as_deref(),
         Some("${wave1_implement-target-inventory.items}")
     );
-    assert_eq!(
-        implementation
-            .extra
-            .get("allow_empty_items")
-            .and_then(serde_json::Value::as_bool),
-        Some(true)
+    assert!(
+        implementation.extra.get("allow_empty_items").is_none(),
+        "implementation waves must not silently no-op when target inventory is empty"
     );
 
     let plan = spec

@@ -75,6 +75,16 @@ impl WorkflowExecutor {
         runner: &dyn WorkflowStageRunner,
     ) -> WorkflowResult<StageRunOutput> {
         match stage.kind {
+            StageKind::Tool
+                if stage.tool.as_deref()
+                    == Some(crate::required_artifacts::REQUIRED_ARTIFACT_INVENTORY_TOOL) =>
+            {
+                self.run_required_artifact_inventory(run, stage)?;
+                Ok(StageRunOutput::markdown(format!(
+                    "Required artifact inventory `{}` complete.",
+                    stage.id
+                )))
+            }
             StageKind::Agent | StageKind::Tool => self.run_agent_like(run, stage, runner).await,
             StageKind::Implementation => {
                 self.run_implementation_with_runner(run, stage, runner)

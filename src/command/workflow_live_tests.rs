@@ -270,6 +270,7 @@ fn planner_prompt_separates_report_artifacts_from_repo_implementation() {
     assert!(prompt.contains("external/project-artifact deliverables"));
     assert!(prompt.contains("split it into separate stages"));
     assert!(prompt.contains("Never let an empty implementation target inventory skip"));
+    assert!(prompt.contains("required_artifacts"));
 }
 
 #[test]

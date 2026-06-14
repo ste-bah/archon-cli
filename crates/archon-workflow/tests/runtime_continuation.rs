@@ -66,7 +66,7 @@ stages:
 }
 
 #[tokio::test]
-async fn generated_target_inventory_empty_items_noops_legacy_specs() {
+async fn implementation_target_inventory_empty_items_fails_fast() {
     struct EmptyTargetInventoryRunner;
 
     impl archon_workflow::WriteBoundaryProbe for EmptyTargetInventoryRunner {}
@@ -109,12 +109,12 @@ stages:
         .execute_with_runner(run.clone(), &EmptyTargetInventoryRunner)
         .await
         .unwrap();
-    assert_eq!(report.failed, 0);
+    assert_eq!(report.failed, 1);
 
     let finished = store.load_state(&run.id).unwrap();
     assert_eq!(
         finished.stages.get("implement").unwrap().status,
-        StageStatus::Accepted
+        StageStatus::Failed
     );
 }
 

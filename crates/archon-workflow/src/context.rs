@@ -7,7 +7,7 @@ use crate::fanout::{FanoutItem, extract_items};
 use crate::reducers::ReducerInput;
 use crate::run::{ArtifactRef, WorkflowRun};
 use crate::source_context;
-use crate::spec::{StageKind, StageSpec};
+use crate::spec::StageSpec;
 use crate::store::WorkflowStore;
 
 const MAX_ARTIFACT_CHARS: usize = 32_000;
@@ -39,12 +39,23 @@ pub fn fanout_input(
 ) -> WorkflowResult<Value> {
     let context = stage_input(store, run, stage)?;
     let sources = source_context::fanout_source_files(store, run, stage, item, &context);
+    let target_root = item
+        .payload
+        .get("target_repository_root")
+        .and_then(Value::as_str)
+        .filter(|root| !root.trim().is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            source_context::effective_root(store, run)
+                .display()
+                .to_string()
+        });
     Ok(json!({
         "workflow_task": run.spec.task,
         "stage_task": stage.task,
         "stage_extra": stage.extra,
         "stage_input": stage.input,
-        "target_repository_root": source_context::effective_root(store, run).display().to_string(),
+        "target_repository_root": target_root,
         "dependencies": context.get("dependencies").cloned().unwrap_or_else(|| json!([])),
         "source_files": sources,
         "fanout_stage": stage.id,
@@ -233,14 +244,6 @@ fn fanout_allows_empty_items(stage: &StageSpec) -> bool {
         .or_else(|| stage.input.get("allow_empty_items"))
         .and_then(Value::as_bool)
         .unwrap_or(false)
-        || generated_target_inventory_fanout(stage)
-}
-
-fn generated_target_inventory_fanout(stage: &StageSpec) -> bool {
-    stage.effective_item_kind() == StageKind::Implementation
-        && foreach_dependency(stage)
-            .as_deref()
-            .is_some_and(|dep| dep.ends_with("-target-inventory"))
 }
 
 fn source_file_items(stage: &StageSpec, files: Vec<Value>) -> Option<Vec<FanoutItem>> {

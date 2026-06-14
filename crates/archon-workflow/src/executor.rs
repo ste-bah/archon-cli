@@ -43,7 +43,8 @@ impl WorkflowExecutor {
         }
     }
 
-    pub fn start(&self, spec: WorkflowSpec) -> WorkflowResult<WorkflowRun> {
+    pub fn start(&self, mut spec: WorkflowSpec) -> WorkflowResult<WorkflowRun> {
+        crate::required_artifact_heal::ensure_required_artifact_self_heal(&mut spec);
         spec.validate()?;
         self.policy.validate_spec(&spec)?;
         let mut run = self.store.create_run(spec)?;
@@ -122,6 +123,12 @@ impl WorkflowExecutor {
             return self.store.save_state(run);
         }
         let result = match stage.kind {
+            StageKind::Tool
+                if stage.tool.as_deref()
+                    == Some(crate::required_artifacts::REQUIRED_ARTIFACT_INVENTORY_TOOL) =>
+            {
+                self.run_required_artifact_inventory(run, stage)
+            }
             StageKind::Agent | StageKind::Tool | StageKind::Checkpoint => {
                 persistence::write_attached_stage_artifact(
                     &self.store,
@@ -212,6 +219,23 @@ impl WorkflowExecutor {
         )
     }
 
+    pub(crate) fn run_required_artifact_inventory(
+        &self,
+        run: &mut WorkflowRun,
+        stage: &StageSpec,
+    ) -> WorkflowResult<()> {
+        persistence::write_attached_stage_artifact(
+            &self.store,
+            run,
+            stage,
+            &stage.id,
+            "json",
+            crate::required_artifacts::inventory_body(&self.store, run, stage),
+            true,
+        )
+        .map(|_| ())
+    }
+
     fn run_quality_gate(&self, run: &mut WorkflowRun, stage: &StageSpec) -> WorkflowResult<()> {
         if let Some(reason) = context::quality_gate_failure(&self.store, run, stage)? {
             persistence::record_quality(
@@ -224,13 +248,42 @@ impl WorkflowExecutor {
             )?;
             return Err(WorkflowError::StageFailed(reason));
         }
+        let artifact_report =
+            crate::required_artifacts::check_required_artifacts(&self.store, run, stage);
+        if let Some(report) = artifact_report.as_ref()
+            && let Some(reason) = report.failure_reason()
+        {
+            let artifact = persistence::write_attached_stage_artifact(
+                &self.store,
+                run,
+                stage,
+                &stage.id,
+                "json",
+                serde_json::to_string(report)?,
+                false,
+            )?;
+            persistence::record_quality(
+                &self.store,
+                &run.id,
+                stage,
+                "failed",
+                Some(&reason),
+                Some(&artifact),
+            )?;
+            return Err(WorkflowError::StageFailed(reason));
+        }
         let artifact = persistence::write_attached_stage_artifact(
             &self.store,
             run,
             stage,
             &stage.id,
             "json",
-            json!({"status": "accepted", "checked_dependencies": stage.depends_on}).to_string(),
+            json!({
+                "status": "accepted",
+                "checked_dependencies": stage.depends_on,
+                "required_artifacts": artifact_report,
+            })
+            .to_string(),
             true,
         )?;
         persistence::record_quality(
