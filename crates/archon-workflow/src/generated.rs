@@ -104,6 +104,7 @@ pub fn normalize_generated_spec(spec: &mut WorkflowSpec) {
     normalize_targetless_implementation_stages(spec);
     promote_quality_gate_entries(spec);
     ensure_generated_remediation_loop(spec);
+    crate::required_artifact_contract::ensure_final_required_artifacts(spec);
     crate::required_artifact_heal::ensure_required_artifact_self_heal(spec);
 }
 

@@ -44,6 +44,7 @@ impl WorkflowExecutor {
     }
 
     pub fn start(&self, mut spec: WorkflowSpec) -> WorkflowResult<WorkflowRun> {
+        crate::required_artifact_contract::ensure_final_required_artifacts(&mut spec);
         crate::required_artifact_heal::ensure_required_artifact_self_heal(&mut spec);
         spec.validate()?;
         self.policy.validate_spec(&spec)?;

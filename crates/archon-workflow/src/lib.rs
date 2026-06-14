@@ -22,6 +22,7 @@ pub mod provider_tiers;
 pub mod quality_gate;
 pub mod reducers;
 mod request;
+mod required_artifact_contract;
 mod required_artifact_heal;
 mod required_artifacts;
 pub mod run;
