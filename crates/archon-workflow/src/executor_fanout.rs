@@ -1,26 +1,45 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use serde_json::Value;
-
-use crate::acceptance::{self, TargetFingerprints};
+use crate::acceptance;
 use crate::context;
+use crate::control::{RunControl, RunControlDecision};
 use crate::error::{WorkflowError, WorkflowResult};
-use crate::executor_output::ensure_output_usable;
+use crate::executor_output::{ensure_fanout_item_output_usable, ensure_output_usable};
 use crate::fanout::{self, FanoutItem};
 use crate::persistence;
 use crate::policy::WorkflowPolicy;
 use crate::request::fanout_item_request;
-use crate::run::{StageStatus, WorkflowRun};
-use crate::runner::{StageRunOutput, WorkflowStageRunner};
+use crate::run::{ItemState, RunStatus, StageStatus, WorkflowRun};
+use crate::runner::{StageRunOutput, StageRunRequest, WorkflowStageRunner};
 use crate::source_context;
-use crate::spec::{ProviderTier, StageKind, StageSpec};
+use crate::spec::{StageKind, StageSpec};
 use crate::store::WorkflowStore;
+use crate::work_unit_coverage::CoverageVerdict;
+use crate::work_unit_gate;
+
+mod coordinated_failure;
+mod coordinated_outcome;
+mod coordinated_success;
+mod coverage_gate;
+mod empty;
+mod failure_records;
+mod required_artifact_repair;
+mod targets;
+use coordinated_outcome::record_coordinated_outcome;
+use empty::empty_fanout_result;
+use failure_records::{record_failure, record_output_failure};
+use targets::{item_target_files, stage_max_agents};
 
 struct ItemAcceptance {
     root: PathBuf,
     targets: Vec<String>,
-    before: TargetFingerprints,
+    payload: serde_json::Value,
+}
+
+enum ItemRunStatus {
+    Accepted,
+    Blocked,
 }
 
 pub(crate) async fn run_fanout_with_runner(
@@ -33,9 +52,9 @@ pub(crate) async fn run_fanout_with_runner(
     let items = context::fanout_items(store, run, stage)?;
     let item_kind = stage.effective_item_kind();
     let implementation_items = item_kind == StageKind::Implementation;
-    // PRD-012: try the coordinated parallel path first. It returns None when it
-    // declined (disabled / non-Git / boundary-unavailable), in which case we
-    // fall through to the existing serial implementation path (width 1).
+    if items.is_empty() {
+        return empty_fanout_result(store, run, stage, implementation_items);
+    }
     if implementation_items
         && let Some(output) =
             try_coordinated_implementation(store, policy, run, stage, runner, &items).await?
@@ -55,6 +74,7 @@ pub(crate) async fn run_fanout_with_runner(
         .filter(|item| fanout::accepted_item_cached(run, &item.id))
         .count();
     let mut failed = 0usize;
+    let mut blocked = 0usize;
     let mut acceptances = BTreeMap::new();
     let mut requests = Vec::new();
     let pending_items = items
@@ -79,7 +99,10 @@ pub(crate) async fn run_fanout_with_runner(
         persistence::record_prompt(store, &request)?;
         requests.push((item.id.clone(), request));
     }
-    let results = fanout::run_items_with_runner(
+    let (results, control_stop) = run_item_batches_with_control(
+        store,
+        run,
+        stage,
         requests,
         runner,
         width,
@@ -91,13 +114,20 @@ pub(crate) async fn run_fanout_with_runner(
         match result {
             Ok(output) => {
                 let result = match acceptances.remove(&item_id) {
-                    Some(binding) => {
-                        record_implementation_success(store, run, stage, item_id, output, binding)
-                    }
+                    Some(binding) => record_implementation_success(
+                        store,
+                        run,
+                        stage,
+                        item_id,
+                        output,
+                        binding,
+                        policy.missing_unit_remediation_max_attempts,
+                    ),
                     None => record_success(store, run, stage, item_id, output),
                 };
                 match result {
-                    Ok(()) => completed += 1,
+                    Ok(ItemRunStatus::Accepted) => completed += 1,
+                    Ok(ItemRunStatus::Blocked) => blocked += 1,
                     Err(_) => failed += 1,
                 }
             }
@@ -106,6 +136,20 @@ pub(crate) async fn run_fanout_with_runner(
                 failed += 1;
             }
         }
+    }
+    if let Some(stop) = control_stop {
+        return match stop {
+            RunControlDecision::Continue => Ok(StageRunOutput::markdown(format!(
+                "Fan-out stage `{}` completed {} item(s), blocked {} item(s), failed {} item(s), width {}.",
+                stage.id, completed, blocked, failed, width
+            ))),
+            RunControlDecision::Paused { generation } => Err(WorkflowError::ControlPaused(
+                format!("fan-out paused at generation {generation} before pending item launch"),
+            )),
+            RunControlDecision::Cancelled { generation } => Err(WorkflowError::ControlCancelled(
+                format!("fan-out cancelled at generation {generation} before pending item launch"),
+            )),
+        };
     }
     if failed > 0 {
         let kind = if implementation_items {
@@ -117,10 +161,101 @@ pub(crate) async fn run_fanout_with_runner(
             "{failed} {kind} item(s) failed"
         )));
     }
+    if blocked > 0 {
+        let kind = if implementation_items {
+            "implementation fan-out"
+        } else {
+            "fan-out"
+        };
+        return Err(WorkflowError::StageBlocked(format!(
+            "{blocked} {kind} item(s) blocked with evidence"
+        )));
+    }
+    if implementation_items {
+        coverage_gate::enforce_stage(
+            store,
+            run,
+            stage,
+            &items,
+            policy.missing_unit_remediation_max_attempts,
+        )?;
+    }
     Ok(StageRunOutput::markdown(format!(
-        "Fan-out stage `{}` completed {} item(s), failed {} item(s), width {}.",
-        stage.id, completed, failed, width
+        "Fan-out stage `{}` completed {} item(s), blocked {} item(s), failed {} item(s), width {}.",
+        stage.id, completed, blocked, failed, width
     )))
+}
+
+type FanoutResult = (String, WorkflowResult<StageRunOutput>);
+
+async fn run_item_batches_with_control(
+    store: &WorkflowStore,
+    run: &mut WorkflowRun,
+    stage: &StageSpec,
+    requests: Vec<(String, StageRunRequest)>,
+    runner: &dyn WorkflowStageRunner,
+    width: usize,
+    max_agents: usize,
+    max_attempts: u32,
+) -> WorkflowResult<(Vec<FanoutResult>, Option<RunControlDecision>)> {
+    if requests.len() > max_agents {
+        return Err(WorkflowError::PolicyDenied(format!(
+            "fan-out item count {} exceeds max_agents {max_agents}",
+            requests.len()
+        )));
+    }
+    let mut results = Vec::new();
+    let mut idx = 0usize;
+    while idx < requests.len() {
+        match RunControl::new(store.clone(), run.id.clone()).checkpoint(run)? {
+            RunControlDecision::Continue => {}
+            decision @ RunControlDecision::Paused { .. } => {
+                return Ok((results, Some(decision)));
+            }
+            decision @ RunControlDecision::Cancelled { .. } => {
+                cancel_pending_items(run, stage, &requests[idx..]);
+                return Ok((results, Some(decision)));
+            }
+        }
+        let end = (idx + width.max(1)).min(requests.len());
+        let chunk = requests[idx..end].to_vec();
+        let chunk_results =
+            fanout::run_items_with_runner(chunk, runner, width, max_agents, max_attempts).await?;
+        results.extend(chunk_results);
+        idx = end;
+        match RunControl::new(store.clone(), run.id.clone()).checkpoint(run)? {
+            RunControlDecision::Continue => {}
+            decision @ RunControlDecision::Paused { .. } => {
+                return Ok((results, Some(decision)));
+            }
+            decision @ RunControlDecision::Cancelled { .. } => {
+                cancel_pending_items(run, stage, &requests[idx..]);
+                return Ok((results, Some(decision)));
+            }
+        }
+    }
+    Ok((results, None))
+}
+
+fn cancel_pending_items(
+    run: &mut WorkflowRun,
+    stage: &StageSpec,
+    pending: &[(String, StageRunRequest)],
+) {
+    run.status = RunStatus::Cancelled;
+    for (item_id, _) in pending {
+        run.items.insert(
+            item_id.clone(),
+            ItemState {
+                id: item_id.clone(),
+                stage_id: stage.id.clone(),
+                status: StageStatus::Cancelled,
+                artifact: None,
+                error: Some("cancelled before launch".to_string()),
+            },
+        );
+    }
+    run.mark_updated();
 }
 
 fn serial_or_clamped_width(
@@ -137,8 +272,6 @@ fn serial_or_clamped_width(
     }
 }
 
-/// Attempt the PRD-012 coordinated parallel implementation path. Returns
-/// `Ok(None)` to signal the caller should run the existing serial path.
 async fn try_coordinated_implementation(
     store: &WorkflowStore,
     policy: &WorkflowPolicy,
@@ -170,6 +303,17 @@ async fn try_coordinated_implementation(
             target_files: item_target_files(stage, &item.payload),
         })
         .collect();
+    if plans_input.iter().any(|plan| {
+        source_context::item_targets_need_serial_root(
+            store,
+            run,
+            &plan.item.payload,
+            &plan.target_files,
+            &canonical,
+        )
+    }) {
+        return Ok(None);
+    }
     let run_root = store.run_dir(&run.id);
     let outcome = {
         let ctx = FanoutCtx {
@@ -181,18 +325,35 @@ async fn try_coordinated_implementation(
             item_deps: BTreeMap::new(),
             verify_inputs: Vec::new(),
         };
-        run_coordinated_implementation_fanout(&ctx, plans_input, &runtime, &cfg, runner)
-            .await
-            .map_err(|err| WorkflowError::StageFailed(err.to_string()))?
+        match run_coordinated_implementation_fanout(&ctx, plans_input, &runtime, &cfg, runner).await
+        {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                let message = err.to_string();
+                if message.contains("ControlPaused") {
+                    let _ = RunControl::new(store.clone(), run.id.clone()).checkpoint(run)?;
+                    return Err(WorkflowError::ControlPaused(message));
+                }
+                if message.contains("ControlCancelled") {
+                    let _ = RunControl::new(store.clone(), run.id.clone()).checkpoint(run)?;
+                    return Err(WorkflowError::ControlCancelled(message));
+                }
+                return Err(WorkflowError::StageFailed(message));
+            }
+        }
     };
-    // TASK-WC-008: best-effort §18 events + metadata-only learning rows.
     let seq_base = (run.stages.len() as u64 + 1) * 100_000;
     crate::events::write_coordination_events::emit_and_record(store, seq_base, &outcome);
     if let Some(_reason) = outcome.serial_fallback {
-        // Serial fallback chosen (disabled / non-Git / boundary-unavailable).
         return Ok(None);
     }
-    record_coordinated_outcome(store, run, stage, &outcome)?;
+    record_coordinated_outcome(
+        store,
+        run,
+        stage,
+        &outcome,
+        policy.missing_unit_remediation_max_attempts,
+    )?;
     let applied = outcome
         .item_status
         .values()
@@ -205,59 +366,14 @@ async fn try_coordinated_implementation(
     ))))
 }
 
-fn record_coordinated_outcome(
-    store: &WorkflowStore,
-    run: &mut WorkflowRun,
-    stage: &StageSpec,
-    outcome: &crate::write_coordinator::CoordinatedOutcome,
-) -> WorkflowResult<()> {
-    use crate::write_coordinator::ManifestStatus;
-
-    let mut failures = Vec::new();
-    for (item_id, status) in &outcome.item_status {
-        let accepted = matches!(
-            status,
-            ManifestStatus::Applied | ManifestStatus::IdempotentNoop
-        );
-        let body = format!("# Coordinated item `{item_id}`\n\nstatus: {status:?}\n");
-        let artifact = persistence::write_attached_stage_artifact(
-            store, run, stage, item_id, "md", body, accepted,
-        )?;
-        let error = (!accepted).then(|| format!("{status:?}"));
-        if let Some(err) = &error {
-            failures.push(format!("{item_id}: {err}"));
-        }
-        fanout::record_item(
-            run,
-            stage,
-            item_id.clone(),
-            if accepted {
-                StageStatus::Accepted
-            } else {
-                StageStatus::Failed
-            },
-            Some(artifact),
-            error,
-        );
-    }
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        Err(WorkflowError::StageFailed(format!(
-            "coordinated implementation fan-out failed: {}",
-            failures.join("; ")
-        )))
-    }
-}
-
 fn record_success(
     store: &WorkflowStore,
     run: &mut WorkflowRun,
     stage: &StageSpec,
     item_id: String,
     output: StageRunOutput,
-) -> WorkflowResult<()> {
-    if let Err(err) = ensure_output_usable(&output.body) {
+) -> WorkflowResult<ItemRunStatus> {
+    if let Err(err) = ensure_fanout_item_output_usable(stage, &output.body) {
         let error = err.to_string();
         record_output_failure(store, run, stage, item_id.clone(), output, error.clone())?;
         return Err(WorkflowError::StageFailed(format!("{item_id}: {error}")));
@@ -289,7 +405,7 @@ fn record_success(
         Some(artifact),
         None,
     );
-    Ok(())
+    Ok(ItemRunStatus::Accepted)
 }
 
 fn record_implementation_success(
@@ -299,22 +415,28 @@ fn record_implementation_success(
     item_id: String,
     output: StageRunOutput,
     binding: ItemAcceptance,
-) -> WorkflowResult<()> {
-    if let Err(err) = ensure_output_usable(&output.body) {
+    max_remediation_attempts: u32,
+) -> WorkflowResult<ItemRunStatus> {
+    if required_artifact_repair::is_blocked_evidence(stage, &output.body) {
+        required_artifact_repair::record_evidence(store, run, stage, item_id, output)?;
+        return Ok(ItemRunStatus::Blocked);
+    }
+    if let Err(err) = ensure_output_usable(&output.body)
+        && !required_artifact_repair::is_accepted_report_evidence(stage, &output.body)
+    {
         let error = err.to_string();
         record_output_failure(store, run, stage, item_id.clone(), output, error.clone())?;
         return Err(WorkflowError::StageFailed(format!("{item_id}: {error}")));
     }
     let root = binding.root;
     let after = acceptance::snapshot_targets(&root, &binding.targets);
-    let outcome = acceptance::evaluate(
-        &root,
-        &binding.targets,
-        &binding.before,
-        &after,
-        stage.verify_command.as_deref(),
-    );
-    let accepted = outcome.is_accepted();
+    let outcome = coverage_gate::evaluate_item(store, run, stage, &root, &binding.targets, &after)?;
+    let coverage =
+        work_unit_gate::evaluate_item_output(run, stage, &item_id, &binding.payload, &output.body);
+    let coverage_accepted = coverage
+        .as_ref()
+        .is_none_or(|coverage| coverage.verdict == CoverageVerdict::Accepted);
+    let accepted = outcome.is_accepted() && coverage_accepted;
     let artifact = persistence::write_attached_stage_artifact(
         store,
         run,
@@ -326,6 +448,47 @@ fn record_implementation_success(
     )?;
     match outcome {
         acceptance::AcceptanceOutcome::Accepted => {
+            if let Some(coverage) = coverage
+                && coverage.verdict != CoverageVerdict::Accepted
+            {
+                let reason = work_unit_gate::error_summary(&coverage);
+                let key = format!("__work_unit_coverage_{item_id}");
+                work_unit_gate::write_named_coverage_artifact(
+                    store, run, stage, &key, &coverage, false,
+                )?;
+                let remediation = crate::work_unit_remediation::write_missing_unit_items(
+                    store,
+                    run,
+                    stage,
+                    &coverage,
+                    vec![crate::work_unit_remediation::source_from_payload(
+                        &binding.payload,
+                    )],
+                    max_remediation_attempts,
+                )?;
+                persistence::record_agent_output(
+                    store,
+                    &run.id,
+                    &stage.id,
+                    &item_id,
+                    Some(&output),
+                    Some(&artifact),
+                    false,
+                    Some(&reason),
+                )?;
+                fanout::record_item(
+                    run,
+                    stage,
+                    item_id.clone(),
+                    StageStatus::Failed,
+                    Some(artifact),
+                    Some(reason.clone()),
+                );
+                if remediation.attempts_exhausted {
+                    return Err(WorkflowError::StageBlocked(format!("{item_id}: {reason}")));
+                }
+                return Err(WorkflowError::StageFailed(format!("{item_id}: {reason}")));
+            }
             persistence::record_agent_output(
                 store,
                 &run.id,
@@ -344,7 +507,7 @@ fn record_implementation_success(
                 Some(artifact),
                 None,
             );
-            Ok(())
+            Ok(ItemRunStatus::Accepted)
         }
         acceptance::AcceptanceOutcome::Rejected(reason) => {
             persistence::record_agent_output(
@@ -370,76 +533,6 @@ fn record_implementation_success(
     }
 }
 
-fn record_failure(
-    store: &WorkflowStore,
-    run: &mut WorkflowRun,
-    stage: &StageSpec,
-    item_id: String,
-    error: String,
-) -> WorkflowResult<()> {
-    let body =
-        format!("# Fan-out Item Failed\n\nitem: `{item_id}`\nstatus: failed\nerror: {error}\n");
-    let artifact =
-        persistence::write_attached_stage_artifact(store, run, stage, &item_id, "md", body, false)?;
-    persistence::record_agent_output(
-        store,
-        &run.id,
-        &stage.id,
-        &item_id,
-        None,
-        Some(&artifact),
-        false,
-        Some(&error),
-    )?;
-    fanout::record_item(
-        run,
-        stage,
-        item_id,
-        StageStatus::Failed,
-        Some(artifact),
-        Some(error),
-    );
-    Ok(())
-}
-
-fn record_output_failure(
-    store: &WorkflowStore,
-    run: &mut WorkflowRun,
-    stage: &StageSpec,
-    item_id: String,
-    output: StageRunOutput,
-    error: String,
-) -> WorkflowResult<()> {
-    let artifact = persistence::write_attached_stage_artifact(
-        store,
-        run,
-        stage,
-        &item_id,
-        &output.extension,
-        output.body.clone(),
-        false,
-    )?;
-    persistence::record_agent_output(
-        store,
-        &run.id,
-        &stage.id,
-        &item_id,
-        Some(&output),
-        Some(&artifact),
-        false,
-        Some(&error),
-    )?;
-    fanout::record_item(
-        run,
-        stage,
-        item_id,
-        StageStatus::Failed,
-        Some(artifact),
-        Some(error),
-    );
-    Ok(())
-}
-
 fn item_acceptance(
     store: &WorkflowStore,
     run: &WorkflowRun,
@@ -453,47 +546,15 @@ fn item_acceptance(
             item.id
         )));
     }
-    let root = source_context::implementation_root_for_targets(store, run, &targets)?;
-    let before = acceptance::snapshot_targets(&root, &targets);
+    let root = source_context::implementation_root_for_payload_targets(
+        store,
+        run,
+        &item.payload,
+        &targets,
+    )?;
     Ok(ItemAcceptance {
         root,
         targets,
-        before,
+        payload: item.payload.clone(),
     })
-}
-
-fn item_target_files(stage: &StageSpec, payload: &Value) -> Vec<String> {
-    let mut targets = string_list(payload.get("target_files"))
-        .into_iter()
-        .chain(string_list(payload.get("expected_target_files")))
-        .chain(string_list(payload.get("target_file")))
-        .chain(string_list(payload.get("target_path")))
-        .collect::<Vec<_>>();
-    if targets.is_empty() {
-        targets = stage.expected_target_files.clone();
-    }
-    targets.retain(|target| !target.trim().is_empty());
-    targets
-}
-
-fn string_list(value: Option<&Value>) -> Vec<String> {
-    match value {
-        Some(Value::Array(values)) => values
-            .iter()
-            .filter_map(Value::as_str)
-            .map(str::to_string)
-            .collect(),
-        Some(Value::String(value)) => vec![value.clone()],
-        _ => Vec::new(),
-    }
-}
-
-fn stage_max_agents(policy: &WorkflowPolicy, run: &WorkflowRun, stage: &StageSpec) -> usize {
-    let base = run.spec.max_agents.min(policy.max_agents_per_run);
-    let effective = if stage.provider_tier == Some(ProviderTier::Local) {
-        base.min(policy.local_provider_max_agents)
-    } else {
-        base
-    };
-    effective as usize
 }

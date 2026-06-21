@@ -127,12 +127,77 @@ pub(crate) fn implementation_root_for_targets(
         })
 }
 
+pub(crate) fn implementation_root_for_payload_targets(
+    store: &WorkflowStore,
+    run: &WorkflowRun,
+    payload: &Value,
+    targets: &[String],
+) -> WorkflowResult<PathBuf> {
+    if let Some(root) = declared_target_root(store, payload) {
+        validate_target_root(&root, targets)?;
+        return Ok(root);
+    }
+    if let Some(root) = project_root_for_absolute_targets(store, targets) {
+        return Ok(root);
+    }
+    implementation_root_for_targets(store, run, targets)
+}
+
+pub(crate) fn fanout_item_target_root(
+    store: &WorkflowStore,
+    run: &WorkflowRun,
+    payload: &Value,
+    fallback_targets: &[String],
+) -> PathBuf {
+    let mut targets = payload_target_files(payload);
+    if targets.is_empty() {
+        targets = fallback_targets.to_vec();
+    }
+    implementation_root_for_payload_targets(store, run, payload, &targets)
+        .unwrap_or_else(|_| effective_root(store, run))
+}
+
+pub(crate) fn item_targets_need_serial_root(
+    store: &WorkflowStore,
+    run: &WorkflowRun,
+    payload: &Value,
+    targets: &[String],
+    canonical: &Path,
+) -> bool {
+    implementation_root_for_payload_targets(store, run, payload, targets)
+        .is_ok_and(|root| !same_root(&root, canonical))
+}
+
 fn absolute_target_parent(targets: &[String]) -> Option<PathBuf> {
     targets
         .iter()
         .map(|target| Path::new(target.trim()))
         .filter(|target| target.is_absolute())
         .find_map(|target| target.parent().map(Path::to_path_buf))
+}
+
+fn declared_target_root(store: &WorkflowStore, payload: &Value) -> Option<PathBuf> {
+    let root = payload
+        .get("target_repository_root")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|root| !root.is_empty())?;
+    let path = Path::new(root);
+    Some(if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        store_project_root(store).join(path)
+    })
+}
+
+fn project_root_for_absolute_targets(store: &WorkflowStore, targets: &[String]) -> Option<PathBuf> {
+    let project = store_project_root(store);
+    targets
+        .iter()
+        .map(|target| Path::new(target.trim()))
+        .filter(|target| target.is_absolute())
+        .any(|target| path_starts_with(target, &project))
+        .then_some(project)
 }
 
 fn source_roots(store: &WorkflowStore, run: &WorkflowRun) -> Vec<PathBuf> {
@@ -319,6 +384,69 @@ fn collect_string_values(value: Option<&Value>, out: &mut BTreeSet<String>) {
             }),
         _ => {}
     }
+}
+
+fn validate_target_root(root: &Path, targets: &[String]) -> WorkflowResult<()> {
+    for target in targets {
+        let target = Path::new(target.trim());
+        if has_parent_component(target) {
+            return Err(WorkflowError::SpecInvalid(format!(
+                "target path escapes target_repository_root via '..': {}",
+                target.display()
+            )));
+        }
+        if target.is_absolute() && !path_starts_with(target, root) {
+            return Err(WorkflowError::SpecInvalid(format!(
+                "absolute target path outside target_repository_root: {}",
+                target.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn payload_target_files(payload: &Value) -> Vec<String> {
+    let mut targets = BTreeSet::new();
+    for key in [
+        "target_files",
+        "expected_target_files",
+        "target_file",
+        "target_path",
+    ] {
+        collect_string_values(payload.get(key), &mut targets);
+    }
+    targets.into_iter().collect()
+}
+
+fn path_starts_with(path: &Path, root: &Path) -> bool {
+    let path = clean_lexical(path);
+    let root = clean_lexical(root);
+    path.starts_with(root)
+}
+
+fn clean_lexical(path: &Path) -> PathBuf {
+    path.components()
+        .fold(PathBuf::new(), |mut out, component| {
+            match component {
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir => {
+                    out.pop();
+                }
+                _ => out.push(component.as_os_str()),
+            }
+            out
+        })
+}
+
+fn has_parent_component(path: &Path) -> bool {
+    path.components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+}
+
+fn same_root(a: &Path, b: &Path) -> bool {
+    let a = a.canonicalize().unwrap_or_else(|_| clean_lexical(a));
+    let b = b.canonicalize().unwrap_or_else(|_| clean_lexical(b));
+    a == b
 }
 
 fn path_candidates(text: &str) -> Vec<String> {

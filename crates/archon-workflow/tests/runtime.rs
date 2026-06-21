@@ -95,6 +95,9 @@ async fn live_executor_routes_fanout_through_runner() {
             &self,
             request: StageRunRequest,
         ) -> archon_workflow::WorkflowResult<StageRunOutput> {
+            if request.stage_id == "discover" {
+                return Ok(StageRunOutput::markdown(r#"{"items":[]}"#));
+            }
             Ok(StageRunOutput::markdown(format!(
                 "runner saw {:?} {}",
                 request.stage_kind, request.stage_id
@@ -338,6 +341,10 @@ async fn reject_verdict_fails_quality_gate() {
     let finished = store.load_state(&run.id).unwrap();
     assert_eq!(
         finished.stages.get("review").unwrap().status,
+        StageStatus::Accepted
+    );
+    assert_eq!(
+        finished.stages.get("quality").unwrap().status,
         StageStatus::Failed
     );
 }
@@ -387,11 +394,11 @@ stages:
     let finished = store.load_state(&run.id).unwrap();
     assert_eq!(
         finished.stages.get("review").unwrap().status,
-        StageStatus::Failed
+        StageStatus::Accepted
     );
     assert_eq!(
         finished.stages.get("quality").unwrap().status,
-        StageStatus::Pending
+        StageStatus::Failed
     );
 }
 
@@ -424,6 +431,9 @@ stages:
     kind: reduce
     reducer: evidence_weighted_report
     depends_on: [review]
+  - id: quality
+    kind: quality_gate
+    depends_on: [review]
 "#
     ))
     .unwrap()
@@ -431,10 +441,6 @@ stages:
 
 #[tokio::test]
 async fn declared_foreach_fanout_with_no_items_fails_fast() {
-    // When a fan-out declares `foreach: ${discover.items}` but the producer
-    // emits no parseable, non-empty `items:` structure, the runtime must fail
-    // fast instead of collapsing to one synthetic item that the agent would
-    // (correctly) reject as missing evidence.
     struct EmptyItemsRunner;
 
     impl archon_workflow::WriteBoundaryProbe for EmptyItemsRunner {}
@@ -445,7 +451,6 @@ async fn declared_foreach_fanout_with_no_items_fails_fast() {
             request: StageRunRequest,
         ) -> archon_workflow::WorkflowResult<StageRunOutput> {
             if request.stage_id == "discover" {
-                // No `items:` document at all — just prose.
                 return Ok(StageRunOutput::markdown(
                     "Discovery complete. No structured items emitted.",
                 ));
@@ -469,7 +474,11 @@ async fn declared_foreach_fanout_with_no_items_fails_fast() {
 
     let finished = store.load_state(&run.id).unwrap();
     assert_eq!(
-        finished.stages.get("review").unwrap().status,
+        finished.stages.get("discover").unwrap().status,
         StageStatus::Failed
+    );
+    assert_eq!(
+        finished.stages.get("review").unwrap().status,
+        StageStatus::Pending
     );
 }

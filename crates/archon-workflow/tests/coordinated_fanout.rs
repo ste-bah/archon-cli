@@ -133,12 +133,15 @@ fn canonical_repo() -> tempfile::TempDir {
 fn impl_fanout_spec(canonical: &Path, targets: &[(&str, &[&str])]) -> WorkflowSpec {
     let items: String = targets
         .iter()
-        .map(|(name, files)| {
+        .enumerate()
+        .map(|(idx, (name, files))| {
             let list = files
                 .iter()
                 .map(|f| format!("              - \"{f}\"\n"))
                 .collect::<String>();
-            format!("        - name: \"{name}\"\n          target_files:\n{list}")
+            format!(
+                "        - name: \"{name}\"\n          task_id: \"UNIT-{idx}\"\n          target_files:\n{list}"
+            )
         })
         .collect();
     WorkflowSpec::from_yaml(&format!(
@@ -193,6 +196,7 @@ fn plan_inputs(targets: &[(&str, &[&str])]) -> Vec<PlanInput> {
             item: FanoutItem {
                 id: format!("implement-{idx}"),
                 payload: serde_json::json!({
+                    "task_id": format!("UNIT-{idx}"),
                     "target_files": files,
                 }),
             },
@@ -201,12 +205,100 @@ fn plan_inputs(targets: &[(&str, &[&str])]) -> Vec<PlanInput> {
         .collect()
 }
 
+fn one_plan_input_with_task_file(task_file: &Path) -> Vec<PlanInput> {
+    vec![PlanInput {
+        item: FanoutItem {
+            id: "implement-0".into(),
+            payload: serde_json::json!({
+                "task_id": "TASK-001",
+                "task_file": task_file.display().to_string(),
+                "target_files": ["src/a.rs"],
+            }),
+        },
+        target_files: vec!["src/a.rs".into()],
+    }]
+}
+
 fn block_on<F: std::future::Future>(f: F) -> F::Output {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap()
         .block_on(f)
+}
+
+#[test]
+fn coordinated_item_input_embeds_task_evidence_and_records_prompt() {
+    let canonical = canonical_repo();
+    let task_root = canonical.path().join("tasks/PRD-ABC-001");
+    std::fs::create_dir_all(task_root.join("specs")).unwrap();
+    std::fs::create_dir_all(task_root.join("context")).unwrap();
+    std::fs::create_dir_all(canonical.path().join("prds")).unwrap();
+    let task_file = task_root.join("TASK-001.md");
+    std::fs::write(&task_file, "## Scope\nImplement src/a.rs\n").unwrap();
+    std::fs::write(
+        canonical.path().join("prds/PRD-ABC-001.md"),
+        "## Requirements\nREQ-DL-001: build the data lake contract.\n",
+    )
+    .unwrap();
+    std::fs::write(task_root.join("README.md"), "# PRD-ABC-001 task pack\n").unwrap();
+    std::fs::write(
+        task_root.join("specs/implementation-slice.md"),
+        "Implementation slice evidence.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        task_root.join("context/activeContext.md"),
+        "Active context evidence.\n",
+    )
+    .unwrap();
+    let targets: &[(&str, &[&str])] = &[("a", &["src/a.rs"])];
+    let store = WorkflowStore::project(canonical.path());
+    let policy = WorkflowPolicy {
+        require_human_for_dangerous_tools: false,
+        ..WorkflowPolicy::default()
+    };
+    let executor = WorkflowExecutor::new(store.clone(), policy.clone());
+    let run = executor
+        .start(impl_fanout_spec(canonical.path(), targets))
+        .unwrap();
+    let cfg = WriteCoordinatorConfig::default();
+    let runtime = resolve_write_coordinator_runtime(canonical.path(), &cfg);
+    let run_root = store.run_dir(&run.id);
+    let ctx = ctx_for(&store, &run, &policy, run_root);
+    let runner = WritingRunner {
+        content: "// evidence\n".into(),
+        record_inputs: std::sync::Mutex::new(vec![]),
+    };
+    let outcome = block_on(run_coordinated_implementation_fanout(
+        &ctx,
+        one_plan_input_with_task_file(&task_file),
+        &runtime,
+        &cfg,
+        &runner,
+    ))
+    .expect("coordinated fanout");
+    assert_eq!(
+        outcome.item_status.get("implement-0"),
+        Some(&ManifestStatus::Applied)
+    );
+    let inputs = runner.record_inputs.lock().unwrap();
+    let evidence = inputs[0]["task_evidence"].as_array().unwrap();
+    let joined = evidence
+        .iter()
+        .filter_map(|v| v["content"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(joined.contains("Implement src/a.rs"));
+    assert!(joined.contains("REQ-DL-001"));
+    assert!(joined.contains("Implementation slice evidence"));
+    assert!(joined.contains("Active context evidence"));
+    assert!(
+        store
+            .run_dir(&run.id)
+            .join("prompts/implement/implement-0.json")
+            .exists()
+    );
 }
 
 #[test]

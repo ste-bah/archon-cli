@@ -10,16 +10,11 @@ use std::path::Path;
 
 pub use super::WriteBoundaryProbe;
 use super::conflict_graph::{WaveCaps, build_schedule};
-use super::patch_apply::{
-    ApplyRecord, ApplyResumeStatus, VerifyResult, apply_wave, resume_status, run_wave_verify,
-    with_repo_lock,
-};
-use super::patch_manifest::{
-    ManifestStatus, PatchManifest, capture_patch, persist_manifest, validate_patch,
-};
+use super::patch_apply::{ApplyRecord, VerifyResult, apply_wave, run_wave_verify, with_repo_lock};
+use super::patch_manifest::{ManifestStatus, PatchManifest, persist_manifest, validate_patch};
 use super::worktree_isolation::{
     CanonicalBaseline, ItemWorkspace, WorkspaceStatus, capture_canonical_baseline,
-    cleanup_workspace, create_item_workspace,
+    create_item_workspace,
 };
 use super::write_plan::{
     NormalizedPath, TargetFilesSource, WritePlan, normalize_target, resource_keys_for_targets,
@@ -29,15 +24,22 @@ use super::{
 };
 
 use crate::fanout::FanoutItem;
+use crate::persistence;
 use crate::policy::WorkflowPolicy;
 use crate::run::WorkflowRun;
 use crate::runner::WorkflowStageRunner;
 use crate::spec::StageSpec;
 use crate::store::WorkflowStore;
+use crate::work_unit_coverage;
 
 mod errors;
+mod resume;
 mod run_agents;
+mod target_adoption;
+mod validation_failure;
+mod wave_failure;
 pub use errors::FanoutError;
+use resume::filter_resumable_items;
 
 /// Borrowed execution context for one implementation fanout stage.
 pub struct FanoutCtx<'a> {
@@ -71,6 +73,7 @@ pub struct WaveOutcome {
 pub struct PlanRecord {
     pub item_id: ItemId,
     pub wave_id: WaveId,
+    pub work_unit_ids: Vec<String>,
     pub target_files: Vec<String>,
     pub changed_files: Vec<String>,
     pub post_hashes: BTreeMap<String, String>,
@@ -159,7 +162,7 @@ pub async fn run_coordinated_implementation_fanout(
         .collect();
 
     for wave in &schedule.waves {
-        process_wave(
+        let keep_going = process_wave(
             ctx,
             &canonical,
             cfg,
@@ -171,39 +174,11 @@ pub async fn run_coordinated_implementation_fanout(
             &mut outcome,
         )
         .await?;
-    }
-    Ok(outcome)
-}
-
-fn filter_resumable_items(
-    ctx: &FanoutCtx<'_>,
-    plans_input: Vec<PlanInput>,
-) -> (Vec<PlanInput>, CoordinatedOutcome) {
-    let mut outcome = CoordinatedOutcome::new(&ctx.run.id, &ctx.stage.id);
-    let mut pending = Vec::new();
-    for input in plans_input {
-        match resume_status(&input.item.id, &ctx.run_root, &ctx.stage.id) {
-            ApplyResumeStatus::Applied => {
-                outcome
-                    .item_status
-                    .insert(input.item.id.clone(), ManifestStatus::Applied);
-            }
-            ApplyResumeStatus::IdempotentNoop => {
-                outcome
-                    .item_status
-                    .insert(input.item.id.clone(), ManifestStatus::IdempotentNoop);
-            }
-            ApplyResumeStatus::Conflicted => {
-                outcome
-                    .item_status
-                    .insert(input.item.id.clone(), ManifestStatus::Conflicted);
-            }
-            ApplyResumeStatus::Failed(_)
-            | ApplyResumeStatus::PendingApply
-            | ApplyResumeStatus::NotPersisted => pending.push(input),
+        if !keep_going {
+            break;
         }
     }
-    (pending, outcome)
+    Ok(outcome)
 }
 
 fn build_write_plan(
@@ -252,30 +227,58 @@ async fn process_wave<'a>(
     input_by_id: &BTreeMap<&str, &'a PlanInput>,
     caps: &WaveCaps,
     outcome: &mut CoordinatedOutcome,
-) -> Result<(), FanoutError> {
+) -> Result<bool, FanoutError> {
     let mut items = build_wave_items(ctx, canonical, cfg, wave, plan_by_id, input_by_id)?;
     let bodies =
         match run_agents::run_wave_agents(ctx, canonical, runner, &items, caps.effective()).await {
             Ok(bodies) => bodies,
             Err(reason) => {
-                finalize_failed_wave(canonical, cfg, wave, &reason, &items, outcome);
-                return Ok(());
+                wave_failure::finalize_failed_wave(canonical, cfg, wave, &reason, &items, outcome);
+                return Ok(false);
             }
         };
     let (manifests, pre_by_item, records) =
-        capture_and_validate(ctx, cfg, wave.wave_id, &items, &bodies)?;
+        match capture_and_validate(ctx, cfg, wave.wave_id, &items, &bodies) {
+            Ok(result) => result,
+            Err(err) => {
+                wave_failure::finalize_failed_wave(
+                    canonical,
+                    cfg,
+                    wave,
+                    &err.to_string(),
+                    &items,
+                    outcome,
+                );
+                return Ok(false);
+            }
+        };
     let (apply_record, verify) =
         match apply_and_verify(ctx, canonical, wave, &manifests, &pre_by_item) {
             Ok(result) => result,
             Err(err) => {
-                finalize_failed_wave(canonical, cfg, wave, &err.to_string(), &items, outcome);
-                return Err(err);
+                wave_failure::finalize_failed_wave(
+                    canonical,
+                    cfg,
+                    wave,
+                    &err.to_string(),
+                    &items,
+                    outcome,
+                );
+                return Ok(false);
             }
         };
+    for manifest in manifests
+        .iter()
+        .filter(|m| matches!(m.status, ManifestStatus::IdempotentNoop))
+    {
+        outcome
+            .item_status
+            .insert(manifest.item_id.clone(), ManifestStatus::IdempotentNoop);
+    }
     record_applied(&apply_record, outcome);
     outcome.plans.extend(records);
     let status = wave_status(&apply_record);
-    cleanup_all(canonical, cfg, &mut items, status);
+    wave_failure::cleanup_all(canonical, cfg, &mut items, status);
     outcome.waves.push(WaveOutcome {
         wave_id: wave.wave_id,
         items: wave.items.clone(),
@@ -283,7 +286,7 @@ async fn process_wave<'a>(
         verify: Some(verify),
         failure: None,
     });
-    Ok(())
+    Ok(true)
 }
 
 fn build_wave_items<'a>(
@@ -323,24 +326,47 @@ fn capture_and_validate(
     cfg: &WriteCoordinatorConfig,
     wave_id: WaveId,
     items: &[ItemState<'_>],
-    bodies: &run_agents::ItemRunBodies,
+    outputs: &run_agents::ItemRunOutputs,
 ) -> Result<CaptureResult, FanoutError> {
     let mut manifests = Vec::new();
     let mut pre_by_item = BTreeMap::new();
     let mut records = Vec::new();
     for it in items {
-        let captured = capture_patch(&it.workspace, &it.plan.target_files, &it.baseline)
-            .map_err(FanoutError::Patch)?;
-        let body = bodies
-            .get(&it.plan.item_id)
-            .map(String::as_str)
-            .unwrap_or("");
-        validate_patch(&captured, it.plan, cfg, body).map_err(FanoutError::Patch)?;
+        let output = outputs.get(&it.plan.item_id).ok_or_else(|| {
+            FanoutError::Workflow(format!("missing output for {}", it.plan.item_id))
+        })?;
+        let (captured, active_plan) =
+            match target_adoption::capture_with_target_adoption(cfg, items.len(), it) {
+                Ok(capture) => capture,
+                Err(err) => {
+                    let reason = err.to_string();
+                    validation_failure::persist_capture_error(ctx, it, output, &reason);
+                    return Err(err);
+                }
+            };
+        if let Err(err) = validate_patch(&captured, &active_plan, cfg, &output.body) {
+            let reason = err.to_string();
+            validation_failure::persist(ctx, it, &captured, output, &reason);
+            return Err(FanoutError::Patch(err));
+        }
+        persistence::record_captured_agent_output(
+            ctx.store,
+            &ctx.run.id,
+            &ctx.stage.id,
+            &it.plan.item_id,
+            output,
+        )
+        .map_err(|err| FanoutError::Workflow(format!("record captured output: {err}")))?;
+        let manifest_status = if captured.patch_bytes.is_empty() {
+            ManifestStatus::IdempotentNoop
+        } else {
+            ManifestStatus::PendingApply
+        };
         records.push(PlanRecord {
             item_id: it.plan.item_id.clone(),
             wave_id,
-            target_files: it
-                .plan
+            work_unit_ids: work_unit_coverage::item_required_units(&it.input.item.payload),
+            target_files: active_plan
                 .target_files
                 .iter()
                 .map(NormalizedPath::as_str)
@@ -355,7 +381,7 @@ fn capture_and_validate(
             &ctx.stage.id,
             &it.plan.item_id,
             &captured,
-            ManifestStatus::PendingApply,
+            manifest_status,
         )
         .map_err(FanoutError::Patch)?;
         manifests.push(load_manifest(&json_path)?);
@@ -424,64 +450,8 @@ fn record_applied(apply_record: &ApplyRecord, outcome: &mut CoordinatedOutcome) 
 }
 
 fn wave_status(apply_record: &ApplyRecord) -> WorkspaceStatus {
-    if apply_record.items_failed.is_empty() {
-        WorkspaceStatus::Succeeded
-    } else {
-        WorkspaceStatus::Failed
-    }
-}
-
-fn finalize_failed_wave(
-    canonical: &Path,
-    cfg: &WriteCoordinatorConfig,
-    wave: &super::conflict_graph::Wave,
-    mutator: &str,
-    items: &[ItemState<'_>],
-    outcome: &mut CoordinatedOutcome,
-) {
-    for it in items {
-        outcome.item_status.insert(
-            it.plan.item_id.clone(),
-            ManifestStatus::Failed {
-                reason: format!("wave aborted: {mutator}"),
-            },
-        );
-        outcome.plans.push(PlanRecord {
-            item_id: it.plan.item_id.clone(),
-            wave_id: wave.wave_id,
-            target_files: it
-                .plan
-                .target_files
-                .iter()
-                .map(NormalizedPath::as_str)
-                .collect(),
-            changed_files: vec![],
-            post_hashes: BTreeMap::new(),
-            patch_bytes_len: 0,
-        });
-        let _ = cleanup_workspace(
-            canonical,
-            &it.plan.isolated_root,
-            WorkspaceStatus::Failed,
-            cfg,
-        );
-    }
-    outcome.waves.push(WaveOutcome {
-        wave_id: wave.wave_id,
-        items: wave.items.clone(),
-        apply_record: None,
-        verify: None,
-        failure: Some(mutator.to_string()),
-    });
-}
-
-fn cleanup_all(
-    canonical: &Path,
-    cfg: &WriteCoordinatorConfig,
-    items: &mut [ItemState<'_>],
-    status: WorkspaceStatus,
-) {
-    for it in items.iter() {
-        let _ = cleanup_workspace(canonical, &it.plan.isolated_root, status, cfg);
+    match apply_record.items_failed.is_empty() {
+        true => WorkspaceStatus::Succeeded,
+        false => WorkspaceStatus::Failed,
     }
 }

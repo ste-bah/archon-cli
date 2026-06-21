@@ -123,7 +123,10 @@ fn verification_for(status: StageStatus) -> Verification {
     match status {
         StageStatus::Accepted => Verification::Accepted,
         StageStatus::ForcedAccepted => Verification::Forced,
+        StageStatus::NeedsReview => Verification::Failed,
+        StageStatus::Blocked => Verification::Failed,
         StageStatus::Failed => Verification::Failed,
+        StageStatus::Cancelled => Verification::Unverified,
         StageStatus::Pending
         | StageStatus::Running
         | StageStatus::Paused
@@ -302,7 +305,14 @@ pub(crate) fn record_workflow_learning(
     run: &WorkflowRun,
     seq: &mut u64,
 ) -> WorkflowResult<()> {
-    if !matches!(run.status, RunStatus::Completed | RunStatus::Failed) {
+    if !matches!(
+        run.status,
+        RunStatus::Completed
+            | RunStatus::NeedsReview
+            | RunStatus::Blocked
+            | RunStatus::Failed
+            | RunStatus::Cancelled
+    ) {
         return Ok(());
     }
     let log = WorkflowEventLog::new(store.clone());

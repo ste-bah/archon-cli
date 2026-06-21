@@ -23,6 +23,7 @@ pub(crate) struct RequiredArtifactReport {
     pub required: Vec<String>,
     pub checked: Vec<CheckedArtifact>,
     pub missing: Vec<String>,
+    pub invalid: Vec<InvalidArtifact>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -32,15 +33,33 @@ pub(crate) struct CheckedArtifact {
     pub exists: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct InvalidArtifact {
+    pub requested: String,
+    pub resolved: String,
+    pub reason: String,
+}
+
 impl RequiredArtifactReport {
     pub(crate) fn failure_reason(&self) -> Option<String> {
-        if self.missing.is_empty() {
-            return None;
+        if !self.missing.is_empty() {
+            return Some(format!(
+                "quality gate missing required artifact(s): {}",
+                self.missing.join(", ")
+            ));
         }
-        Some(format!(
-            "quality gate missing required artifact(s): {}",
-            self.missing.join(", ")
-        ))
+        if !self.invalid.is_empty() {
+            let reasons = self
+                .invalid
+                .iter()
+                .map(|artifact| format!("{}: {}", artifact.requested, artifact.reason))
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Some(format!(
+                "quality gate found invalid required artifact(s): {reasons}"
+            ));
+        }
+        None
     }
 }
 
@@ -63,10 +82,16 @@ pub(crate) fn check_required_artifacts(
         .filter(|artifact| !artifact.exists)
         .map(|artifact| artifact.requested.clone())
         .collect();
+    let invalid = checked
+        .iter()
+        .filter(|artifact| artifact.exists)
+        .filter_map(|artifact| validate_required_artifact(run, artifact))
+        .collect();
     Some(RequiredArtifactReport {
         required,
         checked,
         missing,
+        invalid,
     })
 }
 
@@ -88,16 +113,32 @@ pub(crate) fn inventory_body(
 ) -> String {
     let report = check_required_artifacts(store, run, stage).unwrap_or_else(empty_report);
     let project = project_root(store);
-    let items = report
+    let repository = configured_repository_root(run, &project);
+    let roots = artifact_roots(store, run)
+        .into_iter()
+        .map(|root| root.display().to_string())
+        .collect::<Vec<_>>();
+    let mut items = report
         .checked
         .iter()
         .filter(|artifact| !artifact.exists)
         .map(|artifact| inventory_item(&project, run, artifact))
         .collect::<Vec<_>>();
+    items.extend(
+        report
+            .invalid
+            .iter()
+            .map(|artifact| invalid_inventory_item(&project, run, artifact)),
+    );
     serde_json::json!({
         "items": items,
         "required_artifacts": report.required,
         "missing": report.missing,
+        "invalid": report.invalid,
+        "checked": report.checked,
+        "project_root": project.display().to_string(),
+        "repository_root": repository.map(|root| root.display().to_string()),
+        "artifact_roots": roots,
     })
     .to_string()
 }
@@ -144,6 +185,7 @@ fn empty_report() -> RequiredArtifactReport {
         required: Vec::new(),
         checked: Vec::new(),
         missing: Vec::new(),
+        invalid: Vec::new(),
     }
 }
 
@@ -153,12 +195,23 @@ fn inventory_item(
     artifact: &CheckedArtifact,
 ) -> serde_json::Value {
     let root = target_root(project, run, &artifact.resolved);
+    let source_repository_root =
+        configured_repository_root(run, project).map(|root| root.display().to_string());
+    let mut repair_guidance = crate::required_artifact_repair_guidance::guidance(
+        project,
+        &artifact.requested,
+        &artifact.resolved,
+        None,
+    );
+    add_source_repository_guidance(&mut repair_guidance, source_repository_root.as_deref());
     serde_json::json!({
         "kind": "missing_required_artifact",
         "artifact_path": artifact.requested,
         "resolved_path": artifact.resolved,
         "target_files": [artifact.resolved],
         "target_repository_root": root.display().to_string(),
+        "source_repository_root": source_repository_root,
+        "repair_guidance": repair_guidance,
         "task": format!(
             "Create or repair the required workflow artifact `{}` at `{}` using upstream PRD, task, test, and review evidence. Do not create placeholder content.",
             artifact.requested,
@@ -166,6 +219,50 @@ fn inventory_item(
         ),
         "required_tests": [],
     })
+}
+
+fn invalid_inventory_item(
+    project: &Path,
+    run: &WorkflowRun,
+    artifact: &InvalidArtifact,
+) -> serde_json::Value {
+    let root = target_root(project, run, &artifact.resolved);
+    let source_repository_root =
+        configured_repository_root(run, project).map(|root| root.display().to_string());
+    let mut repair_guidance = crate::required_artifact_repair_guidance::guidance(
+        project,
+        &artifact.requested,
+        &artifact.resolved,
+        Some(&artifact.reason),
+    );
+    add_source_repository_guidance(&mut repair_guidance, source_repository_root.as_deref());
+    serde_json::json!({
+        "kind": "invalid_required_artifact",
+        "artifact_path": artifact.requested,
+        "resolved_path": artifact.resolved,
+        "target_files": [artifact.resolved],
+        "target_repository_root": root.display().to_string(),
+        "source_repository_root": source_repository_root,
+        "reason": artifact.reason,
+        "repair_guidance": repair_guidance,
+        "task": format!(
+            "Repair the required workflow artifact `{}` at `{}`. Current artifact is invalid: {}. Use upstream PRD, task, test, and review evidence. Do not create placeholder content.",
+            artifact.requested,
+            artifact.resolved,
+            artifact.reason
+        ),
+        "required_tests": [],
+    })
+}
+
+fn add_source_repository_guidance(guidance: &mut serde_json::Value, source_root: Option<&str>) {
+    let Some(source_root) = source_root else {
+        return;
+    };
+    guidance["source_repository_root"] = serde_json::json!(source_root);
+    guidance["code_repair_instruction"] = serde_json::json!(
+        "If the project command cannot materialize the artifact because the implementation is stubbed or incomplete, repair source code in source_repository_root and rerun the materialization command before returning blocked evidence."
+    );
 }
 
 fn target_root(project: &Path, run: &WorkflowRun, resolved: &str) -> PathBuf {
@@ -210,6 +307,9 @@ fn configured_repository_root(run: &WorkflowRun, project: &Path) -> Option<PathB
 }
 
 fn check_artifact_path(roots: &[PathBuf], requested: &str) -> CheckedArtifact {
+    if requested.contains('*') {
+        return check_artifact_glob(roots, requested);
+    }
     let candidates = path_candidates(roots, requested);
     let resolved = candidates
         .iter()
@@ -222,6 +322,28 @@ fn check_artifact_path(roots: &[PathBuf], requested: &str) -> CheckedArtifact {
         resolved: resolved.display().to_string(),
         exists: resolved.exists(),
     }
+}
+
+fn check_artifact_glob(roots: &[PathBuf], requested: &str) -> CheckedArtifact {
+    let candidates = path_candidates(roots, requested);
+    let resolved = candidates
+        .iter()
+        .find_map(|path| first_glob_match(path.as_path()))
+        .or_else(|| candidates.first().cloned())
+        .unwrap_or_else(|| PathBuf::from(requested));
+    CheckedArtifact {
+        requested: requested.to_string(),
+        resolved: resolved.display().to_string(),
+        exists: !resolved.display().to_string().contains('*') && resolved.exists(),
+    }
+}
+
+fn first_glob_match(pattern: &Path) -> Option<PathBuf> {
+    let pattern = pattern.to_string_lossy();
+    glob::glob(&pattern)
+        .ok()?
+        .flatten()
+        .find(|path| path.is_file())
 }
 
 fn path_candidates(roots: &[PathBuf], requested: &str) -> Vec<PathBuf> {
@@ -260,6 +382,78 @@ fn project_root(store: &WorkflowStore) -> PathBuf {
     root.parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| root.to_path_buf())
+}
+
+fn validate_required_artifact(
+    _run: &WorkflowRun,
+    artifact: &CheckedArtifact,
+) -> Option<InvalidArtifact> {
+    let path = Path::new(&artifact.resolved);
+    let meta = std::fs::metadata(path).ok()?;
+    let reason = if !meta.is_file() {
+        Some("artifact path is not a file".to_string())
+    } else if meta.len() == 0 {
+        Some("artifact file is empty".to_string())
+    } else if textual_artifact(path) {
+        validate_text_artifact(path, meta.len())
+    } else {
+        None
+    }?;
+    Some(InvalidArtifact {
+        requested: artifact.requested.clone(),
+        resolved: artifact.resolved.clone(),
+        reason,
+    })
+}
+
+fn textual_artifact(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "csv" | "json" | "md" | "toml" | "txt" | "yaml" | "yml"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn validate_text_artifact(path: &Path, size: u64) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let trimmed = text.trim();
+    if trimmed.len() < 16 {
+        return Some("text artifact is too small to contain useful evidence".to_string());
+    }
+    if placeholder_text(trimmed) {
+        return Some("text artifact appears to be placeholder content".to_string());
+    }
+    if path.extension().and_then(|ext| ext.to_str()) == Some("json")
+        && invalid_json_artifact(trimmed)
+    {
+        return Some("json artifact is empty or invalid".to_string());
+    }
+    if size < 32 && trimmed.lines().count() <= 1 {
+        return Some("text artifact is too small to be a real deliverable".to_string());
+    }
+    None
+}
+
+fn placeholder_text(trimmed: &str) -> bool {
+    let lower = trimmed.to_ascii_lowercase();
+    matches!(lower.as_str(), "todo" | "tbd" | "placeholder" | "dummy")
+        || lower.contains("placeholder content")
+        || lower.contains("synthetic evidence")
+        || lower.contains("not implemented")
+}
+
+fn invalid_json_artifact(trimmed: &str) -> bool {
+    match serde_json::from_str::<Value>(trimmed) {
+        Ok(Value::Null) => true,
+        Ok(Value::Array(values)) => values.is_empty(),
+        Ok(Value::Object(fields)) => fields.is_empty(),
+        Ok(_) => false,
+        Err(_) => true,
+    }
 }
 
 fn dedupe_paths(paths: &mut Vec<PathBuf>) {

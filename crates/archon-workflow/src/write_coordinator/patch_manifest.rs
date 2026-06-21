@@ -5,6 +5,7 @@
 //! the declared contract before it touches canonical, and persist the durable
 //! manifest + patch evidence.
 
+mod code_hygiene;
 mod secret_scan;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -66,10 +67,27 @@ pub enum PatchError {
     GitDiffFailed { stderr: String },
     #[error("patch writes undeclared path '{path}'")]
     UndeclaredWrite { path: String },
+    #[error(
+        "dynamic target adoption limit reached at undeclared path '{path}' after {adopted} adopted target(s), max {max}"
+    )]
+    DynamicTargetAdoptionLimit {
+        path: String,
+        adopted: usize,
+        max: usize,
+    },
     #[error("patch path '{path}' escapes repository via symlink")]
     SymlinkEscape { path: String },
     #[error("file '{path}' is {size} bytes, exceeds max {max}")]
     FileTooLarge { path: String, size: u64, max: u64 },
+    #[error("source file '{path}' is {lines} lines, exceeds max {max}")]
+    FileTooManyLines { path: String, lines: u32, max: u32 },
+    #[error("function '{function}' in '{path}' has complexity {complexity}, exceeds max {max}")]
+    FunctionTooComplex {
+        path: String,
+        function: String,
+        complexity: u32,
+        max: u32,
+    },
     #[error("patch is {size} bytes, exceeds max {max}")]
     PatchTooLarge { size: u64, max: u64 },
     #[error("secret '{rule}' detected in patch: {line_preview}")]
@@ -81,6 +99,8 @@ pub enum PatchError {
     EmptyPatch,
     #[error("agent output not usable: {detail}")]
     OutputNotUsable { detail: String },
+    #[error("verification blocked after patch: {detail}")]
+    VerificationBlockedAfterPatch { detail: String },
     #[error("failed to persist manifest: {source}")]
     PersistFailed {
         #[source]
@@ -270,11 +290,22 @@ pub fn validate_patch(
         validate_changed_file(file, plan)?;
     }
     validate_size_budget(captured, plan, cfg)?;
+    code_hygiene::validate(captured, plan, cfg)?;
     // VAL-WC-006 secret scan.
     if let Some((rule, line_preview)) = secret_scan::secret_scan(&captured.patch_bytes) {
         return Err(PatchError::SecretDetected { rule, line_preview });
     }
-    // VAL-WC-007 empty patch only with declared idempotent_noop + matching hashes.
+    if let Err(err) = crate::executor_output::ensure_output_usable(agent_output_body) {
+        let detail = err.to_string();
+        return Err(if captured.patch_bytes.is_empty() {
+            PatchError::OutputNotUsable { detail }
+        } else {
+            PatchError::VerificationBlockedAfterPatch { detail }
+        });
+    }
+    // VAL-WC-007 empty patch is an idempotent no-op when target hashes did not
+    // change and the agent output is otherwise usable. Exact JSON remains
+    // supported, but prose "no missing work" responses no longer brick a retry.
     if captured.patch_bytes.is_empty() {
         let idempotent = serde_json::from_str::<serde_json::Value>(agent_output_body)
             .ok()
@@ -283,16 +314,11 @@ pub fn validate_patch(
                     .and_then(serde_json::Value::as_bool)
             })
             .unwrap_or(false);
-        if !(idempotent && captured.pre_hashes == captured.post_hashes) {
+        let unchanged_targets = captured.pre_hashes == captured.post_hashes;
+        if !(idempotent || unchanged_targets) {
             return Err(PatchError::EmptyPatch);
         }
     }
-    // VAL-WC-008 reuse the canonical output-usability gate.
-    crate::executor_output::ensure_output_usable(agent_output_body).map_err(|e| {
-        PatchError::OutputNotUsable {
-            detail: e.to_string(),
-        }
-    })?;
     // VAL-WC-004 deferred to patch_apply.rs (TASK-WC-006).
     Ok(())
 }

@@ -64,6 +64,7 @@ fn quality_gate_stage(key: &str, value: &Value, existing: &BTreeSet<String>) -> 
         verify_command: None,
         max_parallelism: None,
         item_kind: None,
+        filter: None,
         extra,
     })
 }

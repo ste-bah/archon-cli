@@ -14,10 +14,12 @@ use serde::{Deserialize, Serialize};
 use super::ItemId;
 use super::WaveId;
 use super::patch_manifest::{ManifestStatus, PatchManifest, persist_manifest_status_update};
-use super::worktree_isolation::{IsolationError, run_git};
+use super::worktree_isolation::IsolationError;
 
 const TAIL_BYTES: usize = 4096;
 
+mod apply_git;
+mod file_backup;
 mod lock;
 pub use lock::lock_path_for;
 use lock::with_repo_lock_default;
@@ -134,6 +136,8 @@ mod system_time_millis {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerifyResult {
     pub exit: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
     pub stdout_tail: String,
     pub stderr_tail: String,
     pub duration_ms: u64,
@@ -240,6 +244,11 @@ fn apply_one(
     rec: &mut ApplyRecord,
 ) -> Result<(), ApplyError> {
     let mut updated = m.clone();
+    if matches!(m.status, ManifestStatus::IdempotentNoop) {
+        updated.status = ManifestStatus::IdempotentNoop;
+        persist_status(run_root, run_id, stage_id, &m.item_id, &updated)?;
+        return Ok(());
+    }
     // VAL-WC-004 stale recheck — only files this item INTENDS to mutate.
     if let Some(path) = stale_target(canonical_root, m, pre_hashes_by_item) {
         updated.status = ManifestStatus::Failed {
@@ -250,11 +259,10 @@ fn apply_one(
         persist_status(run_root, run_id, stage_id, &m.item_id, &updated)?;
         return Ok(());
     }
+    let backup = file_backup::FileBackups::capture(canonical_root, &m.changed_files)
+        .map_err(ApplyError::LockIo)?;
     let patch_str = m.patch_path.to_string_lossy().into_owned();
-    match run_git(
-        &["apply", "--3way", "--whitespace=nowarn", &patch_str],
-        canonical_root,
-    ) {
+    match apply_git::apply_patch(canonical_root, &patch_str, &m.changed_files) {
         Ok(_) => {
             updated.post_hashes = hash_targets(canonical_root, &m.declared_target_files);
             updated.status = ManifestStatus::Applied;
@@ -263,8 +271,12 @@ fn apply_one(
             Ok(())
         }
         Err(IsolationError::ProcessFailed { stderr }) => {
-            cleanup_conflict_markers(canonical_root, &m.changed_files);
             let reason = stderr.lines().next().unwrap_or("").to_string();
+            let restore_error = backup.restore(canonical_root).err();
+            let reason = match restore_error {
+                Some(err) => format!("{reason}; restore failed: {err}"),
+                None => reason,
+            };
             updated.status = ManifestStatus::Failed {
                 reason: reason.clone(),
             };
@@ -293,15 +305,6 @@ fn stale_target(
                 .is_some_and(|exp| now.as_deref() != Some(exp))
         })
         .cloned()
-}
-
-fn cleanup_conflict_markers(canonical_root: &Path, changed: &[String]) {
-    if changed.is_empty() {
-        return;
-    }
-    let mut args: Vec<&str> = vec!["checkout", "HEAD", "--"];
-    args.extend(changed.iter().map(String::as_str));
-    let _ = run_git(&args, canonical_root);
 }
 
 fn hash_file(path: &Path) -> Option<String> {
@@ -347,6 +350,7 @@ pub fn run_wave_verify(
     let Some(cmd) = verify_command else {
         let result = VerifyResult {
             exit: 0,
+            command: None,
             stdout_tail: String::new(),
             stderr_tail: String::new(),
             duration_ms: 0,
@@ -370,6 +374,7 @@ pub fn run_wave_verify(
     let duration_ms = start.elapsed().map(|d| d.as_millis() as u64).unwrap_or(0);
     let result = VerifyResult {
         exit: output.status.code().unwrap_or(-1),
+        command: Some(cmd.to_string()),
         stdout_tail: utf8_safe_tail(&output.stdout, TAIL_BYTES),
         stderr_tail: utf8_safe_tail(&output.stderr, TAIL_BYTES),
         duration_ms,
@@ -466,6 +471,9 @@ fn utf8_safe_tail(bytes: &[u8], max: usize) -> String {
     }
 }
 
+#[cfg(test)]
+#[path = "patch_apply_dirty_tests.rs"]
+mod dirty_tests;
 #[cfg(test)]
 #[path = "patch_apply_tests.rs"]
 mod tests;

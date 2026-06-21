@@ -137,13 +137,25 @@ export type WorkflowEventPreview = { runId: string, seq: number, kind: string, s
 
 export type WorkflowControlPreview = { action: string, enabled: boolean, policyReason: string, };
 
-export type WorkflowRunDetail = { summary: WorkflowRunSummary, stages: Array<WorkflowStageView>, artifacts: Array<WorkflowArtifactView>, events: Array<WorkflowEventPreview>, };
+export type WorkflowRunDetail = { summary: WorkflowRunSummary, bundle: WorkflowBundleView | null, approval: WorkflowApprovalView | null, harness: string | null, compiledSpec: string | null, stages: Array<WorkflowStageView>, agents: Array<WorkflowAgentView>, v2Results: Array<WorkflowV2ResultView>, v2Branches: Array<WorkflowV2BranchView>, artifacts: Array<WorkflowArtifactView>, events: Array<WorkflowEventPreview>, };
 
-export type WorkflowStageView = { id: string, status: string, attempt: number, artifacts: number, error: string | null, };
+export type WorkflowStageView = { id: string, status: string, attempt: number, startedAt: string | null, completedAt: string | null, artifacts: number, error: string | null, };
 
 export type WorkflowArtifactView = { id: string, path: string, producingStage: string, contentHash: string, };
 
-export type WorkflowControlRequest = { runId: string, action: string, stageId: string | null, rationale: string | null, confirmationToken: string | null, };
+export type WorkflowBundleView = { workflowPath: string, compiledSpecPath: string, workflowHash: string, compiledHash: string, phaseCount: number, maxAgents: number, maxParallelism: number, writeCapableStages: Array<string>, };
+
+export type WorkflowApprovalView = { workflowHash: string, projectRoot: string, workflowName: string, phaseCount: number, maxAgents: number, maxParallelism: number, writeCapableStages: Array<string>, externalRequirements: Array<string>, costWarning: string, rawScriptPath: string, compiledSpecPath: string, decision: string | null, decidedAt: string | null, decidedBy: string | null, };
+
+export type WorkflowAgentView = { stageId: string, itemId: string, status: string, promptPath: string | null, inputHash: string | null, promptHash: string | null, promptCreatedAt: string | null, provider: string | null, model: string | null, tokensIn: number, tokensOut: number, costUsd: number, artifactId: string | null, artifactPath: string | null, resultPreview: string | null, error: string | null, recentPublicToolCalls: Array<WorkflowToolCallPreview>, outputPath: string, };
+
+export type WorkflowV2ResultView = { callId: string, status: string, summary: string, resultPath: string, artifactCount: number, branchCount: number, };
+
+export type WorkflowV2BranchView = { callId: string, itemId: string, role: string, status: string, summary: string | null, error: string | null, outputPath: string, };
+
+export type WorkflowToolCallPreview = { toolName: string, inputPreview: string | null, outputPreview: string | null, };
+
+export type WorkflowControlRequest = { runId: string, action: string, stageId: string | null, itemId: string | null, rationale: string | null, confirmationToken: string | null, };
 
 export type WorkflowControlResponse = { allowed: boolean, policyReason: string, run: WorkflowRunSummary | null, };
 

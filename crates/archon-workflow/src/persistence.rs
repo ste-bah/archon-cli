@@ -102,18 +102,80 @@ pub(crate) fn record_agent_output(
     accepted: bool,
     error: Option<&str>,
 ) -> WorkflowResult<()> {
+    record_agent_output_with_status(
+        store,
+        run_id,
+        stage_id,
+        item_id,
+        output,
+        artifact,
+        if accepted { "accepted" } else { "failed" },
+        accepted,
+        error,
+    )
+}
+
+pub(crate) fn record_blocked_agent_output(
+    store: &WorkflowStore,
+    run_id: &str,
+    stage_id: &str,
+    item_id: &str,
+    output: Option<&StageRunOutput>,
+    artifact: Option<&ArtifactRef>,
+    error: Option<&str>,
+) -> WorkflowResult<()> {
+    record_agent_output_with_status(
+        store, run_id, stage_id, item_id, output, artifact, "blocked", false, error,
+    )
+}
+
+pub(crate) fn record_captured_agent_output(
+    store: &WorkflowStore,
+    run_id: &str,
+    stage_id: &str,
+    item_id: &str,
+    output: &StageRunOutput,
+) -> WorkflowResult<()> {
+    record_agent_output_with_status(
+        store,
+        run_id,
+        stage_id,
+        item_id,
+        Some(output),
+        None,
+        "captured",
+        false,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_agent_output_with_status(
+    store: &WorkflowStore,
+    run_id: &str,
+    stage_id: &str,
+    item_id: &str,
+    output: Option<&StageRunOutput>,
+    artifact: Option<&ArtifactRef>,
+    status: &str,
+    accepted: bool,
+    error: Option<&str>,
+) -> WorkflowResult<()> {
     let record = sanitize_value(json!({
         "schema": "archon.workflow.agent_output.v1",
         "run_id": run_id,
         "stage_id": stage_id,
         "item_id": item_id,
-        "status": if accepted { "accepted" } else { "failed" },
+        "status": status,
         "accepted": accepted,
         "provider": output.and_then(|o| o.provider_id.as_deref()),
         "model": output.and_then(|o| o.resolved_model.as_deref()),
         "tokens_in": output.map_or(0, |o| o.tokens_in),
         "tokens_out": output.map_or(0, |o| o.tokens_out),
         "cost_usd": output.map_or(0.0, |o| o.cost_usd),
+        "recent_public_tool_calls": output
+            .map(|o| o.tool_uses.iter().take(20).cloned().collect::<Vec<_>>())
+            .unwrap_or_default(),
         "artifact": artifact.map(artifact_json),
         "body": output.map(|o| public_body(&o.body)),
         "error": error,

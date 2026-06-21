@@ -5,44 +5,30 @@ use serde_json::Value;
 use crate::spec::{ProviderTier, RetryPolicy, StageKind, StageSpec, WorkflowSpec};
 
 pub(super) fn ensure_generated_remediation_loop(spec: &mut WorkflowSpec) {
-    if !has_write_capable_stage(spec) || has_remediation_stage(spec) {
+    if !has_write_capable_stage(spec)
+        || has_remediation_stage(spec)
+        || !generated_remediation_loop_requested(spec)
+    {
         return;
     }
-    let Some(gate_idx) = spec
-        .stages
-        .iter()
-        .rposition(|stage| stage.kind == StageKind::QualityGate)
-    else {
-        return;
-    };
-    let gate_deps = spec.stages[gate_idx].depends_on.clone();
-    let inventory_deps = remediation_inventory_deps(spec, gate_idx, &gate_deps);
-    if inventory_deps.is_empty() {
-        return;
+    let mut gate_idx = 0;
+    while gate_idx < spec.stages.len() {
+        if spec.stages[gate_idx].kind != StageKind::QualityGate
+            || !has_write_capable_stage_before(spec, gate_idx)
+        {
+            gate_idx += 1;
+            continue;
+        }
+        let gate_deps = spec.stages[gate_idx].depends_on.clone();
+        let inventory_deps = remediation_inventory_deps(spec, gate_idx, &gate_deps);
+        if inventory_deps.is_empty() {
+            gate_idx += 1;
+            continue;
+        }
+        let report_id = insert_remediation_loop_before_gate(spec, gate_idx, inventory_deps);
+        spec.stages[gate_idx + 5].depends_on = vec![report_id];
+        gate_idx += 6;
     }
-    let existing = spec
-        .stages
-        .iter()
-        .map(|stage| stage.id.clone())
-        .collect::<BTreeSet<_>>();
-    let inventory_id = unique_stage_id("remediation-inventory", &existing);
-    let repair_id = unique_stage_id("remediate-failed-findings", &existing);
-    let tests_id = unique_stage_id("post-remediation-focused-tests", &existing);
-    let review_id = unique_stage_id("post-remediation-adversarial-review", &existing);
-    let report_id = unique_stage_id("post-remediation-acceptance-report", &existing);
-    let post_review_deps =
-        post_remediation_review_deps(&inventory_id, &repair_id, &tests_id, &inventory_deps);
-    let stages = vec![
-        remediation_inventory_stage(&inventory_id, inventory_deps),
-        remediation_fanout_stage(&repair_id, &inventory_id),
-        post_remediation_tests_stage(&tests_id, &repair_id, &inventory_id),
-        post_remediation_review_stage(&review_id, post_review_deps),
-        remediation_report_stage(&report_id, &tests_id, &review_id),
-    ];
-    for (offset, stage) in stages.into_iter().enumerate() {
-        spec.stages.insert(gate_idx + offset, stage);
-    }
-    spec.stages[gate_idx + 5].depends_on = vec![report_id];
 }
 
 pub(super) fn implementation_target_inventory_stage(id: &str, original: &StageSpec) -> StageSpec {
@@ -86,11 +72,88 @@ fn has_write_capable_stage(spec: &WorkflowSpec) -> bool {
     })
 }
 
+fn has_write_capable_stage_before(spec: &WorkflowSpec, idx: usize) -> bool {
+    spec.stages.iter().take(idx).any(|stage| {
+        stage.kind == StageKind::Implementation
+            || stage.item_kind == Some(StageKind::Implementation)
+    })
+}
+
 fn has_remediation_stage(spec: &WorkflowSpec) -> bool {
     spec.stages.iter().any(|stage| {
         let id = stage.id.to_ascii_lowercase();
         id.contains("remediation") || id.contains("remediate") || id.contains("repair")
     })
+}
+
+fn generated_remediation_loop_requested(spec: &WorkflowSpec) -> bool {
+    if task_requests_remediation_loop(&spec.task) {
+        return true;
+    }
+    spec.stages.iter().any(|stage| {
+        bool_extra(stage, "enable_generated_remediation_loop")
+            || bool_extra(stage, "require_remediation_loop")
+            || stage
+                .input
+                .get("enable_generated_remediation_loop")
+                .and_then(Value::as_bool)
+                == Some(true)
+            || stage
+                .input
+                .get("require_remediation_loop")
+                .and_then(Value::as_bool)
+                == Some(true)
+    })
+}
+
+fn task_requests_remediation_loop(task: &str) -> bool {
+    let task = task.to_ascii_lowercase();
+    task.contains("fix every issue")
+        || task.contains("fix every issue found")
+        || task.contains("fix all issues")
+        || (task.contains("adversarial review")
+            && (task.contains("before continuing")
+                || task.contains("before moving")
+                || task.contains("before proceeding")))
+}
+
+fn bool_extra(stage: &StageSpec, key: &str) -> bool {
+    stage.extra.get(key).and_then(Value::as_bool) == Some(true)
+}
+
+fn insert_remediation_loop_before_gate(
+    spec: &mut WorkflowSpec,
+    gate_idx: usize,
+    inventory_deps: Vec<String>,
+) -> String {
+    let existing = spec
+        .stages
+        .iter()
+        .map(|stage| stage.id.clone())
+        .collect::<BTreeSet<_>>();
+    let inventory_id = unique_stage_id("remediation-inventory", &existing);
+    let mut existing = existing;
+    existing.insert(inventory_id.clone());
+    let repair_id = unique_stage_id("remediate-failed-findings", &existing);
+    existing.insert(repair_id.clone());
+    let tests_id = unique_stage_id("post-remediation-focused-tests", &existing);
+    existing.insert(tests_id.clone());
+    let review_id = unique_stage_id("post-remediation-adversarial-review", &existing);
+    existing.insert(review_id.clone());
+    let report_id = unique_stage_id("post-remediation-acceptance-report", &existing);
+    let post_review_deps =
+        post_remediation_review_deps(&inventory_id, &repair_id, &tests_id, &inventory_deps);
+    let stages = vec![
+        remediation_inventory_stage(&inventory_id, inventory_deps),
+        remediation_fanout_stage(&repair_id, &inventory_id),
+        post_remediation_tests_stage(&tests_id, &repair_id, &inventory_id),
+        post_remediation_review_stage(&review_id, post_review_deps),
+        remediation_report_stage(&report_id, &tests_id, &review_id),
+    ];
+    for (offset, stage) in stages.into_iter().enumerate() {
+        spec.stages.insert(gate_idx + offset, stage);
+    }
+    report_id
 }
 
 fn remediation_inventory_deps(
@@ -177,6 +240,7 @@ fn generated_stage(
         verify_command: None,
         max_parallelism: None,
         item_kind: None,
+        filter: None,
         extra: BTreeMap::new(),
     }
 }
@@ -196,6 +260,7 @@ fn remediation_inventory_stage(id: &str, depends_on: Vec<String>) -> StageSpec {
     stage
         .extra
         .insert("deterministic_empty_items".into(), Value::Bool(true));
+    mark_failure_aware(&mut stage);
     stage
 }
 
@@ -213,6 +278,7 @@ fn remediation_fanout_stage(id: &str, inventory_id: &str) -> StageSpec {
     stage
         .extra
         .insert("allow_empty_items".into(), Value::Bool(true));
+    mark_failure_aware(&mut stage);
     stage
 }
 
@@ -222,7 +288,7 @@ fn post_remediation_tests_stage(id: &str, repair_id: &str, inventory_id: &str) -
         StageKind::Agent,
         ProviderTier::Coder,
         vec![repair_id.to_string(), inventory_id.to_string()],
-        "Run focused verification for remediation items. Return status: verified only when commands pass; otherwise return status: failed, failed_timeout, or unverifiable with exact commands and evidence.",
+        "Run focused verification for remediation items. If the remediation inventory emits exactly {\"items\": []} and upstream review evidence has no current blockers, return status: verified with no-op evidence; do not return unverifiable only because there were no remediation items. Otherwise return status: verified only when required commands pass, or failed/failed_timeout/unverifiable with exact commands and evidence.",
     );
     stage.extra.insert(
         "allowed_tools".into(),
@@ -233,17 +299,20 @@ fn post_remediation_tests_stage(id: &str, repair_id: &str, inventory_id: &str) -
             Value::String("Bash".into()),
         ]),
     );
+    mark_failure_aware(&mut stage);
     stage
 }
 
 fn post_remediation_review_stage(id: &str, depends_on: Vec<String>) -> StageSpec {
-    generated_stage(
+    let mut stage = generated_stage(
         id,
         StageKind::Agent,
         ProviderTier::Critic,
         depends_on,
         "Re-run adversarial verification after remediation. Return status: verified only if every original blocker is fixed or no remediation was needed. Return status: failed or unverifiable for remaining blockers.",
-    )
+    );
+    mark_failure_aware(&mut stage);
+    stage
 }
 
 fn remediation_report_stage(id: &str, tests_id: &str, review_id: &str) -> StageSpec {
@@ -256,5 +325,12 @@ fn remediation_report_stage(id: &str, tests_id: &str, review_id: &str) -> StageS
     );
     stage.agent = None;
     stage.reducer = Some(crate::spec::ReducerKind::EvidenceWeightedReport);
+    mark_failure_aware(&mut stage);
     stage
+}
+
+fn mark_failure_aware(stage: &mut StageSpec) {
+    stage
+        .extra
+        .insert("failure_aware".into(), Value::Bool(true));
 }

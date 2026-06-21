@@ -22,6 +22,15 @@ pub struct WriteCoordinatorConfig {
     /// Reject any single file in a patch larger than this many bytes.
     #[serde(default = "default_max_file_bytes")]
     pub max_file_bytes: u64,
+    /// Reject changed source files above this many lines before apply.
+    #[serde(default = "default_max_source_file_lines")]
+    pub max_source_file_lines: u32,
+    /// Reject changed function-like blocks above this cyclomatic score.
+    #[serde(default = "default_max_function_complexity")]
+    pub max_function_complexity: u32,
+    /// Maximum safe undeclared files a serial item may adopt dynamically.
+    #[serde(default = "default_max_dynamic_target_adoptions")]
+    pub max_dynamic_target_adoptions: usize,
     /// Fail validation when an implementation fanout item declares no targets.
     #[serde(default = "default_fail_on_undeclared_write")]
     pub fail_on_undeclared_write: bool,
@@ -38,6 +47,9 @@ impl Default for WriteCoordinatorConfig {
             retain_failed_worktrees: default_retain_failed(),
             max_patch_bytes: default_max_patch_bytes(),
             max_file_bytes: default_max_file_bytes(),
+            max_source_file_lines: default_max_source_file_lines(),
+            max_function_complexity: default_max_function_complexity(),
+            max_dynamic_target_adoptions: default_max_dynamic_target_adoptions(),
             fail_on_undeclared_write: default_fail_on_undeclared_write(),
             allow_dirty_canonical_repo: default_allow_dirty(),
         }
@@ -58,6 +70,18 @@ fn default_max_patch_bytes() -> u64 {
 
 fn default_max_file_bytes() -> u64 {
     1_048_576
+}
+
+fn default_max_source_file_lines() -> u32 {
+    500
+}
+
+fn default_max_function_complexity() -> u32 {
+    15
+}
+
+fn default_max_dynamic_target_adoptions() -> usize {
+    64
 }
 
 fn default_fail_on_undeclared_write() -> bool {
@@ -86,5 +110,8 @@ mod tests {
         assert_eq!(cfg.max_patch_bytes, 1024);
         assert!(cfg.fail_on_undeclared_write);
         assert!(cfg.retain_failed_worktrees);
+        assert_eq!(cfg.max_source_file_lines, 500);
+        assert_eq!(cfg.max_function_complexity, 15);
+        assert_eq!(cfg.max_dynamic_target_adoptions, 64);
     }
 }

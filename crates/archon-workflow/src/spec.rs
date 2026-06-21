@@ -87,6 +87,8 @@ pub struct StageSpec {
     pub max_parallelism: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item_kind: Option<StageKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
     #[serde(default, flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, serde_json::Value>,
 }
@@ -284,6 +286,15 @@ impl WorkflowSpec {
             if let Some(error) = crate::spec_inference::missing_item_kind_error(stage) {
                 return Err(WorkflowError::SpecInvalid(error));
             }
+            if let Some(filter) = stage.filter.as_deref() {
+                if stage.kind != StageKind::Fanout {
+                    return Err(WorkflowError::SpecInvalid(format!(
+                        "stage '{}' filter is only supported on fanout stages",
+                        stage.id
+                    )));
+                }
+                crate::item_filter::validate_filter(&stage.id, filter)?;
+            }
             match stage.kind {
                 StageKind::Agent => {}
                 StageKind::Fanout => {
@@ -300,6 +311,7 @@ impl WorkflowSpec {
                             stage.id
                         )));
                     }
+                    crate::spec_work_units::validate_inline_implementation_work_units(stage)?;
                 }
                 StageKind::Reduce => {}
                 StageKind::Condition => require(stage, stage.condition.as_deref(), "condition")?,
@@ -311,6 +323,7 @@ impl WorkflowSpec {
                             stage.id
                         )));
                     }
+                    crate::spec_work_units::validate_direct_implementation_work_units(stage)?;
                 }
                 StageKind::Checkpoint | StageKind::QualityGate | StageKind::HumanGate => {}
             }

@@ -68,6 +68,7 @@ impl WorkflowPlanner for HeuristicWorkflowPlanner {
                     verify_command: None,
                     max_parallelism: None,
                     item_kind: None,
+                    filter: None,
                     extra: BTreeMap::new(),
                 },
             ],
@@ -101,6 +102,7 @@ fn agent(id: &str, agent: &str, tier: ProviderTier, depends_on: Vec<&str>) -> St
         verify_command: None,
         max_parallelism: None,
         item_kind: None,
+        filter: None,
         extra: BTreeMap::new(),
     }
 }
@@ -153,6 +155,7 @@ fn reduce(id: &str, reducer: ReducerKind, tier: ProviderTier, depends_on: Vec<&s
         verify_command: None,
         max_parallelism: None,
         item_kind: None,
+        filter: None,
         extra: BTreeMap::new(),
     }
 }

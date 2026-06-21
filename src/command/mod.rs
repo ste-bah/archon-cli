@@ -211,6 +211,7 @@ pub(crate) mod web;
 pub(crate) mod web_chat;
 pub(crate) mod workflow;
 pub(crate) mod workflow_live;
+pub(crate) mod workflow_status_blocks;
 pub(crate) mod workflow_world_learning;
 pub(crate) mod world_model;
 

@@ -7,14 +7,11 @@ use serde_json::Value;
 use crate::required_artifacts::required_artifact_paths;
 use crate::spec::{StageKind, WorkflowSpec};
 
-const MAX_REFERENCED_FILES: usize = 16;
-const MAX_REFERENCED_BYTES: usize = 256 * 1024;
+const MAX_REFERENCED_FILES: usize = 256;
+const MAX_REFERENCED_BYTES: usize = 1024 * 1024;
 
 pub(crate) fn ensure_final_required_artifacts(spec: &mut WorkflowSpec) {
     let inferred = infer_required_artifacts(spec);
-    if inferred.is_empty() {
-        return;
-    }
     let Some(gate) = spec
         .stages
         .iter_mut()
@@ -22,19 +19,29 @@ pub(crate) fn ensure_final_required_artifacts(spec: &mut WorkflowSpec) {
     else {
         return;
     };
-    let mut paths = required_artifact_paths(gate);
-    paths.extend(inferred);
-    paths.sort();
-    paths.dedup();
-    if paths.is_empty() {
+    if inferred.is_empty() {
         return;
     }
-    gate.extra.insert(
-        "required_artifacts".into(),
-        Value::Array(paths.into_iter().map(Value::String).collect()),
-    );
+    let hard_required = required_artifact_paths(gate);
     gate.extra
-        .insert("required_artifacts_inferred".into(), Value::Bool(true));
+        .entry("workflow_contracts".into())
+        .or_insert_with(|| contract_report(&hard_required, &inferred));
+    gate.extra
+        .insert("workflow_contracts_inferred".into(), Value::Bool(true));
+    gate.extra
+        .insert("required_artifacts_inferred".into(), Value::Bool(false));
+}
+
+fn contract_report(hard_required: &[String], candidates: &[String]) -> Value {
+    serde_json::json!({
+        "schema": "archon.workflow.contracts.v1",
+        "hard_required_artifacts": hard_required,
+        "candidate_artifacts": candidates,
+        "enforcement": {
+            "hard_required_artifacts": "Only artifacts explicitly declared in the WorkflowSpec are enforced by required_artifacts gates.",
+            "candidate_artifacts": "Paths inferred from task, PRD, or markdown layout text are advisory candidates until a planner or workflow author promotes them explicitly."
+        }
+    })
 }
 
 fn infer_required_artifacts(spec: &WorkflowSpec) -> Vec<String> {
@@ -80,7 +87,8 @@ fn collect_json_strings(value: &Value, out: &mut Vec<String>) {
 }
 
 fn referenced_files(texts: &[String]) -> Vec<PathBuf> {
-    let mut files = BTreeSet::new();
+    let mut explicit_files = BTreeSet::new();
+    let mut dirs = BTreeSet::new();
     for text in texts {
         for token in text.split_whitespace().map(clean_token) {
             if !looks_like_reference(&token) {
@@ -88,21 +96,29 @@ fn referenced_files(texts: &[String]) -> Vec<PathBuf> {
             }
             let path = PathBuf::from(&token);
             if path.is_file() {
-                files.insert(path);
+                explicit_files.insert(path);
             } else if path.is_dir() {
-                for child in markdown_files(&path) {
-                    files.insert(child);
-                    if files.len() >= MAX_REFERENCED_FILES {
-                        return files.into_iter().collect();
-                    }
-                }
-            }
-            if files.len() >= MAX_REFERENCED_FILES {
-                return files.into_iter().collect();
+                dirs.insert(path);
             }
         }
     }
-    files.into_iter().collect()
+    let mut seen = BTreeSet::new();
+    let mut ordered = Vec::new();
+    for file in explicit_files {
+        push_reference_file(file, &mut seen, &mut ordered);
+        if ordered.len() >= MAX_REFERENCED_FILES {
+            return ordered;
+        }
+    }
+    for dir in dirs {
+        for child in markdown_files(&dir) {
+            push_reference_file(child, &mut seen, &mut ordered);
+            if ordered.len() >= MAX_REFERENCED_FILES {
+                return ordered;
+            }
+        }
+    }
+    ordered
 }
 
 fn clean_token(token: &str) -> String {
@@ -133,23 +149,46 @@ fn looks_like_reference(token: &str) -> bool {
 }
 
 fn markdown_files(dir: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut files = entries
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.is_file()
-                && path
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .is_some_and(|ext| matches!(ext, "md" | "yaml" | "yml" | "json"))
-        })
-        .collect::<Vec<_>>();
+    let mut files = Vec::new();
+    collect_markdown_files(dir, &mut files);
     files.sort();
     files.truncate(MAX_REFERENCED_FILES);
     files
+}
+
+fn collect_markdown_files(dir: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
+    entries.sort();
+    for path in entries {
+        if files.len() >= MAX_REFERENCED_FILES {
+            return;
+        }
+        if path.is_dir() {
+            collect_markdown_files(&path, files);
+        } else if is_reference_file(&path) {
+            files.push(path);
+        }
+    }
+}
+
+fn push_reference_file(path: PathBuf, seen: &mut BTreeSet<PathBuf>, ordered: &mut Vec<PathBuf>) {
+    if seen.insert(path.clone()) {
+        ordered.push(path);
+    }
+}
+
+fn is_reference_file(path: &Path) -> bool {
+    path.is_file()
+        && path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| matches!(ext, "md" | "yaml" | "yml" | "json"))
 }
 
 fn read_reference(path: &Path) -> Option<String> {
@@ -162,8 +201,8 @@ fn read_reference(path: &Path) -> Option<String> {
 
 fn collect_inline_project_paths(text: &str, out: &mut BTreeSet<String>) {
     for token in text.split_whitespace().map(clean_token) {
-        if concrete_project_artifact(&token) {
-            out.insert(token);
+        if let Some(path) = project_artifact_pattern(&token) {
+            out.insert(path);
         }
     }
 }
@@ -187,14 +226,16 @@ fn collect_layout_paths(text: &str, out: &mut BTreeSet<String>) {
         while stack.last().is_some_and(|(level, _)| indent <= *level) {
             stack.pop();
         }
-        if line.ends_with('/') && !line.contains('<') {
+        if line.ends_with('/') {
             if let Some(parent) = stack.last().map(|(_, path)| path.clone()) {
-                stack.push((indent, join_path(&parent, line.trim_end_matches('/'))));
+                let child = layout_dir_segment(line.trim_end_matches('/'));
+                stack.push((indent, join_path(&parent, &child)));
             }
-        } else if artifact_leaf(&line)
-            && let Some(parent) = stack.last().map(|(_, path)| path.clone())
-        {
-            out.insert(join_path(&parent, &line));
+        } else if let Some(parent) = stack.last().map(|(_, path)| path.clone()) {
+            let path = join_path(&parent, &line);
+            if let Some(pattern) = project_artifact_pattern(&path) {
+                out.insert(pattern);
+            }
         }
     }
 }
@@ -217,20 +258,69 @@ fn handle_root_line(
     stack.clear();
     if line.ends_with('/') {
         stack.push((indent, cleaned));
-    } else if concrete_project_artifact(&cleaned) {
-        out.insert(cleaned);
+    } else if let Some(pattern) = project_artifact_pattern(&cleaned) {
+        out.insert(pattern);
     }
 }
 
-fn artifact_leaf(line: &str) -> bool {
-    !line.contains('<') && !line.contains('>') && artifact_extension(line)
+fn layout_dir_segment(segment: &str) -> String {
+    if segment.starts_with('<') && segment.ends_with('>') {
+        "*".to_string()
+    } else {
+        segment.to_string()
+    }
+}
+
+fn project_artifact_pattern(path: &str) -> Option<String> {
+    if concrete_project_artifact(path) {
+        return Some(path.to_string());
+    }
+    dynamic_project_artifact_glob(path)
 }
 
 fn concrete_project_artifact(path: &str) -> bool {
-    path.starts_with(".archon/")
+    is_project_artifact_path(path)
         && !path.contains('<')
         && !path.contains('>')
         && artifact_extension(path)
+}
+
+fn dynamic_project_artifact_glob(path: &str) -> Option<String> {
+    if !is_project_artifact_path(path) || !artifact_extension(path) {
+        return None;
+    }
+    let globbed = replace_placeholder_segments(path)?;
+    if globbed.contains('<') || globbed.contains('>') {
+        return None;
+    }
+    Some(globbed)
+}
+
+fn is_project_artifact_path(path: &str) -> bool {
+    path.starts_with(".archon/") || path.contains("/.archon/")
+}
+
+fn replace_placeholder_segments(path: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut chars = path.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '<' {
+            out.push(ch);
+            continue;
+        }
+        let mut closed = false;
+        for inner in chars.by_ref() {
+            if inner == '>' {
+                out.push('*');
+                closed = true;
+                break;
+            }
+        }
+        if !closed {
+            return None;
+        }
+    }
+    (!out.contains('<')).then_some(out)
 }
 
 fn artifact_extension(text: &str) -> bool {

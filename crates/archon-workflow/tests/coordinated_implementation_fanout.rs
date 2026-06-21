@@ -5,18 +5,24 @@
 mod wc_common;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use archon_workflow::write_coordinator::ManifestStatus;
 use archon_workflow::write_coordinator::SerialFallbackReason;
-use archon_workflow::write_coordinator::coordinator::FanoutError;
 use archon_workflow::write_coordinator::patch_apply::{ApplyError, with_repo_lock};
-use archon_workflow::write_coordinator::patch_manifest::PatchError;
 
 use wc_common::{MockAgentRunner, git, init_git_repo, init_plain_dir, run_coordinated};
 
 fn cfg() -> archon_workflow::write_coordinator::WriteCoordinatorConfig {
     archon_workflow::write_coordinator::WriteCoordinatorConfig::default()
+}
+
+fn failed_reason(status: Option<&ManifestStatus>) -> &str {
+    match status {
+        Some(ManifestStatus::Failed { reason }) => reason,
+        other => panic!("expected failed manifest status, got {other:?}"),
+    }
 }
 
 #[test]
@@ -67,31 +73,57 @@ fn ac_wc_003_undeclared_write_contained() {
         for f in declared {
             std::fs::write(root.join(f), format!("// {item}\n")).unwrap();
         }
-        // An undeclared write inside the isolated workspace.
-        std::fs::write(root.join("src/SNEAKY.rs"), "// undeclared\n").unwrap();
+        // An unsafe undeclared write inside the isolated workspace.
+        std::fs::write(root.join(".env"), "SECRET=hunter2\n").unwrap();
         format!("implemented {item}")
     });
     let targets: &[(&str, &[&str])] = &[("a", &["src/a.rs"])];
-    let err = match run_coordinated(
+    let h = run_coordinated(
         repo.path(),
         targets,
         &MockAgentRunner::with_action(action),
         &cfg(),
-    ) {
-        Ok(_) => panic!("undeclared workspace write must fail fast"),
-        Err(err) => err,
-    };
-    match err {
-        FanoutError::Patch(PatchError::UndeclaredWrite { path }) => {
-            assert_eq!(path, "src/SNEAKY.rs");
-        }
-        other => panic!("expected UndeclaredWrite, got {other}"),
-    }
+    )
+    .unwrap();
+    let reason = failed_reason(h.outcome.item_status.get("implement-0"));
+    assert!(reason.contains("undeclared"), "{reason}");
+    assert!(reason.contains(".env"), "{reason}");
     assert!(
-        !repo.path().join("src/SNEAKY.rs").exists(),
+        !repo.path().join(".env").exists(),
         "undeclared write must not reach canonical"
     );
     assert!(!repo.path().join("src/a.rs").exists());
+}
+
+#[test]
+fn safe_single_item_undeclared_source_is_adopted() {
+    let repo = init_git_repo();
+    let action: wc_common::AgentAction = Arc::new(|root, item, declared| {
+        for f in declared {
+            std::fs::write(root.join(f), format!("// {item}\n")).unwrap();
+        }
+        let extra = root.join("crates/archon-tui/src/commands.rs");
+        std::fs::create_dir_all(extra.parent().unwrap()).unwrap();
+        std::fs::write(extra, "// discovered source target\n").unwrap();
+        format!("implemented {item}")
+    });
+    let targets: &[(&str, &[&str])] = &[("a", &["src/a.rs"])];
+    let h = run_coordinated(
+        repo.path(),
+        targets,
+        &MockAgentRunner::with_action(action),
+        &cfg(),
+    )
+    .unwrap();
+    assert_eq!(
+        h.outcome.item_status.get("implement-0"),
+        Some(&ManifestStatus::Applied)
+    );
+    assert!(
+        repo.path()
+            .join("crates/archon-tui/src/commands.rs")
+            .exists()
+    );
 }
 
 #[test]
@@ -391,15 +423,51 @@ fn ac_wc_014_file_size_byte_budget() {
     }
     // limit + 1 is rejected with FileTooLarge.
     let repo = init_git_repo();
-    match run_coordinated(
+    let h = run_coordinated(
         repo.path(),
         targets,
         &MockAgentRunner::with_action(make(limit as usize + 1)),
         &c,
-    ) {
-        Ok(_) => panic!("oversize file must be rejected"),
-        Err(FanoutError::Patch(PatchError::FileTooLarge { .. })) => {}
-        Err(e) => panic!("expected FileTooLarge, got {e}"),
-    }
+    )
+    .unwrap();
+    let reason = failed_reason(h.outcome.item_status.get("implement-0"));
+    assert!(reason.contains("exceeds max"), "{reason}");
     let _ = git; // silence unused import on some cfgs
+}
+
+#[test]
+fn plan_only_confirmation_response_retries_and_applies() {
+    let repo = init_git_repo();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let seen = calls.clone();
+    let action: wc_common::AgentAction = Arc::new(move |root, item, declared| {
+        let call = seen.fetch_add(1, Ordering::SeqCst);
+        if call == 0 {
+            return "I inspected the files and have a plan. Would you like me to proceed?".into();
+        }
+        for file in declared {
+            let path = root.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, format!("// fixed by {item}\n")).unwrap();
+        }
+        format!("implemented {item}")
+    });
+
+    let h = run_coordinated(
+        repo.path(),
+        &[("a", &["src/a.rs"])],
+        &MockAgentRunner::with_action(action),
+        &cfg(),
+    )
+    .unwrap();
+
+    assert_eq!(calls.load(Ordering::SeqCst), 2, "item should retry once");
+    assert_eq!(
+        h.outcome.item_status.get("implement-0"),
+        Some(&ManifestStatus::Applied)
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("src/a.rs")).unwrap(),
+        "// fixed by implement-0\n"
+    );
 }

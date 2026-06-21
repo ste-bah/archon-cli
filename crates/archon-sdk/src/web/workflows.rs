@@ -69,7 +69,14 @@ pub struct WorkflowControlPreview {
 #[ts(rename_all = "camelCase")]
 pub struct WorkflowRunDetail {
     pub summary: WorkflowRunSummary,
+    pub bundle: Option<WorkflowBundleView>,
+    pub approval: Option<WorkflowApprovalView>,
+    pub harness: Option<String>,
+    pub compiled_spec: Option<String>,
     pub stages: Vec<WorkflowStageView>,
+    pub agents: Vec<WorkflowAgentView>,
+    pub v2_results: Vec<WorkflowV2ResultView>,
+    pub v2_branches: Vec<WorkflowV2BranchView>,
     pub artifacts: Vec<WorkflowArtifactView>,
     pub events: Vec<WorkflowEventPreview>,
 }
@@ -81,6 +88,8 @@ pub struct WorkflowStageView {
     pub id: String,
     pub status: String,
     pub attempt: u32,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
     pub artifacts: usize,
     pub error: Option<String>,
 }
@@ -95,6 +104,99 @@ pub struct WorkflowArtifactView {
     pub content_hash: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct WorkflowBundleView {
+    pub workflow_path: String,
+    pub compiled_spec_path: String,
+    pub workflow_hash: String,
+    pub compiled_hash: String,
+    pub phase_count: usize,
+    pub max_agents: u32,
+    pub max_parallelism: u32,
+    pub write_capable_stages: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct WorkflowApprovalView {
+    pub workflow_hash: String,
+    pub project_root: String,
+    pub workflow_name: String,
+    pub phase_count: usize,
+    pub max_agents: u32,
+    pub max_parallelism: u32,
+    pub write_capable_stages: Vec<String>,
+    pub external_requirements: Vec<String>,
+    pub cost_warning: String,
+    pub raw_script_path: String,
+    pub compiled_spec_path: String,
+    pub decision: Option<String>,
+    pub decided_at: Option<String>,
+    pub decided_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct WorkflowAgentView {
+    pub stage_id: String,
+    pub item_id: String,
+    pub status: String,
+    pub prompt_path: Option<String>,
+    pub input_hash: Option<String>,
+    pub prompt_hash: Option<String>,
+    pub prompt_created_at: Option<String>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub tokens_in: u64,
+    pub tokens_out: u64,
+    pub cost_usd: f64,
+    pub artifact_id: Option<String>,
+    pub artifact_path: Option<String>,
+    pub result_preview: Option<String>,
+    pub error: Option<String>,
+    #[serde(default)]
+    pub recent_public_tool_calls: Vec<WorkflowToolCallPreview>,
+    pub output_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct WorkflowV2ResultView {
+    pub call_id: String,
+    pub status: String,
+    pub summary: String,
+    pub result_path: String,
+    pub artifact_count: usize,
+    pub branch_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct WorkflowV2BranchView {
+    pub call_id: String,
+    pub item_id: String,
+    pub role: String,
+    pub status: String,
+    pub summary: Option<String>,
+    pub error: Option<String>,
+    pub output_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct WorkflowToolCallPreview {
+    pub tool_name: String,
+    pub input_preview: Option<String>,
+    pub output_preview: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
@@ -102,6 +204,8 @@ pub struct WorkflowControlRequest {
     pub run_id: String,
     pub action: String,
     pub stage_id: Option<String>,
+    #[serde(default)]
+    pub item_id: Option<String>,
     pub rationale: Option<String>,
     pub confirmation_token: Option<String>,
 }
@@ -261,9 +365,120 @@ fn from_workflow_summary(
 fn from_detail(value: archon_workflow::web_api::WorkflowRunDetail) -> WorkflowRunDetail {
     WorkflowRunDetail {
         summary: from_run(value.summary),
+        bundle: value.bundle.map(from_bundle),
+        approval: value.approval.map(from_approval),
+        harness: value.harness,
+        compiled_spec: value.compiled_spec,
         stages: value.stages.into_iter().map(from_stage).collect(),
+        agents: value.agents.into_iter().map(from_agent).collect(),
+        v2_results: value.v2_results.into_iter().map(from_v2_result).collect(),
+        v2_branches: value.v2_branches.into_iter().map(from_v2_branch).collect(),
         artifacts: value.artifacts.into_iter().map(from_artifact).collect(),
         events: value.events.into_iter().map(from_event).collect(),
+    }
+}
+
+fn from_approval(value: archon_workflow::web_api::WorkflowApprovalView) -> WorkflowApprovalView {
+    WorkflowApprovalView {
+        workflow_hash: value.workflow_hash,
+        project_root: value.project_root,
+        workflow_name: value.workflow_name,
+        phase_count: value.phase_count,
+        max_agents: value.max_agents,
+        max_parallelism: value.max_parallelism,
+        write_capable_stages: value.write_capable_stages,
+        external_requirements: value.external_requirements,
+        cost_warning: value.cost_warning,
+        raw_script_path: value.raw_script_path,
+        compiled_spec_path: value.compiled_spec_path,
+        decision: value.decision,
+        decided_at: value.decided_at,
+        decided_by: value.decided_by,
+    }
+}
+
+fn from_bundle(value: archon_workflow::web_api::WorkflowBundleView) -> WorkflowBundleView {
+    WorkflowBundleView {
+        workflow_path: value.workflow_path,
+        compiled_spec_path: value.compiled_spec_path,
+        workflow_hash: value.workflow_hash,
+        compiled_hash: value.compiled_hash,
+        phase_count: value.phase_count,
+        max_agents: value.max_agents,
+        max_parallelism: value.max_parallelism,
+        write_capable_stages: value.write_capable_stages,
+    }
+}
+
+fn from_agent(value: archon_workflow::web_api::WorkflowAgentView) -> WorkflowAgentView {
+    WorkflowAgentView {
+        stage_id: value.stage_id,
+        item_id: value.item_id,
+        status: value.status,
+        prompt_path: value.prompt_path,
+        input_hash: value.input_hash,
+        prompt_hash: value.prompt_hash,
+        prompt_created_at: value.prompt_created_at,
+        provider: value.provider,
+        model: value.model,
+        tokens_in: value.tokens_in,
+        tokens_out: value.tokens_out,
+        cost_usd: value.cost_usd,
+        artifact_id: value.artifact_id,
+        artifact_path: value.artifact_path,
+        result_preview: value.result_preview,
+        error: value.error,
+        recent_public_tool_calls: value
+            .recent_public_tool_calls
+            .into_iter()
+            .map(from_tool_call)
+            .collect(),
+        output_path: value.output_path,
+    }
+}
+
+fn from_v2_result(value: archon_workflow::web_api::WorkflowV2ResultView) -> WorkflowV2ResultView {
+    WorkflowV2ResultView {
+        call_id: value.call_id,
+        status: value.status,
+        summary: value.summary,
+        result_path: value.result_path,
+        artifact_count: value.artifact_count,
+        branch_count: value.branch_count,
+    }
+}
+
+fn from_v2_branch(value: archon_workflow::web_api::WorkflowV2BranchView) -> WorkflowV2BranchView {
+    WorkflowV2BranchView {
+        call_id: value.call_id,
+        item_id: value.item_id,
+        role: value.role,
+        status: value.status,
+        summary: value.summary,
+        error: value.error,
+        output_path: value.output_path,
+    }
+}
+
+fn from_tool_call(value: serde_json::Value) -> WorkflowToolCallPreview {
+    WorkflowToolCallPreview {
+        tool_name: value
+            .get("tool_name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("tool")
+            .to_string(),
+        input_preview: value.get("input").map(json_preview),
+        output_preview: value.get("output").map(json_preview),
+    }
+}
+
+fn json_preview(value: &serde_json::Value) -> String {
+    let text = serde_json::to_string(value).unwrap_or_else(|_| "<unserializable>".to_string());
+    const LIMIT: usize = 600;
+    if text.len() <= LIMIT {
+        text
+    } else {
+        format!("{}...", text.chars().take(LIMIT).collect::<String>())
     }
 }
 
@@ -285,6 +500,8 @@ fn from_stage(value: archon_workflow::web_api::WorkflowStageView) -> WorkflowSta
         id: value.id,
         status: format!("{:?}", value.status).to_ascii_lowercase(),
         attempt: value.attempt,
+        started_at: value.started_at,
+        completed_at: value.completed_at,
         artifacts: value.artifacts,
         error: value.error,
     }
@@ -333,13 +550,27 @@ fn apply_control(
     store: &archon_workflow::WorkflowStore,
     request: WorkflowControlRequest,
 ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowRun> {
+    if matches!(
+        request.action.as_str(),
+        "approve-run-once" | "approve-always" | "deny-workflow"
+    ) {
+        return apply_approval_control(store, request);
+    }
     let action = match request.action.as_str() {
-        "resume" => archon_workflow::LifecycleAction::Resume,
+        "resume" | "continue" => archon_workflow::LifecycleAction::Resume,
+        "repair" => archon_workflow::LifecycleAction::RestartStage(first_repairable_stage(
+            store,
+            &request.run_id,
+        )?),
         "pause" => archon_workflow::LifecycleAction::Pause,
         "cancel" => archon_workflow::LifecycleAction::Cancel,
         "restart-stage" => {
             archon_workflow::LifecycleAction::RestartStage(required_stage(&request)?)
         }
+        "restart-item" => archon_workflow::LifecycleAction::RestartItem {
+            stage_id: required_stage(&request)?,
+            item_id: required_item(&request)?,
+        },
         "force-accept" => archon_workflow::LifecycleAction::ForceAcceptStage {
             stage_id: required_stage(&request)?,
             forced_by: "web-workbench".to_string(),
@@ -355,6 +586,62 @@ fn apply_control(
     archon_workflow::LifecycleController::new(store.clone()).apply(&request.run_id, action)
 }
 
+fn first_repairable_stage(
+    store: &archon_workflow::WorkflowStore,
+    run_id: &str,
+) -> archon_workflow::WorkflowResult<String> {
+    let run = store.load_state(run_id)?;
+    run.spec
+        .stages
+        .iter()
+        .find(|stage| {
+            run.stages
+                .get(&stage.id)
+                .is_some_and(|state| state.status == archon_workflow::StageStatus::Failed)
+        })
+        .or_else(|| {
+            run.spec.stages.iter().find(|stage| {
+                run.stages
+                    .get(&stage.id)
+                    .is_some_and(|state| state.status == archon_workflow::StageStatus::Blocked)
+            })
+        })
+        .map(|stage| stage.id.clone())
+        .ok_or_else(|| {
+            archon_workflow::WorkflowError::SpecInvalid(format!(
+                "workflow {run_id} has no failed or blocked stage to repair"
+            ))
+        })
+}
+
+fn apply_approval_control(
+    store: &archon_workflow::WorkflowStore,
+    request: WorkflowControlRequest,
+) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowRun> {
+    let run = store.load_state(&request.run_id)?;
+    let approvals = archon_workflow::WorkflowApprovalStore::for_workflow_store(store);
+    let project_root = archon_workflow::approval::project_root_from_workflow_root(store.root());
+    match request.action.as_str() {
+        "approve-run-once" => {
+            approvals.approve_run_once(&project_root, store, &run, "web-workbench")?;
+        }
+        "approve-always" => {
+            approvals.approve_always_for_project(&project_root, store, &run, "web-workbench")?;
+        }
+        "deny-workflow" => {
+            approvals.deny_run(&project_root, store, &run, "web-workbench")?;
+            return archon_workflow::LifecycleController::new(store.clone())
+                .apply(&request.run_id, archon_workflow::LifecycleAction::Cancel);
+        }
+        other => {
+            return Err(archon_workflow::WorkflowError::SpecInvalid(format!(
+                "unknown workflow approval action {other}"
+            )));
+        }
+    }
+    Ok(run)
+}
+
 fn required_stage(request: &WorkflowControlRequest) -> archon_workflow::WorkflowResult<String> {
     request
         .stage_id
@@ -362,6 +649,16 @@ fn required_stage(request: &WorkflowControlRequest) -> archon_workflow::Workflow
         .filter(|id| !id.trim().is_empty())
         .ok_or_else(|| {
             archon_workflow::WorkflowError::SpecInvalid("stage_id is required".to_string())
+        })
+}
+
+fn required_item(request: &WorkflowControlRequest) -> archon_workflow::WorkflowResult<String> {
+    request
+        .item_id
+        .clone()
+        .filter(|id| !id.trim().is_empty())
+        .ok_or_else(|| {
+            archon_workflow::WorkflowError::SpecInvalid("item_id is required".to_string())
         })
 }
 
@@ -402,6 +699,11 @@ pub fn generated_typescript() -> String {
         WorkflowEventPreview::decl(&cfg),
         WorkflowControlPreview::decl(&cfg),
         WorkflowRunDetail::decl(&cfg),
+        WorkflowBundleView::decl(&cfg),
+        WorkflowApprovalView::decl(&cfg),
+        WorkflowAgentView::decl(&cfg),
+        WorkflowV2ResultView::decl(&cfg),
+        WorkflowV2BranchView::decl(&cfg),
         WorkflowStageView::decl(&cfg),
         WorkflowArtifactView::decl(&cfg),
         WorkflowControlRequest::decl(&cfg),

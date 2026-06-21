@@ -124,7 +124,9 @@ fn resolve_returns_feature_disabled_even_with_git_root() {
 
 #[test]
 fn validate_errs_when_items_declare_no_targets_and_fail_on_undeclared_write() {
-    let yaml = impl_fanout_yaml("        - name: alpha\n        - name: beta");
+    let yaml = impl_fanout_yaml(
+        "        - task_id: alpha\n          name: alpha\n        - task_id: beta\n          name: beta",
+    );
     let spec = WorkflowSpec::from_yaml(&yaml).expect("base spec valid");
     let cfg = WriteCoordinatorConfig::default();
     let err = spec
@@ -141,7 +143,9 @@ fn validate_errs_when_items_declare_no_targets_and_fail_on_undeclared_write() {
 
 #[test]
 fn validate_ok_when_fail_on_undeclared_write_disabled() {
-    let yaml = impl_fanout_yaml("        - name: alpha\n        - name: beta");
+    let yaml = impl_fanout_yaml(
+        "        - task_id: alpha\n          name: alpha\n        - task_id: beta\n          name: beta",
+    );
     let spec = WorkflowSpec::from_yaml(&yaml).expect("base spec valid");
     let cfg = WriteCoordinatorConfig {
         fail_on_undeclared_write: false,
@@ -154,7 +158,7 @@ fn validate_ok_when_fail_on_undeclared_write_disabled() {
 #[test]
 fn validate_ok_when_items_declare_target_files() {
     let yaml = impl_fanout_yaml(
-        "        - target_files: [\"src/a.rs\"]\n        - target_files: [\"src/b.rs\"]",
+        "        - task_id: alpha\n          target_files: [\"src/a.rs\"]\n        - task_id: beta\n          target_files: [\"src/b.rs\"]",
     );
     let spec = WorkflowSpec::from_yaml(&yaml).expect("base spec valid");
     let cfg = WriteCoordinatorConfig::default();
@@ -165,7 +169,7 @@ fn validate_ok_when_items_declare_target_files() {
 #[test]
 fn validate_ok_when_items_declare_expected_target_files() {
     let yaml = impl_fanout_yaml(
-        "        - expected_target_files: [\"src/a.rs\"]\n        - expected_target_files: [\"src/b.rs\"]",
+        "        - task_id: alpha\n          expected_target_files: [\"src/a.rs\"]\n        - task_id: beta\n          expected_target_files: [\"src/b.rs\"]",
     );
     let spec = WorkflowSpec::from_yaml(&yaml).expect("base spec valid");
     let cfg = WriteCoordinatorConfig::default();
@@ -195,7 +199,7 @@ stages:
 
 #[test]
 fn validate_skips_everything_when_coordinator_disabled() {
-    let yaml = impl_fanout_yaml("        - name: alpha");
+    let yaml = impl_fanout_yaml("        - task_id: alpha\n          name: alpha");
     let spec = WorkflowSpec::from_yaml(&yaml).expect("base spec valid");
     let cfg = WriteCoordinatorConfig {
         enabled: false,

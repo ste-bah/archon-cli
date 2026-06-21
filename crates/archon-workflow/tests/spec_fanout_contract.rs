@@ -90,7 +90,52 @@ stages:
 }
 
 #[test]
-fn generated_write_workflow_gets_remediation_loop_before_quality_gate() {
+fn generated_write_workflow_does_not_get_hidden_remediation_loop() {
+    let yaml = r#"
+schema: archon.workflow.v1
+name: generated-write-without-hidden-repair
+task: Implement the decomposed PRD.
+stages:
+  - id: task_inventory
+    kind: agent
+    outputs: [items]
+  - id: implement_task
+    kind: fanout
+    task: Implement only the missing work for each item and modify repository files directly.
+    provider_tier: coder
+    foreach: "${task_inventory.items}"
+    depends_on: [task_inventory]
+  - id: adversarial_review
+    kind: agent
+    provider_tier: critic
+    depends_on: [implement_task]
+  - id: final_synthesis
+    kind: reduce
+    depends_on: [adversarial_review]
+  - id: quality_gate
+    kind: quality_gate
+    depends_on: [final_synthesis]
+"#;
+    let spec = WorkflowSpec::from_generated_yaml(yaml, "Fallback task").unwrap();
+    let ids = spec
+        .stages
+        .iter()
+        .map(|stage| stage.id.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        !ids.contains(&"remediation-inventory"),
+        "remediation must be an explicit workflow choice, ids={ids:?}"
+    );
+    let gate = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "quality_gate")
+        .unwrap();
+    assert_eq!(gate.depends_on, vec!["final_synthesis".to_string()]);
+}
+
+#[test]
+fn generated_write_workflow_gets_requested_remediation_loop_before_quality_gate() {
     let yaml = r#"
 schema: archon.workflow.v1
 name: generated-write-without-repair
@@ -115,6 +160,7 @@ stages:
   - id: quality_gate
     kind: quality_gate
     depends_on: [final_synthesis]
+    enable_generated_remediation_loop: true
 "#;
     let spec = WorkflowSpec::from_generated_yaml(yaml, "Fallback task").unwrap();
     let ids = spec
@@ -168,6 +214,16 @@ stages:
             "adversarial_review".to_string()
         ]
     );
+    let post_tests = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "post-remediation-focused-tests")
+        .unwrap();
+    assert!(
+        post_tests.task.as_deref().is_some_and(|task| task
+            .contains("do not return unverifiable only because there were no remediation items")),
+        "empty remediation inventory must be a verifiable no-op"
+    );
     let post_review = spec
         .stages
         .iter()
@@ -195,7 +251,7 @@ stages:
 }
 
 #[test]
-fn generated_required_artifacts_get_self_heal_loop_before_quality_gate() {
+fn generated_required_artifacts_get_requested_self_heal_loop_before_quality_gate() {
     let yaml = r#"
 schema: archon.workflow.v1
 name: generated-required-artifacts
@@ -206,6 +262,7 @@ stages:
   - id: final_quality
     kind: quality_gate
     depends_on: [implementation_report]
+    enable_required_artifact_self_heal: true
     required_artifacts:
       - .archon/trading-lab/strategies/AHDM-v1/strategy-spec.json
 "#;
@@ -258,7 +315,7 @@ stages:
 }
 
 #[test]
-fn generated_targetless_implementation_stage_becomes_inventory_fanout() {
+fn generated_targetless_implementation_stage_with_requested_inventory_becomes_fanout() {
     // Reproduces live planner output that emitted `kind: implementation`
     // without `expected_target_files`. Generated plans should not fail
     // validation, but they also must not fake write targets. The safe repair is
@@ -276,6 +333,7 @@ stages:
     task: Implement TASK-TDL-001.
     provider_tier: coder
     depends_on: [discover]
+    enable_generated_target_inventory: true
   - id: focused_tests
     kind: agent
     depends_on: [implement_t001]
@@ -313,7 +371,7 @@ stages:
         Some("${implement_t001-target-inventory.items}")
     );
     assert!(
-        implementation.extra.get("allow_empty_items").is_none(),
+        !implementation.extra.contains_key("allow_empty_items"),
         "implementation target inventory must fail on empty items unless explicitly allowed"
     );
     assert!(
@@ -324,7 +382,7 @@ stages:
 }
 
 #[test]
-fn generated_agent_named_implement_becomes_write_capable() {
+fn generated_agent_named_implement_with_requested_inventory_becomes_write_capable() {
     // Reproduces a live generated plan where wave implementation stages were
     // emitted as plain agents. They must not execute as read-only/text-only
     // stages; generated normalization promotes them into the same target
@@ -342,6 +400,7 @@ stages:
     kind: agent
     task: Implement only missing T001 work. Run focused T001 tests only.
     depends_on: [implementation_plan]
+    enable_generated_target_inventory: true
   - id: wave1_review
     kind: agent
     task: Perform read-only adversarial review for T001.
@@ -370,7 +429,7 @@ stages:
         Some("${wave1_implement-target-inventory.items}")
     );
     assert!(
-        implementation.extra.get("allow_empty_items").is_none(),
+        !implementation.extra.contains_key("allow_empty_items"),
         "implementation waves must not silently no-op when target inventory is empty"
     );
 
@@ -380,6 +439,59 @@ stages:
         .find(|stage| stage.id == "implementation_plan")
         .unwrap();
     assert_eq!(plan.kind, archon_workflow::StageKind::Agent);
+}
+
+#[test]
+fn generated_targetless_implementation_without_inventory_request_fails_validation() {
+    let yaml = r#"
+schema: archon.workflow.v1
+name: generated-targetless-implementation
+task: Implement the decomposed PRD.
+stages:
+  - id: implement_t001
+    kind: implementation
+    task: Implement TASK-TDL-001.
+    provider_tier: coder
+"#;
+    let err = WorkflowSpec::from_generated_yaml(yaml, "Fallback task")
+        .expect_err("targetless implementation must fail unless inventory generation is explicit");
+    assert!(
+        err.to_string().contains("expected_target_files"),
+        "err={err}"
+    );
+}
+
+#[test]
+fn generated_required_artifacts_do_not_self_heal_without_request() {
+    let yaml = r#"
+schema: archon.workflow.v1
+name: generated-required-artifacts
+task: Build project artifacts.
+stages:
+  - id: implementation_report
+    kind: agent
+  - id: final_quality
+    kind: quality_gate
+    depends_on: [implementation_report]
+    required_artifacts:
+      - .archon/trading-lab/strategies/AHDM-v1/strategy-spec.json
+"#;
+    let spec = WorkflowSpec::from_generated_yaml(yaml, "Fallback task").unwrap();
+    let ids = spec
+        .stages
+        .iter()
+        .map(|stage| stage.id.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        !ids.contains(&"required-artifact-inventory"),
+        "self-heal must be explicit, ids={ids:?}"
+    );
+    let gate = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "final_quality")
+        .unwrap();
+    assert_eq!(gate.depends_on, vec!["implementation_report"]);
 }
 
 #[test]
@@ -406,5 +518,9 @@ stages:
     assert_eq!(
         stage.expected_target_files,
         vec!["crates/example/src/lib.rs".to_string()]
+    );
+    assert_eq!(
+        stage.extra.get("required_work_units"),
+        Some(&serde_json::json!(["implement_known"]))
     );
 }

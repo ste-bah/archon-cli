@@ -28,6 +28,8 @@ pub struct StageRunOutput {
     pub tokens_in: u64,
     pub tokens_out: u64,
     pub cost_usd: f64,
+    #[serde(default)]
+    pub tool_uses: Vec<Value>,
 }
 
 impl StageRunOutput {
@@ -40,6 +42,7 @@ impl StageRunOutput {
             tokens_in: 0,
             tokens_out: 0,
             cost_usd: 0.0,
+            tool_uses: Vec::new(),
         }
     }
 }

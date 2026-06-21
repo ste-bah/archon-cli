@@ -5,6 +5,7 @@
 //! verify the canonical declared-target hashes did not change behind our back.
 
 mod git;
+mod support_files;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -84,14 +85,19 @@ pub enum IsolationError {
     HashMismatch { path: String },
     #[error("file '{path}' is {size} bytes, exceeds max_file_bytes")]
     FileTooLarge { path: String, size: u64 },
+    #[error("unsafe untracked file '{path}' cannot be copied into isolated workspace")]
+    UnsafeUntrackedFile { path: String },
     #[error("git process failed: {stderr}")]
     ProcessFailed { stderr: String },
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
 
-/// Capture the canonical dirty state (PRD-012 §9). Reads bytes ONLY for
-/// declared targets ∪ verify_inputs, and rejects oversize files at capture time.
+/// Capture the canonical dirty state (PRD-012 §9).
+///
+/// Declared targets and verify inputs are copied when untracked. Safe
+/// compile-relevant support files are copied too, because tracked dirty edits
+/// can reference new modules/build files that are not themselves write targets.
 pub fn capture_canonical_baseline(
     canonical_root: &Path,
     plan: &WritePlan,
@@ -111,7 +117,8 @@ pub fn capture_canonical_baseline(
         declared.iter().map(String::as_str).collect();
     wanted.extend(verify.iter().map(String::as_str));
 
-    let untracked_files = capture_untracked(canonical_root, &wanted, cfg.max_file_bytes)?;
+    let untracked_files =
+        support_files::capture_untracked(canonical_root, &wanted, cfg.max_file_bytes)?;
 
     let mut declared_target_meta = BTreeMap::new();
     for path in &declared {
@@ -130,37 +137,6 @@ pub fn capture_canonical_baseline(
     })
 }
 
-/// Enumerate untracked paths, then read bytes ONLY for wanted (declared ∪
-/// verify) paths, rejecting oversize files before loading them.
-fn capture_untracked(
-    canonical_root: &Path,
-    wanted: &std::collections::BTreeSet<&str>,
-    max_file_bytes: u64,
-) -> Result<BTreeMap<String, Vec<u8>>, IsolationError> {
-    let listing = run_git(
-        &["ls-files", "--others", "--exclude-standard", "-z"],
-        canonical_root,
-    )?
-    .stdout;
-    let mut untracked = BTreeMap::new();
-    for raw in listing.split(|byte| *byte == 0) {
-        if raw.is_empty() {
-            continue;
-        }
-        let path = String::from_utf8_lossy(raw).into_owned();
-        if !wanted.contains(path.as_str()) {
-            continue;
-        }
-        let abs = canonical_root.join(&path);
-        let size = std::fs::metadata(&abs)?.len();
-        if size > max_file_bytes {
-            return Err(IsolationError::FileTooLarge { path, size });
-        }
-        untracked.insert(path, std::fs::read(&abs)?);
-    }
-    Ok(untracked)
-}
-
 /// Create the per-item worktree, overlay the dirty state, seal the baseline.
 pub fn create_item_workspace(
     canonical_root: &Path,
@@ -170,6 +146,7 @@ pub fn create_item_workspace(
     if let Some(parent) = plan.isolated_root.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    remove_existing_item_workspace(canonical_root, plan.isolated_root.as_path())?;
     let isolated_str = plan.isolated_root.to_string_lossy().into_owned();
     run_git(
         &["worktree", "add", "--detach", &isolated_str, "HEAD"],
@@ -217,6 +194,24 @@ pub fn create_item_workspace(
         plan: plan.clone(),
         baseline_commit,
     })
+}
+
+fn remove_existing_item_workspace(
+    canonical_root: &Path,
+    isolated_root: &Path,
+) -> Result<(), IsolationError> {
+    run_git(&["worktree", "prune"], canonical_root)?;
+    if !isolated_root.exists() {
+        return Ok(());
+    }
+    let isolated_str = isolated_root.to_string_lossy().into_owned();
+    run_git(
+        &["worktree", "remove", "--force", &isolated_str],
+        canonical_root,
+    )
+    .map_err(|err| IsolationError::WorktreeAddFailed(err.to_string()))?;
+    run_git(&["worktree", "prune"], canonical_root)?;
+    Ok(())
 }
 
 fn baseline_message(plan: &WritePlan) -> String {
@@ -281,7 +276,7 @@ fn repository_fingerprint(canonical_root: &Path) -> Result<String, IsolationErro
         canonical_root,
     )?
     .stdout;
-    for path in split_nul_paths(&listing).filter(|path| !ignored_untracked(path)) {
+    for path in split_nul_paths(&listing).filter(|path| support_files::fingerprintable(path)) {
         bytes.extend_from_slice(path.as_bytes());
         bytes.push(0);
         let meta = file_meta(&canonical_root.join(&path))?;
@@ -296,10 +291,6 @@ fn split_nul_paths(bytes: &[u8]) -> impl Iterator<Item = String> + '_ {
         .split(|byte| *byte == 0)
         .filter(|raw| !raw.is_empty())
         .map(|raw| String::from_utf8_lossy(raw).into_owned())
-}
-
-fn ignored_untracked(path: &str) -> bool {
-    path == ".archon" || path.starts_with(".archon/")
 }
 
 /// Remove or retain the worktree per the retention policy (§14).

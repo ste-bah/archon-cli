@@ -35,6 +35,13 @@ pub(crate) fn ensure_required_artifact_self_heal(spec: &mut WorkflowSpec) {
     );
 }
 
+pub(crate) fn self_heal_requested(spec: &WorkflowSpec) -> bool {
+    spec.stages.iter().any(|stage| {
+        bool_field(stage, "enable_required_artifact_self_heal")
+            || bool_field(stage, "self_heal_required_artifacts")
+    })
+}
+
 fn final_required_artifact_gate(spec: &WorkflowSpec) -> Option<usize> {
     spec.stages.iter().rposition(|stage| {
         stage.kind == StageKind::QualityGate && !required_artifact_paths(stage).is_empty()
@@ -50,6 +57,15 @@ fn has_artifact_heal(spec: &WorkflowSpec) -> bool {
                 .and_then(Value::as_bool)
                 .unwrap_or(false)
     })
+}
+
+fn bool_field(stage: &StageSpec, key: &str) -> bool {
+    stage
+        .extra
+        .get(key)
+        .or_else(|| stage.input.get(key))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 struct ArtifactHealIds {
@@ -112,7 +128,7 @@ fn repair_stage(id: &str, inventory_id: &str, original_gate_deps: &[String]) -> 
         StageKind::Fanout,
         ProviderTier::Coder,
         deps,
-        "Create or repair each missing required artifact. Use upstream PRD, task, test, and review evidence. Do not write placeholders; return blocked if evidence is insufficient.",
+        "Create or repair each missing required artifact. Use upstream PRD, task, test, and review evidence. Do not write placeholders. If the fanout item provides candidate_commands or repair_guidance, run the relevant command(s) before returning blocked. A blocked response must include artifact_path or resolved_path, reason or missing_evidence, and commands_run/attempted_commands/generation_attempts or command_discovery evidence with exact command, exit status, and output summary.",
     );
     stage.foreach = Some(format!("${{{inventory_id}.items}}"));
     stage.item_kind = Some(StageKind::Implementation);
@@ -130,7 +146,7 @@ fn tests_stage(id: &str, repair_id: &str, inventory_id: &str) -> StageSpec {
         StageKind::Agent,
         ProviderTier::Coder,
         vec![repair_id.to_string(), inventory_id.to_string()],
-        "Verify required artifact repairs. If the inventory was empty, report status: verified. Otherwise inspect each target file and run only focused checks needed for those artifacts.",
+        "Verify required artifact repairs using the inventory artifact's checked/resolved paths. Treat relative .archon/... deliverables as project-root artifacts, not repository-root artifacts. If inventory missing=[] and every checked entry exists=true, report status: verified. Otherwise inspect each missing target and run only focused checks needed for those artifacts.",
     );
     stage.extra.insert(
         "allowed_tools".into(),
@@ -150,7 +166,7 @@ fn review_stage(id: &str, repair_id: &str, tests_id: &str, inventory_id: &str) -
             tests_id.to_string(),
             inventory_id.to_string(),
         ],
-        "Adversarially review the required artifact repairs. Return status: verified only when every missing required deliverable is now present and non-placeholder.",
+        "Adversarially review required artifact repairs using the inventory artifact's checked/resolved paths, project_root, repository_root, and artifact_roots. Treat relative .archon/... deliverables as project-root artifacts unless the inventory resolved path says otherwise. Return status: verified only when every checked required deliverable exists at its resolved path and is non-placeholder.",
     );
     mark_artifact_heal(&mut stage);
     stage
@@ -203,6 +219,7 @@ fn base_stage(
         verify_command: None,
         max_parallelism: None,
         item_kind: None,
+        filter: None,
         extra: BTreeMap::new(),
     }
 }

@@ -39,7 +39,10 @@ fn persist_run_to_world_model(
     root: &Path,
     retention: RetentionPolicy,
 ) -> Result<WorkflowWorldLearningSummary> {
-    if !matches!(run.status, RunStatus::Completed | RunStatus::Failed) {
+    if !matches!(
+        run.status,
+        RunStatus::Completed | RunStatus::NeedsReview | RunStatus::Blocked | RunStatus::Failed
+    ) {
         return Ok(WorkflowWorldLearningSummary::skipped(
             "workflow not terminal",
         ));
@@ -166,7 +169,7 @@ fn base_row(
         ..ScalarFeatures::default()
     };
     row.labels.success = success_label(status);
-    row.labels.failure = matches!(status, StageStatus::Failed);
+    row.labels.failure = matches!(status, StageStatus::Failed | StageStatus::Blocked);
     row.labels.retry = attempt > 1;
     row.evidence_refs
         .push(EvidenceRef::new("workflow_run", run.id.clone()));
@@ -176,7 +179,7 @@ fn base_row(
 fn label_row(mut row: WorldTraceRow, status: StageStatus) -> WorldTraceRow {
     let mut labels = DeterministicLabelBuilder.label_row(&row);
     labels.success = success_label(status);
-    labels.failure |= matches!(status, StageStatus::Failed);
+    labels.failure |= matches!(status, StageStatus::Failed | StageStatus::Blocked);
     labels.retry |= row.scalar_features.attempt_index.unwrap_or_default() > 1;
     row.labels = labels;
     row
@@ -194,14 +197,23 @@ fn stage_agent(run: &WorkflowRun, stage_id: &str) -> Option<String> {
 fn terminal_status(status: StageStatus) -> bool {
     matches!(
         status,
-        StageStatus::Accepted | StageStatus::Failed | StageStatus::ForcedAccepted
+        StageStatus::Accepted
+            | StageStatus::Blocked
+            | StageStatus::NeedsReview
+            | StageStatus::Failed
+            | StageStatus::Cancelled
+            | StageStatus::ForcedAccepted
     )
 }
 
 fn success_label(status: StageStatus) -> Option<bool> {
     match status {
-        StageStatus::Accepted | StageStatus::ForcedAccepted => Some(true),
-        StageStatus::Failed => Some(false),
+        StageStatus::Accepted => Some(true),
+        StageStatus::ForcedAccepted => Some(false),
+        StageStatus::Blocked
+        | StageStatus::NeedsReview
+        | StageStatus::Failed
+        | StageStatus::Cancelled => Some(false),
         _ => None,
     }
 }
@@ -212,7 +224,10 @@ fn status_name(status: StageStatus) -> &'static str {
         StageStatus::Running => "running",
         StageStatus::Paused => "paused",
         StageStatus::Accepted => "accepted",
+        StageStatus::NeedsReview => "needs_review",
+        StageStatus::Blocked => "blocked",
         StageStatus::Failed => "failed",
+        StageStatus::Cancelled => "cancelled",
         StageStatus::Skipped => "skipped",
         StageStatus::ForcedAccepted => "forced_accepted",
     }

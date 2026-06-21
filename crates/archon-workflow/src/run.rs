@@ -13,6 +13,8 @@ pub enum RunStatus {
     Planned,
     Running,
     Paused,
+    NeedsReview,
+    Blocked,
     Failed,
     Cancelled,
     Completed,
@@ -24,8 +26,11 @@ pub enum StageStatus {
     Pending,
     Running,
     Paused,
+    NeedsReview,
     Accepted,
+    Blocked,
     Failed,
+    Cancelled,
     Skipped,
     ForcedAccepted,
 }
@@ -70,7 +75,10 @@ impl StageState {
         matches!(
             self.status,
             StageStatus::Accepted
+                | StageStatus::Blocked
+                | StageStatus::NeedsReview
                 | StageStatus::Failed
+                | StageStatus::Cancelled
                 | StageStatus::Skipped
                 | StageStatus::ForcedAccepted
         )
@@ -93,6 +101,8 @@ pub struct WorkflowRun {
     pub status: RunStatus,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    #[serde(default)]
+    pub generation: u64,
     pub stages: BTreeMap<String, StageState>,
     pub items: BTreeMap<String, ItemState>,
     pub root: PathBuf,
@@ -112,6 +122,7 @@ impl WorkflowRun {
             status: RunStatus::Planned,
             created_at: now,
             updated_at: now,
+            generation: 0,
             stages,
             items: BTreeMap::new(),
             root: root.into(),
@@ -127,10 +138,19 @@ impl WorkflowRun {
     }
 
     pub fn accepted_stage(&self, id: &str) -> bool {
+        self.stages
+            .get(id)
+            .is_some_and(|stage| matches!(stage.status, StageStatus::Accepted))
+    }
+
+    pub fn dependency_satisfied_stage(&self, id: &str) -> bool {
         self.stages.get(id).is_some_and(|stage| {
             matches!(
                 stage.status,
-                StageStatus::Accepted | StageStatus::ForcedAccepted
+                StageStatus::Accepted
+                    | StageStatus::ForcedAccepted
+                    | StageStatus::Blocked
+                    | StageStatus::NeedsReview
             )
         })
     }

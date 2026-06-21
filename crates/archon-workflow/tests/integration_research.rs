@@ -35,6 +35,7 @@ impl WorkflowStageRunner for ResearchRunner {
             tokens_in: 1,
             tokens_out: 1,
             cost_usd: 0.0,
+            tool_uses: Vec::new(),
         })
     }
 }

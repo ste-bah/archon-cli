@@ -21,6 +21,7 @@ pub enum WriteCoordinationConflictKind {
     PatchApplyConflict,
     SecretDetected,
     UndeclaredWrite,
+    DynamicTargetAdoptionLimit,
     FileTooLarge,
     PatchTooLarge,
     OutputNotUsable,
@@ -248,8 +249,12 @@ fn classify_conflict(reason: &str) -> WriteCoordinationConflictKind {
         WriteCoordinationConflictKind::StaleBaseline
     } else if lower.contains("secret") {
         WriteCoordinationConflictKind::SecretDetected
+    } else if lower.contains("dynamic target adoption limit") {
+        WriteCoordinationConflictKind::DynamicTargetAdoptionLimit
     } else if lower.contains("undeclared") {
         WriteCoordinationConflictKind::UndeclaredWrite
+    } else if lower.contains("output not usable") || lower.contains("verification blocked") {
+        WriteCoordinationConflictKind::OutputNotUsable
     } else {
         WriteCoordinationConflictKind::PatchApplyConflict
     }

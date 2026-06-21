@@ -1,114 +1,19 @@
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
-use anyhow::Result;
-use archon_pipeline::runner::{AgentExecutionRequest, LlmClient, LlmResponse};
 use archon_workflow::{
-    ProviderTier, StageKind, StageRunRequest, WorkflowStageRunner, WriteBoundaryProbe,
+    RunStatus, StageKind, StageRunRequest, StageStatus, WorkflowRun, WorkflowSpec,
+    WriteBoundaryProbe,
 };
 use serde_json::json;
 
-use super::plan_live;
-use super::workflow_live_prompt::{planner_prompt, workflow_prompt};
-use super::workflow_live_retry::transient_live_agent_error;
+use super::terminal_resume_message;
+use super::workflow_live_prompt::{harness_planner_prompt, workflow_prompt};
 use super::workflow_live_runner::{
-    PipelineWorkflowRunner, allowed_tools, extract_yaml, request_target_repository_root,
+    allowed_tools, request_target_repository_root, workflow_agent_ordinal,
+    workflow_agent_session_id, workflow_stage_system_context,
 };
-
-struct InvalidPlanner;
-
-struct FlakyAgentClient {
-    calls: AtomicUsize,
-    first_error: &'static str,
-}
-
-#[async_trait::async_trait]
-impl LlmClient for InvalidPlanner {
-    async fn send_message(
-        &self,
-        _messages: Vec<serde_json::Value>,
-        _system: Vec<serde_json::Value>,
-        _tools: Vec<serde_json::Value>,
-        _model: &str,
-    ) -> Result<LlmResponse> {
-        Ok(LlmResponse {
-            // Genuinely unrecoverable: a stage pins a concrete model, which
-            // validate_stage_fields rejects and the normalizer does not touch.
-            content: r#"
-schema: archon.workflow.v1
-name: invalid-live-plan
-task: implement a real task
-stages:
-  - id: discover
-    kind: agent
-    provider_tier: planner
-    model: claude-opus-4-8
-"#
-            .to_string(),
-            tool_uses: Vec::new(),
-            tokens_in: 0,
-            tokens_out: 0,
-        })
-    }
-}
-
-#[async_trait::async_trait]
-impl LlmClient for FlakyAgentClient {
-    async fn send_message(
-        &self,
-        _messages: Vec<serde_json::Value>,
-        _system: Vec<serde_json::Value>,
-        _tools: Vec<serde_json::Value>,
-        _model: &str,
-    ) -> Result<LlmResponse> {
-        anyhow::bail!("test should use run_agent");
-    }
-
-    async fn run_agent(&self, _request: AgentExecutionRequest) -> Result<LlmResponse> {
-        let call = self.calls.fetch_add(1, Ordering::SeqCst);
-        if call == 0 {
-            anyhow::bail!(self.first_error);
-        }
-        Ok(LlmResponse {
-            content: "status: completed".to_string(),
-            tool_uses: Vec::new(),
-            tokens_in: 1,
-            tokens_out: 1,
-        })
-    }
-}
-
-fn request(input: serde_json::Value) -> StageRunRequest {
-    StageRunRequest {
-        run_id: "wf-test".into(),
-        stage_id: "implement".into(),
-        stage_kind: StageKind::Implementation,
-        agent: None,
-        task: "implement".into(),
-        attempt: 1,
-        provider_tier: ProviderTier::Coder,
-        depends_on: Vec::new(),
-        input,
-    }
-}
-
-fn runner(llm: Arc<dyn LlmClient>) -> PipelineWorkflowRunner {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
-    PipelineWorkflowRunner {
-        llm,
-        tui_tx,
-        agent_names: Vec::new(),
-        workspace_boundary_supported: false,
-    }
-}
-
-fn boundary_runner(llm: Arc<dyn LlmClient>) -> PipelineWorkflowRunner {
-    PipelineWorkflowRunner {
-        workspace_boundary_supported: true,
-        ..runner(llm)
-    }
-}
+use super::workflow_live_test_support::{InvalidPlanner, boundary_runner, request};
 
 #[test]
 fn workflow_live_uses_target_repository_root_as_subagent_cwd() {
@@ -123,24 +28,102 @@ fn workflow_live_uses_target_repository_root_as_subagent_cwd() {
 }
 
 #[test]
+fn fanout_item_subagent_ordinals_are_unique_per_stage_item() {
+    let first = StageRunRequest {
+        stage_id: "adversarial_review_inventory-0".into(),
+        ..request(json!({}))
+    };
+    let second = StageRunRequest {
+        stage_id: "adversarial_review_inventory-1".into(),
+        ..request(json!({}))
+    };
+
+    assert_ne!(
+        workflow_agent_ordinal(&first),
+        workflow_agent_ordinal(&second)
+    );
+}
+
+#[test]
+fn workflow_stage_session_ids_are_isolated_per_attempt() {
+    let first = StageRunRequest {
+        stage_id: "discover inventory".into(),
+        attempt: 1,
+        ..request(json!({}))
+    };
+    let second = StageRunRequest {
+        stage_id: "discover inventory".into(),
+        attempt: 2,
+        ..request(json!({}))
+    };
+
+    assert_eq!(
+        workflow_agent_session_id(&first),
+        "wf-test-stage-discover-inventory-attempt-1"
+    );
+    assert_eq!(
+        workflow_agent_session_id(&second),
+        "wf-test-stage-discover-inventory-attempt-2"
+    );
+    assert_ne!(
+        workflow_agent_session_id(&first),
+        workflow_agent_session_id(&second)
+    );
+}
+
+#[test]
+fn workflow_stage_system_context_rejects_restored_context() {
+    let req = StageRunRequest {
+        stage_id: "discover".into(),
+        attempt: 3,
+        ..request(json!({}))
+    };
+    let system = workflow_stage_system_context(&req);
+
+    assert!(system.contains("fresh workflow stage invocation"));
+    assert!(system.contains("Ignore any restored conversational context"));
+    assert!(system.contains("do not return restored-context summaries"));
+    assert!(system.contains("attempt 3"));
+}
+
+#[test]
+fn terminal_failed_live_resume_reports_restart_stage_command() {
+    let spec = WorkflowSpec::from_yaml(
+        r#"
+schema: archon.workflow.v1
+name: terminal-resume-guard
+task: verify terminal resume guard
+stages:
+  - id: discover
+    kind: agent
+"#,
+    )
+    .expect("valid spec");
+    let mut run = WorkflowRun::new(spec, "/tmp/workflows/wf-test");
+    run.id = "wf-terminal".to_string();
+    run.status = RunStatus::Failed;
+    run.stages
+        .get_mut("discover")
+        .expect("discover stage")
+        .status = StageStatus::Failed;
+
+    let message = terminal_resume_message(&run).expect("terminal failed message");
+
+    assert!(message.contains("cannot be resumed directly"));
+    assert!(message.contains("/workflow repair wf-terminal"));
+    assert!(message.contains("/workflow continue wf-terminal"));
+    assert!(message.contains("/workflow restart task wf-terminal <task-id>"));
+    assert!(message.contains("Debug detail: failed internal stage is discover"));
+    assert!(!message.contains("/workflow restart-stage wf-terminal discover"));
+}
+
+#[test]
 fn workflow_live_omits_empty_target_repository_root() {
     let req = request(json!({
         "target_repository_root": " ",
     }));
 
     assert_eq!(request_target_repository_root(&req), None);
-}
-
-#[test]
-fn extract_yaml_accepts_plain_or_fenced_output() {
-    assert_eq!(
-        extract_yaml("```yaml\nschema: archon.workflow.v1\n```\n"),
-        "schema: archon.workflow.v1"
-    );
-    assert_eq!(
-        extract_yaml("schema: archon.workflow.v1\n"),
-        "schema: archon.workflow.v1"
-    );
 }
 
 #[test]
@@ -221,6 +204,69 @@ fn command_stage_prompt_uses_configured_bash_timeout() {
 }
 
 #[test]
+fn live_prompt_preserves_project_root_artifact_resolution() {
+    let req = StageRunRequest {
+        stage_id: "post-artifact-repair-review".into(),
+        stage_kind: StageKind::Agent,
+        task: "Adversarially review required artifact repairs.".into(),
+        ..request(json!({}))
+    };
+    let prompt = workflow_prompt(&req);
+
+    assert!(prompt.contains("Runtime evidence guardrails"));
+    assert!(prompt.contains("`project_root`"));
+    assert!(prompt.contains("Relative `.archon/...` deliverables are project-root artifacts"));
+    assert!(prompt.contains("not under `target_repository_root`"));
+}
+
+#[test]
+fn live_prompt_treats_empty_remediation_inventory_as_verified_noop() {
+    let req = StageRunRequest {
+        stage_id: "post-remediation-focused-tests".into(),
+        stage_kind: StageKind::Agent,
+        task: "Run focused tests required by the remediation inventory.".into(),
+        ..request(json!({}))
+    };
+    let prompt = workflow_prompt(&req);
+
+    assert!(prompt.contains("remediation inventory is exactly `{\"items\": []}`"));
+    assert!(prompt.contains("return `status: verified` with no-op evidence"));
+    assert!(prompt.contains("Do not return `status: unverifiable` only because"));
+}
+
+#[test]
+fn live_prompt_requires_structured_items_for_item_producer_stage() {
+    let req = StageRunRequest {
+        stage_id: "discover".into(),
+        stage_kind: StageKind::Agent,
+        task: "Produce an implementation inventory.".into(),
+        ..request(json!({
+            "stage_extra": {
+                "outputs": ["items"]
+            }
+        }))
+    };
+    let prompt = workflow_prompt(&req);
+
+    assert!(prompt.contains("Structured item output contract"));
+    assert!(prompt.contains("top-level `items` array"));
+    assert!(prompt.contains("Do not return only markdown/prose"));
+}
+
+#[test]
+fn live_prompt_does_not_add_item_contract_to_plain_stage() {
+    let req = StageRunRequest {
+        stage_id: "synthesize".into(),
+        stage_kind: StageKind::Reduce,
+        task: "Summarize findings.".into(),
+        ..request(json!({}))
+    };
+    let prompt = workflow_prompt(&req);
+
+    assert!(!prompt.contains("machine-readable fanout item producer"));
+}
+
+#[test]
 fn command_stage_prompt_includes_platform_cargo_policy() {
     let req = StageRunRequest {
         stage_id: "wave5_tests".into(),
@@ -252,25 +298,93 @@ fn command_stage_prompt_does_not_treat_wsl_jobs_as_macos_default() {
 }
 
 #[test]
-fn planner_prompt_requires_platform_aware_cargo_commands() {
-    let prompt = planner_prompt("Implement a Rust workflow task and run focused tests.");
+fn harness_planner_prompt_requires_restricted_host_api() {
+    let prompt = harness_planner_prompt("Implement a workflow task.");
 
-    assert!(prompt.contains("Focused verification is language-agnostic"));
-    assert!(prompt.contains("exact test file/target/module/package/class/test-id"));
-    assert!(prompt.contains("Cargo verification commands MUST be platform-aware"));
-    assert!(prompt.contains("Native macOS, native Linux, and native Windows"));
-    assert!(prompt.contains("Do not place `cargo check --workspace --tests`"));
+    assert!(prompt.contains("export default async function workflow(w)"));
+    assert!(prompt.contains("Use only these host API calls"));
+    assert!(prompt.contains("w.agent"));
+    assert!(prompt.contains("w.fanout"));
+    assert!(prompt.contains("w.parallel"));
+    assert!(prompt.contains("w.reduce"));
+    assert!(prompt.contains("w.implementation"));
+    assert!(prompt.contains("w.qualityGate"));
+    assert!(prompt.contains("w.humanGate"));
+    assert!(prompt.contains("w.checkpoint"));
+    assert!(prompt.contains("w.saveArtifact"));
+    assert!(prompt.contains("w.requireArtifact"));
+    assert!(prompt.contains("w.finalReport"));
+    assert!(prompt.contains("stable literal string id as its first argument"));
+    assert!(prompt.contains("Do not compute host-call ids at runtime"));
+    assert!(prompt.contains("ordinary JavaScript control flow"));
+    assert!(prompt.contains("Do not import modules"));
+    assert!(prompt.contains("Return only JavaScript for workflow.js"));
 }
 
 #[test]
-fn planner_prompt_separates_report_artifacts_from_repo_implementation() {
-    let prompt = planner_prompt("Implement T140 readiness and adversarial review artifacts.");
+fn harness_planner_prompt_keeps_workflows_task_shaped() {
+    let prompt = harness_planner_prompt("Implement a Rust workflow task and run focused tests.");
 
-    assert!(prompt.contains("Do not model report-only"));
-    assert!(prompt.contains("external/project-artifact deliverables"));
-    assert!(prompt.contains("split it into separate stages"));
-    assert!(prompt.contains("Never let an empty implementation target inventory skip"));
-    assert!(prompt.contains("required_artifacts"));
+    assert!(prompt.contains("Shape the workflow to the task"));
+    assert!(prompt.contains("Audit/review/research/planning is usually read-only"));
+    assert!(prompt.contains("Small known edits use w.implementation with targetFiles"));
+    assert!(prompt.contains("Broad migrations use inventory variables"));
+    assert!(prompt.contains("Add remediation/fix calls when the task asks"));
+    assert!(prompt.contains("fix every issue found before continuing"));
+}
+
+#[test]
+fn harness_planner_prompt_requires_explicit_fanout_item_contracts() {
+    let prompt = harness_planner_prompt("Implement a decomposed PRD.");
+
+    assert!(prompt.contains("Every w.fanout or w.parallel that iterates work"));
+    assert!(prompt.contains("w.fanout(\"id\", inventory.items"));
+    assert!(prompt.contains("w.parallel(\"id\", items"));
+    assert!(prompt.contains("actual typed JavaScript array as its second argument"));
+    assert!(prompt.contains("top-level `items: [...]`"));
+    assert!(prompt.contains("target_files"));
+}
+
+#[test]
+fn harness_planner_prompt_separates_report_artifacts_from_repo_implementation() {
+    let prompt =
+        harness_planner_prompt("Implement T140 readiness and adversarial review artifacts.");
+
+    assert!(prompt.contains("Report-only deliverables"));
+    assert!(prompt.contains("w.agent or w.reduce artifacts"));
+    assert!(prompt.contains("w.requireArtifact"));
+    assert!(prompt.contains("do not model reports as implementation work"));
+    assert!(prompt.contains("w.finalReport must include the evidence-producing"));
+}
+
+#[test]
+fn generated_run_branch_is_isolated_from_legacy_executor_dispatch() {
+    let source = std::fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/command/workflow_live.rs"),
+    )
+    .expect("read workflow_live source");
+    let run_branch = source
+        .split("CommandAction::Run { task } => {")
+        .nth(1)
+        .and_then(|rest| rest.split("CommandAction::RunSpec").next())
+        .expect("generated run branch");
+
+    assert!(run_branch.contains("run_generated_v2_workflow"));
+    assert!(!run_branch.contains("start_with_harness"));
+    assert!(!run_branch.contains("execute_with_runner"));
+    assert!(!run_branch.contains("WorkflowExecutor::"));
+}
+
+#[test]
+fn generated_live_path_has_no_yaml_repair_fallback() {
+    let source = std::fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/command/workflow_live.rs"),
+    )
+    .expect("read workflow_live source");
+
+    assert!(!source.contains("validate_or_repair_plan"));
+    assert!(!source.contains("request_repaired_plan"));
+    assert!(!source.contains("generated YAML failed validation"));
 }
 
 #[test]
@@ -286,62 +400,4 @@ fn explicit_stage_extra_can_request_bash() {
     };
 
     assert!(allowed_tools(&req).contains(&"Bash".to_string()));
-}
-
-#[tokio::test]
-async fn live_planner_validation_failure_does_not_fallback_to_smoke_plan() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
-    let err = plan_live("implement the whole PRD", Arc::new(InvalidPlanner), tui_tx)
-        .await
-        .expect_err("invalid live plans must fail instead of using heuristic fallback");
-    assert!(!err.to_string().is_empty());
-}
-
-#[tokio::test]
-async fn workflow_live_retries_transient_agent_decode_errors() {
-    let client = Arc::new(FlakyAgentClient {
-        calls: AtomicUsize::new(0),
-        first_error: "HTTP error: http_error: HTTP error: error decoding response body",
-    });
-    let stage_runner = runner(client.clone());
-
-    let output = stage_runner
-        .run_stage(request(json!({
-            "target_repository_root": "/tmp/target-repo",
-        })))
-        .await
-        .expect("transient provider decode failures should retry and recover");
-
-    assert_eq!(output.body, "status: completed");
-    assert_eq!(client.calls.load(Ordering::SeqCst), 2);
-}
-
-#[tokio::test]
-async fn workflow_live_does_not_retry_permission_errors() {
-    let client = Arc::new(FlakyAgentClient {
-        calls: AtomicUsize::new(0),
-        first_error: "bypassPermissions requires --allow-dangerously-skip-permissions flag",
-    });
-    let stage_runner = runner(client.clone());
-
-    let err = stage_runner
-        .run_stage(request(json!({})))
-        .await
-        .expect_err("permission/config failures are not transport transients");
-
-    assert!(
-        err.to_string()
-            .contains("bypassPermissions requires --allow-dangerously-skip-permissions")
-    );
-    assert_eq!(client.calls.load(Ordering::SeqCst), 1);
-}
-
-#[test]
-fn transient_classifier_matches_provider_decode_but_not_permission_errors() {
-    assert!(transient_live_agent_error(
-        "HTTP error: http_error: HTTP error: error decoding response body"
-    ));
-    assert!(!transient_live_agent_error(
-        "bypassPermissions requires --allow-dangerously-skip-permissions flag"
-    ));
 }

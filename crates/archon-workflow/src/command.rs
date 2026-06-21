@@ -25,10 +25,25 @@ pub enum CommandAction {
     Resume {
         run_id: String,
     },
+    Continue {
+        run_id: String,
+    },
+    Repair {
+        run_id: String,
+    },
     Pause {
         run_id: String,
     },
     Cancel {
+        run_id: String,
+    },
+    ApproveRunOnce {
+        run_id: String,
+    },
+    ApproveAlways {
+        run_id: String,
+    },
+    DenyWorkflow {
         run_id: String,
     },
     RestartAgent {
@@ -39,6 +54,10 @@ pub enum CommandAction {
     RestartStage {
         run_id: String,
         stage_id: String,
+    },
+    RestartTask {
+        run_id: String,
+        task_id: String,
     },
     ForceAccept {
         run_id: String,
@@ -84,10 +103,25 @@ impl WorkflowCommand {
             "resume" => CommandAction::Resume {
                 run_id: required(tail, 0, "run id")?,
             },
+            "continue" => CommandAction::Continue {
+                run_id: required(tail, 0, "run id")?,
+            },
+            "repair" => CommandAction::Repair {
+                run_id: required(tail, 0, "run id")?,
+            },
             "pause" => CommandAction::Pause {
                 run_id: required(tail, 0, "run id")?,
             },
             "cancel" => CommandAction::Cancel {
+                run_id: required(tail, 0, "run id")?,
+            },
+            "approve-run-once" | "approve-once" => CommandAction::ApproveRunOnce {
+                run_id: required(tail, 0, "run id")?,
+            },
+            "approve-always" => CommandAction::ApproveAlways {
+                run_id: required(tail, 0, "run id")?,
+            },
+            "deny-workflow" | "deny" => CommandAction::DenyWorkflow {
                 run_id: required(tail, 0, "run id")?,
             },
             "restart-agent" => CommandAction::RestartAgent {
@@ -98,6 +132,16 @@ impl WorkflowCommand {
             "restart-stage" => CommandAction::RestartStage {
                 run_id: required(tail, 0, "run id")?,
                 stage_id: required(tail, 1, "stage id")?,
+            },
+            "restart" if tail.first().is_some_and(|arg| arg == "task") => {
+                CommandAction::RestartTask {
+                    run_id: required(tail, 1, "run id")?,
+                    task_id: required(tail, 2, "task id")?,
+                }
+            }
+            "restart-task" => CommandAction::RestartTask {
+                run_id: required(tail, 0, "run id")?,
+                task_id: required(tail, 1, "task id")?,
             },
             "force-accept" | "force-continue" => CommandAction::ForceAccept {
                 run_id: required(tail, 0, "run id")?,
@@ -217,6 +261,47 @@ mod tests {
             parse(&["run", "--from-template", "repo-audit"]),
             CommandAction::RunTemplate {
                 name: "repo-audit".into()
+            }
+        );
+    }
+
+    #[test]
+    fn parses_high_level_recovery_commands() {
+        assert_eq!(
+            parse(&["continue", "wf-123"]),
+            CommandAction::Continue {
+                run_id: "wf-123".into()
+            }
+        );
+        assert_eq!(
+            parse(&["repair", "wf-123"]),
+            CommandAction::Repair {
+                run_id: "wf-123".into()
+            }
+        );
+        assert_eq!(
+            parse(&["restart", "task", "wf-123", "T010"]),
+            CommandAction::RestartTask {
+                run_id: "wf-123".into(),
+                task_id: "T010".into()
+            }
+        );
+        assert_eq!(
+            parse(&["restart-task", "wf-123", "T010"]),
+            CommandAction::RestartTask {
+                run_id: "wf-123".into(),
+                task_id: "T010".into()
+            }
+        );
+    }
+
+    #[test]
+    fn keeps_internal_restart_stage_command_available() {
+        assert_eq!(
+            parse(&["restart-stage", "wf-123", "implement-T010"]),
+            CommandAction::RestartStage {
+                run_id: "wf-123".into(),
+                stage_id: "implement-T010".into()
             }
         );
     }

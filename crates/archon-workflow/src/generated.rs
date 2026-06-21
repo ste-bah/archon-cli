@@ -1,3 +1,9 @@
+//! Legacy generated-`WorkflowSpec` normalizers and patchers.
+//!
+//! These functions exist only for explicit legacy YAML/spec workflows. V2
+//! generated workflows carry control state through typed host calls and
+//! `WorkflowV2Result` records, not generated YAML patch-up passes.
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value;
@@ -12,81 +18,15 @@ use generated_remediation::{
 #[path = "generated_quality.rs"]
 mod generated_quality;
 use generated_quality::promote_quality_gate_entries;
-
-pub(crate) fn sanitize_generated_value(value: &mut Value) {
-    let Some(stages) = value.get_mut("stages").and_then(Value::as_array_mut) else {
-        return;
-    };
-    for stage in stages {
-        sanitize_stage_provider_tier(stage);
-    }
-}
-
-fn sanitize_stage_provider_tier(stage: &mut Value) {
-    let Some(object) = stage.as_object_mut() else {
-        return;
-    };
-    let Some(raw) = object.get("provider_tier") else {
-        return;
-    };
-    if valid_provider_tier_value(raw) {
-        return;
-    }
-    let tier = raw
-        .as_str()
-        .and_then(stage_provider_tier_alias)
-        .unwrap_or_else(|| inferred_stage_provider_tier(object));
-    object.insert("provider_tier".into(), Value::String(tier.into()));
-}
-
-fn valid_provider_tier_value(value: &Value) -> bool {
-    value.as_str().is_some_and(|tier| {
-        serde_json::from_value::<ProviderTier>(Value::String(tier.into())).is_ok()
-    })
-}
-
-fn stage_provider_tier_alias(value: &str) -> Option<&'static str> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "executor" | "execution" | "implementer" | "implementation" | "developer" | "engineer"
-        | "builder" | "writer" | "patcher" => Some("coder"),
-        "reviewer" | "auditor" | "skeptic" | "qa" | "quality" | "verifier" => Some("critic"),
-        "synthesizer" | "synthesis" | "summarizer" | "reporter" => Some("reducer"),
-        "research" | "analyst" | "analysis" | "investigator" => Some("researcher"),
-        "orchestrator" | "coordinator" => Some("planner"),
-        "fast" | "low_cost" => Some("cheap"),
-        _ => None,
-    }
-}
-
-fn inferred_stage_provider_tier(object: &serde_json::Map<String, Value>) -> &'static str {
-    let text = format!(
-        "{} {} {}",
-        object.get("id").and_then(Value::as_str).unwrap_or_default(),
-        object
-            .get("kind")
-            .and_then(Value::as_str)
-            .unwrap_or_default(),
-        object
-            .get("task")
-            .and_then(Value::as_str)
-            .unwrap_or_default(),
-    )
-    .to_ascii_lowercase();
-    if contains_any(
-        &text,
-        &["implement", "remediate", "repair", "edit", "patch", "code"],
-    ) {
-        "coder"
-    } else if contains_any(&text, &["review", "audit", "quality", "critic", "verify"]) {
-        "critic"
-    } else if contains_any(&text, &["reduce", "synthesis", "synthesize", "report"]) {
-        "reducer"
-    } else if contains_any(&text, &["research", "investigate", "evidence"]) {
-        "researcher"
-    } else {
-        "planner"
-    }
-}
+#[path = "generated_sanitize.rs"]
+mod generated_sanitize;
+pub(crate) use generated_sanitize::sanitize_generated_value;
+#[path = "generated_completion.rs"]
+mod generated_completion;
+#[path = "generated_remediation_contract.rs"]
+mod generated_remediation_contract;
+#[path = "generated_task_items.rs"]
+mod generated_task_items;
 
 fn contains_any(text: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| text.contains(needle))
@@ -94,6 +34,8 @@ fn contains_any(text: &str, needles: &[&str]) -> bool {
 
 pub fn normalize_generated_spec(spec: &mut WorkflowSpec) {
     neutralize_provider_tiers(spec);
+    normalize_generated_foreach_accessors(spec);
+    ensure_generated_foreach_dependencies(spec);
     normalize_under_specified_stages(spec);
     promote_generated_implementation_agents(spec);
     normalize_generated_fanout_shapes(spec);
@@ -101,11 +43,101 @@ pub fn normalize_generated_spec(spec: &mut WorkflowSpec) {
     normalize_generated_item_kinds(spec);
     infer_implementation_fanouts(spec);
     infer_dependencies_from_io(spec);
-    normalize_targetless_implementation_stages(spec);
+    let allow_generated_target_inventory = generated_expansion_requested(
+        spec,
+        &[
+            "allow_generated_target_inventory",
+            "enable_generated_target_inventory",
+        ],
+    );
+    normalize_targetless_implementation_stages(spec, allow_generated_target_inventory);
+    ensure_direct_implementation_work_units(spec);
+    generated_completion::ensure_generated_completion_contracts(spec);
+    generated_remediation_contract::ensure_remediation_contracts(spec);
     promote_quality_gate_entries(spec);
     ensure_generated_remediation_loop(spec);
     crate::required_artifact_contract::ensure_final_required_artifacts(spec);
-    crate::required_artifact_heal::ensure_required_artifact_self_heal(spec);
+    if generated_expansion_requested(
+        spec,
+        &[
+            "enable_required_artifact_self_heal",
+            "self_heal_required_artifacts",
+        ],
+    ) {
+        crate::required_artifact_heal::ensure_required_artifact_self_heal(spec);
+    }
+}
+
+fn generated_expansion_requested(spec: &WorkflowSpec, keys: &[&str]) -> bool {
+    spec.stages
+        .iter()
+        .any(|stage| keys.iter().any(|key| bool_field(stage, key)))
+}
+
+fn bool_field(stage: &StageSpec, key: &str) -> bool {
+    stage
+        .extra
+        .get(key)
+        .or_else(|| stage.input.get(key))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn ensure_generated_foreach_dependencies(spec: &mut WorkflowSpec) {
+    let stage_ids = spec
+        .stages
+        .iter()
+        .map(|stage| stage.id.clone())
+        .collect::<BTreeSet<_>>();
+    let mut producers_to_declare = BTreeSet::new();
+    for stage in &mut spec.stages {
+        let Some(dep) = foreach_dependency(stage) else {
+            continue;
+        };
+        if dep == stage.id || !stage_ids.contains(&dep) {
+            continue;
+        }
+        if !stage.depends_on.contains(&dep) {
+            stage.depends_on.push(dep.clone());
+        }
+        producers_to_declare.insert(dep);
+    }
+    for producer in producers_to_declare {
+        declare_items_output(spec, &producer);
+    }
+}
+
+fn foreach_dependency(stage: &StageSpec) -> Option<String> {
+    let foreach = stage.foreach.as_deref()?.trim();
+    let inner = foreach.strip_prefix("${")?.strip_suffix('}')?;
+    let (dep, accessor) = inner.split_once('.')?;
+    (accessor.trim() == "items")
+        .then(|| dep.trim().to_string())
+        .filter(|dep| !dep.is_empty())
+}
+
+fn normalize_generated_foreach_accessors(spec: &mut WorkflowSpec) {
+    for stage in &mut spec.stages {
+        let Some(foreach) = stage.foreach.as_deref() else {
+            continue;
+        };
+        if let Some(canonical) = canonical_foreach_accessor(foreach) {
+            stage.foreach = Some(canonical);
+        }
+    }
+}
+
+fn canonical_foreach_accessor(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    let inner = trimmed.strip_prefix('$')?.trim();
+    let inner = inner.trim_start_matches('{').trim_end_matches('}').trim();
+    let (stage, accessor) = inner.split_once('.')?;
+    let stage = stage.trim();
+    let accessor = accessor.trim();
+    if stage.is_empty() || accessor.is_empty() {
+        return None;
+    }
+    Some(format!("${{{stage}.{accessor}}}"))
 }
 
 fn normalize_generated_fanout_shapes(spec: &mut WorkflowSpec) {
@@ -356,7 +388,10 @@ fn infer_dependencies_from_io(spec: &mut WorkflowSpec) {
     }
 }
 
-fn normalize_targetless_implementation_stages(spec: &mut WorkflowSpec) {
+fn normalize_targetless_implementation_stages(
+    spec: &mut WorkflowSpec,
+    allow_generated_target_inventory: bool,
+) {
     let mut existing = spec
         .stages
         .iter()
@@ -372,6 +407,23 @@ fn normalize_targetless_implementation_stages(spec: &mut WorkflowSpec) {
 
         if let Some(targets) = loose_target_files(&stage) {
             stage.expected_target_files = targets;
+            normalized.push(stage);
+            continue;
+        }
+
+        if !allow_generated_target_inventory {
+            normalized.push(stage);
+            continue;
+        }
+
+        if let Some(items) = generated_task_items::implementation_items(&spec.task, &stage) {
+            stage.extra.insert(
+                "normalized_from_kind".into(),
+                Value::String("Implementation".into()),
+            );
+            stage.kind = StageKind::Fanout;
+            stage.item_kind = Some(StageKind::Implementation);
+            stage.input = merge_inline_items(std::mem::take(&mut stage.input), items);
             normalized.push(stage);
             continue;
         }
@@ -395,6 +447,34 @@ fn normalize_targetless_implementation_stages(spec: &mut WorkflowSpec) {
     }
 
     spec.stages = normalized;
+}
+
+fn ensure_direct_implementation_work_units(spec: &mut WorkflowSpec) {
+    for stage in &mut spec.stages {
+        if stage.kind != StageKind::Implementation
+            || !crate::work_unit_coverage::stage_required_units(stage).is_empty()
+        {
+            continue;
+        }
+        stage.extra.insert(
+            "required_work_units".into(),
+            Value::Array(vec![Value::String(stage.id.clone())]),
+        );
+        stage.extra.insert(
+            "normalized_work_unit_scope".into(),
+            Value::String("stage_id".into()),
+        );
+    }
+}
+
+fn merge_inline_items(mut input: Value, items: Vec<Value>) -> Value {
+    match input.as_object_mut() {
+        Some(map) => {
+            map.insert("items".into(), Value::Array(items));
+            input
+        }
+        None => serde_json::json!({ "items": items }),
+    }
 }
 
 fn has_declared_targets(stage: &StageSpec) -> bool {
