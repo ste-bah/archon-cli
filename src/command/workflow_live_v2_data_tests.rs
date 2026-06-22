@@ -51,7 +51,7 @@ fn read_only_fanout_review_branch_stays_needs_review_not_failed() {
 }
 
 #[test]
-fn read_only_fanout_unstructured_blocked_branch_still_blocks() {
+fn read_only_fanout_unstructured_blocked_branch_with_sibling_continues_as_findings() {
     let result = result_from_fanout_report(
         &fanout_call("readOnlyAudits"),
         report(vec![
@@ -60,13 +60,25 @@ fn read_only_fanout_unstructured_blocked_branch_still_blocks() {
         ]),
     );
 
-    assert_eq!(result.status, WorkflowV2Status::Blocked);
-    assert!(result.summary.contains("missing structured evidence"));
+    assert_eq!(result.status, WorkflowV2Status::Accepted);
+    assert!(result.summary.contains("retained for downstream reduction"));
     assert_eq!(result.data["items"][1]["status"], "blocked");
 }
 
 #[test]
-fn schema_branch_error_fails_fanout_before_downstream_work() {
+fn read_only_fanout_all_unstructured_blocked_branches_still_blocks() {
+    let result = result_from_fanout_report(
+        &fanout_call("readOnlyAudits"),
+        report(vec![outcome("b", WorkflowV2Status::Blocked, None, None)]),
+    );
+
+    assert_eq!(result.status, WorkflowV2Status::Blocked);
+    assert!(result.summary.contains("missing structured evidence"));
+    assert_eq!(result.data["items"][0]["status"], "blocked");
+}
+
+#[test]
+fn schema_branch_error_with_sibling_continues_as_findings() {
     let result = result_from_fanout_report(
         &fanout_call("readOnlyAudits"),
         report(vec![
@@ -78,7 +90,8 @@ fn schema_branch_error_fails_fanout_before_downstream_work() {
         ]),
     );
 
-    assert_eq!(result.status, WorkflowV2Status::Failed);
+    assert_eq!(result.status, WorkflowV2Status::Accepted);
+    assert!(result.summary.contains("retained for downstream reduction"));
     let items = result.data["items"].as_array().unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(items[1]["status"], "failed");
@@ -87,7 +100,7 @@ fn schema_branch_error_fails_fanout_before_downstream_work() {
 }
 
 #[test]
-fn transport_branch_error_fails_fanout_before_reducer_or_human_gate() {
+fn transport_branch_error_with_sibling_continues_as_findings() {
     let result = result_from_fanout_report(
         &fanout_call("readOnlyAudits"),
         report(vec![
@@ -96,9 +109,24 @@ fn transport_branch_error_fails_fanout_before_reducer_or_human_gate() {
         ]),
     );
 
+    assert_eq!(result.status, WorkflowV2Status::Accepted);
+    assert!(result.summary.contains("retained for downstream reduction"));
+    assert_eq!(result.data["items"][1]["status"], "failed");
+}
+
+#[test]
+fn read_only_fanout_all_failed_branches_still_fails() {
+    let result = result_from_fanout_report(
+        &fanout_call("readOnlyAudits"),
+        report(vec![failed_error_outcome(
+            "b",
+            "agent transport failed: rate limit",
+        )]),
+    );
+
     assert_eq!(result.status, WorkflowV2Status::Failed);
     assert!(result.summary.contains("failed"));
-    assert_eq!(result.data["items"][1]["status"], "failed");
+    assert_eq!(result.data["items"][0]["status"], "failed");
 }
 
 #[test]

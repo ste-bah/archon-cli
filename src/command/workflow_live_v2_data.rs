@@ -285,6 +285,9 @@ pub(super) fn result_from_fanout_report(
     let blocked_count = count_outcomes_with_status(&outcomes, WorkflowV2Status::Blocked);
     let failed_count = count_outcomes_with_status(&outcomes, WorkflowV2Status::Failed);
     let review_count = count_outcomes_with_status(&outcomes, WorkflowV2Status::NeedsReview);
+    let usable_count = outcomes
+        .len()
+        .saturating_sub(cancelled_count + failed_count + hard_blocked_count);
     let mut result = if cancelled_count > 0 {
         WorkflowV2Result {
             status: WorkflowV2Status::Cancelled,
@@ -294,7 +297,7 @@ pub(super) fn result_from_fanout_report(
             ),
             ..WorkflowV2Result::default()
         }
-    } else if hard_blocked_count > 0 {
+    } else if hard_blocked_count > 0 && usable_count == 0 {
         WorkflowV2Result {
             status: WorkflowV2Status::Blocked,
             summary: format!(
@@ -303,7 +306,7 @@ pub(super) fn result_from_fanout_report(
             ),
             ..WorkflowV2Result::default()
         }
-    } else if failed_count > 0 {
+    } else if failed_count > 0 && usable_count == 0 {
         WorkflowV2Result {
             status: WorkflowV2Status::Failed,
             summary: format!(
@@ -312,19 +315,19 @@ pub(super) fn result_from_fanout_report(
             ),
             ..WorkflowV2Result::default()
         }
-    } else if blocked_count > 0 || review_count > 0 {
+    } else if failed_count > 0 || blocked_count > 0 || review_count > 0 {
         let mut result = WorkflowV2Result {
             status: WorkflowV2Status::Accepted,
             summary: format!(
                 "fanout '{}' completed with {} branch finding(s) retained for downstream reduction",
                 call.id,
-                blocked_count + review_count
+                failed_count + blocked_count + review_count
             ),
             ..WorkflowV2Result::default()
         };
         result.evidence.push(WorkflowV2Evidence::new(
             WorkflowV2EvidenceKind::Review,
-            "read-only fanout branch findings were retained as typed review/remediation data for downstream workflow steps",
+            "read-only fanout branch findings and branch errors were retained as typed review/remediation data for downstream workflow steps",
         ));
         result
     } else {
