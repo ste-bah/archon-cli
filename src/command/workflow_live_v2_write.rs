@@ -212,8 +212,8 @@ async fn run_coordinated_v2_write_fanout(
         for (assignment, result) in wave.assignments.iter().zip(wave_results) {
             let mut result = match result {
                 Ok(result) => result,
-                Err(err) if is_terminal_write_branch_evidence_error(&err.to_string()) => {
-                    terminal_write_branch_error_result(&assignment.item_id, &err.to_string())
+                Err(err) if is_write_branch_validation_error(&err.to_string()) => {
+                    write_branch_validation_error_result(&assignment.item_id, &err.to_string())
                 }
                 Err(err) => return Err(err),
             };
@@ -227,9 +227,9 @@ async fn run_coordinated_v2_write_fanout(
                     ))
                 })?;
             if let Err(err) = validate_changed_files(write_item, &result) {
-                if is_terminal_write_branch_evidence_error(&err.to_string()) {
+                if is_write_branch_validation_error(&err.to_string()) {
                     result =
-                        terminal_write_branch_error_result(&assignment.item_id, &err.to_string());
+                        write_branch_validation_error_result(&assignment.item_id, &err.to_string());
                 } else {
                     return Err(WorkflowError::SpecInvalid(err.to_string()));
                 }
@@ -541,8 +541,8 @@ async fn run_one_worktree_branch(
     .await
     {
         Ok(result) => result,
-        Err(err) if is_terminal_write_branch_evidence_error(&err.to_string()) => {
-            terminal_write_branch_error_result(&branch_id, &err.to_string())
+        Err(err) if is_write_branch_validation_error(&err.to_string()) => {
+            write_branch_validation_error_result(&branch_id, &err.to_string())
         }
         Err(err) => return Err(err),
     };
@@ -553,8 +553,8 @@ async fn run_one_worktree_branch(
         prepared.assignment.owned_targets.clone(),
     );
     if let Err(err) = validate_changed_files(&write_item, &result) {
-        if is_terminal_write_branch_evidence_error(&err.to_string()) {
-            result = terminal_write_branch_error_result(&branch_id, &err.to_string());
+        if is_write_branch_validation_error(&err.to_string()) {
+            result = write_branch_validation_error_result(&branch_id, &err.to_string());
         } else {
             return Err(WorkflowError::SpecInvalid(err.to_string()));
         }
@@ -573,8 +573,8 @@ async fn run_one_worktree_branch(
             &result,
         ) {
             Ok(captured) => captured,
-            Err(err) if is_terminal_write_branch_evidence_error(&err.to_string()) => {
-                result = terminal_write_branch_error_result(&branch_id, &err.to_string());
+            Err(err) if is_write_branch_validation_error(&err.to_string()) => {
+                result = write_branch_validation_error_result(&branch_id, &err.to_string());
                 return Ok(CompletedWorktreeBranch {
                     item_id: branch_id,
                     role: branch_role,
@@ -722,8 +722,8 @@ async fn run_serial_v2_write_fanout(
                 .await
             {
                 Ok(result) => result,
-                Err(err) if is_terminal_write_branch_evidence_error(&err.to_string()) => {
-                    terminal_write_branch_error_result(&branch_id, &err.to_string())
+                Err(err) if is_write_branch_validation_error(&err.to_string()) => {
+                    write_branch_validation_error_result(&branch_id, &err.to_string())
                 }
                 Err(err) => return Err(err),
             };
@@ -738,8 +738,8 @@ async fn run_serial_v2_write_fanout(
                 ))
             })?;
         if let Err(err) = validate_changed_files(write_item, &result) {
-            if is_terminal_write_branch_evidence_error(&err.to_string()) {
-                result = terminal_write_branch_error_result(&branch_id, &err.to_string());
+            if is_write_branch_validation_error(&err.to_string()) {
+                result = write_branch_validation_error_result(&branch_id, &err.to_string());
             } else {
                 return Err(WorkflowError::SpecInvalid(err.to_string()));
             }
@@ -938,42 +938,21 @@ fn result_from_write_fanout(
             ),
             ..WorkflowV2Result::default()
         }
-    } else if blocked > 0 {
-        WorkflowV2Result {
-            status: WorkflowV2Status::Blocked,
-            summary: format!(
-                "write-capable fanout '{}' blocked with {} blocked branch(es)",
-                call.id, blocked
-            ),
-            residual_gaps: vec![WorkflowV2ResidualGap {
-                id: format!(
-                    "blocked_write_fanout_{}",
-                    sanitize_v2_path_segment(&call.id)
-                ),
-                description: format!(
-                    "write-capable fanout '{}' had {} blocked branch(es)",
-                    call.id, blocked
-                ),
-                severity: Some("blocking".to_string()),
-            }],
-            ..WorkflowV2Result::default()
-        }
-    } else if failed > 0 {
-        WorkflowV2Result {
-            status: WorkflowV2Status::Failed,
-            summary: format!(
-                "write-capable fanout '{}' failed with {} failed branch(es)",
-                call.id, failed
-            ),
-            ..WorkflowV2Result::default()
-        }
-    } else if needs_review > 0 {
+    } else if blocked > 0 || failed > 0 || needs_review > 0 {
         WorkflowV2Result {
             status: WorkflowV2Status::NeedsReview,
             summary: format!(
-                "write-capable fanout '{}' completed with {} branch(es) needing review",
-                call.id, needs_review
+                "write-capable fanout '{}' completed with branch findings for workflow.js remediation: blocked {}, failed {}, review {}",
+                call.id, blocked, failed, needs_review
             ),
+            residual_gaps: vec![WorkflowV2ResidualGap {
+                id: format!("write_fanout_review_{}", sanitize_v2_path_segment(&call.id)),
+                description: format!(
+                    "write-capable fanout '{}' returned branch findings; inspect data.items and run remediation or review before final acceptance",
+                    call.id
+                ),
+                severity: Some("review".to_string()),
+            }],
             ..WorkflowV2Result::default()
         }
     } else {
@@ -1019,17 +998,9 @@ fn add_write_fanout_evidence(
     fallback_reason: Option<String>,
 ) {
     let status_evidence = match result.status {
-        WorkflowV2Status::Blocked => Some((
-            archon_workflow::WorkflowV2EvidenceKind::Blocker,
-            "one or more write fanout branches returned a typed blocked result",
-        )),
         WorkflowV2Status::NeedsReview => Some((
             archon_workflow::WorkflowV2EvidenceKind::Review,
-            "write fanout branch findings were retained as typed review data for downstream workflow steps",
-        )),
-        WorkflowV2Status::Failed => Some((
-            archon_workflow::WorkflowV2EvidenceKind::Blocker,
-            "write fanout returned a terminal failed status",
+            "write fanout branch findings were retained as typed review/remediation data for workflow.js",
         )),
         _ => None,
     };
@@ -1070,7 +1041,7 @@ fn record_write_peak(peak: &AtomicUsize, observed: usize) {
     }
 }
 
-fn terminal_write_branch_error_result(item_id: &str, error: &str) -> WorkflowV2Result {
+fn write_branch_validation_error_result(item_id: &str, error: &str) -> WorkflowV2Result {
     let mut result = WorkflowV2Result {
         status: WorkflowV2Status::Failed,
         summary: format!(
@@ -1080,7 +1051,7 @@ fn terminal_write_branch_error_result(item_id: &str, error: &str) -> WorkflowV2R
     };
     result.evidence.push(WorkflowV2Evidence::new(
         WorkflowV2EvidenceKind::Blocker,
-        "write branch validation failure stopped the workflow before downstream work",
+        "write branch validation failure was retained as typed remediation data for workflow.js",
     ));
     result.residual_gaps.push(WorkflowV2ResidualGap {
         id: format!(
@@ -1092,13 +1063,13 @@ fn terminal_write_branch_error_result(item_id: &str, error: &str) -> WorkflowV2R
     });
     result.data = serde_json::json!({
         "branch_id": item_id,
-        "terminal_from_error": true,
+        "branch_error_from_runtime": true,
         "error": truncate_for_result(error, 2_000),
     });
     result
 }
 
-fn is_terminal_write_branch_evidence_error(error: &str) -> bool {
+fn is_write_branch_validation_error(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
     !lower.contains("agent transport failed")
         && (lower.contains("schema repair failed")
@@ -1465,11 +1436,11 @@ mod tests {
         let result = result_from_write_fanout(&call, vec![branch_result], &plan, 1, None);
 
         assert_eq!(result.status, WorkflowV2Status::NeedsReview);
-        assert!(result.summary.contains("needing review"));
+        assert!(result.summary.contains("workflow.js remediation"));
     }
 
     #[test]
-    fn write_fanout_failed_branch_is_terminal_failure() {
+    fn write_fanout_failed_branch_returns_review_data_for_script() {
         let temp = tempfile::tempdir().expect("tempdir");
         let call = WorkflowV2HostCall {
             id: "impl".to_string(),
@@ -1497,14 +1468,14 @@ mod tests {
 
         let result = result_from_write_fanout(&call, vec![branch_result], &plan, 1, None);
 
-        assert_eq!(result.status, WorkflowV2Status::Failed);
-        assert!(result.summary.contains("failed"));
+        assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+        assert!(result.summary.contains("workflow.js remediation"));
         assert_eq!(result.data["items"][0]["status"], "failed");
     }
 
     #[test]
-    fn write_branch_validation_error_becomes_terminal_branch_failure() {
-        let result = terminal_write_branch_error_result(
+    fn write_branch_validation_error_becomes_branch_error_data() {
+        let result = write_branch_validation_error_result(
             "impl-T001",
             "schema repair failed after one retry: first=implementation agent changed files outside declared target_files; repair=implementation noop requires typed task_coverage evidence",
         );
@@ -1514,12 +1485,12 @@ mod tests {
             result.residual_gaps[0].severity.as_deref(),
             Some("blocking")
         );
-        assert_eq!(result.data["terminal_from_error"], true);
+        assert_eq!(result.data["branch_error_from_runtime"], true);
     }
 
     #[test]
-    fn transport_error_is_not_reclassified_as_terminal_write_branch_evidence() {
-        assert!(!is_terminal_write_branch_evidence_error(
+    fn transport_error_is_not_reclassified_as_write_branch_validation_error() {
+        assert!(!is_write_branch_validation_error(
             "agent transport failed: rate limit"
         ));
     }

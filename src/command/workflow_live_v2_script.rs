@@ -22,7 +22,6 @@ pub(super) struct WorkflowV2ScriptSummary {
     pub(super) completed: usize,
     pub(super) executed: usize,
     pub(super) reused: usize,
-    pub(super) failed_call: Option<String>,
     pub(super) calls: Vec<WorkflowV2HostCall>,
 }
 
@@ -135,14 +134,7 @@ impl WorkflowV2ScriptRunner {
             .await;
         match js_result {
             Ok(_) => Ok(host.summary().await),
-            Err(err) => {
-                let summary = host.summary().await;
-                if summary.executed > 0 && should_stop_script_for_status(summary.status) {
-                    Ok(summary)
-                } else {
-                    Err(workflow_js_error(err.to_string()))
-                }
-            }
+            Err(err) => Err(workflow_js_error(err.to_string())),
         }
     }
 }
@@ -168,7 +160,6 @@ struct WorkflowScriptAccumulator {
     completed: usize,
     executed: usize,
     reused: usize,
-    last_failed_call: Option<String>,
     calls: Vec<WorkflowV2HostCall>,
 }
 
@@ -179,7 +170,6 @@ impl Default for WorkflowScriptAccumulator {
             completed: 0,
             executed: 0,
             reused: 0,
-            last_failed_call: None,
             calls: Vec::new(),
         }
     }
@@ -268,12 +258,6 @@ impl WorkflowScriptHost {
         self.update_checkpoint(&record)?;
         self.mark_executed(&record, status).await;
         poll_v2_run_control(&self.runner.workflow_store, &self.runner.run_id, "")?;
-        if should_stop_script_for_status(status) {
-            return Err(WorkflowError::StageFailed(format!(
-                "workflow V2 call '{}' stopped with status {:?}: {}",
-                record.call.id, record.status, record.result.summary
-            )));
-        }
         result_view_json(&record.result)
     }
 
@@ -367,9 +351,6 @@ impl WorkflowScriptHost {
         if is_reusable_status(status) {
             acc.completed += 1;
         }
-        if should_stop_script_for_status(status) {
-            acc.last_failed_call = Some(record.call.id.clone());
-        }
         acc.calls.push(record.call.clone());
     }
 
@@ -380,9 +361,6 @@ impl WorkflowScriptHost {
             completed: acc.completed,
             executed: acc.executed,
             reused: acc.reused,
-            failed_call: should_stop_script_for_status(acc.status)
-                .then(|| acc.last_failed_call.clone())
-                .flatten(),
             calls: acc.calls.clone(),
         }
     }
@@ -568,10 +546,6 @@ fn is_reusable_status(status: WorkflowV2Status) -> bool {
     matches!(status, WorkflowV2Status::Accepted | WorkflowV2Status::Noop)
 }
 
-fn should_stop_script_for_status(status: WorkflowV2Status) -> bool {
-    !is_reusable_status(status)
-}
-
 fn stable_input_hash(input: &serde_json::Value) -> String {
     use sha2::{Digest, Sha256};
 
@@ -591,18 +565,8 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn script_continues_only_after_reusable_statuses() {
-        assert!(!should_stop_script_for_status(WorkflowV2Status::Accepted));
-        assert!(!should_stop_script_for_status(WorkflowV2Status::Noop));
-        assert!(should_stop_script_for_status(WorkflowV2Status::NeedsReview));
-        assert!(should_stop_script_for_status(WorkflowV2Status::Blocked));
-        assert!(should_stop_script_for_status(WorkflowV2Status::Failed));
-        assert!(should_stop_script_for_status(WorkflowV2Status::Cancelled));
-    }
-
     #[tokio::test]
-    async fn non_reusable_host_result_stops_script_before_next_call() {
+    async fn semantic_host_result_returns_to_script_without_stopping_next_call() {
         let temp = tempfile::tempdir().expect("tempdir");
         let spec = test_spec();
         let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
@@ -625,18 +589,21 @@ mod tests {
         let summary = runner
             .run(
                 r#"
-async function workflow(w) {
-  await w.humanGate("confirm-before-write", { task: "Confirm before writing" });
-  await w.checkpoint("should-not-run");
-}
-"#,
+	async function workflow(w) {
+	  const gate = await w.humanGate("confirm-before-write", { task: "Confirm before writing" });
+	  if (gate.status !== "needs_review") {
+	    throw new Error("humanGate did not return typed review data");
+	  }
+	  await w.checkpoint("should-not-run");
+	}
+	"#,
             )
             .await
             .expect("script summary");
 
-        assert_eq!(summary.status, WorkflowV2Status::NeedsReview);
-        assert_eq!(summary.executed, 1);
-        assert_eq!(summary.failed_call.as_deref(), Some("confirm-before-write"));
+        assert_eq!(summary.status, WorkflowV2Status::Accepted);
+        assert_eq!(summary.executed, 2);
+        assert_eq!(summary.completed, 1);
         assert!(
             v2_store
                 .load_call_record("confirm-before-write")
@@ -646,6 +613,58 @@ async function workflow(w) {
         assert!(
             v2_store
                 .load_call_record("should-not-run")
+                .expect("checkpoint lookup")
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn script_can_choose_to_return_after_semantic_review_result() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let spec = test_spec();
+        let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
+        let run = workflow_store.create_run(spec.clone()).expect("run");
+        let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
+        let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+        let client =
+            LiveV2AgentClient::new(Arc::new(PanicLlm), tui_tx, Vec::new(), run.id.clone(), None);
+        let runner = WorkflowV2ScriptRunner::new(
+            "script-owned branch".to_string(),
+            spec,
+            WorkflowV2AgentAdapter::new(),
+            client,
+            v2_store.clone(),
+            workflow_store,
+            run.id.clone(),
+            true,
+        );
+
+        let summary = runner
+            .run(
+                r#"
+	async function workflow(w) {
+	  const gate = await w.humanGate("needs-user-choice", { task: "Ask user before continuing" });
+	  if (gate.status === "needs_review") {
+	    return gate;
+	  }
+	  await w.checkpoint("script-continued");
+	}
+	"#,
+            )
+            .await
+            .expect("script summary");
+
+        assert_eq!(summary.status, WorkflowV2Status::NeedsReview);
+        assert_eq!(summary.executed, 1);
+        assert!(
+            v2_store
+                .load_call_record("needs-user-choice")
+                .expect("gate lookup")
+                .is_some()
+        );
+        assert!(
+            v2_store
+                .load_call_record("script-continued")
                 .expect("checkpoint lookup")
                 .is_none()
         );

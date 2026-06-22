@@ -314,9 +314,10 @@ fn harness_planner_prompt_requires_restricted_host_api() {
     assert!(prompt.contains("w.saveArtifact"));
     assert!(prompt.contains("w.requireArtifact"));
     assert!(prompt.contains("w.finalReport"));
-    assert!(prompt.contains("stable literal string id as its first argument"));
-    assert!(prompt.contains("Do not compute host-call ids at runtime"));
+    assert!(prompt.contains("non-empty stable string id as its first argument"));
+    assert!(prompt.contains("deterministic ids with a literal prefix"));
     assert!(prompt.contains("ordinary JavaScript control flow"));
+    assert!(prompt.contains("non-accepted semantic statuses do not throw"));
     assert!(prompt.contains("Do not import modules"));
     assert!(prompt.contains("Return only JavaScript for workflow.js"));
 }

@@ -30,8 +30,12 @@ fn read_only_fanout_structured_blocked_branch_continues_as_findings() {
         report(vec![accepted_outcome("a"), blocked_outcome("b")]),
     );
 
-    assert_eq!(result.status, WorkflowV2Status::Accepted);
-    assert!(result.summary.contains("retained for downstream reduction"));
+    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+    assert!(
+        result
+            .summary
+            .contains("workflow.js to reduce or remediate")
+    );
     let items = result.data["items"].as_array().unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(items[1]["status"], "blocked");
@@ -45,8 +49,12 @@ fn read_only_fanout_review_branch_stays_needs_review_not_failed() {
         report(vec![accepted_outcome("a"), review_outcome("b")]),
     );
 
-    assert_eq!(result.status, WorkflowV2Status::Accepted);
-    assert!(result.summary.contains("retained for downstream reduction"));
+    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+    assert!(
+        result
+            .summary
+            .contains("workflow.js to reduce or remediate")
+    );
     assert_eq!(result.data["items"].as_array().unwrap().len(), 2);
 }
 
@@ -60,20 +68,28 @@ fn read_only_fanout_unstructured_blocked_branch_with_sibling_continues_as_findin
         ]),
     );
 
-    assert_eq!(result.status, WorkflowV2Status::Accepted);
-    assert!(result.summary.contains("retained for downstream reduction"));
+    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+    assert!(
+        result
+            .summary
+            .contains("workflow.js to reduce or remediate")
+    );
     assert_eq!(result.data["items"][1]["status"], "blocked");
 }
 
 #[test]
-fn read_only_fanout_all_unstructured_blocked_branches_still_blocks() {
+fn read_only_fanout_all_unstructured_blocked_branches_returns_review_data() {
     let result = result_from_fanout_report(
         &fanout_call("readOnlyAudits"),
         report(vec![outcome("b", WorkflowV2Status::Blocked, None, None)]),
     );
 
-    assert_eq!(result.status, WorkflowV2Status::Blocked);
-    assert!(result.summary.contains("missing structured evidence"));
+    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+    assert!(
+        result
+            .summary
+            .contains("workflow.js to reduce or remediate")
+    );
     assert_eq!(result.data["items"][0]["status"], "blocked");
 }
 
@@ -90,12 +106,16 @@ fn schema_branch_error_with_sibling_continues_as_findings() {
         ]),
     );
 
-    assert_eq!(result.status, WorkflowV2Status::Accepted);
-    assert!(result.summary.contains("retained for downstream reduction"));
+    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+    assert!(
+        result
+            .summary
+            .contains("workflow.js to reduce or remediate")
+    );
     let items = result.data["items"].as_array().unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(items[1]["status"], "failed");
-    assert_eq!(items[1]["data"]["terminal_from_error"], true);
+    assert_eq!(items[1]["data"]["branch_error_from_runtime"], true);
     assert_eq!(items[1]["residual_gaps"][0]["severity"], "blocking");
 }
 
@@ -109,13 +129,17 @@ fn transport_branch_error_with_sibling_continues_as_findings() {
         ]),
     );
 
-    assert_eq!(result.status, WorkflowV2Status::Accepted);
-    assert!(result.summary.contains("retained for downstream reduction"));
+    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+    assert!(
+        result
+            .summary
+            .contains("workflow.js to reduce or remediate")
+    );
     assert_eq!(result.data["items"][1]["status"], "failed");
 }
 
 #[test]
-fn read_only_fanout_all_failed_branches_still_fails() {
+fn read_only_fanout_all_failed_branches_returns_review_data() {
     let result = result_from_fanout_report(
         &fanout_call("readOnlyAudits"),
         report(vec![failed_error_outcome(
@@ -124,8 +148,12 @@ fn read_only_fanout_all_failed_branches_still_fails() {
         )]),
     );
 
-    assert_eq!(result.status, WorkflowV2Status::Failed);
-    assert!(result.summary.contains("failed"));
+    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+    assert!(
+        result
+            .summary
+            .contains("workflow.js to reduce or remediate")
+    );
     assert_eq!(result.data["items"][0]["status"], "failed");
 }
 

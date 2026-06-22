@@ -248,12 +248,7 @@ pub(super) fn result_from_fanout_report(
 ) -> WorkflowV2Result {
     let peak_parallelism = report.peak_parallelism;
     let max_parallelism = report.max_parallelism;
-    let raw_outcomes = report.outcomes;
-    let hard_blocked_count = raw_outcomes
-        .iter()
-        .filter(|outcome| outcome.status == WorkflowV2Status::Blocked && outcome.result.is_none())
-        .count();
-    let outcomes = normalize_fanout_outcomes(raw_outcomes);
+    let outcomes = normalize_fanout_outcomes(report.outcomes);
     let typed_results = typed_results_from_outcomes(&outcomes);
     if outcomes.is_empty() {
         let mut result = WorkflowV2Result {
@@ -285,9 +280,6 @@ pub(super) fn result_from_fanout_report(
     let blocked_count = count_outcomes_with_status(&outcomes, WorkflowV2Status::Blocked);
     let failed_count = count_outcomes_with_status(&outcomes, WorkflowV2Status::Failed);
     let review_count = count_outcomes_with_status(&outcomes, WorkflowV2Status::NeedsReview);
-    let usable_count = outcomes
-        .len()
-        .saturating_sub(cancelled_count + failed_count + hard_blocked_count);
     let mut result = if cancelled_count > 0 {
         WorkflowV2Result {
             status: WorkflowV2Status::Cancelled,
@@ -297,39 +289,16 @@ pub(super) fn result_from_fanout_report(
             ),
             ..WorkflowV2Result::default()
         }
-    } else if hard_blocked_count > 0 && usable_count == 0 {
-        WorkflowV2Result {
-            status: WorkflowV2Status::Blocked,
-            summary: format!(
-                "fanout '{}' blocked with {} branch(es) missing structured evidence",
-                call.id, hard_blocked_count
-            ),
-            ..WorkflowV2Result::default()
-        }
-    } else if failed_count > 0 && usable_count == 0 {
-        WorkflowV2Result {
-            status: WorkflowV2Status::Failed,
-            summary: format!(
-                "fanout '{}' failed with {} failed branch(es)",
-                call.id, failed_count
-            ),
-            ..WorkflowV2Result::default()
-        }
     } else if failed_count > 0 || blocked_count > 0 || review_count > 0 {
-        let mut result = WorkflowV2Result {
-            status: WorkflowV2Status::Accepted,
+        WorkflowV2Result {
+            status: WorkflowV2Status::NeedsReview,
             summary: format!(
-                "fanout '{}' completed with {} branch finding(s) retained for downstream reduction",
+                "fanout '{}' completed with {} branch finding(s) for workflow.js to reduce or remediate",
                 call.id,
                 failed_count + blocked_count + review_count
             ),
             ..WorkflowV2Result::default()
-        };
-        result.evidence.push(WorkflowV2Evidence::new(
-            WorkflowV2EvidenceKind::Review,
-            "read-only fanout branch findings and branch errors were retained as typed review/remediation data for downstream workflow steps",
-        ));
-        result
+        }
     } else {
         WorkflowV2Result::accepted(format!(
             "fanout '{}' completed {} branch(es)",
@@ -344,6 +313,12 @@ pub(super) fn result_from_fanout_report(
             peak_parallelism, max_parallelism
         ),
     ));
+    if matches!(result.status, WorkflowV2Status::NeedsReview) {
+        result.evidence.push(WorkflowV2Evidence::new(
+            WorkflowV2EvidenceKind::Review,
+            "fanout returned all branch outcomes as typed data; workflow.js must decide whether to reduce, remediate, retry, ask the user, or accept residual gaps",
+        ));
+    }
     attach_branch_evidence(&mut result, &typed_results);
     result.data = serde_json::json!({
         "items": typed_results,
@@ -379,7 +354,7 @@ fn blocked_branch_result(outcome: &WorkflowV2BranchOutcome) -> WorkflowV2Result 
     let mut result = outcome.result.clone().unwrap_or_else(|| WorkflowV2Result {
         status: WorkflowV2Status::Blocked,
         summary: format!(
-            "fanout branch '{}' reported a blocker that must stop before downstream work",
+            "fanout branch '{}' reported a blocker for workflow.js to handle",
             outcome.item_id
         ),
         ..WorkflowV2Result::default()
@@ -392,7 +367,7 @@ fn blocked_branch_result(outcome: &WorkflowV2BranchOutcome) -> WorkflowV2Result 
     {
         result.evidence.push(WorkflowV2Evidence::new(
             WorkflowV2EvidenceKind::Blocker,
-            "blocked fanout branch stopped the workflow before downstream work",
+            "blocked fanout branch was retained as typed remediation or user-choice input",
         ));
     }
     for gap in &mut result.residual_gaps {
@@ -412,7 +387,7 @@ fn failed_branch_error_result(outcome: &WorkflowV2BranchOutcome, error: &str) ->
     };
     result.evidence.push(WorkflowV2Evidence::new(
         WorkflowV2EvidenceKind::Blocker,
-        "branch output was invalid or asked for confirmation; the workflow stopped before downstream work",
+        "branch output was invalid or asked for confirmation; the branch outcome was retained as typed data for workflow.js",
     ));
     result.residual_gaps.push(WorkflowV2ResidualGap {
         id: format!("invalid_branch_output_{}", sanitize_v2_id(&outcome.item_id)),
@@ -422,7 +397,7 @@ fn failed_branch_error_result(outcome: &WorkflowV2BranchOutcome, error: &str) ->
     result.data = serde_json::json!({
         "branch_id": outcome.item_id,
         "role": outcome.role,
-        "terminal_from_error": true,
+        "branch_error_from_runtime": true,
         "error": truncate_for_result(error, 2_000),
     });
     result

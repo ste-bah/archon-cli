@@ -280,14 +280,6 @@ async fn execute_generated_v2_run(
         "Workflow V2 complete: {} (status {:?}, completed {}, executed {}, reused {})\n",
         run.id, summary.status, summary.completed, summary.executed, summary.reused
     );
-    if let Some(call) = summary.failed_call {
-        let label = if summary.status == archon_workflow::WorkflowV2Status::Failed {
-            "failed_call"
-        } else {
-            "stopped_call"
-        };
-        output.push_str(&format!("{label}: {call}\n"));
-    }
     output.push_str(&format!(
         "harness: {}\nv2_results: {}\n",
         store.run_dir(&run.id).join("workflow.js").display(),
