@@ -81,10 +81,56 @@ pub(super) fn sync_v2_summary_to_run(
             stage.completed_at = Some(chrono::Utc::now());
         }
     }
+    let completed_cleanly = matches!(status, WorkflowV2Status::Accepted | WorkflowV2Status::Noop);
+    let now = chrono::Utc::now();
+    for spec_stage in &run.spec.stages {
+        if !is_dynamic_template_stage(spec_stage)
+            || calls.iter().any(|call| call.id == spec_stage.id)
+        {
+            continue;
+        }
+        let template_matched_runtime_call =
+            dynamic_stage_prefix(spec_stage).is_some_and(|prefix| {
+                calls
+                    .iter()
+                    .any(|call| call.id.starts_with(prefix.as_str()))
+            });
+        if !completed_cleanly && !template_matched_runtime_call {
+            continue;
+        }
+        let stage = run
+            .stages
+            .entry(spec_stage.id.clone())
+            .or_insert_with(|| StageState::pending(&spec_stage.id));
+        if matches!(stage.status, StageStatus::Pending | StageStatus::Running) {
+            stage.status = StageStatus::Skipped;
+            stage.completed_at = Some(now);
+            stage.error = Some(
+                "dynamic host-call template; runtime-discovered call instances carry the concrete result"
+                    .to_string(),
+            );
+        }
+    }
     run.status = run_status_from_v2(status);
     run.mark_updated();
     store.save_state(&run)?;
     Ok(())
+}
+
+fn is_dynamic_template_stage(stage: &archon_workflow::StageSpec) -> bool {
+    stage
+        .extra
+        .get("dynamic_template")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn dynamic_stage_prefix(stage: &archon_workflow::StageSpec) -> Option<String> {
+    stage
+        .extra
+        .get("dynamic_id_prefix")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
 }
 
 fn stage_status_from_v2(status: WorkflowV2Status) -> StageStatus {
@@ -174,7 +220,102 @@ mod tests {
         assert!(stage.completed_at.is_some());
     }
 
+    #[test]
+    fn sync_summary_skips_dynamic_template_when_runtime_instance_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::new(temp.path().join("workflows"));
+        let run = store
+            .create_run(spec_with_dynamic_template_stage(
+                "implementation-wave-dynamic-12345678",
+                "implementation-wave-",
+            ))
+            .unwrap();
+        let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
+        let call = WorkflowV2HostCall {
+            id: "implementation-wave-1".to_string(),
+            method: WorkflowV2HostMethod::Fanout,
+            write_mode: None,
+            options: WorkflowV2HostOptions::default(),
+        };
+        let record = WorkflowV2CallRecord::new(
+            v2_store.run_id(),
+            call.clone(),
+            1,
+            "input-hash".to_string(),
+            WorkflowV2Result::accepted("accepted dynamic call"),
+            Vec::new(),
+        );
+        v2_store.save_call_record(&record).unwrap();
+
+        sync_v2_summary_to_run(
+            &store,
+            &run.id,
+            &[call],
+            &v2_store,
+            WorkflowV2Status::Accepted,
+        )
+        .unwrap();
+
+        let run = store.load_state(&run.id).unwrap();
+        assert_eq!(
+            run.stages
+                .get("implementation-wave-dynamic-12345678")
+                .unwrap()
+                .status,
+            StageStatus::Skipped
+        );
+        assert_eq!(
+            run.stages.get("implementation-wave-1").unwrap().status,
+            StageStatus::Accepted
+        );
+    }
+
+    #[test]
+    fn sync_summary_skips_dynamic_template_when_clean_loop_does_not_execute() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::new(temp.path().join("workflows"));
+        let run = store
+            .create_run(spec_with_dynamic_template_stage(
+                "remediation-dynamic-12345678",
+                "remediation-",
+            ))
+            .unwrap();
+        let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
+
+        sync_v2_summary_to_run(&store, &run.id, &[], &v2_store, WorkflowV2Status::Accepted)
+            .unwrap();
+
+        let run = store.load_state(&run.id).unwrap();
+        assert_eq!(
+            run.stages
+                .get("remediation-dynamic-12345678")
+                .unwrap()
+                .status,
+            StageStatus::Skipped
+        );
+    }
+
     fn spec_with_stage(stage_id: &str) -> WorkflowSpec {
+        spec_with_stage_extra(stage_id, BTreeMap::new())
+    }
+
+    fn spec_with_dynamic_template_stage(stage_id: &str, prefix: &str) -> WorkflowSpec {
+        let mut extra = BTreeMap::new();
+        extra.insert(
+            "dynamic_template".to_string(),
+            serde_json::Value::Bool(true),
+        );
+        extra.insert(
+            "dynamic_id_prefix".to_string(),
+            serde_json::Value::String(prefix.to_string()),
+        );
+        spec_with_stage_extra(stage_id, extra)
+    }
+
+    fn spec_with_stage_extra(
+        stage_id: &str,
+        extra: BTreeMap<String, serde_json::Value>,
+    ) -> WorkflowSpec {
         WorkflowSpec {
             schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
             name: "test".to_string(),
@@ -203,7 +344,7 @@ mod tests {
                 max_parallelism: None,
                 item_kind: None,
                 filter: None,
-                extra: BTreeMap::new(),
+                extra,
             }],
             artifact_policy: Default::default(),
             permissions: BTreeMap::new(),

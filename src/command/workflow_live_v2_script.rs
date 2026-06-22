@@ -587,6 +587,7 @@ mod tests {
     use anyhow::Result;
     use archon_pipeline::runner::{LlmClient, LlmResponse};
     use archon_tui::event_channel::bounded_tui_event_channel;
+    use archon_workflow::StageStatus;
 
     use super::*;
 
@@ -647,6 +648,82 @@ async function workflow(w) {
                 .load_call_record("should-not-run")
                 .expect("checkpoint lookup")
                 .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn dynamic_loop_host_calls_are_recorded_with_runtime_ids() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let spec = test_spec();
+        let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
+        let run = workflow_store.create_run(spec.clone()).expect("run");
+        let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
+        let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+        let client =
+            LiveV2AgentClient::new(Arc::new(PanicLlm), tui_tx, Vec::new(), run.id.clone(), None);
+        let runner = WorkflowV2ScriptRunner::new(
+            "dynamic loop checkpoints".to_string(),
+            spec,
+            WorkflowV2AgentAdapter::new(),
+            client,
+            v2_store.clone(),
+            workflow_store.clone(),
+            run.id.clone(),
+            true,
+        );
+
+        let summary = runner
+            .run(
+                r#"
+async function workflow(w) {
+  let iteration = 1;
+  while (iteration <= 2) {
+    await w.checkpoint("loop-checkpoint-" + iteration, { iteration });
+    iteration += 1;
+  }
+}
+"#,
+            )
+            .await
+            .expect("script summary");
+
+        assert_eq!(summary.status, WorkflowV2Status::Accepted);
+        assert_eq!(summary.executed, 2);
+        assert_eq!(summary.completed, 2);
+        assert_eq!(
+            summary
+                .calls
+                .iter()
+                .map(|call| call.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["loop-checkpoint-1", "loop-checkpoint-2"]
+        );
+        assert!(
+            v2_store
+                .load_call_record("loop-checkpoint-1")
+                .expect("first checkpoint lookup")
+                .is_some()
+        );
+        assert!(
+            v2_store
+                .load_call_record("loop-checkpoint-2")
+                .expect("second checkpoint lookup")
+                .is_some()
+        );
+        let run = workflow_store.load_state(&run.id).expect("run state");
+        assert_eq!(
+            run.stages
+                .get("loop-checkpoint-1")
+                .expect("first runtime stage")
+                .status,
+            StageStatus::Running
+        );
+        assert_eq!(
+            run.stages
+                .get("loop-checkpoint-2")
+                .expect("second runtime stage")
+                .status,
+            StageStatus::Running
         );
     }
 

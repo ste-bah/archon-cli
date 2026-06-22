@@ -151,6 +151,12 @@ fn collect_executable_calls(
                 continue;
             }
         }
+        if starts_keyword(source, idx, "while") {
+            if let Some(next) = collect_while_calls(source, idx, calls, conditions)? {
+                idx = next;
+                continue;
+            }
+        }
         if starts_keyword(source, idx, "for") {
             if let Some(next) = collect_for_calls(source, idx, calls, conditions)? {
                 idx = next;
@@ -258,10 +264,15 @@ fn collect_for_calls(
     };
     let body = &source[idx + 1..body_close];
     let Some(source_expr) = for_of_source_expr(header) else {
-        if body.contains("w.") {
-            return Err(WorkflowV2HarnessError::UnsupportedLoop(
-                "only `for (const item of prior.items) { await w.agent(...) }` style loops can contain host calls; use w.fanout for indexed/while loops".to_string(),
-            ));
+        let mut loop_calls = Vec::new();
+        collect_executable_calls(body, &mut loop_calls, conditions)?;
+        if loop_calls.is_empty() {
+            return Ok(Some(body_close + 1));
+        }
+        require_dynamic_loop_host_ids("for", header, &loop_calls)?;
+        for mut call in loop_calls {
+            annotate_runtime_loop(&mut call, "for", header);
+            calls.push(call);
         }
         return Ok(Some(body_close + 1));
     };
@@ -286,6 +297,41 @@ fn collect_for_calls(
     Ok(Some(body_close + 1))
 }
 
+fn collect_while_calls(
+    source: &str,
+    while_start: usize,
+    calls: &mut Vec<WorkflowV2HostCall>,
+    conditions: &[String],
+) -> Result<Option<usize>, WorkflowV2HarnessError> {
+    let mut idx = skip_ws(source, while_start + "while".len());
+    if !source[idx..].starts_with('(') {
+        return Ok(None);
+    }
+    let Some(condition_close) = matching_delimiter(source, idx, '(', ')') else {
+        return Ok(None);
+    };
+    let condition = source[idx + 1..condition_close].trim();
+    idx = skip_ws(source, condition_close + 1);
+    if !source[idx..].starts_with('{') {
+        return Ok(None);
+    }
+    let Some(body_close) = matching_delimiter(source, idx, '{', '}') else {
+        return Ok(None);
+    };
+    let body = &source[idx + 1..body_close];
+    let mut loop_calls = Vec::new();
+    collect_executable_calls(body, &mut loop_calls, conditions)?;
+    if loop_calls.is_empty() {
+        return Ok(Some(body_close + 1));
+    }
+    require_dynamic_loop_host_ids("while", condition, &loop_calls)?;
+    for mut call in loop_calls {
+        annotate_runtime_loop(&mut call, "while", condition);
+        calls.push(call);
+    }
+    Ok(Some(body_close + 1))
+}
+
 fn for_of_source_expr(header: &str) -> Option<String> {
     let (_, source) = header.split_once(" of ")?;
     let source = source.trim();
@@ -299,6 +345,46 @@ fn for_of_source_expr(header: &str) -> Option<String> {
         return None;
     }
     Some(source.to_string())
+}
+
+fn require_dynamic_loop_host_ids(
+    loop_kind: &str,
+    loop_expr: &str,
+    calls: &[WorkflowV2HostCall],
+) -> Result<(), WorkflowV2HarnessError> {
+    let static_call = calls.iter().find(|call| {
+        !call
+            .options
+            .extra
+            .get("dynamic_id")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+    });
+    if let Some(call) = static_call {
+        return Err(WorkflowV2HarnessError::UnsupportedLoop(format!(
+            "{loop_kind} loop `{loop_expr}` contains host call w.{}('{}') with a static id; adaptive runtime loops must use deterministic dynamic ids with a literal prefix, for example \"{}-\" + iteration",
+            call.method.as_str(),
+            call.id,
+            call.id
+        )));
+    }
+    Ok(())
+}
+
+fn annotate_runtime_loop(call: &mut WorkflowV2HostCall, loop_kind: &str, loop_expr: &str) {
+    call.options.extra.insert(
+        "runtime_loop".to_string(),
+        serde_json::Value::String(loop_kind.to_string()),
+    );
+    let key = match loop_kind {
+        "while" => "loop_condition",
+        "for" => "loop_header",
+        _ => "loop_expression",
+    };
+    call.options.extra.insert(
+        key.to_string(),
+        serde_json::Value::String(loop_expr.to_string()),
+    );
 }
 
 fn annotate_conditions(call: &mut WorkflowV2HostCall, conditions: &[String]) {
@@ -340,6 +426,7 @@ fn parse_host_call_at(
     let call_args = &source[open + 1..close];
     let (id_expr, args) = split_first_argument(call_args);
     let id = host_call_id_from_expr(method, id_expr)?;
+    let dynamic_id = host_call_id_expr_is_dynamic(id_expr);
     validate_fanout_source(method, &id, args)?;
     let write_mode = parse_write_mode(method, &id, args)?;
     if is_write_intent(method, args) && write_mode.is_none() {
@@ -349,6 +436,9 @@ fn parse_host_call_at(
         });
     }
     let mut options = parse_options(method, args);
+    if dynamic_id {
+        annotate_dynamic_host_id(&mut options, id_expr);
+    }
     options.binding = binding_before_call(source, call_start);
     Ok(ParsedHostCall {
         call: WorkflowV2HostCall {
@@ -359,6 +449,27 @@ fn parse_host_call_at(
         },
         end: close + 1,
     })
+}
+
+fn annotate_dynamic_host_id(options: &mut WorkflowV2HostOptions, id_expr: &str) {
+    let id_expr = id_expr.trim();
+    options
+        .extra
+        .insert("dynamic_id".to_string(), serde_json::Value::Bool(true));
+    options.extra.insert(
+        "dynamic_template".to_string(),
+        serde_json::Value::Bool(true),
+    );
+    options.extra.insert(
+        "dynamic_id_expr".to_string(),
+        serde_json::Value::String(id_expr.to_string()),
+    );
+    if let Some((prefix, _)) = leading_string_literal(id_expr) {
+        options.extra.insert(
+            "dynamic_id_prefix".to_string(),
+            serde_json::Value::String(sanitize_dynamic_id_prefix(&prefix)),
+        );
+    }
 }
 
 fn split_first_argument(args: &str) -> (&str, &str) {
@@ -421,6 +532,15 @@ fn host_call_id_from_expr(
         sanitize_dynamic_id_prefix(&prefix),
         stable_expr_hash(expr)
     ))
+}
+
+fn host_call_id_expr_is_dynamic(expr: &str) -> bool {
+    let expr = expr.trim();
+    let Some((_prefix, remainder)) = leading_string_literal(expr) else {
+        return false;
+    };
+    let remainder = remainder.trim();
+    !remainder.is_empty() && (remainder.starts_with('+') || expr.starts_with('`'))
 }
 
 fn leading_string_literal(expr: &str) -> Option<(String, &str)> {

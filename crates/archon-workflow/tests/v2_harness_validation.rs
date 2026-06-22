@@ -198,7 +198,52 @@ export default async function workflow(w) {
 }
 
 #[test]
-fn indexed_loop_with_host_calls_is_rejected() {
+fn indexed_loop_with_dynamic_host_call_ids_is_accepted() {
+    let source = r#"
+export default async function workflow(w) {
+  const inventory = await w.agent("inventory", { role: "planner", task: "return items" });
+  for (let i = 0; i < inventory.items.length; i++) {
+    await w.agent("review-" + i, { role: "critic", task: "review" });
+  }
+}
+"#;
+
+    let plan = validator().validate(source).unwrap();
+    let review = plan
+        .calls
+        .iter()
+        .find(|call| call.id.starts_with("review-dynamic-"))
+        .unwrap();
+
+    assert_eq!(review.method, WorkflowV2HostMethod::Agent);
+    assert_eq!(
+        review
+            .options
+            .extra
+            .get("runtime_loop")
+            .and_then(serde_json::Value::as_str),
+        Some("for")
+    );
+    assert_eq!(
+        review
+            .options
+            .extra
+            .get("loop_header")
+            .and_then(serde_json::Value::as_str),
+        Some("let i = 0; i < inventory.items.length; i++")
+    );
+    assert_eq!(
+        review
+            .options
+            .extra
+            .get("dynamic_id")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+}
+
+#[test]
+fn indexed_loop_with_static_host_call_id_is_rejected() {
     let err = validator()
         .validate(
             r#"
@@ -261,6 +306,110 @@ export default async function workflow(w) {
     assert_eq!(wave.options.source.as_deref(), Some("currentItems"));
     assert_eq!(wave.write_mode, Some(WorkflowV2WriteMode::Coordinated));
     assert!(wave.options.target_files_from_item);
+    assert_eq!(
+        wave.options
+            .extra
+            .get("runtime_loop")
+            .and_then(serde_json::Value::as_str),
+        Some("while")
+    );
+    assert_eq!(
+        wave.options
+            .extra
+            .get("dynamic_id")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+}
+
+#[test]
+fn adaptive_remediation_while_loop_is_accepted() {
+    let source = r#"
+export default async function workflow(w) {
+  const inventory = await w.agent("inventory", {
+    role: "planner",
+    task: "return items needing implementation"
+  });
+  let iteration = 1;
+  let remaining = inventory.items || [];
+  while (remaining.length > 0 && iteration <= 5) {
+    const implementation = await w.fanout("implementation-wave-" + iteration, remaining, {
+      role: "coder",
+      write: "coordinated",
+      itemKind: "implementation",
+      targetFilesFromItem: true,
+      maxParallelism: 4,
+      task: "implement one item"
+    });
+    const review = await w.reduce("adversarial-review-" + iteration, implementation, {
+      role: "critic",
+      task: "return remaining issues as top-level items"
+    });
+    remaining = review.items || [];
+    iteration += 1;
+  }
+  await w.finalReport("final", [inventory], {});
+}
+"#;
+
+    let plan = validator().validate(source).unwrap();
+    let implementation = plan
+        .calls
+        .iter()
+        .find(|call| call.id.starts_with("implementation-wave-dynamic-"))
+        .unwrap();
+    let review = plan
+        .calls
+        .iter()
+        .find(|call| call.id.starts_with("adversarial-review-dynamic-"))
+        .unwrap();
+
+    assert_eq!(implementation.method, WorkflowV2HostMethod::Fanout);
+    assert_eq!(
+        implementation.write_mode,
+        Some(WorkflowV2WriteMode::Coordinated)
+    );
+    assert_eq!(implementation.options.source.as_deref(), Some("remaining"));
+    assert_eq!(
+        implementation
+            .options
+            .extra
+            .get("runtime_loop")
+            .and_then(serde_json::Value::as_str),
+        Some("while")
+    );
+    assert_eq!(review.method, WorkflowV2HostMethod::Reduce);
+    assert_eq!(
+        review.options.source.as_deref(),
+        Some(implementation.id.as_str())
+    );
+    assert_eq!(
+        review
+            .options
+            .extra
+            .get("dynamic_template")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+}
+
+#[test]
+fn adaptive_while_loop_with_static_host_call_id_is_rejected() {
+    let err = validator()
+        .validate(
+            r#"
+export default async function workflow(w) {
+  let iteration = 1;
+  while (iteration <= 2) {
+    await w.checkpoint("same-call-every-iteration", {});
+    iteration += 1;
+  }
+}
+"#,
+        )
+        .unwrap_err();
+
+    assert!(matches!(err, WorkflowV2HarnessError::UnsupportedLoop(_)));
 }
 
 #[test]
@@ -288,6 +437,13 @@ export default async function workflow(w) {
 
     assert_eq!(wave.options.source.as_deref(), Some("items"));
     assert_eq!(wave.write_mode, Some(WorkflowV2WriteMode::Worktree));
+    assert_eq!(
+        wave.options
+            .extra
+            .get("dynamic_id")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
 }
 
 #[test]
