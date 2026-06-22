@@ -811,13 +811,6 @@ fn target_files_for_branch(
     call: &WorkflowV2HostCall,
     branch: &archon_workflow::WorkflowV2FanoutItem,
 ) -> archon_workflow::WorkflowResult<Vec<String>> {
-    if !call.options.target_files.is_empty() {
-        return normalize_declared_targets(
-            &branch.id,
-            &call.options.target_files,
-            spec.target_repository_root.as_deref(),
-        );
-    }
     if call.options.target_files_from_item {
         let targets = branch
             .input
@@ -844,6 +837,13 @@ fn target_files_for_branch(
                 spec.target_repository_root.as_deref(),
             );
         }
+    }
+    if !call.options.target_files.is_empty() {
+        return normalize_declared_targets(
+            &branch.id,
+            &call.options.target_files,
+            spec.target_repository_root.as_deref(),
+        );
     }
     Err(WorkflowError::SpecInvalid(format!(
         "write-capable fanout '{}' item '{}' has no target file ownership",
@@ -1196,6 +1196,71 @@ mod tests {
         let targets = target_files_for_branch(&spec, &call, &branch).expect("target files");
 
         assert_eq!(targets, vec!["src/lib.rs"]);
+    }
+
+    #[test]
+    fn item_target_files_override_static_fallback_targets_for_write_branches() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(&repo).expect("repo");
+        let spec = spec_with_root(&repo);
+        let call = WorkflowV2HostCall {
+            id: "impl".to_string(),
+            method: WorkflowV2HostMethod::Fanout,
+            write_mode: Some(WorkflowV2WriteMode::Worktree),
+            options: WorkflowV2HostOptions {
+                target_files: vec![repo.display().to_string()],
+                target_files_from_item: true,
+                ..WorkflowV2HostOptions::default()
+            },
+        };
+        let branch = WorkflowV2FanoutItem::read_only(
+            "impl-T001",
+            "coder",
+            call.clone(),
+            serde_json::json!({
+                "item": {
+                    "task_id": "T001",
+                    "target_files": ["crates/archon-trading/src/data_lake.rs"]
+                }
+            }),
+        );
+
+        let targets = target_files_for_branch(&spec, &call, &branch).expect("target files");
+
+        assert_eq!(targets, vec!["crates/archon-trading/src/data_lake.rs"]);
+    }
+
+    #[test]
+    fn repo_root_fallback_without_item_targets_is_rejected() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(&repo).expect("repo");
+        let spec = spec_with_root(&repo);
+        let call = WorkflowV2HostCall {
+            id: "impl".to_string(),
+            method: WorkflowV2HostMethod::Fanout,
+            write_mode: Some(WorkflowV2WriteMode::Worktree),
+            options: WorkflowV2HostOptions {
+                target_files: vec![repo.display().to_string()],
+                target_files_from_item: true,
+                ..WorkflowV2HostOptions::default()
+            },
+        };
+        let branch = WorkflowV2FanoutItem::read_only(
+            "impl-T001",
+            "coder",
+            call.clone(),
+            serde_json::json!({
+                "item": {
+                    "task_id": "T001"
+                }
+            }),
+        );
+
+        let error = target_files_for_branch(&spec, &call, &branch).expect_err("repo root target");
+
+        assert!(error.to_string().contains("resolves to repository root"));
     }
 
     #[test]

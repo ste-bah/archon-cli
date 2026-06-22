@@ -216,6 +216,81 @@ export default async function workflow(w) {
 }
 
 #[test]
+fn dynamic_loop_fanout_id_with_static_items_source_is_accepted() {
+    let source = r#"
+export default async function workflow(w) {
+  const inventory = await w.reduce("dependency-ordered-gap-inventory", {
+    tier: "reducer",
+    task: "return data.items"
+  });
+  const completedWorkUnitIds = [];
+  let remainingItems = inventory.items || [];
+  let waveIndex = 1;
+
+  while (remainingItems.length > 0 && waveIndex <= 6) {
+    const readyItems = remainingItems.filter(item => {
+      const deps = Array.isArray(item.dependency_ids) ? item.dependency_ids : [];
+      return deps.every(dep => completedWorkUnitIds.indexOf(dep) >= 0);
+    });
+    const currentItems = readyItems.length > 0 ? readyItems : remainingItems;
+    const wave = await w.fanout("implementation-wave-" + waveIndex, {
+      type: "static_items",
+      items: currentItems
+    }, {
+      tier: "coder",
+      write: "coordinated",
+      itemKind: "implementation",
+      targetFilesFromItem: true,
+      maxParallelism: 4,
+      task: "implement one dependency-ready item"
+    });
+    remainingItems = remainingItems.filter(item => item.id !== wave.id);
+    waveIndex += 1;
+  }
+}
+"#;
+
+    let plan = validator().validate(source).unwrap();
+    let wave = plan
+        .calls
+        .iter()
+        .find(|call| call.id.starts_with("implementation-wave-dynamic-"))
+        .unwrap();
+
+    assert_eq!(wave.method, WorkflowV2HostMethod::Fanout);
+    assert_eq!(wave.options.source.as_deref(), Some("currentItems"));
+    assert_eq!(wave.write_mode, Some(WorkflowV2WriteMode::Coordinated));
+    assert!(wave.options.target_files_from_item);
+}
+
+#[test]
+fn dynamic_template_host_call_id_is_accepted_with_stable_template_id() {
+    let source = r#"
+export default async function workflow(w) {
+  const items = [{ id: "one" }];
+  let waveIndex = 1;
+  await w.fanout(`implementation-wave-${waveIndex}`, items, {
+    tier: "coder",
+    write: "worktree",
+    itemKind: "implementation",
+    targetFilesFromItem: true,
+    task: "implement one item"
+  });
+}
+"#;
+
+    let plan = validator().validate(source).unwrap();
+    let wave = plan
+        .calls
+        .iter()
+        .find(|call| call.id.starts_with("implementation-wave-dynamic-"))
+        .unwrap();
+
+    assert_eq!(wave.options.source.as_deref(), Some("items"));
+    assert_eq!(wave.write_mode, Some(WorkflowV2WriteMode::Worktree));
+}
+
+#[test]
 fn unsafe_import_is_rejected() {
     let err = validator()
         .validate(r#"import fs from "fs"; export default async function workflow(w) {}"#)
@@ -740,6 +815,131 @@ fn host_call_sources_must_reference_earlier_calls() {
 }
 
 #[test]
+fn fanout_can_use_script_owned_inventory_variables() {
+    let source = r#"
+export default async function workflow(w) {
+  const discoveryTracks = [
+    { id: "prd", task: "read task files" },
+    { id: "repo", task: "inspect repository" }
+  ];
+  const discovery = await w.parallel("initial-readonly-discovery", discoveryTracks, {
+    tier: "researcher",
+    task: "run read-only discovery"
+  });
+  return discovery;
+}
+"#;
+
+    let plan = validator().validate(source).unwrap();
+    let discovery = plan
+        .calls
+        .iter()
+        .find(|call| call.id == "initial-readonly-discovery")
+        .unwrap();
+
+    assert_eq!(discovery.options.source.as_deref(), Some("discoveryTracks"));
+    assert_eq!(discovery.write_mode, None);
+}
+
+#[test]
+fn fanout_can_use_typed_static_items_wrapper_over_script_variable() {
+    let source = r#"
+export default async function workflow(w) {
+  const discoveryItems = [
+    { id: "prd", task: "read task files" },
+    { id: "repo", task: "inspect repository" }
+  ];
+  const discovery = await w.fanout("read_only_discovery", {
+    type: "static_items",
+    items: discoveryItems
+  }, {
+    tier: "researcher",
+    task: "run read-only discovery"
+  });
+  return discovery;
+}
+"#;
+
+    let plan = validator().validate(source).unwrap();
+    let discovery = plan
+        .calls
+        .iter()
+        .find(|call| call.id == "read_only_discovery")
+        .unwrap();
+
+    assert_eq!(discovery.options.source.as_deref(), Some("discoveryItems"));
+    assert_eq!(discovery.write_mode, None);
+}
+
+#[test]
+fn parallel_can_use_typed_static_items_wrapper_over_script_variable() {
+    let source = r#"
+export default async function workflow(w) {
+  const discoveryItems = [
+    { id: "prd", task: "read task files" },
+    { id: "repo", task: "inspect repository" }
+  ];
+  await w.parallel("read_only_discovery", {
+    type: "static_items",
+    items: discoveryItems
+  }, {
+    tier: "researcher",
+    task: "run read-only discovery"
+  });
+}
+"#;
+
+    let plan = validator().validate(source).unwrap();
+    let discovery = plan
+        .calls
+        .iter()
+        .find(|call| call.id == "read_only_discovery")
+        .unwrap();
+
+    assert_eq!(discovery.method, WorkflowV2HostMethod::Parallel);
+    assert_eq!(discovery.options.source.as_deref(), Some("discoveryItems"));
+}
+
+#[test]
+fn reduce_inputs_can_mix_script_context_and_host_results() {
+    let source = r#"
+export default async function workflow(w) {
+  const rootContext = {
+    repository: "/repo",
+    requiredReads: ["/repo/README.md"]
+  };
+  const discoveryPlan = await w.agent("prepare-readonly-discovery-plan", {
+    tier: "planner",
+    inputs: [rootContext],
+    task: "plan discovery"
+  });
+  const discovery = await w.parallel("initial-readonly-discovery", discoveryPlan, {
+    tier: "researcher",
+    task: "run discovery"
+  });
+  const inventory = await w.reduce("dependency-aware-implementation-inventory", {
+    tier: "reducer",
+    inputs: [rootContext, discovery],
+    task: "merge context and discovery"
+  });
+  return inventory;
+}
+"#;
+
+    let plan = validator().validate(source).unwrap();
+    let inventory = plan
+        .calls
+        .iter()
+        .find(|call| call.id == "dependency-aware-implementation-inventory")
+        .unwrap();
+
+    assert_eq!(
+        inventory.options.source.as_deref(),
+        Some("[rootContext, initial-readonly-discovery]")
+    );
+}
+
+#[test]
 fn write_fanout_with_explicit_write_mode_is_accepted() {
     let source = r#"
 export default async function workflow(w) {
@@ -760,6 +960,34 @@ export default async function workflow(w) {
         .unwrap();
 
     assert_eq!(implement.write_mode, Some(WorkflowV2WriteMode::Coordinated));
+}
+
+#[test]
+fn read_only_fanout_with_explicit_none_write_mode_is_accepted() {
+    let source = r#"
+export default async function workflow(w) {
+  const seeds = await w.agent("discovery-seeds", { tier: "planner", task: "plan read-only discovery" });
+  await w.fanout("read-only-discovery", seeds.items, {
+    tier: "researcher",
+    itemKind: "discovery_track",
+    write: "none",
+    task: "inspect only"
+  });
+}
+"#;
+
+    let plan = validator().validate(source).unwrap();
+    let discovery = plan
+        .calls
+        .iter()
+        .find(|call| call.id == "read-only-discovery")
+        .unwrap();
+
+    assert_eq!(discovery.write_mode, None);
+    assert_eq!(
+        discovery.options.source.as_deref(),
+        Some("discovery-seeds.items")
+    );
 }
 
 #[test]

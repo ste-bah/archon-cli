@@ -39,7 +39,7 @@ pub enum WorkflowV2HarnessError {
     #[error("fanout host call w.fanout('{0}') must include a typed item source argument")]
     UntypedFanout(String),
     #[error(
-        "host call w.{method}('{id}') source `{source_id}` does not reference an earlier host call"
+        "host call w.{method}('{id}') source `{source_id}` does not reference an earlier host call or declared script variable"
     )]
     UnknownSource {
         method: String,
@@ -116,9 +116,10 @@ fn reject_opaque_host_api_usage(source: &str) -> Result<(), WorkflowV2HarnessErr
 fn extract_host_calls(source: &str) -> Result<Vec<WorkflowV2HostCall>, WorkflowV2HarnessError> {
     let mut calls = Vec::new();
     let body = workflow_body(source).unwrap_or(source);
+    let script_variables = declared_script_variables(body);
     collect_executable_calls(body, &mut calls, &[])?;
     rewrite_aliases(&mut calls);
-    validate_source_references(&calls)?;
+    validate_source_references(&calls, &script_variables)?;
     Ok(calls)
 }
 
@@ -336,43 +337,9 @@ fn parse_host_call_at(
             method.as_str().to_string(),
         ));
     };
-    let mut arg_idx = skip_ws(source, open + 1);
-    let Some(quote) = source[arg_idx..].chars().next() else {
-        return Err(WorkflowV2HarnessError::HostCallRequiresLiteralId(
-            method.as_str().to_string(),
-        ));
-    };
-    if !matches!(quote, '"' | '\'') {
-        return Err(WorkflowV2HarnessError::HostCallRequiresLiteralId(
-            method.as_str().to_string(),
-        ));
-    }
-    let id_start = arg_idx + quote.len_utf8();
-    arg_idx = id_start;
-    let mut escaped = false;
-    let mut id_end = None::<usize>;
-    while arg_idx < close {
-        let ch = source[arg_idx..]
-            .chars()
-            .next()
-            .expect("arg index on char boundary");
-        if escaped {
-            escaped = false;
-        } else if ch == '\\' {
-            escaped = true;
-        } else if ch == quote {
-            id_end = Some(arg_idx);
-            break;
-        }
-        arg_idx += ch.len_utf8();
-    }
-    let Some(id_end) = id_end else {
-        return Err(WorkflowV2HarnessError::HostCallRequiresLiteralId(
-            method.as_str().to_string(),
-        ));
-    };
-    let id = source[id_start..id_end].to_string();
-    let args = &source[id_end + quote.len_utf8()..close];
+    let call_args = &source[open + 1..close];
+    let (id_expr, args) = split_first_argument(call_args);
+    let id = host_call_id_from_expr(method, id_expr)?;
     validate_fanout_source(method, &id, args)?;
     let write_mode = parse_write_mode(method, &id, args)?;
     if is_write_intent(method, args) && write_mode.is_none() {
@@ -392,6 +359,127 @@ fn parse_host_call_at(
         },
         end: close + 1,
     })
+}
+
+fn split_first_argument(args: &str) -> (&str, &str) {
+    let mut depth = 0usize;
+    let mut quote = None::<char>;
+    let mut escaped = false;
+    for (idx, ch) in args.char_indices() {
+        if let Some(active) = quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == active {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '"' | '\'' | '`' => quote = Some(ch),
+            '[' | '{' | '(' => depth += 1,
+            ']' | '}' | ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => return (&args[..idx], &args[idx..]),
+            _ => {}
+        }
+    }
+    (args, "")
+}
+
+fn host_call_id_from_expr(
+    method: WorkflowV2HostMethod,
+    expr: &str,
+) -> Result<String, WorkflowV2HarnessError> {
+    let expr = expr.trim();
+    if expr.is_empty() {
+        return Err(WorkflowV2HarnessError::HostCallRequiresLiteralId(
+            method.as_str().to_string(),
+        ));
+    }
+    let Some((prefix, remainder)) = leading_string_literal(expr) else {
+        return Err(WorkflowV2HarnessError::HostCallRequiresLiteralId(
+            method.as_str().to_string(),
+        ));
+    };
+    if prefix.trim().is_empty() {
+        return Err(WorkflowV2HarnessError::HostCallRequiresLiteralId(
+            method.as_str().to_string(),
+        ));
+    }
+    let remainder = remainder.trim();
+    if remainder.is_empty() {
+        return Ok(prefix);
+    }
+    if !remainder.starts_with('+') && !expr.trim_start().starts_with('`') {
+        return Err(WorkflowV2HarnessError::HostCallRequiresLiteralId(
+            method.as_str().to_string(),
+        ));
+    }
+    Ok(format!(
+        "{}dynamic-{:08x}",
+        sanitize_dynamic_id_prefix(&prefix),
+        stable_expr_hash(expr)
+    ))
+}
+
+fn leading_string_literal(expr: &str) -> Option<(String, &str)> {
+    let mut chars = expr.char_indices();
+    let (_, quote) = chars.next()?;
+    if !matches!(quote, '"' | '\'' | '`') {
+        return None;
+    }
+    let mut escaped = false;
+    let mut value = String::new();
+    for (idx, ch) in chars {
+        if escaped {
+            value.push(ch);
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if quote == '`' && ch == '$' && expr[idx + ch.len_utf8()..].starts_with('{') {
+            return Some((value, &expr[idx..]));
+        }
+        if ch == quote {
+            return Some((value, &expr[idx + ch.len_utf8()..]));
+        }
+        value.push(ch);
+    }
+    None
+}
+
+fn sanitize_dynamic_id_prefix(prefix: &str) -> String {
+    let mut output = prefix
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    while output.ends_with('-') || output.ends_with('_') {
+        output.pop();
+    }
+    if output.is_empty() {
+        "dynamic".to_string()
+    } else {
+        format!("{output}-")
+    }
+}
+
+fn stable_expr_hash(expr: &str) -> u32 {
+    let mut hash = 0x811c_9dc5u32;
+    for byte in expr.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    hash
 }
 
 fn skip_function_declaration(source: &str, start: usize) -> Option<usize> {
@@ -611,13 +699,16 @@ fn rewrite_condition_expr(
     out
 }
 
-fn validate_source_references(calls: &[WorkflowV2HostCall]) -> Result<(), WorkflowV2HarnessError> {
+fn validate_source_references(
+    calls: &[WorkflowV2HostCall],
+    script_variables: &BTreeSet<String>,
+) -> Result<(), WorkflowV2HarnessError> {
     let mut seen = BTreeSet::<String>::new();
     for call in calls {
         if let Some(source) = call.options.source.as_deref() {
             if !source.trim_start().starts_with('{') {
                 for source_id in source_call_ids(source) {
-                    if !seen.contains(&source_id) {
+                    if !seen.contains(&source_id) && !script_variables.contains(&source_id) {
                         return Err(WorkflowV2HarnessError::UnknownSource {
                             method: call.method.as_str().to_string(),
                             id: call.id.clone(),
@@ -634,7 +725,7 @@ fn validate_source_references(calls: &[WorkflowV2HostCall]) -> Result<(), Workfl
             .and_then(serde_json::Value::as_str)
         {
             for source_id in condition_call_ids(condition) {
-                if !seen.contains(&source_id) {
+                if !seen.contains(&source_id) && !script_variables.contains(&source_id) {
                     return Err(WorkflowV2HarnessError::UnknownSource {
                         method: call.method.as_str().to_string(),
                         id: call.id.clone(),
@@ -646,6 +737,15 @@ fn validate_source_references(calls: &[WorkflowV2HostCall]) -> Result<(), Workfl
         seen.insert(call.id.clone());
     }
     Ok(())
+}
+
+fn declared_script_variables(source: &str) -> BTreeSet<String> {
+    let code = code_without_string_literals(source);
+    let re = Regex::new(r#"\b(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\b"#)
+        .expect("script variable regex compiles");
+    re.captures_iter(&code)
+        .filter_map(|captures| captures.get(1).map(|m| m.as_str().to_string()))
+        .collect()
 }
 
 fn source_call_ids(source: &str) -> Vec<String> {
@@ -721,27 +821,72 @@ fn validate_fanout_source(
     if matches!(
         method,
         WorkflowV2HostMethod::Fanout | WorkflowV2HostMethod::Parallel
-    ) && !has_positional_source(args)
+    ) && fanout_item_source_expr(args).is_none()
     {
         return Err(WorkflowV2HarnessError::UntypedFanout(id.to_string()));
     }
     Ok(())
 }
 
-fn has_positional_source(args: &str) -> bool {
+fn fanout_item_source_expr(args: &str) -> Option<String> {
+    let source = positional_source_expr(args, true)?;
+    normalize_fanout_item_source(&source)
+}
+
+fn positional_source_expr(args: &str, allow_object_source: bool) -> Option<String> {
     let trimmed = args.trim_start();
-    trimmed.strip_prefix(',').is_some_and(|rest| {
-        let source = rest.trim_start();
-        !source.starts_with('{')
-            && !source.starts_with('[')
-            && !source.starts_with('"')
-            && !source.starts_with('\'')
-            && !source.starts_with(char::is_numeric)
-            && !source.starts_with("null")
-            && !source.starts_with("undefined")
-            && !source.starts_with("true")
-            && !source.starts_with("false")
-    })
+    let rest = trimmed.strip_prefix(',')?.trim_start();
+    let mut depth = 0usize;
+    let mut quote = None::<char>;
+    let mut escaped = false;
+    for (idx, ch) in rest.char_indices() {
+        if let Some(active) = quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == active {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '"' | '\'' | '`' => quote = Some(ch),
+            '[' | '{' | '(' => depth += 1,
+            ']' | '}' | ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => return non_empty_expr(&rest[..idx], allow_object_source),
+            _ => {}
+        }
+    }
+    non_empty_expr(rest, allow_object_source)
+}
+
+fn normalize_fanout_item_source(raw: &str) -> Option<String> {
+    let value = raw.trim();
+    if invalid_direct_item_source(value) {
+        return None;
+    }
+    if value.starts_with('{') {
+        if !string_prop(value, "type").is_some_and(|kind| kind == "static_items") {
+            return None;
+        }
+        let items = expr_prop(value, "items")?;
+        let items = normalize_fanout_item_source(&items)?;
+        return Some(items);
+    }
+    Some(value.to_string())
+}
+
+fn invalid_direct_item_source(value: &str) -> bool {
+    value.is_empty()
+        || value.starts_with('[')
+        || value.starts_with('"')
+        || value.starts_with('\'')
+        || value.starts_with(char::is_numeric)
+        || value.starts_with("null")
+        || value.starts_with("undefined")
+        || value.starts_with("true")
+        || value.starts_with("false")
 }
 
 fn parse_write_mode(
@@ -752,6 +897,9 @@ fn parse_write_mode(
     let Some(raw) = string_prop(args, "write") else {
         return Ok(None);
     };
+    if raw.eq_ignore_ascii_case("none") {
+        return Ok(None);
+    }
     WorkflowV2WriteMode::parse(&raw).map(Some).ok_or_else(|| {
         WorkflowV2HarnessError::InvalidWriteMode {
             method: method.as_str().to_string(),
@@ -812,35 +960,17 @@ fn source_expr(method: WorkflowV2HostMethod, args: &str) -> Option<String> {
     ) {
         return None;
     }
+    if matches!(
+        method,
+        WorkflowV2HostMethod::Fanout | WorkflowV2HostMethod::Parallel
+    ) {
+        return fanout_item_source_expr(args);
+    }
     let rest = args.trim_start().strip_prefix(',')?.trim_start();
     if let Some(object_source) = object_option_source_expr(method, rest) {
         return Some(object_source);
     }
-    let mut depth = 0usize;
-    let mut quote = None::<char>;
-    let mut escaped = false;
-    for (idx, ch) in rest.char_indices() {
-        if let Some(active) = quote {
-            if escaped {
-                escaped = false;
-            } else if ch == '\\' {
-                escaped = true;
-            } else if ch == active {
-                quote = None;
-            }
-            continue;
-        }
-        match ch {
-            '"' | '\'' | '`' => quote = Some(ch),
-            '[' | '{' | '(' => depth += 1,
-            ']' | '}' | ')' => depth = depth.saturating_sub(1),
-            ',' if depth == 0 => {
-                return non_empty_expr(&rest[..idx], allow_object_source);
-            }
-            _ => {}
-        }
-    }
-    non_empty_expr(rest, allow_object_source)
+    positional_source_expr(args, allow_object_source)
 }
 
 fn object_option_source_expr(method: WorkflowV2HostMethod, rest: &str) -> Option<String> {

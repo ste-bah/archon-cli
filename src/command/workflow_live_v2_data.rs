@@ -54,10 +54,11 @@ pub(super) fn fanout_items_for_call(
             let mut branch_call = execution.call.clone();
             branch_call.id = format!("{}-{item_id}", execution.call.id);
             branch_call.options.source = None;
-            if branch_call.options.target_files.is_empty()
-                && branch_call.options.target_files_from_item
-            {
-                branch_call.options.target_files = target_files_from_value(&value);
+            if branch_call.options.target_files_from_item {
+                let item_targets = target_files_from_value(&value);
+                if !item_targets.is_empty() {
+                    branch_call.options.target_files = item_targets;
+                }
             }
             branch_call.method = if branch_call.write_mode.is_some() {
                 WorkflowV2HostMethod::Implementation

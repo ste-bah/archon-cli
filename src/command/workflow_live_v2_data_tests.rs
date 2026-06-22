@@ -219,6 +219,83 @@ fn fanout_branch_inherits_target_files_from_inventory_item() {
     assert_eq!(request.target_files, vec!["src/lib.rs", "tests/lib.rs"]);
 }
 
+#[test]
+fn fanout_branch_item_targets_override_static_fallback_targets() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path());
+    let mut inventory = WorkflowV2Result::accepted("inventory");
+    inventory.data = serde_json::json!({
+        "items": [
+            {
+                "id": "TDL-001",
+                "target_files": ["crates/archon-trading/src/data_lake.rs"]
+            }
+        ]
+    });
+    store
+        .save_call_record(&WorkflowV2CallRecord::new(
+            "run",
+            WorkflowV2HostCall {
+                id: "inventory".to_string(),
+                method: WorkflowV2HostMethod::Agent,
+                write_mode: None,
+                options: WorkflowV2HostOptions::default(),
+            },
+            1,
+            "input".to_string(),
+            inventory,
+            Vec::new(),
+        ))
+        .expect("save inventory");
+    let execution = WorkflowV2CallExecution {
+        call: WorkflowV2HostCall {
+            id: "implementationResults".to_string(),
+            method: WorkflowV2HostMethod::Fanout,
+            write_mode: Some(WorkflowV2WriteMode::Worktree),
+            options: WorkflowV2HostOptions {
+                source: Some("inventory.items".to_string()),
+                target_files: vec!["/repo".to_string()],
+                target_files_from_item: true,
+                ..WorkflowV2HostOptions::default()
+            },
+        },
+        input: serde_json::Value::Null,
+        depends_on: vec!["inventory".to_string()],
+    };
+
+    let branches = fanout_items_for_call(&execution, &store).expect("fanout items");
+
+    assert_eq!(
+        branches[0].call.options.target_files,
+        vec!["crates/archon-trading/src/data_lake.rs"]
+    );
+    let spec = WorkflowSpec {
+        schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
+        name: "test".to_string(),
+        task: "Implement".to_string(),
+        target_repository_root: Some("/repo".to_string()),
+        max_parallelism: 8,
+        max_agents: 32,
+        provider_tiers: BTreeMap::new(),
+        stages: Vec::new(),
+        artifact_policy: Default::default(),
+        permissions: BTreeMap::new(),
+        quality_gates: BTreeMap::new(),
+        learning_hooks: Vec::new(),
+    };
+    let branch_execution = WorkflowV2CallExecution {
+        call: branches[0].call.clone(),
+        input: branches[0].input.clone(),
+        depends_on: vec!["implementationResults".to_string()],
+    };
+    let request = v2_agent_request("objective", &spec, &branch_execution);
+
+    assert_eq!(
+        request.target_files,
+        vec!["crates/archon-trading/src/data_lake.rs"]
+    );
+}
+
 fn fanout_call(id: &str) -> WorkflowV2HostCall {
     WorkflowV2HostCall {
         id: id.to_string(),

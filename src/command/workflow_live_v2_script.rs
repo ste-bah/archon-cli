@@ -413,11 +413,15 @@ fn parse_script_options(
             }
             "write" | "writeMode" | "write_mode" => {
                 if let Some(raw) = value.as_str() {
-                    write_mode = Some(WorkflowV2WriteMode::parse(raw).ok_or_else(|| {
-                        WorkflowError::SpecInvalid(format!(
-                            "invalid workflow.js write mode '{raw}'"
-                        ))
-                    })?);
+                    if raw.eq_ignore_ascii_case("none") {
+                        write_mode = None;
+                    } else {
+                        write_mode = Some(WorkflowV2WriteMode::parse(raw).ok_or_else(|| {
+                            WorkflowError::SpecInvalid(format!(
+                                "invalid workflow.js write mode '{raw}'"
+                            ))
+                        })?);
+                    }
                 }
             }
             _ => {

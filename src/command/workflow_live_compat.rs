@@ -28,6 +28,7 @@ pub(super) fn compatibility_spec_from_v2_calls(
             let depends_on = compatibility_depends_on(call, previous.as_deref());
             previous = Some(call.id.clone());
             let mut extra = call.options.extra.clone();
+            let condition = string_extra(&mut extra, "condition");
             apply_empty_completion_contract(call, &mut extra);
             archon_workflow::StageSpec {
                 id: call.id.clone(),
@@ -39,7 +40,7 @@ pub(super) fn compatibility_spec_from_v2_calls(
                 foreach: foreach_for_v2_call(call),
                 reducer: None,
                 tool: None,
-                condition: None,
+                condition,
                 depends_on,
                 provider_tier: Some(provider_tier_for_v2_call(call.method)),
                 retry: RetryPolicy::default(),
@@ -78,6 +79,13 @@ pub(super) fn compatibility_spec_from_v2_calls(
         quality_gates: BTreeMap::new(),
         learning_hooks: Vec::new(),
     }
+}
+
+fn string_extra(extra: &mut BTreeMap<String, Value>, key: &str) -> Option<String> {
+    extra
+        .remove(key)
+        .and_then(|value| value.as_str().map(str::trim).map(str::to_string))
+        .filter(|value| !value.is_empty())
 }
 
 fn foreach_for_v2_call(call: &WorkflowV2HostCall) -> Option<String> {
@@ -382,6 +390,63 @@ mod tests {
         assert_eq!(
             implement.extra["completion_task_ids"],
             serde_json::json!(["T001"])
+        );
+    }
+
+    #[test]
+    fn v2_condition_extra_is_serialized_as_typed_stage_condition_once() {
+        let calls = vec![
+            WorkflowV2HostCall {
+                id: "implementationItems".into(),
+                method: WorkflowV2HostMethod::Agent,
+                write_mode: None,
+                options: WorkflowV2HostOptions {
+                    task: Some("Create implementation items.".into()),
+                    ..WorkflowV2HostOptions::default()
+                },
+            },
+            WorkflowV2HostCall {
+                id: "tdl-implementation-wave-1".into(),
+                method: WorkflowV2HostMethod::Fanout,
+                write_mode: Some(WorkflowV2WriteMode::Coordinated),
+                options: WorkflowV2HostOptions {
+                    source: Some("implementationItems".into()),
+                    task: Some("Implement wave 1.".into()),
+                    target_files_from_item: true,
+                    extra: [(
+                        "condition".to_string(),
+                        serde_json::json!("implementationItems.length > 0"),
+                    )]
+                    .into_iter()
+                    .collect(),
+                    ..WorkflowV2HostOptions::default()
+                },
+            },
+        ];
+
+        let spec = compatibility_spec_from_v2_calls("Implement a decomposed PRD.", &calls);
+        let stage = spec
+            .stages
+            .iter()
+            .find(|stage| stage.id == "tdl-implementation-wave-1")
+            .unwrap();
+
+        assert_eq!(
+            stage.condition.as_deref(),
+            Some("implementationItems.length > 0")
+        );
+        assert!(!stage.extra.contains_key("condition"));
+        let yaml = serde_yaml_ng::to_string(&spec).expect("serialize spec");
+        let reparsed: archon_workflow::WorkflowSpec =
+            serde_yaml_ng::from_str(&yaml).expect("deserialize spec without duplicate fields");
+
+        assert_eq!(
+            reparsed
+                .stages
+                .iter()
+                .find(|stage| stage.id == "tdl-implementation-wave-1")
+                .and_then(|stage| stage.condition.as_deref()),
+            Some("implementationItems.length > 0")
         );
     }
 
