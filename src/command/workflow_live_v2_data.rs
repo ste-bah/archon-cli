@@ -248,7 +248,12 @@ pub(super) fn result_from_fanout_report(
 ) -> WorkflowV2Result {
     let peak_parallelism = report.peak_parallelism;
     let max_parallelism = report.max_parallelism;
-    let outcomes = normalize_fanout_outcomes(report.outcomes);
+    let raw_outcomes = report.outcomes;
+    let hard_blocked_count = raw_outcomes
+        .iter()
+        .filter(|outcome| outcome.status == WorkflowV2Status::Blocked && outcome.result.is_none())
+        .count();
+    let outcomes = normalize_fanout_outcomes(raw_outcomes);
     let typed_results = typed_results_from_outcomes(&outcomes);
     if outcomes.is_empty() {
         let mut result = WorkflowV2Result {
@@ -289,12 +294,12 @@ pub(super) fn result_from_fanout_report(
             ),
             ..WorkflowV2Result::default()
         }
-    } else if blocked_count > 0 {
+    } else if hard_blocked_count > 0 {
         WorkflowV2Result {
             status: WorkflowV2Status::Blocked,
             summary: format!(
-                "fanout '{}' blocked with {} blocked branch(es)",
-                call.id, blocked_count
+                "fanout '{}' blocked with {} branch(es) missing structured evidence",
+                call.id, hard_blocked_count
             ),
             ..WorkflowV2Result::default()
         }
@@ -307,12 +312,13 @@ pub(super) fn result_from_fanout_report(
             ),
             ..WorkflowV2Result::default()
         }
-    } else if review_count > 0 {
+    } else if blocked_count > 0 || review_count > 0 {
         let mut result = WorkflowV2Result {
-            status: WorkflowV2Status::NeedsReview,
+            status: WorkflowV2Status::Accepted,
             summary: format!(
-                "fanout '{}' completed with {} branch(es) needing review",
-                call.id, review_count
+                "fanout '{}' completed with {} branch finding(s) retained for downstream reduction",
+                call.id,
+                blocked_count + review_count
             ),
             ..WorkflowV2Result::default()
         };

@@ -24,14 +24,14 @@ fn empty_fanout_without_noop_proof_becomes_review_input() {
 }
 
 #[test]
-fn read_only_fanout_blocked_branch_blocks_downstream_work() {
+fn read_only_fanout_structured_blocked_branch_continues_as_findings() {
     let result = result_from_fanout_report(
         &fanout_call("readOnlyAudits"),
         report(vec![accepted_outcome("a"), blocked_outcome("b")]),
     );
 
-    assert_eq!(result.status, WorkflowV2Status::Blocked);
-    assert!(result.summary.contains("blocked"));
+    assert_eq!(result.status, WorkflowV2Status::Accepted);
+    assert!(result.summary.contains("retained for downstream reduction"));
     let items = result.data["items"].as_array().unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(items[1]["status"], "blocked");
@@ -45,9 +45,24 @@ fn read_only_fanout_review_branch_stays_needs_review_not_failed() {
         report(vec![accepted_outcome("a"), review_outcome("b")]),
     );
 
-    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
-    assert!(result.summary.contains("needing review"));
+    assert_eq!(result.status, WorkflowV2Status::Accepted);
+    assert!(result.summary.contains("retained for downstream reduction"));
     assert_eq!(result.data["items"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn read_only_fanout_unstructured_blocked_branch_still_blocks() {
+    let result = result_from_fanout_report(
+        &fanout_call("readOnlyAudits"),
+        report(vec![
+            accepted_outcome("a"),
+            outcome("b", WorkflowV2Status::Blocked, None, None),
+        ]),
+    );
+
+    assert_eq!(result.status, WorkflowV2Status::Blocked);
+    assert!(result.summary.contains("missing structured evidence"));
+    assert_eq!(result.data["items"][1]["status"], "blocked");
 }
 
 #[test]
