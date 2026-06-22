@@ -29,6 +29,7 @@ struct PlannerFailureAttempt {
     attempt: usize,
     error: Option<String>,
     content_hash: String,
+    content: String,
     content_preview: String,
 }
 
@@ -207,6 +208,7 @@ fn planner_attempt(
             use sha2::{Digest, Sha256};
             hex::encode(Sha256::digest(content.as_bytes()))
         },
+        content: content.to_string(),
         content_preview: truncate_chars(content.trim(), 4000),
     }
 }

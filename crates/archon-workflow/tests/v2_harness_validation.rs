@@ -135,6 +135,81 @@ export default async function workflow(w) {
 }
 
 #[test]
+fn condition_variables_bound_to_hyphenated_call_ids_stay_script_owned() {
+    let source = r#"
+export default async function workflow(w) {
+  const discoveryItems = [{ id: "repo" }];
+  const discovery = await w.parallel("readonly-discovery", discoveryItems, {
+    tier: "researcher",
+    task: "inspect"
+  });
+  const preflight = await w.qualityGate("preflight-readiness", {
+    inputs: [discovery],
+    task: "review readiness"
+  });
+  if (preflight.status !== "accepted") {
+    await w.agent("preflight-remediation-plan", {
+      tier: "planner",
+      inputs: [preflight, discovery],
+      task: "repair plan"
+    });
+  }
+}
+"#;
+
+    let plan = validator().validate(source).unwrap();
+    let remediation = plan
+        .calls
+        .iter()
+        .find(|call| call.id == "preflight-remediation-plan")
+        .expect("remediation call");
+
+    assert_eq!(
+        remediation
+            .options
+            .extra
+            .get("condition")
+            .and_then(serde_json::Value::as_str),
+        Some("preflight.status !== \"accepted\"")
+    );
+    assert_eq!(
+        remediation.options.source.as_deref(),
+        Some("[preflight-readiness, readonly-discovery]")
+    );
+}
+
+#[test]
+fn condition_expressions_are_metadata_not_static_sources() {
+    let source = r#"
+export default async function workflow(w) {
+  const discovery = await w.agent("discover", {
+    tier: "researcher",
+    task: "inspect"
+  });
+  if (Date.now() > 0 && discovery.status !== "cancelled") {
+    await w.finalReport("final", [discovery], {});
+  }
+}
+"#;
+
+    let plan = validator().validate(source).unwrap();
+    let final_report = plan
+        .calls
+        .iter()
+        .find(|call| call.id == "final")
+        .expect("final report");
+
+    assert_eq!(
+        final_report
+            .options
+            .extra
+            .get("condition")
+            .and_then(serde_json::Value::as_str),
+        Some("Date.now() > 0 && discovery.status !== \"cancelled\"")
+    );
+}
+
+#[test]
 fn for_of_agent_loop_lowers_to_source_fanout() {
     let source = r#"
 export default async function workflow(w) {
@@ -951,23 +1026,21 @@ export default async function workflow(w) {
 }
 
 #[test]
-fn host_call_sources_must_reference_earlier_calls() {
-    let err = validator()
-        .validate(
-            r#"export default async function workflow(w) {
+fn source_expressions_are_script_owned_metadata() {
+    let source = r#"
+export default async function workflow(w) {
   await w.fanout("review", missing.items, { role: "critic", task: "review" });
-}"#,
-        )
-        .unwrap_err();
+}
+"#;
 
-    assert_eq!(
-        err,
-        WorkflowV2HarnessError::UnknownSource {
-            method: "fanout".to_string(),
-            id: "review".to_string(),
-            source_id: "missing".to_string(),
-        }
-    );
+    let plan = validator().validate(source).unwrap();
+    let review = plan
+        .calls
+        .iter()
+        .find(|call| call.id == "review")
+        .unwrap();
+
+    assert_eq!(review.options.source.as_deref(), Some("missing.items"));
 }
 
 #[test]

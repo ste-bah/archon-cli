@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use regex::Regex;
 use thiserror::Error;
 
@@ -38,14 +36,6 @@ pub enum WorkflowV2HarnessError {
     MissingWriteMode { method: String, id: String },
     #[error("fanout host call w.fanout('{0}') must include a typed item source argument")]
     UntypedFanout(String),
-    #[error(
-        "host call w.{method}('{id}') source `{source_id}` does not reference an earlier host call or declared script variable"
-    )]
-    UnknownSource {
-        method: String,
-        id: String,
-        source_id: String,
-    },
     #[error("workflow harness loop is unsupported: {0}")]
     UnsupportedLoop(String),
 }
@@ -116,10 +106,8 @@ fn reject_opaque_host_api_usage(source: &str) -> Result<(), WorkflowV2HarnessErr
 fn extract_host_calls(source: &str) -> Result<Vec<WorkflowV2HostCall>, WorkflowV2HarnessError> {
     let mut calls = Vec::new();
     let body = workflow_body(source).unwrap_or(source);
-    let script_variables = declared_script_variables(body);
     collect_executable_calls(body, &mut calls, &[])?;
     rewrite_aliases(&mut calls);
-    validate_source_references(&calls, &script_variables)?;
     Ok(calls)
 }
 
@@ -728,18 +716,6 @@ fn rewrite_aliases(calls: &mut [WorkflowV2HostCall]) {
         if let Some(source) = call.options.source.as_mut() {
             *source = rewrite_source_expr(source, &aliases);
         }
-        let rewritten_condition = call
-            .options
-            .extra
-            .get("condition")
-            .and_then(serde_json::Value::as_str)
-            .map(|condition| rewrite_condition_expr(condition, &aliases));
-        if let Some(condition) = rewritten_condition {
-            call.options.extra.insert(
-                "condition".to_string(),
-                serde_json::Value::String(condition),
-            );
-        }
     }
 }
 
@@ -768,169 +744,6 @@ fn rewrite_source_expr(
         Some(tail) => format!("{replacement}.{tail}"),
         None => replacement.to_string(),
     }
-}
-
-fn rewrite_condition_expr(
-    condition: &str,
-    aliases: &std::collections::BTreeMap<String, String>,
-) -> String {
-    let mut out = String::with_capacity(condition.len());
-    let mut idx = 0usize;
-    let mut quote = None::<char>;
-    let mut escaped = false;
-    while idx < condition.len() {
-        let ch = condition[idx..]
-            .chars()
-            .next()
-            .expect("condition index on char boundary");
-        if let Some(active) = quote {
-            out.push(ch);
-            idx += ch.len_utf8();
-            if escaped {
-                escaped = false;
-            } else if ch == '\\' {
-                escaped = true;
-            } else if ch == active {
-                quote = None;
-            }
-            continue;
-        }
-        if matches!(ch, '"' | '\'' | '`') {
-            quote = Some(ch);
-            out.push(ch);
-            idx += ch.len_utf8();
-            continue;
-        }
-        if ch == '_' || ch.is_ascii_alphabetic() {
-            let end = take_ident(condition, idx);
-            let ident = &condition[idx..end];
-            let previous = condition[..idx].chars().rev().find(|c| !c.is_whitespace());
-            if previous != Some('.') {
-                out.push_str(aliases.get(ident).map(String::as_str).unwrap_or(ident));
-            } else {
-                out.push_str(ident);
-            }
-            idx = end;
-            continue;
-        }
-        out.push(ch);
-        idx += ch.len_utf8();
-    }
-    out
-}
-
-fn validate_source_references(
-    calls: &[WorkflowV2HostCall],
-    script_variables: &BTreeSet<String>,
-) -> Result<(), WorkflowV2HarnessError> {
-    let mut seen = BTreeSet::<String>::new();
-    for call in calls {
-        if let Some(source) = call.options.source.as_deref() {
-            if !source.trim_start().starts_with('{') {
-                for source_id in source_call_ids(source) {
-                    if !seen.contains(&source_id) && !script_variables.contains(&source_id) {
-                        return Err(WorkflowV2HarnessError::UnknownSource {
-                            method: call.method.as_str().to_string(),
-                            id: call.id.clone(),
-                            source_id,
-                        });
-                    }
-                }
-            }
-        }
-        if let Some(condition) = call
-            .options
-            .extra
-            .get("condition")
-            .and_then(serde_json::Value::as_str)
-        {
-            for source_id in condition_call_ids(condition) {
-                if !seen.contains(&source_id) && !script_variables.contains(&source_id) {
-                    return Err(WorkflowV2HarnessError::UnknownSource {
-                        method: call.method.as_str().to_string(),
-                        id: call.id.clone(),
-                        source_id,
-                    });
-                }
-            }
-        }
-        seen.insert(call.id.clone());
-    }
-    Ok(())
-}
-
-fn declared_script_variables(source: &str) -> BTreeSet<String> {
-    let code = code_without_string_literals(source);
-    let re = Regex::new(r#"\b(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\b"#)
-        .expect("script variable regex compiles");
-    re.captures_iter(&code)
-        .filter_map(|captures| captures.get(1).map(|m| m.as_str().to_string()))
-        .collect()
-}
-
-fn source_call_ids(source: &str) -> Vec<String> {
-    let trimmed = source.trim();
-    let body = trimmed
-        .strip_prefix('[')
-        .and_then(|value| value.strip_suffix(']'))
-        .unwrap_or(trimmed);
-    body.split(',')
-        .filter_map(|part| {
-            let head = part
-                .trim()
-                .split_once('.')
-                .map(|(head, _)| head)
-                .unwrap_or(part);
-            let id = head.trim().trim_matches(|ch| ch == '"' || ch == '\'');
-            if id.is_empty() || id.starts_with('{') {
-                None
-            } else {
-                Some(id.to_string())
-            }
-        })
-        .collect()
-}
-
-fn condition_call_ids(condition: &str) -> Vec<String> {
-    let mut ids = BTreeSet::<String>::new();
-    let mut idx = 0usize;
-    let mut quote = None::<char>;
-    let mut escaped = false;
-    while idx < condition.len() {
-        let ch = condition[idx..]
-            .chars()
-            .next()
-            .expect("condition index on char boundary");
-        if let Some(active) = quote {
-            idx += ch.len_utf8();
-            if escaped {
-                escaped = false;
-            } else if ch == '\\' {
-                escaped = true;
-            } else if ch == active {
-                quote = None;
-            }
-            continue;
-        }
-        if matches!(ch, '"' | '\'' | '`') {
-            quote = Some(ch);
-            idx += ch.len_utf8();
-            continue;
-        }
-        if ch == '_' || ch.is_ascii_alphabetic() {
-            let end = take_ident(condition, idx);
-            let ident = &condition[idx..end];
-            let previous = condition[..idx].chars().rev().find(|c| !c.is_whitespace());
-            let next = condition[end..].chars().find(|c| !c.is_whitespace());
-            if previous != Some('.') && next == Some('.') {
-                ids.insert(ident.to_string());
-            }
-            idx = end;
-            continue;
-        }
-        idx += ch.len_utf8();
-    }
-    ids.into_iter().collect()
 }
 
 fn validate_fanout_source(
@@ -1069,7 +882,8 @@ fn source_expr(method: WorkflowV2HostMethod, args: &str) -> Option<String> {
     );
     if !matches!(
         method,
-        WorkflowV2HostMethod::Checkpoint
+        WorkflowV2HostMethod::Agent
+            | WorkflowV2HostMethod::Checkpoint
             | WorkflowV2HostMethod::Fanout
             | WorkflowV2HostMethod::Parallel
             | WorkflowV2HostMethod::Reduce
@@ -1099,7 +913,8 @@ fn object_option_source_expr(method: WorkflowV2HostMethod, rest: &str) -> Option
         return None;
     }
     let keys: &[&str] = match method {
-        WorkflowV2HostMethod::Checkpoint
+        WorkflowV2HostMethod::Agent
+        | WorkflowV2HostMethod::Checkpoint
         | WorkflowV2HostMethod::Reduce
         | WorkflowV2HostMethod::FinalReport
         | WorkflowV2HostMethod::QualityGate => &["inputs", "source", "input"],

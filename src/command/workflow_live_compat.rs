@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use archon_workflow::{
     ProviderTier, RetryPolicy, StageKind, WorkflowSpec, WorkflowV2HostCall, WorkflowV2HostMethod,
@@ -21,12 +21,14 @@ pub(super) fn compatibility_spec_from_v2_calls(
     task: &str,
     calls: &[WorkflowV2HostCall],
 ) -> WorkflowSpec {
-    let mut previous = None::<String>;
+    let known_call_ids = calls
+        .iter()
+        .map(|call| call.id.clone())
+        .collect::<BTreeSet<_>>();
     let mut stages = calls
         .iter()
         .map(|call| {
-            let depends_on = compatibility_depends_on(call, previous.as_deref());
-            previous = Some(call.id.clone());
+            let depends_on = compatibility_depends_on(call, &known_call_ids);
             let mut extra = call.options.extra.clone();
             let condition = string_extra(&mut extra, "condition");
             apply_empty_completion_contract(call, &mut extra);
@@ -37,7 +39,7 @@ pub(super) fn compatibility_spec_from_v2_calls(
                     format!("Execute V2 host call '{}' for objective: {}", call.id, task)
                 })),
                 agent: None,
-                foreach: foreach_for_v2_call(call),
+                foreach: foreach_for_v2_call(call, &known_call_ids),
                 reducer: None,
                 tool: None,
                 condition,
@@ -63,7 +65,7 @@ pub(super) fn compatibility_spec_from_v2_calls(
         })
         .collect::<Vec<_>>();
 
-    mark_item_source_producers(&mut stages, calls);
+    mark_item_source_producers(&mut stages, calls, &known_call_ids);
 
     WorkflowSpec {
         schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
@@ -88,7 +90,10 @@ fn string_extra(extra: &mut BTreeMap<String, Value>, key: &str) -> Option<String
         .filter(|value| !value.is_empty())
 }
 
-fn foreach_for_v2_call(call: &WorkflowV2HostCall) -> Option<String> {
+fn foreach_for_v2_call(
+    call: &WorkflowV2HostCall,
+    known_call_ids: &BTreeSet<String>,
+) -> Option<String> {
     if !matches!(
         call.method,
         WorkflowV2HostMethod::Fanout | WorkflowV2HostMethod::Parallel
@@ -97,7 +102,8 @@ fn foreach_for_v2_call(call: &WorkflowV2HostCall) -> Option<String> {
     }
     let source = call.options.source.as_deref()?.trim();
     let (stage, accessor) = source.split_once('.')?;
-    (!stage.trim().is_empty() && !accessor.trim().is_empty())
+    let stage = stage.trim();
+    (!stage.is_empty() && !accessor.trim().is_empty() && known_call_ids.contains(stage))
         .then(|| format!("${{{}.{}}}", stage.trim(), accessor.trim()))
 }
 
@@ -128,8 +134,12 @@ fn apply_empty_completion_contract(call: &WorkflowV2HostCall, extra: &mut BTreeM
 fn mark_item_source_producers(
     stages: &mut [archon_workflow::StageSpec],
     calls: &[WorkflowV2HostCall],
+    known_call_ids: &BTreeSet<String>,
 ) {
-    for producer in calls.iter().filter_map(item_source_producer) {
+    for producer in calls
+        .iter()
+        .filter_map(|call| item_source_producer(call, known_call_ids))
+    {
         if let Some(stage) = stages.iter_mut().find(|stage| stage.id == producer) {
             declare_items_output(stage);
             append_items_output_contract(stage);
@@ -137,17 +147,21 @@ fn mark_item_source_producers(
     }
 }
 
-fn item_source_producer(call: &WorkflowV2HostCall) -> Option<String> {
+fn item_source_producer(
+    call: &WorkflowV2HostCall,
+    known_call_ids: &BTreeSet<String>,
+) -> Option<String> {
     if !matches!(
         call.method,
         WorkflowV2HostMethod::Fanout | WorkflowV2HostMethod::Parallel
     ) {
         return None;
     }
-    call.options
-        .source
-        .as_deref()
-        .and_then(|source| source_call_ids(source).into_iter().next())
+    call.options.source.as_deref().and_then(|source| {
+        source_call_ids(source)
+            .into_iter()
+            .find(|source_id| known_call_ids.contains(source_id))
+    })
 }
 
 fn declare_items_output(stage: &mut archon_workflow::StageSpec) {
@@ -175,18 +189,20 @@ fn append_items_output_contract(stage: &mut archon_workflow::StageSpec) {
     }
 }
 
-fn compatibility_depends_on(call: &WorkflowV2HostCall, previous: Option<&str>) -> Vec<String> {
-    let source_deps = call
-        .options
+fn compatibility_depends_on(
+    call: &WorkflowV2HostCall,
+    known_call_ids: &BTreeSet<String>,
+) -> Vec<String> {
+    call.options
         .source
         .as_deref()
-        .map(source_call_ids)
-        .unwrap_or_default();
-    if source_deps.is_empty() {
-        previous.into_iter().map(str::to_string).collect()
-    } else {
-        source_deps
-    }
+        .map(|source| {
+            source_call_ids(source)
+                .into_iter()
+                .filter(|source_id| known_call_ids.contains(source_id))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn workflow_name_from_task(task: &str) -> String {
@@ -448,6 +464,62 @@ mod tests {
                 .and_then(|stage| stage.condition.as_deref()),
             Some("implementationItems.length > 0")
         );
+    }
+
+    #[test]
+    fn compatibility_dependencies_only_reference_host_calls() {
+        let calls = vec![
+            WorkflowV2HostCall {
+                id: "discover".into(),
+                method: WorkflowV2HostMethod::Agent,
+                write_mode: None,
+                options: WorkflowV2HostOptions::default(),
+            },
+            WorkflowV2HostCall {
+                id: "review".into(),
+                method: WorkflowV2HostMethod::Fanout,
+                write_mode: None,
+                options: WorkflowV2HostOptions {
+                    source: Some("discover.items".into()),
+                    task: Some("Review discovered work.".into()),
+                    ..WorkflowV2HostOptions::default()
+                },
+            },
+        ];
+
+        let spec = compatibility_spec_from_v2_calls("Review a repo.", &calls);
+        let review = spec
+            .stages
+            .iter()
+            .find(|stage| stage.id == "review")
+            .unwrap();
+
+        assert_eq!(review.depends_on, vec!["discover"]);
+        assert_eq!(review.foreach.as_deref(), Some("${discover.items}"));
+    }
+
+    #[test]
+    fn compatibility_spec_does_not_turn_script_variables_into_stage_dependencies() {
+        let calls = vec![WorkflowV2HostCall {
+            id: "inventory".into(),
+            method: WorkflowV2HostMethod::Reduce,
+            write_mode: None,
+            options: WorkflowV2HostOptions {
+                source: Some("rootContext.items".into()),
+                task: Some("Build inventory from script-owned context.".into()),
+                ..WorkflowV2HostOptions::default()
+            },
+        }];
+
+        let spec = compatibility_spec_from_v2_calls("Build inventory.", &calls);
+        let inventory = spec
+            .stages
+            .iter()
+            .find(|stage| stage.id == "inventory")
+            .unwrap();
+
+        assert!(inventory.depends_on.is_empty());
+        assert!(inventory.foreach.is_none());
     }
 
     #[test]

@@ -47,6 +47,7 @@ async fn live_planner_validation_failure_does_not_fallback_to_smoke_plan() {
             .is_some_and(|attempts| !attempts.is_empty())
     );
     assert!(value["attempts"][0]["content_hash"].as_str().is_some());
+    assert!(value["attempts"][0]["content"].as_str().is_some());
     assert!(value["attempts"][0]["content_preview"].as_str().is_some());
 }
 
