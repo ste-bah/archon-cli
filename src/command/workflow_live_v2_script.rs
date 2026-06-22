@@ -135,7 +135,14 @@ impl WorkflowV2ScriptRunner {
             .await;
         match js_result {
             Ok(_) => Ok(host.summary().await),
-            Err(err) => Err(workflow_js_error(err.to_string())),
+            Err(err) => {
+                let summary = host.summary().await;
+                if summary.executed > 0 && should_stop_script_for_status(summary.status) {
+                    Ok(summary)
+                } else {
+                    Err(workflow_js_error(err.to_string()))
+                }
+            }
         }
     }
 }
@@ -261,6 +268,12 @@ impl WorkflowScriptHost {
         self.update_checkpoint(&record)?;
         self.mark_executed(&record, status).await;
         poll_v2_run_control(&self.runner.workflow_store, &self.runner.run_id, "")?;
+        if should_stop_script_for_status(status) {
+            return Err(WorkflowError::StageFailed(format!(
+                "workflow V2 call '{}' stopped with status {:?}: {}",
+                record.call.id, record.status, record.result.summary
+            )));
+        }
         result_view_json(&record.result)
     }
 
@@ -354,7 +367,7 @@ impl WorkflowScriptHost {
         if is_reusable_status(status) {
             acc.completed += 1;
         }
-        if status == WorkflowV2Status::Failed {
+        if should_stop_script_for_status(status) {
             acc.last_failed_call = Some(record.call.id.clone());
         }
         acc.calls.push(record.call.clone());
@@ -367,7 +380,7 @@ impl WorkflowScriptHost {
             completed: acc.completed,
             executed: acc.executed,
             reused: acc.reused,
-            failed_call: (acc.status == WorkflowV2Status::Failed)
+            failed_call: should_stop_script_for_status(acc.status)
                 .then(|| acc.last_failed_call.clone())
                 .flatten(),
             calls: acc.calls.clone(),
@@ -555,9 +568,117 @@ fn is_reusable_status(status: WorkflowV2Status) -> bool {
     matches!(status, WorkflowV2Status::Accepted | WorkflowV2Status::Noop)
 }
 
+fn should_stop_script_for_status(status: WorkflowV2Status) -> bool {
+    !is_reusable_status(status)
+}
+
 fn stable_input_hash(input: &serde_json::Value) -> String {
     use sha2::{Digest, Sha256};
 
     let bytes = serde_json::to_vec(input).unwrap_or_default();
     hex::encode(Sha256::digest(&bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use anyhow::Result;
+    use archon_pipeline::runner::{LlmClient, LlmResponse};
+    use archon_tui::event_channel::bounded_tui_event_channel;
+
+    use super::*;
+
+    #[test]
+    fn script_continues_only_after_reusable_statuses() {
+        assert!(!should_stop_script_for_status(WorkflowV2Status::Accepted));
+        assert!(!should_stop_script_for_status(WorkflowV2Status::Noop));
+        assert!(should_stop_script_for_status(WorkflowV2Status::NeedsReview));
+        assert!(should_stop_script_for_status(WorkflowV2Status::Blocked));
+        assert!(should_stop_script_for_status(WorkflowV2Status::Failed));
+        assert!(should_stop_script_for_status(WorkflowV2Status::Cancelled));
+    }
+
+    #[tokio::test]
+    async fn non_reusable_host_result_stops_script_before_next_call() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let spec = test_spec();
+        let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
+        let run = workflow_store.create_run(spec.clone()).expect("run");
+        let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
+        let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+        let client =
+            LiveV2AgentClient::new(Arc::new(PanicLlm), tui_tx, Vec::new(), run.id.clone(), None);
+        let runner = WorkflowV2ScriptRunner::new(
+            "needs confirmation".to_string(),
+            spec,
+            WorkflowV2AgentAdapter::new(),
+            client,
+            v2_store.clone(),
+            workflow_store,
+            run.id.clone(),
+            true,
+        );
+
+        let summary = runner
+            .run(
+                r#"
+async function workflow(w) {
+  await w.humanGate("confirm-before-write", { task: "Confirm before writing" });
+  await w.checkpoint("should-not-run");
+}
+"#,
+            )
+            .await
+            .expect("script summary");
+
+        assert_eq!(summary.status, WorkflowV2Status::NeedsReview);
+        assert_eq!(summary.executed, 1);
+        assert_eq!(summary.failed_call.as_deref(), Some("confirm-before-write"));
+        assert!(
+            v2_store
+                .load_call_record("confirm-before-write")
+                .expect("confirm record")
+                .is_some()
+        );
+        assert!(
+            v2_store
+                .load_call_record("should-not-run")
+                .expect("checkpoint lookup")
+                .is_none()
+        );
+    }
+
+    fn test_spec() -> WorkflowSpec {
+        WorkflowSpec {
+            schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
+            name: "script-stop-test".to_string(),
+            task: "test".to_string(),
+            target_repository_root: None,
+            max_parallelism: 4,
+            max_agents: 16,
+            provider_tiers: BTreeMap::new(),
+            stages: Vec::new(),
+            artifact_policy: Default::default(),
+            permissions: BTreeMap::new(),
+            quality_gates: BTreeMap::new(),
+            learning_hooks: Vec::new(),
+        }
+    }
+
+    struct PanicLlm;
+
+    #[async_trait::async_trait]
+    impl LlmClient for PanicLlm {
+        async fn send_message(
+            &self,
+            _messages: Vec<serde_json::Value>,
+            _system: Vec<serde_json::Value>,
+            _tools: Vec<serde_json::Value>,
+            _model: &str,
+        ) -> Result<LlmResponse> {
+            panic!("local-host workflow script test must not call the LLM")
+        }
+    }
 }

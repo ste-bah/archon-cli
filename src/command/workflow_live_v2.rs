@@ -281,7 +281,12 @@ async fn execute_generated_v2_run(
         run.id, summary.status, summary.completed, summary.executed, summary.reused
     );
     if let Some(call) = summary.failed_call {
-        output.push_str(&format!("failed_call: {call}\n"));
+        let label = if summary.status == archon_workflow::WorkflowV2Status::Failed {
+            "failed_call"
+        } else {
+            "stopped_call"
+        };
+        output.push_str(&format!("{label}: {call}\n"));
     }
     output.push_str(&format!(
         "harness: {}\nv2_results: {}\n",

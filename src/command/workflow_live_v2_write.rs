@@ -212,8 +212,8 @@ async fn run_coordinated_v2_write_fanout(
         for (assignment, result) in wave.assignments.iter().zip(wave_results) {
             let mut result = match result {
                 Ok(result) => result,
-                Err(err) if is_recoverable_write_branch_error(&err.to_string()) => {
-                    recoverable_write_branch_error_result(&assignment.item_id, &err.to_string())
+                Err(err) if is_terminal_write_branch_evidence_error(&err.to_string()) => {
+                    terminal_write_branch_error_result(&assignment.item_id, &err.to_string())
                 }
                 Err(err) => return Err(err),
             };
@@ -227,11 +227,9 @@ async fn run_coordinated_v2_write_fanout(
                     ))
                 })?;
             if let Err(err) = validate_changed_files(write_item, &result) {
-                if is_recoverable_write_branch_error(&err.to_string()) {
-                    result = recoverable_write_branch_error_result(
-                        &assignment.item_id,
-                        &err.to_string(),
-                    );
+                if is_terminal_write_branch_evidence_error(&err.to_string()) {
+                    result =
+                        terminal_write_branch_error_result(&assignment.item_id, &err.to_string());
                 } else {
                     return Err(WorkflowError::SpecInvalid(err.to_string()));
                 }
@@ -543,8 +541,8 @@ async fn run_one_worktree_branch(
     .await
     {
         Ok(result) => result,
-        Err(err) if is_recoverable_write_branch_error(&err.to_string()) => {
-            recoverable_write_branch_error_result(&branch_id, &err.to_string())
+        Err(err) if is_terminal_write_branch_evidence_error(&err.to_string()) => {
+            terminal_write_branch_error_result(&branch_id, &err.to_string())
         }
         Err(err) => return Err(err),
     };
@@ -555,8 +553,8 @@ async fn run_one_worktree_branch(
         prepared.assignment.owned_targets.clone(),
     );
     if let Err(err) = validate_changed_files(&write_item, &result) {
-        if is_recoverable_write_branch_error(&err.to_string()) {
-            result = recoverable_write_branch_error_result(&branch_id, &err.to_string());
+        if is_terminal_write_branch_evidence_error(&err.to_string()) {
+            result = terminal_write_branch_error_result(&branch_id, &err.to_string());
         } else {
             return Err(WorkflowError::SpecInvalid(err.to_string()));
         }
@@ -575,8 +573,8 @@ async fn run_one_worktree_branch(
             &result,
         ) {
             Ok(captured) => captured,
-            Err(err) if is_recoverable_write_branch_error(&err.to_string()) => {
-                result = recoverable_write_branch_error_result(&branch_id, &err.to_string());
+            Err(err) if is_terminal_write_branch_evidence_error(&err.to_string()) => {
+                result = terminal_write_branch_error_result(&branch_id, &err.to_string());
                 return Ok(CompletedWorktreeBranch {
                     item_id: branch_id,
                     role: branch_role,
@@ -724,8 +722,8 @@ async fn run_serial_v2_write_fanout(
                 .await
             {
                 Ok(result) => result,
-                Err(err) if is_recoverable_write_branch_error(&err.to_string()) => {
-                    recoverable_write_branch_error_result(&branch_id, &err.to_string())
+                Err(err) if is_terminal_write_branch_evidence_error(&err.to_string()) => {
+                    terminal_write_branch_error_result(&branch_id, &err.to_string())
                 }
                 Err(err) => return Err(err),
             };
@@ -740,8 +738,8 @@ async fn run_serial_v2_write_fanout(
                 ))
             })?;
         if let Err(err) = validate_changed_files(write_item, &result) {
-            if is_recoverable_write_branch_error(&err.to_string()) {
-                result = recoverable_write_branch_error_result(&branch_id, &err.to_string());
+            if is_terminal_write_branch_evidence_error(&err.to_string()) {
+                result = terminal_write_branch_error_result(&branch_id, &err.to_string());
             } else {
                 return Err(WorkflowError::SpecInvalid(err.to_string()));
             }
@@ -942,9 +940,9 @@ fn result_from_write_fanout(
         }
     } else if blocked > 0 {
         WorkflowV2Result {
-            status: WorkflowV2Status::NeedsReview,
+            status: WorkflowV2Status::Blocked,
             summary: format!(
-                "write-capable fanout '{}' completed with {} blocked branch(es) retained for remediation",
+                "write-capable fanout '{}' blocked with {} blocked branch(es)",
                 call.id, blocked
             ),
             residual_gaps: vec![WorkflowV2ResidualGap {
@@ -956,15 +954,15 @@ fn result_from_write_fanout(
                     "write-capable fanout '{}' had {} blocked branch(es)",
                     call.id, blocked
                 ),
-                severity: Some("remediation".to_string()),
+                severity: Some("blocking".to_string()),
             }],
             ..WorkflowV2Result::default()
         }
     } else if failed > 0 {
         WorkflowV2Result {
-            status: WorkflowV2Status::NeedsReview,
+            status: WorkflowV2Status::Failed,
             summary: format!(
-                "write-capable fanout '{}' completed with {} failed branch(es) needing remediation",
+                "write-capable fanout '{}' failed with {} failed branch(es)",
                 call.id, failed
             ),
             ..WorkflowV2Result::default()
@@ -1072,32 +1070,35 @@ fn record_write_peak(peak: &AtomicUsize, observed: usize) {
     }
 }
 
-fn recoverable_write_branch_error_result(item_id: &str, error: &str) -> WorkflowV2Result {
+fn terminal_write_branch_error_result(item_id: &str, error: &str) -> WorkflowV2Result {
     let mut result = WorkflowV2Result {
-        status: WorkflowV2Status::NeedsReview,
+        status: WorkflowV2Status::Failed,
         summary: format!(
-            "write branch '{item_id}' produced recoverable implementation evidence requiring remediation"
+            "write branch '{item_id}' produced invalid implementation evidence after repair"
         ),
         ..WorkflowV2Result::default()
     };
     result.evidence.push(WorkflowV2Evidence::new(
-        WorkflowV2EvidenceKind::Review,
-        "write branch validation failure was retained as remediation input instead of terminating the workflow",
+        WorkflowV2EvidenceKind::Blocker,
+        "write branch validation failure stopped the workflow before downstream work",
     ));
     result.residual_gaps.push(WorkflowV2ResidualGap {
-        id: format!("write_branch_repair_{}", sanitize_v2_path_segment(item_id)),
+        id: format!(
+            "invalid_write_branch_output_{}",
+            sanitize_v2_path_segment(item_id)
+        ),
         description: truncate_for_result(error, 500),
-        severity: Some("remediation".to_string()),
+        severity: Some("blocking".to_string()),
     });
     result.data = serde_json::json!({
         "branch_id": item_id,
-        "normalized_from_error": true,
+        "terminal_from_error": true,
         "error": truncate_for_result(error, 2_000),
     });
     result
 }
 
-fn is_recoverable_write_branch_error(error: &str) -> bool {
+fn is_terminal_write_branch_evidence_error(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
     !lower.contains("agent transport failed")
         && (lower.contains("schema repair failed")
@@ -1468,7 +1469,7 @@ mod tests {
     }
 
     #[test]
-    fn write_fanout_failed_branch_feeds_remediation_not_terminal_failure() {
+    fn write_fanout_failed_branch_is_terminal_failure() {
         let temp = tempfile::tempdir().expect("tempdir");
         let call = WorkflowV2HostCall {
             id: "impl".to_string(),
@@ -1496,29 +1497,29 @@ mod tests {
 
         let result = result_from_write_fanout(&call, vec![branch_result], &plan, 1, None);
 
-        assert_eq!(result.status, WorkflowV2Status::NeedsReview);
-        assert!(result.summary.contains("needing remediation"));
-        assert_eq!(result.residual_gaps.len(), 1);
+        assert_eq!(result.status, WorkflowV2Status::Failed);
+        assert!(result.summary.contains("failed"));
+        assert_eq!(result.data["items"][0]["status"], "failed");
     }
 
     #[test]
-    fn recoverable_write_branch_validation_error_becomes_remediation_input() {
-        let result = recoverable_write_branch_error_result(
+    fn write_branch_validation_error_becomes_terminal_branch_failure() {
+        let result = terminal_write_branch_error_result(
             "impl-T001",
             "schema repair failed after one retry: first=implementation agent changed files outside declared target_files; repair=implementation noop requires typed task_coverage evidence",
         );
 
-        assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+        assert_eq!(result.status, WorkflowV2Status::Failed);
         assert_eq!(
             result.residual_gaps[0].severity.as_deref(),
-            Some("remediation")
+            Some("blocking")
         );
-        assert_eq!(result.data["normalized_from_error"], true);
+        assert_eq!(result.data["terminal_from_error"], true);
     }
 
     #[test]
-    fn transport_error_is_not_reclassified_as_recoverable_write_branch_gap() {
-        assert!(!is_recoverable_write_branch_error(
+    fn transport_error_is_not_reclassified_as_terminal_write_branch_evidence() {
+        assert!(!is_terminal_write_branch_evidence_error(
             "agent transport failed: rate limit"
         ));
     }

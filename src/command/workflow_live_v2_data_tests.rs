@@ -24,18 +24,18 @@ fn empty_fanout_without_noop_proof_becomes_review_input() {
 }
 
 #[test]
-fn read_only_fanout_blocked_branch_stays_non_terminal_review_input() {
+fn read_only_fanout_blocked_branch_blocks_downstream_work() {
     let result = result_from_fanout_report(
         &fanout_call("readOnlyAudits"),
         report(vec![accepted_outcome("a"), blocked_outcome("b")]),
     );
 
-    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
-    assert!(result.summary.contains("needing review"));
+    assert_eq!(result.status, WorkflowV2Status::Blocked);
+    assert!(result.summary.contains("blocked"));
     let items = result.data["items"].as_array().unwrap();
     assert_eq!(items.len(), 2);
-    assert_eq!(items[1]["status"], "needs_review");
-    assert_eq!(items[1]["residual_gaps"][0]["severity"], "remediation");
+    assert_eq!(items[1]["status"], "blocked");
+    assert_eq!(items[1]["residual_gaps"][0]["severity"], "blocking");
 }
 
 #[test]
@@ -51,7 +51,7 @@ fn read_only_fanout_review_branch_stays_needs_review_not_failed() {
 }
 
 #[test]
-fn recoverable_schema_branch_error_becomes_typed_review_data() {
+fn schema_branch_error_fails_fanout_before_downstream_work() {
     let result = result_from_fanout_report(
         &fanout_call("readOnlyAudits"),
         report(vec![
@@ -63,15 +63,16 @@ fn recoverable_schema_branch_error_becomes_typed_review_data() {
         ]),
     );
 
-    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+    assert_eq!(result.status, WorkflowV2Status::Failed);
     let items = result.data["items"].as_array().unwrap();
     assert_eq!(items.len(), 2);
-    assert_eq!(items[1]["status"], "needs_review");
-    assert_eq!(items[1]["data"]["normalized_from_error"], true);
+    assert_eq!(items[1]["status"], "failed");
+    assert_eq!(items[1]["data"]["terminal_from_error"], true);
+    assert_eq!(items[1]["residual_gaps"][0]["severity"], "blocking");
 }
 
 #[test]
-fn transport_branch_error_becomes_review_input_for_reducer_or_human_gate() {
+fn transport_branch_error_fails_fanout_before_reducer_or_human_gate() {
     let result = result_from_fanout_report(
         &fanout_call("readOnlyAudits"),
         report(vec![
@@ -80,9 +81,9 @@ fn transport_branch_error_becomes_review_input_for_reducer_or_human_gate() {
         ]),
     );
 
-    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
-    assert!(result.summary.contains("needing review"));
-    assert_eq!(result.data["items"][1]["status"], "needs_review");
+    assert_eq!(result.status, WorkflowV2Status::Failed);
+    assert!(result.summary.contains("failed"));
+    assert_eq!(result.data["items"][1]["status"], "failed");
 }
 
 #[test]

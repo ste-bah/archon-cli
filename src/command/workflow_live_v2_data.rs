@@ -248,7 +248,7 @@ pub(super) fn result_from_fanout_report(
 ) -> WorkflowV2Result {
     let peak_parallelism = report.peak_parallelism;
     let max_parallelism = report.max_parallelism;
-    let outcomes = normalize_read_only_fanout_outcomes(report.outcomes);
+    let outcomes = normalize_fanout_outcomes(report.outcomes);
     let typed_results = typed_results_from_outcomes(&outcomes);
     if outcomes.is_empty() {
         let mut result = WorkflowV2Result {
@@ -277,6 +277,7 @@ pub(super) fn result_from_fanout_report(
         return result;
     }
     let cancelled_count = count_outcomes_with_status(&outcomes, WorkflowV2Status::Cancelled);
+    let blocked_count = count_outcomes_with_status(&outcomes, WorkflowV2Status::Blocked);
     let failed_count = count_outcomes_with_status(&outcomes, WorkflowV2Status::Failed);
     let review_count = count_outcomes_with_status(&outcomes, WorkflowV2Status::NeedsReview);
     let mut result = if cancelled_count > 0 {
@@ -288,11 +289,20 @@ pub(super) fn result_from_fanout_report(
             ),
             ..WorkflowV2Result::default()
         }
+    } else if blocked_count > 0 {
+        WorkflowV2Result {
+            status: WorkflowV2Status::Blocked,
+            summary: format!(
+                "fanout '{}' blocked with {} blocked branch(es)",
+                call.id, blocked_count
+            ),
+            ..WorkflowV2Result::default()
+        }
     } else if failed_count > 0 {
         WorkflowV2Result {
-            status: WorkflowV2Status::NeedsReview,
+            status: WorkflowV2Status::Failed,
             summary: format!(
-                "fanout '{}' completed with {} failed branch(es) retained for remediation",
+                "fanout '{}' failed with {} failed branch(es)",
                 call.id, failed_count
             ),
             ..WorkflowV2Result::default()
@@ -335,31 +345,19 @@ pub(super) fn result_from_fanout_report(
     result
 }
 
-fn normalize_read_only_fanout_outcomes(
+fn normalize_fanout_outcomes(
     outcomes: Vec<WorkflowV2BranchOutcome>,
 ) -> Vec<WorkflowV2BranchOutcome> {
     outcomes
         .into_iter()
         .map(|mut outcome| {
             match outcome.status {
-                WorkflowV2Status::Blocked => {
-                    outcome.status = WorkflowV2Status::NeedsReview;
-                    outcome.result = Some(blocked_branch_review_result(&outcome));
+                WorkflowV2Status::Blocked if outcome.result.is_none() => {
+                    outcome.result = Some(blocked_branch_result(&outcome));
                 }
                 WorkflowV2Status::Failed if outcome.result.is_none() => {
                     let error = outcome.error.clone().unwrap_or_default();
-                    outcome.status = WorkflowV2Status::NeedsReview;
-                    outcome.result = Some(recoverable_branch_error_result(&outcome, &error));
-                }
-                WorkflowV2Status::Failed
-                    if outcome
-                        .error
-                        .as_deref()
-                        .is_some_and(is_recoverable_agent_output_error) =>
-                {
-                    let error = outcome.error.clone().unwrap_or_default();
-                    outcome.status = WorkflowV2Status::NeedsReview;
-                    outcome.result = Some(recoverable_branch_error_result(&outcome, &error));
+                    outcome.result = Some(failed_branch_error_result(&outcome, &error));
                 }
                 _ => {}
             }
@@ -368,74 +366,57 @@ fn normalize_read_only_fanout_outcomes(
         .collect()
 }
 
-fn blocked_branch_review_result(outcome: &WorkflowV2BranchOutcome) -> WorkflowV2Result {
+fn blocked_branch_result(outcome: &WorkflowV2BranchOutcome) -> WorkflowV2Result {
     let mut result = outcome.result.clone().unwrap_or_else(|| WorkflowV2Result {
-        status: WorkflowV2Status::NeedsReview,
+        status: WorkflowV2Status::Blocked,
         summary: format!(
-            "read-only branch '{}' reported a blocker that must feed remediation or a humanGate choice",
+            "fanout branch '{}' reported a blocker that must stop before downstream work",
             outcome.item_id
         ),
         ..WorkflowV2Result::default()
     });
-    result.status = WorkflowV2Status::NeedsReview;
+    result.status = WorkflowV2Status::Blocked;
     if !result
         .evidence
         .iter()
-        .any(|evidence| evidence.kind == WorkflowV2EvidenceKind::Review)
+        .any(|evidence| evidence.kind == WorkflowV2EvidenceKind::Blocker)
     {
         result.evidence.push(WorkflowV2Evidence::new(
-            WorkflowV2EvidenceKind::Review,
-            "blocked read-only finding was retained as remediation input instead of terminating the workflow",
+            WorkflowV2EvidenceKind::Blocker,
+            "blocked fanout branch stopped the workflow before downstream work",
         ));
     }
     for gap in &mut result.residual_gaps {
-        if gap.severity.as_deref() == Some("blocking") {
-            gap.severity = Some("remediation".to_string());
-        }
+        gap.severity = Some("blocking".to_string());
     }
     result
 }
 
-fn recoverable_branch_error_result(
-    outcome: &WorkflowV2BranchOutcome,
-    error: &str,
-) -> WorkflowV2Result {
+fn failed_branch_error_result(outcome: &WorkflowV2BranchOutcome, error: &str) -> WorkflowV2Result {
     let mut result = WorkflowV2Result {
-        status: WorkflowV2Status::NeedsReview,
+        status: WorkflowV2Status::Failed,
         summary: format!(
-            "read-only branch '{}' produced invalid structured output after repair",
+            "fanout branch '{}' produced invalid structured output after repair",
             outcome.item_id
         ),
         ..WorkflowV2Result::default()
     };
     result.evidence.push(WorkflowV2Evidence::new(
-        WorkflowV2EvidenceKind::Review,
-        "branch output was captured as review evidence instead of terminating the whole read-only fanout",
+        WorkflowV2EvidenceKind::Blocker,
+        "branch output was invalid or asked for confirmation; the workflow stopped before downstream work",
     ));
     result.residual_gaps.push(WorkflowV2ResidualGap {
         id: format!("invalid_branch_output_{}", sanitize_v2_id(&outcome.item_id)),
         description: truncate_for_result(error, 500),
-        severity: Some("review".to_string()),
+        severity: Some("blocking".to_string()),
     });
     result.data = serde_json::json!({
         "branch_id": outcome.item_id,
         "role": outcome.role,
-        "normalized_from_error": true,
+        "terminal_from_error": true,
         "error": truncate_for_result(error, 2_000),
     });
     result
-}
-
-fn is_recoverable_agent_output_error(error: &str) -> bool {
-    let lower = error.to_ascii_lowercase();
-    lower.contains("schema repair failed")
-        || lower.contains("agent output contains a confirmation question")
-        || lower.contains("workflowv2result object")
-        || lower.contains("agent result failed validation")
-        || lower.contains("unknown variant")
-        || lower.contains("invalid type")
-        || lower.contains("workflow result summary is required")
-        || lower.contains("malformedoutput")
 }
 
 fn typed_results_from_outcomes(outcomes: &[WorkflowV2BranchOutcome]) -> Vec<WorkflowV2Result> {
