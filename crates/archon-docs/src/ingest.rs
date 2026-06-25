@@ -345,6 +345,7 @@ pub(crate) async fn run_ingest_pipeline_with_bytes(
         language_hint: None,
     };
 
+    let mut image_ocr_failed = false;
     let extract_result = match provider.extract(request).await {
         Ok(result) => result,
         Err(e) => {
@@ -361,6 +362,7 @@ pub(crate) async fn run_ingest_pipeline_with_bytes(
             // the document. Proceed with empty text + a single page so the image still gets
             // embedded and stored. For all other media, propagate the failure.
             if is_image_media_type(media_type) {
+                image_ocr_failed = true;
                 outcome.warnings.push(format!(
                     "image OCR failed (continuing to image embedding): {e}"
                 ));
@@ -380,18 +382,22 @@ pub(crate) async fn run_ingest_pipeline_with_bytes(
         }
     };
 
-    // Update OCR run to Completed
-    let completed_at = chrono::Utc::now().to_rfc3339();
-    store::update_ocr_run_completion(
-        db,
-        &ocr_run_id,
-        &OcrStatus::Completed,
-        &completed_at,
-        extract_result.processing_duration_ms,
-    )
-    .map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
+    // Update OCR run to Completed — UNLESS image OCR failed above. In that case the run is
+    // already (correctly) recorded as Failed; the document still proceeds to image embedding,
+    // but the OCR run's provenance status must not be relabeled Completed.
+    if !image_ocr_failed {
+        let completed_at = chrono::Utc::now().to_rfc3339();
+        store::update_ocr_run_completion(
+            db,
+            &ocr_run_id,
+            &OcrStatus::Completed,
+            &completed_at,
+            extract_result.processing_duration_ms,
+        )
+        .map_err(|e| DocsError::Storage {
+            message: e.to_string(),
+        })?;
+    }
 
     let full_text = extract_result.full_text;
     let page_offsets = extract_result.page_offsets;

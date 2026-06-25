@@ -150,6 +150,23 @@ fn remove_generated_rows(db: &DbInstance, document_id: &str) -> Result<(), DocsE
         params.clone(),
         "vec_text_chunks",
     )?;
+    // CLIP image/figure embeddings are page-keyed (page-{doc}-N and per-figure {page_id}-imgM),
+    // all sharing the "page-{document_id}-" prefix. Remove them so reprocess doesn't leak/orphan
+    // image vectors (which `search-images` would otherwise still return as stale results).
+    {
+        let mut image_params = params.clone();
+        image_params.insert(
+            "img_prefix".into(),
+            DataValue::from(format!("page-{document_id}-").as_str()),
+        );
+        run_rm_optional(
+            db,
+            "?[page_id] := *vec_page_images{page_id}, starts_with(page_id, $img_prefix)
+             :rm vec_page_images { page_id }",
+            image_params,
+            "vec_page_images",
+        )?;
+    }
     // Chunk-keyed satellites have no document_id column → join through doc_chunks and
     // remove BEFORE the doc_chunks rows are deleted below (else the join finds nothing).
     run_rm_optional(

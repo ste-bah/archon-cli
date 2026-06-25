@@ -353,6 +353,32 @@ fn ensure_vec_text_embedding_cache(db: &DbInstance, dim: usize) -> Result<()> {
 }
 
 fn ensure_vec_page_images(db: &DbInstance, dim: usize) -> Result<()> {
+    // Migration: a DB created by a pre-CLIP build sized `vec_page_images` to the TEXT embedding
+    // dimension. The `:create` below is a no-op when the relation already exists, so a stale
+    // 768-dim relation would silently reject 512-dim CLIP image vectors forever (insert fails →
+    // only a warning). If the existing relation's dim differs, drop it (and its HNSW index) so
+    // it is recreated at the correct image dim. It only ever holds image vectors — none exist on
+    // such old DBs — so the drop is safe; embeddings regenerate on (re-)ingest.
+    if let Some(existing) = existing_vec_page_images_dim(db)
+        && existing != dim
+    {
+        // Drop the HNSW index before the relation (a relation with a live index can't be removed).
+        let _ = crate::cozo_retry::run_script_guarded(
+            db,
+            "::hnsw drop vec_page_images:page_image_embedding_idx",
+            Default::default(),
+            ScriptMutability::Mutable,
+            "vec_page_images index drop",
+        );
+        let _ = crate::cozo_retry::run_script_guarded(
+            db,
+            "::remove vec_page_images",
+            Default::default(),
+            ScriptMutability::Mutable,
+            "vec_page_images dim migration",
+        );
+    }
+
     let create_rel = format!(
         ":create vec_page_images {{
             page_id: String
@@ -376,6 +402,36 @@ fn ensure_vec_page_images(db: &DbInstance, dim: usize) -> Result<()> {
     run_create(db, &create_idx)?;
 
     Ok(())
+}
+
+/// Best-effort read of the embedding dimension of an existing `vec_page_images` relation via
+/// `::columns`. Returns `None` if the relation doesn't exist or the type can't be parsed.
+fn existing_vec_page_images_dim(db: &DbInstance) -> Option<usize> {
+    let result = db
+        .run_script(
+            "::columns vec_page_images",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .ok()?;
+    for row in &result.rows {
+        for cell in row {
+            let Some(text) = cell.get_str() else { continue };
+            // The embedding column's type renders as "<F32; N>" — take the digits after ';'.
+            if text.contains("F32")
+                && let Some(semi) = text.find(';')
+            {
+                let digits: String = text[semi + 1..]
+                    .chars()
+                    .filter(|c| c.is_ascii_digit())
+                    .collect();
+                if let Ok(parsed) = digits.parse::<usize>() {
+                    return Some(parsed);
+                }
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -462,6 +518,43 @@ mod tests {
         assert!(
             after.is_ok(),
             "vector insert must succeed after ensure_vec_schema"
+        );
+    }
+
+    #[test]
+    fn test_vec_page_images_migrates_on_dim_change() {
+        let db = test_db();
+        // Simulate a pre-CLIP DB: vec_page_images sized to the TEXT dim (768).
+        ensure_vec_page_images(&db, 768).unwrap();
+        assert_eq!(existing_vec_page_images_dim(&db), Some(768));
+
+        let mut params = std::collections::BTreeMap::new();
+        let v512 = ndarray::Array1::from_vec(vec![0.0_f32; 512]);
+        params.insert("pid".to_string(), cozo::DataValue::from("page-doc-1"));
+        params.insert(
+            "emb".to_string(),
+            cozo::DataValue::Vec(cozo::Vector::F32(v512)),
+        );
+        params.insert("prov".to_string(), cozo::DataValue::from("clip"));
+        let put = "?[page_id, embedding, provider] <- [[$pid, $emb, $prov]]
+             :put vec_page_images { page_id => embedding, provider }";
+
+        // A 512-dim CLIP vector must NOT fit the stale 768-dim relation yet (the bug).
+        let before = db.run_script(put, params.clone(), cozo::ScriptMutability::Mutable);
+        assert!(
+            before.is_err(),
+            "512-dim insert must fail against a stale 768-dim relation"
+        );
+
+        // Re-ensure at the CLIP image dim → migrate (drop + recreate at 512).
+        ensure_vec_page_images(&db, 512).unwrap();
+        assert_eq!(existing_vec_page_images_dim(&db), Some(512));
+
+        // The same 512-dim insert must now succeed (fix verified).
+        let after = db.run_script(put, params, cozo::ScriptMutability::Mutable);
+        assert!(
+            after.is_ok(),
+            "512-dim insert must succeed after migration: {after:?}"
         );
     }
 

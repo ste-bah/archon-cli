@@ -61,11 +61,21 @@ pub fn search_images(
             ef: 50,
             bind_distance: distance
         }";
-    let result = db
-        .run_script(script, params, ScriptMutability::Immutable)
-        .map_err(|e| DocsError::Retrieval {
-            message: format!("image HNSW search failed: {e}"),
-        })?;
+    let result = match db.run_script(script, params, ScriptMutability::Immutable) {
+        Ok(r) => r,
+        Err(e) => {
+            // No image has ever been embedded → vec_page_images doesn't exist yet. Treat this
+            // as "no results" (mirrors the text-search count_indexed guard) instead of a hard
+            // CLI error.
+            let msg = e.to_string();
+            if msg.contains(crate::errors::COZO_RELATION_NOT_FOUND) {
+                return Ok(Vec::new());
+            }
+            return Err(DocsError::Retrieval {
+                message: format!("image HNSW search failed: {msg}"),
+            });
+        }
+    };
 
     let mut results = Vec::with_capacity(result.rows.len());
     for row in &result.rows {
