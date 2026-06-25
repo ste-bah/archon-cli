@@ -132,7 +132,7 @@ impl LocalEmbeddingProvider for SelectiveMockProvider {
 
 fn setup_with_provider(db: &DbInstance, dim: usize) {
     crate::schema::ensure_doc_schema(db).unwrap();
-    crate::schema::ensure_vec_schema(db, dim).unwrap();
+    crate::schema::ensure_vec_schema(db, dim, None).unwrap();
     crate::embed::set_provider(Box::new(MockProvider { dim }));
 }
 

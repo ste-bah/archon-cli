@@ -29,6 +29,18 @@ pub trait LocalEmbeddingProvider: Send + Sync {
         Ok(None)
     }
 
+    /// Embed a TEXT query into the IMAGE embedding space for cross-modal (text→image)
+    /// search. Multimodal providers (CLIP) return `Some`; text-only providers return `None`.
+    fn embed_image_query(&self, _query: &str) -> Result<Option<Vec<f32>>, DocsError> {
+        Ok(None)
+    }
+
+    /// Vector dimension of this provider's IMAGE embeddings if multimodal (`None` otherwise).
+    /// May differ from the text `dimension()` — CLIP ViT-B/32 image vectors are 512.
+    fn image_dimension(&self) -> Option<usize> {
+        None
+    }
+
     /// Vector dimension produced by this provider.
     fn dimension(&self) -> usize;
 

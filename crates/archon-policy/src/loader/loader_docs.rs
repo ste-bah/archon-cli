@@ -63,6 +63,7 @@ struct RawPdfPolicy {
     chunker: Option<String>,
     marker_sidecar: Option<String>,
     marker_device: Option<String>,
+    marker_python: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -197,6 +198,9 @@ fn apply_pdf(policy: &mut PdfPolicy, raw: RawPdfPolicy) {
     }
     if raw.marker_device.is_some() {
         policy.marker_device = raw.marker_device;
+    }
+    if raw.marker_python.is_some() {
+        policy.marker_python = raw.marker_python;
     }
 }
 

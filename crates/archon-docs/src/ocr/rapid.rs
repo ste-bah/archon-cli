@@ -60,10 +60,21 @@ pub fn allow_rapidocr_fallback() -> bool {
 }
 
 fn python_bin() -> String {
-    std::env::var("ARCHON_RAPIDOCR_PYTHON")
+    if let Some(value) = std::env::var("ARCHON_RAPIDOCR_PYTHON")
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "python3".into())
+    {
+        return value;
+    }
+    // Standalone fallback: the conventional archon helper venv (created during setup) bundles
+    // rapidocr, so RapidOCR works with no env/config. Override with ARCHON_RAPIDOCR_PYTHON.
+    if let Some(home) = dirs::home_dir() {
+        let venv_py = home.join(".archon-marker-venv").join("bin").join("python");
+        if venv_py.exists() {
+            return venv_py.to_string_lossy().into_owned();
+        }
+    }
+    "python3".into()
 }
 
 fn min_score() -> f32 {

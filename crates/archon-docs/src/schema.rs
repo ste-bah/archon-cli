@@ -29,11 +29,13 @@ pub fn ensure_doc_schema(db: &DbInstance) -> Result<()> {
 }
 
 /// Ensure vector relations and HNSW indices exist. Idempotent.
-/// `dim` must be the dimension from the embedding provider.
-pub fn ensure_vec_schema(db: &DbInstance, dim: usize) -> Result<()> {
+/// `dim` is the text embedding dimension; `image_dim` is the IMAGE embedding dimension for
+/// `vec_page_images` (CLIP ViT-B/32 = 512), or `None` for text-only providers (then `dim`
+/// is a harmless placeholder since no image vectors are ever written).
+pub fn ensure_vec_schema(db: &DbInstance, dim: usize, image_dim: Option<usize>) -> Result<()> {
     ensure_vec_text_chunks(db, dim)?;
     ensure_vec_text_embedding_cache(db, dim)?;
-    ensure_vec_page_images(db, dim)?;
+    ensure_vec_page_images(db, image_dim.unwrap_or(dim))?;
     Ok(())
 }
 
@@ -416,9 +418,9 @@ mod tests {
     fn test_vec_schema_idempotent() {
         let db = test_db();
         ensure_doc_schema(&db).unwrap();
-        ensure_vec_schema(&db, 768).unwrap();
+        ensure_vec_schema(&db, 768, None).unwrap();
         // Second call must be silent
-        ensure_vec_schema(&db, 768).unwrap();
+        ensure_vec_schema(&db, 768, None).unwrap();
     }
 
     #[test]
@@ -448,7 +450,7 @@ mod tests {
         );
 
         // Now create vec schema
-        ensure_vec_schema(&db, 768).unwrap();
+        ensure_vec_schema(&db, 768, None).unwrap();
 
         // Same insert must succeed after ensure_vec_schema
         let after = db.run_script(
@@ -467,7 +469,7 @@ mod tests {
     fn test_vec_schema_rejects_wrong_dimension() {
         let db = test_db();
         ensure_doc_schema(&db).unwrap();
-        ensure_vec_schema(&db, 768).unwrap();
+        ensure_vec_schema(&db, 768, None).unwrap();
         // Insert with wrong dimension must fail
         let mut params = std::collections::BTreeMap::new();
         let wrong_vec = ndarray::Array1::from_vec(vec![0.0_f32; 384]);

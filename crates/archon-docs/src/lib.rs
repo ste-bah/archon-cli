@@ -49,6 +49,7 @@ pub mod index_queue;
 mod index_queue_tests;
 pub mod rerank;
 pub mod retrieval;
+pub mod retrieval_image;
 mod retrieval_exact;
 mod retrieval_query;
 mod retrieval_semantic;

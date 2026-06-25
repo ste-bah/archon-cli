@@ -38,7 +38,7 @@ fn hybrid_skips_semantic_when_exact_evidence_is_strong() {
 fn definition_exact_hit_skips_semantic_embedding() {
     let db = test_db();
     crate::schema::ensure_doc_schema(&db).unwrap();
-    crate::schema::ensure_vec_schema(&db, 4).unwrap();
+    crate::schema::ensure_vec_schema(&db, 4, None).unwrap();
     crate::embed::set_provider(Box::new(SynonymProvider));
     let chunk = insert_test_chunk(
         &db,
@@ -72,7 +72,7 @@ fn definition_exact_hit_skips_semantic_embedding() {
 fn definition_typo_uses_relaxed_exact_before_semantic() {
     let db = test_db();
     crate::schema::ensure_doc_schema(&db).unwrap();
-    crate::schema::ensure_vec_schema(&db, 4).unwrap();
+    crate::schema::ensure_vec_schema(&db, 4, None).unwrap();
     crate::embed::set_provider(Box::new(SynonymProvider));
     let chunk = insert_test_chunk(
         &db,
@@ -100,7 +100,7 @@ fn definition_typo_uses_relaxed_exact_before_semantic() {
 fn semantic_search_finds_synonym() {
     let db = test_db();
     crate::schema::ensure_doc_schema(&db).unwrap();
-    crate::schema::ensure_vec_schema(&db, 4).unwrap();
+    crate::schema::ensure_vec_schema(&db, 4, None).unwrap();
     crate::embed::set_provider(Box::new(SynonymProvider));
     let car = insert_test_chunk(
         &db,
@@ -131,7 +131,7 @@ fn semantic_search_finds_synonym() {
 fn hybrid_outperforms_either_alone_on_fixture() {
     let db = test_db();
     crate::schema::ensure_doc_schema(&db).unwrap();
-    crate::schema::ensure_vec_schema(&db, 4).unwrap();
+    crate::schema::ensure_vec_schema(&db, 4, None).unwrap();
     crate::embed::set_provider(Box::new(SynonymProvider));
     let exact_only = insert_test_chunk(
         &db,
@@ -175,7 +175,7 @@ fn hybrid_outperforms_either_alone_on_fixture() {
 fn hybrid_propagates_real_embedding_errors() {
     let db = test_db();
     crate::schema::ensure_doc_schema(&db).unwrap();
-    crate::schema::ensure_vec_schema(&db, 4).unwrap();
+    crate::schema::ensure_vec_schema(&db, 4, None).unwrap();
     crate::embed::set_provider(Box::new(SynonymProvider));
     let chunk = insert_test_chunk(&db, "chunk-vectorized", "A car market fixture.");
     index_chunk(&db, &chunk).unwrap();

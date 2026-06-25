@@ -7,6 +7,7 @@ use archon_docs::answer;
 use archon_docs::ingest;
 use archon_docs::inspect;
 use archon_docs::retrieval;
+use archon_docs::retrieval_image;
 use archon_docs::schema::ensure_doc_schema;
 use archon_docs::store;
 use archon_docs::vlm::factory::{self as vlm_factory, VlmProviderInitStatus};
@@ -38,6 +39,7 @@ pub async fn handle_docs_command(action: DocsAction) -> Result<()> {
         DocsAction::Chunks { document_id } => handle_chunks(&document_id).await,
         DocsAction::Inspect { document_id } => handle_inspect(&document_id).await,
         DocsAction::Search { query, mode, debug } => handle_search(&query, &mode, debug).await,
+        DocsAction::SearchImages { query, limit } => handle_search_images(&query, limit).await,
         DocsAction::Answer { query } => handle_answer(&query).await,
         DocsAction::Provenance { chunk_or_answer_id } => {
             handle_provenance(&chunk_or_answer_id).await
@@ -291,6 +293,31 @@ async fn handle_inspect(document_id: &str) -> Result<()> {
 }
 
 // ── Phase 2: retrieval, answer, provenance ──────────────
+
+async fn handle_search_images(query: &str, limit: usize) -> Result<()> {
+    let db = open_db()?;
+    match retrieval_image::search_images(&db, query, limit) {
+        Ok(results) => {
+            if results.is_empty() {
+                println!(
+                    "No image results. Ingest standalone images (.jpg/.png) first, and ensure a \
+                     multimodal (CLIP) embedding provider is configured."
+                );
+                return Ok(());
+            }
+            println!("Found {} image result(s) for \"{}\":\n", results.len(), query);
+            for (i, r) in results.iter().enumerate() {
+                println!("  {}. score={:.3}  {}", i + 1, r.score, r.source_path);
+                println!(
+                    "     page {} · doc {} · distance {:.4}",
+                    r.page_number, r.document_id, r.distance
+                );
+            }
+            Ok(())
+        }
+        Err(e) => Err(anyhow::anyhow!("{e}")),
+    }
+}
 
 async fn handle_search(query: &str, mode: &str, debug: bool) -> Result<()> {
     let db = open_db()?;

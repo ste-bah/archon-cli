@@ -197,7 +197,7 @@ pub(crate) fn store_image_embedding_if_supported(
             .push("image embedding skipped: no embedding provider configured".into());
         return;
     };
-    if let Err(e) = crate::schema::ensure_vec_schema(db, provider.dimension()) {
+    if let Err(e) = crate::schema::ensure_vec_schema(db, provider.dimension(), provider.image_dimension()) {
         outcome.warnings.push(format!(
             "image embedding skipped: vector schema unavailable: {e}"
         ));

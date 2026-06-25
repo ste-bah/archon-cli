@@ -228,6 +228,10 @@ impl LocalEmbeddingProvider for MultimodalMockProvider {
         Ok(Some(vec![0.25_f32, 0.25, 0.25, 0.25][..self.dim].to_vec()))
     }
 
+    fn image_dimension(&self) -> Option<usize> {
+        Some(self.dim)
+    }
+
     fn dimension(&self) -> usize {
         self.dim
     }

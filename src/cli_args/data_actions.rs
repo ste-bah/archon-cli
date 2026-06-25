@@ -142,6 +142,14 @@ pub enum DocsAction {
         #[arg(long)]
         debug: bool,
     },
+    /// Search images/frames by a text description (cross-modal CLIP text→image)
+    SearchImages {
+        /// Text description to match against image embeddings
+        query: String,
+        /// Maximum results
+        #[arg(long, default_value = "10")]
+        limit: usize,
+    },
     /// Answer a question using document evidence
     Answer {
         /// Question to answer

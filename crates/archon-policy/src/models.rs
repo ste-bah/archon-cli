@@ -238,6 +238,11 @@ pub struct PdfPolicy {
     /// Device override for the Marker sidecar (cuda|mps|cpu); None → sidecar auto-detects.
     #[serde(default)]
     pub marker_device: Option<String>,
+    /// Python interpreter for the Marker sidecar (e.g. a venv's python where marker-pdf is
+    /// installed). None → "python3" on PATH. Lets the sidecar use an isolated env without
+    /// touching the system interpreter.
+    #[serde(default)]
+    pub marker_python: Option<String>,
 }
 
 fn default_chunker() -> String {
@@ -264,6 +269,7 @@ impl Default for PdfPolicy {
             chunker: default_chunker(),
             marker_sidecar: None,
             marker_device: None,
+            marker_python: None,
         }
     }
 }

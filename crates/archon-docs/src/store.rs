@@ -1692,7 +1692,7 @@ mod tests {
     fn test_insert_and_readback_vector() {
         let db = test_db();
         crate::schema::ensure_doc_schema(&db).unwrap();
-        crate::schema::ensure_vec_schema(&db, 3).unwrap();
+        crate::schema::ensure_vec_schema(&db, 3, None).unwrap();
 
         let emb = vec![1.0_f32, 0.0, 0.0];
         insert_chunk_embedding(&db, "chunk-vec-1", &emb, "test-provider").unwrap();
@@ -1709,7 +1709,7 @@ mod tests {
     fn test_bulk_vector_and_status_updates() {
         let db = test_db();
         crate::schema::ensure_doc_schema(&db).unwrap();
-        crate::schema::ensure_vec_schema(&db, 3).unwrap();
+        crate::schema::ensure_vec_schema(&db, 3, None).unwrap();
 
         let chunk_a = ChunkArtifact {
             chunk_id: "bulk-chunk-a".into(),
@@ -1770,7 +1770,7 @@ mod tests {
         let db = test_db();
         // Dimension 4 to test L2 norm explicitly
         crate::schema::ensure_doc_schema(&db).unwrap();
-        crate::schema::ensure_vec_schema(&db, 4).unwrap();
+        crate::schema::ensure_vec_schema(&db, 4, None).unwrap();
 
         // Embedding with L2 norm = 5.0 (3-4-5 triangle in 2D plus zeros)
         let emb = [3.0_f32, 4.0_f32, 0.0, 0.0];

@@ -171,6 +171,20 @@ fn persist_image_result(
     if let Some(vlm) = result.vlm {
         persist_vlm_result(db, document_id, &result.work, vlm, outcome)?;
     }
+    // Full coverage: CLIP-embed each embedded PDF figure so they are visually searchable
+    // alongside standalone images. Key per-figure ("{page_id}-img{N}") so multiple figures
+    // on one page don't collide; `retrieval_image::resolve_page` strips the suffix back to
+    // the page for result resolution. (Suppress the per-figure "not multimodal" warning.)
+    if let Some(page_id) = result.work.page_ids.first() {
+        let fig_key = format!("{}-img{}", page_id, result.work.current);
+        crate::ingest_multimodal::store_image_embedding_if_supported(
+            db,
+            &[fig_key],
+            &result.work.image.bytes,
+            true,
+            outcome,
+        );
+    }
     Ok(())
 }
 

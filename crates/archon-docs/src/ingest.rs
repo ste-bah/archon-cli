@@ -348,7 +348,7 @@ pub(crate) async fn run_ingest_pipeline_with_bytes(
     let extract_result = match provider.extract(request).await {
         Ok(result) => result,
         Err(e) => {
-            // Mark OCR run as Failed before propagating
+            // Mark OCR run as Failed
             let _ = store::update_ocr_run_completion(
                 db,
                 &ocr_run_id,
@@ -356,7 +356,27 @@ pub(crate) async fn run_ingest_pipeline_with_bytes(
                 &chrono::Utc::now().to_rfc3339(),
                 0,
             );
-            return Err(e);
+            // For IMAGES, OCR is best-effort — the CLIP visual embedding is the primary
+            // value (e.g. game frames carry little/no text), so a failed OCR must NOT abort
+            // the document. Proceed with empty text + a single page so the image still gets
+            // embedded and stored. For all other media, propagate the failure.
+            if is_image_media_type(media_type) {
+                outcome.warnings.push(format!(
+                    "image OCR failed (continuing to image embedding): {e}"
+                ));
+                crate::ocr::provider::OcrExtractResult {
+                    full_text: String::new(),
+                    page_count: 1,
+                    page_offsets: vec![crate::models::PageOffset {
+                        page: 1,
+                        char_start: 0,
+                        char_end: 0,
+                    }],
+                    processing_duration_ms: 0,
+                }
+            } else {
+                return Err(e);
+            }
         }
     };
 

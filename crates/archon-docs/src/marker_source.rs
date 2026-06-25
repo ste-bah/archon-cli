@@ -35,7 +35,10 @@ pub enum MarkerSource {
 /// (with optional `marker_device`); absent → `None` (caller falls back to flat-text blocks).
 pub fn from_policy(pdf: &PdfPolicy) -> Option<MarkerSource> {
     pdf.marker_sidecar.as_ref().map(|script| MarkerSource::Subprocess {
-        python: "python3".to_string(),
+        python: pdf
+            .marker_python
+            .clone()
+            .unwrap_or_else(|| "python3".to_string()),
         script: PathBuf::from(script),
         device: pdf.marker_device.clone(),
     })
