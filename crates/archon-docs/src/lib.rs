@@ -4,7 +4,10 @@ pub mod models;
 pub mod schema;
 pub mod store;
 
+pub mod block_chunking;
 pub mod chunking;
+pub mod provenance_chunks;
+pub mod marker_source;
 mod cozo_retry;
 pub mod indexing;
 mod indexing_adaptive;

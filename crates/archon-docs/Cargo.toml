@@ -30,6 +30,7 @@ archon-policy = { path = "../archon-policy" }
 archon-provenance = { path = "../archon-provenance" }
 archon-llm = { path = "../archon-llm" }
 archon-cozo = { path = "../archon-cozo" }
+archon-ingest-ext = { path = "../archon-ingest-ext" }
 tempfile.workspace = true
 
 [dev-dependencies]

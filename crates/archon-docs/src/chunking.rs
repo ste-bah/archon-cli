@@ -111,7 +111,7 @@ pub fn build_chunk_artifacts(
         .collect()
 }
 
-fn page_for_offset(char_offset: usize, offsets: &[PageOffset]) -> u32 {
+pub(crate) fn page_for_offset(char_offset: usize, offsets: &[PageOffset]) -> u32 {
     for o in offsets {
         if char_offset >= o.char_start && char_offset < o.char_end {
             return o.page;

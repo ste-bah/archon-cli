@@ -1,0 +1,125 @@
+[
+  {
+    "text": "Boredom, in Heidegger's account, does not denote a merely psychological inconvenience; it discloses something more radical.",
+    "tokens": [
+      "boredom",
+      "in",
+      "heidegger's",
+      "account",
+      "does",
+      "not",
+      "denote",
+      "a",
+      "merely",
+      "psychological",
+      "inconvenience",
+      "it",
+      "discloses",
+      "something",
+      "more",
+      "radical"
+    ],
+    "sentences": [
+      "Boredom, in Heidegger's account, does not denote a merely psychological inconvenience; it discloses something more radical."
+    ]
+  },
+  {
+    "text": "In the third book of the De Anima, Aristotle situates phantasia between perception and thought, and this position proves decisive.",
+    "tokens": [
+      "in",
+      "the",
+      "third",
+      "book",
+      "of",
+      "the",
+      "de",
+      "anima",
+      "aristotle",
+      "situates",
+      "phantasia",
+      "between",
+      "perception",
+      "and",
+      "thought",
+      "and",
+      "this",
+      "position",
+      "proves",
+      "decisive"
+    ],
+    "sentences": [
+      "In the third book of the De Anima, Aristotle situates phantasia between perception and thought, and this position proves decisive."
+    ]
+  },
+  {
+    "text": "Virtual environments pose a genuine challenge. They are not real, yet they are experienced as real, and this paradox is the crux.",
+    "tokens": [
+      "virtual",
+      "environments",
+      "pose",
+      "a",
+      "genuine",
+      "challenge",
+      "they",
+      "are",
+      "not",
+      "real",
+      "yet",
+      "they",
+      "are",
+      "experienced",
+      "as",
+      "real",
+      "and",
+      "this",
+      "paradox",
+      "is",
+      "the",
+      "crux"
+    ],
+    "sentences": [
+      "Virtual environments pose a genuine challenge.",
+      "They are not real, yet they are experienced as real, and this paradox is the crux."
+    ]
+  },
+  {
+    "text": "Short. Two words. A slightly longer sentence with more than two words follows here.",
+    "tokens": [
+      "short",
+      "two",
+      "words",
+      "a",
+      "slightly",
+      "longer",
+      "sentence",
+      "with",
+      "more",
+      "than",
+      "two",
+      "words",
+      "follows",
+      "here"
+    ],
+    "sentences": [
+      "A slightly longer sentence with more than two words follows here."
+    ]
+  },
+  {
+    "text": "Well-formed hyphenated words and don't-style contractions should survive tokenization intact.",
+    "tokens": [
+      "well-formed",
+      "hyphenated",
+      "words",
+      "and",
+      "don't-style",
+      "contractions",
+      "should",
+      "survive",
+      "tokenization",
+      "intact"
+    ],
+    "sentences": [
+      "Well-formed hyphenated words and don't-style contractions should survive tokenization intact."
+    ]
+  }
+]

@@ -169,6 +169,7 @@ pub(crate) mod session;
 pub(crate) mod skills;
 pub(crate) mod slash;
 pub(crate) mod status;
+pub(crate) mod style;
 pub(crate) mod store_paths;
 #[cfg(test)]
 pub(crate) mod surface_matrix;

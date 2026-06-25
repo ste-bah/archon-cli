@@ -150,6 +150,22 @@ fn remove_generated_rows(db: &DbInstance, document_id: &str) -> Result<(), DocsE
         params.clone(),
         "vec_text_chunks",
     )?;
+    // Chunk-keyed satellites have no document_id column → join through doc_chunks and
+    // remove BEFORE the doc_chunks rows are deleted below (else the join finds nothing).
+    run_rm_optional(
+        db,
+        "?[chunk_id] := *doc_chunks{chunk_id, document_id}, document_id = $did
+         :rm doc_chunk_spatial { chunk_id }",
+        params.clone(),
+        "doc_chunk_spatial",
+    )?;
+    run_rm_optional(
+        db,
+        "?[chunk_id] := *doc_chunks{chunk_id, document_id}, document_id = $did
+         :rm doc_chunk_hashes { chunk_id }",
+        params.clone(),
+        "doc_chunk_hashes",
+    )?;
     for (relation, key) in [
         ("doc_artifacts", "artifact_id"),
         ("doc_pages", "page_id"),
@@ -163,6 +179,7 @@ fn remove_generated_rows(db: &DbInstance, document_id: &str) -> Result<(), DocsE
         ("doc_pdf_metrics", "document_id"),
         ("doc_processing_jobs", "job_id"),
         ("doc_ocr_runs", "ocr_run_id"),
+        ("doc_locators", "locator_id"),
         ("doc_pages", "page_id"),
         ("doc_artifacts", "artifact_id"),
         ("doc_chunks", "chunk_id"),

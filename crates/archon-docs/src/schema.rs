@@ -15,6 +15,9 @@ pub fn ensure_doc_schema(db: &DbInstance) -> Result<()> {
     ensure_doc_pages(db)?;
     ensure_doc_chunks(db)?;
     ensure_doc_chunk_fts(db)?;
+    ensure_doc_chunk_spatial(db)?;
+    ensure_doc_chunk_hashes(db)?;
+    ensure_doc_locators(db)?;
     ensure_doc_image_descriptions(db)?;
     ensure_doc_pdf_metrics(db)?;
     ensure_doc_provenance_edges(db)?;
@@ -143,6 +146,54 @@ fn ensure_doc_chunk_fts(db: &DbInstance) -> Result<()> {
             extract_filter: content != "",
             tokenizer: Simple,
             filters: [Lowercase, Stemmer('english'), Stopwords('en')],
+        }"#,
+    )
+}
+
+/// Per-chunk spatial provenance, keyed by `chunk_id` (verbatim-provenance spec §2).
+/// Additive satellite — joined to `doc_chunks` at query time; never re-keys the vec store.
+/// `super_box`/`blocks` are JSON-encoded strings (Cozo has no Json column, resolution #2).
+fn ensure_doc_chunk_spatial(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create doc_chunk_spatial {
+            chunk_id: String =>
+            page_num: Int,
+            super_box: String,
+            blocks: String,
+            coord_space: String,
+            spatial_hash: String,
+        }"#,
+    )
+}
+
+/// Per-chunk integrity hashes, keyed by `chunk_id` (verbatim-provenance spec §2).
+/// `clean_sha256 == doc_chunks.content_hash` (resolution #4) so it is not duplicated here.
+/// `commit_hash` binds text + spatial into the provenance chain (`chunks_root`).
+fn ensure_doc_chunk_hashes(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create doc_chunk_hashes {
+            chunk_id: String =>
+            raw_sha256: String,
+            cleaning_version: String,
+            commit_hash: String,
+        }"#,
+    )
+}
+
+/// Citation locators captured from running heads (Bekker numbers / page numbers),
+/// ingestion-ports spec §4b. `bbox` is a JSON-encoded "[x0,y0,x1,y1]" string.
+fn ensure_doc_locators(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create doc_locators {
+            locator_id: String =>
+            document_id: String,
+            page_num: Int,
+            kind: String,
+            value: String,
+            bbox: String,
         }"#,
     )
 }

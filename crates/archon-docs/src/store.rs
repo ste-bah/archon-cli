@@ -9,8 +9,9 @@ use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability, Vector};
 
 use crate::models::{
-    ChunkArtifact, DocumentStatus, ImageDescription, OcrRun, OcrStatus, PageArtifact,
-    PdfIngestMetrics, ProcessingJob, ProvenanceEdge, SourceDocument,
+    ChunkArtifact, ChunkHashes, ChunkSpatial, DocumentStatus, ImageDescription, Locator,
+    LocatorKind, OcrRun, OcrStatus, PageArtifact, PdfIngestMetrics, ProcessingJob, ProvenanceEdge,
+    SourceDocument,
 };
 
 // ---------------------------------------------------------------------------
@@ -437,6 +438,171 @@ pub fn insert_chunk(db: &DbInstance, chunk: &ChunkArtifact) -> Result<()> {
     Ok(())
 }
 
+/// Insert (upsert) a chunk's spatial-provenance row into `doc_chunk_spatial`.
+pub fn insert_chunk_spatial(db: &DbInstance, s: &ChunkSpatial) -> Result<()> {
+    let mut params = BTreeMap::new();
+    params.insert("cid".into(), DataValue::from(s.chunk_id.as_str()));
+    params.insert("pn".into(), DataValue::from(s.page_num as i64));
+    params.insert("sb".into(), DataValue::from(s.super_box.as_str()));
+    params.insert("bl".into(), DataValue::from(s.blocks.as_str()));
+    params.insert("cs".into(), DataValue::from(s.coord_space.as_str()));
+    params.insert("sh".into(), DataValue::from(s.spatial_hash.as_str()));
+    crate::cozo_retry::run_script_guarded(
+        db,
+        "?[chunk_id, page_num, super_box, blocks, coord_space, spatial_hash] \
+         <- [[$cid, $pn, $sb, $bl, $cs, $sh]] \
+         :put doc_chunk_spatial { chunk_id => page_num, super_box, blocks, coord_space, spatial_hash }",
+        params,
+        ScriptMutability::Mutable,
+        "insert doc_chunk_spatial",
+    )
+    .map_err(|e| anyhow::anyhow!("insert doc_chunk_spatial failed: {e}"))?;
+    Ok(())
+}
+
+/// Read a single chunk's spatial row, if present.
+pub fn get_chunk_spatial(db: &DbInstance, chunk_id: &str) -> Result<Option<ChunkSpatial>> {
+    let mut params = BTreeMap::new();
+    params.insert("cid".into(), DataValue::from(chunk_id));
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[chunk_id, page_num, super_box, blocks, coord_space, spatial_hash] \
+         := *doc_chunk_spatial{chunk_id, page_num, super_box, blocks, coord_space, spatial_hash}, \
+         chunk_id = $cid",
+        params,
+        ScriptMutability::Immutable,
+        "get doc_chunk_spatial",
+    )
+    .map_err(|e| anyhow::anyhow!("get doc_chunk_spatial failed: {e}"))?;
+    if result.rows.is_empty() {
+        return Ok(None);
+    }
+    let row = &result.rows[0];
+    Ok(Some(ChunkSpatial {
+        chunk_id: row[0].get_str().unwrap_or("").to_string(),
+        page_num: row[1].get_int().unwrap_or(0) as u32,
+        super_box: row[2].get_str().unwrap_or("").to_string(),
+        blocks: row[3].get_str().unwrap_or("").to_string(),
+        coord_space: row[4].get_str().unwrap_or("").to_string(),
+        spatial_hash: row[5].get_str().unwrap_or("").to_string(),
+    }))
+}
+
+/// Insert (upsert) a chunk's integrity-hash row into `doc_chunk_hashes`.
+pub fn insert_chunk_hashes(db: &DbInstance, h: &ChunkHashes) -> Result<()> {
+    let mut params = BTreeMap::new();
+    params.insert("cid".into(), DataValue::from(h.chunk_id.as_str()));
+    params.insert("raw".into(), DataValue::from(h.raw_sha256.as_str()));
+    params.insert("cv".into(), DataValue::from(h.cleaning_version.as_str()));
+    params.insert("commit".into(), DataValue::from(h.commit_hash.as_str()));
+    crate::cozo_retry::run_script_guarded(
+        db,
+        "?[chunk_id, raw_sha256, cleaning_version, commit_hash] \
+         <- [[$cid, $raw, $cv, $commit]] \
+         :put doc_chunk_hashes { chunk_id => raw_sha256, cleaning_version, commit_hash }",
+        params,
+        ScriptMutability::Mutable,
+        "insert doc_chunk_hashes",
+    )
+    .map_err(|e| anyhow::anyhow!("insert doc_chunk_hashes failed: {e}"))?;
+    Ok(())
+}
+
+/// Read a single chunk's integrity-hash row, if present.
+pub fn get_chunk_hashes(db: &DbInstance, chunk_id: &str) -> Result<Option<ChunkHashes>> {
+    let mut params = BTreeMap::new();
+    params.insert("cid".into(), DataValue::from(chunk_id));
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[chunk_id, raw_sha256, cleaning_version, commit_hash] \
+         := *doc_chunk_hashes{chunk_id, raw_sha256, cleaning_version, commit_hash}, chunk_id = $cid",
+        params,
+        ScriptMutability::Immutable,
+        "get doc_chunk_hashes",
+    )
+    .map_err(|e| anyhow::anyhow!("get doc_chunk_hashes failed: {e}"))?;
+    if result.rows.is_empty() {
+        return Ok(None);
+    }
+    let row = &result.rows[0];
+    Ok(Some(ChunkHashes {
+        chunk_id: row[0].get_str().unwrap_or("").to_string(),
+        raw_sha256: row[1].get_str().unwrap_or("").to_string(),
+        cleaning_version: row[2].get_str().unwrap_or("").to_string(),
+        commit_hash: row[3].get_str().unwrap_or("").to_string(),
+    }))
+}
+
+/// All `commit_hash`es for a document's chunks (join `doc_chunks` × `doc_chunk_hashes`
+/// on `chunk_id`). Order is unspecified — the caller sorts before computing `chunks_root`.
+pub fn get_doc_commit_hashes(db: &DbInstance, document_id: &str) -> Result<Vec<String>> {
+    let mut params = BTreeMap::new();
+    params.insert("did".into(), DataValue::from(document_id));
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[commit_hash] := *doc_chunks{chunk_id, document_id}, document_id = $did, \
+         *doc_chunk_hashes{chunk_id, commit_hash}",
+        params,
+        ScriptMutability::Immutable,
+        "get doc commit hashes",
+    )
+    .map_err(|e| anyhow::anyhow!("get doc commit hashes failed: {e}"))?;
+    Ok(result
+        .rows
+        .iter()
+        .map(|row| row[0].get_str().unwrap_or("").to_string())
+        .collect())
+}
+
+/// Insert (upsert) a citation locator into `doc_locators`.
+pub fn insert_locator(db: &DbInstance, l: &Locator) -> Result<()> {
+    let mut params = BTreeMap::new();
+    params.insert("lid".into(), DataValue::from(l.locator_id.as_str()));
+    params.insert("did".into(), DataValue::from(l.document_id.as_str()));
+    params.insert("pn".into(), DataValue::from(l.page_num as i64));
+    params.insert("kind".into(), DataValue::from(l.kind.as_str()));
+    params.insert("val".into(), DataValue::from(l.value.as_str()));
+    params.insert("bbox".into(), DataValue::from(l.bbox.as_str()));
+    crate::cozo_retry::run_script_guarded(
+        db,
+        "?[locator_id, document_id, page_num, kind, value, bbox] \
+         <- [[$lid, $did, $pn, $kind, $val, $bbox]] \
+         :put doc_locators { locator_id => document_id, page_num, kind, value, bbox }",
+        params,
+        ScriptMutability::Mutable,
+        "insert doc_locators",
+    )
+    .map_err(|e| anyhow::anyhow!("insert doc_locators failed: {e}"))?;
+    Ok(())
+}
+
+/// List a document's citation locators, ordered by page then value.
+pub fn list_locators_for_doc(db: &DbInstance, document_id: &str) -> Result<Vec<Locator>> {
+    let mut params = BTreeMap::new();
+    params.insert("did".into(), DataValue::from(document_id));
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[locator_id, document_id, page_num, kind, value, bbox] \
+         := *doc_locators{locator_id, document_id, page_num, kind, value, bbox}, document_id = $did",
+        params,
+        ScriptMutability::Immutable,
+        "list doc_locators",
+    )
+    .map_err(|e| anyhow::anyhow!("list doc_locators failed: {e}"))?;
+    Ok(result
+        .rows
+        .iter()
+        .map(|row| Locator {
+            locator_id: row[0].get_str().unwrap_or("").to_string(),
+            document_id: row[1].get_str().unwrap_or("").to_string(),
+            page_num: row[2].get_int().unwrap_or(0) as u32,
+            kind: LocatorKind::parse(row[3].get_str().unwrap_or("PageNumber")),
+            value: row[4].get_str().unwrap_or("").to_string(),
+            bbox: row[5].get_str().unwrap_or("").to_string(),
+        })
+        .collect())
+}
+
 pub fn list_chunks_for_doc(db: &DbInstance, document_id: &str) -> Result<Vec<ChunkArtifact>> {
     let mut params = BTreeMap::new();
     params.insert("did".into(), DataValue::from(document_id));
@@ -748,6 +914,56 @@ pub fn list_artifacts_for_doc(db: &DbInstance, document_id: &str) -> Result<Vec<
             provenance_record_id: row[5].get_str().unwrap_or("").to_string(),
         })
         .collect())
+}
+
+/// Look up a single artifact by id.
+pub fn get_artifact(db: &DbInstance, artifact_id: &str) -> Result<Option<ArtifactRecord>> {
+    let mut params = BTreeMap::new();
+    params.insert("aid".into(), DataValue::from(artifact_id));
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[artifact_id, document_id, artifact_type, content_hash, created_at, provenance_record_id] \
+         := *doc_artifacts{artifact_id, document_id, artifact_type, content_hash, created_at, provenance_record_id}, \
+         artifact_id = $aid",
+        params,
+        ScriptMutability::Immutable,
+        "get doc_artifacts",
+    )
+    .map_err(|e| anyhow::anyhow!("get artifact failed: {e}"))?;
+    if result.rows.is_empty() {
+        return Ok(None);
+    }
+    let row = &result.rows[0];
+    Ok(Some(ArtifactRecord {
+        artifact_id: row[0].get_str().unwrap_or("").to_string(),
+        document_id: row[1].get_str().unwrap_or("").to_string(),
+        artifact_type: row[2].get_str().unwrap_or("").to_string(),
+        content_hash: row[3].get_str().unwrap_or("").to_string(),
+        created_at: row[4].get_str().unwrap_or("").to_string(),
+        provenance_record_id: row[5].get_str().unwrap_or("").to_string(),
+    }))
+}
+
+/// Point an existing artifact's `provenance_record_id` at a provenance record (closes the
+/// previously-empty-string gap). `:update` touches only that column for the existing key.
+pub fn set_artifact_provenance_record(
+    db: &DbInstance,
+    artifact_id: &str,
+    record_id: &str,
+) -> Result<()> {
+    let mut params = BTreeMap::new();
+    params.insert("aid".into(), DataValue::from(artifact_id));
+    params.insert("rid".into(), DataValue::from(record_id));
+    crate::cozo_retry::run_script_guarded(
+        db,
+        "?[artifact_id, provenance_record_id] <- [[$aid, $rid]] \
+         :update doc_artifacts { artifact_id => provenance_record_id }",
+        params,
+        ScriptMutability::Mutable,
+        "update doc_artifacts provenance_record_id",
+    )
+    .map_err(|e| anyhow::anyhow!("update doc_artifacts provenance_record_id failed: {e}"))?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1327,6 +1543,79 @@ mod tests {
         let chunks = list_chunks_for_doc(&db, "test-doc").unwrap();
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].chunk_id, "chunk-test-0");
+    }
+
+    #[test]
+    fn test_chunk_spatial_roundtrip() {
+        let db = test_db();
+        crate::schema::ensure_doc_schema(&db).unwrap();
+        let s = ChunkSpatial {
+            chunk_id: "chunk-doc-0".into(),
+            page_num: 3,
+            super_box: "[10.0,20.0,100.0,40.0]".into(),
+            blocks: "[[10.0,20.0,100.0,40.0]]".into(),
+            coord_space: "marker".into(),
+            spatial_hash: "deadbeef".into(),
+        };
+        insert_chunk_spatial(&db, &s).unwrap();
+        let got = get_chunk_spatial(&db, "chunk-doc-0").unwrap().unwrap();
+        assert_eq!(got, s);
+        assert!(get_chunk_spatial(&db, "missing").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_chunk_hashes_roundtrip_and_commit_join() {
+        let db = test_db();
+        crate::schema::ensure_doc_schema(&db).unwrap();
+        for i in 0..2u32 {
+            let chunk = ChunkArtifact {
+                chunk_id: format!("chunk-jd-{i}"),
+                document_id: "jd".into(),
+                artifact_id: "art".into(),
+                chunk_index: i,
+                page_start: 1,
+                page_end: 1,
+                content: "x".into(),
+                content_hash: "h".into(),
+                embedding_status: "pending".into(),
+            };
+            insert_chunk(&db, &chunk).unwrap();
+            insert_chunk_hashes(
+                &db,
+                &ChunkHashes {
+                    chunk_id: format!("chunk-jd-{i}"),
+                    raw_sha256: format!("raw{i}"),
+                    cleaning_version: "none".into(),
+                    commit_hash: format!("commit{i}"),
+                },
+            )
+            .unwrap();
+        }
+        let got = get_chunk_hashes(&db, "chunk-jd-1").unwrap().unwrap();
+        assert_eq!(got.commit_hash, "commit1");
+        // The join returns every commit hash for the doc (order-independent).
+        let mut commits = get_doc_commit_hashes(&db, "jd").unwrap();
+        commits.sort();
+        assert_eq!(commits, vec!["commit0".to_string(), "commit1".to_string()]);
+    }
+
+    #[test]
+    fn test_locator_roundtrip() {
+        let db = test_db();
+        crate::schema::ensure_doc_schema(&db).unwrap();
+        let loc = Locator {
+            locator_id: "loc-jd-1".into(),
+            document_id: "jd".into(),
+            page_num: 7,
+            kind: LocatorKind::Bekker,
+            value: "1147a".into(),
+            bbox: "[1.0,2.0,3.0,4.0]".into(),
+        };
+        insert_locator(&db, &loc).unwrap();
+        let locs = list_locators_for_doc(&db, "jd").unwrap();
+        assert_eq!(locs.len(), 1);
+        assert_eq!(locs[0], loc);
+        assert_eq!(locs[0].kind, LocatorKind::Bekker);
     }
 
     #[test]

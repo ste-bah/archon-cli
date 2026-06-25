@@ -226,6 +226,30 @@ pub struct PdfPolicy {
     pub vlm_per_page_image: bool,
     pub render_text_pdf_pages: bool,
     pub image_enrichment_workers: u32,
+    /// Chunking strategy: "token_aware" (default — Marker-block / token-budget chunker
+    /// carrying bboxes) or "page_anchor" (the legacy naive paragraph splitter, kept for
+    /// comparison/fallback). Unknown values fall back to token_aware.
+    #[serde(default = "default_chunker")]
+    pub chunker: String,
+    /// Optional path to the Marker sidecar (`scripts/archon_marker_sidecar.py`). When set
+    /// (with token_aware), PDF ingest uses Marker for real bboxes; absent → flat-text blocks.
+    #[serde(default)]
+    pub marker_sidecar: Option<String>,
+    /// Device override for the Marker sidecar (cuda|mps|cpu); None → sidecar auto-detects.
+    #[serde(default)]
+    pub marker_device: Option<String>,
+}
+
+fn default_chunker() -> String {
+    "token_aware".to_string()
+}
+
+impl PdfPolicy {
+    /// True unless explicitly set to "page_anchor" — so the default and any unknown value
+    /// use the token-aware (bbox-carrying) chunker (best-system default).
+    pub fn use_token_aware_chunker(&self) -> bool {
+        self.chunker != "page_anchor"
+    }
 }
 
 impl Default for PdfPolicy {
@@ -237,6 +261,9 @@ impl Default for PdfPolicy {
             vlm_per_page_image: true,
             render_text_pdf_pages: false,
             image_enrichment_workers: 1,
+            chunker: default_chunker(),
+            marker_sidecar: None,
+            marker_device: None,
         }
     }
 }

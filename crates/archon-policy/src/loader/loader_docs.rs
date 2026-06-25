@@ -60,6 +60,9 @@ struct RawPdfPolicy {
     vlm_per_page_image: Option<bool>,
     render_text_pdf_pages: Option<bool>,
     image_enrichment_workers: Option<u32>,
+    chunker: Option<String>,
+    marker_sidecar: Option<String>,
+    marker_device: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -182,6 +185,18 @@ fn apply_pdf(policy: &mut PdfPolicy, raw: RawPdfPolicy) {
     }
     if let Some(value) = raw.image_enrichment_workers {
         policy.image_enrichment_workers = value.clamp(1, 16);
+    }
+    if let Some(value) = raw.chunker {
+        // Only accept known strategies; anything else keeps the default (token_aware).
+        if value == "page_anchor" || value == "token_aware" {
+            policy.chunker = value;
+        }
+    }
+    if raw.marker_sidecar.is_some() {
+        policy.marker_sidecar = raw.marker_sidecar;
+    }
+    if raw.marker_device.is_some() {
+        policy.marker_device = raw.marker_device;
     }
 }
 
