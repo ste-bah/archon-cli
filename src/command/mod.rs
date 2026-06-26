@@ -170,6 +170,7 @@ pub(crate) mod skills;
 pub(crate) mod slash;
 pub(crate) mod status;
 pub(crate) mod store_paths;
+pub(crate) mod style;
 #[cfg(test)]
 pub(crate) mod surface_matrix;
 // TASK-#209 SLASH-SUMMARY: /summary one-glance session headline.

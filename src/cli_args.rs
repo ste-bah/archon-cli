@@ -12,6 +12,7 @@ mod permissions_actions;
 mod reasoning_actions;
 mod root;
 mod strategy_actions;
+mod style_actions;
 mod trading_actions;
 mod trading_market_actions;
 mod video_actions;
@@ -33,6 +34,7 @@ pub use strategy_actions::{
     CompletionAction, GametheoryAction, PipelineAction, ProviderProfilesAction, ProvidersAction,
     SandboxAction, TeamAction, WorkflowAction,
 };
+pub use style_actions::StyleAction;
 pub use trading_actions::{
     TradingCliAction, TradingCliCommand, TradingCliLiveAction, TradingCliOpenBbAction,
     TradingCliOpenBbMode, TradingCliPaperAction, TradingCliPersona, TradingCliPineAction,

@@ -57,7 +57,8 @@ pub(crate) async fn handle_subcommand(
         | Commands::Prov { .. }
         | Commands::Meaning { .. }
         | Commands::Constellation { .. }
-        | Commands::Memory { .. }) => handle_data_command(command).await,
+        | Commands::Memory { .. }
+        | Commands::Style { .. }) => handle_data_command(command).await,
         command @ (Commands::SelfCmd { .. }
         | Commands::Gametheory { .. }
         | Commands::Completion { .. }) => handle_analysis_command(command, config, env_vars).await,
@@ -256,6 +257,7 @@ async fn handle_data_command(command: Commands) -> Result<()> {
         Commands::Memory { action } => {
             crate::command::memory_cli::handle_memory_command(action).await
         }
+        Commands::Style { action } => crate::command::style::handle_style_command(action).await,
         _ => unreachable!("data command routed to wrong dispatcher"),
     }
 }
