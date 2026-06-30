@@ -103,11 +103,10 @@ fn index_loaded_chunks_inner(
     let provider = get_provider().ok_or_else(|| DocsError::ModelNotConfigured {
         message: "no embedding provider configured".into(),
     })?;
-    crate::schema::ensure_vec_schema(db, provider.dimension(), provider.image_dimension()).map_err(|e| {
-        DocsError::Retrieval {
+    crate::schema::ensure_vec_schema(db, provider.dimension(), provider.image_dimension())
+        .map_err(|e| DocsError::Retrieval {
             message: format!("failed to ensure vec schema: {e}"),
-        }
-    })?;
+        })?;
 
     let mut result = IndexResult::default();
     let provider_name = provider.backend_name();
@@ -318,11 +317,10 @@ pub fn index_chunk(db: &DbInstance, chunk: &ChunkArtifact) -> Result<(), DocsErr
     let provider = get_provider().ok_or_else(|| DocsError::ModelNotConfigured {
         message: "no embedding provider configured".into(),
     })?;
-    crate::schema::ensure_vec_schema(db, provider.dimension(), provider.image_dimension()).map_err(|e| {
-        DocsError::Retrieval {
+    crate::schema::ensure_vec_schema(db, provider.dimension(), provider.image_dimension())
+        .map_err(|e| DocsError::Retrieval {
             message: format!("failed to ensure vec schema: {e}"),
-        }
-    })?;
+        })?;
     let vectors = match provider.embed_chunks(&[chunk.content.clone()]) {
         Ok(vectors) => vectors,
         Err(error) => {

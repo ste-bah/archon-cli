@@ -9,9 +9,13 @@ use crate::cli_args::StyleAction;
 
 pub(crate) async fn handle_style_command(action: StyleAction) -> Result<()> {
     match action {
-        StyleAction::Train { files, name, genre, out, stdout } => {
-            train(files, name, genre, out, stdout)
-        }
+        StyleAction::Train {
+            files,
+            name,
+            genre,
+            out,
+            stdout,
+        } => train(files, name, genre, out, stdout),
     }
 }
 

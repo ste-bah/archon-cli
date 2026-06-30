@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 
 use cozo::DbInstance;
 
-use archon_provenance::{chain, store as prov_store, ProvenanceRecord};
+use archon_provenance::{ProvenanceRecord, chain, store as prov_store};
 
 use crate::errors::DocsError;
 use crate::hash::sha256_str;
@@ -32,7 +32,12 @@ fn null_join(parts: &[&str]) -> String {
 
 /// `commit_hash = sha256(chunk_id ∥ raw_sha256 ∥ clean_sha256 ∥ spatial_hash ∥ cleaning_version)`.
 /// `clean_sha256` is the chunk's `content_hash` (no cleaning).
-pub fn commit_hash(chunk_id: &str, raw_sha256: &str, content_hash: &str, spatial_hash: &str) -> String {
+pub fn commit_hash(
+    chunk_id: &str,
+    raw_sha256: &str,
+    content_hash: &str,
+    spatial_hash: &str,
+) -> String {
     sha256_str(&null_join(&[
         chunk_id,
         raw_sha256,
@@ -81,7 +86,9 @@ pub(crate) fn persist_chunk_integrity(
                 commit_hash: commit.clone(),
             },
         )
-        .map_err(|e| DocsError::Storage { message: e.to_string() })?;
+        .map_err(|e| DocsError::Storage {
+            message: e.to_string(),
+        })?;
         commits.push(commit);
     }
 
@@ -119,10 +126,14 @@ pub(crate) fn persist_chunk_integrity(
         timestamp: chrono::Utc::now().to_rfc3339(),
         chain_hash,
     };
-    prov_store::insert_record(db, &record)
-        .map_err(|e| DocsError::Storage { message: e.to_string() })?;
-    store::set_artifact_provenance_record(db, ocr_artifact_id, &record_id)
-        .map_err(|e| DocsError::Storage { message: e.to_string() })?;
+    prov_store::insert_record(db, &record).map_err(|e| DocsError::Storage {
+        message: e.to_string(),
+    })?;
+    store::set_artifact_provenance_record(db, ocr_artifact_id, &record_id).map_err(|e| {
+        DocsError::Storage {
+            message: e.to_string(),
+        }
+    })?;
     Ok(record_id)
 }
 
@@ -134,14 +145,17 @@ pub fn verify_chunks_root(
     document_id: &str,
     record_id: &str,
 ) -> Result<bool, DocsError> {
-    let record = prov_store::get_record(db, record_id)
-        .map_err(|e| DocsError::Storage { message: e.to_string() })?;
+    let record = prov_store::get_record(db, record_id).map_err(|e| DocsError::Storage {
+        message: e.to_string(),
+    })?;
     let record = match record {
         Some(r) => r,
         None => return Ok(false),
     };
-    let commits = store::get_doc_commit_hashes(db, document_id)
-        .map_err(|e| DocsError::Storage { message: e.to_string() })?;
+    let commits =
+        store::get_doc_commit_hashes(db, document_id).map_err(|e| DocsError::Storage {
+            message: e.to_string(),
+        })?;
     Ok(chunks_root(commits) == record.output_hash)
 }
 
@@ -215,7 +229,10 @@ mod tests {
         assert_eq!(art.provenance_record_id, rid);
 
         // Fresh recompute matches the committed root.
-        assert!(verify_chunks_root(&db, "d", &rid).unwrap(), "untampered → verifies");
+        assert!(
+            verify_chunks_root(&db, "d", &rid).unwrap(),
+            "untampered → verifies"
+        );
 
         // Tamper: overwrite one chunk's commit_hash → root no longer matches.
         store::insert_chunk_hashes(
@@ -228,6 +245,9 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(!verify_chunks_root(&db, "d", &rid).unwrap(), "tampered → fails");
+        assert!(
+            !verify_chunks_root(&db, "d", &rid).unwrap(),
+            "tampered → fails"
+        );
     }
 }

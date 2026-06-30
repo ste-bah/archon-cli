@@ -85,9 +85,9 @@ pub(crate) async fn run_pdf_ingest_pipeline(
                 Some(src) => match src.blocks_for(Path::new(file_path)).await {
                     Ok(b) if !b.is_empty() => (b, crate::block_chunking::COORD_MARKER),
                     Ok(_) => {
-                        outcome
-                            .warnings
-                            .push("marker returned no blocks; falling back to text chunking".to_string());
+                        outcome.warnings.push(
+                            "marker returned no blocks; falling back to text chunking".to_string(),
+                        );
                         (text_blocks(), crate::block_chunking::COORD_NONE)
                     }
                     Err(e) => {

@@ -81,21 +81,30 @@ mod tests {
     use crate::chunk::BlockType;
 
     fn blk(text: &str, page: u32) -> Block {
-        Block { block_type: BlockType::Text, text: text.to_string(), bbox: [1.0, 2.0, 3.0, 4.0], page }
+        Block {
+            block_type: BlockType::Text,
+            text: text.to_string(),
+            bbox: [1.0, 2.0, 3.0, 4.0],
+            page,
+        }
     }
 
     #[test]
     fn captures_bekker_and_page_numbers_and_strips_them() {
         let blocks = vec![
             blk("Real prose about energeia and entelecheia.", 1),
-            blk("1147a", 1),          // 4-digit Bekker (reference would MISS this)
-            blk("184b15", 2),         // Bekker with line number
-            blk("47", 2),             // plain page number
+            blk("1147a", 1),  // 4-digit Bekker (reference would MISS this)
+            blk("184b15", 2), // Bekker with line number
+            blk("47", 2),     // plain page number
             blk("More body text here.", 3),
             blk("see 1147a below", 3), // NOT standalone → kept
         ];
         let (kept, hits) = extract_locators(&blocks);
-        assert_eq!(kept.len(), 3, "two body paras + the inline-reference para remain");
+        assert_eq!(
+            kept.len(),
+            3,
+            "two body paras + the inline-reference para remain"
+        );
         assert!(kept.iter().any(|b| b.text.starts_with("see 1147a")));
 
         assert_eq!(hits.len(), 3);
@@ -113,7 +122,11 @@ mod tests {
     fn letterless_number_is_a_page_number_not_bekker() {
         let (_, hits) = extract_locators(&[blk("123", 5)]);
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].kind, LocatorKind::PageNumber, "no column letter → page number");
+        assert_eq!(
+            hits[0].kind,
+            LocatorKind::PageNumber,
+            "no column letter → page number"
+        );
     }
 
     #[test]

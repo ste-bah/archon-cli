@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use archon_accel::{marker_cpu_fallback_env, plan_marker_ingest, AccelKind, DeviceOverrides};
+use archon_accel::{AccelKind, DeviceOverrides, marker_cpu_fallback_env, plan_marker_ingest};
 use archon_ingest_ext::chunk::Block;
 use archon_ingest_ext::marker::parse_marker_str;
 use archon_policy::PdfPolicy;
@@ -122,17 +122,23 @@ impl MarkerSource {
             } => match run_sidecar(python, script, pdf_path, device.as_deref(), env).await {
                 Ok(json) => Ok(json),
                 // Per-doc GPU-OOM → retry this document on CPU (the load-bearing fallback).
-                Err(SidecarError::Oom { device: dev }) if dev != "cpu" => {
-                    run_sidecar(python, script, pdf_path, Some("cpu"), &marker_cpu_fallback_env())
-                        .await
-                        .map_err(DocsError::from)
-                }
+                Err(SidecarError::Oom { device: dev }) if dev != "cpu" => run_sidecar(
+                    python,
+                    script,
+                    pdf_path,
+                    Some("cpu"),
+                    &marker_cpu_fallback_env(),
+                )
+                .await
+                .map_err(DocsError::from),
                 Err(e) => Err(e.into()),
             },
             MarkerSource::Http { url } => {
-                let bytes = tokio::fs::read(pdf_path).await.map_err(|e| DocsError::Storage {
-                    message: format!("read pdf for marker http failed: {e}"),
-                })?;
+                let bytes = tokio::fs::read(pdf_path)
+                    .await
+                    .map_err(|e| DocsError::Storage {
+                        message: format!("read pdf for marker http failed: {e}"),
+                    })?;
                 let resp = reqwest::Client::new()
                     .post(url)
                     .body(bytes)

@@ -78,9 +78,12 @@ impl FastembedProvider {
     fn ensure_clip_text_model(
         &self,
     ) -> Result<std::sync::MutexGuard<'_, Option<fastembed::TextEmbedding>>, DocsError> {
-        let mut guard = self.clip_text_model.lock().map_err(|e| DocsError::Embedding {
-            message: format!("clip text model lock poisoned: {e}"),
-        })?;
+        let mut guard = self
+            .clip_text_model
+            .lock()
+            .map_err(|e| DocsError::Embedding {
+                message: format!("clip text model lock poisoned: {e}"),
+            })?;
         if guard.is_none() {
             tracing::info!("loading CLIP ViT-B/32 text encoder");
             *guard = Some(load_clip_text_with_timeout(
@@ -297,7 +300,10 @@ fn recv_model<T>(
             message: format!("failed to load {label} model: {error}"),
         }),
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(DocsError::Embedding {
-            message: format!("timed out loading {label} model after {}s", timeout.as_secs()),
+            message: format!(
+                "timed out loading {label} model after {}s",
+                timeout.as_secs()
+            ),
         }),
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(DocsError::Embedding {
             message: format!("{label} model loader thread exited without a result"),

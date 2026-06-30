@@ -62,7 +62,11 @@ fn build_block(block_type: BlockType, html: &str, bbox: [f32; 4], page: u32) -> 
     if block_type == BlockType::Table {
         let grid = crate::table::parse_table_html(html);
         if crate::table::is_real_table(&grid, &crate::table::default_title_markers()) {
-            let g = crate::table::TableGrid { page_num: page, rows: grid, bbox };
+            let g = crate::table::TableGrid {
+                page_num: page,
+                rows: grid,
+                bbox,
+            };
             return Some(Block {
                 block_type: BlockType::Table,
                 text: crate::table::table_chunk_text(&g, "", ""),
@@ -75,14 +79,24 @@ fn build_block(block_type: BlockType, html: &str, bbox: [f32; 4], page: u32) -> 
         return if text.is_empty() {
             None
         } else {
-            Some(Block { block_type: BlockType::Text, text, bbox, page })
+            Some(Block {
+                block_type: BlockType::Text,
+                text,
+                bbox,
+                page,
+            })
         };
     }
     let text = strip_html(html);
     if text.is_empty() {
         None
     } else {
-        Some(Block { block_type, text, bbox, page })
+        Some(Block {
+            block_type,
+            text,
+            bbox,
+            page,
+        })
     }
 }
 
@@ -95,10 +109,7 @@ pub fn parse_marker_json(root: &Value) -> Vec<Block> {
     let mut stack: Vec<(&Value, u32)> = vec![(root, 1)];
 
     while let Some((node, cur_page)) = stack.pop() {
-        let bt = node
-            .get("block_type")
-            .and_then(Value::as_str)
-            .unwrap_or("");
+        let bt = node.get("block_type").and_then(Value::as_str).unwrap_or("");
 
         // Track the current page from `Page` blocks (0-indexed id → 1-indexed page).
         let mut page = cur_page;
@@ -248,11 +259,16 @@ mod tests {
         assert_eq!(blocks[0].block_type, BlockType::Table);
         assert_eq!(blocks[0].page, 3, "page id /page/2/ → 1-indexed page 3");
         assert!(
-            blocks[0].text.starts_with("[TABLE] Page 3, 4 rows × 2 columns"),
+            blocks[0]
+                .text
+                .starts_with("[TABLE] Page 3, 4 rows × 2 columns"),
             "got: {}",
             blocks[0].text
         );
-        assert!(blocks[0].text.contains("| Year | N |"), "markdown header present");
+        assert!(
+            blocks[0].text.contains("| Year | N |"),
+            "markdown header present"
+        );
     }
 
     #[test]
@@ -281,14 +297,22 @@ mod tests {
         assert_eq!(chunks[0].page_end, 1);
         assert_eq!(chunks[0].text.len(), 3600);
         assert_eq!(
-            chunks[0].bboxes.iter().map(|b| b.page_num).collect::<Vec<_>>(),
+            chunks[0]
+                .bboxes
+                .iter()
+                .map(|b| b.page_num)
+                .collect::<Vec<_>>(),
             vec![1]
         );
         assert_eq!(chunks[1].page_start, 1);
         assert_eq!(chunks[1].page_end, 2);
         assert_eq!(chunks[1].text, "Section Two\n\nshort tail body");
         assert_eq!(
-            chunks[1].bboxes.iter().map(|b| b.page_num).collect::<Vec<_>>(),
+            chunks[1]
+                .bboxes
+                .iter()
+                .map(|b| b.page_num)
+                .collect::<Vec<_>>(),
             vec![1, 2]
         );
     }
@@ -307,7 +331,11 @@ mod tests {
         assert_eq!(blocks[0].page, 1);
         assert_eq!(blocks[1].text, "The energeia of a living body.");
         assert_eq!(blocks[2].block_type, BlockType::Table);
-        assert!(blocks[2].text.starts_with("[TABLE] Page 1"), "got: {}", blocks[2].text);
+        assert!(
+            blocks[2].text.starts_with("[TABLE] Page 1"),
+            "got: {}",
+            blocks[2].text
+        );
         assert_eq!(blocks[4].text, "1147a");
         assert_eq!(blocks[4].page, 2);
     }
@@ -326,7 +354,11 @@ mod tests {
         });
         let blocks = parse_marker_json(&tree);
         assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].block_type, BlockType::Text, "rejected table → text");
+        assert_eq!(
+            blocks[0].block_type,
+            BlockType::Text,
+            "rejected table → text"
+        );
         assert!(!blocks[0].text.starts_with("[TABLE]"));
     }
 }

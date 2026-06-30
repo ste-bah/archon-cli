@@ -305,7 +305,11 @@ async fn handle_search_images(query: &str, limit: usize) -> Result<()> {
                 );
                 return Ok(());
             }
-            println!("Found {} image result(s) for \"{}\":\n", results.len(), query);
+            println!(
+                "Found {} image result(s) for \"{}\":\n",
+                results.len(),
+                query
+            );
             for (i, r) in results.iter().enumerate() {
                 println!("  {}. score={:.3}  {}", i + 1, r.score, r.source_path);
                 println!(

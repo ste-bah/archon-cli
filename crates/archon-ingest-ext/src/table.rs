@@ -64,7 +64,10 @@ pub fn is_real_table(rows: &[Vec<String>], title_markers: &[String]) -> bool {
             }
         }
     }
-    let meaningful = col_content.iter().filter(|&&cc| cc as f64 >= 0.4 * dlen).count();
+    let meaningful = col_content
+        .iter()
+        .filter(|&&cc| cc as f64 >= 0.4 * dlen)
+        .count();
     if meaningful < 2 {
         return false;
     }
@@ -86,7 +89,8 @@ pub fn is_real_table(rows: &[Vec<String>], title_markers: &[String]) -> bool {
     if cells.is_empty() {
         return false;
     }
-    let avg_len = cells.iter().map(|s| s.chars().count()).sum::<usize>() as f64 / cells.len() as f64;
+    let avg_len =
+        cells.iter().map(|s| s.chars().count()).sum::<usize>() as f64 / cells.len() as f64;
     if avg_len > 40.0 {
         return false; // prose, not tabular
     }
@@ -98,7 +102,10 @@ pub fn is_real_table(rows: &[Vec<String>], title_markers: &[String]) -> bool {
         return false;
     }
     let csv_lower = to_csv(rows).to_lowercase();
-    if title_markers.iter().any(|m| csv_lower.contains(&m.to_lowercase())) {
+    if title_markers
+        .iter()
+        .any(|m| csv_lower.contains(&m.to_lowercase()))
+    {
         return false; // TOC / copyright / title page
     }
     true
@@ -128,10 +135,15 @@ pub fn to_markdown(rows: &[Vec<String>]) -> String {
     let cols = ncols(rows);
     let esc = |s: &str| s.replace('|', "\\|");
     let fmt = |r: &Vec<String>| -> String {
-        let cells: Vec<String> = (0..cols).map(|c| esc(r.get(c).map(|s| s.as_str()).unwrap_or(""))).collect();
+        let cells: Vec<String> = (0..cols)
+            .map(|c| esc(r.get(c).map(|s| s.as_str()).unwrap_or("")))
+            .collect();
         format!("| {} |", cells.join(" | "))
     };
-    let mut out = vec![fmt(&rows[0]), format!("| {} |", vec!["---"; cols].join(" | "))];
+    let mut out = vec![
+        fmt(&rows[0]),
+        format!("| {} |", vec!["---"; cols].join(" | ")),
+    ];
     for r in &rows[1..] {
         out.push(fmt(r));
     }
@@ -159,12 +171,20 @@ pub fn to_json(rows: &[Vec<String>]) -> String {
         return "[]".to_string();
     }
     let cols = ncols(rows);
-    let header: Vec<String> = (0..cols).map(|c| rows[0].get(c).cloned().unwrap_or_default()).collect();
+    let header: Vec<String> = (0..cols)
+        .map(|c| rows[0].get(c).cloned().unwrap_or_default())
+        .collect();
     let objs: Vec<String> = rows[1..]
         .iter()
         .map(|r| {
             let pairs: Vec<String> = (0..cols)
-                .map(|c| format!("\"{}\": \"{}\"", json_esc(&header[c]), json_esc(r.get(c).map(|s| s.as_str()).unwrap_or(""))))
+                .map(|c| {
+                    format!(
+                        "\"{}\": \"{}\"",
+                        json_esc(&header[c]),
+                        json_esc(r.get(c).map(|s| s.as_str()).unwrap_or(""))
+                    )
+                })
                 .collect();
             format!("{{{}}}", pairs.join(", "))
         })
@@ -177,7 +197,10 @@ pub fn to_json(rows: &[Vec<String>]) -> String {
 pub fn table_chunk_text(grid: &TableGrid, context_before: &str, context_after: &str) -> String {
     let r = grid.rows.len();
     let c = ncols(&grid.rows);
-    let mut s = format!("[TABLE] Page {}, {} rows × {} columns\n", grid.page_num, r, c);
+    let mut s = format!(
+        "[TABLE] Page {}, {} rows × {} columns\n",
+        grid.page_num, r, c
+    );
     s.push_str(context_before);
     s.push_str(&to_markdown(&grid.rows));
     s.push_str(context_after);
@@ -209,7 +232,9 @@ mod tests {
     use super::*;
 
     fn grid(rows: &[&[&str]]) -> Vec<Vec<String>> {
-        rows.iter().map(|r| r.iter().map(|s| s.to_string()).collect()).collect()
+        rows.iter()
+            .map(|r| r.iter().map(|s| s.to_string()).collect())
+            .collect()
     }
 
     #[test]
@@ -233,10 +258,19 @@ mod tests {
     fn rejects_prose_long_cells() {
         let t = grid(&[
             &["Heading one column", "Heading two column"],
-            &["This is a long sentence of prose that clearly is not tabular data at all.", "Another lengthy prose passage masquerading as a table cell here friend."],
-            &["Yet more flowing prose, the kind that PyMuPDF sometimes mistakes for a grid.", "And a final paragraph of prose to push the average cell length well past forty."],
+            &[
+                "This is a long sentence of prose that clearly is not tabular data at all.",
+                "Another lengthy prose passage masquerading as a table cell here friend.",
+            ],
+            &[
+                "Yet more flowing prose, the kind that PyMuPDF sometimes mistakes for a grid.",
+                "And a final paragraph of prose to push the average cell length well past forty.",
+            ],
         ]);
-        assert!(!is_real_table(&t, &default_title_markers()), "avg cell length > 40 → prose");
+        assert!(
+            !is_real_table(&t, &default_title_markers()),
+            "avg cell length > 40 → prose"
+        );
     }
 
     #[test]
@@ -247,7 +281,10 @@ mod tests {
             &["Princeton University Press", "z"],
             &["Copyright 1984", "w"],
         ]);
-        assert!(!is_real_table(&t, &default_title_markers()), "university press / copyright → reject");
+        assert!(
+            !is_real_table(&t, &default_title_markers()),
+            "university press / copyright → reject"
+        );
     }
 
     #[test]
@@ -271,7 +308,11 @@ mod tests {
 
     #[test]
     fn table_chunk_has_marker_header() {
-        let g = TableGrid { page_num: 7, rows: grid(&[&["a", "b"], &["1", "2"]]), bbox: [0.0; 4] };
+        let g = TableGrid {
+            page_num: 7,
+            rows: grid(&[&["a", "b"], &["1", "2"]]),
+            bbox: [0.0; 4],
+        };
         let s = table_chunk_text(&g, "", "");
         assert!(s.starts_with("[TABLE] Page 7, 2 rows × 2 columns\n"));
     }
@@ -284,7 +325,11 @@ mod tests {
         let g = parse_table_html(html);
         assert_eq!(g.len(), 3, "three rows");
         assert_eq!(g[0], vec!["Year".to_string(), "Author".to_string()]);
-        assert_eq!(g[1], vec!["2019".to_string(), "Bogost".to_string()], "inner tags stripped");
+        assert_eq!(
+            g[1],
+            vec!["2019".to_string(), "Bogost".to_string()],
+            "inner tags stripped"
+        );
         assert!(is_real_table(&g, &default_title_markers()));
     }
 }

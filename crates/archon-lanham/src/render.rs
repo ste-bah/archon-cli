@@ -142,18 +142,26 @@ pub fn render_output_style(profile: &Profile, profile_key: &str) -> String {
     let desc = or_else(&profile.metadata.description, &default_desc).to_string();
 
     let genre = or_else(&slt.derived_from, "academic").to_string();
-    let register = match (or_else(&slt.register_target, ""), or_else(&labels.primary_register, "")) {
+    let register = match (
+        or_else(&slt.register_target, ""),
+        or_else(&labels.primary_register, ""),
+    ) {
         (r, _) if !r.is_empty() => r.to_string(),
         (_, p) if !p.is_empty() => p.to_string(),
         _ => "high".to_string(),
     };
     let voice_label = or_else(&labels.voice, "moderate voice").to_string();
-    let effaced = voice_label.to_lowercase().contains("unvoiced") || voice_label.to_lowercase().contains("effaced");
+    let effaced = voice_label.to_lowercase().contains("unvoiced")
+        || voice_label.to_lowercase().contains("effaced");
     let parataxis = or_else(&labels.parataxis_hypotaxis, "mixed").to_string();
     let architecture = or_else(&labels.periodic_running, "mixed").to_string();
     let opacity = or_else(&labels.opacity, "mixed opacity").to_string();
 
-    let at_through = if genre == "academic" { "transparent with AT moments" } else { "oscillating" };
+    let at_through = if genre == "academic" {
+        "transparent with AT moments"
+    } else {
+        "oscillating"
+    };
 
     let mut tacit = or_else(&slt.tacit_persuasion_level, "moderate").to_string();
     if effaced && (tacit == "dense" || tacit == "moderate") {
@@ -186,7 +194,9 @@ pub fn render_output_style(profile: &Profile, profile_key: &str) -> String {
 
     let mut l: Vec<String> = Vec::new();
     l.push(format!("# {name}"));
-    l.push(format!("Description: {desc} — {register} register, {parataxis}, {voice_label}."));
+    l.push(format!(
+        "Description: {desc} — {register} register, {parataxis}, {voice_label}."
+    ));
     l.push(String::new());
     l.push("When composing prose, write in the following trained scholarly voice. Treat these as binding stylistic constraints.".to_string());
 
@@ -229,7 +239,10 @@ pub fn render_output_style(profile: &Profile, profile_key: &str) -> String {
     } else if parataxis.contains("hypotactic") {
         l.push("- Connection is predominantly HYPOTACTIC: build nested subordinate structures; subordinate clauses carry the argumentative weight.".to_string());
     } else {
-        l.push("- Balance coordinate (paratactic) chains with subordination as the thought requires.".to_string());
+        l.push(
+            "- Balance coordinate (paratactic) chains with subordination as the thought requires."
+                .to_string(),
+        );
     }
 
     l.push("\n## VOICE".to_string());
@@ -248,7 +261,14 @@ pub fn render_output_style(profile: &Profile, profile_key: &str) -> String {
         l.push("- At key argumentative turns (theses, conceptual pivots, conclusions) you may make the reader look AT the language via brief figures, register elevation, or periodic syntax — kept brief and occasional.".to_string());
     }
 
-    l.push(format!("\n## {} BUDGET — {tacit}", if effaced { "EMPHASIS" } else { "TACIT PERSUASION" }));
+    l.push(format!(
+        "\n## {} BUDGET — {tacit}",
+        if effaced {
+            "EMPHASIS"
+        } else {
+            "TACIT PERSUASION"
+        }
+    ));
     if effaced {
         l.push("- Use rhetorical figures sparingly and only where they serve the argument; let emphasis come mainly from sentence architecture and diction. Avoid sustained or decorative patterning.".to_string());
     } else {
@@ -282,7 +302,10 @@ pub fn render_output_style(profile: &Profile, profile_key: &str) -> String {
 
     if !transitions.is_empty() {
         l.push("\n## TRANSITIONS".to_string());
-        l.push(format!("- Prefer these connectives for paragraph and argumentative transitions: {}.", transitions.join(", ")));
+        l.push(format!(
+            "- Prefer these connectives for paragraph and argumentative transitions: {}.",
+            transitions.join(", ")
+        ));
     }
 
     l.push("\n## PROSE STYLE DIMENSIONS (the measured profile to match)".to_string());
@@ -295,18 +318,46 @@ pub fn render_output_style(profile: &Profile, profile_key: &str) -> String {
             }
         }
     };
-    dim("Noun/Verb", or_else(&labels.noun_verb, ""), or_else(&expl.noun_verb, ""));
-    dim("Architecture", &architecture, or_else(&expl.periodic_running, ""));
-    dim("Connection", &parataxis, or_else(&expl.parataxis_hypotaxis, ""));
+    dim(
+        "Noun/Verb",
+        or_else(&labels.noun_verb, ""),
+        or_else(&expl.noun_verb, ""),
+    );
+    dim(
+        "Architecture",
+        &architecture,
+        or_else(&expl.periodic_running, ""),
+    );
+    dim(
+        "Connection",
+        &parataxis,
+        or_else(&expl.parataxis_hypotaxis, ""),
+    );
     dim(
         "Voice",
         &voice_label,
-        if effaced { "effaced authorial presence; content over personality" } else { or_else(&expl.voice, "") },
+        if effaced {
+            "effaced authorial presence; content over personality"
+        } else {
+            or_else(&expl.voice, "")
+        },
     );
-    dim("Register", if register == "high" { "high (academic)" } else { &register }, "");
+    dim(
+        "Register",
+        if register == "high" {
+            "high (academic)"
+        } else {
+            &register
+        },
+        "",
+    );
     dim(
         "Opacity",
-        if opacity.contains("opaque") { "foreground language only at conceptual pivots" } else { &opacity },
+        if opacity.contains("opaque") {
+            "foreground language only at conceptual pivots"
+        } else {
+            &opacity
+        },
         "",
     );
 
@@ -328,6 +379,9 @@ mod tests {
             .expect("ref_dalton.md missing — run the render-golden harness");
         let profile: Profile = serde_json::from_str(&profile_json).unwrap();
         let rendered = render_output_style(&profile, "dalton-philosophical-mo2fmhy2");
-        assert_eq!(rendered, reference, "Rust renderer diverged from the .mjs converter");
+        assert_eq!(
+            rendered, reference,
+            "Rust renderer diverged from the .mjs converter"
+        );
     }
 }

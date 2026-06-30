@@ -135,7 +135,8 @@ pub fn chunk_blocks(blocks: &[Block], min: usize, max: usize, _hard: usize) -> V
             // est_tokens(current + "\n\n" + text) over code points (parity with the reference).
             let combined = acc.text.chars().count() + 2 + b.text.chars().count();
             let would_exceed = combined / CHARS_PER_TOKEN > max;
-            let heading_split = b.block_type == BlockType::SectionHeader && est_tokens(&acc.text) >= min;
+            let heading_split =
+                b.block_type == BlockType::SectionHeader && est_tokens(&acc.text) >= min;
             if would_exceed || heading_split {
                 chunks.push(acc.flush());
             }
@@ -169,9 +170,18 @@ fn merge_two(a: ChunkOut, b: ChunkOut) -> ChunkOut {
     }
     let bboxes = pages
         .into_iter()
-        .map(|(p, boxes)| PageBoxes { page_num: p, super_box: merge_bboxes(&boxes), blocks: boxes })
+        .map(|(p, boxes)| PageBoxes {
+            page_num: p,
+            super_box: merge_bboxes(&boxes),
+            blocks: boxes,
+        })
         .collect();
-    ChunkOut { text, page_start, page_end, bboxes }
+    ChunkOut {
+        text,
+        page_start,
+        page_end,
+        bboxes,
+    }
 }
 
 /// Merge each undersized chunk (`< min`) into the NEXT iff same/adjacent page
@@ -204,7 +214,12 @@ mod tests {
     use super::*;
 
     fn blk(t: BlockType, text: &str, page: u32) -> Block {
-        Block { block_type: t, text: text.to_string(), bbox: [0.0, page as f32, 10.0, page as f32 + 1.0], page }
+        Block {
+            block_type: t,
+            text: text.to_string(),
+            bbox: [0.0, page as f32, 10.0, page as f32 + 1.0],
+            page,
+        }
     }
     fn big(page: u32, n: usize) -> Block {
         blk(BlockType::Text, &"x".repeat(n), page)
@@ -224,7 +239,12 @@ mod tests {
 
     #[test]
     fn merge_undersized_is_pairwise_not_chained() {
-        let mk = |text: &str, p: u32| ChunkOut { text: text.into(), page_start: p, page_end: p, bboxes: vec![] };
+        let mk = |text: &str, p: u32| ChunkOut {
+            text: text.into(),
+            page_start: p,
+            page_end: p,
+            bboxes: vec![],
+        };
         // Three adjacent undersized chunks → pairwise [A+B, C], never chained [A+B+C].
         let out = merge_undersized(vec![mk("a", 1), mk("b", 2), mk("c", 3)], TARGET_MIN);
         assert_eq!(out.len(), 2, "pairwise merge, not chained");
@@ -237,7 +257,10 @@ mod tests {
 
     #[test]
     fn small_doc_is_one_chunk_with_page_span() {
-        let blocks = vec![blk(BlockType::Text, "alpha", 1), blk(BlockType::Text, "beta", 2)];
+        let blocks = vec![
+            blk(BlockType::Text, "alpha", 1),
+            blk(BlockType::Text, "beta", 2),
+        ];
         let chunks = chunk_blocks_default(&blocks);
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].text, "alpha\n\nbeta");
@@ -252,7 +275,11 @@ mod tests {
         // second exceeds max and forces a flush. max=1200 tokens → > 4800 chars combined.
         let blocks = vec![big(1, 4000), big(2, 4000)];
         let chunks = chunk_blocks_default(&blocks);
-        assert_eq!(chunks.len(), 2, "second block would exceed max → flush first");
+        assert_eq!(
+            chunks.len(),
+            2,
+            "second block would exceed max → flush first"
+        );
         assert_eq!(chunks[0].page_start, 1);
         assert_eq!(chunks[1].page_start, 2);
     }
@@ -266,7 +293,11 @@ mod tests {
             blk(BlockType::Text, "body of the new section", 1),
         ];
         let chunks = chunk_blocks_default(&blocks);
-        assert_eq!(chunks.len(), 2, "heading boundary splits after min is reached");
+        assert_eq!(
+            chunks.len(),
+            2,
+            "heading boundary splits after min is reached"
+        );
         assert!(chunks[1].text.starts_with("## New Section"));
     }
 
@@ -289,10 +320,23 @@ mod tests {
         // flush the undersized "mid"(p2). merge_undersized folds "mid" into big3 (p3 adjacent).
         let blocks = vec![big(1, 5000), blk(BlockType::Text, "mid", 2), big(3, 5000)];
         let chunks = chunk_blocks_default(&blocks);
-        assert_eq!(chunks.len(), 2, "undersized middle folds into the adjacent next");
-        let merged = chunks.iter().find(|c| c.text.contains("mid")).expect("mid present");
-        assert!(merged.text.contains(&"x".repeat(10)), "mid merged with the page-3 chunk text");
-        assert!(merged.page_start <= 2 && merged.page_end >= 3, "page span widened across merge");
+        assert_eq!(
+            chunks.len(),
+            2,
+            "undersized middle folds into the adjacent next"
+        );
+        let merged = chunks
+            .iter()
+            .find(|c| c.text.contains("mid"))
+            .expect("mid present");
+        assert!(
+            merged.text.contains(&"x".repeat(10)),
+            "mid merged with the page-3 chunk text"
+        );
+        assert!(
+            merged.page_start <= 2 && merged.page_end >= 3,
+            "page span widened across merge"
+        );
     }
 
     #[test]
@@ -300,7 +344,11 @@ mod tests {
         // big1(p1) then a tiny tail that simply joins it (1000+ε tok < max) → single chunk.
         let blocks = vec![big(1, 4000), blk(BlockType::Text, "tail", 2)];
         let chunks = chunk_blocks_default(&blocks);
-        assert_eq!(chunks.len(), 1, "tail under max joins rather than splitting");
+        assert_eq!(
+            chunks.len(),
+            1,
+            "tail under max joins rather than splitting"
+        );
         assert_eq!(chunks[0].page_end, 2);
     }
 }

@@ -43,11 +43,13 @@ pub fn search_images(
         message: "no embedding provider configured. Run 'archon docs model-status' for details."
             .into(),
     })?;
-    let query_vec = provider.embed_image_query(query)?.ok_or_else(|| DocsError::Validation {
-        message: "the configured embedding provider is not multimodal — it produces no image \
+    let query_vec = provider
+        .embed_image_query(query)?
+        .ok_or_else(|| DocsError::Validation {
+            message: "the configured embedding provider is not multimodal — it produces no image \
                   embeddings, so text→image search is unavailable. Use a CLIP-capable provider."
-            .into(),
-    })?;
+                .into(),
+        })?;
 
     let arr = ndarray::Array1::from_vec(query_vec);
     let mut params = BTreeMap::new();

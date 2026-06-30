@@ -55,35 +55,249 @@ pub fn split_sentences(text: &str) -> Vec<String> {
 const BE_VERBS_ARR: &[&str] = &["is", "are", "was", "were", "been", "being", "am"];
 
 const COMMON_VERBS_ARR: &[&str] = &[
-    "is", "are", "was", "were", "been", "being", "am", "have", "has", "had", "do", "does", "did",
-    "say", "said", "says", "make", "made", "makes", "go", "goes", "went", "gone", "take", "took",
-    "taken", "come", "came", "give", "gave", "given", "find", "found", "think", "thought", "know",
-    "knew", "known", "get", "got", "gotten", "see", "saw", "seen", "want", "wanted", "use", "used",
-    "tell", "told", "ask", "asked", "work", "worked", "seem", "seemed", "try", "tried", "leave",
-    "left", "call", "called", "need", "needed", "become", "became", "keep", "kept", "let", "begin",
-    "began", "begun", "show", "showed", "shown", "hear", "heard", "play", "played", "run", "ran",
-    "move", "moved", "live", "lived", "believe", "believed", "bring", "brought", "happen",
-    "happened", "write", "wrote", "written", "provide", "provided", "sit", "sat", "stand", "stood",
-    "lose", "lost", "pay", "paid", "meet", "met", "include", "included", "continue", "continued",
-    "set", "learn", "learned", "change", "changed", "lead", "led", "understand", "understood",
-    "watch", "watched", "follow", "followed", "stop", "stopped", "create", "created", "speak",
-    "spoke", "spoken", "read", "allow", "allowed", "add", "added", "grow", "grew", "grown", "open",
-    "opened", "walk", "walked", "win", "won", "offer", "offered", "remember", "remembered",
-    "consider", "considered", "appear", "appeared", "buy", "bought", "serve", "served", "die",
-    "died", "send", "sent", "build", "built", "stay", "stayed", "fall", "fell", "fallen", "cut",
-    "reach", "reached", "kill", "killed", "remain", "remained", "suggest", "suggested", "raise",
-    "raised", "pass", "passed", "sell", "sold", "require", "required", "report", "reported",
-    "decide", "decided", "pull", "pulled", "develop", "developed", "argues", "argue", "argued",
-    "contends", "contend", "contended", "claims", "claim", "claimed", "asserts", "assert",
-    "asserted", "maintains", "maintain", "maintained", "observes", "observe", "observed", "notes",
-    "note", "noted", "suggests", "indicates", "indicate", "indicated", "demonstrates",
-    "demonstrate", "demonstrated", "reveals", "reveal", "revealed", "establishes", "establish",
-    "established", "examines", "examine", "examined", "explores", "explore", "explored", "analyzes",
-    "analyze", "analyzed", "investigates", "investigate", "investigated",
+    "is",
+    "are",
+    "was",
+    "were",
+    "been",
+    "being",
+    "am",
+    "have",
+    "has",
+    "had",
+    "do",
+    "does",
+    "did",
+    "say",
+    "said",
+    "says",
+    "make",
+    "made",
+    "makes",
+    "go",
+    "goes",
+    "went",
+    "gone",
+    "take",
+    "took",
+    "taken",
+    "come",
+    "came",
+    "give",
+    "gave",
+    "given",
+    "find",
+    "found",
+    "think",
+    "thought",
+    "know",
+    "knew",
+    "known",
+    "get",
+    "got",
+    "gotten",
+    "see",
+    "saw",
+    "seen",
+    "want",
+    "wanted",
+    "use",
+    "used",
+    "tell",
+    "told",
+    "ask",
+    "asked",
+    "work",
+    "worked",
+    "seem",
+    "seemed",
+    "try",
+    "tried",
+    "leave",
+    "left",
+    "call",
+    "called",
+    "need",
+    "needed",
+    "become",
+    "became",
+    "keep",
+    "kept",
+    "let",
+    "begin",
+    "began",
+    "begun",
+    "show",
+    "showed",
+    "shown",
+    "hear",
+    "heard",
+    "play",
+    "played",
+    "run",
+    "ran",
+    "move",
+    "moved",
+    "live",
+    "lived",
+    "believe",
+    "believed",
+    "bring",
+    "brought",
+    "happen",
+    "happened",
+    "write",
+    "wrote",
+    "written",
+    "provide",
+    "provided",
+    "sit",
+    "sat",
+    "stand",
+    "stood",
+    "lose",
+    "lost",
+    "pay",
+    "paid",
+    "meet",
+    "met",
+    "include",
+    "included",
+    "continue",
+    "continued",
+    "set",
+    "learn",
+    "learned",
+    "change",
+    "changed",
+    "lead",
+    "led",
+    "understand",
+    "understood",
+    "watch",
+    "watched",
+    "follow",
+    "followed",
+    "stop",
+    "stopped",
+    "create",
+    "created",
+    "speak",
+    "spoke",
+    "spoken",
+    "read",
+    "allow",
+    "allowed",
+    "add",
+    "added",
+    "grow",
+    "grew",
+    "grown",
+    "open",
+    "opened",
+    "walk",
+    "walked",
+    "win",
+    "won",
+    "offer",
+    "offered",
+    "remember",
+    "remembered",
+    "consider",
+    "considered",
+    "appear",
+    "appeared",
+    "buy",
+    "bought",
+    "serve",
+    "served",
+    "die",
+    "died",
+    "send",
+    "sent",
+    "build",
+    "built",
+    "stay",
+    "stayed",
+    "fall",
+    "fell",
+    "fallen",
+    "cut",
+    "reach",
+    "reached",
+    "kill",
+    "killed",
+    "remain",
+    "remained",
+    "suggest",
+    "suggested",
+    "raise",
+    "raised",
+    "pass",
+    "passed",
+    "sell",
+    "sold",
+    "require",
+    "required",
+    "report",
+    "reported",
+    "decide",
+    "decided",
+    "pull",
+    "pulled",
+    "develop",
+    "developed",
+    "argues",
+    "argue",
+    "argued",
+    "contends",
+    "contend",
+    "contended",
+    "claims",
+    "claim",
+    "claimed",
+    "asserts",
+    "assert",
+    "asserted",
+    "maintains",
+    "maintain",
+    "maintained",
+    "observes",
+    "observe",
+    "observed",
+    "notes",
+    "note",
+    "noted",
+    "suggests",
+    "indicates",
+    "indicate",
+    "indicated",
+    "demonstrates",
+    "demonstrate",
+    "demonstrated",
+    "reveals",
+    "reveal",
+    "revealed",
+    "establishes",
+    "establish",
+    "established",
+    "examines",
+    "examine",
+    "examined",
+    "explores",
+    "explore",
+    "explored",
+    "analyzes",
+    "analyze",
+    "analyzed",
+    "investigates",
+    "investigate",
+    "investigated",
 ];
 
-const NOMINALIZATION_SUFFIXES: &[&str] =
-    &["tion", "sion", "ment", "ness", "ity", "ence", "ance", "ism", "ure"];
+const NOMINALIZATION_SUFFIXES: &[&str] = &[
+    "tion", "sion", "ment", "ness", "ity", "ence", "ance", "ism", "ure",
+];
 const LATINATE_SUFFIXES: &[&str] = &[
     "tion", "sion", "ment", "ance", "ence", "ity", "ous", "ive", "able", "ible", "al", "ual",
 ];
@@ -93,20 +307,52 @@ const ROUGH_STEM_SUFFIXES: &[&str] = &[
 ];
 
 const NOM_EXCLUSIONS_ARR: &[&str] = &[
-    "question", "fortune", "nature", "culture", "adventure", "furniture", "picture", "mixture",
-    "creature", "structure", "feature", "future", "capture", "lecture", "gesture", "posture",
-    "moisture", "nation", "station", "fashion", "passion", "version", "tension", "mention",
-    "attention", "position", "condition", "tradition", "opinion", "religion", "region", "union",
-    "lesson", "reason", "season", "person",
+    "question",
+    "fortune",
+    "nature",
+    "culture",
+    "adventure",
+    "furniture",
+    "picture",
+    "mixture",
+    "creature",
+    "structure",
+    "feature",
+    "future",
+    "capture",
+    "lecture",
+    "gesture",
+    "posture",
+    "moisture",
+    "nation",
+    "station",
+    "fashion",
+    "passion",
+    "version",
+    "tension",
+    "mention",
+    "attention",
+    "position",
+    "condition",
+    "tradition",
+    "opinion",
+    "religion",
+    "region",
+    "union",
+    "lesson",
+    "reason",
+    "season",
+    "person",
 ];
 
 const STOP_ARR: &[&str] = &[
-    "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "from",
-    "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did",
-    "will", "would", "shall", "should", "may", "might", "can", "could", "not", "no", "nor", "so",
-    "yet", "this", "that", "these", "those", "it", "its", "he", "she", "they", "we", "i", "you",
-    "me", "him", "her", "us", "them", "my", "your", "his", "our", "their", "which", "who", "whom",
-    "what", "if", "then", "than", "as", "up", "about", "into", "through", "after", "before",
+    "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by",
+    "from", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does",
+    "did", "will", "would", "shall", "should", "may", "might", "can", "could", "not", "no", "nor",
+    "so", "yet", "this", "that", "these", "those", "it", "its", "he", "she", "they", "we", "i",
+    "you", "me", "him", "her", "us", "them", "my", "your", "his", "our", "their", "which", "who",
+    "whom", "what", "if", "then", "than", "as", "up", "about", "into", "through", "after",
+    "before",
 ];
 
 static BE_VERBS: Lazy<HashSet<&'static str>> = Lazy::new(|| BE_VERBS_ARR.iter().copied().collect());
@@ -191,10 +437,46 @@ pub fn latinate_germanic_ratio(text: &str) -> f64 {
 }
 
 const PREPOSITIONS_ARR: &[&str] = &[
-    "of", "in", "to", "for", "with", "on", "at", "from", "by", "about", "as", "into", "through",
-    "during", "before", "after", "above", "below", "between", "under", "along", "until", "without",
-    "toward", "towards", "upon", "across", "against", "among", "behind", "beyond", "within",
-    "throughout", "beside", "besides", "despite", "concerning", "regarding", "per", "via",
+    "of",
+    "in",
+    "to",
+    "for",
+    "with",
+    "on",
+    "at",
+    "from",
+    "by",
+    "about",
+    "as",
+    "into",
+    "through",
+    "during",
+    "before",
+    "after",
+    "above",
+    "below",
+    "between",
+    "under",
+    "along",
+    "until",
+    "without",
+    "toward",
+    "towards",
+    "upon",
+    "across",
+    "against",
+    "among",
+    "behind",
+    "beyond",
+    "within",
+    "throughout",
+    "beside",
+    "besides",
+    "despite",
+    "concerning",
+    "regarding",
+    "per",
+    "via",
 ];
 static PREPOSITIONS: Lazy<HashSet<&'static str>> =
     Lazy::new(|| PREPOSITIONS_ARR.iter().copied().collect());
@@ -274,9 +556,30 @@ pub fn analyze_noun_verb(text: &str) -> NounVerbMetrics {
 
 const COORDINATING_CONJ_ARR: &[&str] = &["and", "but", "or", "nor", "for", "yet", "so"];
 const SUBORDINATING_CONJ_ARR: &[&str] = &[
-    "although", "because", "since", "unless", "while", "whereas", "when", "where", "if", "though",
-    "after", "before", "until", "once", "whenever", "wherever", "whether", "provided", "supposing",
-    "inasmuch", "insofar", "notwithstanding", "albeit", "lest",
+    "although",
+    "because",
+    "since",
+    "unless",
+    "while",
+    "whereas",
+    "when",
+    "where",
+    "if",
+    "though",
+    "after",
+    "before",
+    "until",
+    "once",
+    "whenever",
+    "wherever",
+    "whether",
+    "provided",
+    "supposing",
+    "inasmuch",
+    "insofar",
+    "notwithstanding",
+    "albeit",
+    "lest",
 ];
 const RELATIVE_WORDS_ARR: &[&str] = &["which", "who", "whom", "whose", "where", "whereby"];
 
@@ -414,17 +717,36 @@ pub fn analyze_parataxis(text: &str) -> ParataxisMetrics {
 
 // ── Data + regexes for the remaining axes ────────────────────────────────────
 const FORMAL_MARKERS_ARR: &[&str] = &[
-    "furthermore", "moreover", "nevertheless", "notwithstanding", "consequently", "subsequently",
-    "henceforth", "whereby", "wherein", "therein", "thereof", "herein", "aforementioned",
-    "heretofore", "thus", "hence", "accordingly", "indeed", "nonetheless",
+    "furthermore",
+    "moreover",
+    "nevertheless",
+    "notwithstanding",
+    "consequently",
+    "subsequently",
+    "henceforth",
+    "whereby",
+    "wherein",
+    "therein",
+    "thereof",
+    "herein",
+    "aforementioned",
+    "heretofore",
+    "thus",
+    "hence",
+    "accordingly",
+    "indeed",
+    "nonetheless",
 ];
 static FORMAL_MARKERS: Lazy<HashSet<&'static str>> =
     Lazy::new(|| FORMAL_MARKERS_ARR.iter().copied().collect());
 
-static CONTRACTION_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b[A-Za-z0-9_]+'[A-Za-z0-9_]+\b").unwrap());
+static CONTRACTION_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\b[A-Za-z0-9_]+'[A-Za-z0-9_]+\b").unwrap());
 static PASSIVE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)\b(?:is|are|was|were|been|be)\s+[A-Za-z0-9_]+ed\b").unwrap());
-static FILLER_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)\b(?:of course|as you know|it is|there is|there are|it was|it has been|in terms of|with respect to|in connection with|pursuant to|shall be|may be|provided that|in accordance)\b").unwrap());
+static FILLER_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)\b(?:of course|as you know|it is|there is|there are|it was|it has been|in terms of|with respect to|in connection with|pursuant to|shall be|may be|provided that|in accordance)\b").unwrap()
+});
 static IMPERSONAL_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^(?:The |It |This |These |That |Those |Such |An? )").unwrap());
 static AND_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)\band\b").unwrap());
@@ -461,7 +783,10 @@ pub struct PeriodicMetrics {
 pub fn analyze_periodic(text: &str) -> PeriodicMetrics {
     let sentences = split_sentences(text);
     if sentences.is_empty() {
-        return PeriodicMetrics { periodic_running_ratio: 0.5, pre_main_verb_clause_count: 0.0 };
+        return PeriodicMetrics {
+            periodic_running_ratio: 0.5,
+            pre_main_verb_clause_count: 0.0,
+        };
     }
     let mut periodic_signals = 0.0f64;
     let mut running_signals = 0.0f64;
@@ -475,9 +800,16 @@ pub fn analyze_periodic(text: &str) -> PeriodicMetrics {
         let first_words: Vec<String> = words
             .iter()
             .take(5)
-            .map(|w| w.to_lowercase().chars().filter(|c| c.is_ascii_lowercase()).collect())
+            .map(|w| {
+                w.to_lowercase()
+                    .chars()
+                    .filter(|c| c.is_ascii_lowercase())
+                    .collect()
+            })
             .collect();
-        let starts_with_subord = first_words.iter().any(|w| SUBORDINATING_CONJ.contains(w.as_str()));
+        let starts_with_subord = first_words
+            .iter()
+            .any(|w| SUBORDINATING_CONJ.contains(w.as_str()));
         let starts_with_participle = PARTICIPLE_RE.is_match(words[0]);
         let mut early_commas = 0usize;
         let mut late_commas = 0usize;
@@ -508,9 +840,16 @@ pub fn analyze_periodic(text: &str) -> PeriodicMetrics {
         }
     }
     let total = periodic_signals + running_signals;
-    let periodic_running_ratio = if total > 0.0 { clamp(running_signals / total, 0.0, 1.0) } else { 0.5 };
+    let periodic_running_ratio = if total > 0.0 {
+        clamp(running_signals / total, 0.0, 1.0)
+    } else {
+        0.5
+    };
     let pre_main_verb_clause_count = total_pre_main as f64 / sentences.len() as f64;
-    PeriodicMetrics { periodic_running_ratio, pre_main_verb_clause_count }
+    PeriodicMetrics {
+        periodic_running_ratio,
+        pre_main_verb_clause_count,
+    }
 }
 
 /// Outputs of the voice axis (entropy/contrast/terminal D1-D3 are computed-but-unused in TS, so omitted).
@@ -522,22 +861,40 @@ pub struct VoiceMetrics {
 pub fn analyze_voice(text: &str) -> VoiceMetrics {
     let sentences = split_sentences(text);
     if sentences.is_empty() {
-        return VoiceMetrics { voice_score: 0.5, dynamic_range: 0.0 };
+        return VoiceMetrics {
+            voice_score: 0.5,
+            dynamic_range: 0.0,
+        };
     }
     let n = sentences.len() as f64;
-    let lengths: Vec<f64> = sentences.iter().map(|s| WHITESPACE.split(s).count() as f64).collect();
+    let lengths: Vec<f64> = sentences
+        .iter()
+        .map(|s| WHITESPACE.split(s).count() as f64)
+        .collect();
     let mean = lengths.iter().sum::<f64>() / lengths.len() as f64;
-    let variance = (lengths.iter().map(|l| (l - mean).powi(2)).sum::<f64>() / lengths.len() as f64).sqrt();
+    let variance =
+        (lengths.iter().map(|l| (l - mean).powi(2)).sum::<f64>() / lengths.len() as f64).sqrt();
     let coeff = if mean > 0.0 { variance / mean } else { 0.0 };
 
     let personality_count = count_markers(&PERSONALITY_MARKERS, text);
     let personality_density = personality_count as f64 / n;
     let dynamic_range = clamp(coeff, 0.0, 1.0);
-    let restriction_signal = if mean < 12.0 { clamp((12.0 - mean) / 8.0, 0.0, 1.0) } else { 0.0 };
+    let restriction_signal = if mean < 12.0 {
+        clamp((12.0 - mean) / 8.0, 0.0, 1.0)
+    } else {
+        0.0
+    };
 
     let openings: Vec<String> = sentences
         .iter()
-        .map(|s| WHITESPACE.split(s).take(2).collect::<Vec<_>>().join(" ").to_lowercase())
+        .map(|s| {
+            WHITESPACE
+                .split(s)
+                .take(2)
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase()
+        })
         .collect();
     let mut counts: HashMap<String, usize> = HashMap::new();
     for o in &openings {
@@ -557,7 +914,10 @@ pub fn analyze_voice(text: &str) -> VoiceMetrics {
     );
     let passive_density = PASSIVE_RE.find_iter(text).count() as f64 / n;
     let filler_density = FILLER_RE.find_iter(text).count() as f64 / n;
-    let impersonal_starts = sentences.iter().filter(|s| IMPERSONAL_RE.is_match(s.trim())).count();
+    let impersonal_starts = sentences
+        .iter()
+        .filter(|s| IMPERSONAL_RE.is_match(s.trim()))
+        .count();
     let impersonal_density = impersonal_starts as f64 / n;
 
     let unvoiced_signal = clamp(
@@ -569,8 +929,13 @@ pub fn analyze_voice(text: &str) -> VoiceMetrics {
         0.0,
         1.0,
     );
-    let has_rhetorical = personality_density > 0.05 || engagement_signal > 0.1 || dynamic_range > 0.3;
-    let effective_repetition = if has_rhetorical { repetition_signal } else { repetition_signal * 0.3 };
+    let has_rhetorical =
+        personality_density > 0.05 || engagement_signal > 0.1 || dynamic_range > 0.3;
+    let effective_repetition = if has_rhetorical {
+        repetition_signal
+    } else {
+        repetition_signal * 0.3
+    };
     let positive_voice = clamp(
         dynamic_range * 0.30
             + clamp(personality_density / 0.2, 0.0, 1.0) * 0.25
@@ -580,8 +945,15 @@ pub fn analyze_voice(text: &str) -> VoiceMetrics {
         0.0,
         1.0,
     );
-    let voice_score = clamp((1.0 - unvoiced_signal) * 0.60 + positive_voice * 0.40, 0.0, 1.0);
-    VoiceMetrics { voice_score, dynamic_range }
+    let voice_score = clamp(
+        (1.0 - unvoiced_signal) * 0.60 + positive_voice * 0.40,
+        0.0,
+        1.0,
+    );
+    VoiceMetrics {
+        voice_score,
+        dynamic_range,
+    }
 }
 
 /// Outputs of the register axis. F-score blend stubbed: `computeFScore` returns 50 with empty POS (L2).
@@ -597,12 +969,19 @@ pub fn analyze_register(text: &str) -> RegisterMetrics {
     let lgr = latinate_germanic_ratio(text);
 
     let mean = if !sentences.is_empty() {
-        sentences.iter().map(|s| WHITESPACE.split(s).count()).sum::<usize>() as f64 / sentences.len() as f64
+        sentences
+            .iter()
+            .map(|s| WHITESPACE.split(s).count())
+            .sum::<usize>() as f64
+            / sentences.len() as f64
     } else {
         15.0
     };
     let contraction_rate = CONTRACTION_RE.find_iter(text).count() as f64 / word_count;
-    let formal_count = words.iter().filter(|w| FORMAL_MARKERS.contains(w.as_str())).count();
+    let formal_count = words
+        .iter()
+        .filter(|w| FORMAL_MARKERS.contains(w.as_str()))
+        .count();
     let formal_density = formal_count as f64 / word_count;
     let avg_word_len = words.iter().map(|w| char_len(w)).sum::<usize>() as f64 / word_count;
     let polysyllabic_ratio = words.iter().filter(|w| char_len(w) >= 8).count() as f64 / word_count;
@@ -628,8 +1007,15 @@ pub fn analyze_register(text: &str) -> RegisterMetrics {
     );
     let register_markedness = clamp((high_signal - low_signal + 1.0) / 2.0, 0.0, 1.0);
     let f_score_normalized = 0.5; // computeFScore → 50 (empty POS) → /100
-    let register_markedness_score = clamp(register_markedness * 0.70 + f_score_normalized * 0.30, 0.0, 1.0);
-    RegisterMetrics { latinate_germanic_ratio: lgr, register_markedness_score }
+    let register_markedness_score = clamp(
+        register_markedness * 0.70 + f_score_normalized * 0.30,
+        0.0,
+        1.0,
+    );
+    RegisterMetrics {
+        latinate_germanic_ratio: lgr,
+        register_markedness_score,
+    }
 }
 
 // ── Opacity ──────────────────────────────────────────────────────────────────
@@ -681,21 +1067,37 @@ static OPACITY_CONTENT_MARKERS: Lazy<Vec<Regex>> = Lazy::new(|| {
 fn opacity_feature_vector(text: &str, sentences: &[String], words: &[String]) -> [f64; 4] {
     let word_count = words.len().max(1) as f64;
     let avg_sent_len = if !sentences.is_empty() {
-        sentences.iter().map(|s| WHITESPACE.split(s).count()).sum::<usize>() as f64 / sentences.len() as f64
+        sentences
+            .iter()
+            .map(|s| WHITESPACE.split(s).count())
+            .sum::<usize>() as f64
+            / sentences.len() as f64
     } else {
         15.0
     };
     let avg_word_len = words.iter().map(|w| char_len(w)).sum::<usize>() as f64 / word_count;
     let punct_density = PUNCT_RE.find_iter(text).count() as f64 / word_count;
-    let func_count = words.iter().filter(|w| FUNCTION_WORDS.contains(w.as_str())).count();
-    [avg_sent_len, avg_word_len, punct_density, func_count as f64 / word_count]
+    let func_count = words
+        .iter()
+        .filter(|w| FUNCTION_WORDS.contains(w.as_str()))
+        .count();
+    [
+        avg_sent_len,
+        avg_word_len,
+        punct_density,
+        func_count as f64 / word_count,
+    ]
 }
 
 fn opacity_deviation_from_norm(text: &str, sentences: &[String], words: &[String]) -> f64 {
     let f = opacity_feature_vector(text, sentences, words);
     let mut dist_sq = 0.0f64;
     for i in 0..4 {
-        let std = if TN_GOLD_STD[i] != 0.0 { TN_GOLD_STD[i] } else { 1.0 };
+        let std = if TN_GOLD_STD[i] != 0.0 {
+            TN_GOLD_STD[i]
+        } else {
+            1.0
+        };
         let z_feature = (f[i] - TN_GOLD_MEAN[i]) / std;
         let z_centroid = (TN_CENTROID[i] - TN_GOLD_MEAN[i]) / std;
         dist_sq += (z_feature - z_centroid).powi(2);
@@ -712,33 +1114,59 @@ struct OpacityBase {
 fn analyze_opacity(text: &str) -> OpacityBase {
     let sentences = split_sentences(text);
     let sentence_count = sentences.len().max(1) as f64;
-    let meta_ling_density = clamp(count_markers(&META_LINGUISTIC_MARKERS, text) as f64 / sentence_count / 0.12, 0.0, 1.0);
-    let content_opacity_density = clamp(count_markers(&OPACITY_CONTENT_MARKERS, text) as f64 / sentence_count / 0.25, 0.0, 1.0);
+    let meta_ling_density = clamp(
+        count_markers(&META_LINGUISTIC_MARKERS, text) as f64 / sentence_count / 0.12,
+        0.0,
+        1.0,
+    );
+    let content_opacity_density = clamp(
+        count_markers(&OPACITY_CONTENT_MARKERS, text) as f64 / sentence_count / 0.25,
+        0.0,
+        1.0,
+    );
     let words = tokenize(text);
     let content_words = get_content_words(&words);
 
     let mut alliteration_hits = 0usize;
     for i in 0..content_words.len().saturating_sub(2) {
         let a = content_words[i].chars().next();
-        if a.is_some() && a == content_words[i + 1].chars().next() && a == content_words[i + 2].chars().next() {
+        if a.is_some()
+            && a == content_words[i + 1].chars().next()
+            && a == content_words[i + 2].chars().next()
+        {
             alliteration_hits += 1;
         }
     }
     let sound_density = clamp(alliteration_hits as f64 / sentence_count / 0.3, 0.0, 1.0);
     let self_consciousness_score = meta_ling_density;
-    let polysyndeton_density = clamp(AND_RE.find_iter(text).count() as f64 / words.len().max(1) as f64 / 0.06, 0.0, 1.0);
+    let polysyndeton_density = clamp(
+        AND_RE.find_iter(text).count() as f64 / words.len().max(1) as f64 / 0.06,
+        0.0,
+        1.0,
+    );
 
     let mut word_freqs: HashMap<&str, usize> = HashMap::new();
     for w in &content_words {
         *word_freqs.entry(w.as_str()).or_insert(0) += 1;
     }
     let repeated = word_freqs.values().filter(|&&c| c >= 3).count();
-    let repetition_density = clamp(repeated as f64 / content_words.len().max(1) as f64 / 0.04, 0.0, 1.0);
+    let repetition_density = clamp(
+        repeated as f64 / content_words.len().max(1) as f64 / 0.04,
+        0.0,
+        1.0,
+    );
 
-    let sent_lens: Vec<usize> = sentences.iter().map(|s| WHITESPACE.split(s).count()).collect();
+    let sent_lens: Vec<usize> = sentences
+        .iter()
+        .map(|s| WHITESPACE.split(s).count())
+        .collect();
     let very_short = sent_lens.iter().filter(|&&l| l <= 5).count();
     let very_long = sent_lens.iter().filter(|&&l| l >= 40).count();
-    let extremes_density = clamp((very_short + very_long) as f64 / sentence_count / 0.25, 0.0, 1.0);
+    let extremes_density = clamp(
+        (very_short + very_long) as f64 / sentence_count / 0.25,
+        0.0,
+        1.0,
+    );
 
     let deviation = opacity_deviation_from_norm(text, &sentences, &words);
     let opacity_score = clamp(
@@ -752,13 +1180,20 @@ fn analyze_opacity(text: &str) -> OpacityBase {
         0.0,
         1.0,
     );
-    OpacityBase { opacity_score, self_consciousness_score }
+    OpacityBase {
+        opacity_score,
+        self_consciousness_score,
+    }
 }
 
 // ── Tacit patterns ───────────────────────────────────────────────────────────
 const CONSONANTS: &str = "bcdfghjklmnpqrstvwxyz";
 const ANTITHESIS_PAIRS: &[(&str, &str)] = &[
-    ("not", "but"), ("rather", "than"), ("neither", "nor"), ("less", "more"), ("few", "many"),
+    ("not", "but"),
+    ("rather", "than"),
+    ("neither", "nor"),
+    ("less", "more"),
+    ("few", "many"),
     ("old", "new"),
 ];
 
@@ -774,7 +1209,12 @@ pub struct TacitPatterns {
 }
 
 fn first_n_lower(s: &str, n: usize) -> String {
-    WHITESPACE.split(s).take(n).collect::<Vec<_>>().join(" ").to_lowercase()
+    WHITESPACE
+        .split(s)
+        .take(n)
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 pub fn detect_tacit(text: &str) -> TacitPatterns {
@@ -801,7 +1241,10 @@ pub fn detect_tacit(text: &str) -> TacitPatterns {
     for i in 0..stems.len().saturating_sub(1) {
         let end = (i + 8).min(stems.len());
         for j in (i + 1)..end {
-            if stems[i] == stems[j] && content_words[i] != content_words[j] && char_len(&stems[i]) > 3 {
+            if stems[i] == stems[j]
+                && content_words[i] != content_words[j]
+                && char_len(&stems[i]) > 3
+            {
                 polyptoton_count += 1;
                 break;
             }
@@ -811,8 +1254,16 @@ pub fn detect_tacit(text: &str) -> TacitPatterns {
 
     let mut chiasmus_count = 0i64;
     for i in 0..sentences.len().saturating_sub(1) {
-        let s1: Vec<String> = tokenize(&sentences[i]).iter().map(|w| rough_stem(w)).filter(|s| char_len(s) > 3).collect();
-        let s2: Vec<String> = tokenize(&sentences[i + 1]).iter().map(|w| rough_stem(w)).filter(|s| char_len(s) > 3).collect();
+        let s1: Vec<String> = tokenize(&sentences[i])
+            .iter()
+            .map(|w| rough_stem(w))
+            .filter(|s| char_len(s) > 3)
+            .collect();
+        let s2: Vec<String> = tokenize(&sentences[i + 1])
+            .iter()
+            .map(|w| rough_stem(w))
+            .filter(|s| char_len(s) > 3)
+            .collect();
         for a in 0..s1.len().saturating_sub(1) {
             let end = (a + 5).min(s1.len());
             for b in (a + 1)..end {
@@ -921,7 +1372,14 @@ pub struct LanhamMetrics {
 // Academic genre thresholds (GENRE_THRESHOLDS["academic"]).
 fn derive_labels(m: &LanhamMetrics) -> Labels {
     let band = |v: f64, lo: f64, hi: f64, a: &str, b: &str, c: &str| {
-        (if v < lo { a } else if v > hi { b } else { c }).to_string()
+        (if v < lo {
+            a
+        } else if v > hi {
+            b
+        } else {
+            c
+        })
+        .to_string()
     };
     let primary_register = if m.register_markedness_score >= 0.62 {
         "high"
@@ -930,7 +1388,14 @@ fn derive_labels(m: &LanhamMetrics) -> Labels {
     } else {
         "middle"
     };
-    let mut noun_verb = band(m.noun_verb_ratio, 0.35, 0.65, "predominantly noun-style", "predominantly verb-style", "balanced");
+    let mut noun_verb = band(
+        m.noun_verb_ratio,
+        0.35,
+        0.65,
+        "predominantly noun-style",
+        "predominantly verb-style",
+        "balanced",
+    );
     if noun_verb == "balanced"
         && m.nominalization_density > 8.0
         && m.be_verb_ratio > 0.25
@@ -940,12 +1405,40 @@ fn derive_labels(m: &LanhamMetrics) -> Labels {
     }
     Labels {
         noun_verb,
-        parataxis_hypotaxis: band(m.parataxis_hypotaxis_ratio, 0.35, 0.65, "predominantly paratactic", "predominantly hypotactic", "mixed"),
-        periodic_running: band(m.periodic_running_ratio, 0.35, 0.65, "predominantly periodic", "predominantly running", "mixed"),
-        voice: band(m.voice_score, 0.30, 0.70, "unvoiced", "strongly voiced", "moderate voice"),
+        parataxis_hypotaxis: band(
+            m.parataxis_hypotaxis_ratio,
+            0.35,
+            0.65,
+            "predominantly paratactic",
+            "predominantly hypotactic",
+            "mixed",
+        ),
+        periodic_running: band(
+            m.periodic_running_ratio,
+            0.35,
+            0.65,
+            "predominantly periodic",
+            "predominantly running",
+            "mixed",
+        ),
+        voice: band(
+            m.voice_score,
+            0.30,
+            0.70,
+            "unvoiced",
+            "strongly voiced",
+            "moderate voice",
+        ),
         primary_register: primary_register.to_string(),
         register_mixed: false,
-        opacity: band(m.opacity_score, 0.25, 0.60, "transparent", "opaque", "mixed opacity"),
+        opacity: band(
+            m.opacity_score,
+            0.25,
+            0.60,
+            "transparent",
+            "opaque",
+            "mixed opacity",
+        ),
     }
 }
 
@@ -961,13 +1454,20 @@ pub fn full_analysis(text: &str) -> LanhamMetrics {
 
     // Blend tacit pattern density into opacity (fullAnalysis).
     let sent_count = SENT_TERM_RE.find_iter(text).count().max(1) as f64;
-    let tacit_total = (tacit.anaphora_count + tacit.chiasmus_count + tacit.antithesis_count
-        + tacit.isocolon_count + tacit.climax_pattern_count) as f64
+    let tacit_total = (tacit.anaphora_count
+        + tacit.chiasmus_count
+        + tacit.antithesis_count
+        + tacit.isocolon_count
+        + tacit.climax_pattern_count) as f64
         / sent_count;
     let tacit_density = clamp(tacit_total / 0.2, 0.0, 1.0);
     let allit = clamp(tacit.alliteration_density / 0.15, 0.0, 1.0);
     let polyp = clamp(tacit.polyptoton_density / 0.1, 0.0, 1.0);
-    let opacity_score = clamp(op.opacity_score * 0.50 + tacit_density * 0.25 + allit * 0.15 + polyp * 0.10, 0.0, 1.0);
+    let opacity_score = clamp(
+        op.opacity_score * 0.50 + tacit_density * 0.25 + allit * 0.15 + polyp * 0.10,
+        0.0,
+        1.0,
+    );
 
     let mut m = LanhamMetrics {
         noun_verb_ratio: nv.noun_verb_ratio,
@@ -1014,7 +1514,11 @@ pub fn train_to_output_style(text: &str, name: &str, genre: &str) -> TrainResult
     let sents = split_sentences(text);
     let lens: Vec<usize> = sents.iter().map(|s| s.split_whitespace().count()).collect();
     let n = sents.len().max(1) as f64;
-    let avg_len = if lens.is_empty() { 0.0 } else { lens.iter().sum::<usize>() as f64 / lens.len() as f64 };
+    let avg_len = if lens.is_empty() {
+        0.0
+    } else {
+        lens.iter().sum::<usize>() as f64 / lens.len() as f64
+    };
     let long_ratio = lens.iter().filter(|&&l| l > 25).count() as f64 / n;
     let complex_ratio = sents
         .iter()
@@ -1026,10 +1530,15 @@ pub fn train_to_output_style(text: &str, name: &str, genre: &str) -> TrainResult
     let words = tokenize(text);
     let wn = words.len().max(1) as f64;
     let first_person = ["i", "we", "my", "our", "me", "us"];
-    let fp = words.iter().filter(|w| first_person.contains(&w.as_str())).count() as f64;
+    let fp = words
+        .iter()
+        .filter(|w| first_person.contains(&w.as_str()))
+        .count() as f64;
     let objectivity = (1.0 - fp / wn * 20.0).clamp(0.0, 1.0);
     let contractions = words.iter().filter(|w| w.contains('\'')).count() as f64;
-    let formality = (0.3 + (1.0 - contractions / wn * 10.0) * 0.3 + latinate_germanic_ratio(text) * 0.4).clamp(0.0, 1.0);
+    let formality =
+        (0.3 + (1.0 - contractions / wn * 10.0) * 0.3 + latinate_germanic_ratio(text) * 0.4)
+            .clamp(0.0, 1.0);
 
     let profile = Profile {
         metadata: Metadata {
@@ -1058,8 +1567,13 @@ pub fn train_to_output_style(text: &str, name: &str, genre: &str) -> TrainResult
                 long_sentence_ratio: long_ratio,
                 complex_sentence_ratio: complex_ratio,
             },
-            tone: Tone { formality_score: formality, objectivity_score: objectivity },
-            argument_patterns: ArgumentPatterns { claim_structure: ClaimStructure::default() },
+            tone: Tone {
+                formality_score: formality,
+                objectivity_score: objectivity,
+            },
+            argument_patterns: ArgumentPatterns {
+                claim_structure: ClaimStructure::default(),
+            },
             common_transitions: Vec::new(),
         },
     };
@@ -1091,11 +1605,17 @@ mod tests {
 
     #[test]
     fn foundation_matches_ts_reference() {
-        let fixtures: Vec<Foundation> = serde_json::from_str(&golden("golden_foundation.json")).unwrap();
+        let fixtures: Vec<Foundation> =
+            serde_json::from_str(&golden("golden_foundation.json")).unwrap();
         assert!(!fixtures.is_empty());
         for fx in &fixtures {
             assert_eq!(tokenize(&fx.text), fx.tokens, "tokenize:\n  {}", fx.text);
-            assert_eq!(split_sentences(&fx.text), fx.sentences, "split_sentences:\n  {}", fx.text);
+            assert_eq!(
+                split_sentences(&fx.text),
+                fx.sentences,
+                "split_sentences:\n  {}",
+                fx.text
+            );
         }
     }
 
@@ -1119,11 +1639,19 @@ mod tests {
         let lx: Lexical = serde_json::from_str(&golden("golden_lexical.json")).unwrap();
         for (i, w) in lx.words.iter().enumerate() {
             assert_eq!(is_verb(w), lx.is_verb[i], "is_verb({w})");
-            assert_eq!(is_nominalization(w), lx.is_nominalization[i], "is_nominalization({w})");
+            assert_eq!(
+                is_nominalization(w),
+                lx.is_nominalization[i],
+                "is_nominalization({w})"
+            );
             assert_eq!(is_latinate(w), lx.is_latinate[i], "is_latinate({w})");
             assert_eq!(rough_stem(w), lx.rough_stem[i], "rough_stem({w})");
         }
-        assert_eq!(get_content_words(&lx.words), lx.content_words, "get_content_words");
+        assert_eq!(
+            get_content_words(&lx.words),
+            lx.content_words,
+            "get_content_words"
+        );
     }
 
     #[derive(Deserialize)]
@@ -1162,68 +1690,159 @@ mod tests {
         let fixtures: Vec<AxisFixture> = serde_json::from_str(&golden("golden_axes.json")).unwrap();
         assert!(!fixtures.is_empty());
         let approx = |a: f64, b: f64, name: &str, t: &str| {
-            assert!((a - b).abs() < 1e-9, "{name}: got {a}, want {b} for:\n  {t}");
+            assert!(
+                (a - b).abs() < 1e-9,
+                "{name}: got {a}, want {b} for:\n  {t}"
+            );
         };
         for fx in &fixtures {
-            approx(latinate_germanic_ratio(&fx.text), fx.latinate_germanic_ratio, "latinate_germanic_ratio", &fx.text);
+            approx(
+                latinate_germanic_ratio(&fx.text),
+                fx.latinate_germanic_ratio,
+                "latinate_germanic_ratio",
+                &fx.text,
+            );
             let nv = analyze_noun_verb(&fx.text);
-            approx(nv.noun_verb_ratio, fx.noun_verb_ratio, "noun_verb_ratio", &fx.text);
-            approx(nv.nominalization_density, fx.nominalization_density, "nominalization_density", &fx.text);
-            approx(nv.prepositional_phrase_density, fx.prepositional_phrase_density, "prepositional_phrase_density", &fx.text);
-            approx(nv.be_verb_ratio, fx.be_verb_ratio, "be_verb_ratio", &fx.text);
+            approx(
+                nv.noun_verb_ratio,
+                fx.noun_verb_ratio,
+                "noun_verb_ratio",
+                &fx.text,
+            );
+            approx(
+                nv.nominalization_density,
+                fx.nominalization_density,
+                "nominalization_density",
+                &fx.text,
+            );
+            approx(
+                nv.prepositional_phrase_density,
+                fx.prepositional_phrase_density,
+                "prepositional_phrase_density",
+                &fx.text,
+            );
+            approx(
+                nv.be_verb_ratio,
+                fx.be_verb_ratio,
+                "be_verb_ratio",
+                &fx.text,
+            );
             let pp = analyze_parataxis(&fx.text);
-            approx(pp.parataxis_hypotaxis_ratio, fx.parataxis_hypotaxis_ratio, "parataxis_hypotaxis_ratio", &fx.text);
-            approx(pp.coordinating_conjunction_density, fx.coordinating_conjunction_density, "coordinating_conjunction_density", &fx.text);
-            approx(pp.subordinating_conjunction_density, fx.subordinating_conjunction_density, "subordinating_conjunction_density", &fx.text);
+            approx(
+                pp.parataxis_hypotaxis_ratio,
+                fx.parataxis_hypotaxis_ratio,
+                "parataxis_hypotaxis_ratio",
+                &fx.text,
+            );
+            approx(
+                pp.coordinating_conjunction_density,
+                fx.coordinating_conjunction_density,
+                "coordinating_conjunction_density",
+                &fx.text,
+            );
+            approx(
+                pp.subordinating_conjunction_density,
+                fx.subordinating_conjunction_density,
+                "subordinating_conjunction_density",
+                &fx.text,
+            );
             let per = analyze_periodic(&fx.text);
-            approx(per.periodic_running_ratio, fx.periodic_running_ratio, "periodic_running_ratio", &fx.text);
-            approx(per.pre_main_verb_clause_count, fx.pre_main_verb_clause_count, "pre_main_verb_clause_count", &fx.text);
+            approx(
+                per.periodic_running_ratio,
+                fx.periodic_running_ratio,
+                "periodic_running_ratio",
+                &fx.text,
+            );
+            approx(
+                per.pre_main_verb_clause_count,
+                fx.pre_main_verb_clause_count,
+                "pre_main_verb_clause_count",
+                &fx.text,
+            );
             let vo = analyze_voice(&fx.text);
             approx(vo.voice_score, fx.voice_score, "voice_score", &fx.text);
-            approx(vo.dynamic_range, fx.dynamic_range, "dynamic_range", &fx.text);
-            approx(analyze_register(&fx.text).register_markedness_score, fx.register_markedness_score, "register_markedness_score", &fx.text);
+            approx(
+                vo.dynamic_range,
+                fx.dynamic_range,
+                "dynamic_range",
+                &fx.text,
+            );
+            approx(
+                analyze_register(&fx.text).register_markedness_score,
+                fx.register_markedness_score,
+                "register_markedness_score",
+                &fx.text,
+            );
         }
     }
 
     #[derive(Deserialize)]
     struct TacitFx {
-        #[serde(rename = "alliterationDensity")] alliteration_density: f64,
-        #[serde(rename = "polyptotonDensity")] polyptoton_density: f64,
-        #[serde(rename = "chiasmusCount")] chiasmus_count: i64,
-        #[serde(rename = "antithesisCount")] antithesis_count: i64,
-        #[serde(rename = "anaphoraCount")] anaphora_count: i64,
-        #[serde(rename = "isocolonCount")] isocolon_count: i64,
-        #[serde(rename = "climaxPatternCount")] climax_pattern_count: i64,
+        #[serde(rename = "alliterationDensity")]
+        alliteration_density: f64,
+        #[serde(rename = "polyptotonDensity")]
+        polyptoton_density: f64,
+        #[serde(rename = "chiasmusCount")]
+        chiasmus_count: i64,
+        #[serde(rename = "antithesisCount")]
+        antithesis_count: i64,
+        #[serde(rename = "anaphoraCount")]
+        anaphora_count: i64,
+        #[serde(rename = "isocolonCount")]
+        isocolon_count: i64,
+        #[serde(rename = "climaxPatternCount")]
+        climax_pattern_count: i64,
     }
     #[derive(Deserialize)]
     struct LabelsFx {
-        #[serde(rename = "nounVerb")] noun_verb: String,
-        #[serde(rename = "parataxisHypotaxis")] parataxis_hypotaxis: String,
-        #[serde(rename = "periodicRunning")] periodic_running: String,
+        #[serde(rename = "nounVerb")]
+        noun_verb: String,
+        #[serde(rename = "parataxisHypotaxis")]
+        parataxis_hypotaxis: String,
+        #[serde(rename = "periodicRunning")]
+        periodic_running: String,
         voice: String,
-        #[serde(rename = "primaryRegister")] primary_register: String,
-        #[serde(rename = "registerMixed")] register_mixed: bool,
+        #[serde(rename = "primaryRegister")]
+        primary_register: String,
+        #[serde(rename = "registerMixed")]
+        register_mixed: bool,
         opacity: String,
     }
     #[derive(Deserialize)]
     struct FullFx {
         text: String,
-        #[serde(rename = "nounVerbRatio")] noun_verb_ratio: f64,
-        #[serde(rename = "nominalizationDensity")] nominalization_density: f64,
-        #[serde(rename = "prepositionalPhraseDensity")] prepositional_phrase_density: f64,
-        #[serde(rename = "beVerbRatio")] be_verb_ratio: f64,
-        #[serde(rename = "parataxisHypotaxisRatio")] parataxis_hypotaxis_ratio: f64,
-        #[serde(rename = "coordinatingConjunctionDensity")] coordinating_conjunction_density: f64,
-        #[serde(rename = "subordinatingConjunctionDensity")] subordinating_conjunction_density: f64,
-        #[serde(rename = "periodicRunningRatio")] periodic_running_ratio: f64,
-        #[serde(rename = "preMainVerbClauseCount")] pre_main_verb_clause_count: f64,
-        #[serde(rename = "voiceScore")] voice_score: f64,
-        #[serde(rename = "dynamicRange")] dynamic_range: f64,
-        #[serde(rename = "latinateGermanicRatio")] latinate_germanic_ratio: f64,
-        #[serde(rename = "registerMarkednessScore")] register_markedness_score: f64,
-        #[serde(rename = "opacityScore")] opacity_score: f64,
-        #[serde(rename = "selfConsciousnessScore")] self_consciousness_score: f64,
-        #[serde(rename = "tacitPatterns")] tacit_patterns: TacitFx,
+        #[serde(rename = "nounVerbRatio")]
+        noun_verb_ratio: f64,
+        #[serde(rename = "nominalizationDensity")]
+        nominalization_density: f64,
+        #[serde(rename = "prepositionalPhraseDensity")]
+        prepositional_phrase_density: f64,
+        #[serde(rename = "beVerbRatio")]
+        be_verb_ratio: f64,
+        #[serde(rename = "parataxisHypotaxisRatio")]
+        parataxis_hypotaxis_ratio: f64,
+        #[serde(rename = "coordinatingConjunctionDensity")]
+        coordinating_conjunction_density: f64,
+        #[serde(rename = "subordinatingConjunctionDensity")]
+        subordinating_conjunction_density: f64,
+        #[serde(rename = "periodicRunningRatio")]
+        periodic_running_ratio: f64,
+        #[serde(rename = "preMainVerbClauseCount")]
+        pre_main_verb_clause_count: f64,
+        #[serde(rename = "voiceScore")]
+        voice_score: f64,
+        #[serde(rename = "dynamicRange")]
+        dynamic_range: f64,
+        #[serde(rename = "latinateGermanicRatio")]
+        latinate_germanic_ratio: f64,
+        #[serde(rename = "registerMarkednessScore")]
+        register_markedness_score: f64,
+        #[serde(rename = "opacityScore")]
+        opacity_score: f64,
+        #[serde(rename = "selfConsciousnessScore")]
+        self_consciousness_score: f64,
+        #[serde(rename = "tacitPatterns")]
+        tacit_patterns: TacitFx,
         labels: LabelsFx,
     }
 
@@ -1232,41 +1851,145 @@ mod tests {
         let fixtures: Vec<FullFx> = serde_json::from_str(&golden("golden_full.json")).unwrap();
         assert!(!fixtures.is_empty());
         let approx = |a: f64, b: f64, name: &str, t: &str| {
-            assert!((a - b).abs() < 1e-9, "{name}: got {a}, want {b} for:\n  {t}");
+            assert!(
+                (a - b).abs() < 1e-9,
+                "{name}: got {a}, want {b} for:\n  {t}"
+            );
         };
         for fx in &fixtures {
             let m = full_analysis(&fx.text);
-            approx(m.noun_verb_ratio, fx.noun_verb_ratio, "noun_verb_ratio", &fx.text);
-            approx(m.nominalization_density, fx.nominalization_density, "nominalization_density", &fx.text);
-            approx(m.prepositional_phrase_density, fx.prepositional_phrase_density, "prepositional_phrase_density", &fx.text);
+            approx(
+                m.noun_verb_ratio,
+                fx.noun_verb_ratio,
+                "noun_verb_ratio",
+                &fx.text,
+            );
+            approx(
+                m.nominalization_density,
+                fx.nominalization_density,
+                "nominalization_density",
+                &fx.text,
+            );
+            approx(
+                m.prepositional_phrase_density,
+                fx.prepositional_phrase_density,
+                "prepositional_phrase_density",
+                &fx.text,
+            );
             approx(m.be_verb_ratio, fx.be_verb_ratio, "be_verb_ratio", &fx.text);
-            approx(m.parataxis_hypotaxis_ratio, fx.parataxis_hypotaxis_ratio, "parataxis_hypotaxis_ratio", &fx.text);
-            approx(m.coordinating_conjunction_density, fx.coordinating_conjunction_density, "coord_density", &fx.text);
-            approx(m.subordinating_conjunction_density, fx.subordinating_conjunction_density, "subord_density", &fx.text);
-            approx(m.periodic_running_ratio, fx.periodic_running_ratio, "periodic_running_ratio", &fx.text);
-            approx(m.pre_main_verb_clause_count, fx.pre_main_verb_clause_count, "pre_main_verb_clause_count", &fx.text);
+            approx(
+                m.parataxis_hypotaxis_ratio,
+                fx.parataxis_hypotaxis_ratio,
+                "parataxis_hypotaxis_ratio",
+                &fx.text,
+            );
+            approx(
+                m.coordinating_conjunction_density,
+                fx.coordinating_conjunction_density,
+                "coord_density",
+                &fx.text,
+            );
+            approx(
+                m.subordinating_conjunction_density,
+                fx.subordinating_conjunction_density,
+                "subord_density",
+                &fx.text,
+            );
+            approx(
+                m.periodic_running_ratio,
+                fx.periodic_running_ratio,
+                "periodic_running_ratio",
+                &fx.text,
+            );
+            approx(
+                m.pre_main_verb_clause_count,
+                fx.pre_main_verb_clause_count,
+                "pre_main_verb_clause_count",
+                &fx.text,
+            );
             approx(m.voice_score, fx.voice_score, "voice_score", &fx.text);
             approx(m.dynamic_range, fx.dynamic_range, "dynamic_range", &fx.text);
-            approx(m.latinate_germanic_ratio, fx.latinate_germanic_ratio, "latinate_germanic_ratio", &fx.text);
-            approx(m.register_markedness_score, fx.register_markedness_score, "register_markedness_score", &fx.text);
+            approx(
+                m.latinate_germanic_ratio,
+                fx.latinate_germanic_ratio,
+                "latinate_germanic_ratio",
+                &fx.text,
+            );
+            approx(
+                m.register_markedness_score,
+                fx.register_markedness_score,
+                "register_markedness_score",
+                &fx.text,
+            );
             approx(m.opacity_score, fx.opacity_score, "opacity_score", &fx.text);
-            approx(m.self_consciousness_score, fx.self_consciousness_score, "self_consciousness_score", &fx.text);
+            approx(
+                m.self_consciousness_score,
+                fx.self_consciousness_score,
+                "self_consciousness_score",
+                &fx.text,
+            );
             let tp = &m.tacit_patterns;
             let fp = &fx.tacit_patterns;
-            approx(tp.alliteration_density, fp.alliteration_density, "alliteration_density", &fx.text);
-            approx(tp.polyptoton_density, fp.polyptoton_density, "polyptoton_density", &fx.text);
-            assert_eq!(tp.chiasmus_count, fp.chiasmus_count, "chiasmus_count: {}", fx.text);
-            assert_eq!(tp.antithesis_count, fp.antithesis_count, "antithesis_count: {}", fx.text);
-            assert_eq!(tp.anaphora_count, fp.anaphora_count, "anaphora_count: {}", fx.text);
-            assert_eq!(tp.isocolon_count, fp.isocolon_count, "isocolon_count: {}", fx.text);
-            assert_eq!(tp.climax_pattern_count, fp.climax_pattern_count, "climax_pattern_count: {}", fx.text);
+            approx(
+                tp.alliteration_density,
+                fp.alliteration_density,
+                "alliteration_density",
+                &fx.text,
+            );
+            approx(
+                tp.polyptoton_density,
+                fp.polyptoton_density,
+                "polyptoton_density",
+                &fx.text,
+            );
+            assert_eq!(
+                tp.chiasmus_count, fp.chiasmus_count,
+                "chiasmus_count: {}",
+                fx.text
+            );
+            assert_eq!(
+                tp.antithesis_count, fp.antithesis_count,
+                "antithesis_count: {}",
+                fx.text
+            );
+            assert_eq!(
+                tp.anaphora_count, fp.anaphora_count,
+                "anaphora_count: {}",
+                fx.text
+            );
+            assert_eq!(
+                tp.isocolon_count, fp.isocolon_count,
+                "isocolon_count: {}",
+                fx.text
+            );
+            assert_eq!(
+                tp.climax_pattern_count, fp.climax_pattern_count,
+                "climax_pattern_count: {}",
+                fx.text
+            );
             let (lm, lf) = (&m.labels, &fx.labels);
             assert_eq!(lm.noun_verb, lf.noun_verb, "label nounVerb: {}", fx.text);
-            assert_eq!(lm.parataxis_hypotaxis, lf.parataxis_hypotaxis, "label parataxis: {}", fx.text);
-            assert_eq!(lm.periodic_running, lf.periodic_running, "label periodic: {}", fx.text);
+            assert_eq!(
+                lm.parataxis_hypotaxis, lf.parataxis_hypotaxis,
+                "label parataxis: {}",
+                fx.text
+            );
+            assert_eq!(
+                lm.periodic_running, lf.periodic_running,
+                "label periodic: {}",
+                fx.text
+            );
             assert_eq!(lm.voice, lf.voice, "label voice: {}", fx.text);
-            assert_eq!(lm.primary_register, lf.primary_register, "label register: {}", fx.text);
-            assert_eq!(lm.register_mixed, lf.register_mixed, "label registerMixed: {}", fx.text);
+            assert_eq!(
+                lm.primary_register, lf.primary_register,
+                "label register: {}",
+                fx.text
+            );
+            assert_eq!(
+                lm.register_mixed, lf.register_mixed,
+                "label registerMixed: {}",
+                fx.text
+            );
             assert_eq!(lm.opacity, lf.opacity, "label opacity: {}", fx.text);
         }
     }

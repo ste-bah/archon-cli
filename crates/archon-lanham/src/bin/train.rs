@@ -17,11 +17,28 @@ fn main() {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--name" => { name = args.get(i + 1).cloned().unwrap_or_default(); i += 2; }
-            "--genre" => { genre = args.get(i + 1).cloned().unwrap_or_else(|| "academic".into()); i += 2; }
-            "--out" => { out = args.get(i + 1).cloned(); i += 2; }
-            f if f.starts_with("--") => { i += 1; }
-            _ => { files.push(args[i].clone()); i += 1; }
+            "--name" => {
+                name = args.get(i + 1).cloned().unwrap_or_default();
+                i += 2;
+            }
+            "--genre" => {
+                genre = args
+                    .get(i + 1)
+                    .cloned()
+                    .unwrap_or_else(|| "academic".into());
+                i += 2;
+            }
+            "--out" => {
+                out = args.get(i + 1).cloned();
+                i += 2;
+            }
+            f if f.starts_with("--") => {
+                i += 1;
+            }
+            _ => {
+                files.push(args[i].clone());
+                i += 1;
+            }
         }
     }
 
@@ -42,7 +59,10 @@ fn main() {
     match out {
         Some(p) => {
             std::fs::write(&p, &r.md).unwrap_or_else(|e| panic!("write {p}: {e}"));
-            eprintln!("trained '{name}' — voice={}, register={}, parataxis={} → {p}", r.voice, r.register, r.parataxis);
+            eprintln!(
+                "trained '{name}' — voice={}, register={}, parataxis={} → {p}",
+                r.voice, r.register, r.parataxis
+            );
         }
         None => print!("{}", r.md),
     }

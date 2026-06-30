@@ -10,7 +10,7 @@
 
 use cozo::DbInstance;
 
-use archon_ingest_ext::chunk::{chunk_blocks_default, Block, BlockType, ChunkOut, PageBoxes};
+use archon_ingest_ext::chunk::{Block, BlockType, ChunkOut, PageBoxes, chunk_blocks_default};
 use archon_ingest_ext::layout;
 
 use crate::chunking::page_for_offset;
@@ -127,7 +127,8 @@ pub(crate) fn chunkout_spatial(
         .find(|p| p.page_num == out.page_start)
         .or_else(|| pages.first());
     let super_box = primary.map(|p| p.super_box).unwrap_or([0.0; 4]);
-    let super_json = serde_json::to_string(&bbox_json(&super_box)).unwrap_or_else(|_| "[]".to_string());
+    let super_json =
+        serde_json::to_string(&bbox_json(&super_box)).unwrap_or_else(|_| "[]".to_string());
     let spatial_hash = sha256_str(&format!("{}\u{0}{}", coord_space, blocks_json));
     Some(ChunkSpatial {
         chunk_id: chunk_id.to_string(),
@@ -242,15 +243,27 @@ mod tests {
         // page 1 owns [0, 20), page 2 owns [20, end).
         let text = "First para.\n\nSecond para on page two.";
         let offsets = vec![
-            PageOffset { page: 1, char_start: 0, char_end: 13 },
-            PageOffset { page: 2, char_start: 13, char_end: text.len() },
+            PageOffset {
+                page: 1,
+                char_start: 0,
+                char_end: 13,
+            },
+            PageOffset {
+                page: 2,
+                char_start: 13,
+                char_end: text.len(),
+            },
         ];
         let blocks = blocks_from_text(text, &offsets);
         assert_eq!(blocks.len(), 2);
         assert_eq!(blocks[0].text, "First para.");
         assert_eq!(blocks[0].page, 1);
         assert_eq!(blocks[1].page, 2);
-        assert_eq!(blocks[0].bbox, [0.0, 0.0, 0.0, 0.0], "flat-text path has sentinel bbox");
+        assert_eq!(
+            blocks[0].bbox,
+            [0.0, 0.0, 0.0, 0.0],
+            "flat-text path has sentinel bbox"
+        );
     }
 
     #[test]
@@ -259,7 +272,11 @@ mod tests {
             text: "x".into(),
             page_start: 1,
             page_end: 1,
-            bboxes: vec![PageBoxes { page_num: 1, super_box: [1.0, 2.0, 3.0, 4.0], blocks: vec![[1.0, 2.0, 3.0, 4.0]] }],
+            bboxes: vec![PageBoxes {
+                page_num: 1,
+                super_box: [1.0, 2.0, 3.0, 4.0],
+                blocks: vec![[1.0, 2.0, 3.0, 4.0]],
+            }],
         };
         assert!(chunkout_spatial("chunk-d-0", &out, COORD_NONE).is_none());
         let s = chunkout_spatial("chunk-d-0", &out, COORD_MARKER).expect("marker → spatial");
@@ -277,20 +294,35 @@ mod tests {
         // Two big single-page blocks → two chunks (each exceeds max alone), with real bboxes.
         let big = "word ".repeat(1200); // ~6000 chars → ~1500 tok > max
         let blocks = vec![
-            Block { block_type: BlockType::Text, text: big.clone(), bbox: [10.0, 20.0, 100.0, 40.0], page: 1 },
-            Block { block_type: BlockType::Text, text: big, bbox: [10.0, 50.0, 100.0, 80.0], page: 2 },
+            Block {
+                block_type: BlockType::Text,
+                text: big.clone(),
+                bbox: [10.0, 20.0, 100.0, 40.0],
+                page: 1,
+            },
+            Block {
+                block_type: BlockType::Text,
+                text: big,
+                bbox: [10.0, 50.0, 100.0, 80.0],
+                page: 2,
+            },
         ];
-        let (chunks, spatials) = persist_block_chunks(
-            &db, "docA", "ocr-docA", "ocr_text", &blocks, COORD_MARKER,
-        )
-        .unwrap();
+        let (chunks, spatials) =
+            persist_block_chunks(&db, "docA", "ocr-docA", "ocr_text", &blocks, COORD_MARKER)
+                .unwrap();
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].chunk_id, "chunk-docA-0");
         assert_eq!(chunks[1].chunk_id, "chunk-docA-1");
-        assert_eq!(spatials.len(), 2, "marker path writes a spatial row per chunk");
+        assert_eq!(
+            spatials.len(),
+            2,
+            "marker path writes a spatial row per chunk"
+        );
 
         // Roundtrip the spatial row from the DB.
-        let got = store::get_chunk_spatial(&db, "chunk-docA-0").unwrap().unwrap();
+        let got = store::get_chunk_spatial(&db, "chunk-docA-0")
+            .unwrap()
+            .unwrap();
         assert_eq!(got.coord_space, "marker");
         assert_eq!(got.page_num, 1);
         let listed = store::list_chunks_for_doc(&db, "docA").unwrap();
@@ -302,15 +334,21 @@ mod tests {
         let db = test_db();
         crate::schema::ensure_doc_schema(&db).unwrap();
         let text = "Short one.\n\nShort two.";
-        let offsets = vec![PageOffset { page: 1, char_start: 0, char_end: text.len() }];
+        let offsets = vec![PageOffset {
+            page: 1,
+            char_start: 0,
+            char_end: text.len(),
+        }];
         let blocks = blocks_from_text(text, &offsets);
-        let (chunks, spatials) = persist_block_chunks(
-            &db, "docB", "ocr-docB", "ocr_text", &blocks, COORD_NONE,
-        )
-        .unwrap();
+        let (chunks, spatials) =
+            persist_block_chunks(&db, "docB", "ocr-docB", "ocr_text", &blocks, COORD_NONE).unwrap();
         assert_eq!(chunks.len(), 1, "small text → one merged chunk");
         assert!(spatials.is_empty(), "flat-text path writes no spatial rows");
-        assert!(store::get_chunk_spatial(&db, "chunk-docB-0").unwrap().is_none());
+        assert!(
+            store::get_chunk_spatial(&db, "chunk-docB-0")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -318,16 +356,33 @@ mod tests {
         let db = test_db();
         crate::schema::ensure_doc_schema(&db).unwrap();
         let blocks = vec![
-            Block { block_type: BlockType::Text, text: "Body about energeia.".into(), bbox: [1.0, 2.0, 3.0, 4.0], page: 1 },
-            Block { block_type: BlockType::Text, text: "1147a".into(), bbox: [5.0, 6.0, 7.0, 8.0], page: 1 },
-            Block { block_type: BlockType::Text, text: "More body.".into(), bbox: [1.0, 2.0, 3.0, 4.0], page: 2 },
+            Block {
+                block_type: BlockType::Text,
+                text: "Body about energeia.".into(),
+                bbox: [1.0, 2.0, 3.0, 4.0],
+                page: 1,
+            },
+            Block {
+                block_type: BlockType::Text,
+                text: "1147a".into(),
+                bbox: [5.0, 6.0, 7.0, 8.0],
+                page: 1,
+            },
+            Block {
+                block_type: BlockType::Text,
+                text: "More body.".into(),
+                bbox: [1.0, 2.0, 3.0, 4.0],
+                page: 2,
+            },
         ];
-        let (chunks, _spatials) = persist_block_chunks(
-            &db, "docL", "ocr-docL", "ocr_text", &blocks, COORD_MARKER,
-        )
-        .unwrap();
+        let (chunks, _spatials) =
+            persist_block_chunks(&db, "docL", "ocr-docL", "ocr_text", &blocks, COORD_MARKER)
+                .unwrap();
         // The Bekker block left the body text...
-        assert!(!chunks.iter().any(|c| c.content.contains("1147a")), "Bekker stripped from body");
+        assert!(
+            !chunks.iter().any(|c| c.content.contains("1147a")),
+            "Bekker stripped from body"
+        );
         assert!(chunks.iter().any(|c| c.content.contains("energeia")));
         // ...but is captured as a first-class locator with its bbox.
         let locs = store::list_locators_for_doc(&db, "docL").unwrap();
