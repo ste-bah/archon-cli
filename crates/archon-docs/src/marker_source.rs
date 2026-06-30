@@ -1,14 +1,16 @@
 //! Marker block source — obtains Marker's block-tree JSON and parses it to `Vec<Block>`.
 //!
-//! Device-agnostic by construction: Marker runs as a Python sidecar that auto-detects its
-//! device (cuda → mps → cpu); the transport here is **orthogonal** to device —
-//! a local subprocess (default, the standalone-Mac story), a remote HTTP Marker service
-//! (e.g. WRAITH for bulk on NVIDIA), or a pre-extracted JSON file you produce out of band.
-//! All three yield the same block-tree JSON, parsed by
-//! `archon_ingest_ext::marker::parse_marker_str`.
+//! Device-adaptive: the Marker sidecar runs as a Python subprocess, but WHICH device it runs
+//! on (and at what surya batch caps) is resolved at build time by `archon-accel` from the
+//! host's *free* VRAM — not a static string. The load-bearing correctness guarantee is the
+//! per-doc GPU-OOM → CPU retry in `fetch_json`. Transport is orthogonal to device: a local
+//! subprocess (default, the standalone Mac/laptop story), a remote HTTP Marker service (e.g.
+//! WRAITH for bulk on NVIDIA), or a pre-extracted JSON file. All three yield the same
+//! block-tree JSON, parsed by `archon_ingest_ext::marker::parse_marker_str`.
 
 use std::path::{Path, PathBuf};
 
+use archon_accel::{marker_cpu_fallback_env, plan_marker_ingest, AccelKind, DeviceOverrides};
 use archon_ingest_ext::chunk::Block;
 use archon_ingest_ext::marker::parse_marker_str;
 use archon_policy::PdfPolicy;
@@ -18,12 +20,14 @@ use crate::errors::DocsError;
 /// Where/how to obtain a PDF's Marker block tree.
 #[derive(Clone, Debug)]
 pub enum MarkerSource {
-    /// Spawn the local Python sidecar: `python <script> <pdf> [--device <dev>]`.
-    /// `device = None` lets the sidecar auto-detect (cuda → mps → cpu).
+    /// Spawn the local Python sidecar: `python <script> <pdf> [--device <dev>]` under `env`
+    /// (surya batch caps + alloc conf from the placement planner). `device = None` lets the
+    /// sidecar auto-detect (cuda → mps → cpu).
     Subprocess {
         python: String,
         script: PathBuf,
         device: Option<String>,
+        env: Vec<(String, String)>,
     },
     /// POST the PDF bytes to a remote Marker HTTP service; expects block-tree JSON back.
     Http { url: String },
@@ -31,17 +35,72 @@ pub enum MarkerSource {
     PreExtracted { json_path: PathBuf },
 }
 
-/// Build a `MarkerSource` from policy: present `marker_sidecar` path → local subprocess
-/// (with optional `marker_device`); absent → `None` (caller falls back to flat-text blocks).
+/// Build a `MarkerSource` from policy. Present `marker_sidecar` path → local subprocess whose
+/// device + surya batch caps are resolved by `archon-accel` from the host's free VRAM
+/// (`marker_device` of `None`/`"auto"` → planner-chosen; an explicit `cuda|mps|cpu` forces it).
+/// Absent `marker_sidecar` → `None` (caller falls back to flat-text blocks).
+///
+/// NOTE: this resolves placement (a cheap `nvidia-smi`/`sysinfo` probe) once per call — in bulk
+/// ingest, once per PDF. It can be hoisted to once-per-run if the probe ever shows up in a profile.
 pub fn from_policy(pdf: &PdfPolicy) -> Option<MarkerSource> {
-    pdf.marker_sidecar.as_ref().map(|script| MarkerSource::Subprocess {
+    let script = pdf.marker_sidecar.as_ref()?;
+    let (device, env) = resolve_marker_placement(pdf);
+    Some(MarkerSource::Subprocess {
         python: pdf
             .marker_python
             .clone()
             .unwrap_or_else(|| "python3".to_string()),
         script: PathBuf::from(script),
-        device: pdf.marker_device.clone(),
+        device: Some(device),
+        env,
     })
+}
+
+/// Map the policy's `marker_device` knob to `archon-accel` overrides. `None`/`"auto"`/unknown →
+/// planner auto-detect; an explicit `cuda|mps|metal|cpu` forces the device (still OOM-guarded).
+fn overrides_from_policy(pdf: &PdfPolicy) -> DeviceOverrides {
+    let force_marker_device = match pdf.marker_device.as_deref() {
+        None | Some("auto") | Some("") => None,
+        Some("cuda") => Some(AccelKind::Cuda),
+        Some("mps") | Some("metal") => Some(AccelKind::Metal),
+        Some("cpu") => Some(AccelKind::Cpu),
+        Some(_) => None,
+    };
+    DeviceOverrides {
+        force_marker_device,
+        memory_budget_mb: pdf.marker_memory_budget_mb,
+        ..DeviceOverrides::default()
+    }
+}
+
+/// Resolve the sidecar device string + env via `archon-accel` (free-VRAM aware).
+fn resolve_marker_placement(pdf: &PdfPolicy) -> (String, Vec<(String, String)>) {
+    let report = archon_accel::detect();
+    let plan = plan_marker_ingest(&report, &overrides_from_policy(pdf));
+    let placement = plan
+        .marker()
+        .expect("plan_marker_ingest always yields a Marker placement");
+    (
+        placement.device.sidecar_device().to_string(),
+        placement.marker_sidecar_env(),
+    )
+}
+
+/// Internal: distinguishes a torch-OOM sidecar failure (retry on CPU) from any other error.
+enum SidecarError {
+    Oom { device: String },
+    Other(DocsError),
+}
+
+impl From<SidecarError> for DocsError {
+    fn from(e: SidecarError) -> Self {
+        match e {
+            SidecarError::Oom { device } => DocsError::Storage {
+                message: format!("marker OOM on device={device} (CPU fallback also failed)"),
+            },
+            SidecarError::Other(d) => d,
+        }
+    }
 }
 
 impl MarkerSource {
@@ -55,28 +114,21 @@ impl MarkerSource {
 
     async fn fetch_json(&self, pdf_path: &Path) -> Result<String, DocsError> {
         match self {
-            MarkerSource::Subprocess { python, script, device } => {
-                let mut cmd = tokio::process::Command::new(python);
-                cmd.arg(script).arg(pdf_path);
-                if let Some(dev) = device {
-                    cmd.arg("--device").arg(dev);
+            MarkerSource::Subprocess {
+                python,
+                script,
+                device,
+                env,
+            } => match run_sidecar(python, script, pdf_path, device.as_deref(), env).await {
+                Ok(json) => Ok(json),
+                // Per-doc GPU-OOM → retry this document on CPU (the load-bearing fallback).
+                Err(SidecarError::Oom { device: dev }) if dev != "cpu" => {
+                    run_sidecar(python, script, pdf_path, Some("cpu"), &marker_cpu_fallback_env())
+                        .await
+                        .map_err(DocsError::from)
                 }
-                let out = cmd.output().await.map_err(|e| DocsError::Storage {
-                    message: format!("marker sidecar spawn failed: {e}"),
-                })?;
-                if !out.status.success() {
-                    return Err(DocsError::Storage {
-                        message: format!(
-                            "marker sidecar exited {}: {}",
-                            out.status,
-                            String::from_utf8_lossy(&out.stderr)
-                        ),
-                    });
-                }
-                String::from_utf8(out.stdout).map_err(|e| DocsError::Storage {
-                    message: format!("marker sidecar stdout not utf-8: {e}"),
-                })
-            }
+                Err(e) => Err(e.into()),
+            },
             MarkerSource::Http { url } => {
                 let bytes = tokio::fs::read(pdf_path).await.map_err(|e| DocsError::Storage {
                     message: format!("read pdf for marker http failed: {e}"),
@@ -93,13 +145,56 @@ impl MarkerSource {
                     message: format!("marker http response read failed: {e}"),
                 })
             }
-            MarkerSource::PreExtracted { json_path } => {
-                tokio::fs::read_to_string(json_path).await.map_err(|e| DocsError::Storage {
+            MarkerSource::PreExtracted { json_path } => tokio::fs::read_to_string(json_path)
+                .await
+                .map_err(|e| DocsError::Storage {
                     message: format!("read pre-extracted marker json failed: {e}"),
-                })
-            }
+                }),
         }
     }
+}
+
+/// Run the Marker sidecar once with `device` + `env`, classifying a torch-OOM exit (the sidecar
+/// exits 42 on OOM, or carries an OOM signature on stderr) so the caller can retry on CPU.
+async fn run_sidecar(
+    python: &str,
+    script: &Path,
+    pdf_path: &Path,
+    device: Option<&str>,
+    env: &[(String, String)],
+) -> Result<String, SidecarError> {
+    let mut cmd = tokio::process::Command::new(python);
+    cmd.arg(script).arg(pdf_path);
+    if let Some(dev) = device {
+        cmd.arg("--device").arg(dev);
+    }
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let out = cmd.output().await.map_err(|e| {
+        SidecarError::Other(DocsError::Storage {
+            message: format!("marker sidecar spawn failed: {e}"),
+        })
+    })?;
+    if out.status.success() {
+        return String::from_utf8(out.stdout).map_err(|e| {
+            SidecarError::Other(DocsError::Storage {
+                message: format!("marker sidecar stdout not utf-8: {e}"),
+            })
+        });
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let is_oom = out.status.code() == Some(42)
+        || stderr.to_lowercase().contains("out of memory")
+        || stderr.contains("OutOfMemoryError");
+    if is_oom {
+        return Err(SidecarError::Oom {
+            device: device.unwrap_or("cpu").to_string(),
+        });
+    }
+    Err(SidecarError::Other(DocsError::Storage {
+        message: format!("marker sidecar exited {}: {}", out.status, stderr),
+    }))
 }
 
 #[cfg(test)]
@@ -139,6 +234,7 @@ mod tests {
             python: "python3".into(),
             script: PathBuf::from("/nonexistent/archon_marker_sidecar.py"),
             device: Some("cpu".into()),
+            env: vec![],
         };
         assert!(src.blocks_for(Path::new("x.pdf")).await.is_err());
     }
@@ -150,7 +246,50 @@ mod tests {
         pdf.marker_sidecar = Some("scripts/archon_marker_sidecar.py".into());
         pdf.marker_device = Some("mps".into());
         match from_policy(&pdf) {
-            Some(MarkerSource::Subprocess { device, .. }) => assert_eq!(device.as_deref(), Some("mps")),
+            Some(MarkerSource::Subprocess { device, .. }) => {
+                assert_eq!(device.as_deref(), Some("mps"))
+            }
+            other => panic!("expected subprocess, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn overrides_map_explicit_devices() {
+        let mut p = PdfPolicy::default();
+        assert_eq!(overrides_from_policy(&p).force_marker_device, None);
+        p.marker_device = Some("auto".into());
+        assert_eq!(overrides_from_policy(&p).force_marker_device, None);
+        p.marker_device = Some("cuda".into());
+        assert_eq!(
+            overrides_from_policy(&p).force_marker_device,
+            Some(AccelKind::Cuda)
+        );
+        p.marker_device = Some("mps".into());
+        assert_eq!(
+            overrides_from_policy(&p).force_marker_device,
+            Some(AccelKind::Metal)
+        );
+        p.marker_device = Some("cpu".into());
+        assert_eq!(
+            overrides_from_policy(&p).force_marker_device,
+            Some(AccelKind::Cpu)
+        );
+    }
+
+    #[test]
+    fn from_policy_forced_cpu_yields_cpu_device_and_env() {
+        // Host-agnostic: forcing cpu must produce a cpu sidecar device + a non-empty env,
+        // regardless of what hardware `detect()` finds on the test host.
+        let p = PdfPolicy {
+            marker_sidecar: Some("scripts/archon_marker_sidecar.py".into()),
+            marker_device: Some("cpu".into()),
+            ..Default::default()
+        };
+        match from_policy(&p) {
+            Some(MarkerSource::Subprocess { device, env, .. }) => {
+                assert_eq!(device.as_deref(), Some("cpu"));
+                assert!(env.iter().any(|(k, _)| k == "TORCH_DEVICE"));
+            }
             other => panic!("expected subprocess, got {other:?}"),
         }
     }

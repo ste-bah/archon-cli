@@ -286,6 +286,12 @@ pub fn plan_marker_ingest(
     plan_placement(report, &consumers, overrides)
 }
 
+/// The sidecar env for a forced-CPU Marker fallback — used on the per-doc GPU-OOM retry in
+/// `archon-docs`. Equivalent to a CPU Marker placement's env (cpu device + small surya caps).
+pub fn marker_cpu_fallback_env() -> Vec<(String, String)> {
+    Placement::cpu(ConsumerKind::Marker, "gpu-oom fallback").marker_sidecar_env()
+}
+
 /// Core planner. Packs GPU-preferring consumers (highest priority first) onto the single
 /// best-free GPU; anything that does not fit free memory falls to CPU. Pure + deterministic.
 pub fn plan_placement(

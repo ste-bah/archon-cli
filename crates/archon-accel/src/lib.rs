@@ -26,7 +26,7 @@ pub mod report;
 
 pub use detect::detect;
 pub use placement::{
-    plan_marker_ingest, plan_placement, ConsumerKind, ConsumerRequest, DeviceOverrides,
-    ModelFootprintTable, Placement, PlacementPlan, Precision, SuryaTier,
+    marker_cpu_fallback_env, plan_marker_ingest, plan_placement, ConsumerKind, ConsumerRequest,
+    DeviceOverrides, ModelFootprintTable, Placement, PlacementPlan, Precision, SuryaTier,
 };
 pub use report::{AccelKind, Accelerator, AcceleratorReport};

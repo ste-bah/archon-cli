@@ -28,7 +28,7 @@ import sys
 def resolve_device(explicit: str | None) -> str:
     """cuda → mps → cpu. `--device`/`TORCH_DEVICE` override auto-detection."""
     chosen = explicit or os.environ.get("TORCH_DEVICE")
-    if chosen:
+    if chosen and chosen != "auto":
         return chosen
     try:
         import torch  # noqa: WPS433 (local import: keep --selftest torch-free)
@@ -110,7 +110,7 @@ def run_marker(pdf_path: str, device: str) -> dict:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Archon Marker sidecar (device-agnostic).")
     parser.add_argument("pdf", nargs="?", help="path to the input PDF")
-    parser.add_argument("--device", help="cuda|mps|cpu (default: auto cuda→mps→cpu)")
+    parser.add_argument("--device", help="cuda|mps|cpu|auto (default/auto: cuda→mps→cpu)")
     parser.add_argument("--output", help="write JSON here (default: stdout)")
     parser.add_argument("--selftest", action="store_true",
                         help="emit a fixture block tree without importing torch/marker")
@@ -123,7 +123,15 @@ def main(argv: list[str]) -> int:
         if not args.pdf:
             parser.error("a <pdf> path is required unless --selftest is given")
         sys.stderr.write(f"[archon-marker] device={device} pdf={args.pdf}\n")
-        tree = run_marker(args.pdf, device)
+        try:
+            tree = run_marker(args.pdf, device)
+        except Exception as exc:  # noqa: BLE001 — classify OOM, re-raise everything else
+            if "out of memory" in str(exc).lower() or type(exc).__name__ == "OutOfMemoryError":
+                # Structured OOM signal: the Rust caller (marker_source.rs) catches exit 42
+                # (or this stderr line) and retries the document on CPU.
+                sys.stderr.write(f"[archon-marker] OOM on device={device}: {exc}\n")
+                return 42
+            raise
 
     payload = json.dumps(tree, ensure_ascii=False)
     if args.output:

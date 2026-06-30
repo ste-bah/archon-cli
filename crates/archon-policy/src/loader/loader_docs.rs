@@ -64,6 +64,7 @@ struct RawPdfPolicy {
     marker_sidecar: Option<String>,
     marker_device: Option<String>,
     marker_python: Option<String>,
+    marker_memory_budget_mb: Option<u64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -201,6 +202,9 @@ fn apply_pdf(policy: &mut PdfPolicy, raw: RawPdfPolicy) {
     }
     if raw.marker_python.is_some() {
         policy.marker_python = raw.marker_python;
+    }
+    if raw.marker_memory_budget_mb.is_some() {
+        policy.marker_memory_budget_mb = raw.marker_memory_budget_mb;
     }
 }
 

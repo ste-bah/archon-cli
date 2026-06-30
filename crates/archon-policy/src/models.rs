@@ -243,6 +243,10 @@ pub struct PdfPolicy {
     /// touching the system interpreter.
     #[serde(default)]
     pub marker_python: Option<String>,
+    /// Optional hard cap (MiB) on GPU memory the placement planner may use for Marker; clamps
+    /// detected free VRAM. None → use detected free VRAM as-is. (archon-accel DeviceOverrides.)
+    #[serde(default)]
+    pub marker_memory_budget_mb: Option<u64>,
 }
 
 fn default_chunker() -> String {
@@ -270,6 +274,7 @@ impl Default for PdfPolicy {
             marker_sidecar: None,
             marker_device: None,
             marker_python: None,
+            marker_memory_budget_mb: None,
         }
     }
 }

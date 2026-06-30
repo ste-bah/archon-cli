@@ -530,6 +530,7 @@ name = "archon-docs"
 version = "1.3.11"
 dependencies = [
  "anyhow",
+ "archon-accel",
  "archon-cozo",
  "archon-ingest-ext",
  "archon-llm",
