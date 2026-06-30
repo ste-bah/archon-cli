@@ -1,0 +1,202 @@
+//! Host-agnostic decision-rule tests for the placement planner. These run on CPU-only CI
+//! runners (and on this GPU dev box) identically, because they feed synthetic reports rather
+//! than calling `detect()`.
+
+use archon_accel::{
+    plan_marker_ingest, plan_placement, AccelKind, Accelerator, AcceleratorReport, ConsumerKind,
+    ConsumerRequest, DeviceOverrides, ModelFootprintTable, Precision, SuryaTier,
+};
+
+fn cuda(total: u64, free: u64) -> AcceleratorReport {
+    AcceleratorReport {
+        platform: "linux".into(),
+        arch: "x86_64".into(),
+        accelerators: vec![Accelerator {
+            kind: AccelKind::Cuda,
+            index: 0,
+            name: "NVIDIA RTX".into(),
+            total_mb: total,
+            free_mb: free,
+        }],
+        host_ram_total_mb: 64_000,
+        host_ram_free_mb: 32_000,
+        unified_memory: false,
+        notes: vec![],
+    }
+}
+
+fn metal(total: u64, free: u64) -> AcceleratorReport {
+    AcceleratorReport {
+        platform: "macos".into(),
+        arch: "aarch64".into(),
+        accelerators: vec![Accelerator {
+            kind: AccelKind::Metal,
+            index: 0,
+            name: "Apple Silicon (unified)".into(),
+            total_mb: total,
+            free_mb: free,
+        }],
+        host_ram_total_mb: total,
+        host_ram_free_mb: free,
+        unified_memory: true,
+        notes: vec![],
+    }
+}
+
+fn cpu_only() -> AcceleratorReport {
+    AcceleratorReport {
+        platform: "linux".into(),
+        arch: "x86_64".into(),
+        accelerators: vec![],
+        host_ram_total_mb: 16_000,
+        host_ram_free_mb: 8_000,
+        unified_memory: false,
+        notes: vec!["no accelerator detected; CPU placement".into()],
+    }
+}
+
+#[test]
+fn big_card_tiny_free_routes_marker_to_cpu() {
+    // THE verified dev-box case: RTX 5090, 32607 MiB total but ~139 MiB free under co-tenancy.
+    let plan = plan_marker_ingest(&cuda(32_607, 139), &DeviceOverrides::default());
+    let m = plan.marker().unwrap();
+    assert_eq!(
+        m.device,
+        AccelKind::Cpu,
+        "big total + tiny free must NOT pick GPU"
+    );
+    assert!(m.reason.contains("< footprint"), "reason: {}", m.reason);
+}
+
+#[test]
+fn ample_cuda_places_marker_generous_fp16() {
+    let plan = plan_marker_ingest(&cuda(24_000, 20_000), &DeviceOverrides::default());
+    let m = plan.marker().unwrap();
+    assert_eq!(m.device, AccelKind::Cuda);
+    assert_eq!(m.precision, Precision::Fp16);
+    assert_eq!(m.surya_tier, SuryaTier::Generous);
+    assert!(m.oom_fallback_to_cpu);
+    assert!(!m.cuda_expandable_segments);
+}
+
+#[test]
+fn constrained_cuda_reduced_with_expandable_and_oom() {
+    // footprint 5120, need 5120+1536=6656; free 5500 sits in [footprint, need).
+    let plan = plan_marker_ingest(&cuda(8_000, 5_500), &DeviceOverrides::default());
+    let m = plan.marker().unwrap();
+    assert_eq!(m.device, AccelKind::Cuda);
+    assert_eq!(m.surya_tier, SuryaTier::Reduced);
+    assert!(m.cuda_expandable_segments);
+    assert!(m.oom_fallback_to_cpu);
+}
+
+#[test]
+fn free_below_footprint_falls_to_cpu() {
+    let plan = plan_marker_ingest(&cuda(8_000, 3_000), &DeviceOverrides::default());
+    assert_eq!(plan.marker().unwrap().device, AccelKind::Cpu);
+}
+
+#[test]
+fn no_gpu_everything_cpu() {
+    let plan = plan_marker_ingest(&cpu_only(), &DeviceOverrides::default());
+    for p in &plan.placements {
+        assert_eq!(p.device, AccelKind::Cpu);
+    }
+}
+
+#[test]
+fn apple_unified_ample_places_marker_on_metal() {
+    // 24 GB Mac, ~18 GB free after the OS reserve.
+    let plan = plan_marker_ingest(&metal(24_576, 18_000), &DeviceOverrides::default());
+    let m = plan.marker().unwrap();
+    assert_eq!(m.device, AccelKind::Metal);
+    assert_eq!(m.surya_tier, SuryaTier::Generous);
+    assert!(m.oom_fallback_to_cpu);
+    assert!(
+        !m.cuda_expandable_segments,
+        "expandable_segments is CUDA-only"
+    );
+}
+
+#[test]
+fn embedding_is_always_cpu_this_round() {
+    let plan = plan_marker_ingest(&cuda(24_000, 20_000), &DeviceOverrides::default());
+    assert_eq!(
+        plan.get(ConsumerKind::Embedding).unwrap().device,
+        AccelKind::Cpu
+    );
+}
+
+#[test]
+fn memory_budget_override_can_force_cpu() {
+    let overrides = DeviceOverrides {
+        memory_budget_mb: Some(4_000),
+        ..DeviceOverrides::default()
+    };
+    // 20 GB free, but the budget clamps usable to 4 GB < footprint 5120.
+    let plan = plan_marker_ingest(&cuda(24_000, 20_000), &overrides);
+    assert_eq!(plan.marker().unwrap().device, AccelKind::Cpu);
+}
+
+#[test]
+fn force_marker_cpu_override_honored() {
+    let overrides = DeviceOverrides {
+        force_marker_device: Some(AccelKind::Cpu),
+        ..DeviceOverrides::default()
+    };
+    let plan = plan_marker_ingest(&cuda(24_000, 20_000), &overrides);
+    assert_eq!(plan.marker().unwrap().device, AccelKind::Cpu);
+}
+
+#[test]
+fn force_marker_cuda_honored_even_without_detected_gpu() {
+    let overrides = DeviceOverrides {
+        force_marker_device: Some(AccelKind::Cuda),
+        ..DeviceOverrides::default()
+    };
+    let plan = plan_marker_ingest(&cpu_only(), &overrides);
+    let m = plan.marker().unwrap();
+    assert_eq!(m.device, AccelKind::Cuda);
+    assert!(
+        m.oom_fallback_to_cpu,
+        "a forced GPU placement is still OOM-guarded"
+    );
+}
+
+#[test]
+fn marker_env_reflects_device_and_tier() {
+    let plan = plan_marker_ingest(&cuda(8_000, 5_500), &DeviceOverrides::default());
+    let env: std::collections::HashMap<_, _> = plan
+        .marker()
+        .unwrap()
+        .marker_sidecar_env()
+        .into_iter()
+        .collect();
+    assert_eq!(env.get("TORCH_DEVICE").map(String::as_str), Some("cuda"));
+    assert_eq!(env.get("TORCH_DTYPE").map(String::as_str), Some("float16"));
+    assert!(env.contains_key("RECOGNITION_BATCH_SIZE"));
+    assert_eq!(
+        env.get("PYTORCH_CUDA_ALLOC_CONF").map(String::as_str),
+        Some("expandable_segments:True")
+    );
+}
+
+#[test]
+fn multi_consumer_seam_packs_by_priority() {
+    // Forward seam (video): Marker(prio 100, 5120) + Whisper(prio 90, 2048) on 6000 MiB free.
+    // Marker fits its footprint (Reduced), leaving ~880 -> Whisper falls to CPU.
+    let models = ModelFootprintTable::default();
+    let consumers = [
+        ConsumerRequest::marker(models.marker_mb),
+        ConsumerRequest::whisper(models.whisper_mb),
+    ];
+    let plan = plan_placement(&cuda(8_000, 6_000), &consumers, &DeviceOverrides::default());
+    assert_eq!(
+        plan.get(ConsumerKind::Marker).unwrap().device,
+        AccelKind::Cuda
+    );
+    assert_eq!(
+        plan.get(ConsumerKind::Whisper).unwrap().device,
+        AccelKind::Cpu
+    );
+}
