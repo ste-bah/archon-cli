@@ -72,6 +72,9 @@ hello.txt
 !/docs/integrations/**
 !/docs/cookbook/
 !/docs/cookbook/**
+# Exception: ingestion parity + device-layer design docs (Port #2).
+!/docs/ingestion/
+!/docs/ingestion/**
 !/docs/operations/
 !/docs/operations/**
 !/docs/maintenance/
