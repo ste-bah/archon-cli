@@ -143,9 +143,20 @@ auto_migrate_reasoning_quality = false
 # ----------------------------------------------------------------------------
 # [policy.docs.vlm] — Document VLM (image description) gates
 # ----------------------------------------------------------------------------
-# Off by default. Flip enabled + mode to "local" once you have a local VLM,
-# or to "cloud" + allow_cloud = true if you've reviewed the privacy
-# implications of sending image bytes to a third-party API.
+# Off by default. Adds a natural-language DESCRIPTION of each figure (separate
+# from OCR, which always extracts text inside images).
+#
+# RECOMMENDED for copyrighted material: run a LOCAL vision model so image bytes
+# never leave the box. Install Ollama, `ollama pull qwen2.5vl:7b` (7B for >=16 GB
+# VRAM runs it on GPU; ~8 GB runs it on CPU, see the guide), then set below:
+#     enabled = true
+#     mode = "local"
+#     provider = "ollama"
+#     [policy.docs.vlm.ollama] model = "qwen2.5vl:7b"
+# NB: qwen2.5vl works on both old and new Ollama; llama3.2-vision (mllama) only
+# runs on older Ollama builds. See docs/ingestion/hardware-vram-guide.md for VRAM tiers.
+# Cloud (best quality, but uploads image bytes): mode="cloud", provider="anthropic"
+# | "gemini", allow_cloud = true, and set the matching *_API_KEY env var.
 [policy.docs.vlm]
 enabled = false
 mode = "disabled"  # "disabled" | "local" | "cloud" | "hybrid"
