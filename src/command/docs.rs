@@ -151,15 +151,23 @@ fn print_enrichment_plan(
         );
         println!("     active verdict; the '{}' detector is currently in force.", plan.detector);
     }
-    if plan.is_scanned_book {
-        println!("  Classification: SCANNED BOOK");
+    if plan.is_scanned_book && plan.has_text_layer {
+        println!("  Classification: SCANNED BOOK (text layer present)");
         println!(
             "    -> image enrichment SKIPPED: {} full-page scan(s) will NOT be OCR'd/VLM'd",
             plan.embedded_images
         );
-        println!("       (Marker OCRs the pages via the text layer).");
+        println!("       (Marker / the text layer already owns the pages).");
         println!("  !! If this is actually a born-digital doc with REAL figures, abort and review");
         println!("     -- the scan detector may have misfired.");
+    } else if plan.is_scanned_book {
+        // Scanned but NO text layer → the page scans are the ONLY content, so they get OCR'd.
+        println!("  Classification: IMAGE-ONLY SCAN (no text layer)");
+        println!(
+            "    -> {} full-page scan(s) WILL be OCR'd for content (Marker if configured, else",
+            plan.embedded_images
+        );
+        println!("       image OCR); VLM skipped -- these are page reproductions, not figures.");
     } else if plan.embedded_images == 0 {
         println!("  Classification: no embedded images -- nothing to enrich.");
     } else {

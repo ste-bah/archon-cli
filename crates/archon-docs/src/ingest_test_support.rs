@@ -49,6 +49,8 @@ impl Drop for PdfCommandEnvGuard {
             std::env::remove_var("ARCHON_PDFTOTEXT_BIN");
             std::env::remove_var("ARCHON_PDFIMAGES_BIN");
             std::env::remove_var("ARCHON_PDFTOPPM_BIN");
+            // Harmless when unset; some tests also mock pdfinfo (page count for the scan detector).
+            std::env::remove_var("ARCHON_PDFINFO_BIN");
         }
     }
 }

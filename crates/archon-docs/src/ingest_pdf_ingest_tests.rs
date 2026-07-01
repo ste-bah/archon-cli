@@ -302,4 +302,83 @@ async fn test_ingest_pipeline_failure_sets_failed_status() {
     );
 }
 
+// ── C3: image-only (no text layer) scanned PDFs ──────────────────
+
+/// An image-only scanned PDF (no text layer) must OCR its page scans (they are the only content —
+/// the scanned-book skip only applies when a text layer / Marker owns the pages) and seal a
+/// synthetic chunks_root over the resulting image-OCR chunks (previously they got no root).
+#[cfg(unix)]
+#[tokio::test]
+#[serial_test::serial(docs_global_state)]
+async fn test_image_only_scan_ocrs_pages_and_seals_synthetic_root() {
+    reset_multimodal_test_providers();
+    crate::ocr::provider::set_provider(Box::new(MockOcrProvider {
+        text: "scanned page body text",
+    }));
+    // VLM is enabled in policy, but an image-only page scan must force it off (page reproductions,
+    // not figures) — assert it never runs.
+    crate::vlm::set_provider(Box::new(MockVlmProvider {
+        description: "MUST NOT be produced for a page scan",
+    }));
+    let policy = vlm_enabled_policy();
+    let db = test_db();
+    let dir = tempfile::tempdir().unwrap();
+    let pdf = dir.path().join("scan-only.pdf");
+    fs::write(&pdf, b"%PDF image only scan").unwrap();
+    let pdftotext = dir.path().join("pdftotext");
+    let pdfimages = dir.path().join("pdfimages");
+    let pdftoppm = dir.path().join("pdftoppm");
+    let pdfinfo = dir.path().join("pdfinfo");
+    let page = dir.path().join("page.bin");
+    fs::write(&page, png_bytes(1300, 2000, 8192)).unwrap();
+    // No text layer.
+    write_executable(&pdftotext, "#!/usr/bin/env bash\nexit 0\n");
+    // One full-page scan (large + page-shaped → aspect scanned); 8K survives the byte filter.
+    write_executable(
+        &pdfimages,
+        &format!(
+            "#!/usr/bin/env bash\n\
+             if [ \"$1\" = \"-list\" ]; then echo '  1 0 image 1300 2000 rgb 3 8 image no 12 0 150 150 8K 1%'; exit 0; fi\n\
+             cp '{}' \"${{@: -1}}-000.png\"\n",
+            page.display()
+        ),
+    );
+    write_executable(&pdftoppm, "#!/usr/bin/env bash\nexit 99\n");
+    // The scan detector needs a page count; mock pdfinfo (cleaned up by PdfCommandEnvGuard).
+    write_executable(&pdfinfo, "#!/usr/bin/env bash\necho 'Pages: 1'\n");
+    set_pdf_command_env(&pdftotext, &pdfimages, &pdftoppm);
+    unsafe {
+        std::env::set_var("ARCHON_PDFINFO_BIN", &pdfinfo);
+    }
+    let _guard = PdfCommandEnvGuard;
+
+    let result = ingest_file_with_policy(&db, &pdf, &policy).await.unwrap();
+
+    // The page scan was OCR'd (NOT skipped) — no text layer means it is the only content.
+    assert_eq!(
+        result.pdf_image_ocr_runs, 1,
+        "image-only scan must be OCR'd, not skipped"
+    );
+    // VLM forced off for image-only page scans.
+    assert_eq!(
+        result.vlm_descriptions, 0,
+        "a full-page scan is not a figure — no VLM"
+    );
+    let chunks = store::list_chunks_for_doc(&db, &result.document_id).unwrap();
+    assert!(!chunks.is_empty(), "image OCR produced content chunks");
+    assert!(
+        chunks
+            .iter()
+            .any(|c| c.content.contains("scanned page body text"))
+    );
+    // A synthetic chunks_root now covers every image-OCR chunk (the C3 integrity fix).
+    let commits = store::get_doc_commit_hashes(&db, &result.document_id).unwrap();
+    assert_eq!(
+        commits.len(),
+        chunks.len(),
+        "every image-OCR chunk got an integrity commit (synthetic root)"
+    );
+    reset_multimodal_test_providers();
+}
+
 // ── BLOCKER #1: Eager indexing tests ─────────────────────────────

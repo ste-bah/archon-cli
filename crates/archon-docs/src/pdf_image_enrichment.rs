@@ -28,9 +28,12 @@ pub(crate) async fn enrich_pdf_images(
     page_ids_by_number: &BTreeMap<u32, String>,
     pages_by_number: &mut BTreeMap<u32, PageArtifact>,
     outcome: &mut PipelineOutcome,
-    // Pre-resolved scanned-book verdict from the active detector (`Some` when the coverage
-    // detector is selected; `None` → fall back to the in-memory aspect heuristic, unchanged).
+    // Pre-resolved scanned-book verdict from the active detector (`Some` for coverage/union;
+    // `None` → fall back to the in-memory aspect heuristic).
     scanned_override: Option<bool>,
+    // Whether the doc produced a text seal (a text layer or Marker OCR owns the pages). A scanned
+    // book WITH text content skips enrichment; one WITHOUT (image-only) must OCR its page scans.
+    has_text_content: bool,
 ) -> Result<Vec<ChunkArtifact>, DocsError> {
     let total = images.len();
     // Image-OCR + VLM-description chunks, returned so the caller can fold them into chunks_root.
@@ -75,27 +78,38 @@ pub(crate) async fn enrich_pdf_images(
         });
     }
 
-    // Scanned-book guard: full-page-scan embedded images (one large image per page across the
-    // doc) ARE the pages — Marker already owns them via the text layer, so OCR-ing them just
-    // duplicates content and VLM-ing them is useless. Skip enrichment (page metadata is already
-    // marked above). Non-scanned docs (born-digital figures) fall through and enrich normally.
-    // The active detector is chosen upstream: `scanned_override` carries the coverage verdict when
-    // that detector is selected; otherwise we use the shipped aspect heuristic on the in-memory
-    // images (identical to prior behavior — the default path is unchanged).
+    // Scanned-book guard. Full-page-scan images ARE the pages, so how we treat them depends on
+    // whether a text layer / Marker already owns those pages (`has_text_content`):
+    //   scanned + text content  → OCR/VLM would duplicate + waste → skip enrichment entirely.
+    //   scanned + NO text layer → the scans are the ONLY content → OCR them (below), but VLM is
+    //                             useless on a page reproduction, so run OCR-only.
+    //   not scanned             → born-digital figures → enrich normally (OCR + VLM per policy).
+    // `scanned_override` carries the coverage/union verdict; else the in-memory aspect heuristic.
     let is_scanned = scanned_override.unwrap_or_else(|| is_scanned_page_images(images, page_count));
-    if is_scanned {
+    if is_scanned && has_text_content {
         let scans = images
             .iter()
             .filter(|i| matches!(i.origin, PdfImageOrigin::Embedded { .. }))
             .count();
         emit_pdf_progress(format!(
-            "PDF image enrichment: doc={document_id} SKIPPED {scans} full-page scan(s) — scanned book, Marker owns the pages"
+            "PDF image enrichment: doc={document_id} SKIPPED {scans} full-page scan(s) — scanned book, text layer owns the pages"
         ));
         outcome.warnings.push(format!(
             "scanned-book: skipped enrichment of {scans} full-page scan image(s)"
         ));
         return Ok(collected);
     }
+    // Image-only scanned book: OCR the page scans (the only content) but force VLM off — a full-page
+    // scan is a page reproduction, not a discrete figure, so a VLM description adds no value and (on
+    // a 100+ page book) is very expensive. Born-digital docs enrich with the policy unchanged.
+    let effective_policy = if is_scanned {
+        let mut p = policy.clone();
+        p.docs.pdf.vlm_per_page_image = false;
+        p
+    } else {
+        policy.clone()
+    };
+    let policy = &effective_policy;
 
     if image_workers(policy) <= 1 {
         for item in work_items {

@@ -91,6 +91,10 @@ pub struct EnrichmentClassification {
     pub coverage_low_confidence: bool,
     /// The two detectors disagree on the scanned/born-digital verdict.
     pub divergent: bool,
+    /// Whether `pdftotext` finds a usable text layer. A scanned book WITH a text layer skips image
+    /// enrichment (Marker/text owns the pages); one WITHOUT (image-only) OCRs its page scans for
+    /// content, so the report must not claim "skipped" for those.
+    pub has_text_layer: bool,
 }
 
 /// Classify a PDF for image enrichment without extracting image bytes or running Marker. Runs BOTH
@@ -120,7 +124,28 @@ pub fn classify_pdf_enrichment(path: &Path, pdf_policy: &PdfPolicy) -> Enrichmen
             .map(|c| c.low_confidence)
             .unwrap_or(false),
         divergent: scan.divergent,
+        has_text_layer: pdf_has_text_layer(path),
     }
+}
+
+/// Quick pre-ingest probe: does `pdftotext` extract a non-trivial text layer? Used only to make the
+/// enrichment report honest about image-only scans (which get OCR'd, not skipped). A handful of
+/// characters (stray artifacts on an otherwise image-only scan) do not count as a text layer.
+fn pdf_has_text_layer(path: &Path) -> bool {
+    let Ok(output) = std::process::Command::new(command_path("pdftotext", "ARCHON_PDFTOTEXT_BIN"))
+        .arg("-layout")
+        .arg(path)
+        .arg("-")
+        .output()
+    else {
+        return false;
+    };
+    output.status.success()
+        && String::from_utf8_lossy(&output.stdout)
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .count()
+            >= 16
 }
 
 pub(crate) fn pdf_page_count(path: &Path) -> Option<u32> {

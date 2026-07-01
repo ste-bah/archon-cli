@@ -7,7 +7,7 @@ use crate::errors::DocsError;
 use crate::hash::sha256_str;
 use crate::ingest::PipelineOutcome;
 use crate::ingest_artifacts::{index_chunks_if_provider_available, persist_text_artifact_chunks};
-use crate::models::{OcrStatus, PageArtifact, PdfIngestMetrics};
+use crate::models::{ArtifactRecord, OcrStatus, PageArtifact, PdfIngestMetrics};
 use crate::pdf;
 use crate::pdf_image_enrichment::enrich_pdf_images;
 use crate::provenance::build_doc_lineage_edges;
@@ -78,7 +78,15 @@ pub(crate) async fn run_pdf_ingest_pipeline(
         source_sha256: String,
     }
     let mut text_seal: Option<TextSeal> = None;
-    if !extract_result.full_text.trim().is_empty() {
+    // Extract text content when there's a text layer OR when Marker is configured and the doc has
+    // page images: Marker's surya OCR reads image-only/scanned pages that carry no text layer, so
+    // this is the C3 path that gives pure-scan PDFs real (bbox-carrying) text + a chunks_root. With
+    // neither, an image-only doc falls through to the image-OCR fallback + synthetic root below.
+    let marker_available =
+        crate::marker_source::from_policy(&policy.docs.pdf, extract_result.page_count).is_some();
+    let has_page_images =
+        !extract_result.embedded_images.is_empty() || !extract_result.rendered_pages.is_empty();
+    if !extract_result.full_text.trim().is_empty() || (marker_available && has_page_images) {
         let ocr_artifact_id = format!("ocr-result-{}", ocr_run_id);
         let (chunks, spatials, ocr_engine) = if policy.docs.pdf.use_token_aware_chunker() {
             // Token-aware path (best-system default). Prefer Marker blocks (real bboxes,
@@ -220,27 +228,63 @@ pub(crate) async fn run_pdf_ingest_pipeline(
         &mut pages_by_number,
         &mut outcome,
         scanned_override,
+        text_seal.is_some(),
     )
     .await?;
-    // V-1 image integrity: image-OCR + VLM-description chunks are persisted AFTER the early text
-    // seal, so re-fold them into chunks_root — re-run persist_chunk_integrity over the text+image
-    // UNION (idempotent upsert; chunks_root sorts commits, so text-only ingests stay byte-identical).
-    // Only fires when the doc had a text seal AND produced image chunks. (Image-only/scanned PDFs
-    // with no text seal still get no root — a documented follow-up needing a synthetic artifact.)
-    if let Some(seal) = text_seal
-        && !image_chunks.is_empty()
-    {
-        let mut all = seal.text_chunks;
-        all.extend(image_chunks);
-        crate::provenance_chunks::persist_chunk_integrity(
-            db,
-            &seal.ocr_artifact_id,
-            &all,
-            &seal.spatial_by,
-            seal.ocr_engine,
-            &seal.source_sha256,
-            ocr_run_id,
-        )?;
+    // V-1 image integrity: fold image-OCR + VLM-description chunks into a chunks_root.
+    if !image_chunks.is_empty() {
+        match &text_seal {
+            // Text doc + images: re-fold the image chunks into the existing text root — re-run
+            // persist_chunk_integrity over the text+image UNION (idempotent superset upsert;
+            // chunks_root sorts commits, so text-only ingests stay byte-identical).
+            Some(seal) => {
+                let mut all = seal.text_chunks.clone();
+                all.extend(image_chunks);
+                crate::provenance_chunks::persist_chunk_integrity(
+                    db,
+                    &seal.ocr_artifact_id,
+                    &all,
+                    &seal.spatial_by,
+                    seal.ocr_engine,
+                    &seal.source_sha256,
+                    ocr_run_id,
+                )?;
+            }
+            // C3: image-only PDF (no text layer, no Marker) — the image-OCR chunks are the only
+            // content, so give them a synthetic OCR artifact + chunks_root for the same
+            // tamper-evidence a text doc gets (closes the previous "chunks but no root" gap).
+            None => {
+                let ocr_artifact_id = format!("ocr-result-{ocr_run_id}");
+                let source_sha256 = store::get_doc_source(db, document_id)
+                    .ok()
+                    .flatten()
+                    .map(|d| d.content_hash)
+                    .unwrap_or_default();
+                store::insert_artifact(
+                    db,
+                    &ArtifactRecord {
+                        artifact_id: ocr_artifact_id.clone(),
+                        document_id: document_id.to_string(),
+                        artifact_type: "ocr_text".to_string(),
+                        content_hash: source_sha256.clone(),
+                        created_at: chrono::Utc::now().to_rfc3339(),
+                        provenance_record_id: String::new(),
+                    },
+                )
+                .map_err(|e| DocsError::Storage {
+                    message: e.to_string(),
+                })?;
+                crate::provenance_chunks::persist_chunk_integrity(
+                    db,
+                    &ocr_artifact_id,
+                    &image_chunks,
+                    &std::collections::BTreeMap::new(),
+                    "image-ocr",
+                    &source_sha256,
+                    ocr_run_id,
+                )?;
+            }
+        }
     }
     outcome.pdf_embedded_images_extracted = outcome
         .pdf_embedded_images_extracted
