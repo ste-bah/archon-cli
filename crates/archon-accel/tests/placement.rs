@@ -4,9 +4,9 @@
 //! keys off a page-scaled footprint and falls back GPU→CPU on OOM.
 
 use archon_accel::{
-    marker_env_for, marker_env_ladder, marker_footprint_mb, plan_marker_ingest, plan_placement,
-    AccelKind, Accelerator, AcceleratorReport, ConsumerKind, ConsumerRequest, DeviceOverrides,
-    ModelFootprintTable, Precision, SuryaTier,
+    marker_env_for, marker_env_ladder, marker_footprint_mb, marker_ingest_plan, plan_marker_ingest,
+    plan_placement, AccelKind, Accelerator, AcceleratorReport, ConsumerKind, ConsumerRequest,
+    DeviceOverrides, MarkerChunk, ModelFootprintTable, Precision, SuryaTier,
 };
 
 fn cuda(total: u64, free: u64) -> AcceleratorReport {
@@ -228,4 +228,95 @@ fn multi_consumer_seam_packs_by_priority() {
         plan.get(ConsumerKind::Whisper).unwrap().device,
         AccelKind::Cpu
     );
+}
+
+// ---- page-range chunking (big-doc-on-small-card) ---------------------------------------------
+
+/// Helper: sidecar device of a chunk's first (preferred) attempt.
+fn first_dev(c: &MarkerChunk) -> &str {
+    c.attempts.first().unwrap().0.as_str()
+}
+
+#[test]
+fn chunk_plan_small_doc_is_one_whole_gpu_chunk() {
+    // 13pp fits an idle 8 GB card whole → a single `None`-range chunk on [GPU, CPU].
+    let chunks = marker_ingest_plan(&cuda(8_151, 7_822), &DeviceOverrides::default(), SMALL);
+    assert_eq!(chunks.len(), 1);
+    assert_eq!(chunks[0].page_range, None);
+    assert_eq!(first_dev(&chunks[0]), "cuda");
+    assert_eq!(chunks[0].attempts.last().unwrap().0, "cpu");
+}
+
+#[test]
+fn chunk_plan_big_doc_on_16gb_is_one_whole_gpu_chunk() {
+    // 300pp (footprint 10240) fits a 16 GB card whole → still a single chunk (no need to split).
+    let chunks = marker_ingest_plan(&cuda(16_384, 15_000), &DeviceOverrides::default(), LARGE);
+    assert_eq!(chunks.len(), 1);
+    assert_eq!(chunks[0].page_range, None);
+    assert_eq!(first_dev(&chunks[0]), "cuda");
+}
+
+#[test]
+fn chunk_plan_big_doc_on_8gb_splits_into_contiguous_gpu_chunks() {
+    // 300pp won't fit an 8 GB card whole (need 10752 > 7310 usable) → split. usable = 7822-512
+    // = 7310 → chunk_pages = (7310-6000)/30 = 43 → ceil(300/43) = 7 chunks, each on GPU.
+    let chunks = marker_ingest_plan(&cuda(8_151, 7_822), &DeviceOverrides::default(), LARGE);
+    assert_eq!(chunks.len(), 7);
+    // Every chunk is a real page-range on the GPU ladder, and each fits the card.
+    for c in &chunks {
+        let (s, e) = c.page_range.expect("chunked → Some(range)");
+        assert_eq!(first_dev(c), "cuda");
+        assert_eq!(c.attempts.last().unwrap().0, "cpu");
+        let pages_in_chunk = e - s + 1;
+        assert!(
+            marker_footprint_mb(pages_in_chunk) + 512 <= 7_822,
+            "chunk {s}..={e} ({pages_in_chunk}pp) must fit the 8 GB card"
+        );
+    }
+    // Ranges tile [0, 299] with no gaps or overlaps.
+    assert_eq!(chunks[0].page_range.unwrap().0, 0);
+    assert_eq!(chunks.last().unwrap().page_range.unwrap().1, LARGE - 1);
+    for w in chunks.windows(2) {
+        assert_eq!(w[0].page_range.unwrap().1 + 1, w[1].page_range.unwrap().0);
+    }
+}
+
+#[test]
+fn chunk_plan_tiny_free_is_one_cpu_chunk() {
+    // Co-tenanted 5090 (139 MiB free): can't fit even the 6 GiB floor → whole doc on CPU.
+    let chunks = marker_ingest_plan(&cuda(32_607, 139), &DeviceOverrides::default(), LARGE);
+    assert_eq!(chunks.len(), 1);
+    assert_eq!(chunks[0].page_range, None);
+    assert_eq!(first_dev(&chunks[0]), "cpu");
+}
+
+#[test]
+fn chunk_plan_no_gpu_is_one_cpu_chunk() {
+    let chunks = marker_ingest_plan(&cpu_only(), &DeviceOverrides::default(), LARGE);
+    assert_eq!(chunks.len(), 1);
+    assert_eq!(chunks[0].page_range, None);
+    assert_eq!(first_dev(&chunks[0]), "cpu");
+}
+
+#[test]
+fn chunk_plan_forced_cpu_never_chunks_to_gpu() {
+    // Even with a big idle GPU, forcing CPU keeps the whole doc on CPU (no page-range split).
+    let overrides = DeviceOverrides {
+        force_marker_device: Some(AccelKind::Cpu),
+        ..DeviceOverrides::default()
+    };
+    let chunks = marker_ingest_plan(&cuda(24_000, 20_000), &overrides, LARGE);
+    assert_eq!(chunks.len(), 1);
+    assert_eq!(chunks[0].page_range, None);
+    assert_eq!(first_dev(&chunks[0]), "cpu");
+}
+
+#[test]
+fn chunk_plan_apple_big_doc_splits_on_metal() {
+    // Apple unified, 10 GB free of a 24 GB box, 300pp: won't fit whole (need 10752) → split onto
+    // Metal (mps), proving chunking is device-agnostic.
+    let chunks = marker_ingest_plan(&metal(24_576, 10_000), &DeviceOverrides::default(), LARGE);
+    assert!(chunks.len() > 1);
+    assert!(chunks.iter().all(|c| first_dev(c) == "mps"));
+    assert_eq!(chunks.last().unwrap().page_range.unwrap().1, LARGE - 1);
 }

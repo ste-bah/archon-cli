@@ -80,12 +80,16 @@ SELFTEST_FIXTURE = {
 }
 
 
-def run_marker(pdf_path: str, device: str) -> dict:
+def run_marker(pdf_path: str, device: str, page_range: "list[int] | None" = None) -> dict:
     """Run Marker with its JSON renderer and return the block tree as a dict.
 
     Marker's JSON renderer already emits `{block_type, id, html, bbox/polygon, children}`,
     which is exactly the Rust parser's contract. `TORCH_DEVICE` is set before importing
     Marker so its models load on the resolved device.
+
+    `page_range` (0-indexed original-PDF page numbers) restricts the run to those pages; Marker
+    keeps ABSOLUTE page ids (`/page/N/`), so a caller can process a big PDF in page-range chunks
+    that each fit VRAM and concatenate the block streams without re-offsetting. `None` = whole doc.
 
     [CONFIRM on the Mac] against the installed Marker version: the converter/renderer import
     paths and whether boxes come back as `bbox` (used here) or `polygon` (map to a bbox).
@@ -94,8 +98,10 @@ def run_marker(pdf_path: str, device: str) -> dict:
     from marker.converters.pdf import PdfConverter
     from marker.models import create_model_dict
 
+    config = {"page_range": page_range} if page_range is not None else {}
     converter = PdfConverter(
         artifact_dict=create_model_dict(),
+        config=config,
         renderer="marker.renderers.json.JSONRenderer",
     )
     rendered = converter(pdf_path)
@@ -111,20 +117,31 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Archon Marker sidecar (device-agnostic).")
     parser.add_argument("pdf", nargs="?", help="path to the input PDF")
     parser.add_argument("--device", help="cuda|mps|cpu|auto (default/auto: cuda→mps→cpu)")
+    parser.add_argument("--page-range", dest="page_range",
+                        help="0-indexed inclusive page range 'START-END' (default: whole doc)")
     parser.add_argument("--output", help="write JSON here (default: stdout)")
     parser.add_argument("--selftest", action="store_true",
                         help="emit a fixture block tree without importing torch/marker")
     args = parser.parse_args(argv)
 
     device = resolve_device(args.device)
+    page_range = None
+    if args.page_range:
+        try:
+            start, end = (int(x) for x in args.page_range.split("-", 1))
+        except ValueError:
+            parser.error(f"--page-range must be 'START-END', got {args.page_range!r}")
+        page_range = list(range(start, end + 1))
     if args.selftest:
         tree = SELFTEST_FIXTURE
     else:
         if not args.pdf:
             parser.error("a <pdf> path is required unless --selftest is given")
-        sys.stderr.write(f"[archon-marker] device={device} pdf={args.pdf}\n")
+        sys.stderr.write(
+            f"[archon-marker] device={device} pdf={args.pdf} page_range={args.page_range or 'all'}\n"
+        )
         try:
-            tree = run_marker(args.pdf, device)
+            tree = run_marker(args.pdf, device, page_range)
         except Exception as exc:  # noqa: BLE001 — classify OOM, re-raise everything else
             if "out of memory" in str(exc).lower() or type(exc).__name__ == "OutOfMemoryError":
                 # Structured OOM signal: the Rust caller (marker_source.rs) catches exit 42

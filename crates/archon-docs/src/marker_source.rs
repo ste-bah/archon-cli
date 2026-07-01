@@ -1,17 +1,19 @@
 //! Marker block source — obtains Marker's block-tree JSON and parses it to `Vec<Block>`.
 //!
-//! Device-adaptive: the Marker sidecar runs as a Python subprocess; `archon-accel` picks GPU vs
-//! CPU from the host's *free* VRAM vs the document's page-scaled footprint (Marker's VRAM tracks
-//! document size, not batch — PR-D). The load-bearing guarantee is the per-doc OOM→CPU fallback in
-//! `fetch_json` (a GPU rung, then CPU — smaller batches don't relieve OOM).
-//! Transport is orthogonal to device: a local
-//! subprocess (default, the standalone Mac/laptop story), a remote HTTP Marker service (e.g.
-//! WRAITH for bulk on NVIDIA), or a pre-extracted JSON file. All three yield the same
-//! block-tree JSON, parsed by `archon_ingest_ext::marker::parse_marker_str`.
+//! Device-adaptive: the Marker sidecar runs as a Python subprocess; `archon-accel` plans one or
+//! more *chunks* from the host's *free* VRAM vs the document's page-scaled footprint (Marker's VRAM
+//! tracks document size, not batch — PR-D). A document that won't fit a small card whole is split
+//! into contiguous page-range chunks (`--page-range`) that each fit; Marker emits absolute page
+//! ids, so the chunks' block streams concatenate in order without re-offset. Each chunk carries a
+//! per-chunk OOM→CPU fallback (`run_chunk`: a GPU rung, then CPU — smaller batches don't relieve
+//! OOM). Transport is orthogonal to device: a local subprocess (default, the standalone Mac/laptop
+//! story), a remote HTTP Marker service (e.g. WRAITH for bulk on NVIDIA), or a pre-extracted JSON
+//! file. All three yield the same block-tree JSON, parsed by
+//! `archon_ingest_ext::marker::parse_marker_str`.
 
 use std::path::{Path, PathBuf};
 
-use archon_accel::{AccelKind, DeviceOverrides, marker_env_ladder};
+use archon_accel::{AccelKind, DeviceOverrides, MarkerChunk, marker_ingest_plan};
 use archon_ingest_ext::chunk::Block;
 use archon_ingest_ext::marker::parse_marker_str;
 use archon_policy::PdfPolicy;
@@ -21,14 +23,15 @@ use crate::errors::DocsError;
 /// Where/how to obtain a PDF's Marker block tree.
 #[derive(Clone, Debug)]
 pub enum MarkerSource {
-    /// Spawn the local Python sidecar per the `archon-accel` OOM ladder — each attempt runs
-    /// `python <script> <pdf> --device <dev>` under that attempt's env.
+    /// Spawn the local Python sidecar, once per `archon-accel` chunk. Each chunk runs
+    /// `python <script> <pdf> --device <dev> [--page-range S-E]` under its env, walking its own
+    /// GPU→CPU OOM ladder; the chunks' block streams concatenate (Marker emits absolute page ids).
+    /// A single whole-document chunk (`page_range: None`) is the common case; several page-range
+    /// chunks keep a big document on a small card's GPU.
     Subprocess {
         python: String,
         script: PathBuf,
-        /// `(sidecar_device, env)` per attempt (GPU then CPU), tried top-to-bottom; advance to
-        /// the next attempt only on a torch-OOM.
-        attempts: Vec<(String, Vec<(String, String)>)>,
+        chunks: Vec<MarkerChunk>,
     },
     /// POST the PDF bytes to a remote Marker HTTP service; expects block-tree JSON back.
     Http { url: String },
@@ -45,7 +48,7 @@ pub enum MarkerSource {
 /// once per PDF. It can be hoisted to once-per-run if the probe ever shows up in a profile.
 pub fn from_policy(pdf: &PdfPolicy, page_count: u32) -> Option<MarkerSource> {
     let script = pdf.marker_sidecar.as_ref()?;
-    let attempts = marker_env_ladder(
+    let chunks = marker_ingest_plan(
         &archon_accel::detect(),
         &overrides_from_policy(pdf),
         page_count,
@@ -56,7 +59,7 @@ pub fn from_policy(pdf: &PdfPolicy, page_count: u32) -> Option<MarkerSource> {
             .clone()
             .unwrap_or_else(|| "python3".to_string()),
         script: PathBuf::from(script),
-        attempts,
+        chunks,
     })
 }
 
@@ -84,38 +87,34 @@ enum SidecarError {
 }
 
 impl MarkerSource {
-    /// Obtain and parse the Marker block stream for `pdf_path`.
+    /// Obtain and parse the Marker block stream for `pdf_path`. For a chunked subprocess plan,
+    /// each chunk is run and parsed independently and the block streams are concatenated in page
+    /// order (Marker emits absolute page ids, so no re-offset is needed).
     pub async fn blocks_for(&self, pdf_path: &Path) -> Result<Vec<Block>, DocsError> {
-        let json = self.fetch_json(pdf_path).await?;
-        parse_marker_str(&json).map_err(|e| DocsError::Storage {
-            message: format!("marker json parse failed: {e}"),
-        })
-    }
-
-    async fn fetch_json(&self, pdf_path: &Path) -> Result<String, DocsError> {
         match self {
             MarkerSource::Subprocess {
                 python,
                 script,
-                attempts,
+                chunks,
             } => {
-                // Try each ladder rung; advance to the next (smaller) attempt only on torch-OOM.
-                let mut last: Option<DocsError> = None;
-                for (device, env) in attempts {
-                    match run_sidecar(python, script, pdf_path, Some(device.as_str()), env).await {
-                        Ok(json) => return Ok(json),
-                        Err(SidecarError::Oom { device: dev }) => {
-                            last = Some(DocsError::Storage {
-                                message: format!("marker OOM on device={dev}"),
-                            });
-                        }
-                        Err(SidecarError::Other(e)) => return Err(e),
-                    }
+                let mut all = Vec::new();
+                for chunk in chunks {
+                    let json = run_chunk(python, script, pdf_path, chunk).await?;
+                    all.append(&mut parse_blocks(&json)?);
                 }
-                Err(last.unwrap_or_else(|| DocsError::Storage {
-                    message: "marker: empty attempt ladder".to_string(),
-                }))
+                Ok(all)
             }
+            MarkerSource::Http { .. } | MarkerSource::PreExtracted { .. } => {
+                let json = self.fetch_json(pdf_path).await?;
+                parse_blocks(&json)
+            }
+        }
+    }
+
+    /// Fetch whole-document Marker JSON for the non-subprocess transports (remote HTTP service or a
+    /// pre-extracted file — both already carry the full document, so neither chunks).
+    async fn fetch_json(&self, pdf_path: &Path) -> Result<String, DocsError> {
+        match self {
             MarkerSource::Http { url } => {
                 let bytes = tokio::fs::read(pdf_path)
                     .await
@@ -139,8 +138,53 @@ impl MarkerSource {
                 .map_err(|e| DocsError::Storage {
                     message: format!("read pre-extracted marker json failed: {e}"),
                 }),
+            MarkerSource::Subprocess { .. } => Err(DocsError::Storage {
+                message: "internal: subprocess is chunked in blocks_for, not fetch_json"
+                    .to_string(),
+            }),
         }
     }
+}
+
+/// Parse a Marker JSON block tree to `Vec<Block>`, mapping parse failures to a storage error.
+fn parse_blocks(json: &str) -> Result<Vec<Block>, DocsError> {
+    parse_marker_str(json).map_err(|e| DocsError::Storage {
+        message: format!("marker json parse failed: {e}"),
+    })
+}
+
+/// Run one chunk through its GPU→CPU OOM ladder, passing `--page-range` when the chunk is a
+/// page range. Advances to the next rung only on a torch-OOM; any other error surfaces.
+async fn run_chunk(
+    python: &str,
+    script: &Path,
+    pdf_path: &Path,
+    chunk: &MarkerChunk,
+) -> Result<String, DocsError> {
+    let mut last: Option<DocsError> = None;
+    for (device, env) in &chunk.attempts {
+        match run_sidecar(
+            python,
+            script,
+            pdf_path,
+            Some(device.as_str()),
+            env,
+            chunk.page_range,
+        )
+        .await
+        {
+            Ok(json) => return Ok(json),
+            Err(SidecarError::Oom { device: dev }) => {
+                last = Some(DocsError::Storage {
+                    message: format!("marker OOM on device={dev}"),
+                });
+            }
+            Err(SidecarError::Other(e)) => return Err(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| DocsError::Storage {
+        message: "marker: empty attempt ladder".to_string(),
+    }))
 }
 
 /// Run the Marker sidecar once with `device` + `env`, classifying a torch-OOM exit (the sidecar
@@ -151,11 +195,15 @@ async fn run_sidecar(
     pdf_path: &Path,
     device: Option<&str>,
     env: &[(String, String)],
+    page_range: Option<(u32, u32)>,
 ) -> Result<String, SidecarError> {
     let mut cmd = tokio::process::Command::new(python);
     cmd.arg(script).arg(pdf_path);
     if let Some(dev) = device {
         cmd.arg("--device").arg(dev);
+    }
+    if let Some((start, end)) = page_range {
+        cmd.arg("--page-range").arg(format!("{start}-{end}"));
     }
     for (k, v) in env {
         cmd.env(k, v);
@@ -222,7 +270,10 @@ mod tests {
         let src = MarkerSource::Subprocess {
             python: "python3".into(),
             script: PathBuf::from("/nonexistent/archon_marker_sidecar.py"),
-            attempts: vec![("cpu".to_string(), vec![])],
+            chunks: vec![MarkerChunk {
+                page_range: None,
+                attempts: vec![("cpu".to_string(), vec![])],
+            }],
         };
         assert!(src.blocks_for(Path::new("x.pdf")).await.is_err());
     }
@@ -234,8 +285,11 @@ mod tests {
         pdf.marker_sidecar = Some("scripts/archon_marker_sidecar.py".into());
         pdf.marker_device = Some("mps".into());
         match from_policy(&pdf, 13) {
-            Some(MarkerSource::Subprocess { attempts, .. }) => {
-                assert_eq!(attempts.first().unwrap().0.as_str(), "mps")
+            Some(MarkerSource::Subprocess { chunks, .. }) => {
+                // Forced mps → a single whole-doc chunk whose preferred attempt is mps.
+                assert_eq!(chunks.len(), 1);
+                assert_eq!(chunks[0].page_range, None);
+                assert_eq!(chunks[0].attempts.first().unwrap().0.as_str(), "mps");
             }
             other => panic!("expected subprocess, got {other:?}"),
         }
@@ -274,8 +328,8 @@ mod tests {
             ..Default::default()
         };
         match from_policy(&p, 13) {
-            Some(MarkerSource::Subprocess { attempts, .. }) => {
-                let (device, env) = attempts.first().unwrap();
+            Some(MarkerSource::Subprocess { chunks, .. }) => {
+                let (device, env) = chunks.first().unwrap().attempts.first().unwrap();
                 assert_eq!(device.as_str(), "cpu");
                 assert!(env.iter().any(|(k, _)| k == "TORCH_DEVICE"));
             }
