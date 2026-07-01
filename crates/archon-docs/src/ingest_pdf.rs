@@ -199,6 +199,7 @@ pub(crate) async fn run_pdf_ingest_pipeline(
         db,
         document_id,
         &pdf_images,
+        extract_result.page_count,
         policy,
         &page_ids_by_number,
         &mut pages_by_number,

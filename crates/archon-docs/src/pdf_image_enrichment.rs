@@ -12,16 +12,18 @@ use crate::ingest_multimodal::persist_vlm_description;
 use crate::models::{ChunkArtifact, PageArtifact, PageOffset, ProvenanceEdgeType};
 use crate::ocr::local::LocalOcrProvider;
 use crate::ocr::provider::{self as ocr_provider, OcrProvider, OcrRequest};
-use crate::pdf::PdfImage;
+use crate::pdf::{PdfImage, PdfImageOrigin};
 use crate::pdf_image_progress::{emit_pdf_image_progress, emit_pdf_progress};
 use crate::pdf_image_vlm::{VlmImageResult, describe_image};
 use crate::provenance::make_edge;
 use crate::store;
 
+#[allow(clippy::too_many_arguments)] // db + doc context + policy + mutable outcome are all needed
 pub(crate) async fn enrich_pdf_images(
     db: &DbInstance,
     document_id: &str,
     images: &[PdfImage],
+    page_count: u32,
     policy: &archon_policy::EffectivePolicy,
     page_ids_by_number: &BTreeMap<u32, String>,
     pages_by_number: &mut BTreeMap<u32, PageArtifact>,
@@ -68,6 +70,24 @@ pub(crate) async fn enrich_pdf_images(
             image: image.clone(),
             page_ids,
         });
+    }
+
+    // Scanned-book guard: full-page-scan embedded images (one large image per page across the
+    // doc) ARE the pages — Marker already owns them via the text layer, so OCR-ing them just
+    // duplicates content and VLM-ing them is useless. Skip enrichment (page metadata is already
+    // marked above). Non-scanned docs (born-digital figures) fall through and enrich normally.
+    if is_scanned_page_images(images, page_count) {
+        let scans = images
+            .iter()
+            .filter(|i| matches!(i.origin, PdfImageOrigin::Embedded { .. }))
+            .count();
+        emit_pdf_progress(format!(
+            "PDF image enrichment: doc={document_id} SKIPPED {scans} full-page scan(s) — scanned book, Marker owns the pages"
+        ));
+        outcome.warnings.push(format!(
+            "scanned-book: skipped enrichment of {scans} full-page scan image(s)"
+        ));
+        return Ok(collected);
     }
 
     if image_workers(policy) <= 1 {
@@ -452,4 +472,85 @@ fn mark_page_image_metadata(
 
 fn image_workers(policy: &archon_policy::EffectivePolicy) -> usize {
     policy.docs.pdf.image_enrichment_workers.clamp(1, 16) as usize
+}
+
+/// Heuristic: do these embedded images look like a SELF-SCANNED book — one large image per page
+/// across most of the document? Such images ARE the page scans (Marker already OCRs them via the
+/// text layer), so enriching them duplicates OCR + wastes the VLM.
+///
+/// The signal is the DISTRIBUTION, not the raw count: a born-digital doc clusters figures (many
+/// pages with zero, some with several), so its fraction of "exactly one large image" pages stays
+/// low — e.g. the King&Salvo article has 17 images on 8 of 17 pages (~24%), while a 281 pp scanned
+/// Uexküll has exactly one per page (100%). Threshold 70% cleanly separates them. Only `Embedded`
+/// images count (rendered-page fallbacks are handled elsewhere); "large" (min side ≥ 1000 px)
+/// excludes per-page logos/icons.
+fn is_scanned_page_images(images: &[PdfImage], page_count: u32) -> bool {
+    if page_count == 0 {
+        return false;
+    }
+    let mut per_page: BTreeMap<u32, (usize, bool)> = BTreeMap::new();
+    for img in images {
+        if !matches!(img.origin, PdfImageOrigin::Embedded { .. }) {
+            continue;
+        }
+        let large = img.width.min(img.height) >= 1000;
+        let entry = per_page.entry(img.source_page).or_insert((0, true));
+        entry.0 += 1;
+        entry.1 = entry.1 && large;
+    }
+    let one_large_pages = per_page
+        .values()
+        .filter(|(count, all_large)| *count == 1 && *all_large)
+        .count();
+    one_large_pages as f64 / page_count as f64 >= 0.70
+}
+
+#[cfg(test)]
+mod scan_detection_tests {
+    use super::*;
+
+    fn embedded(page: u32, w: u32, h: u32) -> PdfImage {
+        PdfImage {
+            bytes: vec![],
+            mime: "image/png",
+            source_page: page,
+            source_pages: vec![page],
+            width: w,
+            height: h,
+            origin: PdfImageOrigin::Embedded { xobject_name: None },
+        }
+    }
+
+    #[test]
+    fn scanned_book_one_large_image_per_page_is_detected() {
+        // 5 pages, one ~full-page scan each → scanned book.
+        let imgs: Vec<_> = (1..=5).map(|p| embedded(p, 2000, 3000)).collect();
+        assert!(is_scanned_page_images(&imgs, 5));
+    }
+
+    #[test]
+    fn born_digital_clustered_figures_are_not_scans() {
+        // 17 pages, figures clustered on a few pages (some pages multiple) → NOT a scanned book.
+        let mut imgs = vec![embedded(5, 1200, 800), embedded(5, 900, 600)];
+        imgs.push(embedded(8, 1200, 700));
+        imgs.push(embedded(8, 800, 600));
+        imgs.push(embedded(8, 800, 600));
+        imgs.push(embedded(12, 1000, 800));
+        imgs.push(embedded(12, 1000, 800));
+        imgs.push(embedded(6, 1100, 700)); // a lone figure page
+        assert!(!is_scanned_page_images(&imgs, 17));
+    }
+
+    #[test]
+    fn per_page_small_icons_are_not_scans() {
+        // One SMALL image per page (e.g. a header logo) is not a full-page scan.
+        let imgs: Vec<_> = (1..=5).map(|p| embedded(p, 120, 60)).collect();
+        assert!(!is_scanned_page_images(&imgs, 5));
+    }
+
+    #[test]
+    fn empty_is_not_a_scan() {
+        assert!(!is_scanned_page_images(&[], 0));
+        assert!(!is_scanned_page_images(&[], 10));
+    }
 }
