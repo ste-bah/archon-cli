@@ -81,7 +81,7 @@ pub(crate) fn persist_vlm_description(
     document_id: &str,
     page_ids: &[String],
     description: &vlm::VlmDescription,
-) -> Result<(), DocsError> {
+) -> Result<Vec<ChunkArtifact>, DocsError> {
     let description_text = description.text.trim();
     let artifact_id = format!("vlm-description-{}", uuid::Uuid::new_v4());
     let created_at = chrono::Utc::now().to_rfc3339();
@@ -171,7 +171,8 @@ pub(crate) fn persist_vlm_description(
         message: e.to_string(),
     })?;
 
-    Ok(())
+    // Return the chunks so the caller can fold them into the document's chunks_root (V-1).
+    Ok(chunks)
 }
 
 fn page_number_from_id(page_id: &str) -> Option<u32> {

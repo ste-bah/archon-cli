@@ -26,8 +26,10 @@ pub(crate) async fn enrich_pdf_images(
     page_ids_by_number: &BTreeMap<u32, String>,
     pages_by_number: &mut BTreeMap<u32, PageArtifact>,
     outcome: &mut PipelineOutcome,
-) -> Result<(), DocsError> {
+) -> Result<Vec<ChunkArtifact>, DocsError> {
     let total = images.len();
+    // Image-OCR + VLM-description chunks, returned so the caller can fold them into chunks_root.
+    let mut collected: Vec<ChunkArtifact> = Vec::new();
     emit_pdf_progress(format!(
         "PDF image enrichment: doc={document_id} images={total} ocr=enabled vlm={} provider={} workers={}",
         policy.docs.pdf.vlm_per_page_image,
@@ -71,9 +73,9 @@ pub(crate) async fn enrich_pdf_images(
     if image_workers(policy) <= 1 {
         for item in work_items {
             let result = process_image(document_id.to_string(), item, policy.clone()).await;
-            persist_image_result(db, document_id, result, outcome)?;
+            persist_image_result(db, document_id, result, outcome, &mut collected)?;
         }
-        return Ok(());
+        return Ok(collected);
     }
 
     let mut next = 0usize;
@@ -95,12 +97,12 @@ pub(crate) async fn enrich_pdf_images(
             message: format!("PDF image worker join failed: {e}"),
             status_code: None,
         })?;
-        if let Err(error) = persist_image_result(db, document_id, result, outcome) {
+        if let Err(error) = persist_image_result(db, document_id, result, outcome, &mut collected) {
             tasks.abort_all();
             return Err(error);
         }
     }
-    Ok(())
+    Ok(collected)
 }
 
 #[derive(Clone)]
@@ -166,10 +168,11 @@ fn persist_image_result(
     document_id: &str,
     result: ImageResult,
     outcome: &mut PipelineOutcome,
+    collected: &mut Vec<ChunkArtifact>,
 ) -> Result<(), DocsError> {
-    persist_ocr_result(db, document_id, &result, outcome)?;
+    persist_ocr_result(db, document_id, &result, outcome, collected)?;
     if let Some(vlm) = result.vlm {
-        persist_vlm_result(db, document_id, &result.work, vlm, outcome)?;
+        persist_vlm_result(db, document_id, &result.work, vlm, outcome, collected)?;
     }
     // Full coverage: CLIP-embed each embedded PDF figure so they are visually searchable
     // alongside standalone images. Key per-figure ("{page_id}-img{N}") so multiple figures
@@ -193,6 +196,7 @@ fn persist_ocr_result(
     document_id: &str,
     result: &ImageResult,
     outcome: &mut PipelineOutcome,
+    collected: &mut Vec<ChunkArtifact>,
 ) -> Result<(), DocsError> {
     let work = &result.work;
     match &result.ocr {
@@ -212,13 +216,13 @@ fn persist_ocr_result(
                 work.image.source_page,
                 text.len()
             ));
-            persist_image_ocr_chunks(
+            collected.extend(persist_image_ocr_chunks(
                 db,
                 document_id,
                 work.image.source_page,
                 &work.page_ids,
                 text,
-            )?;
+            )?);
         }
         OcrImageResult::NoText => emit_pdf_image_progress(
             document_id,
@@ -255,10 +259,16 @@ fn persist_vlm_result(
     work: &ImageWork,
     result: VlmImageResult,
     outcome: &mut PipelineOutcome,
+    collected: &mut Vec<ChunkArtifact>,
 ) -> Result<(), DocsError> {
     match result {
         VlmImageResult::Described(description) => {
-            persist_vlm_description(db, document_id, &work.page_ids, &description)?;
+            collected.extend(persist_vlm_description(
+                db,
+                document_id,
+                &work.page_ids,
+                &description,
+            )?);
             outcome.warnings.push(format!(
                 "image description ok via {}/{} ({}ms, ${:.4})",
                 description.provider,
@@ -340,9 +350,9 @@ fn persist_image_ocr_chunks(
     source_page: u32,
     page_ids: &[String],
     text: &str,
-) -> Result<(), DocsError> {
+) -> Result<Vec<ChunkArtifact>, DocsError> {
     if text.trim().is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let artifact_id = format!("pdf-image-ocr-{}", uuid::Uuid::new_v4());
     let chunks = image_ocr_chunks(db, document_id, source_page, text, &artifact_id)?;
@@ -358,7 +368,7 @@ fn persist_image_ocr_chunks(
         }
     }
     index_chunks_if_provider_available(db, &chunks);
-    Ok(())
+    Ok(chunks)
 }
 
 fn image_ocr_chunks(

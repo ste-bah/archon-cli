@@ -250,4 +250,94 @@ mod tests {
             "tampered → fails"
         );
     }
+
+    #[test]
+    fn refold_over_superset_covers_image_chunks_and_verifies() {
+        let db = test_db();
+        crate::schema::ensure_doc_schema(&db).unwrap();
+        let text_chunks = vec![chunk("d", 0, "alpha body"), chunk("d", 1, "beta body")];
+        store::insert_artifact(
+            &db,
+            &ArtifactRecord {
+                artifact_id: "ocr-d".into(),
+                document_id: "d".into(),
+                artifact_type: "ocr_text".into(),
+                content_hash: "fh".into(),
+                created_at: "t".into(),
+                provenance_record_id: String::new(),
+            },
+        )
+        .unwrap();
+        for c in &text_chunks {
+            store::insert_chunk(&db, c).unwrap();
+        }
+
+        // (1) Early text-only seal (as ingest does before image enrichment).
+        let rid = persist_chunk_integrity(
+            &db,
+            "ocr-d",
+            &text_chunks,
+            &BTreeMap::new(),
+            "poppler",
+            "file-hash",
+            "run-1",
+        )
+        .unwrap();
+        let text_only_root = chunks_root(store::get_doc_commit_hashes(&db, "d").unwrap());
+        assert!(verify_chunks_root(&db, "d", &rid).unwrap());
+
+        // (2) An image-OCR chunk lands AFTER the seal (distinct, uuid-keyed id).
+        let img = ChunkArtifact {
+            chunk_id: "chunk-pdf-image-ocr-xyz-0".into(),
+            document_id: "d".into(),
+            artifact_id: "pdf-image-ocr-xyz".into(),
+            chunk_index: 0,
+            page_start: 2,
+            page_end: 2,
+            content: "figure caption text".into(),
+            content_hash: sha256_str("figure caption text"),
+            embedding_status: "pending".into(),
+        };
+        store::insert_chunk(&db, &img).unwrap();
+
+        // (3) Re-fold over the text+image UNION → same record, superset root.
+        let mut all = text_chunks.clone();
+        all.push(img);
+        let rid2 = persist_chunk_integrity(
+            &db,
+            "ocr-d",
+            &all,
+            &BTreeMap::new(),
+            "poppler",
+            "file-hash",
+            "run-1",
+        )
+        .unwrap();
+        assert_eq!(rid2, rid, "re-fold overwrites the same provenance record");
+        let superset_root = chunks_root(store::get_doc_commit_hashes(&db, "d").unwrap());
+        assert_ne!(
+            superset_root, text_only_root,
+            "the image chunk changes the root"
+        );
+        assert!(
+            verify_chunks_root(&db, "d", &rid).unwrap(),
+            "superset root verifies"
+        );
+
+        // (4) Tampering the IMAGE chunk's commit now flips verify → image content is covered.
+        store::insert_chunk_hashes(
+            &db,
+            &ChunkHashes {
+                chunk_id: "chunk-pdf-image-ocr-xyz-0".into(),
+                raw_sha256: "x".into(),
+                cleaning_version: CLEANING_VERSION.into(),
+                commit_hash: "TAMPERED".into(),
+            },
+        )
+        .unwrap();
+        assert!(
+            !verify_chunks_root(&db, "d", &rid).unwrap(),
+            "tampered image chunk → fails (was silently excluded before)"
+        );
+    }
 }

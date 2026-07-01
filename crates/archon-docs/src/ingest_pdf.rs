@@ -68,6 +68,16 @@ pub(crate) async fn run_pdf_ingest_pipeline(
     }
 
     let page_ids = page_ids_by_number.values().cloned().collect::<Vec<_>>();
+    // Captured when the text root is sealed, so image-OCR/VLM chunks can be re-folded into it
+    // after enrichment (V-1 image integrity).
+    struct TextSeal {
+        ocr_artifact_id: String,
+        text_chunks: Vec<crate::models::ChunkArtifact>,
+        spatial_by: std::collections::BTreeMap<String, String>,
+        ocr_engine: &'static str,
+        source_sha256: String,
+    }
+    let mut text_seal: Option<TextSeal> = None;
     if !extract_result.full_text.trim().is_empty() {
         let ocr_artifact_id = format!("ocr-result-{}", ocr_run_id);
         let (chunks, spatials, ocr_engine) = if policy.docs.pdf.use_token_aware_chunker() {
@@ -158,6 +168,13 @@ pub(crate) async fn run_pdf_ingest_pipeline(
                 &source_sha256,
                 ocr_run_id,
             )?;
+            text_seal = Some(TextSeal {
+                ocr_artifact_id: ocr_artifact_id.clone(),
+                text_chunks: chunks.clone(),
+                spatial_by,
+                ocr_engine,
+                source_sha256,
+            });
         }
         index_chunks_if_provider_available(db, &chunks);
     }
@@ -178,7 +195,7 @@ pub(crate) async fn run_pdf_ingest_pipeline(
             "PDF ingest will trigger VLM calls for extracted page images"
         );
     }
-    enrich_pdf_images(
+    let image_chunks = enrich_pdf_images(
         db,
         document_id,
         &pdf_images,
@@ -188,6 +205,26 @@ pub(crate) async fn run_pdf_ingest_pipeline(
         &mut outcome,
     )
     .await?;
+    // V-1 image integrity: image-OCR + VLM-description chunks are persisted AFTER the early text
+    // seal, so re-fold them into chunks_root — re-run persist_chunk_integrity over the text+image
+    // UNION (idempotent upsert; chunks_root sorts commits, so text-only ingests stay byte-identical).
+    // Only fires when the doc had a text seal AND produced image chunks. (Image-only/scanned PDFs
+    // with no text seal still get no root — a documented follow-up needing a synthetic artifact.)
+    if let Some(seal) = text_seal
+        && !image_chunks.is_empty()
+    {
+        let mut all = seal.text_chunks;
+        all.extend(image_chunks);
+        crate::provenance_chunks::persist_chunk_integrity(
+            db,
+            &seal.ocr_artifact_id,
+            &all,
+            &seal.spatial_by,
+            seal.ocr_engine,
+            &seal.source_sha256,
+            ocr_run_id,
+        )?;
+    }
     outcome.pdf_embedded_images_extracted = outcome
         .pdf_embedded_images_extracted
         .max(extract_result.embedded_images.len());
