@@ -195,6 +195,19 @@ pub(crate) async fn run_pdf_ingest_pipeline(
             "PDF ingest will trigger VLM calls for extracted page images"
         );
     }
+    // Active scanned-book detector governs whether page-scan images are enriched. Coverage needs
+    // page dims, so resolve it from the path here (cheap: pdfimages + lopdf, milliseconds). Aspect
+    // (the default) → None, so enrich_pdf_images keeps using its in-memory heuristic unchanged.
+    let scanned_override =
+        match crate::pdf_scan::ScanDetector::parse(&policy.docs.pdf.scan_detector) {
+            crate::pdf_scan::ScanDetector::Coverage => crate::pdf_scan::classify_scan(
+                Path::new(file_path),
+                crate::pdf_scan::ScanDetector::Coverage,
+            )
+            .coverage
+            .map(|c| c.scanned),
+            crate::pdf_scan::ScanDetector::Aspect => None,
+        };
     let image_chunks = enrich_pdf_images(
         db,
         document_id,
@@ -204,6 +217,7 @@ pub(crate) async fn run_pdf_ingest_pipeline(
         &page_ids_by_number,
         &mut pages_by_number,
         &mut outcome,
+        scanned_override,
     )
     .await?;
     // V-1 image integrity: image-OCR + VLM-description chunks are persisted AFTER the early text

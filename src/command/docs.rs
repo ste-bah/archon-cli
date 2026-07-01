@@ -116,9 +116,41 @@ fn print_enrichment_plan(
     println!("  ENRICHMENT PLAN — {name}");
     println!("========================================================================");
     println!(
-        "  Pages: {}   Embedded images: {}   Page-scans detected: {}",
-        plan.page_count, plan.embedded_images, plan.page_scans
+        "  Pages: {}   Embedded images: {}   Page-scans detected: {} (active detector: {})",
+        plan.page_count, plan.embedded_images, plan.page_scans, plan.detector
     );
+    // A/B: show both detector verdicts so a divergence is visible before committing.
+    let verdict = |scanned: bool| if scanned { "SCANNED" } else { "born-digital" };
+    let coverage_line = match (plan.coverage_scanned, plan.coverage_max) {
+        (Some(scanned), Some(max)) => {
+            format!(
+                "{} ({} page-scan(s), peak coverage {:.0}%){}",
+                verdict(scanned),
+                plan.coverage_page_scans.unwrap_or(0),
+                max * 100.0,
+                if plan.coverage_low_confidence {
+                    " — LOW CONFIDENCE (some images deferred to aspect; review)"
+                } else {
+                    ""
+                }
+            )
+        }
+        _ => "unavailable (no page dimensions readable)".to_string(),
+    };
+    println!(
+        "  Detectors:  aspect = {} ({} page-scan(s))    coverage = {}",
+        verdict(plan.aspect_scanned),
+        plan.aspect_page_scans,
+        coverage_line
+    );
+    if plan.divergent {
+        println!(
+            "  !! DETECTORS DISAGREE — aspect says {}, coverage says {}. Review before trusting the",
+            verdict(plan.aspect_scanned),
+            plan.coverage_scanned.map(verdict).unwrap_or("?")
+        );
+        println!("     active verdict; the '{}' detector is currently in force.", plan.detector);
+    }
     if plan.is_scanned_book {
         println!("  Classification: SCANNED BOOK");
         println!(
@@ -247,7 +279,7 @@ async fn handle_ingest_inner(path_str: &str, yes: bool) -> Result<()> {
         // born-digital paper wrongly flagged as scanned, or a scanned book wrongly enriched) is
         // caught BEFORE any OCR/VLM. Skipped for non-PDFs, with --yes, or when non-interactive.
         if is_pdf_path(&path) {
-            let plan = archon_docs::pdf::classify_pdf_enrichment(&path);
+            let plan = archon_docs::pdf::classify_pdf_enrichment(&path, &policy.docs.pdf);
             print_enrichment_plan(&path, &plan, &policy);
             if !yes && std::io::stdin().is_terminal() && !confirm_proceed()? {
                 println!("Aborted — no changes made.");

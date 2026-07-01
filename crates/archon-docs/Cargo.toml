@@ -21,6 +21,7 @@ chrono.workspace = true
 cozo.workspace = true
 tokio.workspace = true
 walkdir = "2"
+lopdf.workspace = true
 fastembed.workspace = true
 ndarray.workspace = true
 dirs.workspace = true

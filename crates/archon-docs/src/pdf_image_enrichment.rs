@@ -28,6 +28,9 @@ pub(crate) async fn enrich_pdf_images(
     page_ids_by_number: &BTreeMap<u32, String>,
     pages_by_number: &mut BTreeMap<u32, PageArtifact>,
     outcome: &mut PipelineOutcome,
+    // Pre-resolved scanned-book verdict from the active detector (`Some` when the coverage
+    // detector is selected; `None` → fall back to the in-memory aspect heuristic, unchanged).
+    scanned_override: Option<bool>,
 ) -> Result<Vec<ChunkArtifact>, DocsError> {
     let total = images.len();
     // Image-OCR + VLM-description chunks, returned so the caller can fold them into chunks_root.
@@ -76,7 +79,11 @@ pub(crate) async fn enrich_pdf_images(
     // doc) ARE the pages — Marker already owns them via the text layer, so OCR-ing them just
     // duplicates content and VLM-ing them is useless. Skip enrichment (page metadata is already
     // marked above). Non-scanned docs (born-digital figures) fall through and enrich normally.
-    if is_scanned_page_images(images, page_count) {
+    // The active detector is chosen upstream: `scanned_override` carries the coverage verdict when
+    // that detector is selected; otherwise we use the shipped aspect heuristic on the in-memory
+    // images (identical to prior behavior — the default path is unchanged).
+    let is_scanned = scanned_override.unwrap_or_else(|| is_scanned_page_images(images, page_count));
+    if is_scanned {
         let scans = images
             .iter()
             .filter(|i| matches!(i.origin, PdfImageOrigin::Embedded { .. }))

@@ -68,6 +68,7 @@ struct RawPdfPolicy {
     marker_device: Option<String>,
     marker_python: Option<String>,
     marker_memory_budget_mb: Option<u64>,
+    scan_detector: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -218,6 +219,12 @@ fn apply_pdf(policy: &mut PdfPolicy, raw: RawPdfPolicy) {
     if raw.marker_memory_budget_mb.is_some() {
         policy.marker_memory_budget_mb = raw.marker_memory_budget_mb;
     }
+    if let Some(value) = raw.scan_detector {
+        // Only accept known detectors; anything else keeps the default (aspect).
+        if value == "aspect" || value == "coverage" {
+            policy.scan_detector = value;
+        }
+    }
 }
 
 fn apply_retrieval(policy: &mut RetrievalPolicy, raw: RawRetrievalPolicy) {
@@ -226,5 +233,51 @@ fn apply_retrieval(policy: &mut RetrievalPolicy, raw: RawRetrievalPolicy) {
     }
     if let Some(value) = raw.semantic_weight {
         policy.semantic_weight = value;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scan_detector_coverage_is_applied() {
+        let mut pdf = PdfPolicy::default();
+        assert_eq!(pdf.scan_detector, "aspect", "default guard");
+        apply_pdf(
+            &mut pdf,
+            RawPdfPolicy {
+                scan_detector: Some("coverage".to_string()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(pdf.scan_detector, "coverage");
+    }
+
+    #[test]
+    fn scan_detector_unknown_value_keeps_default() {
+        let mut pdf = PdfPolicy::default();
+        apply_pdf(
+            &mut pdf,
+            RawPdfPolicy {
+                scan_detector: Some("nonsense".to_string()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            pdf.scan_detector, "aspect",
+            "unknown detectors are rejected"
+        );
+    }
+
+    #[test]
+    fn scan_detector_from_toml_flows_through_raw_docs() {
+        // The toml → Raw → apply path must carry scan_detector (the field was previously dropped
+        // because the loader layers through Raw structs, not PdfPolicy directly).
+        let raw: RawDocsPolicy =
+            toml::from_str("[pdf]\nscan_detector = \"coverage\"\n").expect("parse");
+        let mut docs = DocsPolicy::default();
+        apply_docs(&mut docs, raw);
+        assert_eq!(docs.pdf.scan_detector, "coverage");
     }
 }

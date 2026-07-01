@@ -29,6 +29,7 @@ pub mod pdf;
 mod pdf_image_enrichment;
 mod pdf_image_progress;
 mod pdf_image_vlm;
+pub mod pdf_scan;
 pub mod provenance;
 pub mod provenance_chunks;
 pub mod reprocess;

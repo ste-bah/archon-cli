@@ -211,6 +211,13 @@ min_image_bytes = 4096
 vlm_per_page_image = true
 render_text_pdf_pages = false
 image_enrichment_workers = 1
+# Scanned-book detector for the image-enrichment skip decision:
+#   "aspect"   = pixel-dims heuristic (large AND page-shaped). Shipped default.
+#   "coverage" = true page-coverage % via image ppi + page MediaBox (removes the DPI/aspect guesses).
+# Both detectors ALWAYS run for the pre-ingest report + divergence log; this selects which is ACTIVE
+# (governs whether full-page-scan images are skipped). Keep "aspect" until coverage is validated on
+# your corpus (watch the pre-ingest report + the "scan-detector DISAGREEMENT" log), then flip.
+scan_detector = "aspect"
 
 # --- Device-adaptive Marker layout + bbox (LOCAL, OPT-IN) --------------------
 # Uncomment + point at YOUR local Marker install to get bbox-carrying ingestion:
