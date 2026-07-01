@@ -1,16 +1,17 @@
 //! Marker block source — obtains Marker's block-tree JSON and parses it to `Vec<Block>`.
 //!
-//! Device-adaptive: the Marker sidecar runs as a Python subprocess, but WHICH device it runs
-//! on (and at what surya batch caps) is resolved at build time by `archon-accel` from the
-//! host's *free* VRAM — not a static string. The load-bearing correctness guarantee is the
-//! per-doc GPU-OOM → CPU retry in `fetch_json`. Transport is orthogonal to device: a local
+//! Device-adaptive: the Marker sidecar runs as a Python subprocess, but WHICH device it runs on
+//! (and at what surya batch caps) is resolved by `archon-accel` from the host's *free* VRAM — a
+//! bigger card gets bigger batches. The load-bearing correctness guarantee is the per-doc
+//! OOM→retry-smaller ladder in `fetch_json`: step DOWN GPU batch tiers, CPU as the last resort.
+//! Transport is orthogonal to device: a local
 //! subprocess (default, the standalone Mac/laptop story), a remote HTTP Marker service (e.g.
 //! WRAITH for bulk on NVIDIA), or a pre-extracted JSON file. All three yield the same
 //! block-tree JSON, parsed by `archon_ingest_ext::marker::parse_marker_str`.
 
 use std::path::{Path, PathBuf};
 
-use archon_accel::{AccelKind, DeviceOverrides, marker_cpu_fallback_env, plan_marker_ingest};
+use archon_accel::{AccelKind, DeviceOverrides, marker_env_ladder};
 use archon_ingest_ext::chunk::Block;
 use archon_ingest_ext::marker::parse_marker_str;
 use archon_policy::PdfPolicy;
@@ -20,14 +21,14 @@ use crate::errors::DocsError;
 /// Where/how to obtain a PDF's Marker block tree.
 #[derive(Clone, Debug)]
 pub enum MarkerSource {
-    /// Spawn the local Python sidecar: `python <script> <pdf> [--device <dev>]` under `env`
-    /// (surya batch caps + alloc conf from the placement planner). `device = None` lets the
-    /// sidecar auto-detect (cuda → mps → cpu).
+    /// Spawn the local Python sidecar per the `archon-accel` OOM→retry-smaller ladder — each
+    /// attempt runs `python <script> <pdf> --device <dev>` under that attempt's env.
     Subprocess {
         python: String,
         script: PathBuf,
-        device: Option<String>,
-        env: Vec<(String, String)>,
+        /// `(sidecar_device, env)` per attempt, biggest batch tier first, CPU last. Tried
+        /// top-to-bottom, advancing to the next (smaller) attempt only on a torch-OOM.
+        attempts: Vec<(String, Vec<(String, String)>)>,
     },
     /// POST the PDF bytes to a remote Marker HTTP service; expects block-tree JSON back.
     Http { url: String },
@@ -36,23 +37,22 @@ pub enum MarkerSource {
 }
 
 /// Build a `MarkerSource` from policy. Present `marker_sidecar` path → local subprocess whose
-/// device + surya batch caps are resolved by `archon-accel` from the host's free VRAM
-/// (`marker_device` of `None`/`"auto"` → planner-chosen; an explicit `cuda|mps|cpu` forces it).
-/// Absent `marker_sidecar` → `None` (caller falls back to flat-text blocks).
+/// device + surya batch caps + OOM→retry-smaller ladder are resolved by `archon-accel` from the
+/// host's free VRAM (`marker_device` of `None`/`"auto"` → planner-chosen; an explicit
+/// `cuda|mps|cpu` forces it). Absent `marker_sidecar` → `None` (caller falls back to flat text).
 ///
-/// NOTE: this resolves placement (a cheap `nvidia-smi`/`sysinfo` probe) once per call — in bulk
-/// ingest, once per PDF. It can be hoisted to once-per-run if the probe ever shows up in a profile.
+/// NOTE: resolves placement (a cheap `nvidia-smi`/`sysinfo` probe) once per call — in bulk ingest,
+/// once per PDF. It can be hoisted to once-per-run if the probe ever shows up in a profile.
 pub fn from_policy(pdf: &PdfPolicy) -> Option<MarkerSource> {
     let script = pdf.marker_sidecar.as_ref()?;
-    let (device, env) = resolve_marker_placement(pdf);
+    let attempts = marker_env_ladder(&archon_accel::detect(), &overrides_from_policy(pdf));
     Some(MarkerSource::Subprocess {
         python: pdf
             .marker_python
             .clone()
             .unwrap_or_else(|| "python3".to_string()),
         script: PathBuf::from(script),
-        device: Some(device),
-        env,
+        attempts,
     })
 }
 
@@ -73,34 +73,10 @@ fn overrides_from_policy(pdf: &PdfPolicy) -> DeviceOverrides {
     }
 }
 
-/// Resolve the sidecar device string + env via `archon-accel` (free-VRAM aware).
-fn resolve_marker_placement(pdf: &PdfPolicy) -> (String, Vec<(String, String)>) {
-    let report = archon_accel::detect();
-    let plan = plan_marker_ingest(&report, &overrides_from_policy(pdf));
-    let placement = plan
-        .marker()
-        .expect("plan_marker_ingest always yields a Marker placement");
-    (
-        placement.device.sidecar_device().to_string(),
-        placement.marker_sidecar_env(),
-    )
-}
-
-/// Internal: distinguishes a torch-OOM sidecar failure (retry on CPU) from any other error.
+/// Internal: distinguishes a torch-OOM sidecar failure (advance the ladder) from any other error.
 enum SidecarError {
     Oom { device: String },
     Other(DocsError),
-}
-
-impl From<SidecarError> for DocsError {
-    fn from(e: SidecarError) -> Self {
-        match e {
-            SidecarError::Oom { device } => DocsError::Storage {
-                message: format!("marker OOM on device={device} (CPU fallback also failed)"),
-            },
-            SidecarError::Other(d) => d,
-        }
-    }
 }
 
 impl MarkerSource {
@@ -117,22 +93,25 @@ impl MarkerSource {
             MarkerSource::Subprocess {
                 python,
                 script,
-                device,
-                env,
-            } => match run_sidecar(python, script, pdf_path, device.as_deref(), env).await {
-                Ok(json) => Ok(json),
-                // Per-doc GPU-OOM → retry this document on CPU (the load-bearing fallback).
-                Err(SidecarError::Oom { device: dev }) if dev != "cpu" => run_sidecar(
-                    python,
-                    script,
-                    pdf_path,
-                    Some("cpu"),
-                    &marker_cpu_fallback_env(),
-                )
-                .await
-                .map_err(DocsError::from),
-                Err(e) => Err(e.into()),
-            },
+                attempts,
+            } => {
+                // Try each ladder rung; advance to the next (smaller) attempt only on torch-OOM.
+                let mut last: Option<DocsError> = None;
+                for (device, env) in attempts {
+                    match run_sidecar(python, script, pdf_path, Some(device.as_str()), env).await {
+                        Ok(json) => return Ok(json),
+                        Err(SidecarError::Oom { device: dev }) => {
+                            last = Some(DocsError::Storage {
+                                message: format!("marker OOM on device={dev}"),
+                            });
+                        }
+                        Err(SidecarError::Other(e)) => return Err(e),
+                    }
+                }
+                Err(last.unwrap_or_else(|| DocsError::Storage {
+                    message: "marker: empty attempt ladder".to_string(),
+                }))
+            }
             MarkerSource::Http { url } => {
                 let bytes = tokio::fs::read(pdf_path)
                     .await
@@ -239,8 +218,7 @@ mod tests {
         let src = MarkerSource::Subprocess {
             python: "python3".into(),
             script: PathBuf::from("/nonexistent/archon_marker_sidecar.py"),
-            device: Some("cpu".into()),
-            env: vec![],
+            attempts: vec![("cpu".to_string(), vec![])],
         };
         assert!(src.blocks_for(Path::new("x.pdf")).await.is_err());
     }
@@ -252,8 +230,8 @@ mod tests {
         pdf.marker_sidecar = Some("scripts/archon_marker_sidecar.py".into());
         pdf.marker_device = Some("mps".into());
         match from_policy(&pdf) {
-            Some(MarkerSource::Subprocess { device, .. }) => {
-                assert_eq!(device.as_deref(), Some("mps"))
+            Some(MarkerSource::Subprocess { attempts, .. }) => {
+                assert_eq!(attempts.first().unwrap().0.as_str(), "mps")
             }
             other => panic!("expected subprocess, got {other:?}"),
         }
@@ -292,8 +270,9 @@ mod tests {
             ..Default::default()
         };
         match from_policy(&p) {
-            Some(MarkerSource::Subprocess { device, env, .. }) => {
-                assert_eq!(device.as_deref(), Some("cpu"));
+            Some(MarkerSource::Subprocess { attempts, .. }) => {
+                let (device, env) = attempts.first().unwrap();
+                assert_eq!(device.as_str(), "cpu");
                 assert!(env.iter().any(|(k, _)| k == "TORCH_DEVICE"));
             }
             other => panic!("expected subprocess, got {other:?}"),

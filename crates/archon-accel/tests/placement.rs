@@ -70,7 +70,8 @@ fn big_card_tiny_free_routes_marker_to_cpu() {
 
 #[test]
 fn ample_cuda_places_marker_generous_fp16() {
-    let plan = plan_marker_ingest(&cuda(24_000, 20_000), &DeviceOverrides::default());
+    // 10 GB free -> Generous (>= need 7680, < AMPLE 12288).
+    let plan = plan_marker_ingest(&cuda(24_000, 10_000), &DeviceOverrides::default());
     let m = plan.marker().unwrap();
     assert_eq!(m.device, AccelKind::Cuda);
     assert_eq!(m.precision, Precision::Fp16);
@@ -106,8 +107,8 @@ fn no_gpu_everything_cpu() {
 
 #[test]
 fn apple_unified_ample_places_marker_on_metal() {
-    // 24 GB Mac, ~18 GB free after the OS reserve.
-    let plan = plan_marker_ingest(&metal(24_576, 18_000), &DeviceOverrides::default());
+    // Mac, ~10 GB free after the OS reserve -> Generous on Metal.
+    let plan = plan_marker_ingest(&metal(24_576, 10_000), &DeviceOverrides::default());
     let m = plan.marker().unwrap();
     assert_eq!(m.device, AccelKind::Metal);
     assert_eq!(m.surya_tier, SuryaTier::Generous);
@@ -133,7 +134,7 @@ fn memory_budget_override_can_force_cpu() {
         memory_budget_mb: Some(4_000),
         ..DeviceOverrides::default()
     };
-    // 20 GB free, but the budget clamps usable to 4 GB < footprint 5120.
+    // 20 GB free, but the budget clamps usable to 4 GB < footprint 6144.
     let plan = plan_marker_ingest(&cuda(24_000, 20_000), &overrides);
     assert_eq!(plan.marker().unwrap().device, AccelKind::Cpu);
 }
@@ -199,4 +200,61 @@ fn multi_consumer_seam_packs_by_priority() {
         plan.get(ConsumerKind::Whisper).unwrap().device,
         AccelKind::Cpu
     );
+}
+
+#[test]
+fn tiers_scale_up_with_free_vram() {
+    // Bigger free VRAM -> bigger batch tier (the upward adaptation).
+    let gen = plan_marker_ingest(&cuda(24_000, 10_000), &DeviceOverrides::default());
+    assert_eq!(gen.marker().unwrap().surya_tier, SuryaTier::Generous);
+    let ample = plan_marker_ingest(&cuda(24_000, 15_000), &DeviceOverrides::default());
+    assert_eq!(ample.marker().unwrap().surya_tier, SuryaTier::Ample); // 16 GB-class
+    let max = plan_marker_ingest(&cuda(32_000, 30_000), &DeviceOverrides::default());
+    assert_eq!(max.marker().unwrap().surya_tier, SuryaTier::Max); // 24 GB+ card
+}
+
+#[test]
+fn bigger_tier_uses_bigger_recognition_batch() {
+    let rec = |t| {
+        archon_accel::marker_env_for(AccelKind::Cuda, t)
+            .into_iter()
+            .find(|(k, _)| k == "RECOGNITION_BATCH_SIZE")
+            .map(|(_, v)| v.parse::<u32>().unwrap())
+            .unwrap()
+    };
+    assert!(rec(SuryaTier::Max) > rec(SuryaTier::Ample));
+    assert!(rec(SuryaTier::Ample) > rec(SuryaTier::Generous));
+    assert!(rec(SuryaTier::Generous) > rec(SuryaTier::Reduced));
+}
+
+#[test]
+fn oom_ladder_steps_down_gpu_then_cpu() {
+    // Ample start -> ladder = [cuda Ample, cuda Generous, cuda Reduced, cpu].
+    let ladder =
+        archon_accel::marker_env_ladder(&cuda(24_000, 15_000), &DeviceOverrides::default());
+    assert!(ladder.len() >= 2);
+    assert_eq!(ladder.first().unwrap().0, "cuda", "starts on GPU");
+    assert_eq!(ladder.last().unwrap().0, "cpu", "ends on CPU last resort");
+    // The GPU rungs shrink the recognition batch monotonically.
+    let recs: Vec<u32> = ladder
+        .iter()
+        .filter(|(dev, _)| dev == "cuda")
+        .map(|(_, env)| {
+            env.iter()
+                .find(|(k, _)| k == "RECOGNITION_BATCH_SIZE")
+                .map(|(_, v)| v.parse::<u32>().unwrap())
+                .unwrap()
+        })
+        .collect();
+    assert!(
+        recs.windows(2).all(|w| w[0] > w[1]),
+        "GPU rungs step down: {recs:?}"
+    );
+}
+
+#[test]
+fn oom_ladder_cpu_only_when_no_gpu() {
+    let ladder = archon_accel::marker_env_ladder(&cpu_only(), &DeviceOverrides::default());
+    assert_eq!(ladder.len(), 1);
+    assert_eq!(ladder[0].0, "cpu");
 }
