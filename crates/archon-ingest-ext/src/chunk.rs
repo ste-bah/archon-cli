@@ -33,6 +33,17 @@ pub struct Block {
     pub page: u32,
 }
 
+/// A figure/picture region detected by Marker (image content, no text). `bbox` is in Marker's
+/// coordinate space — PDF points, top-left origin. Collected by a SEPARATE walk from the text-block
+/// stream (so chunk parity is untouched) and fed to the opt-in figure-region VLM path, which crops
+/// the region from a page render and describes it — the only way to caption figures baked into a
+/// scanned page (no discrete embedded image to describe).
+#[derive(Clone, Debug, PartialEq)]
+pub struct FigureRegion {
+    pub page: u32,
+    pub bbox: [f32; 4],
+}
+
 /// Per-page bbox group: the union super-box plus the individual block boxes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PageBoxes {

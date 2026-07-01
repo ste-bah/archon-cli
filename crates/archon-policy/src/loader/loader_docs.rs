@@ -69,6 +69,7 @@ struct RawPdfPolicy {
     marker_python: Option<String>,
     marker_memory_budget_mb: Option<u64>,
     scan_detector: Option<String>,
+    figure_region_vlm: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -224,6 +225,9 @@ fn apply_pdf(policy: &mut PdfPolicy, raw: RawPdfPolicy) {
         if value == "aspect" || value == "coverage" || value == "union" {
             policy.scan_detector = value;
         }
+    }
+    if let Some(value) = raw.figure_region_vlm {
+        policy.figure_region_vlm = value;
     }
 }
 

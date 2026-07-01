@@ -556,6 +556,7 @@ dependencies = [
  "fastembed",
  "hex",
  "hnsw_rs",
+ "image",
  "lopdf",
  "ndarray",
  "reqwest 0.12.28",

@@ -97,3 +97,4 @@ archon
 
 # machine-specific Archon policy (real paths); template is policy.example.toml
 .archon/policy.toml
+.backups/

@@ -14,8 +14,8 @@
 use std::path::{Path, PathBuf};
 
 use archon_accel::{AccelKind, DeviceOverrides, MarkerChunk, marker_ingest_plan};
-use archon_ingest_ext::chunk::Block;
-use archon_ingest_ext::marker::parse_marker_str;
+use archon_ingest_ext::chunk::{Block, FigureRegion};
+use archon_ingest_ext::marker::{parse_marker_figures_str, parse_marker_str};
 use archon_policy::PdfPolicy;
 
 use crate::errors::DocsError;
@@ -91,22 +91,34 @@ impl MarkerSource {
     /// each chunk is run and parsed independently and the block streams are concatenated in page
     /// order (Marker emits absolute page ids, so no re-offset is needed).
     pub async fn blocks_for(&self, pdf_path: &Path) -> Result<Vec<Block>, DocsError> {
+        Ok(self.blocks_and_figures_for(pdf_path).await?.0)
+    }
+
+    /// Like [`Self::blocks_for`], but ALSO returns the figure/picture regions from the SAME Marker
+    /// run (one sidecar invocation per chunk), for the opt-in figure-region VLM path. Figures are
+    /// parsed by a separate walk that leaves the text-block stream (and thus chunk parity) untouched.
+    pub async fn blocks_and_figures_for(
+        &self,
+        pdf_path: &Path,
+    ) -> Result<(Vec<Block>, Vec<FigureRegion>), DocsError> {
         match self {
             MarkerSource::Subprocess {
                 python,
                 script,
                 chunks,
             } => {
-                let mut all = Vec::new();
+                let mut blocks = Vec::new();
+                let mut figures = Vec::new();
                 for chunk in chunks {
                     let json = run_chunk(python, script, pdf_path, chunk).await?;
-                    all.append(&mut parse_blocks(&json)?);
+                    blocks.append(&mut parse_blocks(&json)?);
+                    figures.append(&mut parse_figures(&json)?);
                 }
-                Ok(all)
+                Ok((blocks, figures))
             }
             MarkerSource::Http { .. } | MarkerSource::PreExtracted { .. } => {
                 let json = self.fetch_json(pdf_path).await?;
-                parse_blocks(&json)
+                Ok((parse_blocks(&json)?, parse_figures(&json)?))
             }
         }
     }
@@ -150,6 +162,13 @@ impl MarkerSource {
 fn parse_blocks(json: &str) -> Result<Vec<Block>, DocsError> {
     parse_marker_str(json).map_err(|e| DocsError::Storage {
         message: format!("marker json parse failed: {e}"),
+    })
+}
+
+/// Parse a Marker JSON block tree to `Vec<FigureRegion>` (the figure-region VLM path).
+fn parse_figures(json: &str) -> Result<Vec<FigureRegion>, DocsError> {
+    parse_marker_figures_str(json).map_err(|e| DocsError::Storage {
+        message: format!("marker figure parse failed: {e}"),
     })
 }
 

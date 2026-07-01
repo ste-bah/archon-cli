@@ -26,6 +26,7 @@ pub mod inspect;
 pub mod marker_source;
 pub mod ocr;
 pub mod pdf;
+mod pdf_figure_vlm;
 mod pdf_image_enrichment;
 mod pdf_image_progress;
 mod pdf_image_vlm;

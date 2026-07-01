@@ -22,6 +22,7 @@ cozo.workspace = true
 tokio.workspace = true
 walkdir = "2"
 lopdf.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
 fastembed.workspace = true
 ndarray.workspace = true
 dirs.workspace = true

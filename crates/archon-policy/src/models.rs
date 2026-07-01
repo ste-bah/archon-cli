@@ -255,6 +255,12 @@ pub struct PdfPolicy {
     /// enriched). Unknown values fall back to the default (union).
     #[serde(default = "default_scan_detector")]
     pub scan_detector: String,
+    /// Opt-in: VLM-describe Marker's detected FIGURE regions by cropping them from a page render.
+    /// For scanned books, figures are baked into the page scans (no discrete embedded image to
+    /// describe), so this is the only way to caption them. Default false (adds a render + VLM call
+    /// per figure). Requires a Marker sidecar + an enabled VLM.
+    #[serde(default)]
+    pub figure_region_vlm: bool,
 }
 
 fn default_chunker() -> String {
@@ -288,6 +294,7 @@ impl Default for PdfPolicy {
             marker_python: None,
             marker_memory_budget_mb: None,
             scan_detector: default_scan_detector(),
+            figure_region_vlm: false,
         }
     }
 }

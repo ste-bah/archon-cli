@@ -86,6 +86,9 @@ pub(crate) async fn run_pdf_ingest_pipeline(
         crate::marker_source::from_policy(&policy.docs.pdf, extract_result.page_count).is_some();
     let has_page_images =
         !extract_result.embedded_images.is_empty() || !extract_result.rendered_pages.is_empty();
+    // Marker's figure regions (page + bbox), captured from the same Marker run below; consumed by
+    // the opt-in figure-region VLM path (C4) after image enrichment.
+    let mut figure_regions: Vec<archon_ingest_ext::chunk::FigureRegion> = Vec::new();
     if !extract_result.full_text.trim().is_empty() || (marker_available && has_page_images) {
         let ocr_artifact_id = format!("ocr-result-{}", ocr_run_id);
         let (chunks, spatials, ocr_engine) = if policy.docs.pdf.use_token_aware_chunker() {
@@ -103,8 +106,11 @@ pub(crate) async fn run_pdf_ingest_pipeline(
                 &policy.docs.pdf,
                 extract_result.page_count,
             ) {
-                Some(src) => match src.blocks_for(Path::new(file_path)).await {
-                    Ok(b) if !b.is_empty() => (b, crate::block_chunking::COORD_MARKER),
+                Some(src) => match src.blocks_and_figures_for(Path::new(file_path)).await {
+                    Ok((b, figs)) if !b.is_empty() => {
+                        figure_regions = figs;
+                        (b, crate::block_chunking::COORD_MARKER)
+                    }
                     Ok(_) => {
                         outcome.warnings.push(
                             "marker returned no blocks; falling back to text chunking".to_string(),
@@ -218,7 +224,7 @@ pub(crate) async fn run_pdf_ingest_pipeline(
             ),
         }
     };
-    let image_chunks = enrich_pdf_images(
+    let mut image_chunks = enrich_pdf_images(
         db,
         document_id,
         &pdf_images,
@@ -231,6 +237,26 @@ pub(crate) async fn run_pdf_ingest_pipeline(
         text_seal.is_some(),
     )
     .await?;
+    // C4 (opt-in): VLM-describe Marker's figure regions by cropping them from a page render. The
+    // only way to caption figures baked into scanned pages, whose page scans are skipped above.
+    // Descriptions join image_chunks so they fold into chunks_root with everything else.
+    if policy.docs.pdf.figure_region_vlm
+        && !figure_regions.is_empty()
+        && policy.docs.vlm.enabled
+        && policy.docs.vlm.provider != "disabled"
+    {
+        let figure_chunks = crate::pdf_figure_vlm::enrich_figure_regions(
+            db,
+            document_id,
+            &figure_regions,
+            Path::new(file_path),
+            policy,
+            &page_ids_by_number,
+            &mut outcome,
+        )
+        .await?;
+        image_chunks.extend(figure_chunks);
+    }
     // V-1 image integrity: fold image-OCR + VLM-description chunks into a chunks_root.
     if !image_chunks.is_empty() {
         match &text_seal {

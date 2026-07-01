@@ -16,7 +16,7 @@
 use regex::Regex;
 use serde_json::Value;
 
-use crate::chunk::{Block, BlockType};
+use crate::chunk::{Block, BlockType, FigureRegion};
 
 /// Marker block types that carry structure and text (`_TEXT_BLOCK_TYPES:230`).
 /// Returns `None` for structural/non-text blocks (Page, Document, Figure, …).
@@ -151,6 +151,57 @@ pub fn parse_marker_str(json: &str) -> Result<Vec<Block>, serde_json::Error> {
     Ok(parse_marker_json(&value))
 }
 
+/// Marker block types that are image regions (no text). `Figure`/`Picture` are Marker's figure
+/// types; `Image` covers other renderers.
+fn is_figure_block(s: &str) -> bool {
+    matches!(s, "Figure" | "Picture" | "Image")
+}
+
+/// Walk Marker's JSON tree collecting figure/picture regions (page + bbox) for the opt-in
+/// figure-region VLM path. Deliberately INDEPENDENT of [`parse_marker_json`] (which drops non-text
+/// blocks and must stay byte-identical for chunk parity) — same tree, same 1-indexed page tracking,
+/// but it emits image regions instead of text blocks.
+pub fn parse_marker_figures(root: &Value) -> Vec<FigureRegion> {
+    let page_re = Regex::new(r"^/page/(\d+)/").expect("static page-id regex");
+    let mut figures: Vec<FigureRegion> = Vec::new();
+    let mut stack: Vec<(&Value, u32)> = vec![(root, 1)];
+
+    while let Some((node, cur_page)) = stack.pop() {
+        let bt = node.get("block_type").and_then(Value::as_str).unwrap_or("");
+
+        let mut page = cur_page;
+        if bt == "Page" {
+            if let Some(id) = node.get("id").and_then(Value::as_str) {
+                if let Some(caps) = page_re.captures(id) {
+                    if let Ok(n) = caps[1].parse::<u32>() {
+                        page = n + 1;
+                    }
+                }
+            }
+        }
+
+        if is_figure_block(bt) {
+            if let Some(bbox) = node.get("bbox").and_then(parse_bbox) {
+                figures.push(FigureRegion { page, bbox });
+            }
+        }
+
+        if let Some(children) = node.get("children").and_then(Value::as_array) {
+            for child in children.iter().rev() {
+                stack.push((child, page));
+            }
+        }
+    }
+
+    figures
+}
+
+/// Convenience: parse a Marker JSON string into a `Vec<FigureRegion>`.
+pub fn parse_marker_figures_str(json: &str) -> Result<Vec<FigureRegion>, serde_json::Error> {
+    let value: Value = serde_json::from_str(json)?;
+    Ok(parse_marker_figures(&value))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,6 +263,38 @@ mod tests {
         assert_eq!(blocks[3].block_type, BlockType::Caption);
         assert_eq!(blocks[3].text, "Fig 1.");
         assert_eq!(blocks[3].page, 2);
+    }
+
+    #[test]
+    fn figures_walk_collects_figure_regions_with_page_and_bbox() {
+        // The fixture has one Figure on page 2 (bbox [10,60,200,200]); the text walk skips it, the
+        // figure walk collects it. Text/Caption/Header blocks are NOT figures.
+        let figures = parse_marker_figures(&fixture());
+        assert_eq!(figures.len(), 1);
+        assert_eq!(figures[0].page, 2);
+        assert_eq!(figures[0].bbox, [10.0, 60.0, 200.0, 200.0]);
+        // The text walk is unchanged (parity): it still yields 4 text blocks and drops the figure.
+        assert_eq!(parse_marker_json(&fixture()).len(), 4);
+    }
+
+    #[test]
+    fn figures_walk_handles_picture_and_image_types_and_skips_bboxless() {
+        let tree = serde_json::json!({
+            "block_type": "Page", "id": "/page/4/Page/0",
+            "children": [
+                {"block_type": "Picture", "bbox": [1, 2, 3, 4]},
+                {"block_type": "Image", "bbox": [5, 6, 7, 8]},
+                {"block_type": "Figure"},                          // no bbox → skipped
+                {"block_type": "Text", "html": "<p>x</p>", "bbox": [0, 0, 1, 1]}
+            ]
+        });
+        let figures = parse_marker_figures(&tree);
+        assert_eq!(
+            figures.len(),
+            2,
+            "Picture + Image kept, bbox-less Figure and Text skipped"
+        );
+        assert!(figures.iter().all(|f| f.page == 5));
     }
 
     #[test]

@@ -220,6 +220,11 @@ image_enrichment_workers = 1
 # aspect + coverage ALWAYS run for the pre-ingest report + divergence log regardless of this setting;
 # this selects which verdict is ACTIVE (governs whether full-page-scan images are skipped).
 scan_detector = "union"
+# Opt-in: VLM-describe Marker's detected FIGURE regions by cropping them from a page render. For
+# scanned books, figures are baked into the page scans (no discrete embedded image to describe), so
+# this is the only way to caption them. Adds a page render + one VLM call per figure. Requires a
+# Marker sidecar (below) + an enabled VLM ([policy.docs.vlm]). Default false.
+figure_region_vlm = false
 
 # --- Device-adaptive Marker layout + bbox (LOCAL, OPT-IN) --------------------
 # Uncomment + point at YOUR local Marker install to get bbox-carrying ingestion:
