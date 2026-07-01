@@ -475,11 +475,13 @@ fn image_workers(policy: &archon_policy::EffectivePolicy) -> usize {
 }
 
 /// Is this embedded image a full-page SCAN — **large AND page-shaped**? The aspect gate is what
-/// separates a page scan from a large figure: a page's long/short side ratio is ~1.2–1.6 (Letter
-/// 1.29, A4 1.41, typical book ~1.5), and that range holds for either orientation. A large *square*
-/// diagram or a *wide* chart is large but not page-shaped, so it is NOT counted as a scan (this
-/// closes the false positive of the size-only check). No page dimensions are available yet — a
-/// follow-up can replace this proxy with a true coverage % via the page MediaBox.
+/// separates a page scan from a large figure: a page's long/short side ratio is ~1.2–1.7 (Letter
+/// 1.29, A4 1.41, US Legal 1.65, and taller book formats — e.g. the Uexküll scans measure ~1.58,
+/// some crops up to ~1.61), and that range holds for either orientation. A large *square* diagram
+/// or a *wide* chart is large but not page-shaped, so it is NOT counted as a scan (closing the
+/// false positive of the size-only check). No page dimensions are available yet — a follow-up can
+/// replace this proxy with a true coverage % via the page MediaBox (also removes the DPI coupling
+/// in the size floor).
 fn is_page_scale(img: &PdfImage) -> bool {
     if !matches!(img.origin, PdfImageOrigin::Embedded { .. }) || img.width == 0 || img.height == 0 {
         return false;
@@ -487,7 +489,7 @@ fn is_page_scale(img: &PdfImage) -> bool {
     let large = img.width.min(img.height) >= 1000;
     let long = img.width.max(img.height) as f64;
     let short = img.width.min(img.height) as f64;
-    let page_shaped = (1.2..=1.6).contains(&(long / short));
+    let page_shaped = (1.2..=1.7).contains(&(long / short));
     large && page_shaped
 }
 
@@ -593,10 +595,26 @@ mod scan_detection_tests {
 
     #[test]
     fn page_shaped_large_image_is_page_scale() {
-        // Letter/A4/book ratios in [1.2,1.6] + large → page-scale (either orientation).
+        // Letter/A4/book ratios in [1.2,1.7] + large → page-scale (either orientation).
         assert!(is_page_scale(&embedded(1, 1275, 1650))); // Letter portrait 1.29
         assert!(is_page_scale(&embedded(1, 1650, 1275))); // Letter landscape
         assert!(is_page_scale(&embedded(1, 1200, 1860))); // ~book 1.55
+        assert!(is_page_scale(&embedded(1, 1303, 2041))); // real Uexküll scan 1.566
+        assert!(is_page_scale(&embedded(1, 1270, 2049))); // Uexküll crop 1.613 (was missed at 1.6)
         assert!(!is_page_scale(&embedded(1, 900, 1400))); // page-shaped but too small
+        assert!(!is_page_scale(&embedded(1, 1000, 2000))); // 2.0 too tall → figure, not page
+    }
+
+    #[test]
+    fn uexkull_like_scans_are_detected() {
+        // 20 pages, one book-format scan each (varied crops 1.56–1.61) → scanned book.
+        let dims = [(1303u32, 2041u32), (1270, 2049), (1309, 2049), (1274, 2045)];
+        let imgs: Vec<_> = (1..=20)
+            .map(|p| {
+                let (w, h) = dims[(p as usize) % dims.len()];
+                embedded(p, w, h)
+            })
+            .collect();
+        assert!(is_scanned_page_images(&imgs, 20));
     }
 }
