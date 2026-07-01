@@ -482,7 +482,7 @@ fn image_workers(policy: &archon_policy::EffectivePolicy) -> usize {
 /// false positive of the size-only check). No page dimensions are available yet — a follow-up can
 /// replace this proxy with a true coverage % via the page MediaBox (also removes the DPI coupling
 /// in the size floor).
-fn is_page_scale(img: &PdfImage) -> bool {
+pub(crate) fn is_page_scale(img: &PdfImage) -> bool {
     if !matches!(img.origin, PdfImageOrigin::Embedded { .. }) || img.width == 0 || img.height == 0 {
         return false;
     }
@@ -501,7 +501,7 @@ fn is_page_scale(img: &PdfImage) -> bool {
 /// pages with zero, some with several), so its fraction of "one page-scan, nothing else" pages stays
 /// low — the King&Salvo article has 17 clustered, non-page-shaped figures (~24% of pages), while a
 /// 281 pp scanned Uexküll has one page-scan per page (100%). Threshold 70% cleanly separates them.
-fn is_scanned_page_images(images: &[PdfImage], page_count: u32) -> bool {
+pub(crate) fn is_scanned_page_images(images: &[PdfImage], page_count: u32) -> bool {
     if page_count == 0 {
         return false;
     }

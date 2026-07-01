@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use std::io::IsTerminal;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use cozo::DbInstance;
@@ -28,7 +29,7 @@ pub(crate) fn open_db() -> Result<DbInstance> {
 
 pub async fn handle_docs_command(action: DocsAction) -> Result<()> {
     match action {
-        DocsAction::Ingest { path } => handle_ingest(&path).await,
+        DocsAction::Ingest { path, yes } => handle_ingest(&path, yes).await,
         DocsAction::Reprocess {
             target,
             defer_index,
@@ -93,13 +94,77 @@ pub async fn handle_docs_command(action: DocsAction) -> Result<()> {
     }
 }
 
-async fn handle_ingest(path_str: &str) -> Result<()> {
-    let result = handle_ingest_inner(path_str).await;
+fn is_pdf_path(path: &Path) -> bool {
+    path.extension()
+        .map(|e| e.eq_ignore_ascii_case("pdf"))
+        .unwrap_or(false)
+}
+
+/// LOUD pre-ingest report of how the image-enrichment classifier will treat this PDF, so a
+/// misclassification is visible (and abortable) before any OCR/VLM runs.
+fn print_enrichment_plan(
+    path: &Path,
+    plan: &archon_docs::pdf::EnrichmentClassification,
+    policy: &archon_policy::EffectivePolicy,
+) {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let vlm_on = policy.docs.vlm.enabled && policy.docs.vlm.provider != "disabled";
+    println!("\n========================================================================");
+    println!("  ENRICHMENT PLAN — {name}");
+    println!("========================================================================");
+    println!(
+        "  Pages: {}   Embedded images: {}   Page-scans detected: {}",
+        plan.page_count, plan.embedded_images, plan.page_scans
+    );
+    if plan.is_scanned_book {
+        println!("  Classification: SCANNED BOOK");
+        println!(
+            "    -> image enrichment SKIPPED: {} full-page scan(s) will NOT be OCR'd/VLM'd",
+            plan.embedded_images
+        );
+        println!("       (Marker OCRs the pages via the text layer).");
+        println!("  !! If this is actually a born-digital doc with REAL figures, abort and review");
+        println!("     -- the scan detector may have misfired.");
+    } else if plan.embedded_images == 0 {
+        println!("  Classification: no embedded images -- nothing to enrich.");
+    } else {
+        println!("  Classification: BORN-DIGITAL");
+        println!(
+            "    -> {} figure(s) WILL be ENRICHED: image OCR{}",
+            plan.will_enrich,
+            if vlm_on {
+                " + VLM description"
+            } else {
+                " (VLM off)"
+            }
+        );
+        println!(
+            "  !! If this is actually a SCANNED book, abort -- enriching page-scans wastes the"
+        );
+        println!("     VLM and duplicates the page text.");
+    }
+    println!("========================================================================");
+}
+
+fn confirm_proceed() -> Result<bool> {
+    use std::io::Write;
+    eprint!("Proceed with this enrichment plan? [y/N] ");
+    std::io::stderr().flush().ok();
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    Ok(matches!(input.trim().to_lowercase().as_str(), "y" | "yes"))
+}
+
+async fn handle_ingest(path_str: &str, yes: bool) -> Result<()> {
+    let result = handle_ingest_inner(path_str, yes).await;
     archon_docs::vlm::clear_provider_blocking_safe().await;
     result
 }
 
-async fn handle_ingest_inner(path_str: &str) -> Result<()> {
+async fn handle_ingest_inner(path_str: &str, yes: bool) -> Result<()> {
     let db = open_db()?;
     let _ = crate::command::docs_embedding::init_embedding(&db);
     let policy = std::env::current_dir()
@@ -177,6 +242,17 @@ async fn handle_ingest_inner(path_str: &str) -> Result<()> {
             );
             crate::command::evidence_index::index_pending_evidence(&db, "video evidence");
             return Ok(());
+        }
+        // Pre-ingest enrichment classification: LOUD report + confirm, so a mis-detected doc (a
+        // born-digital paper wrongly flagged as scanned, or a scanned book wrongly enriched) is
+        // caught BEFORE any OCR/VLM. Skipped for non-PDFs, with --yes, or when non-interactive.
+        if is_pdf_path(&path) {
+            let plan = archon_docs::pdf::classify_pdf_enrichment(&path);
+            print_enrichment_plan(&path, &plan, &policy);
+            if !yes && std::io::stdin().is_terminal() && !confirm_proceed()? {
+                println!("Aborted — no changes made.");
+                return Ok(());
+            }
         }
         match ingest::ingest_file_with_policy(&db, &path, &policy).await {
             Ok(r) if r.pipeline_failed => {

@@ -103,6 +103,9 @@ pub enum DocsAction {
     Ingest {
         /// Path to file or directory to ingest
         path: String,
+        /// Skip the pre-ingest enrichment-classification confirmation prompt (batch/scripted use)
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
     /// Re-run OCR/VLM/image enrichment for an existing document ID or source path/prefix
     Reprocess {

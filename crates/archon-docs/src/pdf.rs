@@ -50,6 +50,73 @@ pub struct PdfImagesListEntry {
     pub xobject_name: Option<String>,
 }
 
+/// A lightweight pre-ingest classification of how the pipeline will treat a PDF's images —
+/// computed from `pdfimages -list` (dims) + `pdfinfo` (page count) ONLY, with no byte extraction
+/// and no Marker. Lets the CLI show a loud report + confirm before committing to the ingest.
+#[derive(Debug, Clone)]
+pub struct EnrichmentClassification {
+    pub page_count: u32,
+    pub embedded_images: usize,
+    pub page_scans: usize,
+    pub is_scanned_book: bool,
+    /// Images that WILL be enriched (OCR + VLM): 0 for a scanned book, else all embedded images.
+    pub will_enrich: usize,
+}
+
+/// Classify a PDF for image enrichment without extracting image bytes or running Marker, using the
+/// SAME detector the ingest pipeline uses ([`crate::pdf_image_enrichment::is_scanned_page_images`]),
+/// so the pre-ingest report matches what will actually happen.
+pub fn classify_pdf_enrichment(path: &Path) -> EnrichmentClassification {
+    let page_count = pdf_page_count(path).unwrap_or(0);
+    let images: Vec<PdfImage> = list_embedded_image_dims(path)
+        .into_iter()
+        .map(|e| PdfImage {
+            bytes: Vec::new(),
+            mime: "",
+            source_page: e.source_page,
+            source_pages: e.source_pages,
+            width: e.width,
+            height: e.height,
+            origin: PdfImageOrigin::Embedded {
+                xobject_name: e.xobject_name,
+            },
+        })
+        .collect();
+    let is_scanned_book = crate::pdf_image_enrichment::is_scanned_page_images(&images, page_count);
+    let page_scans = images
+        .iter()
+        .filter(|i| crate::pdf_image_enrichment::is_page_scale(i))
+        .count();
+    EnrichmentClassification {
+        page_count,
+        embedded_images: images.len(),
+        page_scans,
+        is_scanned_book,
+        will_enrich: if is_scanned_book { 0 } else { images.len() },
+    }
+}
+
+fn pdf_page_count(path: &Path) -> Option<u32> {
+    let output = std::process::Command::new(command_path("pdfinfo", "ARCHON_PDFINFO_BIN"))
+        .arg(path)
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix("Pages:")?.trim().parse::<u32>().ok())
+}
+
+fn list_embedded_image_dims(path: &Path) -> Vec<PdfImagesListEntry> {
+    match std::process::Command::new(command_path("pdfimages", "ARCHON_PDFIMAGES_BIN"))
+        .arg("-list")
+        .arg(path)
+        .output()
+    {
+        Ok(o) if o.status.success() => parse_pdfimages_list(&String::from_utf8_lossy(&o.stdout)),
+        _ => Vec::new(),
+    }
+}
+
 pub async fn extract_pdf_unified(
     path: &Path,
     pdf_policy: &PdfPolicy,
