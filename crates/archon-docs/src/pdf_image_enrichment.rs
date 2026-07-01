@@ -474,35 +474,53 @@ fn image_workers(policy: &archon_policy::EffectivePolicy) -> usize {
     policy.docs.pdf.image_enrichment_workers.clamp(1, 16) as usize
 }
 
-/// Heuristic: do these embedded images look like a SELF-SCANNED book — one large image per page
-/// across most of the document? Such images ARE the page scans (Marker already OCRs them via the
-/// text layer), so enriching them duplicates OCR + wastes the VLM.
+/// Is this embedded image a full-page SCAN — **large AND page-shaped**? The aspect gate is what
+/// separates a page scan from a large figure: a page's long/short side ratio is ~1.2–1.6 (Letter
+/// 1.29, A4 1.41, typical book ~1.5), and that range holds for either orientation. A large *square*
+/// diagram or a *wide* chart is large but not page-shaped, so it is NOT counted as a scan (this
+/// closes the false positive of the size-only check). No page dimensions are available yet — a
+/// follow-up can replace this proxy with a true coverage % via the page MediaBox.
+fn is_page_scale(img: &PdfImage) -> bool {
+    if !matches!(img.origin, PdfImageOrigin::Embedded { .. }) || img.width == 0 || img.height == 0 {
+        return false;
+    }
+    let large = img.width.min(img.height) >= 1000;
+    let long = img.width.max(img.height) as f64;
+    let short = img.width.min(img.height) as f64;
+    let page_shaped = (1.2..=1.6).contains(&(long / short));
+    large && page_shaped
+}
+
+/// Heuristic: do these embedded images look like a SELF-SCANNED book — most pages carry exactly one
+/// full-page SCAN (see [`is_page_scale`])? Such images ARE the page scans (Marker already OCRs them
+/// via the text layer), so enriching them duplicates OCR + wastes the VLM.
 ///
 /// The signal is the DISTRIBUTION, not the raw count: a born-digital doc clusters figures (many
-/// pages with zero, some with several), so its fraction of "exactly one large image" pages stays
-/// low — e.g. the King&Salvo article has 17 images on 8 of 17 pages (~24%), while a 281 pp scanned
-/// Uexküll has exactly one per page (100%). Threshold 70% cleanly separates them. Only `Embedded`
-/// images count (rendered-page fallbacks are handled elsewhere); "large" (min side ≥ 1000 px)
-/// excludes per-page logos/icons.
+/// pages with zero, some with several), so its fraction of "one page-scan, nothing else" pages stays
+/// low — the King&Salvo article has 17 clustered, non-page-shaped figures (~24% of pages), while a
+/// 281 pp scanned Uexküll has one page-scan per page (100%). Threshold 70% cleanly separates them.
 fn is_scanned_page_images(images: &[PdfImage], page_count: u32) -> bool {
     if page_count == 0 {
         return false;
     }
-    let mut per_page: BTreeMap<u32, (usize, bool)> = BTreeMap::new();
+    // (page-scale count, total embedded count) per page.
+    let mut per_page: BTreeMap<u32, (usize, usize)> = BTreeMap::new();
     for img in images {
         if !matches!(img.origin, PdfImageOrigin::Embedded { .. }) {
             continue;
         }
-        let large = img.width.min(img.height) >= 1000;
-        let entry = per_page.entry(img.source_page).or_insert((0, true));
-        entry.0 += 1;
-        entry.1 = entry.1 && large;
+        let entry = per_page.entry(img.source_page).or_insert((0, 0));
+        entry.1 += 1;
+        if is_page_scale(img) {
+            entry.0 += 1;
+        }
     }
-    let one_large_pages = per_page
+    // A "scanned page" carries exactly one embedded image and it is a page scan.
+    let scanned_pages = per_page
         .values()
-        .filter(|(count, all_large)| *count == 1 && *all_large)
+        .filter(|(page_scale, embedded)| *page_scale == 1 && *embedded == 1)
         .count();
-    one_large_pages as f64 / page_count as f64 >= 0.70
+    scanned_pages as f64 / page_count as f64 >= 0.70
 }
 
 #[cfg(test)]
@@ -552,5 +570,33 @@ mod scan_detection_tests {
     fn empty_is_not_a_scan() {
         assert!(!is_scanned_page_images(&[], 0));
         assert!(!is_scanned_page_images(&[], 10));
+    }
+
+    // ---- aspect-ratio gate (adoption #1): large but non-page-shaped images are NOT scans ----
+
+    #[test]
+    fn large_square_figures_per_page_are_not_scans() {
+        // One LARGE ~square diagram per page — size-only would false-positive; the aspect gate
+        // (ratio 1.0 ∉ [1.2,1.6]) correctly rejects it as a page-scan.
+        let imgs: Vec<_> = (1..=6).map(|p| embedded(p, 1500, 1500)).collect();
+        assert!(imgs.iter().all(|i| !is_page_scale(i)));
+        assert!(!is_scanned_page_images(&imgs, 6));
+    }
+
+    #[test]
+    fn large_wide_charts_per_page_are_not_scans() {
+        // One LARGE 16:9 chart per page (ratio 1.78) — not page-shaped → not a scan.
+        let imgs: Vec<_> = (1..=6).map(|p| embedded(p, 1920, 1080)).collect();
+        assert!(imgs.iter().all(|i| !is_page_scale(i)));
+        assert!(!is_scanned_page_images(&imgs, 6));
+    }
+
+    #[test]
+    fn page_shaped_large_image_is_page_scale() {
+        // Letter/A4/book ratios in [1.2,1.6] + large → page-scale (either orientation).
+        assert!(is_page_scale(&embedded(1, 1275, 1650))); // Letter portrait 1.29
+        assert!(is_page_scale(&embedded(1, 1650, 1275))); // Letter landscape
+        assert!(is_page_scale(&embedded(1, 1200, 1860))); // ~book 1.55
+        assert!(!is_page_scale(&embedded(1, 900, 1400))); // page-shaped but too small
     }
 }
