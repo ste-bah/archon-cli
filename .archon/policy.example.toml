@@ -212,14 +212,14 @@ vlm_per_page_image = true
 render_text_pdf_pages = false
 image_enrichment_workers = 1
 # Scanned-book detector for the image-enrichment skip decision:
-#   "aspect"   = pixel-dims heuristic (large AND page-shaped). Shipped default; misses low-DPI scans.
-#   "coverage" = true page-coverage % via image ppi + page MediaBox; misses margin-cropped scans.
-#   "union"    = a page is a scan if aspect OR coverage flags it. Corpus dry-run (161 PDFs) showed
-#                this is strictly better — it catches the low-DPI scans aspect misses AND the
-#                margin-cropped scans coverage misses. RECOMMENDED for the corpus flip.
+#   "union"    = a page is a scan if aspect OR coverage flags it. SHIPPED DEFAULT. Corpus dry-run
+#                (161 PDFs) showed it is strictly best — it catches the low-DPI scans aspect misses
+#                AND the margin-cropped scans coverage misses.
+#   "aspect"   = pixel-dims heuristic alone (large AND page-shaped). Misses low-DPI scans.
+#   "coverage" = page-coverage % via image ppi + page MediaBox alone. Misses margin-cropped scans.
 # aspect + coverage ALWAYS run for the pre-ingest report + divergence log regardless of this setting;
 # this selects which verdict is ACTIVE (governs whether full-page-scan images are skipped).
-scan_detector = "aspect"
+scan_detector = "union"
 
 # --- Device-adaptive Marker layout + bbox (LOCAL, OPT-IN) --------------------
 # Uncomment + point at YOUR local Marker install to get bbox-carrying ingestion:

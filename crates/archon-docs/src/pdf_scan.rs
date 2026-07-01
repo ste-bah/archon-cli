@@ -35,23 +35,25 @@ const SCANNED_BOOK_FRACTION: f64 = 0.70;
 /// Which scan detector governs the active enrichment decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScanDetector {
-    /// Shipped pixel-dims heuristic (large AND page-shaped). The default until coverage is proven.
+    /// Shipped pixel-dims heuristic (large AND page-shaped) alone. Misses low-DPI scans.
     Aspect,
-    /// True page-coverage % via ppi + `MediaBox`.
+    /// True page-coverage % via ppi + `MediaBox` alone. Misses margin-cropped scans.
     Coverage,
     /// A page is a scan if aspect OR coverage flags it — catches both low-DPI scans (coverage) and
-    /// margin-cropped scans (aspect). Corpus-validated as strictly better than either base detector.
+    /// margin-cropped scans (aspect). Corpus-validated as strictly better; the SHIPPED DEFAULT.
     Union,
 }
 
 impl ScanDetector {
-    /// Parse the policy string; anything other than an explicit `"coverage"`/`"union"` is `Aspect`
-    /// (the safe default), so a typo can never silently flip the corpus onto a non-default detector.
+    /// Parse the policy string. `"aspect"`/`"coverage"` select a single base detector; anything
+    /// else (including the default and any unrecognized value) is `Union`, so a typo degrades to
+    /// the best detector rather than a weaker one. (The policy loader already rejects unknown values
+    /// and keeps the default, so `parse` sees only validated strings in the normal flow.)
     pub fn parse(s: &str) -> Self {
         match s.trim().to_ascii_lowercase().as_str() {
+            "aspect" => ScanDetector::Aspect,
             "coverage" => ScanDetector::Coverage,
-            "union" => ScanDetector::Union,
-            _ => ScanDetector::Aspect,
+            _ => ScanDetector::Union,
         }
     }
 
@@ -155,7 +157,7 @@ pub fn classify_scan(
             coverage_scanned = cov.map(|c| c.scanned),
             coverage_max = cov.map(|c| c.max_coverage),
             low_confidence = cov.map(|c| c.low_confidence).unwrap_or(false),
-            "scan-detector DISAGREEMENT (aspect vs coverage) — review before flipping the default"
+            "scan-detector DISAGREEMENT (aspect vs coverage) — union took the OR; review these docs"
         );
     }
 
@@ -505,14 +507,15 @@ mod tests {
     // ---- ScanDetector::parse ------------------------------------------------------------------
 
     #[test]
-    fn detector_parse_defaults_to_aspect() {
+    fn detector_parse_maps_known_and_defaults_to_union() {
+        assert_eq!(ScanDetector::parse("aspect"), ScanDetector::Aspect);
         assert_eq!(ScanDetector::parse("coverage"), ScanDetector::Coverage);
         assert_eq!(ScanDetector::parse("COVERAGE"), ScanDetector::Coverage);
         assert_eq!(ScanDetector::parse("union"), ScanDetector::Union);
         assert_eq!(ScanDetector::parse("UNION"), ScanDetector::Union);
-        assert_eq!(ScanDetector::parse("aspect"), ScanDetector::Aspect);
-        assert_eq!(ScanDetector::parse("typo"), ScanDetector::Aspect);
-        assert_eq!(ScanDetector::parse(""), ScanDetector::Aspect);
+        // Unrecognized / empty → the default (union), not a weaker detector.
+        assert_eq!(ScanDetector::parse("typo"), ScanDetector::Union);
+        assert_eq!(ScanDetector::parse(""), ScanDetector::Union);
     }
 
     // ---- coverage classifier ------------------------------------------------------------------

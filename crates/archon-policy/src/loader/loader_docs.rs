@@ -220,7 +220,7 @@ fn apply_pdf(policy: &mut PdfPolicy, raw: RawPdfPolicy) {
         policy.marker_memory_budget_mb = raw.marker_memory_budget_mb;
     }
     if let Some(value) = raw.scan_detector {
-        // Only accept known detectors; anything else keeps the default (aspect).
+        // Only accept known detectors; anything else keeps the default (union).
         if value == "aspect" || value == "coverage" || value == "union" {
             policy.scan_detector = value;
         }
@@ -243,7 +243,7 @@ mod tests {
     #[test]
     fn scan_detector_coverage_is_applied() {
         let mut pdf = PdfPolicy::default();
-        assert_eq!(pdf.scan_detector, "aspect", "default guard");
+        assert_eq!(pdf.scan_detector, "union", "default guard");
         apply_pdf(
             &mut pdf,
             RawPdfPolicy {
@@ -265,8 +265,8 @@ mod tests {
             },
         );
         assert_eq!(
-            pdf.scan_detector, "aspect",
-            "unknown detectors are rejected"
+            pdf.scan_detector, "union",
+            "unknown detectors are rejected → default kept"
         );
     }
 

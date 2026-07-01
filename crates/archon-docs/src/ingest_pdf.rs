@@ -195,11 +195,11 @@ pub(crate) async fn run_pdf_ingest_pipeline(
             "PDF ingest will trigger VLM calls for extracted page images"
         );
     }
-    // Active scanned-book detector governs whether page-scan images are enriched. For the
-    // coverage/union detectors we resolve the verdict from the path here (cheap: pdfimages + lopdf,
-    // milliseconds) and pass the SAME selected verdict the pre-ingest report shows — including its
-    // aspect fallback when page dims are unreadable — so report and pipeline never disagree. Aspect
-    // mode (the default) → None, so enrich_pdf_images keeps using its in-memory heuristic, unchanged.
+    // Active scanned-book detector governs whether page-scan images are enriched. For the default
+    // "union" detector (and "coverage") we resolve the verdict from the path here (cheap: pdfimages
+    // + lopdf, milliseconds) and pass the SAME selected verdict the pre-ingest report shows —
+    // including its aspect fallback when page dims are unreadable — so report and pipeline never
+    // disagree. Opt-in "aspect" → None, so enrich_pdf_images uses its in-memory heuristic instead.
     let scanned_override = {
         let detector = crate::pdf_scan::ScanDetector::parse(&policy.docs.pdf.scan_detector);
         match detector {

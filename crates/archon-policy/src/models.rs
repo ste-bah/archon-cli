@@ -247,10 +247,12 @@ pub struct PdfPolicy {
     /// detected free VRAM. None → use detected free VRAM as-is. (archon-accel DeviceOverrides.)
     #[serde(default)]
     pub marker_memory_budget_mb: Option<u64>,
-    /// Scanned-book detector for the image-enrichment skip decision: "aspect" (default — the
-    /// shipped pixel-dims heuristic) or "coverage" (true page-coverage % via ppi + MediaBox).
-    /// Both always run for the pre-ingest report + divergence log; this selects which one is
-    /// ACTIVE (governs whether page-scan images are enriched). Unknown values fall back to aspect.
+    /// Scanned-book detector for the image-enrichment skip decision: "union" (default — a page is a
+    /// scan if the aspect pixel-heuristic OR the coverage % flags it; corpus-validated as strictly
+    /// best), "aspect" (shipped pixel-dims heuristic alone), or "coverage" (page-coverage % via ppi
+    /// + MediaBox alone). The aspect + coverage verdicts always run for the pre-ingest report +
+    /// divergence log; this selects which one is ACTIVE (governs whether page-scan images are
+    /// enriched). Unknown values fall back to the default (union).
     #[serde(default = "default_scan_detector")]
     pub scan_detector: String,
 }
@@ -260,7 +262,7 @@ fn default_chunker() -> String {
 }
 
 fn default_scan_detector() -> String {
-    "aspect".to_string()
+    "union".to_string()
 }
 
 impl PdfPolicy {
