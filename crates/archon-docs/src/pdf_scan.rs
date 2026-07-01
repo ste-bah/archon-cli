@@ -39,14 +39,18 @@ pub enum ScanDetector {
     Aspect,
     /// True page-coverage % via ppi + `MediaBox`.
     Coverage,
+    /// A page is a scan if aspect OR coverage flags it — catches both low-DPI scans (coverage) and
+    /// margin-cropped scans (aspect). Corpus-validated as strictly better than either base detector.
+    Union,
 }
 
 impl ScanDetector {
-    /// Parse the policy string; anything other than an explicit `"coverage"` is `Aspect` (the safe
-    /// default), so a typo can never silently flip the corpus onto the unproven detector.
+    /// Parse the policy string; anything other than an explicit `"coverage"`/`"union"` is `Aspect`
+    /// (the safe default), so a typo can never silently flip the corpus onto a non-default detector.
     pub fn parse(s: &str) -> Self {
         match s.trim().to_ascii_lowercase().as_str() {
             "coverage" => ScanDetector::Coverage,
+            "union" => ScanDetector::Union,
             _ => ScanDetector::Aspect,
         }
     }
@@ -55,8 +59,20 @@ impl ScanDetector {
         match self {
             ScanDetector::Aspect => "aspect",
             ScanDetector::Coverage => "coverage",
+            ScanDetector::Union => "union",
         }
     }
+}
+
+/// The union classifier's verdict for a whole document.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnionVerdict {
+    /// ≥70% of pages are a scan by aspect OR coverage.
+    pub scanned: bool,
+    /// Pages flagged a scan by either base detector.
+    pub page_scans: usize,
+    /// ≥1 image was deferred inside the coverage half (unusable ppi / missing dims).
+    pub low_confidence: bool,
 }
 
 /// The coverage classifier's verdict for a whole document.
@@ -111,17 +127,25 @@ pub fn classify_scan(
     let aspect_scanned = is_scanned_page_images(&images, page_count);
     let aspect_page_scans = images.iter().filter(|i| is_page_scale(i)).count();
 
-    // Coverage: needs per-page dims. If none are readable, coverage is unavailable (None), NOT a
-    // silent mirror of aspect.
+    // Coverage + union: both need per-page dims. If none are readable, both are unavailable (None),
+    // NOT a silent mirror of aspect.
     let page_dims = page_dimensions(path);
-    let coverage = if page_dims.is_empty() {
-        None
+    let (coverage, union) = if page_dims.is_empty() {
+        (None, None)
     } else {
-        Some(classify_by_coverage(&entries, &page_dims, page_count))
+        (
+            Some(classify_by_coverage(&entries, &page_dims, page_count)),
+            Some(classify_by_union(&entries, &page_dims, page_count)),
+        )
     };
 
-    let (active_scanned, active_page_scans, divergent) =
-        resolve(aspect_scanned, aspect_page_scans, &coverage, detector);
+    let (active_scanned, active_page_scans, divergent) = resolve(
+        aspect_scanned,
+        aspect_page_scans,
+        &coverage,
+        &union,
+        detector,
+    );
 
     if divergent {
         let cov = coverage.as_ref();
@@ -156,15 +180,24 @@ fn resolve(
     aspect_scanned: bool,
     aspect_page_scans: usize,
     coverage: &Option<CoverageVerdict>,
+    union: &Option<UnionVerdict>,
     detector: ScanDetector,
 ) -> (bool, usize, bool) {
     let divergent = coverage
         .as_ref()
         .is_some_and(|c| c.scanned != aspect_scanned);
-    let (active_scanned, active_page_scans) = match (detector, coverage) {
-        (ScanDetector::Coverage, Some(c)) => (c.scanned, c.page_scans),
-        // Coverage requested but unavailable → aspect fallback; or aspect selected outright.
-        _ => (aspect_scanned, aspect_page_scans),
+    // Coverage/Union govern only when available; otherwise fall back to aspect (can't decide by
+    // page coverage with no page dims).
+    let (active_scanned, active_page_scans) = match detector {
+        ScanDetector::Aspect => (aspect_scanned, aspect_page_scans),
+        ScanDetector::Coverage => coverage
+            .as_ref()
+            .map(|c| (c.scanned, c.page_scans))
+            .unwrap_or((aspect_scanned, aspect_page_scans)),
+        ScanDetector::Union => union
+            .as_ref()
+            .map(|u| (u.scanned, u.page_scans))
+            .unwrap_or((aspect_scanned, aspect_page_scans)),
     };
     (active_scanned, active_page_scans, divergent)
 }
@@ -206,23 +239,10 @@ pub fn classify_by_coverage(
     page_dims: &BTreeMap<u32, (f64, f64)>,
     page_count: u32,
 ) -> CoverageVerdict {
-    let mut per_page: BTreeMap<u32, f64> = BTreeMap::new();
-    let mut deferred = 0usize;
-    for e in entries {
-        let contribution = match coverage_of(e, page_dims) {
-            Some(cov) => cov,
-            None => {
-                deferred += 1;
-                aspect_contribution(e)
-            }
-        };
-        *per_page.entry(e.source_page).or_insert(0.0) += contribution;
-    }
-
+    let (per_page, deferred) = coverage_per_page(entries, page_dims);
     let mut page_scans = 0usize;
     let mut max_coverage = 0.0f64;
-    for cov in per_page.values_mut() {
-        *cov = cov.min(1.0);
+    for cov in per_page.values() {
         max_coverage = max_coverage.max(*cov);
         if *cov >= PAGE_SCAN_COVERAGE {
             page_scans += 1;
@@ -236,6 +256,74 @@ pub fn classify_by_coverage(
         low_confidence: deferred > 0,
         deferred_images: deferred,
     }
+}
+
+/// Per-page (capped) coverage map + count of images deferred to the aspect test (unusable ppi /
+/// missing dims). Shared by the coverage and union classifiers so they compute coverage identically.
+fn coverage_per_page(
+    entries: &[PdfImagesListEntry],
+    page_dims: &BTreeMap<u32, (f64, f64)>,
+) -> (BTreeMap<u32, f64>, usize) {
+    let mut per_page: BTreeMap<u32, f64> = BTreeMap::new();
+    let mut deferred = 0usize;
+    for e in entries {
+        let contribution = match coverage_of(e, page_dims) {
+            Some(cov) => cov,
+            None => {
+                deferred += 1;
+                aspect_contribution(e)
+            }
+        };
+        *per_page.entry(e.source_page).or_insert(0.0) += contribution;
+    }
+    for cov in per_page.values_mut() {
+        *cov = cov.min(1.0);
+    }
+    (per_page, deferred)
+}
+
+/// Union classifier: a page is a scan if it is page-scale by the aspect test OR its coverage reaches
+/// [`PAGE_SCAN_COVERAGE`]. Corpus dry-run showed neither base detector alone is complete — aspect
+/// misses low-DPI scans (below its 1000px pixel floor) while coverage misses margin-cropped scans
+/// (text-block-only images that fill ~0.73 of the page). Their union classifies every divergent
+/// corpus doc correctly.
+pub fn classify_by_union(
+    entries: &[PdfImagesListEntry],
+    page_dims: &BTreeMap<u32, (f64, f64)>,
+    page_count: u32,
+) -> UnionVerdict {
+    let (per_page_cov, deferred) = coverage_per_page(entries, page_dims);
+    let mut scan_pages = aspect_scan_page_set(entries);
+    for (page, cov) in &per_page_cov {
+        if *cov >= PAGE_SCAN_COVERAGE {
+            scan_pages.insert(*page);
+        }
+    }
+    let page_scans = scan_pages.len();
+    let scanned = page_count > 0 && page_scans as f64 / page_count as f64 >= SCANNED_BOOK_FRACTION;
+    UnionVerdict {
+        scanned,
+        page_scans,
+        low_confidence: deferred > 0,
+    }
+}
+
+/// Pages the aspect heuristic counts as scans — exactly one embedded image and it is page-scale.
+/// Mirrors the per-page rule inside [`is_scanned_page_images`], exposed for the union detector.
+fn aspect_scan_page_set(entries: &[PdfImagesListEntry]) -> std::collections::BTreeSet<u32> {
+    let mut per_page: BTreeMap<u32, (usize, usize)> = BTreeMap::new();
+    for e in entries {
+        let counts = per_page.entry(e.source_page).or_insert((0, 0));
+        counts.1 += 1;
+        if is_page_scale(&synth_image(e)) {
+            counts.0 += 1;
+        }
+    }
+    per_page
+        .into_iter()
+        .filter(|(_, (page_scale, embedded))| *page_scale == 1 && *embedded == 1)
+        .map(|(page, _)| page)
+        .collect()
 }
 
 /// The measurable coverage of one image, or `None` when it must defer to the aspect test (no ppi
@@ -420,6 +508,8 @@ mod tests {
     fn detector_parse_defaults_to_aspect() {
         assert_eq!(ScanDetector::parse("coverage"), ScanDetector::Coverage);
         assert_eq!(ScanDetector::parse("COVERAGE"), ScanDetector::Coverage);
+        assert_eq!(ScanDetector::parse("union"), ScanDetector::Union);
+        assert_eq!(ScanDetector::parse("UNION"), ScanDetector::Union);
         assert_eq!(ScanDetector::parse("aspect"), ScanDetector::Aspect);
         assert_eq!(ScanDetector::parse("typo"), ScanDetector::Aspect);
         assert_eq!(ScanDetector::parse(""), ScanDetector::Aspect);
@@ -527,21 +617,78 @@ mod tests {
             low_confidence: false,
             deferred_images: 0,
         });
+        // union verdict distinct from both bases (Konstan-shape: aspect catches, coverage misses).
+        let uni = Some(UnionVerdict {
+            scanned: true,
+            page_scans: 9,
+            low_confidence: false,
+        });
         // aspect=true, coverage=false → divergent; aspect mode keeps aspect verdict.
-        let (scanned, scans, divergent) = resolve(true, 7, &cov, ScanDetector::Aspect);
+        let (scanned, scans, divergent) = resolve(true, 7, &cov, &uni, ScanDetector::Aspect);
         assert!(scanned && scans == 7 && divergent);
         // coverage mode uses the coverage verdict.
-        let (scanned, scans, divergent) = resolve(true, 7, &cov, ScanDetector::Coverage);
+        let (scanned, scans, divergent) = resolve(true, 7, &cov, &uni, ScanDetector::Coverage);
         assert!(!scanned && scans == 0 && divergent);
+        // union mode uses the union verdict.
+        let (scanned, scans, _divergent) = resolve(true, 7, &cov, &uni, ScanDetector::Union);
+        assert!(scanned && scans == 9);
     }
 
     #[test]
     fn resolve_coverage_unavailable_falls_back_to_aspect() {
-        let (scanned, scans, divergent) = resolve(true, 5, &None, ScanDetector::Coverage);
+        let (scanned, scans, divergent) = resolve(true, 5, &None, &None, ScanDetector::Coverage);
         assert!(
             scanned && scans == 5 && !divergent,
             "no coverage → aspect fallback, no divergence"
         );
+        // Union with no page dims also falls back to aspect.
+        let (scanned, scans, _) = resolve(true, 5, &None, &None, ScanDetector::Union);
+        assert!(scanned && scans == 5);
+    }
+
+    // ---- union classifier ---------------------------------------------------------------------
+
+    #[test]
+    fn union_catches_margin_cropped_scan_aspect_only() {
+        // Konstan-shape: page-scale image per page (aspect scan) but coverage ~0.73 (< 0.80).
+        // A 1352x2134px @ 300ppi image on a 375x610pt page → 0.726 coverage; aspect page-scale.
+        let page_dims = dims(&(1..=10).map(|p| (p, 375.0, 610.0)).collect::<Vec<_>>());
+        let entries: Vec<_> = (1..=10).map(|p| entry(p, 1352, 2134, Some(300))).collect();
+        let cov = classify_by_coverage(&entries, &page_dims, 10);
+        assert!(!cov.scanned, "coverage alone misses the cropped scan");
+        let uni = classify_by_union(&entries, &page_dims, 10);
+        assert!(
+            uni.scanned,
+            "union catches it via the aspect page-scale test"
+        );
+        assert_eq!(uni.page_scans, 10);
+    }
+
+    #[test]
+    fn union_catches_low_dpi_scan_coverage_only() {
+        // Low-DPI scan: 700x1140px @ 96ppi fills a 525x855pt page (~1.0 coverage) but min side 700
+        // < 1000 → aspect misses it; coverage catches it; union agrees.
+        let page_dims = dims(&(1..=10).map(|p| (p, 525.0, 855.0)).collect::<Vec<_>>());
+        let entries: Vec<_> = (1..=10).map(|p| entry(p, 700, 1140, Some(96))).collect();
+        assert!(
+            entries.iter().all(|e| e.width.min(e.height) < 1000),
+            "sub-1000px so aspect's floor misses it"
+        );
+        let uni = classify_by_union(&entries, &page_dims, 10);
+        assert!(uni.scanned);
+    }
+
+    #[test]
+    fn union_leaves_born_digital_alone() {
+        // Small clustered figures: neither aspect nor coverage flags a scan → union born-digital.
+        let page_dims = dims(&(1..=10).map(|p| (p, 612.0, 792.0)).collect::<Vec<_>>());
+        let entries: Vec<_> = [2u32, 5, 9]
+            .iter()
+            .map(|&p| entry(p, 300, 300, Some(150)))
+            .collect();
+        let uni = classify_by_union(&entries, &page_dims, 10);
+        assert!(!uni.scanned);
+        assert_eq!(uni.page_scans, 0);
     }
 
     // ---- get_media_box (lopdf) ----------------------------------------------------------------

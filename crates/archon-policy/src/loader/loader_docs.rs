@@ -221,7 +221,7 @@ fn apply_pdf(policy: &mut PdfPolicy, raw: RawPdfPolicy) {
     }
     if let Some(value) = raw.scan_detector {
         // Only accept known detectors; anything else keeps the default (aspect).
-        if value == "aspect" || value == "coverage" {
+        if value == "aspect" || value == "coverage" || value == "union" {
             policy.scan_detector = value;
         }
     }

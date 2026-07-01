@@ -195,23 +195,21 @@ pub(crate) async fn run_pdf_ingest_pipeline(
             "PDF ingest will trigger VLM calls for extracted page images"
         );
     }
-    // Active scanned-book detector governs whether page-scan images are enriched. Under coverage
-    // mode we resolve the verdict from the path here (cheap: pdfimages + lopdf, milliseconds) and
-    // pass the SAME selected verdict the pre-ingest report shows — including its aspect fallback when
-    // page dims are unreadable — so report and pipeline never disagree in coverage mode. Aspect mode
-    // (the default) → None, so enrich_pdf_images keeps using its in-memory heuristic, unchanged.
-    let scanned_override =
-        match crate::pdf_scan::ScanDetector::parse(&policy.docs.pdf.scan_detector) {
-            crate::pdf_scan::ScanDetector::Coverage => Some(
-                crate::pdf_scan::classify_scan(
-                    Path::new(file_path),
-                    crate::pdf_scan::ScanDetector::Coverage,
-                    &policy.docs.pdf,
-                )
-                .active_scanned,
-            ),
+    // Active scanned-book detector governs whether page-scan images are enriched. For the
+    // coverage/union detectors we resolve the verdict from the path here (cheap: pdfimages + lopdf,
+    // milliseconds) and pass the SAME selected verdict the pre-ingest report shows — including its
+    // aspect fallback when page dims are unreadable — so report and pipeline never disagree. Aspect
+    // mode (the default) → None, so enrich_pdf_images keeps using its in-memory heuristic, unchanged.
+    let scanned_override = {
+        let detector = crate::pdf_scan::ScanDetector::parse(&policy.docs.pdf.scan_detector);
+        match detector {
             crate::pdf_scan::ScanDetector::Aspect => None,
-        };
+            _ => Some(
+                crate::pdf_scan::classify_scan(Path::new(file_path), detector, &policy.docs.pdf)
+                    .active_scanned,
+            ),
+        }
+    };
     let image_chunks = enrich_pdf_images(
         db,
         document_id,
