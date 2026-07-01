@@ -94,3 +94,6 @@ FORENSIC-TASK-DECOMPOSITION.yaml
 crates/archon-tui/tests/snapshots/tui_snapshots__splash_empty_activity.snap.new
 crates/archon-tui/tests/snapshots/tui_snapshots__splash_with_activity.snap.new
 archon
+
+# machine-specific Archon policy (real paths); template is policy.example.toml
+.archon/policy.toml

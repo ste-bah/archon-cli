@@ -1,12 +1,15 @@
 # ============================================================================
-# Archon Policy — workspace defaults
+# Archon Policy — EXAMPLE TEMPLATE (safe to commit / share on GitHub)
 # ============================================================================
-# Loaded by archon-policy. See docs/policy.md for the full schema.
+# This is the shareable template — it contains NO machine-specific paths.
+# To use it:  cp .archon/policy.example.toml .archon/policy.toml
+# then edit your copy (your real .archon/policy.toml is gitignored so your
+# absolute paths never get uploaded). See docs/policy.md for the full schema.
 #
 # Load order (later overrides earlier):
 #   1. /etc/archon/policy.toml           — system (lowest)
 #   2. ~/.archon/policy.toml             — user
-#   3. <workspace>/.archon/policy.toml   — project (this file, highest)
+#   3. <workspace>/.archon/policy.toml   — project (highest)
 #
 # Defaults below give new users a working setup with web search + MCP
 # enabled for agents (the common ask). Tighten by setting values to "deny"
@@ -188,6 +191,17 @@ min_image_bytes = 4096
 vlm_per_page_image = true
 render_text_pdf_pages = false
 image_enrichment_workers = 1
+
+# --- Device-adaptive Marker layout + bbox (LOCAL, OPT-IN) --------------------
+# Uncomment + point at YOUR local Marker install to get bbox-carrying ingestion:
+# `archon docs ingest` then auto-runs Marker on the best device (free-VRAM
+# CUDA -> MPS -> CPU), page-range-chunks big docs onto the GPU, and emits real
+# per-block bboxes. Leave commented -> ingestion uses pdftotext (text only, no
+# bboxes). Requires a venv with `pip install marker-pdf`.
+#   marker_sidecar = "/ABSOLUTE/PATH/TO/archon-cli/scripts/archon_marker_sidecar.py"
+#   marker_python  = "/ABSOLUTE/PATH/TO/marker-venv/bin/python3"
+#   marker_device  = "auto"           # auto = free-VRAM CUDA -> MPS -> CPU (default)
+#   marker_memory_budget_mb = 6000    # optional VRAM cap; also forces page-range chunking
 
 # ----------------------------------------------------------------------------
 # [policy.docs.retrieval] — Hybrid search weighting
