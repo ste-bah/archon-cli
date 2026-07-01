@@ -19,6 +19,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use archon_policy::PdfPolicy;
+
 use crate::pdf::{PdfImage, PdfImageOrigin, PdfImagesListEntry};
 use crate::pdf_image_enrichment::{is_page_scale, is_scanned_page_images};
 
@@ -91,10 +93,17 @@ pub struct ScanClassification {
 }
 
 /// Classify a PDF with BOTH detectors and select the active verdict per `detector`. Reads only
-/// `pdfimages -list` (dims + ppi), `pdfinfo` (page count), and `lopdf` (page dims) — no byte
-/// extraction, no Marker. Logs loudly when the two detectors disagree.
-pub fn classify_scan(path: &Path, detector: ScanDetector) -> ScanClassification {
-    let entries = crate::pdf::list_embedded_image_dims(path);
+/// `pdfimages -list` (dims + ppi + size), `pdfinfo` (page count), and `lopdf` (page dims) — no byte
+/// extraction, no Marker. Applies the SAME image gate the ingest pipeline applies
+/// (`extract_embedded_images` + `min_image_dimension`/`min_image_bytes`), so the pre-ingest verdict
+/// tracks what enrichment will actually do rather than counting images the pipeline will discard.
+/// Logs loudly when the two detectors disagree.
+pub fn classify_scan(
+    path: &Path,
+    detector: ScanDetector,
+    pdf_policy: &PdfPolicy,
+) -> ScanClassification {
+    let entries = retained_images(crate::pdf::list_embedded_image_dims(path), pdf_policy);
     let page_count = crate::pdf::pdf_page_count(path).unwrap_or(0);
 
     // Aspect: run the shipped heuristic on images synthesized from the list (dims only).
@@ -158,6 +167,33 @@ fn resolve(
         _ => (aspect_scanned, aspect_page_scans),
     };
     (active_scanned, active_page_scans, divergent)
+}
+
+/// Apply the pipeline's embedded-image gate to `pdfimages -list` entries so the pre-ingest verdict
+/// counts the same images enrichment will: honor `extract_embedded_images` (false → the pipeline
+/// extracts nothing), then filter by `min_image_dimension` (max side) and `min_image_bytes` (the
+/// size-column proxy for the extracted-PNG size — a close, never-exact approximation). An entry with
+/// an unparsable size passes the byte gate (lenient: never drop an image by guessing it away).
+///
+/// NOTE: unlike the pipeline this does NOT dedupe by object/hash — `pdfimages` already lists a shared
+/// XObject once per page it is drawn on, which is exactly the per-page granularity the coverage
+/// classifier needs; deduping would collapse those rows and break the per-page coverage sum. (The
+/// pipeline's aspect path dedupes then counts by a single `source_page`, which under-counts shared
+/// images — a pre-existing quirk, not introduced here.)
+fn retained_images(
+    entries: Vec<PdfImagesListEntry>,
+    pdf_policy: &PdfPolicy,
+) -> Vec<PdfImagesListEntry> {
+    if !pdf_policy.extract_embedded_images {
+        return Vec::new();
+    }
+    entries
+        .into_iter()
+        .filter(|e| {
+            e.width.max(e.height) >= pdf_policy.min_image_dimension
+                && e.bytes.map_or(true, |b| b >= pdf_policy.min_image_bytes)
+        })
+        .collect()
 }
 
 /// Coverage classifier: per-image `coverage = (px·72/ppi)/page_pt`, summed per page and capped at
@@ -301,6 +337,17 @@ mod tests {
     use lopdf::{Dictionary, Document, Object};
 
     fn entry(page: u32, w: u32, h: u32, ppi: Option<u32>) -> PdfImagesListEntry {
+        // Default to a large byte size so coverage tests aren't affected by the byte filter.
+        entry_bytes(page, w, h, ppi, Some(500_000))
+    }
+
+    fn entry_bytes(
+        page: u32,
+        w: u32,
+        h: u32,
+        ppi: Option<u32>,
+        bytes: Option<u64>,
+    ) -> PdfImagesListEntry {
         PdfImagesListEntry {
             source_page: page,
             source_pages: vec![page],
@@ -310,12 +357,61 @@ mod tests {
             xobject_name: None,
             x_ppi: ppi,
             y_ppi: ppi,
-            bytes: Some(500_000),
+            bytes,
         }
     }
 
     fn dims(pairs: &[(u32, f64, f64)]) -> BTreeMap<u32, (f64, f64)> {
         pairs.iter().map(|&(p, w, h)| (p, (w, h))).collect()
+    }
+
+    // ---- retained_images gate (matches the pipeline's embedded-image filter) ------------------
+
+    #[test]
+    fn retained_images_drops_page_shaped_but_tiny_bytes() {
+        // The reviewer scenario: a large page-shaped image compressed to 40 bytes (JBIG2/CCITT).
+        // The pipeline filters it by min_image_bytes; so must the classifier, or the report would
+        // claim SCANNED BOOK while the pipeline enriches the survivors.
+        let policy = PdfPolicy::default(); // min_image_dimension 200, min_image_bytes 4096
+        let kept = retained_images(vec![entry_bytes(1, 1500, 2400, Some(0), Some(40))], &policy);
+        assert!(
+            kept.is_empty(),
+            "40-byte image must be filtered like the pipeline"
+        );
+    }
+
+    #[test]
+    fn retained_images_drops_small_dimension() {
+        let policy = PdfPolicy::default();
+        let kept = retained_images(
+            vec![entry_bytes(1, 120, 90, Some(150), Some(50_000))],
+            &policy,
+        );
+        assert!(kept.is_empty(), "max side 120 < 200 → filtered");
+    }
+
+    #[test]
+    fn retained_images_keeps_real_figures_and_unparsable_size() {
+        let policy = PdfPolicy::default();
+        let kept = retained_images(
+            vec![
+                entry_bytes(1, 1200, 800, Some(150), Some(80_000)), // real figure
+                entry_bytes(2, 1200, 800, Some(150), None),         // size unknown → lenient keep
+            ],
+            &policy,
+        );
+        assert_eq!(kept.len(), 2);
+    }
+
+    #[test]
+    fn retained_images_honors_extract_embedded_images_false() {
+        let mut policy = PdfPolicy::default();
+        policy.extract_embedded_images = false;
+        let kept = retained_images(vec![entry(1, 1500, 2400, Some(150))], &policy);
+        assert!(
+            kept.is_empty(),
+            "pipeline extracts nothing → classifier counts nothing"
+        );
     }
 
     // ---- ScanDetector::parse ------------------------------------------------------------------

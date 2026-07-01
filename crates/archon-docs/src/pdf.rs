@@ -99,7 +99,7 @@ pub struct EnrichmentClassification {
 /// pre-ingest report matches what the pipeline will actually do and surfaces any A/B divergence.
 pub fn classify_pdf_enrichment(path: &Path, pdf_policy: &PdfPolicy) -> EnrichmentClassification {
     let detector = crate::pdf_scan::ScanDetector::parse(&pdf_policy.scan_detector);
-    let scan = crate::pdf_scan::classify_scan(path, detector);
+    let scan = crate::pdf_scan::classify_scan(path, detector, pdf_policy);
     let embedded_images = scan.embedded_images;
     let is_scanned_book = scan.active_scanned;
     EnrichmentClassification {
