@@ -95,10 +95,11 @@ impl ConsumerRequest {
     }
 }
 
-/// Model footprints (MiB). `marker_mb` is MEASURED (PR-D, RTX 5070 / torch 2.11.0+cu128 /
-/// surya 0.17.1, 13pp doc): torch peak reserved ~5956 MiB (peak allocated ~5194) + ~0.5 GiB
-/// CUDA context → 6144 here. surya peak also scales with the configured batch caps and page
-/// complexity. The others remain estimates (whisper/frame-VLM = video round; MPS peak pending).
+/// Model footprints (MiB). `marker_mb` is MEASURED (PR-D, 13pp doc, marker-pdf 1.10.2 / surya
+/// 0.17.1): RTX 5070 CUDA torch peak reserved ~5956 MiB (alloc ~5194) + ~0.5 GiB context; Apple
+/// MPS driver-allocated ~6089 MiB — **both ~6 GiB**, so 6144 here fits either platform. surya peak
+/// also scales with the configured batch caps + page complexity. whisper/frame-VLM stay estimates
+/// (video round). (`APPLE_OS_RESERVE_MB` is a separate, deliberately-conservative OS-headroom knob.)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelFootprintTable {
     pub marker_mb: u64,
