@@ -28,17 +28,14 @@ pub enum Precision {
     Fp32,
 }
 
-/// surya batch-size tier for the Marker sidecar — ordered LARGEST→smallest batches. The planner
-/// escalates the tier with free VRAM (bigger card → bigger batches → more throughput), and the
-/// per-doc OOM→retry-smaller ladder steps DOWN this order. Batch numbers live in [`marker_env_for`];
-/// `Generous` is measured (~6 GiB), `Ample`/`Max` are PROVISIONAL upscales the ladder makes safe.
+/// surya batch config for the Marker sidecar. PR-D calibration proved batch size does NOT change
+/// Marker's VRAM (surya's OCR encoder ingests the whole document in one pass), so this is only a
+/// device-appropriate config, not a memory lever: `Gpu` = surya's own defaults (+ CUDA expandable
+/// segments), `Cpu` = small caps to bound RAM/latency, `None` = a non-Marker consumer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SuryaTier {
-    Max,
-    Ample,
-    Generous,
-    Reduced,
+    Gpu,
     Cpu,
     None,
 }
@@ -98,11 +95,9 @@ impl ConsumerRequest {
     }
 }
 
-/// Model footprints (MiB). `marker_mb` is MEASURED (PR-D, 13pp doc, marker-pdf 1.10.2 / surya
-/// 0.17.1): RTX 5070 CUDA torch peak reserved ~5956 MiB (alloc ~5194) + ~0.5 GiB context; Apple
-/// MPS driver-allocated ~6089 MiB — **both ~6 GiB**, so 6144 here fits either platform. surya peak
-/// also scales with the configured batch caps + page complexity. whisper/frame-VLM stay estimates
-/// (video round). (`APPLE_OS_RESERVE_MB` is a separate, deliberately-conservative OS-headroom knob.)
+/// Model footprints (MiB) for the non-Marker consumers. NOTE: Marker no longer uses `marker_mb` —
+/// its footprint is page-scaled ([`marker_footprint_mb`], PR-D); `marker_mb` is kept only as the
+/// ~6 GiB small-doc reference. whisper/frame-VLM are estimates (video round).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelFootprintTable {
     pub marker_mb: u64,
@@ -137,7 +132,7 @@ impl Default for DeviceOverrides {
         Self {
             force_marker_device: None,
             memory_budget_mb: None,
-            headroom_mb: 1536,
+            headroom_mb: 512,
         }
     }
 }
@@ -177,22 +172,14 @@ impl Placement {
         }
     }
 
-    fn gpu(
-        kind: ConsumerKind,
-        device: AccelKind,
-        index: u32,
-        surya_tier: SuryaTier,
-        reason: impl Into<String>,
-    ) -> Self {
+    fn gpu(kind: ConsumerKind, device: AccelKind, index: u32, reason: impl Into<String>) -> Self {
         Self {
             consumer: kind,
             device,
             device_index: Some(index),
             precision: Precision::Fp16,
-            surya_tier,
-            // expandable_segments helps only the tight CUDA fit (Reduced tier).
-            cuda_expandable_segments: device == AccelKind::Cuda
-                && matches!(surya_tier, SuryaTier::Reduced),
+            surya_tier: SuryaTier::Gpu,
+            cuda_expandable_segments: device == AccelKind::Cuda,
             oom_fallback_to_cpu: true,
             reason: reason.into(),
         }
@@ -207,7 +194,7 @@ impl Placement {
             device,
             device_index: index,
             precision: Precision::Fp16,
-            surya_tier: SuryaTier::Reduced,
+            surya_tier: SuryaTier::Gpu,
             cuda_expandable_segments: device == AccelKind::Cuda,
             oom_fallback_to_cpu: true,
             reason: "forced device via override (OOM-guarded)".to_string(),
@@ -226,16 +213,20 @@ impl Placement {
     }
 }
 
-/// Free-VRAM (MiB) thresholds at/above which the planner escalates to larger surya batch tiers,
-/// so bigger cards run bigger batches. PROVISIONAL — calibrate the caps + these thresholds with
-/// `mem_probe.py`; the per-doc OOM→retry-smaller ladder ([`marker_env_ladder`]) makes an
-/// over-estimate safe (it retries a smaller tier before ever touching CPU).
-const AMPLE_FREE_MB: u64 = 12_288; // ~16 GiB-class cards (e.g. RTX 5080)
-const MAX_FREE_MB: u64 = 20_480; // ~24 GiB+ cards (RTX 5090, 3090, roomy unified Macs)
+/// Marker's per-document GPU footprint (MiB), MEASURED (PR-D, marker-pdf 1.10.2 / surya 0.17.1 on
+/// RTX 5070 CUDA + Apple MPS). Marker's VRAM is set by the OCR encoder's whole-document pass, so it
+/// rises with document size from a ~6 GiB model floor and SATURATES (it is NOT unbounded, and it is
+/// independent of batch size): three points — 13pp→5956, 129pp→9424, 578pp→8470 MiB reserved — fit
+/// `min(6000 + 30·pages, 10240)` (context folded in). The cap is conservative (the 578pp doc came
+/// in under it — page resolution, not count, drives the top end) and the per-doc OOM→CPU fallback
+/// backstops any document that still exceeds it. `pages = 0` (unknown) → the ~6 GiB floor.
+pub fn marker_footprint_mb(pages: u32) -> u64 {
+    (6000 + 30 * pages as u64).min(10240)
+}
 
-/// Build the Marker sidecar env for a device + surya tier (pure). Used by
-/// [`Placement::marker_sidecar_env`] and the OOM→retry-smaller ladder. `Generous` caps are
-/// measured (~6 GiB); `Ample`/`Max` are PROVISIONAL upscales the ladder makes safe.
+/// Build the Marker sidecar env for a device + surya config (pure). Batch caps are NOT a VRAM lever
+/// (PR-D) — GPU is left to surya's own defaults; CPU gets small caps to bound RAM/latency; CUDA
+/// always gets `expandable_segments` to cut fragmentation OOM.
 pub fn marker_env_for(device: AccelKind, tier: SuryaTier) -> Vec<(String, String)> {
     let mut env = vec![
         (
@@ -252,40 +243,24 @@ pub fn marker_env_for(device: AccelKind, tier: SuryaTier) -> Vec<(String, String
             .to_string(),
         ),
     ];
-    // (recognition, detector, layout, table_rec, ocr_error) batch caps, largest tier first.
-    let caps = match tier {
-        SuryaTier::Max => Some((256, 96, 48, 96, 64)),
-        SuryaTier::Ample => Some((128, 48, 24, 48, 32)),
-        SuryaTier::Generous => Some((64, 24, 12, 24, 16)),
-        SuryaTier::Reduced => Some((16, 8, 4, 8, 6)),
-        SuryaTier::Cpu => Some((8, 4, 2, 4, 4)),
-        SuryaTier::None => None,
-    };
-    if let Some((rec, det, lay, tab, ocr)) = caps {
-        env.push(("RECOGNITION_BATCH_SIZE".to_string(), rec.to_string()));
-        env.push(("DETECTOR_BATCH_SIZE".to_string(), det.to_string()));
-        env.push(("LAYOUT_BATCH_SIZE".to_string(), lay.to_string()));
-        env.push(("TABLE_REC_BATCH_SIZE".to_string(), tab.to_string()));
-        env.push(("OCR_ERROR_BATCH_SIZE".to_string(), ocr.to_string()));
+    if matches!(tier, SuryaTier::Cpu) {
+        for (k, v) in [
+            ("RECOGNITION_BATCH_SIZE", "8"),
+            ("DETECTOR_BATCH_SIZE", "4"),
+            ("LAYOUT_BATCH_SIZE", "2"),
+            ("TABLE_REC_BATCH_SIZE", "4"),
+            ("OCR_ERROR_BATCH_SIZE", "4"),
+        ] {
+            env.push((k.to_string(), v.to_string()));
+        }
     }
-    if device == AccelKind::Cuda && matches!(tier, SuryaTier::Reduced) {
+    if device == AccelKind::Cuda {
         env.push((
             "PYTORCH_CUDA_ALLOC_CONF".to_string(),
             "expandable_segments:True".to_string(),
         ));
     }
     env
-}
-
-/// The next-smaller GPU surya tier for the OOM→retry-smaller ladder. `Reduced` is the GPU floor
-/// (below it → CPU), so it and the non-GPU tiers return `None`.
-pub fn smaller_gpu(tier: SuryaTier) -> Option<SuryaTier> {
-    match tier {
-        SuryaTier::Max => Some(SuryaTier::Ample),
-        SuryaTier::Ample => Some(SuryaTier::Generous),
-        SuryaTier::Generous => Some(SuryaTier::Reduced),
-        SuryaTier::Reduced | SuryaTier::Cpu | SuryaTier::None => None,
-    }
 }
 
 /// The full plan: one placement per registered consumer, plus the GPU budget that was used.
@@ -311,10 +286,11 @@ impl PlacementPlan {
 pub fn plan_marker_ingest(
     report: &AcceleratorReport,
     overrides: &DeviceOverrides,
+    pages: u32,
 ) -> PlacementPlan {
     let models = ModelFootprintTable::default();
     let consumers = [
-        ConsumerRequest::marker(models.marker_mb),
+        ConsumerRequest::marker(marker_footprint_mb(pages)),
         ConsumerRequest::embedding(models.embedding_mb),
     ];
     plan_placement(report, &consumers, overrides)
@@ -325,37 +301,29 @@ pub fn marker_cpu_fallback_env() -> Vec<(String, String)> {
     marker_env_for(AccelKind::Cpu, SuryaTier::Cpu)
 }
 
-/// Ordered Marker attempts for one document: `(sidecar_device, env)`, biggest safe batch tier
-/// first, stepping DOWN GPU tiers on OOM, with CPU as the final fallback. `archon-docs` runs the
-/// list top-to-bottom, advancing only on a torch-OOM. Free VRAM chooses the starting tier, so a
-/// bigger card starts with bigger batches; a tier that OOMs on a hard doc drops to the next
-/// smaller tier before ever touching CPU.
+/// Ordered Marker attempts for one document: `(sidecar_device, env)`. `pages` sizes the footprint,
+/// so a big document that won't fit the card starts on CPU. A GPU placement yields two rungs —
+/// `[GPU, CPU]` — because a torch-OOM is only relieved by CPU (PR-D: smaller batches don't reduce
+/// Marker's VRAM). `archon-docs` runs the list top-to-bottom, advancing only on a torch-OOM.
 pub fn marker_env_ladder(
     report: &AcceleratorReport,
     overrides: &DeviceOverrides,
+    pages: u32,
 ) -> Vec<(String, Vec<(String, String)>)> {
-    let plan = plan_marker_ingest(report, overrides);
+    let plan = plan_marker_ingest(report, overrides, pages);
     let m = plan
         .marker()
         .expect("plan_marker_ingest always yields a Marker placement");
-    let mut ladder = Vec::new();
     if m.device == AccelKind::Cpu {
-        ladder.push((
+        return vec![("cpu".to_string(), marker_cpu_fallback_env())];
+    }
+    vec![
+        (
             m.device.sidecar_device().to_string(),
             marker_env_for(m.device, m.surya_tier),
-        ));
-        return ladder;
-    }
-    let mut tier = Some(m.surya_tier);
-    while let Some(t) = tier {
-        ladder.push((
-            m.device.sidecar_device().to_string(),
-            marker_env_for(m.device, t),
-        ));
-        tier = smaller_gpu(t);
-    }
-    ladder.push(("cpu".to_string(), marker_cpu_fallback_env()));
-    ladder
+        ),
+        ("cpu".to_string(), marker_cpu_fallback_env()),
+    ]
 }
 
 /// Core planner. Packs GPU-preferring consumers (highest priority first) onto the single
@@ -422,34 +390,23 @@ fn decide_one(
         _ => return Placement::cpu(c.kind, "no accelerator detected"),
     };
 
+    // Marker's VRAM is bounded by document size, not batch (PR-D). GPU only if the free pool
+    // covers the (page-scaled) footprint + headroom; otherwise CPU. The per-doc OOM->CPU fallback
+    // backstops any residual under-estimate.
     let footprint = c.footprint_mb;
     let need = footprint.saturating_add(overrides.headroom_mb);
     let before = *remaining;
-    if before < footprint {
+    if before < need {
         return Placement::cpu(
             c.kind,
-            format!(
-                "free {before} MiB < footprint {footprint} MiB -> CPU (co-tenancy/constrained)"
-            ),
+            format!("free {before} MiB < need {need} MiB (footprint {footprint}) -> CPU"),
         );
     }
     *remaining = before - footprint;
-    // Free VRAM chooses the batch tier: bigger card -> bigger batches -> more throughput. The
-    // OOM->retry-smaller ladder (marker_env_ladder) protects any over-eager PROVISIONAL upscale.
-    let tier = if before >= MAX_FREE_MB {
-        SuryaTier::Max
-    } else if before >= AMPLE_FREE_MB {
-        SuryaTier::Ample
-    } else if before >= need {
-        SuryaTier::Generous
-    } else {
-        SuryaTier::Reduced
-    };
     Placement::gpu(
         c.kind,
         gkind,
         gidx,
-        tier,
-        format!("free {before} MiB -> {tier:?} (footprint {footprint}, need {need})"),
+        format!("free {before} MiB >= need {need} MiB (footprint {footprint}) -> GPU"),
     )
 }

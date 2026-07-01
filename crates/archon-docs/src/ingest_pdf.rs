@@ -81,7 +81,10 @@ pub(crate) async fn run_pdf_ingest_pipeline(
                     &extract_result.page_offsets,
                 )
             };
-            let (blocks, coord) = match crate::marker_source::from_policy(&policy.docs.pdf) {
+            let (blocks, coord) = match crate::marker_source::from_policy(
+                &policy.docs.pdf,
+                extract_result.page_count,
+            ) {
                 Some(src) => match src.blocks_for(Path::new(file_path)).await {
                     Ok(b) if !b.is_empty() => (b, crate::block_chunking::COORD_MARKER),
                     Ok(_) => {

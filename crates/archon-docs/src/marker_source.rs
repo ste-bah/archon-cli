@@ -1,9 +1,9 @@
 //! Marker block source — obtains Marker's block-tree JSON and parses it to `Vec<Block>`.
 //!
-//! Device-adaptive: the Marker sidecar runs as a Python subprocess, but WHICH device it runs on
-//! (and at what surya batch caps) is resolved by `archon-accel` from the host's *free* VRAM — a
-//! bigger card gets bigger batches. The load-bearing correctness guarantee is the per-doc
-//! OOM→retry-smaller ladder in `fetch_json`: step DOWN GPU batch tiers, CPU as the last resort.
+//! Device-adaptive: the Marker sidecar runs as a Python subprocess; `archon-accel` picks GPU vs
+//! CPU from the host's *free* VRAM vs the document's page-scaled footprint (Marker's VRAM tracks
+//! document size, not batch — PR-D). The load-bearing guarantee is the per-doc OOM→CPU fallback in
+//! `fetch_json` (a GPU rung, then CPU — smaller batches don't relieve OOM).
 //! Transport is orthogonal to device: a local
 //! subprocess (default, the standalone Mac/laptop story), a remote HTTP Marker service (e.g.
 //! WRAITH for bulk on NVIDIA), or a pre-extracted JSON file. All three yield the same
@@ -21,13 +21,13 @@ use crate::errors::DocsError;
 /// Where/how to obtain a PDF's Marker block tree.
 #[derive(Clone, Debug)]
 pub enum MarkerSource {
-    /// Spawn the local Python sidecar per the `archon-accel` OOM→retry-smaller ladder — each
-    /// attempt runs `python <script> <pdf> --device <dev>` under that attempt's env.
+    /// Spawn the local Python sidecar per the `archon-accel` OOM ladder — each attempt runs
+    /// `python <script> <pdf> --device <dev>` under that attempt's env.
     Subprocess {
         python: String,
         script: PathBuf,
-        /// `(sidecar_device, env)` per attempt, biggest batch tier first, CPU last. Tried
-        /// top-to-bottom, advancing to the next (smaller) attempt only on a torch-OOM.
+        /// `(sidecar_device, env)` per attempt (GPU then CPU), tried top-to-bottom; advance to
+        /// the next attempt only on a torch-OOM.
         attempts: Vec<(String, Vec<(String, String)>)>,
     },
     /// POST the PDF bytes to a remote Marker HTTP service; expects block-tree JSON back.
@@ -36,16 +36,20 @@ pub enum MarkerSource {
     PreExtracted { json_path: PathBuf },
 }
 
-/// Build a `MarkerSource` from policy. Present `marker_sidecar` path → local subprocess whose
-/// device + surya batch caps + OOM→retry-smaller ladder are resolved by `archon-accel` from the
-/// host's free VRAM (`marker_device` of `None`/`"auto"` → planner-chosen; an explicit
-/// `cuda|mps|cpu` forces it). Absent `marker_sidecar` → `None` (caller falls back to flat text).
+/// Build a `MarkerSource` from policy. Present `marker_sidecar` path → local subprocess with the
+/// `archon-accel` GPU→CPU OOM ladder, where the GPU-vs-CPU choice comes from the host's free VRAM
+/// vs the **page-scaled** Marker footprint (`page_count`). `marker_device` `None`/`"auto"` →
+/// planner-chosen; an explicit `cuda|mps|cpu` forces it. Absent `marker_sidecar` → `None`.
 ///
 /// NOTE: resolves placement (a cheap `nvidia-smi`/`sysinfo` probe) once per call — in bulk ingest,
 /// once per PDF. It can be hoisted to once-per-run if the probe ever shows up in a profile.
-pub fn from_policy(pdf: &PdfPolicy) -> Option<MarkerSource> {
+pub fn from_policy(pdf: &PdfPolicy, page_count: u32) -> Option<MarkerSource> {
     let script = pdf.marker_sidecar.as_ref()?;
-    let attempts = marker_env_ladder(&archon_accel::detect(), &overrides_from_policy(pdf));
+    let attempts = marker_env_ladder(
+        &archon_accel::detect(),
+        &overrides_from_policy(pdf),
+        page_count,
+    );
     Some(MarkerSource::Subprocess {
         python: pdf
             .marker_python
@@ -226,10 +230,10 @@ mod tests {
     #[test]
     fn from_policy_maps_sidecar_path() {
         let mut pdf = PdfPolicy::default();
-        assert!(from_policy(&pdf).is_none(), "no sidecar → None");
+        assert!(from_policy(&pdf, 13).is_none(), "no sidecar → None");
         pdf.marker_sidecar = Some("scripts/archon_marker_sidecar.py".into());
         pdf.marker_device = Some("mps".into());
-        match from_policy(&pdf) {
+        match from_policy(&pdf, 13) {
             Some(MarkerSource::Subprocess { attempts, .. }) => {
                 assert_eq!(attempts.first().unwrap().0.as_str(), "mps")
             }
@@ -269,7 +273,7 @@ mod tests {
             marker_device: Some("cpu".into()),
             ..Default::default()
         };
-        match from_policy(&p) {
+        match from_policy(&p, 13) {
             Some(MarkerSource::Subprocess { attempts, .. }) => {
                 let (device, env) = attempts.first().unwrap();
                 assert_eq!(device.as_str(), "cpu");
