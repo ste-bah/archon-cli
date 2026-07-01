@@ -168,6 +168,10 @@ require_user_confirmation_for_cloud = true
 endpoint = "http://localhost:11434"
 model = "gemma4:e4b"
 timeout_secs = 120
+# Constrained-VRAM knobs (omit for Ollama defaults). See docs/ingestion/hardware-vram-guide.md.
+# num_ctx = 2048       # smaller context window = much less VRAM (default 32K is wasteful here)
+# keep_alive = "0"     # unload the model immediately after each doc (frees VRAM for Marker); "5m" default
+# num_gpu = 0          # 0 = force CPU (Marker keeps the GPU on <=8 GB hosts); omit to let Ollama decide
 
 [policy.docs.vlm.gemini]
 api_key_env = "GOOGLE_API_KEY"

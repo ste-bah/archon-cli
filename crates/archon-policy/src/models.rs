@@ -328,6 +328,19 @@ pub struct OllamaVlmPolicy {
     pub endpoint: String,
     pub model: String,
     pub timeout_secs: u64,
+    /// Constrained-VRAM knobs (Ollama request options). `None` = omit the key entirely →
+    /// identical behavior to today (Ollama server defaults).
+    /// Context window; smaller = less VRAM (image description needs ~2-4K, not the 32K default).
+    #[serde(default)]
+    pub num_ctx: Option<u32>,
+    /// How long Ollama keeps the model resident after a request. `"0"` unloads immediately (frees
+    /// VRAM for the next document's Marker on constrained hosts); `"5m"` is the server default.
+    #[serde(default)]
+    pub keep_alive: Option<String>,
+    /// GPU layers to offload. `0` forces CPU (Marker keeps the GPU on ≤8 GB hosts); `None` lets
+    /// Ollama decide. `0` is meaningful and distinct from unset, hence `Option`.
+    #[serde(default)]
+    pub num_gpu: Option<u32>,
 }
 
 impl Default for OllamaVlmPolicy {
@@ -336,6 +349,9 @@ impl Default for OllamaVlmPolicy {
             endpoint: "http://localhost:11434".into(),
             model: "gemma4:e4b".into(),
             timeout_secs: 120,
+            num_ctx: None,
+            keep_alive: None,
+            num_gpu: None,
         }
     }
 }

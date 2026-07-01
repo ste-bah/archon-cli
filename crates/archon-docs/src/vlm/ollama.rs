@@ -17,6 +17,11 @@ pub struct OllamaVlmProvider {
     endpoint: String,
     model: String,
     http: reqwest::blocking::Client,
+    /// Constrained-VRAM request knobs (see `archon_policy::OllamaVlmPolicy`). `None` → the key is
+    /// omitted from the request body, i.e. Ollama server defaults (identical to legacy behavior).
+    num_ctx: Option<u32>,
+    keep_alive: Option<String>,
+    num_gpu: Option<u32>,
 }
 
 impl OllamaVlmProvider {
@@ -37,15 +42,22 @@ impl OllamaVlmProvider {
             endpoint: endpoint.into(),
             model: model.into(),
             http,
+            num_ctx: None,
+            keep_alive: None,
+            num_gpu: None,
         })
     }
 
     pub fn from_policy(policy: &archon_policy::OllamaVlmPolicy) -> Result<Self, DocsError> {
-        Self::new(
+        let mut provider = Self::new(
             policy.endpoint.clone(),
             policy.model.clone(),
             Duration::from_secs(policy.timeout_secs),
-        )
+        )?;
+        provider.num_ctx = policy.num_ctx;
+        provider.keep_alive = policy.keep_alive.clone();
+        provider.num_gpu = policy.num_gpu;
+        Ok(provider)
     }
 
     pub fn provider_id(&self) -> &'static str {
@@ -133,7 +145,7 @@ impl OllamaVlmProvider {
         let prompt_text = prompt.unwrap_or(IMAGE_DESCRIPTION_PROMPT);
         let url = format!("{}/api/chat", self.endpoint.trim_end_matches('/'));
         let image = STANDARD.encode(image_bytes);
-        let body = json!({
+        let mut body = json!({
             "model": self.model,
             "messages": [{
                 "role": "user",
@@ -142,6 +154,21 @@ impl OllamaVlmProvider {
             }],
             "stream": false,
         });
+        // Constrained-VRAM knobs: num_ctx/num_gpu nest under "options", keep_alive is top-level.
+        // Each is omitted entirely when unset, so the body stays byte-identical to the default.
+        let mut options = serde_json::Map::new();
+        if let Some(n) = self.num_ctx {
+            options.insert("num_ctx".into(), json!(n));
+        }
+        if let Some(n) = self.num_gpu {
+            options.insert("num_gpu".into(), json!(n));
+        }
+        if !options.is_empty() {
+            body["options"] = serde_json::Value::Object(options);
+        }
+        if let Some(ka) = &self.keep_alive {
+            body["keep_alive"] = json!(ka);
+        }
         let response = self
             .http
             .post(url)
@@ -261,6 +288,76 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(text, "chart slopes upward");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn describe_image_injects_vram_knobs() {
+        // num_ctx + num_gpu nest under "options"; keep_alive is top-level.
+        let server = MockServer::start().await;
+        let encoded = STANDARD.encode(b"image-bytes");
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .and(body_json(json!({
+                "model": "gemma4:e4b",
+                "messages": [{
+                    "role": "user",
+                    "content": IMAGE_DESCRIPTION_PROMPT,
+                    "images": [encoded],
+                }],
+                "stream": false,
+                "options": {"num_ctx": 2048, "num_gpu": 0},
+                "keep_alive": "0",
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "message": {"content": "ok"}
+            })))
+            .mount(&server)
+            .await;
+        let endpoint = server.uri();
+        let text = tokio::task::spawn_blocking(move || {
+            let mut p = provider(endpoint, "gemma4:e4b");
+            p.num_ctx = Some(2048);
+            p.num_gpu = Some(0); // 0 = force CPU; must be SENT, distinct from unset
+            p.keep_alive = Some("0".into());
+            p.describe_image(b"image-bytes", None)
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(text, "ok");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn describe_image_keep_alive_only_omits_options() {
+        // Only keep_alive set → body carries keep_alive but NO "options" key (exact-match proves it).
+        let server = MockServer::start().await;
+        let encoded = STANDARD.encode(b"image-bytes");
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .and(body_json(json!({
+                "model": "gemma4:e4b",
+                "messages": [{
+                    "role": "user",
+                    "content": IMAGE_DESCRIPTION_PROMPT,
+                    "images": [encoded],
+                }],
+                "stream": false,
+                "keep_alive": "5m",
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "message": {"content": "ok"}
+            })))
+            .mount(&server)
+            .await;
+        let endpoint = server.uri();
+        tokio::task::spawn_blocking(move || {
+            let mut p = provider(endpoint, "gemma4:e4b");
+            p.keep_alive = Some("5m".into());
+            p.describe_image(b"image-bytes", None)
+        })
+        .await
+        .unwrap()
+        .unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

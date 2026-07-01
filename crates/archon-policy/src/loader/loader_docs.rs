@@ -27,6 +27,9 @@ struct RawOllamaVlmPolicy {
     endpoint: Option<String>,
     model: Option<String>,
     timeout_secs: Option<u64>,
+    num_ctx: Option<u32>,
+    keep_alive: Option<String>,
+    num_gpu: Option<u32>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -124,6 +127,15 @@ fn apply_ollama_vlm(policy: &mut OllamaVlmPolicy, raw: RawOllamaVlmPolicy) {
     }
     if let Some(value) = raw.timeout_secs {
         policy.timeout_secs = value;
+    }
+    if raw.num_ctx.is_some() {
+        policy.num_ctx = raw.num_ctx;
+    }
+    if raw.keep_alive.is_some() {
+        policy.keep_alive = raw.keep_alive;
+    }
+    if raw.num_gpu.is_some() {
+        policy.num_gpu = raw.num_gpu;
     }
 }
 
