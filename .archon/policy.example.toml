@@ -36,10 +36,13 @@ allow_mcp_server_exposure = true
 # [policy.workers] — Per-worker enablement
 # ----------------------------------------------------------------------------
 # Modes per worker: "allow-local" | "allow-cloud" | "deny"
+# NOTE: these are the MASTER gates. `vlm`/`ocr` here must be enabled IN ADDITION to the detailed
+# [policy.docs.vlm] config below — a "deny" here overrides docs.vlm.enabled=true and the VLM never
+# runs (you'll see "denied by policy.workers.vlm" in ingest logs).
 [policy.workers]
-ocr = "allow-local"           # local OCR via pdftotext / tesseract
+ocr = "allow-local"           # local OCR via pdftotext / tesseract (install `tesseract-ocr` for image OCR)
 embedding = "allow-local"     # fastembed (local) or OpenAI (cloud)
-vlm = "deny"                  # set allow-local for Ollama or allow-cloud for Gemini/Anthropic
+vlm = "deny"                  # MASTER gate for figure VLM — set "allow-local" for Ollama (also set [policy.docs.vlm])
 web_fetch = "allow-local"     # WebFetch tool enabled
 
 
@@ -153,6 +156,8 @@ auto_migrate_reasoning_quality = false
 #     mode = "local"
 #     provider = "ollama"
 #     [policy.docs.vlm.ollama] model = "qwen2.5vl:7b"
+# ALSO REQUIRED: set [policy.workers] vlm = "allow-local" (the master gate above) — otherwise
+# this whole section is ignored. And `sudo apt install tesseract-ocr` for the figure-text OCR.
 # NB: qwen2.5vl works on both old and new Ollama; llama3.2-vision (mllama) only
 # runs on older Ollama builds. See docs/ingestion/hardware-vram-guide.md for VRAM tiers.
 # Cloud (best quality, but uploads image bytes): mode="cloud", provider="anthropic"
