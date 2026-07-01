@@ -81,8 +81,8 @@ fn ample_cuda_places_marker_generous_fp16() {
 
 #[test]
 fn constrained_cuda_reduced_with_expandable_and_oom() {
-    // footprint 5120, need 5120+1536=6656; free 5500 sits in [footprint, need).
-    let plan = plan_marker_ingest(&cuda(8_000, 5_500), &DeviceOverrides::default());
+    // footprint 6144, need 6144+1536=7680; free 6500 sits in [footprint, need).
+    let plan = plan_marker_ingest(&cuda(8_000, 6_500), &DeviceOverrides::default());
     let m = plan.marker().unwrap();
     assert_eq!(m.device, AccelKind::Cuda);
     assert_eq!(m.surya_tier, SuryaTier::Reduced);
@@ -165,7 +165,7 @@ fn force_marker_cuda_honored_even_without_detected_gpu() {
 
 #[test]
 fn marker_env_reflects_device_and_tier() {
-    let plan = plan_marker_ingest(&cuda(8_000, 5_500), &DeviceOverrides::default());
+    let plan = plan_marker_ingest(&cuda(8_000, 6_500), &DeviceOverrides::default());
     let env: std::collections::HashMap<_, _> = plan
         .marker()
         .unwrap()
@@ -183,14 +183,14 @@ fn marker_env_reflects_device_and_tier() {
 
 #[test]
 fn multi_consumer_seam_packs_by_priority() {
-    // Forward seam (video): Marker(prio 100, 5120) + Whisper(prio 90, 2048) on 6000 MiB free.
-    // Marker fits its footprint (Reduced), leaving ~880 -> Whisper falls to CPU.
+    // Forward seam (video): Marker(prio 100, 6144) + Whisper(prio 90, 2048) on 7500 MiB free.
+    // Marker fits its footprint (Reduced), leaving ~1356 -> Whisper falls to CPU.
     let models = ModelFootprintTable::default();
     let consumers = [
         ConsumerRequest::marker(models.marker_mb),
         ConsumerRequest::whisper(models.whisper_mb),
     ];
-    let plan = plan_placement(&cuda(8_000, 6_000), &consumers, &DeviceOverrides::default());
+    let plan = plan_placement(&cuda(8_000, 7_500), &consumers, &DeviceOverrides::default());
     assert_eq!(
         plan.get(ConsumerKind::Marker).unwrap().device,
         AccelKind::Cuda

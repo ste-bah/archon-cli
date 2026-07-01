@@ -95,8 +95,10 @@ impl ConsumerRequest {
     }
 }
 
-/// Provisional model footprints (MiB). All UNVERIFIED — Marker ~5 GiB is a reader estimate,
-/// not a measurement, and surya peak scales with page complexity. PR-D captures real peaks.
+/// Model footprints (MiB). `marker_mb` is MEASURED (PR-D, RTX 5070 / torch 2.11.0+cu128 /
+/// surya 0.17.1, 13pp doc): torch peak reserved ~5956 MiB (peak allocated ~5194) + ~0.5 GiB
+/// CUDA context → 6144 here. surya peak also scales with the configured batch caps and page
+/// complexity. The others remain estimates (whisper/frame-VLM = video round; MPS peak pending).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelFootprintTable {
     pub marker_mb: u64,
@@ -108,7 +110,7 @@ pub struct ModelFootprintTable {
 impl Default for ModelFootprintTable {
     fn default() -> Self {
         Self {
-            marker_mb: 5120,
+            marker_mb: 6144,
             embedding_mb: 512,
             whisper_mb: 2048,
             frame_vlm_mb: 1536,
