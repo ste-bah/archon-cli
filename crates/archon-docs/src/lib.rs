@@ -33,6 +33,7 @@ mod pdf_image_vlm;
 pub mod pdf_scan;
 pub mod provenance;
 pub mod provenance_chunks;
+pub mod quote_verify;
 pub mod reprocess;
 pub mod status;
 mod tool_path;

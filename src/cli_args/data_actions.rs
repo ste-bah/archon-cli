@@ -234,6 +234,20 @@ pub enum DocsAction {
     },
     /// Report embedding model and backend status
     ModelStatus,
+    /// Verify a quote against the corpus — locate its source document, page(s), and bbox(es)
+    VerifyQuote {
+        /// The quote text to locate (verbatim; smart quotes + whitespace are normalized)
+        quote: String,
+        /// Restrict the search to a single document ID
+        #[arg(long)]
+        doc: Option<String>,
+        /// Maximum number of source locations to report
+        #[arg(long, default_value = "3")]
+        limit: usize,
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]

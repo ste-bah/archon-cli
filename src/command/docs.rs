@@ -91,7 +91,109 @@ pub async fn handle_docs_command(action: DocsAction) -> Result<()> {
         DocsAction::ModelStatus => {
             crate::command::docs_embedding::handle_model_status(open_db()?).await
         }
+        DocsAction::VerifyQuote {
+            quote,
+            doc,
+            limit,
+            json,
+        } => handle_verify_quote(&quote, doc.as_deref(), limit, json).await,
     }
+}
+
+/// V-4: locate a quote in the corpus and report its source document, page(s), and bbox(es) so the
+/// citation can be verified against the source (and a PDF highlight drawn).
+async fn handle_verify_quote(quote: &str, doc: Option<&str>, limit: usize, json: bool) -> Result<()> {
+    use archon_docs::quote_verify::{self, MatchKind};
+
+    let db = open_db()?;
+    let locations = match doc {
+        Some(d) => quote_verify::find_fragment_bboxes(&db, d, quote)?
+            .into_iter()
+            .collect::<Vec<_>>(),
+        None => quote_verify::locate_quote(&db, quote, limit.max(1))?,
+    };
+
+    if json {
+        let out = serde_json::json!({
+            "quote": quote,
+            "found": !locations.is_empty(),
+            "locations": locations.iter().map(|l| serde_json::json!({
+                "document_id": l.document_id,
+                "source_path": l.source_path,
+                "page_start": l.page_start,
+                "page_end": l.page_end,
+                "match_kind": if l.match_kind == MatchKind::Exact { "exact" } else { "fuzzy" },
+                "similarity": l.similarity,
+                "source_span": l.source_span,
+                "fragments": l.fragments.iter().map(|f| serde_json::json!({
+                    "chunk_id": f.chunk_id,
+                    "page": f.page,
+                    "bbox": f.bbox,
+                    "coord_space": f.coord_space,
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+        });
+        println!("{}", serde_json::to_string_pretty(&out)?);
+        return Ok(());
+    }
+
+    let shown: String = quote.chars().take(70).collect();
+    println!(
+        "\nQUOTE VERIFICATION — \"{}{}\"",
+        shown,
+        if quote.chars().count() > 70 { "…" } else { "" }
+    );
+    if locations.is_empty() {
+        println!("  ✗ NOT FOUND — no corpus document contains this quote (above the match floor).");
+        println!("    (A real quote not found here may be from a source not in the corpus, or misquoted.)");
+        return Ok(());
+    }
+    for (i, l) in locations.iter().enumerate() {
+        let (mark, label) = match l.match_kind {
+            MatchKind::Exact => ("✓", "EXACT MATCH".to_string()),
+            MatchKind::Fuzzy => (
+                "~",
+                format!(
+                    "FUZZY {:.0}% — {}",
+                    l.similarity * 100.0,
+                    if l.similarity >= 0.90 {
+                        "near-verbatim; minor differences"
+                    } else {
+                        "REVIEW: source differs from the quote"
+                    }
+                ),
+            ),
+        };
+        let name = std::path::Path::new(&l.source_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| l.document_id.clone());
+        println!("\n  [{}] {mark} {label}", i + 1);
+        println!("      source: {name}");
+        let pages = if l.page_start == l.page_end {
+            format!("p.{}", l.page_start)
+        } else {
+            format!("pp.{}–{}", l.page_start, l.page_end)
+        };
+        let boxes: Vec<String> = l
+            .fragments
+            .iter()
+            .map(|f| match f.bbox {
+                Some(b) => format!("p{} [{:.0},{:.0},{:.0},{:.0}]", f.page, b[0], b[1], b[2], b[3]),
+                None => format!("p{} (no bbox)", f.page),
+            })
+            .collect();
+        println!("      {pages}   bbox: {}", boxes.join(" · "));
+        // Exact spans are short; a fuzzy span is the whole matched chunk — truncate for display.
+        let span = l.source_span.trim();
+        let shown_span: String = if span.chars().count() > 320 {
+            format!("{}…", span.chars().take(320).collect::<String>())
+        } else {
+            span.to_string()
+        };
+        println!("      source text: \"{shown_span}\"");
+    }
+    Ok(())
 }
 
 fn is_pdf_path(path: &Path) -> bool {
