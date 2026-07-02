@@ -370,7 +370,12 @@ mod tests {
         db
     }
 
+    // Serial with the docs_global_state group: ingest touches the process-global OCR/VLM/embedding
+    // provider registries (and cozo's shared in-memory engine), so running concurrently with the
+    // serial PDF tests let a mock provider's output leak into this doc's chunks — a flaky content
+    // assertion. Serializing removes the race.
     #[tokio::test]
+    #[serial_test::serial(docs_global_state)]
     async fn reprocess_preserves_source_and_kb_membership() {
         let db = test_db();
         let dir = tempfile::tempdir().unwrap();
@@ -402,6 +407,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial(docs_global_state)]
     async fn reprocess_rejects_changed_source_content() {
         let db = test_db();
         let dir = tempfile::tempdir().unwrap();
