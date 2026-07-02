@@ -248,6 +248,15 @@ pub enum DocsAction {
         #[arg(long)]
         json: bool,
     },
+    /// Verify chunk-integrity (chunks_root) for one document or all documents
+    VerifyIntegrity {
+        /// Restrict verification to a single document ID (default: all documents)
+        #[arg(long)]
+        doc: Option<String>,
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]

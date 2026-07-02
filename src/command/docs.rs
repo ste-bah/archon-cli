@@ -97,6 +97,9 @@ pub async fn handle_docs_command(action: DocsAction) -> Result<()> {
             limit,
             json,
         } => handle_verify_quote(&quote, doc.as_deref(), limit, json).await,
+        DocsAction::VerifyIntegrity { doc, json } => {
+            handle_verify_integrity(doc.as_deref(), json).await
+        }
     }
 }
 
@@ -193,6 +196,128 @@ async fn handle_verify_quote(quote: &str, doc: Option<&str>, limit: usize, json:
         };
         println!("      source text: \"{shown_span}\"");
     }
+    Ok(())
+}
+
+/// Verify chunk-integrity (`chunks_root`) for one or all documents. Recomputes the Merkle-style
+/// root over the document's per-chunk commit hashes and compares it to the sealed
+/// `extract_text_spatial` provenance record — any drift (a chunk added, removed, or edited after
+/// ingestion) flips the root and fails the check. A document with no sealed record (ingested before
+/// integrity sealing existed) is reported separately, not as a failure.
+async fn handle_verify_integrity(doc: Option<&str>, json: bool) -> Result<()> {
+    use archon_docs::{provenance_chunks, store};
+
+    let db = open_db()?;
+    let sources = store::list_doc_sources(&db)?;
+    let targets: Vec<_> = match doc {
+        Some(d) => sources.into_iter().filter(|s| s.document_id == d).collect(),
+        None => sources,
+    };
+    if targets.is_empty() {
+        match doc {
+            Some(d) => println!("No such document: {d}"),
+            None => println!("No documents ingested."),
+        }
+        return Ok(());
+    }
+
+    struct Report {
+        document_id: String,
+        source: String,
+        status: &'static str, // "pass" | "fail" | "no-record"
+        chunks: usize,
+        record_id: Option<String>,
+    }
+
+    let mut reports = Vec::new();
+    for s in &targets {
+        // The chunks_root record hangs off the ocr_text artifact (see persist_chunk_integrity):
+        // record_id = prov-extract-<ocr_artifact_id>. A doc may have more than one ocr_text
+        // artifact (text + image union under C3); the authoritative root is the one sealed over
+        // the current full chunk set, so PASS if ANY sealed record verifies.
+        let sealed: Vec<_> = store::list_artifacts_for_doc(&db, &s.document_id)?
+            .into_iter()
+            .filter(|a| a.artifact_type == "ocr_text" && !a.provenance_record_id.is_empty())
+            .collect();
+        let n_chunks = store::get_doc_commit_hashes(&db, &s.document_id)?.len();
+        let name = std::path::Path::new(&s.source_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| s.document_id.clone());
+
+        if sealed.is_empty() {
+            reports.push(Report {
+                document_id: s.document_id.clone(),
+                source: name,
+                status: "no-record",
+                chunks: n_chunks,
+                record_id: None,
+            });
+            continue;
+        }
+        let mut matched: Option<String> = None;
+        for a in &sealed {
+            if provenance_chunks::verify_chunks_root(&db, &s.document_id, &a.provenance_record_id)? {
+                matched = Some(a.provenance_record_id.clone());
+                break;
+            }
+        }
+        let status = if matched.is_some() { "pass" } else { "fail" };
+        let record_id =
+            matched.or_else(|| sealed.first().map(|a| a.provenance_record_id.clone()));
+        reports.push(Report {
+            document_id: s.document_id.clone(),
+            source: name,
+            status,
+            chunks: n_chunks,
+            record_id,
+        });
+    }
+
+    if json {
+        let out = serde_json::json!({
+            "all_pass": reports.iter().all(|r| r.status == "pass"),
+            "documents": reports.iter().map(|r| serde_json::json!({
+                "document_id": r.document_id,
+                "source": r.source,
+                "status": r.status,
+                "chunks": r.chunks,
+                "record_id": r.record_id,
+            })).collect::<Vec<_>>(),
+        });
+        println!("{}", serde_json::to_string_pretty(&out)?);
+        return Ok(());
+    }
+
+    println!("\nCHUNK-INTEGRITY VERIFICATION (chunks_root)");
+    let (mut pass, mut fail, mut none) = (0usize, 0usize, 0usize);
+    for r in &reports {
+        let (mark, label) = match r.status {
+            "pass" => {
+                pass += 1;
+                ("✓", "INTACT — recomputed root matches the sealed record".to_string())
+            }
+            "fail" => {
+                fail += 1;
+                ("✗", "MISMATCH — chunks changed since sealing (integrity violation)".to_string())
+            }
+            _ => {
+                none += 1;
+                ("!", "NO INTEGRITY RECORD — ingested before chunks_root sealing".to_string())
+            }
+        };
+        println!("\n  {mark} {label}");
+        println!("      source: {}", r.source);
+        println!("      doc:    {}", r.document_id);
+        println!("      chunks: {}", r.chunks);
+        if let Some(rec) = &r.record_id {
+            println!("      record: {rec}");
+        }
+    }
+    println!(
+        "\n  Summary: {pass} intact · {fail} mismatch · {none} no-record  ({} document(s))",
+        reports.len()
+    );
     Ok(())
 }
 
