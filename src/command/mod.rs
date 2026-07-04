@@ -179,6 +179,10 @@ pub(crate) mod team;
 pub(crate) mod trading;
 pub(crate) mod trading_backtest;
 pub(crate) mod trading_data;
+pub(crate) mod trading_data_provider;
+pub(crate) mod trading_data_provider_openbb;
+#[cfg(test)]
+pub(crate) mod trading_data_provider_tests;
 pub(crate) mod trading_io;
 pub(crate) mod trading_live;
 pub(crate) mod trading_openbb;

@@ -33,18 +33,18 @@ pub struct AutoTrainerConfig {
 impl Default for AutoTrainerConfig {
     fn default() -> Self {
         Self {
-            // Enabled by default. The 1h throttle and 5min runtime cap below
+            // Enabled by default. The 24h throttle and 5min runtime cap below
             // remain the compute safety rails; operators can still opt out
             // explicitly with learning.gnn.auto_trainer.enabled=false.
             enabled: true,
-            min_throttle_ms: 3_600_000, // 1 hour
-            max_runtime_ms: 300_000,    // 5 minutes
+            min_throttle_ms: 86_400_000, // 24 hours
+            max_runtime_ms: 300_000,     // 5 minutes
             // Tuned for the first 2-3 normal sessions instead of a dozen+.
             // Correction threshold matches governed-learning proposal clusters.
             first_run_threshold: 30,
             trigger_new_memories: 20,
             trigger_corrections: 3,
-            trigger_elapsed_ms: 21_600_000, // 6 hours
+            trigger_elapsed_ms: 86_400_000, // 24 hours
             tick_interval_ms: 60_000,       // 1 minute
         }
     }

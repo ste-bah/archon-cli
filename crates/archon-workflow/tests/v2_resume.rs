@@ -69,6 +69,9 @@ fn branch_outcomes_are_persisted_to_per_call_item_artifacts() {
         status: WorkflowV2Status::Accepted,
         result: Some(accepted("branch accepted")),
         error: None,
+        failure_kind: None,
+        item_input_hash: Some("test-input-hash-task-t001".to_string()),
+        completion_evidence: Vec::new(),
     };
 
     let path = store

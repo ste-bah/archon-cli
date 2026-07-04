@@ -1,5 +1,8 @@
 use anyhow::{Context, Result, anyhow};
-use archon_trading::data_lake::{CoverageWindow, DataType, DatasetMetadata, GapSummary};
+use archon_trading::data_lake::{
+    CoverageWindow, CurrentSnapshot, DataType, DatasetArtifactPaths, DatasetChecksums,
+    DatasetMetadata, DatasetSourceMetadata, GapSummary,
+};
 use archon_trading::data_store::{StoreOhlcvRequest, TradingDataLake};
 use archon_trading::ohlcv::{OhlcvFormat, parse_ohlcv};
 use serde_json::json;
@@ -9,6 +12,9 @@ use std::path::{Path, PathBuf};
 use crate::cli_args::{TradingCliDataAction, TradingCliOhlcvFormat};
 use crate::command::trading_io::write_or_render;
 use crate::command::trading_tools::project_root;
+
+#[path = "trading_data_env.rs"]
+mod trading_data_env;
 
 pub(crate) fn render_data(action: &TradingCliDataAction) -> Result<String> {
     match action {
@@ -22,6 +28,14 @@ pub(crate) fn render_data(action: &TradingCliDataAction) -> Result<String> {
             provider,
             symbol,
             timezone,
+            provider_symbol,
+            asset_class,
+            timeframe,
+            native_interval,
+            production_eligible,
+            price_basis,
+            session,
+            quality_status,
             adjustment,
             license,
             expected_bars,
@@ -37,6 +51,14 @@ pub(crate) fn render_data(action: &TradingCliDataAction) -> Result<String> {
             provider,
             symbol,
             timezone,
+            provider_symbol: provider_symbol.as_deref(),
+            asset_class,
+            timeframe,
+            native_interval: *native_interval,
+            production_eligible: *production_eligible,
+            price_basis,
+            session,
+            quality_status,
             adjustment,
             license,
             expected_bars: *expected_bars,
@@ -44,19 +66,65 @@ pub(crate) fn render_data(action: &TradingCliDataAction) -> Result<String> {
             optional: *optional,
             out: out.as_deref(),
         }),
-        TradingCliDataAction::List { target, out } => list(target.as_ref(), out.as_deref()),
+        TradingCliDataAction::List { target, json, out } => {
+            list(target.as_ref(), *json, out.as_deref())
+        }
         TradingCliDataAction::Show {
             target,
             dataset_id,
             version,
             out,
         } => show(target.as_ref(), dataset_id, version, out.as_deref()),
-        TradingCliDataAction::ExportOhlcv {
+        TradingCliDataAction::Export {
             target,
             dataset_id,
             version,
             out,
         } => export_ohlcv(target.as_ref(), dataset_id, version, out),
+        TradingCliDataAction::Validate {
+            target,
+            dataset_id,
+            version,
+            out,
+        } => validate(target.as_ref(), dataset_id, version, out.as_deref()),
+        TradingCliDataAction::Providers { target, json: _ } => providers(target.as_ref()),
+        TradingCliDataAction::Capability {
+            target,
+            provider,
+            symbol,
+            timeframe,
+            json: _,
+        } => capability(target.as_ref(), provider, symbol, timeframe),
+        TradingCliDataAction::FetchNative {
+            target,
+            provider,
+            symbol,
+            timeframe,
+            start,
+            end,
+            dataset_id,
+        } => super::trading_data_provider::fetch_native(
+            target.as_ref(),
+            provider,
+            symbol,
+            timeframe,
+            start,
+            end,
+            dataset_id,
+        ),
+        TradingCliDataAction::Snapshot {
+            target,
+            provider,
+            symbol,
+        } => snapshot(target.as_ref(), provider, symbol),
+        TradingCliDataAction::Coverage {
+            target,
+            universe,
+            json,
+            out,
+        } => {
+            super::trading_data_provider::coverage(target.as_ref(), universe, *json, out.as_deref())
+        }
     }
 }
 
@@ -69,6 +137,14 @@ struct IngestInput<'a> {
     provider: &'a str,
     symbol: &'a str,
     timezone: &'a str,
+    provider_symbol: Option<&'a str>,
+    asset_class: &'a str,
+    timeframe: &'a str,
+    native_interval: bool,
+    production_eligible: bool,
+    price_basis: &'a str,
+    session: &'a str,
+    quality_status: &'a str,
     adjustment: &'a str,
     license: &'a str,
     expected_bars: Option<u64>,
@@ -85,6 +161,7 @@ fn status(target: Option<&PathBuf>) -> Result<String> {
         "Trading Lab data lake".to_string(),
         format!("  project: {}", root.display()),
         format!("  registry: {}", lake.registry_path().display()),
+        format!("  schema_version: {}", registry.schema_version),
         format!("  datasets: {}", registry.datasets.len()),
         format!("  data_root: {}", lake.data_root().display()),
     ]
@@ -98,6 +175,7 @@ fn ingest_ohlcv(input: IngestInput<'_>) -> Result<String> {
     let format = OhlcvFormat::from(input.format);
     let bars = parse_ohlcv(&body, format).map_err(|err| anyhow!("invalid OHLCV data: {err:?}"))?;
     let observed = bars.len() as u64;
+    validate_dataset_contract(&input)?;
     let metadata = metadata(&input, observed);
     let record = TradingDataLake::new(root)
         .store_ohlcv(StoreOhlcvRequest {
@@ -105,16 +183,43 @@ fn ingest_ohlcv(input: IngestInput<'_>) -> Result<String> {
             bars,
             raw_body: body,
             raw_format: format,
+            raw_request: json!({
+                "source": input.source,
+                "format": format!("{:?}", input.format)
+            }),
+            redacted_headers: json!({}),
+            provider_notes: "manual ingest; no provider credentials stored".into(),
             created_at: chrono::Utc::now().to_rfc3339(),
         })
         .map_err(data_error)?;
     write_or_render(&record, input.out)
 }
 
-fn list(target: Option<&PathBuf>, out: Option<&Path>) -> Result<String> {
+fn list(target: Option<&PathBuf>, json: bool, out: Option<&Path>) -> Result<String> {
     let root = project_root(target)?;
     let registry = TradingDataLake::new(root).status().map_err(data_error)?;
-    write_or_render(&registry, out)
+    if json || out.is_some() {
+        return write_or_render(&registry, out);
+    }
+    Ok(render_registry_summary(&registry))
+}
+
+fn render_registry_summary(
+    registry: &archon_trading::data_store::PersistentDatasetRegistry,
+) -> String {
+    let mut lines = vec![
+        "Trading Lab data registry".to_string(),
+        format!("  schema_version: {}", registry.schema_version),
+        format!("  datasets: {}", registry.datasets.len()),
+        format!("  snapshots: {}", registry.snapshots.len()),
+    ];
+    for record in registry.datasets.values() {
+        lines.push(format!(
+            "  - {}:{} [{:?}]",
+            record.dataset_id, record.version, record.status
+        ));
+    }
+    lines.join("\n")
 }
 
 fn show(
@@ -130,6 +235,7 @@ fn show(
     let report = json!({
         "record": dataset.record,
         "metadata": dataset.metadata,
+        "artifact_contract": dataset.metadata.paths,
         "bars": dataset.bars.len(),
         "first_bar": dataset.bars.first(),
         "last_bar": dataset.bars.last()
@@ -150,13 +256,173 @@ fn export_ohlcv(
     write_or_render(&dataset.bars, Some(out))
 }
 
+fn validate(
+    target: Option<&PathBuf>,
+    dataset_id: &str,
+    version: &str,
+    out: Option<&Path>,
+) -> Result<String> {
+    let root = project_root(target)?;
+    let report = TradingDataLake::new(root)
+        .validate_ohlcv(dataset_id, version, chrono::Utc::now().to_rfc3339())
+        .map_err(data_error)?;
+    write_or_render(&report, out)
+}
+
+fn providers(target: Option<&PathBuf>) -> Result<String> {
+    let root = project_root(target)?;
+    let lake = TradingDataLake::new(root);
+    let report = json!({
+        "providers": ["tradingview", "openbb", "polygon", "stooq", "yfinance"],
+        "capabilities_path": lake.provider_capabilities_path(),
+        "fetch_contract": "provider-neutral; provider-specific fetches fail closed until implemented"
+    });
+    write_or_render(&report, None)
+}
+
+fn capability(
+    target: Option<&PathBuf>,
+    provider: &str,
+    symbol: &str,
+    timeframe: &str,
+) -> Result<String> {
+    let root = project_root(target)?;
+    let provider_key = provider.trim().to_ascii_lowercase();
+    let lake = TradingDataLake::new(root);
+    let result = if matches!(provider_key.as_str(), "openbb" | "polygon" | "yfinance") {
+        let base_url =
+            std::env::var("OPENBB_API_URL").unwrap_or_else(|_| "http://127.0.0.1:6900".into());
+        super::trading_data_provider_openbb::probe_capability_with_base_url(
+            lake.project_root(),
+            &base_url,
+            provider,
+            symbol,
+            timeframe,
+        )?
+    } else {
+        lake.persist_capability(
+            provider,
+            symbol,
+            timeframe,
+            &chrono::Utc::now().to_rfc3339(),
+        )
+        .map_err(data_error)?
+    };
+    let report = json!({
+        "provider": result.provider,
+        "symbol": result.symbol,
+        "canonical_instrument": result.canonical_instrument,
+        "provider_symbol": result.provider_symbol,
+        "timeframe": result.timeframe,
+        "native_interval": result.native_interval,
+        "production_eligible": result.production_eligible,
+        "can_fetch": result.can_fetch,
+        "current_snapshot_supported": result.current_snapshot_supported,
+        "historical_supported": result.historical_supported,
+        "requires_credentials": result.requires_credentials,
+        "missing_credentials": result.missing_credentials,
+        "provider_blocked": result.provider_blocked,
+        "unsupported": result.unsupported,
+        "credential_state": result.credential_state,
+        "unavailable_reason": result.unavailable_reason,
+        "checked_at": result.checked_at,
+        "provider_environment": trading_data_env::provider_environment_status(provider),
+        "capability_artifact": lake.provider_capability_latest_path(),
+        "fail_closed_behavior": "unavailable capability probes persist proof only and do not write production dataset registry entries"
+    });
+    write_or_render(&report, None)
+}
+
+fn snapshot(target: Option<&PathBuf>, provider: &str, symbol: &str) -> Result<String> {
+    let root = project_root(target)?;
+    let now = chrono::Utc::now().timestamp();
+    let snapshot = CurrentSnapshot {
+        provider: provider.trim().to_ascii_lowercase(),
+        canonical_instrument: symbol.trim().into(),
+        provider_symbol: symbol.trim().into(),
+        captured_at_unix_seconds: now,
+        payload: json!({
+            "unavailable_reason": "provider-specific snapshot fetch support is not implemented",
+            "fail_closed_behavior": "snapshot artifact is diagnostic and cannot satisfy production or promotion gates"
+        }),
+    };
+    let path = TradingDataLake::new(root)
+        .persist_snapshot(snapshot, now)
+        .map_err(data_error)?;
+    let report = json!({
+        "provider": provider,
+        "symbol": symbol,
+        "snapshot_path": path,
+        "can_fetch": false,
+        "unavailable_reason": "provider-specific snapshot fetch support is not implemented"
+    });
+    write_or_render(&report, None)
+}
+
+fn validate_dataset_contract(input: &IngestInput<'_>) -> Result<()> {
+    let provider = input.provider.trim().to_ascii_lowercase();
+    let timeframe = normalize_timeframe(input.timeframe);
+    let expected_id = format!(
+        "{provider}-{}-{timeframe}-{}",
+        input.symbol.trim(),
+        input.price_basis.trim()
+    );
+    if input.dataset_id != expected_id {
+        return Err(anyhow!("dataset_id must be {expected_id}"));
+    }
+    if input.version.trim().is_empty() {
+        return Err(anyhow!(
+            "version must be explicit and deterministic; omitted versions cannot be production eligible"
+        ));
+    }
+    if input.production_eligible
+        && input
+            .provider_symbol
+            .unwrap_or(input.symbol)
+            .trim()
+            .is_empty()
+    {
+        return Err(anyhow!(
+            "provider_symbol is required for production eligible data"
+        ));
+    }
+    if !valid_version(input.version) {
+        return Err(anyhow!(
+            "version must match <YYYYMMDD>-<provider-run-id-or-short-hash>"
+        ));
+    }
+    Ok(())
+}
+
+fn normalize_timeframe(value: &str) -> String {
+    match value.trim() {
+        "4H" | "4h" => "240".into(),
+        "1H" | "1h" => "60".into(),
+        "15m" | "15M" => "15".into(),
+        other => other.into(),
+    }
+}
+
 fn metadata(input: &IngestInput<'_>, observed: u64) -> DatasetMetadata {
     let expected = input.expected_bars.unwrap_or(observed);
     DatasetMetadata {
+        schema_version: "archon-trading-dataset-v2".into(),
         dataset_id: input.dataset_id.into(),
+        version: input.version.into(),
+        canonical_instrument: input.symbol.into(),
+        asset_class: input.asset_class.into(),
         provider: input.provider.into(),
+        provider_symbol: input.provider_symbol.unwrap_or(input.symbol).into(),
+        timeframe: input.timeframe.into(),
+        native_interval: input.native_interval,
+        production_eligible: input.production_eligible,
+        price_basis: input.price_basis.into(),
+        session: input.session.into(),
         data_type: DataType::Ohlcv,
-        symbol_map: BTreeMap::from([(input.symbol.into(), input.symbol.into())]),
+        symbol_map: BTreeMap::from([(
+            input.symbol.into(),
+            input.provider_symbol.unwrap_or(input.symbol).into(),
+        )]),
         timezone: input.timezone.into(),
         adjustment: input.adjustment.into(),
         license: input.license.into(),
@@ -171,13 +437,29 @@ fn metadata(input: &IngestInput<'_>, observed: u64) -> DatasetMetadata {
             expected_bars: expected,
         },
         checksum: String::new(),
-        version: input.version.into(),
+        checksums: DatasetChecksums::default(),
+        paths: DatasetArtifactPaths::default(),
+        source: DatasetSourceMetadata::default(),
+        quality_status: input.quality_status.into(),
+        created_at: String::new(),
         optional: input.optional,
     }
 }
 
-fn data_error(error: archon_trading::data_store::DataStoreError) -> anyhow::Error {
+pub(super) fn data_error(error: archon_trading::data_store::DataStoreError) -> anyhow::Error {
     anyhow!("Trading data lake error: {error:?}")
+}
+
+fn valid_version(value: &str) -> bool {
+    let Some((date, suffix)) = value.split_once('-') else {
+        return false;
+    };
+    date.len() == 8
+        && date.chars().all(|c| c.is_ascii_digit())
+        && !suffix.is_empty()
+        && suffix
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
 impl From<TradingCliOhlcvFormat> for OhlcvFormat {
@@ -188,3 +470,7 @@ impl From<TradingCliOhlcvFormat> for OhlcvFormat {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "trading_data_tests.rs"]
+mod tests;

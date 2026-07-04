@@ -36,6 +36,7 @@ pub fn new_event(
 }
 
 /// Create and persist a LearningEvent in one call.
+#[allow(clippy::too_many_arguments)]
 pub fn record_event(
     db: &DbInstance,
     workspace_id: &str,

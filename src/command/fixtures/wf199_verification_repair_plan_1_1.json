@@ -1,0 +1,25 @@
+{
+  "status": "accepted",
+  "data": {
+    "items": [
+      {
+        "expected_result": "Exit 0 with lines for data_root and registry_path.",
+        "item_id": "verification-wave-1-verify-tdl-001-storage-root-source",
+        "repair_type": "retryable_command_shape",
+        "retry_command": "cd /repo && grep -nE 'data_root|registry_path' crates/archon-trading/src/data_store.rs"
+      },
+      {
+        "expected_result": "Cargo test exits 0 with at least one data_lake::tests target executed and no intended target failures.",
+        "item_id": "verification-wave-1-verify-tdl-001-focused-data-lake-tests",
+        "repair_type": "target_selection",
+        "retry_command": "cd /repo && cargo test -p archon-trading data_lake::tests --lib"
+      },
+      {
+        "expected_result": "Cargo test exits 0 with data_store::data_store_tests targets executed and no intended target failures.",
+        "item_id": "verification-wave-1-verify-tdl-001-focused-data-store-tests",
+        "repair_type": "target_selection",
+        "retry_command": "cd /repo && cargo test -p archon-trading data_store::data_store_tests --lib"
+      }
+    ]
+  }
+}

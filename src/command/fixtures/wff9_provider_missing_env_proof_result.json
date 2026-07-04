@@ -1,0 +1,20 @@
+{
+  "status": "needs_review",
+  "summary": "provider verification reported missing credentials for an API key before redacted env proof was captured",
+  "evidence": [],
+  "commands_run": [
+    {
+      "kind": "test",
+      "command": "provider native data verification",
+      "status": "failed",
+      "exit_code": 1,
+      "output_summary": "provider returned 403 missing API key"
+    }
+  ],
+  "data": {
+    "canonical_task_ids": ["TASK-X-001"]
+  },
+  "residual_gaps": [],
+  "task_coverage": [],
+  "artifacts": []
+}

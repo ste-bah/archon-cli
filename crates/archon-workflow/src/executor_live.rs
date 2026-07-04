@@ -17,6 +17,8 @@ use crate::work_unit_gate;
 
 #[path = "executor_live/direct_verify.rs"]
 mod direct_verify;
+#[path = "executor_live/record_unusable.rs"]
+mod record_unusable;
 
 use super::WorkflowExecutor;
 
@@ -473,33 +475,5 @@ impl WorkflowExecutor {
             None,
         )?;
         Ok(output)
-    }
-
-    fn record_unusable_output(
-        &self,
-        run: &mut WorkflowRun,
-        stage: &StageSpec,
-        output: &StageRunOutput,
-        err: &WorkflowError,
-    ) -> WorkflowResult<()> {
-        let artifact = persistence::write_attached_stage_artifact(
-            &self.store,
-            run,
-            stage,
-            &stage.id,
-            &output.extension,
-            output.body.clone(),
-            false,
-        )?;
-        persistence::record_agent_output(
-            &self.store,
-            &run.id,
-            &stage.id,
-            &stage.id,
-            Some(output),
-            Some(&artifact),
-            false,
-            Some(&err.to_string()),
-        )
     }
 }

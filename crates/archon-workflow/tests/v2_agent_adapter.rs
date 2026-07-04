@@ -22,6 +22,7 @@ fn request(role: &str, write_mode: Option<WorkflowV2WriteMode>) -> WorkflowV2Age
         constraints: vec!["return typed evidence".to_string()],
         input: serde_json::json!({ "task_id": "T001" }),
         repository_root: Some("/repo".to_string()),
+        project_artifacts: Default::default(),
         target_files: vec!["src/lib.rs".to_string()],
     }
 }
@@ -274,6 +275,33 @@ fn read_only_result_accepts_common_schema_aliases() {
         result.task_coverage[0].status,
         WorkflowV2TaskCoverageStatus::Accepted
     );
+}
+
+#[test]
+fn read_only_result_accepts_task_file_evidence_alias() {
+    let adapter = WorkflowV2AgentAdapter::new();
+    let raw = r#"{
+        "status": "accepted",
+        "summary": "Artifact inventory used task-file evidence.",
+        "evidence": [
+            {
+                "kind": "task_file",
+                "summary": "Read TASK-TDL files to identify required artifacts."
+            }
+        ],
+        "files_read": [
+            {
+                "path": "/Volumes/Externalwork/archon-cli/project-1/tasks/PRD-TRADING-DATA-LAKE-AHDM-001/TASK-TDL-080-coverage-matrix-command.md"
+            }
+        ]
+    }"#;
+
+    let result = adapter
+        .parse_agent_output(&request("reducer", None), raw)
+        .expect("task_file evidence should parse at the live agent boundary");
+
+    assert_eq!(result.status, WorkflowV2Status::Accepted);
+    assert_eq!(result.evidence[0].kind, WorkflowV2EvidenceKind::Inspection);
 }
 
 #[test]

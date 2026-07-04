@@ -248,6 +248,29 @@ fn completed_with_gaps_result_status_maps_to_needs_review() {
 }
 
 #[test]
+fn task_file_evidence_kind_maps_to_inspection() {
+    let result: WorkflowV2Result = serde_json::from_value(serde_json::json!({
+        "status": "accepted",
+        "summary": "artifact inventory used task-file evidence",
+        "evidence": [
+            {
+                "kind": "task_file",
+                "summary": "Read TASK-TDL files to identify required artifacts."
+            }
+        ],
+        "files_read": [
+            {
+                "path": "/Volumes/Externalwork/archon-cli/project-1/tasks/PRD-TRADING-DATA-LAKE-AHDM-001/TASK-TDL-080-coverage-matrix-command.md"
+            }
+        ]
+    }))
+    .expect("task_file evidence should parse as inspection evidence");
+
+    assert_eq!(result.evidence[0].kind, WorkflowV2EvidenceKind::Inspection);
+    result.validate().unwrap();
+}
+
+#[test]
 fn completed_with_gaps_task_coverage_maps_to_partial() {
     let coverage: WorkflowV2TaskCoverage = serde_json::from_value(serde_json::json!({
         "task_id": "TASK-CWF-001",

@@ -63,6 +63,14 @@ fn good_response() -> OpenBbResponse {
             ("expected_bars".into(), "252".into()),
             ("observed_bars".into(), "252".into()),
             ("missing_bars".into(), "0".into()),
+            ("asset_class".into(), "equity".into()),
+            ("timeframe".into(), "1d".into()),
+            ("native_interval".into(), "true".into()),
+            ("production_eligible".into(), "true".into()),
+            ("price_basis".into(), "adjusted".into()),
+            ("session".into(), "regular".into()),
+            ("quality_status".into(), "passed".into()),
+            ("http_status".into(), "200".into()),
         ]),
         quality: DataQuality {
             complete: true,
@@ -95,6 +103,50 @@ fn t_openbb_01_rest_first_and_provenance_before_use() {
     assert_eq!(gateway.provenance_log()[0], dataset.provenance);
     assert!(gateway.lake_registry().get("openbb:spy:ohlcv:v1").is_some());
     assert!(dataset.promotion_eligible);
+    assert_eq!(
+        dataset.provenance.meta.get("http_status"),
+        Some(&"200".into())
+    );
+    assert!(dataset.metadata.production_eligible);
+    assert!(dataset.metadata.native_interval);
+    assert_eq!(
+        dataset.promotion_eligible,
+        dataset.metadata.production_eligible && dataset.metadata.native_interval
+    );
+}
+
+#[test]
+fn t_openbb_02_promotion_requires_metadata_production_flags() {
+    let mut response = good_response();
+    response.metadata.remove("native_interval");
+    response.metadata.remove("production_eligible");
+    response
+        .metadata
+        .insert("quality_status".into(), "passed".into());
+    let mut gateway = OpenBbGateway::default();
+    let mut transport = FakeTransport {
+        discovery: true,
+        rest: Some(Ok(response)),
+        ..Default::default()
+    };
+    let dataset = gateway
+        .fetch(
+            &mut transport,
+            request(Provider::Polygon),
+            AccessMode::LiveRequired,
+            "now",
+        )
+        .unwrap();
+
+    assert!(!dataset.metadata.production_eligible);
+    assert!(!dataset.metadata.native_interval);
+    assert!(!dataset.promotion_eligible);
+    assert!(dataset.metadata.quality_status == "passed");
+    assert!(dataset.provenance.license_tier != LicenseTier::ResearchOnly);
+    assert!(
+        dataset.promotion_eligible
+            <= (dataset.metadata.production_eligible && dataset.metadata.native_interval)
+    );
 }
 
 #[test]
@@ -214,4 +266,41 @@ fn ec_trl_09_429_uses_cache_and_ec_trl_10_live_miss_fails() {
         )
         .unwrap_err();
     assert_eq!(err, OpenBbError::CacheMissLiveRequired);
+}
+
+#[test]
+fn openbb_status_unavailable_errors_preserve_diagnostic_codes() {
+    let cases = [
+        (
+            CapabilityUnavailableReason::Unauthorized,
+            "ERR-OPENBB-UNAUTHORIZED",
+        ),
+        (
+            CapabilityUnavailableReason::Forbidden,
+            "ERR-OPENBB-FORBIDDEN",
+        ),
+        (
+            CapabilityUnavailableReason::NotFound,
+            "ERR-OPENBB-NOT-FOUND",
+        ),
+    ];
+
+    for (reason, code) in cases {
+        let mut transport = FakeTransport {
+            discovery: true,
+            rest: Some(Err(OpenBbError::StatusUnavailable(reason))),
+            sdk: Some(Ok(good_response())),
+            ..Default::default()
+        };
+        let err = OpenBbGateway::default()
+            .fetch(
+                &mut transport,
+                request(Provider::Polygon),
+                AccessMode::Research,
+                "now",
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), code);
+        assert_eq!(transport.calls, vec![OpenBbRoute::Rest]);
+    }
 }

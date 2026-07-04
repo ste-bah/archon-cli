@@ -1,0 +1,38 @@
+{
+  "items": [
+    {
+      "artifact_requirements": [
+        {
+          "id": "task-tdl-001-proof-contract",
+          "path": "/Volumes/Externalwork/archon-cli/project-1/.archon/workflows/wf-cac736b8-ca03-4b3f-b5ed-254945aa2c7c/artifacts/TASK-TDL-001-gap-audit-proof-contract.json"
+        },
+        {
+          "id": "tdl-registry-state",
+          "path": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry.json"
+        }
+      ],
+      "canonical_task_ids": ["TASK-TDL-001"],
+      "expected_result_shape": {
+        "canonical_task_ids": ["TASK-TDL-001"],
+        "files_changed": [],
+        "status": "noop"
+      },
+      "item_id": "verify-retry-TASK-TDL-001-consolidated-artifact-suite",
+      "retry_command_shape": [
+        {
+          "command": "Read TASK-TDL-001-gap-audit-proof-contract.json",
+          "kind": "inspect"
+        },
+        {
+          "command": "Read registry.json",
+          "kind": "inspect"
+        }
+      ],
+      "retry_steps": [
+        "Read all artifact paths once and emit one consolidated typed outcome instead of one branch per phrase fragment.",
+        "Verify task_coverage and artifact references in the same outcome."
+      ],
+      "work_type": "verified_noop"
+    }
+  ]
+}

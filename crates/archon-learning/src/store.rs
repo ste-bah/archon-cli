@@ -510,6 +510,7 @@ fn row_to_manifest_version(row: &[DataValue]) -> BehaviourManifestVersion {
 
 // ── PolicyDecision rows ────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 pub fn insert_policy_decision(
     db: &DbInstance,
     decision_id: &str,

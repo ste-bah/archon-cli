@@ -1,83 +1,8 @@
 use clap::Subcommand;
 
-#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
-pub enum ProvidersAction {
-    /// Show provider registry entries
-    List,
-    /// Show Archon surface support by provider/auth mode
-    Capabilities,
-    /// Show provider-neutral runtime status from local configuration
-    Status {
-        /// Restrict output to one provider id
-        #[arg(long)]
-        provider: Option<String>,
-        /// Output the status snapshot as JSON
-        #[arg(long)]
-        json: bool,
-        /// Run opt-in live endpoint reachability checks
-        #[arg(long)]
-        live: bool,
-    },
-    /// Summarize provider health from status and persisted runtime events
-    Report {
-        /// Restrict output to one provider id
-        #[arg(long)]
-        provider: Option<String>,
-        /// Output the report as JSON
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show persisted provider rate-limit windows
-    Limits {
-        /// Restrict output to one provider id
-        #[arg(long)]
-        provider: Option<String>,
-    },
-    /// Inspect persisted provider auth profiles
-    Profiles {
-        #[command(subcommand)]
-        action: ProviderProfilesAction,
-    },
-    /// Diagnose provider/auth configuration
-    Doctor {
-        /// Run opt-in live endpoint reachability checks
-        #[arg(long)]
-        live: bool,
-    },
-}
-
-#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
-pub enum ProviderProfilesAction {
-    /// Import current local/env credentials into the Cozo auth profile store
-    Import,
-    /// List persisted auth profiles
-    List {
-        /// Restrict output to one provider id
-        #[arg(long)]
-        provider: Option<String>,
-    },
-    /// Inspect one persisted auth profile
-    Inspect {
-        /// Profile id to inspect
-        profile_id: String,
-    },
-    /// Clear a profile cooldown marker
-    CooldownClear {
-        /// Profile id to update
-        profile_id: String,
-    },
-    /// Show ordered profile selection and skip reasons
-    Select {
-        /// Provider id to select for
-        provider: String,
-        /// Restrict to one or more auth kinds
-        #[arg(long = "auth-kind")]
-        auth_kinds: Vec<String>,
-        /// Prefer this profile id when it is healthy
-        #[arg(long)]
-        preferred: Option<String>,
-    },
-}
+#[path = "strategy_actions_providers.rs"]
+mod strategy_actions_providers;
+pub use strategy_actions_providers::*;
 
 #[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
 pub enum SandboxAction {
@@ -419,6 +344,9 @@ pub enum WorkflowAction {
         /// Use the configured provider for live stage agents
         #[arg(long)]
         live: bool,
+        /// Approve this generated/saved workflow for a non-interactive live run
+        #[arg(long)]
+        yes: bool,
         /// Natural-language task
         task: Vec<String>,
     },
@@ -432,6 +360,25 @@ pub enum WorkflowAction {
         /// Use the configured provider for live stage agents
         #[arg(long)]
         live: bool,
+        /// Approve this resume for non-interactive live execution
+        #[arg(long)]
+        yes: bool,
+        /// Workflow run ID
+        run_id: String,
+    },
+    /// Continue a workflow using the high-level recovery/resume surface
+    Continue {
+        /// Use the configured provider for live stage agents
+        #[arg(long)]
+        live: bool,
+        /// Approve this continue for non-interactive live execution
+        #[arg(long)]
+        yes: bool,
+        /// Workflow run ID
+        run_id: String,
+    },
+    /// Prepare repair from the first failed or blocked stage
+    Repair {
         /// Workflow run ID
         run_id: String,
     },
@@ -442,6 +389,24 @@ pub enum WorkflowAction {
     },
     /// Cancel a workflow
     Cancel {
+        /// Workflow run ID
+        run_id: String,
+    },
+    /// Approve a generated workflow once for this run
+    #[command(name = "approve-run-once", alias = "approve-once")]
+    ApproveRunOnce {
+        /// Workflow run ID
+        run_id: String,
+    },
+    /// Always approve this workflow approval subject in this project
+    #[command(name = "approve-always")]
+    ApproveAlways {
+        /// Workflow run ID
+        run_id: String,
+    },
+    /// Deny this workflow approval subject in this project and cancel the run
+    #[command(name = "deny-workflow", alias = "deny")]
+    DenyWorkflow {
         /// Workflow run ID
         run_id: String,
     },
@@ -462,6 +427,14 @@ pub enum WorkflowAction {
         run_id: String,
         /// Stage ID to rewind
         stage_id: String,
+    },
+    /// Restart a workflow task by task ID instead of internal stage ID
+    #[command(name = "restart-task")]
+    RestartTask {
+        /// Workflow run ID
+        run_id: String,
+        /// Canonical task ID to restart
+        task_id: String,
     },
     /// Force-accept a failed stage with an audit rationale
     #[command(name = "force-accept", alias = "force-continue")]

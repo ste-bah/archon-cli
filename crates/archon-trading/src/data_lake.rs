@@ -56,10 +56,71 @@ impl GapSummary {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DatasetChecksums {
+    #[serde(default)]
+    pub raw_sha256: String,
+    #[serde(default)]
+    pub normalized_sha256: String,
+    #[serde(default)]
+    pub metadata_sha256: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DatasetArtifactPaths {
+    #[serde(default)]
+    pub raw: String,
+    #[serde(default)]
+    pub raw_response: String,
+    #[serde(default)]
+    pub raw_request: String,
+    #[serde(default)]
+    pub redacted_headers: String,
+    #[serde(default)]
+    pub provider_notes: String,
+    #[serde(default)]
+    pub normalized: String,
+    #[serde(default)]
+    pub validation: String,
+    #[serde(default)]
+    pub manifest: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DatasetSourceMetadata {
+    #[serde(default)]
+    pub license_notes: String,
+    #[serde(default)]
+    pub url_or_endpoint: String,
+    #[serde(default)]
+    pub retrieved_at: String,
+    #[serde(default)]
+    pub credential_required: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DatasetMetadata {
+    #[serde(default = "dataset_schema")]
+    pub schema_version: String,
     pub dataset_id: String,
+    pub version: String,
+    #[serde(default)]
+    pub canonical_instrument: String,
+    #[serde(default)]
+    pub asset_class: String,
     pub provider: String,
+    #[serde(default)]
+    pub provider_symbol: String,
+    #[serde(default)]
+    pub timeframe: String,
+    #[serde(default)]
+    pub native_interval: bool,
+    #[serde(default)]
+    pub production_eligible: bool,
+    #[serde(default = "raw_basis")]
+    pub price_basis: String,
+    #[serde(default = "provider_default_session")]
+    pub session: String,
     pub data_type: DataType,
     pub symbol_map: BTreeMap<String, String>,
     pub timezone: String,
@@ -68,7 +129,16 @@ pub struct DatasetMetadata {
     pub coverage: CoverageWindow,
     pub gaps: GapSummary,
     pub checksum: String,
-    pub version: String,
+    #[serde(default)]
+    pub checksums: DatasetChecksums,
+    #[serde(default)]
+    pub paths: DatasetArtifactPaths,
+    #[serde(default)]
+    pub source: DatasetSourceMetadata,
+    #[serde(default = "degraded_quality")]
+    pub quality_status: String,
+    #[serde(default)]
+    pub created_at: String,
     pub optional: bool,
 }
 
@@ -86,6 +156,10 @@ pub enum DataLakeError {
     MissingMandatoryData(Vec<DataType>),
     UnsupportedInstrumentClass(InstrumentClass),
     FxOptionsNeedSpecAmendment,
+    InvalidDatasetId,
+    InvalidVersion,
+    NonNativeProductionDataset,
+    MetadataIncompleteForProduction,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,7 +173,7 @@ impl DatasetRegistry {
         metadata: DatasetMetadata,
     ) -> Result<VersionedDataset, DataLakeError> {
         validate_metadata(&metadata)?;
-        let status = status_from_gaps(&metadata.gaps);
+        let status = status_from_metadata(&metadata);
         let content_hash = dataset_hash(&metadata);
         let versioned = VersionedDataset {
             metadata,
@@ -107,12 +181,16 @@ impl DatasetRegistry {
             status,
         };
         self.datasets
-            .insert(versioned.metadata.dataset_id.clone(), versioned.clone());
+            .insert(registry_key(&versioned.metadata), versioned.clone());
         Ok(versioned)
     }
 
     pub fn get(&self, dataset_id: &str) -> Option<&VersionedDataset> {
-        self.datasets.get(dataset_id)
+        self.datasets.get(dataset_id).or_else(|| {
+            self.datasets
+                .values()
+                .find(|dataset| dataset.metadata.dataset_id == dataset_id)
+        })
     }
 
     pub fn all(&self) -> impl Iterator<Item = &VersionedDataset> {
@@ -145,15 +223,50 @@ impl DatasetRegistry {
 
 pub fn validate_metadata(metadata: &DatasetMetadata) -> Result<(), DataLakeError> {
     require_text(&metadata.dataset_id, "dataset_id")?;
+    require_text(&metadata.version, "version")?;
     require_text(&metadata.provider, "provider")?;
+    require_text(&metadata.canonical_instrument, "canonical_instrument")?;
+    require_text(&metadata.asset_class, "asset_class")?;
+    require_text(&metadata.provider_symbol, "provider_symbol")?;
+    require_text(&metadata.timeframe, "timeframe")?;
+    require_text(&metadata.price_basis, "price_basis")?;
+    require_text(&metadata.session, "session")?;
+    require_text(&metadata.quality_status, "quality_status")?;
     require_text(&metadata.timezone, "timezone")?;
     require_text(&metadata.adjustment, "adjustment")?;
     require_text(&metadata.license, "license")?;
     require_text(&metadata.coverage.start, "coverage.start")?;
     require_text(&metadata.coverage.end, "coverage.end")?;
     require_text(&metadata.checksum, "checksum")?;
-    require_text(&metadata.version, "version")?;
-    if metadata.symbol_map.is_empty() {
+    if metadata.production_eligible {
+        require_text(&metadata.checksums.raw_sha256, "checksums.raw_sha256")?;
+        require_text(
+            &metadata.checksums.normalized_sha256,
+            "checksums.normalized_sha256",
+        )?;
+        require_text(
+            &metadata.checksums.metadata_sha256,
+            "checksums.metadata_sha256",
+        )?;
+        require_text(&metadata.paths.raw, "paths.raw")?;
+        require_text(&metadata.paths.raw_response, "paths.raw_response")?;
+        require_text(&metadata.paths.raw_request, "paths.raw_request")?;
+        require_text(&metadata.paths.redacted_headers, "paths.redacted_headers")?;
+        require_text(&metadata.paths.provider_notes, "paths.provider_notes")?;
+        require_text(&metadata.paths.normalized, "paths.normalized")?;
+        require_text(&metadata.paths.validation, "paths.validation")?;
+        require_text(&metadata.paths.manifest, "paths.manifest")?;
+    }
+    if !valid_dataset_id(&metadata.dataset_id) {
+        return Err(DataLakeError::InvalidDatasetId);
+    }
+    if !valid_version(&metadata.version) {
+        return Err(DataLakeError::InvalidVersion);
+    }
+    if !provider_identity_matches_dataset(&metadata.provider, &metadata.dataset_id) {
+        return Err(DataLakeError::MetadataIncompleteForProduction);
+    }
+    if !dataset_id_matches_metadata(metadata) {
         return Err(DataLakeError::MissingField("symbol_map"));
     }
     if metadata.coverage.expected_bars == 0 {
@@ -162,14 +275,38 @@ pub fn validate_metadata(metadata: &DatasetMetadata) -> Result<(), DataLakeError
     if metadata.gaps.expected_bars == 0 {
         return Err(DataLakeError::MissingField("gaps.expected_bars"));
     }
+    if metadata.production_eligible && !metadata.native_interval {
+        return Err(DataLakeError::NonNativeProductionDataset);
+    }
+    if metadata.production_eligible && metadata.quality_status != "passed" {
+        return Err(DataLakeError::MetadataIncompleteForProduction);
+    }
+    if metadata.provider.eq_ignore_ascii_case("yfinance")
+        && (metadata.production_eligible || metadata.quality_status != "degraded")
+    {
+        return Err(DataLakeError::MetadataIncompleteForProduction);
+    }
     Ok(())
 }
+
+mod contracts;
+mod identity;
+pub use contracts::*;
+use identity::{dataset_id_matches_metadata, valid_dataset_id, valid_version};
 
 pub fn status_from_gaps(gaps: &GapSummary) -> DatasetStatus {
     if gaps.gap_percent() > 0.01 {
         DatasetStatus::Degraded
     } else {
         DatasetStatus::Healthy
+    }
+}
+
+pub fn status_from_metadata(metadata: &DatasetMetadata) -> DatasetStatus {
+    if !metadata.production_eligible || metadata.quality_status != "passed" {
+        DatasetStatus::Degraded
+    } else {
+        status_from_gaps(&metadata.gaps)
     }
 }
 
@@ -231,6 +368,97 @@ fn dataset_hash(metadata: &DatasetMetadata) -> String {
     blake3::hash(&bytes).to_hex().to_string()
 }
 
+fn registry_key(metadata: &DatasetMetadata) -> String {
+    format!("{}::{:?}", metadata.dataset_id, metadata.data_type)
+}
+
+fn dataset_schema() -> String {
+    "archon-trading-dataset-v2".into()
+}
+
+fn raw_basis() -> String {
+    "raw".into()
+}
+
+fn provider_default_session() -> String {
+    "provider_default".into()
+}
+
+fn degraded_quality() -> String {
+    "degraded".into()
+}
+
+pub(crate) fn normalize_timeframe(value: &str) -> String {
+    match value.trim() {
+        "4H" | "4h" => "240".into(),
+        "1H" | "1h" => "60".into(),
+        "15m" | "15M" => "15".into(),
+        other => other.into(),
+    }
+}
+
+pub(crate) fn provider_supports_native_timeframe(provider: &str, timeframe: &str) -> bool {
+    match provider {
+        "stooq" => timeframe == "1D",
+        "tradingview" | "openbb" | "polygon" | "yfinance" => true,
+        _ => false,
+    }
+}
+
+pub(super) fn unavailable_reason(
+    provider: &str,
+    symbol: &str,
+    timeframe: &str,
+    supported_provider: bool,
+    native_interval: bool,
+) -> String {
+    let provider = provider.trim().to_ascii_lowercase();
+    if provider.is_empty() || symbol.trim().is_empty() || timeframe.is_empty() {
+        "missing provider, symbol, or timeframe".into()
+    } else if let Ok(code) = symbol.trim().parse::<u16>() {
+        status_from_http_code(code)
+            .unwrap_or("provider returned an unavailable status")
+            .into()
+    } else if !supported_provider {
+        "provider is not registered in the capability interface".into()
+    } else if !native_interval && provider == "stooq" {
+        "provider_blocked_or_unavailable: exact native Stooq interval unavailable; resampling is refused".into()
+    } else if !native_interval {
+        "exact native interval is unsupported".into()
+    } else if provider == "yfinance" {
+        "yfinance fallback is degraded and ineligible for promotion".into()
+    } else if matches!(provider.as_str(), "openbb" | "polygon") {
+        "missing provider credentials".into()
+    } else {
+        "provider-specific native fetch support is not implemented in this task".into()
+    }
+}
+
+fn status_from_http_code(code: u16) -> Option<&'static str> {
+    match code {
+        401 => Some("missing or invalid provider credentials"),
+        403 => Some("provider blocked access"),
+        404 => Some("provider symbol or endpoint not found"),
+        _ => None,
+    }
+}
+
+fn provider_identity_matches_dataset(provider: &str, dataset_id: &str) -> bool {
+    let provider = provider.trim().to_ascii_lowercase();
+    let dataset_id = dataset_id.trim().to_ascii_lowercase();
+    let Some((prefix, _)) = dataset_id.split_once('-') else {
+        return true;
+    };
+    match provider.as_str() {
+        "polygon" => prefix == "polygon",
+        "openbb" => prefix == "openbb",
+        "tradingview" => prefix == "tradingview",
+        "stooq" => prefix == "stooq",
+        "yfinance" => prefix == "yfinance",
+        _ => true,
+    }
+}
+
 fn require_text(value: &str, field: &'static str) -> Result<(), DataLakeError> {
     if value.trim().is_empty() {
         Err(DataLakeError::MissingField(field))
@@ -247,134 +475,4 @@ fn is_fx_or_option(asset_class: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::spec_registry::{Instrument, StrategySpec};
-
-    fn metadata(data_type: DataType) -> DatasetMetadata {
-        DatasetMetadata {
-            dataset_id: format!("{:?}-v1", data_type),
-            provider: "approved-provider".into(),
-            data_type,
-            symbol_map: BTreeMap::from([("SPY".into(), "SPY".into())]),
-            timezone: "America/New_York".into(),
-            adjustment: "split_and_dividend".into(),
-            license: "licensed".into(),
-            coverage: CoverageWindow {
-                start: "2020-01-01".into(),
-                end: "2024-01-01".into(),
-                expected_bars: 100,
-                observed_bars: 100,
-            },
-            gaps: GapSummary {
-                missing_bars: 0,
-                expected_bars: 100,
-            },
-            checksum: "abc123".into(),
-            version: "v1".into(),
-            optional: false,
-        }
-    }
-
-    #[test]
-    fn t_data_05_rejects_missing_required_metadata_field() {
-        let mut missing = metadata(DataType::Ohlcv);
-        missing.provider.clear();
-        assert_eq!(
-            validate_metadata(&missing),
-            Err(DataLakeError::MissingField("provider"))
-        );
-    }
-
-    #[test]
-    fn t_data_06_gap_above_one_percent_is_degraded_and_blocks_promotion() {
-        let mut registry = DatasetRegistry::default();
-        let mut degraded = metadata(DataType::Ohlcv);
-        degraded.gaps = GapSummary {
-            missing_bars: 2,
-            expected_bars: 100,
-        };
-        let versioned = registry.register(degraded).unwrap();
-        assert_eq!(versioned.status, DatasetStatus::Degraded);
-        assert_eq!(
-            registry.promotion_ready(&[InstrumentClass::Crypto], false),
-            Err(DataLakeError::DegradedDataset)
-        );
-    }
-
-    #[test]
-    fn degraded_optional_dataset_does_not_satisfy_mandatory_promotion_data() {
-        let mut registry = DatasetRegistry::default();
-        let mut degraded = metadata(DataType::Ohlcv);
-        degraded.optional = true;
-        degraded.gaps = GapSummary {
-            missing_bars: 2,
-            expected_bars: 100,
-        };
-        registry.register(degraded).unwrap();
-        assert_eq!(
-            registry.promotion_ready(&[InstrumentClass::Crypto], false),
-            Err(DataLakeError::MissingMandatoryData(vec![
-                DataType::Ohlcv,
-                DataType::Funding,
-            ]))
-        );
-    }
-
-    #[test]
-    fn ec_trl_07_enforces_mandatory_matrix_and_event_news() {
-        let mut registry = DatasetRegistry::default();
-        for data_type in [
-            DataType::Ohlcv,
-            DataType::CorporateActions,
-            DataType::Fundamentals,
-            DataType::IndexConstituents,
-            DataType::News,
-        ] {
-            registry.register(metadata(data_type)).unwrap();
-        }
-        assert!(
-            registry
-                .promotion_ready(&[InstrumentClass::Equity], true)
-                .is_ok()
-        );
-        assert_eq!(
-            registry.promotion_ready(&[InstrumentClass::Future], false),
-            Err(DataLakeError::MissingMandatoryData(vec![
-                DataType::ContinuousContract,
-                DataType::ContractSpecs,
-            ]))
-        );
-    }
-
-    #[test]
-    fn fx_or_options_need_spec_amendment_before_advancing_past_idea() {
-        let mut spec = StrategySpec {
-            spec_f01_instrument_universe: Some(vec![Instrument {
-                symbol: "EURUSD".into(),
-                venue: "OTC".into(),
-                asset_class: "fx".into(),
-            }]),
-            spec_f02_timeframe_session: None,
-            spec_f03_market_regime_assumptions: None,
-            spec_f04_data_dependencies: None,
-            spec_f05_entry_exit_rules: None,
-            spec_f06_indicator_formulas: None,
-            spec_f07_position_sizing: None,
-            spec_f08_stops: None,
-            spec_f09_invalidation_rules: None,
-            spec_f10_no_trade_conditions: None,
-            spec_f11_cost_assumptions: None,
-            spec_f12_benchmark: None,
-            spec_f13_expected_failure_modes: None,
-            spec_f14_data_quality_tolerances_ms: None,
-            spec_f15_promotion_status: Some(PromotionStatus::Idea),
-        };
-        assert!(spec_can_advance_past_idea(&spec).is_ok());
-        spec.spec_f15_promotion_status = Some(PromotionStatus::Research);
-        assert_eq!(
-            spec_can_advance_past_idea(&spec),
-            Err(DataLakeError::FxOptionsNeedSpecAmendment)
-        );
-    }
-}
+mod tests;

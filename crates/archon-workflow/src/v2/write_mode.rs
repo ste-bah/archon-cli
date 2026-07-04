@@ -143,14 +143,25 @@ pub fn validate_changed_files(
     item: &WorkflowV2WriteItem,
     result: &WorkflowV2Result,
 ) -> Result<(), WorkflowV2WriteSafetyError> {
-    if result.status == WorkflowV2Status::Accepted && result.files_changed.is_empty() {
+    validate_changed_files_for_repository(item, result, None)
+}
+
+pub fn validate_changed_files_for_repository(
+    item: &WorkflowV2WriteItem,
+    result: &WorkflowV2Result,
+    repository_root: Option<&str>,
+) -> Result<(), WorkflowV2WriteSafetyError> {
+    if result.status == WorkflowV2Status::Accepted
+        && result.files_changed.is_empty()
+        && result.artifacts.is_empty()
+    {
         return Err(WorkflowV2WriteSafetyError::AcceptedWriteWithoutChangedFiles(item.id.clone()));
     }
-    let owned = normalize_targets(&item.id, &item.owned_targets)?
+    let owned = normalize_targets_for_repository(&item.id, &item.owned_targets, repository_root)?
         .into_iter()
         .collect::<BTreeSet<_>>();
     for file in &result.files_changed {
-        let normalized = normalize_target(&item.id, &file.path)?;
+        let normalized = normalize_target_for_repository(&item.id, &file.path, repository_root)?;
         if !owned
             .iter()
             .any(|owned_target| path_overlaps(owned_target, &normalized))
@@ -294,6 +305,14 @@ fn normalize_targets(
     item_id: &str,
     targets: &[String],
 ) -> Result<Vec<String>, WorkflowV2WriteSafetyError> {
+    normalize_targets_for_repository(item_id, targets, None)
+}
+
+pub fn normalize_targets_for_repository(
+    item_id: &str,
+    targets: &[String],
+    repository_root: Option<&str>,
+) -> Result<Vec<String>, WorkflowV2WriteSafetyError> {
     if targets.is_empty() {
         return Err(WorkflowV2WriteSafetyError::MissingOwnership(
             item_id.to_string(),
@@ -301,9 +320,56 @@ fn normalize_targets(
     }
     let mut normalized = BTreeSet::new();
     for target in targets {
-        normalized.insert(normalize_target(item_id, target)?);
+        normalized.insert(normalize_target_for_repository(
+            item_id,
+            target,
+            repository_root,
+        )?);
     }
     Ok(normalized.into_iter().collect())
+}
+
+pub fn normalize_target_for_repository(
+    item_id: &str,
+    target: &str,
+    repository_root: Option<&str>,
+) -> Result<String, WorkflowV2WriteSafetyError> {
+    let trimmed = target.trim();
+    let path = Path::new(trimmed);
+    if !path.is_absolute() {
+        return normalize_target(item_id, trimmed);
+    }
+    let Some(root) = repository_root
+        .map(str::trim)
+        .filter(|root| !root.is_empty())
+    else {
+        return Err(WorkflowV2WriteSafetyError::UnsafeTarget {
+            item_id: item_id.to_string(),
+            target: target.to_string(),
+        });
+    };
+    let root_path = Path::new(root);
+    if !root_path.is_absolute() {
+        return Err(WorkflowV2WriteSafetyError::UnsafeTarget {
+            item_id: item_id.to_string(),
+            target: target.to_string(),
+        });
+    }
+    let clean_root = clean_absolute_path(item_id, root, root_path)?;
+    let clean_target = clean_absolute_path(item_id, target, path)?;
+    let relative = clean_target.strip_prefix(&clean_root).map_err(|_| {
+        WorkflowV2WriteSafetyError::UnsafeTarget {
+            item_id: item_id.to_string(),
+            target: target.to_string(),
+        }
+    })?;
+    if relative.as_os_str().is_empty() {
+        return Err(WorkflowV2WriteSafetyError::UnsafeTarget {
+            item_id: item_id.to_string(),
+            target: target.to_string(),
+        });
+    }
+    normalize_target(item_id, &relative.to_string_lossy().replace('\\', "/"))
 }
 
 fn normalize_target(item_id: &str, target: &str) -> Result<String, WorkflowV2WriteSafetyError> {
@@ -337,6 +403,29 @@ fn normalize_target(item_id: &str, target: &str) -> Result<String, WorkflowV2Wri
     Ok(parts.join("/"))
 }
 
+fn clean_absolute_path(
+    item_id: &str,
+    original: &str,
+    path: &Path,
+) -> Result<PathBuf, WorkflowV2WriteSafetyError> {
+    let mut cleaned = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => cleaned.push(prefix.as_os_str()),
+            Component::RootDir => cleaned.push(Path::new("/")),
+            Component::CurDir => {}
+            Component::Normal(part) => cleaned.push(part),
+            Component::ParentDir => {
+                return Err(WorkflowV2WriteSafetyError::UnsafeTarget {
+                    item_id: item_id.to_string(),
+                    target: original.to_string(),
+                });
+            }
+        }
+    }
+    Ok(cleaned)
+}
+
 fn safe_path_segment(raw: &str) -> String {
     let sanitized = raw
         .chars()
@@ -356,3 +445,7 @@ fn safe_path_segment(raw: &str) -> String {
     let hash = blake3::hash(raw.as_bytes()).to_hex().to_string();
     format!("{prefix}-{}", &hash[..8])
 }
+
+#[cfg(test)]
+#[path = "write_mode_tests.rs"]
+mod tests;

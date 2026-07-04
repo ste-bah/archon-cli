@@ -1,0 +1,26 @@
+[
+  {
+    "id": "verify-TASK-TDL-010-retry-structured-evidence",
+    "item_id": "verify-TASK-TDL-010-retry-structured-evidence",
+    "canonical_task_ids": ["TASK-TDL-010"],
+    "commands": [
+      {
+        "command": "cargo test -p archon-trading raw_response_contract_supports_prd_filenames -- --nocapture",
+        "kind": "test",
+        "required_evidence": "Exit code 0."
+      }
+    ],
+    "manual_fixture_retry": {
+      "commands": [
+        "cargo run --bin archon -- trading data ingest-ohlcv --target $TEMP_ROOT",
+        "cargo run --bin archon -- trading data export --target $TEMP_ROOT"
+      ],
+      "artifact_checks": [
+        "$TEMP_ROOT/.archon/trading-lab/data/registry.json",
+        "$TEMP_ROOT/.archon/trading-lab/data/datasets/manual-BTCUSD-1D-raw/20260101-fixture/metadata.json",
+        "$TEMP_ROOT/exported-bars.json"
+      ]
+    },
+    "source_item_id": "impl-TASK-TDL-010-registry-schema-artifact-contract-verification"
+  }
+]

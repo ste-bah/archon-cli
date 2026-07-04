@@ -1,0 +1,43 @@
+[
+  {
+    "acceptance_blocker": "No downstream task may treat datasets as production-ready if registry entries are incomplete or native/production fields are unknown.",
+    "depends_on": [
+      "TASK-TDL-001"
+    ],
+    "id": "REM-TDL-010",
+    "required_artifacts": [
+      ".archon/trading-lab/data/registry.json",
+      ".archon/trading-lab/data/datasets/<dataset-id>/<version>/metadata.json"
+    ],
+    "target_files": [
+      "crates/archon-trading/src/data_lake.rs",
+      "src/command/trading_data.rs"
+    ],
+    "task_id": "TASK-TDL-010",
+    "title": "Prove registry v2, migration, artifact contract, and command/TUI parity",
+    "verification": [
+      "Focused tests for registry schema migration.",
+      "Direct artifact verification that healthy registry entries point only to complete dataset versions."
+    ]
+  },
+  {
+    "acceptance_blocker": "Any validation error, missing metadata, or missing native flag blocks production eligibility.",
+    "depends_on": [
+      "REM-TDL-010"
+    ],
+    "id": "REM-TDL-020",
+    "required_artifacts": [
+      ".archon/trading-lab/data/datasets/<dataset-id>/<version>/validation.json"
+    ],
+    "target_files": [
+      "crates/archon-trading/src/data_lake.rs",
+      "crates/archon-trading/src/data_store.rs"
+    ],
+    "task_id": "TASK-TDL-020",
+    "title": "Prove OHLCV validation reports and native production gates",
+    "verification": [
+      "Focused tests for invalid timestamp and duplicate timestamp.",
+      "Validation must treat missing native_interval or production_eligible as false."
+    ]
+  }
+]

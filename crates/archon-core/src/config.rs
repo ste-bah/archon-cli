@@ -76,6 +76,9 @@ pub struct ArchonConfig {
     /// Subagent execution configuration (authoritative fan-out concurrency cap).
     #[serde(default)]
     pub subagent: SubagentConfig,
+    /// Workflow runtime configuration.
+    #[serde(default)]
+    pub workflow: WorkflowRuntimeConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -674,6 +677,42 @@ impl Default for SubagentConfig {
     }
 }
 
+/// Workflow runtime configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorkflowRuntimeConfig {
+    pub generated: GeneratedWorkflowConfig,
+}
+
+impl Default for WorkflowRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            generated: GeneratedWorkflowConfig::default(),
+        }
+    }
+}
+
+/// Generated workflow limits used by deterministic PRD scaffolds.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GeneratedWorkflowConfig {
+    pub max_repair_iterations: u8,
+    pub max_investigation_iterations: u8,
+    pub verification_branch_timeout_secs: u32,
+    pub host_call_timeout_secs: u32,
+}
+
+impl Default for GeneratedWorkflowConfig {
+    fn default() -> Self {
+        Self {
+            max_repair_iterations: 3,
+            max_investigation_iterations: 3,
+            verification_branch_timeout_secs: 1_200,
+            host_call_timeout_secs: 7_200,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PermissionsConfig {
@@ -1151,9 +1190,9 @@ impl Default for GnnAutoTrainerConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            min_throttle_ms: 3_600_000,
+            min_throttle_ms: 86_400_000,
             trigger_new_memories: 20,
-            trigger_elapsed_ms: 21_600_000,
+            trigger_elapsed_ms: 86_400_000,
             trigger_corrections: 3,
             first_run_threshold: 30,
             max_runtime_ms: 300_000,
@@ -1514,13 +1553,13 @@ impl Default for WorldModelAutoTrainerConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            min_throttle_ms: 3_600_000,
+            min_throttle_ms: 86_400_000,
             idle_required_ms: 300_000,
             battery_suspend_below_percent: 30,
             trigger_new_rows: 100,
             trigger_surprises: 5,
             trigger_corrections: 3,
-            trigger_elapsed_ms: 21_600_000,
+            trigger_elapsed_ms: 86_400_000,
             first_run_threshold: 300,
             max_runtime_ms: 300_000,
             tick_interval_ms: 60_000,
@@ -1790,6 +1829,31 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
         return Err(ConfigError::ValidationError(format!(
             "tools.max_concurrency must be 1..=16, got {}",
             config.tools.max_concurrency
+        )));
+    }
+
+    if !(1..=8).contains(&config.workflow.generated.max_repair_iterations) {
+        return Err(ConfigError::ValidationError(format!(
+            "workflow.generated.max_repair_iterations must be 1..=8, got {}",
+            config.workflow.generated.max_repair_iterations
+        )));
+    }
+    if !(1..=8).contains(&config.workflow.generated.max_investigation_iterations) {
+        return Err(ConfigError::ValidationError(format!(
+            "workflow.generated.max_investigation_iterations must be 1..=8, got {}",
+            config.workflow.generated.max_investigation_iterations
+        )));
+    }
+    if !(300..=86_400).contains(&config.workflow.generated.verification_branch_timeout_secs) {
+        return Err(ConfigError::ValidationError(format!(
+            "workflow.generated.verification_branch_timeout_secs must be 300..=86400, got {}",
+            config.workflow.generated.verification_branch_timeout_secs
+        )));
+    }
+    if !(300..=86_400).contains(&config.workflow.generated.host_call_timeout_secs) {
+        return Err(ConfigError::ValidationError(format!(
+            "workflow.generated.host_call_timeout_secs must be 300..=86400, got {}",
+            config.workflow.generated.host_call_timeout_secs
         )));
     }
 

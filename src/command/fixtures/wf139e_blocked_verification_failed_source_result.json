@@ -1,0 +1,11 @@
+{
+  "status": "needs_review",
+  "summary": "focused verification source items must include item_id/id, canonical_task_ids, and required evidence fields",
+  "residual_gaps": [
+    {
+      "id": "dynamic_wave_source_metadata_verification-wave-1-3",
+      "description": "verification source metadata was rejected before verification agents launched",
+      "severity": "blocking"
+    }
+  ]
+}

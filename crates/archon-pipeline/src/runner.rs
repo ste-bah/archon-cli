@@ -323,6 +323,8 @@ pub struct AgentExecutionRequest {
     pub system: Vec<serde_json::Value>,
     pub tools: Vec<serde_json::Value>,
     pub allowed_tools: Vec<String>,
+    pub timeout_secs: Option<u64>,
+    pub disable_auto_background: bool,
 }
 
 /// Abstraction over the underlying LLM transport. Concrete implementations

@@ -1,0 +1,31 @@
+{
+  "status": "accepted",
+  "result": {
+    "status": "accepted",
+    "data": {
+      "items": [
+        {
+          "id": "retry-registry-data-store",
+          "canonical_task_ids": ["TASK-TDL-010"],
+          "command": "cargo test -p archon-trading data_store -- --nocapture",
+          "expected_evidence": "Exit 0 and output shows intended data_store tests passed.",
+          "retry_reason": "missing command evidence"
+        },
+        {
+          "id": "retry-cli-list",
+          "canonical_task_ids": ["TASK-TDL-010"],
+          "command": "cargo test -p archon-cli cli_args::tests::trading_data_prd_commands_parse -- --nocapture",
+          "expected_evidence": "Exit 0 and output shows the focused CLI parser test passed.",
+          "retry_reason": "missing command evidence"
+        },
+        {
+          "id": "retry-artifact-contract",
+          "canonical_task_ids": ["TASK-TDL-010"],
+          "command": "Inspect the project data registry and required dataset artifact paths.",
+          "expected_evidence": "Evidence lists registry entries checked and every required artifact path found, or states no healthy entries are eligible.",
+          "retry_reason": "fragmented artifact check"
+        }
+      ]
+    }
+  }
+}

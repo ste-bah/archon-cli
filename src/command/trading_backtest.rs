@@ -41,6 +41,7 @@ pub(crate) fn render_backtest(action: &TradingCliBacktestAction) -> Result<Strin
             target,
             dataset_id,
             version,
+            diagnostic_allow_degraded_data,
             quantity,
             rule,
             strategy_rules,
@@ -52,7 +53,16 @@ pub(crate) fn render_backtest(action: &TradingCliBacktestAction) -> Result<Strin
         } => {
             let config: BacktestConfig = read_json(config, "BacktestConfig")?;
             let root = project_root(target.as_ref())?;
-            let dataset = TradingDataLake::new(root)
+            let lake = TradingDataLake::new(root);
+            if strategy_rules.is_some() && !*diagnostic_allow_degraded_data {
+                return Err(anyhow!(
+                    "promotion OHLCV backtests require dataset id/version strategy inputs; loose strategy-rules paths are diagnostic-only"
+                ));
+            }
+            let gate = lake
+                .backtest_data_gate(dataset_id, version, *diagnostic_allow_degraded_data)
+                .map_err(|err| anyhow!("OHLCV backtest data gate failed: {err:?}"))?;
+            let dataset = lake
                 .load_ohlcv(dataset_id, version)
                 .map_err(|err| anyhow!("failed to load OHLCV dataset: {err:?}"))?;
             let request = request(
@@ -71,6 +81,54 @@ pub(crate) fn render_backtest(action: &TradingCliBacktestAction) -> Result<Strin
                 run_ohlcv_backtest(&config, &request, &dataset.bars)
             }
             .map_err(|err| anyhow!("OHLCV backtest failed: {err:?}"))?;
+            let mut value = serde_json::to_value(&report)?;
+            if let serde_json::Value::Object(map) = &mut value {
+                map.insert("data_gate".into(), serde_json::to_value(gate)?);
+            }
+            write_or_render(&value, out.as_deref())
+        }
+        TradingCliBacktestAction::RunAhdmNative {
+            config,
+            target,
+            run_id,
+            dataset_id,
+            version,
+            quantity,
+            generated_at,
+            out,
+        } => {
+            let config: BacktestConfig = read_json(config, "BacktestConfig")?;
+            let root = project_root(target.as_ref())?;
+            let lake = TradingDataLake::new(&root);
+            let generated_at = generated_at
+                .clone()
+                .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+            let run_dir = lake
+                .run_ahdm_native_backtest(
+                    run_id,
+                    dataset_id,
+                    version,
+                    config,
+                    *quantity,
+                    &generated_at,
+                )
+                .map_err(|err| anyhow!("AHDM native backtest failed: {err:?}"))?;
+            let report = serde_json::json!({
+                "status": "created",
+                "strategy_id": "AHDM-v1",
+                "run_id": run_id,
+                "dataset_id": dataset_id,
+                "version": version,
+                "generated_at": generated_at,
+                "run_dir": run_dir,
+                "artifacts": {
+                    "config": run_dir.join("config.json"),
+                    "report": run_dir.join("report.json"),
+                    "trades": run_dir.join("trades.jsonl"),
+                    "equity_curve": run_dir.join("equity_curve.jsonl"),
+                    "adversarial_review": run_dir.join("adversarial-review.md")
+                }
+            });
             write_or_render(&report, out.as_deref())
         }
     }
@@ -124,6 +182,58 @@ impl From<TradingCliOhlcvRule> for OhlcvBacktestRule {
         match value {
             TradingCliOhlcvRule::CloseMomentum => Self::CloseMomentum,
             TradingCliOhlcvRule::SmaCross => Self::SmaCross,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli_args::TradingCliBacktestAction;
+    use std::path::PathBuf;
+
+    #[test]
+    fn run_ohlcv_refuses_loose_strategy_rules_for_promotion_backtest() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = temp.path().join("backtest.json");
+        std::fs::write(&config, serde_json::to_string(&config_fixture()).unwrap()).unwrap();
+
+        let result = render_backtest(&TradingCliBacktestAction::RunOhlcv {
+            config,
+            target: Some(temp.path().to_path_buf()),
+            dataset_id: "btc-1d".into(),
+            version: "v1".into(),
+            diagnostic_allow_degraded_data: false,
+            quantity: 1.0,
+            rule: TradingCliOhlcvRule::CloseMomentum,
+            strategy_rules: Some(PathBuf::from("loose-rules.json")),
+            fast_len: 10,
+            slow_len: 30,
+            exploratory: false,
+            source: TradingCliBacktestSource::NativeHarness,
+            out: None,
+        });
+
+        assert!(matches!(
+            result,
+            Err(error) if error.to_string().contains("loose strategy-rules paths")
+        ));
+    }
+
+    fn config_fixture() -> BacktestConfig {
+        BacktestConfig {
+            strategy_id: "strategy-1".into(),
+            snapshot_checksum: "checksum".into(),
+            starting_equity: 10_000.0,
+            fee_per_share: 0.0,
+            spread_bps: 0.0,
+            slippage_bps: 0.0,
+            market_impact_bps: 0.0,
+            latency_ms: 0,
+            partial_fill_ratio: 1.0,
+            unavailable_liquidity_ratio: 0.0,
+            monte_carlo_seed: 1,
+            parameter_set_id: "params-1".into(),
         }
     }
 }

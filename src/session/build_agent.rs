@@ -48,6 +48,7 @@ pub(super) async fn build_session_agent(
     registry.replace(Box::new(archon_tools::bash::BashTool {
         timeout_secs: config.tools.bash_timeout,
         max_output_bytes: config.tools.bash_max_output,
+        provider_env: None,
     }));
     apply_tool_filters(&mut registry, resolved_flags);
 

@@ -154,18 +154,15 @@ fn non_terminal_review_result_is_checkpointed_and_does_not_stop_downstream_calls
         })
         .expect("run");
 
-    assert_eq!(summary.status, WorkflowV2Status::Accepted);
-    assert_eq!(summary.completed, 3);
+    assert_eq!(summary.status, WorkflowV2Status::NeedsReview);
+    assert_eq!(summary.completed, 2);
     assert_eq!(summary.failed_call, None);
     assert!(store.load_call_record("reduce").expect("load").is_some());
     let checkpoint = store
         .load_checkpoint()
         .expect("load checkpoint")
         .expect("checkpoint");
-    assert_eq!(
-        checkpoint.completed_call_ids,
-        vec!["audit", "reduce", "final"]
-    );
+    assert_eq!(checkpoint.completed_call_ids, vec!["reduce", "final"]);
 }
 
 #[test]

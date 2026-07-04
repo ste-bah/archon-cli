@@ -811,9 +811,9 @@ Background auto-retraining.
 ```toml
 [learning.gnn.auto_trainer]
 enabled = true
-min_throttle_ms = 3600000     # 1 hour
+min_throttle_ms = 86400000    # 24 hours
 trigger_new_memories = 20
-trigger_elapsed_ms = 21600000 # 6 hours
+trigger_elapsed_ms = 86400000 # 24 hours
 trigger_corrections = 3
 first_run_threshold = 30
 max_runtime_ms = 300000       # 5 minutes
@@ -822,10 +822,10 @@ tick_interval_ms = 60000
 
 | Field | Default | What / Why |
 |---|---|---|
-| `enabled` | `true` | ON by default. The 1h throttle and 5min runtime cap keep background training bounded; set `false` to opt out. |
-| `min_throttle_ms` | `3600000` (1h) | Minimum gap between training runs. Prevents thrashing on rapid memory churn. Lower for very active sessions. |
+| `enabled` | `true` | ON by default. The 24h throttle and 5min runtime cap keep background training bounded; set `false` to opt out. |
+| `min_throttle_ms` | `86400000` (24h) | Minimum gap between training runs. Prevents thrashing on rapid memory churn. |
 | `trigger_new_memories` | `20` | Fire training when N new memories have accrued since the last run. |
-| `trigger_elapsed_ms` | `21600000` (6h) | Fire training when this much wall time has elapsed regardless of memory activity. |
+| `trigger_elapsed_ms` | `86400000` (24h) | Fire training when this much wall time has elapsed regardless of memory activity. |
 | `trigger_corrections` | `3` | Fire training when N user corrections have been recorded. Corrections are the strongest training signal. |
 | `first_run_threshold` | `30` | At session startup, if the existing memory count is at least this value, kick off an immediate training run. Lets early workspaces train in the first 2-3 normal sessions. |
 | `max_runtime_ms` | `300000` (5 min) | Wall-clock cap per run. Same semantics as in `[learning.gnn.training]`. |
@@ -969,13 +969,13 @@ min_observed_days = 7
 
 [learning.world_model.auto_trainer]
 enabled = true
-min_throttle_ms = 3600000
+min_throttle_ms = 86400000
 idle_required_ms = 300000
 battery_suspend_below_percent = 30
 trigger_new_rows = 100
 trigger_surprises = 5
 trigger_corrections = 3
-trigger_elapsed_ms = 21600000
+trigger_elapsed_ms = 86400000
 first_run_threshold = 300
 max_runtime_ms = 300000
 tick_interval_ms = 60000
@@ -1680,6 +1680,25 @@ max_body_bytes = 67108864
 [permissions]
 mode = "plan"               # remote sessions are read-only by default
 ```
+
+---
+
+## `[workflow.generated]` (Generated Dynamic Workflows)
+
+Controls bounded JS-owned repair and investigation loops in generated
+decomposed-PRD workflows. These limits do not control subagent fan-out
+concurrency; `[subagent].max_concurrent` remains the authoritative runtime cap.
+
+```toml
+[workflow.generated]
+max_repair_iterations = 3
+max_investigation_iterations = 3
+```
+
+| Field | Default | What / Why |
+|---|---|---|
+| `max_repair_iterations` | `3` | Maximum script-owned semantic repair attempts for malformed or incomplete generated-PRD inventory/evidence before the workflow stops visibly with blocked/needs-review evidence. Valid range: `1..=8`. |
+| `max_investigation_iterations` | `3` | Maximum script-owned investigation attempts for missing target files, verification requirements, artifact requirements, or provider/environment evidence before terminal blocked/needs-review reporting. Valid range: `1..=8`. |
 
 ---
 

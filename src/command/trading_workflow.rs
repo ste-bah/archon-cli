@@ -155,6 +155,7 @@ fn stage(
         verify_command: None,
         max_parallelism: None,
         item_kind: None,
+        filter: None,
         extra: BTreeMap::new(),
     }
 }
@@ -234,7 +235,7 @@ fn post_remediation_tests(input: WorkflowPlanInput<'_>) -> StageSpec {
         StageKind::Agent,
         ProviderTier::Coder,
         vec!["remediate-failed-findings", "remediation-inventory"],
-        "Run the focused tests and checks required by the remediation items. If no remediation items exist, verify that the initial adversarial review was clean. Return structured status: verified only when commands pass; failed, failed_timeout, or unverifiable when they do not. Include exact commands and output summaries.".into(),
+        "Run the focused tests and checks required by the remediation items. If remediation-inventory emits exactly {\"items\": []} and the upstream adversarial review has no current blockers, return status: verified with evidence that remediation was a no-op; do not return unverifiable only because there were no remediation items. Return failed, failed_timeout, or unverifiable only when required commands fail, time out, or cannot be selected despite a concrete blocker. Include exact commands and output summaries.".into(),
         json!({
             "repository": input.repository.display().to_string(),
             "prd": path_value(input.prd),
@@ -335,6 +336,8 @@ fn task_item(path: &Path, prd: Option<&Path>) -> Result<Value> {
     });
     Ok(json!({
         "id": id,
+        "task_id": id,
+        "task_ids": [id],
         "task_file": path.display().to_string(),
         "prd": path_value(prd),
         "target_files": target_files,
@@ -407,6 +410,8 @@ fn default_lifecycle_items(tradingview_replay: bool) -> Vec<Value> {
 fn lifecycle_item(id: &str, target: &str) -> Value {
     json!({
         "id": id,
+        "task_id": id,
+        "task_ids": [id],
         "target_files": [target],
         "instructions": "Create the declared Trading Lab artifact from upstream evidence and validate it with the matching archon trading command."
     })

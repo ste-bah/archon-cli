@@ -18,6 +18,8 @@ pub enum CommandAction {
     },
     RunTemplate {
         name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        args: Option<serde_json::Value>,
     },
     Status {
         run_id: String,
@@ -96,6 +98,7 @@ impl WorkflowCommand {
             },
             "run-template" | "from-template" => CommandAction::RunTemplate {
                 name: required(tail, 0, "template name")?,
+                args: template_args(&tail[1..])?,
             },
             "status" => CommandAction::Status {
                 run_id: required(tail, 0, "run id")?,
@@ -183,11 +186,22 @@ fn parse_run(args: &[String]) -> WorkflowResult<CommandAction> {
     if flag(&args, "--from-template") {
         return Ok(CommandAction::RunTemplate {
             name: required(&args, 1, "template name")?,
+            args: template_args(&args[2..])?,
         });
     }
     Ok(CommandAction::Run {
         task: join_task(&args)?,
     })
+}
+
+fn template_args(args: &[String]) -> WorkflowResult<Option<serde_json::Value>> {
+    if args.is_empty() {
+        return Ok(None);
+    }
+    let raw = join_task(args)?;
+    Ok(Some(
+        serde_json::from_str(&raw).unwrap_or_else(|_| serde_json::Value::String(raw)),
+    ))
 }
 
 fn without_live_flag(args: &[String]) -> Vec<String> {
@@ -260,7 +274,15 @@ mod tests {
         assert_eq!(
             parse(&["run", "--from-template", "repo-audit"]),
             CommandAction::RunTemplate {
-                name: "repo-audit".into()
+                name: "repo-audit".into(),
+                args: None,
+            }
+        );
+        assert_eq!(
+            parse(&["run", "--from-template", "repo-audit", "{\"issue\":1024}"]),
+            CommandAction::RunTemplate {
+                name: "repo-audit".into(),
+                args: Some(serde_json::json!({ "issue": 1024 })),
             }
         );
     }

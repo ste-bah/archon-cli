@@ -40,7 +40,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 use archon_llm::identity::IdentityProvider;
@@ -113,6 +113,12 @@ pub struct AgentSubagentExecutor {
     /// `run_to_completion` and consumed by `on_inner_complete` when
     /// deciding whether to call `save_agent_memory`.
     memory_cache: Arc<Mutex<HashMap<String, MemoryMeta>>>,
+    /// Awaitable admission control for foreground/awaited subagent runs.
+    ///
+    /// `SubagentManager::register_with_id` still enforces the configured
+    /// maximum as a defensive invariant, but workflow fanout must experience
+    /// the limit as backpressure instead of a hard branch failure.
+    subagent_capacity: Arc<Semaphore>,
 }
 
 /// Per-subagent metadata the executor caches between
@@ -148,6 +154,8 @@ impl AgentSubagentExecutor {
         agent_config: Arc<crate::agent::AgentConfig>,
         identity: Arc<IdentityProvider>,
     ) -> Self {
+        let subagent_capacity =
+            Arc::new(Semaphore::new(agent_config.max_subagent_concurrency.max(1)));
         Self {
             client,
             tool_registry,
@@ -165,6 +173,7 @@ impl AgentSubagentExecutor {
             identity,
             worktree_cache: Arc::new(Mutex::new(HashMap::new())),
             memory_cache: Arc::new(Mutex::new(HashMap::new())),
+            subagent_capacity,
         }
     }
 

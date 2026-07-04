@@ -68,7 +68,7 @@ impl WorkflowV2Runtime {
                 match self.resume_decision(&execution.call.id, &input_hash)? {
                     WorkflowV2ResumeDecision::ReuseCachedResult => {
                         if let Some(record) = self.store.load_call_record(&execution.call.id)? {
-                            final_status = record.status;
+                            final_status = merge_status(final_status, record.status);
                         }
                         reused += 1;
                         completed += 1;
@@ -93,7 +93,7 @@ impl WorkflowV2Runtime {
             })?;
 
             let status = result.status;
-            final_status = status;
+            final_status = merge_status(final_status, status);
             let record = WorkflowV2CallRecord::new(
                 self.store.run_id(),
                 execution.call.clone(),
@@ -182,7 +182,7 @@ impl WorkflowV2Runtime {
                 match self.resume_decision(&execution.call.id, &input_hash)? {
                     WorkflowV2ResumeDecision::ReuseCachedResult => {
                         if let Some(record) = self.store.load_call_record(&execution.call.id)? {
-                            final_status = record.status;
+                            final_status = merge_status(final_status, record.status);
                         }
                         reused += 1;
                         completed += 1;
@@ -207,7 +207,7 @@ impl WorkflowV2Runtime {
             })?;
 
             let status = result.status;
-            final_status = status;
+            final_status = merge_status(final_status, status);
             let record = WorkflowV2CallRecord::new(
                 self.store.run_id(),
                 execution.call.clone(),
@@ -274,6 +274,26 @@ fn is_terminal_stop_status(status: WorkflowV2Status) -> bool {
         status,
         WorkflowV2Status::Failed | WorkflowV2Status::Cancelled
     )
+}
+
+fn merge_status(left: WorkflowV2Status, right: WorkflowV2Status) -> WorkflowV2Status {
+    if status_precedence(right) > status_precedence(left) {
+        right
+    } else {
+        left
+    }
+}
+
+fn status_precedence(status: WorkflowV2Status) -> u8 {
+    match status {
+        WorkflowV2Status::Cancelled => 7,
+        WorkflowV2Status::Failed => 6,
+        WorkflowV2Status::Blocked => 5,
+        WorkflowV2Status::NeedsReview => 4,
+        WorkflowV2Status::Running => 3,
+        WorkflowV2Status::Pending => 2,
+        WorkflowV2Status::Accepted | WorkflowV2Status::Noop => 1,
+    }
 }
 
 fn next_action_for_terminal_call(call_id: &str) -> String {

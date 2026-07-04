@@ -1,0 +1,7 @@
+{
+  "status": "needs_review",
+  "failed_call": "blocked-verification-failed-1",
+  "run_id": "wf-fe12e6ae-d01c-4ef0-860d-e36d8c3b2ddb",
+  "source_metadata_gap": "dynamic_wave_source_metadata_verification-wave-1-3",
+  "summary": "The workflow stopped after verification-repair-plan-1-3 because retry_steps were not normalized into focused verification source metadata."
+}

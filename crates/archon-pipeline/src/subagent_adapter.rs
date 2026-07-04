@@ -11,7 +11,8 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 
 use archon_llm::provider::{LlmProvider, LlmRequest};
-use archon_tools::agent_tool::{SubagentRequest, run_subagent};
+use archon_tools::agent_tool::{SubagentRequest, run_subagent, run_subagent_foreground};
+use archon_tools::provider_env::{ProviderEnvPolicy, provider_env_policy_from_marker};
 use archon_tools::subagent_executor::SubagentOutcome;
 use archon_tools::tool::ToolContext;
 
@@ -193,16 +194,20 @@ impl LlmClient for SubagentPipelineClient {
         let activity_model = self.activity_model(&request.agent.model);
         let allowed_tools = Self::allowed_tools(&request);
         let strict_workspace_boundary = Self::strict_workspace_boundary(&request, &allowed_tools);
+        let provider_env = workflow_provider_env_policy(&request);
         let req = SubagentRequest {
             prompt,
             model: Some(activity_model),
             allowed_tools,
             max_turns: SubagentRequest::DEFAULT_MAX_TURNS,
-            timeout_secs: SubagentRequest::DEFAULT_TIMEOUT_SECS,
+            timeout_secs: request
+                .timeout_secs
+                .unwrap_or(SubagentRequest::DEFAULT_TIMEOUT_SECS),
             subagent_type: Some(request.agent.key.clone()),
             run_in_background: false,
             cwd: Some(self.cwd_for_request(&request)),
             isolation: strict_workspace_boundary.then(|| "workspace-boundary".to_string()),
+            provider_env,
         };
 
         let cancel = self
@@ -211,17 +216,39 @@ impl LlmClient for SubagentPipelineClient {
             .as_ref()
             .map(|token| token.child_token())
             .unwrap_or_default();
+        let mut tool_context = self.context.clone();
+        tool_context.cancel_parent = Some(cancel.clone());
 
-        let outcome = run_subagent(
-            format!(
-                "{}-{}-{}",
-                request.session_id, request.ordinal, request.agent.key
-            ),
-            req,
-            cancel,
-            self.context.clone(),
-        )
-        .await;
+        let subagent_id = format!(
+            "{}-{}-{}",
+            request.session_id, request.ordinal, request.agent.key
+        );
+        let mut run: std::pin::Pin<Box<dyn std::future::Future<Output = SubagentOutcome> + Send>> =
+            if request.disable_auto_background {
+                Box::pin(run_subagent_foreground(
+                    subagent_id,
+                    req,
+                    cancel.clone(),
+                    tool_context,
+                ))
+            } else {
+                Box::pin(run_subagent(subagent_id, req, cancel.clone(), tool_context))
+            };
+        let mut timed_out = false;
+        let outcome = if let Some(timeout_secs) = request.timeout_secs {
+            let timeout = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs.max(1)));
+            tokio::pin!(timeout);
+            tokio::select! {
+                outcome = &mut run => outcome,
+                _ = &mut timeout => {
+                    timed_out = true;
+                    cancel.cancel();
+                    run.await
+                }
+            }
+        } else {
+            run.await
+        };
 
         match outcome {
             SubagentOutcome::Completed(content) => Ok(LlmResponse {
@@ -231,12 +258,28 @@ impl LlmClient for SubagentPipelineClient {
                 tokens_out: 0,
             }),
             SubagentOutcome::Failed(error) => Err(anyhow!("subagent failed: {error}")),
+            SubagentOutcome::Cancelled if timed_out => Err(anyhow!(
+                "subagent timed out after {}s",
+                request
+                    .timeout_secs
+                    .unwrap_or(SubagentRequest::DEFAULT_TIMEOUT_SECS)
+            )),
             SubagentOutcome::Cancelled => Err(anyhow!("subagent cancelled")),
             SubagentOutcome::AutoBackgrounded => Err(anyhow!(
                 "subagent auto-backgrounded before returning output"
             )),
         }
     }
+}
+
+fn workflow_provider_env_policy(request: &AgentExecutionRequest) -> Option<ProviderEnvPolicy> {
+    if request.pipeline_type != PipelineType::Workflow || !request.disable_auto_background {
+        return None;
+    }
+    request
+        .tools
+        .iter()
+        .find_map(provider_env_policy_from_marker)
 }
 
 fn values_to_text(values: &[serde_json::Value]) -> String {
@@ -346,6 +389,8 @@ mod tests {
             system: vec![serde_json::json!({"type":"text","text":"system"})],
             tools: Vec::new(),
             allowed_tools: Vec::new(),
+            timeout_secs: None,
+            disable_auto_background: false,
         }
     }
 

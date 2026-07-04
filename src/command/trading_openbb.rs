@@ -130,6 +130,14 @@ fn store_openbb_ohlcv(
             bars,
             raw_body: dataset.body.clone(),
             raw_format: format,
+            raw_request: serde_json::json!({
+                "provider": format!("{:?}", dataset.provenance.provider),
+                "endpoint": dataset.provenance.endpoint,
+                "params": dataset.provenance.params
+            }),
+            redacted_headers: serde_json::json!({}),
+            provider_notes: "OpenBB governed fetch; credentials are referenced by profile only"
+                .into(),
             created_at,
         })
         .map_err(|err| anyhow::anyhow!("failed to store OpenBB OHLCV dataset: {err:?}"))

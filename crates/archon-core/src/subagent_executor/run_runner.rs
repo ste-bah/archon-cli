@@ -10,10 +10,18 @@ impl AgentSubagentExecutor {
         request: &SubagentRequest,
         ctx: &ToolContext,
         prepared: &PreparedSubagentRun,
+        cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<crate::subagent::runner::SubagentRunner, ExecutorError> {
-        let (tool_defs, tool_reg) = self
+        let (tool_defs, mut tool_reg) = self
             .build_subagent_tools(request, prepared.resolved_def.as_ref())
             .await;
+        if let Some(provider_env) = request.provider_env.clone()
+            && tool_reg.get("Bash").is_some()
+        {
+            tool_reg.replace(Box::new(
+                archon_tools::bash::BashTool::default().with_provider_env(provider_env),
+            ));
+        }
         let requested_cwd = super::paths::resolve_cwd(&self.working_dir, request.cwd.as_deref());
         let worktree_info = self
             .create_run_worktree(&ids.manager_id, requested_cwd.as_deref(), prepared)
@@ -21,7 +29,7 @@ impl AgentSubagentExecutor {
         self.cache_run_metadata(&ids.cache_id, &worktree_info, prepared)
             .await;
         let tool_ctx = self
-            .build_child_tool_context(ctx, requested_cwd, worktree_info.as_ref(), prepared)
+            .build_child_tool_context(ctx, requested_cwd, worktree_info.as_ref(), prepared, cancel)
             .await;
         let mut runner = crate::subagent::runner::SubagentRunner::new(
             self.client.clone(),
@@ -105,6 +113,7 @@ impl AgentSubagentExecutor {
         requested_cwd: Option<std::path::PathBuf>,
         worktree_info: Option<&WorktreeInfo>,
         prepared: &PreparedSubagentRun,
+        cancel: &tokio_util::sync::CancellationToken,
     ) -> ToolContext {
         let working_dir = worktree_info
             .map(|wt| wt.worktree_path.clone())
@@ -131,6 +140,14 @@ impl AgentSubagentExecutor {
             &working_dir,
             prepared.isolation.as_deref() == Some("workspace-boundary"),
         );
+        let tool_cancel = cancel.child_token();
+        if let Some(parent_cancel) = parent_ctx.cancel_parent.clone() {
+            let tool_cancel_for_parent = tool_cancel.clone();
+            archon_observability::spawn_named("subagent-tool-cancel-link", async move {
+                parent_cancel.cancelled().await;
+                tool_cancel_for_parent.cancel();
+            });
+        }
         ToolContext {
             working_dir,
             session_id: self.session_id.clone(),
@@ -138,7 +155,7 @@ impl AgentSubagentExecutor {
             extra_dirs,
             in_fork,
             nested: false,
-            cancel_parent: parent_ctx.cancel_parent.clone(),
+            cancel_parent: Some(tool_cancel),
             sandbox: parent_ctx.sandbox.clone(),
             activity_sink: parent_ctx.activity_sink.clone(),
         }

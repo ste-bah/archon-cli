@@ -206,6 +206,7 @@ fn metrics(starting_equity: f64, trades: &[OhlcvTrade]) -> BTreeMap<String, f64>
         ("net_profit".into(), pnl.iter().sum()),
         ("max_drawdown".into(), max_drawdown(starting_equity, &pnl)),
         ("win_rate".into(), win_rate(&pnl)),
+        ("expectancy".into(), average(&pnl)),
         ("trade_count".into(), trades.len() as f64),
         ("avg_trade".into(), average(&pnl)),
         (

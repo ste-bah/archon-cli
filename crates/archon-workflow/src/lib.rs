@@ -23,6 +23,7 @@ pub mod fanout;
 // Legacy-only generated spec patchers. V2 harness validation/result contracts
 // replace these for generated workflow runs.
 mod generated;
+pub mod generated_workflow;
 pub mod harness;
 mod item_filter;
 pub mod learning;
@@ -77,6 +78,10 @@ pub use events::{
     CompactProgress, WorkflowEvent, WorkflowEventKind, WorkflowEventLog, contains_forbidden_field,
 };
 pub use executor::{ExecutionReport, WorkflowExecutor};
+pub use generated_workflow::{
+    GeneratedWorkflowKind, GeneratedWorkflowLearningContext, WorkflowGeneratedScaffold,
+    WorkflowLearningEvent, WorkflowLearningEvidenceRef, workflow_scaffold_hash,
+};
 pub use harness::{HarnessCompiler, HarnessPhase};
 pub use learning::{
     Verification, WorkflowLearningRecord, WorkflowLearningSink, WorkflowRunLearningSummary,
@@ -100,8 +105,9 @@ pub use template::{
     SavedWorkflowCommand, SavedWorkflowTemplate, TemplateRegistry, WorkflowCommandRegistry,
 };
 pub use v2::{
-    WorkflowV2AgentAdapter, WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2AgentRequest,
-    WorkflowV2Artifact, WorkflowV2BranchOutcome, WorkflowV2CallExecution, WorkflowV2CallRecord,
+    BranchFailureKind, PROJECT_ARTIFACT_POLICY_VERSION, WorkflowV2AgentAdapter,
+    WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2AgentRequest, WorkflowV2Artifact,
+    WorkflowV2BranchOutcome, WorkflowV2CallExecution, WorkflowV2CallRecord,
     WorkflowV2CancellationToken, WorkflowV2Checkpoint, WorkflowV2CommandKind,
     WorkflowV2CommandRecord, WorkflowV2CommandStatus, WorkflowV2ConvergenceController,
     WorkflowV2ConvergenceDecision, WorkflowV2ConvergenceError, WorkflowV2ConvergenceStatus,
@@ -111,16 +117,21 @@ pub use v2::{
     WorkflowV2HarnessValidator, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions,
     WorkflowV2ImplementationInspector, WorkflowV2ImplementationStatus,
     WorkflowV2InspectionDecision, WorkflowV2InspectionError, WorkflowV2PrdIntake,
-    WorkflowV2PrdIntakeError, WorkflowV2RemediationItem, WorkflowV2ReportPaths,
-    WorkflowV2ResidualGap, WorkflowV2Result, WorkflowV2ResultStore, WorkflowV2ResumeDecision,
-    WorkflowV2RunSummary, WorkflowV2Runtime, WorkflowV2Scheduler, WorkflowV2SchedulerConfig,
-    WorkflowV2Status, WorkflowV2TaskCoverage, WorkflowV2TaskCoverageStatus,
+    WorkflowV2PrdIntakeError, WorkflowV2ProjectArtifactContext, WorkflowV2RemediationItem,
+    WorkflowV2ReportPaths, WorkflowV2ResidualGap, WorkflowV2Result, WorkflowV2ResultStore,
+    WorkflowV2ResumeDecision, WorkflowV2RunSummary, WorkflowV2Runtime, WorkflowV2Scheduler,
+    WorkflowV2SchedulerConfig, WorkflowV2SourceTargetExpansion, WorkflowV2SourceTaskGraph,
+    WorkflowV2SourceTaskItem, WorkflowV2Status, WorkflowV2TaskCompletionEvidence,
+    WorkflowV2TaskCompletionEvidenceKind, WorkflowV2TaskCoverage, WorkflowV2TaskCoverageStatus,
     WorkflowV2TaskFileStatus, WorkflowV2TaskRecord, WorkflowV2ValidationError,
     WorkflowV2ValidationResult, WorkflowV2VerificationKind, WorkflowV2VerificationOutcome,
     WorkflowV2VerificationStatus, WorkflowV2WorkItem, WorkflowV2WorkItemKind,
     WorkflowV2WriteAssignment, WorkflowV2WriteConflict, WorkflowV2WriteItem, WorkflowV2WriteMode,
     WorkflowV2WritePlan, WorkflowV2WritePlanner, WorkflowV2WriteSafetyError, WorkflowV2WriteWave,
-    test_command, validate_changed_files,
+    has_project_artifact_evidence, normalize_project_artifact_files,
+    normalize_target_for_repository, normalize_targets_for_repository,
+    project_artifact_context_from_v2_root, test_command, validate_changed_files,
+    validate_changed_files_for_repository,
 };
 pub use write_coordinator::{
     ItemId, ResourceKey, SerialFallbackReason, TargetFilesSource, WaveId, WriteBoundaryProbe,

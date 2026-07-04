@@ -32,6 +32,14 @@ pub(crate) fn run_daemon_trainer_tick_controlled(
     config: &archon_core::config::ArchonConfig,
     stop_requested: &dyn Fn() -> bool,
 ) -> Result<String> {
+    run_daemon_trainer_tick_controlled_with_activity(config, stop_requested, None)
+}
+
+pub(crate) fn run_daemon_trainer_tick_controlled_with_activity(
+    config: &archon_core::config::ArchonConfig,
+    stop_requested: &dyn Fn() -> bool,
+    last_activity_age_ms: Option<u64>,
+) -> Result<String> {
     let root = super::world_model_root()?;
     let auto = &config.learning.world_model.auto_trainer;
     let max_runtime_ms = trainer_runtime_limit_ms(config);
@@ -50,7 +58,7 @@ pub(crate) fn run_daemon_trainer_tick_controlled(
     let rendered = super::candidate::render_trainer_tick_observed(
         config,
         &root,
-        Some(auto.idle_required_ms),
+        last_activity_age_ms.or(Some(auto.idle_required_ms)),
         None,
         None,
         false,

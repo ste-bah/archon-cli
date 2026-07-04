@@ -1,0 +1,71 @@
+[
+  {
+    "canonical_task_ids": [
+      "TASK-TDL-050",
+      "TASK-TDL-070"
+    ],
+    "classification": "retryable_command_or_evidence_shape",
+    "do_not_do": [
+      "Do not edit production or test code for this repair item unless the exact retry fails due to assertion/product behavior.",
+      "Do not mark complete from a test-list-only output."
+    ],
+    "id": "repair-verify-TASK-TDL-050-070-fetch-native-cli-parse-check-5",
+    "reason": "The failed branch has failure_kind=execution and empty completion_evidence, while sibling retry checks for the same split item passed the exact parser test and supplied evidence. This indicates a retryable execution/evidence capture issue, not a product-code failure.",
+    "retry_steps": [
+      {
+        "command": "cd /Volumes/Externalwork/archon-cli/archon-cli && cargo test -p archon-cli-workspace trading_data_fetch_native_requires_all_mandatory_flags -- --exact --nocapture",
+        "kind": "test",
+        "required_evidence": [
+          "Exit code 0.",
+          "Cargo output shows `trading_data_fetch_native_requires_all_mandatory_flags` passed with zero intended target failures.",
+          "Evidence states the full fetch-native command parses with `--provider`, `--symbol`, `--timeframe`, `--start`, `--end`, and `--dataset-id`.",
+          "Evidence states missing `--end` is rejected."
+        ]
+      },
+      {
+        "command": "Grep pattern=trading_data_fetch_native_requires_all_mandatory_flags path=/Volumes/Externalwork/archon-cli/archon-cli/src glob=*.rs output_mode=content",
+        "kind": "inspect",
+        "required_evidence": [
+          "Source path containing the parser test.",
+          "Assertions for full accepted command and omitted mandatory flags, especially `--end`."
+        ]
+      }
+    ],
+    "source_failed_item_id": "verification-wave-1-2-verify-TASK-TDL-050-070-fetch-native-cli-parse-retry-check-5"
+  },
+  {
+    "canonical_task_ids": [
+      "TASK-TDL-050",
+      "TASK-TDL-070"
+    ],
+    "classification": "retryable_target_selection",
+    "do_not_do": [
+      "Do not rely on `cargo test -p archon-tui fetch_native` alone if it executes zero tests.",
+      "Do not require product-code remediation from this failure unless the exact alias test fails."
+    ],
+    "id": "repair-verify-TASK-TDL-050-070-tui-fetch-native-aliases-check-1",
+    "reason": "The broad `cargo test -p archon-tui fetch_native` target can produce misleading zero-test evidence. Source inspection shows the intended coverage lives in `commands::tests::filter_trading_data_aliases`, which asserts `/trading data fetch-native` and the Polygon provider alias.",
+    "retry_steps": [
+      {
+        "command": "cd /Volumes/Externalwork/archon-cli/archon-cli && cargo test -p archon-tui commands::tests::filter_trading_data_aliases -- --exact --nocapture",
+        "kind": "test",
+        "required_evidence": [
+          "Exit code 0.",
+          "Cargo output shows `commands::tests::filter_trading_data_aliases` passed with 1 passed, 0 failed.",
+          "Evidence references `/trading data fetch-native`.",
+          "Evidence references `/trading data fetch-native --provider polygon` as the OpenBB/Polygon-specific fetch-native alias."
+        ]
+      },
+      {
+        "command": "Read file_path=/Volumes/Externalwork/archon-cli/archon-cli/crates/archon-tui/src/commands.rs offset=84 limit=150",
+        "kind": "inspect",
+        "required_evidence": [
+          "CommandInfo registration for `/trading data fetch-native`.",
+          "CommandInfo registration for `/trading data fetch-native --provider polygon`.",
+          "Assertions in `filter_trading_data_aliases` for those aliases."
+        ]
+      }
+    ],
+    "source_failed_item_id": "verification-wave-1-2-verify-TASK-TDL-050-070-tui-fetch-native-aliases-retry-check-1"
+  }
+]

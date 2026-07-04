@@ -54,3 +54,34 @@ fn activity_detail_names_stage_cwd_and_tool_mode() {
     assert!(detail.contains("cwd=/tmp/project"));
     assert!(detail.contains("tool_mode=full"));
 }
+
+#[test]
+fn generated_v2_read_only_verification_branch_stays_read_only() {
+    let req = StageRunRequest {
+        run_id: "wf-test".into(),
+        stage_id: "readonly-discovery-verification-inventory".into(),
+        stage_kind: StageKind::Agent,
+        agent: Some("researcher".into()),
+        task: "Inspect focused test commands and verification setup; do not run tests.".into(),
+        attempt: 1,
+        provider_tier: ProviderTier::Researcher,
+        depends_on: Vec::new(),
+        input: json!({
+            "target_repository_root": "/tmp/project",
+            "v2_call": {
+                "id": "readonly-discovery-verification-inventory",
+                "method": "agent",
+                "role": "researcher",
+                "write_mode": null,
+                "target_files": []
+            }
+        }),
+    };
+
+    let tools = allowed_tools(&req);
+    assert!(tools.contains(&"Read".to_string()));
+    assert!(tools.contains(&"Grep".to_string()));
+    assert!(!tools.contains(&"Bash".to_string()));
+    assert!(!tools.contains(&"Write".to_string()));
+    assert!(activity_detail(&req, "stage running").contains("tool_mode=read_only"));
+}

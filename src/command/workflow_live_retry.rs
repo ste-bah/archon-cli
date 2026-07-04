@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use archon_pipeline::runner::{AgentExecutionRequest, LlmClient, LlmResponse};
+use archon_pipeline::runner::{AgentExecutionRequest, LlmClient, LlmResponse, PipelineType};
 use serde_json::Value;
 
 const LIVE_AGENT_TRANSIENT_ATTEMPTS: usize = 3;
@@ -21,7 +21,9 @@ where
             Ok(response) => return Ok(response),
             Err(error) => {
                 let message = error.to_string();
-                if attempt < LIVE_AGENT_TRANSIENT_ATTEMPTS && transient_live_agent_error(&message) {
+                if attempt < LIVE_AGENT_TRANSIENT_ATTEMPTS
+                    && transient_live_agent_error_for_request(&agent_request, &message)
+                {
                     last_error = Some(message);
                     on_retry(attempt);
                     tokio::time::sleep(Duration::from_millis(500 * attempt as u64)).await;
@@ -96,4 +98,81 @@ pub(crate) fn transient_live_agent_error(message: &str) -> bool {
     ]
     .iter()
     .any(|needle| text.contains(needle))
+}
+
+pub(crate) fn transient_live_agent_error_for_request(
+    request: &AgentExecutionRequest,
+    message: &str,
+) -> bool {
+    if request.pipeline_type == PipelineType::Workflow
+        && request.disable_auto_background
+        && foreground_subagent_timeout_or_cancel(message)
+    {
+        return false;
+    }
+    transient_live_agent_error(message)
+}
+
+fn foreground_subagent_timeout_or_cancel(message: &str) -> bool {
+    let text = message.to_ascii_lowercase();
+    text.contains("subagent timed out")
+        || text.contains("subagent cancelled")
+        || text.contains("subagent auto-backgrounded")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use archon_pipeline::runner::{AgentInfo, ToolAccessLevel};
+
+    #[test]
+    fn workflow_foreground_subagent_timeout_is_not_transient_retry() {
+        let request = request(true);
+
+        assert!(!transient_live_agent_error_for_request(
+            &request,
+            "subagent timed out after 7200s"
+        ));
+        assert!(transient_live_agent_error_for_request(
+            &request,
+            "provider request timed out"
+        ));
+    }
+
+    #[test]
+    fn auto_background_timeout_keeps_provider_retry_behavior() {
+        let request = request(false);
+
+        assert!(transient_live_agent_error_for_request(
+            &request,
+            "subagent timed out after 30s"
+        ));
+    }
+
+    fn request(disable_auto_background: bool) -> AgentExecutionRequest {
+        AgentExecutionRequest {
+            session_id: "run".to_string(),
+            pipeline_type: PipelineType::Workflow,
+            task: "branch".to_string(),
+            cwd: None,
+            ordinal: 1,
+            attempt: 1,
+            agent: AgentInfo {
+                key: "coder".to_string(),
+                display_name: "Coder".to_string(),
+                model: "sonnet".to_string(),
+                phase: 1,
+                critical: true,
+                parallelizable: true,
+                quality_threshold: 0.8,
+                tool_access_level: ToolAccessLevel::Full,
+            },
+            messages: Vec::new(),
+            system: Vec::new(),
+            tools: Vec::new(),
+            allowed_tools: Vec::new(),
+            timeout_secs: Some(7200),
+            disable_auto_background,
+        }
+    }
 }

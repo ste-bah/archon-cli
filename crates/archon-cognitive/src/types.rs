@@ -46,9 +46,13 @@ impl CandidateActionKind {
             Self::RunLearningTick => "run_learning_tick",
         }
     }
+}
 
-    pub fn from_str(value: &str) -> Option<Self> {
-        Some(match value {
+impl std::str::FromStr for CandidateActionKind {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(match value {
             "answer_directly" => Self::AnswerDirectly,
             "recall_memory" => Self::RecallMemory,
             "inspect_files" => Self::InspectFiles,
@@ -59,7 +63,7 @@ impl CandidateActionKind {
             "defer_decline" => Self::DeferOrDecline,
             "create_governed_proposal" => Self::CreateGovernedProposal,
             "run_learning_tick" => Self::RunLearningTick,
-            _ => return None,
+            _ => return Err(()),
         })
     }
 }

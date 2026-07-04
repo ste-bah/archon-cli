@@ -1,0 +1,72 @@
+{
+  "run_id": "wf-ab880e3e-8b29-4a78-bb37-1aa5948c0a9d",
+  "call_id": "remediation-wave-1-3",
+  "branch_id": "remediation-wave-1-3-followup-rem-TASK-TDL-010-focused-trading-data-test-failure",
+  "expected_missing_ownership_path": "src/command/trading_data_provider.rs",
+  "source_item": {
+    "item_id": "followup-rem-TASK-TDL-010-focused-trading-data-test-failure",
+    "canonical_task_ids": [
+      "TASK-TDL-010"
+    ],
+    "target_files": [
+      "crates/archon-trading/src/data_lake.rs",
+      "crates/archon-trading/src/data_store.rs",
+      "src/cli_args/tests.rs",
+      "src/cli_args/trading_market_actions.rs",
+      "src/command/trading_data.rs"
+    ]
+  },
+  "branch_result": {
+    "status": "blocked",
+    "summary": "Follow-up remediation could not complete within declared target-file ownership. The required fix path is src/command/trading_data_provider.rs, which was outside declared ownership; no repo change was applied.",
+    "evidence": [
+      {
+        "kind": "review",
+        "summary": "Branch evidence identified a concrete repo file outside current ownership that is required before product-code remediation can proceed.",
+        "source": "src/command/trading_data_provider.rs"
+      }
+    ],
+    "files_read": [
+      {
+        "path": "src/command/trading_data_provider.rs",
+        "purpose": "inspected required fix location"
+      }
+    ],
+    "commands_run": [
+      {
+        "kind": "test",
+        "command": "focused verification command",
+        "status": "failed",
+        "exit_code": 101,
+        "output_summary": "focused check still fails after undeclared file change was reverted"
+      }
+    ],
+    "task_coverage": [
+      {
+        "task_id": "TASK-TDL-010",
+        "status": "blocked",
+        "summary": "Needs ownership expansion before safe remediation can continue",
+        "evidence": [
+          {
+            "kind": "review",
+            "summary": "Required source file is outside current owned target set"
+          }
+        ]
+      }
+    ],
+    "residual_gaps": [
+      {
+        "id": "ownership-expansion-needed",
+        "description": "The required fix path src/command/trading_data_provider.rs is outside declared target_files.",
+        "severity": "blocking"
+      }
+    ],
+    "data": {
+      "branch_id": "remediation-wave-1-3-followup-rem-TASK-TDL-010-focused-trading-data-test-failure",
+      "item_id": "followup-rem-TASK-TDL-010-focused-trading-data-test-failure",
+      "canonical_task_ids": [
+        "TASK-TDL-010"
+      ]
+    }
+  }
+}

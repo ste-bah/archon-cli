@@ -170,6 +170,14 @@ impl SubagentManager {
         self.max_concurrent
     }
 
+    /// Count currently running subagents.
+    pub fn active_count(&self) -> usize {
+        self.agents
+            .values()
+            .filter(|a| a.status == SubagentStatus::Running)
+            .count()
+    }
+
     /// Register a new subagent request.  Returns the UUID assigned.
     pub fn register(&mut self, request: SubagentRequest) -> Result<String, SubagentError> {
         self.register_with_id(Uuid::new_v4().to_string(), request)
@@ -185,11 +193,7 @@ impl SubagentManager {
         id: String,
         request: SubagentRequest,
     ) -> Result<String, SubagentError> {
-        let active = self
-            .agents
-            .values()
-            .filter(|a| a.status == SubagentStatus::Running)
-            .count();
+        let active = self.active_count();
 
         if let Some(existing) = self.agents.get_mut(&id) {
             if existing.status == SubagentStatus::Running {

@@ -1,0 +1,26 @@
+{
+  "items": [
+    {
+      "item_id": "remediate-tradingview-native-fetch-artifact-contract",
+      "canonical_task_ids": ["PRD-TRADING-DATA-LAKE-AHDM-001"],
+      "target_files": [
+        "src/command/trading_data_provider.rs",
+        "src/command/trading_data_provider_tests.rs",
+        "src/command/trading_data.rs"
+      ],
+      "source_item_id": "current-wave-outcome-1",
+      "required_fix": "Update the native provider fetch path so the bin-level command satisfies the complete artifact contract without weakening verification.",
+      "failure_status": "failed",
+      "failure_evidence": [
+        "focused bin verification failed",
+        "the library-level focused tests passed"
+      ],
+      "artifact_requirements": [
+        "preserve complete dataset artifact contract"
+      ],
+      "verification_requirements": [
+        "run the focused bin-level verification"
+      ]
+    }
+  ]
+}

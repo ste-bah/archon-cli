@@ -1,0 +1,15 @@
+[
+  {
+    "item_id": "retry-TASK-TDL-010-aggregate-verification",
+    "canonical_task_ids": ["TASK-TDL-010"],
+    "commands": [
+      {
+        "command": "cargo test -p archon-trading registry -- --nocapture",
+        "kind": "test",
+        "required_evidence": "Exit code 0."
+      }
+    ],
+    "artifact_requirements": [],
+    "source_item_id": "impl-TASK-TDL-010-registry-schema-artifact-contract-verification"
+  }
+]

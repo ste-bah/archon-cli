@@ -81,6 +81,17 @@ fn generated_trading_workflow_has_bounded_remediation_loop() {
         Some(true)
     );
 
+    let post_tests = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "post-remediation-focused-tests")
+        .unwrap();
+    assert!(
+        post_tests.task.as_deref().is_some_and(|task| task
+            .contains("do not return unverifiable only because there were no remediation items")),
+        "empty remediation inventory must be a verifiable no-op"
+    );
+
     let gate = spec
         .stages
         .iter()

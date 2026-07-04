@@ -299,7 +299,7 @@ fn command_stage_prompt_does_not_treat_wsl_jobs_as_macos_default() {
 
 #[test]
 fn harness_planner_prompt_requires_restricted_host_api() {
-    let prompt = harness_planner_prompt("Implement a workflow task.");
+    let prompt = harness_planner_prompt("Implement a workflow task.", None);
 
     assert!(prompt.contains("export default async function workflow(w)"));
     assert!(prompt.contains("Use only these host API calls"));
@@ -324,7 +324,10 @@ fn harness_planner_prompt_requires_restricted_host_api() {
 
 #[test]
 fn harness_planner_prompt_keeps_workflows_task_shaped() {
-    let prompt = harness_planner_prompt("Implement a Rust workflow task and run focused tests.");
+    let prompt = harness_planner_prompt(
+        "Implement a Rust workflow task and run focused tests.",
+        None,
+    );
 
     assert!(prompt.contains("Shape the workflow to the task"));
     assert!(prompt.contains("Audit/review/research/planning is usually read-only"));
@@ -336,7 +339,7 @@ fn harness_planner_prompt_keeps_workflows_task_shaped() {
 
 #[test]
 fn harness_planner_prompt_requires_explicit_fanout_item_contracts() {
-    let prompt = harness_planner_prompt("Implement a decomposed PRD.");
+    let prompt = harness_planner_prompt("Implement a decomposed PRD.", None);
 
     assert!(prompt.contains("Every w.fanout or w.parallel that iterates work"));
     assert!(prompt.contains("w.fanout(\"id\", inventory.items"));
@@ -348,8 +351,10 @@ fn harness_planner_prompt_requires_explicit_fanout_item_contracts() {
 
 #[test]
 fn harness_planner_prompt_separates_report_artifacts_from_repo_implementation() {
-    let prompt =
-        harness_planner_prompt("Implement T140 readiness and adversarial review artifacts.");
+    let prompt = harness_planner_prompt(
+        "Implement T140 readiness and adversarial review artifacts.",
+        None,
+    );
 
     assert!(prompt.contains("Report-only deliverables"));
     assert!(prompt.contains("w.agent or w.reduce artifacts"));

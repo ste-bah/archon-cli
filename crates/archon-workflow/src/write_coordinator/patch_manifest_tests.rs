@@ -178,6 +178,32 @@ fn undeclared_write_rejected() {
 }
 
 #[test]
+fn manifest_config_requires_explicit_ownership() {
+    let repo = canonical_repo();
+    let plan = plan_for(repo.path(), &["src/lib.rs"]);
+    let captured = manual_capture(b"+chrono = \"0.4\"\n", &["Cargo.toml"]);
+    match validate_patch(&captured, &plan, &cfg(), "ok") {
+        Err(PatchError::UndeclaredWrite { path }) => assert_eq!(path, "Cargo.toml"),
+        other => panic!("expected undeclared manifest rejection, got {other:?}"),
+    }
+}
+
+#[test]
+fn explicitly_owned_manifest_config_is_allowed() {
+    let repo = canonical_repo();
+    let plan = plan_for(repo.path(), &["Cargo.toml"]);
+    std::fs::create_dir_all(&plan.isolated_root).expect("isolated root");
+    std::fs::write(
+        plan.isolated_root.join("Cargo.toml"),
+        "[package]\nname = \"x\"\n",
+    )
+    .expect("manifest");
+    let captured = manual_capture(b"+[package]\n", &["Cargo.toml"]);
+
+    validate_patch(&captured, &plan, &cfg(), "ok").expect("explicit manifest ownership passes");
+}
+
+#[test]
 fn patch_too_large_rejected() {
     let repo = canonical_repo();
     let plan = plan_for(repo.path(), &["src/lib.rs"]);

@@ -125,7 +125,7 @@ impl<'a> SelfModelStore<'a> {
                 recommended_caution: None,
             })
             .collect();
-        clusters.sort_by(|a, b| b.last_seen_at.cmp(&a.last_seen_at));
+        clusters.sort_by_key(|cluster| std::cmp::Reverse(cluster.last_seen_at));
         clusters.truncate(limit);
         Ok(clusters)
     }

@@ -67,6 +67,8 @@ impl WorkflowPolicy {
     /// (e.g. `local_provider_max_agents`, OQ-DWF-003) reach the executor.
     pub fn from_config(config: &WorkflowConfig) -> Self {
         Self {
+            max_parallelism: config.default_max_parallelism,
+            max_agents_per_run: config.default_max_agents,
             local_provider_max_agents: config.local_provider_max_agents,
             missing_unit_remediation_max_attempts: config.missing_unit_remediation_max_attempts,
             write_coordinator: config.write_coordinator.clone(),

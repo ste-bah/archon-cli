@@ -161,6 +161,8 @@ async fn execute_tier1_agent(
             system,
             tools: vec![],
             allowed_tools,
+            timeout_secs: None,
+            disable_auto_background: false,
         })
         .await
         .map_err(|e| GameTheoryError::Storage {

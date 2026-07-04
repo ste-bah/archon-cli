@@ -90,6 +90,7 @@ impl Agent {
                                     run_in_background: true,
                                     cwd: None,
                                     isolation: None,
+                                    provider_env: None,
                                 };
                                     let resume_json =
                                         serde_json::to_string(&resume_request).unwrap_or_default();

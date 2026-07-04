@@ -1,0 +1,62 @@
+[
+  {
+    "blocker": "No downstream task may treat datasets as production-ready if registry entries are incomplete or native/production fields are unknown.",
+    "canonical_task_ids": [
+      "TASK-TDL-010"
+    ],
+    "depends_on": [
+      "TASK-TDL-001"
+    ],
+    "id": "VERIFY-TDL-010",
+    "item_id": "VERIFY-TDL-010",
+    "required_evidence": {
+      "artifact_paths": [
+        ".archon/trading-lab/data/registry.json",
+        ".archon/trading-lab/data/datasets/<dataset-id>/<version>/metadata.json"
+      ],
+      "commands_required": true,
+      "direct_checks": [
+        "Healthy registry entries point only to complete dataset versions."
+      ],
+      "focused_tests": [
+        "registry schema migration",
+        "dataset id/version validation"
+      ]
+    },
+    "target_files": [
+      "crates/archon-trading/src/data_lake.rs",
+      "src/command/trading_data.rs"
+    ],
+    "title": "Verify registry v2, migration, artifact contract, and command/TUI parity"
+  },
+  {
+    "blocker": "Any validation error, missing metadata, or missing native flag blocks production eligibility.",
+    "canonical_task_ids": [
+      "TASK-TDL-020"
+    ],
+    "depends_on": [
+      "VERIFY-TDL-010"
+    ],
+    "id": "VERIFY-TDL-020",
+    "item_id": "VERIFY-TDL-020",
+    "required_evidence": {
+      "artifact_paths": [
+        ".archon/trading-lab/data/datasets/<dataset-id>/<version>/validation.json"
+      ],
+      "commands_required": true,
+      "direct_checks": [
+        "Missing native_interval is false.",
+        "Missing production_eligible is false."
+      ],
+      "focused_tests": [
+        "invalid timestamp",
+        "duplicate timestamp",
+        "diagnostic-only mode"
+      ]
+    },
+    "target_files": [
+      "crates/archon-trading/src/data_store.rs"
+    ],
+    "title": "Verify OHLCV validation reports and native production gates"
+  }
+]

@@ -1,0 +1,27 @@
+[
+  {
+    "id": "verify-TASK-TDL-010-registry-migration-retry",
+    "item_id": "verify-TASK-TDL-010-registry-migration-retry",
+    "canonical_task_ids": ["TASK-TDL-010"],
+    "commands": [
+      {
+        "command": "cargo test -p archon-trading v1_registry_migrates_with_backup_on_first_write -- --nocapture",
+        "kind": "test",
+        "required_evidence": "Exit code 0."
+      }
+    ],
+    "expected_artifacts": [],
+    "source_item_id": "impl-TASK-TDL-010-registry-schema-artifact-contract-verification"
+  },
+  {
+    "id": "verify-TASK-TDL-010-manual-fixture-retry",
+    "item_id": "verify-TASK-TDL-010-manual-fixture-retry",
+    "canonical_task_ids": ["TASK-TDL-010"],
+    "commands": ["cargo run --bin archon -- trading data ingest-ohlcv ..."],
+    "artifact_checks": [
+      "$TEMP_ROOT/.archon/trading-lab/data/registry.json",
+      "$TEMP_ROOT/exported-bars.json"
+    ],
+    "source_item_id": "impl-TASK-TDL-010-registry-schema-artifact-contract-verification"
+  }
+]

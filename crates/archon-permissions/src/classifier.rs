@@ -236,9 +236,9 @@ fn split_shell_chain(command: &str) -> Vec<&str> {
         }
 
         if !in_single && !in_double {
-            let op_len = if ch == '&' && bytes.get(i + 1) == Some(&b'&') {
-                2
-            } else if ch == '|' && bytes.get(i + 1) == Some(&b'|') {
+            let two_char_op = (ch == '&' && bytes.get(i + 1) == Some(&b'&'))
+                || (ch == '|' && bytes.get(i + 1) == Some(&b'|'));
+            let op_len = if two_char_op {
                 2
             } else if ch == '|' || ch == ';' || ch == '\n' {
                 1

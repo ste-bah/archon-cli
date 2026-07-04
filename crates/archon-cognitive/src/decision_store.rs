@@ -51,7 +51,10 @@ impl<'a> DecisionStore<'a> {
             ScriptMutability::Immutable,
             "get cognitive decision",
         )?;
-        rows.rows.first().map(row_to_decision).transpose()
+        rows.rows
+            .first()
+            .map(|row| row_to_decision(row))
+            .transpose()
     }
 
     pub fn list_for_session(
@@ -69,7 +72,7 @@ impl<'a> DecisionStore<'a> {
             "list cognitive decisions by session",
         )?;
         let mut decisions = rows_to_decisions(rows)?;
-        decisions.sort_by(|left, right| right.turn_number.cmp(&left.turn_number));
+        decisions.sort_by_key(|decision| std::cmp::Reverse(decision.turn_number));
         decisions.truncate(limit);
         Ok(decisions)
     }

@@ -116,6 +116,7 @@ fn embed_one(provider: Arc<dyn LocalEmbeddingProvider>, batch: EmbeddingBatch) -
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_embedding_batches(
     db: &DbInstance,
     chunks: &[ChunkArtifact],
@@ -157,6 +158,7 @@ fn build_embedding_batches(
     batches
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_embedded_batch(
     db: &DbInstance,
     embedded: EmbeddedBatch,

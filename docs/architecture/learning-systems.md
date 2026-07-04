@@ -405,9 +405,9 @@ max_runtime_ms = 300000
 
 [learning.gnn.auto_trainer]
 enabled = true
-min_throttle_ms = 3600000     # 1 hour
+min_throttle_ms = 86400000    # 24 hours
 trigger_new_memories = 20
-trigger_elapsed_ms = 21600000 # 6 hours
+trigger_elapsed_ms = 86400000 # 24 hours
 trigger_corrections = 3
 first_run_threshold = 30
 max_runtime_ms = 300000       # 5 minutes

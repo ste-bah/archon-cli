@@ -139,7 +139,7 @@ impl<'a> CognitiveInspection<'a> {
             .iter()
             .map(|row| row_to_decision_summary(row))
             .collect();
-        values.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        values.sort_by_key(|value| std::cmp::Reverse(value.created_at));
         values.truncate(limit);
         Ok(values)
     }
@@ -170,7 +170,7 @@ impl<'a> CognitiveInspection<'a> {
             .iter()
             .map(|row| row_to_reflection_summary(row))
             .collect();
-        values.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        values.sort_by_key(|value| std::cmp::Reverse(value.created_at));
         values.truncate(limit);
         Ok(values)
     }
@@ -189,7 +189,7 @@ impl<'a> CognitiveInspection<'a> {
             .iter()
             .map(|row| self.row_to_proposal(row))
             .collect();
-        values.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        values.sort_by_key(|value| std::cmp::Reverse(value.created_at));
         values.truncate(limit);
         Ok(values)
     }
@@ -204,7 +204,7 @@ impl<'a> CognitiveInspection<'a> {
             "query cognitive tick audit",
         )?;
         let mut ticks: Vec<_> = rows.rows.iter().map(|row| row_to_tick(row)).collect();
-        ticks.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        ticks.sort_by_key(|tick| std::cmp::Reverse(tick.created_at));
         Ok(ticks.into_iter().next())
     }
 

@@ -102,7 +102,13 @@ impl WorkflowV2Evidence {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowV2EvidenceKind {
-    #[serde(alias = "inspect")]
+    #[serde(
+        alias = "inspect",
+        alias = "task_file",
+        alias = "task_files",
+        alias = "source_file",
+        alias = "source_files"
+    )]
     Inspection,
     Implementation,
     Test,

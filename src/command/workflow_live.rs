@@ -1,9 +1,6 @@
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-
 use anyhow::Result;
 use archon_core::agents::AgentRegistry;
-use archon_core::config::ArchonConfig;
+use archon_core::config::{ArchonConfig, GeneratedWorkflowConfig};
 use archon_core::env_vars::ArchonEnvVars;
 use archon_pipeline::runner::LlmClient;
 use archon_tui::app::TuiEvent;
@@ -13,12 +10,13 @@ use archon_workflow::{
     WorkflowBundleOrigin, WorkflowConfig, WorkflowExecutor, WorkflowPolicy, WorkflowRun,
     WorkflowStageRunner, WorkflowStore, WorkflowV2HarnessValidator,
 };
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use crate::command::pipeline_support::build_pipeline_adapter;
+use crate::command::pipeline_support::build_subagent_pipeline_adapter;
 use crate::command::workflow::{load_spec_file, load_template, run_action};
 use crate::command::workflow_status_blocks;
 use crate::command::workflow_world_learning;
-
 #[cfg(test)]
 #[path = "workflow_live_planner_repair_tests.rs"]
 mod planner_repair_tests;
@@ -29,17 +27,27 @@ mod tests;
 mod workflow_agent_select;
 #[path = "workflow_live_approval.rs"]
 mod workflow_live_approval;
-#[path = "workflow_live_compat.rs"]
-mod workflow_live_compat;
 #[cfg(test)]
 #[path = "workflow_live_execution_tests.rs"]
 mod workflow_live_execution_tests;
+#[path = "workflow_live_generated_contract.rs"]
+mod workflow_live_generated_contract;
+#[path = "workflow_live_generated_scaffold.rs"]
+mod workflow_live_generated_scaffold;
+#[path = "workflow_live_generated_semantics.rs"]
+mod workflow_live_generated_semantics;
+#[path = "workflow_live_generated_semantics_support.rs"]
+mod workflow_live_generated_semantics_support;
+#[path = "workflow_live_generated_semantics_verification.rs"]
+mod workflow_live_generated_semantics_verification;
 #[path = "workflow_live_items.rs"]
 mod workflow_live_items;
 #[path = "workflow_live_planner.rs"]
 mod workflow_live_planner;
 #[path = "workflow_live_prompt.rs"]
 mod workflow_live_prompt;
+#[path = "workflow_live_repo_root.rs"]
+mod workflow_live_repo_root;
 #[path = "workflow_live_retry.rs"]
 mod workflow_live_retry;
 #[path = "workflow_live_runner.rs"]
@@ -47,6 +55,8 @@ mod workflow_live_runner;
 #[cfg(test)]
 #[path = "workflow_live_runner_tests.rs"]
 mod workflow_live_runner_tests;
+#[path = "workflow_live_task_universe.rs"]
+mod workflow_live_task_universe;
 #[cfg(test)]
 #[path = "workflow_live_test_support.rs"]
 mod workflow_live_test_support;
@@ -57,12 +67,14 @@ mod workflow_live_v2_host;
 #[cfg(test)]
 #[path = "workflow_live_v2_host_tests.rs"]
 mod workflow_live_v2_host_tests;
+#[path = "workflow_live_verification_contract.rs"]
+mod workflow_live_verification_contract;
 #[cfg(test)]
 #[path = "workflow_v2_live_tests.rs"]
 mod workflow_v2_live_tests;
 
 use workflow_live_approval::{LiveApprovalOutcome, gate_live_approval};
-use workflow_live_planner::{LivePlan, plan_live, render_live_plan};
+use workflow_live_planner::{WorkflowScriptPlan, plan_live, render_live_plan};
 use workflow_live_runner::PipelineWorkflowRunner;
 
 pub(crate) fn should_spawn_live(action: &CommandAction) -> bool {
@@ -86,12 +98,14 @@ pub(crate) fn spawn_live_workflow(
 ) {
     let _ = tui_tx.send(TuiEvent::TextDelta(live_start_message(&action)));
     archon_observability::spawn_named("dynamic-workflow-run", async move {
+        let generated_config = load_generated_workflow_config(&cwd, config_path.as_deref());
         let result = run_live_action(
             &cwd,
             action,
             llm,
             tui_tx.clone(),
             config_path,
+            generated_config,
             true,
             LiveApprovalMode::InteractiveSurface,
         )
@@ -115,8 +129,9 @@ pub(crate) async fn run_live_cli_action(
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
 ) -> Result<String> {
-    let adapter = build_pipeline_adapter(config, env_vars, "workflow_cli").await?;
-    let llm: Arc<dyn LlmClient> = Arc::new(adapter);
+    let llm =
+        build_subagent_pipeline_adapter(config, env_vars, "workflow_cli", cwd, "workflow-cli")
+            .await?;
     let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(128);
     let config_path = env_vars
         .config_dir
@@ -129,6 +144,7 @@ pub(crate) async fn run_live_cli_action(
         llm,
         tui_tx,
         Some(config_path),
+        config.workflow.generated.clone(),
         true,
         LiveApprovalMode::CliYes,
     )
@@ -156,11 +172,13 @@ async fn run_live_action(
     llm: Arc<dyn LlmClient>,
     tui_tx: TuiEventSender,
     config_path: Option<PathBuf>,
+    generated_config: GeneratedWorkflowConfig,
     workspace_boundary_supported: bool,
     approval_mode: LiveApprovalMode,
 ) -> Result<String> {
     let store = WorkflowStore::project(cwd);
-    let executor = WorkflowExecutor::new(store.clone(), live_policy(cwd, config_path.as_deref()));
+    let policy = live_policy(cwd, config_path.as_deref());
+    let executor = WorkflowExecutor::new(store.clone(), policy.clone());
     let runner = PipelineWorkflowRunner {
         llm: llm.clone(),
         tui_tx: tui_tx.clone(),
@@ -174,14 +192,28 @@ async fn run_live_action(
     let mut approval_notes = Vec::new();
     let report = match action {
         CommandAction::Plan { task } => {
-            let mut plan = plan_live(&store, &task, llm.clone(), tui_tx.clone()).await?;
-            cap_live_plan_parallelism(&mut plan, &runner);
+            let mut plan = plan_live(
+                &store,
+                &task,
+                llm.clone(),
+                tui_tx.clone(),
+                &generated_config,
+            )
+            .await?;
+            cap_live_plan_parallelism(&mut plan, &runner, &policy);
             return Ok(render_live_plan(&plan)?);
         }
         CommandAction::PlanSpec { path } => return Ok(load_spec_file(cwd, &path)?.to_yaml()?),
         CommandAction::Run { task } => {
-            let mut plan = plan_live(&store, &task, llm.clone(), tui_tx.clone()).await?;
-            cap_live_plan_parallelism(&mut plan, &runner);
+            let mut plan = plan_live(
+                &store,
+                &task,
+                llm.clone(),
+                tui_tx.clone(),
+                &generated_config,
+            )
+            .await?;
+            cap_live_plan_parallelism(&mut plan, &runner, &policy);
             return workflow_live_v2::run_generated_v2_workflow(
                 cwd,
                 &store,
@@ -209,18 +241,19 @@ async fn run_live_action(
             };
             executor.execute_with_runner(run, &runner).await?
         }
-        CommandAction::RunTemplate { name } => {
+        CommandAction::RunTemplate { name, args } => {
             let template = load_template(cwd, &name)?;
             let run = match template.harness_source {
                 Some(harness) => {
                     if let Ok(v2_plan) = WorkflowV2HarnessValidator.validate(&harness) {
                         let task = template.spec.task.clone();
-                        let mut plan = LivePlan {
-                            spec: template.spec,
-                            harness_source: harness.trim().to_string(),
-                            calls: v2_plan.calls,
-                        };
-                        cap_live_plan_parallelism(&mut plan, &runner);
+                        let mut plan = WorkflowScriptPlan::from_template(
+                            template.spec,
+                            &harness,
+                            v2_plan.calls,
+                        );
+                        plan.script_args = args;
+                        cap_live_plan_parallelism(&mut plan, &runner, &policy);
                         return workflow_live_v2::run_saved_v2_workflow(
                             cwd,
                             &store,
@@ -310,15 +343,27 @@ async fn run_live_action(
     Ok(output)
 }
 
-fn cap_live_plan_parallelism(plan: &mut LivePlan, runner: &PipelineWorkflowRunner) {
+fn cap_live_plan_parallelism(
+    plan: &mut WorkflowScriptPlan,
+    runner: &PipelineWorkflowRunner,
+    policy: &WorkflowPolicy,
+) {
     let cap = runner
         .max_concurrency()
         .unwrap_or(archon_core::subagent::SubagentManager::DEFAULT_MAX_CONCURRENT)
         .max(1) as u32;
-    plan.spec.max_parallelism = plan.spec.max_parallelism.min(cap).max(1);
-    for stage in &mut plan.spec.stages {
-        if let Some(max_parallelism) = stage.max_parallelism {
-            stage.max_parallelism = Some(max_parallelism.min(cap).max(1));
+    plan.max_parallelism = match plan.max_parallelism {
+        0 => cap,
+        requested => requested.min(cap).max(1),
+    };
+    let max_agents = policy.max_agents_per_run.max(1);
+    plan.max_agents = match plan.max_agents {
+        0 => max_agents,
+        requested => requested.min(max_agents).max(1),
+    };
+    for call in &mut plan.calls {
+        if let Some(max_parallelism) = call.options.max_parallelism {
+            call.options.max_parallelism = Some(max_parallelism.min(cap as usize).max(1));
         }
     }
 }
@@ -389,8 +434,31 @@ fn load_workflow_config(cwd: &Path, config_path: Option<&Path>) -> WorkflowConfi
         .unwrap_or_else(|_| WorkflowConfig::default())
 }
 
-/// TASK-WC-008: render the §17 compact write-coordination status block for
-/// every coordinated stage that left state on disk.
+fn load_generated_workflow_config(
+    cwd: &Path,
+    config_path: Option<&Path>,
+) -> GeneratedWorkflowConfig {
+    use archon_core::config_layers::{deep_merge_toml, discover_config_paths};
+    let mut merged = toml::Value::Table(toml::map::Map::new());
+    for layer in discover_config_paths(config_path, cwd, None) {
+        let Ok(text) = std::fs::read_to_string(&layer.path) else {
+            continue;
+        };
+        let Ok(value) = text.parse::<toml::Value>() else {
+            continue;
+        };
+        merged = deep_merge_toml(merged, value);
+    }
+    merged
+        .get("workflow")
+        .and_then(|workflow| workflow.get("generated"))
+        .cloned()
+        .unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()))
+        .try_into()
+        .unwrap_or_else(|_| GeneratedWorkflowConfig::default())
+}
+
+/// Render compact write-coordination status blocks left on disk.
 fn write_coordination_blocks(store: &WorkflowStore, run_id: &str) -> String {
     use archon_workflow::write_coordinator::status::{
         coordinated_stage_ids, read_status, render_compact,
@@ -414,8 +482,12 @@ fn live_start_message(action: &CommandAction) -> String {
         CommandAction::RunSpec { path } => {
             format!("Starting dynamic workflow from spec: {path}\n")
         }
-        CommandAction::RunTemplate { name } => {
-            format!("Starting dynamic workflow from template: {name}\n")
+        CommandAction::RunTemplate { name, args } => {
+            if args.is_some() {
+                format!("Starting dynamic workflow from template: {name} with args\n")
+            } else {
+                format!("Starting dynamic workflow from template: {name}\n")
+            }
         }
         CommandAction::Resume { run_id } => {
             format!("Resuming dynamic workflow {run_id} with the active TUI provider...\n")

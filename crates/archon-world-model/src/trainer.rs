@@ -21,7 +21,7 @@ pub struct DynamicTrainerPolicy {
 impl Default for DynamicTrainerPolicy {
     fn default() -> Self {
         Self {
-            min_throttle_ms: 3_600_000,
+            min_throttle_ms: 86_400_000,
             idle_required_ms: 300_000,
             battery_suspend_below_percent: 30,
             max_runtime_ms: 300_000,
@@ -70,7 +70,7 @@ impl Default for DynamicTrainerTriggerPolicy {
             trigger_new_rows: 100,
             trigger_surprises: 5,
             trigger_corrections: 3,
-            trigger_elapsed_ms: 21_600_000,
+            trigger_elapsed_ms: 86_400_000,
             first_run_threshold: 300,
         }
     }

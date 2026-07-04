@@ -13,6 +13,8 @@ use serde_json::json;
 
 use crate::cli_args::CognitiveDaemonAction;
 
+pub(crate) const ARCHON_ACTIVITY_FILE: &str = "archon-activity.json";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DaemonStartOutcome {
     Disabled,
@@ -65,6 +67,29 @@ pub(crate) fn ensure_daemon_started(
         pid: child.id(),
         state_path: status.state_path,
     })
+}
+
+pub(crate) fn record_archon_activity(config: &ArchonConfig, cwd: &Path, reason: &str) {
+    if !config.learning.cognitive.daemon.enabled {
+        return;
+    }
+    let root = cognitive_root(cwd, config);
+    if let Err(error) = write_archon_activity(&root, reason) {
+        tracing::debug!(error = %error, "record archon activity marker failed");
+    }
+}
+
+fn write_archon_activity(root: &Path, reason: &str) -> Result<()> {
+    std::fs::create_dir_all(root)?;
+    std::fs::write(
+        root.join(ARCHON_ACTIVITY_FILE),
+        serde_json::to_vec_pretty(&json!({
+            "pid": std::process::id(),
+            "reason": reason,
+            "updated_at": chrono::Utc::now(),
+        }))?,
+    )?;
+    Ok(())
 }
 
 fn start(config: &ArchonConfig, cwd: &Path, interval_ms: Option<u64>, as_json: bool) -> Result<()> {

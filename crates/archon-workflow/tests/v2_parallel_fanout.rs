@@ -63,6 +63,7 @@ async fn read_only_fanout_runs_branches_concurrently() {
         max_parallelism: 4,
         absolute_max_parallelism: 8,
         role_limits: BTreeMap::new(),
+        branch_timeout: None,
     });
     let active = Arc::new(AtomicUsize::new(0));
     let peak = Arc::new(AtomicUsize::new(0));
@@ -96,6 +97,7 @@ async fn read_only_fanout_observer_receives_each_branch_outcome() {
         max_parallelism: 2,
         absolute_max_parallelism: 8,
         role_limits: BTreeMap::new(),
+        branch_timeout: None,
     });
     let observed = Arc::new(AtomicUsize::new(0));
     let items = vec![item("inspect-a", "reader"), item("inspect-b", "reader")];
@@ -157,6 +159,7 @@ async fn global_cap_is_enforced() {
         max_parallelism: 2,
         absolute_max_parallelism: 8,
         role_limits: BTreeMap::new(),
+        branch_timeout: None,
     });
     let active = Arc::new(AtomicUsize::new(0));
     let peak = Arc::new(AtomicUsize::new(0));
@@ -190,6 +193,7 @@ async fn absolute_cap_clamps_requested_parallelism() {
         max_parallelism: 8,
         absolute_max_parallelism: 2,
         role_limits: BTreeMap::new(),
+        branch_timeout: None,
     });
     let active = Arc::new(AtomicUsize::new(0));
     let peak = Arc::new(AtomicUsize::new(0));
@@ -224,6 +228,7 @@ async fn per_role_cap_is_enforced() {
         max_parallelism: 4,
         absolute_max_parallelism: 8,
         role_limits,
+        branch_timeout: None,
     });
     let active_reviewers = Arc::new(AtomicUsize::new(0));
     let peak_reviewers = Arc::new(AtomicUsize::new(0));
@@ -339,6 +344,7 @@ async fn cancellation_stops_pending_branches() {
         max_parallelism: 1,
         absolute_max_parallelism: 8,
         role_limits: BTreeMap::new(),
+        branch_timeout: None,
     });
     let token = scheduler.cancellation_token();
     let items = vec![
@@ -369,5 +375,52 @@ async fn cancellation_stops_pending_branches() {
             .filter(|outcome| outcome.status == WorkflowV2Status::Cancelled)
             .count(),
         2
+    );
+}
+
+#[tokio::test]
+async fn read_only_fanout_times_out_stuck_branch_without_losing_siblings() {
+    let scheduler = WorkflowV2Scheduler::new(WorkflowV2SchedulerConfig {
+        max_parallelism: 4,
+        absolute_max_parallelism: 8,
+        role_limits: BTreeMap::new(),
+        branch_timeout: Some(Duration::from_millis(25)),
+    });
+    let items = vec![
+        item("quick-a", "reader"),
+        item("stuck", "reader"),
+        item("quick-b", "reader"),
+    ];
+
+    let report = scheduler
+        .run_read_only_fanout(items, |branch| async move {
+            if branch.id == "stuck" {
+                std::future::pending::<Result<WorkflowV2Result, WorkflowError>>().await
+            } else {
+                Ok(accepted(&format!("{} accepted", branch.id)))
+            }
+        })
+        .await
+        .expect("fanout returns typed timeout outcome");
+
+    assert_eq!(report.outcomes.len(), 3);
+    assert!(report.outcomes.iter().any(|outcome| {
+        outcome.item_id == "quick-a" && outcome.status == WorkflowV2Status::Accepted
+    }));
+    let timeout = report
+        .outcomes
+        .iter()
+        .find(|outcome| outcome.item_id == "stuck")
+        .expect("stuck branch outcome");
+    assert_eq!(timeout.status, WorkflowV2Status::Failed);
+    assert_eq!(
+        timeout.failure_kind,
+        Some(archon_workflow::BranchFailureKind::Execution)
+    );
+    assert!(
+        timeout
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("timed out"))
     );
 }

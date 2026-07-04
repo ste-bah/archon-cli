@@ -18,7 +18,7 @@ fn default_config_thresholds_are_tuned() {
     assert_eq!(config.first_run_threshold, 30);
     assert_eq!(config.trigger_new_memories, 20);
     assert_eq!(config.trigger_corrections, 3);
-    assert_eq!(config.min_throttle_ms, 3_600_000);
+    assert_eq!(config.min_throttle_ms, 86_400_000);
     assert_eq!(config.max_runtime_ms, 300_000);
 }
 
@@ -91,6 +91,7 @@ fn memory_trigger_fires_after_threshold() {
 fn memory_trigger_does_not_fire_below_threshold() {
     let config = AutoTrainerConfig {
         trigger_new_memories: 50,
+        trigger_elapsed_ms: 172_800_000,
         ..Default::default()
     };
     let state = TrainerState::default();

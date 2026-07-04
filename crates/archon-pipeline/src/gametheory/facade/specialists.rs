@@ -353,6 +353,8 @@ async fn execute_specialist_call(
             system: system.to_vec(),
             tools: vec![],
             allowed_tools,
+            timeout_secs: None,
+            disable_auto_background: false,
         })
         .await
     {

@@ -1,272 +1,182 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
+use archon_core::config::GeneratedWorkflowConfig;
 use archon_pipeline::runner::LlmClient;
 use archon_tui::app::TuiEvent;
 use archon_tui::event_channel::TuiEventSender;
 use archon_workflow::{
-    ProviderTier, WorkflowError, WorkflowSpec, WorkflowStore, WorkflowV2HarnessValidator,
-    WorkflowV2HostCall,
+    GeneratedWorkflowLearningContext, ProviderTier, RetryPolicy, StageKind, StageSpec,
+    WorkflowConfig, WorkflowError, WorkflowGeneratedScaffold, WorkflowLearningEvent, WorkflowSpec,
+    WorkflowStore, WorkflowV2HarnessValidator, WorkflowV2HostCall, WorkflowV2HostMethod,
+    workflow_scaffold_hash,
 };
 
-use super::workflow_live_compat::compatibility_spec_from_v2_calls;
+use super::workflow_live_generated_scaffold::decomposed_prd_scaffold;
+use super::workflow_live_generated_semantics::validate_generated_workflow_semantics;
 use super::workflow_live_prompt::{harness_planner_prompt, harness_repair_prompt};
+use super::workflow_live_repo_root::infer_target_repository_root;
 use super::workflow_live_retry;
 use super::workflow_live_runner::tier_model_alias;
+use super::workflow_live_task_universe::{
+    WorkflowV2TaskUniverse, extract_task_universe_for_generated_run,
+};
 
 #[derive(Debug, Clone)]
-pub(super) struct LivePlan {
-    pub(super) spec: WorkflowSpec,
+pub(super) struct WorkflowScriptPlan {
+    pub(super) name: String,
+    pub(super) task: String,
+    pub(super) target_repository_root: Option<String>,
+    pub(super) max_agents: u32,
+    pub(super) max_parallelism: u32,
     pub(super) harness_source: String,
     pub(super) calls: Vec<WorkflowV2HostCall>,
+    pub(super) task_universe: Option<WorkflowV2TaskUniverse>,
+    pub(super) script_args: Option<serde_json::Value>,
+    pub(super) governed_learning_context: Vec<GeneratedWorkflowLearningContext>,
+    pub(super) generated_config: GeneratedWorkflowConfig,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
-struct PlannerFailureAttempt {
-    kind: &'static str,
-    attempt: usize,
-    error: Option<String>,
-    content_hash: String,
-    content: String,
-    content_preview: String,
-}
-
-#[derive(Debug, Clone)]
-struct PlannerFailure {
-    error: String,
-    attempts: Vec<PlannerFailureAttempt>,
-}
-
-impl PlannerFailure {
-    fn new(error: impl Into<String>) -> Self {
+impl WorkflowScriptPlan {
+    pub(super) fn generated(
+        task: &str,
+        harness_source: &str,
+        calls: Vec<WorkflowV2HostCall>,
+        task_universe: Option<WorkflowV2TaskUniverse>,
+        generated_config: GeneratedWorkflowConfig,
+    ) -> Self {
+        let defaults = WorkflowConfig::default();
+        let target_repository_root = infer_target_repository_root(task, task_universe.as_ref());
         Self {
-            error: error.into(),
-            attempts: Vec::new(),
+            name: workflow_name_from_task(task),
+            task: task.to_string(),
+            target_repository_root,
+            max_agents: defaults.default_max_agents,
+            max_parallelism: defaults.default_max_parallelism,
+            harness_source: harness_source.trim().to_string(),
+            calls,
+            task_universe,
+            script_args: None,
+            governed_learning_context: Vec::new(),
+            generated_config,
         }
     }
 
-    fn with_attempts(error: impl Into<String>, attempts: Vec<PlannerFailureAttempt>) -> Self {
+    pub(super) fn from_template(
+        spec: WorkflowSpec,
+        harness_source: &str,
+        calls: Vec<WorkflowV2HostCall>,
+    ) -> Self {
         Self {
-            error: error.into(),
-            attempts,
+            name: spec.name,
+            task: spec.task,
+            target_repository_root: spec.target_repository_root,
+            max_agents: spec.max_agents,
+            max_parallelism: spec.max_parallelism,
+            harness_source: harness_source.trim().to_string(),
+            calls,
+            task_universe: None,
+            script_args: None,
+            governed_learning_context: Vec::new(),
+            generated_config: GeneratedWorkflowConfig::default(),
         }
     }
-}
 
-pub(super) async fn plan_live(
-    store: &WorkflowStore,
-    task: &str,
-    llm: Arc<dyn LlmClient>,
-    tui_tx: TuiEventSender,
-) -> Result<LivePlan> {
-    let _ = tui_tx.send(TuiEvent::TextDelta(
-        "Workflow planner: requesting workflow.js harness from active provider; no run directory exists until validation passes.\n"
-            .into(),
-    ));
-    match llm_plan(task, llm, &tui_tx).await {
-        Ok(plan) => {
-            let _ = tui_tx.send(TuiEvent::TextDelta(format!(
-                "Workflow planner: validated V2 harness '{}' with {} host call(s); creating run...\n",
-                plan.spec.name,
-                plan.calls.len()
-            )));
-            Ok(plan)
-        }
-        Err(failure) => {
-            let message = planner_failure_message(store, task, &failure.error, &failure.attempts);
-            let _ = tui_tx.send(TuiEvent::TextDelta(format!(
-                "Workflow planner failed workflow.js safety validation; live mode will not fall back to a fixed pipeline: {message}\n"
-            )));
-            Err(anyhow!(message))
+    pub(super) fn approval_metadata_spec(&self) -> WorkflowSpec {
+        WorkflowSpec {
+            schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
+            name: self.name.clone(),
+            task: self.task.clone(),
+            target_repository_root: self.target_repository_root.clone(),
+            max_parallelism: self.max_parallelism,
+            max_agents: self.max_agents,
+            provider_tiers: Default::default(),
+            stages: self
+                .calls
+                .iter()
+                .map(|call| metadata_stage(&self.task, call))
+                .collect(),
+            artifact_policy: Default::default(),
+            permissions: Default::default(),
+            quality_gates: Default::default(),
+            learning_hooks: Vec::new(),
         }
     }
-}
 
-fn planner_failure_message(
-    store: &WorkflowStore,
-    task: &str,
-    error: &str,
-    attempts: &[PlannerFailureAttempt],
-) -> String {
-    match record_planner_failure(store, task, error, attempts) {
-        Ok(path) => format!("{error}; planner failure recorded at {}", path.display()),
-        Err(log_err) => format!("{error}; planner failure recording also failed: {log_err}"),
+    pub(super) fn scaffold_hash(&self) -> String {
+        workflow_scaffold_hash(&self.harness_source)
+    }
+
+    pub(super) fn generated_scaffold(&self) -> Option<WorkflowGeneratedScaffold> {
+        let task_universe = self.task_universe.as_ref()?;
+        let task_universe = serde_json::to_value(task_universe).ok()?;
+        Some(WorkflowGeneratedScaffold::decomposed_prd(
+            self.harness_source.clone(),
+            task_universe,
+            decomposed_prd_prompt_slots(),
+            self.calls.clone(),
+            self.governed_learning_context.clone(),
+        ))
     }
 }
 
-fn record_planner_failure(
-    store: &WorkflowStore,
-    task: &str,
-    error: &str,
-    attempts: &[PlannerFailureAttempt],
-) -> Result<PathBuf> {
-    let dir = store.root().join("planner-failures");
-    fs::create_dir_all(&dir)?;
-    let created_at = chrono::Utc::now().to_rfc3339();
-    let id = chrono::Utc::now().timestamp_millis();
-    let target = dir.join(format!("planner-failure-{id}.json"));
-    let tmp = target.with_extension("json.tmp");
-    let body = serde_json::json!({
-        "schema": "archon.workflow.planner_failure.v1",
-        "created_at": created_at,
-        "task": task,
-        "error": error,
-        "attempts": attempts,
-    });
-    fs::write(&tmp, serde_json::to_vec_pretty(&body)?)?;
-    fs::rename(&tmp, &target)?;
-    Ok(target)
+fn decomposed_prd_prompt_slots() -> BTreeMap<String, String> {
+    BTreeMap::from([
+        (
+            "read_only_discovery".to_string(),
+            "Parallel read-only PRD/task/repository/acceptance audits.".to_string(),
+        ),
+        (
+            "implementation_inventory".to_string(),
+            "Reducer turns taskUniverse plus discovery into dependency-aware implementation items."
+                .to_string(),
+        ),
+        (
+            "implementation_wave".to_string(),
+            "Coder fanout receives only dependency-ready readyImplementationItems with coordinated/worktree write mode."
+                .to_string(),
+        ),
+        (
+            "remediation".to_string(),
+            "Reducer and coder fanout process only non-accepted/non-noop wave outcomes.".to_string(),
+        ),
+        (
+            "verification".to_string(),
+            "Focused read-only verification must pass before completedIds unblock dependents."
+                .to_string(),
+        ),
+        (
+            "adversarial_review".to_string(),
+            "Read-only reducer review and remediation loop check PRD/TASK evidence before final acceptance."
+                .to_string(),
+        ),
+        (
+            "final_acceptance".to_string(),
+            "Final audit/report receive taskUniverse plus implementation, verification, review, and artifact evidence."
+                .to_string(),
+        ),
+    ])
 }
 
-async fn llm_plan(
-    task: &str,
-    llm: Arc<dyn LlmClient>,
-    tui_tx: &TuiEventSender,
-) -> std::result::Result<LivePlan, PlannerFailure> {
-    let response = workflow_live_retry::send_message_with_transient_retry(
-        &llm,
-        vec![serde_json::json!({
-            "role": "user",
-            "content": harness_planner_prompt(task),
-        })],
-        vec![serde_json::json!({
-            "type": "text",
-            "text": "You are Archon's provider-neutral dynamic workflow planner. Return only workflow.js JavaScript using the allowed w.* host API. Do not include hidden reasoning, credentials, provider names, model names, imports, filesystem, network, shell, or eval.",
-        })],
-        Vec::new(),
-        tier_model_alias(ProviderTier::Planner),
-        |attempt| {
-            let _ = tui_tx.send(TuiEvent::TextDelta(format!(
-                "Workflow planner: transient provider error; retrying harness request ({attempt}/3)...\n"
-            )));
-        },
-    )
-    .await
-    .map_err(|err| PlannerFailure::new(err.to_string()))?;
-    let raw = extract_javascript(&response.content);
-    validate_or_repair_harness(task, raw, llm, tui_tx).await
-}
+include!("workflow_live_planner_repair.rs");
 
-async fn validate_or_repair_harness(
-    task: &str,
-    raw: String,
-    llm: Arc<dyn LlmClient>,
-    tui_tx: &TuiEventSender,
-) -> std::result::Result<LivePlan, PlannerFailure> {
-    const MAX_REPAIRS: usize = 2;
-    let mut harness = raw;
-    let mut attempts = Vec::new();
-    for attempt in 0..=MAX_REPAIRS {
-        match compile_harness_plan(task, &harness) {
-            Ok(plan) => return Ok(plan),
-            Err(err) if attempt < MAX_REPAIRS => {
-                let error = err.to_string();
-                attempts.push(planner_attempt(
-                    "harness",
-                    attempt + 1,
-                    Some(&error),
-                    &harness,
-                ));
-                let repair_number = attempt + 1;
-                let _ = tui_tx.send(TuiEvent::TextDelta(format!(
-                    "Workflow planner: generated harness failed validation ({err}); requesting repaired harness ({repair_number}/{MAX_REPAIRS})...\n"
-                )));
-                harness = request_repaired_harness(task, &harness, error, llm.clone())
-                    .await
-                    .map_err(|err| {
-                        PlannerFailure::with_attempts(err.to_string(), attempts.clone())
-                    })?;
-            }
-            Err(err) => {
-                let error = err.to_string();
-                attempts.push(planner_attempt(
-                    "harness",
-                    attempt + 1,
-                    Some(&error),
-                    &harness,
-                ));
-                return Err(PlannerFailure::with_attempts(error, attempts));
-            }
-        }
-    }
-    unreachable!("harness repair loop either returns plan or final error")
-}
-
-fn planner_attempt(
-    kind: &'static str,
-    attempt: usize,
-    error: Option<&str>,
-    content: &str,
-) -> PlannerFailureAttempt {
-    PlannerFailureAttempt {
-        kind,
-        attempt,
-        error: error.map(str::to_string),
-        content_hash: {
-            use sha2::{Digest, Sha256};
-            hex::encode(Sha256::digest(content.as_bytes()))
-        },
-        content: content.to_string(),
-        content_preview: truncate_chars(content.trim(), 4000),
-    }
-}
-
-fn truncate_chars(value: &str, max: usize) -> String {
-    let mut out = value.chars().take(max).collect::<String>();
-    if value.chars().count() > max {
-        out.push_str("\n...[truncated]");
-    }
-    out
-}
-
-fn compile_harness_plan(
-    task: &str,
-    harness_source: &str,
-) -> archon_workflow::WorkflowResult<LivePlan> {
-    let plan = WorkflowV2HarnessValidator::default()
-        .validate(harness_source)
-        .map_err(|err| WorkflowError::SpecInvalid(err.to_string()))?;
-    let spec = compatibility_spec_from_v2_calls(task, &plan.calls);
-    Ok(LivePlan {
-        spec,
-        harness_source: harness_source.trim().to_string(),
-        calls: plan.calls,
-    })
-}
-
-async fn request_repaired_harness(
-    task: &str,
-    invalid_harness: &str,
-    error: String,
-    llm: Arc<dyn LlmClient>,
-) -> Result<String> {
-    let response = workflow_live_retry::send_message_with_transient_retry(
-        &llm,
-        vec![serde_json::json!({
-            "role": "user",
-            "content": harness_repair_prompt(task, invalid_harness, &error),
-        })],
-        vec![serde_json::json!({
-            "type": "text",
-            "text": "Repair the workflow.js harness only. Use only the allowed w.* host API and preserve provider neutrality.",
-        })],
-        Vec::new(),
-        tier_model_alias(ProviderTier::Planner),
-        |_| {},
-    )
-    .await?;
-    Ok(extract_javascript(&response.content))
-}
-
-pub(super) fn render_live_plan(plan: &LivePlan) -> Result<String> {
+pub(super) fn render_live_plan(plan: &WorkflowScriptPlan) -> Result<String> {
     let mut out = String::new();
     out.push_str(&format!(
         "Workflow V2 harness validated: {} ({} host call(s))\n",
-        plan.spec.name,
+        plan.name,
         plan.calls.len()
     ));
+    if plan.task_universe.is_some() {
+        out.push_str(&format!(
+            "Generated repair caps: max_repair_iterations={}, max_investigation_iterations={}\n",
+            plan.generated_config.max_repair_iterations,
+            plan.generated_config.max_investigation_iterations
+        ));
+    }
     for call in &plan.calls {
         out.push_str(&format!(
             "- {}: w.{} write_mode={:?}\n",
@@ -277,9 +187,152 @@ pub(super) fn render_live_plan(plan: &LivePlan) -> Result<String> {
     }
     out.push_str("\nworkflow.js:\n");
     out.push_str(&plan.harness_source);
-    out.push_str("\n\nworkflow.v2.compat.yaml:\n");
-    out.push_str(&plan.spec.to_yaml()?);
+    out.push_str("\n\nworkflow.approval-metadata.yaml:\n");
+    out.push_str(&plan.approval_metadata_spec().to_yaml()?);
     Ok(out)
+}
+
+fn metadata_stage(task: &str, call: &WorkflowV2HostCall) -> StageSpec {
+    let mut extra = call.options.extra.clone();
+    let condition = take_extra_string(&mut extra, "condition");
+    strip_reserved_stage_extra(&mut extra);
+    StageSpec {
+        id: call.id.clone(),
+        kind: stage_kind_for_call(call.method),
+        task: Some(call.options.task.clone().unwrap_or_else(|| {
+            format!(
+                "Approval metadata for V2 host call '{}' in generated workflow: {}",
+                call.id, task
+            )
+        })),
+        agent: None,
+        foreach: None,
+        reducer: None,
+        tool: declared_tool_name(call),
+        condition,
+        depends_on: Vec::new(),
+        provider_tier: Some(provider_tier_for_call(call.method)),
+        retry: RetryPolicy::default(),
+        input: serde_json::json!({
+            "runtime": "script_first_v2",
+            "metadata_only": true,
+            "host_call": call.method.as_str(),
+            "write_mode": call.write_mode,
+            "source": call.options.source.clone(),
+            "role": call.options.role.clone(),
+        }),
+        model: None,
+        provider: None,
+        expected_target_files: call.options.target_files.clone(),
+        verify_command: None,
+        max_parallelism: call.options.max_parallelism.map(|value| value as u32),
+        item_kind: call.write_mode.map(|_| StageKind::Implementation),
+        filter: None,
+        extra,
+    }
+}
+
+fn declared_tool_name(call: &WorkflowV2HostCall) -> Option<String> {
+    if call.method != WorkflowV2HostMethod::Tool {
+        return None;
+    }
+    call.options
+        .extra
+        .get("tool")
+        .or_else(|| call.options.extra.get("name"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+}
+
+fn take_extra_string(
+    extra: &mut std::collections::BTreeMap<String, serde_json::Value>,
+    key: &str,
+) -> Option<String> {
+    extra.remove(key).map(|value| match value {
+        serde_json::Value::String(text) => text,
+        other => other.to_string(),
+    })
+}
+
+fn strip_reserved_stage_extra(extra: &mut std::collections::BTreeMap<String, serde_json::Value>) {
+    for key in [
+        "id",
+        "kind",
+        "task",
+        "agent",
+        "foreach",
+        "reducer",
+        "tool",
+        "condition",
+        "depends_on",
+        "provider_tier",
+        "retry",
+        "input",
+        "model",
+        "provider",
+        "expected_target_files",
+        "verify_command",
+        "max_parallelism",
+        "item_kind",
+        "filter",
+    ] {
+        extra.remove(key);
+    }
+}
+
+fn stage_kind_for_call(method: WorkflowV2HostMethod) -> StageKind {
+    match method {
+        WorkflowV2HostMethod::Agent => StageKind::Agent,
+        WorkflowV2HostMethod::Fanout | WorkflowV2HostMethod::Parallel => StageKind::Fanout,
+        WorkflowV2HostMethod::Reduce | WorkflowV2HostMethod::FinalReport => StageKind::Reduce,
+        WorkflowV2HostMethod::Tool
+        | WorkflowV2HostMethod::Checkpoint
+        | WorkflowV2HostMethod::SaveArtifact
+        | WorkflowV2HostMethod::RequireArtifact => StageKind::Tool,
+        WorkflowV2HostMethod::Implementation => StageKind::Implementation,
+        WorkflowV2HostMethod::QualityGate => StageKind::QualityGate,
+        WorkflowV2HostMethod::HumanGate => StageKind::HumanGate,
+    }
+}
+
+fn provider_tier_for_call(method: WorkflowV2HostMethod) -> ProviderTier {
+    match method {
+        WorkflowV2HostMethod::Agent => ProviderTier::Researcher,
+        WorkflowV2HostMethod::Fanout
+        | WorkflowV2HostMethod::Parallel
+        | WorkflowV2HostMethod::Implementation => ProviderTier::Coder,
+        WorkflowV2HostMethod::Reduce | WorkflowV2HostMethod::FinalReport => ProviderTier::Reducer,
+        WorkflowV2HostMethod::QualityGate | WorkflowV2HostMethod::HumanGate => ProviderTier::Critic,
+        WorkflowV2HostMethod::Tool
+        | WorkflowV2HostMethod::Checkpoint
+        | WorkflowV2HostMethod::SaveArtifact
+        | WorkflowV2HostMethod::RequireArtifact => ProviderTier::Local,
+    }
+}
+
+fn workflow_name_from_task(task: &str) -> String {
+    let slug = task
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .take(8)
+        .collect::<Vec<_>>()
+        .join("-");
+    if slug.is_empty() {
+        "workflow-v2".to_string()
+    } else {
+        slug
+    }
 }
 
 fn extract_javascript(content: &str) -> String {
@@ -297,3 +350,7 @@ fn extract_javascript(content: &str) -> String {
     }
     trimmed.to_string()
 }
+
+#[cfg(test)]
+#[path = "workflow_live_planner_tests.rs"]
+mod tests;

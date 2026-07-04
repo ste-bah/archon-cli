@@ -19,6 +19,7 @@ fn cli_v2_prompt_contract_uses_typed_adapter_contract() {
         constraints: vec!["no plan-only result".into()],
         input: serde_json::json!({ "task_id": "T001" }),
         repository_root: Some("/repo".into()),
+        project_artifacts: Default::default(),
         target_files: vec!["src/lib.rs".into()],
     });
 
@@ -66,6 +67,7 @@ fn request(role: &str) -> WorkflowV2AgentRequest {
         constraints: Vec::new(),
         input: serde_json::json!({}),
         repository_root: None,
+        project_artifacts: Default::default(),
         target_files: Vec::new(),
     }
 }

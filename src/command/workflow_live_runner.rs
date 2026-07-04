@@ -78,6 +78,8 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             })],
             tools: Vec::new(),
             allowed_tools: allowed_tools(&request),
+            timeout_secs: None,
+            disable_auto_background: false,
         };
         let response = match workflow_live_retry::run_agent_with_transient_retry(
             &self.llm,
@@ -371,23 +373,47 @@ pub(crate) fn command_execution_stage(request: &StageRunRequest) -> bool {
     if command_execution_stage_id(&request.stage_id) {
         return true;
     }
+    if generated_v2_read_only_call(request) {
+        return false;
+    }
     let haystack = format!(
-        "{}\n{}\n{}",
+        "{}\n{}\n{}\n{}",
         request.stage_id,
         request.task,
         request
             .input
             .get("stage_task")
             .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
+            .unwrap_or_default(),
+        request.input
     )
     .to_ascii_lowercase();
     command_execution_text(&haystack)
 }
 
+fn generated_v2_read_only_call(request: &StageRunRequest) -> bool {
+    let Some(v2_call) = request.input.get("v2_call") else {
+        return false;
+    };
+    let write_mode = v2_call.get("write_mode");
+    if write_mode.is_some_and(|value| !value.is_null()) {
+        return false;
+    }
+    let method = v2_call
+        .get("method")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    matches!(
+        method,
+        "agent" | "fanout" | "parallel" | "reduce" | "finalReport" | "qualityGate" | "humanGate"
+    )
+}
+
 fn command_execution_stage_id(stage_id: &str) -> bool {
     let id = stage_id.to_ascii_lowercase().replace('-', "_");
-    id.ends_with("_tests")
+    id.starts_with("verification_wave_")
+        || id.starts_with("review_verification_wave_")
+        || id.ends_with("_tests")
         || id.contains("_post_tests")
         || id.contains("_focused_tests")
         || id.contains("_verification")

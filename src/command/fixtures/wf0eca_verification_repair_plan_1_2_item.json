@@ -1,0 +1,11 @@
+{
+  "canonical_task_ids": [
+    "TASK-TDL-010"
+  ],
+  "id": "retry-TASK-TDL-010-cli-parse-prd-data-commands",
+  "required_evidence": "Command exits 0 and output identifies trading_data_prd_commands_parse as passed.",
+  "retry_commands": [
+    "cargo test trading_data_prd_commands_parse"
+  ],
+  "source_item_id": "verify-TASK-TDL-010-cli-parse-prd-data-commands"
+}

@@ -475,9 +475,9 @@ max_runtime_ms = 300000        # 5 minutes max per training run
 # Set to false to disable autonomous retraining (only /learning-status retrain works).
 [learning.gnn.auto_trainer]
 enabled = true
-min_throttle_ms = 3600000      # 1 hour minimum between runs
+min_throttle_ms = 86400000     # 24 hours minimum between training runs
 trigger_new_memories = 20      # fire when N new memories accrued
-trigger_elapsed_ms = 21600000  # 6 hours
+trigger_elapsed_ms = 86400000  # 24 hours
 trigger_corrections = 3        # fire when N user corrections logged
 first_run_threshold = 30       # kickoff at startup if memory_count >= this
 max_runtime_ms = 300000        # 5 minutes max per run
@@ -596,13 +596,13 @@ min_observed_days = 7
 
 [learning.world_model.auto_trainer]
 enabled = true
-min_throttle_ms = 3600000
+min_throttle_ms = 86400000
 idle_required_ms = 300000
 battery_suspend_below_percent = 30
 trigger_new_rows = 100
 trigger_surprises = 5
 trigger_corrections = 3
-trigger_elapsed_ms = 21600000
+trigger_elapsed_ms = 86400000
 first_run_threshold = 300
 max_runtime_ms = 300000
 tick_interval_ms = 60000
@@ -805,6 +805,16 @@ max_retries = 2
 # agent pool.
 [subagent]
 max_concurrent = 4
+
+# ----------------------------------------------------------------------------
+# [workflow.generated] — Generated dynamic workflow repair/investigation caps
+# ----------------------------------------------------------------------------
+# Generated decomposed-PRD workflows keep orchestration in workflow.js. These
+# caps bound JS-owned semantic repair/investigation loops; runtime/safety
+# failures still stop terminally.
+[workflow.generated]
+max_repair_iterations = 3
+max_investigation_iterations = 3
 
 
 # ----------------------------------------------------------------------------

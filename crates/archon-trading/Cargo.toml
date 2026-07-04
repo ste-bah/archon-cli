@@ -13,6 +13,7 @@ serde.workspace = true
 blake3.workspace = true
 cozo.workspace = true
 csv.workspace = true
+chrono.workspace = true
 
 serde_json.workspace = true
 

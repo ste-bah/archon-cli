@@ -1,3 +1,4 @@
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use archon_pipeline::runner::{AgentExecutionRequest, LlmClient, PipelineType};
@@ -24,6 +25,7 @@ pub(super) struct LiveV2AgentClient {
     agent_names: Vec<String>,
     run_id: String,
     target_repository_root: Option<String>,
+    timeout_secs: Option<u64>,
 }
 
 impl LiveV2AgentClient {
@@ -33,6 +35,7 @@ impl LiveV2AgentClient {
         agent_names: Vec<String>,
         run_id: String,
         target_repository_root: Option<String>,
+        timeout_secs: Option<u64>,
     ) -> Self {
         Self {
             llm,
@@ -41,6 +44,7 @@ impl LiveV2AgentClient {
             agent_names,
             run_id,
             target_repository_root,
+            timeout_secs,
         }
     }
 
@@ -52,6 +56,19 @@ impl LiveV2AgentClient {
             agent_names: self.agent_names.clone(),
             run_id: self.run_id.clone(),
             target_repository_root: self.target_repository_root.clone(),
+            timeout_secs: self.timeout_secs,
+        }
+    }
+
+    pub(super) fn with_timeout_secs(&self, timeout_secs: Option<u64>) -> Self {
+        Self {
+            llm: self.llm.clone(),
+            tui_tx: self.tui_tx.clone(),
+            provider_tier: self.provider_tier,
+            agent_names: self.agent_names.clone(),
+            run_id: self.run_id.clone(),
+            target_repository_root: self.target_repository_root.clone(),
+            timeout_secs,
         }
     }
 
@@ -100,10 +117,10 @@ fn live_v2_subagent_max_concurrency() -> Option<usize> {
 }
 
 fn read_only_v2_fanout_parallelism(requested: Option<usize>, subagent_cap: Option<usize>) -> usize {
-    requested
-        .unwrap_or(8)
-        .max(1)
-        .min(subagent_cap.unwrap_or(usize::MAX).max(1))
+    let cap = subagent_cap
+        .unwrap_or(archon_core::subagent::SubagentManager::DEFAULT_MAX_CONCURRENT)
+        .max(1);
+    requested.map_or(cap, |requested| requested.max(1).min(cap))
 }
 
 #[async_trait::async_trait]
@@ -151,8 +168,10 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
                 "type": "text",
                 "text": v2_system_context(&stage_request),
             })],
-            tools: Vec::new(),
+            tools: super::workflow_live_provider_env::provider_env_tool_markers(request),
             allowed_tools: allowed_tools(&stage_request),
+            timeout_secs: self.timeout_secs,
+            disable_auto_background: true,
         };
         let response = match workflow_live_retry::run_agent_with_transient_retry(
             &self.llm,
@@ -207,6 +226,7 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
             constraints: Vec::new(),
             input: serde_json::Value::Null,
             repository_root: self.target_repository_root.clone(),
+            project_artifacts: Default::default(),
             target_files: Vec::new(),
         };
         self.run_agent_request(&request, prompt).await
@@ -252,6 +272,7 @@ fn stage_input_for_v2_agent(
                 serde_json::Value::String(root),
             );
         }
+        insert_project_artifact_context(object, request);
         object.insert(
             "stage_task".to_string(),
             serde_json::Value::String(request.task.clone()),
@@ -283,6 +304,107 @@ fn stage_input_for_v2_agent(
     input
 }
 
+fn insert_project_artifact_context(
+    object: &mut serde_json::Map<String, serde_json::Value>,
+    request: &WorkflowV2AgentRequest,
+) {
+    if request.project_artifacts.is_empty() {
+        return;
+    }
+    if let Some(root) = request.project_artifacts.project_root.clone() {
+        object.insert(
+            "project_artifact_root".to_string(),
+            serde_json::Value::String(root),
+        );
+    }
+    object.insert(
+        "project_artifact_roots".to_string(),
+        serde_json::json!(request.project_artifacts.artifact_roots),
+    );
+    let resolved = resolved_project_artifact_paths(object, request);
+    if !resolved.is_empty() {
+        object.insert(
+            "project_artifact_paths".to_string(),
+            serde_json::json!(resolved),
+        );
+    }
+    if request.is_write_capable() {
+        mark_required_bash(object);
+    }
+}
+
+fn resolved_project_artifact_paths(
+    object: &serde_json::Map<String, serde_json::Value>,
+    request: &WorkflowV2AgentRequest,
+) -> Vec<serde_json::Value> {
+    let Some(root) = request.project_artifacts.project_root.as_deref() else {
+        return Vec::new();
+    };
+    artifact_requirement_values(object.get("artifact_requirements"))
+        .into_iter()
+        .filter_map(|raw| resolved_project_artifact_path(root, &raw))
+        .map(|(raw, absolute)| serde_json::json!({ "path": raw, "absolute_path": absolute }))
+        .collect()
+}
+
+fn artifact_requirement_values(value: Option<&serde_json::Value>) -> Vec<String> {
+    match value {
+        Some(serde_json::Value::Array(items)) => items
+            .iter()
+            .flat_map(|item| artifact_requirement_values(Some(item)))
+            .collect(),
+        Some(serde_json::Value::String(path)) => vec![path.clone()],
+        Some(serde_json::Value::Object(object)) => ["path", "artifact_path", "artifactPath"]
+            .iter()
+            .filter_map(|key| object.get(*key).and_then(serde_json::Value::as_str))
+            .map(str::to_string)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn resolved_project_artifact_path(root: &str, raw: &str) -> Option<(String, String)> {
+    let raw = raw.trim();
+    if raw.is_empty() || path_has_parent_component(raw) {
+        return None;
+    }
+    let path = Path::new(raw);
+    if path.is_absolute() {
+        return path
+            .starts_with(root)
+            .then(|| (raw.to_string(), raw.to_string()));
+    }
+    Some((
+        raw.to_string(),
+        PathBuf::from(root).join(path).display().to_string(),
+    ))
+}
+
+fn path_has_parent_component(raw: &str) -> bool {
+    Path::new(raw)
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+}
+
+fn mark_required_bash(object: &mut serde_json::Map<String, serde_json::Value>) {
+    let extra = object
+        .entry("stage_extra".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    let Some(extra) = extra.as_object_mut() else {
+        return;
+    };
+    let tools = extra
+        .entry("required_tools".to_string())
+        .or_insert_with(|| serde_json::json!([]));
+    let Some(tools) = tools.as_array_mut() else {
+        *tools = serde_json::json!(["Bash"]);
+        return;
+    };
+    if !tools.iter().any(|tool| tool.as_str() == Some("Bash")) {
+        tools.push(serde_json::json!("Bash"));
+    }
+}
+
 fn stage_kind_for_v2_agent(request: &WorkflowV2AgentRequest) -> StageKind {
     if request.is_write_capable() {
         return StageKind::Implementation;
@@ -310,129 +432,5 @@ fn v2_system_context(request: &StageRunRequest) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use archon_workflow::{WorkflowV2HostCall, WorkflowV2HostMethod};
-    use std::path::PathBuf;
-
-    fn request(
-        method: WorkflowV2HostMethod,
-        write_mode: Option<WorkflowV2WriteMode>,
-    ) -> WorkflowV2AgentRequest {
-        WorkflowV2AgentRequest {
-            call: WorkflowV2HostCall {
-                id: "discover".to_string(),
-                method,
-                write_mode,
-                options: Default::default(),
-            },
-            role: if write_mode.is_some() {
-                "coder"
-            } else {
-                "researcher"
-            }
-            .to_string(),
-            task: "inspect repository and task files".to_string(),
-            constraints: Vec::new(),
-            input: serde_json::json!({ "objective": "test" }),
-            repository_root: Some("/repo".to_string()),
-            target_files: vec!["src/lib.rs".to_string()],
-        }
-    }
-
-    #[test]
-    fn read_only_v2_agent_gets_repository_cwd_and_read_tools() {
-        let stage = stage_request_for_v2_agent(
-            "wf-test",
-            ProviderTier::Researcher,
-            None,
-            &request(WorkflowV2HostMethod::Agent, None),
-        );
-
-        assert_eq!(stage.stage_kind, StageKind::Agent);
-        assert_eq!(
-            request_target_repository_root(&stage),
-            Some(PathBuf::from("/repo"))
-        );
-        let tools = allowed_tools(&stage);
-        assert!(tools.contains(&"Read".to_string()));
-        assert!(tools.contains(&"Grep".to_string()));
-        assert!(tools.contains(&"Glob".to_string()));
-        assert!(!tools.contains(&"Write".to_string()));
-    }
-
-    #[test]
-    fn write_capable_v2_agent_gets_full_tools_and_ownership_metadata() {
-        let stage = stage_request_for_v2_agent(
-            "wf-test",
-            ProviderTier::Coder,
-            Some("/fallback".to_string()),
-            &request(
-                WorkflowV2HostMethod::Implementation,
-                Some(WorkflowV2WriteMode::Coordinated),
-            ),
-        );
-
-        assert_eq!(stage.stage_kind, StageKind::Implementation);
-        assert_eq!(
-            request_target_repository_root(&stage),
-            Some(PathBuf::from("/repo"))
-        );
-        assert_eq!(
-            stage
-                .input
-                .get("write_coordination")
-                .and_then(|value| value.get("enabled"))
-                .and_then(serde_json::Value::as_bool),
-            Some(true)
-        );
-        let tools = allowed_tools(&stage);
-        assert!(tools.contains(&"Write".to_string()));
-        assert!(tools.contains(&"Edit".to_string()));
-        assert!(tools.contains(&"ApplyPatch".to_string()));
-    }
-
-    #[test]
-    fn worktree_v2_agent_marks_write_coordination_enabled() {
-        let stage = stage_request_for_v2_agent(
-            "wf-test",
-            ProviderTier::Coder,
-            None,
-            &request(
-                WorkflowV2HostMethod::Implementation,
-                Some(WorkflowV2WriteMode::Worktree),
-            ),
-        );
-
-        assert_eq!(
-            stage
-                .input
-                .get("write_coordination")
-                .and_then(|value| value.get("enabled"))
-                .and_then(serde_json::Value::as_bool),
-            Some(true)
-        );
-        assert_eq!(
-            stage
-                .input
-                .get("write_coordination")
-                .and_then(|value| value.get("mode"))
-                .and_then(serde_json::Value::as_str),
-            Some("worktree")
-        );
-    }
-
-    #[test]
-    fn read_only_fanout_parallelism_clamps_to_live_subagent_cap() {
-        assert_eq!(read_only_v2_fanout_parallelism(Some(8), Some(4)), 4);
-        assert_eq!(read_only_v2_fanout_parallelism(Some(2), Some(4)), 2);
-        assert_eq!(read_only_v2_fanout_parallelism(None, Some(4)), 4);
-        assert_eq!(read_only_v2_fanout_parallelism(Some(0), Some(4)), 1);
-    }
-
-    #[test]
-    fn read_only_fanout_parallelism_uses_requested_width_without_cap() {
-        assert_eq!(read_only_v2_fanout_parallelism(Some(8), None), 8);
-        assert_eq!(read_only_v2_fanout_parallelism(None, None), 8);
-    }
-}
+#[path = "workflow_live_v2_client_tests.rs"]
+mod tests;

@@ -1,0 +1,291 @@
+use super::*;
+use archon_workflow::{WorkflowV2HostCall, WorkflowV2HostMethod};
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+#[derive(Default)]
+struct RecordingClient {
+    last_request: Mutex<Option<AgentExecutionRequest>>,
+}
+
+#[async_trait::async_trait]
+impl LlmClient for RecordingClient {
+    async fn send_message(
+        &self,
+        _messages: Vec<serde_json::Value>,
+        _system: Vec<serde_json::Value>,
+        _tools: Vec<serde_json::Value>,
+        _model: &str,
+    ) -> anyhow::Result<archon_pipeline::runner::LlmResponse> {
+        Ok(archon_pipeline::runner::LlmResponse {
+            content: "fallback".to_string(),
+            tool_uses: Vec::new(),
+            tokens_in: 0,
+            tokens_out: 0,
+        })
+    }
+
+    async fn run_agent(
+        &self,
+        request: AgentExecutionRequest,
+    ) -> anyhow::Result<archon_pipeline::runner::LlmResponse> {
+        *self.last_request.lock().expect("recording lock") = Some(request);
+        Ok(archon_pipeline::runner::LlmResponse {
+            content: "recorded".to_string(),
+            tool_uses: Vec::new(),
+            tokens_in: 0,
+            tokens_out: 0,
+        })
+    }
+}
+
+fn request(
+    method: WorkflowV2HostMethod,
+    write_mode: Option<WorkflowV2WriteMode>,
+) -> WorkflowV2AgentRequest {
+    WorkflowV2AgentRequest {
+        call: WorkflowV2HostCall {
+            id: "discover".to_string(),
+            method,
+            write_mode,
+            options: Default::default(),
+        },
+        role: if write_mode.is_some() {
+            "coder"
+        } else {
+            "researcher"
+        }
+        .to_string(),
+        task: "inspect repository and task files".to_string(),
+        constraints: Vec::new(),
+        input: serde_json::json!({ "objective": "test" }),
+        repository_root: Some("/repo".to_string()),
+        project_artifacts: Default::default(),
+        target_files: vec!["src/lib.rs".to_string()],
+    }
+}
+
+#[test]
+fn read_only_v2_agent_gets_repository_cwd_and_read_tools() {
+    let stage = stage_request_for_v2_agent(
+        "wf-test",
+        ProviderTier::Researcher,
+        None,
+        &request(WorkflowV2HostMethod::Agent, None),
+    );
+
+    assert_eq!(stage.stage_kind, StageKind::Agent);
+    assert_eq!(
+        request_target_repository_root(&stage),
+        Some(PathBuf::from("/repo"))
+    );
+    let tools = allowed_tools(&stage);
+    assert!(tools.contains(&"Read".to_string()));
+    assert!(tools.contains(&"Grep".to_string()));
+    assert!(tools.contains(&"Glob".to_string()));
+    assert!(!tools.contains(&"Write".to_string()));
+    assert!(!tools.contains(&"Bash".to_string()));
+}
+
+#[test]
+fn generated_v2_verification_fanout_gets_bash_without_write_tools() {
+    let mut req = request(WorkflowV2HostMethod::Parallel, None);
+    req.call.id = "verification-wave-1".to_string();
+    req.input = serde_json::json!({
+        "focused_verification": [
+            {"command": "cargo test -p archon-trading data_store -- --nocapture"}
+        ]
+    });
+    let stage = stage_request_for_v2_agent("wf-test", ProviderTier::Coder, None, &req);
+
+    let tools = allowed_tools(&stage);
+
+    assert!(tools.contains(&"Bash".to_string()));
+    assert!(tools.contains(&"Read".to_string()));
+    assert!(!tools.contains(&"Write".to_string()));
+}
+
+#[test]
+fn generated_v2_verification_resolves_project_artifact_paths() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let v2_root = temp.path().join("project/.archon/workflows/wf-test/v2");
+    std::fs::create_dir_all(&v2_root).expect("v2 root");
+    let mut req = request(WorkflowV2HostMethod::Parallel, None);
+    req.call.id = "verification-wave-1".to_string();
+    req.project_artifacts = archon_workflow::project_artifact_context_from_v2_root(&v2_root);
+    req.input = serde_json::json!({
+        "artifact_requirements": [
+            ".archon/workflows/wf-test/artifacts/data-lake-gap-audit.json",
+            {"path": ".archon/trading-lab/data/registry.json"}
+        ],
+        "focused_verification": "check project artifacts"
+    });
+
+    let stage = stage_request_for_v2_agent("wf-test", ProviderTier::Coder, None, &req);
+    let paths = stage
+        .input
+        .get("project_artifact_paths")
+        .and_then(serde_json::Value::as_array)
+        .expect("resolved project artifact paths");
+
+    assert_eq!(paths.len(), 2);
+    assert!(paths.iter().any(|entry| {
+        entry
+            .get("absolute_path")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|path| {
+                path.ends_with(".archon/workflows/wf-test/artifacts/data-lake-gap-audit.json")
+            })
+    }));
+    assert!(!allowed_tools(&stage).contains(&"Write".to_string()));
+}
+
+#[test]
+fn write_capable_v2_agent_gets_full_tools_and_ownership_metadata() {
+    let stage = stage_request_for_v2_agent(
+        "wf-test",
+        ProviderTier::Coder,
+        Some("/fallback".to_string()),
+        &request(
+            WorkflowV2HostMethod::Implementation,
+            Some(WorkflowV2WriteMode::Coordinated),
+        ),
+    );
+
+    assert_eq!(stage.stage_kind, StageKind::Implementation);
+    assert_eq!(
+        request_target_repository_root(&stage),
+        Some(PathBuf::from("/repo"))
+    );
+    assert_eq!(
+        stage
+            .input
+            .get("write_coordination")
+            .and_then(|value| value.get("enabled"))
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    let tools = allowed_tools(&stage);
+    assert!(tools.contains(&"Write".to_string()));
+    assert!(tools.contains(&"Edit".to_string()));
+    assert!(tools.contains(&"ApplyPatch".to_string()));
+}
+
+#[test]
+fn generated_v2_write_with_project_artifacts_gets_bash_and_project_root() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let v2_root = temp.path().join("runtime/.archon/workflows/wf-test/v2");
+    std::fs::create_dir_all(&v2_root).expect("v2 root");
+    let mut req = request(
+        WorkflowV2HostMethod::Fanout,
+        Some(WorkflowV2WriteMode::Coordinated),
+    );
+    req.call.id = "remediation-wave-1".to_string();
+    req.project_artifacts = archon_workflow::project_artifact_context_from_v2_root(&v2_root);
+    req.input = serde_json::json!({
+        "artifact_requirements": [
+            {"path": ".archon/trading-lab/data/registry-migration-report.json"}
+        ]
+    });
+
+    let stage = stage_request_for_v2_agent("wf-test", ProviderTier::Coder, None, &req);
+    let tools = allowed_tools(&stage);
+
+    assert!(tools.contains(&"Bash".to_string()));
+    assert_eq!(
+        stage
+            .input
+            .get("project_artifact_root")
+            .and_then(serde_json::Value::as_str),
+        req.project_artifacts.project_root.as_deref()
+    );
+    assert_eq!(
+        stage
+            .input
+            .get("stage_extra")
+            .and_then(|value| value.get("required_tools"))
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(1)
+    );
+}
+
+#[test]
+fn worktree_v2_agent_marks_write_coordination_enabled() {
+    let stage = stage_request_for_v2_agent(
+        "wf-test",
+        ProviderTier::Coder,
+        None,
+        &request(
+            WorkflowV2HostMethod::Implementation,
+            Some(WorkflowV2WriteMode::Worktree),
+        ),
+    );
+
+    assert_eq!(
+        stage
+            .input
+            .get("write_coordination")
+            .and_then(|value| value.get("enabled"))
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        stage
+            .input
+            .get("write_coordination")
+            .and_then(|value| value.get("mode"))
+            .and_then(serde_json::Value::as_str),
+        Some("worktree")
+    );
+}
+
+#[test]
+fn read_only_fanout_parallelism_clamps_to_live_subagent_cap() {
+    assert_eq!(read_only_v2_fanout_parallelism(Some(8), Some(4)), 4);
+    assert_eq!(read_only_v2_fanout_parallelism(Some(2), Some(4)), 2);
+    assert_eq!(read_only_v2_fanout_parallelism(None, Some(4)), 4);
+    assert_eq!(read_only_v2_fanout_parallelism(Some(0), Some(4)), 1);
+}
+
+#[test]
+fn read_only_fanout_parallelism_uses_default_subagent_cap_when_executor_missing() {
+    assert_eq!(read_only_v2_fanout_parallelism(Some(8), None), 4);
+    assert_eq!(read_only_v2_fanout_parallelism(None, None), 4);
+}
+
+#[tokio::test]
+async fn generated_v2_agent_requests_are_foreground_with_configured_timeout() {
+    let recorder = Arc::new(RecordingClient::default());
+    let (tui_tx, _tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    let client = LiveV2AgentClient::new(
+        recorder.clone(),
+        tui_tx,
+        Vec::new(),
+        "wf-test".to_string(),
+        Some("/repo".to_string()),
+        Some(17),
+    );
+
+    let result = client
+        .run_agent_request(
+            &request(WorkflowV2HostMethod::Agent, None),
+            "inspect".to_string(),
+        )
+        .await
+        .expect("agent response");
+
+    assert_eq!(result, "recorded");
+    let recorded = recorder
+        .last_request
+        .lock()
+        .expect("recording lock")
+        .clone()
+        .expect("recorded request");
+    assert_eq!(recorded.pipeline_type, PipelineType::Workflow);
+    assert_eq!(recorded.timeout_secs, Some(17));
+    assert!(
+        recorded.disable_auto_background,
+        "generated V2 awaited host calls must remain foreground-controlled"
+    );
+}

@@ -46,6 +46,7 @@ async fn bash_timeout() {
     let tool = BashTool {
         timeout_secs: 1,
         max_output_bytes: 102400,
+        provider_env: None,
     };
     let result = tool
         .execute(
@@ -67,6 +68,7 @@ async fn workflow_bash_does_not_shorten_configured_timeout() {
     let tool = BashTool {
         timeout_secs: 1,
         max_output_bytes: 102400,
+        provider_env: None,
     };
     let ctx = ToolContext {
         session_id: "wf-test-run".into(),
@@ -92,6 +94,7 @@ async fn workflow_bash_ignores_shell_timeout_wrapper() {
     let tool = BashTool {
         timeout_secs: 1,
         max_output_bytes: 102400,
+        provider_env: None,
     };
     let ctx = ToolContext {
         session_id: "wf-test-run".into(),
@@ -117,6 +120,7 @@ async fn bash_output_truncation() {
     let tool = BashTool {
         timeout_secs: 10,
         max_output_bytes: 100,
+        provider_env: None,
     };
     let result = tool
         .execute(

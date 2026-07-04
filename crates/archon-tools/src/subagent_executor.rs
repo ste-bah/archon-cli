@@ -27,7 +27,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
-use crate::agent_tool::SubagentRequest;
+use crate::subagent_request::SubagentRequest;
 use crate::tool::ToolContext;
 
 // ---------------------------------------------------------------------------

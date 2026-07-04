@@ -65,9 +65,16 @@ async fn live_planner_uses_bounded_iterative_harness_repair() {
         calls: AtomicUsize::new(0),
     });
 
-    let plan = plan_live(&store, "inspect the repository", planner.clone(), tui_tx)
-        .await
-        .expect("second repaired harness should validate");
+    let generated_config = archon_core::config::GeneratedWorkflowConfig::default();
+    let plan = plan_live(
+        &store,
+        "inspect the repository",
+        planner.clone(),
+        tui_tx,
+        &generated_config,
+    )
+    .await
+    .expect("second repaired harness should validate");
 
     assert_eq!(plan.calls.len(), 1);
     assert_eq!(plan.calls[0].id, "discover");

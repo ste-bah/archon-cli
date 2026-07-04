@@ -43,6 +43,8 @@ pub enum TvReadAction {
     PineCompileCheck,
     ScreenshotCapture,
     ScriptVersionSync,
+    OhlcvNativeStatus,
+    OhlcvNativeCandles,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,6 +154,34 @@ impl TradingViewMcpAdapter {
         )
     }
 
+    pub fn ohlcv_native_status<T: TvMcpTransport>(
+        &self,
+        transport: &mut T,
+        symbol: &str,
+        timeframe: &str,
+    ) -> Result<TvMcpResponse, TvMcpError> {
+        self.read_call(
+            transport,
+            TvReadAction::OhlcvNativeStatus,
+            json!({ "symbol": symbol, "timeframe": timeframe }),
+        )
+    }
+
+    pub fn ohlcv_native_candles<T: TvMcpTransport>(
+        &self,
+        transport: &mut T,
+        symbol: &str,
+        timeframe: &str,
+        start: &str,
+        end: &str,
+    ) -> Result<TvMcpResponse, TvMcpError> {
+        self.read_call(
+            transport,
+            TvReadAction::OhlcvNativeCandles,
+            json!({ "symbol": symbol, "timeframe": timeframe, "start": start, "end": end }),
+        )
+    }
+
     pub fn write_action<T: TvMcpTransport>(
         &self,
         transport: &mut T,
@@ -238,6 +268,8 @@ const fn read_tool(action: TvReadAction) -> &'static str {
         TvReadAction::PineCompileCheck => "tv.pine_compile_check",
         TvReadAction::ScreenshotCapture => "tv.screenshot_capture",
         TvReadAction::ScriptVersionSync => "tv.script_version_sync",
+        TvReadAction::OhlcvNativeStatus => "tv.ohlcv_native_status",
+        TvReadAction::OhlcvNativeCandles => "tv.ohlcv_native_candles",
     }
 }
 

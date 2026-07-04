@@ -1,10 +1,14 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use super::project_artifact_completion::complete_project_artifact_requirements;
 use super::{
     WorkflowV2CommandKind, WorkflowV2CommandStatus, WorkflowV2EvidenceKind, WorkflowV2HostCall,
-    WorkflowV2Result, WorkflowV2Status, WorkflowV2TaskCoverageStatus, WorkflowV2WriteItem,
-    WorkflowV2WriteMode, validate_changed_files,
+    WorkflowV2ProjectArtifactContext, WorkflowV2Result, WorkflowV2Status,
+    WorkflowV2TaskCoverageStatus, WorkflowV2WriteItem, WorkflowV2WriteMode,
+    has_project_artifact_evidence, has_project_artifact_requirement,
+    load_project_artifact_branch_result, normalize_project_artifact_files,
+    normalize_target_for_repository, normalize_targets_for_repository, validate_changed_files,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -18,6 +22,11 @@ pub struct WorkflowV2AgentRequest {
     pub input: serde_json::Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository_root: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "WorkflowV2ProjectArtifactContext::is_empty"
+    )]
+    pub project_artifacts: WorkflowV2ProjectArtifactContext,
     #[serde(default)]
     pub target_files: Vec<String>,
 }
@@ -37,7 +46,6 @@ impl WorkflowV2AgentAdapter {
     pub fn new() -> Self {
         Self
     }
-
     pub fn build_prompt(&self, request: &WorkflowV2AgentRequest) -> String {
         let input = serde_json::to_string_pretty(&request.input)
             .unwrap_or_else(|_| request.input.to_string());
@@ -46,6 +54,8 @@ impl WorkflowV2AgentAdapter {
         } else {
             serde_json::to_string(&request.target_files).unwrap_or_else(|_| "[]".to_string())
         };
+        let artifact_roots = serde_json::to_string(&request.project_artifacts.artifact_roots)
+            .unwrap_or_else(|_| "[]".to_string());
         let constraints = if request.constraints.is_empty() {
             "[]".to_string()
         } else {
@@ -56,6 +66,11 @@ impl WorkflowV2AgentAdapter {
         } else {
             READ_ONLY_RULES
         };
+        let project_artifact_paths =
+            super::project_artifact_prompt::project_artifact_prompt_section(
+                &request.input,
+                &request.project_artifacts,
+            );
 
         format!(
             "## Archon Workflow V2 Agent Call\n\
@@ -63,7 +78,10 @@ impl WorkflowV2AgentAdapter {
              role: {role}\n\
              write_mode: {write_mode}\n\
              repository_root: {repository_root}\n\
+             project_artifact_root: {project_artifact_root}\n\
+             project_artifact_roots: {artifact_roots}\n\
              target_files: {target_files}\n\n\
+             {project_artifact_paths}\
              ## Task\n{task}\n\n\
              ## Constraints\n```json\n{constraints}\n```\n\n\
              ## Input\n```json\n{input}\n```\n\n\
@@ -79,13 +97,19 @@ impl WorkflowV2AgentAdapter {
             role = request.role,
             write_mode = write_mode_label(request.call.write_mode),
             repository_root = request.repository_root.as_deref().unwrap_or("<none>"),
+            project_artifact_root = request
+                .project_artifacts
+                .project_root
+                .as_deref()
+                .unwrap_or("<none>"),
+            artifact_roots = artifact_roots,
             target_files = target_files,
+            project_artifact_paths = project_artifact_paths,
             task = request.task,
             constraints = constraints,
             input = input,
         )
     }
-
     pub fn build_repair_prompt(
         &self,
         request: &WorkflowV2AgentRequest,
@@ -113,17 +137,22 @@ impl WorkflowV2AgentAdapter {
         output: &str,
     ) -> Result<WorkflowV2Result, WorkflowV2AgentError> {
         reject_forbidden_text(output)?;
-        let mut result: WorkflowV2Result = serde_json::from_str(output).map_err(|err| {
-            WorkflowV2AgentError::MalformedOutput(format!(
-                "agent output must be one JSON WorkflowV2Result object: {err}"
-            ))
-        })?;
-        normalize_read_only_test_inspection(request, &mut result);
-        result.validate().map_err(|err| {
-            WorkflowV2AgentError::InvalidResult(format!("agent result failed validation: {err}"))
-        })?;
-        validate_request_specific_result(request, &result)?;
-        Ok(result)
+        let mut result: WorkflowV2Result = match serde_json::from_str(output) {
+            Ok(result) => result,
+            Err(err) => {
+                return self
+                    .project_artifact_branch_result(request)?
+                    .ok_or_else(|| {
+                        WorkflowV2AgentError::MalformedOutput(format!(
+                            "agent output must be one JSON WorkflowV2Result object: {err}"
+                        ))
+                    });
+            }
+        };
+        match self.validate_agent_result(request, &mut result) {
+            Ok(()) => Ok(result),
+            Err(err) => self.project_artifact_branch_result(request)?.ok_or(err),
+        }
     }
 
     pub async fn run_with_repair<C>(
@@ -135,19 +164,73 @@ impl WorkflowV2AgentAdapter {
         C: WorkflowV2AgentClient + Sync,
     {
         let prompt = self.build_prompt(request);
-        let first = client.run_agent_request(request, prompt).await?;
+        let first = match client.run_agent_request(request, prompt).await {
+            Ok(first) => first,
+            Err(err) => return self.project_artifact_branch_result(request)?.ok_or(err),
+        };
         match self.parse_agent_output(request, &first) {
             Ok(result) => Ok(result),
             Err(first_error) => {
                 let repair_prompt = self.build_repair_prompt(request, &first, &first_error);
-                let repaired = client.run_agent_request(request, repair_prompt).await?;
-                self.parse_agent_output(request, &repaired)
-                    .map_err(|repair_error| WorkflowV2AgentError::RepairExhausted {
-                        first_error: Box::new(first_error),
-                        repair_error: Box::new(repair_error),
-                    })
+                let repaired = match client.run_agent_request(request, repair_prompt).await {
+                    Ok(repaired) => repaired,
+                    Err(err) => return self.project_artifact_branch_result(request)?.ok_or(err),
+                };
+                match self.parse_agent_output(request, &repaired) {
+                    Ok(result) => Ok(result),
+                    Err(repair_error) => self.project_artifact_branch_result(request)?.ok_or(
+                        WorkflowV2AgentError::RepairExhausted {
+                            first_error: Box::new(first_error),
+                            repair_error: Box::new(repair_error),
+                        },
+                    ),
+                }
             }
         }
+    }
+
+    fn validate_agent_result(
+        &self,
+        request: &WorkflowV2AgentRequest,
+        result: &mut WorkflowV2Result,
+    ) -> Result<(), WorkflowV2AgentError> {
+        normalize_read_only_test_inspection(request, result);
+        if request.is_write_capable() {
+            complete_project_artifact_requirements(
+                &request.call.id,
+                &request.input,
+                result,
+                &request.project_artifacts,
+            )
+            .map_err(|err| {
+                WorkflowV2AgentError::ImplementationChangedFilesOutsideOwnership(err.to_string())
+            })?;
+        }
+        result.validate().map_err(|err| {
+            WorkflowV2AgentError::InvalidResult(format!("agent result failed validation: {err}"))
+        })?;
+        validate_request_specific_result(request, result)
+    }
+
+    fn project_artifact_branch_result(
+        &self,
+        request: &WorkflowV2AgentRequest,
+    ) -> Result<Option<WorkflowV2Result>, WorkflowV2AgentError> {
+        if !request.is_write_capable() || request.project_artifacts.is_empty() {
+            return Ok(None);
+        }
+        let Some(mut result) =
+            load_project_artifact_branch_result(&request.call.id, &request.project_artifacts)
+                .map_err(|err| {
+                    WorkflowV2AgentError::ImplementationChangedFilesOutsideOwnership(
+                        err.to_string(),
+                    )
+                })?
+        else {
+            return Ok(None);
+        };
+        self.validate_agent_result(request, &mut result)?;
+        Ok(Some(result))
     }
 }
 
@@ -184,6 +267,10 @@ pub enum WorkflowV2AgentError {
     ImplementationAcceptedWithoutChanges,
     #[error("implementation noop requires typed task_coverage evidence")]
     ImplementationNoopWithoutTaskCoverage,
+    #[error(
+        "implementation noop with declared project artifacts requires existing artifact evidence"
+    )]
+    ImplementationNoopMissingProjectArtifactEvidence,
     #[error("implementation agent changed files outside declared target_files: {0}")]
     ImplementationChangedFilesOutsideOwnership(String),
     #[error("read-only agent result must not claim changed files")]
@@ -199,7 +286,7 @@ pub enum WorkflowV2AgentError {
 
 fn validate_request_specific_result(
     request: &WorkflowV2AgentRequest,
-    result: &WorkflowV2Result,
+    result: &mut WorkflowV2Result,
 ) -> Result<(), WorkflowV2AgentError> {
     reject_forbidden_result_text(result)?;
     if !request.is_write_capable() {
@@ -211,13 +298,26 @@ fn validate_request_specific_result(
     if plan_only_text(result) {
         return Err(WorkflowV2AgentError::PlanOnlyImplementation);
     }
+    normalize_project_artifact_files(&request.call.id, result, &request.project_artifacts)
+        .map_err(|err| {
+            WorkflowV2AgentError::ImplementationChangedFilesOutsideOwnership(err.to_string())
+        })?;
     validate_write_ownership(request, result)?;
     match result.status {
-        WorkflowV2Status::Accepted if result.files_changed.is_empty() => {
+        WorkflowV2Status::Accepted
+            if result.files_changed.is_empty()
+                && !has_project_artifact_evidence(result, &request.project_artifacts) =>
+        {
             Err(WorkflowV2AgentError::ImplementationAcceptedWithoutChanges)
         }
         WorkflowV2Status::Noop if !has_typed_noop_proof(result) => {
             Err(WorkflowV2AgentError::ImplementationNoopWithoutTaskCoverage)
+        }
+        WorkflowV2Status::Noop
+            if has_project_artifact_requirement(&request.input, &request.project_artifacts)
+                && !has_project_artifact_evidence(result, &request.project_artifacts) =>
+        {
+            Err(WorkflowV2AgentError::ImplementationNoopMissingProjectArtifactEvidence)
         }
         _ => Ok(()),
     }
@@ -254,10 +354,22 @@ fn has_successful_test_command(result: &WorkflowV2Result) -> bool {
 
 fn validate_write_ownership(
     request: &WorkflowV2AgentRequest,
-    result: &WorkflowV2Result,
+    result: &mut WorkflowV2Result,
 ) -> Result<(), WorkflowV2AgentError> {
     if result.files_changed.is_empty() {
         return Ok(());
+    }
+    let repository_root = request.repository_root.as_deref();
+    let target_files =
+        normalize_targets_for_repository(&request.call.id, &request.target_files, repository_root)
+            .map_err(|err| {
+                WorkflowV2AgentError::ImplementationChangedFilesOutsideOwnership(err.to_string())
+            })?;
+    for file in &mut result.files_changed {
+        file.path = normalize_target_for_repository(&request.call.id, &file.path, repository_root)
+            .map_err(|err| {
+                WorkflowV2AgentError::ImplementationChangedFilesOutsideOwnership(err.to_string())
+            })?;
     }
     let write_item = WorkflowV2WriteItem::new(
         request.call.id.clone(),
@@ -265,7 +377,7 @@ fn validate_write_ownership(
             .call
             .write_mode
             .unwrap_or(WorkflowV2WriteMode::Serial),
-        request.target_files.clone(),
+        target_files,
     );
     validate_changed_files(&write_item, result).map_err(|err| {
         WorkflowV2AgentError::ImplementationChangedFilesOutsideOwnership(err.to_string())
@@ -354,14 +466,17 @@ fn truncate_chars(value: &str, max_chars: usize) -> String {
     out
 }
 
-const READ_ONLY_RULES: &str =
-    "- This is read-only work: do not claim file edits and leave files_changed empty.";
+const READ_ONLY_RULES: &str = concat!(
+    "- This is read-only work: do not claim file edits and leave files_changed empty.\n",
+    "- For project artifact checks, use project_artifact_paths absolute_path values when present; otherwise resolve .archon/... paths under project_artifact_root, not repository_root."
+);
 
 const IMPLEMENTATION_RULES: &str = concat!(
     "- This is implementation-capable work.\n",
     "- If edits are required and made, status must be accepted and files_changed must list each changed path.\n",
-    "- If no edits are required because the work is already complete, status must be noop and task_coverage must include typed evidence.\n",
-    "- Status accepted with no files_changed is invalid for implementation work."
+    "- Repository source edits must stay under repository_root and declared target_files; workflow/project artifacts must be written under project_artifact_root when provided and listed in artifacts.\n",
+    "- If no edits are required because the work is already complete, status must be noop and task_coverage must include typed evidence; declared project artifacts also require existing artifact evidence.\n",
+    "- Status accepted with no files_changed is invalid unless concrete project artifact evidence was written under project_artifact_root."
 );
 
 const RESULT_SCHEMA: &str = r#"{
@@ -376,3 +491,10 @@ const RESULT_SCHEMA: &str = r#"{
   "residual_gaps": [{"id": "gap-id", "description": "remaining gap", "severity": "optional"}],
   "data": {"items": "optional typed payload for downstream fanout/reduce"}
 }"#;
+
+#[cfg(test)]
+#[path = "agent_adapter_project_artifact_completion_tests.rs"]
+mod project_artifact_completion_tests;
+#[cfg(test)]
+#[path = "agent_adapter_tests.rs"]
+mod tests;

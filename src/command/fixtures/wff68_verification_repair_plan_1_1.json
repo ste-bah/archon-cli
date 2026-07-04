@@ -1,0 +1,33 @@
+{
+  "status": "accepted",
+  "summary": "Verification repair is appropriate: retry the malformed verification evidence checks.",
+  "data": {
+    "repair_plan": {
+      "classification": "verification_repair_only",
+      "not_product_code_failure": true,
+      "retry_items": [
+        {
+          "action": "retry",
+          "canonical_task_ids": ["TASK-TDL-001"],
+          "expected_acceptance": "Exit 0. If .archon/trading-lab/data is absent, record zero-dataset state. If files are listed, reconcile exact paths against the gap report before accepting downstream generated artifacts.",
+          "item_id": "verify-TASK-TDL-001-zero-dataset-root-check",
+          "verification_shape": "Run from repository root: test ! -d .archon/trading-lab/data || find .archon/trading-lab/data -maxdepth 3 -type f | head -50"
+        },
+        {
+          "action": "retry",
+          "canonical_task_ids": ["TASK-TDL-001"],
+          "expected_acceptance": "Evidence must include source path and line references; no alternate market-data store or storage-root migration is indicated.",
+          "item_id": "verify-TASK-TDL-001-storage-root-source-contract",
+          "verification_shape": "Inspect crates/archon-trading/src/data_store.rs lines 153-158 and record that data_root joins .archon/trading-lab/data and registry_path joins registry.json."
+        },
+        {
+          "action": "skip_unless_code_changed",
+          "canonical_task_ids": ["TASK-TDL-001"],
+          "expected_acceptance": "Do not mark failed merely because the conditional command was not run when no code was touched.",
+          "item_id": "verify-TASK-TDL-001-conditional-workspace-check-if-code-touched",
+          "verification_shape": "Inspect implementation-wave evidence/files_changed for TASK-TDL-001. If no source files changed, mark skipped/not-required with evidence. If source files changed, run cargo check --workspace --tests -j1."
+        }
+      ]
+    }
+  }
+}
