@@ -28,6 +28,11 @@ pub mod ocr;
 pub mod pdf;
 mod pdf_figure_vlm;
 mod pdf_image_enrichment;
+// The `--jobs auto` VRAM→worker derivation lives beside the enrichment engine's own worker
+// knob (`image_workers`) so the two 1..=16 clamps can never drift apart; the CLI needs it to
+// resolve the flag before ingest, hence this single-purpose re-export from an otherwise
+// private module.
+pub use pdf_image_enrichment::{VLM_HEADROOM_MB, VLM_SLOT_MB, auto_image_workers};
 mod pdf_image_progress;
 mod pdf_image_vlm;
 pub mod pdf_scan;

@@ -45,6 +45,11 @@ pub struct IngestFileResult {
     pub pdf_image_vlm_failures: usize,
     pub pdf_image_ocr_failures: usize,
     pub pdf_pages_rendered: usize,
+    /// For a PDF through the token-aware chunker: which coordinate space the chunks got —
+    /// `COORD_MARKER` (real per-block bboxes) or `COORD_NONE` (bbox-less text fallback). `None`
+    /// when no coord was assigned (non-PDF, page_anchor chunker, or skipped). Drives the
+    /// end-of-run COORD integrity summary so a silent degradation to text fallback is visible.
+    pub pdf_coord: Option<&'static str>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -58,6 +63,9 @@ pub(crate) struct PipelineOutcome {
     pub(crate) pdf_image_vlm_failures: usize,
     pub(crate) pdf_image_ocr_failures: usize,
     pub(crate) pdf_pages_rendered: usize,
+    /// Coordinate space the PDF's chunks landed in (`COORD_MARKER`/`COORD_NONE`); see
+    /// `IngestFileResult::pdf_coord`.
+    pub(crate) pdf_coord: Option<&'static str>,
 }
 
 /// Detect media type from file extension.
@@ -182,6 +190,7 @@ pub async fn ingest_file_with_policy(
             pdf_image_vlm_failures: 0,
             pdf_image_ocr_failures: 0,
             pdf_pages_rendered: 0,
+            pdf_coord: None,
         });
     }
 
@@ -291,6 +300,7 @@ pub async fn ingest_file_with_policy(
         pdf_image_vlm_failures: outcome.pdf_image_vlm_failures,
         pdf_image_ocr_failures: outcome.pdf_image_ocr_failures,
         pdf_pages_rendered: outcome.pdf_pages_rendered,
+        pdf_coord: outcome.pdf_coord,
     })
 }
 

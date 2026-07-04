@@ -82,8 +82,10 @@ pub(crate) async fn run_pdf_ingest_pipeline(
     // page images: Marker's surya OCR reads image-only/scanned pages that carry no text layer, so
     // this is the C3 path that gives pure-scan PDFs real (bbox-carrying) text + a chunks_root. With
     // neither, an image-only doc falls through to the image-OCR fallback + synthetic root below.
-    let marker_available =
-        crate::marker_source::from_policy(&policy.docs.pdf, extract_result.page_count).is_some();
+    // Resolve the Marker source ONCE (the probe is cheap but the variant also drives the strict
+    // no-silent-degradation policy below), then reuse it.
+    let marker_src = crate::marker_source::from_policy(&policy.docs.pdf, extract_result.page_count);
+    let marker_available = marker_src.is_some();
     let has_page_images =
         !extract_result.embedded_images.is_empty() || !extract_result.rendered_pages.is_empty();
     // Marker's figure regions (page + bbox), captured from the same Marker run below; consumed by
@@ -102,30 +104,55 @@ pub(crate) async fn run_pdf_ingest_pipeline(
                     &extract_result.page_offsets,
                 )
             };
-            let (blocks, coord) = match crate::marker_source::from_policy(
-                &policy.docs.pdf,
-                extract_result.page_count,
-            ) {
-                Some(src) => match src.blocks_and_figures_for(Path::new(file_path)).await {
-                    Ok((b, figs)) if !b.is_empty() => {
-                        figure_regions = figs;
-                        (b, crate::block_chunking::COORD_MARKER)
+            let (blocks, coord) = match &marker_src {
+                Some(src) => {
+                    // The persistent HTTP server has no per-doc OOM ladder and no page-range
+                    // chunking, and a set `marker_url` is an explicit "I want real bboxes"
+                    // request. So for the Http transport a Marker failure/empty result is a HARD
+                    // error (propagates → document Failed → sources_failed) rather than a silent
+                    // degradation to bbox-less COORD_NONE that would still be counted "Ingested".
+                    // The subprocess transport keeps its original warn-and-fall-back behavior.
+                    let http = matches!(src, crate::marker_source::MarkerSource::Http { .. });
+                    match src.blocks_and_figures_for(Path::new(file_path)).await {
+                        Ok((b, figs)) if !b.is_empty() => {
+                            figure_regions = figs;
+                            (b, crate::block_chunking::COORD_MARKER)
+                        }
+                        Ok(_) if http => {
+                            return Err(DocsError::Storage {
+                                message: format!(
+                                    "marker HTTP server returned no blocks for {file_path}; \
+                                     refusing silent bbox-less fallback because marker_url is set"
+                                ),
+                            });
+                        }
+                        Ok(_) => {
+                            outcome.warnings.push(
+                                "marker returned no blocks; falling back to text chunking"
+                                    .to_string(),
+                            );
+                            (text_blocks(), crate::block_chunking::COORD_NONE)
+                        }
+                        Err(e) if http => {
+                            return Err(DocsError::Storage {
+                                message: format!(
+                                    "marker HTTP request failed for {file_path} ({e}); \
+                                     refusing silent bbox-less fallback because marker_url is set"
+                                ),
+                            });
+                        }
+                        Err(e) => {
+                            outcome.warnings.push(format!(
+                                "marker sidecar failed ({e}); falling back to text chunking"
+                            ));
+                            (text_blocks(), crate::block_chunking::COORD_NONE)
+                        }
                     }
-                    Ok(_) => {
-                        outcome.warnings.push(
-                            "marker returned no blocks; falling back to text chunking".to_string(),
-                        );
-                        (text_blocks(), crate::block_chunking::COORD_NONE)
-                    }
-                    Err(e) => {
-                        outcome.warnings.push(format!(
-                            "marker sidecar failed ({e}); falling back to text chunking"
-                        ));
-                        (text_blocks(), crate::block_chunking::COORD_NONE)
-                    }
-                },
+                }
                 None => (text_blocks(), crate::block_chunking::COORD_NONE),
             };
+            // Record the coordinate space for the end-of-run COORD integrity summary.
+            outcome.pdf_coord = Some(coord);
             let ocr_engine = if coord == crate::block_chunking::COORD_MARKER {
                 "marker"
             } else {

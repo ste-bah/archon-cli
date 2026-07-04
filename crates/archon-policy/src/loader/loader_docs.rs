@@ -68,6 +68,7 @@ struct RawPdfPolicy {
     marker_device: Option<String>,
     marker_python: Option<String>,
     marker_memory_budget_mb: Option<u64>,
+    marker_url: Option<String>,
     scan_detector: Option<String>,
     figure_region_vlm: Option<bool>,
 }
@@ -220,6 +221,9 @@ fn apply_pdf(policy: &mut PdfPolicy, raw: RawPdfPolicy) {
     if raw.marker_memory_budget_mb.is_some() {
         policy.marker_memory_budget_mb = raw.marker_memory_budget_mb;
     }
+    if raw.marker_url.is_some() {
+        policy.marker_url = raw.marker_url;
+    }
     if let Some(value) = raw.scan_detector {
         // Only accept known detectors; anything else keeps the default (union).
         if value == "aspect" || value == "coverage" || value == "union" {
@@ -271,6 +275,19 @@ mod tests {
         assert_eq!(
             pdf.scan_detector, "union",
             "unknown detectors are rejected → default kept"
+        );
+    }
+
+    #[test]
+    fn marker_url_from_toml_flows_through_raw_docs() {
+        let raw: RawDocsPolicy =
+            toml::from_str("[pdf]\nmarker_url = \"http://127.0.0.1:8010\"\n").expect("parse");
+        let mut docs = DocsPolicy::default();
+        assert_eq!(docs.pdf.marker_url, None, "default guard");
+        apply_docs(&mut docs, raw);
+        assert_eq!(
+            docs.pdf.marker_url,
+            Some("http://127.0.0.1:8010".to_string())
         );
     }
 

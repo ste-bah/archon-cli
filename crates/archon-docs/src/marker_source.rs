@@ -7,11 +7,17 @@
 //! ids, so the chunks' block streams concatenate in order without re-offset. Each chunk carries a
 //! per-chunk OOM→CPU fallback (`run_chunk`: a GPU rung, then CPU — smaller batches don't relieve
 //! OOM). Transport is orthogonal to device: a local subprocess (default, the standalone Mac/laptop
-//! story), a remote HTTP Marker service (e.g. WRAITH for bulk on NVIDIA), or a pre-extracted JSON
-//! file. All three yield the same block-tree JSON, parsed by
+//! story), a persistent HTTP Marker server (warm resident models for bulk ingest), or a
+//! pre-extracted JSON file. All three yield the same block-tree JSON, parsed by
 //! `archon_ingest_ext::marker::parse_marker_str`.
+//!
+//! NOTE on the HTTP transport: the server reads the PDF from ITS OWN local filesystem (it is sent
+//! only a `pdf_path`, never the bytes). So `marker_url` must point at a server that shares
+//! archon's filesystem — same host, or a mount where the identical absolute path resolves. It is
+//! NOT a general remote-upload service.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use archon_accel::{AccelKind, DeviceOverrides, MarkerChunk, marker_ingest_plan};
 use archon_ingest_ext::chunk::{Block, FigureRegion};
@@ -19,6 +25,17 @@ use archon_ingest_ext::marker::{parse_marker_figures_str, parse_marker_str};
 use archon_policy::PdfPolicy;
 
 use crate::errors::DocsError;
+
+/// Per-document HTTP conversion timeout. Marker on a large scanned book can legitimately take
+/// several minutes on GPU (longer on a CPU-fallback), so this is generous — but bounded, so one
+/// wedged conversion can't hang an unattended bulk run forever behind the server's convert lock.
+/// On timeout the request errors, which the Http transport treats as a hard Marker failure.
+pub const HTTP_CONVERT_TIMEOUT_SECS: u64 = 900;
+
+/// Health preflight budget: how long to wait for a just-started Marker server to finish loading
+/// its ~6 GB of surya models (it doesn't bind its port until then), and how often to re-poll.
+pub const HEALTH_MAX_WAIT_SECS: u64 = 120;
+pub const HEALTH_POLL_INTERVAL_SECS: u64 = 2;
 
 /// Where/how to obtain a PDF's Marker block tree.
 #[derive(Clone, Debug)]
@@ -33,20 +50,34 @@ pub enum MarkerSource {
         script: PathBuf,
         chunks: Vec<MarkerChunk>,
     },
-    /// POST the PDF bytes to a remote Marker HTTP service; expects block-tree JSON back.
-    Http { url: String },
+    /// POST `{"pdf_path", "device"}` to a persistent Marker HTTP server's `/convert` endpoint
+    /// (`scripts/archon_marker_server.py`) and get the same normalized block-tree JSON back. The
+    /// server loads the surya models ONCE at startup and keeps them resident, so bulk ingest pays
+    /// no per-document model reload (the subprocess sidecar reloads ~6 GB per PDF). Server and
+    /// archon run on the same host: the absolute `pdf_path` is read locally by the server, so no
+    /// bytes are uploaded. `device` is advisory — the server's models live on its startup device.
+    Http { url: String, device: Option<String> },
     /// Read a pre-extracted Marker JSON file (decoupled — you run Marker however/whenever).
     PreExtracted { json_path: PathBuf },
 }
 
-/// Build a `MarkerSource` from policy. Present `marker_sidecar` path → local subprocess with the
-/// `archon-accel` GPU→CPU OOM ladder, where the GPU-vs-CPU choice comes from the host's free VRAM
-/// vs the **page-scaled** Marker footprint (`page_count`). `marker_device` `None`/`"auto"` →
-/// planner-chosen; an explicit `cuda|mps|cpu` forces it. Absent `marker_sidecar` → `None`.
+/// Build a `MarkerSource` from policy. PRECEDENCE: a set `marker_url` → the persistent Marker
+/// HTTP server (`MarkerSource::Http`, whole-document, no chunking — the warm server owns its own
+/// device/memory). Else a set `marker_sidecar` path → local subprocess with the `archon-accel`
+/// GPU→CPU OOM ladder, where the GPU-vs-CPU choice comes from the host's free VRAM vs the
+/// **page-scaled** Marker footprint (`page_count`). `marker_device` `None`/`"auto"` →
+/// planner-chosen; an explicit `cuda|mps|cpu` forces it. Neither set → `None`.
 ///
-/// NOTE: resolves placement (a cheap `nvidia-smi`/`sysinfo` probe) once per call — in bulk ingest,
-/// once per PDF. It can be hoisted to once-per-run if the probe ever shows up in a profile.
+/// NOTE: the subprocess path resolves placement (a cheap `nvidia-smi`/`sysinfo` probe) once per
+/// call — in bulk ingest, once per PDF. It can be hoisted to once-per-run if the probe ever shows
+/// up in a profile. The Http path skips the probe entirely.
 pub fn from_policy(pdf: &PdfPolicy, page_count: u32) -> Option<MarkerSource> {
+    if let Some(url) = pdf.marker_url.as_ref() {
+        return Some(MarkerSource::Http {
+            url: url.clone(),
+            device: pdf.marker_device.clone(),
+        });
+    }
     let script = pdf.marker_sidecar.as_ref()?;
     let chunks = marker_ingest_plan(
         &archon_accel::detect(),
@@ -61,6 +92,67 @@ pub fn from_policy(pdf: &PdfPolicy, page_count: u32) -> Option<MarkerSource> {
         script: PathBuf::from(script),
         chunks,
     })
+}
+
+/// Preflight a persistent Marker server's `/health` before an ingest run. The server does not
+/// bind its port until its ~6 GB of models finish loading (tens of seconds), so a just-started
+/// server is tolerated: poll `{url}/health` every `poll` until it returns
+/// `{"status":"ok","models_loaded":true}`, giving up after `max_wait`. Returns `Err` (do NOT
+/// ingest) if the server never becomes ready — this is what turns a wrong/forgotten `marker_url`
+/// or a still-loading/dead server into a hard stop instead of a silently bbox-less corpus.
+pub async fn preflight_health(
+    url: &str,
+    max_wait: Duration,
+    poll: Duration,
+) -> Result<(), DocsError> {
+    let endpoint = format!("{}/health", url.trim_end_matches('/'));
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|e| DocsError::Storage {
+            message: format!("marker health client build failed: {e}"),
+        })?;
+    let deadline = std::time::Instant::now() + max_wait;
+    let mut last_err;
+    loop {
+        match client.get(&endpoint).send().await {
+            Ok(resp) => {
+                let status = resp.status();
+                match resp.text().await {
+                    Ok(body) => {
+                        if status.is_success() && health_body_ready(&body) {
+                            return Ok(());
+                        }
+                        last_err = format!("status={status} body={}", body.trim());
+                    }
+                    Err(e) => last_err = format!("status={status} (body read failed: {e})"),
+                }
+            }
+            Err(e) => last_err = e.to_string(),
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(DocsError::Storage {
+                message: format!(
+                    "marker server at {url} not ready after {}s (last: {last_err}). \
+                     Start it (scripts/archon_marker_server.py) or unset marker_url; \
+                     refusing to ingest without the warm Marker server.",
+                    max_wait.as_secs()
+                ),
+            });
+        }
+        tokio::time::sleep(poll).await;
+    }
+}
+
+/// True iff a `/health` JSON body reports the server up with models resident.
+fn health_body_ready(body: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .map(|v| {
+            v.get("status").and_then(|s| s.as_str()) == Some("ok")
+                && v.get("models_loaded").and_then(|m| m.as_bool()) == Some(true)
+        })
+        .unwrap_or(false)
 }
 
 /// Map the policy's `marker_device` knob to `archon-accel` overrides. `None`/`"auto"`/unknown →
@@ -123,27 +215,54 @@ impl MarkerSource {
         }
     }
 
-    /// Fetch whole-document Marker JSON for the non-subprocess transports (remote HTTP service or a
-    /// pre-extracted file — both already carry the full document, so neither chunks).
+    /// Fetch whole-document Marker JSON for the non-subprocess transports (persistent HTTP server
+    /// or a pre-extracted file — both already carry the full document, so neither chunks).
+    ///
+    /// HTTP contract (matched by `scripts/archon_marker_server.py`):
+    /// `POST {url}/convert` with JSON body `{"pdf_path": "<absolute path>", "device": "<dev>"}` →
+    /// 200 with the same normalized block-tree JSON the subprocess sidecar prints to stdout.
     async fn fetch_json(&self, pdf_path: &Path) -> Result<String, DocsError> {
         match self {
-            MarkerSource::Http { url } => {
-                let bytes = tokio::fs::read(pdf_path)
-                    .await
+            MarkerSource::Http { url, device } => {
+                // The server reads the PDF from the local filesystem (same host), so the path
+                // must be absolute regardless of archon's cwd.
+                let abs = tokio::fs::canonicalize(pdf_path).await.map_err(|e| {
+                    DocsError::Storage {
+                        message: format!(
+                            "canonicalize pdf path for marker http failed ({}): {e}",
+                            pdf_path.display()
+                        ),
+                    }
+                })?;
+                let body = serde_json::json!({
+                    "pdf_path": abs.to_string_lossy(),
+                    "device": device.as_deref().unwrap_or("auto"),
+                });
+                let endpoint = format!("{}/convert", url.trim_end_matches('/'));
+                let client = reqwest::Client::builder()
+                    .timeout(Duration::from_secs(HTTP_CONVERT_TIMEOUT_SECS))
+                    .build()
                     .map_err(|e| DocsError::Storage {
-                        message: format!("read pdf for marker http failed: {e}"),
+                        message: format!("marker http client build failed: {e}"),
                     })?;
-                let resp = reqwest::Client::new()
-                    .post(url)
-                    .body(bytes)
+                let resp = client
+                    .post(&endpoint)
+                    .json(&body)
                     .send()
                     .await
                     .map_err(|e| DocsError::Storage {
-                        message: format!("marker http request failed: {e}"),
+                        message: format!("marker http request failed ({endpoint}): {e}"),
                     })?;
-                resp.text().await.map_err(|e| DocsError::Storage {
+                let status = resp.status();
+                let text = resp.text().await.map_err(|e| DocsError::Storage {
                     message: format!("marker http response read failed: {e}"),
-                })
+                })?;
+                if !status.is_success() {
+                    return Err(DocsError::Storage {
+                        message: format!("marker http server returned {status}: {text}"),
+                    });
+                }
+                Ok(text)
             }
             MarkerSource::PreExtracted { json_path } => tokio::fs::read_to_string(json_path)
                 .await
@@ -312,6 +431,61 @@ mod tests {
             }
             other => panic!("expected subprocess, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn from_policy_marker_url_takes_precedence_over_sidecar() {
+        // marker_url alone → Http (warm server).
+        let mut pdf = PdfPolicy {
+            marker_url: Some("http://127.0.0.1:8010".into()),
+            marker_device: Some("cuda".into()),
+            ..Default::default()
+        };
+        match from_policy(&pdf, 13) {
+            Some(MarkerSource::Http { url, device }) => {
+                assert_eq!(url, "http://127.0.0.1:8010");
+                assert_eq!(device.as_deref(), Some("cuda"));
+            }
+            other => panic!("expected http, got {other:?}"),
+        }
+        // marker_url + marker_sidecar → still Http (url wins).
+        pdf.marker_sidecar = Some("scripts/archon_marker_sidecar.py".into());
+        assert!(matches!(
+            from_policy(&pdf, 13),
+            Some(MarkerSource::Http { .. })
+        ));
+        // Only marker_sidecar → Subprocess (today's behavior, unchanged).
+        pdf.marker_url = None;
+        assert!(matches!(
+            from_policy(&pdf, 13),
+            Some(MarkerSource::Subprocess { .. })
+        ));
+    }
+
+    #[test]
+    fn health_body_ready_requires_ok_and_models_loaded() {
+        assert!(health_body_ready(
+            r#"{"status":"ok","device":"cuda","models_loaded":true}"#
+        ));
+        assert!(!health_body_ready(r#"{"status":"ok","models_loaded":false}"#));
+        assert!(!health_body_ready(r#"{"status":"loading","models_loaded":true}"#));
+        assert!(!health_body_ready("not json"));
+        assert!(!health_body_ready(r#"{"status":"ok"}"#));
+    }
+
+    #[tokio::test]
+    async fn preflight_fails_fast_when_server_down() {
+        // Port 9 (discard) refuses connections; the poll loop must give up at the deadline and
+        // return Err rather than proceeding. Short budget so the test is fast.
+        let res = preflight_health(
+            "http://127.0.0.1:9",
+            Duration::from_millis(400),
+            Duration::from_millis(100),
+        )
+        .await;
+        assert!(res.is_err(), "a dead server must fail preflight, not pass");
+        let msg = format!("{}", res.unwrap_err());
+        assert!(msg.contains("not ready"), "clear message; got: {msg}");
     }
 
     #[test]

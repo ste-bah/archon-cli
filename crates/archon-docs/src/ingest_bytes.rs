@@ -57,6 +57,7 @@ pub async fn ingest_bytes_source_with_policy(
             pdf_image_vlm_failures: 0,
             pdf_image_ocr_failures: 0,
             pdf_pages_rendered: 0,
+            pdf_coord: None,
         });
     }
 
@@ -149,6 +150,7 @@ pub async fn ingest_bytes_source_with_policy(
         pdf_image_vlm_failures: outcome.pdf_image_vlm_failures,
         pdf_image_ocr_failures: outcome.pdf_image_ocr_failures,
         pdf_pages_rendered: outcome.pdf_pages_rendered,
+        pdf_coord: outcome.pdf_coord,
     })
 }
 

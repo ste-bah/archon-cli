@@ -495,6 +495,64 @@ fn image_workers(policy: &archon_policy::EffectivePolicy) -> usize {
     policy.docs.pdf.image_enrichment_workers.clamp(1, 16) as usize
 }
 
+// ---- `--jobs auto`: derive the worker count from FREE VRAM ----
+
+/// Marginal VRAM per concurrent VLM slot (MiB). The model weights are resident ONCE (the
+/// ollama server shares them across requests — see [`VLM_MODEL_RESERVE_MB`]); each
+/// *additional* in-flight request costs roughly its KV cache + activations + image tensors.
+/// 2500 MiB is a conservative envelope for qwen2.5vl:7b processing a single page-figure image.
+pub const VLM_SLOT_MB: u64 = 2500;
+
+/// Resident weights (MiB) of the configured VLM (qwen2.5vl:7b, ~6.5 GB). We must reserve this
+/// EXPLICITLY because the free-VRAM probe (`archon_accel::detect`) runs at ingest start, BEFORE
+/// ollama lazy-loads the model on its first request (and ollama unloads again after
+/// `keep_alive`). On a cold/idle card the probe therefore sees the weights' VRAM as "free"; if
+/// we budgeted worker slots against that number we would recommend N slots that only fit once
+/// the 6.5 GB model is NOT loaded — then the load happens and the card OOMs. Subtracting the
+/// reserve up front makes the recommendation survive the lazy load. Tied to the VLM model: if
+/// the configured model changes, this must track its weight footprint.
+///
+/// Trade-off (intentional, safe direction): if the model happens to be ALREADY resident when we
+/// probe (a warm card, another job holding it under keep_alive), we double-count its weights and
+/// under-recommend slightly. Under-parallelizing is safe; OOMing is not.
+pub const VLM_MODEL_RESERVE_MB: u64 = 6500;
+
+/// Safety margin (MiB) left free on the card: driver/display churn, allocator fragmentation,
+/// and co-tenant processes growing under us mid-ingest. The probe is taken once at ingest
+/// start, so the margin must absorb drift over the whole run.
+pub const VLM_HEADROOM_MB: u64 = 2048;
+
+/// Hard cap on unified-memory (Apple Silicon) hosts. GPU and CPU share one pool there, so
+/// over-committing shows up as OS memory *pressure* (a soft, uncatchable slowdown/kill), not
+/// a CUDA-style OOM we could detect and back off from. Stay conservative regardless of pool
+/// size.
+const UNIFIED_MEMORY_MAX_WORKERS: u64 = 2;
+
+/// Derive the image-enrichment worker count for `--jobs auto` from an accelerator probe.
+/// Driven by *free* VRAM, not card size — a 32 GB card with 139 MB free under co-tenancy
+/// must run serial. Pure function of the report so it is unit-testable without hardware.
+/// Always returns at least 1 (serial); never exceeds the enrichment engine's cap of 16
+/// (the same cap `image_workers` applies to the policy value).
+pub fn auto_image_workers(report: &archon_accel::AcceleratorReport) -> u32 {
+    let Some(gpu) = report.best_gpu() else {
+        // No CUDA/Metal device: the VLM is running on CPU (or a remote endpoint); parallel
+        // slots would only contend for the same cores. Stay serial.
+        return 1;
+    };
+    // Budget slots against what remains AFTER the model's resident weights (which the cold-card
+    // probe counts as free — see VLM_MODEL_RESERVE_MB) and the safety margin are set aside.
+    let usable = gpu
+        .free_mb
+        .saturating_sub(VLM_MODEL_RESERVE_MB + VLM_HEADROOM_MB);
+    let n = (usable / VLM_SLOT_MB).clamp(1, 16);
+    let n = if report.unified_memory {
+        n.min(UNIFIED_MEMORY_MAX_WORKERS)
+    } else {
+        n
+    };
+    n as u32
+}
+
 /// Is this embedded image a full-page SCAN — **large AND page-shaped**? The aspect gate is what
 /// separates a page scan from a large figure: a page's long/short side ratio is ~1.2–1.7 (Letter
 /// 1.29, A4 1.41, US Legal 1.65, and taller book formats — e.g. the Uexküll scans measure ~1.58,
@@ -637,5 +695,88 @@ mod scan_detection_tests {
             })
             .collect();
         assert!(is_scanned_page_images(&imgs, 20));
+    }
+}
+
+#[cfg(test)]
+mod auto_workers_tests {
+    use super::*;
+    use archon_accel::{AccelKind, Accelerator, AcceleratorReport};
+
+    fn report(accelerators: Vec<Accelerator>, unified_memory: bool) -> AcceleratorReport {
+        AcceleratorReport {
+            platform: "test".into(),
+            arch: "test".into(),
+            accelerators,
+            host_ram_total_mb: 32768,
+            host_ram_free_mb: 16384,
+            unified_memory,
+            notes: vec![],
+        }
+    }
+
+    fn gpu(kind: AccelKind, total_mb: u64, free_mb: u64) -> Accelerator {
+        Accelerator {
+            kind,
+            index: 0,
+            name: "test-gpu".into(),
+            total_mb,
+            free_mb,
+        }
+    }
+
+    #[test]
+    fn no_gpu_is_serial() {
+        // CPU-only host (or only a Cpu accelerator entry): the VLM has no card to pack; serial.
+        assert_eq!(auto_image_workers(&report(vec![], false)), 1);
+        assert_eq!(
+            auto_image_workers(&report(vec![gpu(AccelKind::Cpu, 32768, 16384)], false)),
+            1
+        );
+    }
+
+    #[test]
+    fn co_tenancy_starved_card_is_serial() {
+        // The 5090 co-tenancy case: 32 GB card with 139 MB free → free-driven math floors at 1.
+        let r = report(vec![gpu(AccelKind::Cuda, 32768, 139)], false);
+        assert_eq!(auto_image_workers(&r), 1);
+    }
+
+    #[test]
+    fn laptop_8gb_cold_card_is_serial() {
+        // RTX 5070 laptop-class, COLD card: probe sees ~8192 MB free, but the 6.5 GB VLM
+        // weights are NOT loaded yet. Budgeting slots against 8192 and THEN loading the model
+        // would OOM. Reserving weights+headroom: 8192.saturating_sub(6500+2048)=0 → N=1 (SAFE).
+        let r = report(vec![gpu(AccelKind::Cuda, 8192, 8192)], false);
+        assert_eq!(auto_image_workers(&r), 1);
+    }
+
+    #[test]
+    fn laptop_8gb_post_marker_is_serial() {
+        // Realistic mid-run 8 GB state (Marker/other tenants already resident, ~1.5 GB free):
+        // well under the model reserve → serial.
+        let r = report(vec![gpu(AccelKind::Cuda, 8192, 1500)], false);
+        assert_eq!(auto_image_workers(&r), 1);
+    }
+
+    #[test]
+    fn thirty_gb_free_scales_up_and_huge_card_caps_at_16() {
+        // 5090-class, 29887 MB free → (29887 - 6500 - 2048) / 2500 = 8 workers.
+        let r = report(vec![gpu(AccelKind::Cuda, 32768, 29887)], false);
+        assert_eq!(auto_image_workers(&r), 8);
+        // 64 GB free → (65536 - 8548) / 2500 = 22, clamped to the engine's cap of 16.
+        let r = report(vec![gpu(AccelKind::Cuda, 65536, 65536)], false);
+        assert_eq!(auto_image_workers(&r), 16);
+    }
+
+    #[test]
+    fn unified_memory_caps_at_two() {
+        // Mac 24 GB unified, 20480 MB free → (20480 - 8548) / 2500 = 4 raw, but memory
+        // pressure is uncatchable there — hard cap 2.
+        let r = report(vec![gpu(AccelKind::Metal, 24576, 20480)], true);
+        assert_eq!(auto_image_workers(&r), 2);
+        // Unified but tiny free pool still floors at 1, not 2.
+        let r = report(vec![gpu(AccelKind::Metal, 8192, 1024)], true);
+        assert_eq!(auto_image_workers(&r), 1);
     }
 }

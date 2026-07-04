@@ -106,6 +106,10 @@ pub enum DocsAction {
         /// Skip the pre-ingest enrichment-classification confirmation prompt (batch/scripted use)
         #[arg(long, short = 'y')]
         yes: bool,
+        /// Image-enrichment concurrency: "auto" (derive from free VRAM, confirm when
+        /// interactive) or a number 1..=16. Unset -> the policy value (default 1 = serial).
+        #[arg(long)]
+        jobs: Option<String>,
     },
     /// Re-run OCR/VLM/image enrichment for an existing document ID or source path/prefix
     Reprocess {

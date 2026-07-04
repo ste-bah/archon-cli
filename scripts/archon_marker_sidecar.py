@@ -24,22 +24,12 @@ import json
 import os
 import sys
 
-
-def resolve_device(explicit: str | None) -> str:
-    """cuda → mps → cpu. `--device`/`TORCH_DEVICE` override auto-detection."""
-    chosen = explicit or os.environ.get("TORCH_DEVICE")
-    if chosen and chosen != "auto":
-        return chosen
-    try:
-        import torch  # noqa: WPS433 (local import: keep --selftest torch-free)
-
-        if torch.cuda.is_available():
-            return "cuda"
-        if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
-            return "mps"
-    except Exception:  # torch absent or broken → CPU is always valid
-        pass
-    return "cpu"
+# The conversion + normalization core is SHARED with the persistent HTTP server
+# (archon_marker_server.py) via archon_marker_core so both transports emit identical
+# block trees. The script's own directory is put on sys.path so the import works no
+# matter what cwd the Rust caller spawns us from.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from archon_marker_core import resolve_device, run_marker  # noqa: E402
 
 
 # A minimal block tree matching the Rust parser's expectations. Shapes the contract:
@@ -78,39 +68,6 @@ SELFTEST_FIXTURE = {
         },
     ],
 }
-
-
-def run_marker(pdf_path: str, device: str, page_range: "list[int] | None" = None) -> dict:
-    """Run Marker with its JSON renderer and return the block tree as a dict.
-
-    Marker's JSON renderer already emits `{block_type, id, html, bbox/polygon, children}`,
-    which is exactly the Rust parser's contract. `TORCH_DEVICE` is set before importing
-    Marker so its models load on the resolved device.
-
-    `page_range` (0-indexed original-PDF page numbers) restricts the run to those pages; Marker
-    keeps ABSOLUTE page ids (`/page/N/`), so a caller can process a big PDF in page-range chunks
-    that each fit VRAM and concatenate the block streams without re-offsetting. `None` = whole doc.
-
-    [CONFIRM on the Mac] against the installed Marker version: the converter/renderer import
-    paths and whether boxes come back as `bbox` (used here) or `polygon` (map to a bbox).
-    """
-    os.environ["TORCH_DEVICE"] = device
-    from marker.converters.pdf import PdfConverter
-    from marker.models import create_model_dict
-
-    config = {"page_range": page_range} if page_range is not None else {}
-    converter = PdfConverter(
-        artifact_dict=create_model_dict(),
-        config=config,
-        renderer="marker.renderers.json.JSONRenderer",
-    )
-    rendered = converter(pdf_path)
-    # `rendered` is a pydantic model with `.children`; round-trip via JSON for a plain dict.
-    if hasattr(rendered, "model_dump"):
-        return rendered.model_dump(mode="json")
-    if hasattr(rendered, "dict"):
-        return rendered.dict()
-    return json.loads(rendered.json())
 
 
 def main(argv: list[str]) -> int:

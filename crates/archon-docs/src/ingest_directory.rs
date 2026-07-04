@@ -25,6 +25,11 @@ pub struct IngestResult {
     pub pdf_image_vlm_failures: usize,
     pub pdf_image_ocr_failures: usize,
     pub pdf_pages_rendered: usize,
+    /// Integrity tally across PDFs: how many landed in `COORD_MARKER` (real bboxes) vs
+    /// `COORD_NONE` (bbox-less text fallback). For the corpus re-ingest, `pdf_coord_none == 0`
+    /// is the at-a-glance proof that no document silently degraded.
+    pub pdf_coord_marker: usize,
+    pub pdf_coord_none: usize,
     pub warnings: Vec<String>,
     pub errors: Vec<String>,
 }
@@ -122,4 +127,9 @@ fn add_pdf_counts(result: &mut IngestResult, file: &IngestFileResult) {
     result.pdf_image_vlm_failures += file.pdf_image_vlm_failures;
     result.pdf_image_ocr_failures += file.pdf_image_ocr_failures;
     result.pdf_pages_rendered += file.pdf_pages_rendered;
+    match file.pdf_coord {
+        Some(crate::block_chunking::COORD_MARKER) => result.pdf_coord_marker += 1,
+        Some(_) => result.pdf_coord_none += 1,
+        None => {}
+    }
 }

@@ -247,6 +247,12 @@ pub struct PdfPolicy {
     /// detected free VRAM. None → use detected free VRAM as-is. (archon-accel DeviceOverrides.)
     #[serde(default)]
     pub marker_memory_budget_mb: Option<u64>,
+    /// Persistent Marker HTTP server base URL (e.g. "http://127.0.0.1:8010"); when set, PDF
+    /// ingest uses the warm server instead of the per-doc subprocess sidecar — models stay
+    /// resident, no per-doc reload. Takes precedence over `marker_sidecar`. None (default) →
+    /// today's subprocess behavior, unchanged.
+    #[serde(default)]
+    pub marker_url: Option<String>,
     /// Scanned-book detector for the image-enrichment skip decision: "union" (default — a page is a
     /// scan if the aspect pixel-heuristic OR the coverage % flags it; corpus-validated as strictly
     /// best), "aspect" (shipped pixel-dims heuristic alone), or "coverage" (page-coverage % via ppi
@@ -293,6 +299,7 @@ impl Default for PdfPolicy {
             marker_device: None,
             marker_python: None,
             marker_memory_budget_mb: None,
+            marker_url: None,
             scan_detector: default_scan_detector(),
             figure_region_vlm: false,
         }

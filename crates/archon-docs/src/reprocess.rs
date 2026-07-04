@@ -114,6 +114,7 @@ pub async fn reprocess_document_with_policy(
             pdf_image_vlm_failures: outcome.pdf_image_vlm_failures,
             pdf_image_ocr_failures: outcome.pdf_image_ocr_failures,
             pdf_pages_rendered: outcome.pdf_pages_rendered,
+            pdf_coord: outcome.pdf_coord,
         },
     })
 }

@@ -29,7 +29,7 @@ pub(crate) fn open_db() -> Result<DbInstance> {
 
 pub async fn handle_docs_command(action: DocsAction) -> Result<()> {
     match action {
-        DocsAction::Ingest { path, yes } => handle_ingest(&path, yes).await,
+        DocsAction::Ingest { path, yes, jobs } => handle_ingest(&path, yes, jobs.as_deref()).await,
         DocsAction::Reprocess {
             target,
             defer_index,
@@ -425,25 +425,115 @@ fn confirm_proceed() -> Result<bool> {
     Ok(matches!(input.trim().to_lowercase().as_str(), "y" | "yes"))
 }
 
-async fn handle_ingest(path_str: &str, yes: bool) -> Result<()> {
-    let result = handle_ingest_inner(path_str, yes).await;
+/// Resolve `--jobs` to a concrete image-enrichment worker count.
+///
+/// - An explicit integer wins outright (clamped to the enrichment engine's 1..=16), no prompt.
+/// - `auto` probes the accelerators and derives a recommendation from FREE VRAM (free, not
+///   card size — co-tenancy can starve a big card). Interactive sessions get to confirm or
+///   override the recommendation; `--yes` (or a non-tty stdin) takes it unattended.
+fn resolve_jobs(jobs: &str, yes: bool) -> Result<u32> {
+    if !jobs.eq_ignore_ascii_case("auto") {
+        // Explicit numeric value: reject out-of-range rather than silently coercing, so `--jobs 0`
+        // or `--jobs 99` surfaces the user's mistake instead of quietly becoming 1 or 16. (The
+        // 1..=16 clamp is kept only for the auto-derived value, which is machine-generated.)
+        let n: u32 = jobs.parse().map_err(|_| {
+            anyhow::anyhow!("--jobs must be \"auto\" or an integer 1..=16 (got: {jobs})")
+        })?;
+        if !(1..=16).contains(&n) {
+            anyhow::bail!("--jobs must be \"auto\" or an integer 1..=16 (got: {n})");
+        }
+        return Ok(n);
+    }
+    let report = archon_accel::detect();
+    let recommended = archon_docs::auto_image_workers(&report);
+    match report.best_gpu() {
+        Some(gpu) => println!(
+            "GPU: {} — {} MB free → recommended {} parallel VLM workers (1 = serial).{}",
+            gpu.name,
+            gpu.free_mb,
+            recommended,
+            if report.unified_memory {
+                " [unified memory: capped at 2]"
+            } else {
+                ""
+            }
+        ),
+        None => println!("No GPU detected → recommended 1 VLM worker (serial)."),
+    }
+    if yes || !std::io::stdin().is_terminal() {
+        // Unattended (--yes or piped stdin): take the probe's answer, but say so — the run
+        // log should show why N workers were chosen.
+        println!("Using {recommended} image-enrichment worker(s) (--jobs auto).");
+        return Ok(recommended);
+    }
+    use std::io::Write;
+    eprint!("Image-enrichment workers? [{recommended}]: ");
+    std::io::stderr().flush().ok();
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Ok(recommended);
+    }
+    let n: u32 = trimmed.parse().map_err(|_| {
+        anyhow::anyhow!("expected an empty line (accept {recommended}) or a number 1..=16 (got: {trimmed})")
+    })?;
+    Ok(n.clamp(1, 16))
+}
+
+async fn handle_ingest(path_str: &str, yes: bool, jobs: Option<&str>) -> Result<()> {
+    let result = handle_ingest_inner(path_str, yes, jobs).await;
     archon_docs::vlm::clear_provider_blocking_safe().await;
     result
 }
 
-async fn handle_ingest_inner(path_str: &str, yes: bool) -> Result<()> {
-    let db = open_db()?;
-    let _ = crate::command::docs_embedding::init_embedding(&db);
-    let policy = std::env::current_dir()
-        .ok()
-        .and_then(|cwd| archon_policy::load_effective_policy(&cwd).ok())
-        .unwrap_or_default();
-    let vlm_report = vlm_factory::configure_registered_provider_blocking_safe(&policy).await;
+async fn handle_ingest_inner(path_str: &str, yes: bool, jobs: Option<&str>) -> Result<()> {
+    // Validate the path FIRST — before the (possibly interactive) `--jobs auto` probe/prompt —
+    // so a typo'd path errors immediately instead of after the user answers a worker-count prompt.
     let path = PathBuf::from(path_str);
-
     if !path.exists() {
         anyhow::bail!("Path does not exist: {}", path_str);
     }
+
+    let db = open_db()?;
+    let _ = crate::command::docs_embedding::init_embedding(&db);
+    let mut policy = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| archon_policy::load_effective_policy(&cwd).ok())
+        .unwrap_or_default();
+    // `--jobs` overrides the policy's image-enrichment worker count at runtime, resolved
+    // BEFORE any ingest work so the probe/prompt happens once up front. When the flag is
+    // absent the policy value stands untouched — the zero-regression default (a policy.toml
+    // that sets its own worker count keeps working exactly as before this flag existed).
+    if let Some(jobs) = jobs {
+        let workers = resolve_jobs(jobs, yes)?;
+        policy.docs.pdf.image_enrichment_workers = workers;
+        if workers > 1 {
+            // The workers fan out over one ollama server; unless it accepts parallel
+            // requests they just queue there and the run is serial anyway.
+            println!(
+                "Note: {workers} parallel VLM workers need the ollama server to accept \
+                 parallel requests (OLLAMA_NUM_PARALLEL >= {workers}); otherwise they queue serially."
+            );
+        }
+    }
+    // Preflight the persistent Marker server BEFORE any ingest work: a set `marker_url` means the
+    // run expects real bboxes, so a wrong/forgotten URL or a still-loading/dead server must hard-
+    // stop here rather than silently degrade the whole corpus to bbox-less text. Tolerates a just-
+    // started server by polling /health (it doesn't bind its port until models finish loading).
+    if let Some(marker_url) = policy.docs.pdf.marker_url.clone() {
+        println!("Marker server: preflighting {marker_url}/health (waiting for warm models)…");
+        archon_docs::marker_source::preflight_health(
+            &marker_url,
+            std::time::Duration::from_secs(archon_docs::marker_source::HEALTH_MAX_WAIT_SECS),
+            std::time::Duration::from_secs(archon_docs::marker_source::HEALTH_POLL_INTERVAL_SECS),
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        println!("Marker server: ready (models resident).");
+    }
+
+    let vlm_report = vlm_factory::configure_registered_provider_blocking_safe(&policy).await;
 
     if path.is_dir() {
         let result = ingest::ingest_directory_with_policy(&db, &path, &policy).await?;
@@ -478,6 +568,20 @@ async fn handle_ingest_inner(path_str: &str, yes: bool) -> Result<()> {
             );
         }
         print_vlm_init_warning_if_needed(&vlm_report);
+        // COORD integrity summary: for the re-ingest we must see at a glance that no PDF silently
+        // fell back to bbox-less text. Printed whenever any PDF carried a coordinate verdict.
+        if result.pdf_coord_marker > 0 || result.pdf_coord_none > 0 {
+            println!(
+                "Marker coord: {} doc(s) COORD_MARKER (real bboxes), {} COORD_NONE (text fallback)",
+                result.pdf_coord_marker, result.pdf_coord_none
+            );
+            if result.pdf_coord_none > 0 {
+                println!(
+                    "  WARNING: {} PDF(s) landed in COORD_NONE — those chunks carry NO bboxes.",
+                    result.pdf_coord_none
+                );
+            }
+        }
         for warning in &result.warnings {
             println!("Warning: {warning}");
         }
@@ -541,6 +645,9 @@ async fn handle_ingest_inner(path_str: &str, yes: bool) -> Result<()> {
             }
             Ok(r) if r.was_new => {
                 println!("Ingested: {}", r.document_id);
+                if let Some(coord) = r.pdf_coord {
+                    println!("Marker coord: {coord}");
+                }
                 if r.vlm_descriptions > 0 {
                     println!(
                         "VLM descriptions: {} via {}/{}",
