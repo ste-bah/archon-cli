@@ -75,6 +75,9 @@ hello.txt
 # Exception: ingestion parity + device-layer design docs (Port #2).
 !/docs/ingestion/
 !/docs/ingestion/**
+# Exception: dissertation-port overview / platform-agnostic / setup docs.
+!/docs/dissertation-port/
+!/docs/dissertation-port/**
 !/docs/operations/
 !/docs/operations/**
 !/docs/maintenance/
