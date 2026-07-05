@@ -178,7 +178,27 @@ fn overrides_from_policy(pdf: &PdfPolicy) -> DeviceOverrides {
 enum SidecarError {
     Oom { device: String },
     Killed { device: String },
+    /// The per-attempt wall clock elapsed (a wedged sidecar — MPS driver deadlock, surya spin).
+    /// Also advances the ladder: a hung GPU convert gets retried on CPU.
+    TimedOut { device: String },
     Other(DocsError),
+}
+
+/// Per-attempt wall-clock bound on ONE marker sidecar conversion. GPU marker is fast, so a long
+/// GPU run is a hang → a tight budget catches it and the ladder falls to CPU. CPU marker of a
+/// large page-range chunk is legitimately slow → a generous budget avoids false-timeouts (it is
+/// the last rung, so an elapse there hard-fails the chunk, exactly as a true hang would).
+fn marker_timeout(device: Option<&str>) -> std::time::Duration {
+    let (var, default_secs) = if device == Some("cpu") {
+        ("ARCHON_MARKER_CPU_TIMEOUT_SECS", 3600u64)
+    } else {
+        ("ARCHON_MARKER_GPU_TIMEOUT_SECS", 900u64)
+    };
+    let secs = std::env::var(var)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(default_secs);
+    std::time::Duration::from_secs(secs)
 }
 
 impl MarkerSource {
@@ -326,6 +346,11 @@ async fn run_chunk(
                     message: format!("marker killed by signal on device={dev}"),
                 });
             }
+            Err(SidecarError::TimedOut { device: dev }) => {
+                last = Some(DocsError::Storage {
+                    message: format!("marker timed out on device={dev}"),
+                });
+            }
             Err(SidecarError::Other(e)) => return Err(e),
         }
     }
@@ -337,7 +362,8 @@ async fn run_chunk(
 /// Run the Marker sidecar once with `device` + `env`, classifying a torch-OOM exit (the sidecar
 /// exits 42 on OOM, or carries an OOM signature on stderr) and a signal termination (`code()` is
 /// `None` — e.g. a jetsam SIGKILL, which leaves no exit code and no stderr signature) so the
-/// caller can retry on CPU.
+/// caller can retry on CPU. The whole conversion is bounded by [`marker_timeout`]'s per-device
+/// wall clock; on elapse the child is killed (kill_on_drop) and `TimedOut` advances the ladder.
 async fn run_sidecar(
     python: &str,
     script: &Path,
@@ -357,11 +383,21 @@ async fn run_sidecar(
     for (k, v) in env {
         cmd.env(k, v);
     }
-    let out = cmd.output().await.map_err(|e| {
-        SidecarError::Other(DocsError::Storage {
-            message: format!("marker sidecar spawn failed: {e}"),
-        })
-    })?;
+    // Kill a timed-out child when the output future is dropped by the timeout below — a wedged
+    // marker (MPS driver deadlock, surya spin) must not outlive its attempt.
+    cmd.kill_on_drop(true);
+    let out = match tokio::time::timeout(marker_timeout(device), cmd.output()).await {
+        Err(_elapsed) => {
+            return Err(SidecarError::TimedOut {
+                device: device.unwrap_or("cpu").to_string(),
+            });
+        }
+        Ok(res) => res.map_err(|e| {
+            SidecarError::Other(DocsError::Storage {
+                message: format!("marker sidecar spawn failed: {e}"),
+            })
+        })?,
+    };
     if out.status.success() {
         return String::from_utf8(out.stdout).map_err(|e| {
             SidecarError::Other(DocsError::Storage {
@@ -483,6 +519,87 @@ echo '{"block_type":"Document","children":[{"block_type":"Page","id":"/page/0/Pa
         let msg = format!("{err}");
         assert!(msg.contains("killed by signal"), "got: {msg}");
         assert!(msg.contains("device=mps"), "got: {msg}");
+    }
+
+    /// Fake sidecar (run via bash): HANGS (sleeps well past the test budget) on any non-cpu
+    /// device — the wedged-GPU shape — and emits a valid block tree on cpu.
+    fn write_hanging_sidecar(dir: &Path) -> PathBuf {
+        let script = dir.join("hanging_sidecar.sh");
+        std::fs::write(
+            &script,
+            r#"#!/usr/bin/env bash
+# args: <pdf> --device <dev>
+if [ "$3" != "cpu" ]; then sleep 30; fi
+echo '{"block_type":"Document","children":[{"block_type":"Page","id":"/page/0/Page/0","children":[{"block_type":"Text","html":"<p>cpu ok</p>","bbox":[1,2,3,4]}]}]}'
+"#,
+        )
+        .unwrap();
+        script
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(docs_global_state)]
+    async fn marker_timeout_on_gpu_attempt_advances_ladder_to_cpu() {
+        // A hung GPU rung must time out (~1s, NOT the sidecar's 30s sleep) and advance to CPU.
+        unsafe {
+            std::env::set_var("ARCHON_MARKER_GPU_TIMEOUT_SECS", "1");
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let src = MarkerSource::Subprocess {
+            python: "bash".into(),
+            script: write_hanging_sidecar(dir.path()),
+            chunks: vec![MarkerChunk {
+                page_range: None,
+                attempts: vec![("mps".to_string(), vec![]), ("cpu".to_string(), vec![])],
+            }],
+        };
+        // Bound the test's own wall clock: without the per-attempt timeout this would sit in the
+        // sidecar's 30s sleep, so an unresolved future here IS the regression.
+        let blocks = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            src.blocks_for(Path::new("x.pdf")),
+        )
+        .await
+        .expect("ladder must advance past the hung GPU rung within the timeout budget")
+        .unwrap();
+        unsafe {
+            std::env::remove_var("ARCHON_MARKER_GPU_TIMEOUT_SECS");
+        }
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].text, "cpu ok");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(docs_global_state)]
+    async fn marker_timeout_on_last_rung_surfaces_error() {
+        // With no rung left to advance to, the recorded timeout surfaces as the error.
+        unsafe {
+            std::env::set_var("ARCHON_MARKER_CPU_TIMEOUT_SECS", "1");
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("hanging_cpu_sidecar.sh");
+        std::fs::write(&script, "#!/usr/bin/env bash\nsleep 30\n").unwrap();
+        let src = MarkerSource::Subprocess {
+            python: "bash".into(),
+            script,
+            chunks: vec![MarkerChunk {
+                page_range: None,
+                attempts: vec![("cpu".to_string(), vec![])],
+            }],
+        };
+        let err = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            src.blocks_for(Path::new("x.pdf")),
+        )
+        .await
+        .expect("last-rung timeout must resolve to Err, not hang")
+        .unwrap_err();
+        unsafe {
+            std::env::remove_var("ARCHON_MARKER_CPU_TIMEOUT_SECS");
+        }
+        let msg = format!("{err}");
+        assert!(msg.contains("timed out"), "got: {msg}");
+        assert!(msg.contains("device=cpu"), "got: {msg}");
     }
 
     #[test]
