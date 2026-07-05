@@ -17,22 +17,32 @@ const APPLE_OS_RESERVE_MB: u64 = 6144;
 #[allow(dead_code)]
 const APPLE_VLM_CORESIDENT_RESERVE_MB: u64 = 6800;
 
+/// Bound on the `unified` term of the budget: at most 1.5x the instantaneous free RAM
+/// (`free * NUM / DEN`). Unified memory can reclaim caches/compressed pages under GPU growth,
+/// so allowing SOME over-commit of the snapshot is correct — but an unbounded, free-independent
+/// term over-reports wildly on a big machine under heavy non-VLM pressure.
+#[allow(dead_code)]
+const APPLE_UNIFIED_OVERCOMMIT_NUM: u64 = 3;
+#[allow(dead_code)]
+const APPLE_UNIFIED_OVERCOMMIT_DEN: u64 = 2; // unified term capped at 1.5x instantaneous free
+
 /// Unified-memory GPU budget for Apple Silicon (MiB). On unified memory the GPU grows into the
 /// shared RAM pool, so the instantaneous free-RAM snapshot understates what Marker's surya model
 /// can use. Take the LARGER of (a) instantaneous free minus the OS reserve — right when RAM is
 /// plentiful — and (b) the total pool minus OS + a coresident-VLM reserve — right when free is
-/// transiently low on a large machine. The `unified` term is free-INDEPENDENT, so on a large
-/// machine under heavy non-VLM pressure it can over-report; a clean MPS OOM (`RuntimeError:
-/// MPS backend out of memory`) is caught by the per-doc OOM->CPU ladder, but — per
-/// [`AcceleratorReport::unified_memory`] — unified over-commit usually shows up as *soft* OS
-/// pressure, and a jetsam SIGKILL is NOT ladder-catchable (no exit 42 / OOM stderr). Bounding
-/// the `unified` term to a fraction of free + treating signal-kills as CPU-retryable is a
-/// tracked hardening follow-up; the current form is validated for the normal (uncontended)
-/// bulk-ingest envelope.
+/// transiently low on a large machine. The `unified` term is BOUNDED to 1.5x actual free RAM
+/// (no longer free-independent), so it cannot claim far more than is physically free on a large
+/// machine under heavy non-VLM pressure (64GB total / 3GB free must not report ~51GB); within
+/// that bound, a clean MPS OOM (`RuntimeError: MPS backend out of memory`) is still backstopped
+/// by the per-doc OOM->CPU ladder.
 #[allow(dead_code)]
 fn apple_unified_gpu_budget_mb(ram_total_mb: u64, ram_free_mb: u64) -> u64 {
     let instantaneous = ram_free_mb.saturating_sub(APPLE_OS_RESERVE_MB);
-    let unified = ram_total_mb.saturating_sub(APPLE_OS_RESERVE_MB + APPLE_VLM_CORESIDENT_RESERVE_MB);
+    let unified = ram_total_mb
+        .saturating_sub(APPLE_OS_RESERVE_MB + APPLE_VLM_CORESIDENT_RESERVE_MB)
+        .min(
+            ram_free_mb.saturating_mul(APPLE_UNIFIED_OVERCOMMIT_NUM) / APPLE_UNIFIED_OVERCOMMIT_DEN,
+        );
     instantaneous.max(unified)
 }
 
@@ -193,5 +203,22 @@ mod tests {
     fn unified_budget_8gb_machine_is_zero() {
         // Both terms saturate to 0 → CPU.
         assert_eq!(apple_unified_gpu_budget_mb(8192, 5000), 0);
+    }
+
+    #[test]
+    fn unified_budget_64gb_low_free_no_longer_overreports() {
+        // 64GB machine with only 3GB free: the old free-independent unified term claimed
+        // 65536-12944=52592 (→ "MPS-viable" with 3GB physically free). Bounded:
+        // instantaneous = max(3072-6144, 0) = 0; unified = min(52592, 3072*3/2=4608) = 4608.
+        let budget = apple_unified_gpu_budget_mb(65536, 3072);
+        assert_eq!(budget, 4608);
+        assert!(budget < FLOOR_MB, "must stay below the Marker floor → CPU");
+    }
+
+    #[test]
+    fn unified_budget_overcommit_bound_clamps() {
+        // 64GB / 8GB free: instantaneous = 8192-6144 = 2048;
+        // unified = min(65536-12944=52592, 8192*3/2=12288) = 12288 (bound applied, not 52592).
+        assert_eq!(apple_unified_gpu_budget_mb(65536, 8192), 12288);
     }
 }

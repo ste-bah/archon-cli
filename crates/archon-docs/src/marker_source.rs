@@ -172,9 +172,12 @@ fn overrides_from_policy(pdf: &PdfPolicy) -> DeviceOverrides {
     }
 }
 
-/// Internal: distinguishes a torch-OOM sidecar failure (advance the ladder) from any other error.
+/// Internal: distinguishes a torch-OOM sidecar failure (advance the ladder) and a signal-kill
+/// (e.g. a jetsam/OOM-killer SIGKILL — also advance the ladder; a clean torch OOM never gets to
+/// print its signature when the OS kills the process) from any other error.
 enum SidecarError {
     Oom { device: String },
+    Killed { device: String },
     Other(DocsError),
 }
 
@@ -292,7 +295,8 @@ fn parse_figures(json: &str) -> Result<Vec<FigureRegion>, DocsError> {
 }
 
 /// Run one chunk through its GPU→CPU OOM ladder, passing `--page-range` when the chunk is a
-/// page range. Advances to the next rung only on a torch-OOM; any other error surfaces.
+/// page range. Advances to the next rung on a torch-OOM or a signal-kill (an OS memory kill
+/// presents as a signal, not exit 42); any other error surfaces.
 async fn run_chunk(
     python: &str,
     script: &Path,
@@ -317,6 +321,11 @@ async fn run_chunk(
                     message: format!("marker OOM on device={dev}"),
                 });
             }
+            Err(SidecarError::Killed { device: dev }) => {
+                last = Some(DocsError::Storage {
+                    message: format!("marker killed by signal on device={dev}"),
+                });
+            }
             Err(SidecarError::Other(e)) => return Err(e),
         }
     }
@@ -326,7 +335,9 @@ async fn run_chunk(
 }
 
 /// Run the Marker sidecar once with `device` + `env`, classifying a torch-OOM exit (the sidecar
-/// exits 42 on OOM, or carries an OOM signature on stderr) so the caller can retry on CPU.
+/// exits 42 on OOM, or carries an OOM signature on stderr) and a signal termination (`code()` is
+/// `None` — e.g. a jetsam SIGKILL, which leaves no exit code and no stderr signature) so the
+/// caller can retry on CPU.
 async fn run_sidecar(
     python: &str,
     script: &Path,
@@ -364,6 +375,13 @@ async fn run_sidecar(
         || stderr.contains("OutOfMemoryError");
     if is_oom {
         return Err(SidecarError::Oom {
+            device: device.unwrap_or("cpu").to_string(),
+        });
+    }
+    if out.status.code().is_none() {
+        // Terminated by a signal (no exit code): treat like OOM and advance the ladder — an OS
+        // memory kill (jetsam SIGKILL) looks exactly like this, and a CPU retry beats a hard fail.
+        return Err(SidecarError::Killed {
             device: device.unwrap_or("cpu").to_string(),
         });
     }
@@ -414,6 +432,57 @@ mod tests {
             }],
         };
         assert!(src.blocks_for(Path::new("x.pdf")).await.is_err());
+    }
+
+    /// Fake sidecar (run via bash): SIGKILLs itself on any non-cpu device — `status.code()` is
+    /// `None`, no OOM stderr, exactly the jetsam shape — and emits a valid block tree on cpu.
+    fn write_signal_kill_sidecar(dir: &Path) -> PathBuf {
+        let script = dir.join("fake_sidecar.sh");
+        std::fs::write(
+            &script,
+            r#"#!/usr/bin/env bash
+# args: <pdf> --device <dev>
+if [ "$3" != "cpu" ]; then kill -9 $$; fi
+echo '{"block_type":"Document","children":[{"block_type":"Page","id":"/page/0/Page/0","children":[{"block_type":"Text","html":"<p>cpu ok</p>","bbox":[1,2,3,4]}]}]}'
+"#,
+        )
+        .unwrap();
+        script
+    }
+
+    #[tokio::test]
+    async fn signal_killed_gpu_attempt_advances_ladder_to_cpu() {
+        // A signal-kill on the GPU rung must advance to the CPU rung (like OOM), not hard-fail.
+        let dir = tempfile::tempdir().unwrap();
+        let src = MarkerSource::Subprocess {
+            python: "bash".into(),
+            script: write_signal_kill_sidecar(dir.path()),
+            chunks: vec![MarkerChunk {
+                page_range: None,
+                attempts: vec![("mps".to_string(), vec![]), ("cpu".to_string(), vec![])],
+            }],
+        };
+        let blocks = src.blocks_for(Path::new("x.pdf")).await.unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].text, "cpu ok");
+    }
+
+    #[tokio::test]
+    async fn signal_kill_on_last_rung_surfaces_killed_error() {
+        // With no rung left to advance to, the recorded signal-kill surfaces as the error.
+        let dir = tempfile::tempdir().unwrap();
+        let src = MarkerSource::Subprocess {
+            python: "bash".into(),
+            script: write_signal_kill_sidecar(dir.path()),
+            chunks: vec![MarkerChunk {
+                page_range: None,
+                attempts: vec![("mps".to_string(), vec![])],
+            }],
+        };
+        let err = src.blocks_for(Path::new("x.pdf")).await.unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("killed by signal"), "got: {msg}");
+        assert!(msg.contains("device=mps"), "got: {msg}");
     }
 
     #[test]
