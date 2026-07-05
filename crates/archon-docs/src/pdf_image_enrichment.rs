@@ -113,8 +113,17 @@ pub(crate) async fn enrich_pdf_images(
 
     if image_workers(policy) <= 1 {
         for item in work_items {
-            let result = process_image(document_id.to_string(), item, policy.clone()).await;
-            persist_image_result(db, document_id, result, outcome, &mut collected)?;
+            match tokio::time::timeout(
+                per_image_timeout(),
+                process_image(document_id.to_string(), item.clone(), policy.clone()),
+            )
+            .await
+            {
+                Ok(result) => {
+                    persist_image_result(db, document_id, result, outcome, &mut collected)?
+                }
+                Err(_elapsed) => record_image_timeout(document_id, &item, outcome),
+            }
         }
         return Ok(collected);
     }
@@ -127,10 +136,24 @@ pub(crate) async fn enrich_pdf_images(
             let item = work_items[next].clone();
             let policy = policy.clone();
             let doc = document_id.to_string();
-            tasks.spawn(async move { process_image(doc, item, policy).await });
+            // On timeout, `process_image` never returns — hand the work back so the caller can
+            // synthesize a per-image skip (JoinSet gives no task identity at join time).
+            tasks.spawn(async move {
+                let work = item.clone();
+                match tokio::time::timeout(per_image_timeout(), process_image(doc, item, policy))
+                    .await
+                {
+                    Ok(result) => Ok(result),
+                    Err(_elapsed) => Err(work),
+                }
+            });
             next += 1;
         }
         let Some(joined) = tasks.join_next().await else {
+            // Defensive: an emptied set with no work left must exit, never spin.
+            if next >= work_items.len() {
+                break;
+            }
             continue;
         };
         let result = joined.map_err(|e| DocsError::VlmProvider {
@@ -138,12 +161,45 @@ pub(crate) async fn enrich_pdf_images(
             message: format!("PDF image worker join failed: {e}"),
             status_code: None,
         })?;
-        if let Err(error) = persist_image_result(db, document_id, result, outcome, &mut collected) {
-            tasks.abort_all();
-            return Err(error);
+        match result {
+            Ok(result) => {
+                if let Err(error) =
+                    persist_image_result(db, document_id, result, outcome, &mut collected)
+                {
+                    tasks.abort_all();
+                    return Err(error);
+                }
+            }
+            // A wall-clock timeout skips just this image; the run continues.
+            Err(work) => record_image_timeout(document_id, &work, outcome),
         }
     }
     Ok(collected)
+}
+
+/// Per-image wall-clock backstop over the WHOLE `process_image` (OCR + VLM) of one image. A
+/// LOOSE budget by design: the default 600s sits well above legitimate worst-case VLM time
+/// (the 120s per-request reqwest timeout × retries + backoff), so it only fires on a truly
+/// wedged external call (the observed 0-CPU ingest hang), never on slow-but-progressing work.
+fn per_image_timeout() -> std::time::Duration {
+    let secs = std::env::var("ARCHON_PDF_IMAGE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(600);
+    std::time::Duration::from_secs(secs)
+}
+
+/// The per-image backstop fired: record a per-image SKIP (progress line + failure counter +
+/// warning) and move on — a hung image must never be fatal to the document.
+fn record_image_timeout(document_id: &str, work: &ImageWork, outcome: &mut PipelineOutcome) {
+    let warning = format!(
+        "PDF image enrichment timed out after {}s on page {} (image skipped)",
+        per_image_timeout().as_secs(),
+        work.image.source_page
+    );
+    outcome.pdf_image_vlm_failures += 1;
+    outcome.warnings.push(warning.clone());
+    emit_vlm_skip(document_id, work, &warning);
 }
 
 #[derive(Clone)]

@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use super::provider::{OcrExtractResult, OcrProvider, OcrRequest};
+use super::provider::{OcrExtractResult, OcrProvider, OcrRequest, ocr_timeout, pdf_render_timeout};
 use super::rapid;
 use crate::errors::DocsError;
 use crate::models::PageOffset;
@@ -90,13 +90,23 @@ async fn extract_image_with_tesseract(
     if let Some(language) = language_hint.filter(|s| !s.trim().is_empty()) {
         command.arg("-l").arg(language);
     }
+    command.kill_on_drop(true);
 
-    let output = command.output().await.map_err(|e| DocsError::OcrApi {
-        message: format!(
-            "tesseract not found or failed to start for image OCR. Install tesseract-ocr. ({e})"
-        ),
-        status_code: None,
-    })?;
+    let output = tokio::time::timeout(ocr_timeout(), command.output())
+        .await
+        .map_err(|_elapsed| DocsError::OcrApi {
+            message: format!(
+                "tesseract image OCR timed out after {}s",
+                ocr_timeout().as_secs()
+            ),
+            status_code: None,
+        })?
+        .map_err(|e| DocsError::OcrApi {
+            message: format!(
+                "tesseract not found or failed to start for image OCR. Install tesseract-ocr. ({e})"
+            ),
+            status_code: None,
+        })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -143,13 +153,23 @@ fn extract_text_file(path: &Path) -> Result<OcrExtractResult, DocsError> {
 async fn extract_pdf_native(path: &Path) -> Result<OcrExtractResult, DocsError> {
     let path_str = path.to_string_lossy().to_string();
 
-    // Try pdftotext (from poppler-utils) first
-    let output = tokio::process::Command::new(command_path("pdftotext", "ARCHON_PDFTOTEXT_BIN"))
+    // Try pdftotext (from poppler-utils) first — bounded like the other OCR-path subprocesses.
+    let mut command =
+        tokio::process::Command::new(command_path("pdftotext", "ARCHON_PDFTOTEXT_BIN"));
+    command
         .arg("-layout")
         .arg(&path_str)
         .arg("-")
-        .output()
-        .await;
+        .kill_on_drop(true);
+    let output = match tokio::time::timeout(ocr_timeout(), command.output()).await {
+        Ok(output) => output,
+        Err(_elapsed) => {
+            return Err(DocsError::OcrApi {
+                message: format!("pdftotext timed out after {}s", ocr_timeout().as_secs()),
+                status_code: None,
+            });
+        }
+    };
 
     match output {
         Ok(out) if out.status.success() => {
@@ -236,12 +256,21 @@ async fn extract_scanned_pdf(
 
 async fn render_pdf_pages(path: &Path, render_dir: &Path) -> Result<Vec<PathBuf>, DocsError> {
     let prefix = render_dir.join("page");
-    let output = tokio::process::Command::new(command_path("pdftoppm", "ARCHON_PDFTOPPM_BIN"))
+    let mut command = tokio::process::Command::new(command_path("pdftoppm", "ARCHON_PDFTOPPM_BIN"));
+    command
         .arg("-png")
         .arg(path)
         .arg(&prefix)
-        .output()
+        .kill_on_drop(true);
+    let output = tokio::time::timeout(pdf_render_timeout(), command.output())
         .await
+        .map_err(|_elapsed| DocsError::OcrApi {
+            message: format!(
+                "pdftoppm PDF render timed out after {}s",
+                pdf_render_timeout().as_secs()
+            ),
+            status_code: None,
+        })?
         .map_err(|e| DocsError::OcrApi {
             message: format!(
                 "pdftoppm not found or failed to start for scanned PDF OCR. \
