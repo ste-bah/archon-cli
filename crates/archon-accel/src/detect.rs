@@ -5,8 +5,36 @@ use crate::report::{AccelKind, Accelerator, AcceleratorReport};
 
 const BYTES_PER_MIB: u64 = 1024 * 1024;
 
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+// The Apple constants + budget helper below are only *called* from the macos/aarch64 detect path,
+// but stay un-gated so the pure helper unit-tests run on every platform.
+#[allow(dead_code)]
 const APPLE_OS_RESERVE_MB: u64 = 6144;
+
+/// MEASURED ollama qwen2.5vl:7b footprint on Metal (6.8GB, observed on the 24GB Mac validation
+/// run 2026-07-04). Reserved because ollama keeps the VLM model resident across documents
+/// (idle-timeout), so Marker's surya and the VLM are potentially coresident in the SAME unified
+/// pool — Marker must not claim memory the VLM needs.
+#[allow(dead_code)]
+const APPLE_VLM_CORESIDENT_RESERVE_MB: u64 = 6800;
+
+/// Unified-memory GPU budget for Apple Silicon (MiB). On unified memory the GPU grows into the
+/// shared RAM pool, so the instantaneous free-RAM snapshot understates what Marker's surya model
+/// can use. Take the LARGER of (a) instantaneous free minus the OS reserve — right when RAM is
+/// plentiful — and (b) the total pool minus OS + a coresident-VLM reserve — right when free is
+/// transiently low on a large machine. The `unified` term is free-INDEPENDENT, so on a large
+/// machine under heavy non-VLM pressure it can over-report; a clean MPS OOM (`RuntimeError:
+/// MPS backend out of memory`) is caught by the per-doc OOM->CPU ladder, but — per
+/// [`AcceleratorReport::unified_memory`] — unified over-commit usually shows up as *soft* OS
+/// pressure, and a jetsam SIGKILL is NOT ladder-catchable (no exit 42 / OOM stderr). Bounding
+/// the `unified` term to a fraction of free + treating signal-kills as CPU-retryable is a
+/// tracked hardening follow-up; the current form is validated for the normal (uncontended)
+/// bulk-ingest envelope.
+#[allow(dead_code)]
+fn apple_unified_gpu_budget_mb(ram_total_mb: u64, ram_free_mb: u64) -> u64 {
+    let instantaneous = ram_free_mb.saturating_sub(APPLE_OS_RESERVE_MB);
+    let unified = ram_total_mb.saturating_sub(APPLE_OS_RESERVE_MB + APPLE_VLM_CORESIDENT_RESERVE_MB);
+    instantaneous.max(unified)
+}
 
 /// Probe the host. Shell-outs (`nvidia-smi`) or platform calls that fail are recorded in
 /// `notes` and degrade to fewer accelerators — never an error.
@@ -60,7 +88,7 @@ fn detect_accelerators(
 ) -> Vec<Accelerator> {
     // Apple Silicon always exposes a Metal-capable integrated GPU sharing the unified pool.
     // Usable GPU memory ≈ available RAM minus an OS reserve; pressure (not OOM) governs the rest.
-    let free_mb = ram_free_mb.saturating_sub(APPLE_OS_RESERVE_MB);
+    let free_mb = apple_unified_gpu_budget_mb(ram_total_mb, ram_free_mb);
     vec![Accelerator {
         kind: AccelKind::Metal,
         index: 0,
@@ -132,5 +160,38 @@ mod tests {
         if let Some(g) = r.best_gpu() {
             assert!(!g.name.is_empty());
         }
+    }
+
+    // 6000 = MARKER_FLOOR_MB in placement.rs (hardcoded here to avoid coupling the tests to
+    // the planner module).
+    const FLOOR_MB: u64 = 6000;
+
+    #[test]
+    fn unified_budget_24gb_mac_transient_low_free_stays_on_metal() {
+        // Real Mac scenario: 24GB total, ~11.2GB free at launch.
+        // max(11256-6144=5112, 24576-(6144+6800)=11632) = 11632 → Metal fits.
+        let budget = apple_unified_gpu_budget_mb(24576, 11256);
+        assert_eq!(budget, 11632);
+        assert!(budget > FLOOR_MB);
+    }
+
+    #[test]
+    fn unified_budget_24gb_mac_plenty_free_uses_instantaneous_term() {
+        // max(20000-6144=13856, 11632) = 13856 → instantaneous term wins.
+        assert_eq!(apple_unified_gpu_budget_mb(24576, 20000), 13856);
+    }
+
+    #[test]
+    fn unified_budget_16gb_tight_machine_stays_cpu() {
+        // max(8000-6144=1856, 16384-12944=3440) = 3440 → below the floor, CPU.
+        let budget = apple_unified_gpu_budget_mb(16384, 8000);
+        assert_eq!(budget, 3440);
+        assert!(budget < FLOOR_MB);
+    }
+
+    #[test]
+    fn unified_budget_8gb_machine_is_zero() {
+        // Both terms saturate to 0 → CPU.
+        assert_eq!(apple_unified_gpu_budget_mb(8192, 5000), 0);
     }
 }
