@@ -169,9 +169,17 @@ The analyzer is pure Rust (`regex`, `once_cell`, `serde`) — no external tools.
 ## 4. Known limitations / experimental (honest inventory)
 
 **Ingestion**
-- Multi-consumer GPU arbitration in `placement.rs` (`ConsumerKind::{Whisper, FrameVlm}`)
-  is a dormant seam — Marker is the only live GPU consumer this round; the
-  whisper/frame-VLM footprints are unverified estimates for the video port.
+- The `ConsumerKind::{Whisper, FrameVlm}` variants in `placement.rs` are an
+  intentional, near-zero-cost seam — **not pending work**. They exist so the
+  accel type surface stays honest for a future revisit of video, but the
+  multi-consumer *arbiter* they'd feed is deliberately unbuilt: GPU consumers on
+  the media paths run **sequentially** (Marker exits and frees its VRAM before
+  the VLM loads; video ASR → frame-VLM would follow the same shape), so
+  single-consumer free-VRAM placement already covers the real cases and there is
+  no co-residency to budget. Marker is the only live GPU consumer; the
+  whisper/frame-VLM footprints are placeholder estimates. If constrained-hardware
+  video ingest ever needs it, the useful move is to route those consumers through
+  the existing single-consumer placement — not to build the arbiter.
 - Embedding is CPU-only this round (GPU embedding is opt-in / future).
 - `figure_region_vlm` (figure-crop VLM) and non-default scan-detector modes are opt-in.
 - `archon_marker_core.py` should be re-confirmed against the installed Marker
