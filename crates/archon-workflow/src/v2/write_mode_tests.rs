@@ -72,3 +72,33 @@ fn absolute_changed_file_outside_repository_remains_unsafe() {
         WorkflowV2WriteSafetyError::UnsafeTarget { .. }
     ));
 }
+
+#[test]
+fn instruction_text_target_is_rejected_before_path_resolution() {
+    let error = normalize_targets_for_repository(
+        "REM-X-001",
+        &["Produce or update admissible evidence references for the audit; do not use task docs as repo-owned implementation targets".to_string()],
+        None,
+    )
+    .expect_err("prose target must be unsafe");
+
+    assert!(matches!(
+        error,
+        WorkflowV2WriteSafetyError::UnsafeTarget { .. }
+    ));
+}
+
+#[test]
+fn target_with_internal_whitespace_is_rejected() {
+    let error = normalize_targets_for_repository(
+        "REM-X-002",
+        &["src/some file.rs".to_string()],
+        Some("/repo"),
+    )
+    .expect_err("whitespace target must be unsafe");
+
+    assert!(matches!(
+        error,
+        WorkflowV2WriteSafetyError::UnsafeTarget { .. }
+    ));
+}

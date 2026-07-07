@@ -309,6 +309,11 @@ fn target_file_issue(target: &str, root: &str) -> Option<&'static str> {
     if trimmed.is_empty() {
         return Some("implementation item has an empty target file");
     }
+    if trimmed.chars().any(char::is_whitespace) {
+        return Some(
+            "target_files must hold repository file paths, not instruction text or prose",
+        );
+    }
     let normalized = normalized_contract_path(trimmed)?;
     let absolute = is_contract_absolute_path(trimmed);
     if absolute {

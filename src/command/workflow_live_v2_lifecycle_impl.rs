@@ -140,6 +140,7 @@ impl LifecycleDriver {
             &contract,
             &support::array(remediation_inventory.get("items")),
         );
+        let mut unscheduled_followup: Option<serde_json::Value> = None;
         let mut remediation_attempt = 1usize;
         while !unresolved.is_empty() && remediation_attempt <= self.max_repair_iterations {
             let call_id = format!("remediation-outcome-repair-{wave_index}-{remediation_attempt}");
@@ -176,6 +177,7 @@ impl LifecycleDriver {
                 &remediation_task_ids,
             );
             if !remediation::remediation_inventory_ready(&followup_inventory) {
+                unscheduled_followup = Some(followup_inventory);
                 break;
             }
             let followup_wave = self
@@ -248,7 +250,12 @@ impl LifecycleDriver {
                 );
                 let expansion_inventory =
                     remediation::normalize_remediation_inventory(&contract, &expansion_raw);
-                if remediation::remediation_inventory_ready(&expansion_inventory) {
+                let expansion_ready =
+                    remediation::remediation_inventory_ready(&expansion_inventory);
+                if !expansion_ready {
+                    unscheduled_followup.get_or_insert(expansion_inventory.clone());
+                }
+                if expansion_ready {
                     let expansion_wave = self
                         .write_fanout(
                             &format!(
@@ -292,6 +299,7 @@ impl LifecycleDriver {
                         "remediationInventory": remediation_inventory,
                         "remediationWave": remediation_wave,
                         "unresolvedAfterRemediation": unresolved,
+                        "unscheduledFollowupInventory": unscheduled_followup,
                         "implementationEvidence": evidence.implementation,
                         "repair_attempts": evidence.repair_attempts,
                     }),

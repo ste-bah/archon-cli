@@ -375,7 +375,9 @@ pub fn normalize_target_for_repository(
 fn normalize_target(item_id: &str, target: &str) -> Result<String, WorkflowV2WriteSafetyError> {
     let trimmed = target.trim();
     let path = Path::new(trimmed);
-    if trimmed.is_empty() || path.is_absolute() {
+    // Whitespace inside a declared target means instruction text leaked into
+    // an ownership field; reject it before it can resolve to a path.
+    if trimmed.is_empty() || trimmed.chars().any(char::is_whitespace) || path.is_absolute() {
         return Err(WorkflowV2WriteSafetyError::UnsafeTarget {
             item_id: item_id.to_string(),
             target: target.to_string(),

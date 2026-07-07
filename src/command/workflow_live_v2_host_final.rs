@@ -55,7 +55,14 @@ fn final_report_result(
             severity: Some("review".to_string()),
         });
     }
-    result.data = serde_json::to_value(report)?;
+    let mut data = serde_json::to_value(report)?;
+    if result.status != WorkflowV2Status::Accepted
+        && let Some(object) = data.as_object_mut()
+        && let Some(blocker) = final_report_blocker_context(execution)
+    {
+        object.insert("blocker".to_string(), blocker);
+    }
+    result.data = data;
     Ok(result)
 }
 

@@ -79,3 +79,21 @@ fn workflow_live_generated_contract_flags_noncanonical_remediation_fixture() {
         inventory.issues
     );
 }
+
+#[test]
+fn target_file_issue_rejects_instruction_text() {
+    let issue = super::lifecycle_target_file_issue(
+        "Produce or update admissible evidence references for the audit",
+        Some("/repo"),
+    )
+    .expect("prose target must raise a contract issue");
+    assert!(issue.contains("not instruction text"), "issue: {issue}");
+}
+
+#[test]
+fn target_file_issue_accepts_repo_relative_path() {
+    assert!(
+        super::lifecycle_target_file_issue("crates/archon-core/src/lib.rs", Some("/repo"))
+            .is_none()
+    );
+}
