@@ -266,16 +266,14 @@ fn is_reusable_status(status: WorkflowV2Status) -> bool {
 }
 
 fn terminal_stop_for_call(call: &WorkflowV2HostCall, status: WorkflowV2Status) -> bool {
-    matches!(
-        status,
-        WorkflowV2Status::Failed | WorkflowV2Status::Cancelled
-    ) || matches!(
-        call.method,
-        WorkflowV2HostMethod::HumanGate
-            | WorkflowV2HostMethod::QualityGate
-            | WorkflowV2HostMethod::RequireArtifact
-            | WorkflowV2HostMethod::FinalReport
-    ) && !matches!(status, WorkflowV2Status::Accepted | WorkflowV2Status::Noop)
+    // Errors are values: task-level failures flow back to the script as
+    // structured results for script-owned remediation. Only cancellation and
+    // unsatisfied final/human gates unwind the script.
+    matches!(status, WorkflowV2Status::Cancelled)
+        || matches!(
+            call.method,
+            WorkflowV2HostMethod::HumanGate | WorkflowV2HostMethod::FinalReport
+        ) && !matches!(status, WorkflowV2Status::Accepted | WorkflowV2Status::Noop)
 }
 
 fn merge_v2_status(left: WorkflowV2Status, right: WorkflowV2Status) -> WorkflowV2Status {

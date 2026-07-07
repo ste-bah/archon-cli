@@ -13,7 +13,6 @@ mod project_artifact_completion;
 mod project_artifact_prompt;
 pub mod project_artifact_results;
 pub mod project_artifacts;
-pub mod remediation;
 pub mod report;
 pub mod result;
 pub mod result_store;
@@ -41,11 +40,6 @@ pub use project_artifacts::{
     PROJECT_ARTIFACT_POLICY_VERSION, WorkflowV2ProjectArtifactContext,
     has_project_artifact_evidence, has_project_artifact_requirement,
     normalize_project_artifact_files, project_artifact_context_from_v2_root,
-};
-pub use remediation::{
-    WorkflowV2ConvergenceController, WorkflowV2ConvergenceDecision, WorkflowV2ConvergenceError,
-    WorkflowV2ConvergenceStatus, WorkflowV2RemediationItem, WorkflowV2VerificationKind,
-    WorkflowV2VerificationOutcome, WorkflowV2VerificationStatus, test_command,
 };
 pub use report::{
     WorkflowV2FinalReport, WorkflowV2FinalReportBuilder, WorkflowV2FinalReportError,

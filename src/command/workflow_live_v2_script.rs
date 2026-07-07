@@ -254,7 +254,6 @@ struct WorkflowScriptAccumulator {
     failed_call: Option<String>,
     failed_result_path: Option<String>,
     next_action: Option<String>,
-    terminal_latched: bool,
 }
 
 impl Default for WorkflowScriptAccumulator {
@@ -268,7 +267,6 @@ impl Default for WorkflowScriptAccumulator {
             failed_call: None,
             failed_result_path: None,
             next_action: None,
-            terminal_latched: false,
         }
     }
 }

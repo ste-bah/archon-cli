@@ -11,7 +11,6 @@ impl WorkflowScriptHost {
         payload: String,
     ) -> archon_workflow::WorkflowResult<String> {
         let request: ScriptHostRequest = serde_json::from_str(&payload)?;
-        self.ensure_generated_prd_not_terminally_latched().await?;
         let execution = self.execution_from_request(&method, request)?;
         let mut source_metadata = dynamic_wave_source_metadata(
             &execution,
@@ -263,7 +262,14 @@ impl WorkflowScriptHost {
 
     async fn mark_executed(&self, record: &WorkflowV2CallRecord, status: WorkflowV2Status) {
         let mut acc = self.accumulator.lock().await;
-        acc.status = merge_v2_status(acc.status, status);
+        // A final report is the script speaking for the whole run: its status
+        // overrides accumulated call severities so script-recovered failures
+        // do not doom an otherwise accepted run.
+        if record.call.method == WorkflowV2HostMethod::FinalReport {
+            acc.status = status;
+        } else {
+            acc.status = merge_v2_status(acc.status, status);
+        }
         acc.executed += 1;
         if is_reusable_status(status) {
             acc.completed += 1;
@@ -278,13 +284,14 @@ impl WorkflowScriptHost {
         next_action: String,
     ) {
         let mut acc = self.accumulator.lock().await;
-        acc.status = merge_v2_status(acc.status, record.status);
+        if record.call.method == WorkflowV2HostMethod::FinalReport {
+            acc.status = record.status;
+        } else {
+            acc.status = merge_v2_status(acc.status, record.status);
+        }
         acc.failed_call = Some(record.call.id.clone());
         acc.failed_result_path = Some(result_path);
         acc.next_action = Some(next_action);
-        if self.generated_decomposed_prd_run() {
-            acc.terminal_latched = true;
-        }
     }
 
     async fn mark_script_failure(&self, error: &str) -> WorkflowV2ScriptSummary {
@@ -295,9 +302,6 @@ impl WorkflowScriptHost {
         acc.failed_call = Some("workflow.js".to_string());
         acc.failed_result_path = None;
         acc.next_action = Some(next_action.clone());
-        if self.generated_decomposed_prd_run() {
-            acc.terminal_latched = true;
-        }
         drop(acc);
         self.emit_v2_event(
             WorkflowEventKind::StageFailed,
@@ -312,22 +316,6 @@ impl WorkflowScriptHost {
         );
         self.emit_terminal_status(WorkflowV2Status::Failed);
         self.summary().await
-    }
-
-    async fn ensure_generated_prd_not_terminally_latched(
-        &self,
-    ) -> archon_workflow::WorkflowResult<()> {
-        if !self.generated_decomposed_prd_run() {
-            return Ok(());
-        }
-        let acc = self.accumulator.lock().await;
-        if !acc.terminal_latched {
-            return Ok(());
-        }
-        Err(WorkflowError::StageFailed(format!(
-            "{TERMINAL_HOST_CALL_MARKER} generated decomposed PRD workflow already stopped at {}",
-            acc.failed_call.as_deref().unwrap_or("unknown-call")
-        )))
     }
 
     fn generated_decomposed_prd_run(&self) -> bool {

@@ -94,7 +94,7 @@
     }
 
     #[tokio::test]
-    async fn failed_reduce_rejects_await_and_stops_before_downstream_calls() {
+    async fn failed_reduce_returns_error_value_for_script_owned_remediation() {
         let temp = tempfile::tempdir().expect("tempdir");
         let spec = test_spec();
         let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
@@ -130,7 +130,7 @@
 	async function workflow(w) {
 	  const reduced = await w.reduce("reduce-discovery", [{ id: "a", summary: "large branch data" }], { role: "reducer", task: "Reduce discovery into implementation inventory" });
 	  if (reduced.status === "failed") {
-	    await w.checkpoint("bad-empty-inventory-fallthrough");
+	    await w.checkpoint("script-owned-remediation");
 	  }
 	  await w.checkpoint("script-continued");
 	}
@@ -139,10 +139,10 @@
             .await
             .expect("script summary");
 
+        // Errors are values: the failed reduce flows back to the script, the
+        // script-owned remediation branch is reachable, and the run continues.
         assert_eq!(summary.status, WorkflowV2Status::Failed);
-        assert_eq!(summary.executed, 1);
-        assert_eq!(summary.completed, 0);
-        assert_eq!(summary.failed_call.as_deref(), Some("reduce-discovery"));
+        assert_eq!(summary.executed, 3);
         assert!(
             v2_store
                 .load_call_record("reduce-discovery")
@@ -151,15 +151,15 @@
         );
         assert!(
             v2_store
-                .load_call_record("bad-empty-inventory-fallthrough")
-                .expect("fallthrough lookup")
-                .is_none()
+                .load_call_record("script-owned-remediation")
+                .expect("remediation branch lookup")
+                .is_some()
         );
         assert!(
             v2_store
                 .load_call_record("script-continued")
                 .expect("checkpoint lookup")
-                .is_none()
+                .is_some()
         );
     }
 
@@ -246,7 +246,7 @@ async function workflow(w) {
     }
 
     #[tokio::test]
-    async fn non_accepted_quality_gate_stops_before_final_report() {
+    async fn non_accepted_quality_gate_returns_value_the_script_consumes() {
         let temp = tempfile::tempdir().expect("tempdir");
         let spec = test_spec();
         let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
@@ -279,17 +279,17 @@ async function workflow(w) {
                 r#"
 async function workflow(w) {
   const gate = await w.qualityGate("quality", { task: "Check typed inputs before final report" });
-  await w.finalReport("final", { inputs: [gate], task: "This must not run" });
+  await w.finalReport("final", { status: gate.status, inputs: [gate], task: "Report the gate outcome either way" });
 }
 "#,
             )
             .await
             .expect("script summary");
 
+        // Errors are values: the non-accepted gate flows to the script, which
+        // still produces a final report describing the outcome.
         assert_eq!(summary.status, WorkflowV2Status::NeedsReview);
-        assert_eq!(summary.executed, 1);
-        assert_eq!(summary.completed, 0);
-        assert_eq!(summary.failed_call.as_deref(), Some("quality"));
+        assert_eq!(summary.failed_call.as_deref(), Some("final"));
         assert!(
             v2_store
                 .load_call_record("quality")
@@ -300,12 +300,12 @@ async function workflow(w) {
             v2_store
                 .load_call_record("final")
                 .expect("final lookup")
-                .is_none()
+                .is_some()
         );
     }
 
     #[tokio::test]
-    async fn generated_prd_terminal_stop_cannot_be_caught_and_bypassed() {
+    async fn non_accepted_final_report_still_ends_the_script() {
         let temp = tempfile::tempdir().expect("tempdir");
         let spec = test_spec();
         let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
@@ -337,12 +337,8 @@ async function workflow(w) {
             .run(
                 r#"
 async function workflow(w) {
-  try {
-    await w.qualityGate("terminal-quality", { task: "Stop before final acceptance" });
-  } catch (err) {
-    // Generated decomposed PRD host terminal stops remain latched by the runtime.
-  }
-  await w.checkpoint("should-not-run-after-terminal-catch");
+  await w.finalReport("blocked-report", { status: "needs_review", inputs: {}, task: "Stop with review data" });
+  await w.checkpoint("should-not-run-after-final-report");
 }
 "#,
             )
@@ -350,18 +346,10 @@ async function workflow(w) {
             .expect("script summary");
 
         assert_eq!(summary.status, WorkflowV2Status::NeedsReview);
-        assert_eq!(summary.executed, 1);
-        assert_eq!(summary.completed, 0);
-        assert_eq!(summary.failed_call.as_deref(), Some("terminal-quality"));
+        assert_eq!(summary.failed_call.as_deref(), Some("blocked-report"));
         assert!(
             v2_store
-                .load_call_record("terminal-quality")
-                .expect("quality lookup")
-                .is_some_and(|record| record.status == WorkflowV2Status::NeedsReview)
-        );
-        assert!(
-            v2_store
-                .load_call_record("should-not-run-after-terminal-catch")
+                .load_call_record("should-not-run-after-final-report")
                 .expect("checkpoint lookup")
                 .is_none()
         );
