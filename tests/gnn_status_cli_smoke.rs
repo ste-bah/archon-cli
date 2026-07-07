@@ -12,13 +12,16 @@ fn gnn_status_cli_smoke() {
         return;
     };
     let tmp = tempfile::tempdir().expect("tempdir");
-    let config_home = tmp.path().join("config");
-    let data_home = tmp.path().join("data");
+    let fake_home = tmp.path().join("home");
 
+    // `default_memory_data_dir`/`default_config_path` resolve via `dirs::data_dir()`
+    // / `dirs::config_dir()`, which derive from `$HOME` on every platform (and only
+    // fall back to `$XDG_DATA_HOME`/`$XDG_CONFIG_HOME` on Linux) — so `HOME` is the
+    // one override that isolates this smoke test from a machine's real durable
+    // memory graph on both macOS and Linux.
     let output = Command::new(bin)
         .current_dir(tmp.path())
-        .env("XDG_CONFIG_HOME", &config_home)
-        .env("XDG_DATA_HOME", &data_home)
+        .env("HOME", &fake_home)
         .args(["learning", "gnn", "status"])
         .output()
         .expect("run archon learning gnn status");
