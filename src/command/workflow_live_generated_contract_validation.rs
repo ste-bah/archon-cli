@@ -136,6 +136,9 @@ fn generated_item_issues(
     issues
 }
 
+
+/// task_id -> claiming (item_id, canonical_task_ids) pairs.
+type TaskClaims = BTreeMap<String, Vec<(Option<String>, Vec<String>)>>;
 fn generated_support_item(value: &serde_json::Value) -> bool {
     let work_type = first_string(value, &["work_type", "workType", "kind"])
         .unwrap_or_default()
@@ -157,7 +160,7 @@ fn generated_inventory_graph_issues(
         return Vec::new();
     }
     let mut issues = Vec::new();
-    let mut claimed_by_task: BTreeMap<String, Vec<(Option<String>, Vec<String>)>> = BTreeMap::new();
+    let mut claimed_by_task: TaskClaims = BTreeMap::new();
     for item in items {
         let item_id = first_string(item, &["item_id", "id"]);
         let canonical_task_ids = raw_strings_from_aliases(item, &["canonical_task_ids"]);

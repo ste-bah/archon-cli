@@ -115,8 +115,10 @@ mod tests {
     }
 
     fn test_executor(cap: usize) -> Arc<AgentSubagentExecutor> {
-        let mut agent_config = AgentConfig::default();
-        agent_config.max_subagent_concurrency = cap;
+        let agent_config = AgentConfig {
+            max_subagent_concurrency: cap,
+            ..Default::default()
+        };
         let project_dir = std::env::temp_dir();
         Arc::new(AgentSubagentExecutor::new(
             Arc::new(MockLlmProvider),

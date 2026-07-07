@@ -52,9 +52,11 @@ fn nan_guard_keeps_weights_finite_under_extreme_lr() {
     store.initialize("layer3", H2, dim, Initialization::He, 102);
     let v_before = store.save_all().expect("save initial weights");
 
-    let mut gnn_cfg = GnnConfig::default();
-    gnn_cfg.input_dim = dim;
-    gnn_cfg.output_dim = dim;
+    let gnn_cfg = GnnConfig {
+        input_dim: dim,
+        output_dim: dim,
+        ..Default::default()
+    };
 
     let enhancer = GnnEnhancer::with_in_memory_weights(gnn_cfg, CacheConfig::default(), 100);
     // Override enhancer weights from CozoDB store
@@ -144,9 +146,11 @@ fn cozodb_weight_version_survives_training() {
     store.initialize("layer3", H2, dim, Initialization::He, 202);
     let v_before = store.save_all().expect("save");
 
-    let mut gnn_cfg = GnnConfig::default();
-    gnn_cfg.input_dim = dim;
-    gnn_cfg.output_dim = dim;
+    let gnn_cfg = GnnConfig {
+        input_dim: dim,
+        output_dim: dim,
+        ..Default::default()
+    };
     let enhancer = GnnEnhancer::with_in_memory_weights(gnn_cfg, CacheConfig::default(), 200);
 
     // Override enhancer weights from CozoDB

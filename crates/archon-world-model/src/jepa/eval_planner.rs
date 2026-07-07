@@ -313,7 +313,7 @@ mod tests_eval_planner {
     fn corpus_fingerprint_changes_when_row_added() {
         let row1 = make_row("s1", "r1", Some("a"));
         let row2 = make_row("s1", "r2", Some("b"));
-        let fp1 = JepaEvalPlanner::compute_corpus_fingerprint(&[row1.clone()]);
+        let fp1 = JepaEvalPlanner::compute_corpus_fingerprint(std::slice::from_ref(&row1));
         let fp2 = JepaEvalPlanner::compute_corpus_fingerprint(&[row1, row2]);
         assert_ne!(fp1, fp2);
     }

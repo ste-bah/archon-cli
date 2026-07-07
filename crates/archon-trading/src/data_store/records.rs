@@ -44,10 +44,8 @@ pub(super) fn enrich_metadata_artifacts(
     root: &Path,
     metadata: &mut DatasetMetadata,
     raw_body: &[u8],
-    normalized_path: &Path,
-    raw_path: &Path,
-    validation_path: &Path,
-    manifest_path: &Path,
+    (normalized_path, raw_path): (&Path, &Path),
+    (validation_path, manifest_path): (&Path, &Path),
     created_at: &str,
 ) -> Result<(), DataStoreError> {
     let normalized = std::fs::read(normalized_path).map_err(io_error)?;

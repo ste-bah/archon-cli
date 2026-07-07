@@ -18,6 +18,13 @@ use super::memory_context::recall_prior_context_for_agent;
 use super::types::{SpecialistCallOutput, SpecialistExecutionOutcome};
 use super::{GameTheoryMemoryContext, GameTheoryRunOptions};
 
+#[cfg(test)]
+type SpecialistFixtureParts = (
+    HashMap<String, String>,
+    Vec<(String, String)>,
+    Vec<MemoryRecallAudit>,
+);
+
 /// Test-only deterministic specialist fixture with failure isolation.
 #[cfg(test)]
 pub(super) fn execute_test_specialist_fixture(
@@ -25,11 +32,7 @@ pub(super) fn execute_test_specialist_fixture(
     fingerprint: &GameTheoryFingerprint,
     situation: &str,
     memory_ctx: &GameTheoryMemoryContext,
-) -> (
-    HashMap<String, String>,
-    Vec<(String, String)>,
-    Vec<MemoryRecallAudit>,
-) {
+) -> SpecialistFixtureParts {
     let outcome = execute_test_specialist_fixture_with_options(
         routing,
         fingerprint,
@@ -207,8 +210,7 @@ pub(super) async fn execute_specialists_real_with_options(
                 llm,
                 &fingerprint.run_id,
                 agent_key,
-                situation,
-                &fingerprint_summary,
+                (situation, &fingerprint_summary),
                 memory_ctx,
                 &system,
                 learning_contexts.get(agent_key),
@@ -251,8 +253,7 @@ async fn execute_specialist_call(
     llm: &dyn LlmClient,
     run_id: &str,
     agent_key: &str,
-    situation: &str,
-    fingerprint_summary: &str,
+    (situation, fingerprint_summary): (&str, &str),
     memory_ctx: &GameTheoryMemoryContext,
     system: &[serde_json::Value],
     learning_context: Option<&LearningContext>,

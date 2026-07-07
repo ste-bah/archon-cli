@@ -260,10 +260,7 @@ async fn pump_one_stream_with_state(
         };
         buf.extend_from_slice(&chunk);
 
-        loop {
-            let Some(nl) = buf.iter().position(|&b| b == b'\n') else {
-                break;
-            };
+        while let Some(nl) = buf.iter().position(|&b| b == b'\n') {
             let mut line_bytes = buf.drain(..=nl).collect::<Vec<u8>>();
             line_bytes.pop();
             if line_bytes.last() == Some(&b'\r') {

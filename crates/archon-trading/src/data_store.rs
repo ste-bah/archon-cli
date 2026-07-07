@@ -261,10 +261,8 @@ impl TradingDataLake {
         self.write_dataset(
             versioned,
             request.bars,
-            request.raw_body,
-            request.raw_format,
-            request.raw_request,
-            request.redacted_headers,
+            (request.raw_body, request.raw_format),
+            (request.raw_request, request.redacted_headers),
             request.provider_notes,
             request.created_at,
         )
@@ -371,10 +369,8 @@ impl TradingDataLake {
         &self,
         mut versioned: VersionedDataset,
         bars: Vec<OhlcvBar>,
-        raw_body: Vec<u8>,
-        raw_format: OhlcvFormat,
-        raw_request: serde_json::Value,
-        redacted_headers: serde_json::Value,
+        (raw_body, raw_format): (Vec<u8>, OhlcvFormat),
+        (raw_request, redacted_headers): (serde_json::Value, serde_json::Value),
         provider_notes: String,
         created_at: String,
     ) -> Result<StoredDatasetRecord, DataStoreError> {
@@ -397,10 +393,8 @@ impl TradingDataLake {
             &self.root,
             &mut versioned.metadata,
             &raw_body,
-            &normalized_path,
-            &raw_path,
-            &validation_path,
-            &manifest_path,
+            (&normalized_path, &raw_path),
+            (&validation_path, &manifest_path),
             &created_at,
         )?;
         versioned.content_hash = versioned.metadata.checksum.clone();

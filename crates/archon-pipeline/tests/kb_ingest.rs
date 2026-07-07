@@ -18,18 +18,6 @@ fn mem_db() -> DbInstance {
     DbInstance::new("mem", "", Default::default()).expect("in-memory CozoDB")
 }
 
-/// Count rows in the `kb_nodes` relation.
-fn count_nodes(db: &DbInstance) -> usize {
-    let result = db
-        .run_script(
-            "?[count(node_id)] := *kb_nodes{node_id}",
-            Default::default(),
-            ScriptMutability::Immutable,
-        )
-        .expect("count query");
-    result.rows[0][0].get_int().unwrap_or(0) as usize
-}
-
 /// Query nodes by source path.
 fn nodes_by_source(db: &DbInstance, source: &str) -> Vec<Vec<DataValue>> {
     let mut params = BTreeMap::new();

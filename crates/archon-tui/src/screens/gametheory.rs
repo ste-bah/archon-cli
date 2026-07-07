@@ -74,6 +74,10 @@ impl GameTheoryScreen {
         self.browser.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.browser.is_empty()
+    }
+
     pub fn selected(&self) -> Option<&GameTheoryRow> {
         self.browser.selected()
     }

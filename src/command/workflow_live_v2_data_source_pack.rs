@@ -11,9 +11,11 @@ pub(super) fn source_pack_value(value: &serde_json::Value) -> serde_json::Value 
             }
             let mut packed = serde_json::Map::new();
             for (key, value) in object {
-                if key == "result" {
-                    packed.insert(key.clone(), source_pack_value(value));
-                } else if key == "items" || key.ends_with("Items") || key.ends_with("_items") {
+                if key == "result"
+                    || key == "items"
+                    || key.ends_with("Items")
+                    || key.ends_with("_items")
+                {
                     packed.insert(key.clone(), source_pack_value(value));
                 } else if key == "branch_artifact_paths" || key == "artifact_paths" {
                     packed.insert(key.clone(), value.clone());

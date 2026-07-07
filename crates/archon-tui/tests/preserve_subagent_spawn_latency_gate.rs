@@ -34,6 +34,7 @@
 //!   2. `tokio::spawn`s the runner (via installed `SubagentExecutor`).
 //!   3. Registers the handle in `BACKGROUND_AGENTS`.
 //!   4. Returns `ToolResult::success({"agent_id","status":"spawned"})`.
+//!
 //! Steps 2-4 are synchronous from the caller's point of view — no await on
 //! the parent loop. This is the "BACKGROUND_AGENTS insert returns" instant
 //! that the sibling TUI-811 load test also anchors on.

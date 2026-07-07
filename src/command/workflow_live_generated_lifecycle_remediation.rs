@@ -288,11 +288,11 @@ fn remediation_item_with_source_ownership(
         "focused_verification",
         "acceptance_criteria",
     ] {
-        if !present(merged.get(fallback).map(|v| v)) && present(source.get(fallback)) {
+        if !present(merged.get(fallback)) && present(source.get(fallback)) {
             merged.insert(fallback.to_string(), source.get(fallback).cloned().unwrap());
         }
     }
-    if !present(merged.get("source_item_id").map(|v| v))
+    if !present(merged.get("source_item_id"))
         && let Some(source_id) = source
             .get("item_id")
             .or_else(|| source.get("id"))

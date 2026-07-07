@@ -73,8 +73,7 @@ pub(crate) async fn handle_resume(
                     session_id,
                     cwd,
                     leann.as_ref(),
-                    reflexion.as_mut(),
-                    learning.as_mut(),
+                    (reflexion.as_mut(), learning.as_mut()),
                     options,
                 )
                 .await?;
@@ -110,8 +109,7 @@ pub(crate) async fn handle_resume(
                     session_id,
                     cwd,
                     None,
-                    reflexion.as_mut(),
-                    trajectory_learning.as_mut(),
+                    (reflexion.as_mut(), trajectory_learning.as_mut()),
                     options,
                 )
                 .await?;

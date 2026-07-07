@@ -167,11 +167,9 @@ async fn run_query(
                 usage.input_tokens += u.input_tokens;
             }
             StreamEvent::ContentBlockStart {
-                block_type,
-                tool_use_id: _,
-                tool_name: _,
+                block_type: ContentBlockType::Text,
                 ..
-            } if block_type == ContentBlockType::Text => {
+            } => {
                 text_buf.clear();
             }
             StreamEvent::TextDelta { text, .. } => {

@@ -19,36 +19,21 @@ use std::collections::HashMap;
 #[derive(Debug, Deserialize)]
 struct FixtureFile {
     seed: u64,
-    config: FixtureConfig,
     layer_ids: Vec<String>,
     layer_weights: HashMap<String, FixtureLayerWeights>,
     fixtures: Vec<Fixture>,
 }
 
 #[derive(Debug, Deserialize)]
-struct FixtureConfig {
-    #[serde(rename = "inputDim")]
-    input_dim: usize,
-    #[serde(rename = "outputDim")]
-    output_dim: usize,
-}
-
-#[derive(Debug, Deserialize)]
 struct FixtureLayerWeights {
-    #[serde(rename = "inDim")]
-    in_dim: usize,
     #[serde(rename = "outDim")]
     out_dim: usize,
-    seed: u64,
     first_row_sample: Vec<f32>,
-    #[serde(default)]
-    weights: Vec<Vec<f32>>,
 }
 
 #[derive(Debug, Deserialize)]
 struct Fixture {
     name: String,
-    seed: u64,
     #[serde(default)]
     input: Option<Vec<Option<f32>>>,
     #[serde(default)]
@@ -193,11 +178,10 @@ fn forward_pass_parity_all_input_fixtures() {
         if cos_sim < 0.999 {
             // Compute first 10 diverging indices for diagnostics
             let mut diverged = Vec::new();
-            let min_len = result.enhanced.len().min(expected.len());
-            for i in 0..min_len {
-                let diff = (result.enhanced[i] - expected[i]).abs();
+            for (i, (&got, &want)) in result.enhanced.iter().zip(expected.iter()).enumerate() {
+                let diff = (got - want).abs();
                 if diff > 1e-4 {
-                    diverged.push((i, result.enhanced[i], expected[i], diff));
+                    diverged.push((i, got, want, diff));
                     if diverged.len() >= 10 {
                         break;
                     }

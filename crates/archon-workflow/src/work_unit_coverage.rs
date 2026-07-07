@@ -302,10 +302,3 @@ fn normalized(value: &str) -> String {
         .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
         .collect()
 }
-
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeSet;
-
-    use super::{CoverageVerdict, evaluate};
-}

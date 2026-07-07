@@ -4,7 +4,7 @@ fn train_jepa_candidate_with_tensor_backend<B: JepaTensorBackend>(
     backend_status: BackendStatus,
     backend: B,
     should_stop: Option<&dyn Fn() -> bool>,
-    progress: Option<&dyn Fn(&str, &str)>,
+    progress: JepaProgressObserver,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     config.validate()?;
     check_jepa_training_stop(should_stop, "jepa example build")?;

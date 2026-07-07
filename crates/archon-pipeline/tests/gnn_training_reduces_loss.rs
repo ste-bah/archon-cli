@@ -41,12 +41,14 @@ fn make_samples(n: usize) -> Vec<TrajectoryWithFeedback> {
 
 #[test]
 fn training_reduces_loss_and_passes_three_property_gate() {
-    let mut gnn_cfg = GnnConfig::default();
-    gnn_cfg.input_dim = DIM;
-    gnn_cfg.output_dim = DIM;
-    // Disable layer norm to prevent mode collapse from excessive normalization
-    gnn_cfg.use_layer_norm = false;
-    gnn_cfg.use_residual = false;
+    // Layer norm disabled to prevent mode collapse from excessive normalization
+    let gnn_cfg = GnnConfig {
+        input_dim: DIM,
+        output_dim: DIM,
+        use_layer_norm: false,
+        use_residual: false,
+        ..Default::default()
+    };
     let enhancer = GnnEnhancer::with_in_memory_weights(gnn_cfg, CacheConfig::default(), 42);
 
     let samples = make_samples(200);

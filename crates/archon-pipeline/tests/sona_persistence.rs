@@ -59,8 +59,10 @@ fn provide_feedback_with_db_persists_to_cozo() {
     let db = mem_db();
     initialize_learning_schemas(&db).unwrap();
 
-    let mut config = SonaConfig::default();
-    config.db = Some(Arc::new(db.clone()));
+    let config = SonaConfig {
+        db: Some(Arc::new(db.clone())),
+        ..Default::default()
+    };
 
     let mut engine = SonaEngine::new(config);
     let trajectory = engine.create_trajectory("test.route", "test-agent", "session-1");
@@ -159,10 +161,12 @@ fn provide_feedback_embeds_when_quality_first_set_nonzero() {
     let db = mem_db();
     initialize_learning_schemas(&db).unwrap();
 
-    let mut config = SonaConfig::default();
-    config.db = Some(Arc::new(db));
-    config.embedding_provider = Some(Arc::new(StubEmbedder { dim: 4 }));
-    config.gnn_input_dim = 4;
+    let config = SonaConfig {
+        db: Some(Arc::new(db)),
+        embedding_provider: Some(Arc::new(StubEmbedder { dim: 4 })),
+        gnn_input_dim: 4,
+        ..Default::default()
+    };
 
     let mut engine = SonaEngine::new(config);
     let trajectory = engine.create_trajectory("test.route", "test-agent", "session-1");

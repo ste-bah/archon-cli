@@ -134,7 +134,7 @@ pub fn detect_interrupted(state_dir: &Path) -> Result<Vec<PipelineCheckpoint>> {
         }
     }
 
-    sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
     Ok(sessions)
 }
 

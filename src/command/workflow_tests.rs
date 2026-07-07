@@ -426,8 +426,10 @@ fn test_v2_call(
     method: WorkflowV2HostMethod,
     source: Option<&str>,
 ) -> WorkflowV2HostCall {
-    let mut options = WorkflowV2HostOptions::default();
-    options.source = source.map(str::to_string);
+    let options = WorkflowV2HostOptions {
+        source: source.map(str::to_string),
+        ..Default::default()
+    };
     WorkflowV2HostCall {
         id: id.to_string(),
         method,

@@ -48,8 +48,10 @@ fn reserved_header_validation_is_case_insensitive() {
         "User-Agent",
         "OpenAI-Beta",
     ] {
-        let mut spoof = SpoofConfig::default();
-        spoof.extra_headers = BTreeMap::from([(key.to_string(), "bad".to_string())]);
+        let spoof = SpoofConfig {
+            extra_headers: BTreeMap::from([(key.to_string(), "bad".to_string())]),
+            ..Default::default()
+        };
         assert!(matches!(
             validate_spoof_headers(&spoof),
             Err(LlmError::Auth(message)) if message.contains("reserved header")

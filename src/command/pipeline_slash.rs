@@ -155,8 +155,7 @@ fn resume_in_process(
                     &session,
                     &cwd,
                     leann.as_deref(),
-                    reflexion.as_mut(),
-                    learning.as_mut(),
+                    (reflexion.as_mut(), learning.as_mut()),
                     options,
                 )
                 .await;
@@ -190,8 +189,7 @@ fn resume_in_process(
                     &session,
                     &cwd,
                     None,
-                    reflexion.as_mut(),
-                    learning.as_mut(),
+                    (reflexion.as_mut(), learning.as_mut()),
                     options,
                 )
                 .await;

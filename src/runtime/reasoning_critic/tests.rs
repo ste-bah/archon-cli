@@ -84,8 +84,10 @@ async fn critic_writes_derived_event_and_cost_row() {
     let temp = tempfile::tempdir().unwrap();
     let mut policy = archon_policy::models::EffectivePolicy::default();
     policy.reasoning_quality.allow_llm_critic = true;
-    let mut config = archon_core::config::ReasoningQualityCriticConfig::default();
-    config.allow_llm = true;
+    let config = archon_core::config::ReasoningQualityCriticConfig {
+        allow_llm: true,
+        ..Default::default()
+    };
     let event = ReasoningQualityEvent {
         event_id: "rqevt_fake".into(),
         claim_id: "rqclm_fake".into(),
@@ -126,9 +128,11 @@ async fn critic_writes_derived_event_and_cost_row() {
 #[test]
 fn default_provider_critic_model_falls_back_when_model_is_not_available() {
     let temp = tempfile::tempdir().unwrap();
-    let mut config = archon_core::config::ReasoningQualityCriticConfig::default();
-    config.provider = "default".into();
-    config.model = "claude-opus-4-7".into();
+    let config = archon_core::config::ReasoningQualityCriticConfig {
+        provider: "default".into(),
+        model: "claude-opus-4-7".into(),
+        ..Default::default()
+    };
     let runtime = CriticRuntime {
         enabled: true,
         config,

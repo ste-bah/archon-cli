@@ -180,8 +180,10 @@ pub fn mlx_metal_fit_transition_model(
         state_dim,
         BackendKind::Metal,
         rows as u64,
-        state_weights.try_as_slice::<f32>()?.to_vec(),
-        action_weights.try_as_slice::<f32>()?.to_vec(),
+        (
+            state_weights.try_as_slice::<f32>()?.to_vec(),
+            action_weights.try_as_slice::<f32>()?.to_vec(),
+        ),
         transition_bias.try_as_slice::<f32>()?.to_vec(),
         mean_delta.try_as_slice::<f32>()?.to_vec(),
         examples,

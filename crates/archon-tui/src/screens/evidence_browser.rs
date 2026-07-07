@@ -47,6 +47,10 @@ impl<T: EvidenceRow> EvidenceBrowser<T> {
         self.list.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn selected(&self) -> Option<&T> {
         self.list.selected()
     }

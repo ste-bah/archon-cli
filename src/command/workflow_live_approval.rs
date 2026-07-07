@@ -12,7 +12,7 @@ use archon_workflow::{
 use super::LiveApprovalMode;
 
 pub(super) enum LiveApprovalOutcome {
-    Proceed { run: WorkflowRun, note: String },
+    Proceed { run: Box<WorkflowRun>, note: String },
     Pending(String),
     Denied(String),
 }
@@ -37,7 +37,10 @@ pub(super) fn gate_live_approval(
         let record = approvals.approve_run_once(cwd, store, &run, approval_mode.decided_by())?;
         let note = render_approval_note(&record, approvals.path());
         let _ = tui_tx.send(TuiEvent::TextDelta(note.clone()));
-        return Ok(LiveApprovalOutcome::Proceed { run, note });
+        return Ok(LiveApprovalOutcome::Proceed {
+            run: Box::new(run),
+            note,
+        });
     }
 
     let inspection = approvals.inspect_run(cwd, store, &run)?;
@@ -46,7 +49,10 @@ pub(super) fn gate_live_approval(
             let record = inspection.decision.as_ref().expect("decision exists");
             let note = render_approval_note(record, approvals.path());
             let _ = tui_tx.send(TuiEvent::TextDelta(note.clone()));
-            Ok(LiveApprovalOutcome::Proceed { run, note })
+            Ok(LiveApprovalOutcome::Proceed {
+                run: Box::new(run),
+                note,
+            })
         }
         Some(WorkflowApprovalDecision::RunOnce)
             if inspection
@@ -58,7 +64,10 @@ pub(super) fn gate_live_approval(
             let record = inspection.decision.as_ref().expect("decision exists");
             let note = render_approval_note(record, approvals.path());
             let _ = tui_tx.send(TuiEvent::TextDelta(note.clone()));
-            Ok(LiveApprovalOutcome::Proceed { run, note })
+            Ok(LiveApprovalOutcome::Proceed {
+                run: Box::new(run),
+                note,
+            })
         }
         Some(WorkflowApprovalDecision::Denied) => {
             let cancelled =

@@ -68,7 +68,7 @@ async fn run_v2_workflow_with_origin(
     let run = match gate_live_approval(cwd, store, run, approval_mode, &tui_tx)? {
         LiveApprovalOutcome::Proceed { run, note } => {
             let _ = tui_tx.send(TuiEvent::TextDelta(note.clone()));
-            run
+            *run
         }
         LiveApprovalOutcome::Pending(message) | LiveApprovalOutcome::Denied(message) => {
             return Ok(message);
@@ -122,7 +122,7 @@ pub(super) async fn resume_generated_v2_workflow(
             if matches!(run.status, RunStatus::Paused) {
                 LifecycleController::new(store.clone()).apply(&run.id, LifecycleAction::Resume)?
             } else {
-                run
+                *run
             }
         }
         LiveApprovalOutcome::Pending(message) | LiveApprovalOutcome::Denied(message) => {

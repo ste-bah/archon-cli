@@ -164,10 +164,10 @@ async fn run_concurrent_test(n: usize, wall_budget_ms: u64, p99_budget_ms: u64) 
     // Spawn all n turns with zero .await between spawns.
     // Measure per-spawn dispatch latency (spawn_turn call time, not turn completion).
     let mut latencies_ms: Vec<u64> = Vec::with_capacity(n);
-    for i in 0..n {
+    for runner in runners.iter().take(n) {
         let prompt = format!("prompt-{:04}", TURN_COUNTER.fetch_add(1, Ordering::SeqCst));
         let t_spawn = Instant::now();
-        let _ = dispatcher.spawn_turn(prompt, runners[i].clone());
+        let _ = dispatcher.spawn_turn(prompt, runner.clone());
         latencies_ms.push(t_spawn.elapsed().as_millis() as u64);
     }
 

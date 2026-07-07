@@ -8,7 +8,7 @@ use crate::slash_context::SlashCommandContext;
 
 pub(super) enum PostTurnAction {
     PersistSession {
-        guardrail: Option<crate::command::world_model::RuntimeGuardrailRecord>,
+        guardrail: Option<Box<crate::command::world_model::RuntimeGuardrailRecord>>,
     },
     SkillComplete {
         reload_registry_for: Option<String>,
@@ -39,7 +39,7 @@ pub(super) async fn handle_completed_turn(
                     dispatcher,
                     adapter,
                     queue,
-                    guardrail,
+                    *guardrail,
                 );
             }
         }
@@ -119,7 +119,7 @@ fn maybe_spawn_guardrail_repair(
             }
         }
         queue.push_back(PostTurnAction::PersistSession {
-            guardrail: Some(guardrail),
+            guardrail: Some(Box::new(guardrail)),
         });
     }
 }

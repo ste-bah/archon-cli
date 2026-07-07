@@ -15,12 +15,13 @@ pub(super) async fn collect_stream_round(
     runner: &SubagentRunner,
     messages: &mut Vec<serde_json::Value>,
     auto_compact: &mut crate::agent::AutoCompactState,
-    reactive_overflow_retried: &mut bool,
-    reactive_rate_limit_retried: &mut bool,
-    last_known_context_tokens: &mut u64,
+    (reactive_overflow_retried, reactive_rate_limit_retried, last_known_context_tokens): (
+        &mut bool,
+        &mut bool,
+        &mut u64,
+    ),
     request: LlmRequest,
-    request_body_bytes: usize,
-    large_retry_body_bytes: usize,
+    (request_body_bytes, large_retry_body_bytes): (usize, usize),
     telemetry: &crate::agent::autocompact::CompactionTelemetry,
 ) -> anyhow::Result<StreamRoundResult> {
     let mut rx = open_stream_with_retries(

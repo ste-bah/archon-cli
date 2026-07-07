@@ -161,24 +161,18 @@ pub fn evaluate_trainer_trigger(
 pub fn run_dynamic_training_once(
     root: &Path,
     state_dim: usize,
-    backend: BackendKind,
-    allow_cpu_fallback: bool,
+    (backend, allow_cpu_fallback): (BackendKind, bool),
     adapter: &dyn WorldEmbeddingAdapter,
-    policy: DynamicTrainerPolicy,
-    trigger_policy: DynamicTrainerTriggerPolicy,
-    runtime: TrainerRuntimeSnapshot,
-    triggers: DynamicTrainerTriggerSnapshot,
+    (policy, trigger_policy): (DynamicTrainerPolicy, DynamicTrainerTriggerPolicy),
+    (runtime, triggers): (TrainerRuntimeSnapshot, DynamicTrainerTriggerSnapshot),
 ) -> Result<DynamicTrainerRunReport> {
     run_dynamic_training_once_controlled(
         root,
         state_dim,
-        backend,
-        allow_cpu_fallback,
+        (backend, allow_cpu_fallback),
         adapter,
-        policy,
-        trigger_policy,
-        runtime,
-        triggers,
+        (policy, trigger_policy),
+        (runtime, triggers),
         None,
     )
 }
@@ -186,13 +180,10 @@ pub fn run_dynamic_training_once(
 pub fn run_dynamic_training_once_controlled(
     root: &Path,
     state_dim: usize,
-    backend: BackendKind,
-    allow_cpu_fallback: bool,
+    (backend, allow_cpu_fallback): (BackendKind, bool),
     adapter: &dyn WorldEmbeddingAdapter,
-    policy: DynamicTrainerPolicy,
-    trigger_policy: DynamicTrainerTriggerPolicy,
-    runtime: TrainerRuntimeSnapshot,
-    triggers: DynamicTrainerTriggerSnapshot,
+    (policy, trigger_policy): (DynamicTrainerPolicy, DynamicTrainerTriggerPolicy),
+    (runtime, triggers): (TrainerRuntimeSnapshot, DynamicTrainerTriggerSnapshot),
     should_stop: Option<&dyn Fn() -> bool>,
 ) -> Result<DynamicTrainerRunReport> {
     let mut decision = evaluate_dynamic_trainer(policy, runtime);
@@ -379,20 +370,23 @@ mod tests {
         let run = run_dynamic_training_once(
             temp.path(),
             4,
-            BackendKind::Cpu,
-            true,
+            (BackendKind::Cpu, true),
             &adapter,
-            DynamicTrainerPolicy::default(),
-            DynamicTrainerTriggerPolicy::default(),
-            idle_snapshot(),
-            DynamicTrainerTriggerSnapshot {
-                total_rows: 300,
-                candidate_count: 0,
-                new_rows_since_training: 0,
-                surprises_since_training: 0,
-                corrections_since_training: 0,
-                elapsed_since_training_ms: None,
-            },
+            (
+                DynamicTrainerPolicy::default(),
+                DynamicTrainerTriggerPolicy::default(),
+            ),
+            (
+                idle_snapshot(),
+                DynamicTrainerTriggerSnapshot {
+                    total_rows: 300,
+                    candidate_count: 0,
+                    new_rows_since_training: 0,
+                    surprises_since_training: 0,
+                    corrections_since_training: 0,
+                    elapsed_since_training_ms: None,
+                },
+            ),
         )
         .unwrap();
 

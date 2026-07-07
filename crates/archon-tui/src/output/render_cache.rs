@@ -48,7 +48,7 @@ pub(super) fn visible_line_range(
                 .get(idx + 1)
                 .copied()
                 .unwrap_or(wrap.total_wrapped);
-            (**offset <= scroll_y && next > scroll_y) || **offset > scroll_y
+            **offset > scroll_y || next > scroll_y
         })
         .map(|(idx, _)| idx)
         .unwrap_or_else(|| wrap.offsets.len().saturating_sub(1));

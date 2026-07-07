@@ -95,6 +95,8 @@ pub enum TradingCliBacktestAction {
     },
 }
 
+// PRD-TRADING-DATA-LAKE work in progress; variant layout settles with the PRD.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
 pub enum TradingCliDataAction {
     /// Show persistent Trading Lab data-lake status

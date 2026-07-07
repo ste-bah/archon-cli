@@ -1,6 +1,10 @@
 #![allow(clippy::doc_lazy_continuation)]
 #![allow(clippy::doc_overindented_list_items)]
 #![allow(clippy::empty_line_after_doc_comments)]
+// Session/workflow entry points thread wide context through plain arguments;
+// restructuring them is the documented threading-model follow-up
+// (reports/rescue-phase5-report.md).
+#![allow(clippy::too_many_arguments)]
 
 mod agent_handle;
 pub(crate) mod cli_args;

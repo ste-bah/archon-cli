@@ -77,6 +77,8 @@ impl EmbeddingProvider for CountingEmbeddingProvider {
 }
 
 /// Insert a single chunk directly into CozoDB with the given embedding vector.
+// Test helper mirroring the chunk row shape; the argument list is the schema.
+#[allow(clippy::too_many_arguments)]
 fn insert_chunk(
     db: &DbInstance,
     chunk_id: &str,

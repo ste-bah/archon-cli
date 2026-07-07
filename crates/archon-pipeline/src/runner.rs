@@ -443,8 +443,7 @@ pub async fn run_pipeline(
         llm,
         &mut session,
         leann,
-        &mut reflexion,
-        &mut learning,
+        (&mut reflexion, &mut learning),
         None,
         PipelineRunOptions::default(),
     )
@@ -469,8 +468,7 @@ pub async fn run_pipeline_audited(
         llm,
         &mut session,
         leann,
-        &mut reflexion,
-        &mut learning,
+        (&mut reflexion, &mut learning),
         Some(audit),
         PipelineRunOptions::default(),
     )
@@ -493,8 +491,7 @@ pub async fn resume_pipeline_audited(
         session_id,
         worktree,
         leann,
-        reflexion,
-        learning,
+        (reflexion, learning),
         PipelineRunOptions::default(),
     )
     .await
@@ -507,8 +504,10 @@ pub async fn resume_pipeline_audited_with_options(
     session_id: &str,
     worktree: &Path,
     leann: Option<&LeannIntegration>,
-    mut reflexion: Option<&mut ReflexionInjector>,
-    mut learning: Option<&mut LearningIntegration>,
+    (mut reflexion, mut learning): (
+        Option<&mut ReflexionInjector>,
+        Option<&mut LearningIntegration>,
+    ),
     options: PipelineRunOptions,
 ) -> Result<PipelineResult> {
     let audit = PipelineAuditRun::resume(worktree, session_id)?;
@@ -521,8 +520,7 @@ pub async fn resume_pipeline_audited_with_options(
         llm,
         &mut session,
         leann,
-        &mut reflexion,
-        &mut learning,
+        (&mut reflexion, &mut learning),
         Some(audit),
         options,
     )
@@ -534,8 +532,10 @@ async fn run_pipeline_inner(
     llm: &dyn LlmClient,
     session: &mut PipelineSession,
     leann: Option<&LeannIntegration>,
-    reflexion: &mut Option<&mut ReflexionInjector>,
-    learning: &mut Option<&mut LearningIntegration>,
+    (reflexion, learning): (
+        &mut Option<&mut ReflexionInjector>,
+        &mut Option<&mut LearningIntegration>,
+    ),
     mut audit: Option<PipelineAuditRun>,
     options: PipelineRunOptions,
 ) -> Result<PipelineResult> {

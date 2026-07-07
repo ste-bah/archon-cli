@@ -24,10 +24,6 @@ pub(super) fn array(value: Option<&Value>) -> Vec<Value> {
     }
 }
 
-pub(super) fn field_array(value: &Value, key: &str) -> Vec<Value> {
-    array(value.get(key))
-}
-
 /// JS `generatedContractPresent`: non-empty string/array/object, or any other
 /// non-null value.
 pub(super) fn present(value: Option<&Value>) -> bool {
@@ -357,7 +353,7 @@ pub(super) fn split_focused_verification_items(
                 "focused_verification".to_string(),
                 Value::Array(vec![Value::String(check.clone())]),
             );
-            if !present(clone.get("source_item_id").map(|v| v)) {
+            if !present(clone.get("source_item_id")) {
                 clone.insert("source_item_id".to_string(), Value::String(base_id.clone()));
             }
             clone.insert(

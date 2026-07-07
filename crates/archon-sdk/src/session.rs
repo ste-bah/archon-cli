@@ -232,7 +232,7 @@ pub async fn list_sessions(
             });
         }
     }
-    infos.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    infos.sort_by_key(|info| std::cmp::Reverse(info.created_at));
     Ok(infos)
 }
 

@@ -101,10 +101,12 @@ fn layer_backward_matches_numerical_gradient() {
 
 #[test]
 fn full_backward_on_toy_gnn_produces_nonzero_gradients() {
-    let mut cfg = GnnConfig::default();
-    cfg.input_dim = 8;
-    cfg.output_dim = 8;
-    cfg.num_layers = 3;
+    let cfg = GnnConfig {
+        input_dim: 8,
+        output_dim: 8,
+        num_layers: 3,
+        ..Default::default()
+    };
     let enhancer = GnnEnhancer::with_in_memory_weights(cfg, CacheConfig::default(), 42);
 
     let input: Vec<f32> = vec![0.5; 8];

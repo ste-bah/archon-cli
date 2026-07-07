@@ -158,8 +158,7 @@ pub(super) fn decomposed_prd_plan_calls() -> Vec<WorkflowV2HostCall> {
     ];
     PLAN.iter()
         .map(|(id, method, write_mode)| {
-            let mut options = WorkflowV2HostOptions::default();
-            options.item_kind = match *id {
+            let item_kind = match *id {
                 "implementation-wave" | "remediation-wave" | "review-remediation-wave" => {
                     Some("implementation".to_string())
                 }
@@ -171,11 +170,16 @@ pub(super) fn decomposed_prd_plan_calls() -> Vec<WorkflowV2HostCall> {
                 }
                 _ => None,
             };
-            options.source = match *id {
+            let source = match *id {
                 "implementation-wave" => Some("readyImplementationItems".to_string()),
                 "remediation-wave" => Some("remediationInventory.items".to_string()),
                 "review-remediation-wave" => Some("reviewRemediationInventory.items".to_string()),
                 _ => None,
+            };
+            let mut options = WorkflowV2HostOptions {
+                item_kind,
+                source,
+                ..Default::default()
             };
             if !STATIC_IDS.contains(id) {
                 options.extra.insert(

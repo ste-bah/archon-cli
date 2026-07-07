@@ -562,7 +562,7 @@ impl PhDQualityCalculator {
             250..500 => 0.14,
             _ => 0.18,
         };
-        let structural_quality = self.score_structural_quality(text).max(0.12).min(0.20);
+        let structural_quality = self.score_structural_quality(text).clamp(0.12, 0.20);
         let research_rigor = (pass_count as f64 * 0.04
             + if has_required_table { 0.05 } else { 0.0 }
             + if has_aggregate { 0.03 } else { 0.0 }
@@ -573,7 +573,7 @@ impl PhDQualityCalculator {
             + if has_blocking_issues { 0.02 } else { 0.0 }
             + if has_final_instruction { 0.03 } else { 0.0 })
         .min(0.20);
-        let format_quality = self.score_format_quality(text).max(0.06).min(0.10);
+        let format_quality = self.score_format_quality(text).clamp(0.06, 0.10);
 
         let raw_total =
             content_depth + structural_quality + research_rigor + completeness + format_quality;

@@ -148,8 +148,8 @@ mod tests {
         // We use Result::is_ok to check the guard can be instantiated.
         let guard_result = TerminalGuard::enter();
         // If we're in a non-TTY environment, this may fail - that's ok
-        if guard_result.is_ok() {
-            drop(guard_result.unwrap());
+        if let Ok(guard) = guard_result {
+            drop(guard);
         }
     }
 

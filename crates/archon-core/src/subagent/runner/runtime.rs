@@ -82,12 +82,16 @@ impl SubagentRunner {
                 self,
                 &mut messages,
                 &mut auto_compact,
-                &mut reactive_overflow_retried,
-                &mut reactive_rate_limit_retried,
-                &mut last_known_context_tokens,
+                (
+                    &mut reactive_overflow_retried,
+                    &mut reactive_rate_limit_retried,
+                    &mut last_known_context_tokens,
+                ),
                 prepared_request.request,
-                prepared_request.request_body_bytes,
-                prepared_request.large_retry_body_bytes,
+                (
+                    prepared_request.request_body_bytes,
+                    prepared_request.large_retry_body_bytes,
+                ),
                 &prepared_request.telemetry,
             )
             .await?;

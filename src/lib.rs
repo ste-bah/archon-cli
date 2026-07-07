@@ -9,7 +9,11 @@
 
 pub mod cli_args;
 
+// Test-target mirror of the trading data-lake commands. The PRD-TRADING-
+// DATA-LAKE work is still in progress, so parts of this scaffold are not
+// exercised yet.
 #[cfg(test)]
+#[allow(dead_code)]
 pub(crate) mod command {
     #[path = "../command/trading_io.rs"]
     pub(crate) mod trading_io;

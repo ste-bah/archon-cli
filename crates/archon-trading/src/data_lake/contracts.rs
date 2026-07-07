@@ -206,10 +206,8 @@ pub fn can_fetch_symbol_timeframe(
             provider,
             trimmed_symbol,
             &normalized_timeframe,
-            supported_provider,
-            exact_native_interval,
-            missing_credentials,
-            provider_blocked,
+            (supported_provider, exact_native_interval),
+            (missing_credentials, provider_blocked),
             &normalized_provider,
         ))
     };
@@ -238,10 +236,8 @@ fn capability_unavailable_reason(
     provider: &str,
     symbol: &str,
     timeframe: &str,
-    supported_provider: bool,
-    native_interval: bool,
-    missing_credentials: bool,
-    provider_blocked: bool,
+    (supported_provider, native_interval): (bool, bool),
+    (missing_credentials, provider_blocked): (bool, bool),
     normalized_provider: &str,
 ) -> String {
     if missing_credentials {

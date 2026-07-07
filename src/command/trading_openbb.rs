@@ -68,6 +68,8 @@ fn path_state(path: &std::path::Path) -> String {
     }
 }
 
+// PRD-TRADING-DATA-LAKE work in progress; signature settles with the PRD.
+#[allow(clippy::too_many_arguments)]
 fn fetch(
     request_path: &std::path::Path,
     metadata_path: &std::path::Path,

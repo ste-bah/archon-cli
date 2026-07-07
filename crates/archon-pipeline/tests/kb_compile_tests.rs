@@ -101,16 +101,6 @@ impl KbLlmClient for MockSummaryLlm {
     }
 }
 
-/// Mock that always fails (returns an error).
-struct FailingLlm;
-
-#[async_trait::async_trait]
-impl KbLlmClient for FailingLlm {
-    async fn complete(&self, _prompt: &str) -> Result<String> {
-        Err(anyhow::anyhow!("LLM unavailable"))
-    }
-}
-
 /// Mock that returns invalid (non-JSON) responses.
 struct BadJsonLlm;
 

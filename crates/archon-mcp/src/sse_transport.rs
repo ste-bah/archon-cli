@@ -127,10 +127,7 @@ pub(crate) async fn pump_sse_stream(resp: reqwest::Response, tx: mpsc::Sender<Ss
 
         // Drain any complete lines from `buf` (delimited by `\n`; strip a
         // trailing `\r` if present).
-        loop {
-            let Some(nl) = buf.iter().position(|&b| b == b'\n') else {
-                break;
-            };
+        while let Some(nl) = buf.iter().position(|&b| b == b'\n') {
             let mut line_bytes = buf.drain(..=nl).collect::<Vec<u8>>();
             line_bytes.pop(); // remove '\n'
             if line_bytes.last() == Some(&b'\r') {

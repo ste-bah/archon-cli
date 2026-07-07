@@ -336,8 +336,10 @@ mod tests {
 
     #[test]
     fn test_eviction_on_size_limit() {
-        let mut cfg = CacheConfig::default();
-        cfg.max_size = 2;
+        let cfg = CacheConfig {
+            max_size: 2,
+            ..Default::default()
+        };
         let mgr = GnnCacheManager::new(cfg);
 
         let k1 = mgr.smart_cache_key(&[1.0], &[]);

@@ -223,7 +223,7 @@ mod tests {
 
         let row =
             WorldTraceRow::new("session-1", WorldActionKind::ToolCall).with_row_id("stable-row");
-        put_rows(&db, &[row.clone()]).unwrap();
+        put_rows(&db, std::slice::from_ref(&row)).unwrap();
         put_rows(&db, &[row]).unwrap();
 
         assert_eq!(count_rows(&db).unwrap(), 1);

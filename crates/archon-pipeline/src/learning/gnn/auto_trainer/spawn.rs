@@ -59,10 +59,8 @@ impl AutoTrainer {
                 enhancer,
                 weight_store,
                 train_cfg,
-                sample_provider,
-                triplet_provider,
-                cancel,
-                training_cancel,
+                (sample_provider, triplet_provider),
+                (cancel, training_cancel),
             )
             .await;
         });
