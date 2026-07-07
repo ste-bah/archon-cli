@@ -174,59 +174,24 @@ async function workflow(w) {
         );
     }
 
-// The legacy pseudo-parser comparison ran here until the parser was deleted:
-// the static plan was pinned equal to its extraction by stage family
-// (rescue Phase 1 gate). The static plan is now the source of truth.
-#[tokio::test]
-async fn dry_run_trace_stays_within_declared_scaffold_stage_families() {
+// The scaffold is a native Rust lifecycle with a descriptor record; the
+// declared static plan is its single source of truth for approval metadata.
+#[test]
+fn static_scaffold_plan_has_unique_ids_and_write_isolated_fanouts() {
     use std::collections::BTreeSet;
-    let universe = super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverse {
-        schema_version: "workflow-v2-task-universe-v1".to_string(),
-        source_roots: vec!["/tmp/tasks".to_string()],
-        tasks: vec![
-            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
-                canonical_task_id: "TASK-TDL-001".to_string(),
-                aliases: vec!["T001".to_string()],
-                source_path: "/tmp/tasks/TASK-TDL-001.md".to_string(),
-                dependency_ids: Vec::new(),
-                title: None,
-                artifact_requirements: Vec::new(),
-            },
-        ],
-    };
-    let scaffold = super::super::super::workflow_live_generated_scaffold::decomposed_prd_scaffold(
-        "Implement the decomposed PRD",
-        Some("/tmp/repo"),
-        &universe,
-        &[],
-        &archon_core::config::GeneratedWorkflowConfig::default(),
-    )
-    .expect("scaffold");
-    let static_plan: BTreeSet<String> =
-        super::super::super::workflow_live_generated_scaffold::decomposed_prd_plan_calls()
-            .iter()
-            .map(|call| format!("{}|{}|{:?}", call.id, call.method.as_str(), call.write_mode))
-            .collect();
-    assert!(!static_plan.is_empty());
-
-    // The dry-run trace must be a valid execution path through the plan:
-    // non-empty, and every recorded call belongs to a declared stage family.
-    let dry_run = dry_run_workflow_plan(&scaffold, None)
-        .await
-        .expect("dry-run plan");
-    assert!(!dry_run.is_empty());
-    for call in &dry_run {
-        let call_family = call
-            .id
-            .trim_end_matches(|ch: char| ch.is_ascii_digit() || ch == '-')
-            .to_string();
-        assert!(
-            static_plan
-                .iter()
-                .any(|entry| entry.starts_with(&call_family)),
-            "dry-run call '{}' is not part of a declared stage family",
-            call.id
-        );
+    let plan = super::super::super::workflow_live_generated_scaffold::decomposed_prd_plan_calls();
+    assert!(!plan.is_empty());
+    let mut seen = BTreeSet::new();
+    for call in &plan {
+        assert!(seen.insert(call.id.clone()), "duplicate id {}", call.id);
+        if call.method == WorkflowV2HostMethod::Fanout {
+            assert_eq!(
+                call.write_mode,
+                Some(WorkflowV2WriteMode::Worktree),
+                "{}",
+                call.id
+            );
+        }
     }
 }
 

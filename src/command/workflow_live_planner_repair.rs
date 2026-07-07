@@ -282,18 +282,15 @@ async fn compile_harness_plan(
     harness_source: &str,
     generated_config: &GeneratedWorkflowConfig,
 ) -> archon_workflow::WorkflowResult<WorkflowScriptPlan> {
-    // QuickJS is the single grammar: the dry-run compiles the script and
-    // records its typed host calls without invoking agents.
-    let traced_calls = super::workflow_live_v2::dry_run_workflow_plan(harness_source, None).await?;
     let calls = if task_universe.is_some() {
-        // The deterministic scaffold is Rust-generated, so Rust declares its
-        // full stage-family plan; the dry-run above still guards against
-        // splice/syntax defects in the generated source.
+        // Native lifecycle: the plan is declared by the Rust generator and
+        // the recorded document is a descriptor, not an executable script.
         super::workflow_live_generated_scaffold::decomposed_prd_plan_calls()
     } else {
-        traced_calls
+        // QuickJS is the single grammar for LLM-authored scripts: the dry-run
+        // compiles the script and records its typed host calls.
+        super::workflow_live_v2::dry_run_workflow_plan(harness_source, None).await?
     };
-    validate_generated_workflow_semantics(task, task_universe.as_ref(), harness_source, &calls)?;
     Ok(WorkflowScriptPlan::generated(
         task,
         harness_source,

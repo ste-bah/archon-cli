@@ -49,12 +49,3 @@ fn workflow_live_generated_contract_keeps_consolidated_retry_item_schedulable() 
         .is_some_and(|items| items.len() == 2));
 }
 
-#[test]
-fn generated_js_splitter_preserves_explicit_consolidated_retry_contracts() {
-    let helper = generated_prd_contract_js();
-
-    assert!(helper.contains("item.expected_result_shape"));
-    assert!(helper.contains("item.retry_command_shape"));
-    assert!(helper.contains("item.split_verification_items === false"));
-    assert!(helper.contains("generatedContractConstrainInventoryTasks"));
-}

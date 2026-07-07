@@ -1,36 +1,4 @@
 #[test]
-fn workflow_live_generated_contract_js_helper_is_pure() {
-    let helper = generated_prd_contract_js();
-    assert!(!helper.contains("w."));
-    assert!(!helper.contains("await "));
-    assert!(!helper.contains("import("));
-    assert!(!helper.contains("eval("));
-    assert!(helper.contains("function generatedContractApplyRetryAliases"));
-}
-
-#[test]
-fn workflow_live_generated_contract_js_splits_broad_verification_items_without_host_calls() {
-    let helper = generated_prd_contract_js();
-    assert!(helper.contains("function splitFocusedVerificationItems"));
-    assert!(helper.contains("focused_verification: [check]"));
-    assert!(helper.contains("split_from_item_id"));
-    assert!(helper.contains("expected_completion_evidence"));
-    assert!(!helper.contains("splitFocusedVerificationItems(items) {\n    await"));
-    assert!(!helper.contains("splitFocusedVerificationItems(items) {\n    w."));
-}
-
-#[test]
-fn workflow_live_generated_contract_js_does_not_split_verification_requirement_bullets() {
-    let helper = generated_prd_contract_js();
-    assert!(helper.contains(
-        r#"copyArray("focused_verification", ["focused_verification", "focusedVerification", "focused_tests", "focusedTests", "verification", "verification_requirements", "verificationRequirements", "verification_shape", "verificationShape", "command", "check", "test_command", "testCommand", "commands", "commands_run", "commandsRun", "manual_fixture_steps", "manualFixtureSteps"])"#
-    ));
-    assert!(helper.contains(
-        r#"generatedContractRawValues(source, ["verification_requirements", "verificationRequirements", "verification", "verification_shape", "verificationShape", "focused_verification""#
-    ));
-}
-
-#[test]
 fn workflow_live_generated_contract_normalizes_expected_completion_evidence() {
     let value = serde_json::json!({
         "item_id": "retry-verify-TASK-TDL-010-artifact-contract-source-check-canonical",
@@ -324,28 +292,6 @@ fn workflow_live_generated_contract_top_level_items_are_authoritative() {
         inventory.issues.is_empty(),
         "stale nested roots must not create duplicate graph issues: {:?}",
         inventory.issues
-    );
-}
-
-#[test]
-fn workflow_live_generated_contract_js_preserves_host_unresolved_issues() {
-    let helper = generated_prd_contract_js();
-    assert!(helper.contains("const sourceIssues = generatedContractInventorySourceIssues(source)"));
-    assert!(helper.contains("function generatedContractInventorySourceIssues"));
-    assert!(helper.contains("[\"result\", \"data\"]"));
-    assert!(helper.contains("const unresolved_issues = sourceIssues.concat"));
-}
-
-#[test]
-fn workflow_live_generated_contract_js_merge_repair_is_non_destructive() {
-    let helper = generated_prd_contract_js();
-    assert!(helper.contains("function mergeInventoryRepair"));
-    assert!(helper.contains("const existingItems"));
-    assert!(helper.contains("mergedByKey"));
-    assert!(helper.contains("return { ...inventory, unresolved_issues: [], items: order.map"));
-    assert!(
-        !helper.contains("return { ...inventory, items: repairItems };"),
-        "repair output must not replace the whole inventory"
     );
 }
 

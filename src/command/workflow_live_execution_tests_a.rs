@@ -93,106 +93,31 @@ async fn implementation_prd_plan_uses_deterministic_scaffold_not_provider_fanout
 
     assert_eq!(planner.calls.load(Ordering::SeqCst), 0);
     assert!(
-        plan.harness_source.contains("const taskUniverse ="),
+        plan.harness_source
+            .contains("# Archon decomposed-PRD workflow (native lifecycle v1)"),
+        "{}",
+        plan.harness_source
+    );
+    assert!(
+        plan.harness_source.contains("task_universe:"),
         "{}",
         plan.harness_source
     );
     assert!(
         plan.harness_source
-            .contains("const readyItems = readyItemsFrom(remainingItems, completedIds)"),
+            .contains("- implementation-wave (fanout, write=Worktree)"),
         "{}",
         plan.harness_source
     );
     assert!(
         plan.harness_source
-            .contains("dependencyIdsFor(item).every((id) => completedIds.has(id))"),
+            .contains("- verification-wave (parallel)"),
         "{}",
         plan.harness_source
     );
     assert!(
         plan.harness_source
-            .contains("const readyNoopItems = readyItems.filter"),
-        "{}",
-        plan.harness_source
-    );
-    assert!(
-        plan.harness_source
-            .contains("const readyImplementationItems = readyItems.filter"),
-        "{}",
-        plan.harness_source
-    );
-    assert!(
-        plan.harness_source
-            .contains("w.reduce(\"dependency-graph-repair-\" + repairAttempt"),
-        "{}",
-        plan.harness_source
-    );
-    assert!(
-        plan.harness_source
-            .contains("function generatedContractIsSupportItem"),
-        "{}",
-        plan.harness_source
-    );
-    assert!(
-        plan.harness_source.contains("support_items"),
-        "{}",
-        plan.harness_source
-    );
-    assert!(
-        !plan
-            .harness_source
-            .contains("afterRepairIssueFingerprint === beforeRepairIssueFingerprint"),
-        "{}",
-        plan.harness_source
-    );
-    assert!(
-        plan.harness_source
-            .contains("w.reduce(\"dependency-graph-repair-deadlock-\" + dependencyIteration"),
-        "{}",
-        plan.harness_source
-    );
-    assert!(
-        plan.harness_source
-            .contains("w.parallel(\"noop-proof-verification-\" + dependencyIteration"),
-        "{}",
-        plan.harness_source
-    );
-    assert!(
-        plan.harness_source
-            .contains("w.fanout(\"implementation-wave-\" + currentImplementationWaveIndex, readyImplementationItems"),
-        "{}",
-        plan.harness_source
-    );
-    assert!(
-        plan.harness_source
-            .contains("w.parallel(\"verification-wave-\" + currentImplementationWaveIndex"),
-        "{}",
-        plan.harness_source
-    );
-    assert!(
-        plan.harness_source.contains(
-            "Return one item per exact command/check whenever possible. Every item must include item_id, canonical_task_ids"
-        ),
-        "{}",
-        plan.harness_source
-    );
-    assert!(
-        plan.harness_source.contains(
-            "Repair failed focused verification shape into a concrete retry plan only when the issue is missing/malformed verification evidence"
-        ),
-        "{}",
-        plan.harness_source
-    );
-    assert!(
-        plan.harness_source.contains(
-            "verificationPlan.items = generatedContractVerificationItems(verificationPlan)"
-        ),
-        "{}",
-        plan.harness_source
-    );
-    assert!(
-        plan.harness_source
-            .contains("w.fanout(\"remediation-wave-\" + currentImplementationWaveIndex"),
+            .contains("- remediation-wave (fanout, write=Worktree)"),
         "{}",
         plan.harness_source
     );
@@ -310,7 +235,7 @@ async fn implementation_prd_plan_embeds_governed_learning_context_from_prior_run
 
     assert!(
         plan.harness_source
-            .contains("const governedLearningContext =")
+            .contains("governed_learning_context:")
     );
     assert!(plan.harness_source.contains("final_evidence_gap"));
     assert_eq!(plan.governed_learning_context.len(), 1);

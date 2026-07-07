@@ -6,9 +6,14 @@ use archon_workflow::{
     WorkflowV2HostOptions, WorkflowV2WriteMode,
 };
 
-use super::workflow_live_generated_contract::generated_prd_contract_js;
 use super::workflow_live_task_universe::WorkflowV2TaskUniverse;
 
+/// The recorded plan document for a decomposed-PRD run.
+///
+/// The lifecycle executes natively in Rust (`run_decomposed_lifecycle`); this
+/// descriptor is the run's durable record and hash identity — what the
+/// maintainer approves and what result reuse keys on. It is deterministic for
+/// a given task universe, learning context, and configuration.
 pub(super) fn decomposed_prd_scaffold(
     task: &str,
     target_repository_root: Option<&str>,
@@ -16,79 +21,55 @@ pub(super) fn decomposed_prd_scaffold(
     governed_learning_context: &[GeneratedWorkflowLearningContext],
     generated_config: &GeneratedWorkflowConfig,
 ) -> WorkflowResult<String> {
-    let task_json = serde_json::to_string(task)?;
-    let target_repository_root_json = serde_json::to_string(&target_repository_root)?;
-    let project_artifact_root_json = serde_json::to_string(&project_artifact_root(task_universe))?;
     let universe_json = serde_json::to_string_pretty(task_universe)?;
     let learning_json = serde_json::to_string_pretty(governed_learning_context)?;
-    let max_repair_iterations = generated_config.max_repair_iterations.max(1).min(8);
-    let max_investigation_iterations = generated_config.max_investigation_iterations.max(1).min(8);
+    let max_repair_iterations = generated_config.max_repair_iterations.clamp(1, 8);
+    let max_investigation_iterations = generated_config.max_investigation_iterations.clamp(1, 8);
+    let max_dependency_waves = task_universe.tasks.len().saturating_mul(3).max(1);
 
-    let mut source = String::new();
-    source.push_str("export default async function workflow(w) {\n");
-    source.push_str("  const taskText = ");
-    source.push_str(&task_json);
-    source.push_str(";\n");
-    source.push_str("  const targetRepositoryRoot = ");
-    source.push_str(&target_repository_root_json);
-    source.push_str(";\n");
-    source.push_str("  const projectArtifactRoot = ");
-    source.push_str(&project_artifact_root_json);
-    source.push_str(";\n");
-    source.push_str("  const taskUniverse = ");
-    source.push_str(&indent_json_for_js(&universe_json));
-    source.push_str(";\n");
-    source.push_str("  const governedLearningContext = ");
-    source.push_str(&indent_json_for_js(&learning_json));
-    source.push_str(";\n");
-    source.push_str(&format!(
-        "  const maxRepairIterations = {max_repair_iterations};\n  const maxInvestigationIterations = {max_investigation_iterations};\n",
-    ));
-    source.push_str(
-        r#"  const canonicalTaskUniverse = new Set((taskUniverse.tasks || []).map((task) => task.canonical_task_id).filter(Boolean));
-  const maxDependencyWaves = Math.max(1, canonicalTaskUniverse.size * 3);
-  const implementationEvidence = [];
-  const verificationEvidence = [];
-  const reviewEvidence = [];
-  const artifactEvidence = [];
-  const repairAttempts = [];
-  const finalEvidenceRepairAttempts = [];
-  const discoveryItems = [
-    {
-      id: "prd-task-review",
-      task: "Read the PRD, decomposed task files, implementation slice, and context files. Return structured requirements, dependency evidence, task coverage requirements, verification requirements, artifact requirements, and residual risks. Distinguish repository source paths from project artifact/data paths under projectArtifactRoot.",
-      paths: taskUniverse.source_roots || []
-    },
-    {
-      id: "repository-implementation-audit",
-      task: "Inspect the target repository for existing implementation relevant to taskText. Return concrete files read, existing evidence, missing work, test commands, and safety concerns. Do not modify files.",
-      paths: taskUniverse.source_roots || []
-    },
-    {
-      id: "acceptance-evidence-audit",
-      task: "Map every canonical task in taskUniverse to acceptance criteria, required artifacts, provider/data constraints, and focused verification commands. Use governedLearningContext only as sanitized prior-run hints with evidence refs; verify every claim against current PRD/code. Artifact paths must be checked relative to projectArtifactRoot when they are project artifacts. Do not mark implementation tasks accepted from read-only evidence.",
-      paths: taskUniverse.source_roots || []
-    }
-  ];
-"#,
+    let mut descriptor = String::new();
+    descriptor.push_str("# Archon decomposed-PRD workflow (native lifecycle v1)\n");
+    descriptor.push_str(
+        "# Executed by the Rust lifecycle driver; this document is the approved plan record.\n\n",
     );
-    source.push_str(generated_prd_contract_js());
-    source.push_str(include_str!("workflow_live_generated_scaffold_noop.js"));
-    source.push_str(include_str!(
-        "workflow_live_generated_scaffold_remediation.js"
+    descriptor.push_str(&format!("task: {}\n", serde_json::to_string(task)?));
+    descriptor.push_str(&format!(
+        "target_repository_root: {}\n",
+        serde_json::to_string(&target_repository_root)?
     ));
-    source.push_str(include_str!("workflow_live_generated_scaffold_body_a.js"));
-    source.push_str(include_str!("workflow_live_generated_scaffold_body_b.js"));
-    Ok(source)
+    descriptor.push_str(&format!(
+        "project_artifact_root: {}\n",
+        serde_json::to_string(&project_artifact_root(task_universe))?
+    ));
+    descriptor.push_str(&format!("max_repair_iterations: {max_repair_iterations}\n"));
+    descriptor.push_str(&format!(
+        "max_investigation_iterations: {max_investigation_iterations}\n"
+    ));
+    descriptor.push_str(&format!("max_dependency_waves: {max_dependency_waves}\n\n"));
+    descriptor.push_str("stage_families:\n");
+    for call in decomposed_prd_plan_calls() {
+        descriptor.push_str(&format!(
+            "- {} ({}{})\n",
+            call.id,
+            call.method.as_str(),
+            match call.write_mode {
+                Some(mode) => format!(", write={mode:?}"),
+                None => String::new(),
+            },
+        ));
+    }
+    descriptor.push_str("\ntask_universe:\n");
+    descriptor.push_str(&universe_json);
+    descriptor.push_str("\n\ngoverned_learning_context:\n");
+    descriptor.push_str(&learning_json);
+    descriptor.push('\n');
+    Ok(descriptor)
 }
 
-/// The approval-time plan for the deterministic decomposed-PRD scaffold.
-///
-/// The scaffold is generated by Rust, so Rust declares its stage families
-/// directly — one entry per family with the write mode the scaffold uses.
-/// Dynamic loop indices are runtime concerns; the approval surface reviews
-/// stage families. Pinned against the legacy pseudo-parser's extraction by
-/// the comparison test until that parser is deleted.
+/// The approval-time plan for the deterministic decomposed-PRD lifecycle:
+/// one entry per stage family, with the write mode, item kind, and source the
+/// lifecycle uses. This is the single declaration the approval surface, the
+/// persisted host-call manifest, and restart invalidation consume.
 pub(super) fn decomposed_prd_plan_calls() -> Vec<WorkflowV2HostCall> {
     const WORKTREE: Option<WorkflowV2WriteMode> = Some(WorkflowV2WriteMode::Worktree);
     const PLAN: &[(&str, &str, Option<WorkflowV2WriteMode>)] = &[
@@ -159,9 +140,8 @@ pub(super) fn decomposed_prd_plan_calls() -> Vec<WorkflowV2HostCall> {
         ("blocked-final-readiness", "finalReport", None),
         ("final-acceptance-report", "finalReport", None),
     ];
-    // Families that appear exactly once in the scaffold keep their literal id;
-    // every other family is suffixed at runtime, so the plan records its
-    // dynamic id prefix (what the deleted pseudo-parser used to synthesize).
+    // Families that occur exactly once keep their literal id; every other
+    // family is suffixed at runtime, so the plan records its dynamic prefix.
     const STATIC_IDS: &[&str] = &[
         "blocked-malformed-inventory",
         "blocked-empty-implementation-inventory",
@@ -212,10 +192,6 @@ pub(super) fn decomposed_prd_plan_calls() -> Vec<WorkflowV2HostCall> {
             }
         })
         .collect()
-}
-
-fn indent_json_for_js(json: &str) -> String {
-    json.lines().collect::<Vec<_>>().join("\n  ")
 }
 
 fn project_artifact_root(task_universe: &WorkflowV2TaskUniverse) -> Option<String> {

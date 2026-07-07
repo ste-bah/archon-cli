@@ -38,12 +38,6 @@ mod workflow_live_generated_lifecycle_remediation;
 mod workflow_live_generated_lifecycle_support;
 #[path = "workflow_live_generated_scaffold.rs"]
 mod workflow_live_generated_scaffold;
-#[path = "workflow_live_generated_semantics.rs"]
-mod workflow_live_generated_semantics;
-#[path = "workflow_live_generated_semantics_support.rs"]
-mod workflow_live_generated_semantics_support;
-#[path = "workflow_live_generated_semantics_verification.rs"]
-mod workflow_live_generated_semantics_verification;
 #[path = "workflow_live_items.rs"]
 mod workflow_live_items;
 #[path = "workflow_live_planner.rs"]

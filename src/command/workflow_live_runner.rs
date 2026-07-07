@@ -370,11 +370,20 @@ pub(crate) fn command_execution_stage(request: &StageRunRequest) -> bool {
     if stage_extra_requests_bash(request) {
         return true;
     }
+    // Typed V2 calls decide from declared fields: focused-verification waves
+    // run commands; every other read-only call gets no shell. Prose sniffing
+    // is reserved for requests without a typed call.
+    if request.input.get("v2_call").is_some() {
+        let id = request.stage_id.to_ascii_lowercase().replace('-', "_");
+        if id.starts_with("verification_wave_") || id.starts_with("review_verification_wave_") {
+            return true;
+        }
+        if generated_v2_read_only_call(request) {
+            return false;
+        }
+    }
     if command_execution_stage_id(&request.stage_id) {
         return true;
-    }
-    if generated_v2_read_only_call(request) {
-        return false;
     }
     let haystack = format!(
         "{}\n{}\n{}\n{}",

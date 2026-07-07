@@ -15,7 +15,6 @@ use archon_workflow::{
 };
 
 use super::workflow_live_generated_scaffold::decomposed_prd_scaffold;
-use super::workflow_live_generated_semantics::validate_generated_workflow_semantics;
 use super::workflow_live_prompt::{harness_planner_prompt, harness_repair_prompt};
 use super::workflow_live_repo_root::infer_target_repository_root;
 use super::workflow_live_retry;

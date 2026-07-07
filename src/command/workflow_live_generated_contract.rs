@@ -463,10 +463,6 @@ pub(super) fn evidence_refs_from_generated_value(value: &serde_json::Value) -> V
     )
 }
 
-pub(super) fn generated_prd_contract_js() -> &'static str {
-    GENERATED_PRD_CONTRACT_JS
-}
-
 /// Lifecycle shims: JS `generatedContractTargetFileIssue` and the item-less
 /// fallback of JS `generatedContractInventorySourceItems`.
 pub(super) fn lifecycle_target_file_issue(
@@ -488,14 +484,6 @@ include!("workflow_live_generated_contract_validation.rs");
 include!("workflow_live_generated_contract_helpers.rs");
 
 include!("workflow_live_generated_contract_retry.rs");
-
-const GENERATED_PRD_CONTRACT_JS: &str = concat!(
-    include_str!("workflow_live_generated_contract.js"),
-    "\n",
-    include_str!("workflow_live_generated_contract_retry.js"),
-    "\n",
-    include_str!("workflow_live_generated_contract_preflight.js"),
-);
 
 #[cfg(test)]
 #[path = "workflow_live_generated_contract_tests.rs"]
