@@ -101,3 +101,4 @@ archon
 # machine-specific Archon policy (real paths); template is policy.example.toml
 .archon/policy.toml
 .backups/
+/parity-ref/  # portability copy of god-agent markdown_chunker.py for scripts/chunk_parity_check.py
