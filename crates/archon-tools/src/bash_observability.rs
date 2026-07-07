@@ -31,7 +31,7 @@ pub(crate) fn start_bash_heartbeat(
         sink.as_ref(),
         &session_id,
         run_id.as_deref(),
-        bash_message(pid, 0, timeout_ms, &cwd, label, fingerprint, 0, 0),
+        bash_message(pid, 0, timeout_ms, &cwd, label, fingerprint, (0, 0)),
     );
 
     Some(tokio::spawn(async move {
@@ -51,8 +51,10 @@ pub(crate) fn start_bash_heartbeat(
                     &cwd,
                     label,
                     fingerprint,
-                    stdout_bytes.load(Ordering::Relaxed),
-                    stderr_bytes.load(Ordering::Relaxed),
+                    (
+                        stdout_bytes.load(Ordering::Relaxed),
+                        stderr_bytes.load(Ordering::Relaxed),
+                    ),
                 ),
             );
         }
@@ -90,8 +92,7 @@ fn bash_message(
     cwd: &str,
     label: &'static str,
     fingerprint: u64,
-    stdout_bytes: usize,
-    stderr_bytes: usize,
+    (stdout_bytes, stderr_bytes): (usize, usize),
 ) -> String {
     format!(
         "Bash running pid={} elapsed={}s timeout={}s stdout={}B stderr={}B cwd={} command={} hash={:016x}",
@@ -163,7 +164,7 @@ mod tests {
         let first = command_fingerprint("cargo test foo");
         let second = command_fingerprint("cargo test foo");
         assert_eq!(first, second);
-        let rendered = bash_message(Some(42), 30, 86_400_000, ".", "cargo test", first, 1, 2);
+        let rendered = bash_message(Some(42), 30, 86_400_000, ".", "cargo test", first, (1, 2));
         assert!(rendered.contains("pid=42"));
         assert!(rendered.contains("command=cargo test"));
         assert!(!rendered.contains("cargo test foo"));

@@ -194,7 +194,8 @@ mod tests {
 
     /// Tests share the global TODO_STORE. This mutex serialises any test that
     /// writes then reads the store, preventing interleaving.
-    static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+    static TEST_LOCK: LazyLock<tokio::sync::Mutex<()>> =
+        LazyLock::new(|| tokio::sync::Mutex::new(()));
 
     fn test_ctx() -> ToolContext {
         ToolContext {
@@ -225,7 +226,7 @@ mod tests {
 
     #[tokio::test]
     async fn write_and_read_todos() {
-        let _lock = TEST_LOCK.lock().unwrap();
+        let _lock = TEST_LOCK.lock().await;
         clear_store();
         let tool = TodoWriteTool;
         let input = json!({
@@ -249,7 +250,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_todos_clears_list() {
-        let _lock = TEST_LOCK.lock().unwrap();
+        let _lock = TEST_LOCK.lock().await;
         clear_store();
         let tool = TodoWriteTool;
 
@@ -273,7 +274,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_invalid_status() {
-        let _lock = TEST_LOCK.lock().unwrap();
+        let _lock = TEST_LOCK.lock().await;
         clear_store();
         let tool = TodoWriteTool;
         let result = tool
@@ -292,7 +293,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_over_max_items() {
-        let _lock = TEST_LOCK.lock().unwrap();
+        let _lock = TEST_LOCK.lock().await;
         clear_store();
         let tool = TodoWriteTool;
         let items: Vec<serde_json::Value> = (0..101)
@@ -315,7 +316,7 @@ mod tests {
 
     #[tokio::test]
     async fn missing_item_fields_are_errors() {
-        let _lock = TEST_LOCK.lock().unwrap();
+        let _lock = TEST_LOCK.lock().await;
         clear_store();
         let tool = TodoWriteTool;
 
@@ -358,7 +359,7 @@ mod tests {
 
     #[tokio::test]
     async fn overwrites_previous_list() {
-        let _lock = TEST_LOCK.lock().unwrap();
+        let _lock = TEST_LOCK.lock().await;
         clear_store();
         let tool = TodoWriteTool;
 

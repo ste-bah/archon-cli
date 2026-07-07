@@ -303,7 +303,7 @@ impl Tool for BashTool {
     fn permission_level(&self, input: &serde_json::Value) -> PermissionLevel {
         let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
 
-        match archon_permissions::classifier::classify_command(&command, &[], &[], &[]) {
+        match archon_permissions::classifier::classify_command(command, &[], &[], &[]) {
             archon_permissions::classifier::CommandClass::Safe => PermissionLevel::Safe,
             archon_permissions::classifier::CommandClass::Risky => PermissionLevel::Risky,
             archon_permissions::classifier::CommandClass::Dangerous => PermissionLevel::Dangerous,

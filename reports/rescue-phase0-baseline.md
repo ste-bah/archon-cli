@@ -44,7 +44,18 @@ at baseline because ci-gate fail-fasts at the file-size step):
   verification-inventory call. Same class as the `context_output` layer;
   Phase 5 scope.
 
-### `scripts/ci-gate.sh`
+### `scripts/ci-gate.sh` — clippy step (discovered Phase 3, 2026-07-07)
+After the FileSizeGuard was fixed, the gate fail-fasts at the clippy step
+(`--workspace --all-targets -- -D warnings`): pre-existing errors in crates
+untouched by the rescue — archon-core (29), archon-mcp (2),
+archon-workflow lib (10), archon-tools (9, fixed during the rescue since it
+was first in fail-fast order), and possibly more behind the fail-fast. The
+workspace was never clippy-clean under the pinned toolchain; per-phase gate
+discipline for the rescue = touched crates clippy-clean + the non-clippy gate
+steps green. The archon-workflow lib errors sit in legacy modules scheduled
+for deletion (Phases 3–5).
+
+### `scripts/ci-gate.sh` — FileSizeGuard
 Fails at the FileSizeGuard step (fail-fast; later steps did not run):
 
 - `crates/archon-trading/src/data_store/data_store_tests.rs` — 955 lines (> 500, not allowlisted)
