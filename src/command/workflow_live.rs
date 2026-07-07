@@ -28,6 +28,9 @@ mod workflow_agent_select;
 #[path = "workflow_live_approval.rs"]
 mod workflow_live_approval;
 #[cfg(test)]
+#[path = "workflow_live_canary_tests.rs"]
+mod workflow_live_canary_tests;
+#[cfg(test)]
 #[path = "workflow_live_execution_tests.rs"]
 mod workflow_live_execution_tests;
 #[path = "workflow_live_generated_contract.rs"]
