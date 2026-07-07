@@ -9,14 +9,6 @@ use archon_workflow::{
 use super::workflow_live_generated_contract::generated_prd_contract_js;
 use super::workflow_live_task_universe::WorkflowV2TaskUniverse;
 
-#[path = "workflow_live_generated_scaffold_ownership.rs"]
-mod workflow_live_generated_scaffold_ownership;
-#[path = "workflow_live_generated_scaffold_verification.rs"]
-mod workflow_live_generated_scaffold_verification;
-
-use workflow_live_generated_scaffold_ownership::apply_ownership_expansion_lifecycle;
-use workflow_live_generated_scaffold_verification::apply_verification_remediation_lifecycle;
-
 pub(super) fn decomposed_prd_scaffold(
     task: &str,
     target_repository_root: Option<&str>,
@@ -87,8 +79,6 @@ pub(super) fn decomposed_prd_scaffold(
     ));
     source.push_str(include_str!("workflow_live_generated_scaffold_body_a.js"));
     source.push_str(include_str!("workflow_live_generated_scaffold_body_b.js"));
-    source = apply_verification_remediation_lifecycle(source);
-    source = apply_ownership_expansion_lifecycle(source);
     Ok(source)
 }
 
