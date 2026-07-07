@@ -1,5 +1,27 @@
 # Phase 2 working notes — un-JS the PRD scaffold (in progress)
 
+## STATUS 2026-07-07 (post-milestone)
+
+DONE (committed d35b0632, 7a7093ab, 8899b7ca):
+- Rust lifecycle driver executes decomposed-PRD runs natively via
+  WorkflowScriptHost::execute (files: workflow_live_v2_lifecycle{,_waves,_impl,
+  _verify,_review}.rs + workflow_live_v2_lifecycle_prompts.rs + support/
+  remediation/outcomes helper modules). Canary trace identical call-for-call;
+  288 workflow bin tests green (same 2 known-red); crate suite unchanged.
+- String-surgery splice fns DELETED; payloads baked into body_a.js
+  byte-identically (hash stable).
+
+REMAINING for Phase 2 close-out:
+1. The scaffold JS (body_a 613 + body_b 189 + noop 62 + remediation 97 +
+   contract JS 669) is now generation-and-record only — never executed for
+   decomposed runs. Deleting it requires swapping the recorded artifact to a
+   Rust-rendered descriptor (hash identity change → bundle/approval/semantics
+   test churn). Decide: do now for net-negative LOC, or fold into Phase 5
+   legacy demolition (semantics substring validators die at the same time).
+   Current Phase 2 net LOC is POSITIVE (+~2.2k driver) until this lands.
+2. cargo test -p archon-workflow + ci-gate full run + phase report.
+3. Delete this notes file when the phase report lands.
+
 Delete when Phase 2 lands. Goal: rewrite the decomposed-PRD lifecycle as plain
 Rust driving `WorkflowV2Scheduler` + result store; QuickJS path remains only
 for LLM-authored scripts (`RunTemplate`).
