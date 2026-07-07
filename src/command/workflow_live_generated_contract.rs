@@ -18,6 +18,7 @@ pub(super) enum GeneratedContractIssueKind {
 }
 
 impl GeneratedContractIssueKind {
+    #[cfg(test)]
     pub(super) fn as_str(&self) -> &'static str {
         match self {
             Self::InventoryShapeRepair => "inventory_shape_repair",
@@ -109,6 +110,7 @@ impl ContractTaskUniverse {
     }
 }
 
+#[cfg(test)]
 pub(super) fn normalize_generated_inventory_value(
     value: &serde_json::Value,
     task_universe: Option<&WorkflowV2TaskUniverse>,

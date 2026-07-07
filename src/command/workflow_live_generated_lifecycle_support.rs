@@ -24,10 +24,6 @@ pub(super) fn array(value: Option<&Value>) -> Vec<Value> {
     }
 }
 
-pub(super) fn field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
-    value.get(key)
-}
-
 pub(super) fn field_array(value: &Value, key: &str) -> Vec<Value> {
     array(value.get(key))
 }

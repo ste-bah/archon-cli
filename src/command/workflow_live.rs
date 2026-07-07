@@ -6,16 +6,14 @@ use archon_pipeline::runner::LlmClient;
 use archon_tui::app::TuiEvent;
 use archon_tui::event_channel::TuiEventSender;
 use archon_workflow::{
-    CommandAction, LifecycleAction, LifecycleController, RunStatus, StageStatus, WorkflowConfig,
-    WorkflowExecutor, WorkflowPolicy, WorkflowRun, WorkflowStageRunner, WorkflowStore,
+    CommandAction, RunStatus, StageStatus, WorkflowConfig, WorkflowPolicy, WorkflowRun,
+    WorkflowStageRunner, WorkflowStore,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::command::pipeline_support::build_subagent_pipeline_adapter;
 use crate::command::workflow::{load_spec_file, load_template, run_action};
-use crate::command::workflow_status_blocks;
-use crate::command::workflow_world_learning;
 #[cfg(test)]
 #[path = "workflow_live_planner_repair_tests.rs"]
 mod planner_repair_tests;
@@ -79,7 +77,6 @@ mod workflow_live_verification_contract;
 #[path = "workflow_v2_live_tests.rs"]
 mod workflow_v2_live_tests;
 
-use workflow_live_approval::{LiveApprovalOutcome, gate_live_approval};
 use workflow_live_planner::{WorkflowScriptPlan, plan_live, render_live_plan};
 use workflow_live_runner::PipelineWorkflowRunner;
 
@@ -184,7 +181,6 @@ async fn run_live_action(
 ) -> Result<String> {
     let store = WorkflowStore::project(cwd);
     let policy = live_policy(cwd, config_path.as_deref());
-    let executor = WorkflowExecutor::new(store.clone(), policy.clone());
     let runner = PipelineWorkflowRunner {
         llm: llm.clone(),
         tui_tx: tui_tx.clone(),
@@ -195,7 +191,6 @@ async fn run_live_action(
             .collect(),
         workspace_boundary_supported,
     };
-    let mut approval_notes = Vec::new();
     let capped_live_plan = |task: &str| {
         let llm = llm.clone();
         let tui_tx = tui_tx.clone();
@@ -210,7 +205,7 @@ async fn run_live_action(
             Ok::<_, anyhow::Error>(plan)
         }
     };
-    let report = match action {
+    match action {
         CommandAction::Plan { task } => {
             let plan = capped_live_plan(&task).await?;
             return Ok(render_live_plan(&plan)?);
@@ -231,60 +226,38 @@ async fn run_live_action(
             )
             .await;
         }
-        CommandAction::RunSpec { path } => {
-            let spec = load_spec_file(cwd, &path)?;
-            let run = executor.start_imported_spec(spec)?;
-            let run = match gate_live_approval(cwd, &store, run, approval_mode, &tui_tx)? {
-                LiveApprovalOutcome::Proceed { run, note } => {
-                    approval_notes.push(note);
-                    run
-                }
-                LiveApprovalOutcome::Pending(message) | LiveApprovalOutcome::Denied(message) => {
-                    return Ok(message);
-                }
-            };
-            executor.execute_with_runner(run, &runner).await?
+        CommandAction::RunSpec { .. } => {
+            return Err(anyhow!(
+                "legacy imported-spec execution was removed by the workflow runtime rescue;                  run work through the V2 runtime with /workflow run <task> or a saved V2 workflow"
+            ));
         }
         CommandAction::RunTemplate { name, args } => {
             let template = load_template(cwd, &name)?;
-            let run = match template.harness_source {
-                Some(harness) => {
-                    // QuickJS dry-run is the single grammar; failure is a hard error.
-                    let calls = workflow_live_v2::dry_run_workflow_plan(&harness, args.as_ref())
-                        .await
-                        .map_err(|err| {
-                            anyhow!("saved workflow '{name}' failed validation: {err}")
-                        })?;
-                    let task = template.spec.task.clone();
-                    let mut plan =
-                        WorkflowScriptPlan::from_template(template.spec, &harness, calls);
-                    plan.script_args = args;
-                    cap_live_plan_parallelism(&mut plan, &runner, &policy);
-                    return workflow_live_v2::run_saved_v2_workflow(
-                        cwd,
-                        &store,
-                        plan,
-                        task,
-                        llm,
-                        tui_tx,
-                        runner.agent_names.clone(),
-                        approval_mode,
-                        workspace_boundary_supported,
-                    )
-                    .await;
-                }
-                None => executor.start(template.spec)?,
+            let Some(harness) = template.harness_source else {
+                return Err(anyhow!(
+                    "saved workflow '{name}' has no V2 harness; legacy template execution                      was removed by the workflow runtime rescue"
+                ));
             };
-            let run = match gate_live_approval(cwd, &store, run, approval_mode, &tui_tx)? {
-                LiveApprovalOutcome::Proceed { run, note } => {
-                    approval_notes.push(note);
-                    run
-                }
-                LiveApprovalOutcome::Pending(message) | LiveApprovalOutcome::Denied(message) => {
-                    return Ok(message);
-                }
-            };
-            executor.execute_with_runner(run, &runner).await?
+            // QuickJS dry-run is the single grammar; failure is a hard error.
+            let calls = workflow_live_v2::dry_run_workflow_plan(&harness, args.as_ref())
+                .await
+                .map_err(|err| anyhow!("saved workflow '{name}' failed validation: {err}"))?;
+            let task = template.spec.task.clone();
+            let mut plan = WorkflowScriptPlan::from_template(template.spec, &harness, calls);
+            plan.script_args = args;
+            cap_live_plan_parallelism(&mut plan, &runner, &policy);
+            return workflow_live_v2::run_saved_v2_workflow(
+                cwd,
+                &store,
+                plan,
+                task,
+                llm,
+                tui_tx,
+                runner.agent_names.clone(),
+                approval_mode,
+                workspace_boundary_supported,
+            )
+            .await;
         }
         CommandAction::Resume { run_id } | CommandAction::Continue { run_id } => {
             if let Some(output) = workflow_live_v2::resume_generated_v2_workflow(
@@ -305,42 +278,12 @@ async fn run_live_action(
             if let Some(message) = terminal_resume_message(&run) {
                 return Ok(message);
             }
-            let run = match gate_live_approval(cwd, &store, run, approval_mode, &tui_tx)? {
-                LiveApprovalOutcome::Proceed { run, note } => {
-                    approval_notes.push(note);
-                    if matches!(run.status, RunStatus::Paused) {
-                        LifecycleController::new(store.clone())
-                            .apply(&run.id, LifecycleAction::Resume)?
-                    } else {
-                        run
-                    }
-                }
-                LiveApprovalOutcome::Pending(message) | LiveApprovalOutcome::Denied(message) => {
-                    return Ok(message);
-                }
-            };
-            executor.execute_with_runner(run, &runner).await?
+            return Err(anyhow!(
+                "workflow {run_id} is not a resumable V2 run; legacy stage execution was                  removed by the workflow runtime rescue"
+            ));
         }
-        other => return run_action(cwd, other),
-    };
-    let learning_note = workflow_world_learning::record_report(&store, &report);
-    let wc_blocks = write_coordination_blocks(&store, &report.run_id);
-    let evidence_blocks = workflow_status_blocks::evidence_blocks(&store, &report.run_id);
-    let mut output = approval_notes.join("");
-    output.push_str(&format!(
-        "Workflow complete: {} (completed {}, blocked {}, forced {}, failed {}, skipped {})",
-        report.run_id,
-        report.completed,
-        report.blocked,
-        report.forced_accepted,
-        report.failed,
-        report.skipped
-    ));
-    output.push('\n');
-    output.push_str(&learning_note);
-    output.push_str(&wc_blocks);
-    output.push_str(&evidence_blocks);
-    Ok(output)
+        other => run_action(cwd, other),
+    }
 }
 
 fn cap_live_plan_parallelism(
@@ -459,19 +402,6 @@ fn load_generated_workflow_config(
 }
 
 /// Render compact write-coordination status blocks left on disk.
-fn write_coordination_blocks(store: &WorkflowStore, run_id: &str) -> String {
-    use archon_workflow::write_coordinator::status::{
-        coordinated_stage_ids, read_status, render_compact,
-    };
-    let mut out = String::new();
-    for stage_id in coordinated_stage_ids(store, run_id) {
-        if let Ok(Some(status)) = read_status(store, run_id, &stage_id) {
-            out.push_str(&render_compact(&status));
-        }
-    }
-    out
-}
-
 fn live_start_message(action: &CommandAction) -> String {
     match action {
         CommandAction::Plan { task } => format!("Planning dynamic workflow for task: {task}\n"),

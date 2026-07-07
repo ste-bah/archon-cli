@@ -4,18 +4,6 @@ pub(crate) fn load_spec_file(cwd: &Path, path: &str) -> Result<WorkflowSpec> {
     WorkflowSpec::from_yaml(&raw).map_err(Into::into)
 }
 
-fn execute_spec(store: &WorkflowStore, spec: WorkflowSpec) -> Result<ExecutionReport> {
-    let executor = WorkflowExecutor::new(store.clone(), WorkflowPolicy::default());
-    let run = executor.start(spec)?;
-    executor.execute(run).map_err(Into::into)
-}
-
-fn execute_imported_spec(store: &WorkflowStore, spec: WorkflowSpec) -> Result<ExecutionReport> {
-    let executor = WorkflowExecutor::new(store.clone(), WorkflowPolicy::default());
-    let run = executor.start_imported_spec(spec)?;
-    executor.execute(run).map_err(Into::into)
-}
-
 pub(crate) struct LoadedWorkflowTemplate {
     pub spec: WorkflowSpec,
     pub harness_source: Option<String>,
@@ -32,34 +20,6 @@ pub(crate) fn load_template(cwd: &Path, name: &str) -> Result<LoadedWorkflowTemp
         spec: TemplateRegistry::project(cwd).load(name)?.spec,
         harness_source: None,
     })
-}
-
-fn execute_template(
-    store: &WorkflowStore,
-    template: LoadedWorkflowTemplate,
-) -> Result<ExecutionReport> {
-    let executor = WorkflowExecutor::new(store.clone(), WorkflowPolicy::default());
-    let run = match template.harness_source {
-        Some(harness) => executor.start_with_harness(
-            template.spec,
-            &harness,
-            WorkflowBundleOrigin::SavedCommand,
-        )?,
-        None => executor.start(template.spec)?,
-    };
-    executor.execute(run).map_err(Into::into)
-}
-
-fn resume_workflow(store: &WorkflowStore, run_id: &str) -> Result<String> {
-    let run = store.load_state(run_id)?;
-    let executor = WorkflowExecutor::new(store.clone(), WorkflowPolicy::default());
-    let report = executor.execute(run)?;
-    Ok(deterministic_text(
-        "Workflow resumed",
-        store,
-        report.clone(),
-        workflow_world_learning::record_report(store, &report),
-    ))
 }
 
 fn repair_workflow(store: &WorkflowStore, run_id: &str) -> Result<String> {

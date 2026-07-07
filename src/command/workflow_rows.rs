@@ -1,18 +1,3 @@
-fn deterministic_text(
-    label: &str,
-    store: &WorkflowStore,
-    report: ExecutionReport,
-    learning_note: String,
-) -> String {
-    let evidence_blocks = workflow_status_blocks::evidence_blocks(store, &report.run_id);
-    format!(
-        "{label} (deterministic CLI smoke mode; pass --live or use TUI /workflow for LLM-backed agents): {} (completed {}, failed {}, skipped {})",
-        report.run_id, report.completed, report.failed, report.skipped
-    ) + "\n"
-        + learning_note.as_str()
-        + evidence_blocks.as_str()
-}
-
 fn emit_workflow_rows(
     cwd: &Path,
     action: &CommandAction,

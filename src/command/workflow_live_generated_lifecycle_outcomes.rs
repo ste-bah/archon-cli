@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-use super::{LifecycleContract, array, present, strings_of};
+use super::{LifecycleContract, array, present};
 
 /// JS `hasConcreteEvidence` (body_a.js).
 pub(crate) fn has_concrete_evidence(outcome: &Value) -> bool {

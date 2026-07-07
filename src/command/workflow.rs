@@ -8,18 +8,15 @@ use archon_core::env_vars::ArchonEnvVars;
 use archon_tui::app::{EvidenceRowPayload, TuiEvent, ViewId};
 use archon_workflow::run::StageState;
 use archon_workflow::{
-    CommandAction, ExecutionReport, HeuristicWorkflowPlanner, LifecycleAction, LifecycleController,
-    RunStatus, StageStatus, TemplateRegistry, WorkflowApprovalStore, WorkflowBundle,
-    WorkflowBundleOrigin, WorkflowCommand, WorkflowCommandRegistry, WorkflowExecutor,
-    WorkflowPlanner, WorkflowPolicy, WorkflowRun, WorkflowSpec, WorkflowStore,
-    WorkflowV2CallExecution, WorkflowV2ResultStore,
+    CommandAction, HeuristicWorkflowPlanner, LifecycleAction, LifecycleController, RunStatus,
+    StageStatus, TemplateRegistry, WorkflowApprovalStore, WorkflowBundle, WorkflowBundleOrigin,
+    WorkflowCommand, WorkflowCommandRegistry, WorkflowPlanner, WorkflowRun, WorkflowSpec,
+    WorkflowStore, WorkflowV2CallExecution, WorkflowV2ResultStore,
 };
 
 use crate::cli_args::WorkflowAction;
 use crate::command::registry::{CommandContext, CommandHandler};
 use crate::command::workflow_live::{run_live_cli_action, should_spawn_live, spawn_live_workflow};
-use crate::command::workflow_status_blocks;
-use crate::command::workflow_world_learning;
 
 pub(crate) struct WorkflowHandler;
 
@@ -197,39 +194,16 @@ pub(super) fn run_action(cwd: &Path, action: CommandAction) -> Result<String> {
     let text = match action {
         CommandAction::Plan { task } => planner.plan(&task)?.to_yaml()?,
         CommandAction::PlanSpec { path } => load_spec_file(cwd, &path)?.to_yaml()?,
-        CommandAction::Run { task } => {
-            let spec = planner.plan(&task)?;
-            let report = execute_spec(&store, spec)?;
-            deterministic_text(
-                "Workflow complete",
-                &store,
-                report.clone(),
-                workflow_world_learning::record_report(&store, &report),
-            )
-        }
-        CommandAction::RunSpec { path } => {
-            let spec = load_spec_file(cwd, &path)?;
-            let report = execute_imported_spec(&store, spec)?;
-            deterministic_text(
-                "Workflow complete",
-                &store,
-                report.clone(),
-                workflow_world_learning::record_report(&store, &report),
-            )
-        }
-        CommandAction::RunTemplate { name, .. } => {
-            let template = load_template(cwd, &name)?;
-            let report = execute_template(&store, template)?;
-            deterministic_text(
-                "Workflow complete",
-                &store,
-                report.clone(),
-                workflow_world_learning::record_report(&store, &report),
-            )
+        CommandAction::Run { .. }
+        | CommandAction::RunSpec { .. }
+        | CommandAction::RunTemplate { .. }
+        | CommandAction::Resume { .. }
+        | CommandAction::Continue { .. } => {
+            return Err(anyhow!(
+                "legacy deterministic workflow execution was removed by the workflow runtime                  rescue; workflows run through the live V2 runtime"
+            ));
         }
         CommandAction::Status { run_id } => status_detail_text(&store, &run_id)?,
-        CommandAction::Resume { run_id } => resume_workflow(&store, &run_id)?,
-        CommandAction::Continue { run_id } => resume_workflow(&store, &run_id)?,
         CommandAction::Repair { run_id } => repair_workflow(&store, &run_id)?,
         CommandAction::Pause { run_id } => lifecycle(&store, &run_id, LifecycleAction::Pause)?,
         CommandAction::Cancel { run_id } => lifecycle(&store, &run_id, LifecycleAction::Cancel)?,
