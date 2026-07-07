@@ -175,18 +175,18 @@ impl RiskGovernor {
         account: &AccountState,
         decision: &RiskDecision,
     ) -> Result<(), RiskGovernorError> {
-        if let Some(store) = &self.state_store {
-            if decision.status != RiskDecisionStatus::Approved {
-                store
-                    .persist_state(&RiskRuntimeState {
-                        strategy_id: intent.strategy_id.clone(),
-                        consecutive_losses: 0,
-                        daily_loss_cents: (account.daily_loss_pct * 100.0) as i64,
-                        cooldown_until_unix_ms: account.cooldown_until_unix_ms,
-                        restart_auto_halt: true,
-                    })
-                    .map_err(|err| RiskGovernorError::State(format!("{err:?}")))?;
-            }
+        if let Some(store) = &self.state_store
+            && decision.status != RiskDecisionStatus::Approved
+        {
+            store
+                .persist_state(&RiskRuntimeState {
+                    strategy_id: intent.strategy_id.clone(),
+                    consecutive_losses: 0,
+                    daily_loss_cents: (account.daily_loss_pct * 100.0) as i64,
+                    cooldown_until_unix_ms: account.cooldown_until_unix_ms,
+                    restart_auto_halt: true,
+                })
+                .map_err(|err| RiskGovernorError::State(format!("{err:?}")))?;
         }
         Ok(())
     }

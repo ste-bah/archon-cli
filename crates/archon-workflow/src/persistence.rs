@@ -3,13 +3,10 @@ use std::path::PathBuf;
 use chrono::Utc;
 use serde_json::{Value, json};
 
-use crate::error::{WorkflowError, WorkflowResult};
+use crate::error::WorkflowResult;
 use crate::events::sanitize_value;
-use crate::reducers::{ReducerInput, ReducerOutput};
-use crate::run::{ArtifactRef, WorkflowRun};
+use crate::run::ArtifactRef;
 use crate::runner::{StageRunOutput, StageRunRequest};
-use crate::spec::{ReducerKind, StageSpec};
-use crate::stage::source_input_hash;
 use crate::store::{WorkflowStore, safe_path_component};
 
 pub(crate) fn record_prompt(
@@ -46,51 +43,6 @@ pub(crate) fn record_prompt(
     )
 }
 
-pub(crate) fn write_stage_artifact(
-    store: &WorkflowStore,
-    run_id: &str,
-    stage: &StageSpec,
-    artifact_key: &str,
-    extension: &str,
-    body: &str,
-    accepted: bool,
-) -> WorkflowResult<ArtifactRef> {
-    store.write_named_artifact(
-        run_id,
-        &stage.id,
-        artifact_key,
-        &source_input_hash(stage),
-        extension,
-        body.as_bytes(),
-        accepted,
-    )
-}
-
-pub(crate) fn write_attached_stage_artifact(
-    store: &WorkflowStore,
-    run: &mut WorkflowRun,
-    stage: &StageSpec,
-    artifact_key: &str,
-    extension: &str,
-    body: String,
-    accepted: bool,
-) -> WorkflowResult<ArtifactRef> {
-    let artifact = write_stage_artifact(
-        store,
-        &run.id,
-        stage,
-        artifact_key,
-        extension,
-        &body,
-        accepted,
-    )?;
-    let state = run
-        .stage_mut(&stage.id)
-        .ok_or_else(|| WorkflowError::SpecInvalid(format!("missing stage {}", stage.id)))?;
-    state.artifacts.push(artifact.clone());
-    Ok(artifact)
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn record_agent_output(
     store: &WorkflowStore,
@@ -112,20 +64,6 @@ pub(crate) fn record_agent_output(
         if accepted { "accepted" } else { "failed" },
         accepted,
         error,
-    )
-}
-
-pub(crate) fn record_blocked_agent_output(
-    store: &WorkflowStore,
-    run_id: &str,
-    stage_id: &str,
-    item_id: &str,
-    output: Option<&StageRunOutput>,
-    artifact: Option<&ArtifactRef>,
-    error: Option<&str>,
-) -> WorkflowResult<()> {
-    record_agent_output_with_status(
-        store, run_id, stage_id, item_id, output, artifact, "blocked", false, error,
     )
 }
 
@@ -186,64 +124,6 @@ fn record_agent_output_with_status(
         record_path("agent-outputs", stage_id, item_id, "json"),
         &record,
     )
-}
-
-pub(crate) fn agent_output_exists(
-    store: &WorkflowStore,
-    run_id: &str,
-    stage_id: &str,
-    item_id: &str,
-) -> bool {
-    store
-        .run_dir(run_id)
-        .join(record_path("agent-outputs", stage_id, item_id, "json"))
-        .exists()
-}
-
-pub(crate) fn record_reducer(
-    store: &WorkflowStore,
-    run_id: &str,
-    stage: &StageSpec,
-    reducer: ReducerKind,
-    inputs: &[ReducerInput],
-    output: &ReducerOutput,
-    artifact: &ArtifactRef,
-) -> WorkflowResult<()> {
-    let record = sanitize_value(json!({
-        "schema": "archon.workflow.reducer.v1",
-        "run_id": run_id,
-        "stage_id": stage.id,
-        "reducer": reducer,
-        "input_count": inputs.len(),
-        "inputs": inputs,
-        "output": output,
-        "artifact": artifact_json(artifact),
-        "created_at": Utc::now().to_rfc3339(),
-    }));
-    let path = PathBuf::from("reducers").join(format!("{}.json", safe_path_component(&stage.id)));
-    store.write_run_json(run_id, path, &record)
-}
-
-pub(crate) fn record_quality(
-    store: &WorkflowStore,
-    run_id: &str,
-    stage: &StageSpec,
-    status: &str,
-    reason: Option<&str>,
-    artifact: Option<&ArtifactRef>,
-) -> WorkflowResult<()> {
-    let record = sanitize_value(json!({
-        "schema": "archon.workflow.quality.v1",
-        "run_id": run_id,
-        "stage_id": stage.id,
-        "status": status,
-        "checked_dependencies": stage.depends_on,
-        "reason": reason,
-        "artifact": artifact.map(artifact_json),
-        "created_at": Utc::now().to_rfc3339(),
-    }));
-    let path = PathBuf::from("quality").join(format!("{}.json", safe_path_component(&stage.id)));
-    store.write_run_json(run_id, path, &record)
 }
 
 pub(crate) fn record_forced_accept(

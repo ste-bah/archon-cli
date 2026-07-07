@@ -122,7 +122,7 @@ fn workflow_live_generated_contract_extracts_direct_retry_items_fixture() {
     assert!(
         item["focused_verification"]
             .as_array()
-            .is_some_and(|items| items.len() >= 1)
+            .is_some_and(|items| !items.is_empty())
     );
     assert!(
         item["expected_evidence"]
@@ -151,7 +151,7 @@ fn workflow_live_generated_contract_normalizes_retry_command_fixture() {
         assert!(
             item["expected_evidence"]
                 .as_array()
-                .is_some_and(|items| items.len() >= 1)
+                .is_some_and(|items| !items.is_empty())
         );
         assert!(
             item["artifact_requirements"]

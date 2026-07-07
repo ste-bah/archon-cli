@@ -21,12 +21,11 @@ pub(super) fn execution_with_resolved_source(
 ) -> archon_workflow::WorkflowResult<WorkflowV2CallExecution> {
     if execution.input.get("source_data").is_some() {
         let mut enriched = execution.clone();
-        if execution.call.method == WorkflowV2HostMethod::Reduce {
-            if let Some(object) = enriched.input.as_object_mut() {
-                if let Some(source_data) = object.get("source_data").cloned() {
-                    object.insert("source_data".to_string(), source_pack_value(&source_data));
-                }
-            }
+        if execution.call.method == WorkflowV2HostMethod::Reduce
+            && let Some(object) = enriched.input.as_object_mut()
+            && let Some(source_data) = object.get("source_data").cloned()
+        {
+            object.insert("source_data".to_string(), source_pack_value(&source_data));
         }
         return Ok(enriched);
     }

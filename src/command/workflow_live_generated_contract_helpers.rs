@@ -111,8 +111,8 @@ fn normalize_remediation_context(
     value: &serde_json::Value,
     object: &mut serde_json::Map<String, serde_json::Value>,
 ) {
-    if !object.contains_key("source_item_id") {
-        if let Some(source_item_id) = first_string(
+    if !object.contains_key("source_item_id")
+        && let Some(source_item_id) = first_string(
             value,
             &[
                 "source_item_id",
@@ -132,7 +132,6 @@ fn normalize_remediation_context(
                 serde_json::Value::String(source_item_id),
             );
         }
-    }
     if !object.contains_key("failure_status") {
         if let Some(status) = first_string(
             value,
@@ -184,8 +183,8 @@ fn normalize_remediation_context(
             );
         }
     }
-    if !object.contains_key("required_fix") {
-        if let Some(required_fix) = first_string(
+    if !object.contains_key("required_fix")
+        && let Some(required_fix) = first_string(
             value,
             &[
                 "required_fix",
@@ -204,7 +203,6 @@ fn normalize_remediation_context(
                 serde_json::Value::String(required_fix),
             );
         }
-    }
     if !object.contains_key("verification_requirements") {
         let requirements = raw_values_from_aliases(
             value,

@@ -272,19 +272,19 @@ fn report_metric_pairs(
     pnl: &[f64],
 ) -> [(&'static str, f64); REPORT_METRIC_COUNT] {
     [
-        ("net_profit", sum(&pnl)),
+        ("net_profit", sum(pnl)),
         (
             "gross_profit",
             pnl.iter().copied().filter(|v| *v > 0.0).sum(),
         ),
         ("gross_loss", pnl.iter().copied().filter(|v| *v < 0.0).sum()),
-        ("max_drawdown", max_drawdown(starting_equity, &pnl)),
-        ("sharpe", sharpe(&pnl)),
-        ("sortino", sortino(&pnl)),
-        ("profit_factor", profit_factor(&pnl)),
-        ("win_rate", win_rate(&pnl)),
+        ("max_drawdown", max_drawdown(starting_equity, pnl)),
+        ("sharpe", sharpe(pnl)),
+        ("sortino", sortino(pnl)),
+        ("profit_factor", profit_factor(pnl)),
+        ("win_rate", win_rate(pnl)),
         ("trade_count", fills.len() as f64),
-        ("avg_trade", average(&pnl)),
+        ("avg_trade", average(pnl)),
         (
             "cost_total",
             fills.iter().map(|fill| sum_costs(fill.costs)).sum(),

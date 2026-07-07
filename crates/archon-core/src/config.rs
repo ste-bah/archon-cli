@@ -103,19 +103,11 @@ pub struct ProvidersConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct ModelsConfig {
     pub anthropic: AnthropicModelsConfig,
     #[serde(rename = "openai-codex")]
     pub openai_codex: OpenAiCodexModelsConfig,
-}
-
-impl Default for ModelsConfig {
-    fn default() -> Self {
-        Self {
-            anthropic: AnthropicModelsConfig::default(),
-            openai_codex: OpenAiCodexModelsConfig::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -680,16 +672,9 @@ impl Default for SubagentConfig {
 /// Workflow runtime configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct WorkflowRuntimeConfig {
     pub generated: GeneratedWorkflowConfig,
-}
-
-impl Default for WorkflowRuntimeConfig {
-    fn default() -> Self {
-        Self {
-            generated: GeneratedWorkflowConfig::default(),
-        }
-    }
 }
 
 /// Generated workflow limits used by deterministic PRD scaffolds.

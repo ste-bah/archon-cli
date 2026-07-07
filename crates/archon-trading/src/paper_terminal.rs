@@ -30,7 +30,7 @@ pub struct PaperLedgerEntry {
     pub note: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct PaperSample {
     pub closed_trades: u32,
     pub calendar_days: u32,
@@ -263,17 +263,6 @@ impl PaperTerminal {
             tax: TaxFields::default(),
             artefacts: vec![],
             maker_checker: None,
-        }
-    }
-}
-
-impl Default for PaperSample {
-    fn default() -> Self {
-        Self {
-            closed_trades: 0,
-            calendar_days: 0,
-            regime_ids: BTreeSet::new(),
-            postmortem_ready: false,
         }
     }
 }

@@ -98,7 +98,7 @@ fn failure_kind_from_write_result(result: &WorkflowV2Result) -> Option<BranchFai
         .data
         .get("failure_kind")
         .and_then(|value| serde_json::from_value(value.clone()).ok())
-        .or_else(|| match result.status {
+        .or(match result.status {
             WorkflowV2Status::Failed
             | WorkflowV2Status::Blocked
             | WorkflowV2Status::NeedsReview => Some(BranchFailureKind::Semantic),

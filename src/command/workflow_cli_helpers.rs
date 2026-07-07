@@ -41,7 +41,7 @@ fn template_args_from_task(task: &[String]) -> Result<Option<serde_json::Value>>
     }
     let raw = task_string(task)?;
     Ok(Some(
-        serde_json::from_str(&raw).unwrap_or_else(|_| serde_json::Value::String(raw)),
+        serde_json::from_str(&raw).unwrap_or(serde_json::Value::String(raw)),
     ))
 }
 

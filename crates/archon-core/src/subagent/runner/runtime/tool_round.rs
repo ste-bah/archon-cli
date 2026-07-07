@@ -180,7 +180,7 @@ fn record_tool_results(
     exec_results: Vec<ToolResult>,
 ) {
     let mut tool_results: Vec<serde_json::Value> = Vec::with_capacity(prepared.len());
-    for (prepared_tool, result) in prepared.iter().zip(exec_results.into_iter()) {
+    for (prepared_tool, result) in prepared.iter().zip(exec_results) {
         record_tool_progress(runner, prepared_tool);
         let context_output = crate::agent::tool_result_context::cap_tool_output_for_context(
             &prepared_tool.name,

@@ -58,8 +58,8 @@ fn normalize_retry_context(
         &["artifact_paths", "artifactPaths"],
     );
     append_alias_values(object, "artifact_requirements", artifacts);
-    if !object.contains_key("source_item_id") {
-        if let Some(source_item_id) =
+    if !object.contains_key("source_item_id")
+        && let Some(source_item_id) =
             first_string(value, &["source_failed_item_id", "sourceFailedItemId"])
         {
             object.insert(
@@ -67,7 +67,6 @@ fn normalize_retry_context(
                 serde_json::Value::String(source_item_id),
             );
         }
-    }
 }
 
 fn normalize_provider_env_context(

@@ -4,10 +4,8 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 use crate::error::{WorkflowError, WorkflowResult};
-use crate::events::{WorkflowEventKind, WorkflowEventLog};
 use crate::run::{ArtifactRef, RunStatus, StageStatus, WorkflowRun};
 use crate::store::WorkflowStore;
 
@@ -298,47 +296,4 @@ pub fn record_write_coordination_outcome(
         })
         .collect();
     write_jsonl(&dir.join("outcomes.jsonl"), &rows)
-}
-
-pub(crate) fn record_workflow_learning(
-    store: &WorkflowStore,
-    run: &WorkflowRun,
-    seq: &mut u64,
-) -> WorkflowResult<()> {
-    if !matches!(
-        run.status,
-        RunStatus::Completed
-            | RunStatus::NeedsReview
-            | RunStatus::Blocked
-            | RunStatus::Failed
-            | RunStatus::Cancelled
-    ) {
-        return Ok(());
-    }
-    let log = WorkflowEventLog::new(store.clone());
-    match WorkflowLearningSink::new(store.clone()).record(run) {
-        Ok(summary) => {
-            log.emit(
-                &run.id,
-                *seq,
-                WorkflowEventKind::LearningRecorded,
-                json!({
-                    "records": summary.records,
-                    "durable_records": summary.durable_records,
-                    "adapter_records": summary.adapter_records,
-                    "proposal_records": summary.proposal_records,
-                }),
-            )?;
-        }
-        Err(err) => {
-            log.emit(
-                &run.id,
-                *seq,
-                WorkflowEventKind::LearningRecorded,
-                json!({"status": "degraded", "error_class": err.to_string()}),
-            )?;
-        }
-    }
-    *seq += 1;
-    Ok(())
 }

@@ -157,17 +157,6 @@ pub(crate) fn fanout_item_target_root(
         .unwrap_or_else(|_| effective_root(store, run))
 }
 
-pub(crate) fn item_targets_need_serial_root(
-    store: &WorkflowStore,
-    run: &WorkflowRun,
-    payload: &Value,
-    targets: &[String],
-    canonical: &Path,
-) -> bool {
-    implementation_root_for_payload_targets(store, run, payload, targets)
-        .is_ok_and(|root| !same_root(&root, canonical))
-}
-
 fn absolute_target_parent(targets: &[String]) -> Option<PathBuf> {
     targets
         .iter()
@@ -441,12 +430,6 @@ fn clean_lexical(path: &Path) -> PathBuf {
 fn has_parent_component(path: &Path) -> bool {
     path.components()
         .any(|component| matches!(component, std::path::Component::ParentDir))
-}
-
-fn same_root(a: &Path, b: &Path) -> bool {
-    let a = a.canonicalize().unwrap_or_else(|_| clean_lexical(a));
-    let b = b.canonicalize().unwrap_or_else(|_| clean_lexical(b));
-    a == b
 }
 
 fn path_candidates(text: &str) -> Vec<String> {

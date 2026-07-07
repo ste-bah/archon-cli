@@ -265,20 +265,21 @@ pub(super) fn merge_inventory_repair(
         let tombstone = ["remove", "tombstone", "deleted"]
             .iter()
             .any(|key| repair_item.get(*key) == Some(&Value::Bool(true)));
-        if let Some(matched_key) = &matched {
-            if tombstone && present(repair_item.get("evidence")) {
-                let existing = merged.get(matched_key).cloned();
-                if let Some(existing) = existing {
-                    if let Some(existing_primary) = primary_key(&existing) {
-                        merged.remove(&existing_primary);
-                        order.retain(|key| key != &existing_primary);
-                    }
-                    for alias in item_keys(&existing) {
-                        merged.remove(&alias);
-                    }
+        if let Some(matched_key) = &matched
+            && tombstone
+            && present(repair_item.get("evidence"))
+        {
+            let existing = merged.get(matched_key).cloned();
+            if let Some(existing) = existing {
+                if let Some(existing_primary) = primary_key(&existing) {
+                    merged.remove(&existing_primary);
+                    order.retain(|key| key != &existing_primary);
                 }
-                continue;
+                for alias in item_keys(&existing) {
+                    merged.remove(&alias);
+                }
             }
+            continue;
         }
         if let Some(matched_key) = matched {
             let existing = merged.get(&matched_key).cloned().unwrap_or_default();
@@ -356,7 +357,7 @@ pub(super) fn split_focused_verification_items(
                 "focused_verification".to_string(),
                 Value::Array(vec![Value::String(check.clone())]),
             );
-            if !present(clone.get("source_item_id").map(|v| &*v)) {
+            if !present(clone.get("source_item_id").map(|v| v)) {
                 clone.insert("source_item_id".to_string(), Value::String(base_id.clone()));
             }
             clone.insert(

@@ -3,7 +3,6 @@
 pub mod acceptance;
 pub mod approval;
 pub mod bundle;
-mod cargo_target_env;
 pub mod command;
 mod command_execution;
 mod completion_proof;

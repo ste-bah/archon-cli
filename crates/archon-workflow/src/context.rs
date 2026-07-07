@@ -353,28 +353,6 @@ fn fanout_allows_empty_items(stage: &StageSpec) -> bool {
         || crate::completion_proof::enabled(stage)
 }
 
-pub(crate) fn empty_completion_summary(
-    store: &WorkflowStore,
-    run: &WorkflowRun,
-    stage: &StageSpec,
-) -> WorkflowResult<Option<String>> {
-    let Some(dep) = foreach_dependency(stage) else {
-        return if crate::completion_proof::enabled(stage) {
-            Err(WorkflowError::StageFailed(format!(
-                "implementation fan-out stage '{}' allows empty completion but has no foreach producer",
-                stage.id
-            )))
-        } else {
-            Ok(None)
-        };
-    };
-    crate::completion_proof::summary_for_stage(
-        &run.spec,
-        stage,
-        &dependency_item_bodies(store, run, &dep)?,
-    )
-}
-
 fn source_file_items(stage: &StageSpec, files: Vec<Value>) -> Option<Vec<FanoutItem>> {
     (!files.is_empty()).then(|| {
         files

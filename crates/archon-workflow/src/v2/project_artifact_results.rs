@@ -164,10 +164,10 @@ fn wrapper_branch_result_marker(value: &serde_json::Value) -> bool {
 fn copy_top_level_branch_fields(result: &mut WorkflowV2Result, value: &serde_json::Value) {
     let mut data = result.data.as_object().cloned().unwrap_or_default();
     for key in ["item_id", "source_item_id", "canonical_task_ids"] {
-        if data.get(key).is_none() {
-            if let Some(raw) = value.get(key) {
-                data.insert(key.to_string(), raw.clone());
-            }
+        if data.get(key).is_none()
+            && let Some(raw) = value.get(key)
+        {
+            data.insert(key.to_string(), raw.clone());
         }
     }
     result.data = serde_json::Value::Object(data);

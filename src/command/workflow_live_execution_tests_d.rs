@@ -118,8 +118,8 @@ async fn wait_for_generated_run_id(cwd: &std::path::Path) -> String {
     let workflow_root = cwd.join(".archon/workflows");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
-        if let Ok(entries) = std::fs::read_dir(&workflow_root) {
-            if let Some(run_id) = entries.filter_map(|entry| entry.ok()).find_map(|entry| {
+        if let Ok(entries) = std::fs::read_dir(&workflow_root)
+            && let Some(run_id) = entries.filter_map(|entry| entry.ok()).find_map(|entry| {
                 let path = entry.path();
                 if path.join("workflow.js").exists() {
                     path.file_name()
@@ -131,7 +131,6 @@ async fn wait_for_generated_run_id(cwd: &std::path::Path) -> String {
             }) {
                 return run_id;
             }
-        }
         assert!(
             std::time::Instant::now() < deadline,
             "generated workflow run directory was not created"

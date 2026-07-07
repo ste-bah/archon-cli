@@ -177,7 +177,7 @@ fn source_task_graph_from_items(
     for (item_id, canonical_task_ids, value) in raw_items {
         let dependency_ids = normalize_dependency_refs(&value, universe, &item_to_tasks);
         let raw_target_files = sorted_unique(non_empty_strings(
-            (&value)
+            value
                 .get("target_files")
                 .or_else(|| value.get("targetFiles")),
         ));
@@ -228,24 +228,24 @@ fn source_task_graph_from_items(
             declared_target_files,
             target_file_expansions,
             acceptance_criteria: sorted_unique(non_empty_strings(
-                (&value)
+                value
                     .get("acceptance_criteria")
                     .or_else(|| value.get("acceptanceCriteria")),
             )),
             focused_verification: sorted_unique(non_empty_strings(
-                (&value)
+                value
                     .get("focused_verification")
                     .or_else(|| value.get("focused_tests"))
                     .or_else(|| value.get("focusedTests")),
             )),
             expected_evidence: sorted_unique(non_empty_strings(
-                (&value)
+                value
                     .get("expected_evidence")
                     .or_else(|| value.get("expectedEvidence")),
             )),
             artifact_requirements: sorted_unique({
                 let mut values = non_empty_strings(
-                    (&value)
+                    value
                         .get("artifact_requirements")
                         .or_else(|| value.get("artifacts")),
                 );

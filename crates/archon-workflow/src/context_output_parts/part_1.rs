@@ -15,18 +15,13 @@ pub fn output_reports_blocked(body: &str) -> Option<String> {
     output_reports_invalid_review_evidence_from_body(body, &lower)
 }
 
-pub fn output_reports_invalid_review_evidence(body: &str) -> Option<String> {
-    let lower = body.to_ascii_lowercase();
-    output_reports_invalid_review_evidence_from_body(body, &lower)
-}
-
 fn output_reports_invalid_review_evidence_from_body(body: &str, lower: &str) -> Option<String> {
-    if reports_waiting_for_confirmation(&lower) {
+    if reports_waiting_for_confirmation(lower) {
         return Some(
             "agent output asks for confirmation instead of executing the stage".to_string(),
         );
     }
-    if reports_explicit_blocked_status(body, lower) || reports_missing_evidence_block(&lower) {
+    if reports_explicit_blocked_status(body, lower) || reports_missing_evidence_block(lower) {
         return Some("agent output declares blocked or missing evidence".to_string());
     }
     None

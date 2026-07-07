@@ -111,7 +111,7 @@ impl WorkflowV2ResultStore {
             let entry = entry.map_err(|err| WorkflowError::io(&dir, err))?;
             if entry
                 .file_type()
-                .map_err(|err| WorkflowError::io(&entry.path(), err))?
+                .map_err(|err| WorkflowError::io(entry.path(), err))?
                 .is_file()
             {
                 deleted += 1;
@@ -140,7 +140,7 @@ impl WorkflowV2ResultStore {
             let entry = entry.map_err(|err| WorkflowError::io(&dir, err))?;
             if !entry
                 .file_type()
-                .map_err(|err| WorkflowError::io(&entry.path(), err))?
+                .map_err(|err| WorkflowError::io(entry.path(), err))?
                 .is_file()
             {
                 continue;

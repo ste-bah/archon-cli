@@ -221,10 +221,10 @@ fn remediation_source_by_id(
     let prefix = format!("{}-", source_call_id.trim());
     let mut ids = BTreeSet::new();
     for id in raw_ids {
-        if let Some(stripped) = id.strip_prefix(&prefix) {
-            if !stripped.is_empty() {
-                ids.insert(stripped.to_string());
-            }
+        if let Some(stripped) = id.strip_prefix(&prefix)
+            && !stripped.is_empty()
+        {
+            ids.insert(stripped.to_string());
         }
         ids.insert(id);
     }
@@ -288,21 +288,20 @@ fn remediation_item_with_source_ownership(
         "focused_verification",
         "acceptance_criteria",
     ] {
-        if !present(merged.get(fallback).map(|v| &*v)) && present(source.get(fallback)) {
+        if !present(merged.get(fallback).map(|v| v)) && present(source.get(fallback)) {
             merged.insert(fallback.to_string(), source.get(fallback).cloned().unwrap());
         }
     }
-    if !present(merged.get("source_item_id").map(|v| &*v)) {
-        if let Some(source_id) = source
+    if !present(merged.get("source_item_id").map(|v| v))
+        && let Some(source_id) = source
             .get("item_id")
             .or_else(|| source.get("id"))
             .and_then(Value::as_str)
-        {
-            merged.insert(
-                "source_item_id".to_string(),
-                Value::String(source_id.to_string()),
-            );
-        }
+    {
+        merged.insert(
+            "source_item_id".to_string(),
+            Value::String(source_id.to_string()),
+        );
     }
     Value::Object(merged)
 }

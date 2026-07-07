@@ -82,7 +82,7 @@ impl ToolRegistry {
     /// Get tool definitions for API request (JSON schemas).
     pub fn tool_definitions(&self) -> Vec<serde_json::Value> {
         let mut tools: Vec<_> = self.tools.iter().collect();
-        tools.sort_by(|(left, _), (right, _)| left.cmp(right));
+        tools.sort_by_key(|(left, _)| *left);
         tools
             .into_iter()
             .map(|(_, tool)| {

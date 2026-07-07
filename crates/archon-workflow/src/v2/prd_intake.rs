@@ -318,11 +318,11 @@ fn extract_raw_sections<'a>(body: &'a str, headings: &[&str]) -> Vec<&'a str> {
         let content_start = start + line.len();
         let mut end = body.len();
         for (next_start, next_line) in lines.iter().skip(idx + 1) {
-            if let Some((next_level, _)) = markdown_heading(next_line.trim()) {
-                if next_level <= level {
-                    end = *next_start;
-                    break;
-                }
+            if let Some((next_level, _)) = markdown_heading(next_line.trim())
+                && next_level <= level
+            {
+                end = *next_start;
+                break;
             }
         }
         sections.push(body[content_start..end].trim());

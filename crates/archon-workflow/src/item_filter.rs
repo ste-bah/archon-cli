@@ -50,18 +50,6 @@ pub(crate) fn apply_stage_filter(
     Ok(filtered)
 }
 
-pub(crate) fn stage_filter_matches(stage: &StageSpec, payload: &Value) -> WorkflowResult<bool> {
-    let Some(raw) = stage
-        .filter
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    else {
-        return Ok(true);
-    };
-    parse_predicate(&stage.id, raw).map(|predicate| predicate.matches(payload))
-}
-
 fn parse_predicate(stage_id: &str, raw: &str) -> WorkflowResult<Predicate> {
     let (lhs, op, rhs) = split_operator(raw).ok_or_else(|| invalid_filter(stage_id, raw))?;
     let path = parse_item_path(lhs).ok_or_else(|| invalid_filter(stage_id, raw))?;

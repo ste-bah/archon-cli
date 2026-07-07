@@ -292,10 +292,7 @@ fn parse_timestamp_ms(raw: &str) -> Option<u64> {
         [s] => (0, 0, *s),
         _ => return None,
     };
-    let (secs, millis) = seconds
-        .split_once('.')
-        .map(|(s, ms)| (s, ms))
-        .unwrap_or((seconds, "0"));
+    let (secs, millis) = seconds.split_once('.').unwrap_or((seconds, "0"));
     let seconds = secs.parse::<u64>().ok()?;
     let millis = format!("{millis:0<3}")
         .chars()

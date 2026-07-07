@@ -80,7 +80,7 @@ fn generated_item_issues(
                     "implementation item is missing focused verification requirements",
                 ));
             }
-            if !value.get("artifact_requirements").is_some() {
+            if value.get("artifact_requirements").is_none() {
                 issues.push(make_issue(
                     GeneratedContractIssueKind::ArtifactRequirementsDiscovery,
                     "artifact_requirements",

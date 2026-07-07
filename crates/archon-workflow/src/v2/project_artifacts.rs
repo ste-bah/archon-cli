@@ -387,14 +387,14 @@ fn absolute_artifact_candidate(
     relative: &str,
     context: &WorkflowV2ProjectArtifactContext,
 ) -> PathBuf {
-    if let Some(run_id) = context.run_id.as_deref().filter(|id| !id.is_empty()) {
-        if relative.starts_with("artifacts/") {
-            return project_root
-                .join(".archon")
-                .join("workflows")
-                .join(run_id)
-                .join(relative);
-        }
+    if let Some(run_id) = context.run_id.as_deref().filter(|id| !id.is_empty())
+        && relative.starts_with("artifacts/")
+    {
+        return project_root
+            .join(".archon")
+            .join("workflows")
+            .join(run_id)
+            .join(relative);
     }
     project_root.join(relative)
 }

@@ -1,33 +1,4 @@
-use std::collections::BTreeSet;
-
-use serde_json::{Map, Value, json};
-
-use crate::reducers::{ReducerInput, ReducerOutput};
-use crate::spec::{StageSpec, stage_declares_items_producer};
-
-pub(crate) fn structured_items_output(
-    stage: &StageSpec,
-    inputs: &[ReducerInput],
-) -> Option<ReducerOutput> {
-    if !stage_declares_items_producer(stage) {
-        return None;
-    }
-    let items = dedupe_items(
-        inputs
-            .iter()
-            .filter_map(|input| items_from_text(&input.content))
-            .flatten()
-            .collect(),
-    );
-    let body = serde_json::to_string_pretty(&json!({ "items": items })).ok()?;
-    Some(ReducerOutput {
-        title: "Structured Items".to_string(),
-        body,
-        accepted_inputs: inputs.iter().filter(|input| input.accepted).count(),
-        failed_inputs: inputs.iter().filter(|input| input.failed).count(),
-        dissent: Vec::new(),
-    })
-}
+use serde_json::{Map, Value};
 
 pub(crate) fn items_from_text(body: &str) -> Option<Vec<Value>> {
     for candidate in candidate_documents(body) {
@@ -185,22 +156,6 @@ fn copy_string_array(
             Value::Array(values.into_iter().map(Value::String).collect()),
         );
     }
-}
-
-fn dedupe_items(items: Vec<Value>) -> Vec<Value> {
-    let mut seen = BTreeSet::new();
-    items
-        .into_iter()
-        .filter(|item| {
-            let key = item
-                .get("finding_id")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .or_else(|| serde_json::to_string(item).ok())
-                .unwrap_or_else(|| item.to_string());
-            seen.insert(key)
-        })
-        .collect()
 }
 
 fn candidate_documents(body: &str) -> Vec<String> {

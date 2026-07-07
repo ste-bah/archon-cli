@@ -153,6 +153,7 @@ impl WorkflowStore {
         let path = run_dir.join(".control.lock");
         let file = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(&path)

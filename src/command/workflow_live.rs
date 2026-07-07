@@ -202,9 +202,9 @@ async fn run_live_action(
     match action {
         CommandAction::Plan { task } => {
             let plan = capped_live_plan(&task).await?;
-            return Ok(render_live_plan(&plan)?);
+            render_live_plan(&plan)
         }
-        CommandAction::PlanSpec { path } => return Ok(load_spec_file(cwd, &path)?.to_yaml()?),
+        CommandAction::PlanSpec { path } => Ok(load_spec_file(cwd, &path)?.to_yaml()?),
         CommandAction::Run { task } => {
             let plan = capped_live_plan(&task).await?;
             return workflow_live_v2::run_generated_v2_workflow(
@@ -220,11 +220,9 @@ async fn run_live_action(
             )
             .await;
         }
-        CommandAction::RunSpec { .. } => {
-            return Err(anyhow!(
-                "legacy imported-spec execution was removed by the workflow runtime rescue;                  run work through the V2 runtime with /workflow run <task> or a saved V2 workflow"
-            ));
-        }
+        CommandAction::RunSpec { .. } => Err(anyhow!(
+            "legacy imported-spec execution was removed by the workflow runtime rescue;                  run work through the V2 runtime with /workflow run <task> or a saved V2 workflow"
+        )),
         CommandAction::RunTemplate { name, args } => {
             let template = load_template(cwd, &name)?;
             let Some(harness) = template.harness_source else {
@@ -272,9 +270,9 @@ async fn run_live_action(
             if let Some(message) = terminal_resume_message(&run) {
                 return Ok(message);
             }
-            return Err(anyhow!(
+            Err(anyhow!(
                 "workflow {run_id} is not a resumable V2 run; legacy stage execution was                  removed by the workflow runtime rescue"
-            ));
+            ))
         }
         other => run_action(cwd, other),
     }

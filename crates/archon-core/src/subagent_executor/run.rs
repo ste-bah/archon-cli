@@ -47,7 +47,7 @@ impl AgentSubagentExecutor {
             .prepare_subagent_run(&ids.manager_id, &request, &ctx)
             .await?;
         let runner = self
-            .build_subagent_runner(&ids, &request, &ctx, &prepared, &cancel)
+            .build_subagent_runner(ids, &request, &ctx, &prepared, &cancel)
             .await?;
         let activity_model = runner.model().to_string();
 

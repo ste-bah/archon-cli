@@ -190,13 +190,6 @@ pub(crate) fn bundles_from_agent_records(
         .collect()
 }
 
-pub(crate) fn bundles_from_output_body(body: &str, item_id: Option<String>) -> Vec<EvidenceBundle> {
-    let value = serde_json::from_str::<Value>(body)
-        .or_else(|_| serde_yaml_ng::from_str::<Value>(body))
-        .unwrap_or_else(|_| Value::String(body.to_string()));
-    evidence_parse::value_to_bundles(&value, item_id)
-}
-
 fn bundle_satisfies_unit(bundle: &EvidenceBundle) -> bool {
     non_blocking_status(&bundle.status)
         && bundle.residual_gaps.is_empty()
@@ -314,39 +307,5 @@ fn normalized(value: &str) -> String {
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::{CoverageVerdict, bundles_from_output_body, evaluate};
-
-    #[test]
-    fn generated_agent_evidence_aliases_satisfy_work_unit_coverage() {
-        let body = r#"{
-            "status": "accepted",
-            "completed_task_ids": ["TASK-TDL-010"],
-            "source_files_changed": [
-                "crates/archon-trading/src/data_store.rs",
-                "crates/archon-trading/src/data_store/io.rs"
-            ],
-            "focused_tests": [
-                {
-                    "command": "cargo test -p archon-trading data_store::tests::metadata_json_contains_self_describing_paths_and_checksums",
-                    "exit_status": 0,
-                    "result": "passed"
-                }
-            ],
-            "notes": "No residual gaps for this task."
-        }"#;
-
-        let coverage = evaluate(
-            "run",
-            "implement",
-            "attempt",
-            BTreeSet::from(["TASK-TDL-010".to_string()]),
-            bundles_from_output_body(body, Some("implement-0".to_string())),
-        );
-
-        assert_eq!(coverage.verdict, CoverageVerdict::Accepted);
-        assert_eq!(
-            coverage.satisfied_work_units,
-            vec!["TASK-TDL-010".to_string()]
-        );
-    }
+    use super::{CoverageVerdict, evaluate};
 }
