@@ -10,7 +10,7 @@ fn final_report_result(
     let mut report = WorkflowV2FinalReportBuilder::new()
         .build(paths, &required_task_ids, &source_results)
         .map_err(|err| WorkflowError::SpecInvalid(err.to_string()))?;
-    guard_final_report_artifact_paths_exist(&mut report);
+    guard_final_report_artifact_paths_exist(&mut report, v2_store.root());
     guard_final_report_against_dynamic_wave_evidence(&mut report, v2_store, task_universe)?;
     let report_path = artifact_path(
         v2_store.root(),
@@ -189,6 +189,19 @@ fn guard_final_report_against_dynamic_wave_evidence(
         .missing_tasks
         .retain(|task_id| !completed_ids.contains(task_id));
     if unsupported_claims.is_empty() && missing_dynamic.is_empty() {
+        // The builder downgrades a report whose direct source results carry no
+        // commands; the durable ledger merged above is the authoritative
+        // command evidence. Restore acceptance when the ledger reconciled
+        // cleanly and nothing else is wrong.
+        if report.status == WorkflowV2Status::NeedsReview
+            && !report.commands_run.is_empty()
+            && report.failed_tasks.is_empty()
+            && report.blocked_tasks.is_empty()
+            && report.missing_tasks.is_empty()
+            && report.residual_gaps.is_empty()
+        {
+            report.status = WorkflowV2Status::Accepted;
+        }
         return Ok(());
     }
 
@@ -268,12 +281,29 @@ fn command_key(command: &archon_workflow::WorkflowV2CommandRecord) -> String {
     )
 }
 
-fn guard_final_report_artifact_paths_exist(report: &mut WorkflowV2FinalReport) {
+fn guard_final_report_artifact_paths_exist(report: &mut WorkflowV2FinalReport, v2_root: &Path) {
+    // Relative artifact paths are project-artifact-root relative; resolve them
+    // against the project root that owns this run, never the process cwd.
+    let project_root = v2_root
+        .ancestors()
+        .find(|ancestor| ancestor.file_name().is_some_and(|name| name == ".archon"))
+        .and_then(Path::parent)
+        .map(Path::to_path_buf);
+    let artifact_exists = |raw: &str| -> bool {
+        let path = Path::new(raw);
+        if path.is_absolute() {
+            return path.exists();
+        }
+        match &project_root {
+            Some(root) => root.join(path).exists() || path.exists(),
+            None => path.exists(),
+        }
+    };
     let missing = report
         .artifacts
         .iter()
         .filter(|artifact| {
-            artifact.path.trim().is_empty() || !Path::new(artifact.path.trim()).exists()
+            artifact.path.trim().is_empty() || !artifact_exists(artifact.path.trim())
         })
         .map(|artifact| {
             if artifact.path.trim().is_empty() {

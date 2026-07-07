@@ -87,10 +87,6 @@ impl WorkflowExecutor {
         origin: WorkflowBundleOrigin,
         harness_source: Option<&str>,
     ) -> WorkflowResult<WorkflowRun> {
-        crate::required_artifact_contract::ensure_final_required_artifacts(&mut spec);
-        if crate::required_artifact_heal::self_heal_requested(&spec) {
-            crate::required_artifact_heal::ensure_required_artifact_self_heal(&mut spec);
-        }
         spec.validate()?;
         self.policy.validate_spec(&spec)?;
         let mut run = self.store.create_run(spec)?;

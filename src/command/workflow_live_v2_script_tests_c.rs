@@ -190,6 +190,7 @@ async fn dry_run_trace_stays_within_declared_scaffold_stage_families() {
                 source_path: "/tmp/tasks/TASK-TDL-001.md".to_string(),
                 dependency_ids: Vec::new(),
                 title: None,
+                artifact_requirements: Vec::new(),
             },
         ],
     };

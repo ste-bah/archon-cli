@@ -38,10 +38,6 @@ mod remediation_inventory;
 mod remediation_items;
 mod remediation_noop;
 mod request;
-mod required_artifact_contract;
-mod required_artifact_heal;
-mod required_artifact_repair_guidance;
-mod required_artifacts;
 pub mod run;
 pub mod runner;
 mod source_context;
@@ -105,8 +101,8 @@ pub use template::{
 pub use v2::{
     BranchFailureKind, PROJECT_ARTIFACT_POLICY_VERSION, WorkflowV2AgentAdapter,
     WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2AgentRequest, WorkflowV2Artifact,
-    WorkflowV2BranchOutcome, WorkflowV2CallExecution, WorkflowV2CallRecord,
-    WorkflowV2CancellationToken, WorkflowV2Checkpoint, WorkflowV2CommandKind,
+    WorkflowV2ArtifactRequirement, WorkflowV2BranchOutcome, WorkflowV2CallExecution,
+    WorkflowV2CallRecord, WorkflowV2CancellationToken, WorkflowV2Checkpoint, WorkflowV2CommandKind,
     WorkflowV2CommandRecord, WorkflowV2CommandStatus, WorkflowV2ConvergenceController,
     WorkflowV2ConvergenceDecision, WorkflowV2ConvergenceError, WorkflowV2ConvergenceStatus,
     WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2FanoutItem, WorkflowV2FanoutReport,

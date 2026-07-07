@@ -22,12 +22,6 @@ impl WorkflowExecutor {
             return self.store.save_state_preserving_control(run);
         }
         let result = match stage.kind {
-            StageKind::Tool
-                if stage.tool.as_deref()
-                    == Some(crate::required_artifacts::REQUIRED_ARTIFACT_INVENTORY_TOOL) =>
-            {
-                self.run_required_artifact_inventory(run, stage)
-            }
             StageKind::Agent | StageKind::Tool | StageKind::Checkpoint => {
                 persistence::write_attached_stage_artifact(
                     &self.store,
@@ -183,23 +177,6 @@ impl WorkflowExecutor {
         )
     }
 
-    pub(crate) fn run_required_artifact_inventory(
-        &self,
-        run: &mut WorkflowRun,
-        stage: &StageSpec,
-    ) -> WorkflowResult<()> {
-        persistence::write_attached_stage_artifact(
-            &self.store,
-            run,
-            stage,
-            &stage.id,
-            "json",
-            crate::required_artifacts::inventory_body(&self.store, run, stage),
-            true,
-        )
-        .map(|_| ())
-    }
-
     pub(super) fn run_quality_gate(
         &self,
         run: &mut WorkflowRun,
@@ -216,30 +193,6 @@ impl WorkflowExecutor {
             )?;
             return Err(WorkflowError::StageFailed(reason));
         }
-        let artifact_report =
-            crate::required_artifacts::check_required_artifacts(&self.store, run, stage);
-        if let Some(report) = artifact_report.as_ref()
-            && let Some(reason) = report.failure_reason()
-        {
-            let artifact = persistence::write_attached_stage_artifact(
-                &self.store,
-                run,
-                stage,
-                &stage.id,
-                "json",
-                serde_json::to_string(report)?,
-                false,
-            )?;
-            persistence::record_quality(
-                &self.store,
-                &run.id,
-                stage,
-                "failed",
-                Some(&reason),
-                Some(&artifact),
-            )?;
-            return Err(WorkflowError::StageFailed(reason));
-        }
         let artifact = persistence::write_attached_stage_artifact(
             &self.store,
             run,
@@ -249,7 +202,6 @@ impl WorkflowExecutor {
             json!({
                 "status": "accepted",
                 "checked_dependencies": stage.depends_on,
-                "required_artifacts": artifact_report,
             })
             .to_string(),
             true,

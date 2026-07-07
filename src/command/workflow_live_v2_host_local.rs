@@ -64,9 +64,24 @@ fn save_artifact_result(
 
 fn require_artifact_result(
     execution: &WorkflowV2CallExecution,
-    _v2_store: &WorkflowV2ResultStore,
+    v2_store: &WorkflowV2ResultStore,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
-    let paths = artifact_paths_from_input(&execution.input);
+    // Declared artifact paths are project-artifact-root relative; resolve them
+    // against the project root that owns this run's `.archon` directory, never
+    // against the process working directory.
+    let project_root = v2_store
+        .root()
+        .ancestors()
+        .find(|ancestor| ancestor.file_name().is_some_and(|name| name == ".archon"))
+        .and_then(std::path::Path::parent)
+        .map(std::path::Path::to_path_buf);
+    let paths: Vec<std::path::PathBuf> = artifact_paths_from_input(&execution.input)
+        .into_iter()
+        .map(|path| match (&project_root, path.is_relative()) {
+            (Some(root), true) => root.join(path),
+            _ => path,
+        })
+        .collect();
     if paths.is_empty() {
         let mut result = WorkflowV2Result {
             status: WorkflowV2Status::NeedsReview,

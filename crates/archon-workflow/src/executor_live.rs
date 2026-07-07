@@ -158,16 +158,6 @@ impl WorkflowExecutor {
             return Ok(output);
         }
         match stage.kind {
-            StageKind::Tool
-                if stage.tool.as_deref()
-                    == Some(crate::required_artifacts::REQUIRED_ARTIFACT_INVENTORY_TOOL) =>
-            {
-                self.run_required_artifact_inventory(run, stage)?;
-                Ok(StageRunOutput::markdown(format!(
-                    "Required artifact inventory `{}` complete.",
-                    stage.id
-                )))
-            }
             StageKind::Agent | StageKind::Tool if direct_verify::should_run(stage) => {
                 self.run_direct_verify_command(run, stage)
             }

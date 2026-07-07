@@ -192,6 +192,7 @@ impl LifecycleDriver {
         items: serde_json::Value,
         task: &str,
     ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+        let items = self.with_declared_task_artifacts(items);
         self.call(
             "fanout",
             id,
@@ -206,6 +207,40 @@ impl LifecycleDriver {
             }),
         )
         .await
+    }
+
+    /// Declared artifact contract: every write-capable item carries the
+    /// artifact requirements its task pack declares, so the implementing
+    /// agent is always instructed to produce them (the wf-afae6bee fix).
+    fn with_declared_task_artifacts(&self, items: serde_json::Value) -> serde_json::Value {
+        let contract = self.contract();
+        let enriched: Vec<serde_json::Value> = support::array(Some(&items))
+            .into_iter()
+            .map(|item| {
+                let ids = contract.canonical_ids_for(&item);
+                let mut requirements = support::array(item.get("artifact_requirements"));
+                for task in &self.universe.tasks {
+                    if !ids.contains(&task.canonical_task_id) {
+                        continue;
+                    }
+                    for declared in &task.artifact_requirements {
+                        let already = requirements
+                            .iter()
+                            .any(|entry| entry.as_str() == Some(declared.as_str()));
+                        if !already {
+                            requirements.push(serde_json::Value::String(declared.clone()));
+                        }
+                    }
+                }
+                let mut object = item.as_object().cloned().unwrap_or_default();
+                object.insert(
+                    "artifact_requirements".to_string(),
+                    serde_json::Value::Array(requirements),
+                );
+                serde_json::Value::Object(object)
+            })
+            .collect();
+        serde_json::Value::Array(enriched)
     }
 
     /// Terminal stop. The host raises the terminal marker for every

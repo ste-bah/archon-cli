@@ -56,16 +56,6 @@ pub fn normalize_generated_spec(spec: &mut WorkflowSpec) {
     generated_remediation_contract::ensure_remediation_contracts(spec);
     promote_quality_gate_entries(spec);
     ensure_generated_remediation_loop(spec);
-    crate::required_artifact_contract::ensure_final_required_artifacts(spec);
-    if generated_expansion_requested(
-        spec,
-        &[
-            "enable_required_artifact_self_heal",
-            "self_heal_required_artifacts",
-        ],
-    ) {
-        crate::required_artifact_heal::ensure_required_artifact_self_heal(spec);
-    }
 }
 
 fn generated_expansion_requested(spec: &WorkflowSpec, keys: &[&str]) -> bool {

@@ -13,9 +13,12 @@
 //! the implementing agent's instructions and the run finishes with a final
 //! report instead of a run-level verification block.
 //!
-//! Expected to FAIL on the pre-rescue architecture (inferred artifact
-//! contracts, terminal latch) and PASS after declared artifact contracts
-//! (Phase 3) and error-as-value (Phase 4).
+//! Failed on the pre-rescue architecture (inferred artifact contracts,
+//! terminal latch); GREEN since rescue Phase 3 (declared artifact contracts:
+//! task-pack declarations reach the implementing agent, write capability is
+//! declared not role-sniffed, artifact paths resolve against the project
+//! root, and the completion ledger receives write-fanout evidence).
+//! This is the rescue's acceptance test — it must stay green.
 
 use std::path::PathBuf;
 use std::process::Command as CanaryGitCommand;
@@ -306,6 +309,36 @@ impl CanaryAgentClient {
             .to_string();
         }
 
+        // Artifact inventory reducer: list the one concrete evidence artifact.
+        if prompt.contains("List every required generated dataset") {
+            return serde_json::json!({
+                "status": "accepted",
+                "summary": "Artifact inventory for TASK-TDL-001.",
+                "evidence": [
+                    { "kind": "inspection", "summary": "collected artifact inventory" }
+                ],
+                "artifacts": [{
+                    "id": "gap-audit-evidence",
+                    "path": CANARY_ARTIFACT_REL,
+                    "description": "gap audit evidence artifact"
+                }],
+                "commands_run": [],
+                "files_read": [],
+                "files_changed": [],
+                "task_coverage": [],
+                "residual_gaps": [],
+                "data": {
+                    "artifact_paths": [CANARY_ARTIFACT_REL],
+                    "items": [{
+                        "artifact_path": CANARY_ARTIFACT_REL,
+                        "canonical_task_ids": [CANARY_TASK_ID],
+                        "kind": "evidence"
+                    }]
+                }
+            })
+            .to_string();
+        }
+
         // Read-only discovery and any other reducer: generic accepted evidence.
         Self::accepted(
             "Read-only discovery summary.",
@@ -358,39 +391,6 @@ fn collect_text(value: &serde_json::Value, into: &mut String) {
             }
         }
         _ => {}
-    }
-}
-
-/// Print every persisted V2 call record (id, status, summary) so a canary
-/// failure explains itself under `--nocapture`.
-fn dump_v2_results(project_root: &std::path::Path) {
-    let workflows = project_root.join(".archon/workflows");
-    let Ok(runs) = std::fs::read_dir(&workflows) else {
-        eprintln!("canary: no workflow runs under {}", workflows.display());
-        return;
-    };
-    for run in runs.filter_map(|entry| entry.ok()) {
-        let results = run.path().join("v2/results");
-        let Ok(records) = std::fs::read_dir(&results) else {
-            continue;
-        };
-        for record in records.filter_map(|entry| entry.ok()) {
-            let Ok(body) = std::fs::read_to_string(record.path()) else {
-                continue;
-            };
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) else {
-                continue;
-            };
-            eprintln!(
-                "canary result: call={} status={} summary={}",
-                value["call"]["id"], value["status"], value["result"]["summary"]
-            );
-            if value["call"]["id"] == "implementation-wave-1" {
-                let detail = value["result"].to_string();
-                let head: String = detail.chars().take(4000).collect();
-                eprintln!("canary implementation-wave-1 result detail: {head}");
-            }
-        }
     }
 }
 
@@ -462,13 +462,6 @@ async fn canary_wf_afae6bee_regression() {
     .expect("decomposed PRD canary run completes with a final report");
 
     let prompts = client.prompts.lock().expect("prompt log").clone();
-    for prompt in &prompts {
-        if prompt.contains("Implement only the assigned dependency-ready item") {
-            eprintln!("canary implementation prompt head: {prompt}");
-            break;
-        }
-    }
-    dump_v2_results(project_root);
 
     assert!(
         client.artifact_exists(),

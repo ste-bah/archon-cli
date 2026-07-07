@@ -94,6 +94,7 @@ fn task_universe() -> WorkflowV2TaskUniverse {
                 source_path: "/tmp/tasks/TASK-TDL-001.md".to_string(),
                 dependency_ids: Vec::new(),
                 title: None,
+                artifact_requirements: Vec::new(),
             },
             WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-010".to_string(),
@@ -101,6 +102,7 @@ fn task_universe() -> WorkflowV2TaskUniverse {
                 source_path: "/tmp/tasks/TASK-TDL-010.md".to_string(),
                 dependency_ids: vec!["TASK-TDL-001".to_string()],
                 title: None,
+                artifact_requirements: Vec::new(),
             },
         ],
     }

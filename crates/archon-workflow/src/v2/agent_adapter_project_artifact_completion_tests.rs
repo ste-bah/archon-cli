@@ -4,7 +4,7 @@ use super::*;
 use crate::{WorkflowV2EvidenceKind, WorkflowV2HostMethod, WorkflowV2HostOptions};
 
 #[test]
-fn accepted_stub_uses_existing_required_project_artifact_evidence() {
+fn declared_artifact_present_is_recorded_verbatim_as_evidence() {
     let (request, artifact_path) = request_with_required_artifact("impl-artifact-complete");
     write_project_artifact_file(&request, &artifact_path);
     let output = serde_json::to_string(&WorkflowV2Result::accepted("artifact written"))
@@ -12,11 +12,10 @@ fn accepted_stub_uses_existing_required_project_artifact_evidence() {
 
     let parsed = WorkflowV2AgentAdapter::new()
         .parse_agent_output(&request, &output)
-        .expect("existing required artifact completes evidence envelope");
+        .expect("existing declared artifact completes evidence envelope");
 
     assert_eq!(parsed.status, WorkflowV2Status::Accepted);
     assert_eq!(parsed.artifacts[0].path, artifact_path);
-    assert_eq!(parsed.task_coverage[0].task_id, "TASK-X-001");
     assert!(parsed.evidence.iter().any(|evidence| {
         evidence.kind == WorkflowV2EvidenceKind::Artifact
             && evidence
@@ -26,19 +25,25 @@ fn accepted_stub_uses_existing_required_project_artifact_evidence() {
 }
 
 #[test]
-fn missing_required_project_artifact_keeps_stub_needs_review() {
+fn missing_declared_artifact_is_a_failed_result_value() {
     let (request, artifact_path) = request_with_required_artifact("impl-artifact-missing");
     let output = serde_json::to_string(&WorkflowV2Result::accepted("artifact written"))
         .expect("result json");
 
     let parsed = WorkflowV2AgentAdapter::new()
         .parse_agent_output(&request, &output)
-        .expect("missing required artifact is review data");
+        .expect("missing declared artifact is a failed result value, not an error");
 
-    assert_eq!(parsed.status, WorkflowV2Status::NeedsReview);
+    assert_eq!(parsed.status, WorkflowV2Status::Failed);
     assert!(parsed.artifacts.is_empty());
+    assert!(
+        parsed.data["missing_required_artifacts"]
+            .as_array()
+            .is_some_and(|missing| missing.iter().any(|path| path == &artifact_path))
+    );
     assert!(parsed.residual_gaps.iter().any(|gap| {
-        gap.description.contains("missing project artifact")
+        gap.description
+            .contains("declared artifact contract not satisfied")
             && gap.description.contains(&artifact_path)
     }));
 }

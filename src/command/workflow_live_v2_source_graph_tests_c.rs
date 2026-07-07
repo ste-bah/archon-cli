@@ -239,6 +239,7 @@ fn task_universe() -> WorkflowV2TaskUniverse {
                 source_path: "/tmp/tasks/TASK-TDL-001.md".to_string(),
                 dependency_ids: Vec::new(),
                 title: None,
+                artifact_requirements: Vec::new(),
             },
             super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-010".to_string(),
@@ -246,6 +247,7 @@ fn task_universe() -> WorkflowV2TaskUniverse {
                 source_path: "/tmp/tasks/TASK-TDL-010.md".to_string(),
                 dependency_ids: vec!["TASK-TDL-001".to_string()],
                 title: None,
+                artifact_requirements: Vec::new(),
             },
         ],
     }
@@ -262,6 +264,7 @@ fn tdl_task_universe() -> WorkflowV2TaskUniverse {
                 source_path: "/tmp/tasks/TASK-TDL-001.md".to_string(),
                 dependency_ids: Vec::new(),
                 title: None,
+                artifact_requirements: Vec::new(),
             },
             super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-010".to_string(),
@@ -269,6 +272,7 @@ fn tdl_task_universe() -> WorkflowV2TaskUniverse {
                 source_path: "/tmp/tasks/TASK-TDL-010.md".to_string(),
                 dependency_ids: vec!["TASK-TDL-001".to_string()],
                 title: None,
+                artifact_requirements: Vec::new(),
             },
             super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-020".to_string(),
@@ -276,6 +280,7 @@ fn tdl_task_universe() -> WorkflowV2TaskUniverse {
                 source_path: "/tmp/tasks/TASK-TDL-020.md".to_string(),
                 dependency_ids: vec!["TASK-TDL-010".to_string()],
                 title: None,
+                artifact_requirements: Vec::new(),
             },
             super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-050".to_string(),
@@ -283,6 +288,7 @@ fn tdl_task_universe() -> WorkflowV2TaskUniverse {
                 source_path: "/tmp/tasks/TASK-TDL-050.md".to_string(),
                 dependency_ids: vec!["TASK-TDL-020".to_string()],
                 title: None,
+                artifact_requirements: Vec::new(),
             },
             super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-070".to_string(),
@@ -290,6 +296,7 @@ fn tdl_task_universe() -> WorkflowV2TaskUniverse {
                 source_path: "/tmp/tasks/TASK-TDL-070.md".to_string(),
                 dependency_ids: vec!["TASK-TDL-020".to_string()],
                 title: None,
+                artifact_requirements: Vec::new(),
             },
         ],
     }

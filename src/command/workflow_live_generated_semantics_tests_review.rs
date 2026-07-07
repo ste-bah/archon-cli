@@ -51,5 +51,6 @@ fn task(id: &str, dependencies: &[&str]) -> WorkflowV2TaskUniverseTask {
         source_path: format!("/tmp/tasks/{id}.md"),
         dependency_ids: dependencies.iter().map(|id| (*id).to_string()).collect(),
         title: None,
+        artifact_requirements: Vec::new(),
     }
 }

@@ -3,20 +3,16 @@ use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
 
+use super::host_api::WorkflowV2ArtifactRequirement;
 use super::project_artifacts::WorkflowV2ProjectArtifactContext;
 
 pub(crate) fn project_artifact_prompt_section(
     input: &Value,
+    required_artifacts: &[WorkflowV2ArtifactRequirement],
+    write_capable: bool,
     context: &WorkflowV2ProjectArtifactContext,
 ) -> String {
-    let Some(root) = context
-        .project_root
-        .as_deref()
-        .filter(|root| !root.is_empty())
-    else {
-        return String::new();
-    };
-    let entries = resolved_project_artifact_entries(input, root);
+    let entries = declared_project_artifact_entries(input, required_artifacts, context);
     if entries.is_empty() {
         return String::new();
     }
@@ -25,14 +21,40 @@ pub(crate) fn project_artifact_prompt_section(
          Use these absolute paths for project artifacts. Do not resolve relative `.archon/...` \
          artifact paths against `repository_root`.\n",
     );
-    for (raw, absolute) in entries {
+    for (raw, absolute) in &entries {
         section.push_str(&format!("- {raw} => {absolute}\n"));
+    }
+    if write_capable {
+        section.push_str(
+            "These paths are this call's declared artifact contract: write every file listed \
+             above and include each path in your structured result's `artifacts` array. A \
+             declared artifact that does not exist on return fails this call.\n",
+        );
     }
     section
 }
 
-fn resolved_project_artifact_entries(input: &Value, root: &str) -> Vec<(String, String)> {
-    let mut raw_paths = Vec::new();
+/// The declared artifact contract for a call: the explicit
+/// `required_artifacts` declaration plus explicit artifact-requirement fields
+/// in the call input, resolved against the project artifact root. This same
+/// set drives both the agent prompt and the on-return validation, so a path
+/// is only ever validated if the agent was instructed to produce it.
+pub(crate) fn declared_project_artifact_entries(
+    input: &Value,
+    required_artifacts: &[WorkflowV2ArtifactRequirement],
+    context: &WorkflowV2ProjectArtifactContext,
+) -> Vec<(String, String)> {
+    let Some(root) = context
+        .project_root
+        .as_deref()
+        .filter(|root| !root.is_empty())
+    else {
+        return Vec::new();
+    };
+    let mut raw_paths: Vec<String> = required_artifacts
+        .iter()
+        .map(|requirement| requirement.path.clone())
+        .collect();
     collect_artifact_paths(input, false, &mut raw_paths);
     let mut seen = BTreeSet::new();
     raw_paths

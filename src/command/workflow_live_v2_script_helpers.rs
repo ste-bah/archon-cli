@@ -34,6 +34,9 @@ fn parse_script_options(
                 options.max_parallelism =
                     value.as_u64().and_then(|value| usize::try_from(value).ok());
             }
+            "requiredArtifacts" | "required_artifacts" => {
+                options.required_artifacts = artifact_requirements(value);
+            }
             "write" | "writeMode" | "write_mode" => {
                 if let Some(raw) = value.as_str() {
                     if raw.eq_ignore_ascii_case("none") {

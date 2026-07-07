@@ -152,76 +152,6 @@ async fn repair_response_uses_repository_aware_ownership_validation() {
 }
 
 #[test]
-fn malformed_output_can_use_typed_project_artifact_branch_result() {
-    let (request, artifact_path) = project_artifact_request("implementation-wave-1-impl-a");
-    write_branch_result_artifact(&request, &artifact_path);
-
-    let parsed = WorkflowV2AgentAdapter::new()
-        .parse_agent_output(&request, "not json")
-        .expect("typed artifact result rescues malformed envelope");
-
-    assert_eq!(parsed.status, WorkflowV2Status::Accepted);
-    assert_eq!(parsed.data["canonical_task_ids"][0], "TASK-X-001");
-    assert!(parsed.files_changed.is_empty());
-    assert!(
-        parsed
-            .artifacts
-            .iter()
-            .any(|artifact| artifact.path.ends_with(&artifact_path))
-    );
-}
-
-#[tokio::test]
-async fn transport_failure_can_use_typed_project_artifact_branch_result() {
-    let (request, artifact_path) = project_artifact_request("implementation-wave-2-impl-a");
-    write_branch_result_artifact(&request, &artifact_path);
-    let client = TransportClient;
-
-    let parsed = WorkflowV2AgentAdapter::new()
-        .run_with_repair(&client, &request)
-        .await
-        .expect("typed artifact result rescues transport output failure");
-
-    assert_eq!(parsed.status, WorkflowV2Status::Accepted);
-    assert_eq!(parsed.task_coverage[0].task_id, "TASK-X-001");
-}
-
-#[test]
-fn malformed_output_can_use_schema_less_project_artifact_evidence() {
-    let (request, artifact_path) = project_artifact_request("implementation-wave-3-impl-a");
-    write_schema_less_evidence_artifact(&request, &artifact_path, true);
-
-    let parsed = WorkflowV2AgentAdapter::new()
-        .parse_agent_output(&request, "not json")
-        .expect("schema-less artifact evidence rescues malformed envelope");
-
-    assert_eq!(parsed.status, WorkflowV2Status::Accepted);
-    assert_eq!(parsed.data["canonical_task_ids"][0], "TASK-X-001");
-    assert!(parsed.files_changed.is_empty());
-    assert!(
-        parsed
-            .artifacts
-            .iter()
-            .any(|artifact| artifact.path.ends_with(&artifact_path))
-    );
-}
-
-#[test]
-fn failed_untyped_command_artifact_is_review_not_acceptance() {
-    let (request, artifact_path) = project_artifact_request("implementation-wave-4-impl-a");
-    write_schema_less_evidence_artifact(&request, &artifact_path, false);
-
-    let parsed = WorkflowV2AgentAdapter::new()
-        .parse_agent_output(&request, "not json")
-        .expect("schema-less artifact evidence remains usable review data");
-
-    assert_eq!(parsed.status, WorkflowV2Status::NeedsReview);
-    assert!(parsed.residual_gaps.iter().any(|gap| {
-        gap.id.contains("failed_command") && gap.description.contains("lint check")
-    }));
-}
-
-#[test]
 fn project_artifact_context_has_no_workflow_specific_default_root() {
     let temp = tempfile::tempdir().expect("tempdir");
     let v2_root = temp.path().join("project/.archon/workflows/wf-generic/v2");
@@ -246,12 +176,20 @@ fn artifact_declaring_noop_requires_existing_project_artifact_evidence() {
 
     let parsed = WorkflowV2AgentAdapter::new()
         .parse_agent_output(&request, &output)
-        .expect("missing required artifact is JS-visible review data");
+        .expect("missing declared artifact is a failed result value, not an error");
 
-    assert_eq!(parsed.status, WorkflowV2Status::NeedsReview);
+    assert_eq!(parsed.status, WorkflowV2Status::Failed);
     assert!(parsed.artifacts.is_empty());
+    assert!(
+        parsed.data["missing_required_artifacts"]
+            .as_array()
+            .is_some_and(|missing| missing
+                .iter()
+                .any(|path| path == ".archon/artifacts/required.json"))
+    );
     assert!(parsed.residual_gaps.iter().any(|gap| {
-        gap.description.contains("missing project artifact")
+        gap.description
+            .contains("declared artifact contract not satisfied")
             && gap.description.contains(".archon/artifacts/required.json")
     }));
 }

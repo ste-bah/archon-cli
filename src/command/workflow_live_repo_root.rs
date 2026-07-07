@@ -253,6 +253,7 @@ mod tests {
                 source_path: tasks.join("TASK-ABC-001.md").display().to_string(),
                 dependency_ids: Vec::new(),
                 title: None,
+                artifact_requirements: Vec::new(),
             }],
         }
     }

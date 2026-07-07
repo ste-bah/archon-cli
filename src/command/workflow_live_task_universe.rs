@@ -32,6 +32,10 @@ pub(super) struct WorkflowV2TaskUniverseTask {
     pub(super) dependency_ids: Vec<String>,
     #[serde(default)]
     pub(super) title: Option<String>,
+    /// Explicit artifact declarations from the task file (paths relative to
+    /// the project artifact root). Part of the declared artifact contract.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) artifact_requirements: Vec<String>,
 }
 
 pub(super) fn extract_task_universe_for_generated_run(
@@ -251,7 +255,40 @@ fn parse_task_file(path: &Path, raw: &str) -> WorkflowResult<WorkflowV2TaskUnive
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string),
+        artifact_requirements: declared_task_artifact_requirements(raw),
     })
+}
+
+/// Explicit artifact declarations in a TASK-*.md file: list items under an
+/// "Artifact Requirements" heading, plus `artifact_requirements:` field lists.
+/// These declarations flow into every implementation/remediation item for the
+/// task, so the agent that owns the task is always instructed to produce them.
+fn declared_task_artifact_requirements(raw: &str) -> Vec<String> {
+    let mut requirements = first_list_field(raw, "artifact_requirements");
+    let mut in_section = false;
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if let Some(heading) = trimmed.strip_prefix('#') {
+            in_section = heading
+                .trim_start_matches('#')
+                .trim()
+                .eq_ignore_ascii_case("artifact requirements");
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        if let Some(item) = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "))
+        {
+            let path = item.trim().trim_matches('`').trim();
+            if !path.is_empty() {
+                requirements.push(path.to_string());
+            }
+        }
+    }
+    sorted_unique(requirements)
 }
 
 fn first_field(raw: &str, field: &str) -> Option<String> {

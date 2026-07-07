@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::project_artifact_completion::complete_project_artifact_requirements;
+use super::project_artifact_completion::enforce_declared_artifact_requirements;
 use super::{
     WorkflowV2CommandKind, WorkflowV2CommandStatus, WorkflowV2EvidenceKind, WorkflowV2HostCall,
     WorkflowV2ProjectArtifactContext, WorkflowV2Result, WorkflowV2Status,
     WorkflowV2TaskCoverageStatus, WorkflowV2WriteItem, WorkflowV2WriteMode,
     has_project_artifact_evidence, has_project_artifact_requirement,
-    load_project_artifact_branch_result, normalize_project_artifact_files,
-    normalize_target_for_repository, normalize_targets_for_repository, validate_changed_files,
+    normalize_project_artifact_files, normalize_target_for_repository,
+    normalize_targets_for_repository, validate_changed_files,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -32,10 +32,12 @@ pub struct WorkflowV2AgentRequest {
 }
 
 impl WorkflowV2AgentRequest {
+    /// Write capability is DECLARED via the call's write mode, never inferred
+    /// from role names. Read-only calls that borrow a coder-tier model (e.g.
+    /// focused verification) must not be held to implementation contracts
+    /// they were instructed not to satisfy.
     pub fn is_write_capable(&self) -> bool {
         self.call.write_mode.is_some()
-            || self.role.eq_ignore_ascii_case("coder")
-            || self.role.eq_ignore_ascii_case("implementation")
     }
 }
 
@@ -69,6 +71,8 @@ impl WorkflowV2AgentAdapter {
         let project_artifact_paths =
             super::project_artifact_prompt::project_artifact_prompt_section(
                 &request.input,
+                &request.call.options.required_artifacts,
+                request.is_write_capable(),
                 &request.project_artifacts,
             );
 
@@ -137,22 +141,13 @@ impl WorkflowV2AgentAdapter {
         output: &str,
     ) -> Result<WorkflowV2Result, WorkflowV2AgentError> {
         reject_forbidden_text(output)?;
-        let mut result: WorkflowV2Result = match serde_json::from_str(output) {
-            Ok(result) => result,
-            Err(err) => {
-                return self
-                    .project_artifact_branch_result(request)?
-                    .ok_or_else(|| {
-                        WorkflowV2AgentError::MalformedOutput(format!(
-                            "agent output must be one JSON WorkflowV2Result object: {err}"
-                        ))
-                    });
-            }
-        };
-        match self.validate_agent_result(request, &mut result) {
-            Ok(()) => Ok(result),
-            Err(err) => self.project_artifact_branch_result(request)?.ok_or(err),
-        }
+        let mut result: WorkflowV2Result = serde_json::from_str(output).map_err(|err| {
+            WorkflowV2AgentError::MalformedOutput(format!(
+                "agent output must be one JSON WorkflowV2Result object: {err}"
+            ))
+        })?;
+        self.validate_agent_result(request, &mut result)?;
+        Ok(result)
     }
 
     pub async fn run_with_repair<C>(
@@ -164,27 +159,17 @@ impl WorkflowV2AgentAdapter {
         C: WorkflowV2AgentClient + Sync,
     {
         let prompt = self.build_prompt(request);
-        let first = match client.run_agent_request(request, prompt).await {
-            Ok(first) => first,
-            Err(err) => return self.project_artifact_branch_result(request)?.ok_or(err),
-        };
+        let first = client.run_agent_request(request, prompt).await?;
         match self.parse_agent_output(request, &first) {
             Ok(result) => Ok(result),
             Err(first_error) => {
                 let repair_prompt = self.build_repair_prompt(request, &first, &first_error);
-                let repaired = match client.run_agent_request(request, repair_prompt).await {
-                    Ok(repaired) => repaired,
-                    Err(err) => return self.project_artifact_branch_result(request)?.ok_or(err),
-                };
-                match self.parse_agent_output(request, &repaired) {
-                    Ok(result) => Ok(result),
-                    Err(repair_error) => self.project_artifact_branch_result(request)?.ok_or(
-                        WorkflowV2AgentError::RepairExhausted {
-                            first_error: Box::new(first_error),
-                            repair_error: Box::new(repair_error),
-                        },
-                    ),
-                }
+                let repaired = client.run_agent_request(request, repair_prompt).await?;
+                self.parse_agent_output(request, &repaired)
+                    .map_err(|repair_error| WorkflowV2AgentError::RepairExhausted {
+                        first_error: Box::new(first_error),
+                        repair_error: Box::new(repair_error),
+                    })
             }
         }
     }
@@ -196,41 +181,18 @@ impl WorkflowV2AgentAdapter {
     ) -> Result<(), WorkflowV2AgentError> {
         normalize_read_only_test_inspection(request, result);
         if request.is_write_capable() {
-            complete_project_artifact_requirements(
+            enforce_declared_artifact_requirements(
                 &request.call.id,
                 &request.input,
+                &request.call.options.required_artifacts,
                 result,
                 &request.project_artifacts,
-            )
-            .map_err(|err| {
-                WorkflowV2AgentError::ImplementationChangedFilesOutsideOwnership(err.to_string())
-            })?;
+            );
         }
         result.validate().map_err(|err| {
             WorkflowV2AgentError::InvalidResult(format!("agent result failed validation: {err}"))
         })?;
         validate_request_specific_result(request, result)
-    }
-
-    fn project_artifact_branch_result(
-        &self,
-        request: &WorkflowV2AgentRequest,
-    ) -> Result<Option<WorkflowV2Result>, WorkflowV2AgentError> {
-        if !request.is_write_capable() || request.project_artifacts.is_empty() {
-            return Ok(None);
-        }
-        let Some(mut result) =
-            load_project_artifact_branch_result(&request.call.id, &request.project_artifacts)
-                .map_err(|err| {
-                    WorkflowV2AgentError::ImplementationChangedFilesOutsideOwnership(
-                        err.to_string(),
-                    )
-                })?
-        else {
-            return Ok(None);
-        };
-        self.validate_agent_result(request, &mut result)?;
-        Ok(Some(result))
     }
 }
 

@@ -6,7 +6,7 @@ fn result_from_write_fanout(
     fallback_reason: Option<String>,
 ) -> WorkflowV2Result {
     annotate_write_ownership_expansions(&mut branch_results, plan);
-    let outcome_views = sanitized_write_fanout_outcomes(&branch_results);
+    let outcome_views = sanitized_write_fanout_outcomes(call, &branch_results);
     let invalid_outcome_count = outcome_views
         .iter()
         .filter(|outcome| {
@@ -126,14 +126,20 @@ fn result_from_write_fanout(
     result
 }
 
-fn sanitized_write_fanout_outcomes(branch_results: &[WorkflowV2Result]) -> Vec<serde_json::Value> {
+fn sanitized_write_fanout_outcomes(
+    call: &WorkflowV2HostCall,
+    branch_results: &[WorkflowV2Result],
+) -> Vec<serde_json::Value> {
     branch_results
         .iter()
-        .map(sanitized_write_fanout_outcome)
+        .map(|result| sanitized_write_fanout_outcome(call, result))
         .collect()
 }
 
-fn sanitized_write_fanout_outcome(result: &WorkflowV2Result) -> serde_json::Value {
+fn sanitized_write_fanout_outcome(
+    call: &WorkflowV2HostCall,
+    result: &WorkflowV2Result,
+) -> serde_json::Value {
     let item_id = item_id_from_branch_result(result);
     let canonical_task_ids = canonical_task_ids_from_branch_result(result);
     let evidence = concrete_evidence_from_branch_result(result);
@@ -158,6 +164,19 @@ fn sanitized_write_fanout_outcome(result: &WorkflowV2Result) -> serde_json::Valu
         status = WorkflowV2Status::NeedsReview;
         failure_kind = Some(BranchFailureKind::Contract);
     }
+    // Durable completion evidence must survive into the persisted outcome
+    // view; the completion ledger and result reuse read it from here.
+    let mut ledger_outcome = WorkflowV2BranchOutcome {
+        item_id: item_id.clone().unwrap_or_default(),
+        role: String::new(),
+        status,
+        result: Some(result.clone()),
+        error: None,
+        failure_kind: failure_kind.clone(),
+        item_input_hash: None,
+        completion_evidence: Vec::new(),
+    };
+    attach_completion_evidence_for_call(call, &mut ledger_outcome);
     serde_json::json!({
         "item_id": item_id.clone(),
         "id": item_id,
@@ -168,6 +187,7 @@ fn sanitized_write_fanout_outcome(result: &WorkflowV2Result) -> serde_json::Valu
         "contract_valid": contract_errors.is_empty(),
         "contract_errors": contract_errors,
         "summary": result.summary,
+        "completion_evidence": ledger_outcome.completion_evidence,
     })
 }
 

@@ -30,8 +30,31 @@ pub struct WorkflowV2HostOptions {
     pub target_files_from_item: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_parallelism: Option<usize>,
+    /// Declared artifact contract for this call: paths relative to the
+    /// project artifact root that the agent must produce. Declared once here,
+    /// injected into the agent's prompt/output schema, and validated verbatim
+    /// on return — never inferred.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_artifacts: Vec<WorkflowV2ArtifactRequirement>,
     #[serde(default)]
     pub extra: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowV2ArtifactRequirement {
+    /// Path relative to `projectArtifactRoot`.
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
+impl WorkflowV2ArtifactRequirement {
+    pub fn new(path: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            kind: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
