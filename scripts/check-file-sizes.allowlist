@@ -272,3 +272,7 @@ crates/archon-sdk/src/web/mod.rs
 crates/archon-tools/tests/tool_tests.rs
 src/command/behaviour.rs
 src/command/world_model/ingest_files.rs
+
+# --- pre-existing debt captured during workflow runtime rescue phase 0 (2026-07-07) ---
+crates/archon-trading/src/data_store/data_store_tests.rs
+web/src/views/WorkflowPage.tsx
