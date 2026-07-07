@@ -18,7 +18,6 @@ pub(super) enum GeneratedContractIssueKind {
 }
 
 impl GeneratedContractIssueKind {
-    #[allow(dead_code)]
     pub(super) fn as_str(&self) -> &'static str {
         match self {
             Self::InventoryShapeRepair => "inventory_shape_repair",
@@ -45,11 +44,9 @@ pub(super) struct GeneratedContractIssue {
 #[derive(Debug, Clone)]
 pub(super) struct NormalizedGeneratedItem {
     pub(super) value: serde_json::Value,
-    #[allow(dead_code)]
     pub(super) issues: Vec<GeneratedContractIssue>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(super) struct NormalizedGeneratedInventory {
     pub(super) items: Vec<serde_json::Value>,
@@ -112,7 +109,6 @@ impl ContractTaskUniverse {
     }
 }
 
-#[allow(dead_code)]
 pub(super) fn normalize_generated_inventory_value(
     value: &serde_json::Value,
     task_universe: Option<&WorkflowV2TaskUniverse>,
@@ -120,7 +116,6 @@ pub(super) fn normalize_generated_inventory_value(
     normalize_generated_inventory_value_with_repo(value, task_universe, None)
 }
 
-#[allow(dead_code)]
 pub(super) fn normalize_generated_inventory_value_with_repo(
     value: &serde_json::Value,
     task_universe: Option<&WorkflowV2TaskUniverse>,
@@ -470,7 +465,8 @@ pub(super) fn generated_prd_contract_js() -> &'static str {
     GENERATED_PRD_CONTRACT_JS
 }
 
-/// Lifecycle shim: single-target validation (JS `generatedContractTargetFileIssue`).
+/// Lifecycle shims: JS `generatedContractTargetFileIssue` and the item-less
+/// fallback of JS `generatedContractInventorySourceItems`.
 pub(super) fn lifecycle_target_file_issue(
     target: &str,
     target_repository_root: Option<&str>,
@@ -479,8 +475,6 @@ pub(super) fn lifecycle_target_file_issue(
     target_file_issue(target, &root)
 }
 
-/// Lifecycle shim: raw inventory item collection for item-less result shapes
-/// (JS `generatedContractInventorySourceItems` fallback path).
 pub(super) fn lifecycle_inventory_source_items(
     value: &serde_json::Value,
 ) -> Vec<serde_json::Value> {

@@ -277,6 +277,9 @@ include!("workflow_live_v2_script_host.rs");
 
 include!("workflow_live_v2_script_helpers.rs");
 
+#[path = "workflow_live_v2_lifecycle_prompts.rs"]
+mod workflow_live_v2_lifecycle_prompts;
+
 include!("workflow_live_v2_script_dry_run.rs");
 
 include!("workflow_live_v2_lifecycle.rs");

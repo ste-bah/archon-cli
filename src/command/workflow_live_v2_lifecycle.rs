@@ -7,7 +7,7 @@
 use super::super::workflow_live_generated_lifecycle_remediation as remediation;
 use super::super::workflow_live_generated_lifecycle_support as support;
 use super::super::workflow_live_generated_lifecycle_support::LifecycleContract;
-use super::super::workflow_live_v2_lifecycle_prompts as prompts;
+use self::workflow_live_v2_lifecycle_prompts as prompts;
 
 impl WorkflowV2ScriptRunner {
     /// Run the decomposed-PRD lifecycle natively. `harness_source` is the

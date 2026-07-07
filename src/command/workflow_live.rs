@@ -73,8 +73,6 @@ mod workflow_live_v2_host;
 #[cfg(test)]
 #[path = "workflow_live_v2_host_tests.rs"]
 mod workflow_live_v2_host_tests;
-#[path = "workflow_live_v2_lifecycle_prompts.rs"]
-mod workflow_live_v2_lifecycle_prompts;
 #[path = "workflow_live_verification_contract.rs"]
 mod workflow_live_verification_contract;
 #[cfg(test)]
@@ -198,30 +196,28 @@ async fn run_live_action(
         workspace_boundary_supported,
     };
     let mut approval_notes = Vec::new();
+    let capped_live_plan = |task: &str| {
+        let llm = llm.clone();
+        let tui_tx = tui_tx.clone();
+        let task = task.to_string();
+        let store = &store;
+        let runner = &runner;
+        let policy = &policy;
+        let generated_config = &generated_config;
+        async move {
+            let mut plan = plan_live(store, &task, llm, tui_tx, generated_config).await?;
+            cap_live_plan_parallelism(&mut plan, runner, policy);
+            Ok::<_, anyhow::Error>(plan)
+        }
+    };
     let report = match action {
         CommandAction::Plan { task } => {
-            let mut plan = plan_live(
-                &store,
-                &task,
-                llm.clone(),
-                tui_tx.clone(),
-                &generated_config,
-            )
-            .await?;
-            cap_live_plan_parallelism(&mut plan, &runner, &policy);
+            let plan = capped_live_plan(&task).await?;
             return Ok(render_live_plan(&plan)?);
         }
         CommandAction::PlanSpec { path } => return Ok(load_spec_file(cwd, &path)?.to_yaml()?),
         CommandAction::Run { task } => {
-            let mut plan = plan_live(
-                &store,
-                &task,
-                llm.clone(),
-                tui_tx.clone(),
-                &generated_config,
-            )
-            .await?;
-            cap_live_plan_parallelism(&mut plan, &runner, &policy);
+            let plan = capped_live_plan(&task).await?;
             return workflow_live_v2::run_generated_v2_workflow(
                 cwd,
                 &store,
@@ -253,8 +249,7 @@ async fn run_live_action(
             let template = load_template(cwd, &name)?;
             let run = match template.harness_source {
                 Some(harness) => {
-                    // QuickJS dry-run is the only grammar: validation failure
-                    // is a hard error, never a different execution semantics.
+                    // QuickJS dry-run is the single grammar; failure is a hard error.
                     let calls = workflow_live_v2::dry_run_workflow_plan(&harness, args.as_ref())
                         .await
                         .map_err(|err| {
