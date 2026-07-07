@@ -3,7 +3,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{WorkflowError, WorkflowResult};
-use crate::generated::{normalize_generated_spec, sanitize_generated_value};
 use crate::spec_deser::{
     deserialize_learning_hooks, deserialize_permissions, deserialize_provider_tiers,
     deserialize_quality_gates,
@@ -130,18 +129,6 @@ fn default_max_agents() -> u32 {
 impl WorkflowSpec {
     pub fn from_yaml(input: &str) -> WorkflowResult<Self> {
         let spec: Self = serde_yaml_ng::from_str(input)?;
-        spec.validate()?;
-        Ok(spec)
-    }
-
-    pub fn from_generated_yaml(input: &str, fallback_task: &str) -> WorkflowResult<Self> {
-        let mut value: serde_json::Value = serde_yaml_ng::from_str(input)?;
-        sanitize_generated_value(&mut value);
-        let mut spec: Self = serde_json::from_value(value)?;
-        if spec.task.trim().is_empty() {
-            spec.task = fallback_task.to_string();
-        }
-        normalize_generated_spec(&mut spec);
         spec.validate()?;
         Ok(spec)
     }

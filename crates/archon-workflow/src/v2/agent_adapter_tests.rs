@@ -210,25 +210,6 @@ fn artifact_declaring_noop_accepts_existing_project_artifact_evidence() {
     assert_eq!(parsed.artifacts[0].path, artifact_path);
 }
 
-struct TransportClient;
-
-#[async_trait::async_trait]
-impl WorkflowV2AgentClient for TransportClient {
-    async fn run_agent_request(
-        &self,
-        _request: &WorkflowV2AgentRequest,
-        _prompt: String,
-    ) -> Result<String, WorkflowV2AgentError> {
-        Err(WorkflowV2AgentError::Transport(
-            "agent output not usable".to_string(),
-        ))
-    }
-
-    async fn run_agent(&self, _prompt: String) -> Result<String, WorkflowV2AgentError> {
-        unreachable!("tests use run_agent_request")
-    }
-}
-
 fn project_artifact_request(call_id: &str) -> (WorkflowV2AgentRequest, String) {
     let temp = tempfile::tempdir().expect("tempdir").keep();
     let project = temp.join("project");

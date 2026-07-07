@@ -13,8 +13,8 @@ use archon_workflow::write_coordinator::{
     WriteBoundaryProbe, WriteCoordinatorConfig, resolve_write_coordinator_runtime,
 };
 use archon_workflow::{
-    StageKind, StageRunOutput, StageRunRequest, WorkflowExecutor, WorkflowPolicy, WorkflowSpec,
-    WorkflowStageRunner, WorkflowStore,
+    StageKind, StageRunOutput, StageRunRequest, WorkflowPolicy, WorkflowSpec, WorkflowStageRunner,
+    WorkflowStore,
 };
 
 pub type AgentAction = Arc<dyn Fn(&Path, &str, &[String]) -> String + Send + Sync>;
@@ -219,8 +219,9 @@ pub fn run_coordinated(
 ) -> Result<Harness, FanoutError> {
     let store = WorkflowStore::project(canonical);
     let policy = permissive_policy();
-    let executor = WorkflowExecutor::new(store.clone(), policy.clone());
-    let run = executor.start(spec_yaml(canonical, targets)).unwrap();
+    let spec = spec_yaml(canonical, targets);
+    spec.validate().unwrap();
+    let run = store.create_run(spec).unwrap();
     let run_root = store.run_dir(&run.id);
     let runtime = resolve_write_coordinator_runtime(canonical, cfg);
     let outcome = {

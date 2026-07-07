@@ -6,8 +6,6 @@ pub mod bundle;
 mod cargo_target_env;
 pub mod command;
 mod command_execution;
-// Legacy-only YAML/spec control-plane support. V2 generated workflows must not
-// import these modules; see tests/v2_boundary.rs for the enforced boundary.
 mod completion_proof;
 pub mod config;
 pub mod context;
@@ -15,14 +13,8 @@ mod context_output;
 pub mod control;
 pub mod error;
 pub mod events;
-mod exec_state;
-pub mod executor;
-mod executor_fanout;
 mod executor_output;
 pub mod fanout;
-// Legacy-only generated spec patchers. V2 harness validation/result contracts
-// replace these for generated workflow runs.
-mod generated;
 pub mod generated_workflow;
 mod item_filter;
 pub mod learning;
@@ -32,10 +24,7 @@ pub mod planner;
 pub mod policy;
 pub mod provider_tiers;
 pub mod reducers;
-// Legacy-only remediation and required-artifact artifact inference.
-mod remediation_inventory;
 mod remediation_items;
-mod remediation_noop;
 mod request;
 pub mod run;
 pub mod runner;
@@ -45,17 +34,14 @@ mod spec_deser;
 mod spec_inference;
 mod spec_policy;
 mod spec_work_units;
-mod spec_write_coordination;
 pub mod stage;
 pub mod store;
 pub mod template;
 pub mod tui_events;
 pub mod v2;
 pub mod web_api;
-// Legacy-only completion coverage gates. V2 uses typed task coverage directly.
 mod work_unit_coverage;
 mod work_unit_gate;
-mod work_unit_remediation;
 pub mod write_coordinator;
 
 pub use acceptance::{AcceptanceOutcome, TargetFingerprints};
@@ -71,7 +57,6 @@ pub use error::{WorkflowError, WorkflowResult};
 pub use events::{
     CompactProgress, WorkflowEvent, WorkflowEventKind, WorkflowEventLog, contains_forbidden_field,
 };
-pub use executor::{ExecutionReport, WorkflowExecutor};
 pub use generated_workflow::{
     GeneratedWorkflowKind, GeneratedWorkflowLearningContext, WorkflowGeneratedScaffold,
     WorkflowLearningEvent, WorkflowLearningEvidenceRef, workflow_scaffold_hash,
