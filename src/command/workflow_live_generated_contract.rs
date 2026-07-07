@@ -470,6 +470,23 @@ pub(super) fn generated_prd_contract_js() -> &'static str {
     GENERATED_PRD_CONTRACT_JS
 }
 
+/// Lifecycle shim: single-target validation (JS `generatedContractTargetFileIssue`).
+pub(super) fn lifecycle_target_file_issue(
+    target: &str,
+    target_repository_root: Option<&str>,
+) -> Option<&'static str> {
+    let root = target_repository_root.and_then(normalized_contract_path)?;
+    target_file_issue(target, &root)
+}
+
+/// Lifecycle shim: raw inventory item collection for item-less result shapes
+/// (JS `generatedContractInventorySourceItems` fallback path).
+pub(super) fn lifecycle_inventory_source_items(
+    value: &serde_json::Value,
+) -> Vec<serde_json::Value> {
+    collect_generated_inventory_items(value)
+}
+
 include!("workflow_live_generated_contract_validation.rs");
 
 include!("workflow_live_generated_contract_helpers.rs");

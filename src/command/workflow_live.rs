@@ -34,6 +34,10 @@ mod workflow_live_canary_tests;
 mod workflow_live_execution_tests;
 #[path = "workflow_live_generated_contract.rs"]
 mod workflow_live_generated_contract;
+#[path = "workflow_live_generated_lifecycle_remediation.rs"]
+mod workflow_live_generated_lifecycle_remediation;
+#[path = "workflow_live_generated_lifecycle_support.rs"]
+mod workflow_live_generated_lifecycle_support;
 #[path = "workflow_live_generated_scaffold.rs"]
 mod workflow_live_generated_scaffold;
 #[path = "workflow_live_generated_semantics.rs"]
