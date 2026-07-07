@@ -31,11 +31,7 @@ fn mouse_capture_policy(explicit: Option<&str>, is_wsl: bool) -> bool {
         Some("1" | "true" | "on" | "yes") => true,
         Some("0" | "false" | "off" | "no") => false,
         Some(_) => false,
-        // Default to enabled so trackpad/mouse-wheel scroll works out of the
-        // box. Users who need native terminal text selection can opt out with
-        // ARCHON_TUI_MOUSE_CAPTURE=0. WSL detection retained for the explicit
-        // branch above but no longer drives the default.
-        None => true,
+        None => is_wsl,
     }
 }
 
@@ -158,10 +154,9 @@ mod tests {
     }
 
     #[test]
-    fn mouse_capture_defaults_to_true_regardless_of_wsl() {
-        // Default is now always enabled — WSL flag no longer drives the default.
+    fn mouse_capture_defaults_to_wsl() {
         assert!(mouse_capture_policy(None, true));
-        assert!(mouse_capture_policy(None, false));
+        assert!(!mouse_capture_policy(None, false));
     }
 
     #[test]
