@@ -6,8 +6,6 @@
 
 pub mod agent_adapter;
 mod branch_evidence;
-pub mod harness;
-mod harness_safety;
 pub mod host_api;
 pub mod implementation_inspection;
 pub mod prd_intake;
@@ -29,7 +27,6 @@ pub mod write_mode;
 pub use agent_adapter::{
     WorkflowV2AgentAdapter, WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2AgentRequest,
 };
-pub use harness::{WorkflowV2HarnessError, WorkflowV2HarnessPlan, WorkflowV2HarnessValidator};
 pub use host_api::{
     WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2WriteMode,
 };

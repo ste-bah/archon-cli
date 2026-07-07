@@ -199,9 +199,6 @@ export default async function workflow(w) {
   await w.agent("inspect", { role: "researcher", task: "Inspect via saved V2 command." });
 }
 "#;
-    WorkflowV2HarnessValidator
-        .validate(harness)
-        .expect("v2 harness validates");
     let spec = WorkflowSpec {
         schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
         name: "saved-v2".to_string(),

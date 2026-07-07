@@ -35,6 +35,15 @@ Clean (2m54s, `-j 4`).
 The compensation layers the review flagged are already failing their own tests
 on the review branch.
 
+Additionally discovered during Phase 1 (the bin-crate suite was never fully run
+at baseline because ci-gate fail-fasts at the file-size step):
+
+- `command::workflow_live::workflow_live_runner_tests::generated_v2_read_only_verification_branch_stays_read_only`
+  fails pre-rescue (verified against the untouched review branch): the
+  text-sniffing `command_execution_stage` heuristic grants Bash to a read-only
+  verification-inventory call. Same class as the `context_output` layer;
+  Phase 5 scope.
+
 ### `scripts/ci-gate.sh`
 Fails at the FileSizeGuard step (fail-fast; later steps did not run):
 

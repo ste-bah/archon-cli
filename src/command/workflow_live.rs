@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use archon_core::agents::AgentRegistry;
 use archon_core::config::{ArchonConfig, GeneratedWorkflowConfig};
 use archon_core::env_vars::ArchonEnvVars;
@@ -6,9 +6,8 @@ use archon_pipeline::runner::LlmClient;
 use archon_tui::app::TuiEvent;
 use archon_tui::event_channel::TuiEventSender;
 use archon_workflow::{
-    CommandAction, LifecycleAction, LifecycleController, RunStatus, StageStatus,
-    WorkflowBundleOrigin, WorkflowConfig, WorkflowExecutor, WorkflowPolicy, WorkflowRun,
-    WorkflowStageRunner, WorkflowStore, WorkflowV2HarnessValidator,
+    CommandAction, LifecycleAction, LifecycleController, RunStatus, StageStatus, WorkflowConfig,
+    WorkflowExecutor, WorkflowPolicy, WorkflowRun, WorkflowStageRunner, WorkflowStore,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -248,33 +247,30 @@ async fn run_live_action(
             let template = load_template(cwd, &name)?;
             let run = match template.harness_source {
                 Some(harness) => {
-                    if let Ok(v2_plan) = WorkflowV2HarnessValidator.validate(&harness) {
-                        let task = template.spec.task.clone();
-                        let mut plan = WorkflowScriptPlan::from_template(
-                            template.spec,
-                            &harness,
-                            v2_plan.calls,
-                        );
-                        plan.script_args = args;
-                        cap_live_plan_parallelism(&mut plan, &runner, &policy);
-                        return workflow_live_v2::run_saved_v2_workflow(
-                            cwd,
-                            &store,
-                            plan,
-                            task,
-                            llm,
-                            tui_tx,
-                            runner.agent_names.clone(),
-                            approval_mode,
-                            workspace_boundary_supported,
-                        )
-                        .await;
-                    }
-                    executor.start_with_harness(
-                        template.spec,
-                        &harness,
-                        WorkflowBundleOrigin::SavedCommand,
-                    )?
+                    // QuickJS dry-run is the only grammar: validation failure
+                    // is a hard error, never a different execution semantics.
+                    let calls = workflow_live_v2::dry_run_workflow_plan(&harness, args.as_ref())
+                        .await
+                        .map_err(|err| {
+                            anyhow!("saved workflow '{name}' failed validation: {err}")
+                        })?;
+                    let task = template.spec.task.clone();
+                    let mut plan =
+                        WorkflowScriptPlan::from_template(template.spec, &harness, calls);
+                    plan.script_args = args;
+                    cap_live_plan_parallelism(&mut plan, &runner, &policy);
+                    return workflow_live_v2::run_saved_v2_workflow(
+                        cwd,
+                        &store,
+                        plan,
+                        task,
+                        llm,
+                        tui_tx,
+                        runner.agent_names.clone(),
+                        approval_mode,
+                        workspace_boundary_supported,
+                    )
+                    .await;
                 }
                 None => executor.start(template.spec)?,
             };

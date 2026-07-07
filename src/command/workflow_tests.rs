@@ -232,6 +232,34 @@ export default async function workflow(w) {
     }
     store.save_state(&run).unwrap();
 
+    // Restart invalidation reads the host-call manifest persisted with the
+    // run (as approval-time planning writes it), not the script source.
+    let manifest_calls = vec![
+        test_v2_call("readonly-discovery", WorkflowV2HostMethod::Parallel, None),
+        test_v2_call(
+            "dependency-aware-implementation-inventory",
+            WorkflowV2HostMethod::Reduce,
+            Some("[readonly-discovery]"),
+        ),
+        test_v2_call(
+            "implementation-wave-1",
+            WorkflowV2HostMethod::Fanout,
+            Some("dependency-aware-implementation-inventory.items"),
+        ),
+    ];
+    std::fs::create_dir_all(store.run_dir(&run.id).join("v2")).unwrap();
+    std::fs::write(
+        store.run_dir(&run.id).join("v2/generated-metadata.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "workflow-generated-v2-metadata-v1",
+            "generated_scaffold": {
+                "host_call_manifest": manifest_calls,
+            },
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
     let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
     save_test_call_record(
         &v2_store,

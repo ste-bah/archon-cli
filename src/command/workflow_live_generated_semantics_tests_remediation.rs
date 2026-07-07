@@ -1,5 +1,3 @@
-use archon_workflow::WorkflowV2HarnessValidator;
-
 use super::super::workflow_live_generated_scaffold::decomposed_prd_scaffold;
 use super::super::workflow_live_task_universe::{
     WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask,
@@ -42,10 +40,7 @@ fn generated_semantics_rejects_unscoped_followup_remediation_inventory() {
         "followupRemediationInventory = filterRemediationInventoryByTaskIds(normalizeRemediationInventoryForSources(followupRemediationInventory, remediationInventory.items, readyImplementationItems, \"remediation-wave-\" + currentImplementationWaveIndex), remediationTaskIds);",
         "followupRemediationInventory = normalizeRemediationInventory(followupRemediationInventory);",
     );
-    let calls = WorkflowV2HarnessValidator::default()
-        .validate(&source)
-        .expect("harness validates")
-        .calls;
+    let calls = super::super::workflow_live_generated_scaffold::decomposed_prd_plan_calls();
 
     let err = validate_generated_workflow_semantics(
         "Implement decomposed PRD with dependency_ids",
@@ -64,10 +59,7 @@ fn generated_semantics_rejects_remediation_without_source_ownership() {
         "remediationInventory = normalizeRemediationInventoryForSources(remediationInventory, readyImplementationItems, [], \"implementation-wave-\" + currentImplementationWaveIndex);",
         "remediationInventory = normalizeRemediationInventory(remediationInventory);",
     );
-    let calls = WorkflowV2HarnessValidator::default()
-        .validate(&source)
-        .expect("harness validates")
-        .calls;
+    let calls = super::super::workflow_live_generated_scaffold::decomposed_prd_plan_calls();
 
     let err = validate_generated_workflow_semantics(
         "Implement decomposed PRD with dependency_ids",

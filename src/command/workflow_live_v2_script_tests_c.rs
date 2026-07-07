@@ -173,3 +173,119 @@ async function workflow(w) {
             StageStatus::Running
         );
     }
+
+// The legacy pseudo-parser comparison ran here until the parser was deleted:
+// the static plan was pinned equal to its extraction by stage family
+// (rescue Phase 1 gate). The static plan is now the source of truth.
+#[tokio::test]
+async fn dry_run_trace_stays_within_declared_scaffold_stage_families() {
+    use std::collections::BTreeSet;
+    let universe = super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverse {
+        schema_version: "workflow-v2-task-universe-v1".to_string(),
+        source_roots: vec!["/tmp/tasks".to_string()],
+        tasks: vec![
+            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+                canonical_task_id: "TASK-TDL-001".to_string(),
+                aliases: vec!["T001".to_string()],
+                source_path: "/tmp/tasks/TASK-TDL-001.md".to_string(),
+                dependency_ids: Vec::new(),
+                title: None,
+            },
+        ],
+    };
+    let scaffold = super::super::super::workflow_live_generated_scaffold::decomposed_prd_scaffold(
+        "Implement the decomposed PRD",
+        Some("/tmp/repo"),
+        &universe,
+        &[],
+        &archon_core::config::GeneratedWorkflowConfig::default(),
+    )
+    .expect("scaffold");
+    let static_plan: BTreeSet<String> =
+        super::super::super::workflow_live_generated_scaffold::decomposed_prd_plan_calls()
+            .iter()
+            .map(|call| format!("{}|{}|{:?}", call.id, call.method.as_str(), call.write_mode))
+            .collect();
+    assert!(!static_plan.is_empty());
+
+    // The dry-run trace must be a valid execution path through the plan:
+    // non-empty, and every recorded call belongs to a declared stage family.
+    let dry_run = dry_run_workflow_plan(&scaffold, None)
+        .await
+        .expect("dry-run plan");
+    assert!(!dry_run.is_empty());
+    for call in &dry_run {
+        let call_family = call
+            .id
+            .trim_end_matches(|ch: char| ch.is_ascii_digit() || ch == '-')
+            .to_string();
+        assert!(
+            static_plan
+                .iter()
+                .any(|entry| entry.starts_with(&call_family)),
+            "dry-run call '{}' is not part of a declared stage family",
+            call.id
+        );
+    }
+}
+
+#[tokio::test]
+async fn dry_run_rejects_provider_routing_and_duplicate_ids() {
+    let duplicate = r#"
+async function workflow(w) {
+  await w.checkpoint("same-id");
+  await w.checkpoint("same-id");
+}
+"#;
+    let error = dry_run_workflow_plan(duplicate, None)
+        .await
+        .expect_err("duplicate ids must fail");
+    assert!(
+        error.to_string().contains("duplicate host call id"),
+        "{error}"
+    );
+
+    let routed = r#"
+async function workflow(w) {
+  await w.agent("routed", { model: "claude-opus-4-8", task: "inspect" });
+}
+"#;
+    let error = dry_run_workflow_plan(routed, None)
+        .await
+        .expect_err("model override must fail");
+    assert!(
+        error.to_string().contains("provider routing is host policy"),
+        "{error}"
+    );
+
+    let syntax_error = r#"
+async function workflow(w) {
+  await w.agent("broken", { task: "inspect" }
+}
+"#;
+    let error = dry_run_workflow_plan(syntax_error, None)
+        .await
+        .expect_err("syntax error must fail");
+    assert!(error.to_string().contains("validation failed"), "{error}");
+}
+
+#[tokio::test]
+async fn determinism_prelude_blocks_wall_clock_and_randomness() {
+    for forbidden in ["Math.random()", "Date.now()", "new Date()"] {
+        let source = format!(
+            r#"
+async function workflow(w) {{
+  const value = {forbidden};
+  await w.checkpoint("uses-nondeterminism-" + value);
+}}
+"#
+        );
+        let error = dry_run_workflow_plan(&source, None)
+            .await
+            .expect_err("nondeterministic script must fail");
+        assert!(
+            error.to_string().contains("unavailable in workflow scripts"),
+            "{forbidden}: {error}"
+        );
+    }
+}

@@ -1,5 +1,3 @@
-use archon_workflow::WorkflowV2HarnessValidator;
-
 use super::super::workflow_live_generated_scaffold::decomposed_prd_scaffold;
 use super::super::workflow_live_task_universe::{
     WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask,
@@ -9,10 +7,7 @@ use super::validate_generated_workflow_semantics;
 #[test]
 fn generated_scaffold_repairs_review_remediation_inventory_before_fanout() {
     let source = canonical_scaffold();
-    let calls = WorkflowV2HarnessValidator::default()
-        .validate(&source)
-        .expect("harness validates")
-        .calls;
+    let calls = super::super::workflow_live_generated_scaffold::decomposed_prd_plan_calls();
 
     assert!(source.contains("normalizeReviewRemediationInventory"));
     assert!(source.contains("reviewNeedsRemediation(review)"));

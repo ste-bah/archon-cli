@@ -52,7 +52,7 @@ pub(super) async fn plan_live(
             &governed_learning_context,
             generated_config,
         )?;
-        match compile_harness_plan(task, Some(task_universe), &harness, generated_config) {
+        match compile_harness_plan(task, Some(task_universe), &harness, generated_config).await {
             Ok(mut plan) => {
                 plan.governed_learning_context = governed_learning_context;
                 let _ = tui_tx.send(TuiEvent::TextDelta(format!(
@@ -210,7 +210,7 @@ async fn validate_or_repair_harness(
     let mut harness = raw;
     let mut attempts = Vec::new();
     for attempt in 0..=MAX_REPAIRS {
-        match compile_harness_plan(task, task_universe.clone(), &harness, generated_config) {
+        match compile_harness_plan(task, task_universe.clone(), &harness, generated_config).await {
             Ok(plan) => return Ok(plan),
             Err(err) if attempt < MAX_REPAIRS => {
                 let error = err.to_string();
@@ -276,25 +276,28 @@ fn truncate_chars(value: &str, max: usize) -> String {
     out
 }
 
-fn compile_harness_plan(
+async fn compile_harness_plan(
     task: &str,
     task_universe: Option<WorkflowV2TaskUniverse>,
     harness_source: &str,
     generated_config: &GeneratedWorkflowConfig,
 ) -> archon_workflow::WorkflowResult<WorkflowScriptPlan> {
-    let plan = WorkflowV2HarnessValidator::default()
-        .validate(harness_source)
-        .map_err(|err| WorkflowError::SpecInvalid(err.to_string()))?;
-    validate_generated_workflow_semantics(
-        task,
-        task_universe.as_ref(),
-        harness_source,
-        &plan.calls,
-    )?;
+    // QuickJS is the single grammar: the dry-run compiles the script and
+    // records its typed host calls without invoking agents.
+    let traced_calls = super::workflow_live_v2::dry_run_workflow_plan(harness_source, None).await?;
+    let calls = if task_universe.is_some() {
+        // The deterministic scaffold is Rust-generated, so Rust declares its
+        // full stage-family plan; the dry-run above still guards against
+        // splice/syntax defects in the generated source.
+        super::workflow_live_generated_scaffold::decomposed_prd_plan_calls()
+    } else {
+        traced_calls
+    };
+    validate_generated_workflow_semantics(task, task_universe.as_ref(), harness_source, &calls)?;
     Ok(WorkflowScriptPlan::generated(
         task,
         harness_source,
-        plan.calls,
+        calls,
         task_universe,
         generated_config.clone(),
     ))

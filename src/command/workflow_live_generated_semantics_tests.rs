@@ -1,6 +1,5 @@
 use archon_workflow::{
-    WorkflowV2HarnessValidator, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions,
-    WorkflowV2WriteMode,
+    WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2WriteMode,
 };
 
 use super::super::workflow_live_generated_scaffold::decomposed_prd_scaffold;
@@ -63,19 +62,24 @@ fn generated_semantics_accepts_deterministic_decomposed_prd_scaffold() {
 }
 
 #[test]
-fn generated_semantics_rejects_non_isolated_generated_write_fanout() {
-    let source = canonical_scaffold().replace("write: \"worktree\"", "write: \"coordinated\"");
-    let calls = validated_calls(&source);
-
-    let err = validate_generated_workflow_semantics(
-        "Implement decomposed PRD with dependency_ids",
-        Some(&task_universe()),
-        &source,
-        &calls,
-    )
-    .expect_err("generated write fanout must be worktree isolated");
-
-    assert!(err.to_string().contains("worktree-isolated"));
+fn generated_scaffold_emits_only_worktree_isolated_write_fanout() {
+    // No source parser re-derives write modes any more: the scaffold
+    // generator is the single producer, so assert its output directly, and
+    // assert the declared plan agrees.
+    let source = canonical_scaffold();
+    assert!(source.contains("write: \"worktree\""));
+    assert!(!source.contains("write: \"coordinated\""));
+    assert!(!source.contains("write: \"serial\""));
+    for call in super::super::workflow_live_generated_scaffold::decomposed_prd_plan_calls() {
+        if call.method == WorkflowV2HostMethod::Fanout && call.write_mode.is_some() {
+            assert_eq!(
+                call.write_mode,
+                Some(archon_workflow::WorkflowV2WriteMode::Worktree),
+                "{}",
+                call.id
+            );
+        }
+    }
 }
 
 #[test]
@@ -427,11 +431,8 @@ fn canonical_scaffold() -> String {
     .expect("scaffold generation succeeds")
 }
 
-fn validated_calls(source: &str) -> Vec<WorkflowV2HostCall> {
-    WorkflowV2HarnessValidator::default()
-        .validate(source)
-        .expect("harness validates")
-        .calls
+fn validated_calls(_source: &str) -> Vec<WorkflowV2HostCall> {
+    super::super::workflow_live_generated_scaffold::decomposed_prd_plan_calls()
 }
 
 fn implementation_call(

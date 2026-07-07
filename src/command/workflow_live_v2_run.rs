@@ -98,7 +98,7 @@ pub(super) async fn resume_generated_v2_workflow(
     workspace_boundary_supported: bool,
 ) -> Result<Option<String>> {
     let run = store.load_state(run_id)?;
-    let Some(plan) = live_plan_from_generated_bundle(store, &run)? else {
+    let Some(plan) = live_plan_from_generated_bundle(store, &run).await? else {
         return Ok(None);
     };
     match run.status {
@@ -144,7 +144,7 @@ pub(super) async fn resume_generated_v2_workflow(
     .map(Some)
 }
 
-fn live_plan_from_generated_bundle(
+async fn live_plan_from_generated_bundle(
     store: &WorkflowStore,
     run: &WorkflowRun,
 ) -> Result<Option<WorkflowScriptPlan>> {
@@ -169,12 +169,22 @@ fn live_plan_from_generated_bundle(
         path: harness_path.clone(),
         source: err,
     })?;
-    let plan = WorkflowV2HarnessValidator
-        .validate(&harness_source)
-        .map_err(|err| WorkflowError::SpecInvalid(err.to_string()))?;
+    // One source of truth for the plan: the host-call manifest persisted at
+    // approval time. Scripts without one (older saved runs) are re-planned by
+    // the QuickJS dry-run; a script that fails it is a hard error.
+    let metadata = load_generated_v2_metadata(store, &run.id)?;
+    let calls = match metadata
+        .as_ref()
+        .and_then(|metadata| metadata.generated_scaffold.as_ref())
+        .map(|scaffold| scaffold.host_call_manifest.clone())
+        .filter(|calls| !calls.is_empty())
+    {
+        Some(calls) => calls,
+        None => dry_run_workflow_plan(&harness_source, None).await?,
+    };
     let mut script_plan =
-        WorkflowScriptPlan::from_template(run.spec.clone(), &harness_source, plan.calls);
-    if let Some(metadata) = load_generated_v2_metadata(store, &run.id)? {
+        WorkflowScriptPlan::from_template(run.spec.clone(), &harness_source, calls);
+    if let Some(metadata) = metadata {
         let current_hash = workflow_scaffold_hash(&harness_source);
         if let Some(scaffold_hash) = metadata.scaffold_hash.as_deref()
             && scaffold_hash != current_hash

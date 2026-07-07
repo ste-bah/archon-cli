@@ -18,7 +18,7 @@ use crate::runner::WorkflowStageRunner;
 use crate::spec::{ReducerKind, StageKind, StageSpec, WorkflowSpec};
 use crate::stage::{ordered_stages, stage_ready};
 use crate::store::WorkflowStore;
-use crate::{HarnessCompiler, WorkflowBundle, WorkflowBundleOrigin, WorkflowHarness};
+use crate::{WorkflowBundle, WorkflowBundleOrigin, WorkflowHarness};
 
 #[path = "executor_live.rs"]
 mod executor_live;
@@ -67,7 +67,9 @@ impl WorkflowExecutor {
         harness_source: &str,
         origin: WorkflowBundleOrigin,
     ) -> WorkflowResult<WorkflowRun> {
-        HarnessCompiler::default().validate(harness_source)?;
+        // Legacy runs execute spec stages; the harness is bundled for record
+        // only. Source-text validation belongs to the QuickJS dry-run at the
+        // V2 boundary, not to a second parser here.
         self.start_validated(spec, origin, Some(harness_source))
     }
 

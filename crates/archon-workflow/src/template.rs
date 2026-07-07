@@ -9,11 +9,9 @@ use crate::bundle::{
     workflow_command_dir, write_capable_stage_ids,
 };
 use crate::error::{WorkflowError, WorkflowResult};
-use crate::harness::HarnessCompiler;
 use crate::run::WorkflowRun;
 use crate::spec::WorkflowSpec;
 use crate::store::WorkflowStore;
-use crate::v2::WorkflowV2HarnessValidator;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SavedWorkflowTemplate {
@@ -168,17 +166,15 @@ impl WorkflowCommandRegistry {
 }
 
 fn validate_saved_harness(source: &str) -> WorkflowResult<()> {
-    if HarnessCompiler::default().validate(source).is_ok() {
-        return Ok(());
+    // Source-text scanning is gone: QuickJS is the single grammar and the
+    // sandbox is the engine. The dry-run at the run boundary is the real
+    // validation; saving only requires a non-empty script.
+    if source.trim().is_empty() {
+        return Err(WorkflowError::UnsafeTemplate(
+            "saved workflow harness is empty".to_string(),
+        ));
     }
-    WorkflowV2HarnessValidator
-        .validate(source)
-        .map(|_| ())
-        .map_err(|err| {
-            WorkflowError::UnsafeTemplate(format!(
-                "saved workflow harness failed legacy and V2 validation: {err}"
-            ))
-        })
+    Ok(())
 }
 
 pub fn sanitize_spec(spec: &WorkflowSpec) -> WorkflowResult<WorkflowSpec> {

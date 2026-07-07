@@ -24,7 +24,6 @@ pub mod fanout;
 // replace these for generated workflow runs.
 mod generated;
 pub mod generated_workflow;
-pub mod harness;
 mod item_filter;
 pub mod learning;
 pub mod lifecycle;
@@ -82,7 +81,6 @@ pub use generated_workflow::{
     GeneratedWorkflowKind, GeneratedWorkflowLearningContext, WorkflowGeneratedScaffold,
     WorkflowLearningEvent, WorkflowLearningEvidenceRef, workflow_scaffold_hash,
 };
-pub use harness::{HarnessCompiler, HarnessPhase};
 pub use learning::{
     Verification, WorkflowLearningRecord, WorkflowLearningSink, WorkflowRunLearningSummary,
     learning_records,
@@ -113,9 +111,8 @@ pub use v2::{
     WorkflowV2ConvergenceDecision, WorkflowV2ConvergenceError, WorkflowV2ConvergenceStatus,
     WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2FanoutItem, WorkflowV2FanoutReport,
     WorkflowV2FileRecord, WorkflowV2FinalReport, WorkflowV2FinalReportBuilder,
-    WorkflowV2FinalReportError, WorkflowV2Harness, WorkflowV2HarnessError, WorkflowV2HarnessPlan,
-    WorkflowV2HarnessValidator, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions,
-    WorkflowV2ImplementationInspector, WorkflowV2ImplementationStatus,
+    WorkflowV2FinalReportError, WorkflowV2Harness, WorkflowV2HostCall, WorkflowV2HostMethod,
+    WorkflowV2HostOptions, WorkflowV2ImplementationInspector, WorkflowV2ImplementationStatus,
     WorkflowV2InspectionDecision, WorkflowV2InspectionError, WorkflowV2PrdIntake,
     WorkflowV2PrdIntakeError, WorkflowV2ProjectArtifactContext, WorkflowV2RemediationItem,
     WorkflowV2ReportPaths, WorkflowV2ResidualGap, WorkflowV2Result, WorkflowV2ResultStore,

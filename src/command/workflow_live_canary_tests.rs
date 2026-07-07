@@ -383,9 +383,7 @@ fn dump_v2_results(project_root: &std::path::Path) {
             };
             eprintln!(
                 "canary result: call={} status={} summary={}",
-                value["call"]["id"],
-                value["status"],
-                value["result"]["summary"]
+                value["call"]["id"], value["status"], value["result"]["summary"]
             );
             if value["call"]["id"] == "implementation-wave-1" {
                 let detail = value["result"].to_string();

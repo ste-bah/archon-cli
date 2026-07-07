@@ -18,9 +18,9 @@ use archon_workflow::{
     WorkflowLearningEvidenceRef, WorkflowRun, WorkflowStore, WorkflowV2AgentAdapter,
     WorkflowV2AgentError, WorkflowV2BranchOutcome, WorkflowV2CallExecution, WorkflowV2CallRecord,
     WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2FanoutItem, WorkflowV2FanoutReport,
-    WorkflowV2HarnessValidator, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2ResidualGap,
-    WorkflowV2Result, WorkflowV2ResultStore, WorkflowV2Scheduler, WorkflowV2SchedulerConfig,
-    WorkflowV2Status, workflow_scaffold_hash,
+    WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2ResidualGap, WorkflowV2Result,
+    WorkflowV2ResultStore, WorkflowV2Scheduler, WorkflowV2SchedulerConfig, WorkflowV2Status,
+    workflow_scaffold_hash,
 };
 
 #[path = "workflow_live_provider_env.rs"]
@@ -64,6 +64,7 @@ use workflow_live_v2_state::{poll_v2_run_control, sync_v2_summary_to_run};
 mod workflow_live_v2_script;
 
 use workflow_live_v2_script::WorkflowV2ScriptRunner;
+pub(super) use workflow_live_v2_script::dry_run_workflow_plan;
 
 use super::LiveApprovalMode;
 use super::workflow_live_approval::{LiveApprovalOutcome, gate_live_approval};

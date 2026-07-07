@@ -9,7 +9,7 @@ use archon_workflow::{
     RunStatus, StageKind, StageRunRequest, WorkflowApprovalStore, WorkflowBundle,
     WorkflowBundleOrigin, WorkflowCommandRegistry, WorkflowLearningEvent,
     WorkflowLearningEvidenceRef, WorkflowSpec, WorkflowStageRunner, WorkflowStore,
-    WorkflowV2HarnessValidator, WorkflowV2HostCall, WorkflowV2Status, workflow_scaffold_hash,
+    WorkflowV2HostCall, WorkflowV2Status, workflow_scaffold_hash,
 };
 use serde_json::json;
 

@@ -66,13 +66,24 @@ fn generated_v2_restart_executions(
     store: &WorkflowStore,
     run: &WorkflowRun,
 ) -> Result<Vec<WorkflowV2CallExecution>> {
-    let harness_path = store.run_dir(&run.id).join("workflow.js");
-    let harness_source = fs::read_to_string(&harness_path)?;
-    let plan = WorkflowV2HarnessValidator::default()
-        .validate(&harness_source)
-        .map_err(|err| anyhow!("invalid generated workflow.js: {err}"))?;
-    Ok(plan
-        .calls
+    // One source of truth: the host-call manifest persisted with the run at
+    // approval time. Runs without one fall back to per-call invalidation —
+    // the result store's input hashing re-executes stale dependents anyway.
+    let metadata_path = store.run_dir(&run.id).join("v2/generated-metadata.json");
+    if !metadata_path.exists() {
+        return Ok(Vec::new());
+    }
+    let raw = fs::read_to_string(&metadata_path)?;
+    let metadata: serde_json::Value = serde_json::from_str(&raw)?;
+    let calls: Vec<archon_workflow::WorkflowV2HostCall> = metadata
+        .get("generated_scaffold")
+        .and_then(|scaffold| scaffold.get("host_call_manifest"))
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|err| anyhow!("invalid persisted host call manifest: {err}"))?
+        .unwrap_or_default();
+    Ok(calls
         .into_iter()
         .map(|call| {
             let depends_on = call

@@ -12,7 +12,7 @@ use archon_workflow::{
     RunStatus, StageStatus, TemplateRegistry, WorkflowApprovalStore, WorkflowBundle,
     WorkflowBundleOrigin, WorkflowCommand, WorkflowCommandRegistry, WorkflowExecutor,
     WorkflowPlanner, WorkflowPolicy, WorkflowRun, WorkflowSpec, WorkflowStore,
-    WorkflowV2CallExecution, WorkflowV2HarnessValidator, WorkflowV2ResultStore,
+    WorkflowV2CallExecution, WorkflowV2ResultStore,
 };
 
 use crate::cli_args::WorkflowAction;

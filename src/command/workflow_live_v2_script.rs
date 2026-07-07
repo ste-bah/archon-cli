@@ -277,6 +277,8 @@ include!("workflow_live_v2_script_host.rs");
 
 include!("workflow_live_v2_script_helpers.rs");
 
+include!("workflow_live_v2_script_dry_run.rs");
+
 #[cfg(test)]
 #[path = "workflow_live_v2_script_tests.rs"]
 mod tests;

@@ -84,6 +84,33 @@ fn script_source(harness_source: &str, script_args: Option<&serde_json::Value>) 
         r#"
 globalThis.args = {args_literal};
 
+// Determinism prelude: workflow scripts must be replayable. Wall-clock and
+// randomness are host concerns; pass timestamps via args.
+delete Math.random;
+Math.random = () => {{
+  throw new Error("Math.random() is unavailable in workflow scripts: workflows must be deterministic");
+}};
+const __archonRealDate = Date;
+globalThis.Date = new Proxy(__archonRealDate, {{
+  apply() {{
+    throw new Error("Date() is unavailable in workflow scripts: pass timestamps via args");
+  }},
+  construct(target, argumentList) {{
+    if (argumentList.length === 0) {{
+      throw new Error("new Date() without arguments is unavailable in workflow scripts: pass timestamps via args");
+    }}
+    return new target(...argumentList);
+  }},
+  get(target, property, receiver) {{
+    if (property === "now") {{
+      return () => {{
+        throw new Error("Date.now() is unavailable in workflow scripts: pass timestamps via args");
+      }};
+    }}
+    return Reflect.get(target, property, receiver);
+  }},
+}});
+
 {normalized}
 
 const __archonW = Object.freeze({{

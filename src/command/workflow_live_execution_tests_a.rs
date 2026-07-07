@@ -201,7 +201,15 @@ async fn implementation_prd_plan_uses_deterministic_scaffold_not_provider_fanout
     let implementation_call = plan
         .calls
         .iter()
-        .find(|call| call.id.starts_with("implementation-wave-dynamic-"))
+        .find(|call| {
+            call.id == "implementation-wave"
+                && call
+                    .options
+                    .extra
+                    .get("dynamic_id_prefix")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("implementation-wave-")
+        })
         .expect("implementation wave call");
     assert_eq!(
         implementation_call.options.source.as_deref(),
