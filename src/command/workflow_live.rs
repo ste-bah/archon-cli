@@ -73,6 +73,8 @@ mod workflow_live_v2_host;
 #[cfg(test)]
 #[path = "workflow_live_v2_host_tests.rs"]
 mod workflow_live_v2_host_tests;
+#[path = "workflow_live_v2_lifecycle_prompts.rs"]
+mod workflow_live_v2_lifecycle_prompts;
 #[path = "workflow_live_verification_contract.rs"]
 mod workflow_live_verification_contract;
 #[cfg(test)]

@@ -60,7 +60,12 @@ fn remediation_item_issues(contract: &LifecycleContract<'_>, item: &Value) -> Ve
             &format!("remediation dependency is not canonical: {dep}"),
         ));
     }
-    for required in ["source_item_id", "failure_status", "failure_evidence", "required_fix"] {
+    for required in [
+        "source_item_id",
+        "failure_status",
+        "failure_evidence",
+        "required_fix",
+    ] {
         if !present(item.get(required)) {
             issues.push(issue(
                 "inventory_shape_repair",
@@ -158,11 +163,9 @@ pub(super) fn normalize_remediation_inventory_for_sources(
                 fallback_items,
                 source_call_id,
             ) {
-                Some(source) => {
-                    contract.normalize_item(&remediation_item_with_source_ownership(
-                        contract, &item, &source,
-                    ))
-                }
+                Some(source) => contract.normalize_item(&remediation_item_with_source_ownership(
+                    contract, &item, &source,
+                )),
                 None => item,
             }
         })

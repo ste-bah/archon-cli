@@ -1,0 +1,467 @@
+// Focused-verification lifecycle for the Rust decomposed-PRD lifecycle:
+// planning, verification waves, failure triage, write remediation, and retry
+// plans — ported faithfully from the spliced verification lifecycle
+// (workflow_live_generated_scaffold_verification.rs::VERIFICATION_LIFECYCLE_JS).
+
+impl LifecycleDriver {
+    pub(in super::super) async fn run_verification_lifecycle(
+        &self,
+        ready_implementation_items: &[serde_json::Value],
+        implementation_candidate_ids_unique: &[String],
+        wave_index: usize,
+        dependency_iteration: usize,
+        accepted_this_wave: &mut std::collections::BTreeSet<String>,
+        evidence: &mut LifecycleEvidence,
+    ) -> archon_workflow::WorkflowResult<()> {
+        let contract = self.contract();
+        let verification_options = |task: &str| {
+            serde_json::json!({
+                "tier": "coder",
+                "itemKind": "focused_verification",
+                "task": task,
+            })
+        };
+
+        let raw_plan = self
+            .reduce(
+                &format!("verification-plan-{wave_index}"),
+                serde_json::json!([
+                    self.task_universe,
+                    ready_implementation_items,
+                    implementation_candidate_ids_unique,
+                    evidence.implementation
+                ]),
+                "reducer",
+                prompts::VERIFICATION_PLAN_TASK,
+            )
+            .await?;
+        let mut verification_plan = contract.normalize_inventory(&raw_plan);
+        let mut plan_repair_attempt = 1usize;
+        while !support::verification_inventory_ready(&verification_plan)
+            && plan_repair_attempt <= self.max_repair_iterations
+        {
+            let call_id = format!("verification-plan-repair-{wave_index}-{plan_repair_attempt}");
+            let repair = self
+                .reduce(
+                    &call_id,
+                    serde_json::json!([
+                        self.task_universe,
+                        ready_implementation_items,
+                        implementation_candidate_ids_unique,
+                        evidence.implementation,
+                        verification_plan
+                    ]),
+                    "reducer",
+                    prompts::VERIFICATION_PLAN_REPAIR_TASK,
+                )
+                .await?;
+            support::record_repair_attempt(
+                &mut evidence.repair_attempts,
+                &call_id,
+                "verification_plan_repair",
+                &implementation_candidate_ids_unique
+                    .iter()
+                    .map(|id| serde_json::json!({ "canonical_task_ids": [id] }))
+                    .collect::<Vec<_>>(),
+                &repair,
+            );
+            verification_plan = contract.normalize_inventory(&repair);
+            plan_repair_attempt += 1;
+        }
+        let plan_items = if support::verification_inventory_ready(&verification_plan) {
+            support::verification_items(&contract, &verification_plan)
+        } else {
+            Vec::new()
+        };
+        if plan_items.is_empty() {
+            return self
+                .final_report(
+                    &format!("blocked-empty-verification-{wave_index}"),
+                    None,
+                    "needs_review",
+                    serde_json::json!({
+                        "taskUniverse": self.task_universe,
+                        "readyImplementationItems": ready_implementation_items,
+                        "implementationCandidateIdsUnique": implementation_candidate_ids_unique,
+                        "verificationPlan": verification_plan,
+                        "implementationEvidence": evidence.implementation,
+                        "repair_attempts": evidence.repair_attempts,
+                    }),
+                    prompts::BLOCKED_EMPTY_VERIFICATION_TASK,
+                )
+                .await;
+        }
+        let mut plan_items = plan_items;
+
+        let mut verification = self
+            .parallel(
+                &format!("verification-wave-{wave_index}"),
+                serde_json::json!(plan_items),
+                verification_options(prompts::VERIFICATION_WAVE_TASK),
+            )
+            .await?;
+        evidence.verification.push(serde_json::json!({
+            "kind": "verification",
+            "implementationWaveIndex": wave_index,
+            "dependencyIteration": dependency_iteration,
+            "verificationPlan": { "items": plan_items },
+            "result": verification,
+        }));
+
+        let mut repair_attempt = 1usize;
+        let mut remediation_attempt = 1usize;
+        while !support::outcome_accepted_or_noop(&verification)
+            && repair_attempt <= self.max_repair_iterations
+        {
+            let outcomes = support::outcomes_of(&verification);
+            let actionable: Vec<serde_json::Value> = outcomes
+                .iter()
+                .filter(|outcome| {
+                    let data = outcome
+                        .get("result")
+                        .and_then(|result| result.get("data"))
+                        .or_else(|| outcome.get("data"))
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
+                    data.get("verification_remediation_required")
+                        == Some(&serde_json::Value::Bool(true))
+                        || data.get("verification_failure_class").and_then(|v| v.as_str())
+                            == Some("actionable_implementation_failure")
+                        || data
+                            .get("verification_failure_next_action")
+                            .and_then(|v| v.as_str())
+                            == Some("write_remediation")
+                })
+                .cloned()
+                .collect();
+
+            if !actionable.is_empty() {
+                let continue_loop = self
+                    .run_verification_remediation(
+                        ready_implementation_items,
+                        &plan_items,
+                        &actionable,
+                        wave_index,
+                        dependency_iteration,
+                        repair_attempt,
+                        &mut remediation_attempt,
+                        &mut verification,
+                        evidence,
+                    )
+                    .await?;
+                if !continue_loop {
+                    break;
+                }
+                repair_attempt += 1;
+                continue;
+            }
+
+            let call_id = format!("verification-repair-plan-{wave_index}-{repair_attempt}");
+            let repair_plan = self
+                .reduce(
+                    &call_id,
+                    serde_json::json!([
+                        self.task_universe,
+                        plan_items,
+                        verification,
+                        evidence.implementation
+                    ]),
+                    "reducer",
+                    prompts::VERIFICATION_REPAIR_PLAN_TASK,
+                )
+                .await?;
+            support::record_repair_attempt(
+                &mut evidence.repair_attempts,
+                &call_id,
+                "verification_repair",
+                &support::outcomes_of(&verification),
+                &repair_plan,
+            );
+            let mut repair_inventory = contract.normalize_inventory(&repair_plan);
+            let allowed_task_ids: Vec<String> = support::unique(
+                plan_items
+                    .iter()
+                    .flat_map(|item| support::strings_of(item.get("canonical_task_ids")))
+                    .collect(),
+            );
+            repair_inventory =
+                support::constrain_inventory_tasks(&contract, &repair_inventory, &allowed_task_ids);
+            let mut shape_attempt = 1usize;
+            while !support::verification_inventory_ready(&repair_inventory)
+                && !support::array(repair_inventory.get("unresolved_issues")).is_empty()
+                && shape_attempt <= self.max_repair_iterations
+            {
+                let shape_call_id = format!(
+                    "verification-repair-shape-repair-{wave_index}-{repair_attempt}-{shape_attempt}"
+                );
+                let issues = support::array(repair_inventory.get("unresolved_issues"));
+                let shape_repair = self
+                    .reduce(
+                        &shape_call_id,
+                        serde_json::json!([
+                            self.task_universe,
+                            repair_inventory,
+                            issues,
+                            verification,
+                            evidence.implementation
+                        ]),
+                        "reducer",
+                        prompts::VERIFICATION_REPAIR_SHAPE_REPAIR_TASK,
+                    )
+                    .await?;
+                support::record_repair_attempt(
+                    &mut evidence.repair_attempts,
+                    &shape_call_id,
+                    "verification_repair_shape_repair",
+                    &issues,
+                    &shape_repair,
+                );
+                repair_inventory = contract.normalize_inventory(&shape_repair);
+                repair_inventory = support::constrain_inventory_tasks(
+                    &contract,
+                    &repair_inventory,
+                    &allowed_task_ids,
+                );
+                shape_attempt += 1;
+            }
+            if !support::verification_inventory_ready(&repair_inventory)
+                || support::array(repair_inventory.get("items")).is_empty()
+            {
+                break;
+            }
+            plan_items = support::verification_items(&contract, &repair_inventory);
+            verification = self
+                .parallel(
+                    &format!("verification-wave-{wave_index}-{repair_attempt}"),
+                    serde_json::json!(plan_items),
+                    verification_options(prompts::RETRY_VERIFICATION_WAVE_TASK),
+                )
+                .await?;
+            evidence.verification.push(serde_json::json!({
+                "kind": "verification-retry",
+                "implementationWaveIndex": wave_index,
+                "dependencyIteration": dependency_iteration,
+                "verificationRepairAttempt": repair_attempt,
+                "verificationPlan": { "items": plan_items },
+                "result": verification,
+            }));
+            repair_attempt += 1;
+        }
+
+        if !support::outcome_accepted_or_noop(&verification) {
+            return self
+                .final_report(
+                    &format!("blocked-verification-failed-{wave_index}"),
+                    None,
+                    "needs_review",
+                    serde_json::json!({
+                        "taskUniverse": self.task_universe,
+                        "readyImplementationItems": ready_implementation_items,
+                        "implementationCandidateIdsUnique": implementation_candidate_ids_unique,
+                        "implementationEvidence": evidence.implementation,
+                        "verificationEvidence": evidence.verification,
+                        "verification": verification,
+                        "repair_attempts": evidence.repair_attempts,
+                    }),
+                    prompts::BLOCKED_VERIFICATION_FAILED_TASK,
+                )
+                .await;
+        }
+        for id in support::accepted_or_noop_canonical_task_ids_from(
+            &contract,
+            &support::outcomes_of(&verification),
+        ) {
+            if implementation_candidate_ids_unique.contains(&id) {
+                accepted_this_wave.insert(id);
+            }
+        }
+        Ok(())
+    }
+
+    /// Triage → write remediation → post-remediation re-verification. Returns
+    /// whether the outer verification loop should continue (JS `continue`) or
+    /// break.
+    #[allow(clippy::too_many_arguments)]
+    async fn run_verification_remediation(
+        &self,
+        ready_implementation_items: &[serde_json::Value],
+        plan_items: &[serde_json::Value],
+        actionable: &[serde_json::Value],
+        wave_index: usize,
+        dependency_iteration: usize,
+        repair_attempt: usize,
+        remediation_attempt: &mut usize,
+        verification: &mut serde_json::Value,
+        evidence: &mut LifecycleEvidence,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        let contract = self.contract();
+        let triage_id = format!("verification-failure-triage-{wave_index}-{repair_attempt}");
+        let triage = self
+            .reduce(
+                &triage_id,
+                serde_json::json!([
+                    self.task_universe,
+                    ready_implementation_items,
+                    plan_items,
+                    actionable,
+                    evidence.implementation,
+                    evidence.verification
+                ]),
+                "reducer",
+                prompts::VERIFICATION_FAILURE_TRIAGE_TASK,
+            )
+            .await?;
+        support::record_repair_attempt(
+            &mut evidence.repair_attempts,
+            &triage_id,
+            "verification_failure_triage",
+            actionable,
+            &triage,
+        );
+        let inventory_id =
+            format!("verification-remediation-inventory-{wave_index}-{remediation_attempt}");
+        let raw_inventory = self
+            .reduce(
+                &inventory_id,
+                serde_json::json!([
+                    self.task_universe,
+                    ready_implementation_items,
+                    plan_items,
+                    triage,
+                    actionable,
+                    evidence.implementation,
+                    evidence.verification
+                ]),
+                "reducer",
+                prompts::VERIFICATION_REMEDIATION_INVENTORY_TASK,
+            )
+            .await?;
+        support::record_repair_attempt(
+            &mut evidence.repair_attempts,
+            &inventory_id,
+            "verification_remediation_inventory",
+            actionable,
+            &raw_inventory,
+        );
+        let remediation_inventory = remediation::normalize_remediation_inventory_for_sources(
+            &contract,
+            &raw_inventory,
+            ready_implementation_items,
+            &[],
+            &format!("verification-wave-{wave_index}"),
+        );
+        if !remediation::remediation_inventory_ready(&remediation_inventory) {
+            return Ok(false);
+        }
+        let remediation_wave = self
+            .write_fanout(
+                &format!("remediation-wave-{wave_index}-verification-{remediation_attempt}"),
+                serde_json::json!(support::array(remediation_inventory.get("items"))),
+                prompts::VERIFICATION_REMEDIATION_WAVE_TASK,
+            )
+            .await?;
+        evidence.implementation.push(serde_json::json!({
+            "kind": "verification-remediation",
+            "implementationWaveIndex": wave_index,
+            "dependencyIteration": dependency_iteration,
+            "verificationRemediationAttempt": *remediation_attempt,
+            "verificationRemediationInventory": remediation_inventory,
+            "result": remediation_wave,
+        }));
+        let unresolved =
+            support::non_accepted_outcomes(&support::outcomes_of(&remediation_wave));
+        if !unresolved.is_empty() {
+            support::record_repair_attempt(
+                &mut evidence.repair_attempts,
+                &format!("remediation-wave-{wave_index}-verification-{remediation_attempt}"),
+                "verification_remediation_unresolved",
+                &unresolved,
+                &remediation_wave,
+            );
+            return Ok(false);
+        }
+        let plan_id =
+            format!("post-remediation-verification-plan-{wave_index}-{remediation_attempt}");
+        let raw_plan = self
+            .reduce(
+                &plan_id,
+                serde_json::json!([
+                    self.task_universe,
+                    ready_implementation_items,
+                    support::array(remediation_inventory.get("items")),
+                    remediation_wave,
+                    evidence.implementation,
+                    evidence.verification
+                ]),
+                "reducer",
+                prompts::POST_REMEDIATION_VERIFICATION_PLAN_TASK,
+            )
+            .await?;
+        support::record_repair_attempt(
+            &mut evidence.repair_attempts,
+            &plan_id,
+            "post_remediation_verification_plan",
+            &support::array(remediation_inventory.get("items")),
+            &raw_plan,
+        );
+        let mut post_plan = contract.normalize_inventory(&raw_plan);
+        let mut shape_attempt = 1usize;
+        while !support::verification_inventory_ready(&post_plan)
+            && shape_attempt <= self.max_repair_iterations
+        {
+            let repair_id = format!(
+                "post-remediation-verification-plan-repair-{wave_index}-{remediation_attempt}-{shape_attempt}"
+            );
+            let issues = support::array(post_plan.get("unresolved_issues"));
+            let repair = self
+                .reduce(
+                    &repair_id,
+                    serde_json::json!([
+                        self.task_universe,
+                        support::array(remediation_inventory.get("items")),
+                        remediation_wave,
+                        post_plan
+                    ]),
+                    "reducer",
+                    prompts::POST_REMEDIATION_VERIFICATION_PLAN_REPAIR_TASK,
+                )
+                .await?;
+            support::record_repair_attempt(
+                &mut evidence.repair_attempts,
+                &repair_id,
+                "post_remediation_verification_plan_repair",
+                &issues,
+                &repair,
+            );
+            post_plan = contract.normalize_inventory(&repair);
+            shape_attempt += 1;
+        }
+        if !support::verification_inventory_ready(&post_plan)
+            || support::array(post_plan.get("items")).is_empty()
+        {
+            return Ok(false);
+        }
+        let post_items = support::verification_items(&contract, &post_plan);
+        *verification = self
+            .parallel(
+                &format!("verification-wave-{wave_index}-post-remediation-{remediation_attempt}"),
+                serde_json::json!(post_items),
+                serde_json::json!({
+                    "tier": "coder",
+                    "itemKind": "focused_verification",
+                    "task": prompts::POST_REMEDIATION_VERIFICATION_WAVE_TASK,
+                }),
+            )
+            .await?;
+        evidence.verification.push(serde_json::json!({
+            "kind": "post-remediation-verification",
+            "implementationWaveIndex": wave_index,
+            "dependencyIteration": dependency_iteration,
+            "verificationRemediationAttempt": *remediation_attempt,
+            "verificationPlan": { "items": post_items },
+            "result": verification,
+        }));
+        *remediation_attempt += 1;
+        Ok(true)
+    }
+}

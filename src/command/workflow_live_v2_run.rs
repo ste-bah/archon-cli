@@ -287,7 +287,21 @@ async fn execute_generated_v2_run(
         plan.task_universe.clone(),
         plan.script_args.clone(),
     );
-    let summary = match runner.run(&plan.harness_source).await {
+    // Decomposed-PRD runs execute the Rust lifecycle natively; the recorded
+    // scaffold source remains the hash/reuse identity. QuickJS interprets only
+    // LLM-authored scripts.
+    let run_result = if plan.task_universe.is_some() {
+        runner
+            .run_decomposed_lifecycle(
+                &plan.harness_source,
+                serde_json::to_value(&plan.governed_learning_context)
+                    .unwrap_or(serde_json::Value::Array(Vec::new())),
+            )
+            .await
+    } else {
+        runner.run(&plan.harness_source).await
+    };
+    let summary = match run_result {
         Ok(summary) => summary,
         Err(WorkflowError::ControlPaused(message)) => {
             return Ok(format!(

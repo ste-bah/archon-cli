@@ -279,6 +279,16 @@ include!("workflow_live_v2_script_helpers.rs");
 
 include!("workflow_live_v2_script_dry_run.rs");
 
+include!("workflow_live_v2_lifecycle.rs");
+
+include!("workflow_live_v2_lifecycle_waves.rs");
+
+include!("workflow_live_v2_lifecycle_impl.rs");
+
+include!("workflow_live_v2_lifecycle_verify.rs");
+
+include!("workflow_live_v2_lifecycle_review.rs");
+
 #[cfg(test)]
 #[path = "workflow_live_v2_script_tests.rs"]
 mod tests;

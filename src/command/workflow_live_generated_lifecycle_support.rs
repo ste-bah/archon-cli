@@ -217,7 +217,11 @@ pub(super) fn merge_inventory_repair(
         .or_else(|| repair.get("inventory").and_then(|inner| inner.get("items")))
         .or(data_items);
     repair_items.extend(array(direct));
-    for extra_key in ["repaired_items", "implementation_items", "verified_noop_items"] {
+    for extra_key in [
+        "repaired_items",
+        "implementation_items",
+        "verified_noop_items",
+    ] {
         repair_items.extend(array(data.and_then(|data| data.get(extra_key))));
         repair_items.extend(array(data_items.and_then(|items| items.get(extra_key))));
     }
@@ -290,10 +294,7 @@ pub(super) fn merge_inventory_repair(
             if let Some(existing_primary) = primary_key(&existing) {
                 merged.insert(existing_primary, combined.clone());
             }
-            for alias in item_keys(&existing)
-                .into_iter()
-                .chain(item_keys(&combined))
-            {
+            for alias in item_keys(&existing).into_iter().chain(item_keys(&combined)) {
                 merged.insert(alias, combined.clone());
             }
             continue;
@@ -360,10 +361,7 @@ pub(super) fn split_focused_verification_items(
                 Value::Array(vec![Value::String(check.clone())]),
             );
             if !present(clone.get("source_item_id").map(|v| &*v)) {
-                clone.insert(
-                    "source_item_id".to_string(),
-                    Value::String(base_id.clone()),
-                );
+                clone.insert("source_item_id".to_string(), Value::String(base_id.clone()));
             }
             clone.insert(
                 "split_from_item_id".to_string(),
@@ -376,7 +374,10 @@ pub(super) fn split_focused_verification_items(
 }
 
 /// JS `generatedContractVerificationItems`.
-pub(super) fn verification_items(contract: &LifecycleContract<'_>, inventory: &Value) -> Vec<Value> {
+pub(super) fn verification_items(
+    contract: &LifecycleContract<'_>,
+    inventory: &Value,
+) -> Vec<Value> {
     let items: Vec<Value> = array(inventory.get("items"))
         .iter()
         .map(|item| contract.normalize_item(item))
