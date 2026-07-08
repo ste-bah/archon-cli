@@ -6,6 +6,15 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+// Orchestration ports (FCDP follow-up #2): mechanical gauntlet + provenance chain +
+// model call. Byte-faithful re-implementations of scripts/fcdp/{gauntlet,provenance}.py
+// and the fable() model helper.
+pub mod fable;
+pub mod gauntlet;
+pub mod judge;
+pub mod orchestrator;
+pub mod provenance;
+
 // ── M1: Pack schema (FCDP v2 §1 + plan-v2 Move 3 P2b) ──────────────────────
 
 #[derive(Serialize, Deserialize, Debug)]

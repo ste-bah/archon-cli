@@ -1,0 +1,4 @@
+1. Locked terms are used consistently. VERDICT: NO
+2. No later passage contradicts an earlier one. Verdict: no
+3. Evidence characterization drifts between paragraphs — the answer is unclear.
+4. Two passages treat the same concept compatibly.

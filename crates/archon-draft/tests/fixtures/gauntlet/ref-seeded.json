@@ -1,0 +1,16 @@
+{
+ "defects": [
+  "G-B/D2: literal quoted span in pre-substitution draft (must enter via \u00abQnn\u00bb): ``as the very condition for the possibility of rational discou''",
+  "G-C: locus '(Heidegger 253)' does not trace to pack (memory locus?)",
+  "G-D: retired stem 'phantasmat-': 'e force lies in the phantasmatic register it opens'",
+  "G-D: gendered pronoun bound to 'the player': 'Heidegger 253). The player finds that his world is disclosed before he chooses it.\n\nGross '",
+  "G-D: explicit back-reference: 'As discussed above, the soul is best u'",
+  "G-D: 'faculty of X' instead of Greek term: 'etoric} 4), and the faculty of imagination completes what perc'",
+  "G-D/P8: banned phrase present: it is important to note"
+ ],
+ "advisories": [
+  "G-B: straight double-quote characters present \u2014 verify not quotation use",
+  "G-F: word count 121 vs target [220,340]"
+ ],
+ "pass": false
+}

@@ -1,0 +1,46 @@
+{
+ "battery_order": [
+  "E3",
+  "E4",
+  "E1",
+  "E2",
+  "E5"
+ ],
+ "defects": [
+  "GE/E4: 2) The quotation is deployed against its stated intended use, framing rather than illustrating. VERDICT: NO",
+  "GE/E2: 4. One UNCERTAIN item is asserted flatly as if confirmed. VERDICT: YES",
+  "GE/E5: no clean verdict extracted \u2014 fail-closed"
+ ],
+ "transcript": [
+  {
+   "item": "E3",
+   "question": "Does the passage assert anything with no warrant in the evidence bank or foundation text?",
+   "line": "1. The passage introduces no ungrounded assertion; every claim traces to the bank. VERDICT: NO",
+   "verdict": "NO"
+  },
+  {
+   "item": "E4",
+   "question": "Is each quotation used in a way consistent with its stated intended rhetorical use in the quote index?",
+   "line": "2) The quotation is deployed against its stated intended use, framing rather than illustrating. VERDICT: NO",
+   "verdict": "NO"
+  },
+  {
+   "item": "E1",
+   "question": "Is every claim of the foundation text present in the passage (none silently dropped)?",
+   "line": "**3.** All foundation claims are carried forward without loss. VERDICT: YES",
+   "verdict": "YES"
+  },
+  {
+   "item": "E2",
+   "question": "Does the passage alter any foundation claim's strength or modality beyond what its evidence grade licenses (e.g., asserting an UNCERTAIN item flatly)?",
+   "line": "4. One UNCERTAIN item is asserted flatly as if confirmed. VERDICT: YES",
+   "verdict": "YES"
+  },
+  {
+   "item": "E5",
+   "question": "Are all evidence items asserted at a strength matching their grade (AUTHOR-CONFIRMED flat; CONFIRMED with its measure; UNCERTAIN hedged or omitted)?",
+   "line": "5. Grades are respected throughout, though the reasoning here trails off without a clear ruling.",
+   "verdict": null
+  }
+ ]
+}

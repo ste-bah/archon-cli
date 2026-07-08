@@ -1,0 +1,10 @@
+{
+ "defects": [
+  "G-B: assigned quote Q1 unused in draft",
+  "G-B: assigned quote Q2 unused in draft"
+ ],
+ "advisories": [
+  "G-F: word count 29 vs target [220,340]"
+ ],
+ "pass": false
+}

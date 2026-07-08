@@ -1,0 +1,88 @@
+{
+ "meta": {
+  "section_id": "SLICE-TEST-rhetorical-ontology-mini",
+  "pack_version": "fixture-1",
+  "register": "ma-applications",
+  "created": "2026-07-07"
+ },
+ "p1_task": {
+  "section_identity": "Test slice: rhetorical ontology micro-section (2 movements)",
+  "insertion_point": "N/A (sandbox slice test)",
+  "target_words": [
+   220,
+   340
+  ],
+  "audience": "dissertation committee",
+  "latex_conventions": "quotes as ``...''; \\textit for Greek terms; no Unicode quotes"
+ },
+ "p2_style_target": {
+  "gate_config_path": "../fingerprints/ga-gate-locked-v2.json",
+  "register_name": "ma-applications"
+ },
+ "p2b_exemplars": [
+  {
+   "movement_type": "theoretical-exposition",
+   "source": "synthetic-test-exemplar",
+   "approved": true,
+   "text": "A useful distinction separates three cases of readiness. In the first case there is only bare capacity: a blank instrument that could in principle record a signal but currently records nothing at all. The second case adds a settled disposition: the instrument has been calibrated and now stands ready to measure, though it is not measuring at this moment. The third case is the exercise itself: the calibrated instrument actively taking a reading. The middle case is the pivot, because a settled readiness is already a kind of latent activity."
+  }
+ ],
+ "p3_terminology_locks": [
+  "hexis != habit != doxa — never conflate",
+  "ungendered prose; in-game subject = 'the player'",
+  "Greek faculty-names italic (\\textit{phantasia}, \\textit{doxa}, \\textit{orexis}); never 'faculty of X'",
+  "retired stem: 'phantasmatic' -> 'phantasmic'",
+  "no bold run-in heads; no explicit back-references; no 'supplies the canonical anchor'",
+  "missing source -> ******"
+ ],
+ "p8_negative_constraints": [
+  "no 'delve'",
+  "no 'tapestry'",
+  "no 'it is important to note'",
+  "no 'supplies the canonical anchor'"
+ ],
+ "p9_usage_statement": "The model contributes phrasing, structure, and analysis of pack-supplied evidence only; it may not introduce claims beyond the evidence bank, may not invent or recall citations, and every quotation enters by ID substitution only.",
+ "p4a_quote_index": [
+  {
+   "id": "Q1",
+   "source": "Aristotle, On The Soul (McKeon ed.)",
+   "locus": "656, 412a1, 20",
+   "description": "soul = substance as form of a natural body having life potentially",
+   "intended_use": "evidence satellite grounding the capacity/actuality claim"
+  },
+  {
+   "id": "Q2",
+   "source": "Gross, Heidegger and Rhetoric",
+   "locus": "p. 4",
+   "description": "pathos as condition of possibility for rational discourse",
+   "intended_use": "evidence satellite for the affect-grounds-logos claim"
+  }
+ ],
+ "p5_evidence": [
+  {
+   "id": "E1",
+   "grade": "AUTHOR-CONFIRMED",
+   "content": "This fixture reads Aristotle's first/second actuality distinction through the English-speaker example (child / silent bilingual / speaking bilingual)."
+  },
+  {
+   "id": "E2",
+   "grade": "CONFIRMED",
+   "content": "Heidegger's GA18 reading treats logos as grounded in pathos; Gross articulates this as affect being the condition for rational discourse."
+  },
+  {
+   "id": "E3",
+   "grade": "UNCERTAIN",
+   "content": "Possible link to Rickert's ambience claim — do not assert flatly."
+  }
+ ],
+ "p6_semantics": "Rhetorical ontology: being-moved (affectability) as ontological condition; first vs second actuality; soul as capacity-form, not identity.",
+ "p7_foundation": "Aristotle presents the soul as the form of a natural body having life potentially within it; the first actuality is a capacity for the second. Affectability grounds the possibility of discourse.",
+ "p4b_bank_path": "test-fixture-quotes.json",
+ "verification": {
+  "quotes_verified_at": "2026-07-07",
+  "verified_against": [
+   "synthetic test fixture (no source document)"
+  ],
+  "test_fixture": true
+ }
+}

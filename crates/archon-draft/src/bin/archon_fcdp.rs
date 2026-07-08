@@ -1,12 +1,17 @@
-//! archon-fcdp — CLI for the FCDP drafting-protocol gates.
+//! archon-fcdp — CLI for the FCDP drafting-protocol.
 //!
 //!   archon-fcdp measure <file...>                          # sentence axes + Lanham metrics JSON
 //!   archon-fcdp gp-validate <pack.json>                    # gate G-P (exit 1 on errors)
 //!   archon-fcdp substitute <draft> <pack.json> <out>       # «Qnn» substitution (exit 1 on unknown IDs)
 //!   archon-fcdp ga-gate <text> <gate-config.json> [--chapter]   # gate G-A (exit 1 on hard fail)
+//!   archon-fcdp run <pack.json> <workdir> [--model M] [--gate-config P]
+//!                                                          # full E2E: D1→D1.5→D2→gauntlet→R-loop
 //!
-//! Orchestration (stages D1/D1.5/D2, judge gates G-E/G-G, provenance, R-loop)
-//! lives in scripts/fcdp/ pending the `archon draft` subcommand wiring.
+//! `run` replaces the former scripts/fcdp/*.py orchestration (all ported to this crate).
+//! Model resolution: --model → $ARCHON_MODEL (stand-in for the archon config model until
+//! follow-up #1 wires the in-process session model) → default claude-opus-4-8. Requires
+//! $ANTHROPIC_API_KEY. STOP-AND-SURFACE is a valid terminal outcome (exit 0); only a
+//! run error exits non-zero.
 
 use archon_draft::*;
 use std::process::exit;
@@ -19,6 +24,13 @@ fn today() -> String {
             .expect("date");
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     })
+}
+
+fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
+    args.iter()
+        .position(|a| a == name)
+        .and_then(|i| args.get(i + 1))
+        .map(|s| s.as_str())
 }
 
 fn load_pack(path: &str) -> (Pack, QuoteBank) {
@@ -101,8 +113,66 @@ fn main() {
                 exit(1);
             }
         }
+        Some("run") => {
+            let pack_path = args.get(1).unwrap_or_else(|| {
+                eprintln!(
+                    "usage: archon-fcdp run <pack.json> <workdir> [--model M] [--gate-config P]"
+                );
+                exit(2)
+            });
+            let work_arg = args.get(2).unwrap_or_else(|| {
+                eprintln!(
+                    "usage: archon-fcdp run <pack.json> <workdir> [--model M] [--gate-config P]"
+                );
+                exit(2)
+            });
+            let work = std::path::Path::new(work_arg);
+            let (pack, bank) = load_pack(pack_path);
+
+            // gate config: --gate-config, else p2_style_target.gate_config_path relative to pack
+            let pack_dir = std::path::Path::new(pack_path).parent().unwrap();
+            let gc_path = match flag(&args, "--gate-config") {
+                Some(p) => std::path::PathBuf::from(p),
+                None => pack_dir.join(&pack.p2_style_target.gate_config_path),
+            };
+            let cfg: GateConfig = serde_json::from_str(
+                &std::fs::read_to_string(&gc_path)
+                    .unwrap_or_else(|e| panic!("read gate config {}: {e}", gc_path.display())),
+            )
+            .unwrap_or_else(|e| panic!("gate config parse: {e}"));
+
+            let config_model = std::env::var("ARCHON_MODEL").ok();
+            let model = fable::resolve_model(flag(&args, "--model"), config_model.as_deref());
+            // Auth (subscription OAuth or API key) resolved from env/credentials by archon-llm.
+            let fclient = fable::FableClient::from_env()
+                .unwrap_or_else(|e| panic!("model client init failed: {e}"));
+            eprintln!("archon-fcdp run: model={model} work={}", work.display());
+
+            let call = |p: &str, mt: u32| fclient.call(&model, p, mt);
+            match orchestrator::run(&call, &model, &pack, &bank, &cfg, work) {
+                Ok(o) => {
+                    let summary = serde_json::json!({
+                        "status": o.status,
+                        "cycles": o.cycles,
+                        "surface_to_user_in_skeleton": o.surface_to_user_in_skeleton,
+                        "chain_verified": o.chain_verified,
+                        "surfaced_defects": o.surfaced_defects,
+                        "final_words": o.final_draft.split_whitespace().count(),
+                    });
+                    let _ = std::fs::write(
+                        work.join("outcome.json"),
+                        serde_json::to_string_pretty(&summary).unwrap(),
+                    );
+                    println!("{}", serde_json::to_string_pretty(&summary).unwrap());
+                }
+                Err(e) => {
+                    eprintln!("RUN ERROR: {e}");
+                    exit(1);
+                }
+            }
+        }
         _ => {
-            eprintln!("usage: archon-fcdp measure|gp-validate|substitute|ga-gate ...");
+            eprintln!("usage: archon-fcdp measure|gp-validate|substitute|ga-gate|run ...");
             exit(2);
         }
     }
