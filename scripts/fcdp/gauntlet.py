@@ -93,7 +93,7 @@ if "******" in draft:
 GD = [
     (r"phantasmat", "retired stem 'phantasmat-'"),
     (r"\\textbf\{[^}]{2,40}\.\}", "bold run-in head"),
-    (r"\b(she|he|his|her|hers)\b[^.]{0,40}\bplayer\b|\bplayer\b[^.]{0,60}\b(she|he|his|her|hers)\b", "gendered pronoun bound to 'the player'"),
+    (r"\b(she|he|his|her|hers)\b(?!\s+\w+,)[^.]{0,40}\bplayer\b|\bplayer\b[^.]{0,60}\b(she|he|his|her|hers)\b(?!\s+\w+,)", "gendered pronoun bound to 'the player'"),
     (r"supplies the [a-z ]*anchor", "'supplies the ... anchor' pattern"),
     (r"\b[Aa]s (discussed|noted|mentioned) (above|earlier|previously)\b", "explicit back-reference"),
     (r"[“”‘’]", "Unicode quote character"),
