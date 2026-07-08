@@ -6,7 +6,7 @@ usage: final_cycle.py <workdir> <pack.json>
 import json, os, subprocess, sys, urllib.request
 from pathlib import Path
 
-work, pack_path = Path(sys.argv[1]), Path(sys.argv[2]).resolve()
+work, pack_path = Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve()
 sb = Path(__file__).parent
 pack = json.load(open(pack_path))
 chain = work / "provenance.jsonl"

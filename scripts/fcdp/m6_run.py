@@ -11,7 +11,7 @@ usage: m6_run.py <pack.json> <workdir>
 import json, os, re, subprocess, sys, urllib.request
 from pathlib import Path
 
-pack_path, work = Path(sys.argv[1]).resolve(), Path(sys.argv[2])
+pack_path, work = Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve()
 work.mkdir(parents=True, exist_ok=True)
 sb = Path(__file__).parent
 pack = json.load(open(pack_path))

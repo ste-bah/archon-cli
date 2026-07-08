@@ -6,7 +6,7 @@ usage: rcycle.py <workdir> <pack.json>
 import json, os, subprocess, sys, urllib.request
 from pathlib import Path
 
-work, pack_path = Path(sys.argv[1]), Path(sys.argv[2]).resolve()
+work, pack_path = Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve()
 cycle = int(sys.argv[3]) if len(sys.argv) > 3 else 1
 extra_defects = sys.argv[4].split("||") if len(sys.argv) > 4 else []
 sb = Path(__file__).parent
