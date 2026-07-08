@@ -1,0 +1,18 @@
+[package]
+name = "archon-draft"
+version = "0.1.0"
+edition = "2021"
+
+# FCDP (Fable Console Drafting Protocol) primitives — pack schema + G-P,
+# «Qnn» quote substitution, measurement over archon-lanham, two-tier G-A gate.
+# Validated in the standalone FCDP sandbox before promotion (docs/fcdp/).
+
+[dependencies]
+archon-lanham = { path = "../archon-lanham" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+
+[[bin]]
+name = "archon-fcdp"
+path = "src/bin/archon_fcdp.rs"
