@@ -13,7 +13,10 @@ use std::process::exit;
 
 fn today() -> String {
     std::env::var("FCDP_TODAY").unwrap_or_else(|_| {
-        let out = std::process::Command::new("date").arg("+%F").output().expect("date");
+        let out = std::process::Command::new("date")
+            .arg("+%F")
+            .output()
+            .expect("date");
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     })
 }
@@ -21,7 +24,10 @@ fn today() -> String {
 fn load_pack(path: &str) -> (Pack, QuoteBank) {
     let raw = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {path}: {e}"));
     let pack: Pack = serde_json::from_str(&raw).unwrap_or_else(|e| panic!("pack parse: {e}"));
-    let bank_path = std::path::Path::new(path).parent().unwrap().join(&pack.p4b_bank_path);
+    let bank_path = std::path::Path::new(path)
+        .parent()
+        .unwrap()
+        .join(&pack.p4b_bank_path);
     let braw = std::fs::read_to_string(&bank_path)
         .unwrap_or_else(|e| panic!("read bank {}: {e}", bank_path.display()));
     let bank: QuoteBank = serde_json::from_str(&braw).unwrap_or_else(|e| panic!("bank parse: {e}"));
@@ -51,8 +57,12 @@ fn main() {
                 eprintln!("ERROR {e}");
             }
             if errs.is_empty() {
-                println!("G-P PASS ({} quotes, {} evidence items, {} exemplars)",
-                    pack.p4a_quote_index.len(), pack.p5_evidence.len(), pack.p2b_exemplars.len());
+                println!(
+                    "G-P PASS ({} quotes, {} evidence items, {} exemplars)",
+                    pack.p4a_quote_index.len(),
+                    pack.p5_evidence.len(),
+                    pack.p2b_exemplars.len()
+                );
             } else {
                 println!("G-P FAIL — {} error(s)", errs.len());
                 exit(1);
@@ -67,10 +77,17 @@ fn main() {
                 eprintln!("UNUSED bank entries: {}", r.unused.join(", "));
             }
             if !r.unknown.is_empty() {
-                eprintln!("GATE FAIL — unknown quote IDs in draft: {}", r.unknown.join(", "));
+                eprintln!(
+                    "GATE FAIL — unknown quote IDs in draft: {}",
+                    r.unknown.join(", ")
+                );
                 exit(1);
             }
-            println!("OK — {} quotes substituted; {} bank entries unused", r.used.len(), r.unused.len());
+            println!(
+                "OK — {} quotes substituted; {} bank entries unused",
+                r.used.len(),
+                r.unused.len()
+            );
         }
         Some("ga-gate") => {
             let chapter = args.iter().any(|a| a == "--chapter");

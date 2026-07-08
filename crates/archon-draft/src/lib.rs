@@ -143,7 +143,10 @@ pub fn gp_validate(pack: &Pack, bank: &QuoteBank, today: &str) -> (Vec<String>, 
     }
     for ex in &pack.p2b_exemplars {
         if !ex.approved {
-            warns.push(format!("P2b exemplar ({}) not user-approved yet", ex.movement_type));
+            warns.push(format!(
+                "P2b exemplar ({}) not user-approved yet",
+                ex.movement_type
+            ));
         }
     }
     if pack.verification.quotes_verified_at != today {
@@ -194,7 +197,11 @@ pub fn substitute_quote_ids(draft: &str, bank: &QuoteBank) -> SubstitutionResult
             }
         })
         .into_owned();
-    let unused = bank.keys().filter(|k| !used.contains(*k)).cloned().collect();
+    let unused = bank
+        .keys()
+        .filter(|k| !used.contains(*k))
+        .cloned()
+        .collect();
     SubstitutionResult {
         output,
         used: used.into_iter().collect(),
@@ -243,14 +250,20 @@ pub fn ga_compare(metrics: &serde_json::Value, cfg: &GateConfig, chapter_scale: 
     for (name, spec) in &cfg.tier1_per_section {
         if let Some(v) = get(name) {
             if v < spec.band.0 || v > spec.band.1 {
-                hard.push(format!("T1 {name}: {v:.3} outside [{:.3},{:.3}]", spec.band.0, spec.band.1));
+                hard.push(format!(
+                    "T1 {name}: {v:.3} outside [{:.3},{:.3}]",
+                    spec.band.0, spec.band.1
+                ));
             }
         }
     }
     for (name, spec) in &cfg.tier2_chapter {
         if let Some(v) = get(name) {
             if v < spec.band.0 || v > spec.band.1 {
-                let msg = format!("T2 {name}: {v:.3} outside [{:.3},{:.3}]", spec.band.0, spec.band.1);
+                let msg = format!(
+                    "T2 {name}: {v:.3} outside [{:.3},{:.3}]",
+                    spec.band.0, spec.band.1
+                );
                 if chapter_scale {
                     hard.push(msg);
                 } else {
@@ -262,7 +275,10 @@ pub fn ga_compare(metrics: &serde_json::Value, cfg: &GateConfig, chapter_scale: 
     let mut label_failures = Vec::new();
     if let (Some(want), Some(got)) = (
         cfg.categorical_labels.as_object(),
-        metrics.get("lanham").and_then(|l| l.get("labels")).and_then(|l| l.as_object()),
+        metrics
+            .get("lanham")
+            .and_then(|l| l.get("labels"))
+            .and_then(|l| l.as_object()),
     ) {
         for (k, wv) in want {
             let gv = got.get(k).and_then(|v| v.as_str()).unwrap_or("");
@@ -285,7 +301,8 @@ pub fn ga_compare(metrics: &serde_json::Value, cfg: &GateConfig, chapter_scale: 
                 serde_json::Value::Object(o) => {
                     if let Some(acc) = o.get("accept").and_then(|a| a.as_array()) {
                         if !acc.iter().any(|a| a.as_str() == Some(gv)) {
-                            label_failures.push(format!("label {k}: got '{gv}', want one of {acc:?}"));
+                            label_failures
+                                .push(format!("label {k}: got '{gv}', want one of {acc:?}"));
                         }
                     }
                 }
@@ -302,7 +319,6 @@ pub fn ga_compare(metrics: &serde_json::Value, cfg: &GateConfig, chapter_scale: 
         pass,
     }
 }
-
 
 // ── measurement: sentence axes + full Lanham metrics (G-A's input) ─────────
 
@@ -331,7 +347,11 @@ pub fn strip_markup(raw: &str) -> String {
 /// (LanhamMetrics derives only Clone upstream, so fields are mapped by hand).
 pub fn measure_text(text: &str) -> serde_json::Value {
     let sents = split_sentences(text);
-    let lens: Vec<usize> = sents.iter().map(|s| tokenize(s).len()).filter(|&n| n > 0).collect();
+    let lens: Vec<usize> = sents
+        .iter()
+        .map(|s| tokenize(s).len())
+        .filter(|&n| n > 0)
+        .collect();
     let n = lens.len().max(1);
     let total: usize = lens.iter().sum();
     let m = full_analysis(text);
@@ -388,15 +408,30 @@ mod tests {
 
     fn bank() -> QuoteBank {
         let mut b = QuoteBank::new();
-        b.insert("Q1".into(), QuoteEntry { text: "``quoted words''".into(), cite: "(Gross 4)".into() });
-        b.insert("Q2".into(), QuoteEntry { text: "``other''".into(), cite: String::new() });
+        b.insert(
+            "Q1".into(),
+            QuoteEntry {
+                text: "``quoted words''".into(),
+                cite: "(Gross 4)".into(),
+            },
+        );
+        b.insert(
+            "Q2".into(),
+            QuoteEntry {
+                text: "``other''".into(),
+                cite: String::new(),
+            },
+        );
         b
     }
 
     #[test]
     fn substitute_modes() {
         let r = substitute_quote_ids("A «Q1+» B «Q2» C «Q1@» D", &bank());
-        assert_eq!(r.output, "A ``quoted words'' (Gross 4) B ``other'' C (Gross 4) D");
+        assert_eq!(
+            r.output,
+            "A ``quoted words'' (Gross 4) B ``other'' C (Gross 4) D"
+        );
         assert!(r.unknown.is_empty());
         assert!(r.unused.is_empty());
     }

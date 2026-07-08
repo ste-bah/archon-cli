@@ -1,38 +1,39 @@
 [
  {
   "source": "MA-veridissimilitude",
-  "words": 143,
-  "text": "An Ethos of Reality; or, A Persuasive Virtual Ecology Gnomes & Goblins is a human created perceptual world or a virtual simulacrum\u2014 Jean Baudrillard\u2019s notion of a representation which has no reference to an original in objective reality \u2014and this lack of a physical referent is of a two-fold nature: first, because it is not a virtual rendition of a real place or location it could be said to have no reference to an actual earthly place; and, secondly, the specific virtual tree you see in a VE, for example, has no actual physical referent in the physical space within which the user experiences the simulation. Because a VE is a computer simulation it is not bound by the physical laws of objective reality nor is it limited to earthly objects, entities, and places. So, while one of the common applications for this",
+  "words": 134,
+  "text": "Gnomes & Goblins is a human created perceptual world or a virtual simulacrum\u2014 Jean Baudrillard\u2019s notion of a representation which has no reference to an original in objective reality \u2014and this lack of a physical referent is of a two-fold nature: first, because it is not a virtual rendition of a real place or location it could be said to have no reference to an actual earthly place; and, secondly, the specific virtual tree you see in a VE, for example, has no actual physical referent in the physical space within which the user experiences the simulation. Because a VE is a computer simulation it is not bound by the physical laws of objective reality nor is it limited to earthly objects, entities, and places. So, while one of the common applications for this",
   "movement_type": "close-reading",
-  "approved": false
+  "approved": true,
+  "edit_note": "user removed leading subsection-title fragment ('An Ethos of Reality; or, A Persuasive Virtual Ecology') captured by the auto-splitter \u2014 not representative of prose voice"
  },
  {
   "source": "Virtual-Phantasmic",
   "words": 188,
   "text": "Arguing that virtual objects are digital objects that are \\textit{grounded} in computational processes which are \\textit{grounded} in physical computers, Chalmers attempts to explain the existence and ontological status of virtual objects in terms of the code, data structures, or digital objects that constitute them which in turn are explained by the computational process of the physical computer. However, while I agree with Chalmers\u2019 characterization of a digital object as a data structure which determines a virtual object\u2019s perceptible properties, there seems to be complications with Chalmers\u2019 identity claim. Firstly, his definition of a digital object could easily be applied to more traditional objects such as the icon for \\textit{Microsoft Word} and the program itself would also be qualified as such. Thus, his definition fails to capture the distinction between a virtual object experienced in VR versus other types of digital objects. Secondly, and more important, it seems that a digital object can exist without the virtual object, but a virtual object cannot exist without the digital object on which it depends. This state of affairs is our first clue that virtual objects and digital objects are not identical.",
   "movement_type": "theoretical-exposition",
-  "approved": false
+  "approved": true
  },
  {
   "source": "Virtual-Phantasmic",
   "words": 246,
   "text": "The digital object only depends on the computer which stores and reads it, whereas the virtual object ontologically depends on a particular digital object, the computer that renders it, and the HMD which mediates our experience of it. Even if the computer is turned off the digital object still exists in the computer\u2019s memory, but the rendered virtual object does not. While we might be able to open the program and observe the actual code or digital object as it is stored in the computer, the virtual object which arises from it cannot be perceived without the VR technology that mediates the final rendered output. Virtual objects are real objects insofar as they are images composed of light\u2014a massless object\u2014projected and mediated by the HMD. A specific virtual object, therefore, can only exist when the computer reads the digital object and actively renders it as a virtual object which is projected and mediated through the HMD; the existence of a digital object, on the other hand, needs only the computer in which it is stored. Furthermore, Chalmers\u2019 claim does not seem to adequately capture and explain our experience of virtual objects, and it is in regard to this aspect that his argument does not seem to hold up. When I dodge, say, a storm trooper\u2019s blaster fire headed my way, I am not responding to the data structure or digital object but the perceptual visual and spatial properties of the virtual object the digital object manifests.",
   "movement_type": "theoretical-exposition",
-  "approved": false
+  "approved": true
  },
  {
   "source": "Virtual-Phantasmic",
   "words": 200,
   "text": "An adept and experienced programmer fluent in the coding language may be able to look at the segment of code and understand that the object will be a lightsaber with such and such properties, but the experience of the virtually rendered object is in no way identical with the experience of observing the digital object on which it depends. Just because a virtual object covaries with\\footnote{For you cannot make a change in the virtual object without making a change in the digital object on which it depends.} and depends on the digital object does not necessitate that the two objects\u2014and, especially, our experience of them\u2014are identical. Even though the properties of the virtual object are related to the properties of the digital object, the virtual object has properties that the digital object does not: namely, the perceptible properties the user experiences when encountering a virtual thing. You cannot hear the crackling sound of the lightsaber as it moves through the air or see the slight halo of light that radiates from it like heat waves coming off a hot sidewalk by merely examining the digital object on which it depends. You must experience the virtual object in and of itself.",
   "movement_type": "close-reading",
-  "approved": false
+  "approved": true
  },
  {
   "source": "Virtual-Phantasmic",
   "words": 218,
   "text": "My distinction between a virtual object and the digital object on which it depends does not invalidate Chalmers\u2019 argument that virtual objects are real, but it does, I believe, offer us a more useful philosophical conception of such by allowing us to more fully pin down a virtual object\u2019s causal powers which affect the user. Accordingly, I would define a virtual object as the virtually rendered output of a digital object; a virtual property, then, is a perceptible property that is the virtually rendered output of a digital property; and, lastly, a virtual event is the perceptual experience of a virtually rendered digital event. Furthermore, this distinction is useful because it allows us to clarify and individuate between two different explanations for two different events. This individuation, therefore, more wholly captures how virtual objects, virtual properties, and virtual events ontologically depend on and are causally explained by their underlying digital objects, digital properties, and digital events, as well as causally explain our perceptual experience of a virtual event. \\hl{Having established the metaphysical grounds for the reality of virtual artifacts, I must now discuss my rhetorical ontological position. ***OR*** move to introduce Rhetorical Phantasia using a case study (Yosemite). ***OR*** establish my notion of rhetorical ecologies so that I can integrate the ontological implications of phantasia for rhetorical ecologies.}",
   "movement_type": "theoretical-exposition",
-  "approved": false
+  "approved": true
  },
  {
   "source": "Virtual-Phantasmic",
@@ -67,48 +68,48 @@
   "words": 192,
   "text": "Before moving forward, let us recap the primary points made thus far. The soul, as an intrinsic capacity of living beings which accounts for the various types of movement of which they are capable is what makes us what we are; and the primary characteristic of such is openness, the capability to move and be-moved, the inherent affectability found in all living things. \\textit{Phantasia} is a faculty of the soul that mediates direct perception of sensible things, enables mood formation, and enables \\textit{logos}: through which opinion formation is possible and which makes intelligible the potentialities afforded by our environment in terms of our for-the-sake-of-which. Both mood and opinion are movements originated by the soul in direct response to sensible objects and serve to attune us to our environment in a certain way. For if we come to the opinion that Aristotle's hazy figure in the distance is a bear or wolf, our orientation to that figure will be far different than if we opine that it is merely a tree. Either way, both our affectual and intellectual responses will reveal some possibilities for action while masking others by directly influencing our for-the-sake-of-which.",
   "movement_type": "transition-argument",
-  "approved": false
+  "approved": true
  },
  {
   "source": "Ontological-Violence",
   "words": 250,
   "text": "Now let's turn to the Irishman. Having never had any previous experience with snakes in his lifetime, hearing the sound for the first time will likely generate a mood of curiosity. This mood allows for various orientations towards his environment. He begins to look around for whatever creature or object has made this unidentifiable sound. On hearing the sound the second time more distinctly, let\u2019s say he comes to the opinion that it is some weird kind of beetle he has never encountered before. Thus, his curious mood persists and the path forward now affords the possibility for fascinating discovery. His attention may similarly be directed towards elements of this scene that were previously passed over such as the various trees or other flora and fauna populating the area. In this example, the same direct perception is experienced by each man, but their resulting mood and opinion vary dramatically. This suggests that the formation of both mood and opinion are environmentally and culturally conditioned by the respective rhetorical ecologies within which they have been \\textit{attuned}. In this case, our affective response (our mood) and our intellectual response (our opinion) are determined by having been fundamentally attuned by our experiences within certain environments over time. Mood and opinion are influenced by the backlog of past experiences within specific environments. Thus, in the moment, our mood and opinion are determined by our experiences of various environments in the past which conditions our experience of the current environmental situation we find ourselves in.",
   "movement_type": "close-reading",
-  "approved": false
+  "approved": true
  },
  {
   "source": "Ontological-Violence",
   "words": 161,
   "text": "A virtual environment is a computer-generated world, oftentimes interactive and consisting of scenes, landscapes, flora, fauna, and other objects. What needs to be emphasized here is that an effective virtual environment is, first and foremost, a \\textit{rhetorical ecology}. The persuasiveness of virtual environments depends on how it constructs and presents itself as an ecology: how it manifests the relations of the virtual objects and creatures to one another and their environment, and to the player as well. The ontological status of virtual environments and the objects and entities within it need not refer to any factual, objectively real object or environment; rather, VEs ability to immerse the players and exert rhetorical powers requires that the player be thrown into a persuasive situational reality: an ecological relationship of mutual affectability wherein the environment\u2014and the objects and entities which populate it\u2014appears to act on and respond to the player as much as the player is able to act on and respond to them.",
   "movement_type": "theoretical-exposition",
-  "approved": false
+  "approved": true
  },
  {
   "source": "Ontological-Violence",
   "words": 137,
   "text": "Because the virtual environment a player experiences, as a completed product, is essentially static and stable, all of the environmental affordances, all of the potentialities of action for the player within this virtual world are \\textit{always already} predetermined by the programmer(s) and the program. A specific virtual program will, therefore, technically allow only a specific number of actions and interactions to be made with a specific number of virtual objects and entities. Furthermore, because every virtual program has, at least implicitly, an ultimate operative goal or design in regard to the player, the task of the researcher analyzing such a virtual ecology is to make manifest the relations between the player, the virtual entities and objects that are encountered, and the VE within which the player exists and which orients them towards achieving the ultimate operative goal.",
   "movement_type": "theoretical-exposition",
-  "approved": false
+  "approved": true
  },
  {
   "source": "Ontological-Violence",
   "words": 149,
   "text": "Considering this, it is likely the player has come to feel \\textit{in-tune} in this virtual world, to feel as if they \\textit{fit}. Moreover, as the house in question is in a rather obscure location, it is highly likely that the player randomly happens upon it while searching for the various items and loot hidden throughout the world (\\textit{spatial involvement}). Their mood (\\textit{affective involvement}) may be one of curiosity leading them to explore this section of the map; it may be one of determination, if they are trying to discover hidden items or the various easter eggs strewn throughout the world. Indeed, part of what makes such a complex open world game like \\textit{RDR2} so appealing is the ability to search and discover. However, what one discovers might not always be something positive, and this element of surprise embedded in the \\textit{spatial dimension} amplifies the player's affective response (\\textit{affective dimension}).",
   "movement_type": "close-reading",
-  "approved": false
+  "approved": true
  },
  {
   "source": "Ontological-Violence",
   "words": 213,
   "text": "To help us break this down further, let\u2019s take Kyle mentioned above as one point of comparison and for the second a hypothetical young child with no concept of rape, sexual assault, or perhaps sex in and of itself. (Though I must note I highly discourage any parent allow their young children to play this game due to its adult content.) Both the child and Kyle are in the same situational circumstance and are exposed to the same stimuli: they are exploring the world and randomly happen on this event. To reiterate, while it is strongly implied that Arthur is raped in this event, there is nothing that definitively supports this thereby allowing for various interpretations. For the young child, it is possible that the metallic-like sounds would be understood as connoting the swamp man rifling through Arthur\u2019s pockets and satchel looking for things to steal which is supported by the fact that Sonny steals 1 dollar from Arthur. Lacking the cultural and contextual knowledge necessary to arrive at the opinion that Arthur is sexually assaulted, the child could viably opine that he was robbed. Given that the game\u2019s narrative and gameplay are centered on being a gang member who participates in various criminal activities, the narrative dimension allows for such an interpretation.",
   "movement_type": "close-reading",
-  "approved": false
+  "approved": true
  },
  {
   "source": "Ontological-Violence",
   "words": 159,
   "text": "By emplacing the player, as a participant, in a virtual rhetorical ecology which actualizes mutual affectability, or feedback, between player and world, a clever developer can leverage ambient rhetoric to reveal the world in a desired way, to reattune or transform the player\u2019s mode of being-in-the-world. That is, a virtual world or event can be rhetorically ontologically transformative only when it affects our for-the-sake-of-which, only when it immerses us in a rhetorical ecology which manifests our relationship to the virtual world not that of subject to depicted object but rather as existing within a relation of mutual affectability. What this particular event demonstrates is how a virtual world can produce\u2014perhaps by intentional design\u2014a transformation in a player\u2019s being-in-the-world by affecting mood and opinion through interaction with the game world. This is achieved by designing a virtual world that takes into account the fundamental nature by which we perceive, understand, and act; in other words, by hacking the human soul.",
   "movement_type": "transition-argument",
-  "approved": false
+  "approved": true
  }
 ]
