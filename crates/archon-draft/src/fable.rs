@@ -25,6 +25,26 @@ use serde_json::{json, Value};
 /// Local runs override to `claude-fable-5` via config/CLI (see `resolve_model`).
 pub const DEFAULT_MODEL: &str = "claude-opus-4-8";
 
+/// Absolute per-call `max_tokens` ceiling for the empty-output retry escalation.
+/// Adaptive thinking can occasionally consume a stage's whole budget and return
+/// NO visible text (`stop_reason=max_tokens`) — the Opus flake. `call` retries
+/// with a doubled budget so thinking leaves room for the answer; this caps how
+/// far it escalates (stage budgets are 8k–16k, so 32k is 2–4× headroom).
+pub const MAX_TOKEN_CEILING: u32 = 32_000;
+
+/// Decide the next `max_tokens` for an empty-output retry. Returns `Some(next)`
+/// ONLY when the empty was the thinking-ate-the-whole-budget case
+/// (`stop_reason=max_tokens`) and there is still headroom below
+/// [`MAX_TOKEN_CEILING`]; otherwise `None` (stop retrying — a genuinely empty
+/// answer or an unrelated stop reason must surface, never silently loop).
+pub fn escalate_budget(stop_reason: Option<&str>, budget: u32) -> Option<u32> {
+    if stop_reason == Some("max_tokens") && budget < MAX_TOKEN_CEILING {
+        Some(budget.saturating_mul(2).min(MAX_TOKEN_CEILING))
+    } else {
+        None
+    }
+}
+
 /// Central model-resolution seam: `--model` override → archon config model → default.
 ///
 /// `config_model` is the value the archon system persists (`LlmConfig.model`, home of the
@@ -106,9 +126,59 @@ impl FableClient {
         Ok(Self { client, rt })
     }
 
+    /// One model call, with a token-budget retry that recovers the whole
+    /// adaptive-thinking-ate-the-budget failure family. Delegates to
+    /// [`Self::call_once`]; whenever the response stopped at `max_tokens` — either
+    /// [`FableError::Empty`] (thinking consumed everything, no visible answer: the
+    /// run-aborting Opus flake) OR an `Ok` whose output was cut off mid-answer
+    /// (e.g. a judge verdict truncated before its block → phantom fail-closed) —
+    /// it re-issues the SAME call with a doubled `max_tokens` (see
+    /// [`escalate_budget`]) until the answer completes or the budget reaches
+    /// [`MAX_TOKEN_CEILING`]. The request SHAPE is unchanged (adaptive thinking +
+    /// effort:medium — the validated contract); only the ceiling grows, giving
+    /// thinking room to leave a complete answer. This pipeline's outputs are short
+    /// (≈450–650-word sections, terse judge verdicts), so a `max_tokens` stop is a
+    /// reliable signal of over-thinking, not a legitimately long completion.
+    /// A genuine empty (non-`max_tokens` stop, or empty at the ceiling) still surfaces.
+    pub fn call(
+        &self,
+        model: &str,
+        prompt: &str,
+        max_tokens: u32,
+    ) -> Result<FableResponse, FableError> {
+        let mut budget = max_tokens;
+        loop {
+            match self.call_once(model, prompt, budget) {
+                // Ok but truncated at the token ceiling → escalate for a COMPLETE
+                // answer (the judge-truncation → fail-closed case). If there is no
+                // headroom left, return the best (truncated) answer we got.
+                Ok(resp) if resp.stop_reason.as_deref() == Some("max_tokens") => {
+                    match escalate_budget(resp.stop_reason.as_deref(), budget) {
+                        Some(next) => {
+                            budget = next;
+                            continue;
+                        }
+                        None => return Ok(resp),
+                    }
+                }
+                Ok(resp) => return Ok(resp),
+                Err(FableError::Empty { stop_reason }) => {
+                    match escalate_budget(stop_reason.as_deref(), budget) {
+                        Some(next) => {
+                            budget = next;
+                            continue;
+                        }
+                        None => return Err(FableError::Empty { stop_reason }),
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
     /// One model call. Concatenates TextDelta content (thinking deltas ignored, matching
     /// Python's `b.get("text","")`); hard-fails on empty output.
-    pub fn call(
+    fn call_once(
         &self,
         model: &str,
         prompt: &str,
@@ -173,6 +243,29 @@ mod tests {
         assert_eq!(resolve_model(None, Some("m-cfg")), "m-cfg");
         assert_eq!(resolve_model(None, None), DEFAULT_MODEL);
         assert_eq!(resolve_model(None, None), "claude-opus-4-8");
+    }
+
+    #[test]
+    fn escalate_budget_doubles_on_max_tokens_until_ceiling() {
+        // Thinking ate the budget → double, capped at the ceiling.
+        assert_eq!(escalate_budget(Some("max_tokens"), 8_000), Some(16_000));
+        assert_eq!(escalate_budget(Some("max_tokens"), 9_000), Some(18_000));
+        assert_eq!(escalate_budget(Some("max_tokens"), 16_000), Some(32_000));
+        // Cap: doubling would overshoot → clamp to MAX_TOKEN_CEILING.
+        assert_eq!(
+            escalate_budget(Some("max_tokens"), 20_000),
+            Some(MAX_TOKEN_CEILING)
+        );
+        // At/above the ceiling → stop (no infinite escalation).
+        assert_eq!(escalate_budget(Some("max_tokens"), MAX_TOKEN_CEILING), None);
+    }
+
+    #[test]
+    fn escalate_budget_does_not_retry_non_budget_empties() {
+        // Empty with a non-max_tokens stop reason is a genuine empty — never retry.
+        assert_eq!(escalate_budget(Some("end_turn"), 8_000), None);
+        assert_eq!(escalate_budget(Some("stop_sequence"), 8_000), None);
+        assert_eq!(escalate_budget(None, 8_000), None);
     }
 
     #[test]
