@@ -45,6 +45,29 @@ pub fn escalate_budget(stop_reason: Option<&str>, budget: u32) -> Option<u32> {
     }
 }
 
+/// Operator diagnostic emitted (to stderr) when the retry escalation exhausts
+/// [`MAX_TOKEN_CEILING`] and still can't get a complete answer. `empty` = the
+/// model returned NO text (the run will abort); `false` = truncated-but-non-empty
+/// (best-effort output is returned and may fail a downstream gate). Pure so the
+/// wording — the signal that lets the author tell a budget wall from a real
+/// content defect — is unit-pinned. See `fable::call`.
+pub fn ceiling_hit_diagnostic(empty: bool) -> String {
+    if empty {
+        format!(
+            "fcdp: CEILING HIT — empty model output at the {MAX_TOKEN_CEILING}-token ceiling; \
+             adaptive thinking exhausted the budget with no answer. This stage wants more tokens \
+             than allotted — raise MAX_TOKEN_CEILING, or simplify/split the stage. Aborting."
+        )
+    } else {
+        format!(
+            "fcdp: CEILING HIT — model output still truncated at the {MAX_TOKEN_CEILING}-token \
+             ceiling (stop_reason=max_tokens). This passage wanted more tokens than allotted; a \
+             downstream defect or fail-closed verdict here may be a BUDGET WALL, not a content \
+             flaw. Returning the truncated output."
+        )
+    }
+}
+
 /// Central model-resolution seam: `--model` override → archon config model → default.
 ///
 /// `config_model` is the value the archon system persists (`LlmConfig.model`, home of the
@@ -151,24 +174,38 @@ impl FableClient {
             match self.call_once(model, prompt, budget) {
                 // Ok but truncated at the token ceiling → escalate for a COMPLETE
                 // answer (the judge-truncation → fail-closed case). If there is no
-                // headroom left, return the best (truncated) answer we got.
+                // headroom left, warn (budget wall vs. content defect) and return
+                // the best (truncated) answer we got.
                 Ok(resp) if resp.stop_reason.as_deref() == Some("max_tokens") => {
                     match escalate_budget(resp.stop_reason.as_deref(), budget) {
                         Some(next) => {
+                            eprintln!(
+                                "fcdp: output truncated at {budget} tokens — retrying at {next}"
+                            );
                             budget = next;
                             continue;
                         }
-                        None => return Ok(resp),
+                        None => {
+                            eprintln!("{}", ceiling_hit_diagnostic(false));
+                            return Ok(resp);
+                        }
                     }
                 }
                 Ok(resp) => return Ok(resp),
                 Err(FableError::Empty { stop_reason }) => {
                     match escalate_budget(stop_reason.as_deref(), budget) {
                         Some(next) => {
+                            eprintln!(
+                                "fcdp: empty output at {budget} tokens (thinking consumed the \
+                                 budget) — retrying at {next}"
+                            );
                             budget = next;
                             continue;
                         }
-                        None => return Err(FableError::Empty { stop_reason }),
+                        None => {
+                            eprintln!("{}", ceiling_hit_diagnostic(true));
+                            return Err(FableError::Empty { stop_reason });
+                        }
                     }
                 }
                 Err(e) => return Err(e),
@@ -258,6 +295,28 @@ mod tests {
         );
         // At/above the ceiling → stop (no infinite escalation).
         assert_eq!(escalate_budget(Some("max_tokens"), MAX_TOKEN_CEILING), None);
+    }
+
+    #[test]
+    fn ceiling_hit_diagnostic_distinguishes_budget_wall_from_content_defect() {
+        // Both messages name the ceiling and the "budget wall" framing so the
+        // author can tell a token limit from a real content defect.
+        let empty = ceiling_hit_diagnostic(true);
+        assert!(empty.contains("CEILING HIT"));
+        assert!(
+            empty.contains("32000"),
+            "must name the ceiling value: {empty}"
+        );
+        assert!(empty.contains("Aborting"), "empty case aborts: {empty}");
+
+        let truncated = ceiling_hit_diagnostic(false);
+        assert!(truncated.contains("CEILING HIT"));
+        assert!(truncated.contains("32000"));
+        assert!(
+            truncated.contains("BUDGET WALL"),
+            "truncated case must flag a possible budget wall: {truncated}"
+        );
+        assert_ne!(empty, truncated, "the two cases must read differently");
     }
 
     #[test]
