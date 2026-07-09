@@ -1,13 +1,19 @@
 //! Judge gates G-E (foundation fidelity) and G-G (consistency).
 //!
-//! Byte-faithful port of `scripts/fcdp/judge.py`. The model call runs through
-//! [`crate::fable`]; everything else here is deterministic and golden-tested:
+//! Ported from `scripts/fcdp/judge.py`. The model call runs through [`crate::fable`];
+//! everything else here is deterministic and golden-tested:
 //!   * seed = `int(sha256(section_id)[:8], 16)`;
 //!   * a reproducible LCG Fisher-Yates battery shuffle (no RNG lib → identical on every
 //!     platform) — validated against the real M6 orders (GE `[E3,E4,E1,E2,E5]`,
 //!     GG `[G3,G4,G2,G1]`);
 //!   * block-based, fail-closed verdict extraction (anything not a clean YES/NO counts
 //!     toward the defect side).
+//!
+//! `extract` is HARDENED beyond the Python original (see its rustdoc) to cut phantom
+//! fail-closed defects from judge format drift — a relaxed VERDICT separator, broadened
+//! item headers, and a bare-terminal-YES/NO fallback. The prompt is also tightened with
+//! a worked example. All changes only ever rescue an UNAMBIGUOUS verdict; a genuinely
+//! murky answer still fail-closes, and the golden extraction fixtures parse identically.
 
 use crate::fable::{self, FableError};
 use crate::{EvidenceGrade, Pack};
@@ -145,7 +151,7 @@ fn build_prompt(ctx: &str, draft: &str, battery: &[BatteryItem]) -> String {
         .collect::<Vec<_>>()
         .join("\n");
     format!(
-        "You are evaluating a passage of scholarly prose against reference material. Answer each numbered question independently.\n\nREFERENCE MATERIAL:\n{ctx}\n\nPASSAGE UNDER EVALUATION:\n{draft}\n\nQUESTIONS:\n{items}\n\nFor EACH question, in order: give one sentence of reasoning first, THEN end the line with exactly \"VERDICT: YES\" or \"VERDICT: NO\". Answer every question. Do not summarize at the end."
+        "You are evaluating a passage of scholarly prose against reference material. Answer each numbered question independently.\n\nREFERENCE MATERIAL:\n{ctx}\n\nPASSAGE UNDER EVALUATION:\n{draft}\n\nQUESTIONS:\n{items}\n\nANSWER FORMAT — follow it EXACTLY. For each question, on ITS OWN line: the plain number and a period, one sentence of reasoning, then the literal verdict marker. Use this exact shape, and nothing else:\n\n1. <one sentence of reasoning>. VERDICT: YES\n2. <one sentence of reasoning>. VERDICT: NO\n\nRULES: start each line with the plain number and a period (\"1.\", \"2.\", …) — no bold, no headings, no bullets. End each line with exactly \"VERDICT: YES\" or \"VERDICT: NO\" — the word VERDICT, a colon, then YES or NO. Answer every question, in order. Do not write a preamble or a closing summary."
     )
 }
 
@@ -177,23 +183,56 @@ fn normalize_ws(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Conservative fallback for a block whose verdict wasn't written as `VERDICT: …`:
+/// if the block's LAST non-empty line, stripped to bare letters, is exactly `YES`
+/// or `NO`, take it (the model put the verdict on its own line). Deliberately
+/// narrow — a lone terminal YES/NO is unambiguously the verdict, whereas
+/// "…, so no." (letters `SONO`) or "…unclear." stays fail-closed. Never turns a
+/// murky answer into a pass, so the fail-closed safety property is preserved.
+fn terminal_verdict(block: &str) -> Option<String> {
+    let last = block.lines().rev().find(|l| !l.trim().is_empty())?;
+    let letters: String = last
+        .chars()
+        .filter(|c| c.is_ascii_alphabetic())
+        .collect::<String>()
+        .to_uppercase();
+    match letters.as_str() {
+        "YES" => Some("YES".to_string()),
+        "NO" => Some("NO".to_string()),
+        _ => None,
+    }
+}
+
 /// Block-based, fail-closed verdict extraction. Returns (defects, transcript).
-/// Ported verbatim from judge.py: item N's block runs from its "N." / "N)" header
-/// (optionally `**`-prefixed, multiline) to the next present header; a block with no
-/// clean `VERDICT: YES|NO` is a fail-closed defect; a clean verdict equal to the item's
-/// `bad_on` is a defect.
+/// Item N's block runs from its header ("N." / "N)" / "N:", optionally
+/// bold/bulleted, multiline) to the next present header. A block with no verdict
+/// is a fail-closed defect; a verdict equal to the item's `bad_on` is a defect.
+/// HARDENED beyond the original Python port to cut phantom fail-closed defects
+/// (judge format drift): a relaxed VERDICT separator, broadened item headers, and
+/// a bare-terminal-YES/NO fallback ([`terminal_verdict`]). Every change only ever
+/// RESCUES an unambiguous verdict — genuinely murky answers still fail-closed.
 pub fn extract(
     gate: Gate,
     battery: &[BatteryItem],
     text: &str,
 ) -> (Vec<String>, Vec<TranscriptItem>) {
-    let verdict_re = regex::Regex::new(r"(?i)VERDICT:?\s*\**\s*(YES|NO)").unwrap();
+    // Hardened vs. the Python port (still fail-closed): tolerate a dash / en-dash
+    // / em-dash (or nothing) where a colon is expected, so "VERDICT — YES" reads.
+    let verdict_re =
+        regex::Regex::new(r"(?i)VERDICT\s*[:\u{2013}\u{2014}-]?\s*\**\s*(YES|NO)").unwrap();
     let g = gate.as_str();
 
     // byte offsets of each item header, or None
     let starts: Vec<Option<usize>> = (0..battery.len())
         .map(|i| {
-            let re = regex::Regex::new(&format!(r"(?m)^\s*(?:\*\*)?{}[.)]", i + 1)).unwrap();
+            // Hardened: tolerate a leading markdown bullet/heading marker, bold
+            // around the number, and a ":" terminator — so "**1.**", "- 1.",
+            // "### 1", and "1:" all register as item headers.
+            let re = regex::Regex::new(&format!(
+                r"(?m)^\s*(?:[#>*\-]\s+)?(?:\*\*)?{}(?:\*\*)?\s*[.):]",
+                i + 1
+            ))
+            .unwrap();
             re.find(text).map(|m| m.start())
         })
         .collect();
@@ -211,7 +250,10 @@ pub fn extract(
                 text[s..nxt].to_string()
             }
         };
-        let verdict = verdict_re.captures(&block).map(|c| c[1].to_uppercase());
+        let verdict = verdict_re
+            .captures(&block)
+            .map(|c| c[1].to_uppercase())
+            .or_else(|| terminal_verdict(&block));
         // match = " ".join(block.split())[:300] if block else None
         let match_str: Option<String> = if block.is_empty() {
             None
@@ -319,5 +361,38 @@ mod tests {
         assert_eq!(ge, vec!["E3", "E4", "E1", "E2", "E5"]);
         let (gg, _) = battery_order(Gate::GG, sid);
         assert_eq!(gg, vec!["G3", "G4", "G2", "G1"]);
+    }
+
+    #[test]
+    fn extract_hardened_rescues_format_drift_but_keeps_fail_closed() {
+        // Base (unshuffled) GE battery: header N maps to item N-1 (E1..E5).
+        let battery = base_battery(Gate::GE);
+        // 1: dash separator; 2: plain colon (control); 3: bold header + bare
+        // terminal verdict on its own line; 4: genuinely unclear (must fail-closed);
+        // 5: no space after the colon (control).
+        let text = "1. Reasoning. VERDICT \u{2014} YES\n\
+                    2. Reasoning. VERDICT: NO\n\
+                    **3.** Reasoning here.\n\
+                    NO\n\
+                    4. Reasoning trails off, genuinely unclear here.\n\
+                    5. Reasoning. VERDICT:YES\n";
+        let (_defects, transcript) = extract(Gate::GE, &battery, text);
+        let verdicts: Vec<Option<&str>> = transcript.iter().map(|t| t.verdict.as_deref()).collect();
+        assert_eq!(
+            verdicts,
+            vec![Some("YES"), Some("NO"), Some("NO"), None, Some("YES")],
+            "dash-verdict (1) + bare-terminal (3) rescued; unclear (4) stays fail-closed"
+        );
+    }
+
+    #[test]
+    fn terminal_verdict_only_fires_on_a_lone_yes_no() {
+        assert_eq!(terminal_verdict("blah\nYES").as_deref(), Some("YES"));
+        assert_eq!(terminal_verdict("x\n**NO**").as_deref(), Some("NO"));
+        assert_eq!(terminal_verdict(": yes").as_deref(), Some("YES"));
+        // Reasoning that merely contains yes/no must NOT be mistaken for a verdict.
+        assert_eq!(terminal_verdict("reasoning, so no.").as_deref(), None);
+        assert_eq!(terminal_verdict("the answer is unclear.").as_deref(), None);
+        assert_eq!(terminal_verdict("").as_deref(), None);
     }
 }
