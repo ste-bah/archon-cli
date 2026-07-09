@@ -58,8 +58,10 @@ pub(crate) async fn handle_draft_command(
     let chain_path = workdir.join("provenance.jsonl");
     // Quote (id, verbatim text) pairs for post-run corpus-source linkage — captured before the
     // bank moves into the blocking task.
-    let quote_texts: Vec<(String, String)> =
-        bank.iter().map(|(id, q)| (id.clone(), q.text.clone())).collect();
+    let quote_texts: Vec<(String, String)> = bank
+        .iter()
+        .map(|(id, q)| (id.clone(), q.text.clone()))
+        .collect();
 
     let outcome = tokio::task::spawn_blocking(
         move || -> std::result::Result<orchestrator::Outcome, String> {
@@ -301,7 +303,8 @@ fn link_cited_sources(
     // resolution just returns nothing.
     let _ = archon_docs::schema::ensure_doc_schema(db);
 
-    let mut cited: std::collections::BTreeMap<String, CitedSource> = std::collections::BTreeMap::new();
+    let mut cited: std::collections::BTreeMap<String, CitedSource> =
+        std::collections::BTreeMap::new();
     // Distinct corpus nodes to cite. Always the source document (guarantees the trace reaches an
     // ingested `source_document`), plus the exact chunk(s) each quote occupies — the trace then
     // also bridges chunk → page → document via the ingestion synthetic edges, so the lineage is
@@ -332,15 +335,17 @@ fn link_cited_sources(
         for f in &loc.fragments {
             cite_targets.insert(f.chunk_id.clone());
         }
-        let entry = cited.entry(loc.document_id.clone()).or_insert_with(|| CitedSource {
-            document_id: loc.document_id.clone(),
-            source_path: loc.source_path.clone(),
-            page_start: loc.page_start,
-            page_end: loc.page_end,
-            similarity: loc.similarity,
-            exact,
-            quote_ids: Vec::new(),
-        });
+        let entry = cited
+            .entry(loc.document_id.clone())
+            .or_insert_with(|| CitedSource {
+                document_id: loc.document_id.clone(),
+                source_path: loc.source_path.clone(),
+                page_start: loc.page_start,
+                page_end: loc.page_end,
+                similarity: loc.similarity,
+                exact,
+                quote_ids: Vec::new(),
+            });
         entry.quote_ids.push(qid.clone());
         entry.page_start = entry.page_start.min(loc.page_start);
         entry.page_end = entry.page_end.max(loc.page_end);

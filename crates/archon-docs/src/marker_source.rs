@@ -176,11 +176,17 @@ fn overrides_from_policy(pdf: &PdfPolicy) -> DeviceOverrides {
 /// (e.g. a jetsam/OOM-killer SIGKILL — also advance the ladder; a clean torch OOM never gets to
 /// print its signature when the OS kills the process) from any other error.
 enum SidecarError {
-    Oom { device: String },
-    Killed { device: String },
+    Oom {
+        device: String,
+    },
+    Killed {
+        device: String,
+    },
     /// The per-attempt wall clock elapsed (a wedged sidecar — MPS driver deadlock, surya spin).
     /// Also advances the ladder: a hung GPU convert gets retried on CPU.
-    TimedOut { device: String },
+    TimedOut {
+        device: String,
+    },
     Other(DocsError),
 }
 
@@ -249,14 +255,15 @@ impl MarkerSource {
             MarkerSource::Http { url, device } => {
                 // The server reads the PDF from the local filesystem (same host), so the path
                 // must be absolute regardless of archon's cwd.
-                let abs = tokio::fs::canonicalize(pdf_path).await.map_err(|e| {
-                    DocsError::Storage {
-                        message: format!(
-                            "canonicalize pdf path for marker http failed ({}): {e}",
-                            pdf_path.display()
-                        ),
-                    }
-                })?;
+                let abs =
+                    tokio::fs::canonicalize(pdf_path)
+                        .await
+                        .map_err(|e| DocsError::Storage {
+                            message: format!(
+                                "canonicalize pdf path for marker http failed ({}): {e}",
+                                pdf_path.display()
+                            ),
+                        })?;
                 let body = serde_json::json!({
                     "pdf_path": abs.to_string_lossy(),
                     "device": device.as_deref().unwrap_or("auto"),
@@ -653,8 +660,12 @@ echo '{"block_type":"Document","children":[{"block_type":"Page","id":"/page/0/Pa
         assert!(health_body_ready(
             r#"{"status":"ok","device":"cuda","models_loaded":true}"#
         ));
-        assert!(!health_body_ready(r#"{"status":"ok","models_loaded":false}"#));
-        assert!(!health_body_ready(r#"{"status":"loading","models_loaded":true}"#));
+        assert!(!health_body_ready(
+            r#"{"status":"ok","models_loaded":false}"#
+        ));
+        assert!(!health_body_ready(
+            r#"{"status":"loading","models_loaded":true}"#
+        ));
         assert!(!health_body_ready("not json"));
         assert!(!health_body_ready(r#"{"status":"ok"}"#));
     }

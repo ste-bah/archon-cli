@@ -105,7 +105,12 @@ pub async fn handle_docs_command(action: DocsAction) -> Result<()> {
 
 /// V-4: locate a quote in the corpus and report its source document, page(s), and bbox(es) so the
 /// citation can be verified against the source (and a PDF highlight drawn).
-async fn handle_verify_quote(quote: &str, doc: Option<&str>, limit: usize, json: bool) -> Result<()> {
+async fn handle_verify_quote(
+    quote: &str,
+    doc: Option<&str>,
+    limit: usize,
+    json: bool,
+) -> Result<()> {
     use archon_docs::quote_verify::{self, MatchKind};
 
     let db = open_db()?;
@@ -144,11 +149,17 @@ async fn handle_verify_quote(quote: &str, doc: Option<&str>, limit: usize, json:
     println!(
         "\nQUOTE VERIFICATION — \"{}{}\"",
         shown,
-        if quote.chars().count() > 70 { "…" } else { "" }
+        if quote.chars().count() > 70 {
+            "…"
+        } else {
+            ""
+        }
     );
     if locations.is_empty() {
         println!("  ✗ NOT FOUND — no corpus document contains this quote (above the match floor).");
-        println!("    (A real quote not found here may be from a source not in the corpus, or misquoted.)");
+        println!(
+            "    (A real quote not found here may be from a source not in the corpus, or misquoted.)"
+        );
         return Ok(());
     }
     for (i, l) in locations.iter().enumerate() {
@@ -182,7 +193,10 @@ async fn handle_verify_quote(quote: &str, doc: Option<&str>, limit: usize, json:
             .fragments
             .iter()
             .map(|f| match f.bbox {
-                Some(b) => format!("p{} [{:.0},{:.0},{:.0},{:.0}]", f.page, b[0], b[1], b[2], b[3]),
+                Some(b) => format!(
+                    "p{} [{:.0},{:.0},{:.0},{:.0}]",
+                    f.page, b[0], b[1], b[2], b[3]
+                ),
                 None => format!("p{} (no bbox)", f.page),
             })
             .collect();
@@ -257,14 +271,14 @@ async fn handle_verify_integrity(doc: Option<&str>, json: bool) -> Result<()> {
         }
         let mut matched: Option<String> = None;
         for a in &sealed {
-            if provenance_chunks::verify_chunks_root(&db, &s.document_id, &a.provenance_record_id)? {
+            if provenance_chunks::verify_chunks_root(&db, &s.document_id, &a.provenance_record_id)?
+            {
                 matched = Some(a.provenance_record_id.clone());
                 break;
             }
         }
         let status = if matched.is_some() { "pass" } else { "fail" };
-        let record_id =
-            matched.or_else(|| sealed.first().map(|a| a.provenance_record_id.clone()));
+        let record_id = matched.or_else(|| sealed.first().map(|a| a.provenance_record_id.clone()));
         reports.push(Report {
             document_id: s.document_id.clone(),
             source: name,
@@ -295,15 +309,24 @@ async fn handle_verify_integrity(doc: Option<&str>, json: bool) -> Result<()> {
         let (mark, label) = match r.status {
             "pass" => {
                 pass += 1;
-                ("✓", "INTACT — recomputed root matches the sealed record".to_string())
+                (
+                    "✓",
+                    "INTACT — recomputed root matches the sealed record".to_string(),
+                )
             }
             "fail" => {
                 fail += 1;
-                ("✗", "MISMATCH — chunks changed since sealing (integrity violation)".to_string())
+                (
+                    "✗",
+                    "MISMATCH — chunks changed since sealing (integrity violation)".to_string(),
+                )
             }
             _ => {
                 none += 1;
-                ("!", "NO INTEGRITY RECORD — ingested before chunks_root sealing".to_string())
+                (
+                    "!",
+                    "NO INTEGRITY RECORD — ingested before chunks_root sealing".to_string(),
+                )
             }
         };
         println!("\n  {mark} {label}");
@@ -376,7 +399,10 @@ fn print_enrichment_plan(
             verdict(plan.aspect_scanned),
             plan.coverage_scanned.map(verdict).unwrap_or("?")
         );
-        println!("     active verdict; the '{}' detector is currently in force.", plan.detector);
+        println!(
+            "     active verdict; the '{}' detector is currently in force.",
+            plan.detector
+        );
     }
     if plan.is_scanned_book && plan.has_text_layer {
         println!("  Classification: SCANNED BOOK (text layer present)");
@@ -476,7 +502,9 @@ fn resolve_jobs(jobs: &str, yes: bool) -> Result<u32> {
         return Ok(recommended);
     }
     let n: u32 = trimmed.parse().map_err(|_| {
-        anyhow::anyhow!("expected an empty line (accept {recommended}) or a number 1..=16 (got: {trimmed})")
+        anyhow::anyhow!(
+            "expected an empty line (accept {recommended}) or a number 1..=16 (got: {trimmed})"
+        )
     })?;
     Ok(n.clamp(1, 16))
 }
