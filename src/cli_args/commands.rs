@@ -105,6 +105,19 @@ pub enum Commands {
         #[arg(long)]
         detach: bool,
     },
+    /// Draft a dissertation section with the FCDP protocol (D1 → D1.5 → D2 → gauntlet → R-loop)
+    Draft {
+        /// Path to the context pack JSON
+        pack: std::path::PathBuf,
+        /// Working directory for artifacts + provenance chain
+        workdir: std::path::PathBuf,
+        /// Model override (default: configured Anthropic Opus, else claude-opus-4-8)
+        #[arg(long)]
+        model: Option<String>,
+        /// Gate config JSON (default: the pack's p2_style_target.gate_config_path)
+        #[arg(long)]
+        gate_config: Option<std::path::PathBuf>,
+    },
     /// Manage governed learning behaviour
     Behaviour {
         #[command(subcommand)]

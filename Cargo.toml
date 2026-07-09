@@ -164,6 +164,7 @@ archon-world-model = { path = "crates/archon-world-model" }
 archon-reasoning-quality = { path = "crates/archon-reasoning-quality" }
 archon-workflow = { path = "crates/archon-workflow" }
 archon-lanham = { path = "crates/archon-lanham" }
+archon-draft = { path = "crates/archon-draft" }
 reqwest.workspace = true
 openssl.workspace = true
 chrono.workspace = true

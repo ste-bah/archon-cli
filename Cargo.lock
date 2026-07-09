@@ -323,6 +323,7 @@ dependencies = [
  "archon-constellation",
  "archon-core",
  "archon-docs",
+ "archon-draft",
  "archon-knowledge",
  "archon-lanham",
  "archon-leann",
