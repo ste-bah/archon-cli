@@ -127,6 +127,9 @@ pub(super) fn normalize_generated_inventory_value_with_repo(
     let mut issues = Vec::new();
     let mut items = Vec::new();
     let universe = ContractTaskUniverse::from_authoritative(task_universe);
+    if raw_items.is_empty() {
+        issues.push(empty_inventory_issue(&universe));
+    }
     for raw in raw_items {
         let normalized =
             normalize_generated_item_value_with_repo(&raw, task_universe, target_repository_root);
@@ -138,6 +141,16 @@ pub(super) fn normalize_generated_inventory_value_with_repo(
     }
     issues.extend(generated_inventory_graph_issues(&items, &universe));
     NormalizedGeneratedInventory { items, issues }
+}
+
+fn empty_inventory_issue(universe: &ContractTaskUniverse) -> GeneratedContractIssue {
+    GeneratedContractIssue {
+        kind: GeneratedContractIssueKind::InventoryShapeRepair,
+        field: "items".to_string(),
+        message: "generated implementation inventory did not contain schedulable items".to_string(),
+        item_id: None,
+        canonical_task_ids: universe.canonical.iter().cloned().collect(),
+    }
 }
 
 pub(super) fn normalize_generated_item_value(
@@ -217,8 +230,6 @@ pub(super) fn normalize_generated_item_value_with_repo(
             "focused_tests",
             "focusedTests",
             "verification",
-            "verification_requirements",
-            "verificationRequirements",
             "verification_shape",
             "verificationShape",
             "command",
@@ -234,6 +245,16 @@ pub(super) fn normalize_generated_item_value_with_repo(
         &mut object,
         "focused_verification",
     );
+    if !value_present(object.get("focused_verification")) {
+        append_alias_values(
+            &mut object,
+            "focused_verification",
+            raw_values_from_aliases(
+                value,
+                &["verification_requirements", "verificationRequirements"],
+            ),
+        );
+    }
     copy_nested_required_evidence_array(
         value,
         &[
@@ -274,39 +295,9 @@ pub(super) fn normalize_generated_item_value_with_repo(
         &mut object,
         "expected_evidence",
     );
-    copy_alias_array(
-        value,
-        &[
-            "artifact_requirements",
-            "artifactRequirements",
-            "artifacts",
-            "required_artifacts",
-            "requiredArtifacts",
-            "expected_artifacts",
-            "expectedArtifacts",
-            "artifact_checks",
-            "artifactChecks",
-            "project_artifact_requirements",
-            "projectArtifactRequirements",
-        ],
-        &mut object,
-        "artifact_requirements",
-    );
-    copy_nested_required_evidence_array(
-        value,
-        &[
-            "artifact_paths",
-            "artifactPaths",
-            "artifacts",
-            "expected_artifacts",
-            "expectedArtifacts",
-            "artifact_checks",
-            "artifactChecks",
-        ],
-        &mut object,
-        "artifact_requirements",
-    );
-    copy_nested_object_array(
+    copy_artifact_requirement_aliases(value, &mut object);
+    copy_nested_artifact_requirement_aliases(value, &mut object);
+    copy_nested_object_artifact_aliases(
         value,
         &["manual_fixture_retry", "manualFixtureRetry"],
         &[
@@ -318,7 +309,6 @@ pub(super) fn normalize_generated_item_value_with_repo(
             "artifactPaths",
         ],
         &mut object,
-        "artifact_requirements",
     );
     normalize_retry_context(value, &mut object);
     copy_alias_array(
@@ -482,6 +472,8 @@ pub(super) fn lifecycle_inventory_source_items(
 include!("workflow_live_generated_contract_validation.rs");
 
 include!("workflow_live_generated_contract_helpers.rs");
+
+include!("workflow_live_generated_contract_artifacts.rs");
 
 include!("workflow_live_generated_contract_retry.rs");
 

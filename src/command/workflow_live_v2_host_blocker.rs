@@ -20,19 +20,7 @@ fn final_report_blocker_context(
         "call_id".to_string(),
         serde_json::Value::String(execution.call.id.clone()),
     );
-    for (source_key, digest_key) in [
-        ("unresolvedAfterRemediation", "unresolved_outcomes"),
-        ("unresolved", "unresolved_outcomes"),
-        ("failedImplementationOutcomes", "failed_outcomes"),
-    ] {
-        if blocker.contains_key(digest_key) {
-            continue;
-        }
-        let digest = outcome_digest(inputs.get(source_key));
-        if !digest.is_empty() {
-            blocker.insert(digest_key.to_string(), serde_json::Value::Array(digest));
-        }
-    }
+    insert_outcome_digests(inputs, &mut blocker);
     if let Some(inventory) = inputs.get("unscheduledFollowupInventory")
         && !inventory.is_null()
     {
@@ -51,11 +39,35 @@ fn final_report_blocker_context(
     (blocker.len() > 1).then_some(serde_json::Value::Object(blocker))
 }
 
+fn insert_outcome_digests(
+    inputs: &serde_json::Value,
+    blocker: &mut serde_json::Map<String, serde_json::Value>,
+) {
+    for (source_key, digest_key) in [
+        ("unresolvedAfterRemediation", "unresolved_outcomes"),
+        ("unresolved", "unresolved_outcomes"),
+        ("failedImplementationOutcomes", "failed_outcomes"),
+        ("reviewVerification", "failed_outcomes"),
+        ("verification", "failed_outcomes"),
+    ] {
+        if blocker.contains_key(digest_key) {
+            continue;
+        }
+        let digest = outcome_digest(inputs.get(source_key));
+        if !digest.is_empty() {
+            blocker.insert(digest_key.to_string(), serde_json::Value::Array(digest));
+        }
+    }
+}
+
 fn outcome_digest(value: Option<&serde_json::Value>) -> Vec<serde_json::Value> {
-    value
-        .and_then(serde_json::Value::as_array)
-        .map(|outcomes| outcomes.iter().map(outcome_digest_entry).collect())
-        .unwrap_or_default()
+    match value {
+        Some(serde_json::Value::Array(outcomes)) => {
+            outcomes.iter().map(outcome_digest_entry).collect()
+        }
+        Some(value @ serde_json::Value::Object(_)) => vec![outcome_digest_entry(value)],
+        _ => Vec::new(),
+    }
 }
 
 fn outcome_digest_entry(outcome: &serde_json::Value) -> serde_json::Value {

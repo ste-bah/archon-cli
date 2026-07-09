@@ -78,12 +78,11 @@ fn canonical_working_dir(working_dir: &Path) -> PathBuf {
 
 fn local_target_root() -> PathBuf {
     let temp = std::env::temp_dir();
-    let root = if temp.starts_with("/Volumes/") {
-        PathBuf::from("/tmp")
-    } else {
-        temp
-    };
-    root.join("archon-cargo-target")
+    local_target_root_for_temp(&temp)
+}
+
+fn local_target_root_for_temp(temp: &Path) -> PathBuf {
+    temp.join("archon-cargo-target")
 }
 
 fn stable_path_hash(path: &Path) -> String {
@@ -146,6 +145,15 @@ mod tests {
         assert_ne!(
             stable_path_hash(path),
             stable_path_hash(Path::new("/Volumes/Externalwork/other"))
+        );
+    }
+
+    #[test]
+    fn local_target_root_respects_configured_temp_root() {
+        let temp = Path::new("/Volumes/Externalwork/archon-cli/tmp");
+        assert_eq!(
+            local_target_root_for_temp(temp),
+            Path::new("/Volumes/Externalwork/archon-cli/tmp/archon-cargo-target")
         );
     }
 

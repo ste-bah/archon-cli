@@ -65,6 +65,14 @@
             target_files_for_branch(Some(&repo_root), &call, &branch).expect("artifact ownership");
 
         assert!(targets.is_empty());
+        let write_items =
+            write_items_for_branches(Some(&repo_root), &call, &[branch]).expect("write items");
+        assert!(write_items[0].artifact_only);
+        let plan = WorkflowV2WritePlanner::new(temp.path())
+            .plan(&write_items)
+            .expect("artifact-only write plan");
+        assert_eq!(plan.waves.len(), 1);
+        assert!(plan.waves[0].assignments[0].owned_targets.is_empty());
     }
 
     #[test]

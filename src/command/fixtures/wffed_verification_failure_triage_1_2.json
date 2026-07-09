@@ -1,0 +1,52 @@
+{
+  "data": {
+    "do_not_mark_complete": true,
+    "implementation_failures": [],
+    "retry_items": [
+      {
+        "canonical_task_ids": [
+          "TASK-TDL-010"
+        ],
+        "classification": "retryable_verification_shape_issue",
+        "evidence": [
+          "TASK-TDL-010 artifact contract lists metadata.json, validation.json, manifest.json, ohlcv.jsonl, raw/response, raw/request.json, raw/headers.redacted.json, and raw/provider-notes.md.",
+          "Registry records include corresponding T010 path fields such as metadata_path, validation_path, manifest_path, normalized_path, raw_path, raw_request_path, raw_response_path, redacted_headers_path, provider_notes_path, and dataset_path.",
+          "Multiple retry outcomes accepted T010-focused registry artifact checks using the task-aligned field set."
+        ],
+        "failure_kind": "semantic",
+        "item_id": "verification-wave-1-1-VERIFY-TDL-010-003-project-registry-artifact-contract-check-7",
+        "reason": "Verifier required artifact fields not specified by TASK-TDL-010: processed_path, features_path, labels_path, quality_report_path, and contract_path.",
+        "recommended_retry": "Re-run the project registry artifact contract verifier with TASK-TDL-010 path requirements: dataset_path, manifest_path, metadata_path, normalized_path, validation_path, raw_path, raw_request_path, raw_response_path, redacted_headers_path, and provider_notes_path; do not require later-task feature/label/quality/contract fields for T010."
+      },
+      {
+        "canonical_task_ids": [
+          "TASK-TDL-010"
+        ],
+        "classification": "retry_resolved_verification_execution_issue",
+        "evidence": [
+          "Retry wave reported cargo test -p archon-trading data_store_tests -- --nocapture exited 0 with 37 passed, 0 failed and named migration/artifact/fail-closed coverage."
+        ],
+        "failure_kind": "execution",
+        "item_id": "verification-wave-1-VERIFY-TDL-010-001-data-store-registry-tests-check-1..3",
+        "reason": "Initial failures have null evidence and no actionable stderr/stdout; retry wave produced concrete accepted evidence for the same focused cargo test.",
+        "recommended_retry": "No write remediation; reduce as superseded by accepted retry evidence or rerun once only if the workflow requires a fresh current command."
+      },
+      {
+        "canonical_task_ids": [
+          "TASK-TDL-010"
+        ],
+        "classification": "retry_resolved_verification_execution_issue",
+        "evidence": [
+          "Retry wave reported cargo test trading_data_prd_commands_parse -- --nocapture exited 0 with canonical 1 passed, 0 failed and covered data list --json, data export, and export-ohlcv alias."
+        ],
+        "failure_kind": "execution",
+        "item_id": "verification-wave-1-VERIFY-TDL-010-002-cli-prd-parse-tests-check-1",
+        "reason": "Initial failure has null evidence and no actionable stderr/stdout; retry wave produced concrete accepted evidence for the same CLI parse test.",
+        "recommended_retry": "No write remediation; reduce as superseded by accepted retry evidence or rerun once only if the workflow requires a fresh current command."
+      }
+    ],
+    "terminal_blockers": []
+  },
+  "status": "accepted",
+  "summary": "Classified failed focused verification outcomes for TASK-TDL-010. No actionable implementation write remediation is supported by the evidence. The remaining semantic failure is a verification-shape issue: it required processed/features/labels/quality/contract paths that are not part of TASK-TDL-010's stated dataset artifact contract, while later retries verified the TASK-TDL-010 contract paths. Earlier execution failures lacked concrete stderr/stdout and were already retry-resolved by focused reruns."
+}

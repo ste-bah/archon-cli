@@ -8,6 +8,7 @@ use archon_tui::events::{AgentActivityRole, AgentActivityStatus, AgentActivityUp
 use archon_workflow::{
     ProviderTier, StageKind, StageRunRequest, WorkflowV2AgentClient, WorkflowV2AgentError,
     WorkflowV2AgentRequest, WorkflowV2HostMethod, WorkflowV2WriteMode,
+    v2::project_artifact_contract::artifact_requirement_paths_from_field,
 };
 
 use super::super::workflow_live_retry;
@@ -340,27 +341,14 @@ fn resolved_project_artifact_paths(
     let Some(root) = request.project_artifacts.project_root.as_deref() else {
         return Vec::new();
     };
-    artifact_requirement_values(object.get("artifact_requirements"))
+    object
+        .get("artifact_requirements")
+        .map(artifact_requirement_paths_from_field)
+        .unwrap_or_default()
         .into_iter()
         .filter_map(|raw| resolved_project_artifact_path(root, &raw))
         .map(|(raw, absolute)| serde_json::json!({ "path": raw, "absolute_path": absolute }))
         .collect()
-}
-
-fn artifact_requirement_values(value: Option<&serde_json::Value>) -> Vec<String> {
-    match value {
-        Some(serde_json::Value::Array(items)) => items
-            .iter()
-            .flat_map(|item| artifact_requirement_values(Some(item)))
-            .collect(),
-        Some(serde_json::Value::String(path)) => vec![path.clone()],
-        Some(serde_json::Value::Object(object)) => ["path", "artifact_path", "artifactPath"]
-            .iter()
-            .filter_map(|key| object.get(*key).and_then(serde_json::Value::as_str))
-            .map(str::to_string)
-            .collect(),
-        _ => Vec::new(),
-    }
 }
 
 fn resolved_project_artifact_path(root: &str, raw: &str) -> Option<(String, String)> {

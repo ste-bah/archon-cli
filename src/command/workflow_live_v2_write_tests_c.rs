@@ -66,6 +66,46 @@ fn write_fanout_failed_branch_returns_remediation_data_for_script() {
 }
 
 #[test]
+fn write_fanout_outcome_gap_evidence_uses_schema_kind() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let call = WorkflowV2HostCall {
+        id: "impl".to_string(),
+        method: WorkflowV2HostMethod::Fanout,
+        write_mode: Some(WorkflowV2WriteMode::Coordinated),
+        options: WorkflowV2HostOptions::default(),
+    };
+    let plan = WorkflowV2WritePlanner::new(temp.path())
+        .plan(&[WorkflowV2WriteItem::new(
+            "impl-T001",
+            WorkflowV2WriteMode::Coordinated,
+            vec!["src/lib.rs".to_string()],
+        )])
+        .expect("write plan");
+    let mut branch_result = WorkflowV2Result {
+        status: WorkflowV2Status::NeedsReview,
+        summary: "branch needs follow-up".to_string(),
+        data: serde_json::json!({
+            "item_id": "impl-T001",
+            "canonical_task_ids": ["TASK-001"]
+        }),
+        ..WorkflowV2Result::default()
+    };
+    branch_result.residual_gaps.push(WorkflowV2ResidualGap {
+        id: "missing-evidence".to_string(),
+        description: "branch did not provide concrete evidence".to_string(),
+        severity: Some("review".to_string()),
+    });
+
+    let result = result_from_write_fanout(&call, vec![branch_result], &plan, 1, None);
+    let evidence = result.data["outcomes"][0]["evidence"].clone();
+    let parsed: Vec<WorkflowV2Evidence> = serde_json::from_value(evidence).expect("evidence schema");
+
+    assert!(parsed.iter().any(|item| {
+        item.kind == WorkflowV2EvidenceKind::Review && item.summary.contains("missing-evidence")
+    }));
+}
+
+#[test]
 fn write_branch_validation_error_becomes_branch_error_data() {
     let result = write_branch_validation_error_result(
         "impl-T001",

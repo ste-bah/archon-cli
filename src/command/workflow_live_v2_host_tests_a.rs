@@ -4,8 +4,8 @@ use archon_workflow::{
     WorkflowV2CallExecution, WorkflowV2CallRecord, WorkflowV2CommandKind, WorkflowV2CommandRecord,
     WorkflowV2CommandStatus, WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2HostCall,
     WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2Result, WorkflowV2ResultStore,
-    WorkflowV2Status, WorkflowV2TaskCompletionEvidence, WorkflowV2TaskCompletionEvidenceKind,
-    WorkflowV2TaskCoverage, WorkflowV2TaskCoverageStatus,
+    WorkflowV2ResidualGap, WorkflowV2Status, WorkflowV2TaskCompletionEvidence,
+    WorkflowV2TaskCompletionEvidenceKind, WorkflowV2TaskCoverage, WorkflowV2TaskCoverageStatus,
 };
 
 use super::workflow_live_task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};

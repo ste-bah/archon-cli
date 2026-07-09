@@ -10,6 +10,7 @@ pub mod host_api;
 pub mod implementation_inspection;
 pub mod prd_intake;
 mod project_artifact_completion;
+pub mod project_artifact_contract;
 mod project_artifact_prompt;
 pub mod project_artifact_results;
 pub mod project_artifacts;

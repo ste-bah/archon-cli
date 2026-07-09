@@ -241,96 +241,154 @@ fn concrete_evidence_from_branch_result(result: &WorkflowV2Result) -> Vec<serde_
         WorkflowV2Status::Accepted | WorkflowV2Status::Noop
     );
     let mut evidence = Vec::new();
-    evidence.extend(
-        result
-            .evidence
-            .iter()
-            .filter(|item| {
-                !accepted_or_noop
-                    || matches!(
-                        item.kind,
-                        WorkflowV2EvidenceKind::Implementation | WorkflowV2EvidenceKind::Test
-                    )
-            })
-            .map(|item| {
-                serde_json::json!({
-                    "kind": item.kind,
-                    "summary": item.summary.clone(),
-                    "source": item.source.clone(),
-                })
-            }),
-    );
-    evidence.extend(
-        result
-            .commands_run
-            .iter()
-            .filter(|command| {
-                !accepted_or_noop || command.status == WorkflowV2CommandStatus::Succeeded
-            })
-            .map(|command| {
-                serde_json::json!({
-                    "kind": "command",
-                    "command": command.command.clone(),
-                    "status": command.status,
-                    "exit_code": command.exit_code,
-                    "output_summary": command.output_summary.clone(),
-                })
-            }),
-    );
-    evidence.extend(result.files_changed.iter().map(|file| {
-        serde_json::json!({
-            "kind": "file_changed",
-            "path": file.path.clone(),
-            "purpose": file.purpose.clone(),
+    evidence.extend(branch_evidence_records(result, accepted_or_noop));
+    evidence.extend(branch_command_records(result, accepted_or_noop));
+    evidence.extend(branch_file_records(result));
+    evidence.extend(branch_artifact_records(result));
+    evidence.extend(branch_data_evidence_refs(result));
+    evidence.extend(branch_task_coverage_records(result, accepted_or_noop));
+    evidence.extend(branch_residual_gap_records(result, accepted_or_noop));
+    evidence
+}
+
+fn branch_evidence_records(
+    result: &WorkflowV2Result,
+    accepted_or_noop: bool,
+) -> Vec<serde_json::Value> {
+    result
+        .evidence
+        .iter()
+        .filter(|item| {
+            !accepted_or_noop
+                || matches!(
+                    item.kind,
+                    WorkflowV2EvidenceKind::Implementation | WorkflowV2EvidenceKind::Test
+                )
         })
-    }));
-    evidence.extend(result.artifacts.iter().map(|artifact| {
-        serde_json::json!({
-            "kind": "artifact",
-            "id": artifact.id.clone(),
-            "path": artifact.path.clone(),
-            "description": artifact.description.clone(),
-        })
-    }));
-    evidence.extend(
-        evidence_refs_from_generated_value(&result.data)
-            .into_iter()
-            .map(|reference| {
-                serde_json::json!({
-                    "kind": "evidence_ref",
-                    "summary": reference,
-                })
-            }),
-    );
-    for coverage in &result.task_coverage {
-        if accepted_or_noop
-            && !matches!(
-                coverage.status,
-                WorkflowV2TaskCoverageStatus::Accepted | WorkflowV2TaskCoverageStatus::Noop
-            )
-        {
-            continue;
-        }
-        evidence.extend(coverage.evidence.iter().map(|item| {
+        .map(|item| {
             serde_json::json!({
                 "kind": item.kind,
                 "summary": item.summary.clone(),
                 "source": item.source.clone(),
-                "task_id": coverage.task_id.clone(),
             })
-        }));
-    }
-    if !accepted_or_noop {
-        evidence.extend(result.residual_gaps.iter().map(|gap| {
+        })
+        .collect()
+}
+
+fn branch_command_records(
+    result: &WorkflowV2Result,
+    accepted_or_noop: bool,
+) -> Vec<serde_json::Value> {
+    result
+        .commands_run
+        .iter()
+        .filter(|command| {
+            !accepted_or_noop || command.status == WorkflowV2CommandStatus::Succeeded
+        })
+        .map(|command| {
             serde_json::json!({
-                "kind": "residual_gap",
+                "kind": "command",
+                "command": command.command.clone(),
+                "status": command.status,
+                "exit_code": command.exit_code,
+                "output_summary": command.output_summary.clone(),
+            })
+        })
+        .collect()
+}
+
+fn branch_file_records(result: &WorkflowV2Result) -> Vec<serde_json::Value> {
+    result
+        .files_changed
+        .iter()
+        .map(|file| {
+            serde_json::json!({
+                "kind": "file_changed",
+                "path": file.path.clone(),
+                "purpose": file.purpose.clone(),
+            })
+        })
+        .collect()
+}
+
+fn branch_artifact_records(result: &WorkflowV2Result) -> Vec<serde_json::Value> {
+    result
+        .artifacts
+        .iter()
+        .map(|artifact| {
+            serde_json::json!({
+                "kind": "artifact",
+                "id": artifact.id.clone(),
+                "path": artifact.path.clone(),
+                "description": artifact.description.clone(),
+            })
+        })
+        .collect()
+}
+
+fn branch_data_evidence_refs(result: &WorkflowV2Result) -> Vec<serde_json::Value> {
+    evidence_refs_from_generated_value(&result.data)
+        .into_iter()
+        .map(|reference| {
+            serde_json::json!({
+                "kind": "evidence_ref",
+                "summary": reference,
+            })
+        })
+        .collect()
+}
+
+fn branch_task_coverage_records(
+    result: &WorkflowV2Result,
+    accepted_or_noop: bool,
+) -> Vec<serde_json::Value> {
+    result
+        .task_coverage
+        .iter()
+        .filter(|coverage| task_coverage_counts_as_evidence(coverage, accepted_or_noop))
+        .flat_map(|coverage| {
+            coverage.evidence.iter().map(|item| {
+                serde_json::json!({
+                    "kind": item.kind,
+                    "summary": item.summary.clone(),
+                    "source": item.source.clone(),
+                    "task_id": coverage.task_id.clone(),
+                })
+            })
+        })
+        .collect()
+}
+
+fn task_coverage_counts_as_evidence(
+    coverage: &WorkflowV2TaskCoverage,
+    accepted_or_noop: bool,
+) -> bool {
+    !accepted_or_noop
+        || matches!(
+            coverage.status,
+            WorkflowV2TaskCoverageStatus::Accepted | WorkflowV2TaskCoverageStatus::Noop
+        )
+}
+
+fn branch_residual_gap_records(
+    result: &WorkflowV2Result,
+    accepted_or_noop: bool,
+) -> Vec<serde_json::Value> {
+    if accepted_or_noop {
+        return Vec::new();
+    }
+    result
+        .residual_gaps
+        .iter()
+        .map(|gap| {
+            serde_json::json!({
+                "kind": "review",
+                "summary": format!("residual gap {}: {}", gap.id, gap.description),
                 "id": gap.id.clone(),
-                "description": gap.description.clone(),
                 "severity": gap.severity.clone(),
             })
-        }));
-    }
-    evidence
+        })
+        .collect()
 }
 
 fn string_array_from_data(value: Option<&serde_json::Value>) -> Vec<String> {

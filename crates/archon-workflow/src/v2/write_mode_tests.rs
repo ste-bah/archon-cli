@@ -102,3 +102,34 @@ fn target_with_internal_whitespace_is_rejected() {
         WorkflowV2WriteSafetyError::UnsafeTarget { .. }
     ));
 }
+
+#[test]
+fn empty_write_ownership_still_requires_explicit_artifact_only() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let error = WorkflowV2WritePlanner::new(temp.path())
+        .plan(&[WorkflowV2WriteItem::new(
+            "impl-empty",
+            WorkflowV2WriteMode::Worktree,
+            Vec::new(),
+        )])
+        .expect_err("plain empty ownership must fail");
+
+    assert!(matches!(
+        error,
+        WorkflowV2WriteSafetyError::MissingOwnership(_)
+    ));
+}
+
+#[test]
+fn artifact_only_write_item_can_plan_without_repo_targets() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let plan = WorkflowV2WritePlanner::new(temp.path())
+        .plan(&[WorkflowV2WriteItem::artifact_only(
+            "artifact-remediation",
+            WorkflowV2WriteMode::Worktree,
+        )])
+        .expect("artifact-only plan");
+
+    assert_eq!(plan.waves.len(), 1);
+    assert!(plan.waves[0].assignments[0].owned_targets.is_empty());
+}

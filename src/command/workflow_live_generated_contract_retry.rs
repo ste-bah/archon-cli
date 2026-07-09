@@ -8,7 +8,16 @@ fn normalize_retry_context(
     );
     commands.extend(raw_values_from_aliases(
         value,
-        &["retry_command", "retryCommand", "retry_commands", "retryCommands"],
+        &[
+            "retry_command",
+            "retryCommand",
+            "retry_commands",
+            "retryCommands",
+            "recommended_retry",
+            "recommendedRetry",
+            "recommended_retries",
+            "recommendedRetries",
+        ],
     ));
     commands.extend(nested_alias_values(
         value,
@@ -41,6 +50,12 @@ fn normalize_retry_context(
         value,
         &["acceptance_rule", "acceptanceRule"],
     ));
+    if expected.is_empty() {
+        expected.extend(raw_values_from_aliases(
+            value,
+            &["recommended_retry", "recommendedRetry"],
+        ));
+    }
     expected.extend(nested_alias_values(
         value,
         &completion_evidence_roots(),
@@ -57,7 +72,7 @@ fn normalize_retry_context(
         &completion_evidence_roots(),
         &["artifact_paths", "artifactPaths"],
     );
-    append_alias_values(object, "artifact_requirements", artifacts);
+    append_artifact_requirement_values(object, artifacts, false);
     if !object.contains_key("source_item_id")
         && let Some(source_item_id) =
             first_string(value, &["source_failed_item_id", "sourceFailedItemId"])
@@ -165,8 +180,8 @@ fn value_at_path<'a>(
 }
 
 fn push_inventory_root_items(root: &serde_json::Value, out: &mut Vec<serde_json::Value>) {
-    push_array(root.get("items"), out);
-    push_array(root.get("inventory").and_then(|v| v.get("items")), out);
+    push_item_collection(root.get("items"), out);
+    push_item_collection(root.get("inventory").and_then(|v| v.get("items")), out);
     push_array(root.get("repaired_items"), out);
     push_array(root.get("implementation_items"), out);
     push_array(root.get("verified_noop_items"), out);
@@ -174,6 +189,38 @@ fn push_inventory_root_items(root: &serde_json::Value, out: &mut Vec<serde_json:
         push_array(items.get("repaired_items"), out);
         push_array(items.get("implementation_items"), out);
         push_array(items.get("verified_noop_items"), out);
+    }
+}
+
+fn push_item_collection(value: Option<&serde_json::Value>, out: &mut Vec<serde_json::Value>) {
+    match value {
+        Some(serde_json::Value::Array(items)) => out.extend(items.iter().cloned()),
+        Some(serde_json::Value::Object(items)) => push_grouped_item_buckets(items, out),
+        _ => {}
+    }
+}
+
+fn push_grouped_item_buckets(
+    items: &serde_json::Map<String, serde_json::Value>,
+    out: &mut Vec<serde_json::Value>,
+) {
+    for key in [
+        "implementation",
+        "implementations",
+        "implementation_items",
+        "remediation",
+        "remediation_items",
+        "review_remediation",
+        "review_remediation_items",
+        "focused_verification",
+        "focused_verification_items",
+        "review_verification",
+        "review_verification_items",
+        "verified_noop",
+        "verified_noops",
+        "verified_noop_items",
+    ] {
+        push_array(items.get(key), out);
     }
 }
 

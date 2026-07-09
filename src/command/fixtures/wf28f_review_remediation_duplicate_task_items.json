@@ -9,7 +9,7 @@
     "required_fix": "Materialize the first project artifact evidence set.",
     "target_files": [],
     "focused_verification": ["Verify first project artifact evidence exists."],
-    "artifact_requirements": ["project artifact evidence one"]
+    "artifact_requirements": [".archon/artifacts/review-gap-one.json"]
   },
   {
     "item_id": "rem-review-gap-two",
@@ -21,6 +21,6 @@
     "required_fix": "Materialize the second project artifact evidence set.",
     "target_files": [],
     "focused_verification": ["Verify second project artifact evidence exists."],
-    "artifact_requirements": ["project artifact evidence two"]
+    "artifact_requirements": [".archon/artifacts/review-gap-two.json"]
   }
 ]

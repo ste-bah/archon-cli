@@ -442,3 +442,7 @@ pub(super) fn record_repair_attempt(
 #[path = "workflow_live_generated_lifecycle_outcomes.rs"]
 mod outcomes;
 pub(super) use outcomes::*;
+
+#[cfg(test)]
+#[path = "workflow_live_generated_lifecycle_support_tests.rs"]
+mod tests;

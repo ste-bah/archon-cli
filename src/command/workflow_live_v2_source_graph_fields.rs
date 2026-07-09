@@ -36,11 +36,7 @@ fn remediation_item_has_required_fields(value: &serde_json::Value) -> bool {
                 .or_else(|| value.get("focused_tests"))
                 .or_else(|| value.get("focusedTests")),
         )
-        && value
-            .get("artifact_requirements")
-            .or_else(|| value.get("artifactRequirements"))
-            .or_else(|| value.get("artifacts"))
-            .is_some()
+        && verification_evidence_fields_present(value)
 }
 
 fn review_remediation_item_has_required_fields(value: &serde_json::Value) -> bool {
@@ -79,11 +75,7 @@ fn review_remediation_item_has_required_fields(value: &serde_json::Value) -> boo
                 .or_else(|| value.get("verification_requirements"))
                 .or_else(|| value.get("verificationRequirements")),
         )
-        && value
-            .get("artifact_requirements")
-            .or_else(|| value.get("artifactRequirements"))
-            .or_else(|| value.get("artifacts"))
-            .is_some()
+        && verification_evidence_fields_present(value)
 }
 
 fn noop_item_has_required_fields(value: &serde_json::Value) -> bool {

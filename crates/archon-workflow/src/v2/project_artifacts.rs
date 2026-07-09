@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     WorkflowV2Artifact, WorkflowV2ResidualGap, WorkflowV2Result, WorkflowV2Status,
-    WorkflowV2WriteSafetyError,
+    WorkflowV2WriteSafetyError, project_artifact_contract::artifact_requirement_paths,
 };
 
 pub const PROJECT_ARTIFACT_POLICY_VERSION: &str = "workflow-v2-project-artifacts-v2";
@@ -239,43 +239,6 @@ fn artifact_roots_for_run(run_id: Option<&str>) -> Vec<String> {
     roots
 }
 
-fn artifact_requirement_paths(value: &serde_json::Value) -> Vec<String> {
-    let mut paths = Vec::new();
-    collect_artifact_requirement_paths(value, &mut paths);
-    paths
-}
-
-fn collect_artifact_requirement_paths(value: &serde_json::Value, paths: &mut Vec<String>) {
-    match value {
-        serde_json::Value::Array(items) => {
-            for item in items {
-                collect_artifact_requirement_paths(item, paths);
-            }
-        }
-        serde_json::Value::Object(object) => collect_artifact_object_paths(object, paths),
-        serde_json::Value::String(path) => paths.push(path.clone()),
-        _ => {}
-    }
-}
-
-fn collect_artifact_object_paths(
-    object: &serde_json::Map<String, serde_json::Value>,
-    paths: &mut Vec<String>,
-) {
-    for key in [
-        "artifact_requirements",
-        "project_artifact_requirements",
-        "required_artifacts",
-        "artifact_paths",
-        "path",
-        "artifact_path",
-    ] {
-        if let Some(value) = object.get(key) {
-            collect_artifact_requirement_paths(value, paths);
-        }
-    }
-}
-
 fn artifact_root_from_requirement(path: &str) -> Option<String> {
     let normalized = normalize_relative_path("artifact-requirement", path).ok()?;
     if !normalized.starts_with(".archon/") && !normalized.starts_with("artifacts/") {
@@ -299,11 +262,20 @@ fn push_unique_root(roots: &mut Vec<String>, root: String) {
 
 fn allowed_relative_artifact(relative: &str, context: &WorkflowV2ProjectArtifactContext) -> bool {
     relative.starts_with("artifacts/")
+        || namespaced_project_data_artifact(relative)
         || run_prefixed_workflow_artifact(relative, context)
         || context
             .artifact_roots
             .iter()
             .any(|root| relative_under_root(relative, root))
+}
+
+fn namespaced_project_data_artifact(relative: &str) -> bool {
+    let parts = relative.split('/').collect::<Vec<_>>();
+    if parts.len() < 4 || parts[0] != ".archon" || parts[2] != "data" {
+        return false;
+    }
+    !matches!(parts[1], "" | "artifacts" | "workflows")
 }
 
 fn run_prefixed_workflow_artifact(

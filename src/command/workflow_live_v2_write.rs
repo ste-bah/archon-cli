@@ -4,9 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use archon_workflow::write_coordinator::patch_apply::apply_wave;
-use archon_workflow::write_coordinator::patch_manifest::{
-    capture_patch, persist_manifest, validate_patch,
-};
+use archon_workflow::write_coordinator::patch_manifest::{capture_patch, persist_manifest};
 use archon_workflow::write_coordinator::worktree_isolation::{
     capture_canonical_baseline, cleanup_workspace, create_item_workspace,
 };
@@ -21,9 +19,9 @@ use archon_workflow::{
     BranchFailureKind, TargetFilesSource, WorkflowError, WorkflowV2AgentAdapter,
     WorkflowV2BranchOutcome, WorkflowV2CallExecution, WorkflowV2CommandStatus, WorkflowV2Evidence,
     WorkflowV2EvidenceKind, WorkflowV2HostCall, WorkflowV2ResidualGap, WorkflowV2Result,
-    WorkflowV2ResultStore, WorkflowV2Status, WorkflowV2TaskCoverageStatus,
+    WorkflowV2ResultStore, WorkflowV2Status, WorkflowV2TaskCoverage, WorkflowV2TaskCoverageStatus,
     WorkflowV2WriteAssignment, WorkflowV2WriteItem, WorkflowV2WriteMode, WorkflowV2WritePlan,
-    WorkflowV2WritePlanner, WriteCoordinatorConfig, WritePlan,
+    WorkflowV2WritePlanner, WorkflowV2WriteWave, WriteCoordinatorConfig, WritePlan,
     validate_changed_files_for_repository,
 };
 use tokio::sync::Semaphore;
@@ -82,6 +80,15 @@ pub(super) async fn run_write_capable_v2_fanout(
     let plan = planner
         .plan(&write_items)
         .map_err(|err| WorkflowError::SpecInvalid(err.to_string()))?;
+    if let Some(result) = preflight_write_fanout_source_contract(
+        &execution.call,
+        &branches,
+        &write_items,
+        &plan,
+        target_repository_root,
+    ) {
+        return Ok(result);
+    }
     match (execution.call.write_mode, workspace_boundary_supported) {
         (Some(WorkflowV2WriteMode::Coordinated), true) => {
             run_coordinated_v2_write_fanout(
@@ -202,9 +209,15 @@ include!("workflow_live_v2_write_coordinated.rs");
 
 include!("workflow_live_v2_write_worktree.rs");
 
+include!("workflow_live_v2_write_worktree_wave.rs");
+
+include!("workflow_live_v2_write_worktree_branch.rs");
+
 include!("workflow_live_v2_write_serial.rs");
 
 include!("workflow_live_v2_write_contract.rs");
+
+include!("workflow_live_v2_write_preflight.rs");
 
 include!("workflow_live_v2_write_ownership.rs");
 

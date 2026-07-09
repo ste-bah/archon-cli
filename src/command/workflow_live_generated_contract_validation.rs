@@ -54,6 +54,13 @@ fn generated_item_issues(
             ));
         }
     }
+    if value_present(value.get("artifact_requirement_issues")) {
+        issues.push(make_issue(
+            GeneratedContractIssueKind::ArtifactRequirementsDiscovery,
+            "artifact_requirements",
+            "artifact declarations must be concrete paths or explicit evidence expectations",
+        ));
+    }
     if generated_focused_verification_item(value) {
         return issues;
     }

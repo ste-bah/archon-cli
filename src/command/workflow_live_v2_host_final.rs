@@ -3,7 +3,7 @@ fn final_report_result(
     v2_store: &WorkflowV2ResultStore,
     task_universe: Option<&WorkflowV2TaskUniverse>,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
-    let source_results = source_results(execution, v2_store)?;
+    let source_results = final_report_source_results(source_results(execution, v2_store)?);
     let required_task_ids = authoritative_task_ids(task_universe)
         .unwrap_or_else(|| required_task_ids_from_results(&source_results));
     let paths = report_paths(v2_store.root());
@@ -64,6 +64,20 @@ fn final_report_result(
     }
     result.data = data;
     Ok(result)
+}
+
+fn final_report_source_results(results: Vec<WorkflowV2Result>) -> Vec<WorkflowV2Result> {
+    results
+        .into_iter()
+        .filter(|result| !proofless_accepted_metadata(result))
+        .collect()
+}
+
+fn proofless_accepted_metadata(result: &WorkflowV2Result) -> bool {
+    matches!(
+        result.status,
+        WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+    ) && !source_result_has_concrete_evidence(result)
 }
 
 fn guard_final_report_against_dynamic_wave_evidence(
@@ -289,37 +303,8 @@ fn command_key(command: &archon_workflow::WorkflowV2CommandRecord) -> String {
 }
 
 fn guard_final_report_artifact_paths_exist(report: &mut WorkflowV2FinalReport, v2_root: &Path) {
-    // Relative artifact paths are project-artifact-root relative; resolve them
-    // against the project root that owns this run, never the process cwd.
-    let project_root = v2_root
-        .ancestors()
-        .find(|ancestor| ancestor.file_name().is_some_and(|name| name == ".archon"))
-        .and_then(Path::parent)
-        .map(Path::to_path_buf);
-    let artifact_exists = |raw: &str| -> bool {
-        let path = Path::new(raw);
-        if path.is_absolute() {
-            return path.exists();
-        }
-        match &project_root {
-            Some(root) => root.join(path).exists() || path.exists(),
-            None => path.exists(),
-        }
-    };
-    let missing = report
-        .artifacts
-        .iter()
-        .filter(|artifact| {
-            artifact.path.trim().is_empty() || !artifact_exists(artifact.path.trim())
-        })
-        .map(|artifact| {
-            if artifact.path.trim().is_empty() {
-                format!("{}:<empty-path>", artifact.id)
-            } else {
-                format!("{}:{}", artifact.id, artifact.path)
-            }
-        })
-        .collect::<Vec<_>>();
+    let project_root = project_root_for_v2_root(v2_root);
+    let missing = missing_final_artifact_refs(report, project_root.as_deref());
     if missing.is_empty() {
         return;
     }
@@ -332,6 +317,45 @@ fn guard_final_report_artifact_paths_exist(report: &mut WorkflowV2FinalReport, v
         ),
         severity: Some("blocking".to_string()),
     });
+}
+
+fn project_root_for_v2_root(v2_root: &Path) -> Option<PathBuf> {
+    v2_root
+        .ancestors()
+        .find(|ancestor| ancestor.file_name().is_some_and(|name| name == ".archon"))
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+}
+
+fn missing_final_artifact_refs(
+    report: &WorkflowV2FinalReport,
+    project_root: Option<&Path>,
+) -> Vec<String> {
+    report
+        .artifacts
+        .iter()
+        .filter(|artifact| !final_artifact_path_exists(artifact.path.trim(), project_root))
+        .map(|artifact| final_artifact_ref_label(&artifact.id, artifact.path.trim()))
+        .collect()
+}
+
+fn final_artifact_path_exists(raw: &str, project_root: Option<&Path>) -> bool {
+    if raw.is_empty() {
+        return false;
+    }
+    let path = Path::new(raw);
+    if path.is_absolute() {
+        return path.exists();
+    }
+    project_root.is_some_and(|root| root.join(path).exists()) || path.exists()
+}
+
+fn final_artifact_ref_label(id: &str, path: &str) -> String {
+    if path.is_empty() {
+        format!("{id}:<empty-path>")
+    } else {
+        format!("{id}:{path}")
+    }
 }
 
 fn merge_sorted_strings(mut existing: Vec<String>, extra: BTreeSet<String>) -> Vec<String> {

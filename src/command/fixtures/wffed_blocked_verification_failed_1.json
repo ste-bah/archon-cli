@@ -1,0 +1,29 @@
+{
+  "data": {
+    "call_id": "blocked-verification-failed-1",
+    "failed_outcomes": [
+      {
+        "item_id": null,
+        "status": "needs_review",
+        "summary": "fanout 'verification-wave-1-1' completed with 1 branch finding(s) for workflow.js to reduce or remediate"
+      }
+    ],
+    "implementation_evidence_digest": [
+      {
+        "dependencyIteration": 2,
+        "implementationWaveIndex": 1,
+        "kind": "implementation",
+        "outcomes": [
+          {
+            "item_id": "implementation-wave-1-IMPL-TDL-010-REGISTRY-SCHEMA-ARTIFACT-CONTRACT-VERIFY",
+            "status": "noop",
+            "summary": "TASK-TDL-010 was already implemented and verified: registry v2/v1 migration, artifact contract health checks, and CLI parse coverage all pass; declared project artifacts exist under the trading data root."
+          }
+        ],
+        "remediationAttempt": null
+      }
+    ]
+  },
+  "status": "needs_review",
+  "summary": "final report 'blocked-verification-failed-1' produced status NeedsReview"
+}

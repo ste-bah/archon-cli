@@ -1,0 +1,54 @@
+{
+  "items": [
+    {
+      "artifact_requirements": [
+        "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry.json",
+        "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry-migration-report.json"
+      ],
+      "canonical_task_ids": [
+        "TASK-TDL-010"
+      ],
+      "expected_evidence": "Command exits 0 and output shows a nonzero number of data_store_tests passed with no failures. Passing evidence must include the registry migration/idempotence and artifact/fail-closed test names or a duplicate cargo harness pass section for the same focused target.",
+      "focused_verification": "cd /Volumes/Externalwork/archon-cli/archon-cli && cargo test -p archon-trading data_store_tests -- --nocapture",
+      "item_id": "VERIFY-TDL-010-001-data-store-registry-tests",
+      "source_item_id": "IMPL-TDL-010-REGISTRY-SCHEMA-ARTIFACT-CONTRACT-VERIFY"
+    },
+    {
+      "artifact_requirements": [],
+      "canonical_task_ids": [
+        "TASK-TDL-010"
+      ],
+      "expected_evidence": "Command exits 0 and output shows trading_data_prd_commands_parse passed with no intended target failures, proving data list --json, data export --dataset-id --version --out, and export-ohlcv alias parse coverage.",
+      "focused_verification": "cd /Volumes/Externalwork/archon-cli/archon-cli && cargo test trading_data_prd_commands_parse -- --nocapture",
+      "item_id": "VERIFY-TDL-010-002-cli-prd-parse-tests",
+      "source_item_id": "IMPL-TDL-010-REGISTRY-SCHEMA-ARTIFACT-CONTRACT-VERIFY"
+    },
+    {
+      "artifact_requirements": [
+        "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry.json",
+        "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry-migration-report.json"
+      ],
+      "canonical_task_ids": [
+        "TASK-TDL-010"
+      ],
+      "expected_evidence": "Command exits 0 and prints registry_exists=True, report_exists=True, schema=archon-trading-data-registry-v2, migration_schema=archon-trading-data-registry-v2, failed=0 or failed=None, and a healthy_checked count. Any Healthy registry entry missing native_interval=true, production_eligible=true, or a required artifact path fails the check.",
+      "focused_verification": "cd /Volumes/Externalwork/archon-cli/archon-cli && python3 - <<'PY'\nimport json, pathlib\nproject=pathlib.Path('/Volumes/Externalwork/archon-cli/project-1')\nregistry_path=project/'.archon/trading-lab/data/registry.json'\nreport_path=project/'.archon/trading-lab/data/registry-migration-report.json'\nregistry=json.loads(registry_path.read_text())\nrequired=['dataset_path','manifest_path','metadata_path','normalized_path','provider_notes_path','raw_path','raw_request_path','raw_response_path','redacted_headers_path','validation_path']\nhealthy=[]\nfor key, record in registry['datasets'].items():\n    if record.get('status') == 'Healthy':\n        missing_flags=[f for f in ['native_interval','production_eligible'] if record.get(f) is not True]\n        missing_paths=[field for field in required if not record.get(field) or not (project/record[field]).exists()]\n        if missing_flags or missing_paths:\n            raise SystemExit(f'{key} incomplete flags={missing_flags} paths={missing_paths}')\n        healthy.append(key)\nreport=json.loads(report_path.read_text())\nif registry.get('schema_version') != 'archon-trading-data-registry-v2':\n    raise SystemExit(f'bad registry schema {registry.get(\"schema_version\")}')\nif report.get('schema_version') != 'archon-trading-data-registry-v2' or report.get('failed') not in (0, None):\n    raise SystemExit(f'bad migration report schema={report.get(\"schema_version\")} failed={report.get(\"failed\")}')\nprint(f'registry_exists={registry_path.exists()} report_exists={report_path.exists()} schema={registry.get(\"schema_version\")} healthy_checked={len(healthy)} datasets={len(registry[\"datasets\"])} migration_schema={report.get(\"schema_version\")} migrated={report.get(\"migrated\")} skipped={report.get(\"skipped\")} failed={report.get(\"failed\")}')\nPY",
+      "item_id": "VERIFY-TDL-010-003-project-registry-artifact-contract",
+      "source_item_id": "IMPL-TDL-010-REGISTRY-SCHEMA-ARTIFACT-CONTRACT-VERIFY"
+    },
+    {
+      "artifact_requirements": [
+        "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry.json",
+        "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry-migration-report.json",
+        "/Volumes/Externalwork/archon-cli/project-1/.archon/workflows/wf-feddb36a-2c20-4a72-bfd8-c59f68f465c7/write-coordination/stages/implementation-wave-1/manifests/implementation-wave-1-IMPL-TDL-010-REGISTRY-SCHEMA-ARTIFACT-CONTRACT-VERIFY.json"
+      ],
+      "canonical_task_ids": [
+        "TASK-TDL-010"
+      ],
+      "expected_evidence": "Command exits 0 and lists all three resolved artifact paths under projectArtifactRoot/workflow artifact roots. No path may resolve under targetRepositoryRoot for project .archon trading data artifacts.",
+      "focused_verification": "ls -l /Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry.json /Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry-migration-report.json /Volumes/Externalwork/archon-cli/project-1/.archon/workflows/wf-feddb36a-2c20-4a72-bfd8-c59f68f465c7/write-coordination/stages/implementation-wave-1/manifests/implementation-wave-1-IMPL-TDL-010-REGISTRY-SCHEMA-ARTIFACT-CONTRACT-VERIFY.json",
+      "item_id": "VERIFY-TDL-010-004-resolved-artifact-path-existence",
+      "source_item_id": "IMPL-TDL-010-REGISTRY-SCHEMA-ARTIFACT-CONTRACT-VERIFY"
+    }
+  ]
+}

@@ -154,17 +154,54 @@ fn collect_source_results(
             }
         }
         serde_json::Value::Object(object) => {
-            if let Some(result) = object.get("result") {
-                results.push(serde_json::from_value(result.clone())?);
-            } else if object.contains_key("status") && object.contains_key("summary") {
-                results.push(serde_json::from_value(value.clone())?);
-            } else if let Some(inputs) = object.get("inputs") {
-                collect_source_results(inputs, results)?;
+            if let Some(result) = object.get("result").filter(|value| is_workflow_result_value(value)) {
+                push_source_result(result, results)?;
+            } else if is_workflow_result_value(value) {
+                push_source_result(value, results)?;
+            } else {
+                for child in object.values() {
+                    collect_source_results(child, results)?;
+                }
             }
         }
         _ => {}
     }
     Ok(())
+}
+
+fn push_source_result(
+    value: &serde_json::Value,
+    results: &mut Vec<WorkflowV2Result>,
+) -> archon_workflow::WorkflowResult<()> {
+    let result: WorkflowV2Result = serde_json::from_value(value.clone())?;
+    results.push(result);
+    Ok(())
+}
+
+fn source_result_has_concrete_evidence(result: &WorkflowV2Result) -> bool {
+    result
+        .evidence
+        .iter()
+        .any(|evidence| !evidence.summary.trim().is_empty())
+        || result.commands_run.iter().any(|command| !command.command.trim().is_empty())
+        || result.task_coverage.iter().any(|coverage| {
+            coverage
+                .evidence
+                .iter()
+                .any(|evidence| !evidence.summary.trim().is_empty())
+        })
+}
+
+fn is_workflow_result_value(value: &serde_json::Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    object.contains_key("status")
+        && (object.contains_key("summary")
+            || object.contains_key("residual_gaps")
+            || object.contains_key("task_coverage")
+            || object.contains_key("commands_run")
+            || object.contains_key("evidence"))
 }
 
 fn source_call_ids(source: &str) -> Vec<String> {

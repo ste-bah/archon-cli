@@ -244,6 +244,24 @@ fn remediation_source_metadata_treats_task_source_root_paths_as_evidence() {
 fn review_remediation_source_metadata_accepts_wf580_fixture_shape() {
     let fixture = include_str!("fixtures/wf580_review_remediation_inventory_items.json");
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
+    let normalized_items = source_data
+        .as_array()
+        .expect("fixture array")
+        .iter()
+        .map(|value| {
+            crate::command::workflow_live::workflow_live_generated_contract::normalize_generated_item_value(
+                value,
+                Some(&tdl_task_universe()),
+            )
+            .value
+        })
+        .collect::<Vec<_>>();
+    for value in &normalized_items {
+        assert!(
+            review_remediation_item_has_required_fields(value),
+            "normalized review remediation item lacks required graph fields: {value:#}"
+        );
+    }
     let execution = review_remediation_execution(source_data);
 
     let metadata = dynamic_wave_source_metadata(&execution, Some(&tdl_task_universe()), None);

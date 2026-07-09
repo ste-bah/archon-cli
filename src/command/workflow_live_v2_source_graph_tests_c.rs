@@ -98,7 +98,7 @@ fn review_remediation_accepts_artifact_only_canonical_task_item() {
         "required_fix": "create the missing project artifact under the runtime project root",
         "target_files": [],
         "focused_verification": ["verify the project artifact exists and matches schema"],
-        "artifact_requirements": ["project .archon data artifact"]
+        "artifact_requirements": [".archon/artifacts/project-data-artifact.json"]
     });
     let execution = review_remediation_execution(serde_json::json!([item]));
 

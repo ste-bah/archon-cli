@@ -195,7 +195,11 @@ fn write_items_for_branches(
         .iter()
         .map(|branch| {
             let targets = target_files_for_branch(target_repository_root, call, branch)?;
-            Ok(WorkflowV2WriteItem::new(branch.id.clone(), mode, targets))
+            if targets.is_empty() {
+                Ok(WorkflowV2WriteItem::artifact_only(branch.id.clone(), mode))
+            } else {
+                Ok(WorkflowV2WriteItem::new(branch.id.clone(), mode, targets))
+            }
         })
         .collect()
 }

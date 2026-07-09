@@ -101,9 +101,20 @@ fn append_alias_values(
         .and_then(serde_json::Value::as_array)
         .cloned()
         .unwrap_or_default();
-    merged.extend(values);
+    append_unique_values(&mut merged, values);
     if !merged.is_empty() {
         object.insert(target.to_string(), serde_json::Value::Array(merged));
+    }
+}
+
+fn append_unique_values(
+    merged: &mut Vec<serde_json::Value>,
+    values: Vec<serde_json::Value>,
+) {
+    for value in values {
+        if !merged.iter().any(|existing| existing == &value) {
+            merged.push(value);
+        }
     }
 }
 
@@ -212,8 +223,6 @@ fn normalize_remediation_context(
                 "verification_shape",
                 "verificationShape",
                 "verification",
-                "focused_verification",
-                "focusedVerification",
                 "focused_tests",
                 "focusedTests",
             ],

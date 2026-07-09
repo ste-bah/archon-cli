@@ -113,11 +113,17 @@ fn verify_persisted_capability(
 }
 
 fn verify_capability_contract(result: &ProviderCapabilityResult) -> Result<(), DataStoreError> {
+    let provider_implemented = result.unavailable_reason.is_none();
     if result.can_fetch
         && (!result.native_interval || !result.historical_supported || !result.production_eligible)
     {
         return Err(DataStoreError::InvalidMetadata(
             "can_fetch=true requires proven native_interval, historical_supported, production_eligible, and provider implementation".into(),
+        ));
+    }
+    if result.can_fetch && !provider_implemented {
+        return Err(DataStoreError::InvalidMetadata(
+            "can_fetch=true requires downstream provider implementation proof, not capability metadata alone".into(),
         ));
     }
     if result.can_fetch && result.unavailable_reason.is_some() {

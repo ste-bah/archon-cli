@@ -1,0 +1,103 @@
+{
+  "items": [
+    {
+      "canonical_task_ids": [
+        "TASK-TDL-010"
+      ],
+      "expected_evidence": [
+        "Command exits 0.",
+        "Output reports nonzero focused test execution, with expected prior evidence of 37 passed, 0 failed.",
+        "Evidence identifies registry v2/v1 migration idempotence, artifact contract, and fail-closed metadata coverage."
+      ],
+      "focused_verification": [
+        "Run: cd /Volumes/Externalwork/archon-cli/archon-cli && cargo test -p archon-trading data_store_tests -- --nocapture",
+        "Confirm the focused data-store registry/artifact tests execute nonzero tests and pass, including v1/v2 migration idempotence, artifact contract, and fail-closed metadata cases."
+      ],
+      "item_id": "VERIFY-TDL-010-001-data-store-registry-tests",
+      "provider_env_requirements": [],
+      "source_item_id": "IMPL-TDL-010-REGISTRY-SCHEMA-ARTIFACT-CONTRACT-VERIFY",
+      "source_outcome_item_ids": [
+        "verification-wave-1-VERIFY-TDL-010-001-data-store-registry-tests-check-1",
+        "verification-wave-1-VERIFY-TDL-010-001-data-store-registry-tests-check-2",
+        "verification-wave-1-VERIFY-TDL-010-001-data-store-registry-tests-check-3"
+      ]
+    },
+    {
+      "canonical_task_ids": [
+        "TASK-TDL-010"
+      ],
+      "expected_evidence": [
+        "Command exits 0.",
+        "Output includes cli_args::tests::tests_trading_data::trading_data_prd_commands_parse passing.",
+        "Canonical pass/fail count is 1 passed, 0 failed after accounting for duplicate workspace/lib/bin harness sections."
+      ],
+      "focused_verification": [
+        "Run: cd /Volumes/Externalwork/archon-cli/archon-cli && cargo test trading_data_prd_commands_parse -- --nocapture",
+        "Confirm the focused CLI parse test covers data list --json, data export, and the export-ohlcv alias without intended target failures."
+      ],
+      "item_id": "VERIFY-TDL-010-002-cli-prd-parse-tests",
+      "provider_env_requirements": [],
+      "source_item_id": "IMPL-TDL-010-REGISTRY-SCHEMA-ARTIFACT-CONTRACT-VERIFY",
+      "source_outcome_item_ids": [
+        "verification-wave-1-VERIFY-TDL-010-002-cli-prd-parse-tests-check-1",
+        "verification-wave-1-VERIFY-TDL-010-002-cli-prd-parse-tests-check-2",
+        "verification-wave-1-VERIFY-TDL-010-002-cli-prd-parse-tests-check-3"
+      ]
+    },
+    {
+      "artifact_requirements": [
+        ".archon/trading-lab/data/registry.json",
+        ".archon/trading-lab/data/registry-migration-report.json"
+      ],
+      "canonical_task_ids": [
+        "TASK-TDL-010"
+      ],
+      "expected_evidence": [
+        "Command exits 0.",
+        "Output includes registry_exists=True and report_exists=True.",
+        "Output includes schema=archon-trading-data-registry-v2 and migration_schema=archon-trading-data-registry-v2.",
+        "Output includes healthy_checked=4, datasets=4, migrated=1, skipped=1, failed=0 or equivalent accepted evidence."
+      ],
+      "focused_verification": [
+        "Run the focused Python registry artifact contract inspection against /Volumes/Externalwork/archon-cli/project-1 as project root.",
+        "Confirm registry schema_version is archon-trading-data-registry-v2.",
+        "Confirm each Healthy dataset has native_interval=true, production_eligible=true, and all required artifact path fields exist under the project root.",
+        "Confirm the migration report schema_version is archon-trading-data-registry-v2 and failed is 0 or absent."
+      ],
+      "item_id": "VERIFY-TDL-010-003-project-registry-artifact-contract",
+      "provider_env_requirements": [],
+      "source_item_id": "IMPL-TDL-010-REGISTRY-SCHEMA-ARTIFACT-CONTRACT-VERIFY",
+      "source_outcome_item_ids": [
+        "verification-wave-1-VERIFY-TDL-010-003-project-registry-artifact-contract-check-1",
+        "verification-wave-1-VERIFY-TDL-010-003-project-registry-artifact-contract-check-2",
+        "verification-wave-1-VERIFY-TDL-010-003-project-registry-artifact-contract-check-3"
+      ]
+    },
+    {
+      "artifact_requirements": [
+        ".archon/trading-lab/data/registry.json",
+        ".archon/trading-lab/data/registry-migration-report.json",
+        ".archon/workflows/wf-feddb36a-2c20-4a72-bfd8-c59f68f465c7/write-coordination/stages/implementation-wave-1/manifests/implementation-wave-1-IMPL-TDL-010-REGISTRY-SCHEMA-ARTIFACT-CONTRACT-VERIFY.json"
+      ],
+      "canonical_task_ids": [
+        "TASK-TDL-010"
+      ],
+      "expected_evidence": [
+        "ls command exits 0.",
+        "Evidence confirms all three artifact paths are present under projectArtifactRoot."
+      ],
+      "focused_verification": [
+        "Run: ls -l /Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry.json /Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry-migration-report.json /Volumes/Externalwork/archon-cli/project-1/.archon/workflows/wf-feddb36a-2c20-4a72-bfd8-c59f68f465c7/write-coordination/stages/implementation-wave-1/manifests/implementation-wave-1-IMPL-TDL-010-REGISTRY-SCHEMA-ARTIFACT-CONTRACT-VERIFY.json",
+        "Confirm all required project artifacts exist at the resolved absolute paths under /Volumes/Externalwork/archon-cli/project-1."
+      ],
+      "item_id": "VERIFY-TDL-010-004-resolved-artifact-path-existence",
+      "provider_env_requirements": [],
+      "source_item_id": "IMPL-TDL-010-REGISTRY-SCHEMA-ARTIFACT-CONTRACT-VERIFY",
+      "source_outcome_item_ids": [
+        "verification-wave-1-VERIFY-TDL-010-004-resolved-artifact-path-existence-check-1",
+        "verification-wave-1-VERIFY-TDL-010-004-resolved-artifact-path-existence-check-2",
+        "verification-wave-1-VERIFY-TDL-010-004-resolved-artifact-path-existence-check-3"
+      ]
+    }
+  ]
+}

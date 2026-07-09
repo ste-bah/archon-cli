@@ -58,6 +58,23 @@ fn workflow_live_generated_contract_classifies_repairable_inventory_gaps() {
 }
 
 #[test]
+fn workflow_live_generated_contract_empty_inventory_routes_to_shape_repair() {
+    let inventory = normalize_generated_inventory_value(
+        &serde_json::json!({
+            "status": "needs_review",
+            "summary": "audit evidence without schedulable implementation items",
+            "task_coverage": [],
+            "residual_gaps": []
+        }),
+        Some(&task_universe()),
+    );
+    assert!(inventory.items.is_empty());
+    assert!(inventory.issues.iter().any(|issue| {
+        issue.kind.as_str() == "inventory_shape_repair" && issue.field == "items"
+    }));
+}
+
+#[test]
 fn workflow_live_generated_contract_ignores_unowned_support_items_for_scheduling() {
     let inventory = normalize_generated_inventory_value_with_repo(
         &serde_json::json!({

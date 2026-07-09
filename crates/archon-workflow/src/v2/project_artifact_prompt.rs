@@ -4,6 +4,7 @@ use std::path::{Component, Path, PathBuf};
 use serde_json::Value;
 
 use super::host_api::WorkflowV2ArtifactRequirement;
+use super::project_artifact_contract::artifact_requirement_paths;
 use super::project_artifacts::WorkflowV2ProjectArtifactContext;
 
 pub(crate) fn project_artifact_prompt_section(
@@ -55,64 +56,13 @@ pub(crate) fn declared_project_artifact_entries(
         .iter()
         .map(|requirement| requirement.path.clone())
         .collect();
-    collect_artifact_paths(input, false, &mut raw_paths);
+    raw_paths.extend(artifact_requirement_paths(input));
     let mut seen = BTreeSet::new();
     raw_paths
         .into_iter()
         .filter_map(|raw| resolved_project_artifact_path(root, &raw))
         .filter(|entry| seen.insert(entry.clone()))
         .collect()
-}
-
-fn collect_artifact_paths(value: &Value, in_artifact_list: bool, paths: &mut Vec<String>) {
-    match value {
-        Value::Array(items) => collect_artifact_array(items, in_artifact_list, paths),
-        Value::Object(object) => {
-            for (key, child) in object {
-                let child_artifact_list = in_artifact_list || artifact_list_key(key);
-                if child_artifact_list && path_key(key) {
-                    push_string_path(child, paths);
-                }
-                collect_artifact_paths(child, child_artifact_list, paths);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn collect_artifact_array(items: &[Value], in_artifact_list: bool, paths: &mut Vec<String>) {
-    for item in items {
-        if in_artifact_list {
-            push_string_path(item, paths);
-        }
-        collect_artifact_paths(item, in_artifact_list, paths);
-    }
-}
-
-fn push_string_path(value: &Value, paths: &mut Vec<String>) {
-    if let Some(path) = value.as_str().filter(|path| !path.trim().is_empty()) {
-        paths.push(path.to_string());
-    }
-}
-
-fn artifact_list_key(key: &str) -> bool {
-    matches!(
-        key,
-        "artifact_requirements"
-            | "artifactRequirements"
-            | "project_artifact_requirements"
-            | "required_artifacts"
-            | "requiredArtifacts"
-            | "expected_artifacts"
-            | "artifact_checks"
-            | "artifacts"
-            | "artifact_paths"
-            | "artifactPaths"
-    )
-}
-
-fn path_key(key: &str) -> bool {
-    matches!(key, "path" | "artifact_path" | "artifactPath")
 }
 
 fn resolved_project_artifact_path(root: &str, raw: &str) -> Option<(String, String)> {

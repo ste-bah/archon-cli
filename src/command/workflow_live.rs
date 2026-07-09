@@ -25,6 +25,9 @@ mod workflow_agent_select;
 #[path = "workflow_live_approval.rs"]
 mod workflow_live_approval;
 #[cfg(test)]
+#[path = "workflow_live_canary_retry_tests.rs"]
+mod workflow_live_canary_retry_tests;
+#[cfg(test)]
 #[path = "workflow_live_canary_tests.rs"]
 mod workflow_live_canary_tests;
 #[cfg(test)]
@@ -38,6 +41,9 @@ mod workflow_live_generated_lifecycle_remediation;
 mod workflow_live_generated_lifecycle_support;
 #[path = "workflow_live_generated_scaffold.rs"]
 mod workflow_live_generated_scaffold;
+#[cfg(test)]
+#[path = "workflow_live_generated_semantics_tests.rs"]
+mod workflow_live_generated_semantics_tests;
 #[path = "workflow_live_items.rs"]
 mod workflow_live_items;
 #[path = "workflow_live_planner.rs"]

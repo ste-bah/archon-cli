@@ -277,6 +277,8 @@ include!("workflow_live_v2_script_helpers.rs");
 
 #[path = "workflow_live_v2_lifecycle_prompts.rs"]
 mod workflow_live_v2_lifecycle_prompts;
+#[path = "workflow_live_v2_lifecycle_verify_supersede.rs"]
+mod workflow_live_v2_lifecycle_verify_supersede;
 
 include!("workflow_live_v2_script_dry_run.rs");
 
@@ -288,8 +290,13 @@ include!("workflow_live_v2_lifecycle_impl.rs");
 
 include!("workflow_live_v2_lifecycle_verify.rs");
 
+include!("workflow_live_v2_lifecycle_verify_remediation.rs");
+
 include!("workflow_live_v2_lifecycle_review.rs");
 
 #[cfg(test)]
 #[path = "workflow_live_v2_script_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "workflow_live_v2_lifecycle_verify_remediation_tests.rs"]
+mod workflow_live_v2_lifecycle_verify_remediation_tests;

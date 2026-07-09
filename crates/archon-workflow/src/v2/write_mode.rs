@@ -10,6 +10,7 @@ pub struct WorkflowV2WriteItem {
     pub id: String,
     pub mode: WorkflowV2WriteMode,
     pub owned_targets: Vec<String>,
+    pub artifact_only: bool,
 }
 
 impl WorkflowV2WriteItem {
@@ -22,6 +23,16 @@ impl WorkflowV2WriteItem {
             id: id.into(),
             mode,
             owned_targets,
+            artifact_only: false,
+        }
+    }
+
+    pub fn artifact_only(id: impl Into<String>, mode: WorkflowV2WriteMode) -> Self {
+        Self {
+            id: id.into(),
+            mode,
+            owned_targets: Vec::new(),
+            artifact_only: true,
         }
     }
 }
@@ -98,23 +109,37 @@ impl WorkflowV2WritePlanner {
         items: Vec<NormalizedWriteItem>,
     ) -> WorkflowV2WritePlan {
         let conflicts = conflicts_for_items(&items, true);
-        let assignments = items
-            .into_iter()
-            .map(|item| WorkflowV2WriteAssignment {
-                worktree_path: Some(
-                    self.worktree_root
-                        .join(safe_path_segment(&item.id))
-                        .display()
-                        .to_string(),
-                ),
-                item_id: item.id,
-                owned_targets: item.owned_targets,
-            })
-            .collect();
+        let mut waves: Vec<WorkflowV2WriteWave> = Vec::new();
+        for item in items {
+            let assignment = self.worktree_assignment(item);
+            if let Some(wave) = waves
+                .iter_mut()
+                .find(|wave| !assignment_overlaps_wave(&assignment, wave))
+            {
+                wave.assignments.push(assignment);
+            } else {
+                waves.push(WorkflowV2WriteWave {
+                    assignments: vec![assignment],
+                });
+            }
+        }
         WorkflowV2WritePlan {
             mode,
-            waves: vec![WorkflowV2WriteWave { assignments }],
+            waves,
             conflicts,
+        }
+    }
+
+    fn worktree_assignment(&self, item: NormalizedWriteItem) -> WorkflowV2WriteAssignment {
+        WorkflowV2WriteAssignment {
+            worktree_path: Some(
+                self.worktree_root
+                    .join(safe_path_segment(&item.id))
+                    .display()
+                    .to_string(),
+            ),
+            item_id: item.id,
+            owned_targets: item.owned_targets,
         }
     }
 }
@@ -295,10 +320,19 @@ fn normalize_items(
         .map(|item| {
             Ok(NormalizedWriteItem {
                 id: item.id.clone(),
-                owned_targets: normalize_targets(&item.id, &item.owned_targets)?,
+                owned_targets: normalize_item_targets(item)?,
             })
         })
         .collect()
+}
+
+fn normalize_item_targets(
+    item: &WorkflowV2WriteItem,
+) -> Result<Vec<String>, WorkflowV2WriteSafetyError> {
+    if item.artifact_only && item.owned_targets.is_empty() {
+        return Ok(Vec::new());
+    }
+    normalize_targets(&item.id, &item.owned_targets)
 }
 
 fn normalize_targets(
@@ -343,33 +377,28 @@ pub fn normalize_target_for_repository(
         .map(str::trim)
         .filter(|root| !root.is_empty())
     else {
-        return Err(WorkflowV2WriteSafetyError::UnsafeTarget {
-            item_id: item_id.to_string(),
-            target: target.to_string(),
-        });
+        return Err(unsafe_target(item_id, target));
     };
     let root_path = Path::new(root);
     if !root_path.is_absolute() {
-        return Err(WorkflowV2WriteSafetyError::UnsafeTarget {
-            item_id: item_id.to_string(),
-            target: target.to_string(),
-        });
+        return Err(unsafe_target(item_id, target));
     }
     let clean_root = clean_absolute_path(item_id, root, root_path)?;
     let clean_target = clean_absolute_path(item_id, target, path)?;
-    let relative = clean_target.strip_prefix(&clean_root).map_err(|_| {
-        WorkflowV2WriteSafetyError::UnsafeTarget {
-            item_id: item_id.to_string(),
-            target: target.to_string(),
-        }
-    })?;
+    let relative = clean_target
+        .strip_prefix(&clean_root)
+        .map_err(|_| unsafe_target(item_id, target))?;
     if relative.as_os_str().is_empty() {
-        return Err(WorkflowV2WriteSafetyError::UnsafeTarget {
-            item_id: item_id.to_string(),
-            target: target.to_string(),
-        });
+        return Err(unsafe_target(item_id, target));
     }
     normalize_target(item_id, &relative.to_string_lossy().replace('\\', "/"))
+}
+
+fn unsafe_target(item_id: &str, target: &str) -> WorkflowV2WriteSafetyError {
+    WorkflowV2WriteSafetyError::UnsafeTarget {
+        item_id: item_id.to_string(),
+        target: target.to_string(),
+    }
 }
 
 fn normalize_target(item_id: &str, target: &str) -> Result<String, WorkflowV2WriteSafetyError> {

@@ -198,19 +198,16 @@ pub fn can_fetch_symbol_timeframe(
         && !missing_credentials
         && !provider_blocked
         && normalized_provider != "yfinance";
-    let can_fetch = production_eligible && normalized_provider != "tradingview";
-    let unavailable_reason = if can_fetch {
-        None
-    } else {
-        Some(capability_unavailable_reason(
-            provider,
-            trimmed_symbol,
-            &normalized_timeframe,
-            (supported_provider, exact_native_interval),
-            (missing_credentials, provider_blocked),
-            &normalized_provider,
-        ))
-    };
+    let can_fetch = false;
+    let unavailable_reason = Some(capability_unavailable_reason(
+        provider,
+        trimmed_symbol,
+        &normalized_timeframe,
+        (supported_provider, exact_native_interval),
+        (missing_credentials, provider_blocked),
+        &normalized_provider,
+        production_eligible,
+    ));
     ProviderCapabilityResult {
         provider: normalized_provider,
         symbol: trimmed_symbol.to_string(),
@@ -239,13 +236,17 @@ fn capability_unavailable_reason(
     (supported_provider, native_interval): (bool, bool),
     (missing_credentials, provider_blocked): (bool, bool),
     normalized_provider: &str,
+    provider_implemented: bool,
 ) -> String {
-    if missing_credentials {
-        "missing provider credentials".into()
-    } else if provider_blocked {
+    if provider_blocked {
         "provider blocked access".into()
+    } else if missing_credentials {
+        "missing provider credentials".into()
     } else if normalized_provider == "yfinance" && native_interval {
         "yfinance fallback is degraded and ineligible for promotion".into()
+    } else if provider_implemented {
+        "capability record only; downstream provider fetch implementation proof is required before can_fetch=true"
+            .into()
     } else {
         unavailable_reason(
             provider,

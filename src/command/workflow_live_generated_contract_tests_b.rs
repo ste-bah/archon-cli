@@ -146,19 +146,24 @@ fn workflow_live_generated_contract_normalizes_retry_command_fixture() {
         assert!(
             item["focused_verification"]
                 .as_array()
-                .is_some_and(|items| items.len() >= 2)
+                .is_some_and(|items| !items.is_empty())
         );
         assert!(
             item["expected_evidence"]
                 .as_array()
                 .is_some_and(|items| !items.is_empty())
         );
-        assert!(
-            item["artifact_requirements"]
-                .as_array()
-                .is_some_and(|items| !items.is_empty())
-        );
     }
+    assert!(inventory.items[0].get("artifact_requirements").is_none());
+    assert_eq!(
+        inventory.items[1]["artifact_requirements"],
+        serde_json::json!([".archon/trading-lab/data/registry.json"])
+    );
+    assert!(
+        inventory.items.iter().all(|item| item["expected_evidence"]
+            .as_array()
+            .is_some_and(|items| items.iter().any(|value| value == "terminal output")))
+    );
 }
 
 #[test]

@@ -61,12 +61,11 @@ fn worktree_mode_records_paths_and_isolates_overlaps() {
         ])
         .expect("plan");
 
-    assert_eq!(plan.waves.len(), 1);
-    assert_eq!(plan.waves[0].assignments.len(), 2);
+    assert_eq!(plan.waves.len(), 2);
     assert!(
-        plan.waves[0]
-            .assignments
+        plan.waves
             .iter()
+            .flat_map(|wave| wave.assignments.iter())
             .all(|assignment| assignment.worktree_path.is_some())
     );
     assert_eq!(plan.conflicts.len(), 1);
