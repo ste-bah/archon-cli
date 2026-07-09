@@ -18,6 +18,7 @@ use crate::command::cost::CostHandler;
 use crate::command::denials::DenialsHandler;
 use crate::command::diff::DiffHandler;
 use crate::command::doctor::DoctorHandler;
+use crate::command::draft::DraftHandler;
 use crate::command::effort::EffortHandler;
 use crate::command::evidence_view::{DocsViewHandler, LearningViewHandler};
 use crate::command::export::ExportHandler;
@@ -61,6 +62,7 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("effort", Arc::new(EffortHandler));
     b.insert_primary("garden", Arc::new(GardenHandler));
     b.insert_primary("model", Arc::new(ModelHandler));
+    b.insert_primary("draft", Arc::new(DraftHandler));
     b.insert_primary("copy", Arc::new(CopyHandler::new()));
     b.insert_primary("context", Arc::new(ContextHandler));
     b.insert_primary("status", Arc::new(StatusHandler));

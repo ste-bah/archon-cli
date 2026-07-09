@@ -238,7 +238,9 @@ pub(crate) fn build_command_context<'a>(
             Some("status") => {
                 ctx.status_snapshot = Some(status::build_status_snapshot(slash_ctx).await);
             }
-            Some("model") => {
+            Some("model") | Some("draft") => {
+                // /model reads+writes the session model; /draft READS it to
+                // pick the drafting model (same snapshot, same lock traffic).
                 ctx.model_snapshot = Some(model::build_model_snapshot(slash_ctx).await);
             }
             Some("cost") => {
@@ -481,6 +483,27 @@ pub(crate) fn apply_effect<'a>(
                 );
                 let _ = tui_tx.send(TuiEvent::PermissionModeChanged(resolved.clone()));
                 tracing::info!(mode = %resolved, "set permission mode via /permissions");
+            }
+            // FCDP-DRAFT: hand off to the DETACHED streaming subprocess spawner.
+            // Returns immediately — the draft runs for minutes and must not
+            // block this inline await (see spawn_draft_command_tui). `slash_ctx`
+            // is unused: all data was captured into the effect at build time.
+            CommandEffect::RunDraft {
+                pack,
+                workdir,
+                model,
+                gate_config,
+                cwd,
+            } => {
+                let _ = slash_ctx;
+                crate::command::slash::spawn_draft_command_tui(
+                    tui_tx.clone(),
+                    pack,
+                    workdir,
+                    model,
+                    gate_config,
+                    cwd,
+                );
             } // Future variants (AGS-819 /theme, etc.): add a match arm here
               // with the appropriate awaited mutex write. No fallback arm —
               // enum exhaustiveness forces new tickets to wire their effects
@@ -672,6 +695,13 @@ mod tests {
             // unreachable here. Arm exists to keep the match exhaustive
             // and guard against silent drift on future variants.
             CommandEffect::SetPermissionMode(_) => {
+                unreachable!("narrow apply_effect harness only exercises SetModelOverride")
+            }
+            // FCDP-DRAFT: RunDraft belongs to /draft. This narrow harness
+            // only constructs SetModelOverride above; RunDraft is unreachable
+            // here. Arm exists to keep the match exhaustive and guard against
+            // silent drift on future variants.
+            CommandEffect::RunDraft { .. } => {
                 unreachable!("narrow apply_effect harness only exercises SetModelOverride")
             }
         }

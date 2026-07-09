@@ -14,6 +14,9 @@ use anyhow::{Context, Result, anyhow};
 use archon_core::config::ArchonConfig;
 use archon_draft::fable::{self, FableClient};
 use archon_draft::{GateConfig, Pack, QuoteBank, orchestrator};
+use archon_tui::app::TuiEvent;
+
+use crate::command::registry::{CommandContext, CommandEffect, CommandHandler};
 
 pub(crate) async fn handle_draft_command(
     pack_path: PathBuf,
@@ -368,6 +371,180 @@ fn link_cited_sources(
     }
 
     cited.into_values().collect()
+}
+
+/// Zero-sized handler registered as the primary `/draft` slash command.
+///
+/// Runs the FCDP drafting protocol from inside the TUI. The model is the
+/// session's live model (whatever `/model` last set), overridable per-call
+/// with `--model`. A draft takes minutes and `CommandHandler::execute` is
+/// sync, so the handler only PARSES + stashes a `CommandEffect::RunDraft`;
+/// the dispatch site spawns a detached streaming subprocess (mirrors `/diff`,
+/// extended for a long-running command). No aliases.
+pub(crate) struct DraftHandler;
+
+impl CommandHandler for DraftHandler {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
+        // Parse: <pack> <workdir> [--model <name>] [--gate-config <path>].
+        let mut positional: Vec<&String> = Vec::new();
+        let mut model_override: Option<String> = None;
+        let mut gate_config: Option<PathBuf> = None;
+        let mut it = args.iter();
+        while let Some(a) = it.next() {
+            match a.as_str() {
+                "--model" => model_override = it.next().cloned(),
+                "--gate-config" => gate_config = it.next().map(PathBuf::from),
+                _ => positional.push(a),
+            }
+        }
+
+        if positional.len() < 2 {
+            ctx.emit(TuiEvent::TextDelta(
+                "\nUsage: /draft <pack.json> <workdir> [--model <name>] [--gate-config <path>]\n\
+                 Drafts an FCDP section with the session's current model (see /model).\n"
+                    .to_string(),
+            ));
+            return Ok(());
+        }
+
+        let pack = PathBuf::from(positional[0]);
+        let workdir = PathBuf::from(positional[1]);
+
+        // Model: explicit --model wins; else the session's live model — the
+        // same value /model reads/writes, captured here via model_snapshot
+        // (build_command_context populates it for /draft too).
+        let model = match model_override {
+            Some(m) => m,
+            None => match ctx.model_snapshot.as_ref() {
+                Some(snap) => snap.current_model.clone(),
+                None => {
+                    ctx.emit(TuiEvent::Error(
+                        "DraftHandler: model_snapshot not populated — build_command_context bug"
+                            .to_string(),
+                    ));
+                    return Ok(());
+                }
+            },
+        };
+
+        // cwd: session working dir → subprocess cwd, so relative pack/workdir
+        // paths and the provenance store (`<cwd>/.archon`) resolve from the
+        // project root the user is working in.
+        let cwd = match &ctx.working_dir {
+            Some(p) => p.clone(),
+            None => {
+                ctx.emit(TuiEvent::Error(
+                    "DraftHandler: working_dir not populated in CommandContext".to_string(),
+                ));
+                return Ok(());
+            }
+        };
+
+        ctx.emit(TuiEvent::TextDelta(format!(
+            "\nDrafting {} with {model} \u{2192} {} (streaming progress; this takes a few minutes)\n",
+            pack.display(),
+            workdir.display(),
+        )));
+        ctx.pending_effect = Some(CommandEffect::RunDraft {
+            pack,
+            workdir,
+            model,
+            gate_config,
+            cwd,
+        });
+        Ok(())
+    }
+
+    fn description(&self) -> &str {
+        "Draft an FCDP dissertation section with the current model"
+    }
+}
+
+#[cfg(test)]
+mod draft_handler_tests {
+    use super::*;
+    use crate::command::model::ModelSnapshot;
+    use crate::command::test_support::CtxBuilder;
+
+    fn ctx_with(
+        model: Option<&str>,
+        wd: Option<&str>,
+    ) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
+        let mut b = CtxBuilder::new();
+        if let Some(m) = model {
+            b = b.with_model_snapshot(ModelSnapshot {
+                current_model: m.to_string(),
+            });
+        }
+        b = b.with_working_dir_opt(wd.map(PathBuf::from));
+        b.build()
+    }
+
+    #[test]
+    fn stashes_effect_with_session_model() {
+        let (mut ctx, _rx) = ctx_with(Some("claude-opus-4-8"), Some("/proj"));
+        DraftHandler
+            .execute(&mut ctx, &["pack.json".to_string(), "out".to_string()])
+            .unwrap();
+        match ctx.pending_effect {
+            Some(CommandEffect::RunDraft {
+                ref pack,
+                ref workdir,
+                ref model,
+                ref gate_config,
+                ref cwd,
+            }) => {
+                assert_eq!(pack, &PathBuf::from("pack.json"));
+                assert_eq!(workdir, &PathBuf::from("out"));
+                assert_eq!(model, "claude-opus-4-8");
+                assert!(gate_config.is_none());
+                assert_eq!(cwd, &PathBuf::from("/proj"));
+            }
+            ref other => panic!("expected RunDraft, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn model_flag_overrides_session_model_and_takes_gate_config() {
+        let (mut ctx, _rx) = ctx_with(Some("claude-opus-4-8"), Some("/proj"));
+        DraftHandler
+            .execute(
+                &mut ctx,
+                &[
+                    "p.json".to_string(),
+                    "out".to_string(),
+                    "--model".to_string(),
+                    "claude-fable-5".to_string(),
+                    "--gate-config".to_string(),
+                    "g.json".to_string(),
+                ],
+            )
+            .unwrap();
+        match ctx.pending_effect {
+            Some(CommandEffect::RunDraft {
+                ref model,
+                ref gate_config,
+                ..
+            }) => {
+                assert_eq!(model, "claude-fable-5");
+                assert_eq!(gate_config.as_deref(), Some(Path::new("g.json")));
+            }
+            ref other => panic!("expected RunDraft, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn usage_emitted_and_no_effect_when_missing_args() {
+        let (mut ctx, mut rx) = ctx_with(Some("claude-opus-4-8"), Some("/proj"));
+        DraftHandler
+            .execute(&mut ctx, &["only-pack".to_string()])
+            .unwrap();
+        assert!(ctx.pending_effect.is_none());
+        match rx.try_recv().expect("usage event") {
+            TuiEvent::TextDelta(m) => assert!(m.contains("Usage: /draft")),
+            other => panic!("expected usage TextDelta, got {other:?}"),
+        }
+    }
 }
 
 #[cfg(test)]

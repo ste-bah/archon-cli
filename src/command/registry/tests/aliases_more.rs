@@ -320,6 +320,14 @@ fn command_effect_debug_and_clone() {
         CommandEffect::SetPermissionMode(_) => {
             unreachable!("this test only constructs SetModelOverride")
         }
+        // FCDP-DRAFT: RunDraft is the sixth variant, added by the /draft
+        // migration. This test only constructs SetModelOverride, so RunDraft
+        // is unreachable here; the arm exists solely to satisfy
+        // exhaustiveness and guard against silent drift if a future variant
+        // is added without updating this pin.
+        CommandEffect::RunDraft { .. } => {
+            unreachable!("this test only constructs SetModelOverride")
+        }
     }
     // Debug impl must not panic — format! exercises it.
     let _ = format!("{e:?}");
