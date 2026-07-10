@@ -1,5 +1,5 @@
 use super::*;
-use crate::{WorkflowV2FileRecord, WorkflowV2Result};
+use crate::{WorkflowV2Artifact, WorkflowV2FileRecord, WorkflowV2Result};
 
 #[test]
 fn absolute_changed_file_inside_repository_matches_relative_owned_target() {
@@ -132,4 +132,53 @@ fn artifact_only_write_item_can_plan_without_repo_targets() {
 
     assert_eq!(plan.waves.len(), 1);
     assert!(plan.waves[0].assignments[0].owned_targets.is_empty());
+    assert!(plan.waves[0].assignments[0].artifact_only);
+}
+
+#[test]
+fn artifact_only_accepted_result_requires_artifact_not_repo_edit() {
+    let item =
+        WorkflowV2WriteItem::artifact_only("artifact-remediation", WorkflowV2WriteMode::Worktree);
+    let mut result = WorkflowV2Result::accepted("created project artifact");
+    result.artifacts.push(WorkflowV2Artifact {
+        id: "gap-audit".to_string(),
+        path: ".archon/workflows/wf-test/gap-audit.json".to_string(),
+        description: None,
+    });
+
+    validate_changed_files_for_repository(&item, &result, Some("/repo"))
+        .expect("artifact-only evidence does not need repo ownership");
+}
+
+#[test]
+fn artifact_only_result_cannot_change_repo_source() {
+    let item =
+        WorkflowV2WriteItem::artifact_only("artifact-remediation", WorkflowV2WriteMode::Worktree);
+    let mut result = WorkflowV2Result::accepted("changed repo source");
+    result
+        .files_changed
+        .push(WorkflowV2FileRecord::new("src/lib.rs"));
+
+    let error = validate_changed_files_for_repository(&item, &result, Some("/repo"))
+        .expect_err("artifact-only branch must not edit repo files");
+
+    assert!(matches!(
+        error,
+        WorkflowV2WriteSafetyError::ChangedFileOutsideOwnership { .. }
+    ));
+}
+
+#[test]
+fn artifact_only_accepted_result_still_requires_artifact_evidence() {
+    let item =
+        WorkflowV2WriteItem::artifact_only("artifact-remediation", WorkflowV2WriteMode::Worktree);
+    let result = WorkflowV2Result::accepted("no artifact reported");
+
+    let error = validate_changed_files_for_repository(&item, &result, Some("/repo"))
+        .expect_err("accepted artifact-only branch needs artifact evidence");
+
+    assert!(matches!(
+        error,
+        WorkflowV2WriteSafetyError::AcceptedWriteWithoutChangedFiles(_)
+    ));
 }

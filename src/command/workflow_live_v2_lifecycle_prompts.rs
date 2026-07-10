@@ -114,14 +114,16 @@ pub(crate) const REVIEW_REMEDIATION_INVENTORY_REPAIR_TASK: &str = "Repair review
 
 pub(crate) const BLOCKED_EMPTY_REVIEW_REMEDIATION_TASK: &str = "Stop because adversarial review found issues but review remediation inventory is still empty or malformed after JS-owned repair.";
 
-pub(crate) const REVIEW_REMEDIATION_WAVE_TASK: &str = "Fix only the assigned adversarial review issue. Return canonical task IDs, status, concrete evidence, commands/tests, artifacts, and residual gaps.";
+pub(crate) const REVIEW_REMEDIATION_WAVE_TASK: &str = "Fix only the assigned adversarial review issue. Return canonical task IDs, status, concrete evidence, commands/tests, artifacts, and residual gaps. Place evidence or placeholder outputs under the workflow run artifact directory, not inside canonical product artifact trees unless the source item explicitly owns that concrete artifact path.";
 
-pub(crate) const REVIEW_VERIFICATION_PLAN_TASK: &str = "Plan focused verification for review remediation before final review can pass. Return one item per exact command/check whenever possible. Every item must include item_id, canonical_task_ids, dependency_ids using canonical task IDs only, source_item_id or source_call_id when available, focused_verification, expected_evidence, and optional artifact_requirements. Evidence is accepted when at least one intended target passes and no intended target fails; duplicate cargo workspace/lib/bin harness pass sections are valid as one canonical pass.";
+pub(crate) const BLOCKED_REVIEW_REMEDIATION_FAILED_TASK: &str = "Stop because review remediation write branches failed before verification could be validly planned.";
+
+pub(crate) const REVIEW_VERIFICATION_PLAN_TASK: &str = "Plan focused verification for review remediation before final review can pass. Return one item per exact command/check whenever possible. Every item must include item_id, canonical_task_ids, dependency_ids using canonical task IDs only, source_item_id or source_call_id when available, focused_verification, expected_evidence, and optional artifact_requirements. For backtest artifact checks, enumerate exact fields or paths and treat a directory as a concrete backtest run only when it contains config.json or is explicitly referenced by readiness or acceptance evidence; placeholder or evidence-only dirs are hygiene residual gaps, not failing backtest runs. Evidence is accepted when at least one intended target passes and no intended target fails; duplicate cargo workspace/lib/bin harness pass sections are valid as one canonical pass.";
 
 pub(crate) const BLOCKED_EMPTY_REVIEW_VERIFICATION_TASK: &str =
     "Stop because review remediation had no focused verification plan.";
 
-pub(crate) const REVIEW_VERIFICATION_WAVE_TASK: &str = "Run focused verification for review remediation. Return commands with exit_code and output_summary, matched test/check names, pass/fail count, artifacts checked, and residual gaps. Accept duplicate cargo workspace/lib/bin harness pass sections as one canonical pass when at least one intended target passes and no intended target fails. Do not modify files.";
+pub(crate) const REVIEW_VERIFICATION_WAVE_TASK: &str = "Run focused verification for review remediation. Return commands with exit_code and output_summary, matched test/check names, pass/fail count, artifacts checked, and residual gaps. For backtest artifact checks, apply the full run artifact contract only to directories with config.json or explicit readiness or acceptance evidence; report placeholder or evidence-only dirs as non-blocking hygiene residual gaps. Paper-readiness blockers remain genuine blockers. Accept duplicate cargo workspace/lib/bin harness pass sections as one canonical pass when at least one intended target passes and no intended target fails. Do not modify files.";
 
 pub(crate) const BLOCKED_REVIEW_VERIFICATION_FAILED_TASK: &str =
     "Stop because review remediation verification failed.";

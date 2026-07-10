@@ -200,6 +200,157 @@ fn ahdm_readiness_report_records_failed_gates_and_residual_gap_schema() {
     assert!(adversarial.contains("no high-probability claim"));
 }
 
+#[test]
+fn stores_snapshot_artifact_with_freshness_metadata() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let path = lake
+        .persist_snapshot(
+            crate::data_lake::CurrentSnapshot {
+                provider: "tradingview".into(),
+                canonical_instrument: "ES".into(),
+                provider_symbol: "CME_MINI:ES1!".into(),
+                captured_at_unix_seconds: 1_000,
+                payload: serde_json::json!({"price": 5000.0}),
+            },
+            1_301,
+        )
+        .unwrap();
+    let text = std::fs::read_to_string(path).unwrap();
+    assert!(text.contains("Stale"));
+    assert!(text.contains("captured_at_unix_seconds"));
+}
+
+#[test]
+fn validation_summary_counts_duplicates_bad_ohlc_and_volume() {
+    let mut bars = vec![
+        bar("2026-01-01T00:00:00Z", 10.0),
+        bar("2026-01-01T00:00:00Z", 10.0),
+    ];
+    bars[1].high = 5.0;
+    bars[1].volume = -1.0;
+    let report = validation_report(&request().metadata, &bars, "now".into());
+    assert_eq!(report.summary.duplicate_timestamp_count, 1);
+    assert_eq!(report.summary.bad_ohlc_count, 1);
+    assert_eq!(report.summary.missing_volume_count, 1);
+    assert_eq!(report.status, ValidationStatus::Failed);
+    assert!(
+        report
+            .checks
+            .iter()
+            .any(|check| check.id == "ohlcv.duplicate_timestamps")
+    );
+    assert!(!report.production_eligible);
+}
+
+#[test]
+fn validation_report_fails_closed_for_native_gate_invariants() {
+    let mut metadata = request().metadata;
+    metadata.native_interval = false;
+    metadata.production_eligible = true;
+    metadata.gaps.missing_bars = 1;
+    let mut bars = vec![bar("2026-01-01T00:00:00Z", 10.0)];
+    bars.push(bar("2026-01-01 00:00:00", 10.0));
+    bars.push(bar("2026-01-01T00:00:00Z", 10.0));
+    bars[2].open = f64::NAN;
+    bars[2].volume = 0.0;
+    metadata.coverage.observed_bars = bars.len() as u64;
+
+    let report = validation_report(&metadata, &bars, "now".into());
+    assert_eq!(report.status, ValidationStatus::Failed);
+    assert!(!report.native_interval);
+    assert!(!report.production_eligible);
+    for required in [
+        "metadata.native_interval",
+        "ohlcv.rfc3339_timestamps",
+        "ohlcv.duplicate_timestamps",
+        "ohlcv.ohlc_sanity",
+        "ohlcv.volume",
+        "ohlcv.gaps",
+        "ohlcv.valid_bars",
+    ] {
+        assert!(
+            report
+                .checks
+                .iter()
+                .any(|check| check.id == required && check.status == ValidationStatus::Failed),
+            "missing failed check {required}"
+        );
+    }
+}
+
+#[test]
+fn failed_validation_still_writes_validation_report() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let record = lake.store_ohlcv(request()).unwrap();
+    let metadata_path = temp.path().join(&record.metadata_path);
+    let mut metadata: DatasetMetadata = read_json(&metadata_path).unwrap();
+    metadata.provider.clear();
+    write_json(&metadata_path, &metadata).unwrap();
+    let result = lake.validate_ohlcv("manual-BTCUSD-1D-raw", "20260101-fixture", "now".into());
+    assert!(matches!(result, Err(DataStoreError::InvalidOhlcv(_))));
+    let report: ValidationReport = read_json(&temp.path().join(&record.validation_path)).unwrap();
+    assert_eq!(report.status, ValidationStatus::Failed);
+    assert!(!report.production_eligible);
+}
+
+#[test]
+fn backtest_gate_refuses_non_native_dataset_without_diagnostic_override() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let mut request = request();
+    request.metadata.native_interval = false;
+    request.metadata.production_eligible = false;
+    request.metadata.quality_status = "degraded".into();
+    lake.store_ohlcv(request).unwrap();
+
+    let result = lake.backtest_data_gate("manual-BTCUSD-1D-raw", "20260101-fixture", false);
+    assert!(matches!(result, Err(DataStoreError::InvalidMetadata(_))));
+}
+
+#[test]
+fn diagnostic_backtest_gate_reports_overridden_dataset_issues() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let mut request = request();
+    request.metadata.native_interval = false;
+    request.metadata.production_eligible = false;
+    request.metadata.quality_status = "degraded".into();
+    lake.store_ohlcv(request).unwrap();
+
+    let report = lake
+        .backtest_data_gate("manual-BTCUSD-1D-raw", "20260101-fixture", true)
+        .unwrap();
+    assert!(report.diagnostic);
+    assert!(!report.promotion_eligible);
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| issue.contains("provider-native") || issue.contains("native interval"))
+    );
+    assert_eq!(report.overridden_issues, report.issues);
+}
+
+#[test]
+fn backtest_gate_refuses_checksum_mismatch() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let record = lake.store_ohlcv(request()).unwrap();
+    let metadata_path = temp.path().join(&record.metadata_path);
+    let mut metadata: DatasetMetadata = read_json(&metadata_path).unwrap();
+    metadata.checksum = "wrong-checksum".into();
+    write_json(&metadata_path, &metadata).unwrap();
+
+    let result = lake.backtest_data_gate("manual-BTCUSD-1D-raw", "20260101-fixture", false);
+    assert!(matches!(
+        result,
+        Err(DataStoreError::InvalidMetadata(message))
+            if message.contains("checksum mismatch")
+    ));
+}
+
 fn request() -> StoreOhlcvRequest {
     StoreOhlcvRequest {
         metadata: DatasetMetadata {

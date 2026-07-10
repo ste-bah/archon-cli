@@ -23,6 +23,7 @@ pub mod scheduler;
 pub mod task_record;
 pub mod validation;
 pub mod write_mode;
+mod write_mode_paths;
 
 pub use agent_adapter::{
     WorkflowV2AgentAdapter, WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2AgentRequest,
@@ -69,9 +70,9 @@ pub use validation::{WorkflowV2ValidationError, WorkflowV2ValidationResult};
 pub use write_mode::{
     WorkflowV2WriteAssignment, WorkflowV2WriteConflict, WorkflowV2WriteItem, WorkflowV2WritePlan,
     WorkflowV2WritePlanner, WorkflowV2WriteSafetyError, WorkflowV2WriteWave,
-    normalize_target_for_repository, normalize_targets_for_repository, validate_changed_files,
-    validate_changed_files_for_repository,
+    validate_changed_files, validate_changed_files_for_repository,
 };
+pub use write_mode_paths::{normalize_target_for_repository, normalize_targets_for_repository};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkflowV2Harness {

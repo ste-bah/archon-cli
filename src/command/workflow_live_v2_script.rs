@@ -277,6 +277,10 @@ include!("workflow_live_v2_script_helpers.rs");
 
 #[path = "workflow_live_v2_lifecycle_prompts.rs"]
 mod workflow_live_v2_lifecycle_prompts;
+#[path = "workflow_live_v2_lifecycle_review_remediation.rs"]
+mod workflow_live_v2_lifecycle_review_remediation;
+#[path = "workflow_live_v2_lifecycle_review_verification.rs"]
+mod workflow_live_v2_lifecycle_review_verification;
 #[path = "workflow_live_v2_lifecycle_verify_supersede.rs"]
 mod workflow_live_v2_lifecycle_verify_supersede;
 
@@ -297,6 +301,12 @@ include!("workflow_live_v2_lifecycle_review.rs");
 #[cfg(test)]
 #[path = "workflow_live_v2_script_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "workflow_live_v2_lifecycle_review_remediation_tests.rs"]
+mod workflow_live_v2_lifecycle_review_remediation_tests;
+#[cfg(test)]
+#[path = "workflow_live_v2_lifecycle_review_verification_tests.rs"]
+mod workflow_live_v2_lifecycle_review_verification_tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_lifecycle_verify_remediation_tests.rs"]
 mod workflow_live_v2_lifecycle_verify_remediation_tests;

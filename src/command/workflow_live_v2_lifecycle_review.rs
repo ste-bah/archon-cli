@@ -1,9 +1,3 @@
-// Adversarial review and final acceptance gates for the Rust decomposed-PRD
-// lifecycle — ported faithfully from
-// workflow_live_generated_scaffold_body_b.js (artifact inventory, bounded
-// review remediation loop with hard cap 6, final evidence reconciliation,
-// requireArtifact, zero-gap audit, quality gate, final report).
-
 impl LifecycleDriver {
     pub(in super::super) async fn run_review_and_final_gates(
         &self,
@@ -137,70 +131,28 @@ impl LifecycleDriver {
                 "reviewRemediationInventory": review_remediation_inventory,
                 "result": review_fixes,
             }));
-            let review_verification_plan = self
-                .reduce(
-                    &format!("review-verification-plan-{review_iteration}"),
-                    serde_json::json!([
-                        self.task_universe,
-                        review_fixes,
-                        evidence.implementation
-                    ]),
-                    "reducer",
-                    prompts::REVIEW_VERIFICATION_PLAN_TASK,
+            if self
+                .block_failed_review_remediation(
+                    evidence,
+                    review_iteration,
+                    &review,
+                    &review_remediation_inventory,
+                    &review_fixes,
                 )
-                .await?;
-            let plan_items = support::array(review_verification_plan.get("items"));
-            if plan_items.is_empty() {
-                return self
-                    .final_report(
-                        &format!("blocked-empty-review-verification-{review_iteration}"),
-                        None,
-                        "needs_review",
-                        serde_json::json!({
-                            "taskUniverse": self.task_universe,
-                            "review": review,
-                            "reviewFixes": review_fixes,
-                            "reviewVerificationPlan": review_verification_plan,
-                            "repair_attempts": evidence.repair_attempts,
-                        }),
-                        prompts::BLOCKED_EMPTY_REVIEW_VERIFICATION_TASK,
-                    )
-                    .await;
+                .await?
+            {
+                return Ok(());
             }
-            let split_items = support::split_focused_verification_items(&contract, &plan_items);
-            let review_verification = self
-                .parallel(
-                    &format!("review-verification-wave-{review_iteration}"),
-                    serde_json::json!(split_items),
-                    serde_json::json!({
-                        "tier": "coder",
-                        "task": prompts::REVIEW_VERIFICATION_WAVE_TASK,
-                    }),
+            if !self
+                .run_review_verification_gate(
+                    review_iteration,
+                    &review,
+                    &review_fixes,
+                    evidence,
                 )
-                .await?;
-            evidence.verification.push(serde_json::json!({
-                "kind": "review-verification",
-                "reviewIteration": review_iteration,
-                "reviewVerificationPlan": { "items": split_items },
-                "result": review_verification,
-            }));
-            if !support::outcome_accepted_or_noop(&review_verification) {
-                return self
-                    .final_report(
-                        &format!("blocked-review-verification-failed-{review_iteration}"),
-                        None,
-                        "needs_review",
-                        serde_json::json!({
-                            "taskUniverse": self.task_universe,
-                            "reviewFixes": review_fixes,
-                            "reviewVerification": review_verification,
-                            "implementationEvidence": evidence.implementation,
-                            "verificationEvidence": evidence.verification,
-                            "repair_attempts": evidence.repair_attempts,
-                        }),
-                        prompts::BLOCKED_REVIEW_VERIFICATION_FAILED_TASK,
-                    )
-                    .await;
+                .await?
+            {
+                return Ok(());
             }
             review_iteration += 1;
             review = self

@@ -121,11 +121,12 @@ fn validate_worktree_branch_result(
     branch: &WorktreeBranchExecution,
     assignment: &WorkflowV2WriteAssignment,
 ) -> archon_workflow::WorkflowResult<()> {
-    let item = WorkflowV2WriteItem::new(
+    let mut item = WorkflowV2WriteItem::new(
         branch.execution.call.id.clone(),
         WorkflowV2WriteMode::Worktree,
         assignment.owned_targets.clone(),
     );
+    item.artifact_only = assignment.artifact_only;
     let root = branch.workspace_root.display().to_string();
     if let Err(err) = validate_changed_files_for_repository(&item, result, Some(&root)) {
         if is_write_branch_validation_error(&err.to_string()) {
