@@ -149,6 +149,26 @@ fn retry_inventory_rejects_a_dropped_source_gap() {
 }
 
 #[test]
+fn retry_invariant_issue_exposes_authoritative_repair_values() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/wf6dd_verification_retry_invariant_failure.json"
+    ))
+    .expect("fixture JSON");
+    let checked = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
+        &fixture["inventory"],
+        &fixture["verification"],
+    );
+    let issues = support::array(checked.get("unresolved_issues"));
+
+    assert!(issues.iter().any(|issue| {
+        issue["required_source_residual_gap_ids"]
+            == serde_json::json!(["manifest-required-evidence-missing"])
+            && issue["required_failed_predicate"]
+                == "Manifest must include registry and focused command evidence."
+    }));
+}
+
+#[test]
 fn retry_inventory_accepts_the_exact_source_gap_and_predicate() {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "fixtures/wf32_verification_invariant_chain.json"

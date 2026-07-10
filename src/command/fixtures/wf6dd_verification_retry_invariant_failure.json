@@ -1,0 +1,34 @@
+{
+  "inventory": {
+    "items": [
+      {
+        "item_id": "retry-verification-item",
+        "source_item_id": "failed-verification-item",
+        "canonical_task_ids": ["TASK-FIXTURE-010"],
+        "focused_verification": ["inspect the remediation manifest"],
+        "expected_evidence": ["the manifest contains its evidence references"],
+        "source_residual_gap_ids": ["wrong-gap"],
+        "failed_predicate": "a paraphrased predicate"
+      }
+    ],
+    "unresolved_issues": []
+  },
+  "verification": {
+    "outcomes": [
+      {
+        "id": "failed-verification-item",
+        "status": "failed",
+        "canonical_task_ids": ["TASK-FIXTURE-010"],
+        "result": {
+          "residual_gaps": [
+            {
+              "id": "manifest-required-evidence-missing",
+              "description": "Manifest must include registry and focused command evidence.",
+              "severity": "high"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

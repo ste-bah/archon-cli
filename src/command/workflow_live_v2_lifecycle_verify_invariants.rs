@@ -40,20 +40,22 @@ fn retry_item_invariant_issues(item: &Value, failed: &[Value]) -> Vec<Value> {
         .collect();
     let mut issues = Vec::new();
     if !missing.is_empty() {
-        issues.push(invariant_issue(
+        issues.push(invariant_issue_for_gaps(
             item,
             "source_residual_gap_ids",
             &format!(
                 "retry item dropped source residual gap IDs: {}",
                 missing.join(", ")
             ),
+            &gaps,
         ));
     }
     if !predicate_matches_gaps(item, &gaps) {
-        issues.push(invariant_issue(
+        issues.push(invariant_issue_for_gaps(
             item,
             "failed_predicate",
             "retry item changed or dropped the failed predicate",
+            &gaps,
         ));
     }
     issues
@@ -125,4 +127,25 @@ fn invariant_issue(item: &Value, field: &str, message: &str) -> Value {
         "item_id": item.get("item_id").or_else(|| item.get("id")).cloned(),
         "canonical_task_ids": support::strings_of(item.get("canonical_task_ids")),
     })
+}
+
+fn invariant_issue_for_gaps(
+    item: &Value,
+    field: &str,
+    message: &str,
+    gaps: &[(String, String)],
+) -> Value {
+    let mut issue = invariant_issue(item, field, message);
+    issue["required_source_residual_gap_ids"] =
+        serde_json::json!(gaps.iter().map(|(id, _)| id).collect::<Vec<_>>());
+    issue["required_failed_predicate"] = serde_json::json!(gap_predicate(gaps));
+    issue
+}
+
+fn gap_predicate(gaps: &[(String, String)]) -> String {
+    gaps.iter()
+        .map(|(_, description)| description.trim())
+        .filter(|description| !description.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
