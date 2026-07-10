@@ -178,6 +178,10 @@ impl LifecycleDriver {
                 &repair_plan,
             );
             let mut repair_inventory = contract.normalize_inventory(&repair_plan);
+            repair_inventory = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
+                &repair_inventory,
+                &verification,
+            );
             let allowed_task_ids: Vec<String> = support::unique(
                 plan_items
                     .iter()
@@ -217,6 +221,10 @@ impl LifecycleDriver {
                     &shape_repair,
                 );
                 repair_inventory = contract.normalize_inventory(&shape_repair);
+                repair_inventory = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
+                    &repair_inventory,
+                    &verification,
+                );
                 repair_inventory = support::constrain_inventory_tasks(
                     &contract,
                     &repair_inventory,
@@ -326,12 +334,5 @@ fn item_matches_ids(
 }
 
 fn item_match_ids(item: &serde_json::Value) -> Vec<String> {
-    let mut ids = Vec::new();
-    for key in ["item_id", "id", "source_item_id", "split_from_item_id"] {
-        if let Some(value) = item.get(key).and_then(serde_json::Value::as_str) {
-            ids.push(value.to_string());
-        }
-    }
-    ids.extend(support::strings_of(item.get("source_outcome_item_ids")));
-    ids
+    workflow_live_v2_lifecycle_verify_invariants::verification_item_ids(item)
 }

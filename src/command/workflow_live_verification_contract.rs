@@ -96,6 +96,9 @@ pub(super) fn classify_verification_result(result: &WorkflowV2Result) -> Verific
     if zero_matched_text(&text) {
         return VerificationFailureClass::RetryableVerificationIssue;
     }
+    if provider_proof_mismatch_text(&text) {
+        return VerificationFailureClass::ActionableImplementationFailure;
+    }
     if provider_credential_text(&text) {
         return match provider_env_proof_state(result) {
             Some("missing") => VerificationFailureClass::ExternalUnavailable,
@@ -256,6 +259,14 @@ fn provider_credential_text(text: &str) -> bool {
         && (text.contains("missing") || text.contains("not configured") || text.contains("403"))
 }
 
+fn provider_proof_mismatch_text(text: &str) -> bool {
+    let mismatch = text.contains("provider-env-status-mismatch")
+        || text.contains("provider-env-proof-mismatch")
+        || text.contains("conflicts with current redacted provider_env_proof")
+        || text.contains("while redacted environment proof reports");
+    mismatch && (text.contains("artifact") || text.contains("provider_environment"))
+}
+
 fn provider_env_proof_state(result: &WorkflowV2Result) -> Option<&str> {
     result
         .data
@@ -377,6 +388,33 @@ mod tests {
                     "credential_state": "present",
                     "redacted_env_keys_checked": [{"key": "POLYGON_API_KEY", "state": "present"}]
                 }
+            }),
+            ..WorkflowV2Result::default()
+        };
+
+        assert_eq!(
+            classify_verification_result(&result),
+            VerificationFailureClass::ActionableImplementationFailure
+        );
+    }
+
+    #[test]
+    fn provider_artifact_mismatch_requires_write_remediation() {
+        let result = WorkflowV2Result {
+            status: WorkflowV2Status::Failed,
+            summary:
+                "artifact reports API key missing while redacted environment proof reports present"
+                    .to_string(),
+            residual_gaps: vec![archon_workflow::WorkflowV2ResidualGap {
+                id: "provider-env-status-mismatch".to_string(),
+                description:
+                    "provider_environment conflicts with current redacted provider_env_proof"
+                        .to_string(),
+                severity: Some("high".to_string()),
+            }],
+            data: serde_json::json!({
+                "canonical_task_ids": ["TASK-FIXTURE-030"],
+                "provider_env_proof": { "credential_state": "missing" }
             }),
             ..WorkflowV2Result::default()
         };

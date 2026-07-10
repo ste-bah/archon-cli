@@ -1,3 +1,4 @@
+#[derive(Default)]
 struct WorktreeWaveArtifacts {
     results: Vec<WorkflowV2Result>,
     manifests: Vec<PatchManifest>,
@@ -6,6 +7,7 @@ struct WorktreeWaveArtifacts {
     apply_gap: Option<String>,
 }
 
+#[derive(Default)]
 struct WorktreePlanArtifacts {
     results: Vec<WorkflowV2Result>,
     manifests: Vec<PatchManifest>,
@@ -265,18 +267,6 @@ fn collect_worktree_wave_artifacts(
     Ok(artifacts)
 }
 
-impl Default for WorktreeWaveArtifacts {
-    fn default() -> Self {
-        Self {
-            results: Vec::new(),
-            manifests: Vec::new(),
-            pre_hashes: BTreeMap::new(),
-            completed: Vec::new(),
-            apply_gap: None,
-        }
-    }
-}
-
 fn push_worktree_manifest_artifacts(
     artifacts: &mut WorktreeWaveArtifacts,
     completed_branch: &CompletedWorktreeBranch,
@@ -311,17 +301,6 @@ fn apply_worktree_wave(
         )
     });
     worktree_apply_gap(apply_result)
-}
-
-impl Default for WorktreePlanArtifacts {
-    fn default() -> Self {
-        Self {
-            results: Vec::new(),
-            manifests: Vec::new(),
-            apply_gap: None,
-            peak_parallelism: 0,
-        }
-    }
 }
 
 fn worktree_apply_gap(result: Result<archon_workflow::write_coordinator::ApplyRecord, impl std::fmt::Display>) -> Option<String> {

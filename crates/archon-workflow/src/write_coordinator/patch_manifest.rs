@@ -123,8 +123,8 @@ pub fn capture_patch(
     // Step 1: intent-to-add untracked declared targets so creates appear in diff.
     let mut intent_added: Vec<String> = Vec::new();
     for rel in &diff_targets {
-        if isolated.join(&rel).exists() && !is_tracked(isolated, &rel) {
-            run_git(&["add", "--intent-to-add", &rel], isolated).map_err(|e| {
+        if isolated.join(rel).exists() && !is_tracked(isolated, rel) {
+            run_git(&["add", "--intent-to-add", rel], isolated).map_err(|e| {
                 PatchError::GitDiffFailed {
                     stderr: e.to_string(),
                 }
@@ -187,7 +187,7 @@ fn validated_workspace_changes(
     }
     let paths = workspace_changed_paths(isolated)?;
     for path in &paths {
-        let normalized = normalize_target(&path, &plan.canonical_root)
+        let normalized = normalize_target(path, &plan.canonical_root)
             .map_err(|_| PatchError::UndeclaredWrite { path: path.clone() })?;
         if !path_is_owned(&normalized, plan) {
             return Err(PatchError::UndeclaredWrite { path: path.clone() });

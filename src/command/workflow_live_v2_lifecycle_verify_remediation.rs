@@ -42,7 +42,7 @@ impl LifecycleDriver {
             actionable,
             &triage,
         );
-        if let Some(retry_items) = triage_retry_items(&contract, &triage, plan_items) {
+        if let Some(retry_items) = triage_retry_items(&contract, &triage, plan_items, actionable) {
             *verification = self
                 .parallel(
                     &format!("verification-wave-{wave_index}-triage-retry-{repair_attempt}"),
@@ -389,8 +389,13 @@ fn triage_retry_items(
     contract: &LifecycleContract<'_>,
     triage: &serde_json::Value,
     plan_items: &[serde_json::Value],
+    source_outcomes: &[serde_json::Value],
 ) -> Option<Vec<serde_json::Value>> {
     let inventory = contract.normalize_inventory(triage);
+    let inventory = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
+        &inventory,
+        &serde_json::json!({ "outcomes": source_outcomes }),
+    );
     let allowed = allowed_verification_task_ids(plan_items);
     let constrained = support::constrain_inventory_tasks(contract, &inventory, &allowed);
     if !support::verification_inventory_ready(&constrained) {

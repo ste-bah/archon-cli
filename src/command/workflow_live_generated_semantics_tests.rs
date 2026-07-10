@@ -1,4 +1,5 @@
 #[allow(dead_code)]
+#[allow(clippy::duplicate_mod)]
 #[path = "workflow_live_v2_lifecycle_prompts.rs"]
 mod prompts;
 

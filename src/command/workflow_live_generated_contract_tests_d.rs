@@ -5,10 +5,14 @@ fn workflow_live_generated_contract_normalizes_direct_command_retry_fixture() {
     let inventory = normalize_generated_inventory_value(&value, Some(&tdl_task_universe()));
 
     assert_eq!(inventory.items.len(), 3);
-    assert!(
-        inventory.issues.is_empty(),
-        "direct command retry items must be canonical before source scheduling: {:?}",
-        inventory.issues
+    assert_eq!(
+        inventory
+            .issues
+            .iter()
+            .filter(|issue| issue.kind == GeneratedContractIssueKind::EvidenceRepair)
+            .count(),
+        6,
+        "legacy retries must repair dropped invariant identity"
     );
     for item in &inventory.items {
         assert_eq!(
@@ -29,13 +33,20 @@ fn workflow_live_generated_contract_normalizes_direct_command_retry_fixture() {
 }
 
 #[test]
-fn workflow_live_generated_contract_keeps_consolidated_retry_item_schedulable() {
+fn workflow_live_generated_contract_requires_invariants_for_consolidated_retry_item() {
     let fixture = include_str!("fixtures/wfcac_verification_repair_consolidated_retry_item.json");
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let inventory = normalize_generated_inventory_value(&value, Some(&tdl_task_universe()));
 
     assert_eq!(inventory.items.len(), 1);
-    assert!(inventory.issues.is_empty(), "{:?}", inventory.issues);
+    assert_eq!(
+        inventory
+            .issues
+            .iter()
+            .filter(|issue| issue.kind == GeneratedContractIssueKind::EvidenceRepair)
+            .count(),
+        2
+    );
     let item = &inventory.items[0];
     assert_eq!(item["canonical_task_ids"], serde_json::json!(["TASK-TDL-001"]));
     assert!(item["focused_verification"].as_array().is_some_and(|items| {

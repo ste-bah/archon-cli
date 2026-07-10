@@ -275,12 +275,16 @@ include!("workflow_live_v2_script_host.rs");
 
 include!("workflow_live_v2_script_helpers.rs");
 
+include!("workflow_live_v2_script_verification.rs");
+
 #[path = "workflow_live_v2_lifecycle_prompts.rs"]
 mod workflow_live_v2_lifecycle_prompts;
 #[path = "workflow_live_v2_lifecycle_review_remediation.rs"]
 mod workflow_live_v2_lifecycle_review_remediation;
 #[path = "workflow_live_v2_lifecycle_review_verification.rs"]
 mod workflow_live_v2_lifecycle_review_verification;
+#[path = "workflow_live_v2_lifecycle_verify_invariants.rs"]
+mod workflow_live_v2_lifecycle_verify_invariants;
 #[path = "workflow_live_v2_lifecycle_verify_supersede.rs"]
 mod workflow_live_v2_lifecycle_verify_supersede;
 

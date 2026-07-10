@@ -193,10 +193,14 @@ fn workflow_live_generated_contract_normalizes_nested_result_retry_fixture() {
             .as_array()
             .is_some_and(|items| items.len() == 2)
     );
-    assert!(
-        inventory.issues.is_empty(),
-        "retry fixture should not require source metadata repair: {:?}",
-        inventory.issues
+    assert_eq!(
+        inventory
+            .issues
+            .iter()
+            .filter(|issue| issue.kind == GeneratedContractIssueKind::EvidenceRepair)
+            .count(),
+        2,
+        "legacy retry must preserve command normalization but require invariant repair"
     );
 }
 

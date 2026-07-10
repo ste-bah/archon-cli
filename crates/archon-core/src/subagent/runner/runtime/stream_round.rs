@@ -99,26 +99,25 @@ pub(super) async fn collect_stream_round(
             StreamEvent::Error {
                 error_type,
                 message,
-            } => {
-                if handle_stream_error(
-                    runner,
-                    messages,
-                    auto_compact,
-                    reactive_overflow_retried,
-                    reactive_rate_limit_retried,
-                    last_known_context_tokens,
-                    request_body_bytes,
-                    large_retry_body_bytes,
-                    telemetry,
-                    error_type,
-                    message,
-                )
-                .await?
-                {
-                    retry_after_compact = true;
-                    break;
-                }
+            } if handle_stream_error(
+                runner,
+                messages,
+                auto_compact,
+                reactive_overflow_retried,
+                reactive_rate_limit_retried,
+                last_known_context_tokens,
+                request_body_bytes,
+                large_retry_body_bytes,
+                telemetry,
+                error_type.clone(),
+                message.clone(),
+            )
+            .await? =>
+            {
+                retry_after_compact = true;
+                break;
             }
+            StreamEvent::Error { .. } => {}
             StreamEvent::MessageStart { ref usage, .. } => {
                 record_message_start_usage(runner, usage);
             }

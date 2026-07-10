@@ -57,6 +57,40 @@
     }
 
     #[test]
+    fn artifact_only_focused_verification_can_accept_verification_coverage() {
+        let result: WorkflowV2Result = serde_json::from_str(include_str!(
+            "fixtures/wf32_artifact_verification_aggregate.json"
+        ))
+        .expect("D16 fixture");
+        let options = WorkflowV2HostOptions {
+            item_kind: Some("focused_verification".to_string()),
+            ..WorkflowV2HostOptions::default()
+        };
+        let execution = WorkflowV2CallExecution {
+            call: WorkflowV2HostCall {
+                id: "verification-wave-fixture".to_string(),
+                method: WorkflowV2HostMethod::Parallel,
+                write_mode: None,
+                options,
+            },
+            input: serde_json::Value::Null,
+            depends_on: Vec::new(),
+        };
+
+        let result = normalize_result_for_call(&execution, result);
+
+        assert_eq!(result.status, WorkflowV2Status::Accepted);
+        assert_eq!(
+            result.task_coverage[0].status,
+            WorkflowV2TaskCoverageStatus::Accepted
+        );
+        assert!(!result
+            .residual_gaps
+            .iter()
+            .any(|gap| gap.id.starts_with("read_only_task_acceptance_")));
+    }
+
+    #[test]
     fn empty_items_output_requires_noop_proof() {
         let mut result = WorkflowV2Result::accepted("inventory complete");
         result.evidence.push(WorkflowV2Evidence::new(

@@ -5,7 +5,9 @@ use archon_workflow::{
     WorkflowV2SourceTaskGraph, WorkflowV2SourceTaskItem, WorkflowV2WriteMode,
 };
 
-use super::super::workflow_live_generated_contract::normalize_generated_item_value;
+use super::super::workflow_live_generated_contract::{
+    GeneratedContractIssueKind, normalize_generated_item_value,
+};
 use super::super::workflow_live_task_universe::WorkflowV2TaskUniverse;
 use super::workflow_live_v2_stable_json::stable_hash;
 use super::workflow_live_v2_target_expansion::expand_declared_rust_module_targets;

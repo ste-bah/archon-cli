@@ -62,6 +62,13 @@ fn generated_item_issues(
         ));
     }
     if generated_focused_verification_item(value) {
+        for field in retry_invariant_missing_fields(value) {
+            issues.push(make_issue(
+                GeneratedContractIssueKind::EvidenceRepair,
+                field,
+                "verification retry item must preserve source residual gap IDs and the failed predicate",
+            ));
+        }
         return issues;
     }
     match work_type.as_str() {

@@ -311,6 +311,7 @@ pub(super) fn normalize_generated_item_value_with_repo(
         &mut object,
     );
     normalize_retry_context(value, &mut object);
+    normalize_retry_invariant_context(value, &mut object);
     copy_alias_array(
         value,
         &[
@@ -476,6 +477,8 @@ include!("workflow_live_generated_contract_helpers.rs");
 include!("workflow_live_generated_contract_artifacts.rs");
 
 include!("workflow_live_generated_contract_retry.rs");
+
+include!("workflow_live_generated_contract_invariants.rs");
 
 #[cfg(test)]
 #[path = "workflow_live_generated_contract_tests.rs"]

@@ -186,7 +186,7 @@ fn fallback_tradingview_fixture_from_cli(cli: &Path) -> Option<Vec<u8>> {
     let start = source.find("JSON.stringify(")? + "JSON.stringify(".len();
     let tail = &source[start..];
     let end = tail.rfind("));")?;
-    Some(tail[..end].as_bytes().to_vec())
+    Some(tail.as_bytes()[..end].to_vec())
 }
 
 fn bars_from_tradingview_response(body: &[u8]) -> Result<Vec<OhlcvBar>> {

@@ -133,23 +133,15 @@ fn focused_verification_expected_evidence_changes_source_fingerprint() {
 }
 
 #[test]
-fn focused_verification_accepts_wffe12_retry_steps_fixture() {
+fn focused_verification_rejects_retry_steps_without_invariants() {
     let fixture = include_str!("fixtures/wffe12_verification_repair_plan_1_3_items.json");
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let execution = focused_verification_execution(source_data);
 
     let metadata = dynamic_wave_source_metadata(&execution, Some(&tdl_task_universe()), None);
 
-    assert_eq!(metadata.invalid_reason, None, "{metadata:?}");
-    assert!(metadata.source_fingerprint.is_some());
-    let graph = metadata.source_task_graph.expect("graph");
-    assert_eq!(graph.items.len(), 2);
-    assert!(graph.items.iter().all(|item| {
-        item.canonical_task_ids == vec!["TASK-TDL-050", "TASK-TDL-070"]
-            && !item.focused_verification.is_empty()
-            && !item.expected_evidence.is_empty()
-            && item.artifact_requirements.is_empty()
-    }));
+    assert!(metadata.invalid_reason.is_some(), "{metadata:?}");
+    assert!(metadata.source_fingerprint.is_none());
 }
 
 #[test]
@@ -177,7 +169,7 @@ fn focused_verification_accepts_nested_retry_repair_plan_fixture() {
 }
 
 #[test]
-fn focused_verification_accepts_direct_retry_items_fixture() {
+fn focused_verification_rejects_direct_retry_items_without_invariants() {
     let fixture = include_str!("fixtures/wf1ca_verification_repair_plan_1_1.json");
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let normalized =
@@ -189,13 +181,8 @@ fn focused_verification_accepts_direct_retry_items_fixture() {
 
     let metadata = dynamic_wave_source_metadata(&execution, Some(&tdl_task_universe()), None);
 
-    assert_eq!(metadata.invalid_reason, None, "{metadata:?}");
-    assert!(metadata.source_fingerprint.is_some());
-    let graph = metadata.source_task_graph.expect("graph");
-    assert_eq!(graph.items.len(), 1);
-    assert_eq!(graph.items[0].canonical_task_ids, vec!["TASK-TDL-001"]);
-    assert!(!graph.items[0].focused_verification.is_empty());
-    assert!(!graph.items[0].expected_evidence.is_empty());
+    assert!(metadata.invalid_reason.is_some(), "{metadata:?}");
+    assert!(metadata.source_fingerprint.is_none());
 }
 
 #[test]
@@ -223,7 +210,7 @@ fn focused_verification_accepts_retry_command_fixture() {
 }
 
 #[test]
-fn focused_verification_accepts_nested_result_retry_fixture() {
+fn focused_verification_rejects_nested_retry_without_invariants() {
     let fixture = include_str!("fixtures/wf19f5_verification_repair_plan_1_3.json");
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let normalized =
@@ -235,13 +222,8 @@ fn focused_verification_accepts_nested_result_retry_fixture() {
 
     let metadata = dynamic_wave_source_metadata(&execution, Some(&tdl_task_universe()), None);
 
-    assert_eq!(metadata.invalid_reason, None, "{metadata:?}");
-    assert!(metadata.source_fingerprint.is_some());
-    let graph = metadata.source_task_graph.expect("graph");
-    assert_eq!(graph.items.len(), 1);
-    assert_eq!(graph.items[0].canonical_task_ids, vec!["TASK-TDL-010"]);
-    assert!(!graph.items[0].focused_verification.is_empty());
-    assert!(!graph.items[0].expected_evidence.is_empty());
+    assert!(metadata.invalid_reason.is_some(), "{metadata:?}");
+    assert!(metadata.source_fingerprint.is_none());
 }
 
 #[test]

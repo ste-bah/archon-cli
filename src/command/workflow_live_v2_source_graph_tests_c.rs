@@ -44,7 +44,7 @@ fn focused_verification_accepts_required_evidence_retry_commands_fixture() {
 }
 
 #[test]
-fn focused_verification_accepts_lowercase_embedded_retry_item_ids() {
+fn focused_verification_rejects_embedded_retry_items_without_invariants() {
     let fixture = include_str!("fixtures/wf199_verification_repair_plan_1_1.json");
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let source_data = value["data"]["items"].clone();
@@ -52,18 +52,12 @@ fn focused_verification_accepts_lowercase_embedded_retry_item_ids() {
 
     let metadata = dynamic_wave_source_metadata(&execution, Some(&tdl_task_universe()), None);
 
-    assert_eq!(metadata.invalid_reason, None, "{metadata:?}");
-    let graph = metadata.source_task_graph.expect("graph");
-    assert_eq!(graph.items.len(), 3);
-    assert!(graph.items.iter().all(|item| {
-        item.canonical_task_ids == vec!["TASK-TDL-001"]
-            && !item.focused_verification.is_empty()
-            && !item.expected_evidence.is_empty()
-    }));
+    assert!(metadata.invalid_reason.is_some(), "{metadata:?}");
+    assert!(metadata.source_fingerprint.is_none());
 }
 
 #[test]
-fn focused_verification_accepts_direct_command_retry_fixture() {
+fn focused_verification_rejects_direct_retry_without_invariants() {
     let fixture = include_str!("fixtures/wfc5d4_verification_repair_plan_1_3.json");
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let normalized =
@@ -75,15 +69,8 @@ fn focused_verification_accepts_direct_command_retry_fixture() {
 
     let metadata = dynamic_wave_source_metadata(&execution, Some(&tdl_task_universe()), None);
 
-    assert_eq!(metadata.invalid_reason, None, "{metadata:?}");
-    assert!(metadata.source_fingerprint.is_some());
-    let graph = metadata.source_task_graph.expect("graph");
-    assert_eq!(graph.items.len(), 3);
-    assert!(graph.items.iter().all(|item| {
-        item.canonical_task_ids == vec!["TASK-TDL-010"]
-            && !item.focused_verification.is_empty()
-            && !item.expected_evidence.is_empty()
-    }));
+    assert!(metadata.invalid_reason.is_some(), "{metadata:?}");
+    assert!(metadata.source_fingerprint.is_none());
 }
 
 #[test]
@@ -226,6 +213,42 @@ fn focused_verification_execution(source_data: serde_json::Value) -> WorkflowV2C
         }),
         depends_on: Vec::new(),
     }
+}
+
+#[test]
+fn focused_verification_retry_requires_source_invariant_identity() {
+    let execution = focused_verification_execution(serde_json::json!([{
+        "item_id": "retry-verification",
+        "source_item_id": "failed-verification",
+        "canonical_task_ids": ["TASK-TDL-010"],
+        "retry_type": "verification_evidence_repair",
+        "focused_verification": ["inspect artifact"],
+        "expected_evidence": ["artifact is valid"]
+    }]));
+
+    let metadata = dynamic_wave_source_metadata(&execution, Some(&tdl_task_universe()), None);
+
+    assert!(metadata.source_fingerprint.is_none());
+    assert!(metadata.invalid_reason.is_some());
+}
+
+#[test]
+fn focused_verification_retry_with_source_invariant_is_schedulable() {
+    let execution = focused_verification_execution(serde_json::json!([{
+        "item_id": "retry-verification",
+        "source_item_id": "failed-verification",
+        "canonical_task_ids": ["TASK-TDL-010"],
+        "retry_type": "verification_evidence_repair",
+        "source_residual_gap_ids": ["artifact-status-mismatch"],
+        "failed_predicate": "artifact status must equal runtime status",
+        "focused_verification": ["compare artifact status with runtime status"],
+        "expected_evidence": ["artifact-status-mismatch is resolved"]
+    }]));
+
+    let metadata = dynamic_wave_source_metadata(&execution, Some(&tdl_task_universe()), None);
+
+    assert_eq!(metadata.invalid_reason, None, "{metadata:?}");
+    assert!(metadata.source_fingerprint.is_some());
 }
 
 fn task_universe() -> WorkflowV2TaskUniverse {

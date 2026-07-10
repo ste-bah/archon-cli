@@ -1,0 +1,48 @@
+{
+  "initial_verification": {
+    "status": "needs_review",
+    "outcomes": [
+      {
+        "item_id": "verify-provider-artifact",
+        "source_item_id": "provider-capability-proof",
+        "canonical_task_ids": ["TASK-FIXTURE-030"],
+        "status": "failed",
+        "result": {
+          "residual_gaps": [
+            {
+              "id": "provider-env-status-mismatch",
+              "description": "Artifact credential status must match current redacted provider proof.",
+              "severity": "high"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "invalid_retry_plan": {
+    "items": [
+      {
+        "item_id": "retry-provider-artifact-shape",
+        "source_item_id": "verify-provider-artifact",
+        "canonical_task_ids": ["TASK-FIXTURE-030"],
+        "retry_type": "verification_evidence_repair",
+        "focused_verification": ["Read the provider artifact"],
+        "expected_evidence": ["Artifact fields are present"]
+      }
+    ]
+  },
+  "valid_retry_plan": {
+    "items": [
+      {
+        "item_id": "retry-provider-artifact-invariant",
+        "source_item_id": "verify-provider-artifact",
+        "canonical_task_ids": ["TASK-FIXTURE-030"],
+        "retry_type": "verification_evidence_repair",
+        "source_residual_gap_ids": ["provider-env-status-mismatch"],
+        "failed_predicate": "Artifact credential status must match current redacted provider proof.",
+        "focused_verification": ["Compare artifact credential status with current redacted provider proof"],
+        "expected_evidence": ["The provider-env-status-mismatch predicate is resolved"]
+      }
+    ]
+  }
+}

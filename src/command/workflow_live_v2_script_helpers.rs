@@ -363,9 +363,13 @@ fn downgrade_read_only_accepted_task_coverage(
             .evidence
             .iter()
             .any(|evidence| matches!(evidence.kind, WorkflowV2EvidenceKind::Implementation));
+    let verified_task_ids = focused_verification_accepted_task_ids(call, result);
     let mut downgraded = Vec::new();
     for coverage in &mut result.task_coverage {
         if coverage.status != WorkflowV2TaskCoverageStatus::Accepted {
+            continue;
+        }
+        if verified_task_ids.contains(&coverage.task_id) {
             continue;
         }
         let coverage_has_implementation_evidence = coverage.evidence.iter().any(|evidence| {

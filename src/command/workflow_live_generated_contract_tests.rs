@@ -73,3 +73,4 @@ include!("workflow_live_generated_contract_tests_c.rs");
 include!("workflow_live_generated_contract_tests_d.rs");
 include!("workflow_live_generated_contract_tests_e.rs");
 include!("workflow_live_generated_contract_tests_f.rs");
+include!("workflow_live_generated_contract_tests_g.rs");

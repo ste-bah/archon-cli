@@ -125,8 +125,21 @@ fn source_task_graph_from_items(
     let mut raw_items = Vec::new();
     let mut item_to_tasks: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for value in values {
-        let normalized_value =
-            normalize_generated_item_value(value, Some(authoritative_task_universe)).value;
+        let normalized = normalize_generated_item_value(value, Some(authoritative_task_universe));
+        if matches!(
+            wave_kind,
+            DynamicSourceKind::FocusedVerification | DynamicSourceKind::ReviewVerification
+        ) && normalized.issues.iter().any(|issue| {
+            issue.kind == GeneratedContractIssueKind::EvidenceRepair
+                && matches!(
+                    issue.field.as_str(),
+                    "source_residual_gap_ids" | "failed_predicate"
+                )
+        })
+        {
+            return None;
+        }
+        let normalized_value = normalized.value;
         let value = &normalized_value;
         let item_id = item_id(value)?;
         if matches!(wave_kind, DynamicSourceKind::Remediation)

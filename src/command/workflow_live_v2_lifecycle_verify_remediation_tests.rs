@@ -35,17 +35,15 @@ fn fabel_triage_retry_items_keep_only_required_reruns() {
     ))
     .expect("fixture json");
 
-    let retry_items = triage_retry_items(&contract, &triage, &[plan_item]).expect("retry items");
+    let source_outcomes = vec![failed_outcome_with_gap(
+        "verification-wave-1-1-VERIFY-TDL-010-003-project-registry-artifact-contract-check-7",
+        "gap-healthy-dataset-required-artifact-path-fields",
+    )];
+    let retry_items = triage_retry_items(&contract, &triage, &[plan_item], &source_outcomes);
 
-    assert_eq!(retry_items.len(), 1);
     assert!(
-        retry_items[0]["focused_verification"]
-            .as_array()
-            .is_some_and(|items| !items.is_empty())
-    );
-    assert_ne!(
-        retry_items[0]["classification"].as_str(),
-        Some("retry_resolved_verification_execution_issue")
+        retry_items.is_none(),
+        "legacy retry dropped source invariant"
     );
 }
 
@@ -60,7 +58,7 @@ fn fabel_supersede_accepts_shape_failure_with_sibling_evidence() {
         "status": "needs_review",
         "outcomes": [
             accepted_outcome("accepted-sibling"),
-            failed_outcome("failed-shape")
+            failed_outcome_with_gap("failed-shape", "shape-gap")
         ]
     });
     let triage = serde_json::json!({
@@ -70,7 +68,9 @@ fn fabel_supersede_accepts_shape_failure_with_sibling_evidence() {
             "terminal_blockers": [],
             "retry_items": [{
                 "item_id": "failed-shape",
-                "classification": "retryable_verification_shape_issue"
+                "classification": "retryable_verification_shape_issue",
+                "source_residual_gap_ids": ["shape-gap"],
+                "failed_predicate": "failed invariant"
             }]
         }
     });
@@ -88,6 +88,79 @@ fn fabel_supersede_accepts_shape_failure_with_sibling_evidence() {
         supersede.record["superseded"][0]["failed_outcome_id"],
         "failed-shape"
     );
+}
+
+#[test]
+fn supersede_rejects_sibling_evidence_for_a_different_invariant() {
+    let (universe, _) = contract_fixture();
+    let contract = LifecycleContract {
+        task_universe: &universe,
+        target_repository_root: Some("/repo"),
+    };
+    let verification = serde_json::json!({
+        "status": "needs_review",
+        "outcomes": [
+            accepted_outcome("accepted-sibling"),
+            failed_outcome_with_gap("failed-shape", "provider-env-mismatch")
+        ]
+    });
+    let triage = serde_json::json!({
+        "status": "accepted",
+        "data": {
+            "implementation_failures": [],
+            "terminal_blockers": [],
+            "retry_items": [{
+                "item_id": "failed-shape",
+                "classification": "retryable_verification_shape_issue",
+                "source_residual_gap_ids": ["evidence-shape-gap"],
+                "failed_predicate": "evidence envelope must be valid"
+            }]
+        }
+    });
+
+    assert!(
+        workflow_live_v2_lifecycle_verify_supersede::try_supersede_verification(
+            &contract,
+            &verification,
+            &triage,
+            "verification-failure-triage",
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn retry_inventory_rejects_a_dropped_source_gap() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/wf32_verification_invariant_chain.json"
+    ))
+    .expect("D17 fixture");
+
+    let inventory = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
+        &fixture["invalid_retry_plan"],
+        &fixture["initial_verification"],
+    );
+
+    assert!(
+        support::array(inventory.get("unresolved_issues"))
+            .iter()
+            .any(|issue| issue["field"] == "source_residual_gap_ids")
+    );
+}
+
+#[test]
+fn retry_inventory_accepts_the_exact_source_gap_and_predicate() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/wf32_verification_invariant_chain.json"
+    ))
+    .expect("D17 fixture");
+
+    let inventory = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
+        &fixture["valid_retry_plan"],
+        &fixture["initial_verification"],
+    );
+
+    assert!(support::array(inventory.get("unresolved_issues")).is_empty());
 }
 
 #[test]
@@ -119,7 +192,8 @@ fn accepted_outcome(id: &str) -> serde_json::Value {
         "item_id": id,
         "status": "accepted",
         "canonical_task_ids": ["TASK-TDL-010"],
-        "evidence": [{ "summary": "accepted sibling evidence" }]
+        "evidence": [{ "summary": "shape-gap resolved: evidence envelope must be valid" }],
+        "resolved_residual_gap_ids": ["shape-gap"]
     })
 }
 
@@ -130,6 +204,16 @@ fn failed_outcome(id: &str) -> serde_json::Value {
         "canonical_task_ids": ["TASK-TDL-010"],
         "result": { "data": { "verification_failure_class": "retryable_verification_issue" } }
     })
+}
+
+fn failed_outcome_with_gap(id: &str, gap_id: &str) -> serde_json::Value {
+    let mut outcome = failed_outcome(id);
+    outcome["result"]["residual_gaps"] = serde_json::json!([{
+        "id": gap_id,
+        "description": "failed invariant",
+        "severity": "review"
+    }]);
+    outcome
 }
 
 fn retry_item(id: &str, source: &str) -> serde_json::Value {

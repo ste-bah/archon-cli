@@ -39,6 +39,11 @@ struct WorktreeBranchExecution {
     execution: WorkflowV2CallExecution,
 }
 
+type CapturedWorktreeManifest = (
+    Option<PatchManifest>,
+    Option<BTreeMap<String, String>>,
+);
+
 fn prepare_worktree_branch_execution(
     execution: &WorkflowV2CallExecution,
     store_for_control: &archon_workflow::WorkflowStore,
@@ -154,7 +159,7 @@ fn capture_worktree_branch_manifest(
     cfg: &WriteCoordinatorConfig,
     result: &mut WorkflowV2Result,
     prepared: &PreparedWorktreeBranch,
-) -> archon_workflow::WorkflowResult<(Option<PatchManifest>, Option<BTreeMap<String, String>>)> {
+) -> archon_workflow::WorkflowResult<CapturedWorktreeManifest> {
     if !matches!(
         result.status,
         WorkflowV2Status::Accepted | WorkflowV2Status::Noop
