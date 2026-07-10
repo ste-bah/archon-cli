@@ -132,6 +132,35 @@ fn parser_coerces_unknown_command_kind_to_other() {
     assert_eq!(parsed.commands_run[0].kind, WorkflowV2CommandKind::Other);
 }
 
+#[test]
+fn parser_stamps_missing_mechanical_artifact_id() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(repo.join("crates/archon-trading/src")).expect("repo");
+    let repo_root = repo.display().to_string();
+    let request = write_request(&repo_root);
+    let output = serde_json::json!({
+        "status": "accepted",
+        "summary": "updated native validation gate",
+        "evidence": [{"kind": "implementation", "summary": "updated gate logic"}],
+        "artifacts": [{"path": "reports/validation.json"}],
+        "commands_run": [{
+            "command": "cargo test -p archon-trading validation_gates",
+            "status": "succeeded",
+            "exit_code": 0,
+            "output_summary": "passed"
+        }],
+        "files_changed": [{"path": "crates/archon-trading/src/data_lake.rs"}]
+    });
+
+    let parsed = WorkflowV2AgentAdapter::new()
+        .parse_agent_output(&request, &output.to_string())
+        .expect("mechanical fields are host stamped");
+
+    assert_eq!(parsed.artifacts[0].id, "artifact-0-validation-json");
+    assert_eq!(parsed.commands_run[0].kind, WorkflowV2CommandKind::Other);
+}
+
 struct SequenceClient {
     outputs: Mutex<Vec<String>>,
 }

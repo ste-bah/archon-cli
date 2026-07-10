@@ -9,56 +9,63 @@ pub(super) fn enforce_retry_invariants(inventory: &Value, verification: &Value) 
     }
     let mut object = inventory.as_object().cloned().unwrap_or_default();
     let mut issues = support::array(object.get("unresolved_issues"));
-    for item in support::array(object.get("items")) {
-        issues.extend(retry_item_invariant_issues(&item, &failed));
+    issues.retain(|issue| !retry_invariant_contract_issue(issue));
+    let mut items = Vec::new();
+    for mut item in support::array(object.get("items")) {
+        if let Some(source) = matching_failed_outcome(&item, &failed) {
+            stamp_retry_invariant(&mut item, source);
+        } else {
+            issues.push(invariant_issue(
+                &item,
+                "source_item_id",
+                "retry item does not identify a failed source outcome",
+            ));
+        }
+        items.push(item);
     }
+    object.insert("items".to_string(), Value::Array(items));
     object.insert("unresolved_issues".to_string(), Value::Array(issues));
     Value::Object(object)
 }
 
-fn retry_item_invariant_issues(item: &Value, failed: &[Value]) -> Vec<Value> {
-    let Some(source) = matching_failed_outcome(item, failed) else {
-        return vec![invariant_issue(
-            item,
-            "source_item_id",
-            "retry item does not identify a failed source outcome",
-        )];
-    };
+fn retry_invariant_contract_issue(issue: &Value) -> bool {
+    matches!(
+        issue.get("field").and_then(Value::as_str),
+        Some("source_residual_gap_ids" | "failed_predicate")
+    )
+}
+
+fn stamp_retry_invariant(item: &mut Value, source: &Value) {
     let gaps = residual_gap_entries(source);
-    if gaps.is_empty() {
-        return vec![invariant_issue(
-            source,
-            "residual_gaps",
-            "failed source outcome has no invariant identity",
-        )];
-    }
-    let source_ids = support::strings_of(item.get("source_residual_gap_ids"));
-    let missing: Vec<String> = gaps
+    let Some(object) = item.as_object_mut() else {
+        return;
+    };
+    object.insert(
+        "source_residual_gap_ids".to_string(),
+        serde_json::json!(gaps.iter().map(|(id, _)| id).collect::<Vec<_>>()),
+    );
+    object.insert(
+        "failed_predicate".to_string(),
+        Value::String(source_failed_predicate(source, &gaps)),
+    );
+}
+
+fn source_failed_predicate(source: &Value, gaps: &[(String, String)]) -> String {
+    let descriptions = gaps
         .iter()
-        .map(|(id, _)| id.clone())
-        .filter(|id| !source_ids.contains(id))
-        .collect();
-    let mut issues = Vec::new();
-    if !missing.is_empty() {
-        issues.push(invariant_issue_for_gaps(
-            item,
-            "source_residual_gap_ids",
-            &format!(
-                "retry item dropped source residual gap IDs: {}",
-                missing.join(", ")
-            ),
-            &gaps,
-        ));
+        .map(|(_, description)| description.trim())
+        .filter(|description| !description.is_empty())
+        .collect::<Vec<_>>();
+    if !descriptions.is_empty() {
+        return descriptions.join("\n");
     }
-    if !predicate_matches_gaps(item, &gaps) {
-        issues.push(invariant_issue_for_gaps(
-            item,
-            "failed_predicate",
-            "retry item changed or dropped the failed predicate",
-            &gaps,
-        ));
-    }
-    issues
+    source
+        .get("result")
+        .and_then(|result| result.get("summary"))
+        .or_else(|| source.get("summary"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn matching_failed_outcome<'a>(item: &Value, failed: &'a [Value]) -> Option<&'a Value> {
@@ -91,15 +98,6 @@ fn residual_gap_roots(value: &Value) -> Vec<&Value> {
     roots
 }
 
-pub(super) fn predicate_matches_gaps(item: &Value, gaps: &[(String, String)]) -> bool {
-    let Some(predicate) = item.get("failed_predicate").and_then(Value::as_str) else {
-        return false;
-    };
-    gaps.iter()
-        .filter(|(_, description)| !description.is_empty())
-        .all(|(_, description)| predicate.contains(description))
-}
-
 pub(super) fn verification_item_ids(value: &Value) -> Vec<String> {
     let mut ids = direct_item_ids(value);
     if let Some(data) = value.get("result").and_then(|result| result.get("data")) {
@@ -127,25 +125,4 @@ fn invariant_issue(item: &Value, field: &str, message: &str) -> Value {
         "item_id": item.get("item_id").or_else(|| item.get("id")).cloned(),
         "canonical_task_ids": support::strings_of(item.get("canonical_task_ids")),
     })
-}
-
-fn invariant_issue_for_gaps(
-    item: &Value,
-    field: &str,
-    message: &str,
-    gaps: &[(String, String)],
-) -> Value {
-    let mut issue = invariant_issue(item, field, message);
-    issue["required_source_residual_gap_ids"] =
-        serde_json::json!(gaps.iter().map(|(id, _)| id).collect::<Vec<_>>());
-    issue["required_failed_predicate"] = serde_json::json!(gap_predicate(gaps));
-    issue
-}
-
-fn gap_predicate(gaps: &[(String, String)]) -> String {
-    gaps.iter()
-        .map(|(_, description)| description.trim())
-        .filter(|description| !description.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
 }

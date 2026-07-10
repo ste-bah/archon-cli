@@ -18,11 +18,11 @@ use archon_workflow::write_coordinator::{
 use archon_workflow::{
     BranchFailureKind, TargetFilesSource, WorkflowError, WorkflowV2AgentAdapter,
     WorkflowV2BranchOutcome, WorkflowV2CallExecution, WorkflowV2CommandStatus, WorkflowV2Evidence,
-    WorkflowV2EvidenceKind, WorkflowV2HostCall, WorkflowV2ResidualGap, WorkflowV2Result,
-    WorkflowV2ResultStore, WorkflowV2Status, WorkflowV2TaskCoverage, WorkflowV2TaskCoverageStatus,
-    WorkflowV2WriteAssignment, WorkflowV2WriteItem, WorkflowV2WriteMode, WorkflowV2WritePlan,
-    WorkflowV2WritePlanner, WorkflowV2WriteWave, WriteCoordinatorConfig, WritePlan,
-    validate_changed_files_for_repository,
+    WorkflowV2EvidenceKind, WorkflowV2HostCall, WorkflowV2RejectedOutput, WorkflowV2ResidualGap,
+    WorkflowV2Result, WorkflowV2ResultStore, WorkflowV2Status, WorkflowV2TaskCoverage,
+    WorkflowV2TaskCoverageStatus, WorkflowV2WriteAssignment, WorkflowV2WriteItem,
+    WorkflowV2WriteMode, WorkflowV2WritePlan, WorkflowV2WritePlanner, WorkflowV2WriteWave,
+    WriteCoordinatorConfig, WritePlan, validate_changed_files_for_repository,
 };
 use tokio::sync::Semaphore;
 

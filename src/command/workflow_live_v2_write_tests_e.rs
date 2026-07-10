@@ -63,3 +63,26 @@ fn validation_error_preserves_source_task_identity() {
     );
     assert_eq!(result.data["branch_error_from_runtime"], true);
 }
+
+#[test]
+fn post_parse_worktree_rejection_persists_the_result_body() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let result = WorkflowV2Result::accepted("agent accepted without enough evidence");
+
+    persist_rejected_worktree_result(
+        &store,
+        "implementation-branch",
+        "validation",
+        &result,
+        "implementation artifact declares accepted status without required evidence fields",
+    );
+
+    let body = std::fs::read_to_string(store.rejected_output_path("implementation-branch"))
+        .expect("rejected output log");
+    let log: serde_json::Value = serde_json::from_str(&body).expect("rejected output JSON");
+    assert_eq!(log["rejections"][0]["attempt"], "validation");
+    assert!(log["rejections"][0]["raw_body"]
+        .as_str()
+        .is_some_and(|body| body.contains("agent accepted without enough evidence")));
+}

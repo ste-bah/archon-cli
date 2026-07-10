@@ -24,9 +24,17 @@ async fn run_one_worktree_branch(
     .await
     ?;
     poll_v2_run_control(store_for_control, run_id, &branch.id)?;
-    validate_worktree_branch_result(&mut result, &branch, &prepared.assignment)?;
+    validate_worktree_branch_result(&mut result, &branch, &prepared.assignment, v2_store)?;
     let (manifest, pre_hashes) =
-        capture_worktree_branch_manifest(run_root, run_id, execution, cfg, &mut result, &prepared)?;
+        capture_worktree_branch_manifest(
+            run_root,
+            run_id,
+            execution,
+            cfg,
+            v2_store,
+            &mut result,
+            &prepared,
+        )?;
     let _ = canonical_root;
     Ok(completed_worktree_branch(branch, result, manifest, pre_hashes))
 }
@@ -129,6 +137,7 @@ fn validate_worktree_branch_result(
     result: &mut WorkflowV2Result,
     branch: &WorktreeBranchExecution,
     assignment: &WorkflowV2WriteAssignment,
+    v2_store: &WorkflowV2ResultStore,
 ) -> archon_workflow::WorkflowResult<()> {
     let mut item = WorkflowV2WriteItem::new(
         branch.execution.call.id.clone(),
@@ -139,6 +148,13 @@ fn validate_worktree_branch_result(
     item.artifact_only = assignment.artifact_only;
     let root = branch.workspace_root.display().to_string();
     if let Err(err) = validate_changed_files_for_repository(&item, result, Some(&root)) {
+        persist_rejected_worktree_result(
+            v2_store,
+            &branch.id,
+            "ownership_validation",
+            result,
+            &err.to_string(),
+        );
         if is_write_branch_validation_error(&err.to_string()) {
             *result = write_branch_validation_error_result(
                 &branch.id,
@@ -157,6 +173,7 @@ fn capture_worktree_branch_manifest(
     run_id: &str,
     execution: &WorkflowV2CallExecution,
     cfg: &WriteCoordinatorConfig,
+    v2_store: &WorkflowV2ResultStore,
     result: &mut WorkflowV2Result,
     prepared: &PreparedWorktreeBranch,
 ) -> archon_workflow::WorkflowResult<CapturedWorktreeManifest> {
@@ -175,19 +192,44 @@ fn capture_worktree_branch_manifest(
         result,
     ) {
         Ok(captured) => captured,
-        Err(err) if is_write_branch_validation_error(&err.to_string()) => {
-            *result = write_branch_validation_error_result(
+        Err(err) => {
+            persist_rejected_worktree_result(
+                v2_store,
                 branch_id,
-                Some(&prepared.branch.input),
+                "patch_validation",
+                result,
                 &err.to_string(),
             );
-            return Ok((None, None));
+            if is_write_branch_validation_error(&err.to_string()) {
+                *result = write_branch_validation_error_result(
+                    branch_id,
+                    Some(&prepared.branch.input),
+                    &err.to_string(),
+                );
+                return Ok((None, None));
+            }
+            return Err(err);
         }
-        Err(err) => return Err(err),
     };
     let manifest = persist_worktree_manifest(run_root, run_id, execution, branch_id, &captured)?;
     push_patch_manifest_artifact(result, run_root, &execution.call.id, branch_id);
     Ok((Some(manifest), Some(captured.pre_hashes)))
+}
+
+fn persist_rejected_worktree_result(
+    store: &WorkflowV2ResultStore,
+    branch_id: &str,
+    attempt: &str,
+    result: &WorkflowV2Result,
+    error: &str,
+) {
+    let raw_body = serde_json::to_string(result).unwrap_or_else(|_| result.summary.clone());
+    let record = WorkflowV2RejectedOutput {
+        attempt: attempt.to_string(),
+        error: error.to_string(),
+        raw_body,
+    };
+    let _ = store.append_rejected_output(branch_id, record);
 }
 
 fn push_patch_manifest_artifact(

@@ -13,6 +13,46 @@
     ],
     "unresolved_issues": []
   },
+  "round_1_inventory": {
+    "items": [
+      {
+        "item_id": "retry-verification-item",
+        "source_item_id": "failed-verification-item",
+        "canonical_task_ids": ["TASK-FIXTURE-010"],
+        "focused_verification": ["inspect the exact manifest evidence fields"],
+        "expected_evidence": ["all manifest evidence fields are present"],
+        "source_residual_gap_ids": ["manifest-required-evidence-missing"],
+        "failed_predicate": "The manifest needs complete evidence fields."
+      }
+    ],
+    "unresolved_issues": []
+  },
+  "round_3_inventory": {
+    "items": [
+      {
+        "item_id": "retry-verification-item",
+        "source_item_id": "failed-verification-item",
+        "canonical_task_ids": ["TASK-FIXTURE-010"],
+        "focused_verification": ["inspect the manifest and registry evidence"],
+        "expected_evidence": ["the manifest references focused verification"],
+        "source_residual_gap_ids": ["older-implementation-gap"],
+        "failed_predicate": "Manifest evidence is incomplete."
+      }
+    ],
+    "unresolved_issues": []
+  },
+  "unmatched_inventory": {
+    "items": [
+      {
+        "item_id": "unmatched-retry",
+        "source_item_id": "unknown-failure",
+        "canonical_task_ids": ["TASK-FIXTURE-010"],
+        "focused_verification": ["inspect something"],
+        "expected_evidence": ["something passes"]
+      }
+    ],
+    "unresolved_issues": []
+  },
   "verification": {
     "outcomes": [
       {

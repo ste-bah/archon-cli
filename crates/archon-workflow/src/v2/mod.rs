@@ -5,6 +5,7 @@
 //! tasks; this module establishes the public boundary used by those slices.
 
 pub mod agent_adapter;
+mod agent_output_normalize;
 mod branch_evidence;
 pub mod host_api;
 pub mod implementation_inspection;

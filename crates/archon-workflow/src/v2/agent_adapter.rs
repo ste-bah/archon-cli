@@ -151,7 +151,13 @@ impl WorkflowV2AgentAdapter {
         output: &str,
     ) -> Result<WorkflowV2Result, WorkflowV2AgentError> {
         reject_forbidden_text(output)?;
-        let mut result: WorkflowV2Result = serde_json::from_str(output).map_err(|err| {
+        let value = super::agent_output_normalize::normalize_agent_output(request, output)
+            .map_err(|err| {
+                WorkflowV2AgentError::MalformedOutput(format!(
+                    "agent output must be one JSON WorkflowV2Result object: {err}"
+                ))
+            })?;
+        let mut result: WorkflowV2Result = serde_json::from_value(value).map_err(|err| {
             WorkflowV2AgentError::MalformedOutput(format!(
                 "agent output must be one JSON WorkflowV2Result object: {err}"
             ))

@@ -99,7 +99,6 @@ fn triage_marks_shape_or_resolved(item: &Value) -> bool {
 fn triage_preserves_invariant(item: &Value, gaps: &[(String, String)]) -> bool {
     let ids = support::strings_of(item.get("source_residual_gap_ids"));
     gaps.iter().all(|(id, _)| ids.contains(id))
-        && workflow_live_v2_lifecycle_verify_invariants::predicate_matches_gaps(item, gaps)
 }
 
 fn accepted_sibling_ids(

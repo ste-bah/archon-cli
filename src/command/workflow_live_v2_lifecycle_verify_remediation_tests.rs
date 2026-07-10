@@ -43,7 +43,7 @@ fn fabel_triage_retry_items_keep_only_required_reruns() {
 
     assert!(
         retry_items.is_none(),
-        "legacy retry dropped source invariant"
+        "legacy triage fixture retains unrelated contract defects"
     );
 }
 
@@ -130,7 +130,7 @@ fn supersede_rejects_sibling_evidence_for_a_different_invariant() {
 }
 
 #[test]
-fn retry_inventory_rejects_a_dropped_source_gap() {
+fn retry_inventory_stamps_a_dropped_source_gap() {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "fixtures/wf32_verification_invariant_chain.json"
     ))
@@ -141,31 +141,52 @@ fn retry_inventory_rejects_a_dropped_source_gap() {
         &fixture["initial_verification"],
     );
 
-    assert!(
-        support::array(inventory.get("unresolved_issues"))
-            .iter()
-            .any(|issue| issue["field"] == "source_residual_gap_ids")
+    assert!(support::array(inventory.get("unresolved_issues")).is_empty());
+    assert_eq!(
+        inventory["items"][0]["source_residual_gap_ids"],
+        fixture["valid_retry_plan"]["items"][0]["source_residual_gap_ids"]
     );
 }
 
 #[test]
-fn retry_invariant_issue_exposes_authoritative_repair_values() {
+fn canary_shape_repair_rounds_use_stable_host_gap_identity() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/wf6dd_verification_retry_invariant_failure.json"
+    ))
+    .expect("fixture JSON");
+    for key in ["round_1_inventory", "round_3_inventory"] {
+        let checked = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
+            &fixture[key],
+            &fixture["verification"],
+        );
+        assert!(support::array(checked.get("unresolved_issues")).is_empty());
+        assert_eq!(
+            checked["items"][0]["source_residual_gap_ids"],
+            serde_json::json!(["manifest-required-evidence-missing"])
+        );
+        assert_eq!(
+            checked["items"][0]["failed_predicate"],
+            "Manifest must include registry and focused command evidence."
+        );
+    }
+}
+
+#[test]
+fn retry_inventory_without_matching_failure_is_rejected() {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "fixtures/wf6dd_verification_retry_invariant_failure.json"
     ))
     .expect("fixture JSON");
     let checked = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
-        &fixture["inventory"],
+        &fixture["unmatched_inventory"],
         &fixture["verification"],
     );
-    let issues = support::array(checked.get("unresolved_issues"));
 
-    assert!(issues.iter().any(|issue| {
-        issue["required_source_residual_gap_ids"]
-            == serde_json::json!(["manifest-required-evidence-missing"])
-            && issue["required_failed_predicate"]
-                == "Manifest must include registry and focused command evidence."
-    }));
+    assert!(
+        support::array(checked.get("unresolved_issues"))
+            .iter()
+            .any(|issue| issue["field"] == "source_item_id")
+    );
 }
 
 #[test]
