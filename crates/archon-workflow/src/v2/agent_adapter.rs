@@ -436,6 +436,9 @@ const READ_ONLY_RULES: &str = concat!(
 const IMPLEMENTATION_RULES: &str = concat!(
     "- This is implementation-capable work.\n",
     "- If edits are required and made, status must be accepted and files_changed must list each changed path.\n",
+    "- The top-level status is your branch verdict; nested artifact/evidence content may describe fail-closed examples such as validation reports with status=failed.\n",
+    "- commands_run.kind must be one of inspect, test, build, format, review, or other; use other for implementation notes.\n",
+    "- Accepted/noop results must include concrete evidence: files/artifacts, commands_run, task_coverage, and residual_gaps when relevant.\n",
     "- Repository source edits must stay under repository_root and declared target_files; workflow/project artifacts must be written under project_artifact_root when provided and listed in artifacts.\n",
     "- If no edits are required because the work is already complete, status must be noop and task_coverage must include typed evidence; declared project artifacts also require existing artifact evidence.\n",
     "- Status accepted with no files_changed is invalid unless concrete project artifact evidence was written under project_artifact_root."

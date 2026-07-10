@@ -211,7 +211,7 @@ fn reports_accepted_without_evidence(body: &str, lower: &str) -> bool {
 fn reports_accepted_status(body: &str, lower: &str) -> bool {
     if serde_json::from_str::<Value>(body)
         .ok()
-        .is_some_and(|value| value_has_accepted_status(&value))
+        .is_some_and(|value| value_has_accepted_envelope_status(&value))
     {
         return true;
     }

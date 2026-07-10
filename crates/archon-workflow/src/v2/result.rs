@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -137,7 +137,7 @@ pub struct WorkflowV2CommandRecord {
     pub output_summary: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowV2CommandKind {
     #[serde(alias = "inspection")]
@@ -147,6 +147,27 @@ pub enum WorkflowV2CommandKind {
     Format,
     Review,
     Other,
+}
+
+impl<'de> Deserialize<'de> for WorkflowV2CommandKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Ok(command_kind_from_str(&raw))
+    }
+}
+
+fn command_kind_from_str(raw: &str) -> WorkflowV2CommandKind {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "inspect" | "inspection" => WorkflowV2CommandKind::Inspect,
+        "test" => WorkflowV2CommandKind::Test,
+        "build" => WorkflowV2CommandKind::Build,
+        "format" => WorkflowV2CommandKind::Format,
+        "review" => WorkflowV2CommandKind::Review,
+        _ => WorkflowV2CommandKind::Other,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

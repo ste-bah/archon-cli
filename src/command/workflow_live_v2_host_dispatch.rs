@@ -191,7 +191,9 @@ async fn run_single_v2_agent_call_in_repository(
     let provider_env =
         workflow_live_provider_env::prepare_provider_env_for_v2_request(&mut request).await;
     let call_client = client.with_provider_tier(provider_tier_for_v2_request(&request));
-    match adapter.run_with_repair(&call_client, &request).await {
+    match run_v2_agent_call_with_rejected_output_log(adapter, &call_client, &request, v2_store)
+        .await
+    {
         Ok(mut result) => {
             workflow_live_provider_env::stamp_provider_env_result(
                 &mut result,
@@ -204,6 +206,75 @@ async fn run_single_v2_agent_call_in_repository(
         }
         Err(err) => Err(WorkflowError::StageFailed(err.to_string())),
     }
+}
+
+async fn run_v2_agent_call_with_rejected_output_log(
+    adapter: &WorkflowV2AgentAdapter,
+    client: &LiveV2AgentClient,
+    request: &archon_workflow::WorkflowV2AgentRequest,
+    v2_store: Option<&WorkflowV2ResultStore>,
+) -> Result<WorkflowV2Result, WorkflowV2AgentError> {
+    let first = client
+        .run_agent_request(request, adapter.build_prompt(request))
+        .await?;
+    match adapter.parse_agent_output(request, &first) {
+        Ok(result) => Ok(result),
+        Err(first_error) => {
+            save_rejected_write_output(v2_store, request, "first", &first, &first_error);
+            run_v2_agent_repair_with_rejected_output_log(
+                adapter,
+                client,
+                request,
+                v2_store,
+                first,
+                first_error,
+            )
+            .await
+        }
+    }
+}
+
+async fn run_v2_agent_repair_with_rejected_output_log(
+    adapter: &WorkflowV2AgentAdapter,
+    client: &LiveV2AgentClient,
+    request: &archon_workflow::WorkflowV2AgentRequest,
+    v2_store: Option<&WorkflowV2ResultStore>,
+    first: String,
+    first_error: WorkflowV2AgentError,
+) -> Result<WorkflowV2Result, WorkflowV2AgentError> {
+    let prompt = adapter.build_repair_prompt(request, &first, &first_error);
+    let repaired = client.run_agent_request(request, prompt).await?;
+    match adapter.parse_agent_output(request, &repaired) {
+        Ok(result) => Ok(result),
+        Err(repair_error) => {
+            save_rejected_write_output(v2_store, request, "repair", &repaired, &repair_error);
+            Err(WorkflowV2AgentError::RepairExhausted {
+                first_error: Box::new(first_error),
+                repair_error: Box::new(repair_error),
+            })
+        }
+    }
+}
+
+fn save_rejected_write_output(
+    v2_store: Option<&WorkflowV2ResultStore>,
+    request: &archon_workflow::WorkflowV2AgentRequest,
+    attempt: &str,
+    body: &str,
+    error: &WorkflowV2AgentError,
+) {
+    if !request.is_write_capable() {
+        return;
+    }
+    let Some(store) = v2_store else {
+        return;
+    };
+    let record = WorkflowV2RejectedOutput {
+        attempt: attempt.to_string(),
+        error: error.to_string(),
+        raw_body: body.to_string(),
+    };
+    let _ = store.append_rejected_output(&request.call.id, record);
 }
 
 pub(super) fn provider_tier_for_v2_request(
@@ -329,4 +400,46 @@ fn sanitize_generated_contract_gap_id(raw: &str) -> String {
         }
     }
     out.trim_matches('_').to_string()
+}
+
+#[cfg(test)]
+mod rejected_output_tests {
+    use super::*;
+
+    #[test]
+    fn rejected_write_output_is_persisted_under_v2_store() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+        let request = archon_workflow::WorkflowV2AgentRequest {
+            call: WorkflowV2HostCall {
+                id: "implementation-wave-branch-a".to_string(),
+                method: WorkflowV2HostMethod::Implementation,
+                write_mode: Some(archon_workflow::WorkflowV2WriteMode::Worktree),
+                options: archon_workflow::WorkflowV2HostOptions::default(),
+            },
+            role: "coder".to_string(),
+            task: "write branch".to_string(),
+            constraints: Vec::new(),
+            input: serde_json::json!({}),
+            repository_root: None,
+            project_artifacts: Default::default(),
+            target_files: vec!["src/lib.rs".to_string()],
+        };
+        let raw = r#"{"status":"accepted","commands_run":[{"kind":"implementation"}]}"#;
+
+        save_rejected_write_output(
+            Some(&store),
+            &request,
+            "first",
+            raw,
+            &WorkflowV2AgentError::MalformedOutput("bad schema".to_string()),
+        );
+
+        let saved = fs::read_to_string(store.rejected_output_path(&request.call.id))
+            .expect("rejected output log");
+        let parsed: serde_json::Value = serde_json::from_str(&saved).expect("json log");
+        assert_eq!(parsed["branch_id"], request.call.id);
+        assert_eq!(parsed["rejections"][0]["attempt"], "first");
+        assert_eq!(parsed["rejections"][0]["raw_body"], raw);
+    }
 }

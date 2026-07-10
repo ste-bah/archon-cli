@@ -48,35 +48,28 @@ fn next_line_has_blocking_status(lines: &[&str], idx: usize) -> bool {
 fn json_reports_failed_verification(body: &str) -> Option<bool> {
     serde_json::from_str::<Value>(body)
         .ok()
-        .map(|value| value_reports_failed_verification(&value))
+        .map(|value| value_reports_failed_envelope_status(&value))
 }
 
-fn value_reports_failed_verification(value: &Value) -> bool {
-    match value {
-        Value::Object(fields) => fields.iter().any(|(field, value)| {
-            if is_non_final_attempts_field(field) {
-                return false;
-            }
-            (is_verification_status_field(field) && value_is_blocking_status(value))
-                || value_reports_failed_verification(value)
-        }),
-        Value::Array(values) => values.iter().any(value_reports_failed_verification),
-        _ => false,
+fn value_reports_failed_envelope_status(value: &Value) -> bool {
+    let Value::Object(fields) = value else {
+        return false;
+    };
+    if object_has_accepted_status(fields) {
+        return false;
     }
+    object_has_blocking_status(fields)
+        || wrapped_body(fields).is_some_and(value_reports_failed_envelope_status)
 }
 
-fn value_has_accepted_status(value: &Value) -> bool {
-    match value {
-        Value::Object(fields) => {
-            object_has_accepted_status(fields)
-                || fields
-                    .iter()
-                    .filter(|(field, _)| !is_non_final_attempts_field(field))
-                    .any(|(_, value)| value_has_accepted_status(value))
-        }
-        Value::Array(values) => values.iter().any(value_has_accepted_status),
-        _ => false,
+fn value_has_accepted_envelope_status(value: &Value) -> bool {
+    let Value::Object(fields) = value else {
+        return false;
+    };
+    if object_has_accepted_status(fields) {
+        return true;
     }
+    wrapped_body(fields).is_some_and(value_has_accepted_envelope_status)
 }
 
 fn object_has_accepted_status(fields: &serde_json::Map<String, Value>) -> bool {
@@ -86,6 +79,18 @@ fn object_has_accepted_status(fields: &serde_json::Map<String, Value>) -> bool {
             .map(normalized_status_value)
             .is_some_and(|status| status == "accepted")
     })
+}
+
+fn object_has_blocking_status(fields: &serde_json::Map<String, Value>) -> bool {
+    fields.iter().any(|(field, value)| {
+        is_verification_status_field(field) && value_is_blocking_status(value)
+    })
+}
+
+fn wrapped_body(fields: &serde_json::Map<String, Value>) -> Option<&Value> {
+    ["body", "output"]
+        .iter()
+        .find_map(|field| fields.get(*field))
 }
 
 fn is_non_final_attempts_field(field: &str) -> bool {

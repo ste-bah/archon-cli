@@ -15,26 +15,40 @@ pub(super) fn validate(
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
-        validate_line_count(file, &text, cfg.max_source_file_lines)?;
+        let baseline = std::fs::read_to_string(plan.canonical_root.join(file)).ok();
+        validate_line_count(file, baseline.as_deref(), &text, cfg.max_source_file_lines)?;
         validate_complexity(file, &text, cfg.max_function_complexity)?;
     }
     Ok(())
 }
 
-fn validate_line_count(path: &str, text: &str, max: u32) -> Result<(), PatchError> {
+fn validate_line_count(
+    path: &str,
+    baseline: Option<&str>,
+    text: &str,
+    max: u32,
+) -> Result<(), PatchError> {
     if max == 0 {
         return Ok(());
     }
     let lines = text.lines().count() as u32;
-    if lines > max {
-        Err(PatchError::FileTooManyLines {
-            path: path.to_string(),
-            lines,
-            max,
-        })
-    } else {
-        Ok(())
+    if lines <= max {
+        return Ok(());
     }
+    if let Some(baseline_lines) = baseline_line_count(baseline)
+        && lines <= baseline_lines
+    {
+        return Ok(());
+    }
+    Err(PatchError::FileTooManyLines {
+        path: path.to_string(),
+        lines,
+        max,
+    })
+}
+
+fn baseline_line_count(text: Option<&str>) -> Option<u32> {
+    text.map(|value| value.lines().count() as u32)
 }
 
 fn validate_complexity(path: &str, text: &str, max: u32) -> Result<(), PatchError> {

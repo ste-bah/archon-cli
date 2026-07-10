@@ -53,7 +53,7 @@ pub use result::{
     WorkflowV2Result, WorkflowV2Status, WorkflowV2TaskCoverage, WorkflowV2TaskCoverageStatus,
 };
 pub use result_store::{
-    WorkflowV2CallRecord, WorkflowV2Checkpoint, WorkflowV2ResultStore,
+    WorkflowV2CallRecord, WorkflowV2Checkpoint, WorkflowV2RejectedOutput, WorkflowV2ResultStore,
     WorkflowV2SourceTargetExpansion, WorkflowV2SourceTaskGraph, WorkflowV2SourceTaskItem,
     WorkflowV2TaskCompletionEvidence, WorkflowV2TaskCompletionEvidenceKind,
 };

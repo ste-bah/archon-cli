@@ -77,7 +77,10 @@ impl WorkflowV2FinalReportBuilder {
                     index: idx,
                     message: err.to_string(),
                 })?;
-            collect_result(idx, result, &mut report, &mut coverage_by_task);
+            if result_status_requires_review(result.status) {
+                report.status = WorkflowV2Status::NeedsReview;
+            }
+            collect_result(result, &mut report, &mut coverage_by_task);
         }
 
         classify_required_tasks(required_task_ids, &coverage_by_task, &mut report);
@@ -123,7 +126,6 @@ fn validate_paths(paths: &WorkflowV2ReportPaths) -> Result<(), WorkflowV2FinalRe
 }
 
 fn collect_result(
-    idx: usize,
     result: &WorkflowV2Result,
     report: &mut WorkflowV2FinalReport,
     coverage_by_task: &mut BTreeMap<String, Vec<WorkflowV2TaskCoverage>>,
@@ -156,30 +158,30 @@ fn collect_result(
             .or_default()
             .push(coverage.clone());
     }
-    if matches!(
-        result.status,
-        WorkflowV2Status::Pending
-            | WorkflowV2Status::Running
-            | WorkflowV2Status::Failed
-            | WorkflowV2Status::Blocked
-            | WorkflowV2Status::NeedsReview
-            | WorkflowV2Status::Cancelled
-    ) {
-        let task_ids = if result.task_coverage.is_empty() {
-            vec![format!("result:{idx}")]
-        } else {
-            result
-                .task_coverage
-                .iter()
-                .map(|coverage| coverage.task_id.clone())
-                .collect()
-        };
+    if result_status_requires_review(result.status) {
+        let task_ids: Vec<_> = result
+            .task_coverage
+            .iter()
+            .map(|coverage| coverage.task_id.clone())
+            .collect();
         if result.status == WorkflowV2Status::Blocked {
             report.blocked_tasks.extend(task_ids);
         } else {
             report.failed_tasks.extend(task_ids);
         }
     }
+}
+
+fn result_status_requires_review(status: WorkflowV2Status) -> bool {
+    matches!(
+        status,
+        WorkflowV2Status::Pending
+            | WorkflowV2Status::Running
+            | WorkflowV2Status::Failed
+            | WorkflowV2Status::Blocked
+            | WorkflowV2Status::NeedsReview
+            | WorkflowV2Status::Cancelled
+    )
 }
 
 fn classify_required_tasks(

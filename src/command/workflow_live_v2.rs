@@ -16,11 +16,11 @@ use archon_workflow::{
     ProviderTier, RunStatus, WorkflowBundle, WorkflowBundleOrigin, WorkflowError,
     WorkflowEventKind, WorkflowEventLog, WorkflowGeneratedScaffold, WorkflowLearningEvent,
     WorkflowLearningEvidenceRef, WorkflowRun, WorkflowStore, WorkflowV2AgentAdapter,
-    WorkflowV2AgentError, WorkflowV2BranchOutcome, WorkflowV2CallExecution, WorkflowV2CallRecord,
-    WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2FanoutItem, WorkflowV2FanoutReport,
-    WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2ResidualGap, WorkflowV2Result,
-    WorkflowV2ResultStore, WorkflowV2Scheduler, WorkflowV2SchedulerConfig, WorkflowV2Status,
-    workflow_scaffold_hash,
+    WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2BranchOutcome, WorkflowV2CallExecution,
+    WorkflowV2CallRecord, WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2FanoutItem,
+    WorkflowV2FanoutReport, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2RejectedOutput,
+    WorkflowV2ResidualGap, WorkflowV2Result, WorkflowV2ResultStore, WorkflowV2Scheduler,
+    WorkflowV2SchedulerConfig, WorkflowV2Status, workflow_scaffold_hash,
 };
 
 #[path = "workflow_live_provider_env.rs"]

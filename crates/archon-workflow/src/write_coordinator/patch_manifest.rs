@@ -472,5 +472,8 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), PatchError> {
 }
 
 #[cfg(test)]
+#[path = "patch_manifest_line_count_tests.rs"]
+mod line_count_tests;
+#[cfg(test)]
 #[path = "patch_manifest_tests.rs"]
 mod tests;

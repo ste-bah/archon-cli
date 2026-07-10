@@ -66,3 +66,40 @@ fn worktree_write_result_does_not_record_serial_fallback_when_active() {
             .contains("write-capable fanout used Worktree")
     }));
 }
+
+#[test]
+fn owned_module_scope_allows_new_child_file_but_not_sibling() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(repo.join("src/data_store")).expect("module dir");
+    std::fs::write(repo.join("src/data_store.rs"), "mod io;\n").expect("module");
+    std::fs::write(repo.join("src/data_store/io.rs"), "").expect("child");
+    let repo_root = repo.display().to_string();
+    let expanded = expand_declared_rust_module_targets(
+        "impl-data-store",
+        &["src/data_store.rs".to_string()],
+        Some(&repo_root),
+    )
+    .expect("expanded");
+    let item = WorkflowV2WriteItem::new(
+        "impl-data-store",
+        WorkflowV2WriteMode::Worktree,
+        expanded.target_files,
+    );
+    let mut result = WorkflowV2Result::accepted("created module child");
+    result
+        .files_changed
+        .push(WorkflowV2FileRecord::new("src/data_store/new_tests.rs"));
+
+    validate_changed_files_for_repository(&item, &result, Some(&repo_root))
+        .expect("owned module directory permits new child files");
+
+    result.files_changed = vec![WorkflowV2FileRecord::new("src/other/new_tests.rs")];
+    match validate_changed_files_for_repository(&item, &result, Some(&repo_root)) {
+        Err(archon_workflow::WorkflowV2WriteSafetyError::ChangedFileOutsideOwnership {
+            path,
+            ..
+        }) => assert_eq!(path, "src/other/new_tests.rs"),
+        other => panic!("expected ChangedFileOutsideOwnership, got {other:?}"),
+    }
+}

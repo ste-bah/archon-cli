@@ -94,6 +94,11 @@ fn rust_module_expansion(repository_root: &Path, target: &str) -> Option<TargetF
             ));
         }
     }
+    if !expanded.is_empty()
+        && let Some(relative) = repo_relative(repository_root, &repository_root.join(&module_dir))
+    {
+        expanded.insert(relative);
+    }
     Some(TargetFileExpansion {
         source: target.to_string(),
         expanded: expanded.into_iter().collect(),
@@ -179,9 +184,31 @@ mod tests {
         assert_eq!(expanded.declared_target_files, vec!["src/foo.rs"]);
         assert_eq!(
             expanded.target_files,
-            vec!["src/foo.rs", "src/foo/bar.rs", "src/foo/baz.rs"]
+            vec!["src/foo", "src/foo.rs", "src/foo/bar.rs", "src/foo/baz.rs"]
         );
         assert_eq!(expanded.target_file_expansions[0].source, "src/foo.rs");
+    }
+
+    #[test]
+    fn module_directory_expansion_allows_new_child_files() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path();
+        fs::create_dir_all(repo.join("src/data_store")).expect("module dir");
+        fs::write(repo.join("src/data_store.rs"), "mod io;\n").expect("module");
+        fs::write(repo.join("src/data_store/io.rs"), "").expect("child");
+
+        let expanded = expand_declared_rust_module_targets(
+            "item",
+            &["src/data_store.rs".to_string()],
+            Some(&repo.display().to_string()),
+        )
+        .expect("expanded");
+
+        assert!(
+            expanded
+                .target_files
+                .contains(&"src/data_store".to_string())
+        );
     }
 
     #[test]

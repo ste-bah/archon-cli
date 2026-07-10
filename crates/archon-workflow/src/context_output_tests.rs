@@ -150,6 +150,45 @@ fn accepted_json_with_verification_evidence_is_allowed() {
 }
 
 #[test]
+fn accepted_json_with_nested_failed_validation_evidence_is_allowed() {
+    let body = r#"{
+        "status": "accepted",
+        "changed_files": ["crates/archon-trading/src/data_store/gates.rs"],
+        "commands_run": [
+            {"command": "cargo test -p archon-trading validation_gates", "exit_status": 0}
+        ],
+        "evidence": [
+            {
+                "kind": "review",
+                "summary": "Fail-closed fixture report contained {\"status\":\"failed\"} for invalid input."
+            }
+        ],
+        "verification": [
+            {
+                "command": "validation report negative case",
+                "exit_status": 0,
+                "result": "invalid input correctly produced status failed"
+            }
+        ],
+        "residual_gaps": []
+    }"#;
+
+    assert_eq!(output_reports_failed_verification(body), None);
+}
+
+#[test]
+fn top_level_failed_json_still_blocks() {
+    let body = r#"{
+        "status": "failed",
+        "changed_files": ["crates/archon-trading/src/data_store/gates.rs"],
+        "commands_run": [{"command": "cargo test", "exit_status": 1}],
+        "residual_gaps": []
+    }"#;
+
+    assert!(output_reports_failed_verification(body).is_some());
+}
+
+#[test]
 fn accepted_json_with_tests_evidence_is_allowed() {
     let body = r#"{
         "status": "accepted",

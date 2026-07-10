@@ -61,6 +61,25 @@ impl WorkflowV2ResultStore {
             .join(format!("{}.json", sanitize_call_id(item_id)))
     }
 
+    pub fn rejected_output_path(&self, branch_id: &str) -> PathBuf {
+        self.root
+            .join("rejected-outputs")
+            .join(format!("{}.json", sanitize_call_id(branch_id)))
+    }
+
+    pub fn append_rejected_output(
+        &self,
+        branch_id: &str,
+        record: WorkflowV2RejectedOutput,
+    ) -> WorkflowResult<PathBuf> {
+        let path = self.rejected_output_path(branch_id);
+        let mut log = load_rejected_output_log(&path)?;
+        log.branch_id = branch_id.to_string();
+        log.rejections.push(record);
+        write_json(&path, &log)?;
+        Ok(path)
+    }
+
     pub fn save_call_record(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<()> {
         let path = self.result_path(&record.call.id);
         let mut clean = sanitize_for_persistence(record)?;
@@ -203,6 +222,30 @@ impl WorkflowV2ResultStore {
         }
         Ok(invalidated.into_iter().collect())
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowV2RejectedOutput {
+    pub attempt: String,
+    pub error: String,
+    pub raw_body: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WorkflowV2RejectedOutputLog {
+    branch_id: String,
+    rejections: Vec<WorkflowV2RejectedOutput>,
+}
+
+fn load_rejected_output_log(path: &Path) -> WorkflowResult<WorkflowV2RejectedOutputLog> {
+    if !path.exists() {
+        return Ok(WorkflowV2RejectedOutputLog {
+            branch_id: String::new(),
+            rejections: Vec::new(),
+        });
+    }
+    let raw = fs::read_to_string(path).map_err(|err| WorkflowError::io(path, err))?;
+    serde_json::from_str(&raw).map_err(Into::into)
 }
 
 include!("result_store_records.rs");

@@ -205,7 +205,7 @@ fn hidden_needs_review_result_prevents_success() {
         .expect("report");
 
     assert_eq!(report.status, WorkflowV2Status::NeedsReview);
-    assert_eq!(report.failed_tasks, vec!["result:1"]);
+    assert!(report.failed_tasks.is_empty());
 }
 
 fn paths() -> WorkflowV2ReportPaths {
