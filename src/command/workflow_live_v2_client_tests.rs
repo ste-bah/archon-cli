@@ -62,6 +62,7 @@ fn request(
         repository_root: Some("/repo".to_string()),
         project_artifacts: Default::default(),
         target_files: vec!["src/lib.rs".to_string()],
+        target_ownership_scopes: Vec::new(),
     }
 }
 

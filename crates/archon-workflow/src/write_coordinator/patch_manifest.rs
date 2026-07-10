@@ -7,8 +7,9 @@
 
 mod code_hygiene;
 mod secret_scan;
+mod target_hashes;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,8 @@ use super::ItemId;
 use super::worktree_isolation::{CanonicalBaseline, ItemWorkspace, run_git};
 use super::write_plan::{NormalizedPath, WritePlan, normalize_target};
 use crate::write_coordinator::WriteCoordinatorConfig;
+
+use self::target_hashes::target_hashes;
 
 pub const PATCH_MANIFEST_SCHEMA: &str = "archon.workflow.patch_manifest.v1";
 
@@ -115,38 +118,34 @@ pub fn capture_patch(
     baseline: &CanonicalBaseline,
 ) -> Result<CapturedPatch, PatchError> {
     let isolated = workspace.plan.isolated_root.as_path();
+    let changed_paths = validated_workspace_changes(isolated, &workspace.plan)?;
+    let diff_targets = diff_targets(isolated, declared_targets, &changed_paths);
     // Step 1: intent-to-add untracked declared targets so creates appear in diff.
     let mut intent_added: Vec<String> = Vec::new();
-    for target in declared_targets {
-        let rel = target.as_str();
+    for rel in &diff_targets {
         if isolated.join(&rel).exists() && !is_tracked(isolated, &rel) {
             run_git(&["add", "--intent-to-add", &rel], isolated).map_err(|e| {
                 PatchError::GitDiffFailed {
                     stderr: e.to_string(),
                 }
             })?;
-            intent_added.push(rel);
+            intent_added.push(rel.clone());
         }
     }
-    reject_undeclared_workspace_changes(isolated, &workspace.plan, declared_targets)?;
     // Step 2: ONE git diff for the apply patch (combined staged + unstaged;
     // never also --cached). --no-renames keeps a rename as delete+add so the
     // patch and the path accounting agree.
-    let targets: Vec<String> = declared_targets
-        .iter()
-        .map(NormalizedPath::as_str)
-        .collect();
     let patch_bytes = run_diff(
         isolated,
         &["diff", "--binary", "--no-renames", "HEAD", "--"],
-        &targets,
+        &diff_targets,
     )?;
     // Step 3: derive paths from `--name-status -z` — NUL-separated, so paths
     // with spaces survive; status letters are authoritative for create/delete.
     let status_bytes = run_diff(
         isolated,
         &["diff", "--name-status", "--no-renames", "-z", "HEAD", "--"],
-        &targets,
+        &diff_targets,
     )?;
     let (changed_files, created_files, deleted_files) = parse_name_status(&status_bytes);
     let (pre_hashes, post_hashes) = target_hashes(isolated, declared_targets, baseline);
@@ -179,23 +178,37 @@ fn is_tracked(isolated: &Path, rel: &str) -> bool {
     run_git(&["ls-files", "--error-unmatch", rel], isolated).is_ok()
 }
 
-fn reject_undeclared_workspace_changes(
+fn validated_workspace_changes(
     isolated: &Path,
     plan: &WritePlan,
-    declared_targets: &[NormalizedPath],
-) -> Result<(), PatchError> {
+) -> Result<Vec<String>, PatchError> {
     if !plan.workspace_boundary_required {
-        return Ok(());
+        return workspace_changed_paths(isolated);
     }
-    let declared: BTreeSet<NormalizedPath> = declared_targets.iter().cloned().collect();
-    for path in workspace_changed_paths(isolated)? {
+    let paths = workspace_changed_paths(isolated)?;
+    for path in &paths {
         let normalized = normalize_target(&path, &plan.canonical_root)
             .map_err(|_| PatchError::UndeclaredWrite { path: path.clone() })?;
-        if !declared.contains(&normalized) {
-            return Err(PatchError::UndeclaredWrite { path });
+        if !path_is_owned(&normalized, plan) {
+            return Err(PatchError::UndeclaredWrite { path: path.clone() });
         }
     }
-    Ok(())
+    Ok(paths)
+}
+
+fn diff_targets(
+    isolated: &Path,
+    declared_targets: &[NormalizedPath],
+    changed_paths: &[String],
+) -> Vec<String> {
+    if !changed_paths.is_empty() {
+        return changed_paths.to_vec();
+    }
+    declared_targets
+        .iter()
+        .map(NormalizedPath::as_str)
+        .filter(|path| !isolated.join(path).is_dir())
+        .collect()
 }
 
 fn workspace_changed_paths(isolated: &Path) -> Result<Vec<String>, PatchError> {
@@ -226,33 +239,6 @@ fn split_nul_paths(bytes: &[u8]) -> impl Iterator<Item = String> + '_ {
         .split(|byte| *byte == 0)
         .filter(|raw| !raw.is_empty())
         .map(|raw| String::from_utf8_lossy(raw).into_owned())
-}
-
-type HashPair = (BTreeMap<String, String>, BTreeMap<String, String>);
-
-/// pre_hashes from baseline; post_hashes from the post-agent workspace state.
-fn target_hashes(
-    isolated: &Path,
-    declared_targets: &[NormalizedPath],
-    baseline: &CanonicalBaseline,
-) -> HashPair {
-    let mut pre = BTreeMap::new();
-    let mut post = BTreeMap::new();
-    for target in declared_targets {
-        let rel = target.as_str();
-        if let Some(meta) = baseline.declared_target_meta.get(&rel) {
-            pre.insert(rel.clone(), meta.blake3_hex.clone());
-        }
-        post.insert(rel.clone(), hash_file_or_deleted(&isolated.join(&rel)));
-    }
-    (pre, post)
-}
-
-fn hash_file_or_deleted(path: &Path) -> String {
-    match std::fs::read(path) {
-        Ok(bytes) => blake3::hash(&bytes).to_hex().to_string(),
-        Err(_) => "deleted".to_string(),
-    }
 }
 
 /// Parse `git diff --name-status -z` output: NUL-separated `STATUS\0path\0`
@@ -357,7 +343,7 @@ fn validate_changed_file(file: &str, plan: &WritePlan) -> Result<(), PatchError>
         normalize_target(file, &plan.canonical_root).map_err(|_| PatchError::UndeclaredWrite {
             path: file.to_string(),
         })?;
-    if !plan.target_files.contains(&normalized) {
+    if !path_is_owned(&normalized, plan) {
         return Err(PatchError::UndeclaredWrite {
             path: file.to_string(),
         });
@@ -386,6 +372,30 @@ fn validate_changed_file(file: &str, plan: &WritePlan) -> Result<(), PatchError>
         }
     }
     Ok(())
+}
+
+fn path_is_owned(path: &NormalizedPath, plan: &WritePlan) -> bool {
+    plan.target_files
+        .iter()
+        .any(|target| normalized_path_overlaps(target, path))
+        || plan
+            .target_dir_scopes
+            .iter()
+            .any(|scope| normalized_path_overlaps(scope, path))
+}
+
+fn normalized_path_overlaps(left: &NormalizedPath, right: &NormalizedPath) -> bool {
+    path_overlaps(&left.as_str(), &right.as_str())
+}
+
+fn path_overlaps(left: &str, right: &str) -> bool {
+    left == right
+        || left
+            .strip_prefix(right)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+        || right
+            .strip_prefix(left)
+            .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
 /// Write `<stage>/manifests/<item>.json` + `<stage>/patches/<item>.patch` atomically.
@@ -471,6 +481,9 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), PatchError> {
     Ok(())
 }
 
+#[cfg(test)]
+#[path = "patch_manifest_d15_tests.rs"]
+mod d15_tests;
 #[cfg(test)]
 #[path = "patch_manifest_line_count_tests.rs"]
 mod line_count_tests;

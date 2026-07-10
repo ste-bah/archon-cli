@@ -23,6 +23,7 @@ fn write_request(repo_root: &str) -> WorkflowV2AgentRequest {
         repository_root: Some(repo_root.to_string()),
         project_artifacts: Default::default(),
         target_files: vec!["crates/archon-trading/src/data_lake.rs".to_string()],
+        target_ownership_scopes: Vec::new(),
     }
 }
 
@@ -52,6 +53,7 @@ fn build_prompt_resolves_project_artifacts_under_project_root() {
         repository_root: Some(repo.display().to_string()),
         project_artifacts: crate::project_artifact_context_from_v2_root(&v2_root),
         target_files: Vec::new(),
+        target_ownership_scopes: Vec::new(),
     };
     request
         .project_artifacts
@@ -263,6 +265,7 @@ fn project_artifact_request(call_id: &str) -> (WorkflowV2AgentRequest, String) {
         repository_root: Some(repo.display().to_string()),
         project_artifacts: crate::project_artifact_context_from_v2_root(&v2_root),
         target_files: vec!["src/lib.rs".to_string()],
+        target_ownership_scopes: Vec::new(),
     };
     (request, artifact_path)
 }

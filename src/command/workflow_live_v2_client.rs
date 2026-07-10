@@ -229,6 +229,7 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
             repository_root: self.target_repository_root.clone(),
             project_artifacts: Default::default(),
             target_files: Vec::new(),
+            target_ownership_scopes: Vec::new(),
         };
         self.run_agent_request(&request, prompt).await
     }

@@ -81,6 +81,7 @@ pub struct WritePlan {
     pub canonical_root: PathBuf,
     pub isolated_root: PathBuf,
     pub target_files: Vec<NormalizedPath>,
+    pub target_dir_scopes: Vec<NormalizedPath>,
     pub target_files_source: TargetFilesSource,
     pub read_context_files: Vec<NormalizedPath>,
     pub verify_inputs: Vec<NormalizedPath>,

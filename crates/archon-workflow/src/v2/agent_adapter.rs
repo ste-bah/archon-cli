@@ -29,6 +29,8 @@ pub struct WorkflowV2AgentRequest {
     pub project_artifacts: WorkflowV2ProjectArtifactContext,
     #[serde(default)]
     pub target_files: Vec<String>,
+    #[serde(default)]
+    pub target_ownership_scopes: Vec<String>,
 }
 
 impl WorkflowV2AgentRequest {
@@ -55,6 +57,12 @@ impl WorkflowV2AgentAdapter {
             "[]".to_string()
         } else {
             serde_json::to_string(&request.target_files).unwrap_or_else(|_| "[]".to_string())
+        };
+        let target_ownership_scopes = if request.target_ownership_scopes.is_empty() {
+            "[]".to_string()
+        } else {
+            serde_json::to_string(&request.target_ownership_scopes)
+                .unwrap_or_else(|_| "[]".to_string())
         };
         let artifact_roots = serde_json::to_string(&request.project_artifacts.artifact_roots)
             .unwrap_or_else(|_| "[]".to_string());
@@ -84,7 +92,8 @@ impl WorkflowV2AgentAdapter {
              repository_root: {repository_root}\n\
              project_artifact_root: {project_artifact_root}\n\
              project_artifact_roots: {artifact_roots}\n\
-             target_files: {target_files}\n\n\
+             target_files: {target_files}\n\
+             target_ownership_scopes: {target_ownership_scopes}\n\n\
              {project_artifact_paths}\
              ## Task\n{task}\n\n\
              ## Constraints\n```json\n{constraints}\n```\n\n\
@@ -108,6 +117,7 @@ impl WorkflowV2AgentAdapter {
                 .unwrap_or("<none>"),
             artifact_roots = artifact_roots,
             target_files = target_files,
+            target_ownership_scopes = target_ownership_scopes,
             project_artifact_paths = project_artifact_paths,
             task = request.task,
             constraints = constraints,
@@ -340,7 +350,8 @@ fn validate_write_ownership(
             .write_mode
             .unwrap_or(WorkflowV2WriteMode::Serial),
         target_files,
-    );
+    )
+    .with_owned_scopes(request.target_ownership_scopes.clone());
     validate_changed_files(&write_item, result).map_err(|err| {
         WorkflowV2AgentError::ImplementationChangedFilesOutsideOwnership(err.to_string())
     })
@@ -440,12 +451,14 @@ const IMPLEMENTATION_RULES: &str = concat!(
     "- commands_run.kind must be one of inspect, test, build, format, review, or other; use other for implementation notes.\n",
     "- Accepted/noop results must include concrete evidence: files/artifacts, commands_run, task_coverage, and residual_gaps when relevant.\n",
     "- Repository source edits must stay under repository_root and declared target_files; workflow/project artifacts must be written under project_artifact_root when provided and listed in artifacts.\n",
+    "- If a write branch is genuinely already complete with no patch, return top-level \"status\":\"noop\", \"idempotent_noop\":true, commands_run evidence, and accepted/noop task_coverage evidence.\n",
     "- If no edits are required because the work is already complete, status must be noop and task_coverage must include typed evidence; declared project artifacts also require existing artifact evidence.\n",
     "- Status accepted with no files_changed is invalid unless concrete project artifact evidence was written under project_artifact_root."
 );
 
 const RESULT_SCHEMA: &str = r#"{
   "status": "accepted | noop | failed | blocked | needs_review | cancelled",
+  "idempotent_noop": "optional boolean; true only for a top-level noop with concrete evidence and no patch",
   "summary": "concise factual summary",
   "evidence": [{"kind": "inspection | implementation | test | review | remediation | blocker | artifact | other", "summary": "specific evidence", "source": "optional path or command"}],
   "artifacts": [{"id": "stable-id", "path": "artifact/path", "description": "optional"}],

@@ -47,6 +47,10 @@ async fn run_coordinated_v2_write_fanout(
                 record_write_peak(&peak, now_active);
                 let mut branch_call = branch.call;
                 branch_call.options.target_files = assignment.owned_targets.clone();
+                branch_call.options.extra.insert(
+                    "target_ownership_scopes".to_string(),
+                    serde_json::to_value(&assignment.owned_scopes)?,
+                );
                 let branch_execution = WorkflowV2CallExecution {
                     call: branch_call,
                     input: branch.input,

@@ -21,6 +21,7 @@ fn cli_v2_prompt_contract_uses_typed_adapter_contract() {
         repository_root: Some("/repo".into()),
         project_artifacts: Default::default(),
         target_files: vec!["src/lib.rs".into()],
+        target_ownership_scopes: Vec::new(),
     });
 
     assert!(prompt.contains("Required JSON Result Envelope"));
@@ -69,5 +70,6 @@ fn request(role: &str) -> WorkflowV2AgentRequest {
         repository_root: None,
         project_artifacts: Default::default(),
         target_files: Vec::new(),
+        target_ownership_scopes: Vec::new(),
     }
 }

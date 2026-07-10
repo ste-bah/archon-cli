@@ -44,6 +44,7 @@ fn prepare(repo: &Path, item: &str, edit: &str) -> (PatchManifest, BTreeMap<Stri
         canonical_root: repo.to_path_buf(),
         isolated_root: repo.join(".archon/wc/run1").join(item),
         target_files: vec![normalize_target("src/lib.rs", repo).unwrap()],
+        target_dir_scopes: Vec::new(),
         target_files_source: TargetFilesSource::Item,
         read_context_files: vec![],
         verify_inputs: vec![],

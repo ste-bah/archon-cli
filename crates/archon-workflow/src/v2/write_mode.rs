@@ -11,6 +11,7 @@ pub struct WorkflowV2WriteItem {
     pub id: String,
     pub mode: WorkflowV2WriteMode,
     pub owned_targets: Vec<String>,
+    pub owned_scopes: Vec<String>,
     pub artifact_only: bool,
 }
 
@@ -24,8 +25,14 @@ impl WorkflowV2WriteItem {
             id: id.into(),
             mode,
             owned_targets,
+            owned_scopes: Vec::new(),
             artifact_only: false,
         }
+    }
+
+    pub fn with_owned_scopes(mut self, owned_scopes: Vec<String>) -> Self {
+        self.owned_scopes = owned_scopes;
+        self
     }
 
     pub fn artifact_only(id: impl Into<String>, mode: WorkflowV2WriteMode) -> Self {
@@ -33,6 +40,7 @@ impl WorkflowV2WriteItem {
             id: id.into(),
             mode,
             owned_targets: Vec::new(),
+            owned_scopes: Vec::new(),
             artifact_only: true,
         }
     }
@@ -54,6 +62,7 @@ pub struct WorkflowV2WriteWave {
 pub struct WorkflowV2WriteAssignment {
     pub item_id: String,
     pub owned_targets: Vec<String>,
+    pub owned_scopes: Vec<String>,
     pub worktree_path: Option<String>,
     pub artifact_only: bool,
 }
@@ -142,6 +151,7 @@ impl WorkflowV2WritePlanner {
             ),
             item_id: item.id,
             owned_targets: item.owned_targets,
+            owned_scopes: item.owned_scopes,
             artifact_only: item.artifact_only,
         }
     }
@@ -191,12 +201,12 @@ pub fn validate_changed_files_for_repository(
     let owned = normalize_targets_for_repository(&item.id, &item.owned_targets, repository_root)?
         .into_iter()
         .collect::<BTreeSet<_>>();
+    let scopes = normalize_scope_targets(&item.id, &item.owned_scopes, repository_root)?
+        .into_iter()
+        .collect::<BTreeSet<_>>();
     for file in &result.files_changed {
         let normalized = normalize_target_for_repository(&item.id, &file.path, repository_root)?;
-        if !owned
-            .iter()
-            .any(|owned_target| path_overlaps(owned_target, &normalized))
-        {
+        if !path_is_owned(&normalized, &owned, &scopes) {
             return Err(WorkflowV2WriteSafetyError::ChangedFileOutsideOwnership {
                 item_id: item.id.clone(),
                 path: file.path.clone(),
@@ -210,6 +220,7 @@ pub fn validate_changed_files_for_repository(
 struct NormalizedWriteItem {
     id: String,
     owned_targets: Vec<String>,
+    owned_scopes: Vec<String>,
     artifact_only: bool,
 }
 
@@ -221,6 +232,7 @@ fn serial_plan(mode: WorkflowV2WriteMode, items: Vec<NormalizedWriteItem>) -> Wo
             assignments: vec![WorkflowV2WriteAssignment {
                 item_id: item.id,
                 owned_targets: item.owned_targets,
+                owned_scopes: item.owned_scopes,
                 worktree_path: None,
                 artifact_only: item.artifact_only,
             }],
@@ -243,6 +255,7 @@ fn coordinated_plan(
         let assignment = WorkflowV2WriteAssignment {
             item_id: item.id,
             owned_targets: item.owned_targets,
+            owned_scopes: item.owned_scopes,
             worktree_path: None,
             artifact_only: item.artifact_only,
         };
@@ -270,7 +283,7 @@ fn assignment_overlaps_wave(
 ) -> bool {
     wave.assignments
         .iter()
-        .any(|existing| targets_overlap(&assignment.owned_targets, &existing.owned_targets))
+        .any(|existing| targets_overlap(&assignment_paths(assignment), &assignment_paths(existing)))
 }
 
 fn conflicts_for_items(
@@ -280,7 +293,7 @@ fn conflicts_for_items(
     let mut conflicts = Vec::new();
     for (left_index, left) in items.iter().enumerate() {
         for right in items.iter().skip(left_index + 1) {
-            for target in overlapping_targets(&left.owned_targets, &right.owned_targets) {
+            for target in overlapping_targets(&item_paths(left), &item_paths(right)) {
                 conflicts.push(WorkflowV2WriteConflict {
                     left_item: left.id.clone(),
                     right_item: right.id.clone(),
@@ -295,6 +308,23 @@ fn conflicts_for_items(
 
 fn targets_overlap(left: &[String], right: &[String]) -> bool {
     !overlapping_targets(left, right).is_empty()
+}
+
+fn path_is_owned(changed: &str, owned: &BTreeSet<String>, scopes: &BTreeSet<String>) -> bool {
+    owned.iter().any(|target| path_overlaps(target, changed))
+        || scopes.iter().any(|scope| path_overlaps(scope, changed))
+}
+
+fn item_paths(item: &NormalizedWriteItem) -> Vec<String> {
+    let mut paths = item.owned_targets.clone();
+    paths.extend(item.owned_scopes.clone());
+    paths
+}
+
+fn assignment_paths(assignment: &WorkflowV2WriteAssignment) -> Vec<String> {
+    let mut paths = assignment.owned_targets.clone();
+    paths.extend(assignment.owned_scopes.clone());
+    paths
 }
 
 fn overlapping_targets(left: &[String], right: &[String]) -> Vec<String> {
@@ -330,6 +360,7 @@ fn normalize_items(
             Ok(NormalizedWriteItem {
                 id: item.id.clone(),
                 owned_targets: normalize_item_targets(item)?,
+                owned_scopes: normalize_scope_targets(&item.id, &item.owned_scopes, None)?,
                 artifact_only: item.artifact_only,
             })
         })
@@ -370,6 +401,17 @@ fn normalize_targets(
     targets: &[String],
 ) -> Result<Vec<String>, WorkflowV2WriteSafetyError> {
     normalize_targets_for_repository(item_id, targets, None)
+}
+
+fn normalize_scope_targets(
+    item_id: &str,
+    scopes: &[String],
+    repository_root: Option<&str>,
+) -> Result<Vec<String>, WorkflowV2WriteSafetyError> {
+    if scopes.is_empty() {
+        return Ok(Vec::new());
+    }
+    normalize_targets_for_repository(item_id, scopes, repository_root)
 }
 
 fn safe_path_segment(raw: &str) -> String {

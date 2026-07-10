@@ -207,6 +207,7 @@ fn build_write_plan(
         canonical_root: canonical.to_path_buf(),
         isolated_root,
         target_files,
+        target_dir_scopes: Vec::new(),
         target_files_source: TargetFilesSource::Item,
         read_context_files: vec![],
         verify_inputs: ctx.verify_inputs.clone(),

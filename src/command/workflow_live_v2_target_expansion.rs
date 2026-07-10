@@ -8,6 +8,7 @@ use archon_workflow::{WorkflowV2WriteSafetyError, normalize_targets_for_reposito
 pub(super) struct ExpandedTargetFiles {
     pub(super) declared_target_files: Vec<String>,
     pub(super) target_files: Vec<String>,
+    pub(super) target_dir_scopes: Vec<String>,
     pub(super) target_file_expansions: Vec<TargetFileExpansion>,
 }
 
@@ -15,6 +16,7 @@ pub(super) struct ExpandedTargetFiles {
 pub(super) struct TargetFileExpansion {
     pub(super) source: String,
     pub(super) expanded: Vec<String>,
+    pub(super) dir_scopes: Vec<String>,
     pub(super) notes: Vec<String>,
 }
 
@@ -30,6 +32,7 @@ pub(super) fn expand_declared_rust_module_targets(
         .filter(|root| !root.is_empty())
         .map(PathBuf::from);
     let mut effective_targets = BTreeSet::new();
+    let mut effective_scopes = BTreeSet::new();
     let mut target_file_expansions = Vec::new();
     for target in &declared_target_files {
         effective_targets.insert(target.clone());
@@ -40,7 +43,13 @@ pub(super) fn expand_declared_rust_module_targets(
             for expanded in &expansion.expanded {
                 effective_targets.insert(expanded.clone());
             }
-            if !expansion.expanded.is_empty() || !expansion.notes.is_empty() {
+            for scope in &expansion.dir_scopes {
+                effective_scopes.insert(scope.clone());
+            }
+            if !expansion.expanded.is_empty()
+                || !expansion.dir_scopes.is_empty()
+                || !expansion.notes.is_empty()
+            {
                 target_file_expansions.push(expansion);
             }
         }
@@ -48,6 +57,7 @@ pub(super) fn expand_declared_rust_module_targets(
     Ok(ExpandedTargetFiles {
         declared_target_files,
         target_files: effective_targets.into_iter().collect(),
+        target_dir_scopes: effective_scopes.into_iter().collect(),
         target_file_expansions,
     })
 }
@@ -94,16 +104,26 @@ fn rust_module_expansion(repository_root: &Path, target: &str) -> Option<TargetF
             ));
         }
     }
-    if !expanded.is_empty()
-        && let Some(relative) = repo_relative(repository_root, &repository_root.join(&module_dir))
-    {
-        expanded.insert(relative);
-    }
+    let dir_scopes = module_dir_scope(repository_root, &module_dir, !expanded.is_empty());
     Some(TargetFileExpansion {
         source: target.to_string(),
         expanded: expanded.into_iter().collect(),
+        dir_scopes,
         notes,
     })
+}
+
+fn module_dir_scope(
+    repository_root: &Path,
+    module_dir: &Path,
+    has_file_children: bool,
+) -> Vec<String> {
+    if !has_file_children {
+        return Vec::new();
+    }
+    repo_relative(repository_root, &repository_root.join(module_dir))
+        .into_iter()
+        .collect()
 }
 
 fn module_directory_for_target(target: &Path) -> Option<PathBuf> {
@@ -184,8 +204,9 @@ mod tests {
         assert_eq!(expanded.declared_target_files, vec!["src/foo.rs"]);
         assert_eq!(
             expanded.target_files,
-            vec!["src/foo", "src/foo.rs", "src/foo/bar.rs", "src/foo/baz.rs"]
+            vec!["src/foo.rs", "src/foo/bar.rs", "src/foo/baz.rs"]
         );
+        assert_eq!(expanded.target_dir_scopes, vec!["src/foo"]);
         assert_eq!(expanded.target_file_expansions[0].source, "src/foo.rs");
     }
 
@@ -205,8 +226,13 @@ mod tests {
         .expect("expanded");
 
         assert!(
-            expanded
+            !expanded
                 .target_files
+                .contains(&"src/data_store".to_string())
+        );
+        assert!(
+            expanded
+                .target_dir_scopes
                 .contains(&"src/data_store".to_string())
         );
     }

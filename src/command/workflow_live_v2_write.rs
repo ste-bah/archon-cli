@@ -32,7 +32,9 @@ use super::super::workflow_live_generated_contract::{
 use super::workflow_live_v2_aggregate::attach_branch_evidence;
 use super::workflow_live_v2_data::{attach_completion_evidence_for_call, fanout_items_for_call};
 use super::workflow_live_v2_state::poll_v2_run_control;
-use super::workflow_live_v2_target_expansion::expand_declared_rust_module_targets;
+use super::workflow_live_v2_target_expansion::{
+    ExpandedTargetFiles, expand_declared_rust_module_targets,
+};
 use super::{
     LiveV2AgentClient, run_single_v2_agent_call, run_single_v2_agent_call_in_repository,
     split_reusable_branch_outcomes,

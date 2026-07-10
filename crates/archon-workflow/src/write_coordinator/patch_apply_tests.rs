@@ -62,6 +62,7 @@ fn prepare(
             .iter()
             .map(|t| normalize_target(t, repo).unwrap())
             .collect(),
+        target_dir_scopes: Vec::new(),
         target_files_source: TargetFilesSource::Item,
         read_context_files: vec![],
         verify_inputs: vec![],

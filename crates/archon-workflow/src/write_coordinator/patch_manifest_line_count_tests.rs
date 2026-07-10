@@ -13,6 +13,7 @@ fn plan_for(root: &Path, target: &str) -> WritePlan {
         canonical_root: root.to_path_buf(),
         isolated_root: root.join(".archon/wc/run1/impl-0"),
         target_files: vec![normalize_target(target, root).expect("target")],
+        target_dir_scopes: Vec::new(),
         target_files_source: TargetFilesSource::Item,
         read_context_files: vec![],
         verify_inputs: vec![],

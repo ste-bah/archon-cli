@@ -247,6 +247,7 @@ fn wf139_runtime_project_artifact_is_not_repo_source_write() {
         repository_root: Some(repo_root.display().to_string()),
         project_artifacts: archon_workflow::project_artifact_context_from_v2_root(&v2_root),
         target_files: vec!["src/lib.rs".to_string()],
+        target_ownership_scopes: Vec::new(),
     };
     let mut branch_result = WorkflowV2Result::accepted("wrote project artifact");
     branch_result.evidence.push(WorkflowV2Evidence::new(
@@ -338,6 +339,7 @@ fn missing_runtime_project_artifact_is_needs_review_not_safety() {
         repository_root: Some(repo_root.display().to_string()),
         project_artifacts: archon_workflow::project_artifact_context_from_v2_root(&v2_root),
         target_files: vec!["src/lib.rs".to_string()],
+        target_ownership_scopes: Vec::new(),
     };
     let mut branch_result = WorkflowV2Result::accepted("reported project artifact");
     branch_result
@@ -405,6 +407,7 @@ fn missing_declared_project_artifact_does_not_count_as_evidence() {
         repository_root: Some(repo_root.display().to_string()),
         project_artifacts: archon_workflow::project_artifact_context_from_v2_root(&v2_root),
         target_files: vec!["src/lib.rs".to_string()],
+        target_ownership_scopes: Vec::new(),
     };
     let mut branch_result = WorkflowV2Result::accepted("claimed project artifact");
     branch_result.evidence.push(WorkflowV2Evidence::new(

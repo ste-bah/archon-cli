@@ -115,10 +115,15 @@ fn verify_persisted_capability(
 fn verify_capability_contract(result: &ProviderCapabilityResult) -> Result<(), DataStoreError> {
     let provider_implemented = result.unavailable_reason.is_none();
     if result.can_fetch
-        && (!result.native_interval || !result.historical_supported || !result.production_eligible)
+        && (!result.native_interval
+            || !result.historical_supported
+            || !result.production_eligible
+            || result.missing_credentials
+            || result.provider_blocked
+            || result.unsupported)
     {
         return Err(DataStoreError::InvalidMetadata(
-            "can_fetch=true requires proven native_interval, historical_supported, production_eligible, and provider implementation".into(),
+            "can_fetch=true requires proven native_interval, historical_supported, production_eligible, credentials, unblocked provider support, and provider implementation".into(),
         ));
     }
     if result.can_fetch && !provider_implemented {

@@ -218,7 +218,10 @@ async fn run_v2_agent_call_with_rejected_output_log(
         .run_agent_request(request, adapter.build_prompt(request))
         .await?;
     match adapter.parse_agent_output(request, &first) {
-        Ok(result) => Ok(result),
+        Ok(result) => {
+            save_rejected_write_result(v2_store, request, "first", &first, &result);
+            Ok(result)
+        }
         Err(first_error) => {
             save_rejected_write_output(v2_store, request, "first", &first, &first_error);
             run_v2_agent_repair_with_rejected_output_log(
@@ -245,7 +248,10 @@ async fn run_v2_agent_repair_with_rejected_output_log(
     let prompt = adapter.build_repair_prompt(request, &first, &first_error);
     let repaired = client.run_agent_request(request, prompt).await?;
     match adapter.parse_agent_output(request, &repaired) {
-        Ok(result) => Ok(result),
+        Ok(result) => {
+            save_rejected_write_result(v2_store, request, "repair", &repaired, &result);
+            Ok(result)
+        }
         Err(repair_error) => {
             save_rejected_write_output(v2_store, request, "repair", &repaired, &repair_error);
             Err(WorkflowV2AgentError::RepairExhausted {
@@ -275,6 +281,35 @@ fn save_rejected_write_output(
         raw_body: body.to_string(),
     };
     let _ = store.append_rejected_output(&request.call.id, record);
+}
+
+fn save_rejected_write_result(
+    v2_store: Option<&WorkflowV2ResultStore>,
+    request: &archon_workflow::WorkflowV2AgentRequest,
+    attempt: &str,
+    body: &str,
+    result: &WorkflowV2Result,
+) {
+    if !result_has_rejected_write_output(result) {
+        return;
+    }
+    save_rejected_write_output(
+        v2_store,
+        request,
+        attempt,
+        body,
+        &WorkflowV2AgentError::InvalidResult(result.summary.clone()),
+    );
+}
+
+fn result_has_rejected_write_output(result: &WorkflowV2Result) -> bool {
+    result.residual_gaps.iter().any(|gap| {
+        gap.id.starts_with("invalid_write_branch_output_")
+            || gap.description.contains("patch is empty")
+            || gap.description.contains("output not usable")
+            || gap.description.contains("verification blocked after patch")
+            || gap.description.contains("exceeds max")
+    })
 }
 
 pub(super) fn provider_tier_for_v2_request(
@@ -403,43 +438,5 @@ fn sanitize_generated_contract_gap_id(raw: &str) -> String {
 }
 
 #[cfg(test)]
-mod rejected_output_tests {
-    use super::*;
-
-    #[test]
-    fn rejected_write_output_is_persisted_under_v2_store() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
-        let request = archon_workflow::WorkflowV2AgentRequest {
-            call: WorkflowV2HostCall {
-                id: "implementation-wave-branch-a".to_string(),
-                method: WorkflowV2HostMethod::Implementation,
-                write_mode: Some(archon_workflow::WorkflowV2WriteMode::Worktree),
-                options: archon_workflow::WorkflowV2HostOptions::default(),
-            },
-            role: "coder".to_string(),
-            task: "write branch".to_string(),
-            constraints: Vec::new(),
-            input: serde_json::json!({}),
-            repository_root: None,
-            project_artifacts: Default::default(),
-            target_files: vec!["src/lib.rs".to_string()],
-        };
-        let raw = r#"{"status":"accepted","commands_run":[{"kind":"implementation"}]}"#;
-
-        save_rejected_write_output(
-            Some(&store),
-            &request,
-            "first",
-            raw,
-            &WorkflowV2AgentError::MalformedOutput("bad schema".to_string()),
-        );
-
-        let saved = fs::read_to_string(store.rejected_output_path(&request.call.id))
-            .expect("rejected output log");
-        let parsed: serde_json::Value = serde_json::from_str(&saved).expect("json log");
-        assert_eq!(parsed["branch_id"], request.call.id);
-        assert_eq!(parsed["rejections"][0]["attempt"], "first");
-        assert_eq!(parsed["rejections"][0]["raw_body"], raw);
-    }
-}
+#[path = "workflow_live_v2_host_dispatch_rejected_output_tests.rs"]
+mod rejected_output_tests;

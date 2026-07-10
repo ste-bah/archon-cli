@@ -49,6 +49,10 @@ fn prepare_worktree_branch_execution(
     poll_v2_run_control(store_for_control, run_id, &id)?;
     let mut call = prepared.branch.call.clone();
     call.options.target_files = prepared.assignment.owned_targets.clone();
+    call.options.extra.insert(
+        "target_ownership_scopes".to_string(),
+        serde_json::to_value(&prepared.assignment.owned_scopes)?,
+    );
     Ok(WorktreeBranchExecution {
         id,
         role: prepared.branch.role.clone(),
@@ -125,7 +129,8 @@ fn validate_worktree_branch_result(
         branch.execution.call.id.clone(),
         WorkflowV2WriteMode::Worktree,
         assignment.owned_targets.clone(),
-    );
+    )
+    .with_owned_scopes(assignment.owned_scopes.clone());
     item.artifact_only = assignment.artifact_only;
     let root = branch.workspace_root.display().to_string();
     if let Err(err) = validate_changed_files_for_repository(&item, result, Some(&root)) {
@@ -258,6 +263,7 @@ fn coordinator_plan_for_assignment(
         canonical_root: canonical_root.to_path_buf(),
         isolated_root,
         target_files: targets,
+        target_dir_scopes: normalized_assignment_scopes(assignment, canonical_root)?,
         target_files_source: TargetFilesSource::Item,
         read_context_files: Vec::new(),
         verify_inputs: Vec::new(),
@@ -288,6 +294,20 @@ fn normalized_assignment_targets(
 ) -> archon_workflow::WorkflowResult<Vec<NormalizedPath>> {
     assignment
         .owned_targets
+        .iter()
+        .map(|target| {
+            normalize_target(target, canonical_root)
+                .map_err(|err| WorkflowError::SpecInvalid(err.to_string()))
+        })
+        .collect()
+}
+
+fn normalized_assignment_scopes(
+    assignment: &WorkflowV2WriteAssignment,
+    canonical_root: &Path,
+) -> archon_workflow::WorkflowResult<Vec<NormalizedPath>> {
+    assignment
+        .owned_scopes
         .iter()
         .map(|target| {
             normalize_target(target, canonical_root)

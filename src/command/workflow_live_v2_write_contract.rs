@@ -194,40 +194,57 @@ fn write_items_for_branches(
     branches
         .iter()
         .map(|branch| {
-            let targets = target_files_for_branch(target_repository_root, call, branch)?;
-            if targets.is_empty() {
+            let expanded = expanded_targets_for_branch(target_repository_root, call, branch)?;
+            if expanded.target_files.is_empty() {
                 Ok(WorkflowV2WriteItem::artifact_only(branch.id.clone(), mode))
             } else {
-                Ok(WorkflowV2WriteItem::new(branch.id.clone(), mode, targets))
+                Ok(
+                    WorkflowV2WriteItem::new(branch.id.clone(), mode, expanded.target_files)
+                        .with_owned_scopes(expanded.target_dir_scopes),
+                )
             }
         })
         .collect()
 }
 
+#[cfg(test)]
 fn target_files_for_branch(
     target_repository_root: Option<&str>,
     call: &WorkflowV2HostCall,
     branch: &archon_workflow::WorkflowV2FanoutItem,
 ) -> archon_workflow::WorkflowResult<Vec<String>> {
+    Ok(expanded_targets_for_branch(target_repository_root, call, branch)?.target_files)
+}
+
+fn expanded_targets_for_branch(
+    target_repository_root: Option<&str>,
+    call: &WorkflowV2HostCall,
+    branch: &archon_workflow::WorkflowV2FanoutItem,
+) -> archon_workflow::WorkflowResult<ExpandedTargetFiles> {
     let branch_targets = &branch.call.options.target_files;
     if !branch_targets.is_empty() && branch_targets != &call.options.target_files {
-        return normalize_declared_targets(&branch.id, branch_targets, target_repository_root);
+        return expand_declared_targets(&branch.id, branch_targets, target_repository_root);
     }
     if call.options.target_files_from_item {
         let targets = target_files_from_branch_item(branch);
         if !targets.is_empty() {
-            return normalize_declared_targets(&branch.id, &targets, target_repository_root);
+            return expand_declared_targets(&branch.id, &targets, target_repository_root);
         }
     }
     if !call.options.target_files.is_empty() {
-        return normalize_declared_targets(
+        return expand_declared_targets(
             &branch.id,
             &call.options.target_files,
             target_repository_root,
         );
     }
     if branch_has_artifact_requirements(branch) {
-        return Ok(Vec::new());
+        return Ok(ExpandedTargetFiles {
+            declared_target_files: Vec::new(),
+            target_files: Vec::new(),
+            target_dir_scopes: Vec::new(),
+            target_file_expansions: Vec::new(),
+        });
     }
     Err(WorkflowError::SpecInvalid(format!(
         "write-capable fanout '{}' item '{}' has no target file ownership",
@@ -280,12 +297,11 @@ fn value_has_content(value: &serde_json::Value) -> bool {
     }
 }
 
-fn normalize_declared_targets(
+fn expand_declared_targets(
     item_id: &str,
     targets: &[String],
     target_repository_root: Option<&str>,
-) -> archon_workflow::WorkflowResult<Vec<String>> {
+) -> archon_workflow::WorkflowResult<ExpandedTargetFiles> {
     expand_declared_rust_module_targets(item_id, targets, target_repository_root)
-        .map(|expanded| expanded.target_files)
         .map_err(|err| WorkflowError::SpecInvalid(err.to_string()))
 }

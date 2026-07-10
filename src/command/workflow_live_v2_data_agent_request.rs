@@ -32,7 +32,24 @@ pub(super) fn v2_agent_request(
         repository_root: target_repository_root,
         project_artifacts: Default::default(),
         target_files: execution.call.options.target_files.clone(),
+        target_ownership_scopes: target_ownership_scopes(&execution.call.options.extra),
     }
+}
+
+fn target_ownership_scopes(
+    extra: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> Vec<String> {
+    extra
+        .get("target_ownership_scopes")
+        .and_then(serde_json::Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn call_declares_items_output(call: &WorkflowV2HostCall) -> bool {

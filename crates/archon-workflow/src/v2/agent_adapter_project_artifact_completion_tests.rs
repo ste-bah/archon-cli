@@ -79,6 +79,7 @@ fn prose_artifact_requirement_is_not_resolved_as_project_path() {
         repository_root: Some(repo.display().to_string()),
         project_artifacts: crate::project_artifact_context_from_v2_root(&v2_root),
         target_files: vec!["src/lib.rs".to_string()],
+        target_ownership_scopes: Vec::new(),
     };
     request
         .project_artifacts
@@ -135,6 +136,7 @@ fn glob_artifact_requirement_is_not_resolved_as_project_path() {
         repository_root: Some(repo.display().to_string()),
         project_artifacts: crate::project_artifact_context_from_v2_root(&v2_root),
         target_files: vec!["src/lib.rs".to_string()],
+        target_ownership_scopes: Vec::new(),
     };
     request
         .project_artifacts
@@ -185,6 +187,7 @@ fn placeholder_artifact_requirement_is_not_resolved_as_project_path() {
         repository_root: Some(repo.display().to_string()),
         project_artifacts: crate::project_artifact_context_from_v2_root(&v2_root),
         target_files: vec!["src/lib.rs".to_string()],
+        target_ownership_scopes: Vec::new(),
     };
     request
         .project_artifacts
@@ -232,6 +235,7 @@ fn namespaced_project_data_file_changed_is_artifact_evidence() {
         repository_root: Some(repo.display().to_string()),
         project_artifacts: crate::project_artifact_context_from_v2_root(&v2_root),
         target_files: vec!["src/lib.rs".to_string()],
+        target_ownership_scopes: Vec::new(),
     };
     let mut result = WorkflowV2Result::accepted("artifact written");
     result.evidence.push(WorkflowV2Evidence::new(
@@ -279,6 +283,7 @@ fn request_with_required_artifact(call_id: &str) -> (WorkflowV2AgentRequest, Str
         repository_root: Some(repo.display().to_string()),
         project_artifacts: crate::project_artifact_context_from_v2_root(&v2_root),
         target_files: vec!["src/lib.rs".to_string()],
+        target_ownership_scopes: Vec::new(),
     };
     request
         .project_artifacts

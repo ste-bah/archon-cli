@@ -7,6 +7,7 @@ fn worktree_assignment_builds_coordinator_plan_with_isolated_root() {
     let assignment = WorkflowV2WriteAssignment {
         item_id: "impl-T001".to_string(),
         owned_targets: vec!["src/lib.rs".to_string()],
+        owned_scopes: Vec::new(),
         worktree_path: Some(temp.path().join("wt").display().to_string()),
         artifact_only: false,
     };
@@ -85,7 +86,8 @@ fn owned_module_scope_allows_new_child_file_but_not_sibling() {
         "impl-data-store",
         WorkflowV2WriteMode::Worktree,
         expanded.target_files,
-    );
+    )
+    .with_owned_scopes(expanded.target_dir_scopes);
     let mut result = WorkflowV2Result::accepted("created module child");
     result
         .files_changed

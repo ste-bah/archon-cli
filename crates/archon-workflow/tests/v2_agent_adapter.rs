@@ -24,6 +24,7 @@ fn request(role: &str, write_mode: Option<WorkflowV2WriteMode>) -> WorkflowV2Age
         repository_root: Some("/repo".to_string()),
         project_artifacts: Default::default(),
         target_files: vec!["src/lib.rs".to_string()],
+        target_ownership_scopes: Vec::new(),
     }
 }
 
