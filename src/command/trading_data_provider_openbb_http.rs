@@ -18,6 +18,20 @@ pub(super) fn fetch_openbb_response(
         base_url.trim_end_matches('/'),
         request.endpoint.trim_start_matches('/')
     );
+    fetch_response_blocking(url, request)
+}
+
+fn fetch_response_blocking(
+    url: String,
+    request: &OpenBbNativeRequest,
+) -> Result<OpenBbHttpResponse, String> {
+    run_reqwest_blocking(|| request_openbb(url, request))
+}
+
+fn request_openbb(
+    url: String,
+    request: &OpenBbNativeRequest,
+) -> Result<OpenBbHttpResponse, String> {
     let response = reqwest::blocking::Client::new()
         .get(url)
         .query(&request.params)
@@ -43,6 +57,19 @@ pub(super) fn fetch_openbb_response(
         body,
         redacted_headers,
     })
+}
+
+fn run_reqwest_blocking<F>(operation: F) -> Result<OpenBbHttpResponse, String>
+where
+    F: FnOnce() -> Result<OpenBbHttpResponse, String>,
+{
+    if tokio::runtime::Handle::try_current().is_ok() {
+        // `reqwest::blocking` owns an internal Tokio runtime. Running and
+        // dropping it inside a Tokio worker panics, so keep this synchronous
+        // command path inside Tokio's blocking section when invoked by the CLI.
+        return tokio::task::block_in_place(operation);
+    }
+    operation()
 }
 
 fn require_credentials(request: &OpenBbNativeRequest) -> Result<(), String> {

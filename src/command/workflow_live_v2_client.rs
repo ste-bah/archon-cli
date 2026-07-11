@@ -1,4 +1,3 @@
-use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use archon_pipeline::runner::{AgentExecutionRequest, LlmClient, PipelineType};
@@ -8,8 +7,9 @@ use archon_tui::events::{AgentActivityRole, AgentActivityStatus, AgentActivityUp
 use archon_workflow::{
     ProviderTier, StageKind, StageRunRequest, WorkflowV2AgentClient, WorkflowV2AgentError,
     WorkflowV2AgentRequest, WorkflowV2HostMethod, WorkflowV2WriteMode,
-    v2::project_artifact_contract::artifact_requirement_paths_from_field,
 };
+
+use super::workflow_live_v2_artifact_paths::stamp_project_artifact_paths;
 
 use super::super::workflow_live_retry;
 use super::super::workflow_live_runner::{
@@ -323,7 +323,12 @@ fn insert_project_artifact_context(
         "project_artifact_roots".to_string(),
         serde_json::json!(request.project_artifacts.artifact_roots),
     );
-    let resolved = resolved_project_artifact_paths(object, request);
+    let resolved = request
+        .project_artifacts
+        .project_root
+        .as_deref()
+        .map(|root| stamp_project_artifact_paths(object, root))
+        .unwrap_or_default();
     if !resolved.is_empty() {
         object.insert(
             "project_artifact_paths".to_string(),
@@ -333,46 +338,6 @@ fn insert_project_artifact_context(
     if request.is_write_capable() {
         mark_required_bash(object);
     }
-}
-
-fn resolved_project_artifact_paths(
-    object: &serde_json::Map<String, serde_json::Value>,
-    request: &WorkflowV2AgentRequest,
-) -> Vec<serde_json::Value> {
-    let Some(root) = request.project_artifacts.project_root.as_deref() else {
-        return Vec::new();
-    };
-    object
-        .get("artifact_requirements")
-        .map(artifact_requirement_paths_from_field)
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|raw| resolved_project_artifact_path(root, &raw))
-        .map(|(raw, absolute)| serde_json::json!({ "path": raw, "absolute_path": absolute }))
-        .collect()
-}
-
-fn resolved_project_artifact_path(root: &str, raw: &str) -> Option<(String, String)> {
-    let raw = raw.trim();
-    if raw.is_empty() || path_has_parent_component(raw) {
-        return None;
-    }
-    let path = Path::new(raw);
-    if path.is_absolute() {
-        return path
-            .starts_with(root)
-            .then(|| (raw.to_string(), raw.to_string()));
-    }
-    Some((
-        raw.to_string(),
-        PathBuf::from(root).join(path).display().to_string(),
-    ))
-}
-
-fn path_has_parent_component(raw: &str) -> bool {
-    Path::new(raw)
-        .components()
-        .any(|component| matches!(component, Component::ParentDir))
 }
 
 fn mark_required_bash(object: &mut serde_json::Map<String, serde_json::Value>) {

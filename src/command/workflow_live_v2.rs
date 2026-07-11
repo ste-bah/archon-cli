@@ -27,6 +27,8 @@ use archon_workflow::{
 mod workflow_live_provider_env;
 #[path = "workflow_live_v2_aggregate.rs"]
 mod workflow_live_v2_aggregate;
+#[path = "workflow_live_v2_artifact_paths.rs"]
+mod workflow_live_v2_artifact_paths;
 #[path = "workflow_live_v2_data.rs"]
 mod workflow_live_v2_data;
 #[cfg(test)]

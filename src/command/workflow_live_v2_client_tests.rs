@@ -142,6 +142,49 @@ fn generated_v2_verification_resolves_project_artifact_paths() {
 }
 
 #[test]
+fn verification_input_stamps_project_relative_artifacts_into_canonical_fields() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project_root = temp.path().join("project");
+    let v2_root = project_root.join(".archon/workflows/wf-test/v2");
+    std::fs::create_dir_all(&v2_root).expect("v2 root");
+    for index in 1..=5 {
+        let validation = project_root.join(format!(
+            ".archon/trading-lab/data/datasets/dataset-{index}/v1/validation.json"
+        ));
+        std::fs::create_dir_all(validation.parent().expect("validation parent"))
+            .expect("dataset directory");
+        std::fs::write(validation, "{}\n").expect("validation artifact");
+    }
+    let fixture = include_str!("fixtures/wf346_verification_project_relative_item.json");
+    let mut req = request(WorkflowV2HostMethod::Parallel, None);
+    req.call.id = "verification-wave-2".to_string();
+    req.project_artifacts = archon_workflow::project_artifact_context_from_v2_root(&v2_root);
+    req.input = serde_json::from_str(fixture).expect("verification fixture");
+
+    let stage = stage_request_for_v2_agent("wf-test", ProviderTier::Coder, None, &req);
+    let dataset_root = project_root.join(".archon/trading-lab/data/datasets");
+    let registry = project_root.join(".archon/trading-lab/data/registry.json");
+    let requirements = stage.input["artifact_requirements"]
+        .as_array()
+        .expect("artifact requirements");
+    let focused = stage.input["focused_verification"][0]
+        .as_str()
+        .expect("focused verification");
+
+    assert_eq!(requirements[0], dataset_root.display().to_string());
+    assert_eq!(requirements[1], registry.display().to_string());
+    assert!(focused.contains(&dataset_root.display().to_string()));
+    assert!(focused.contains(&registry.display().to_string()));
+    assert!(!focused.contains("Inspect .archon/"));
+    assert_eq!(
+        std::fs::read_dir(dataset_root)
+            .expect("resolved dataset root")
+            .count(),
+        5
+    );
+}
+
+#[test]
 fn write_capable_v2_agent_gets_full_tools_and_ownership_metadata() {
     let stage = stage_request_for_v2_agent(
         "wf-test",

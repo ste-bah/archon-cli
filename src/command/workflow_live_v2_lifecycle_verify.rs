@@ -177,6 +177,31 @@ impl LifecycleDriver {
                 &support::outcomes_of(&verification),
                 &repair_plan,
             );
+            let routed = workflow_live_v2_lifecycle_verify_routing::write_remediation_outcomes(
+                &repair_plan,
+                &verification,
+            );
+            if !routed.is_empty() {
+                let continue_loop = self
+                    .run_write_verification_remediation(
+                        ready_implementation_items,
+                        &plan_items,
+                        &routed,
+                        wave_index,
+                        dependency_iteration,
+                        &mut remediation_attempt,
+                        &mut verification,
+                        evidence,
+                        &repair_plan,
+                        &call_id,
+                    )
+                    .await?;
+                if !continue_loop {
+                    break;
+                }
+                repair_attempt += 1;
+                continue;
+            }
             let mut repair_inventory = contract.normalize_inventory(&repair_plan);
             repair_inventory = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
                 &repair_inventory,

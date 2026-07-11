@@ -106,6 +106,9 @@ pub(super) fn classify_verification_result(result: &WorkflowV2Result) -> Verific
             _ => VerificationFailureClass::ContractFailure,
         };
     }
+    if missing_concrete_artifact_failure(result) {
+        return VerificationFailureClass::ActionableImplementationFailure;
+    }
     if has_intended_failures(result)
         || explicit_intended_failure_count(result) > 0
             && failed_test_command_with_failures(result, &text)
@@ -150,6 +153,13 @@ fn explicit_intended_failure_count(result: &WorkflowV2Result) -> usize {
     {
         return count as usize;
     }
+    if let Some(count) = result
+        .data
+        .get("fail_count")
+        .and_then(serde_json::Value::as_u64)
+    {
+        return count as usize;
+    }
     result
         .data
         .get("matched_test_check_names")
@@ -157,6 +167,20 @@ fn explicit_intended_failure_count(result: &WorkflowV2Result) -> usize {
         .and_then(serde_json::Value::as_array)
         .map(Vec::len)
         .unwrap_or_default()
+}
+
+fn missing_concrete_artifact_failure(result: &WorkflowV2Result) -> bool {
+    let checked_artifacts = result
+        .data
+        .get("artifacts_checked")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|items| !items.is_empty());
+    let missing_gap = result.residual_gaps.iter().any(|gap| {
+        let text = format!("{} {}", gap.id, gap.description).to_ascii_lowercase();
+        (text.contains("missing") || text.contains("absent"))
+            && (text.contains("artifact") || text.contains("registry"))
+    });
+    checked_artifacts && explicit_intended_failure_count(result) > 0 && missing_gap
 }
 
 fn inferred_task_ids(result: &WorkflowV2Result, item_id: &str) -> Vec<String> {
@@ -443,6 +467,19 @@ mod tests {
             }),
             ..WorkflowV2Result::default()
         };
+
+        assert_eq!(
+            classify_verification_result(&result),
+            VerificationFailureClass::ActionableImplementationFailure
+        );
+    }
+
+    #[test]
+    fn missing_concrete_artifacts_route_to_write_remediation() {
+        let result: WorkflowV2Result = serde_json::from_str(include_str!(
+            "fixtures/wf346_verification_missing_project_artifacts.json"
+        ))
+        .expect("fixture");
 
         assert_eq!(
             classify_verification_result(&result),

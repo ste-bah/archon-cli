@@ -1,0 +1,13 @@
+{
+  "item_id": "verification-retry-validation-artifact-fields-check-1",
+  "canonical_task_ids": ["TASK-FIXTURE-020"],
+  "source_item_id": "inventory-validation-native-gates",
+  "focused_verification": [
+    "Inspect .archon/trading-lab/data/datasets for validation.json files and verify .archon/trading-lab/data/registry.json references resolve."
+  ],
+  "expected_evidence": "Five dataset validation artifacts and the registry are present under projectArtifactRoot.",
+  "artifact_requirements": [
+    ".archon/trading-lab/data/datasets",
+    ".archon/trading-lab/data/registry.json"
+  ]
+}

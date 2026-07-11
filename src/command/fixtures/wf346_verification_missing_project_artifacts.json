@@ -1,0 +1,42 @@
+{
+  "status": "failed",
+  "summary": "Required dataset artifact root and registry are absent.",
+  "evidence": [
+    {
+      "kind": "artifact",
+      "summary": "No validation artifacts or registry were found under the resolved project artifact root."
+    }
+  ],
+  "commands_run": [
+    {
+      "kind": "inspect",
+      "command": "test -d /project/.archon/trading-lab/data/datasets",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "datasets_dir_exists=no"
+    }
+  ],
+  "task_coverage": [
+    {
+      "task_id": "TASK-FIXTURE-020",
+      "status": "missing",
+      "summary": "Required concrete artifact evidence is absent."
+    }
+  ],
+  "residual_gaps": [
+    {
+      "id": "missing-dataset-artifact-root",
+      "description": "Required concrete dataset artifact directory is absent.",
+      "severity": "high"
+    }
+  ],
+  "data": {
+    "canonical_task_ids": ["TASK-FIXTURE-020"],
+    "pass_count": 0,
+    "fail_count": 2,
+    "artifacts_checked": [
+      "/project/.archon/trading-lab/data/datasets",
+      "/project/.archon/trading-lab/data/registry.json"
+    ]
+  }
+}
