@@ -59,7 +59,18 @@ fn value_reports_failed_envelope_status(value: &Value) -> bool {
         return false;
     }
     object_has_blocking_status(fields)
+        || object_has_failed_final_checks(fields)
         || wrapped_body(fields).is_some_and(value_reports_failed_envelope_status)
+}
+
+fn object_has_failed_final_checks(fields: &serde_json::Map<String, Value>) -> bool {
+    ["test_results", "tests", "verification"]
+        .iter()
+        .filter_map(|field| fields.get(*field))
+        .filter_map(Value::as_array)
+        .flatten()
+        .filter_map(Value::as_object)
+        .any(object_has_blocking_status)
 }
 
 fn value_has_accepted_envelope_status(value: &Value) -> bool {

@@ -131,6 +131,41 @@ fn accepted_json_with_implementation_evidence_is_allowed() {
 }
 
 #[test]
+fn accepted_artifact_only_result_is_allowed() {
+    let body = include_str!("context_output_fixtures/d19_artifact_only_accepted.json");
+    assert_eq!(output_reports_failed_verification(body), None);
+}
+
+#[test]
+fn accepted_artifact_only_text_result_is_allowed() {
+    let body = "status: accepted\nartifacts: proof.json\ncommands_run: artifact check passed\nresidual_gaps: none";
+    assert_eq!(output_reports_failed_verification(body), None);
+}
+
+#[test]
+fn accepted_artifact_aliases_require_non_empty_evidence() {
+    for field in ["artifacts", "artifact_paths", "artifacts_checked"] {
+        let mut body = serde_json::json!({
+            "status": "accepted",
+            "commands_run": [{"command": "check proof", "status": "succeeded"}],
+            "residual_gaps": []
+        });
+        body[field] = serde_json::json!(["proof.json"]);
+        assert_eq!(output_reports_failed_verification(&body.to_string()), None);
+    }
+
+    let empty =
+        r#"{"status":"accepted","artifacts":[],"commands_run":["check"],"residual_gaps":[]}"#;
+    assert!(output_reports_failed_verification(empty).is_some());
+}
+
+#[test]
+fn bare_accepted_result_still_requires_evidence() {
+    let body = r#"{"status":"accepted","summary":"done"}"#;
+    assert!(output_reports_failed_verification(body).is_some());
+}
+
+#[test]
 fn accepted_json_with_verification_evidence_is_allowed() {
     let body = r#"{
         "status": "accepted",

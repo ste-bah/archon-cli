@@ -1,0 +1,51 @@
+{
+  "status": "accepted",
+  "summary": "Stooq unavailable proof is complete without repository source changes.",
+  "evidence": [
+    {
+      "kind": "inspection",
+      "summary": "All declared source files remain below the configured size limit.",
+      "source": "wc -l declared target files"
+    },
+    {
+      "kind": "test",
+      "summary": "Provider-focused tests passed.",
+      "source": "cargo test -p archon-trading provider -- --nocapture"
+    },
+    {
+      "kind": "artifact",
+      "summary": "The unavailable proof is fail-closed and non-promotable.",
+      "source": ".archon/trading-lab/data/datasets/stooq-proof/metadata.json"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "stooq-proof-metadata",
+      "path": ".archon/trading-lab/data/datasets/stooq-proof/metadata.json",
+      "description": "Fail-closed metadata proof."
+    },
+    {
+      "id": "stooq-proof-validation",
+      "path": ".archon/trading-lab/data/datasets/stooq-proof/validation.json",
+      "description": "Fail-closed validation proof."
+    }
+  ],
+  "commands_run": [
+    {
+      "kind": "test",
+      "command": "cargo test -p archon-trading provider -- --nocapture",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "Provider tests passed."
+    }
+  ],
+  "files_changed": [],
+  "task_coverage": [
+    {
+      "task_id": "TASK-FIXTURE-ARTIFACT-ONLY",
+      "status": "accepted",
+      "summary": "Artifact-only fail-closed evidence satisfies the task contract."
+    }
+  ],
+  "residual_gaps": []
+}

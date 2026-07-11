@@ -203,7 +203,7 @@ fn reports_accepted_without_evidence(body: &str, lower: &str) -> bool {
     if let Ok(value) = serde_json::from_str::<Value>(body) {
         return !json_has_acceptance_evidence(&value);
     }
-    !(text_has_any(lower, FILE_EVIDENCE_FIELDS)
+    !((text_has_any(lower, FILE_EVIDENCE_FIELDS) || text_has_any(lower, ARTIFACT_EVIDENCE_FIELDS))
         && text_has_any(lower, VERIFICATION_EVIDENCE_FIELDS)
         && text_has_any(lower, COMPLETION_EVIDENCE_FIELDS))
 }
@@ -227,7 +227,8 @@ fn json_has_acceptance_evidence(value: &Value) -> bool {
     match value {
         Value::Object(fields) => {
             if object_has_accepted_status(fields) {
-                return json_has_non_empty_field(value, FILE_EVIDENCE_FIELDS)
+                return (json_has_non_empty_field(value, FILE_EVIDENCE_FIELDS)
+                    || json_has_non_empty_field(value, ARTIFACT_EVIDENCE_FIELDS))
                     && json_has_non_empty_field(value, VERIFICATION_EVIDENCE_FIELDS)
                     && json_has_field(value, COMPLETION_EVIDENCE_FIELDS);
             }
@@ -249,6 +250,8 @@ const FILE_EVIDENCE_FIELDS: &[&str] = &[
     "source_files",
     "declared_target_files",
 ];
+
+const ARTIFACT_EVIDENCE_FIELDS: &[&str] = &["artifacts", "artifact_paths", "artifacts_checked"];
 
 const VERIFICATION_EVIDENCE_FIELDS: &[&str] = &[
     "acceptance_checks",
