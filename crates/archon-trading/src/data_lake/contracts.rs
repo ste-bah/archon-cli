@@ -238,7 +238,9 @@ fn capability_unavailable_reason(
     normalized_provider: &str,
     provider_implemented: bool,
 ) -> String {
-    if provider_blocked {
+    if let Some(reason) = http_status_unavailable_reason(symbol) {
+        reason.into()
+    } else if provider_blocked {
         "provider blocked access".into()
     } else if missing_credentials {
         "missing provider credentials".into()
@@ -266,8 +268,17 @@ fn has_provider_credentials(provider: &str) -> bool {
     keys.is_empty() || keys.iter().any(|key| std::env::var_os(key).is_some())
 }
 
+fn http_status_unavailable_reason(symbol: &str) -> Option<&'static str> {
+    match symbol.trim().parse::<u16>().ok()? {
+        401 => Some("missing or invalid provider credentials"),
+        403 => Some("provider blocked access"),
+        404 => Some("provider symbol or endpoint not found"),
+        _ => None,
+    }
+}
+
 fn provider_blocked(symbol: &str) -> bool {
-    matches!(symbol.trim().parse::<u16>(), Ok(401 | 403))
+    matches!(symbol.trim().parse::<u16>(), Ok(403))
 }
 
 fn credential_state_label(requires_credentials: bool, missing_credentials: bool) -> String {

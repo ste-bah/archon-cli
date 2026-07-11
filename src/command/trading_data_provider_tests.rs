@@ -134,7 +134,8 @@ mod tests {
         )
         .unwrap();
         assert!(text.contains("provider_blocked_or_unavailable"));
-        assert!(text.contains("baseline_unavailable"));
+        assert!(text.contains("exact native Stooq data was not directly supplied"));
+        assert!(text.contains("resampling is refused"));
         assert!(text.contains("\"production_eligible\": false"));
     }
 

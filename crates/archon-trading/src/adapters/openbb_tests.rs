@@ -65,6 +65,7 @@ fn good_response() -> OpenBbResponse {
             ("missing_bars".into(), "0".into()),
             ("asset_class".into(), "equity".into()),
             ("timeframe".into(), "1d".into()),
+            ("version".into(), "20230101-openbb_native".into()),
             ("native_interval".into(), "true".into()),
             ("production_eligible".into(), "true".into()),
             ("price_basis".into(), "adjusted".into()),
@@ -101,7 +102,12 @@ fn t_openbb_01_rest_first_and_provenance_before_use() {
         .unwrap();
     assert_eq!(transport.calls, vec![OpenBbRoute::Rest]);
     assert_eq!(gateway.provenance_log()[0], dataset.provenance);
-    assert!(gateway.lake_registry().get("openbb:spy:ohlcv:v1").is_some());
+    assert!(
+        gateway
+            .lake_registry()
+            .get("polygon-SPY-1d-adjusted")
+            .is_some()
+    );
     assert!(dataset.promotion_eligible);
     assert_eq!(
         dataset.provenance.meta.get("http_status"),

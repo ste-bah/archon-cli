@@ -246,6 +246,13 @@ fn capability_maps_timeframes_and_unavailable_reasons_fail_closed() {
     );
     assert!(!blocked.can_fetch);
 
+    let unauthorized = can_fetch_symbol_timeframe("polygon", "401", "1D", "now");
+    assert_eq!(
+        unauthorized.unavailable_reason.as_deref(),
+        Some("missing or invalid provider credentials")
+    );
+    assert!(!unauthorized.can_fetch);
+
     let missing_credentials = can_fetch_symbol_timeframe("polygon", "SPY", "1D", "now");
     assert!(missing_credentials.requires_credentials);
     assert_eq!(
@@ -253,6 +260,13 @@ fn capability_maps_timeframes_and_unavailable_reasons_fail_closed() {
         Some("missing provider credentials")
     );
     assert!(!missing_credentials.can_fetch);
+
+    let not_found = can_fetch_symbol_timeframe("polygon", "404", "1D", "now");
+    assert_eq!(
+        not_found.unavailable_reason.as_deref(),
+        Some("provider symbol or endpoint not found")
+    );
+    assert!(!not_found.can_fetch);
 
     let fallback = can_fetch_symbol_timeframe("yfinance", "SPY", "1D", "now");
     assert_eq!(

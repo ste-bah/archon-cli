@@ -47,10 +47,15 @@ fn unavailable_provider_report(
     let result = TradingDataLake::new(root)
         .persist_capability(provider, symbol, timeframe, &checked_at)
         .map_err(data_error)?;
-    let reason = result
+    let mut reason = result
         .unavailable_reason
-        .as_deref()
-        .unwrap_or("provider-native fetch unavailable");
+        .clone()
+        .unwrap_or_else(|| "provider-native fetch unavailable".into());
+    if provider.trim().eq_ignore_ascii_case("stooq") {
+        reason = format!(
+            "provider_blocked_or_unavailable: {reason}; exact native Stooq data was not directly supplied and resampling is refused"
+        );
+    }
     let report = json!({
         "provider": result.provider,
         "symbol": result.symbol,
@@ -430,7 +435,7 @@ fn timezone_for(symbol: &str) -> &'static str {
 
 fn provider_quality_status(provider: &str) -> &'static str {
     match provider.trim().to_ascii_lowercase().as_str() {
-        "stooq" => "baseline_unavailable",
+        "stooq" => "provider_blocked_or_unavailable",
         "yfinance" => "degraded_fallback",
         _ => "unavailable",
     }
@@ -486,12 +491,4 @@ fn readable_coverage(
     }
     lines.push(format!("gaps: {}", matrix.gaps.len()));
     lines.join("\n")
-}
-
-#[allow(dead_code)]
-fn normalized_bars_from_provider_fixture(
-    body: &[u8],
-    format: OhlcvFormat,
-) -> Result<Vec<OhlcvBar>> {
-    parse_ohlcv(body, format).map_err(|err| anyhow!("invalid provider OHLCV data: {err:?}"))
 }
