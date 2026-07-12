@@ -103,10 +103,14 @@ impl LifecycleDriver {
         } else {
             format!("review-verification-wave-{review_iteration}-retry-{retry}")
         };
+        let items = super::workflow_live_v2_lifecycle_verify_options::prepare_verification_items(
+            items.to_vec(),
+            self.project_artifact_root.as_deref(),
+        );
         self.parallel(
             &id,
-            serde_json::json!(items),
-            review_verification_options(items, prompts::REVIEW_VERIFICATION_WAVE_TASK),
+            serde_json::json!(&items),
+            review_verification_options(&items, prompts::REVIEW_VERIFICATION_WAVE_TASK),
         )
         .await
     }
@@ -192,11 +196,7 @@ fn record_review_verification_retry(
 }
 
 pub(super) fn review_verification_options(items: &[Value], task: &str) -> Value {
-    let mut options = serde_json::json!({ "tier": "coder", "task": task });
-    if items_have_cargo_commands(items) {
-        options["maxParallelism"] = serde_json::json!(1);
-    }
-    options
+    super::workflow_live_v2_lifecycle_verify_options::verification_options(items, task, false)
 }
 
 pub(super) fn review_verification_has_execution_failure(verification: &Value) -> bool {
@@ -256,20 +256,4 @@ fn item_ids(item: &Value) -> Vec<String> {
     }
     ids.extend(support::strings_of(item.get("source_outcome_item_ids")));
     ids
-}
-
-fn items_have_cargo_commands(items: &[Value]) -> bool {
-    items.iter().any(|item| {
-        support::raw_strings(
-            item,
-            &[
-                "focused_verification",
-                "commands",
-                "command",
-                "expected_evidence",
-            ],
-        )
-        .iter()
-        .any(|text| text.to_ascii_lowercase().contains("cargo "))
-    })
 }

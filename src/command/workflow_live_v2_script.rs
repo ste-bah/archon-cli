@@ -287,6 +287,8 @@ mod workflow_live_v2_lifecycle_review_verification;
 mod workflow_live_v2_lifecycle_verify_invariants;
 #[path = "workflow_live_v2_lifecycle_verify_merge.rs"]
 mod workflow_live_v2_lifecycle_verify_merge;
+#[path = "workflow_live_v2_lifecycle_verify_options.rs"]
+mod workflow_live_v2_lifecycle_verify_options;
 #[path = "workflow_live_v2_lifecycle_verify_routing.rs"]
 mod workflow_live_v2_lifecycle_verify_routing;
 #[path = "workflow_live_v2_lifecycle_verify_supersede.rs"]
@@ -315,6 +317,9 @@ mod workflow_live_v2_lifecycle_review_remediation_tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_lifecycle_review_verification_tests.rs"]
 mod workflow_live_v2_lifecycle_review_verification_tests;
+#[cfg(test)]
+#[path = "workflow_live_v2_lifecycle_verify_options_tests.rs"]
+mod workflow_live_v2_lifecycle_verify_options_tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_lifecycle_verify_remediation_tests.rs"]
 mod workflow_live_v2_lifecycle_verify_remediation_tests;

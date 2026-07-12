@@ -2,6 +2,26 @@ use serde_json::Value;
 
 use crate::command::workflow_live::workflow_live_generated_lifecycle_support as support;
 
+pub(super) struct VerificationTriageRoutes {
+    pub(super) implementation_failures: Vec<Value>,
+    pub(super) retry_items: Vec<Value>,
+}
+
+pub(super) fn triage_routes(triage: &Value) -> VerificationTriageRoutes {
+    let data = triage_data(triage);
+    let mut implementation_failures = support::array(data.get("implementation_failures"));
+    implementation_failures.extend(
+        support::array(data.get("items"))
+            .into_iter()
+            .filter(is_actionable_classification),
+    );
+    dedup_items(&mut implementation_failures);
+    VerificationTriageRoutes {
+        implementation_failures,
+        retry_items: support::array(data.get("retry_items")),
+    }
+}
+
 pub(super) fn write_remediation_outcomes(repair_plan: &Value, verification: &Value) -> Vec<Value> {
     let data = repair_plan
         .get("data")
@@ -39,6 +59,27 @@ fn outcome_id(outcome: &Value) -> String {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string()
+}
+
+fn triage_data(triage: &Value) -> &Value {
+    triage
+        .get("data")
+        .or_else(|| triage.get("result").and_then(|result| result.get("data")))
+        .unwrap_or(triage)
+}
+
+fn is_actionable_classification(item: &Value) -> bool {
+    let class = item
+        .get("classification")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    class.contains("actionable") || class.contains("implementation_failure")
+}
+
+fn dedup_items(items: &mut Vec<Value>) {
+    let mut seen = std::collections::BTreeSet::new();
+    items.retain(|item| seen.insert(item.to_string()));
 }
 
 #[cfg(test)]

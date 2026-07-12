@@ -24,6 +24,23 @@ fn contract_fixture() -> (WorkflowV2TaskUniverse, serde_json::Value) {
 }
 
 #[test]
+fn mixed_triage_preserves_actionable_and_retry_routes() {
+    let triage: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/wf3b9_verification_failure_triage_5_3.json"
+    ))
+    .expect("D25 fixture");
+
+    let routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(&triage);
+
+    assert_eq!(routes.implementation_failures.len(), 1);
+    assert_eq!(routes.retry_items.len(), 3);
+    assert_eq!(
+        routes.implementation_failures[0]["classification"],
+        "actionable_implementation_failure"
+    );
+}
+
+#[test]
 fn fabel_triage_retry_items_keep_only_required_reruns() {
     let (universe, plan_item) = contract_fixture();
     let contract = LifecycleContract {

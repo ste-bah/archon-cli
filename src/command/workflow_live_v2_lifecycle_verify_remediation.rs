@@ -42,12 +42,23 @@ impl LifecycleDriver {
             actionable,
             &triage,
         );
+        let routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(&triage);
+        let mut retried = false;
         if let Some(retry_items) = triage_retry_items(&contract, &triage, plan_items, actionable) {
+            let retry_items =
+                workflow_live_v2_lifecycle_verify_options::prepare_verification_items(
+                    retry_items,
+                    self.project_artifact_root.as_deref(),
+                );
             let retry_result = self
                 .parallel(
                     &format!("verification-wave-{wave_index}-triage-retry-{repair_attempt}"),
                     serde_json::json!(&retry_items),
-                    retry_verification_options(),
+                    workflow_live_v2_lifecycle_verify_options::verification_options(
+                        &retry_items,
+                        prompts::RETRY_VERIFICATION_WAVE_TASK,
+                        true,
+                    ),
                 )
                 .await?;
             *verification = workflow_live_v2_lifecycle_verify_merge::merge_retry_outcomes(
@@ -63,12 +74,20 @@ impl LifecycleDriver {
                 "verificationPlan": { "items": retry_items },
                 "result": verification,
             }));
+            retried = true;
+        }
+        if retried && routes.implementation_failures.is_empty() {
             return Ok(true);
         }
+        let remediation_items = if routes.implementation_failures.is_empty() {
+            actionable
+        } else {
+            &routes.implementation_failures
+        };
         self.run_write_verification_remediation(
             ready_implementation_items,
             plan_items,
-            actionable,
+            remediation_items,
             wave_index,
             dependency_iteration,
             remediation_attempt,
@@ -265,11 +284,19 @@ impl LifecycleDriver {
         else {
             return Ok(false);
         };
+        let post_items = workflow_live_v2_lifecycle_verify_options::prepare_verification_items(
+            post_items,
+            self.project_artifact_root.as_deref(),
+        );
         *verification = self
             .parallel(
                 &format!("verification-wave-{wave_index}-post-remediation-{remediation_attempt}"),
-                serde_json::json!(post_items),
-                post_remediation_verification_options(),
+                serde_json::json!(&post_items),
+                workflow_live_v2_lifecycle_verify_options::verification_options(
+                    &post_items,
+                    prompts::POST_REMEDIATION_VERIFICATION_WAVE_TASK,
+                    true,
+                ),
             )
             .await?;
         evidence.verification.push(serde_json::json!({
@@ -400,7 +427,8 @@ fn triage_retry_items(
     plan_items: &[serde_json::Value],
     source_outcomes: &[serde_json::Value],
 ) -> Option<Vec<serde_json::Value>> {
-    let inventory = contract.normalize_inventory(triage);
+    let retry_items = workflow_live_v2_lifecycle_verify_routing::triage_routes(triage).retry_items;
+    let inventory = contract.normalize_inventory(&serde_json::json!({ "items": retry_items }));
     let inventory = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
         &inventory,
         &serde_json::json!({ "outcomes": source_outcomes }),
@@ -433,22 +461,6 @@ fn allowed_verification_task_ids(plan_items: &[serde_json::Value]) -> Vec<String
             .flat_map(|item| support::strings_of(item.get("canonical_task_ids")))
             .collect(),
     )
-}
-
-fn retry_verification_options() -> serde_json::Value {
-    serde_json::json!({
-        "tier": "coder",
-        "itemKind": "focused_verification",
-        "task": prompts::RETRY_VERIFICATION_WAVE_TASK,
-    })
-}
-
-fn post_remediation_verification_options() -> serde_json::Value {
-    serde_json::json!({
-        "tier": "coder",
-        "itemKind": "focused_verification",
-        "task": prompts::POST_REMEDIATION_VERIFICATION_WAVE_TASK,
-    })
 }
 
 fn record_unresolved_verification_remediation(

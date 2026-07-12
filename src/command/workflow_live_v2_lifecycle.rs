@@ -50,6 +50,10 @@ impl WorkflowV2ScriptRunner {
             ));
         };
         let target_repository_root = self.runtime.target_repository_root.clone();
+        let project_artifact_root = archon_workflow::project_artifact_context_from_v2_root(
+            self.v2_store.root(),
+        )
+        .project_root;
         let generated_config = self.runtime.generated_config.clone();
         let host = Arc::new(WorkflowScriptHost {
             scaffold_hash: workflow_scaffold_hash(harness_source),
@@ -60,6 +64,7 @@ impl WorkflowV2ScriptRunner {
             host.clone(),
             task_universe,
             target_repository_root,
+            project_artifact_root,
             governed_learning_context,
             &generated_config,
         );
@@ -94,6 +99,7 @@ struct LifecycleDriver {
     universe: WorkflowV2TaskUniverse,
     task_universe: serde_json::Value,
     target_repository_root: Option<String>,
+    project_artifact_root: Option<String>,
     governed_learning_context: serde_json::Value,
     max_repair_iterations: usize,
     max_investigation_iterations: usize,
@@ -116,6 +122,7 @@ impl LifecycleDriver {
         host: Arc<WorkflowScriptHost>,
         universe: WorkflowV2TaskUniverse,
         target_repository_root: Option<String>,
+        project_artifact_root: Option<String>,
         governed_learning_context: serde_json::Value,
         generated_config: &archon_core::config::GeneratedWorkflowConfig,
     ) -> Self {
@@ -126,6 +133,7 @@ impl LifecycleDriver {
             task_universe,
             universe,
             target_repository_root,
+            project_artifact_root,
             governed_learning_context,
             max_repair_iterations: usize::from(generated_config.max_repair_iterations.clamp(1, 8)),
             max_investigation_iterations: usize::from(
@@ -211,7 +219,7 @@ impl LifecycleDriver {
 
     /// Declared artifact contract: every write-capable item carries the
     /// artifact requirements its task pack declares, so the implementing
-    /// agent is always instructed to produce them (the wf-afae6bee fix).
+    /// agent is always instructed to produce them.
     fn with_declared_task_artifacts(&self, items: serde_json::Value) -> serde_json::Value {
         let contract = self.contract();
         let enriched: Vec<serde_json::Value> = support::array(Some(&items))

@@ -14,13 +14,6 @@ impl LifecycleDriver {
         evidence: &mut LifecycleEvidence,
     ) -> archon_workflow::WorkflowResult<()> {
         let contract = self.contract();
-        let verification_options = |task: &str| {
-            serde_json::json!({
-                "tier": "coder",
-                "itemKind": "focused_verification",
-                "task": task,
-            })
-        };
 
         let raw_plan = self
             .reduce(
@@ -91,13 +84,20 @@ impl LifecycleDriver {
                 )
                 .await;
         }
-        let mut plan_items = plan_items;
+        let mut plan_items = workflow_live_v2_lifecycle_verify_options::prepare_verification_items(
+            plan_items,
+            self.project_artifact_root.as_deref(),
+        );
 
         let mut verification = self
             .parallel(
                 &format!("verification-wave-{wave_index}"),
-                serde_json::json!(plan_items),
-                verification_options(prompts::VERIFICATION_WAVE_TASK),
+                serde_json::json!(&plan_items),
+                workflow_live_v2_lifecycle_verify_options::verification_options(
+                    &plan_items,
+                    prompts::VERIFICATION_WAVE_TASK,
+                    true,
+                ),
             )
             .await?;
         evidence.verification.push(serde_json::json!({
@@ -271,11 +271,19 @@ impl LifecycleDriver {
                 break;
             }
             plan_items = support::verification_items(&contract, &repair_inventory);
+            plan_items = workflow_live_v2_lifecycle_verify_options::prepare_verification_items(
+                plan_items,
+                self.project_artifact_root.as_deref(),
+            );
             verification = self
                 .parallel(
                     &format!("verification-wave-{wave_index}-{repair_attempt}"),
-                    serde_json::json!(plan_items),
-                    verification_options(prompts::RETRY_VERIFICATION_WAVE_TASK),
+                    serde_json::json!(&plan_items),
+                    workflow_live_v2_lifecycle_verify_options::verification_options(
+                        &plan_items,
+                        prompts::RETRY_VERIFICATION_WAVE_TASK,
+                        true,
+                    ),
                 )
                 .await?;
             evidence.verification.push(serde_json::json!({
