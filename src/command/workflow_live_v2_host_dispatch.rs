@@ -237,30 +237,7 @@ async fn run_v2_agent_call_with_rejected_output_log(
     }
 }
 
-async fn run_v2_agent_repair_with_rejected_output_log(
-    adapter: &WorkflowV2AgentAdapter,
-    client: &LiveV2AgentClient,
-    request: &archon_workflow::WorkflowV2AgentRequest,
-    v2_store: Option<&WorkflowV2ResultStore>,
-    first: String,
-    first_error: WorkflowV2AgentError,
-) -> Result<WorkflowV2Result, WorkflowV2AgentError> {
-    let prompt = adapter.build_repair_prompt(request, &first, &first_error);
-    let repaired = client.run_agent_request(request, prompt).await?;
-    match adapter.parse_agent_output(request, &repaired) {
-        Ok(result) => {
-            save_rejected_write_result(v2_store, request, "repair", &repaired, &result);
-            Ok(result)
-        }
-        Err(repair_error) => {
-            save_rejected_write_output(v2_store, request, "repair", &repaired, &repair_error);
-            Err(WorkflowV2AgentError::RepairExhausted {
-                first_error: Box::new(first_error),
-                repair_error: Box::new(repair_error),
-            })
-        }
-    }
-}
+include!("workflow_live_v2_host_dispatch_repair.rs");
 
 fn save_rejected_write_output(
     v2_store: Option<&WorkflowV2ResultStore>,

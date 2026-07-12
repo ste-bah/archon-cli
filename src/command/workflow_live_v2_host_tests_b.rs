@@ -421,3 +421,30 @@ fn blocked_final_report_ignores_accepted_metadata_without_evidence() {
         report.data
     );
 }
+
+#[test]
+fn final_accounting_removes_cross_cutting_task_status_collisions() {
+    let mut report: WorkflowV2FinalReport = serde_json::from_value(serde_json::json!({
+        "status": "needs_review",
+        "paths": {"harness_path":"h", "run_state_path":"s", "event_log_path":"e"},
+        "task_coverage": [], "files_read": [], "files_changed": [],
+        "commands_run": [], "tests_run": [], "review_findings": [],
+        "remediation_actions": [], "artifacts": [],
+        "accepted_tasks": ["TASK-1"], "noop_tasks": [],
+        "failed_tasks": ["GAP-REVIEW", "TASK-1"],
+        "blocked_tasks": ["TASK-1"], "missing_tasks": [],
+        "review_blockers": [],
+        "residual_gaps": [{
+            "id": "GAP-REVIEW", "description": "project-level review blocker",
+            "severity": "blocking"
+        }]
+    }))
+    .expect("report fixture");
+
+    reconcile_final_task_statuses(&mut report, &["TASK-1".to_string()]);
+
+    assert_eq!(report.accepted_tasks, vec!["TASK-1"]);
+    assert!(report.failed_tasks.is_empty());
+    assert!(report.blocked_tasks.is_empty());
+    assert_eq!(report.review_blockers[0].id, "GAP-REVIEW");
+}

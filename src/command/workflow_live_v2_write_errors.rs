@@ -113,7 +113,7 @@ fn is_recoverable_write_branch_timeout(error: &str) -> bool {
 }
 
 fn write_branch_error_kind(error: &str) -> BranchFailureKind {
-    let lower = error.to_ascii_lowercase();
+    let lower = root_write_branch_error(error).to_ascii_lowercase();
     if lower.contains("changed files outside declared ownership")
         || lower.contains("implementation agent changed files outside declared target_files")
         || lower.contains("changed files outside declared target_files")
@@ -135,6 +135,17 @@ fn write_branch_error_kind(error: &str) -> BranchFailureKind {
         return BranchFailureKind::Execution;
     }
     BranchFailureKind::Contract
+}
+
+fn root_write_branch_error(error: &str) -> &str {
+    let marker = "schema repair failed after bounded retries: root=";
+    let Some(root_and_last) = error.strip_prefix(marker) else {
+        return error;
+    };
+    root_and_last
+        .split_once("; last=")
+        .map(|(root, _)| root)
+        .unwrap_or(root_and_last)
 }
 
 fn is_write_branch_validation_error(error: &str) -> bool {

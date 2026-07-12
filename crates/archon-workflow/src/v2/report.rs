@@ -33,6 +33,8 @@ pub struct WorkflowV2FinalReport {
     pub failed_tasks: Vec<String>,
     pub blocked_tasks: Vec<String>,
     pub missing_tasks: Vec<String>,
+    #[serde(default)]
+    pub review_blockers: Vec<WorkflowV2ResidualGap>,
     pub residual_gaps: Vec<WorkflowV2ResidualGap>,
 }
 
@@ -67,6 +69,7 @@ impl WorkflowV2FinalReportBuilder {
             failed_tasks: Vec::new(),
             blocked_tasks: Vec::new(),
             missing_tasks: Vec::new(),
+            review_blockers: Vec::new(),
             residual_gaps: Vec::new(),
         };
         let mut coverage_by_task = BTreeMap::<String, Vec<WorkflowV2TaskCoverage>>::new();
@@ -84,6 +87,7 @@ impl WorkflowV2FinalReportBuilder {
         }
 
         classify_required_tasks(required_task_ids, &coverage_by_task, &mut report);
+        report.review_blockers = unique_gaps(&report.residual_gaps);
         if report.commands_run.is_empty() {
             report.status = WorkflowV2Status::NeedsReview;
         }
@@ -158,18 +162,6 @@ fn collect_result(
             .or_default()
             .push(coverage.clone());
     }
-    if result_status_requires_review(result.status) {
-        let task_ids: Vec<_> = result
-            .task_coverage
-            .iter()
-            .map(|coverage| coverage.task_id.clone())
-            .collect();
-        if result.status == WorkflowV2Status::Blocked {
-            report.blocked_tasks.extend(task_ids);
-        } else {
-            report.failed_tasks.extend(task_ids);
-        }
-    }
 }
 
 fn result_status_requires_review(status: WorkflowV2Status) -> bool {
@@ -235,4 +227,12 @@ fn merge_sorted(mut existing: Vec<String>, extra: BTreeSet<String>) -> Vec<Strin
     existing.sort();
     existing.dedup();
     existing
+}
+
+fn unique_gaps(gaps: &[WorkflowV2ResidualGap]) -> Vec<WorkflowV2ResidualGap> {
+    let mut by_id = BTreeMap::new();
+    for gap in gaps {
+        by_id.entry(gap.id.clone()).or_insert_with(|| gap.clone());
+    }
+    by_id.into_values().collect()
 }

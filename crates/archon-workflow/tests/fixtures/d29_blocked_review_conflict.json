@@ -1,0 +1,7 @@
+{
+  "required_task_ids": ["T001"],
+  "review_gap": {
+    "id": "GAP-REVIEW-ACCEPTANCE-CONFLICT",
+    "description": "Project-level acceptance remains blocked even though the task evidence is accepted."
+  }
+}

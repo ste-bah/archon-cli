@@ -26,6 +26,17 @@ fn unsafe_path_still_classifies_as_safety() {
 }
 
 #[test]
+fn compound_repair_failure_uses_root_rejection_kind() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/d26_compound_repair_failure.json"
+    ))
+    .expect("fixture");
+    let error = fixture["error"].as_str().expect("error");
+
+    assert_eq!(write_branch_error_kind(error), BranchFailureKind::Contract);
+}
+
+#[test]
 fn oversized_candidate_file_is_review_data_not_terminal_stage_failure() {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "fixtures/wfdc_size_policy_branch_failure.json"

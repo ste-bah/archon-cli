@@ -1,6 +1,4 @@
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
-
+pub use super::agent_repair::WorkflowV2AgentError;
 use super::project_artifact_completion::enforce_declared_artifact_requirements;
 use super::{
     WorkflowV2CommandKind, WorkflowV2CommandStatus, WorkflowV2EvidenceKind, WorkflowV2HostCall,
@@ -10,6 +8,7 @@ use super::{
     normalize_project_artifact_files, normalize_target_for_repository,
     normalize_targets_for_repository, validate_changed_files,
 };
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowV2AgentRequest {
@@ -136,15 +135,27 @@ impl WorkflowV2AgentAdapter {
         invalid_output: &str,
         error: &WorkflowV2AgentError,
     ) -> String {
+        let target_files = serde_json::to_string(&request.target_files).unwrap_or_default();
+        let target_scopes =
+            serde_json::to_string(&request.target_ownership_scopes).unwrap_or_default();
+        let final_output_rule = if request.is_write_capable() {
+            FINAL_OUTPUT_RULE
+        } else {
+            ""
+        };
         format!(
             "The previous workflow V2 agent response for call '{}' was invalid.\n\n\
              Error: {error}\n\n\
              Return exactly one JSON object matching the required result envelope. \
              Do not include markdown fences, restored-context summaries, confirmation questions, \
              provider names, model names, or plan-only text.\n\n\
+             Declared target_files: {target_files}\n\
+             Declared target ownership scopes: {target_scopes}\n\
+             Do not edit or claim repository files outside that ownership.\n\n\
              Task:\n{}\n\n\
              Required JSON Result Envelope:\n{RESULT_SCHEMA}\n\n\
-             Previous invalid output excerpt:\n{}\n",
+             Previous invalid output excerpt:\n{}\n\n\
+             {final_output_rule}\n",
             request.call.id,
             request.task,
             truncate_chars(invalid_output, 2_000),
@@ -170,30 +181,6 @@ impl WorkflowV2AgentAdapter {
         })?;
         self.validate_agent_result(request, &mut result)?;
         Ok(result)
-    }
-
-    pub async fn run_with_repair<C>(
-        &self,
-        client: &C,
-        request: &WorkflowV2AgentRequest,
-    ) -> Result<WorkflowV2Result, WorkflowV2AgentError>
-    where
-        C: WorkflowV2AgentClient + Sync,
-    {
-        let prompt = self.build_prompt(request);
-        let first = client.run_agent_request(request, prompt).await?;
-        match self.parse_agent_output(request, &first) {
-            Ok(result) => Ok(result),
-            Err(first_error) => {
-                let repair_prompt = self.build_repair_prompt(request, &first, &first_error);
-                let repaired = client.run_agent_request(request, repair_prompt).await?;
-                self.parse_agent_output(request, &repaired)
-                    .map_err(|repair_error| WorkflowV2AgentError::RepairExhausted {
-                        first_error: Box::new(first_error),
-                        repair_error: Box::new(repair_error),
-                    })
-            }
-        }
     }
 
     fn validate_agent_result(
@@ -229,43 +216,6 @@ pub trait WorkflowV2AgentClient {
     }
 
     async fn run_agent(&self, prompt: String) -> Result<String, WorkflowV2AgentError>;
-}
-
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum WorkflowV2AgentError {
-    #[error("{0}")]
-    MalformedOutput(String),
-    #[error("{0}")]
-    InvalidResult(String),
-    #[error("agent output contains restored-context summary text")]
-    RestoredContextSummary,
-    #[error("agent output contains a confirmation question instead of executing")]
-    ConfirmationQuestion,
-    #[error(
-        "implementation agent returned a plan-only result instead of edits or typed no-op proof"
-    )]
-    PlanOnlyImplementation,
-    #[error(
-        "implementation agent returned accepted status without changed files; use noop with task coverage evidence when no edits are required"
-    )]
-    ImplementationAcceptedWithoutChanges,
-    #[error("implementation noop requires typed task_coverage evidence")]
-    ImplementationNoopWithoutTaskCoverage,
-    #[error(
-        "implementation noop with declared project artifacts requires existing artifact evidence"
-    )]
-    ImplementationNoopMissingProjectArtifactEvidence,
-    #[error("implementation agent changed files outside declared target_files: {0}")]
-    ImplementationChangedFilesOutsideOwnership(String),
-    #[error("read-only agent result must not claim changed files")]
-    ReadOnlyChangedFiles,
-    #[error("agent transport failed: {0}")]
-    Transport(String),
-    #[error("schema repair failed after one retry: first={first_error}; repair={repair_error}")]
-    RepairExhausted {
-        first_error: Box<WorkflowV2AgentError>,
-        repair_error: Box<WorkflowV2AgentError>,
-    },
 }
 
 fn validate_request_specific_result(

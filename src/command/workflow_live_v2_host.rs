@@ -16,6 +16,8 @@ include!("workflow_live_v2_host_local.rs");
 
 include!("workflow_live_v2_host_final.rs");
 
+include!("workflow_live_v2_final_accounting.rs");
+
 include!("workflow_live_v2_host_support.rs");
 
 include!("workflow_live_v2_host_blocker.rs");

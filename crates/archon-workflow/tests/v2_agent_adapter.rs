@@ -135,6 +135,8 @@ async fn malformed_output_gets_one_schema_repair_retry() {
     assert!(client.prompts()[1].contains("previous workflow V2 agent response"));
     assert!(client.prompts()[1].contains("Required JSON Result Envelope"));
     assert!(client.prompts()[1].contains("\"task_coverage\""));
+    assert!(client.prompts()[1].contains("Declared target_files"));
+    assert!(client.prompts()[1].trim_end().ends_with("Status: noop."));
 }
 
 #[tokio::test]

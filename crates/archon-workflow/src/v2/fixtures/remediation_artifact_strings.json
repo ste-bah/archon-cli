@@ -1,0 +1,8 @@
+{
+  "status": "accepted",
+  "summary": "changed native validation gate",
+  "evidence": [{"kind": "implementation", "summary": "updated gate logic"}],
+  "artifacts": ["reports/validation.json"],
+  "files_read": ["crates/archon-trading/src/data_lake.rs"],
+  "files_changed": ["crates/archon-trading/src/data_lake.rs"]
+}

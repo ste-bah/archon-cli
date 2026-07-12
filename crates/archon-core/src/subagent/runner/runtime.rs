@@ -33,7 +33,7 @@ impl SubagentRunner {
         };
 
         let started = Instant::now();
-        let deadline = started + Duration::from_secs(self.timeout_secs);
+        let mut deadline = started + Duration::from_secs(self.timeout_secs);
         let mut auto_compact = crate::agent::AutoCompactState::default();
         let mut cumulative_billable_tokens = 0_u64;
         let mut last_known_context_tokens = 0_u64;
@@ -126,6 +126,7 @@ impl SubagentRunner {
                 stream.pending_tools,
             )
             .await;
+            deadline += archon_tools::take_timeout_exempt_cargo_wait(&self.tool_context.session_id);
         }
 
         self.emit_activity_stream(

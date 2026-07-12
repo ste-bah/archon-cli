@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use tokio_util::sync::CancellationToken;
 
 static TARGET_LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+static EXEMPT_WAITS: OnceLock<std::sync::Mutex<HashMap<String, Duration>>> = OnceLock::new();
 
 pub(crate) struct CargoTargetDirLock {
     _guard: OwnedMutexGuard<()>,
@@ -15,6 +17,7 @@ pub(crate) async fn apply_cargo_target_dir_guard(
     env: &mut Vec<(String, String)>,
     command: &str,
     working_dir: &Path,
+    session_id: &str,
     cancel: Option<CancellationToken>,
 ) -> Result<Option<CargoTargetDirLock>, String> {
     let Some(target_dir) =
@@ -34,7 +37,33 @@ pub(crate) async fn apply_cargo_target_dir_guard(
         "CARGO_TARGET_DIR".to_string(),
         target_dir.display().to_string(),
     ));
-    Ok(Some(lock_target_dir(target_dir, cancel).await?))
+    let started = Instant::now();
+    let lock = lock_target_dir(target_dir, cancel).await?;
+    record_timeout_exempt_wait(session_id, started.elapsed());
+    Ok(Some(lock))
+}
+
+pub fn take_timeout_exempt_cargo_wait(session_id: &str) -> Duration {
+    if session_id.is_empty() {
+        return Duration::ZERO;
+    }
+    let waits = EXEMPT_WAITS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    waits
+        .lock()
+        .ok()
+        .and_then(|mut waits| waits.remove(session_id))
+        .unwrap_or_default()
+}
+
+fn record_timeout_exempt_wait(session_id: &str, wait: Duration) {
+    if session_id.is_empty() || wait.is_zero() {
+        return;
+    }
+    let waits = EXEMPT_WAITS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    if let Ok(mut waits) = waits.lock() {
+        let recorded = waits.entry(session_id.to_string()).or_default();
+        *recorded = (*recorded).max(wait);
+    }
 }
 
 fn guarded_cargo_target_dir(
@@ -254,6 +283,7 @@ mod tests {
             &mut first_env,
             "cargo test",
             Path::new("/Volumes/Externalwork/demo"),
+            "session-1",
             None,
         )
         .await
@@ -265,6 +295,7 @@ mod tests {
             &mut second_env,
             "cargo test",
             Path::new("/Volumes/Externalwork/demo"),
+            "session-2",
             None,
         );
         assert!(
@@ -274,5 +305,37 @@ mod tests {
             "second cargo command should wait for the same target lock"
         );
         drop(first);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn cargo_lock_wait_is_recorded_outside_session_timeout() {
+        let mut first_env = Vec::new();
+        let first = apply_cargo_target_dir_guard(
+            &mut first_env,
+            "cargo test",
+            Path::new("/Volumes/Externalwork/demo"),
+            "holder",
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let waiting = tokio::spawn(async {
+            let mut env = Vec::new();
+            apply_cargo_target_dir_guard(
+                &mut env,
+                "cargo test",
+                Path::new("/Volumes/Externalwork/demo"),
+                "queued",
+                None,
+            )
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        drop(first);
+        waiting.await.unwrap().unwrap();
+
+        assert!(take_timeout_exempt_cargo_wait("queued") >= Duration::from_millis(50));
     }
 }

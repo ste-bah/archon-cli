@@ -12,6 +12,7 @@ fn final_report_result(
         .map_err(|err| WorkflowError::SpecInvalid(err.to_string()))?;
     guard_final_report_artifact_paths_exist(&mut report, v2_store.root());
     guard_final_report_against_dynamic_wave_evidence(&mut report, v2_store, task_universe)?;
+    reconcile_final_task_statuses(&mut report, &required_task_ids);
     let report_path = artifact_path(
         v2_store.root(),
         &format!("{}-final-report", execution.call.id),

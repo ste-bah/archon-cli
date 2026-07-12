@@ -11,9 +11,24 @@ pub(super) fn normalize_agent_output(
         return Ok(value);
     };
     stamp_envelope(request, object);
+    normalize_path_records(object, "artifacts");
+    normalize_path_records(object, "files_read");
+    normalize_path_records(object, "files_changed");
     stamp_artifact_ids(object);
     normalize_commands(object);
     Ok(value)
+}
+
+fn normalize_path_records(object: &mut Map<String, Value>, field: &str) {
+    let Some(records) = object.get_mut(field).and_then(Value::as_array_mut) else {
+        return;
+    };
+    for record in records {
+        let Some(path) = record.as_str() else {
+            continue;
+        };
+        *record = serde_json::json!({"path": path});
+    }
 }
 
 fn stamp_envelope(request: &WorkflowV2AgentRequest, object: &mut Map<String, Value>) {

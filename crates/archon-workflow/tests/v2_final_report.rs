@@ -208,6 +208,41 @@ fn hidden_needs_review_result_prevents_success() {
     assert!(report.failed_tasks.is_empty());
 }
 
+#[test]
+fn cross_cutting_review_blocker_does_not_double_count_accepted_tasks() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/d29_blocked_review_conflict.json"))
+            .expect("fixture");
+    let required = fixture["required_task_ids"]
+        .as_array()
+        .expect("required tasks")
+        .iter()
+        .map(|value| value.as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    let mut review = coverage_result("T001", WorkflowV2TaskCoverageStatus::Accepted);
+    review.residual_gaps.push(WorkflowV2ResidualGap {
+        id: fixture["review_gap"]["id"].as_str().unwrap().to_string(),
+        description: fixture["review_gap"]["description"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        severity: Some("critical".to_string()),
+    });
+
+    let report = WorkflowV2FinalReportBuilder::new()
+        .build(paths(), &required, &[accepted_result("T001"), review])
+        .expect("report");
+
+    assert_eq!(report.accepted_tasks, vec!["T001"]);
+    assert!(report.failed_tasks.is_empty());
+    assert!(report.blocked_tasks.is_empty());
+    assert_eq!(
+        report.review_blockers[0].id,
+        "GAP-REVIEW-ACCEPTANCE-CONFLICT"
+    );
+    assert_eq!(report.status, WorkflowV2Status::NeedsReview);
+}
+
 fn paths() -> WorkflowV2ReportPaths {
     WorkflowV2ReportPaths {
         harness_path: "/run/workflow.js".to_string(),

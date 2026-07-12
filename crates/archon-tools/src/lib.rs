@@ -14,6 +14,7 @@ pub use background_agents::{
 pub mod bash;
 pub(crate) mod bash_observability;
 pub(crate) mod cargo_target_env;
+pub use cargo_target_env::take_timeout_exempt_cargo_wait;
 pub mod concurrency;
 pub mod config_tool;
 pub mod docs;

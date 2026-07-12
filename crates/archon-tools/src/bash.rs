@@ -166,6 +166,7 @@ impl Tool for BashTool {
             &mut env_vars,
             raw_command,
             &ctx.working_dir,
+            &ctx.session_id,
             ctx.cancel_parent.clone(),
         )
         .await

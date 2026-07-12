@@ -202,6 +202,78 @@ fn parser_stamps_missing_mechanical_artifact_id() {
     assert_eq!(parsed.commands_run[0].kind, WorkflowV2CommandKind::Other);
 }
 
+#[test]
+fn parser_coerces_bare_string_artifacts_and_file_records() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(repo.join("crates/archon-trading/src")).expect("repo");
+    let request = write_request(&repo.display().to_string());
+    let output = include_str!("fixtures/remediation_artifact_strings.json");
+
+    let parsed = WorkflowV2AgentAdapter::new()
+        .parse_agent_output(&request, output)
+        .expect("safe string records should normalize");
+
+    assert_eq!(parsed.artifacts[0].path, "reports/validation.json");
+    assert_eq!(
+        parsed.files_read[0].path,
+        "crates/archon-trading/src/data_lake.rs"
+    );
+    assert_eq!(
+        parsed.files_changed[0].path,
+        "crates/archon-trading/src/data_lake.rs"
+    );
+}
+
+#[test]
+fn parser_keeps_unknown_command_status_strict() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(repo.join("crates/archon-trading/src")).expect("repo");
+    let request = write_request(&repo.display().to_string());
+    let output = serde_json::json!({
+        "status": "accepted",
+        "summary": "changed native validation gate",
+        "evidence": [{"kind": "implementation", "summary": "updated gate logic"}],
+        "commands_run": [{
+            "kind": "test",
+            "command": "cargo test focused",
+            "status": "maybe",
+            "output_summary": "unknown"
+        }],
+        "files_changed": ["crates/archon-trading/src/data_lake.rs"]
+    });
+
+    assert!(
+        WorkflowV2AgentAdapter::new()
+            .parse_agent_output(&request, &output.to_string())
+            .is_err()
+    );
+}
+
+#[test]
+fn string_changed_file_still_obeys_ownership() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(repo.join("crates/archon-trading/src")).expect("repo");
+    let request = write_request(&repo.display().to_string());
+    let output = serde_json::json!({
+        "status": "accepted",
+        "summary": "changed an undeclared file",
+        "evidence": [{"kind": "implementation", "summary": "updated logic"}],
+        "files_changed": ["crates/archon-trading/src/other.rs"]
+    });
+
+    let error = WorkflowV2AgentAdapter::new()
+        .parse_agent_output(&request, &output.to_string())
+        .expect_err("string coercion must not bypass ownership");
+
+    assert!(matches!(
+        error,
+        WorkflowV2AgentError::ImplementationChangedFilesOutsideOwnership(_)
+    ));
+}
+
 struct SequenceClient {
     outputs: Mutex<Vec<String>>,
 }
@@ -244,6 +316,37 @@ async fn repair_response_uses_repository_aware_ownership_validation() {
         .run_with_repair(&client, &request)
         .await
         .expect("repair accepted");
+
+    assert_eq!(
+        parsed.files_changed[0].path,
+        "crates/archon-trading/src/data_lake.rs"
+    );
+}
+
+#[tokio::test]
+async fn repair_allows_one_more_attempt_for_a_new_error_class() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(repo.join("crates/archon-trading/src")).expect("repo");
+    let repo_root = repo.display().to_string();
+    let request = write_request(&repo_root);
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/compound_repair_outputs.json"))
+            .expect("fixture");
+    let corrected = serde_json::to_string(&accepted_result_with_absolute_change(&repo_root))
+        .expect("result json");
+    let client = SequenceClient {
+        outputs: Mutex::new(vec![
+            fixture["first"].as_str().unwrap().to_string(),
+            fixture["repair"].to_string(),
+            corrected,
+        ]),
+    };
+
+    let parsed = WorkflowV2AgentAdapter::new()
+        .run_with_repair(&client, &request)
+        .await
+        .expect("different repair class gets one bounded extra attempt");
 
     assert_eq!(
         parsed.files_changed[0].path,
