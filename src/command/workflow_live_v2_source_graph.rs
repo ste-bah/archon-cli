@@ -18,6 +18,8 @@ include!("workflow_live_v2_source_graph_build.rs");
 
 include!("workflow_live_v2_source_graph_fields.rs");
 
+include!("workflow_live_v2_source_graph_diagnostics.rs");
+
 include!("workflow_live_v2_source_graph_helpers.rs");
 
 #[cfg(test)]

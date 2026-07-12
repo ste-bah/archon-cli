@@ -228,6 +228,94 @@ fn fabel_shape_repair_drops_already_accepted_source_outcomes() {
     assert_eq!(items[0]["item_id"], "retry-failed");
 }
 
+#[test]
+fn d22_verification_remediation_source_items_satisfy_graph_contract() {
+    let item: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/wf485_verification_remediation_source_item.json"
+    ))
+    .expect("D22 fixture");
+    let source_items =
+        workflow_live_v2_lifecycle_verify_merge::verification_remediation_source_items(
+            &serde_json::json!({ "items": [item] }),
+        );
+
+    assert_eq!(
+        source_items[0]["verification_requirements"],
+        source_items[0]["focused_verification"]
+    );
+    let universe = WorkflowV2TaskUniverse {
+        schema_version: "workflow-v2-task-universe-v1".to_string(),
+        source_roots: Vec::new(),
+        tasks: vec![
+            WorkflowV2TaskUniverseTask {
+                canonical_task_id: "TASK-TDL-050".to_string(),
+                aliases: Vec::new(),
+                source_path: "tasks/TASK-TDL-050.md".to_string(),
+                dependency_ids: vec!["TASK-TDL-030".to_string()],
+                title: None,
+                artifact_requirements: Vec::new(),
+            },
+            WorkflowV2TaskUniverseTask {
+                canonical_task_id: "TASK-TDL-030".to_string(),
+                aliases: Vec::new(),
+                source_path: "tasks/TASK-TDL-030.md".to_string(),
+                dependency_ids: Vec::new(),
+                title: None,
+                artifact_requirements: Vec::new(),
+            },
+        ],
+    };
+    let execution = WorkflowV2CallExecution {
+        call: WorkflowV2HostCall {
+            id: "remediation-wave-5-verification-1".to_string(),
+            method: WorkflowV2HostMethod::Fanout,
+            write_mode: Some(WorkflowV2WriteMode::Worktree),
+            options: WorkflowV2HostOptions {
+                item_kind: Some("implementation".to_string()),
+                target_files_from_item: true,
+                ..WorkflowV2HostOptions::default()
+            },
+        },
+        input: serde_json::json!({ "source_data": source_items }),
+        depends_on: Vec::new(),
+    };
+    let metadata = dynamic_wave_source_metadata(&execution, Some(&universe), None);
+    assert_eq!(metadata.invalid_reason, None, "{metadata:?}");
+    assert!(metadata.source_fingerprint.is_some());
+}
+
+#[test]
+fn d23_retry_merge_preserves_unretried_failures() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/wf485_verification_retry_merge.json"))
+            .expect("D23 fixture");
+    let retry_items = support::array(fixture.get("retry_items"));
+    let merged = workflow_live_v2_lifecycle_verify_merge::merge_retry_outcomes(
+        &fixture["initial"],
+        fixture["retry_result"].clone(),
+        &retry_items,
+    );
+    let outcomes = support::outcomes_of(&merged);
+
+    assert_eq!(outcomes.len(), 9);
+    assert_eq!(merged["status"], "needs_review");
+    assert_eq!(
+        merged["summary"],
+        "verification retry merged 9 outcomes with 2 unresolved"
+    );
+    assert!(outcomes.iter().any(|outcome| {
+        outcome["item_id"] == "verify-040-artifact" && outcome["status"] == "failed"
+    }));
+    assert!(
+        !outcomes
+            .iter()
+            .any(|outcome| outcome["item_id"] == "verify-050-artifact")
+    );
+    assert!(outcomes.iter().any(|outcome| {
+        outcome["source_item_id"] == "verify-050-artifact" && outcome["status"] == "accepted"
+    }));
+}
+
 fn accepted_outcome(id: &str) -> serde_json::Value {
     serde_json::json!({
         "item_id": id,

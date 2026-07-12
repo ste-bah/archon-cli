@@ -54,11 +54,15 @@ pub(super) fn dynamic_wave_source_metadata(
         wave_kind,
         target_repository_root,
     ) else {
+        let issue = source_data_contract_issue(
+            items,
+            &task_universe,
+            authoritative_task_universe,
+            wave_kind,
+        );
         return DynamicWaveSourceMetadata {
             source_metadata_required: true,
-            invalid_reason: Some(format!(
-                "{wave_kind} source items must include item_id/id, canonical_task_ids, and required evidence fields"
-            )),
+            invalid_reason: Some(format!("{wave_kind} {issue}")),
             ..DynamicWaveSourceMetadata::empty()
         };
     };

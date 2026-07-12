@@ -208,33 +208,58 @@ pub(super) fn metadata_is_derived_or_resampled_diagnostic(metadata: &DatasetMeta
         || metadata.dataset_id.to_ascii_lowercase().contains("derived")
 }
 
-fn metadata_required_fields_present(metadata: &DatasetMetadata) -> bool {
-    !metadata.dataset_id.trim().is_empty()
-        && !metadata.version.trim().is_empty()
-        && !metadata.canonical_instrument.trim().is_empty()
-        && !metadata.asset_class.trim().is_empty()
-        && !metadata.provider.trim().is_empty()
-        && !metadata.provider_symbol.trim().is_empty()
-        && !metadata.timeframe.trim().is_empty()
-        && !metadata.timezone.trim().is_empty()
-        && !metadata.adjustment.trim().is_empty()
-        && !metadata.license.trim().is_empty()
-        && !metadata.coverage.start.trim().is_empty()
-        && !metadata.coverage.end.trim().is_empty()
+fn all_non_empty(values: &[&str]) -> bool {
+    values.iter().all(|value| !value.trim().is_empty())
+}
+
+fn metadata_identity_fields_present(metadata: &DatasetMetadata) -> bool {
+    all_non_empty(&[
+        &metadata.dataset_id,
+        &metadata.version,
+        &metadata.canonical_instrument,
+        &metadata.asset_class,
+        &metadata.provider,
+        &metadata.provider_symbol,
+        &metadata.timeframe,
+        &metadata.timezone,
+        &metadata.adjustment,
+        &metadata.license,
+    ])
+}
+
+fn metadata_coverage_fields_present(metadata: &DatasetMetadata) -> bool {
+    all_non_empty(&[&metadata.coverage.start, &metadata.coverage.end])
         && metadata.coverage.expected_bars > 0
         && metadata.gaps.expected_bars > 0
-        && !metadata.checksum.trim().is_empty()
-        && !metadata.checksums.raw_sha256.trim().is_empty()
-        && !metadata.checksums.normalized_sha256.trim().is_empty()
-        && !metadata.checksums.metadata_sha256.trim().is_empty()
-        && !metadata.paths.raw.trim().is_empty()
-        && !metadata.paths.raw_response.trim().is_empty()
-        && !metadata.paths.raw_request.trim().is_empty()
-        && !metadata.paths.redacted_headers.trim().is_empty()
-        && !metadata.paths.provider_notes.trim().is_empty()
-        && !metadata.paths.normalized.trim().is_empty()
-        && !metadata.paths.validation.trim().is_empty()
-        && !metadata.paths.manifest.trim().is_empty()
+}
+
+fn metadata_checksum_fields_present(metadata: &DatasetMetadata) -> bool {
+    all_non_empty(&[
+        &metadata.checksum,
+        &metadata.checksums.raw_sha256,
+        &metadata.checksums.normalized_sha256,
+        &metadata.checksums.metadata_sha256,
+    ])
+}
+
+fn metadata_path_fields_present(metadata: &DatasetMetadata) -> bool {
+    all_non_empty(&[
+        &metadata.paths.raw,
+        &metadata.paths.raw_response,
+        &metadata.paths.raw_request,
+        &metadata.paths.redacted_headers,
+        &metadata.paths.provider_notes,
+        &metadata.paths.normalized,
+        &metadata.paths.validation,
+        &metadata.paths.manifest,
+    ])
+}
+
+fn metadata_required_fields_present(metadata: &DatasetMetadata) -> bool {
+    metadata_identity_fields_present(metadata)
+        && metadata_coverage_fields_present(metadata)
+        && metadata_checksum_fields_present(metadata)
+        && metadata_path_fields_present(metadata)
 }
 
 pub(super) fn push_check(checks: &mut Vec<ValidationCheck>, id: &str, passed: bool, message: &str) {

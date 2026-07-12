@@ -137,6 +137,29 @@ fn review_remediation_rejects_synthetic_task_ids() {
     assert!(metadata.invalid_reason.is_some(), "{metadata:?}");
 }
 
+#[test]
+fn source_metadata_error_names_the_failing_source_field() {
+    let item = serde_json::json!({
+        "item_id": "repair-artifact",
+        "canonical_task_ids": ["TASK-TDL-050"],
+        "dependency_ids": [],
+        "failure_status": "failed",
+        "failure_evidence": ["artifact is empty"],
+        "source_item_id": "failed-review-check",
+        "target_files": [],
+        "focused_verification": ["check artifact"],
+        "verification_requirements": ["check artifact"],
+        "artifact_requirements": [".archon/artifact.json"]
+    });
+    let execution = review_remediation_execution(serde_json::json!([item]));
+    let metadata = dynamic_wave_source_metadata(&execution, Some(&tdl_task_universe()), None);
+
+    assert_eq!(
+        metadata.invalid_reason.as_deref(),
+        Some("review remediation source_data[0].required_fix is missing or empty")
+    );
+}
+
 fn execution(source_data: serde_json::Value) -> WorkflowV2CallExecution {
     WorkflowV2CallExecution {
         call: WorkflowV2HostCall {

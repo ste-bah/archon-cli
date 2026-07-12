@@ -1,0 +1,12 @@
+{
+  "item_id": "remediate-empty-provider-artifact",
+  "canonical_task_ids": ["TASK-TDL-050"],
+  "dependency_ids": ["TASK-TDL-030"],
+  "source_item_id": "verify-provider-artifact-contract",
+  "failure_status": "failed",
+  "failure_evidence": ["The declared normalized artifact exists but is empty."],
+  "required_fix": "Produce valid native rows or preserve an honest unavailable artifact contract.",
+  "target_files": [],
+  "focused_verification": ["Verify every declared provider artifact is non-empty."],
+  "artifact_requirements": [".archon/data/provider/validation.json"]
+}

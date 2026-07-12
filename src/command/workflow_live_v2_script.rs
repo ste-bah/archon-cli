@@ -285,6 +285,8 @@ mod workflow_live_v2_lifecycle_review_remediation;
 mod workflow_live_v2_lifecycle_review_verification;
 #[path = "workflow_live_v2_lifecycle_verify_invariants.rs"]
 mod workflow_live_v2_lifecycle_verify_invariants;
+#[path = "workflow_live_v2_lifecycle_verify_merge.rs"]
+mod workflow_live_v2_lifecycle_verify_merge;
 #[path = "workflow_live_v2_lifecycle_verify_routing.rs"]
 mod workflow_live_v2_lifecycle_verify_routing;
 #[path = "workflow_live_v2_lifecycle_verify_supersede.rs"]

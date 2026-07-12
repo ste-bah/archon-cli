@@ -72,7 +72,7 @@ fn focused_verification_rejects_missing_verification_evidence_fields() {
             .invalid_reason
             .as_deref()
             .unwrap_or_default()
-            .contains("focused verification source items must include"),
+            .contains("focused verification source_data[0].focused_verification is missing or empty"),
         "{metadata:?}"
     );
 }

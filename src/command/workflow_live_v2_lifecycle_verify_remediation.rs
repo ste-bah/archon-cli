@@ -43,13 +43,18 @@ impl LifecycleDriver {
             &triage,
         );
         if let Some(retry_items) = triage_retry_items(&contract, &triage, plan_items, actionable) {
-            *verification = self
+            let retry_result = self
                 .parallel(
                     &format!("verification-wave-{wave_index}-triage-retry-{repair_attempt}"),
-                    serde_json::json!(retry_items),
+                    serde_json::json!(&retry_items),
                     retry_verification_options(),
                 )
                 .await?;
+            *verification = workflow_live_v2_lifecycle_verify_merge::merge_retry_outcomes(
+                verification,
+                retry_result,
+                &retry_items,
+            );
             evidence.verification.push(serde_json::json!({
                 "kind": "verification-triage-retry",
                 "implementationWaveIndex": wave_index,
@@ -195,10 +200,14 @@ impl LifecycleDriver {
         remediation_attempt: &usize,
         evidence: &mut LifecycleEvidence,
     ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+        let source_items =
+            workflow_live_v2_lifecycle_verify_merge::verification_remediation_source_items(
+                remediation_inventory,
+            );
         let remediation_wave = self
             .write_fanout(
                 &format!("remediation-wave-{wave_index}-verification-{remediation_attempt}"),
-                serde_json::json!(support::array(remediation_inventory.get("items"))),
+                serde_json::json!(source_items),
                 prompts::VERIFICATION_REMEDIATION_WAVE_TASK,
             )
             .await?;
