@@ -157,6 +157,54 @@ impl LifecycleDriver {
                 continue;
             }
 
+            let repeated = workflow_live_v2_lifecycle_verify_routing::repeated_gap_write_remediation_outcomes(
+                &evidence.verification,
+                &verification,
+            );
+            if !repeated.is_empty() {
+                let call_id = format!(
+                    "verification-repeated-gap-escalation-{wave_index}-{repair_attempt}"
+                );
+                let source_ids = repeated
+                    .iter()
+                    .filter_map(|outcome| outcome.get("item_id").and_then(serde_json::Value::as_str))
+                    .collect::<Vec<_>>();
+                let route = serde_json::json!({
+                    "status": "accepted",
+                    "data": {
+                        "route": "write_remediation",
+                        "route_reason": "same residual gap reproduced across two retry generations",
+                        "source_outcome_ids": source_ids,
+                    }
+                });
+                support::record_repair_attempt(
+                    &mut evidence.repair_attempts,
+                    &call_id,
+                    "verification_repeated_gap_escalation",
+                    &repeated,
+                    &route,
+                );
+                let continue_loop = self
+                    .run_write_verification_remediation(
+                        ready_implementation_items,
+                        &plan_items,
+                        &repeated,
+                        wave_index,
+                        dependency_iteration,
+                        &mut remediation_attempt,
+                        &mut verification,
+                        evidence,
+                        &route,
+                        &call_id,
+                    )
+                    .await?;
+                if !continue_loop {
+                    break;
+                }
+                repair_attempt += 1;
+                continue;
+            }
+
             let call_id = format!("verification-repair-plan-{wave_index}-{repair_attempt}");
             let repair_plan = self
                 .reduce(

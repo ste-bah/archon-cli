@@ -59,3 +59,102 @@ fn unsatisfiable_predicate_route_reauthors_check_with_gap_identity() {
         assert!(rewritten["items"][0]["failed_predicate"].is_string());
     }
 }
+
+fn d31_fixture() -> Value {
+    serde_json::from_str(include_str!("fixtures/d31_repeated_gap_retry_chain.json"))
+        .expect("D31 fixture")
+}
+
+#[test]
+fn one_retry_generation_does_not_escalate() {
+    let fixture = d31_fixture();
+    let history = fixture["retry_generations"]
+        .as_array()
+        .expect("retry generations");
+
+    let selected = repeated_gap_write_remediation_outcomes(&history[..1], &history[0]["result"]);
+
+    assert!(selected.is_empty());
+}
+
+#[test]
+fn second_reproduction_escalates_only_the_matching_gap() {
+    let fixture = d31_fixture();
+    assert!(
+        fixture["repair_plans"]
+            .as_array()
+            .expect("repair plans")
+            .iter()
+            .all(|plan| plan["route"] != "write_remediation")
+    );
+    let history = fixture["retry_generations"]
+        .as_array()
+        .expect("retry generations");
+
+    let selected = repeated_gap_write_remediation_outcomes(&history[..2], &history[1]["result"]);
+
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0]["item_id"], "retry-generation-2");
+}
+
+#[test]
+fn merged_unretried_failure_does_not_count_as_reproduced() {
+    let gap = |id: &str, gap_id: &str| {
+        serde_json::json!({
+            "item_id": id,
+            "status": "failed",
+            "result": { "residual_gaps": [{ "id": gap_id }] }
+        })
+    };
+    let history = vec![
+        serde_json::json!({
+            "kind": "verification-retry",
+            "result": { "outcomes": [gap("persistent", "persistent-gap")] }
+        }),
+        serde_json::json!({
+            "kind": "verification-triage-retry",
+            "verificationPlan": { "items": [{ "item_id": "actual-retry" }] },
+            "result": { "outcomes": [
+                gap("persistent", "persistent-gap"),
+                gap("actual-retry", "different-gap")
+            ] }
+        }),
+    ];
+
+    let selected = repeated_gap_write_remediation_outcomes(&history, &history[1]["result"]);
+
+    assert!(selected.is_empty());
+}
+
+#[test]
+fn verification_prompts_require_d2_failure_fields() {
+    let prompts = [
+        super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_WAVE_TASK,
+        super::super::workflow_live_v2_lifecycle_prompts::RETRY_VERIFICATION_WAVE_TASK,
+        super::super::workflow_live_v2_lifecycle_prompts::POST_REMEDIATION_VERIFICATION_WAVE_TASK,
+        super::super::workflow_live_v2_lifecycle_prompts::REVIEW_VERIFICATION_WAVE_TASK,
+    ];
+    for prompt in prompts {
+        assert!(prompt.contains("pass_fail_count"));
+        assert!(prompt.contains("intended_target_failed"));
+        assert!(prompt.contains("matched_test_check_names.failed"));
+    }
+}
+
+#[test]
+fn repair_prompt_requires_write_route_for_reproduced_failures() {
+    let prompt = super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_REPAIR_PLAN_TASK;
+
+    assert!(prompt.contains("consistently reproduced"));
+    assert!(prompt.contains("route: write_remediation"));
+}
+
+#[test]
+fn provider_remediation_requires_profile_grounded_redacted_proof() {
+    let prompt =
+        super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_REMEDIATION_WAVE_TASK;
+
+    assert!(prompt.contains("source ~/.profile"));
+    assert!(prompt.contains("provider_env_proof"));
+    assert!(prompt.contains("never credential values"));
+}

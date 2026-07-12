@@ -41,6 +41,85 @@ pub(super) fn write_remediation_outcomes(repair_plan: &Value, verification: &Val
         .collect()
 }
 
+pub(super) fn repeated_gap_write_remediation_outcomes(
+    verification_history: &[Value],
+    verification: &Value,
+) -> Vec<Value> {
+    let mut generations = std::collections::BTreeMap::new();
+    for record in verification_history
+        .iter()
+        .filter(|record| is_retry(record))
+    {
+        for gap_id in retry_generation_gap_ids(record) {
+            *generations.entry(gap_id).or_insert(0usize) += 1;
+        }
+    }
+    support::non_accepted_outcomes(&support::outcomes_of(verification))
+        .into_iter()
+        .filter(|outcome| {
+            outcome_gap_ids(outcome)
+                .iter()
+                .any(|id| generations.get(id).is_some_and(|count| *count >= 2))
+        })
+        .collect()
+}
+
+fn is_retry(record: &Value) -> bool {
+    matches!(
+        record.get("kind").and_then(Value::as_str),
+        Some("verification-retry" | "verification-triage-retry")
+    )
+}
+
+fn retry_generation_gap_ids(record: &Value) -> std::collections::BTreeSet<String> {
+    let result = record.get("result").unwrap_or(record);
+    let retried_ids = support::array(
+        record
+            .get("verificationPlan")
+            .and_then(|plan| plan.get("items")),
+    )
+    .iter()
+    .flat_map(|item| {
+        ["item_id", "id", "source_item_id"]
+            .iter()
+            .filter_map(|key| item.get(*key).and_then(Value::as_str).map(str::to_string))
+    })
+    .collect::<std::collections::BTreeSet<_>>();
+    support::non_accepted_outcomes(&support::outcomes_of(result))
+        .iter()
+        .filter(|outcome| outcome_matches_retry(outcome, &retried_ids))
+        .flat_map(outcome_gap_ids)
+        .collect()
+}
+
+fn outcome_matches_retry(
+    outcome: &Value,
+    retried_ids: &std::collections::BTreeSet<String>,
+) -> bool {
+    if retried_ids.is_empty() {
+        return true;
+    }
+    let id = outcome_id(outcome);
+    retried_ids
+        .iter()
+        .any(|retry_id| id == *retry_id || id.ends_with(&format!("-{retry_id}")))
+}
+
+fn outcome_gap_ids(outcome: &Value) -> std::collections::BTreeSet<String> {
+    let result = outcome.get("result").unwrap_or(outcome);
+    let data = result.get("data").unwrap_or(&Value::Null);
+    let mut ids: std::collections::BTreeSet<String> =
+        support::strings_of(data.get("source_residual_gap_ids"))
+            .into_iter()
+            .collect();
+    for gap in support::array(result.get("residual_gaps")) {
+        if let Some(id) = gap.get("id").and_then(Value::as_str) {
+            ids.insert(id.to_string());
+        }
+    }
+    ids
+}
+
 pub(super) fn predicate_rewrite_inventory(
     repair_plan: &Value,
     verification: &Value,
