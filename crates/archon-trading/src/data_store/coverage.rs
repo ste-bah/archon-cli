@@ -21,23 +21,38 @@ pub(super) fn coverage_cell(
     checked_at: &str,
 ) -> CoverageCell {
     let mut rejected_reasons = Vec::new();
-    for record in registry.datasets.values() {
-        let Some(provider) = coverage_record_candidate(record, instrument, timeframe) else {
-            continue;
-        };
-        let freshness = snapshot_freshness_for(registry, &provider, instrument, checked_at);
-        if freshness != SnapshotFreshness::Fresh {
-            rejected_reasons.push(snapshot_gap_reason(&provider, instrument, freshness));
+    for provider in provider_order() {
+        let capability = can_fetch_symbol_timeframe(provider, instrument, timeframe, checked_at);
+        if !capability.native_interval {
             continue;
         }
-        match coverage_record_issues(lake, record, instrument, timeframe) {
-            Ok(()) => return available_coverage_cell(record, instrument, timeframe),
-            Err(issues) => rejected_reasons.push(format!(
-                "{}:{} rejected: {}",
-                record.dataset_id,
-                record.version,
-                issues.join("; ")
-            )),
+        let records = coverage_record_candidates(registry, provider, instrument, timeframe);
+        if records.is_empty() {
+            append_rejected_provider_records(
+                registry,
+                provider,
+                instrument,
+                timeframe,
+                &mut rejected_reasons,
+            );
+            rejected_reasons.push(provider_unavailable_reason(&capability));
+            continue;
+        }
+        let freshness = snapshot_freshness_for(registry, provider, instrument, checked_at);
+        if freshness != SnapshotFreshness::Fresh {
+            rejected_reasons.push(snapshot_gap_reason(provider, instrument, freshness));
+            continue;
+        }
+        for record in records {
+            match coverage_record_issues(lake, record, instrument, timeframe) {
+                Ok(()) => return available_coverage_cell(record, instrument, timeframe),
+                Err(issues) => rejected_reasons.push(format!(
+                    "{}:{} rejected: {}",
+                    record.dataset_id,
+                    record.version,
+                    issues.join("; ")
+                )),
+            }
         }
     }
 
@@ -132,13 +147,81 @@ pub(super) fn coverage_markdown(matrix: &CoverageMatrix) -> String {
     text
 }
 
-fn coverage_record_candidate(
+pub(super) fn validate_coverage_matrix_complete(
+    matrix: &CoverageMatrix,
+) -> Result<(), DataStoreError> {
+    let missing = matrix
+        .cells
+        .iter()
+        .filter(|cell| !cell.available || cell.dataset_id.is_none() || !cell.production_eligible)
+        .map(|cell| {
+            format!(
+                "{}:{}: {}",
+                cell.canonical_instrument,
+                cell.timeframe,
+                cell.fallback_reason
+                    .as_deref()
+                    .unwrap_or("no provider-native validated registry dataset")
+            )
+        })
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(DataStoreError::InvalidMetadata(format!(
+            "coverage matrix incomplete for trading-core-v1: {}",
+            missing.join("; ")
+        )))
+    }
+}
+
+fn coverage_record_candidates<'a>(
+    registry: &'a PersistentDatasetRegistry,
+    provider: &str,
+    instrument: &str,
+    timeframe: &str,
+) -> Vec<&'a StoredDatasetRecord> {
+    registry
+        .datasets
+        .values()
+        .filter(|record| {
+            record.provider == provider
+                && record_matches_coverage_cell(record, instrument, timeframe)
+        })
+        .collect()
+}
+
+fn append_rejected_provider_records(
+    registry: &PersistentDatasetRegistry,
+    provider: &str,
+    instrument: &str,
+    timeframe: &str,
+    rejected_reasons: &mut Vec<String>,
+) {
+    for record in registry.datasets.values().filter(|record| {
+        record.provider == provider && record.symbol == instrument && record.timeframe == timeframe
+    }) {
+        rejected_reasons.push(format!(
+            "{}:{} rejected: registry native_interval={} production_eligible={} status={:?}",
+            record.dataset_id,
+            record.version,
+            record.native_interval,
+            record.production_eligible,
+            record.status
+        ));
+    }
+}
+
+fn record_matches_coverage_cell(
     record: &StoredDatasetRecord,
     instrument: &str,
     timeframe: &str,
-) -> Option<String> {
-    (record.dataset_id.contains(instrument) && record.dataset_id.contains(timeframe))
-        .then(|| record.provider.clone())
+) -> bool {
+    record.symbol == instrument
+        && record.timeframe == timeframe
+        && record.native_interval
+        && record.production_eligible
+        && record.status == DatasetStatus::Healthy
 }
 
 fn coverage_record_issues(
@@ -237,6 +320,18 @@ fn unix_seconds(value: &str) -> Option<i64> {
 fn snapshot_gap_reason(provider: &str, instrument: &str, freshness: SnapshotFreshness) -> String {
     format!(
         "{provider}:{instrument} current snapshot freshness is {freshness:?}; snapshots older than 5 minutes are stale"
+    )
+}
+
+fn provider_unavailable_reason(capability: &ProviderCapabilityResult) -> String {
+    format!(
+        "{}:{} no provider-native validated registry dataset; capability reason: {}",
+        capability.provider,
+        capability.canonical_instrument,
+        capability
+            .unavailable_reason
+            .as_deref()
+            .unwrap_or("unavailable")
     )
 }
 

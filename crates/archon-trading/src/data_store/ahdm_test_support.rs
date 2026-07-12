@@ -20,22 +20,21 @@ use crate::data_lake::{CoverageWindow, CurrentSnapshot, DataType, GapSummary};
 fn coverage_matrix_persists_latest_history_and_readable_markdown() {
     let temp = tempfile::tempdir().unwrap();
     let lake = TradingDataLake::new(temp.path());
-    let mut request = request();
-    request.metadata.dataset_id = "tradingview-SPY-1D-raw".into();
-    request.metadata.canonical_instrument = "SPY".into();
-    request.metadata.provider = "tradingview".into();
-    request.metadata.provider_symbol = "SPY".into();
-    request.metadata.asset_class = "equity".into();
-    request.metadata.timeframe = "1D".into();
-    request.metadata.symbol_map = BTreeMap::from([("SPY".into(), "SPY".into())]);
-    lake.store_ohlcv(request).unwrap();
-    persist_spy_snapshot(&lake, 1_781_049_600);
+    store_complete_trading_core_coverage(&lake);
+    persist_trading_core_snapshots(&lake, 1_781_049_600);
 
     let matrix = lake
         .write_coverage_matrix("trading-core-v1", "2026-06-10T00:00:00Z".into())
         .unwrap();
 
     assert_eq!(matrix.cells.len(), 30);
+    assert!(matrix.gaps.is_empty());
+    assert!(matrix.cells.iter().all(|cell| {
+        cell.available
+            && cell.dataset_id.is_some()
+            && cell.production_eligible
+            && cell.row_count > 0
+    }));
     assert!(matrix.cells.iter().any(|cell| {
         cell.canonical_instrument == "SPY" && cell.timeframe == "1D" && cell.available
     }));
@@ -48,6 +47,47 @@ fn coverage_matrix_persists_latest_history_and_readable_markdown() {
     );
     let markdown = std::fs::read_to_string(lake.coverage_dir().join("latest.md")).unwrap();
     assert!(markdown.contains("| SPY | 1D | tradingview | SPY | true | true | true | passed |"));
+}
+
+#[test]
+fn coverage_matrix_fails_closed_when_required_registry_cells_are_missing() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    lake.store_ohlcv(spy_request()).unwrap();
+    persist_spy_snapshot(&lake, 1_781_049_600);
+
+    let result = lake.write_coverage_matrix("trading-core-v1", "2026-06-10T00:00:00Z".into());
+
+    assert!(matches!(
+        result,
+        Err(DataStoreError::InvalidMetadata(message))
+            if message.contains("coverage matrix incomplete for trading-core-v1")
+                && message.contains("ES:1W")
+                && message.contains("no provider-native validated registry dataset")
+    ));
+    assert!(!lake.coverage_dir().join("latest.json").exists());
+}
+
+#[test]
+fn coverage_cell_unavailable_reason_includes_selected_provider_and_capability() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let matrix = lake
+        .coverage_matrix("trading-core-v1", "2026-06-10T00:00:00Z".into())
+        .unwrap();
+    let cell = matrix
+        .cells
+        .iter()
+        .find(|cell| cell.canonical_instrument == "ES" && cell.timeframe == "1W")
+        .unwrap();
+    assert!(!cell.available);
+    assert_eq!(cell.selected_provider, "tradingview");
+    assert!(
+        cell.fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("no provider-native validated registry dataset")
+    );
 }
 
 #[test]
@@ -75,7 +115,7 @@ fn coverage_matrix_refuses_false_positive_non_native_cell() {
         cell.fallback_reason
             .as_deref()
             .unwrap()
-            .contains("native interval metadata")
+            .contains("native_interval=false")
     );
 }
 
@@ -390,23 +430,54 @@ fn request() -> StoreOhlcvRequest {
 }
 
 fn spy_request() -> StoreOhlcvRequest {
+    core_coverage_request("SPY", "1D")
+}
+
+fn core_coverage_request(instrument: &str, timeframe: &str) -> StoreOhlcvRequest {
     let mut request = request();
-    request.metadata.dataset_id = "tradingview-SPY-1D-raw".into();
-    request.metadata.canonical_instrument = "SPY".into();
     request.metadata.provider = "tradingview".into();
-    request.metadata.provider_symbol = "SPY".into();
-    request.metadata.asset_class = "equity".into();
-    request.metadata.timeframe = "1D".into();
-    request.metadata.symbol_map = BTreeMap::from([("SPY".into(), "SPY".into())]);
+    request.metadata.canonical_instrument = instrument.into();
+    request.metadata.provider_symbol = provider_symbol(instrument, "tradingview");
+    request.metadata.dataset_id = format!("tradingview-{instrument}-{timeframe}-raw");
+    request.metadata.asset_class = if instrument.ends_with("USDT") {
+        "crypto"
+    } else {
+        "equity"
+    }
+    .into();
+    request.metadata.timeframe = timeframe.into();
+    request.metadata.symbol_map = BTreeMap::from([(
+        instrument.into(),
+        provider_symbol(instrument, "tradingview"),
+    )]);
     request
 }
 
+fn store_complete_trading_core_coverage(lake: &TradingDataLake) {
+    for instrument in trading_core_instruments() {
+        for timeframe in trading_core_timeframes() {
+            lake.store_ohlcv(core_coverage_request(&instrument, &timeframe))
+                .unwrap();
+        }
+    }
+}
+
+fn persist_trading_core_snapshots(lake: &TradingDataLake, captured_at_unix_seconds: i64) {
+    for instrument in trading_core_instruments() {
+        persist_snapshot(lake, &instrument, captured_at_unix_seconds);
+    }
+}
+
 fn persist_spy_snapshot(lake: &TradingDataLake, captured_at_unix_seconds: i64) {
+    persist_snapshot(lake, "SPY", captured_at_unix_seconds);
+}
+
+fn persist_snapshot(lake: &TradingDataLake, instrument: &str, captured_at_unix_seconds: i64) {
     lake.persist_snapshot(
         CurrentSnapshot {
             provider: "tradingview".into(),
-            canonical_instrument: "SPY".into(),
-            provider_symbol: "SPY".into(),
+            canonical_instrument: instrument.into(),
+            provider_symbol: provider_symbol(instrument, "tradingview"),
             captured_at_unix_seconds,
             payload: serde_json::json!({"last": 500.0}),
         },

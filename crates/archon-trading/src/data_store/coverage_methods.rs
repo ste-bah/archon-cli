@@ -48,6 +48,7 @@ impl TradingDataLake {
         generated_at: String,
     ) -> Result<CoverageMatrix, DataStoreError> {
         let matrix = self.coverage_matrix(universe, generated_at)?;
+        validate_coverage_matrix_complete(&matrix)?;
         let coverage_dir = self.coverage_dir();
         write_json(&coverage_dir.join("latest.json"), &matrix)?;
         write_text(&coverage_dir.join("latest.md"), &coverage_markdown(&matrix))?;
