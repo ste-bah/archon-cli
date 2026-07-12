@@ -22,7 +22,12 @@ pub(super) fn coverage_cell(
 ) -> CoverageCell {
     let mut rejected_reasons = Vec::new();
     for record in registry.datasets.values() {
-        if !coverage_record_candidate(record, instrument, timeframe) {
+        let Some(provider) = coverage_record_candidate(record, instrument, timeframe) else {
+            continue;
+        };
+        let freshness = snapshot_freshness_for(registry, &provider, instrument, checked_at);
+        if freshness != SnapshotFreshness::Fresh {
+            rejected_reasons.push(snapshot_gap_reason(&provider, instrument, freshness));
             continue;
         }
         match coverage_record_issues(lake, record, instrument, timeframe) {
@@ -131,8 +136,9 @@ fn coverage_record_candidate(
     record: &StoredDatasetRecord,
     instrument: &str,
     timeframe: &str,
-) -> bool {
-    record.dataset_id.contains(instrument) && record.dataset_id.contains(timeframe)
+) -> Option<String> {
+    (record.dataset_id.contains(instrument) && record.dataset_id.contains(timeframe))
+        .then(|| record.provider.clone())
 }
 
 fn coverage_record_issues(
@@ -181,6 +187,57 @@ fn append_coverage_identity_issues(
             metadata.timeframe
         ));
     }
+}
+
+fn snapshot_freshness_for(
+    registry: &PersistentDatasetRegistry,
+    provider: &str,
+    instrument: &str,
+    generated_at: &str,
+) -> SnapshotFreshness {
+    let generated_at = unix_seconds(generated_at).unwrap_or(i64::MAX);
+    snapshot_freshness(
+        snapshot_captured_at(registry, provider, instrument),
+        generated_at,
+    )
+}
+
+fn snapshot_captured_at(
+    registry: &PersistentDatasetRegistry,
+    provider: &str,
+    instrument: &str,
+) -> Option<i64> {
+    registry
+        .snapshots
+        .values()
+        .filter_map(|artifact| matching_snapshot_captured_at(artifact, provider, instrument))
+        .max()
+}
+
+fn matching_snapshot_captured_at(
+    artifact: &serde_json::Value,
+    provider: &str,
+    instrument: &str,
+) -> Option<i64> {
+    let snapshot = artifact.get("snapshot").unwrap_or(artifact);
+    let artifact_provider = snapshot.get("provider")?.as_str()?;
+    let artifact_instrument = snapshot.get("canonical_instrument")?.as_str()?;
+    if !artifact_provider.eq_ignore_ascii_case(provider) || artifact_instrument != instrument {
+        return None;
+    }
+    snapshot.get("captured_at_unix_seconds")?.as_i64()
+}
+
+fn unix_seconds(value: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|timestamp| timestamp.timestamp())
+        .ok()
+}
+
+fn snapshot_gap_reason(provider: &str, instrument: &str, freshness: SnapshotFreshness) -> String {
+    format!(
+        "{provider}:{instrument} current snapshot freshness is {freshness:?}; snapshots older than 5 minutes are stale"
+    )
 }
 
 pub(super) fn provider_order() -> [&'static str; 5] {

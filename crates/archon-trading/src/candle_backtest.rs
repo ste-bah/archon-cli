@@ -37,6 +37,7 @@ pub struct OhlcvBacktestReport {
 pub enum CandleBacktestError {
     InvalidConfig(&'static str),
     NotEnoughBars,
+    InvalidDatasetRef(&'static str),
     CustomStrategy(CustomStrategyError),
 }
 
@@ -60,7 +61,7 @@ pub fn run_ohlcv_backtest(
         rule: format!("{:?}", request.rule),
         exploratory: request.exploratory,
         source: request.source,
-        promotion_eligible: !request.exploratory && request.source == EvidenceSource::NativeHarness,
+        promotion_eligible: request_is_promotion_eligible(request),
         metrics,
         trades,
     })
@@ -78,6 +79,9 @@ fn validate_request(
     }
     if request.rule == OhlcvBacktestRule::SmaCross && request.fast_len >= request.slow_len {
         return Err(CandleBacktestError::InvalidConfig("sma_lengths"));
+    }
+    if request_is_promotion_candidate(request) {
+        validate_promotion_dataset_ref(request)?;
     }
     Ok(())
 }
@@ -158,7 +162,7 @@ pub fn run_custom_ohlcv_backtest(
         rule: custom_rule_name(strategy),
         exploratory: request.exploratory,
         source: request.source,
-        promotion_eligible: !request.exploratory && request.source == EvidenceSource::NativeHarness,
+        promotion_eligible: request_is_promotion_eligible(request),
         metrics,
         trades,
     })
@@ -244,6 +248,41 @@ fn win_rate(values: &[f64]) -> f64 {
     }
 }
 
+fn request_is_promotion_candidate(request: &OhlcvBacktestRequest) -> bool {
+    !request.exploratory && request.source == EvidenceSource::NativeHarness
+}
+
+fn request_is_promotion_eligible(request: &OhlcvBacktestRequest) -> bool {
+    request_is_promotion_candidate(request)
+        && request.dataset.status == crate::data_lake::DatasetStatus::Healthy
+}
+
+fn validate_promotion_dataset_ref(
+    request: &OhlcvBacktestRequest,
+) -> Result<(), CandleBacktestError> {
+    if request.dataset.status != crate::data_lake::DatasetStatus::Healthy {
+        return Err(CandleBacktestError::InvalidDatasetRef("dataset_status"));
+    }
+    for (field, value) in [
+        ("dataset_id", request.dataset.dataset_id.as_str()),
+        ("dataset_version", request.dataset.version.as_str()),
+        ("dataset_checksum", request.dataset.checksum.as_str()),
+    ] {
+        if value.trim().is_empty() || looks_like_loose_path(value) {
+            return Err(CandleBacktestError::InvalidDatasetRef(field));
+        }
+    }
+    Ok(())
+}
+
+fn looks_like_loose_path(value: &str) -> bool {
+    value.starts_with('/')
+        || value.starts_with("./")
+        || value.starts_with("../")
+        || value.contains('/')
+        || value.contains('\\')
+}
+
 fn custom_rule_name(strategy: &CustomOhlcvStrategy) -> String {
     strategy
         .name
@@ -264,6 +303,32 @@ mod tests {
         assert_eq!(report.trades.len(), 1);
         assert_eq!(report.dataset_id, "btc-1d");
         assert!(report.metrics["net_profit"].is_finite());
+    }
+
+    #[test]
+    fn promotion_backtest_refuses_loose_dataset_path() {
+        let mut request = request();
+        request.dataset.dataset_id = "/tmp/btc-1d.jsonl".into();
+
+        let result = run_ohlcv_backtest(&config(), &request, &bars());
+
+        assert!(matches!(
+            result,
+            Err(CandleBacktestError::InvalidDatasetRef("dataset_id"))
+        ));
+    }
+
+    #[test]
+    fn promotion_backtest_refuses_degraded_dataset_ref() {
+        let mut request = request();
+        request.dataset.status = DatasetStatus::Degraded;
+
+        let result = run_ohlcv_backtest(&config(), &request, &bars());
+
+        assert!(matches!(
+            result,
+            Err(CandleBacktestError::InvalidDatasetRef("dataset_status"))
+        ));
     }
 
     fn request() -> OhlcvBacktestRequest {

@@ -144,12 +144,31 @@ pub(super) fn ahdm_strategy_spec(
         "schema_version": "archon-ahdm-strategy-spec-v1",
         "strategy_id": "AHDM-v1",
         "generated_at": generated_at,
+        "confidence": {
+            "type": "score",
+            "score_not_probability": true,
+            "sum_weights": 100,
+            "no_trade_below": 0.55,
+            "paper_consideration_min": 0.70,
+            "paper_requires_backtest_gates": true
+        },
+        "initial_bias": {
+            "components": manifest["rules"].clone(),
+            "sum_weights": 100,
+            "missing_evidence_behavior": "no_trade_fail_closed"
+        },
+        "entry_models": manifest["entry_models"].clone(),
+        "datasets": datasets.clone(),
+        "risk": {
+            "position_sizing": {"risk_fraction": 0.005, "max_fraction": 0.01, "formula": "min(account_equity*risk_fraction/abs(entry-stop), account_equity*max_fraction/entry)", "promotion_claim": false},
+            "missing_or_invalid_inputs": "no_trade_fail_closed",
+            "live_trading": "out_of_scope"
+        },
         "instrument_universe": ["ES", "NQ", "SPY", "QQQ", "BTCUSDT", "ETHUSDT"],
         "timeframe_stack": ["1W", "1D", "240", "60", "15"],
         "required_datasets": datasets,
         "daily_bias_formula": manifest["rules"].clone(),
         "confidence_scoring": {"type": "score_not_probability", "sum_weights": 100, "no_trade_below": 0.55, "paper_consideration_min": 0.70},
-        "entry_models": manifest["entry_models"].clone(),
         "invalidation_logic": "entry invalidates on missing required evidence, broken setup level, or data gate failure",
         "stop_logic": "deterministic setup invalidation stop from shared manifest; no live order placement",
         "tp_logic": {"tp1": "first planned objective", "tp2": "second planned objective", "tp3": "final planned objective"},

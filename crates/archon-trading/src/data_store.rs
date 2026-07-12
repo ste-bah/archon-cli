@@ -3,10 +3,10 @@ use crate::candle_backtest::{OhlcvBacktestReport, run_ohlcv_backtest};
 use crate::data_lake::{
     BacktestDataGateReport, CoverageCell, CoverageGap, CoverageMatrix, DatasetArtifactPaths,
     DatasetChecksums, DatasetMetadata, DatasetSourceMetadata, DatasetStatus,
-    ProviderCapabilityResult, ValidationCheck, ValidationReport, ValidationSeverity,
-    ValidationStatus, ValidationSummary, VersionedDataset, can_fetch_symbol_timeframe,
-    normalize_timeframe, provider_supports_native_timeframe, status_from_metadata,
-    validate_metadata,
+    ProviderCapabilityResult, SnapshotFreshness, ValidationCheck, ValidationReport,
+    ValidationSeverity, ValidationStatus, ValidationSummary, VersionedDataset,
+    can_fetch_symbol_timeframe, normalize_timeframe, provider_supports_native_timeframe,
+    snapshot_freshness, status_from_metadata, validate_metadata,
 };
 use crate::ohlcv::{
     OhlcvBacktestRequest, OhlcvBacktestRule, OhlcvBar, OhlcvDatasetRef, OhlcvFormat,

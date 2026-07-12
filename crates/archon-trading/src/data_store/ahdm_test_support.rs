@@ -14,7 +14,7 @@ pub(super) fn ahdm_position_size(account_equity: f64, entry: f64, stop: f64) -> 
 }
 
 use super::*;
-use crate::data_lake::{CoverageWindow, DataType, GapSummary};
+use crate::data_lake::{CoverageWindow, CurrentSnapshot, DataType, GapSummary};
 
 #[test]
 fn coverage_matrix_persists_latest_history_and_readable_markdown() {
@@ -29,6 +29,7 @@ fn coverage_matrix_persists_latest_history_and_readable_markdown() {
     request.metadata.timeframe = "1D".into();
     request.metadata.symbol_map = BTreeMap::from([("SPY".into(), "SPY".into())]);
     lake.store_ohlcv(request).unwrap();
+    persist_spy_snapshot(&lake, 1_781_049_600);
 
     let matrix = lake
         .write_coverage_matrix("trading-core-v1", "2026-06-10T00:00:00Z".into())
@@ -57,6 +58,7 @@ fn coverage_matrix_refuses_false_positive_non_native_cell() {
     request.metadata.native_interval = false;
     request.metadata.production_eligible = true;
     lake.store_ohlcv(request).unwrap();
+    persist_spy_snapshot(&lake, 1_781_049_600);
 
     let matrix = lake
         .coverage_matrix("trading-core-v1", "2026-06-10T00:00:00Z".into())
@@ -82,6 +84,7 @@ fn coverage_matrix_refuses_false_positive_failed_validation_cell() {
     let temp = tempfile::tempdir().unwrap();
     let lake = TradingDataLake::new(temp.path());
     let record = lake.store_ohlcv(spy_request()).unwrap();
+    persist_spy_snapshot(&lake, 1_781_049_600);
     let validation_path = temp.path().join(&record.validation_path);
     let mut report: ValidationReport = read_json(&validation_path).unwrap();
     report.status = ValidationStatus::Failed;
@@ -111,6 +114,7 @@ fn coverage_matrix_refuses_false_positive_checksum_mismatch_cell() {
     let temp = tempfile::tempdir().unwrap();
     let lake = TradingDataLake::new(temp.path());
     let record = lake.store_ohlcv(spy_request()).unwrap();
+    persist_spy_snapshot(&lake, 1_781_049_600);
     let metadata_path = temp.path().join(&record.metadata_path);
     let mut metadata: DatasetMetadata = read_json(&metadata_path).unwrap();
     metadata.checksum = "wrong-checksum".into();
@@ -139,6 +143,7 @@ fn coverage_matrix_refuses_false_positive_missing_artifact_cell() {
     let temp = tempfile::tempdir().unwrap();
     let lake = TradingDataLake::new(temp.path());
     let record = lake.store_ohlcv(spy_request()).unwrap();
+    persist_spy_snapshot(&lake, 1_781_049_600);
     std::fs::remove_file(temp.path().join(&record.manifest_path)).unwrap();
 
     let matrix = lake
@@ -394,6 +399,20 @@ fn spy_request() -> StoreOhlcvRequest {
     request.metadata.timeframe = "1D".into();
     request.metadata.symbol_map = BTreeMap::from([("SPY".into(), "SPY".into())]);
     request
+}
+
+fn persist_spy_snapshot(lake: &TradingDataLake, captured_at_unix_seconds: i64) {
+    lake.persist_snapshot(
+        CurrentSnapshot {
+            provider: "tradingview".into(),
+            canonical_instrument: "SPY".into(),
+            provider_symbol: "SPY".into(),
+            captured_at_unix_seconds,
+            payload: serde_json::json!({"last": 500.0}),
+        },
+        1_781_049_600,
+    )
+    .unwrap();
 }
 
 fn bar(timestamp: &str, close: f64) -> OhlcvBar {

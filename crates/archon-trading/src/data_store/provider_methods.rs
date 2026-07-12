@@ -80,7 +80,26 @@ impl TradingDataLake {
             "classified_at_unix_seconds": now_unix_seconds
         });
         write_json(&path, &artifact)?;
+        self.record_snapshot_artifact(
+            &snapshot.provider,
+            &snapshot.canonical_instrument,
+            &artifact,
+        )?;
         Ok(path)
+    }
+
+    fn record_snapshot_artifact(
+        &self,
+        provider: &str,
+        instrument: &str,
+        artifact: &serde_json::Value,
+    ) -> Result<(), DataStoreError> {
+        let mut registry = self.load_registry()?;
+        registry.snapshots.insert(
+            capability_key(provider, instrument, "snapshot"),
+            artifact.clone(),
+        );
+        write_json(&self.registry_path(), &registry)
     }
 }
 
