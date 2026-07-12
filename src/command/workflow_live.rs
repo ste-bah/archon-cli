@@ -66,6 +66,11 @@ mod workflow_live_task_universe;
 mod workflow_live_test_support;
 #[path = "workflow_live_v2.rs"]
 mod workflow_live_v2;
+#[path = "workflow_live_v2_completion_credit.rs"]
+mod workflow_live_v2_completion_credit;
+#[cfg(test)]
+#[path = "workflow_live_v2_completion_credit_tests.rs"]
+mod workflow_live_v2_completion_credit_tests;
 #[path = "workflow_live_v2_host.rs"]
 mod workflow_live_v2_host;
 #[cfg(test)]

@@ -105,6 +105,88 @@ fn blocked_final_report_preserves_prior_dynamic_wave_completion_evidence() {
 }
 
 #[test]
+fn final_report_counts_branch_level_noop_credit_after_resume() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path());
+    let evidence = WorkflowV2TaskCompletionEvidence::new(
+        "TASK-TDL-010",
+        WorkflowV2TaskCompletionEvidenceKind::ImplementationCandidate,
+        "implementation-wave-1",
+        "impl-TASK-TDL-010",
+        WorkflowV2Status::Noop,
+    );
+    let outcome = WorkflowV2BranchOutcome {
+        item_id: "impl-TASK-TDL-010".to_string(),
+        role: "coder".to_string(),
+        status: WorkflowV2Status::Noop,
+        result: None,
+        error: None,
+        failure_kind: None,
+        item_input_hash: None,
+        completion_evidence: vec![evidence],
+    };
+    store
+        .save_branch_outcome("implementation-wave-1", &outcome)
+        .expect("branch outcome");
+    let final_report = WorkflowV2CallExecution {
+        input: serde_json::json!({
+            "source_data": WorkflowV2Result::accepted("review complete")
+        }),
+        ..execution("final-acceptance-report", WorkflowV2HostMethod::FinalReport, None)
+    };
+
+    let report = execute_local_host_call(&final_report, &store, Some(&task_universe_010()))
+        .expect("final")
+        .expect("local result");
+
+    assert!(report.data["missing_tasks"].as_array().is_some_and(Vec::is_empty));
+    assert!(report.data["noop_tasks"].as_array().is_some_and(|tasks| {
+        tasks.iter().any(|task| task == "TASK-TDL-010")
+    }));
+}
+
+#[test]
+fn final_report_rejects_branch_credit_with_missing_artifact() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path());
+    let mut evidence = WorkflowV2TaskCompletionEvidence::new(
+        "TASK-TDL-010",
+        WorkflowV2TaskCompletionEvidenceKind::ImplementationCandidate,
+        "implementation-wave-1",
+        "impl-TASK-TDL-010",
+        WorkflowV2Status::Noop,
+    );
+    evidence.artifact_paths = vec!["missing/evidence.json".to_string()];
+    let outcome = WorkflowV2BranchOutcome {
+        item_id: "impl-TASK-TDL-010".to_string(),
+        role: "coder".to_string(),
+        status: WorkflowV2Status::Noop,
+        result: None,
+        error: None,
+        failure_kind: None,
+        item_input_hash: None,
+        completion_evidence: vec![evidence],
+    };
+    store
+        .save_branch_outcome("implementation-wave-1", &outcome)
+        .expect("branch outcome");
+    let final_report = WorkflowV2CallExecution {
+        input: serde_json::json!({
+            "source_data": WorkflowV2Result::accepted("review complete")
+        }),
+        ..execution("final-acceptance-report", WorkflowV2HostMethod::FinalReport, None)
+    };
+
+    let report = execute_local_host_call(&final_report, &store, Some(&task_universe_010()))
+        .expect("final")
+        .expect("local result");
+
+    assert!(report.data["missing_tasks"].as_array().is_some_and(|tasks| {
+        tasks.iter().any(|task| task == "TASK-TDL-010")
+    }));
+}
+
+#[test]
 fn final_report_accepts_repository_relative_focused_verification_artifacts() {
     let temp = tempfile::tempdir().expect("tempdir");
     let project_root = temp.path().join("project-1");

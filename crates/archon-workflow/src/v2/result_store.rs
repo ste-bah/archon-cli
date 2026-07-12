@@ -111,6 +111,27 @@ impl WorkflowV2ResultStore {
         serde_json::from_str(&raw).map(Some).map_err(Into::into)
     }
 
+    pub fn load_branch_outcomes(&self) -> WorkflowResult<Vec<WorkflowV2BranchOutcome>> {
+        let root = self.root.join("branches");
+        if !root.exists() {
+            return Ok(Vec::new());
+        }
+        let mut outcomes = Vec::new();
+        for call_dir in fs::read_dir(&root).map_err(|err| WorkflowError::io(&root, err))? {
+            let call_dir = call_dir.map_err(|err| WorkflowError::io(&root, err))?;
+            if !call_dir
+                .file_type()
+                .map_err(|err| WorkflowError::io(call_dir.path(), err))?
+                .is_dir()
+            {
+                continue;
+            }
+            load_outcomes_from_dir(&call_dir.path(), &mut outcomes)?;
+        }
+        outcomes.sort_by(|left, right| left.item_id.cmp(&right.item_id));
+        Ok(outcomes)
+    }
+
     pub fn delete_branch_outcome(&self, call_id: &str, item_id: &str) -> WorkflowResult<bool> {
         let path = self.branch_outcome_path(call_id, item_id);
         if !path.exists() {
@@ -222,6 +243,28 @@ impl WorkflowV2ResultStore {
         }
         Ok(invalidated.into_iter().collect())
     }
+}
+
+fn load_outcomes_from_dir(
+    dir: &Path,
+    outcomes: &mut Vec<WorkflowV2BranchOutcome>,
+) -> WorkflowResult<()> {
+    for entry in fs::read_dir(dir).map_err(|err| WorkflowError::io(dir, err))? {
+        let entry = entry.map_err(|err| WorkflowError::io(dir, err))?;
+        if !entry
+            .file_type()
+            .map_err(|err| WorkflowError::io(entry.path(), err))?
+            .is_file()
+        {
+            continue;
+        }
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) == Some("json") {
+            let raw = fs::read_to_string(&path).map_err(|err| WorkflowError::io(&path, err))?;
+            outcomes.push(serde_json::from_str(&raw)?);
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

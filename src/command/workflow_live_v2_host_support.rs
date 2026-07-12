@@ -251,38 +251,12 @@ fn completion_ledger_state(
     v2_store: &WorkflowV2ResultStore,
     required_task_ids: BTreeSet<String>,
 ) -> archon_workflow::WorkflowResult<(BTreeSet<String>, BTreeSet<String>, Vec<String>)> {
-    let records = v2_store.load_call_records()?;
-    let mut implementation_ids = BTreeSet::new();
-    let mut verification_ids = BTreeSet::new();
-    let mut noop_ids = BTreeSet::new();
-    let mut artifact_gaps = Vec::new();
-    for record in records {
-        for evidence in &record.completion_evidence {
-            if !artifact_paths_exist(v2_store.root(), &evidence.artifact_paths) {
-                artifact_gaps.push(format!("{}:missing artifact evidence", evidence.task_id));
-                continue;
-            }
-            match evidence.evidence_kind {
-                WorkflowV2TaskCompletionEvidenceKind::VerifiedNoop => {
-                    noop_ids.insert(evidence.task_id.clone());
-                }
-                WorkflowV2TaskCompletionEvidenceKind::ImplementationCandidate => {
-                    implementation_ids.insert(evidence.task_id.clone());
-                }
-                WorkflowV2TaskCompletionEvidenceKind::FocusedVerification => {
-                    verification_ids.insert(evidence.task_id.clone());
-                }
-            }
-        }
-    }
-    let mut completed = BTreeSet::new();
-    for task_id in &required_task_ids {
-        if noop_ids.contains(task_id)
-            || (implementation_ids.contains(task_id) && verification_ids.contains(task_id))
-        {
-            completed.insert(task_id.clone());
-        }
-    }
+    let (credit, mut artifact_gaps) = validated_completion_credit(v2_store)?;
+    let completed = credit
+        .completed_ids()
+        .intersection(&required_task_ids)
+        .cloned()
+        .collect::<BTreeSet<_>>();
     let missing = required_task_ids
         .difference(&completed)
         .cloned()
@@ -290,6 +264,35 @@ fn completion_ledger_state(
     artifact_gaps.sort();
     artifact_gaps.dedup();
     Ok((completed, missing, artifact_gaps))
+}
+
+fn validated_completion_credit(
+    v2_store: &WorkflowV2ResultStore,
+) -> archon_workflow::WorkflowResult<(CompletionCredit, Vec<String>)> {
+    let mut credit = CompletionCredit::default();
+    let mut gaps = Vec::new();
+    for record in v2_store.load_call_records()? {
+        collect_valid_credit(v2_store, &record.completion_evidence, &mut credit, &mut gaps);
+    }
+    for outcome in v2_store.load_branch_outcomes()? {
+        collect_valid_credit(v2_store, &outcome.completion_evidence, &mut credit, &mut gaps);
+    }
+    Ok((credit, gaps))
+}
+
+fn collect_valid_credit(
+    store: &WorkflowV2ResultStore,
+    evidence: &[archon_workflow::WorkflowV2TaskCompletionEvidence],
+    credit: &mut CompletionCredit,
+    gaps: &mut Vec<String>,
+) {
+    for item in evidence {
+        if artifact_paths_exist(store.root(), &item.artifact_paths) {
+            credit.record(item);
+        } else {
+            gaps.push(format!("{}:missing artifact evidence", item.task_id));
+        }
+    }
 }
 
 fn artifact_paths_exist(v2_root: &Path, paths: &[String]) -> bool {

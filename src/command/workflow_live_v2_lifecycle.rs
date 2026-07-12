@@ -1,8 +1,7 @@
 // Rust decomposed-PRD lifecycle driver — the faithful port of the generated
-// scaffold JS (body_a/body_b + verification/ownership splices). It drives the
-// same `WorkflowScriptHost::execute` entry point the QuickJS bridge used, so
-// result reuse, source metadata, run control, events, and persistence behave
-// identically; only the interpreter changed.
+// scaffold JS (body_a/body_b + verification/ownership splices). It drives the same
+// `WorkflowScriptHost::execute` entry point the QuickJS bridge used, so
+// result reuse, source metadata, run control, events, and persistence behave identically.
 
 use super::super::workflow_live_generated_lifecycle_remediation as remediation;
 use super::super::workflow_live_generated_lifecycle_support as support;
@@ -54,6 +53,7 @@ impl WorkflowV2ScriptRunner {
             self.v2_store.root(),
         )
         .project_root;
+        let resume_completed_ids = self.resume_completed_ids.clone();
         let generated_config = self.runtime.generated_config.clone();
         let host = Arc::new(WorkflowScriptHost {
             scaffold_hash: workflow_scaffold_hash(harness_source),
@@ -66,6 +66,7 @@ impl WorkflowV2ScriptRunner {
             target_repository_root,
             project_artifact_root,
             governed_learning_context,
+            resume_completed_ids,
             &generated_config,
         );
         match driver.run().await {
@@ -101,6 +102,7 @@ struct LifecycleDriver {
     target_repository_root: Option<String>,
     project_artifact_root: Option<String>,
     governed_learning_context: serde_json::Value,
+    resume_completed_ids: std::collections::BTreeSet<String>,
     max_repair_iterations: usize,
     max_investigation_iterations: usize,
     max_dependency_waves: usize,
@@ -124,6 +126,7 @@ impl LifecycleDriver {
         target_repository_root: Option<String>,
         project_artifact_root: Option<String>,
         governed_learning_context: serde_json::Value,
+        resume_completed_ids: std::collections::BTreeSet<String>,
         generated_config: &archon_core::config::GeneratedWorkflowConfig,
     ) -> Self {
         let task_universe = serde_json::to_value(&universe).unwrap_or(serde_json::Value::Null);
@@ -135,6 +138,7 @@ impl LifecycleDriver {
             target_repository_root,
             project_artifact_root,
             governed_learning_context,
+            resume_completed_ids,
             max_repair_iterations: usize::from(generated_config.max_repair_iterations.clamp(1, 8)),
             max_investigation_iterations: usize::from(
                 generated_config.max_investigation_iterations.clamp(1, 8),

@@ -90,9 +90,6 @@ fn guard_final_report_against_dynamic_wave_evidence(
         .map(|ids| ids.into_iter().collect::<BTreeSet<_>>())
         .unwrap_or_default();
     let mut completed_ids = BTreeSet::new();
-    let mut implementation_ids = BTreeSet::new();
-    let mut verification_ids = BTreeSet::new();
-    let mut noop_ids = BTreeSet::new();
     let mut ledger_accepted_ids = BTreeSet::new();
     let mut ledger_noop_ids = BTreeSet::new();
     let mut ledger_task_coverage = Vec::new();
@@ -132,20 +129,6 @@ fn guard_final_report_against_dynamic_wave_evidence(
             ) {
                 record_has_valid_completion = true;
             }
-            match evidence.evidence_kind {
-                WorkflowV2TaskCompletionEvidenceKind::VerifiedNoop => {
-                    noop_ids.insert(evidence.task_id.clone());
-                }
-                WorkflowV2TaskCompletionEvidenceKind::ImplementationCandidate => {
-                    implementation_ids.insert(evidence.task_id.clone());
-                }
-                WorkflowV2TaskCompletionEvidenceKind::FocusedVerification => {
-                    verification_ids.insert(evidence.task_id.clone());
-                }
-            }
-            if evidence.status == WorkflowV2Status::Noop {
-                ledger_noop_ids.insert(evidence.task_id.clone());
-            }
         }
         if record_has_valid_completion {
             ledger_task_coverage.extend(record.result.task_coverage.clone());
@@ -167,6 +150,10 @@ fn guard_final_report_against_dynamic_wave_evidence(
                 .filter(|id| !id.trim().is_empty()),
         );
     }
+    let (credit, _) = validated_completion_credit(v2_store)?;
+    let implementation_ids = credit.implementation;
+    let verification_ids = credit.verification;
+    let noop_ids = credit.noop;
     if dynamic_universe.is_empty() {
         return Ok(());
     }

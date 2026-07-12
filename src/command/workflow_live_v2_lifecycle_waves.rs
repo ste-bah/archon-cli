@@ -12,7 +12,8 @@ impl LifecycleDriver {
     ) -> archon_workflow::WorkflowResult<serde_json::Value> {
         let contract = self.contract();
         let mut remaining_items = support::array(inventory.get("items"));
-        let mut completed_ids: std::collections::BTreeSet<String> = Default::default();
+        let mut completed_ids = self.resume_completed_ids.clone();
+        remaining_items.retain(|item| !support::item_is_completed(&contract, item, &completed_ids));
         let mut dependency_iteration = 1usize;
         let mut implementation_wave_index = 1usize;
 

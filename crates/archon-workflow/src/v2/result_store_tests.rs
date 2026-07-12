@@ -46,6 +46,39 @@ fn call_records_are_sanitized_before_persistence() {
 }
 
 #[test]
+fn branch_outcomes_can_be_loaded_across_calls() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path());
+    let first = WorkflowV2BranchOutcome {
+        item_id: "first-item".to_string(),
+        role: "coder".to_string(),
+        status: WorkflowV2Status::Noop,
+        result: None,
+        error: None,
+        failure_kind: None,
+        item_input_hash: None,
+        completion_evidence: Vec::new(),
+    };
+    let second = WorkflowV2BranchOutcome {
+        item_id: "second-item".to_string(),
+        status: WorkflowV2Status::Accepted,
+        ..first.clone()
+    };
+    store
+        .save_branch_outcome("implementation-wave-1", &first)
+        .expect("first outcome");
+    store
+        .save_branch_outcome("verification-wave-1", &second)
+        .expect("second outcome");
+
+    let outcomes = store.load_branch_outcomes().expect("load outcomes");
+
+    assert_eq!(outcomes.len(), 2);
+    assert_eq!(outcomes[0].item_id, "first-item");
+    assert_eq!(outcomes[1].item_id, "second-item");
+}
+
+#[test]
 fn branch_outcomes_are_sanitized_before_persistence() {
     let temp = tempfile::tempdir().expect("tempdir");
     let store = WorkflowV2ResultStore::new(temp.path());

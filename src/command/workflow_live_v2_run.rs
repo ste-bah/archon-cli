@@ -278,6 +278,20 @@ async fn execute_generated_v2_run(
         Some(u64::from(runtime.generated_config.host_call_timeout_secs)),
     );
     let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
+    let resume_completed_ids = if adopt_accepted_cache {
+        plan.task_universe
+            .as_ref()
+            .map(|universe| {
+                super::workflow_live_v2_completion_credit::prepare_resume_credit(
+                    &v2_store,
+                    universe,
+                )
+            })
+            .transpose()?
+            .unwrap_or_default()
+    } else {
+        Default::default()
+    };
     let runner = WorkflowV2ScriptRunner::new(
         task,
         runtime,
@@ -290,7 +304,8 @@ async fn execute_generated_v2_run(
         plan.task_universe.clone(),
         plan.script_args.clone(),
     )
-    .with_frontier_resume(adopt_accepted_cache);
+    .with_frontier_resume(adopt_accepted_cache)
+    .with_resume_completed_ids(resume_completed_ids);
     // Decomposed-PRD runs execute the Rust lifecycle natively; the recorded
     // scaffold source remains the hash/reuse identity. QuickJS interprets only
     // LLM-authored scripts.
