@@ -65,7 +65,21 @@ fn normalize_commands(object: &mut Map<String, Value>) {
             continue;
         };
         insert_missing(fields, "kind", Value::String("other".to_string()));
+        normalize_command_status(fields);
     }
+}
+
+fn normalize_command_status(fields: &mut Map<String, Value>) {
+    let Some(status) = fields.get("status").and_then(Value::as_str) else {
+        return;
+    };
+    let canonical = match status.to_ascii_lowercase().as_str() {
+        "passed" | "ok" | "success" => "succeeded",
+        "failure" | "error" => "failed",
+        "skip" => "skipped",
+        _ => return,
+    };
+    fields.insert("status".to_string(), Value::String(canonical.to_string()));
 }
 
 fn artifact_id(index: usize, path: &str) -> String {

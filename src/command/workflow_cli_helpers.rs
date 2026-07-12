@@ -35,6 +35,18 @@ fn run_cli_action(
     })
 }
 
+fn ensure_resume_from_compatible(
+    spec_file: &Option<PathBuf>,
+    from_template: &Option<String>,
+) -> Result<()> {
+    if spec_file.is_some() || from_template.is_some() {
+        return Err(anyhow!(
+            "--resume-from cannot be combined with --spec-file or --from-template"
+        ));
+    }
+    Ok(())
+}
+
 fn template_args_from_task(task: &[String]) -> Result<Option<serde_json::Value>> {
     if task.is_empty() {
         return Ok(None);

@@ -41,6 +41,60 @@ pub(super) fn write_remediation_outcomes(repair_plan: &Value, verification: &Val
         .collect()
 }
 
+pub(super) fn predicate_rewrite_inventory(
+    repair_plan: &Value,
+    verification: &Value,
+) -> Option<Value> {
+    let data = triage_data(repair_plan);
+    if data.get("route").and_then(Value::as_str) != Some("predicate_unsatisfiable_as_written") {
+        return None;
+    }
+    let mut items = support::array(data.get("re_authored_items"));
+    if items.is_empty() {
+        items = support::array(data.get("items"));
+    }
+    let outcomes = support::non_accepted_outcomes(&support::outcomes_of(verification));
+    for item in &mut items {
+        stamp_failed_predicate(item, &outcomes);
+    }
+    Some(serde_json::json!({ "status": "accepted", "items": items }))
+}
+
+fn stamp_failed_predicate(item: &mut Value, outcomes: &[Value]) {
+    let source_id = item
+        .get("source_item_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let Some(outcome) = outcomes.iter().find(|outcome| {
+        let id = outcome_id(outcome);
+        !source_id.is_empty() && (id == source_id || id.ends_with(&format!("-{source_id}")))
+    }) else {
+        return;
+    };
+    let gaps = residual_gaps(outcome);
+    let ids: Vec<String> = gaps
+        .iter()
+        .filter_map(|gap| gap.get("id").and_then(Value::as_str).map(str::to_string))
+        .collect();
+    let predicate = gaps
+        .first()
+        .and_then(|gap| gap.get("description"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    if let Some(object) = item.as_object_mut() {
+        object.insert(
+            "source_residual_gap_ids".to_string(),
+            serde_json::json!(ids),
+        );
+        object.insert("failed_predicate".to_string(), predicate);
+    }
+}
+
+fn residual_gaps(outcome: &Value) -> Vec<Value> {
+    let result = outcome.get("result").unwrap_or(outcome);
+    support::array(result.get("residual_gaps"))
+}
+
 fn route_outcome_ids(data: &Value) -> Vec<String> {
     [
         "source_outcome_ids",

@@ -1,5 +1,5 @@
 use super::workflow_live_v2_lifecycle_verify_options::{
-    prepare_verification_items, verification_options,
+    prepare_verification_items, verification_options, write_wave_parallelism,
 };
 
 #[test]
@@ -9,9 +9,55 @@ fn verification_items_receive_the_runtime_project_root() {
         "artifact_requirements": [".archon/data/validation.json"]
     })];
 
-    let prepared = prepare_verification_items(items, Some("/runtime/project"));
+    let prepared = prepare_verification_items(items, Some("/runtime/project"), &[]);
 
     assert_eq!(prepared[0]["project_artifact_root"], "/runtime/project");
+}
+
+#[test]
+fn verification_items_receive_manifest_grounded_diff_scope() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let manifest_path = temp
+        .path()
+        .join("write-coordination/stages/write/manifests/branch.json");
+    std::fs::create_dir_all(manifest_path.parent().expect("manifest parent"))
+        .expect("manifest dir");
+    std::fs::write(
+        &manifest_path,
+        serde_json::json!({
+            "schema": "archon.workflow.patch_manifest.v1",
+            "item_id": "write-task",
+            "declared_target_files": ["src/owned.rs"],
+            "changed_files": ["src/owned.rs"]
+        })
+        .to_string(),
+    )
+    .expect("manifest");
+    let items = vec![serde_json::json!({
+        "item_id": "verify-scope",
+        "source_item_id": "write-task",
+        "canonical_task_ids": ["TASK-001"]
+    })];
+    let evidence = vec![serde_json::json!({
+        "result": { "data": { "outcomes": [{
+            "item_id": "write-task",
+            "canonical_task_ids": ["TASK-001"],
+            "completion_evidence": [{
+                "artifact_paths": [manifest_path]
+            }]
+        }] } }
+    })];
+
+    let prepared = prepare_verification_items(items, None, &evidence);
+
+    assert_eq!(
+        prepared[0]["write_coordination_scope"]["declared_target_files"],
+        serde_json::json!(["src/owned.rs"])
+    );
+    assert_eq!(
+        prepared[0]["write_coordination_scope"]["changed_files"],
+        serde_json::json!(["src/owned.rs"])
+    );
 }
 
 #[test]
@@ -36,4 +82,14 @@ fn non_cargo_verification_keeps_default_parallelism() {
     let options = verification_options(&items, "verify", true);
 
     assert!(options.get("maxParallelism").is_none());
+}
+
+#[test]
+fn cargo_write_waves_serialize_before_agent_launch() {
+    let items = vec![serde_json::json!({
+        "item_id": "write-cargo",
+        "focused_verification": ["cargo test focused"]
+    })];
+
+    assert_eq!(write_wave_parallelism(&items), 1);
 }

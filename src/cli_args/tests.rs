@@ -99,6 +99,35 @@ mod remote_url_parse_tests {
 }
 
 #[cfg(test)]
+mod workflow_resume_from_parse_tests {
+    use super::{Cli, Commands};
+    use crate::cli_args::WorkflowAction;
+    use clap::Parser;
+
+    #[test]
+    fn workflow_run_resume_from_parses() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "workflow",
+            "run",
+            "--live",
+            "--yes",
+            "--resume-from",
+            "prior-run",
+            "same task",
+        ])
+        .expect("resume-from must parse");
+
+        match cli.command {
+            Some(Commands::Workflow {
+                action: WorkflowAction::Run { resume_from, .. },
+            }) => assert_eq!(resume_from.as_deref(), Some("prior-run")),
+            other => panic!("expected workflow run, got {other:?}"),
+        }
+    }
+}
+
+#[cfg(test)]
 mod cognitive_parse_tests {
     use super::{Cli, CognitiveAction, CognitiveDaemonAction, Commands};
     use clap::Parser;

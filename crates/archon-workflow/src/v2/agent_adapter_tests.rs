@@ -133,6 +133,47 @@ fn parser_coerces_unknown_command_kind_to_other() {
 }
 
 #[test]
+fn parser_normalizes_known_command_status_synonyms() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(repo.join("crates/archon-trading/src")).expect("repo");
+    let request = write_request(&repo.display().to_string());
+    let output = serde_json::json!({
+        "status": "accepted",
+        "summary": "changed native validation gate",
+        "evidence": [{"kind": "implementation", "summary": "updated gate logic"}],
+        "commands_run": [{
+            "kind": "test",
+            "command": "cargo test focused",
+            "status": "passed",
+            "exit_code": 0,
+            "output_summary": "passed"
+        }],
+        "files_changed": [{"path": "crates/archon-trading/src/data_lake.rs"}]
+    });
+
+    let parsed = WorkflowV2AgentAdapter::new()
+        .parse_agent_output(&request, &output.to_string())
+        .expect("known status synonym should normalize");
+
+    assert_eq!(
+        parsed.commands_run[0].status,
+        WorkflowV2CommandStatus::Succeeded
+    );
+}
+
+#[test]
+fn write_prompt_ends_with_explicit_json_noop_contract() {
+    let request = write_request("/repo");
+
+    let prompt = WorkflowV2AgentAdapter::new().build_prompt(&request);
+
+    assert!(prompt.contains("## Final Output Rule"));
+    assert!(prompt.contains("Never return prose such as Status: noop"));
+    assert!(prompt.trim_end().ends_with("Status: noop."));
+}
+
+#[test]
 fn parser_stamps_missing_mechanical_artifact_id() {
     let temp = tempfile::tempdir().expect("tempdir");
     let repo = temp.path().join("repo");

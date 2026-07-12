@@ -106,11 +106,21 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
         WorkflowAction::Run {
             spec_file,
             from_template,
+            resume_from,
             live,
             yes,
             task,
         } => {
             require_live_approval(*live, *yes, "workflow run --live")?;
+            if let Some(run_id) = resume_from {
+                ensure_resume_from_compatible(spec_file, from_template)?;
+                return Ok((
+                    CommandAction::Resume {
+                        run_id: run_id.clone(),
+                    },
+                    mode(*live),
+                ));
+            }
             let action = run_cli_action(spec_file.as_ref(), from_template.as_ref(), task)?;
             return Ok((action, mode(*live)));
         }

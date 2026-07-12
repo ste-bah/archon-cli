@@ -106,15 +106,20 @@ async fn run_read_only_v2_fanout(
                             input: branch.input.clone(),
                             depends_on: vec![parent_call_id],
                         };
-                        let result = run_single_v2_agent_call(
-                            &task,
-                            target_repository_root.clone(),
-                            &branch_execution,
-                            &adapter,
-                            &branch_client,
-                            None,
-                        )
-                        .await?;
+                        let result = match workflow_live_v2_manifest_scope::
+                            manifest_scope_verification_result(&branch_execution.input)
+                        {
+                            Some(result) => result,
+                            None => run_single_v2_agent_call(
+                                &task,
+                                target_repository_root.clone(),
+                                &branch_execution,
+                                &adapter,
+                                &branch_client,
+                                None,
+                            )
+                            .await?,
+                        };
                         poll_v2_run_control(&control_store, &run_id, &branch.id)?;
                         Ok(result)
                     }

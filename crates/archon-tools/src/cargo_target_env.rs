@@ -49,7 +49,7 @@ fn guarded_cargo_target_dir(
     {
         return None;
     }
-    Some(local_target_root().join(stable_path_hash(&canonical_working_dir(working_dir))))
+    Some(local_target_root().join(stable_path_hash(&repository_identity(working_dir))))
 }
 
 fn env_has_cargo_target(env: &[(String, String)]) -> bool {
@@ -74,6 +74,50 @@ fn is_macos_external_volume(working_dir: &Path) -> bool {
 
 fn canonical_working_dir(working_dir: &Path) -> PathBuf {
     std::fs::canonicalize(working_dir).unwrap_or_else(|_| working_dir.to_path_buf())
+}
+
+fn repository_identity(working_dir: &Path) -> PathBuf {
+    let canonical = canonical_working_dir(working_dir);
+    for ancestor in canonical.ancestors() {
+        let marker = ancestor.join(".git");
+        if marker.is_dir() {
+            return std::fs::canonicalize(ancestor).unwrap_or_else(|_| ancestor.to_path_buf());
+        }
+        if let Some(git_dir) = git_dir_from_file(&marker, ancestor) {
+            return repository_root_from_git_dir(&git_dir);
+        }
+    }
+    canonical
+}
+
+fn git_dir_from_file(marker: &Path, repo_root: &Path) -> Option<PathBuf> {
+    let raw = std::fs::read_to_string(marker).ok()?;
+    let path = raw.trim().strip_prefix("gitdir:")?.trim();
+    let git_dir = PathBuf::from(path);
+    let resolved = if git_dir.is_absolute() {
+        git_dir
+    } else {
+        repo_root.join(git_dir)
+    };
+    Some(std::fs::canonicalize(&resolved).unwrap_or(resolved))
+}
+
+fn common_git_dir(git_dir: &Path) -> PathBuf {
+    let Some(worktrees) = git_dir.parent() else {
+        return git_dir.to_path_buf();
+    };
+    if worktrees.file_name().and_then(|name| name.to_str()) != Some("worktrees") {
+        return git_dir.to_path_buf();
+    }
+    worktrees
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| git_dir.to_path_buf())
+}
+
+fn repository_root_from_git_dir(git_dir: &Path) -> PathBuf {
+    let common = common_git_dir(git_dir);
+    common.parent().map(Path::to_path_buf).unwrap_or(common)
 }
 
 fn local_target_root() -> PathBuf {
@@ -154,6 +198,26 @@ mod tests {
         assert_eq!(
             local_target_root_for_temp(temp),
             Path::new("/Volumes/Externalwork/archon-cli/tmp/archon-cargo-target")
+        );
+    }
+
+    #[test]
+    fn linked_worktree_uses_primary_repository_identity() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let primary = temp.path().join("primary");
+        let worktree = temp.path().join("worktree");
+        let worktree_git = primary.join(".git/worktrees/feature");
+        std::fs::create_dir_all(&worktree_git).expect("worktree git dir");
+        std::fs::create_dir_all(&worktree).expect("worktree");
+        std::fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}\n", worktree_git.display()),
+        )
+        .expect("git file");
+
+        assert_eq!(
+            repository_identity(&worktree),
+            std::fs::canonicalize(primary).expect("canonical primary repository")
         );
     }
 

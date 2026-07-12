@@ -1,18 +1,19 @@
 use super::{
-    GeneratedV2RestartTarget, WorkflowHandler, generated_v2_restart_target,
+    GeneratedV2RestartTarget, WorkflowHandler, cli_action, generated_v2_restart_target,
     invalidate_generated_v2_call, invalidate_generated_v2_item, restart_task_workflow,
     stage_id_for_task, status_text,
 };
+use crate::cli_args::WorkflowAction;
 use crate::command::registry::CommandHandler;
 use crate::command::test_support::{CtxBuilder, drain_tui_events};
 use archon_tui::app::TuiEvent;
 use archon_workflow::run::StageState;
 use archon_workflow::{
-    ProviderTier, RetryPolicy, RunStatus, StageKind, StageSpec, StageStatus, WorkflowBundle,
-    WorkflowBundleOrigin, WorkflowRun, WorkflowSpec, WorkflowStore, WorkflowV2BranchOutcome,
-    WorkflowV2CallRecord, WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2HostCall,
-    WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2Result, WorkflowV2ResultStore,
-    WorkflowV2Status, WorkflowV2WriteMode,
+    CommandAction, ProviderTier, RetryPolicy, RunStatus, StageKind, StageSpec, StageStatus,
+    WorkflowBundle, WorkflowBundleOrigin, WorkflowRun, WorkflowSpec, WorkflowStore,
+    WorkflowV2BranchOutcome, WorkflowV2CallRecord, WorkflowV2Evidence, WorkflowV2EvidenceKind,
+    WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2Result,
+    WorkflowV2ResultStore, WorkflowV2Status, WorkflowV2WriteMode,
 };
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -41,6 +42,25 @@ fn workflow_list_completes_tui_slash_lifecycle() {
             .any(|event| matches!(event, TuiEvent::SlashCommandComplete)),
         "workflow command must complete the slash lifecycle"
     );
+}
+
+#[test]
+fn run_resume_from_uses_existing_v2_resume_path() {
+    let action = WorkflowAction::Run {
+        spec_file: None,
+        from_template: None,
+        resume_from: Some("prior-run".to_string()),
+        live: true,
+        yes: true,
+        task: vec!["same canary task".to_string()],
+    };
+
+    let (command, _) = cli_action(&action).expect("resume-from action");
+
+    assert!(matches!(
+        command,
+        CommandAction::Resume { run_id } if run_id == "prior-run"
+    ));
 }
 
 #[test]

@@ -55,7 +55,7 @@ impl LifecycleDriver {
         evidence: &mut LifecycleEvidence,
     ) -> archon_workflow::WorkflowResult<Value> {
         let mut verification = self
-            .run_review_verification_wave(review_iteration, 0, &items)
+            .run_review_verification_wave(review_iteration, 0, &items, evidence)
             .await?;
         record_review_verification(evidence, review_iteration, 0, &items, &verification);
         for retry in 1..=REVIEW_VERIFICATION_EXECUTION_RETRIES {
@@ -70,7 +70,7 @@ impl LifecycleDriver {
             }
             record_review_verification_retry(evidence, review_iteration, retry, &verification);
             verification = self
-                .run_review_verification_wave(review_iteration, retry, &items)
+                .run_review_verification_wave(review_iteration, retry, &items, evidence)
                 .await?;
             record_review_verification(evidence, review_iteration, retry, &items, &verification);
         }
@@ -97,6 +97,7 @@ impl LifecycleDriver {
         review_iteration: usize,
         retry: usize,
         items: &[Value],
+        evidence: &LifecycleEvidence,
     ) -> archon_workflow::WorkflowResult<Value> {
         let id = if retry == 0 {
             format!("review-verification-wave-{review_iteration}")
@@ -106,6 +107,7 @@ impl LifecycleDriver {
         let items = super::workflow_live_v2_lifecycle_verify_options::prepare_verification_items(
             items.to_vec(),
             self.project_artifact_root.as_deref(),
+            &evidence.implementation,
         );
         self.parallel(
             &id,

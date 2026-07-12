@@ -291,6 +291,8 @@ mod workflow_live_v2_lifecycle_verify_merge;
 mod workflow_live_v2_lifecycle_verify_options;
 #[path = "workflow_live_v2_lifecycle_verify_routing.rs"]
 mod workflow_live_v2_lifecycle_verify_routing;
+#[path = "workflow_live_v2_lifecycle_verify_scope.rs"]
+mod workflow_live_v2_lifecycle_verify_scope;
 #[path = "workflow_live_v2_lifecycle_verify_supersede.rs"]
 mod workflow_live_v2_lifecycle_verify_supersede;
 

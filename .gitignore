@@ -1,5 +1,7 @@
 # Rust build output
 /target/
+.archon/
+artifacts/
 **/*.rs.bk
 
 # Node / Gradle / Swift build artifacts (SDK clients)

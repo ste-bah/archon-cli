@@ -49,6 +49,7 @@ impl LifecycleDriver {
                 workflow_live_v2_lifecycle_verify_options::prepare_verification_items(
                     retry_items,
                     self.project_artifact_root.as_deref(),
+                    &evidence.implementation,
                 );
             let retry_result = self
                 .parallel(
@@ -287,6 +288,7 @@ impl LifecycleDriver {
         let post_items = workflow_live_v2_lifecycle_verify_options::prepare_verification_items(
             post_items,
             self.project_artifact_root.as_deref(),
+            &evidence.implementation,
         );
         *verification = self
             .parallel(

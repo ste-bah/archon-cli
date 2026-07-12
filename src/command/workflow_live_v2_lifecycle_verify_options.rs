@@ -5,7 +5,10 @@ use crate::command::workflow_live::workflow_live_generated_lifecycle_support as 
 pub(super) fn prepare_verification_items(
     items: Vec<Value>,
     project_artifact_root: Option<&str>,
+    implementation_evidence: &[Value],
 ) -> Vec<Value> {
+    let scopes =
+        super::workflow_live_v2_lifecycle_verify_scope::manifest_scopes(implementation_evidence);
     items
         .into_iter()
         .map(|mut item| {
@@ -15,6 +18,9 @@ pub(super) fn prepare_verification_items(
                     Value::String(root.to_string()),
                 );
             }
+            super::workflow_live_v2_lifecycle_verify_scope::stamp_manifest_scope(
+                &mut item, &scopes,
+            );
             item
         })
         .collect()
@@ -29,6 +35,14 @@ pub(super) fn verification_options(items: &[Value], task: &str, focused: bool) -
         options["maxParallelism"] = serde_json::json!(1);
     }
     options
+}
+
+pub(super) fn write_wave_parallelism(items: &[Value]) -> Value {
+    if items_have_cargo_commands(items) {
+        serde_json::json!(1)
+    } else {
+        Value::String("configured".to_string())
+    }
 }
 
 fn items_have_cargo_commands(items: &[Value]) -> bool {

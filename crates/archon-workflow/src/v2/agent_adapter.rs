@@ -76,6 +76,11 @@ impl WorkflowV2AgentAdapter {
         } else {
             READ_ONLY_RULES
         };
+        let final_output_rule = if request.is_write_capable() {
+            FINAL_OUTPUT_RULE
+        } else {
+            ""
+        };
         let project_artifact_paths =
             super::project_artifact_prompt::project_artifact_prompt_section(
                 &request.input,
@@ -105,7 +110,8 @@ impl WorkflowV2AgentAdapter {
              - Do not stop at a plan or proposed next steps for executable work.\n\
              {write_rules}\n\n\
              ## Required JSON Result Envelope\n\
-             {RESULT_SCHEMA}\n",
+             {RESULT_SCHEMA}\n\n\
+             {final_output_rule}\n",
             call_id = request.call.id,
             role = request.role,
             write_mode = write_mode_label(request.call.write_mode),
@@ -461,6 +467,9 @@ const IMPLEMENTATION_RULES: &str = concat!(
     "- If no edits are required because the work is already complete, status must be noop and task_coverage must include typed evidence; declared project artifacts also require existing artifact evidence.\n",
     "- Status accepted with no files_changed is invalid unless concrete project artifact evidence was written under project_artifact_root."
 );
+
+const FINAL_OUTPUT_RULE: &str = r#"## Final Output Rule
+Your final message must be exactly one JSON WorkflowV2Result object, even for a no-op. Example: {"status":"noop","idempotent_noop":true,"summary":"already satisfied","evidence":[{"kind":"inspection","summary":"verified existing implementation"}],"commands_run":[{"kind":"inspect","command":"exact check","status":"succeeded","exit_code":0,"output_summary":"passed"}],"files_changed":[],"task_coverage":[{"task_id":"canonical task id","status":"noop","summary":"already satisfied","evidence":[{"kind":"implementation","summary":"concrete proof"}]}],"residual_gaps":[]}. Never return prose such as Status: noop."#;
 
 const RESULT_SCHEMA: &str = r#"{
   "status": "accepted | noop | failed | blocked | needs_review | cancelled",

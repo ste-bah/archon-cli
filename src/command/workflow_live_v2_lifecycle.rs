@@ -201,6 +201,9 @@ impl LifecycleDriver {
         task: &str,
     ) -> archon_workflow::WorkflowResult<serde_json::Value> {
         let items = self.with_declared_task_artifacts(items);
+        let source_items = support::array(Some(&items));
+        let max_parallelism =
+            workflow_live_v2_lifecycle_verify_options::write_wave_parallelism(&source_items);
         self.call(
             "fanout",
             id,
@@ -209,7 +212,7 @@ impl LifecycleDriver {
                 "tier": "coder",
                 "itemKind": "implementation",
                 "write": "worktree",
-                "maxParallelism": "configured",
+                "maxParallelism": max_parallelism,
                 "targetFilesFromItem": true,
                 "task": task,
             }),

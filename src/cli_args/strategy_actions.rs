@@ -341,6 +341,9 @@ pub enum WorkflowAction {
         /// Execute a saved project workflow template
         #[arg(long = "from-template", value_name = "NAME")]
         from_template: Option<String>,
+        /// Resume a prior generated V2 run and reuse its accepted/noop calls
+        #[arg(long = "resume-from", value_name = "RUN_ID")]
+        resume_from: Option<String>,
         /// Use the configured provider for live stage agents
         #[arg(long)]
         live: bool,

@@ -87,6 +87,7 @@ impl LifecycleDriver {
         let mut plan_items = workflow_live_v2_lifecycle_verify_options::prepare_verification_items(
             plan_items,
             self.project_artifact_root.as_deref(),
+            &evidence.implementation,
         );
 
         let mut verification = self
@@ -202,7 +203,12 @@ impl LifecycleDriver {
                 repair_attempt += 1;
                 continue;
             }
-            let mut repair_inventory = contract.normalize_inventory(&repair_plan);
+            let repair_source = workflow_live_v2_lifecycle_verify_routing::predicate_rewrite_inventory(
+                &repair_plan,
+                &verification,
+            )
+            .unwrap_or_else(|| repair_plan.clone());
+            let mut repair_inventory = contract.normalize_inventory(&repair_source);
             repair_inventory = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
                 &repair_inventory,
                 &verification,
@@ -274,6 +280,7 @@ impl LifecycleDriver {
             plan_items = workflow_live_v2_lifecycle_verify_options::prepare_verification_items(
                 plan_items,
                 self.project_artifact_root.as_deref(),
+                &evidence.implementation,
             );
             verification = self
                 .parallel(
