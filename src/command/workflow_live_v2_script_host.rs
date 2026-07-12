@@ -24,12 +24,15 @@ impl WorkflowScriptHost {
         if let Some(record) = self.runner.v2_store.load_call_record(&execution.call.id)? {
             let source_metadata_reusable = !source_metadata.source_metadata_required
                 || source_metadata.source_fingerprint.is_some();
-            if source_metadata_reusable
+            let strict_reuse = source_metadata_reusable
                 && record.is_reusable_for_source_and_scaffold(
                     &input_hash,
                     source_metadata.source_fingerprint.as_deref(),
                     Some(&self.scaffold_hash),
-                )
+                );
+            let frontier_reuse = self.runner.adopt_accepted_cache
+                && frontier_resume_record_reusable(&record, &self.scaffold_hash);
+            if (strict_reuse || frontier_reuse)
                 && reusable_record_has_required_completion_evidence(&record)
             {
                 self.mark_reused(&record).await?;

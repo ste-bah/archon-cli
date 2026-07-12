@@ -55,6 +55,7 @@ pub(super) struct WorkflowV2ScriptRunner {
     workspace_boundary_supported: bool,
     task_universe: Option<WorkflowV2TaskUniverse>,
     script_args: Option<serde_json::Value>,
+    adopt_accepted_cache: bool,
 }
 
 impl WorkflowV2ScriptRunner {
@@ -81,7 +82,13 @@ impl WorkflowV2ScriptRunner {
             workspace_boundary_supported,
             task_universe,
             script_args,
+            adopt_accepted_cache: false,
         }
+    }
+
+    pub(super) fn with_frontier_resume(mut self, enabled: bool) -> Self {
+        self.adopt_accepted_cache = enabled;
+        self
     }
 
     pub(super) async fn run(

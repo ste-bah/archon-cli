@@ -83,6 +83,7 @@ async fn run_v2_workflow_with_origin(
         tui_tx,
         agent_names,
         workspace_boundary_supported,
+        false,
     )
     .await
 }
@@ -139,6 +140,7 @@ pub(super) async fn resume_generated_v2_workflow(
         tui_tx,
         agent_names,
         workspace_boundary_supported,
+        true,
     )
     .await
     .map(Some)
@@ -260,6 +262,7 @@ async fn execute_generated_v2_run(
     tui_tx: TuiEventSender,
     agent_names: Vec<String>,
     workspace_boundary_supported: bool,
+    adopt_accepted_cache: bool,
 ) -> Result<String> {
     let adapter = WorkflowV2AgentAdapter::new();
     let runtime = WorkflowV2ScriptRuntime {
@@ -286,7 +289,8 @@ async fn execute_generated_v2_run(
         workspace_boundary_supported,
         plan.task_universe.clone(),
         plan.script_args.clone(),
-    );
+    )
+    .with_frontier_resume(adopt_accepted_cache);
     // Decomposed-PRD runs execute the Rust lifecycle natively; the recorded
     // scaffold source remains the hash/reuse identity. QuickJS interprets only
     // LLM-authored scripts.

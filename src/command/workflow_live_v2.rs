@@ -34,6 +34,9 @@ mod workflow_live_v2_data;
 #[cfg(test)]
 #[path = "workflow_live_v2_data_tests.rs"]
 mod workflow_live_v2_data_tests;
+#[cfg(test)]
+#[path = "workflow_live_v2_frontier_resume_tests.rs"]
+mod workflow_live_v2_frontier_resume_tests;
 #[path = "workflow_live_v2_manifest_scope.rs"]
 mod workflow_live_v2_manifest_scope;
 #[cfg(test)]

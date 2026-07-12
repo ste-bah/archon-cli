@@ -242,6 +242,16 @@ fn reusable_record_has_required_completion_evidence(record: &WorkflowV2CallRecor
     !completion_evidence_call_id(&record.call.id) || !record.completion_evidence.is_empty()
 }
 
+pub(super) fn frontier_resume_record_reusable(
+    record: &WorkflowV2CallRecord,
+    scaffold_hash: &str,
+) -> bool {
+    record.invalidated_by.is_none()
+        && is_reusable_status(record.status)
+        && record.result.validate().is_ok()
+        && record.scaffold_hash.as_deref() == Some(scaffold_hash)
+}
+
 fn evidence_snapshot_hash(evidence: &[WorkflowV2TaskCompletionEvidence]) -> Option<String> {
     if evidence.is_empty() {
         return None;
