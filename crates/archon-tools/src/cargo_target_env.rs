@@ -7,7 +7,19 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 use tokio_util::sync::CancellationToken;
 
 static TARGET_LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
-static EXEMPT_WAITS: OnceLock<std::sync::Mutex<HashMap<String, Duration>>> = OnceLock::new();
+static EXEMPT_WAITS: OnceLock<std::sync::Mutex<HashMap<String, CargoWaitState>>> = OnceLock::new();
+
+#[derive(Default)]
+struct CargoWaitState {
+    completed: Duration,
+    active_since: Option<Instant>,
+    active_count: usize,
+}
+
+struct CargoWaitRegistration {
+    session_id: String,
+    active: bool,
+}
 
 pub(crate) struct CargoTargetDirLock {
     _guard: OwnedMutexGuard<()>,
@@ -37,10 +49,19 @@ pub(crate) async fn apply_cargo_target_dir_guard(
         "CARGO_TARGET_DIR".to_string(),
         target_dir.display().to_string(),
     ));
-    let started = Instant::now();
+    let mut wait = CargoWaitRegistration::begin(session_id);
     let lock = lock_target_dir(target_dir, cancel).await?;
-    record_timeout_exempt_wait(session_id, started.elapsed());
+    wait.finish();
     Ok(Some(lock))
+}
+
+pub fn current_timeout_exempt_cargo_wait(session_id: &str) -> Duration {
+    let waits = EXEMPT_WAITS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    waits
+        .lock()
+        .ok()
+        .and_then(|waits| waits.get(session_id).map(CargoWaitState::total))
+        .unwrap_or_default()
 }
 
 pub fn take_timeout_exempt_cargo_wait(session_id: &str) -> Duration {
@@ -51,18 +72,63 @@ pub fn take_timeout_exempt_cargo_wait(session_id: &str) -> Duration {
     waits
         .lock()
         .ok()
-        .and_then(|mut waits| waits.remove(session_id))
+        .and_then(|mut waits| waits.remove(session_id).map(|state| state.total()))
         .unwrap_or_default()
 }
 
-fn record_timeout_exempt_wait(session_id: &str, wait: Duration) {
-    if session_id.is_empty() || wait.is_zero() {
-        return;
+impl CargoWaitState {
+    fn total(&self) -> Duration {
+        let active = self
+            .active_since
+            .map(|started| started.elapsed())
+            .unwrap_or_default();
+        self.completed + active
     }
+}
+
+impl CargoWaitRegistration {
+    fn begin(session_id: &str) -> Self {
+        if !session_id.is_empty() {
+            update_wait_state(session_id, true);
+        }
+        Self {
+            session_id: session_id.to_string(),
+            active: !session_id.is_empty(),
+        }
+    }
+
+    fn finish(&mut self) {
+        if self.active {
+            update_wait_state(&self.session_id, false);
+            self.active = false;
+        }
+    }
+}
+
+impl Drop for CargoWaitRegistration {
+    fn drop(&mut self) {
+        self.finish();
+    }
+}
+
+fn update_wait_state(session_id: &str, starting: bool) {
     let waits = EXEMPT_WAITS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
-    if let Ok(mut waits) = waits.lock() {
-        let recorded = waits.entry(session_id.to_string()).or_default();
-        *recorded = (*recorded).max(wait);
+    let Ok(mut waits) = waits.lock() else {
+        return;
+    };
+    let state = waits.entry(session_id.to_string()).or_default();
+    if starting {
+        if state.active_count == 0 {
+            state.active_since = Some(Instant::now());
+        }
+        state.active_count += 1;
+    } else if state.active_count > 0 {
+        state.active_count -= 1;
+        if state.active_count == 0
+            && let Some(started) = state.active_since.take()
+        {
+            state.completed += started.elapsed();
+        }
     }
 }
 
@@ -333,6 +399,7 @@ mod tests {
             .await
         });
         tokio::time::sleep(Duration::from_millis(60)).await;
+        assert!(current_timeout_exempt_cargo_wait("queued") >= Duration::from_millis(50));
         drop(first);
         waiting.await.unwrap().unwrap();
 

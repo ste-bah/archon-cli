@@ -18,6 +18,7 @@ pub(super) async fn replay_tool_round(
     text_content: String,
     thinking_blocks: BTreeMap<u32, PendingThinkingBlock>,
     pending_tools: Vec<PendingTool>,
+    round_cancel: tokio_util::sync::CancellationToken,
 ) {
     record_assistant_tool_use_message(
         runner,
@@ -27,7 +28,7 @@ pub(super) async fn replay_tool_round(
         &pending_tools,
     );
     let prepared = prepare_tools_for_execution(runner, &pending_tools);
-    let exec_results = execute_prepared_tools(runner, &prepared).await;
+    let exec_results = execute_prepared_tools(runner, &prepared, round_cancel).await;
     record_tool_results(runner, messages, &prepared, exec_results);
     drain_pending_user_turns(runner, messages).await;
 }
@@ -152,6 +153,7 @@ fn tool_allows_empty_input(runner: &SubagentRunner, name: &str) -> bool {
 async fn execute_prepared_tools(
     runner: &SubagentRunner,
     prepared: &[PreparedTool],
+    round_cancel: tokio_util::sync::CancellationToken,
 ) -> Vec<ToolResult> {
     let registry = Arc::clone(&runner.registry);
     let exec_futures: Vec<_> = prepared
@@ -161,7 +163,8 @@ async fn execute_prepared_tools(
             let input = p.input.clone();
             let parse_error = p.parse_error.clone();
             let registry = Arc::clone(&registry);
-            let ctx = runner.tool_context.clone();
+            let mut ctx = runner.tool_context.clone();
+            ctx.cancel_parent = Some(round_cancel.child_token());
             async move {
                 if let Some(err) = parse_error {
                     return ToolResult::error(err);

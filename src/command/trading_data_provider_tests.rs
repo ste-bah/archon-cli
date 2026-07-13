@@ -1,16 +1,18 @@
 use super::trading_data_provider::*;
 
 #[cfg(test)]
+#[path = "trading_data_provider_test_server.rs"]
+mod mock_openbb;
+
+#[cfg(test)]
 mod tests {
     use super::super::trading_data_provider_openbb::fetch_native_with_base_url;
+    use super::mock_openbb::openbb_server;
     use super::*;
     use archon_trading::data_store::TradingDataLake;
     use serde_json::json;
     use std::collections::BTreeMap;
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
     use std::sync::{Mutex, MutexGuard};
-    use std::thread;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -385,40 +387,6 @@ mod tests {
                 .join(".archon/trading-lab/data/provider-capabilities.json")
                 .exists()
         );
-    }
-
-    struct MockOpenBbServer {
-        base_url: String,
-        handle: thread::JoinHandle<()>,
-    }
-
-    impl MockOpenBbServer {
-        fn join(self) {
-            self.handle.join().unwrap();
-        }
-    }
-
-    fn openbb_server(body: serde_json::Value, expected_parts: &[&'static str]) -> MockOpenBbServer {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let base_url = format!("http://{}", listener.local_addr().unwrap());
-        let body = body.to_string();
-        let expected_parts = expected_parts.to_vec();
-        let handle = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut buffer = [0_u8; 4096];
-            let read = stream.read(&mut buffer).unwrap();
-            let request = String::from_utf8_lossy(&buffer[..read]);
-            for expected in expected_parts {
-                assert!(request.contains(expected), "request was {request}");
-            }
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nX-Api-Key: hidden\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            stream.write_all(response.as_bytes()).unwrap();
-        });
-        MockOpenBbServer { base_url, handle }
     }
 
     struct EnvGuard {

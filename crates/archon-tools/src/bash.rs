@@ -203,6 +203,7 @@ impl Tool for BashTool {
             .stdin(Stdio::null());
         #[cfg(unix)]
         cmd.process_group(0); // new process group for clean kill
+        cmd.kill_on_drop(true);
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => return ToolResult::error(format!("Failed to spawn bash: {e}")),
@@ -374,17 +375,18 @@ async fn terminate_child(child: &mut Child, reason: &str) {
         let _ = child.kill().await;
     }
 
-    if tokio::time::timeout(Duration::from_millis(500), child.wait())
+    let exited = tokio::time::timeout(Duration::from_millis(500), child.wait())
         .await
-        .is_ok()
-    {
-        return;
-    }
+        .is_ok();
 
     #[cfg(unix)]
     if let Some(pid) = pid {
         signal_process_group(pid, libc::SIGKILL);
     }
+    if exited {
+        return;
+    }
+
     let _ = child.kill().await;
     let _ = child.wait().await;
     tracing::info!(reason, "bash: terminated process group");

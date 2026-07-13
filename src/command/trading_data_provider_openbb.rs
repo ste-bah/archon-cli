@@ -18,7 +18,9 @@ mod parse;
 mod request;
 
 use http::fetch_openbb_response;
-use metadata::{native_metadata_from_bars, native_quality_status, provider_notes, unavailable_report};
+use metadata::{
+    native_metadata_from_bars, native_quality_status, provider_notes, unavailable_report,
+};
 use parse::bars_from_openbb_response;
 use request::openbb_native_request;
 
@@ -66,12 +68,7 @@ pub(crate) fn fetch_native_with_base_url(
     let record = TradingDataLake::new(root)
         .store_ohlcv(StoreOhlcvRequest {
             metadata: native_metadata_from_bars(
-                dataset_id,
-                provider,
-                symbol,
-                timeframe,
-                &request,
-                &bars,
+                dataset_id, provider, symbol, timeframe, &request, &bars,
             ),
             bars,
             raw_body: response.body,

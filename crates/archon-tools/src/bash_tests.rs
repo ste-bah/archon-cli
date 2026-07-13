@@ -62,7 +62,10 @@ async fn timeout_kills_background_process_group() {
     let result = tool
         .execute(
             json!({
-                "command": format!("sleep 30 & echo $! > {}; wait", pid_file.display()),
+                "command": format!(
+                    "sh -c 'trap \"\" TERM; while :; do sleep 1; done' & echo $! > {}; wait",
+                    pid_file.display()
+                ),
                 "timeout": 100
             }),
             &ToolContext {
@@ -133,6 +136,8 @@ fn process_exists(pid: &str) -> bool {
     std::process::Command::new("kill")
         .arg("-0")
         .arg(pid)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .map(|status| status.success())
         .unwrap_or(false)

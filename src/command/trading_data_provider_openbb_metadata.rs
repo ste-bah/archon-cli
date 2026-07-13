@@ -40,7 +40,13 @@ pub(super) fn native_metadata_from_bars(
             start: bars
                 .first()
                 .map(|bar| bar.timestamp.clone())
-                .unwrap_or_else(|| request.params.get("start_date").cloned().unwrap_or_default()),
+                .unwrap_or_else(|| {
+                    request
+                        .params
+                        .get("start_date")
+                        .cloned()
+                        .unwrap_or_default()
+                }),
             end: bars
                 .last()
                 .map(|bar| bar.timestamp.clone())
