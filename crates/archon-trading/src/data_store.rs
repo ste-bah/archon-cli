@@ -96,6 +96,7 @@ pub struct StoredOhlcvDataset {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PersistentDatasetRegistry {
+    #[serde(rename = "schema", alias = "schema_version")]
     pub schema_version: String,
     pub datasets: BTreeMap<String, StoredDatasetRecord>,
     #[serde(default)]

@@ -214,6 +214,9 @@ fn v1_registry_migrates_with_backup_on_first_write() {
     }));
     let registry_text = std::fs::read_to_string(lake.registry_path()).unwrap();
     assert!(registry_text.contains("\"snapshots\""));
+    let registry_json: serde_json::Value = serde_json::from_str(&registry_text).unwrap();
+    assert_eq!(registry_json["schema"], REGISTRY_SCHEMA_V2);
+    assert!(registry_json.get("schema_version").is_none());
     let report = lake.migration_report().unwrap();
     assert_eq!(report.schema_version, REGISTRY_SCHEMA_V2);
     assert_eq!(report.migrated, 1);
@@ -318,7 +321,7 @@ fn interrupted_registry_write_temp_file_does_not_replace_registry() {
     let interrupted_temp = lake.registry_path().with_extension("tmp");
     std::fs::write(
         &interrupted_temp,
-        r#"{"schema_version":"archon-trading-data-registry-v2","datasets":{}}"#,
+        r#"{"schema":"archon-trading-data-registry-v2","datasets":{}}"#,
     )
     .unwrap();
 
