@@ -306,6 +306,8 @@ mod workflow_live_v2_lifecycle_verify_invariants;
 mod workflow_live_v2_lifecycle_verify_merge;
 #[path = "workflow_live_v2_lifecycle_verify_options.rs"]
 mod workflow_live_v2_lifecycle_verify_options;
+#[path = "workflow_live_v2_lifecycle_verify_retriage.rs"]
+mod workflow_live_v2_lifecycle_verify_retriage;
 #[path = "workflow_live_v2_lifecycle_verify_routing.rs"]
 mod workflow_live_v2_lifecycle_verify_routing;
 #[path = "workflow_live_v2_lifecycle_verify_scope.rs"]
@@ -322,6 +324,8 @@ include!("workflow_live_v2_lifecycle_waves.rs");
 include!("workflow_live_v2_lifecycle_impl.rs");
 
 include!("workflow_live_v2_lifecycle_verify.rs");
+
+include!("workflow_live_v2_lifecycle_verify_triage.rs");
 
 include!("workflow_live_v2_lifecycle_verify_remediation.rs");
 

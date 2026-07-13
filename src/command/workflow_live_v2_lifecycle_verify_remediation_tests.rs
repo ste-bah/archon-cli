@@ -147,6 +147,81 @@ fn supersede_rejects_sibling_evidence_for_a_different_invariant() {
 }
 
 #[test]
+fn d32_unprovable_supersede_requires_one_bounded_retriage() {
+    let (universe, _) = contract_fixture();
+    let contract = LifecycleContract {
+        task_universe: &universe,
+        target_repository_root: Some("/repo"),
+    };
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/d32_zero_match_retriage.json"))
+            .expect("D32 fixture");
+
+    assert!(
+        workflow_live_v2_lifecycle_verify_retriage::needs_bounded_retriage(
+            &contract,
+            &fixture["verification"],
+            &fixture["triage"],
+        )
+    );
+    assert!(
+        workflow_live_v2_lifecycle_verify_supersede::try_supersede_verification(
+            &contract,
+            &fixture["verification"],
+            &fixture["triage"],
+            "verification-failure-triage-4-1",
+        )
+        .is_none()
+    );
+    let feedback = workflow_live_v2_lifecycle_verify_retriage::retriage_feedback(
+        &fixture["verification"],
+        &fixture["triage"],
+    );
+    assert_eq!(
+        support::strings_of(feedback.get("failed_outcome_ids")).len(),
+        4
+    );
+    assert_eq!(feedback["required_route"], "corrected_retry_items");
+}
+
+#[test]
+fn d32_triage_prompt_routes_stale_filters_to_corrected_retries() {
+    let prompt = workflow_live_v2_lifecycle_prompts::VERIFICATION_FAILURE_TRIAGE_TASK;
+
+    assert!(prompt.contains("zero-match"));
+    assert!(prompt.contains("repository-search-verified"));
+    assert!(prompt.contains("never superseded_items"));
+    assert!(prompt.contains("corrected exact test names"));
+}
+
+#[test]
+fn d32_corrected_retries_validate_against_every_failed_outcome() {
+    let (universe, plan_item) = contract_fixture();
+    let contract = LifecycleContract {
+        task_universe: &universe,
+        target_repository_root: Some("/repo"),
+    };
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/d32_zero_match_retriage.json"))
+            .expect("D32 fixture");
+    let failed = support::non_accepted_outcomes(&support::outcomes_of(&fixture["verification"]));
+    let retry_items: Vec<serde_json::Value> = failed.iter().map(corrected_retry_item).collect();
+    let triage = serde_json::json!({ "data": { "retry_items": retry_items } });
+
+    let retries = triage_retry_items(&contract, &triage, &[plan_item], &failed)
+        .expect("all corrected retries should validate");
+
+    assert_eq!(retries.len(), 4);
+    assert!(
+        !workflow_live_v2_lifecycle_verify_retriage::needs_bounded_retriage(
+            &contract,
+            &fixture["verification"],
+            &triage,
+        )
+    );
+}
+
+#[test]
 fn retry_inventory_stamps_a_dropped_source_gap() {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "fixtures/wf32_verification_invariant_chain.json"
@@ -369,5 +444,20 @@ fn retry_item(id: &str, source: &str) -> serde_json::Value {
         "canonical_task_ids": ["TASK-TDL-010"],
         "focused_verification": ["retry check"],
         "expected_evidence": ["retry evidence"]
+    })
+}
+
+fn corrected_retry_item(outcome: &serde_json::Value) -> serde_json::Value {
+    let item_id = outcome["item_id"].as_str().expect("item id");
+    let gap = &outcome["result"]["residual_gaps"][0];
+    serde_json::json!({
+        "item_id": item_id,
+        "source_item_id": item_id,
+        "canonical_task_ids": ["TASK-TDL-010"],
+        "classification": "retryable_verification_shape_issue",
+        "source_residual_gap_ids": [gap["id"].clone()],
+        "failed_predicate": gap["description"].clone(),
+        "focused_verification": ["cargo test trading_data_validation_and_provider_commands_parse"],
+        "expected_evidence": ["The corrected exact test name runs and passes."]
     })
 }

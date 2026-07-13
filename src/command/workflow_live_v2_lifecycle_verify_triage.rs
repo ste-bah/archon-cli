@@ -1,0 +1,199 @@
+// Verification-failure triage and its single bounded re-triage path.
+
+impl LifecycleDriver {
+    #[allow(clippy::too_many_arguments)]
+    async fn run_verification_remediation(
+        &self,
+        ready_items: &[serde_json::Value],
+        plan_items: &[serde_json::Value],
+        actionable: &[serde_json::Value],
+        wave_index: usize,
+        dependency_iteration: usize,
+        repair_attempt: usize,
+        remediation_attempt: &mut usize,
+        verification: &mut serde_json::Value,
+        evidence: &mut LifecycleEvidence,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        let triage_id = format!("verification-failure-triage-{wave_index}-{repair_attempt}");
+        let failed_outcomes =
+            support::non_accepted_outcomes(&support::outcomes_of(verification));
+        let triage = self
+            .verification_failure_triage(
+                &triage_id,
+                ready_items,
+                plan_items,
+                &failed_outcomes,
+                evidence,
+            )
+            .await?;
+        let (triage, triage_id) = self
+            .bounded_verification_retriage(
+                triage,
+                &triage_id,
+                plan_items,
+                &failed_outcomes,
+                wave_index,
+                repair_attempt,
+                verification,
+                evidence,
+            )
+            .await?;
+        let routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(&triage);
+        let retried = self
+            .run_triage_retry(
+                &triage, plan_items, &failed_outcomes, wave_index, dependency_iteration,
+                repair_attempt, verification, evidence,
+            )
+            .await?;
+        if retried && routes.implementation_failures.is_empty() {
+            return Ok(true);
+        }
+        let remediation_items = if routes.implementation_failures.is_empty() {
+            actionable
+        } else {
+            &routes.implementation_failures
+        };
+        self.run_write_verification_remediation(
+            ready_items, plan_items, remediation_items, wave_index, dependency_iteration,
+            remediation_attempt, verification, evidence, &triage, &triage_id,
+        )
+        .await
+    }
+
+    async fn verification_failure_triage(
+        &self,
+        triage_id: &str,
+        ready_items: &[serde_json::Value],
+        plan_items: &[serde_json::Value],
+        actionable: &[serde_json::Value],
+        evidence: &mut LifecycleEvidence,
+    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+        let triage = self
+            .reduce(
+                triage_id,
+                serde_json::json!([
+                    self.task_universe, ready_items, plan_items, actionable,
+                    evidence.implementation, evidence.verification
+                ]),
+                "reducer",
+                prompts::VERIFICATION_FAILURE_TRIAGE_TASK,
+            )
+            .await?;
+        support::record_repair_attempt(
+            &mut evidence.repair_attempts,
+            triage_id,
+            "verification_failure_triage",
+            actionable,
+            &triage,
+        );
+        Ok(triage)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn bounded_verification_retriage(
+        &self,
+        triage: serde_json::Value,
+        triage_id: &str,
+        plan_items: &[serde_json::Value],
+        actionable: &[serde_json::Value],
+        wave_index: usize,
+        repair_attempt: usize,
+        verification: &serde_json::Value,
+        evidence: &mut LifecycleEvidence,
+    ) -> archon_workflow::WorkflowResult<(serde_json::Value, String)> {
+        if !workflow_live_v2_lifecycle_verify_retriage::needs_bounded_retriage(
+            &self.contract(), verification, &triage,
+        ) {
+            return Ok((triage, triage_id.to_string()));
+        }
+        let id = format!("verification-failure-retriage-{wave_index}-{repair_attempt}");
+        let feedback = workflow_live_v2_lifecycle_verify_retriage::retriage_feedback(
+            verification,
+            &triage,
+        );
+        let retriage = self
+            .reduce(
+                &id,
+                serde_json::json!([
+                    self.task_universe, plan_items, actionable, feedback
+                ]),
+                "reducer",
+                prompts::VERIFICATION_FAILURE_RETRIAGE_TASK,
+            )
+            .await?;
+        support::record_repair_attempt(
+            &mut evidence.repair_attempts,
+            &id,
+            "verification_failure_retriage",
+            actionable,
+            &retriage,
+        );
+        Ok((retriage, id))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn run_triage_retry(
+        &self,
+        triage: &serde_json::Value,
+        plan_items: &[serde_json::Value],
+        source_outcomes: &[serde_json::Value],
+        wave_index: usize,
+        dependency_iteration: usize,
+        repair_attempt: usize,
+        verification: &mut serde_json::Value,
+        evidence: &mut LifecycleEvidence,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        let contract = self.contract();
+        let Some(retry_items) = triage_retry_items(
+            &contract,
+            triage,
+            plan_items,
+            source_outcomes,
+        ) else {
+            return Ok(false);
+        };
+        let retry_items = workflow_live_v2_lifecycle_verify_options::prepare_verification_items(
+            retry_items,
+            self.project_artifact_root.as_deref(),
+            &evidence.implementation,
+        );
+        let retry_result = self
+            .parallel(
+                &format!("verification-wave-{wave_index}-triage-retry-{repair_attempt}"),
+                serde_json::json!(&retry_items),
+                workflow_live_v2_lifecycle_verify_options::verification_options(
+                    &retry_items,
+                    prompts::RETRY_VERIFICATION_WAVE_TASK,
+                    true,
+                ),
+            )
+            .await?;
+        *verification = workflow_live_v2_lifecycle_verify_merge::merge_retry_outcomes(
+            verification,
+            retry_result,
+            &retry_items,
+        );
+        record_triage_retry(
+            evidence, wave_index, dependency_iteration, repair_attempt, retry_items, verification,
+        );
+        Ok(true)
+    }
+}
+
+fn record_triage_retry(
+    evidence: &mut LifecycleEvidence,
+    wave_index: usize,
+    dependency_iteration: usize,
+    repair_attempt: usize,
+    retry_items: Vec<serde_json::Value>,
+    verification: &serde_json::Value,
+) {
+    evidence.verification.push(serde_json::json!({
+        "kind": "verification-triage-retry",
+        "implementationWaveIndex": wave_index,
+        "dependencyIteration": dependency_iteration,
+        "verificationRepairAttempt": repair_attempt,
+        "verificationPlan": { "items": retry_items },
+        "result": verification,
+    }));
+}
