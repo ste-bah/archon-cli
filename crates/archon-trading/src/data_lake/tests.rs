@@ -273,6 +273,7 @@ fn capability_maps_timeframes_and_unavailable_reasons_fail_closed() {
         fallback.unavailable_reason.as_deref(),
         Some("yfinance fallback is degraded and ineligible for promotion")
     );
+    assert!(!fallback.native_interval);
     assert!(!fallback.can_fetch);
     restore_env("POLYGON_API_KEY", previous_key);
 }

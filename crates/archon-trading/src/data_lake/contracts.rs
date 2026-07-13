@@ -201,6 +201,10 @@ pub fn can_fetch_symbol_timeframe(
         && !provider_blocked
         && normalized_provider != "yfinance";
     let can_fetch = false;
+    let capability_native_interval = exact_native_interval
+        && supported_provider
+        && !missing_input
+        && normalized_provider != "yfinance";
     let unavailable_reason = Some(capability_unavailable_reason(
         provider,
         trimmed_symbol,
@@ -216,7 +220,7 @@ pub fn can_fetch_symbol_timeframe(
         canonical_instrument: trimmed_symbol.to_string(),
         provider_symbol: trimmed_symbol.to_string(),
         timeframe: normalized_timeframe.clone(),
-        native_interval: exact_native_interval && supported_provider && !missing_input,
+        native_interval: capability_native_interval,
         production_eligible,
         can_fetch,
         current_snapshot_supported: supported_provider && !missing_input,

@@ -208,6 +208,35 @@ fn manual_ingest_contract_requires_deterministic_id_and_version() {
     assert!(validate_dataset_contract(&invalid).is_err());
 }
 
+#[test]
+fn fetch_native_reports_yfinance_degraded_fallback() {
+    let temp = tempfile::tempdir().unwrap();
+    let output = render_data(&TradingCliDataAction::FetchNative {
+        target: Some(temp.path().to_path_buf()),
+        provider: "yfinance".into(),
+        symbol: "SPY".into(),
+        timeframe: "5".into(),
+        start: "2024-01-01".into(),
+        end: "2024-01-05".into(),
+        dataset_id: "yfinance-SPY-5-raw".into(),
+    })
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+    assert_eq!(report["provider"], "yfinance");
+    assert_eq!(report["can_fetch"], false);
+    assert_eq!(report["quality_status"], "degraded_fallback");
+    assert_eq!(report["production_eligible"], false);
+    assert_eq!(report["provider_blocked_or_unavailable"], true);
+    assert!(
+        report["unavailable_reason"]
+            .as_str()
+            .unwrap()
+            .contains("unsupported native timeframe `5`")
+    );
+    assert!(!TradingDataLake::new(temp.path()).registry_path().exists());
+}
+
 fn test_store_request() -> StoreOhlcvRequest {
     StoreOhlcvRequest {
         metadata: DatasetMetadata {

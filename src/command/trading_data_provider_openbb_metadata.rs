@@ -1,5 +1,6 @@
 use anyhow::Result;
 use archon_trading::data_lake::{CoverageWindow, DataType, DatasetMetadata, GapSummary};
+use archon_trading::ohlcv::OhlcvBar;
 use serde_json::json;
 use std::collections::BTreeMap;
 
@@ -7,13 +8,13 @@ use crate::command::trading_io::write_or_render;
 
 use super::request::{OpenBbNativeRequest, is_crypto, is_future};
 
-pub(super) fn native_metadata(
+pub(super) fn native_metadata_from_bars(
     dataset_id: &str,
     provider: &str,
     symbol: &str,
     timeframe: &str,
     request: &OpenBbNativeRequest,
-    rows: usize,
+    bars: &[OhlcvBar],
 ) -> DatasetMetadata {
     let provider_key = provider.trim().to_ascii_lowercase();
     DatasetMetadata {
@@ -36,18 +37,20 @@ pub(super) fn native_metadata(
         adjustment: adjustment_for(symbol).into(),
         license: license_for(&provider_key, &request.openbb_provider),
         coverage: CoverageWindow {
-            start: request
-                .params
-                .get("start_date")
-                .cloned()
-                .unwrap_or_default(),
-            end: request.params.get("end_date").cloned().unwrap_or_default(),
-            expected_bars: rows as u64,
-            observed_bars: rows as u64,
+            start: bars
+                .first()
+                .map(|bar| bar.timestamp.clone())
+                .unwrap_or_else(|| request.params.get("start_date").cloned().unwrap_or_default()),
+            end: bars
+                .last()
+                .map(|bar| bar.timestamp.clone())
+                .unwrap_or_else(|| request.params.get("end_date").cloned().unwrap_or_default()),
+            expected_bars: bars.len() as u64,
+            observed_bars: bars.len() as u64,
         },
         gaps: GapSummary {
             missing_bars: 0,
-            expected_bars: rows as u64,
+            expected_bars: bars.len() as u64,
         },
         checksum: String::new(),
         checksums: Default::default(),

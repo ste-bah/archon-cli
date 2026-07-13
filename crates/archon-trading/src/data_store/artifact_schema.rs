@@ -18,7 +18,110 @@ pub(super) fn schema_artifact_value<T: Serialize>(
         .filter(|schema| !schema.trim().is_empty())
         .ok_or_else(|| DataStoreError::InvalidMetadata("artifact schema is required".into()))?;
     object.insert("schema".into(), serde_json::Value::String(schema));
+    if is_validation_report(&object) {
+        add_validation_report_fields(&mut object);
+    }
     Ok(serde_json::Value::Object(object))
+}
+
+fn is_validation_report(object: &serde_json::Map<String, serde_json::Value>) -> bool {
+    object.contains_key("dataset_id")
+        && object.contains_key("version")
+        && object.contains_key("checks")
+        && object.contains_key("summary")
+        && object.contains_key("validated_at")
+}
+
+fn add_validation_report_fields(object: &mut serde_json::Map<String, serde_json::Value>) {
+    insert_check_field(
+        object,
+        "duplicate_timestamp_check",
+        &["ohlcv.duplicate_timestamps"],
+    );
+    insert_check_field(
+        object,
+        "ohlc_check",
+        &["ohlcv.ohlc_sanity", "ohlcv.valid_bars"],
+    );
+    insert_check_field(object, "volume_check", &["ohlcv.volume"]);
+    insert_check_field(object, "gap_check", &["ohlcv.gaps"]);
+    insert_check_field(
+        object,
+        "timestamp_check",
+        &["ohlcv.rfc3339_timestamps", "ohlcv.monotonic_timestamps"],
+    );
+    insert_check_field(
+        object,
+        "metadata_check",
+        &[
+            "metadata.complete",
+            "metadata.production_contract",
+            "metadata.coverage_minimum",
+            "metadata.native_interval",
+            "metadata.not_derived_or_resampled",
+            "metadata.production_eligible",
+        ],
+    );
+}
+
+fn insert_check_field(
+    object: &mut serde_json::Map<String, serde_json::Value>,
+    field: &str,
+    check_ids: &[&str],
+) {
+    let checks = matching_checks(object, check_ids);
+    object.insert(
+        field.into(),
+        serde_json::json!({
+            "status": aggregate_check_status(&checks),
+            "check_ids": check_ids,
+            "checks": checks,
+        }),
+    );
+}
+
+fn matching_checks(
+    object: &serde_json::Map<String, serde_json::Value>,
+    check_ids: &[&str],
+) -> Vec<serde_json::Value> {
+    object
+        .get("checks")
+        .and_then(serde_json::Value::as_array)
+        .map(|checks| {
+            checks
+                .iter()
+                .filter(|check| {
+                    check
+                        .get("id")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|id| check_ids.contains(&id))
+                })
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn aggregate_check_status(checks: &[serde_json::Value]) -> &'static str {
+    if checks
+        .iter()
+        .any(|check| check_status(check) == Some("failed"))
+    {
+        "failed"
+    } else if checks.is_empty() {
+        "missing"
+    } else if checks
+        .iter()
+        .any(|check| check_status(check) == Some("degraded"))
+    {
+        "degraded"
+    } else {
+        "passed"
+    }
+}
+
+fn check_status(check: &serde_json::Value) -> Option<&str> {
+    check.get("status").and_then(serde_json::Value::as_str)
 }
 
 pub(super) fn write_schema_json<T: Serialize>(
