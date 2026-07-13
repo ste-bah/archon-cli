@@ -22,14 +22,14 @@ impl TradingDataLake {
         let citations_path = evidence_dir.join("citations.json");
         validate_ahdm_citations(&citations)?;
         write_text(&inventory_path, &ahdm_inventory_markdown(&citations, &gaps))?;
-        write_json(&citations_path, &citations)?;
+        write_schema_json(&citations_path, &citations)?;
         Ok(vec![inventory_path, citations_path])
     }
 
     pub fn write_ahdm_strategy_spec(&self, generated_at: &str) -> Result<PathBuf, DataStoreError> {
         let spec = ahdm_strategy_spec(&self.load_registry()?, generated_at);
         let path = self.ahdm_strategy_root().join("strategy-spec.json");
-        write_json(&path, &spec)?;
+        write_schema_json(&path, &spec)?;
         Ok(path)
     }
 
@@ -49,7 +49,7 @@ impl TradingDataLake {
         let report_path = dir.join("compile-report.json");
         write_text(&indicator_path, &ahdm_pine_source("indicator", &manifest))?;
         write_text(&strategy_path, &ahdm_pine_source("strategy", &manifest))?;
-        write_json(
+        write_schema_json(
             &report_path,
             &serde_json::json!({
                 "schema_version": "archon-ahdm-pine-compile-report-v1",
@@ -86,12 +86,12 @@ impl TradingDataLake {
             .join(safe_path(run_id));
         let manifest = ahdm_rule_manifest(generated_at);
         let dataset_ref = ahdm_backtest_dataset_ref(&dataset);
-        write_json(
+        write_schema_json(
             &dir.join("config.json"),
             &ahdm_backtest_config(&config, &manifest, &gate, &dataset_ref),
         )?;
         let manifest_hash = bytes_checksum(manifest.to_string().as_bytes());
-        write_json(
+        write_schema_json(
             &dir.join("report.json"),
             &ahdm_backtest_report(&report, &manifest_hash, &gate, &dataset_ref),
         )?;

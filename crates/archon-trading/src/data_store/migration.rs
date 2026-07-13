@@ -222,7 +222,7 @@ fn persist_migrated_metadata(
     path: &Path,
     metadata: &DatasetMetadata,
 ) -> Result<(), DataStoreError> {
-    write_json(path, metadata)
+    write_schema_json(path, metadata)
 }
 
 fn write_migration_validation(
@@ -231,8 +231,8 @@ fn write_migration_validation(
     metadata: &DatasetMetadata,
 ) -> Result<(), DataStoreError> {
     let report = migration_validation_report(metadata, record);
-    write_json(&root.join(&record.validation_path), &report)?;
-    write_json(&root.join(&record.manifest_path), record)
+    write_schema_json(&root.join(&record.validation_path), &report)?;
+    write_schema_json(&root.join(&record.manifest_path), record)
 }
 
 fn migration_validation_report(
@@ -273,7 +273,7 @@ fn write_registry_migration_report(
     report: &RegistryMigrationReport,
 ) -> Result<String, DataStoreError> {
     let path = data_root.join("registry-migration-report.json");
-    write_json(&path, report)?;
+    write_schema_json(&path, report)?;
     relative(root, &path)
 }
 

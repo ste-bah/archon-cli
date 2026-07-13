@@ -284,6 +284,10 @@ fn v2_migration_report_is_idempotent_and_skips_existing_v2() {
     assert_eq!(second.migrated, 1);
     assert_eq!(second.skipped, 1);
     assert_eq!(second.failed, 0);
+    let report_json: serde_json::Value =
+        read_json(&lake.data_root().join("registry-migration-report.json")).unwrap();
+    assert_eq!(report_json["schema"], REGISTRY_SCHEMA_V2);
+    assert!(report_json.get("schema_version").is_none());
     assert_eq!(
         second.report_path.as_deref(),
         Some(".archon/trading-lab/data/registry-migration-report.json")

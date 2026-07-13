@@ -1,0 +1,63 @@
+{
+  "remediation_wave": {
+    "status": "needs_review",
+    "outcomes": [
+      {
+        "item_id": "accepted-sibling",
+        "canonical_task_ids": ["TASK-002"],
+        "status": "accepted",
+        "summary": "Sibling remediation passed."
+      },
+      {
+        "item_id": "failed-provider-envelope",
+        "canonical_task_ids": ["TASK-001"],
+        "status": "needs_review",
+        "failure_kind": "contract",
+        "summary": "Write branch produced invalid implementation evidence after repair.",
+        "evidence": [
+          {
+            "kind": "review",
+            "summary": "workflow stage failed: source file 'src/data_store.rs' is 501 lines, exceeds max 500"
+          }
+        ]
+      }
+    ]
+  },
+  "followup_inventory": {
+    "items": [
+      {
+        "item_id": "repair-provider-envelope-split",
+        "source_item_id": "failed-provider-envelope",
+        "canonical_task_ids": ["TASK-001"],
+        "target_files": ["src/data_store.rs", "src/data_store/provider_artifact.rs"],
+        "failure_status": "needs_review",
+        "failure_evidence": ["source file exceeded max 500 lines"],
+        "required_fix": "Split schema serialization into the owned module and retry.",
+        "focused_verification": ["line-count and focused tests pass"],
+        "artifact_requirements": []
+      }
+    ]
+  },
+  "followup_wave": {
+    "status": "accepted",
+    "outcomes": [
+      {
+        "item_id": "repair-provider-envelope-split",
+        "source_item_id": "failed-provider-envelope",
+        "canonical_task_ids": ["TASK-001"],
+        "status": "accepted",
+        "summary": "Schema serialization was split into the owned module."
+      }
+    ]
+  },
+  "blocked_report": {
+    "id": "blocked-verification-failed-3",
+    "status": "needs_review",
+    "review_blockers": [
+      {
+        "id": "provider-capabilities-schema-envelope-missing",
+        "severity": "high"
+      }
+    ]
+  }
+}

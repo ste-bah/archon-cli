@@ -37,6 +37,7 @@ pub struct ValidationSummary {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ValidationReport {
+    #[serde(rename = "schema", alias = "schema_version")]
     pub schema_version: String,
     pub dataset_id: String,
     pub version: String,
@@ -90,6 +91,7 @@ pub struct CurrentSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CoverageMatrix {
+    #[serde(rename = "schema", alias = "schema_version")]
     pub schema_version: String,
     pub generated_at: String,
     pub instruments: Vec<String>,

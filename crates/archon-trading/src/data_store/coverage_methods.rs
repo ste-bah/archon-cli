@@ -50,9 +50,9 @@ impl TradingDataLake {
         let matrix = self.coverage_matrix(universe, generated_at)?;
         validate_coverage_matrix_complete(&matrix)?;
         let coverage_dir = self.coverage_dir();
-        write_json(&coverage_dir.join("latest.json"), &matrix)?;
+        write_schema_json(&coverage_dir.join("latest.json"), &matrix)?;
         write_text(&coverage_dir.join("latest.md"), &coverage_markdown(&matrix))?;
-        write_json(
+        write_schema_json(
             &coverage_dir
                 .join("history")
                 .join(format!("{}.json", safe_path(&matrix.generated_at))),

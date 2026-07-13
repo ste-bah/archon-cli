@@ -133,7 +133,7 @@ pub(super) fn fail_closed_validation_record(
         stored.production_eligible = false;
         stored.status = DatasetStatus::Degraded;
     }
-    write_json(
+    write_schema_json(
         &root.join(".archon/trading-lab/data/registry.json"),
         &registry,
     )?;
@@ -159,7 +159,7 @@ pub(super) fn sync_validation_record(
             DatasetStatus::Degraded
         };
     }
-    write_json(
+    write_schema_json(
         &root.join(".archon/trading-lab/data/registry.json"),
         &registry,
     )?;
@@ -177,5 +177,5 @@ fn update_metadata_from_validation(
     if !report.production_eligible {
         metadata.quality_status = "degraded".into();
     }
-    write_json(&metadata_path, &metadata)
+    write_schema_json(&metadata_path, &metadata)
 }

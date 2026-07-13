@@ -45,6 +45,7 @@ impl LifecycleDriver {
         }
         let remediation_wave = self
             .run_verification_remediation_wave(
+                ready_implementation_items,
                 &remediation_inventory,
                 wave_index,
                 dependency_iteration,
@@ -112,42 +113,6 @@ impl LifecycleDriver {
             &[],
             &format!("verification-wave-{wave_index}"),
         ))
-    }
-
-    async fn run_verification_remediation_wave(
-        &self,
-        remediation_inventory: &serde_json::Value,
-        wave_index: usize,
-        dependency_iteration: usize,
-        remediation_attempt: &usize,
-        evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
-        let source_items =
-            workflow_live_v2_lifecycle_verify_merge::verification_remediation_source_items(
-                remediation_inventory,
-            );
-        let remediation_wave = self
-            .write_fanout(
-                &format!("remediation-wave-{wave_index}-verification-{remediation_attempt}"),
-                serde_json::json!(source_items),
-                prompts::VERIFICATION_REMEDIATION_WAVE_TASK,
-            )
-            .await?;
-        evidence.implementation.push(serde_json::json!({
-            "kind": "verification-remediation",
-            "implementationWaveIndex": wave_index,
-            "dependencyIteration": dependency_iteration,
-            "verificationRemediationAttempt": remediation_attempt,
-            "verificationRemediationInventory": remediation_inventory,
-            "result": remediation_wave,
-        }));
-        record_unresolved_verification_remediation(
-            remediation_attempt,
-            wave_index,
-            evidence,
-            &remediation_wave,
-        );
-        Ok(remediation_wave)
     }
 
     #[allow(clippy::too_many_arguments)]

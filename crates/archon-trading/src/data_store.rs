@@ -23,6 +23,7 @@ mod ahdm;
 mod ahdm_methods;
 #[cfg(test)]
 mod ahdm_test_support;
+mod artifact_schema;
 mod coverage;
 mod coverage_methods;
 mod gates;
@@ -34,6 +35,7 @@ mod util;
 mod validation;
 
 use ahdm::*;
+use artifact_schema::*;
 use coverage::*;
 use gates::*;
 use io::*;
@@ -47,6 +49,7 @@ pub struct StoredDatasetRecord {
     pub dataset_id: String,
     pub version: String,
     #[serde(default = "registry_contract_schema")]
+    #[serde(rename = "schema", alias = "schema_version")]
     pub schema_version: String,
     #[serde(default)]
     pub dataset_path: String,
@@ -130,6 +133,7 @@ pub enum DataStoreError {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RegistryMigrationReport {
+    #[serde(rename = "schema", alias = "schema_version")]
     pub schema_version: String,
     pub migrated: usize,
     pub skipped: usize,
@@ -290,7 +294,7 @@ impl TradingDataLake {
             bars,
         };
         let report = validation_report(&dataset.metadata, &dataset.bars, validated_at);
-        write_json(&self.root.join(&dataset.record.validation_path), &report)?;
+        write_schema_json(&self.root.join(&dataset.record.validation_path), &report)?;
         if report.status == ValidationStatus::Failed {
             fail_closed_validation_record(&self.root, &dataset.record, &report)?;
             return Err(DataStoreError::InvalidOhlcv(format!("{report:?}")));
@@ -414,8 +418,8 @@ impl TradingDataLake {
             }
             versioned.status = DatasetStatus::Degraded;
         }
-        write_json(&validation_path, &validation)?;
-        write_json(&metadata_path, &versioned.metadata)?;
+        write_schema_json(&validation_path, &validation)?;
+        write_schema_json(&metadata_path, &versioned.metadata)?;
         let record = record(
             &self.root,
             &versioned,
@@ -429,7 +433,7 @@ impl TradingDataLake {
             },
             created_at,
         )?;
-        write_json(&manifest_path, &record)?;
+        write_schema_json(&manifest_path, &record)?;
         verify_artifacts(&self.root, &record)?;
         let migration = self.load_registry_migration(true)?;
         let mut registry = migration.registry;
@@ -440,7 +444,7 @@ impl TradingDataLake {
             registry_key(&record.dataset_id, &record.version),
             record.clone(),
         );
-        write_json_with_backup(&self.registry_path(), &registry, &backup)?;
+        write_schema_json_with_backup(&self.registry_path(), &registry, &backup)?;
         Ok(record)
     }
 
@@ -464,7 +468,7 @@ impl TradingDataLake {
         if !path.exists() {
             let registry = PersistentDatasetRegistry::default();
             if write_reports {
-                write_json(&path, &registry)?;
+                write_schema_json(&path, &registry)?;
             }
             return Ok(RegistryMigration {
                 registry,
@@ -488,5 +492,7 @@ impl TradingDataLake {
 
 #[cfg(test)]
 mod data_store_ahdm_tests;
+#[cfg(test)]
+mod data_store_schema_tests;
 #[cfg(test)]
 mod data_store_tests;

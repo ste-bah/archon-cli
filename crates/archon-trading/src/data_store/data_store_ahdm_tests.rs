@@ -10,6 +10,8 @@ fn ahdm_evidence_inventory_and_citations_fail_closed_for_gaps() {
         .unwrap();
     let citations: serde_json::Value =
         read_json(&lake.ahdm_strategy_root().join("evidence/citations.json")).unwrap();
+    assert_eq!(citations["schema"], "archon-ahdm-citations-v1");
+    assert!(citations.get("schema_version").is_none());
     assert_eq!(
         citations["promotion_policy"]["hypotheses_barred_from_promotion_until_cited"],
         true
@@ -41,7 +43,8 @@ fn ahdm_strategy_spec_contains_required_model_contract() {
         .unwrap();
     let spec: serde_json::Value = read_json(&path).unwrap();
 
-    assert_eq!(spec["schema_version"], "archon-ahdm-strategy-spec-v1");
+    assert_eq!(spec["schema"], "archon-ahdm-strategy-spec-v1");
+    assert!(spec.get("schema_version").is_none());
     assert_eq!(spec["confidence_scoring"]["type"], "score_not_probability");
     assert_eq!(spec["confidence_scoring"]["sum_weights"], 100);
     assert_eq!(spec["confidence_scoring"]["no_trade_below"], 0.55);
@@ -95,6 +98,7 @@ fn ahdm_pine_artifacts_are_exploratory_and_manifest_traceable() {
     let report: serde_json::Value =
         read_json(&lake.ahdm_strategy_root().join("pine/compile-report.json")).unwrap();
 
+    assert_eq!(report["schema"], "archon-ahdm-pine-compile-report-v1");
     assert!(indicator.contains("indicator(\"AHDM-v1 indicator\""));
     assert!(strategy.contains("strategy(\"AHDM-v1 strategy\""));
     for required in [
@@ -138,6 +142,8 @@ fn ahdm_native_backtest_writes_replayable_manifest_parity_artifacts() {
 
     let config: serde_json::Value = read_json(&dir.join("config.json")).unwrap();
     let report: serde_json::Value = read_json(&dir.join("report.json")).unwrap();
+    assert_eq!(config["schema"], "archon-ahdm-backtest-config-v1");
+    assert_eq!(report["schema"], "archon-ahdm-backtest-report-v1");
     assert_eq!(config["dataset"]["dataset_id"], "manual-BTCUSD-1D-raw");
     assert_eq!(config["dataset"]["native_interval"], true);
     assert_eq!(report["diagnostic"], false);

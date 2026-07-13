@@ -101,6 +101,7 @@ pub struct DatasetSourceMetadata {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DatasetMetadata {
     #[serde(default = "dataset_schema")]
+    #[serde(rename = "schema", alias = "schema_version")]
     pub schema_version: String,
     pub dataset_id: String,
     pub version: String,

@@ -16,13 +16,40 @@ pub(super) fn merge_retry_outcomes(
     retry_result: Value,
     retry_items: &[Value],
 ) -> Value {
-    let replaced_ids = retry_source_ids(retry_items);
-    let mut outcomes: Vec<Value> = support::outcomes_of(verification)
+    merge_selected_outcomes(
+        verification,
+        retry_result,
+        retry_items,
+        "verification retry",
+    )
+}
+
+pub(super) fn merge_repair_outcomes(
+    remediation_wave: &Value,
+    followup_wave: Value,
+    followup_items: &[Value],
+) -> Value {
+    merge_selected_outcomes(
+        remediation_wave,
+        followup_wave,
+        followup_items,
+        "remediation repair",
+    )
+}
+
+fn merge_selected_outcomes(
+    original: &Value,
+    replacement: Value,
+    replacement_items: &[Value],
+    label: &str,
+) -> Value {
+    let replaced_ids = retry_source_ids(replacement_items);
+    let mut outcomes: Vec<Value> = support::outcomes_of(original)
         .into_iter()
         .filter(|outcome| !outcome_matches(outcome, &replaced_ids))
         .collect();
-    outcomes.extend(support::outcomes_of(&retry_result));
-    verification_with_outcomes(verification, outcomes)
+    outcomes.extend(support::outcomes_of(&replacement));
+    verification_with_outcomes(original, outcomes, label)
 }
 
 fn stamp_verification_requirements(item: Value) -> Value {
@@ -80,10 +107,10 @@ fn id_matches(candidate: &str, expected: &str) -> bool {
     candidate == expected || candidate.ends_with(&format!("-{expected}"))
 }
 
-fn verification_with_outcomes(verification: &Value, outcomes: Vec<Value>) -> Value {
+fn verification_with_outcomes(verification: &Value, outcomes: Vec<Value>, label: &str) -> Value {
     let mut merged = verification.as_object().cloned().unwrap_or_default();
     let status = merged_status(&outcomes);
-    let summary = merged_summary(&outcomes);
+    let summary = merged_summary(&outcomes, label);
     merged.insert("outcomes".to_string(), Value::Array(outcomes.clone()));
     merged.insert("items".to_string(), Value::Array(outcomes.clone()));
     merged.insert("status".to_string(), Value::String(status.to_string()));
@@ -100,13 +127,13 @@ fn merged_status(outcomes: &[Value]) -> &'static str {
     }
 }
 
-fn merged_summary(outcomes: &[Value]) -> String {
+fn merged_summary(outcomes: &[Value], label: &str) -> String {
     let unresolved = outcomes
         .iter()
         .filter(|outcome| !support::outcome_accepted_or_noop(outcome))
         .count();
     format!(
-        "verification retry merged {} outcomes with {unresolved} unresolved",
+        "{label} merged {} outcomes with {unresolved} unresolved",
         outcomes.len()
     )
 }
