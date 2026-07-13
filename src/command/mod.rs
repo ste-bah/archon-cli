@@ -113,6 +113,7 @@ pub(crate) mod pipeline_slash;
 pub(crate) mod pipeline_slash_progress;
 pub(crate) mod pipeline_support;
 pub(crate) mod provider_gate;
+pub(crate) mod workflow_mcp;
 // TASK-TUI-626: /plan Plan Mode toggle via SNAPSHOT+EFFECT pattern.
 pub(crate) mod plan;
 // TASK-P0-B.3 (#174): plan-file I/O shim (re-exports from archon_core).

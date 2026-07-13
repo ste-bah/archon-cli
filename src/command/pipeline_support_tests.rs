@@ -21,8 +21,8 @@ fn pipeline_learning_schema_defaults_to_project_learning_store() {
     assert!(!temp.path().join(".archon").join("archon-data.db").exists());
 }
 
-#[test]
-fn workflow_cli_subagent_executor_is_installed_with_configured_cap() {
+#[tokio::test]
+async fn workflow_cli_subagent_executor_is_installed_with_configured_cap() {
     let temp = tempfile::tempdir().expect("tempdir");
     let mut config = ArchonConfig::default();
     config.subagent.max_concurrent = 3;
@@ -33,7 +33,8 @@ fn workflow_cli_subagent_executor_is_installed_with_configured_cap() {
         temp.path(),
         "workflow-cli-test",
         workflow_cli_agent_config(&config, temp.path(), "workflow-cli-test"),
-    );
+    )
+    .await;
 
     let executor =
         archon_tools::subagent_executor::get_subagent_executor().expect("installed executor");

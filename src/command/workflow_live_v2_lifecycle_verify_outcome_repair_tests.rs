@@ -69,3 +69,57 @@ fn d33_prompt_requires_split_or_retry_for_mechanical_contract_failure() {
     assert!(prompt.contains("split"));
     assert!(prompt.contains("500"));
 }
+
+#[test]
+fn d36_two_unchanged_noop_rounds_stop_before_the_third_round() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/d36_raw_artifact_overreach_noop_loop.json"
+    ))
+    .expect("D36 fixture");
+    let wave = fixture["remediation_wave"].clone();
+    let rounds = fixture["noop_repair_rounds"]
+        .as_array()
+        .expect("repair rounds");
+    let mut streak = 0;
+
+    for round in &rounds[..2] {
+        streak = workflow_live_v2_lifecycle_verify_outcome_repair::next_noop_disagreement_streak(
+            streak, &wave, &wave, round,
+        );
+    }
+    assert_eq!(streak, 2);
+    let stopped = workflow_live_v2_lifecycle_verify_outcome_repair::mark_noop_disagreement(&wave);
+    assert!(
+        workflow_live_v2_lifecycle_verify_outcome_repair::repairable_contract_outcomes(&stopped)
+            .is_empty()
+    );
+    assert!(
+        support::outcomes_of(&stopped)
+            .iter()
+            .all(|outcome| { outcome["failure_kind"] == "verification_overreach" })
+    );
+    assert_eq!(
+        rounds.len(),
+        3,
+        "fixture retains the exhausted canary round"
+    );
+}
+
+#[test]
+fn d36_changed_followup_result_resets_noop_disagreement_streak() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/d36_raw_artifact_overreach_noop_loop.json"
+    ))
+    .expect("D36 fixture");
+    let wave = fixture["remediation_wave"].clone();
+    let accepted = serde_json::json!({
+        "outcomes": [{"item_id": "fixed", "status": "accepted"}]
+    });
+
+    assert_eq!(
+        workflow_live_v2_lifecycle_verify_outcome_repair::next_noop_disagreement_streak(
+            1, &wave, &accepted, &accepted,
+        ),
+        0
+    );
+}

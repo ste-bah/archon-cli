@@ -119,6 +119,10 @@ fn verification_with_outcomes(verification: &Value, outcomes: Vec<Value>, label:
     Value::Object(merged)
 }
 
+pub(super) fn replace_all_outcomes(original: &Value, outcomes: Vec<Value>, label: &str) -> Value {
+    verification_with_outcomes(original, outcomes, label)
+}
+
 fn merged_status(outcomes: &[Value]) -> &'static str {
     if outcomes.iter().all(support::outcome_accepted_or_noop) {
         "accepted"

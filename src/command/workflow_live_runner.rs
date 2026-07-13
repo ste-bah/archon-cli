@@ -331,7 +331,9 @@ pub(crate) fn allowed_tools(request: &StageRunRequest) -> Vec<String> {
             "DocGet",
         ],
     };
-    tools.into_iter().map(str::to_string).collect()
+    let mut tools = tools.into_iter().map(str::to_string).collect::<Vec<_>>();
+    tools.extend(super::workflow_live_mcp::allowed_mcp_tools(request));
+    tools
 }
 
 fn implementation_tools(request: &StageRunRequest) -> Vec<&'static str> {

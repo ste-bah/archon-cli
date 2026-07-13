@@ -55,27 +55,43 @@ impl LifecycleDriver {
             &support::array(initial_inventory.get("items")),
         );
         let mut inventory = initial_inventory.clone();
+        let mut noop_disagreement_streak = 0usize;
         for repair_attempt in 1..=self.max_repair_iterations {
             let repairable = workflow_live_v2_lifecycle_verify_outcome_repair::repairable_contract_outcomes(&wave);
             if repairable.is_empty() {
                 break;
             }
-            let followup = self
+            let followup_inventory = self
                 .verification_remediation_followup_inventory(
                     ready_items, &inventory, &wave, &repairable, &allowed,
                     wave_index, remediation_attempt, repair_attempt, evidence,
                 )
                 .await?;
-            if !remediation::remediation_inventory_ready(&followup) {
+            if !remediation::remediation_inventory_ready(&followup_inventory) {
                 break;
             }
-            wave = self
+            let before = wave.clone();
+            let (next_wave, followup_wave) = self
                 .run_verification_remediation_followup(
-                    &followup, wave, wave_index, dependency_iteration,
+                    &followup_inventory, wave, wave_index, dependency_iteration,
                     remediation_attempt, repair_attempt, evidence,
                 )
                 .await?;
-            inventory = followup;
+            noop_disagreement_streak =
+                workflow_live_v2_lifecycle_verify_outcome_repair::next_noop_disagreement_streak(
+                    noop_disagreement_streak,
+                    &before,
+                    &next_wave,
+                    &followup_wave,
+                );
+            wave = next_wave;
+            if noop_disagreement_streak >= 2 {
+                wave = workflow_live_v2_lifecycle_verify_outcome_repair::mark_noop_disagreement(
+                    &wave,
+                );
+                break;
+            }
+            inventory = followup_inventory;
         }
         Ok(wave)
     }
@@ -135,7 +151,7 @@ impl LifecycleDriver {
         remediation_attempt: &usize,
         repair_attempt: usize,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+    ) -> archon_workflow::WorkflowResult<(serde_json::Value, serde_json::Value)> {
         let items = workflow_live_v2_lifecycle_verify_merge::verification_remediation_source_items(
             inventory,
         );
@@ -153,9 +169,12 @@ impl LifecycleDriver {
             evidence, wave_index, dependency_iteration, remediation_attempt,
             "verification-remediation-retry", inventory, &followup,
         );
-        Ok(workflow_live_v2_lifecycle_verify_outcome_repair::merge_repaired_outcomes(
-            &wave, followup, &items,
-        ))
+        let merged = workflow_live_v2_lifecycle_verify_outcome_repair::merge_repaired_outcomes(
+            &wave,
+            followup.clone(),
+            &items,
+        );
+        Ok((merged, followup))
     }
 }
 

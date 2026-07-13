@@ -1,0 +1,105 @@
+{
+  "verification_plan": [
+    {
+      "item_id": "verify-TASK-TDL-040-raw-artifacts",
+      "source_item_id": "impl-TASK-TDL-040",
+      "canonical_task_ids": ["TASK-TDL-040"],
+      "focused_verification": "Check raw/request.json, raw/headers.redacted.json, and raw/provider-notes.md.",
+      "expected_evidence": "Paths exist, request metadata is secret-free, headers are redacted, and provider notes contain no credentials.",
+      "artifact_requirements": ["raw/request.json", "raw/headers.redacted.json", "raw/provider-notes.md"]
+    },
+    {
+      "item_id": "verify-TASK-TDL-050-raw-artifacts",
+      "source_item_id": "impl-TASK-TDL-050",
+      "canonical_task_ids": ["TASK-TDL-050"],
+      "focused_verification": "Check raw/request.json, raw/headers.redacted.json, and raw/provider-notes.md.",
+      "expected_evidence": "Paths exist, headers contain no credential values, provider identity and adjusted/unadjusted policy are recorded, and request metadata contains no secrets.",
+      "artifact_requirements": ["raw/request.json", "raw/headers.redacted.json", "raw/provider-notes.md"]
+    },
+    {
+      "item_id": "verify-TASK-TDL-070-raw-artifacts",
+      "source_item_id": "impl-TASK-TDL-070",
+      "canonical_task_ids": ["TASK-TDL-070"],
+      "focused_verification": "Check raw/request.json, raw/headers.redacted.json, and raw/provider-notes.md.",
+      "expected_evidence": "Paths exist, headers contain no credential values, yfinance fallback is degraded and promotion-ineligible, and request metadata contains no secrets.",
+      "artifact_requirements": ["raw/request.json", "raw/headers.redacted.json", "raw/provider-notes.md"]
+    }
+  ],
+  "triage": {
+    "status": "accepted",
+    "result": {
+      "data": {
+        "implementation_failures": [
+          {
+            "item_id": "implementation-failure-verification-wave-5-verify-TASK-TDL-040-raw-artifacts",
+            "source_item_id": "verification-wave-5-verify-TASK-TDL-040-raw-artifacts",
+            "canonical_task_ids": ["TASK-TDL-040"],
+            "classification": "actionable_implementation_failure",
+            "source_residual_gap_ids": ["task-id-mismatch"],
+            "failed_predicate": "Raw artifacts appear to document TASK-TDL-060 instead of canonical task TASK-TDL-040.",
+            "focused_verification": "Check raw/request.json and raw/provider-notes.md."
+          },
+          {
+            "item_id": "implementation-failure-verification-wave-5-verify-TASK-TDL-050-raw-artifacts",
+            "source_item_id": "verification-wave-5-verify-TASK-TDL-050-raw-artifacts",
+            "canonical_task_ids": ["TASK-TDL-050"],
+            "classification": "actionable_implementation_failure",
+            "source_residual_gap_ids": ["gap-task-id-mismatch", "gap-adjusted-unadjusted-policy"],
+            "failed_predicate": "Raw artifacts identify TASK-TDL-060, not TASK-TDL-050, and provider-notes.md lacks adjusted/unadjusted policy.",
+            "focused_verification": "Check raw/request.json and raw/provider-notes.md."
+          },
+          {
+            "item_id": "implementation-failure-verification-wave-5-verify-TASK-TDL-070-raw-artifacts",
+            "source_item_id": "verification-wave-5-verify-TASK-TDL-070-raw-artifacts",
+            "canonical_task_ids": ["TASK-TDL-070"],
+            "classification": "actionable_implementation_failure",
+            "source_residual_gap_ids": ["gap-TDL-070-raw-artifacts-content"],
+            "failed_predicate": "Need TASK-TDL-070-specific raw/request.json and raw/provider-notes.md; existing files identify TASK-TDL-060.",
+            "focused_verification": "Check raw/request.json and raw/provider-notes.md."
+          }
+        ],
+        "retry_items": [],
+        "superseded_items": [],
+        "terminal_blockers": []
+      }
+    }
+  },
+  "raw_provider_artifacts": [
+    {
+      "path": ".archon/trading-lab/data/datasets/tradingview-ES-1D-raw/20260708-proof/raw/request.json",
+      "content": {"provider": "tradingview", "symbol": "CME_MINI:ES1!", "timeframe": "1D"}
+    },
+    {
+      "path": ".archon/trading-lab/data/datasets/yfinance-BTCUSDT-1H-raw/20260708-fallback/raw/request.json",
+      "content": {"provider": "yfinance", "fallback": true, "diagnostic_only": true}
+    },
+    {
+      "path": ".archon/trading-lab/data/datasets/polygon-SPY-15-raw/20260708-proof/raw/provider-notes.md",
+      "content": "OpenBB/Polygon native runtime proof. Adjusted/unadjusted policy is recorded without credential values."
+    }
+  ],
+  "remediation_wave": {
+    "status": "needs_review",
+    "outcomes": [
+      {
+        "item_id": "remediation-wave-5-verification-1-remediation-impl-TASK-TDL-040-raw-artifacts-content",
+        "status": "needs_review",
+        "failure_kind": "contract",
+        "error": "source file data_store.rs exceeds max 500",
+        "result": {"data": {"verification_remediation_required": true}}
+      },
+      {
+        "item_id": "remediation-wave-5-verification-1-remediation-impl-TASK-TDL-070-raw-artifacts-content",
+        "status": "needs_review",
+        "failure_kind": "contract",
+        "error": "source file data_store.rs exceeds max 500",
+        "result": {"data": {"verification_remediation_required": true}}
+      }
+    ]
+  },
+  "noop_repair_rounds": [
+    {"outcomes": [{"item_id": "followup-1-040", "status": "noop"}, {"item_id": "followup-1-070", "status": "noop"}]},
+    {"outcomes": [{"item_id": "followup-2-040", "status": "noop"}, {"item_id": "followup-2-070", "status": "noop"}]},
+    {"outcomes": [{"item_id": "followup-3-040", "status": "blocked"}, {"item_id": "followup-3-070", "status": "noop"}]}
+  ]
+}

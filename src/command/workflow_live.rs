@@ -46,6 +46,8 @@ mod workflow_live_generated_scaffold;
 mod workflow_live_generated_semantics_tests;
 #[path = "workflow_live_items.rs"]
 mod workflow_live_items;
+#[path = "workflow_live_mcp.rs"]
+mod workflow_live_mcp;
 #[path = "workflow_live_planner.rs"]
 mod workflow_live_planner;
 #[path = "workflow_live_prompt.rs"]

@@ -53,7 +53,8 @@ pub(crate) async fn build_subagent_pipeline_adapter(
         cwd,
         session_id,
         agent_config.clone(),
-    );
+    )
+    .await;
     let tool_context = ToolContext {
         working_dir: cwd.to_path_buf(),
         session_id: session_id.to_string(),
@@ -85,12 +86,12 @@ fn workflow_cli_agent_config(config: &ArchonConfig, cwd: &Path, session_id: &str
     }
 }
 
-fn install_workflow_cli_subagent_executor(
+async fn install_workflow_cli_subagent_executor(
     config: &ArchonConfig,
     provider: Arc<dyn LlmProvider>,
     cwd: &Path,
     session_id: &str,
-    agent_config: AgentConfig,
+    mut agent_config: AgentConfig,
 ) {
     let mut registry = create_default_registry(cwd.to_path_buf(), None);
     registry.replace(Box::new(archon_tools::bash::BashTool {
@@ -98,6 +99,12 @@ fn install_workflow_cli_subagent_executor(
         max_output_bytes: config.tools.bash_max_output,
         provider_env: None,
     }));
+    crate::command::workflow_mcp::install_project_tools(
+        cwd,
+        &mut registry,
+        &mut agent_config.permission_rules,
+    )
+    .await;
     let subagent_manager = Arc::new(tokio::sync::Mutex::new(SubagentManager::new(
         agent_config.max_subagent_concurrency,
     )));

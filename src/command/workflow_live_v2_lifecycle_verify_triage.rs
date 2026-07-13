@@ -79,6 +79,10 @@ impl LifecycleDriver {
                 prompts::VERIFICATION_FAILURE_TRIAGE_TASK,
             )
             .await?;
+        let triage = workflow_live_v2_lifecycle_verify_overreach::reroute_unplanned_raw_task_identity(
+            triage,
+            plan_items,
+        );
         support::record_repair_attempt(
             &mut evidence.repair_attempts,
             triage_id,

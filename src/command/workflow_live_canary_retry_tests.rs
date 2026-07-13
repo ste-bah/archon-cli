@@ -102,10 +102,12 @@ impl RetryAgentClient {
         }
         if prompt.contains("Classify failed focused verification outcomes") {
             *self.triage_seen.lock().expect("triage seen") = true;
+            let mut retry = Self::verification_item("retry-verify-retry-001");
+            retry["source_item_id"] = serde_json::json!("verify-retry-001");
             return Self::accepted(
                 "Retry verifier shape.",
                 serde_json::json!({
-                    "retry_items": [Self::verification_item("retry-verify-retry-001")],
+                    "retry_items": [retry],
                     "write_remediation_items": [],
                     "terminal_blockers": []
                 }),

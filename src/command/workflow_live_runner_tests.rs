@@ -85,3 +85,74 @@ fn generated_v2_read_only_verification_branch_stays_read_only() {
     assert!(!tools.contains(&"Write".to_string()));
     assert!(activity_detail(&req, "stage running").contains("tool_mode=read_only"));
 }
+
+fn mcp_project() -> tempfile::TempDir {
+    let project = tempfile::tempdir().expect("temp project");
+    std::fs::write(
+        project.path().join(".mcp.json"),
+        r#"{
+          "mcpServers": {
+            "tradingview": {
+              "command": "node",
+              "toolPolicy": {
+                "trustServerHints": false,
+                "toolPermissions": {
+                  "data_get_ohlcv": "safe",
+                  "pine_check": "safe",
+                  "pine_compile": "risky",
+                  "pine_smart_compile": "risky",
+                  "alert_create": "dangerous"
+                }
+              }
+            }
+          }
+        }"#,
+    )
+    .expect("write MCP config");
+    project
+}
+
+fn mcp_request(project: &std::path::Path, item: serde_json::Value) -> StageRunRequest {
+    request(json!({
+        "project_artifact_root": project,
+        "taskUniverse": {"tasks": [{"canonical_task_id": "TASK-TDL-040"}]},
+        "item": item
+    }))
+}
+
+#[test]
+fn d37_task_scoped_provider_and_pine_tools_are_exposed() {
+    let project = mcp_project();
+    let provider = mcp_request(
+        project.path(),
+        json!({"canonical_task_ids": ["TASK-TDL-040"]}),
+    );
+    let pine = mcp_request(
+        project.path(),
+        json!({"canonical_task_ids": ["TASK-TDL-120"]}),
+    );
+
+    let provider_tools = allowed_tools(&provider);
+    let pine_tools = allowed_tools(&pine);
+    assert!(provider_tools.contains(&"mcp__tradingview__data_get_ohlcv".to_string()));
+    assert!(!provider_tools.contains(&"mcp__tradingview__pine_compile".to_string()));
+    assert!(pine_tools.contains(&"mcp__tradingview__pine_compile".to_string()));
+    assert!(pine_tools.contains(&"mcp__tradingview__pine_smart_compile".to_string()));
+    assert!(!pine_tools.contains(&"mcp__tradingview__data_get_ohlcv".to_string()));
+}
+
+#[test]
+fn d37_declared_tools_are_honored_but_dangerous_policy_is_not() {
+    let project = mcp_project();
+    let req = mcp_request(
+        project.path(),
+        json!({
+            "canonical_task_ids": ["TASK-TDL-001"],
+            "required_tools": ["pine_check", "alert_create"]
+        }),
+    );
+
+    let tools = allowed_tools(&req);
+    assert!(tools.contains(&"mcp__tradingview__pine_check".to_string()));
+    assert!(!tools.contains(&"mcp__tradingview__alert_create".to_string()));
+}
