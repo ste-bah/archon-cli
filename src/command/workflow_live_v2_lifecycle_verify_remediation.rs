@@ -14,9 +14,7 @@ impl LifecycleDriver {
         verification: &mut serde_json::Value,
         evidence: &mut LifecycleEvidence,
         triage: &serde_json::Value,
-        triage_id: &str,
     ) -> archon_workflow::WorkflowResult<bool> {
-        let contract = self.contract();
         let remediation_inventory = self
             .verification_remediation_inventory(
                 ready_implementation_items,
@@ -28,21 +26,25 @@ impl LifecycleDriver {
                 triage,
             )
             .await?;
-        if !remediation::remediation_inventory_ready(&remediation_inventory) {
-            if let Some(supersede) =
-                workflow_live_v2_lifecycle_verify_supersede::try_supersede_verification(
-                    &contract,
-                    verification,
-                    triage,
-                    triage_id,
-                )
-            {
-                *verification = supersede.verification;
-                evidence.verification.push(supersede.record);
+        let mut routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(triage);
+        if routes.implementation_failures.is_empty() {
+            routes.implementation_failures = actionable.to_vec();
+        }
+        let route_plan = workflow_live_v2_lifecycle_verify_routing::triage_route_plan(&routes);
+        match workflow_live_v2_lifecycle_verify_routing::remediation_inventory_route(
+            &route_plan,
+            remediation::remediation_inventory_ready(&remediation_inventory),
+        ) {
+            workflow_live_v2_lifecycle_verify_routing::RemediationInventoryRoute::RunWriteRemediation => {}
+            workflow_live_v2_lifecycle_verify_routing::RemediationInventoryRoute::RegenerateInventory => {
                 return Ok(true);
             }
-            return Ok(false);
+            workflow_live_v2_lifecycle_verify_routing::RemediationInventoryRoute::NotNeeded
+            | workflow_live_v2_lifecycle_verify_routing::RemediationInventoryRoute::Block => {
+                return Ok(false);
+            }
         }
+        let contract = self.contract();
         let remediation_wave = self
             .run_verification_remediation_wave(
                 ready_implementation_items,
@@ -320,7 +322,8 @@ fn retry_item_requires_rerun(item: &serde_json::Value) -> bool {
         .or_else(|| item.get("verification_failure_class"))
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
-    !class.contains("resolved")
+    let class = class.to_ascii_lowercase();
+    !class.contains("sibling") && !class.contains("supersed")
 }
 
 fn allowed_verification_task_ids(plan_items: &[serde_json::Value]) -> Vec<String> {

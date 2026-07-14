@@ -141,7 +141,6 @@ impl LifecycleDriver {
                     .run_verification_remediation(
                         ready_implementation_items,
                         &plan_items,
-                        &actionable,
                         wave_index,
                         dependency_iteration,
                         repair_attempt,
@@ -195,7 +194,6 @@ impl LifecycleDriver {
                         &mut verification,
                         evidence,
                         &route,
-                        &call_id,
                     )
                     .await?;
                 if !continue_loop {
@@ -242,7 +240,6 @@ impl LifecycleDriver {
                         &mut verification,
                         evidence,
                         &repair_plan,
-                        &call_id,
                     )
                     .await?;
                 if !continue_loop {

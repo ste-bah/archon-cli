@@ -41,6 +41,106 @@ fn mixed_triage_preserves_actionable_and_retry_routes() {
 }
 
 #[test]
+fn d46_execution_retry_is_scheduled_even_when_write_inventory_is_empty() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/d46_orphaned_verification_retry.json"
+    ))
+    .expect("D46 fixture");
+    let universe = WorkflowV2TaskUniverse {
+        schema_version: "workflow-v2-task-universe-v1".to_string(),
+        source_roots: Vec::new(),
+        tasks: vec![WorkflowV2TaskUniverseTask {
+            canonical_task_id: "TASK-TDL-060".to_string(),
+            aliases: Vec::new(),
+            source_path: "tasks/TASK-TDL-060.md".to_string(),
+            dependency_ids: Vec::new(),
+            title: None,
+            artifact_requirements: Vec::new(),
+        }],
+    };
+    let contract = LifecycleContract {
+        task_universe: &universe,
+        target_repository_root: Some("/repo"),
+    };
+    let failed = vec![fixture["failed_outcome"].clone()];
+
+    let retries = triage_retry_items(
+        &contract,
+        &fixture["triage"],
+        &[fixture["plan_item"].clone()],
+        &failed,
+    )
+    .expect("D46 execution retry must remain schedulable");
+    let routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(&fixture["triage"]);
+    let plan = workflow_live_v2_lifecycle_verify_routing::triage_route_plan(&routes);
+
+    assert_eq!(retries.len(), 1);
+    assert_eq!(
+        retries[0]["classification"],
+        "retry_resolved_verification_execution_issue"
+    );
+    assert!(plan.run_retries);
+    assert!(plan.try_supersede);
+    assert!(!plan.run_write_remediation);
+    assert_eq!(
+        workflow_live_v2_lifecycle_verify_routing::remediation_inventory_route(&plan, false),
+        workflow_live_v2_lifecycle_verify_routing::RemediationInventoryRoute::NotNeeded
+    );
+}
+
+#[test]
+fn mixed_supersede_marks_only_its_failed_outcome() {
+    let (universe, _) = contract_fixture();
+    let contract = LifecycleContract {
+        task_universe: &universe,
+        target_repository_root: Some("/repo"),
+    };
+    let verification = serde_json::json!({
+        "status": "needs_review",
+        "outcomes": [
+            accepted_outcome("accepted-sibling"),
+            failed_outcome_with_gap("failed-shape", "shape-gap"),
+            failed_outcome_with_gap("failed-implementation", "implementation-gap")
+        ]
+    });
+    let triage = serde_json::json!({ "data": {
+        "superseded_items": [{
+            "item_id": "supersede-shape",
+            "source_item_id": "failed-shape",
+            "canonical_task_ids": ["TASK-TDL-010"],
+            "classification": "retry_resolved_by_sibling_evidence",
+            "source_residual_gap_ids": ["shape-gap"],
+            "failed_predicate": "shape-gap"
+        }],
+        "implementation_failures": [{
+            "item_id": "repair-implementation",
+            "source_item_id": "failed-implementation",
+            "canonical_task_ids": ["TASK-TDL-010"],
+            "classification": "actionable_implementation_failure"
+        }]
+    }});
+
+    let result = workflow_live_v2_lifecycle_verify_supersede::try_supersede_verification(
+        &contract,
+        &verification,
+        &triage,
+        "triage-mixed",
+    )
+    .expect("the selected shape failure is provably supersedable");
+    let outcomes = support::outcomes_of(&result.verification);
+
+    assert_eq!(result.verification["status"], "needs_review");
+    assert!(
+        outcomes
+            .iter()
+            .any(|outcome| { outcome["item_id"] == "failed-shape" && outcome["status"] == "noop" })
+    );
+    assert!(outcomes.iter().any(|outcome| {
+        outcome["item_id"] == "failed-implementation" && outcome["status"] == "failed"
+    }));
+}
+
+#[test]
 fn fabel_triage_retry_items_keep_only_required_reruns() {
     let (universe, plan_item) = contract_fixture();
     let contract = LifecycleContract {

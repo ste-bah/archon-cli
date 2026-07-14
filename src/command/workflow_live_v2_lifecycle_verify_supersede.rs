@@ -29,13 +29,26 @@ pub(super) fn try_supersede_verification(
         .filter(|outcome| support::outcome_accepted_or_noop(outcome))
         .cloned()
         .collect();
-    let records = supersede_records(contract, &failed, &accepted, triage)?;
+    let candidates = triage_supersede_items(triage);
+    let selected: Vec<Value> = failed
+        .iter()
+        .filter(|failure| {
+            candidates
+                .iter()
+                .any(|candidate| items_share_id(failure, candidate))
+        })
+        .cloned()
+        .collect();
+    if selected.is_empty() {
+        return None;
+    }
+    let records = supersede_records(contract, &selected, &accepted, triage)?;
     Some(VerificationSupersede {
         verification: verification_with_supersede(verification, &records),
         record: serde_json::json!({
             "kind": "verification-supersede",
             "triage_call_id": triage_call_id,
-            "reason": "triage found no implementation or terminal blocker and accepted sibling evidence covers the failed verifier shape",
+            "reason": "accepted sibling evidence covers the selected failed verifier shapes",
             "superseded": records,
         }),
     })
@@ -43,8 +56,8 @@ pub(super) fn try_supersede_verification(
 
 fn triage_has_blockers(triage: &Value) -> bool {
     let data = triage_data(triage);
-    !support::array(data.and_then(|data| data.get("implementation_failures"))).is_empty()
-        || !support::array(data.and_then(|data| data.get("terminal_blockers"))).is_empty()
+    !support::array(data.and_then(|data| data.get("terminal_blockers"))).is_empty()
+        || !support::array(data.and_then(|data| data.get("terminalBlockers"))).is_empty()
 }
 
 fn supersede_records(
@@ -134,14 +147,76 @@ fn accepted_resolves_invariant(outcome: &Value, gaps: &[(String, String)]) -> bo
 }
 
 fn verification_with_supersede(verification: &Value, records: &[Value]) -> Value {
-    let mut object = verification.as_object().cloned().unwrap_or_default();
-    object.insert("status".to_string(), Value::String("accepted".to_string()));
+    let superseded_ids: std::collections::BTreeSet<String> = records
+        .iter()
+        .filter_map(|record| {
+            record
+                .get("failed_outcome_id")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .collect();
+    let outcomes = support::outcomes_of(verification)
+        .into_iter()
+        .map(|outcome| {
+            if superseded_ids.contains(&outcome_id(&outcome)) {
+                superseded_outcome(outcome)
+            } else {
+                outcome
+            }
+        })
+        .collect();
+    let merged = super::workflow_live_v2_lifecycle_verify_merge::replace_all_outcomes(
+        verification,
+        outcomes,
+        "verification supersede",
+    );
+    let mut object = merged.as_object().cloned().unwrap_or_default();
     object.insert(
         "superseded_verification_outcomes".to_string(),
         Value::Array(records.to_vec()),
     );
-    object.insert("residual_gaps".to_string(), Value::Array(Vec::new()));
     Value::Object(object)
+}
+
+fn superseded_outcome(outcome: Value) -> Value {
+    let Some(mut object) = outcome.as_object().cloned() else {
+        return outcome;
+    };
+    object.insert("status".to_string(), Value::String("noop".to_string()));
+    object.insert("superseded_by_triage".to_string(), Value::Bool(true));
+    Value::Object(object)
+}
+
+fn triage_supersede_items(triage: &Value) -> Vec<Value> {
+    let Some(data) = triage_data(triage) else {
+        return Vec::new();
+    };
+    let mut items = support::array(data.get("superseded_items"));
+    items.extend(support::array(data.get("supersededItems")));
+    items.extend(
+        support::array(data.get("retry_items"))
+            .into_iter()
+            .filter(triage_marks_supersede_candidate),
+    );
+    items
+}
+
+fn triage_marks_supersede_candidate(item: &Value) -> bool {
+    item.get("classification")
+        .or_else(|| item.get("verification_failure_class"))
+        .and_then(Value::as_str)
+        .is_some_and(|class| {
+            let class = class.to_ascii_lowercase();
+            class.contains("shape") || class.contains("sibling")
+        })
+}
+
+fn items_share_id(left: &Value, right: &Value) -> bool {
+    let left_ids = outcome_match_ids(left);
+    outcome_match_ids(right)
+        .iter()
+        .any(|id| left_ids.contains(id))
 }
 
 fn triage_items(triage: &Value) -> Vec<Value> {

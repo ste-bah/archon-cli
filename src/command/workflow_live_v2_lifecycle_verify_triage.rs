@@ -6,7 +6,6 @@ impl LifecycleDriver {
         &self,
         ready_items: &[serde_json::Value],
         plan_items: &[serde_json::Value],
-        actionable: &[serde_json::Value],
         wave_index: usize,
         dependency_iteration: usize,
         repair_attempt: usize,
@@ -39,23 +38,55 @@ impl LifecycleDriver {
             )
             .await?;
         let routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(&triage);
-        let retried = self
-            .run_triage_retry(
-                &triage, plan_items, &failed_outcomes, wave_index, dependency_iteration,
-                repair_attempt, verification, evidence,
-            )
-            .await?;
-        if retried && routes.implementation_failures.is_empty() {
-            return Ok(true);
+        let route_plan = workflow_live_v2_lifecycle_verify_routing::triage_route_plan(&routes);
+        if route_plan.terminal_blocked {
+            return Ok(false);
         }
-        let remediation_items = if routes.implementation_failures.is_empty() {
-            actionable
+        let retried = if route_plan.run_retries {
+            self.run_triage_retry(
+                &triage,
+                plan_items,
+                &failed_outcomes,
+                wave_index,
+                dependency_iteration,
+                repair_attempt,
+                verification,
+                evidence,
+            )
+            .await?
         } else {
-            &routes.implementation_failures
+            false
         };
+        let superseded = if route_plan.try_supersede {
+            workflow_live_v2_lifecycle_verify_supersede::try_supersede_verification(
+                &self.contract(),
+                verification,
+                &triage,
+                &triage_id,
+            )
+        } else {
+            None
+        };
+        let superseded = if let Some(supersede) = superseded {
+            *verification = supersede.verification;
+            evidence.verification.push(supersede.record);
+            true
+        } else {
+            false
+        };
+        if !route_plan.run_write_remediation {
+            return Ok(retried || superseded);
+        }
         self.run_write_verification_remediation(
-            ready_items, plan_items, remediation_items, wave_index, dependency_iteration,
-            remediation_attempt, verification, evidence, &triage, &triage_id,
+            ready_items,
+            plan_items,
+            &routes.implementation_failures,
+            wave_index,
+            dependency_iteration,
+            remediation_attempt,
+            verification,
+            evidence,
+            &triage,
         )
         .await
     }

@@ -2,9 +2,28 @@ use serde_json::Value;
 
 use crate::command::workflow_live::workflow_live_generated_lifecycle_support as support;
 
+#[derive(Debug, Default)]
 pub(super) struct VerificationTriageRoutes {
     pub(super) implementation_failures: Vec<Value>,
     pub(super) retry_items: Vec<Value>,
+    pub(super) superseded_items: Vec<Value>,
+    pub(super) terminal_blockers: Vec<Value>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct VerificationTriageRoutePlan {
+    pub(super) run_retries: bool,
+    pub(super) try_supersede: bool,
+    pub(super) run_write_remediation: bool,
+    pub(super) terminal_blocked: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum RemediationInventoryRoute {
+    NotNeeded,
+    RunWriteRemediation,
+    RegenerateInventory,
+    Block,
 }
 
 pub(super) fn triage_routes(triage: &Value) -> VerificationTriageRoutes {
@@ -16,9 +35,47 @@ pub(super) fn triage_routes(triage: &Value) -> VerificationTriageRoutes {
             .filter(is_actionable_classification),
     );
     dedup_items(&mut implementation_failures);
+    let mut retry_items = support::array(data.get("retry_items"));
+    retry_items.extend(support::array(data.get("retryItems")));
+    dedup_items(&mut retry_items);
+    let mut superseded_items = support::array(data.get("superseded_items"));
+    superseded_items.extend(support::array(data.get("supersededItems")));
+    dedup_items(&mut superseded_items);
+    let mut terminal_blockers = support::array(data.get("terminal_blockers"));
+    terminal_blockers.extend(support::array(data.get("terminalBlockers")));
+    dedup_items(&mut terminal_blockers);
     VerificationTriageRoutes {
         implementation_failures,
-        retry_items: support::array(data.get("retry_items")),
+        retry_items,
+        superseded_items,
+        terminal_blockers,
+    }
+}
+
+pub(super) fn triage_route_plan(routes: &VerificationTriageRoutes) -> VerificationTriageRoutePlan {
+    VerificationTriageRoutePlan {
+        run_retries: !routes.retry_items.is_empty(),
+        try_supersede: !routes.superseded_items.is_empty()
+            || routes.retry_items.iter().any(is_sibling_resolved),
+        run_write_remediation: !routes.implementation_failures.is_empty(),
+        terminal_blocked: !routes.terminal_blockers.is_empty(),
+    }
+}
+
+pub(super) fn remediation_inventory_route(
+    plan: &VerificationTriageRoutePlan,
+    inventory_ready: bool,
+) -> RemediationInventoryRoute {
+    if plan.terminal_blocked {
+        return RemediationInventoryRoute::Block;
+    }
+    if !plan.run_write_remediation {
+        return RemediationInventoryRoute::NotNeeded;
+    }
+    if inventory_ready {
+        RemediationInventoryRoute::RunWriteRemediation
+    } else {
+        RemediationInventoryRoute::RegenerateInventory
     }
 }
 
@@ -208,6 +265,13 @@ fn is_actionable_classification(item: &Value) -> bool {
         .unwrap_or_default()
         .to_ascii_lowercase();
     class.contains("actionable") || class.contains("implementation_failure")
+}
+
+fn is_sibling_resolved(item: &Value) -> bool {
+    item.get("classification")
+        .or_else(|| item.get("verification_failure_class"))
+        .and_then(Value::as_str)
+        .is_some_and(|class| class.to_ascii_lowercase().contains("sibling"))
 }
 
 fn dedup_items(items: &mut Vec<Value>) {

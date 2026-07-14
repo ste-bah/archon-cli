@@ -1,0 +1,50 @@
+{
+  "plan_item": {
+    "item_id": "verify-TASK-TDL-060-fetch-native-cli-contract",
+    "canonical_task_ids": ["TASK-TDL-060"],
+    "focused_verification": ["run the focused native-fetch CLI contract tests"],
+    "expected_evidence": ["the intended CLI contract tests execute"]
+  },
+  "failed_outcome": {
+    "item_id": "verification-wave-1-verify-TASK-TDL-060-fetch-native-cli-contract",
+    "status": "failed",
+    "canonical_task_ids": ["TASK-TDL-060"],
+    "result": {
+      "residual_gaps": [{
+        "id": "invalid_branch_output_verification-wave-1-verify-TASK-TDL-060-fetch-native-cli-contract",
+        "description": "subagent timed out after 1200s"
+      }]
+    }
+  },
+  "triage": {
+    "status": "needs_review",
+    "result": {
+      "data": {
+        "implementation_failures": [],
+        "retry_items": [{
+          "item_id": "retry-verification-wave-1-verify-TASK-TDL-060-fetch-native-cli-contract",
+          "source_item_id": "verification-wave-1-verify-TASK-TDL-060-fetch-native-cli-contract",
+          "canonical_task_ids": ["TASK-TDL-060"],
+          "classification": "retry_resolved_verification_execution_issue",
+          "source_residual_gap_ids": ["invalid_branch_output_verification-wave-1-verify-TASK-TDL-060-fetch-native-cli-contract"],
+          "failed_predicate": "subagent timed out after 1200s",
+          "recommended_retry": "Run the repository-search-verified focused native-fetch CLI tests separately.",
+          "expected_evidence": ["the intended CLI contract tests execute without a timeout"]
+        }],
+        "superseded_items": [{
+          "item_id": "superseded-stooq-artifact-overreach",
+          "source_item_id": "verification-wave-1-verify-TASK-TDL-060-artifact-backed-stooq-capability",
+          "canonical_task_ids": ["TASK-TDL-060"],
+          "classification": "retry_resolved_by_sibling_evidence",
+          "source_residual_gap_ids": ["stooq-provider-env-proof-not-profile-sourced"],
+          "failed_predicate": "keyless Stooq provider lacks profile proof"
+        }],
+        "terminal_blockers": []
+      }
+    }
+  },
+  "remediation_inventory": {
+    "status": "accepted",
+    "items": []
+  }
+}

@@ -1,6 +1,70 @@
 use super::*;
 
 #[test]
+fn every_triage_route_combination_has_a_defined_disposition() {
+    for mask in 0u8..8 {
+        for inventory_ready in [false, true] {
+            let routes = VerificationTriageRoutes {
+                retry_items: ((mask & 1) != 0)
+                    .then(|| serde_json::json!({ "item_id": "retry" }))
+                    .into_iter()
+                    .collect(),
+                superseded_items: ((mask & 2) != 0)
+                    .then(|| serde_json::json!({ "item_id": "supersede" }))
+                    .into_iter()
+                    .collect(),
+                implementation_failures: ((mask & 4) != 0)
+                    .then(|| serde_json::json!({ "item_id": "write" }))
+                    .into_iter()
+                    .collect(),
+                terminal_blockers: Vec::new(),
+            };
+            let plan = triage_route_plan(&routes);
+            let inventory_route = remediation_inventory_route(&plan, inventory_ready);
+
+            assert_eq!(plan.run_retries, mask & 1 != 0, "mask={mask}");
+            assert_eq!(plan.try_supersede, mask & 2 != 0, "mask={mask}");
+            assert_eq!(plan.run_write_remediation, mask & 4 != 0, "mask={mask}");
+            assert!(!plan.terminal_blocked, "mask={mask}");
+            match (mask & 4 != 0, inventory_ready) {
+                (true, true) => assert_eq!(
+                    inventory_route,
+                    RemediationInventoryRoute::RunWriteRemediation,
+                    "mask={mask}"
+                ),
+                (true, false) => assert_eq!(
+                    inventory_route,
+                    RemediationInventoryRoute::RegenerateInventory,
+                    "mask={mask}"
+                ),
+                (false, _) => assert_eq!(
+                    inventory_route,
+                    RemediationInventoryRoute::NotNeeded,
+                    "mask={mask}"
+                ),
+            }
+        }
+    }
+}
+
+#[test]
+fn terminal_blocker_overrides_all_nonterminal_routes() {
+    let routes = VerificationTriageRoutes {
+        retry_items: vec![serde_json::json!({ "item_id": "retry" })],
+        superseded_items: vec![serde_json::json!({ "item_id": "supersede" })],
+        implementation_failures: vec![serde_json::json!({ "item_id": "write" })],
+        terminal_blockers: vec![serde_json::json!({ "item_id": "terminal" })],
+    };
+    let plan = triage_route_plan(&routes);
+
+    assert!(plan.terminal_blocked);
+    assert_eq!(
+        remediation_inventory_route(&plan, true),
+        RemediationInventoryRoute::Block
+    );
+}
+
+#[test]
 fn explicit_write_route_selects_named_failed_outcome() {
     let repair = serde_json::json!({
         "status": "accepted",
