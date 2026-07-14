@@ -138,7 +138,8 @@ fn should_reject_duplicate_task_assignment(wave_kind: DynamicSourceKind) -> bool
 fn allows_duplicate_task_assignment(wave_kind: DynamicSourceKind) -> bool {
     matches!(
         wave_kind,
-        DynamicSourceKind::ReviewRemediation
+        DynamicSourceKind::Remediation
+            | DynamicSourceKind::ReviewRemediation
             | DynamicSourceKind::FocusedVerification
             | DynamicSourceKind::ReviewVerification
     )

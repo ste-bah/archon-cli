@@ -377,7 +377,14 @@ impl LlmProvider for CodexProvider {
         tokio::spawn(forward_codex_sse(byte_stream, raw_tx));
         tokio::spawn(async move {
             let mut accumulator = StreamAccumulator::default();
-            while let Some(item) = raw_rx.recv().await {
+            loop {
+                let item = tokio::select! {
+                    _ = tx.closed() => return,
+                    item = raw_rx.recv() => item,
+                };
+                let Some(item) = item else {
+                    break;
+                };
                 match item {
                     Ok(event) => {
                         for translated in accumulator.process(event) {

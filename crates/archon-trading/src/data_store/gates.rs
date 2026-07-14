@@ -31,6 +31,17 @@ pub(super) fn append_dataset_gate_issues(
     if metadata_is_derived_or_resampled_diagnostic(&dataset.metadata) {
         issues.push("derived/resampled diagnostic candles cannot satisfy production gates".into());
     }
+    if dataset
+        .metadata
+        .provider
+        .trim()
+        .eq_ignore_ascii_case("manual")
+    {
+        issues.push("manual datasets cannot satisfy provider-native production gates".into());
+    }
+    if dataset.bars.len() < 2 {
+        issues.push("dataset has insufficient bar substance for a production backtest".into());
+    }
     if !dataset.metadata.production_eligible {
         issues.push("dataset is not production eligible".into());
     }

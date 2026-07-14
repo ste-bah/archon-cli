@@ -51,7 +51,7 @@ fn ahdm_strategy_spec_contains_required_model_contract() {
     assert_eq!(spec["confidence_scoring"]["paper_consideration_min"], 0.70);
     assert_eq!(
         spec["required_datasets"][0]["dataset_id"],
-        "manual-BTCUSD-1D-raw"
+        "polygon-BTCUSD-1D-raw"
     );
     assert_eq!(spec["entry_models"].as_array().unwrap().len(), 3);
     assert!(
@@ -127,7 +127,7 @@ fn ahdm_native_backtest_writes_replayable_manifest_parity_artifacts() {
     let dir = lake
         .run_ahdm_native_backtest(
             "run-1",
-            "manual-BTCUSD-1D-raw",
+            "polygon-BTCUSD-1D-raw",
             "20260101-fixture",
             backtest_config(),
             1.0,
@@ -144,7 +144,7 @@ fn ahdm_native_backtest_writes_replayable_manifest_parity_artifacts() {
     let report: serde_json::Value = read_json(&dir.join("report.json")).unwrap();
     assert_eq!(config["schema"], "archon-ahdm-backtest-config-v1");
     assert_eq!(report["schema"], "archon-ahdm-backtest-report-v1");
-    assert_eq!(config["dataset"]["dataset_id"], "manual-BTCUSD-1D-raw");
+    assert_eq!(config["dataset"]["dataset_id"], "polygon-BTCUSD-1D-raw");
     assert_eq!(config["dataset"]["native_interval"], true);
     assert_eq!(report["diagnostic"], false);
     assert_eq!(report["promotion_eligible"], true);
@@ -164,7 +164,7 @@ fn ahdm_readiness_report_records_failed_gates_and_residual_gap_schema() {
     let run_dir = lake
         .run_ahdm_native_backtest(
             "run-1",
-            "manual-BTCUSD-1D-raw",
+            "polygon-BTCUSD-1D-raw",
             "20260101-fixture",
             backtest_config(),
             1.0,
@@ -294,7 +294,7 @@ fn failed_validation_still_writes_validation_report() {
     let mut metadata: DatasetMetadata = read_json(&metadata_path).unwrap();
     metadata.provider.clear();
     write_json(&metadata_path, &metadata).unwrap();
-    let result = lake.validate_ohlcv("manual-BTCUSD-1D-raw", "20260101-fixture", "now".into());
+    let result = lake.validate_ohlcv("polygon-BTCUSD-1D-raw", "20260101-fixture", "now".into());
     assert!(matches!(result, Err(DataStoreError::InvalidOhlcv(_))));
     let report: ValidationReport = read_json(&temp.path().join(&record.validation_path)).unwrap();
     assert_eq!(report.status, ValidationStatus::Failed);
@@ -311,7 +311,7 @@ fn backtest_gate_refuses_non_native_dataset_without_diagnostic_override() {
     request.metadata.quality_status = "degraded".into();
     lake.store_ohlcv(request).unwrap();
 
-    let result = lake.backtest_data_gate("manual-BTCUSD-1D-raw", "20260101-fixture", false);
+    let result = lake.backtest_data_gate("polygon-BTCUSD-1D-raw", "20260101-fixture", false);
     assert!(matches!(result, Err(DataStoreError::InvalidMetadata(_))));
 }
 
@@ -326,7 +326,7 @@ fn diagnostic_backtest_gate_reports_overridden_dataset_issues() {
     lake.store_ohlcv(request).unwrap();
 
     let report = lake
-        .backtest_data_gate("manual-BTCUSD-1D-raw", "20260101-fixture", true)
+        .backtest_data_gate("polygon-BTCUSD-1D-raw", "20260101-fixture", true)
         .unwrap();
     assert!(report.diagnostic);
     assert!(!report.promotion_eligible);
@@ -349,7 +349,7 @@ fn backtest_gate_refuses_checksum_mismatch() {
     metadata.checksum = "wrong-checksum".into();
     write_json(&metadata_path, &metadata).unwrap();
 
-    let result = lake.backtest_data_gate("manual-BTCUSD-1D-raw", "20260101-fixture", false);
+    let result = lake.backtest_data_gate("polygon-BTCUSD-1D-raw", "20260101-fixture", false);
     assert!(matches!(
         result,
         Err(DataStoreError::InvalidMetadata(message))
@@ -361,11 +361,11 @@ fn request() -> StoreOhlcvRequest {
     StoreOhlcvRequest {
         metadata: DatasetMetadata {
             schema_version: "archon-trading-dataset-20260101-fixture".into(),
-            dataset_id: "manual-BTCUSD-1D-raw".into(),
+            dataset_id: "polygon-BTCUSD-1D-raw".into(),
             version: "20260101-fixture".into(),
             canonical_instrument: "BTCUSD".into(),
             asset_class: "crypto".into(),
-            provider: "manual".into(),
+            provider: "polygon".into(),
             provider_symbol: "BTCUSD".into(),
             timeframe: "1D".into(),
             native_interval: true,
@@ -380,12 +380,12 @@ fn request() -> StoreOhlcvRequest {
             coverage: CoverageWindow {
                 start: String::new(),
                 end: String::new(),
-                expected_bars: 2,
+                expected_bars: 3,
                 observed_bars: 0,
             },
             gaps: GapSummary {
                 missing_bars: 0,
-                expected_bars: 2,
+                expected_bars: 3,
             },
             checksum: String::new(),
             checksums: DatasetChecksums::default(),
@@ -398,6 +398,7 @@ fn request() -> StoreOhlcvRequest {
         bars: vec![
             bar("2026-01-01T00:00:00Z", 10.0),
             bar("2026-01-02T00:00:00Z", 11.0),
+            bar("2026-01-03T00:00:00Z", 10.0),
         ],
         raw_body: b"raw".to_vec(),
         raw_format: OhlcvFormat::Csv,

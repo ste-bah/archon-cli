@@ -42,6 +42,7 @@ impl AnthropicClient {
     pub fn new(auth: AuthProvider, identity: IdentityProvider, api_url: Option<String>) -> Self {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(300))
+            .pool_max_idle_per_host(0)
             .no_proxy()
             .build()
             .expect("reqwest client should build");
@@ -262,7 +263,10 @@ impl AnthropicClient {
         let (tx, rx) = tokio::sync::mpsc::channel(256);
 
         tokio::spawn(async move {
-            let text = response.text().await.unwrap_or_default();
+            let text = tokio::select! {
+                _ = tx.closed() => return,
+                text = response.text() => text.unwrap_or_default(),
+            };
             let pairs = split_sse_lines(&text);
             for (event_type, data) in pairs {
                 match parse_sse_event(event_type, data) {

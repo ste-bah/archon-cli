@@ -98,17 +98,17 @@ fn mark_if_unchanged(mut outcome: Value, signatures: &BTreeSet<String>) -> Value
             "unchanged verification failure survived two noop remediation rounds".to_string(),
         ),
     );
-    if let Some(result) = object.get_mut("result").and_then(Value::as_object_mut) {
-        if let Some(data) = result.get_mut("data").and_then(Value::as_object_mut) {
-            data.insert(
-                "verification_failure_class".to_string(),
-                Value::String("artifact_contract_overreach".to_string()),
-            );
-            data.insert(
-                "verification_remediation_required".to_string(),
-                Value::Bool(false),
-            );
-        }
+    if let Some(result) = object.get_mut("result").and_then(Value::as_object_mut)
+        && let Some(data) = result.get_mut("data").and_then(Value::as_object_mut)
+    {
+        data.insert(
+            "verification_failure_class".to_string(),
+            Value::String("artifact_contract_overreach".to_string()),
+        );
+        data.insert(
+            "verification_remediation_required".to_string(),
+            Value::Bool(false),
+        );
     }
     outcome
 }

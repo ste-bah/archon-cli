@@ -69,16 +69,42 @@ impl SubagentRunner {
                 return Ok("[Agent shutdown requested]".to_string());
             }
 
-            let prepared_request = prepare_request_round(
-                self,
-                &mut messages,
-                &mut auto_compact,
-                &mut last_known_context_tokens,
-                &mut proactive_pressure_attempted,
-                reasoning_encrypted.clone(),
+            let request_deadline = tokio::time::Instant::from_std(
+                deadline
+                    + archon_tools::current_timeout_exempt_cargo_wait(
+                        &self.tool_context.session_id,
+                    ),
+            );
+            let prepared_request = tokio::time::timeout_at(
+                request_deadline,
+                prepare_request_round(
+                    self,
+                    &mut messages,
+                    &mut auto_compact,
+                    &mut last_known_context_tokens,
+                    &mut proactive_pressure_attempted,
+                    reasoning_encrypted.clone(),
+                ),
             )
-            .await;
-            let stream = collect_stream_round(
+            .await
+            .map_err(|_| {
+                let elapsed = started.elapsed().as_secs();
+                anyhow::anyhow!(
+                    "Subagent wall-clock timeout: {elapsed}s elapsed (cap: {}s) while preparing LLM request at turn {}/{}",
+                    self.timeout_secs,
+                    turn,
+                    self.max_turns,
+                )
+            })?;
+            let inference_deadline = tokio::time::Instant::from_std(
+                deadline
+                    + archon_tools::current_timeout_exempt_cargo_wait(
+                        &self.tool_context.session_id,
+                    ),
+            );
+            let stream = tokio::time::timeout_at(
+                inference_deadline,
+                collect_stream_round(
                 self,
                 &mut messages,
                 &mut auto_compact,
@@ -93,8 +119,18 @@ impl SubagentRunner {
                     prepared_request.large_retry_body_bytes,
                 ),
                 &prepared_request.telemetry,
+                ),
             )
-            .await?;
+            .await
+            .map_err(|_| {
+                let elapsed = started.elapsed().as_secs();
+                anyhow::anyhow!(
+                    "Subagent wall-clock timeout: {elapsed}s elapsed (cap: {}s) during LLM inference at turn {}/{}",
+                    self.timeout_secs,
+                    turn,
+                    self.max_turns,
+                )
+            })??;
             if stream.retry_after_compact {
                 continue;
             }

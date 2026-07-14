@@ -61,7 +61,7 @@ pub fn run_ohlcv_backtest(
         rule: format!("{:?}", request.rule),
         exploratory: request.exploratory,
         source: request.source,
-        promotion_eligible: request_is_promotion_eligible(request),
+        promotion_eligible: request_is_promotion_eligible(request, &trades),
         metrics,
         trades,
     })
@@ -162,7 +162,7 @@ pub fn run_custom_ohlcv_backtest(
         rule: custom_rule_name(strategy),
         exploratory: request.exploratory,
         source: request.source,
-        promotion_eligible: request_is_promotion_eligible(request),
+        promotion_eligible: request_is_promotion_eligible(request, &trades),
         metrics,
         trades,
     })
@@ -252,9 +252,15 @@ fn request_is_promotion_candidate(request: &OhlcvBacktestRequest) -> bool {
     !request.exploratory && request.source == EvidenceSource::NativeHarness
 }
 
-fn request_is_promotion_eligible(request: &OhlcvBacktestRequest) -> bool {
+fn request_is_promotion_eligible(request: &OhlcvBacktestRequest, trades: &[OhlcvTrade]) -> bool {
     request_is_promotion_candidate(request)
         && request.dataset.status == crate::data_lake::DatasetStatus::Healthy
+        && trades.iter().any(|trade| {
+            trade.exit_index > trade.entry_index
+                && trade.exit_timestamp != trade.entry_timestamp
+                && trade.entry_price.is_finite()
+                && trade.exit_price.is_finite()
+        })
 }
 
 fn validate_promotion_dataset_ref(
@@ -329,6 +335,26 @@ mod tests {
             result,
             Err(CandleBacktestError::InvalidDatasetRef("dataset_status"))
         ));
+    }
+
+    #[test]
+    fn d42_promotion_requires_replayable_trade_substance() {
+        let bars = vec![bar("1", 10.0), bar("2", 9.0), bar("3", 8.0)];
+        let report = run_ohlcv_backtest(&config(), &request(), &bars).unwrap();
+
+        assert!(report.trades.is_empty());
+        assert_eq!(report.metrics["trade_count"], 0.0);
+        assert!(!report.promotion_eligible);
+    }
+
+    #[test]
+    fn d42_same_bar_round_trip_cannot_promote() {
+        let bars = vec![bar("1", 10.0), bar("2", 11.0)];
+        let report = run_ohlcv_backtest(&config(), &request(), &bars).unwrap();
+
+        assert_eq!(report.trades.len(), 1);
+        assert_eq!(report.trades[0].entry_index, report.trades[0].exit_index);
+        assert!(!report.promotion_eligible);
     }
 
     fn request() -> OhlcvBacktestRequest {

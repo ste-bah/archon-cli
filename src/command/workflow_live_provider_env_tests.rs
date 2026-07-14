@@ -44,6 +44,21 @@ fn provider_env_policy_derives_key_from_provider_requirement_object() {
 }
 
 #[test]
+fn d40_tdl_080_always_gets_profile_sourced_polygon_preflight() {
+    let input = serde_json::json!({
+        "item": {
+            "canonical_task_ids": ["TASK-TDL-080"],
+            "item_id": "impl-TASK-TDL-080-coverage"
+        }
+    });
+
+    let policy = provider_env_policy_from_input(&input).expect("TDL-080 policy");
+
+    assert_eq!(policy.required_keys, vec!["POLYGON_API_KEY"]);
+    assert_eq!(policy.profile_sources, vec!["~/.profile"]);
+}
+
+#[test]
 fn provider_env_result_stamp_persists_redacted_proof_only() {
     let prepared = PreparedProviderEnv {
         policy: ProviderEnvPolicy {

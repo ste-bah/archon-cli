@@ -221,6 +221,21 @@ fn backtest_gate_enforces_required_raw_artifact_contract() {
 }
 
 #[test]
+fn d42_backtest_gate_refuses_manual_dataset_claiming_native_metadata() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    lake.store_ohlcv(request()).unwrap();
+
+    let result = lake.backtest_data_gate("manual-BTCUSD-1D-raw", "20260101-fixture", false);
+
+    assert!(matches!(
+        result,
+        Err(DataStoreError::InvalidMetadata(message))
+            if message.contains("manual datasets cannot satisfy provider-native")
+    ));
+}
+
+#[test]
 fn registry_schema_v2_preserves_v1_readability_and_blocks_unknown_schema() {
     let temp = tempfile::tempdir().unwrap();
     let lake = TradingDataLake::new(temp.path());

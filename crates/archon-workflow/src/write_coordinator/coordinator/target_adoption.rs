@@ -14,7 +14,9 @@ pub(super) fn capture_with_target_adoption(
     let mut active_plan = it.plan.clone();
     let mut discovered = Vec::new();
     loop {
-        match capture_patch(&it.workspace, &active_plan.target_files, &it.baseline) {
+        let mut active_workspace = it.workspace.clone();
+        active_workspace.plan = active_plan.clone();
+        match capture_patch(&active_workspace, &active_plan.target_files, &it.baseline) {
             Ok(captured) => return Ok((captured, active_plan)),
             Err(PatchError::UndeclaredWrite { path }) => {
                 if discovered.len() >= cfg.max_dynamic_target_adoptions {

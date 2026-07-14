@@ -18,7 +18,14 @@ pub(super) fn forward_stream(
     let (tx, rx) = tokio::sync::mpsc::channel(64);
     tokio::spawn(async move {
         let mut completed = false;
-        while let Some(event) = inner_rx.recv().await {
+        loop {
+            let event = tokio::select! {
+                _ = tx.closed() => break,
+                event = inner_rx.recv() => event,
+            };
+            let Some(event) = event else {
+                break;
+            };
             match &event {
                 StreamEvent::Error {
                     error_type,

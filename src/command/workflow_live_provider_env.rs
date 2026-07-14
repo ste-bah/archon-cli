@@ -96,6 +96,9 @@ pub(super) fn provider_env_policy_from_input(
     if let Some(item) = input.get("item") {
         keys.extend(provider_env_keys(item));
     }
+    if contains_canonical_task(input, "TASK-TDL-080") {
+        keys.push("POLYGON_API_KEY".to_string());
+    }
     let keys: Vec<String> = keys
         .into_iter()
         .collect::<BTreeSet<_>>()
@@ -108,6 +111,32 @@ pub(super) fn provider_env_policy_from_input(
     policy.profile_sources = profile_sources(input);
     policy.reason = Some("generated workflow provider-sensitive verification".to_string());
     Some(policy)
+}
+
+fn contains_canonical_task(value: &serde_json::Value, expected: &str) -> bool {
+    match value {
+        serde_json::Value::Array(values) => values
+            .iter()
+            .any(|value| contains_canonical_task(value, expected)),
+        serde_json::Value::Object(object) => {
+            let owns_task = [
+                "canonical_task_ids",
+                "canonicalTaskIds",
+                "task_id",
+                "taskId",
+            ]
+            .iter()
+            .filter_map(|key| object.get(*key))
+            .flat_map(value_strings)
+            .any(|task_id| task_id == expected);
+            owns_task
+                || object
+                    .get("item")
+                    .is_some_and(|item| contains_canonical_task(item, expected))
+        }
+        serde_json::Value::String(value) => value == expected,
+        _ => false,
+    }
 }
 
 fn provider_env_keys(value: &serde_json::Value) -> Vec<String> {

@@ -306,6 +306,70 @@ fn dynamic_wave_source_rejects_duplicate_task_assignment_without_fingerprint() {
 }
 
 #[test]
+fn d43_verification_remediation_allows_multiple_repairs_for_one_canonical_task() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/d43_same_task_verification_remediation.json"
+    ))
+    .expect("D43 fixture");
+    let execution = WorkflowV2CallExecution {
+        call: WorkflowV2HostCall {
+            id: "remediation-wave-10-verification-1".to_string(),
+            method: WorkflowV2HostMethod::Fanout,
+            write_mode: Some(WorkflowV2WriteMode::Worktree),
+            options: WorkflowV2HostOptions {
+                item_kind: Some("implementation".to_string()),
+                target_files_from_item: true,
+                ..WorkflowV2HostOptions::default()
+            },
+        },
+        input: serde_json::json!({ "source_data": fixture["source_data"] }),
+        depends_on: Vec::new(),
+    };
+    let mut universe = tdl_task_universe();
+    for task_id in ["TASK-TDL-090", "TASK-TDL-110", "TASK-TDL-120"] {
+        universe.tasks.push(
+            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+            canonical_task_id: task_id.to_string(),
+            aliases: Vec::new(),
+            source_path: format!("/tmp/tasks/{task_id}.md"),
+            dependency_ids: Vec::new(),
+            title: None,
+            artifact_requirements: Vec::new(),
+            },
+        );
+    }
+    universe.tasks.push(
+        super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+        canonical_task_id: "TASK-TDL-130".to_string(),
+        aliases: Vec::new(),
+        source_path: "/tmp/tasks/TASK-TDL-130.md".to_string(),
+        dependency_ids: vec![
+            "TASK-TDL-090".to_string(),
+            "TASK-TDL-110".to_string(),
+            "TASK-TDL-120".to_string(),
+        ],
+        title: None,
+        artifact_requirements: Vec::new(),
+        },
+    );
+
+    let metadata = dynamic_wave_source_metadata(&execution, Some(&universe), None);
+
+    assert_eq!(metadata.invalid_reason, None, "{metadata:?}");
+    assert!(metadata.source_fingerprint.is_some());
+    let graph = metadata.source_task_graph.expect("source graph");
+    assert_eq!(graph.items.len(), 2);
+    assert!(graph
+        .items
+        .iter()
+        .all(|item| item.canonical_task_ids == ["TASK-TDL-130"]));
+    assert_eq!(
+        fixture["rejected"]["data"]["source_metadata_invalid"],
+        "source graph canonical task 'TASK-TDL-130' is assigned by multiple source items"
+    );
+}
+
+#[test]
 fn dynamic_wave_source_without_authoritative_universe_is_not_reusable() {
     let execution = execution(serde_json::json!([
         {

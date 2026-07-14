@@ -2,6 +2,9 @@ use std::collections::BTreeMap;
 
 use super::*;
 
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+const STREAM_RECONNECT_BACKOFF: Duration = Duration::from_secs(1);
+
 pub(super) struct StreamRoundResult {
     pub text_content: String,
     pub thinking_blocks: BTreeMap<u32, PendingThinkingBlock>,
@@ -24,19 +27,39 @@ pub(super) async fn collect_stream_round(
     (request_body_bytes, large_retry_body_bytes): (usize, usize),
     telemetry: &crate::agent::autocompact::CompactionTelemetry,
 ) -> anyhow::Result<StreamRoundResult> {
-    let mut rx = open_stream_with_retries(
-        runner,
-        messages,
-        auto_compact,
-        reactive_overflow_retried,
-        reactive_rate_limit_retried,
-        last_known_context_tokens,
-        request,
-        request_body_bytes,
-        large_retry_body_bytes,
-        telemetry,
-    )
-    .await?;
+    let mut reconnected = false;
+    let mut rx = loop {
+        let attempt_request = LlmRequest {
+            messages: messages.clone(),
+            ..request.clone()
+        };
+        match tokio::time::timeout(
+            STREAM_IDLE_TIMEOUT,
+            open_stream_with_retries(
+                runner,
+                messages,
+                auto_compact,
+                reactive_overflow_retried,
+                reactive_rate_limit_retried,
+                last_known_context_tokens,
+                attempt_request,
+                request_body_bytes,
+                large_retry_body_bytes,
+                telemetry,
+            ),
+        )
+        .await
+        {
+            Ok(result) => break result?,
+            Err(_) if !reconnected => {
+                reconnected = true;
+                tokio::time::sleep(STREAM_RECONNECT_BACKOFF).await;
+            }
+            Err(_) => {
+                anyhow::bail!("Subagent LLM stream idle timeout while opening response")
+            }
+        }
+    };
 
     let mut text_content = String::new();
     let mut thinking_blocks = BTreeMap::<u32, PendingThinkingBlock>::new();
@@ -45,8 +68,40 @@ pub(super) async fn collect_stream_round(
     let mut pending_tool_indices: Vec<u32> = Vec::new();
     let mut usage_acc = archon_llm::usage::UsageAccumulator::default();
     let mut retry_after_compact = false;
+    let mut received_event = false;
 
-    while let Some(event) = rx.recv().await {
+    loop {
+        let event = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, rx.recv()).await {
+            Ok(event) => event,
+            Err(_) if !received_event && !reconnected => {
+                drop(rx);
+                reconnected = true;
+                tokio::time::sleep(STREAM_RECONNECT_BACKOFF).await;
+                let retry_request = LlmRequest {
+                    messages: messages.clone(),
+                    ..request.clone()
+                };
+                rx = tokio::time::timeout(
+                    STREAM_IDLE_TIMEOUT,
+                    runner.provider.stream(retry_request),
+                )
+                .await
+                .map_err(|_| {
+                    anyhow::anyhow!("Subagent LLM stream idle timeout while reconnecting")
+                })??;
+                continue;
+            }
+            Err(_) => {
+                anyhow::bail!(
+                    "Subagent LLM stream idle timeout: no event received for {}s",
+                    STREAM_IDLE_TIMEOUT.as_secs()
+                )
+            }
+        };
+        let Some(event) = event else {
+            break;
+        };
+        received_event = true;
         usage_acc.record_event(&event);
         match event {
             StreamEvent::ContentBlockStart {

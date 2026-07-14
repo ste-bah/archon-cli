@@ -61,6 +61,37 @@ fn verification_items_receive_manifest_grounded_diff_scope() {
 }
 
 #[test]
+fn d40_tdl_080_gets_substantive_registry_backed_coverage_verification() {
+    let items = vec![serde_json::json!({
+        "item_id": "verify-TASK-TDL-080-shape-only",
+        "source_item_id": "impl-TASK-TDL-080-coverage",
+        "canonical_task_ids": ["TASK-TDL-080"],
+        "focused_verification": "jq '.cells | length' coverage/latest.json"
+    })];
+
+    let prepared = prepare_verification_items(items, Some("/runtime/project"), &[]);
+    let substantive = prepared
+        .iter()
+        .find(|item| item["item_id"] == "verify-TASK-TDL-080-required-native-coverage")
+        .expect("substantive coverage check");
+
+    assert!(
+        substantive["focused_verification"]
+            .as_str()
+            .expect("command")
+            .contains("lacks healthy registered native provenance")
+    );
+    assert_eq!(
+        substantive["provider_env_requirements"],
+        serde_json::json!(["POLYGON_API_KEY"])
+    );
+    assert_eq!(
+        substantive["required_tools"],
+        serde_json::json!(["mcp__tradingview__data_get_ohlcv"])
+    );
+}
+
+#[test]
 fn cargo_verification_waves_are_serialized() {
     let items = vec![serde_json::json!({
         "item_id": "verify-cargo",

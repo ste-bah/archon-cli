@@ -299,10 +299,8 @@ fn stale_target(
         .iter()
         .filter(|t| m.changed_files.iter().any(|c| c == *t))
         .find(|t| {
-            let now = hash_file(&canonical_root.join(t));
-            expected
-                .get(t.as_str())
-                .is_some_and(|exp| now.as_deref() != Some(exp))
+            let now = hash_file(&canonical_root.join(t)).unwrap_or_else(|| "absent".to_string());
+            expected.get(t.as_str()).is_some_and(|exp| now != *exp)
         })
         .cloned()
 }

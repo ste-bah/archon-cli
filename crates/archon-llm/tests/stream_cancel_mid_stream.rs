@@ -24,9 +24,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use archon_llm::anthropic::{AnthropicClient, MessageRequest};
+use archon_llm::auth::AuthProvider;
+use archon_llm::identity::{IdentityMode, IdentityProvider};
+use archon_llm::types::Secret;
 use axum::Router;
 use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::routing::get;
+use axum::routing::{get, post};
 use futures_util::{Stream, StreamExt, stream};
 use tokio::net::TcpListener;
 
@@ -176,6 +180,54 @@ async fn stream_cancel_mid_stream_drops_server_connection() {
     assert!(
         peak >= 1,
         "peak active connections should be >= 1; got {peak}"
+    );
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn anthropic_receiver_drop_cancels_stalled_response_body() {
+    let state = ConnState::default();
+    let app: Router = Router::new()
+        .route("/v1/messages", post(sse_handler))
+        .with_state(state.clone());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let client = AnthropicClient::new(
+        AuthProvider::ApiKey(Secret::new("test-key".to_string())),
+        IdentityProvider::new(
+            IdentityMode::Clean,
+            "test-session".to_string(),
+            "test-device".to_string(),
+            String::new(),
+        ),
+        Some(format!("http://{addr}/v1/messages")),
+    );
+    let rx = client
+        .stream_message(MessageRequest {
+            messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
+            ..MessageRequest::default()
+        })
+        .await
+        .expect("stream response headers");
+
+    assert_eq!(state.active.load(Ordering::SeqCst), 1);
+    drop(rx);
+
+    for _ in 0..40 {
+        if state.active.load(Ordering::SeqCst) == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(
+        state.active.load(Ordering::SeqCst),
+        0,
+        "dropping the provider receiver must close the stalled HTTP body"
     );
 
     server.abort();
