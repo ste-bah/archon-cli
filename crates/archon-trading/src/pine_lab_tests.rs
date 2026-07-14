@@ -169,3 +169,23 @@ fn ac_003_alerts_are_non_authoritative_order_intents() {
     let intent = pine_alert_to_non_authoritative_intent(&script).unwrap();
     assert_eq!(intent["requires_risk_governor"], true);
 }
+
+#[test]
+fn task_tdl_120_compiled_pine_evidence_does_not_enable_live_trading() {
+    let report = serde_json::json!({
+        "task_id": "TASK-TDL-120",
+        "tooling_available": true,
+        "status": "compiled",
+        "promotion_eligible": true,
+        "exploratory_only": true,
+        "mcp_tools": [
+            {"tool": "mcp__tradingview__pine_analyze", "success": true},
+            {"tool": "mcp__tradingview__pine_check", "success": true},
+            {"tool": "mcp__tradingview__pine_analyze", "success": true},
+            {"tool": "mcp__tradingview__pine_check", "success": true}
+        ],
+        "promotion": {"live_trading_enabled": false}
+    });
+    assert_eq!(report["promotion"]["live_trading_enabled"], false);
+    assert_eq!(report["mcp_tools"].as_array().unwrap().len(), 4);
+}

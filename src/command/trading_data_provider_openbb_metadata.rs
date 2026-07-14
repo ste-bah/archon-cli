@@ -1,5 +1,7 @@
 use anyhow::Result;
-use archon_trading::data_lake::{CoverageWindow, DataType, DatasetMetadata, GapSummary};
+use archon_trading::data_lake::{
+    CoverageWindow, DataType, DatasetMetadata, GapSummary, ProviderCapabilityResult,
+};
 use archon_trading::ohlcv::OhlcvBar;
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -77,6 +79,7 @@ pub(super) fn unavailable_report(
     dataset_id: &str,
     reason: &str,
 ) -> Result<String> {
+    let missing_credentials = is_missing_credentials_reason(reason);
     let report = json!({
         "provider": provider.trim().to_ascii_lowercase(),
         "symbol": symbol,
@@ -90,6 +93,10 @@ pub(super) fn unavailable_report(
         "quality_status": provider_quality_status(provider),
         "production_eligible": false,
         "provider_blocked_or_unavailable": true,
+        "requires_credentials": requires_openbb_credentials(provider),
+        "missing_credentials": missing_credentials,
+        "credential_state": if missing_credentials { "missing" } else { "unavailable" },
+        "secret_policy": "credential values are never stored; only env key presence is recorded",
         "fail_closed_behavior": "no dataset registry entry is written unless provider-native fetch returns complete artifacts"
     });
     write_or_render(&report, None)
@@ -109,6 +116,54 @@ fn provider_quality_status(provider: &str) -> &'static str {
         "yfinance" => "degraded_fallback",
         _ => "unavailable",
     }
+}
+
+pub(super) fn apply_unavailable_capability_reason(
+    result: &mut ProviderCapabilityResult,
+    reason: &str,
+) {
+    let missing_credentials = is_missing_credentials_reason(reason);
+    result.can_fetch = false;
+    result.production_eligible = false;
+    result.unavailable_reason = Some(reason.to_string());
+
+    if missing_credentials {
+        result.requires_credentials = true;
+        result.missing_credentials = true;
+        result.credential_state = "missing".into();
+        result.provider_blocked = false;
+        result.historical_supported = result.native_interval;
+        return;
+    }
+
+    result.missing_credentials = false;
+    result.credential_state = "unavailable".into();
+    if is_native_unsupported_reason(reason) {
+        result.unsupported = true;
+    }
+    result.native_interval = false;
+    result.historical_supported = false;
+}
+
+fn is_missing_credentials_reason(reason: &str) -> bool {
+    let lower = reason.to_ascii_lowercase();
+    lower.contains("credentials unavailable")
+        || lower.contains("missing provider credentials")
+        || lower.contains("env keys checked")
+}
+
+fn is_native_unsupported_reason(reason: &str) -> bool {
+    let lower = reason.to_ascii_lowercase();
+    lower.contains("futures native fetch is unavailable")
+        || lower.contains("unsupported native timeframe")
+        || lower.contains("not backed by the openbb native fetch path")
+}
+
+fn requires_openbb_credentials(provider: &str) -> bool {
+    matches!(
+        provider.trim().to_ascii_lowercase().as_str(),
+        "openbb" | "polygon"
+    )
 }
 
 fn native_version(timeframe: &str, request: &OpenBbNativeRequest) -> String {

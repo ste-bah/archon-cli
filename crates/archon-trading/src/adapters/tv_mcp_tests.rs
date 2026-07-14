@@ -110,3 +110,40 @@ fn compile_check_enforces_thirty_second_sla() {
         .unwrap_err();
     assert_eq!(err, TvMcpError::CompileSlaExceeded { elapsed_ms: 30_001 });
 }
+
+#[test]
+fn native_ohlcv_candles_require_supported_interval_preflight_contract() {
+    let preflight = TvNativeOhlcvPreflight::require("BINANCE:BTCUSDT", "240").unwrap();
+    assert_eq!(preflight.health_tool, "mcp__tradingview__tv_health_check");
+    assert_eq!(
+        preflight.chart_state_tool,
+        "mcp__tradingview__chart_get_state"
+    );
+    assert_eq!(preflight.ohlcv_tool, "mcp__tradingview__data_get_ohlcv");
+    let contract = preflight.request_contract();
+    assert_eq!(
+        contract["source_classification"],
+        "chart_equivalent_research_data"
+    );
+    assert_eq!(contract["not_institutional_vendor_data"], true);
+}
+
+#[test]
+fn native_ohlcv_candles_fail_closed_on_unsupported_interval() {
+    let mut transport = FakeTransport {
+        failures_before_success: 0,
+        calls: 0,
+        elapsed: Duration::from_millis(1),
+    };
+    let err = adapter(false, false)
+        .ohlcv_native_candles(
+            &mut transport,
+            "BINANCE:BTCUSDT",
+            "4H",
+            "2024-01-01",
+            "2024-01-02",
+        )
+        .unwrap_err();
+    assert_eq!(transport.calls, 0);
+    assert!(matches!(err, TvMcpError::NativeOhlcvUnavailable { .. }));
+}

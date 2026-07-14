@@ -84,6 +84,10 @@ pub(crate) fn render_backtest(action: &TradingCliBacktestAction) -> Result<Strin
             let mut value = serde_json::to_value(&report)?;
             if let serde_json::Value::Object(map) = &mut value {
                 map.insert("data_gate".into(), serde_json::to_value(gate)?);
+                map.insert(
+                    "dataset_provenance".into(),
+                    dataset_provenance(&dataset.record),
+                );
             }
             write_or_render(&value, out.as_deref())
         }
@@ -113,6 +117,9 @@ pub(crate) fn render_backtest(action: &TradingCliBacktestAction) -> Result<Strin
                     &generated_at,
                 )
                 .map_err(|err| anyhow!("AHDM native backtest failed: {err:?}"))?;
+            let dataset = lake.load_ohlcv(dataset_id, version).map_err(|err| {
+                anyhow!("failed to load AHDM backtest dataset provenance: {err:?}")
+            })?;
             let report = serde_json::json!({
                 "status": "created",
                 "strategy_id": "AHDM-v1",
@@ -120,6 +127,7 @@ pub(crate) fn render_backtest(action: &TradingCliBacktestAction) -> Result<Strin
                 "dataset_id": dataset_id,
                 "version": version,
                 "generated_at": generated_at,
+                "dataset_provenance": dataset_provenance(&dataset.record),
                 "run_dir": run_dir,
                 "artifacts": {
                     "config": run_dir.join("config.json"),
@@ -159,6 +167,25 @@ fn request(
     }
 }
 
+fn dataset_provenance(
+    record: &archon_trading::data_store::StoredDatasetRecord,
+) -> serde_json::Value {
+    serde_json::json!({
+        "dataset_id": record.dataset_id,
+        "version": record.version,
+        "provider": record.provider,
+        "timeframe": record.timeframe,
+        "status": record.status,
+        "checksum": record.checksum,
+        "metadata_checksum": record.metadata_checksum,
+        "validation_path": record.validation_path,
+        "manifest_path": record.manifest_path,
+        "metadata_path": record.metadata_path,
+        "normalized_path": record.normalized_path,
+        "raw_path": record.raw_path,
+    })
+}
+
 impl From<TradingCliDatasetStatus> for DatasetStatus {
     fn from(value: TradingCliDatasetStatus) -> Self {
         match value {
@@ -193,6 +220,19 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
+    fn dataset_provenance_records_gate_identifiers_and_manifest_path() {
+        let record = stored_record();
+        let provenance = dataset_provenance(&record);
+
+        assert_eq!(provenance["dataset_id"], "btc-1d");
+        assert_eq!(provenance["version"], "v1");
+        assert_eq!(provenance["provider"], "tradingview");
+        assert_eq!(provenance["timeframe"], "1D");
+        assert_eq!(provenance["validation_path"], "validation.json");
+        assert_eq!(provenance["manifest_path"], "manifest.json");
+    }
+
+    #[test]
     fn run_ohlcv_refuses_loose_strategy_rules_for_promotion_backtest() {
         let temp = tempfile::tempdir().unwrap();
         let config = temp.path().join("backtest.json");
@@ -218,6 +258,38 @@ mod tests {
             result,
             Err(error) if error.to_string().contains("loose strategy-rules paths")
         ));
+    }
+
+    fn stored_record() -> archon_trading::data_store::StoredDatasetRecord {
+        archon_trading::data_store::StoredDatasetRecord {
+            dataset_id: "btc-1d".into(),
+            version: "v1".into(),
+            schema_version: "archon-trading-data-registry-v2".into(),
+            dataset_path: "datasets/btc-1d/v1".into(),
+            metadata_checksum: "metadata-checksum".into(),
+            raw_checksum: "raw-checksum".into(),
+            raw_response_path: "raw/response.json".into(),
+            raw_request_path: "raw/request.json".into(),
+            redacted_headers_path: "raw/headers.redacted.json".into(),
+            provider_notes_path: "raw/provider-notes.md".into(),
+            provider: "tradingview".into(),
+            data_type: "Ohlcv".into(),
+            symbol: "BTCUSD".into(),
+            timeframe: "1D".into(),
+            native_interval: true,
+            production_eligible: true,
+            status: DatasetStatus::Healthy,
+            checksum: "normalized-checksum".into(),
+            bars: 2,
+            coverage_start: "2026-01-01T00:00:00Z".into(),
+            coverage_end: "2026-01-02T00:00:00Z".into(),
+            metadata_path: "metadata.json".into(),
+            normalized_path: "ohlcv.jsonl".into(),
+            raw_path: "raw/response.json".into(),
+            validation_path: "validation.json".into(),
+            manifest_path: "manifest.json".into(),
+            created_at: "2026-01-02T00:00:00Z".into(),
+        }
     }
 
     fn config_fixture() -> BacktestConfig {

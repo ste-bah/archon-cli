@@ -1,5 +1,19 @@
 use super::*;
 
+fn required_cell_field<'a>(value: Option<&'a str>, field: &str) -> Result<&'a str, DataStoreError> {
+    value
+        .filter(|text| !text.trim().is_empty())
+        .ok_or_else(|| DataStoreError::InvalidMetadata(format!("coverage cell missing {field}")))
+}
+
+fn coverage_run_id(run_prefix: &str, cell: &CoverageCell) -> String {
+    format!(
+        "{}-{}-{}",
+        safe_path(run_prefix),
+        safe_path(&cell.canonical_instrument),
+        safe_path(&cell.timeframe)
+    )
+}
 impl TradingDataLake {
     pub fn write_ahdm_evidence_inventory(
         &self,
@@ -52,17 +66,71 @@ impl TradingDataLake {
         write_schema_json(
             &report_path,
             &serde_json::json!({
-                "schema_version": "archon-ahdm-pine-compile-report-v1",
+                "schema": "archon-ahdm-pine-compile-report-v1",
                 "strategy_id": "AHDM-v1",
+                "task_id": "TASK-TDL-120",
                 "checked_at": generated_at,
                 "tooling_available": false,
-                "status": "not_checked_fail_closed",
+                "status": "tooling_unavailable",
                 "promotion_eligible": false,
                 "pine_results": "exploratory_only",
-                "residual_gap": residual_gap("GAP-AHDM-PINE-001", "pine", "TradingView/Pine compile tooling is unavailable in this offline run", "Pine readiness and promotion evidence cannot be satisfied", generated_at),
+                "exploratory_only": true,
+                "promotion_scope": "exploratory artifact generation only; Pine tooling evidence is required before compile readiness and paper/live promotion still requires independent readiness gates",
+                "mcp_tools": [],
+                "tooling_unavailable_policy": {
+                    "fail_closed": true,
+                    "reason": "write_ahdm_pine_artifacts does not call provider-sensitive Pine tooling; external compile evidence must be recorded separately"
+                },
+                "shared_manifest_traceability": {
+                    "native_and_pine_parity_key": manifest["native_and_pine_parity_key"].clone(),
+                    "native_manifest_source": "crates/archon-trading/src/data_store/ahdm.rs::ahdm_rule_manifest",
+                    "pine_generation_source": "crates/archon-trading/src/data_store/ahdm_methods.rs::write_ahdm_pine_artifacts",
+                    "indicator": indicator_path.to_string_lossy(),
+                    "strategy": strategy_path.to_string_lossy()
+                },
+                "promotion": {
+                    "pine_readiness": "requires_external_compile_check",
+                    "paper_trading_readiness": "requires_independent_gates",
+                    "live_trading_enabled": false,
+                    "reason": "Generated Pine artifacts are exploratory; unavailable Pine tooling evidence fails closed and does not satisfy paper/live promotion gates."
+                }
             }),
         )?;
         Ok(vec![indicator_path, strategy_path, report_path])
+    }
+
+    pub fn run_ahdm_native_backtest_coverage(
+        &self,
+        run_prefix: &str,
+        config: BacktestConfig,
+        quantity: f64,
+        generated_at: &str,
+    ) -> Result<Vec<PathBuf>, DataStoreError> {
+        let matrix = self.coverage_matrix("trading-core-v1", generated_at.into())?;
+        validate_coverage_matrix_complete(&matrix)?;
+        let mut seen = std::collections::BTreeSet::new();
+        let mut run_dirs = Vec::new();
+        for cell in matrix.cells.iter().filter(|cell| cell.available) {
+            let dataset_id = required_cell_field(cell.dataset_id.as_deref(), "dataset_id")?;
+            let version = required_cell_field(cell.version.as_deref(), "version")?;
+            if !seen.insert((dataset_id.to_string(), version.to_string())) {
+                continue;
+            }
+            run_dirs.push(self.run_ahdm_native_backtest(
+                &coverage_run_id(run_prefix, cell),
+                dataset_id,
+                version,
+                config.clone(),
+                quantity,
+                generated_at,
+            )?);
+        }
+        if run_dirs.is_empty() {
+            return Err(DataStoreError::InvalidMetadata(
+                "AHDM coverage backtest found no registered datasets".into(),
+            ));
+        }
+        Ok(run_dirs)
     }
 
     pub fn run_ahdm_native_backtest(

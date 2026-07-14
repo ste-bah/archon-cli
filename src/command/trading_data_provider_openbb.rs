@@ -19,7 +19,8 @@ mod request;
 
 use http::fetch_openbb_response;
 use metadata::{
-    native_metadata_from_bars, native_quality_status, provider_notes, unavailable_report,
+    apply_unavailable_capability_reason, native_metadata_from_bars, native_quality_status,
+    provider_notes, unavailable_report,
 };
 use parse::bars_from_openbb_response;
 use request::openbb_native_request;
@@ -129,11 +130,7 @@ pub(crate) fn probe_capability_with_base_url(
             result.unavailable_reason = None;
         }
         Err(reason) => {
-            result.can_fetch = false;
-            result.native_interval = false;
-            result.production_eligible = false;
-            result.historical_supported = false;
-            result.unavailable_reason = Some(reason);
+            apply_unavailable_capability_reason(&mut result, &reason);
         }
     }
     TradingDataLake::new(root)

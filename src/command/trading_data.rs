@@ -308,6 +308,20 @@ fn capability(
         )
         .map_err(data_error)?
     };
+    let exact_native_support = result.native_interval && result.historical_supported;
+    let capability_state = if result.can_fetch {
+        "can_fetch"
+    } else if result.provider_blocked {
+        "provider_blocked"
+    } else if result.native_interval && !result.production_eligible {
+        "degraded"
+    } else {
+        "unavailable"
+    };
+    let mut capability_states = vec![capability_state];
+    if exact_native_support {
+        capability_states.push("exact_native_support");
+    }
     let report = json!({
         "provider": result.provider,
         "symbol": result.symbol,
@@ -317,6 +331,9 @@ fn capability(
         "native_interval": result.native_interval,
         "production_eligible": result.production_eligible,
         "can_fetch": result.can_fetch,
+        "capability_state": capability_state,
+        "capability_states": capability_states,
+        "exact_native_support": exact_native_support,
         "current_snapshot_supported": result.current_snapshot_supported,
         "historical_supported": result.historical_supported,
         "requires_credentials": result.requires_credentials,

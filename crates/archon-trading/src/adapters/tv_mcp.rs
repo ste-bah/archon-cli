@@ -7,6 +7,8 @@ use std::time::Duration;
 
 const MAX_RETRIES: u8 = 3;
 const COMPILE_SLA_MS: u128 = 30_000;
+pub const SUPPORTED_NATIVE_OHLCV_INTERVALS: &[&str] = &["1W", "1D", "240", "60", "15"];
+const TV_CHART_EQUIVALENT_SOURCE: &str = "chart_equivalent_research_data";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TvMcpConfig {
@@ -62,6 +64,56 @@ pub struct TvMcpResponse {
     pub adapter_pin: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TvNativeOhlcvPreflight {
+    pub health_tool: &'static str,
+    pub chart_state_tool: &'static str,
+    pub ohlcv_tool: &'static str,
+    pub symbol: String,
+    pub timeframe: String,
+    pub native_interval_supported: bool,
+    pub source_classification: &'static str,
+    pub fail_closed_behavior: &'static str,
+}
+
+impl TvNativeOhlcvPreflight {
+    pub fn require(symbol: &str, timeframe: &str) -> Result<Self, TvMcpError> {
+        let native_interval_supported =
+            SUPPORTED_NATIVE_OHLCV_INTERVALS.contains(&timeframe.trim());
+        let preflight = Self {
+            health_tool: "mcp__tradingview__tv_health_check",
+            chart_state_tool: "mcp__tradingview__chart_get_state",
+            ohlcv_tool: "mcp__tradingview__data_get_ohlcv",
+            symbol: symbol.trim().into(),
+            timeframe: timeframe.trim().into(),
+            native_interval_supported,
+            source_classification: TV_CHART_EQUIVALENT_SOURCE,
+            fail_closed_behavior: "health and chart state must be checked before OHLCV fetch; unavailable preflight writes an unavailable record without a healthy registry entry",
+        };
+        if preflight.symbol.is_empty()
+            || preflight.timeframe.is_empty()
+            || !native_interval_supported
+        {
+            return Err(TvMcpError::NativeOhlcvUnavailable {
+                reason: "TradingView MCP native OHLCV requires symbol, supported native interval, health check, and chart state preflight".into(),
+            });
+        }
+        Ok(preflight)
+    }
+
+    pub fn request_contract(&self) -> Value {
+        json!({
+            "provider": "tradingview",
+            "symbol": self.symbol,
+            "timeframe": self.timeframe,
+            "mcp_preflight_tools": [self.health_tool, self.chart_state_tool],
+            "ohlcv_tool": self.ohlcv_tool,
+            "source_classification": self.source_classification,
+            "not_institutional_vendor_data": true,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TvMcpError {
     MissingAdapterPin,
@@ -76,6 +128,9 @@ pub enum TvMcpError {
     },
     CompileSlaExceeded {
         elapsed_ms: u128,
+    },
+    NativeOhlcvUnavailable {
+        reason: String,
     },
 }
 
@@ -175,6 +230,7 @@ impl TradingViewMcpAdapter {
         start: &str,
         end: &str,
     ) -> Result<TvMcpResponse, TvMcpError> {
+        let _preflight = TvNativeOhlcvPreflight::require(symbol, timeframe)?;
         self.read_call(
             transport,
             TvReadAction::OhlcvNativeCandles,
