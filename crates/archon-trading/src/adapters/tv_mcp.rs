@@ -230,10 +230,22 @@ impl TradingViewMcpAdapter {
         start: &str,
         end: &str,
     ) -> Result<TvMcpResponse, TvMcpError> {
-        let _preflight = TvNativeOhlcvPreflight::require(symbol, timeframe)?;
-        self.read_call(
+        let preflight = TvNativeOhlcvPreflight::require(symbol, timeframe)?;
+        self.require_native_preflight(
             transport,
-            TvReadAction::OhlcvNativeCandles,
+            preflight.health_tool,
+            json!({ "symbol": preflight.symbol, "timeframe": preflight.timeframe }),
+            "TradingView MCP health check failed before native OHLCV fetch",
+        )?;
+        self.require_native_preflight(
+            transport,
+            preflight.chart_state_tool,
+            json!({ "symbol": preflight.symbol, "timeframe": preflight.timeframe }),
+            "TradingView MCP chart state check failed before native OHLCV fetch",
+        )?;
+        self.call_with_fail_closed_retries(
+            transport,
+            preflight.ohlcv_tool,
             json!({ "symbol": symbol, "timeframe": timeframe, "start": start, "end": end }),
         )
     }
@@ -276,6 +288,20 @@ impl TradingViewMcpAdapter {
             .ok_or_else(|| write_denied("maker-checker approval required"))?
             .verify_pair()
             .map_err(TvMcpError::MakerChecker)
+    }
+
+    fn require_native_preflight<T: TvMcpTransport>(
+        &self,
+        transport: &mut T,
+        tool_name: &str,
+        arguments: Value,
+        unavailable_reason: &str,
+    ) -> Result<(), TvMcpError> {
+        self.call_with_fail_closed_retries(transport, tool_name, arguments)
+            .map(|_| ())
+            .map_err(|_| TvMcpError::NativeOhlcvUnavailable {
+                reason: unavailable_reason.into(),
+            })
     }
 
     fn call_with_fail_closed_retries<T: TvMcpTransport>(
@@ -325,7 +351,7 @@ const fn read_tool(action: TvReadAction) -> &'static str {
         TvReadAction::ScreenshotCapture => "tv.screenshot_capture",
         TvReadAction::ScriptVersionSync => "tv.script_version_sync",
         TvReadAction::OhlcvNativeStatus => "tv.ohlcv_native_status",
-        TvReadAction::OhlcvNativeCandles => "tv.ohlcv_native_candles",
+        TvReadAction::OhlcvNativeCandles => "mcp__tradingview__data_get_ohlcv",
     }
 }
 

@@ -4,11 +4,13 @@ struct FakeTransport {
     failures_before_success: u8,
     calls: u8,
     elapsed: Duration,
+    called_tools: Vec<String>,
 }
 
 impl TvMcpTransport for FakeTransport {
-    fn call_tool(&mut self, _tool_name: &str, _arguments: Value) -> Result<TimedMcpResult, String> {
+    fn call_tool(&mut self, tool_name: &str, _arguments: Value) -> Result<TimedMcpResult, String> {
         self.calls += 1;
+        self.called_tools.push(tool_name.into());
         if self.calls <= self.failures_before_success {
             return Err("mcp unavailable".into());
         }
@@ -37,6 +39,7 @@ fn read_tier_is_default_on_and_pinned() {
         failures_before_success: 0,
         calls: 0,
         elapsed: Duration::from_millis(20),
+        called_tools: Vec::new(),
     };
     let response = adapter(false, false)
         .docs_lookup(&mut transport, "pine v6")
@@ -51,6 +54,7 @@ fn t_pine_05_write_tier_denies_without_enablement_and_sandbox() {
         failures_before_success: 0,
         calls: 0,
         elapsed: Duration::from_millis(1),
+        called_tools: Vec::new(),
     };
     let err = adapter(false, false)
         .write_action(&mut transport, TvWriteAction::AlertSetup, json!({}), None)
@@ -66,6 +70,7 @@ fn write_tier_requires_distinct_maker_checker_pair() {
         failures_before_success: 0,
         calls: 0,
         elapsed: Duration::from_millis(5),
+        called_tools: Vec::new(),
     };
     let response = adapter(true, true)
         .write_action(
@@ -84,6 +89,7 @@ fn ec_trl_06_mcp_failure_fails_closed_after_three_retries() {
         failures_before_success: 5,
         calls: 0,
         elapsed: Duration::from_millis(1),
+        called_tools: Vec::new(),
     };
     let err = adapter(false, false)
         .script_version_sync(&mut transport, "s1")
@@ -104,6 +110,7 @@ fn compile_check_enforces_thirty_second_sla() {
         failures_before_success: 0,
         calls: 0,
         elapsed: Duration::from_millis(30_001),
+        called_tools: Vec::new(),
     };
     let err = adapter(false, false)
         .pine_compile_check(&mut transport, "//@version=6")
@@ -129,11 +136,71 @@ fn native_ohlcv_candles_require_supported_interval_preflight_contract() {
 }
 
 #[test]
+fn native_ohlcv_candles_run_health_and_state_before_fetch() {
+    let mut transport = FakeTransport {
+        failures_before_success: 0,
+        calls: 0,
+        elapsed: Duration::from_millis(1),
+        called_tools: Vec::new(),
+    };
+
+    let response = adapter(false, false)
+        .ohlcv_native_candles(
+            &mut transport,
+            "BINANCE:BTCUSDT",
+            "240",
+            "2024-01-01",
+            "2024-01-02",
+        )
+        .unwrap();
+
+    assert_eq!(response.content_text, vec!["ok"]);
+    assert_eq!(
+        transport.called_tools,
+        vec![
+            "mcp__tradingview__tv_health_check",
+            "mcp__tradingview__chart_get_state",
+            "mcp__tradingview__data_get_ohlcv",
+        ]
+    );
+}
+
+#[test]
+fn native_ohlcv_candles_fail_closed_when_health_preflight_fails() {
+    let mut transport = FakeTransport {
+        failures_before_success: MAX_RETRIES,
+        calls: 0,
+        elapsed: Duration::from_millis(1),
+        called_tools: Vec::new(),
+    };
+
+    let err = adapter(false, false)
+        .ohlcv_native_candles(
+            &mut transport,
+            "BINANCE:BTCUSDT",
+            "240",
+            "2024-01-01",
+            "2024-01-02",
+        )
+        .unwrap_err();
+
+    assert_eq!(transport.calls, MAX_RETRIES);
+    assert!(matches!(err, TvMcpError::NativeOhlcvUnavailable { .. }));
+    assert!(
+        transport
+            .called_tools
+            .iter()
+            .all(|tool| tool == "mcp__tradingview__tv_health_check")
+    );
+}
+
+#[test]
 fn native_ohlcv_candles_fail_closed_on_unsupported_interval() {
     let mut transport = FakeTransport {
         failures_before_success: 0,
         calls: 0,
         elapsed: Duration::from_millis(1),
+        called_tools: Vec::new(),
     };
     let err = adapter(false, false)
         .ohlcv_native_candles(
