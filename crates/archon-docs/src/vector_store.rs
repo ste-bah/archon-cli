@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -9,6 +10,31 @@ const VECTOR_PREFIX: &str = "vec";
 const CACHE_PREFIX: &str = "cache";
 const ID_PREFIX: &str = "id";
 const DEFAULT_STORE_DIR: &str = "doc-vector-store";
+
+#[cfg(test)]
+thread_local! {
+    static HIT_RESOLUTION_PROBES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn chunk_ids_by_hnsw_id(records: &[RawVectorRecord]) -> HashMap<usize, String> {
+    records
+        .iter()
+        .fold(HashMap::new(), |mut chunk_ids, record| {
+            chunk_ids
+                .entry(record.hnsw_id)
+                .or_insert_with(|| record.chunk_id.clone());
+            chunk_ids
+        })
+}
+
+fn chunk_id_for_hnsw_id(
+    chunk_ids: &std::collections::HashMap<usize, String>,
+    hnsw_id: usize,
+) -> Option<&String> {
+    #[cfg(test)]
+    HIT_RESOLUTION_PROBES.with(|probes| probes.set(probes.get() + 1));
+    chunk_ids.get(&hnsw_id)
+}
 
 #[derive(Clone, Debug)]
 pub struct VectorWrite<'a> {
@@ -71,16 +97,21 @@ impl DocVectorStore {
     }
 
     pub fn put_vectors(&self, rows: &[VectorWrite<'_>]) -> Result<usize> {
+        for row in rows {
+            validate_provider(row.provider)?;
+        }
         if rows.is_empty() {
             return Ok(0);
         }
         let mut batch = WriteBatch::default();
+        let mut written_keys = HashSet::new();
         for row in rows {
             if row.embedding.is_empty() {
                 continue;
             }
             let bytes = encode_vector(row.embedding);
-            batch.put(vector_key(row.provider, row.chunk_id), &bytes);
+            let vector_key = vector_key(row.provider, row.chunk_id);
+            batch.put(&vector_key, &bytes);
             batch.put(
                 id_key(row.provider, row.chunk_id),
                 hnsw_id(row.chunk_id).to_be_bytes(),
@@ -88,14 +119,19 @@ impl DocVectorStore {
             if !row.content_hash.is_empty() {
                 batch.put(cache_key(row.provider, row.content_hash), &bytes);
             }
+            written_keys.insert(vector_key);
+        }
+        if written_keys.is_empty() {
+            return Ok(0);
         }
         self.db
             .write(batch)
             .context("write raw vectors to RocksDB vector store")?;
-        Ok(rows.len())
+        Ok(written_keys.len())
     }
 
     pub fn has_vector(&self, provider: &str, chunk_id: &str) -> Result<bool> {
+        validate_provider(provider)?;
         self.db
             .get_pinned(vector_key(provider, chunk_id))
             .context("read vector presence from RocksDB")
@@ -103,6 +139,7 @@ impl DocVectorStore {
     }
 
     pub fn cached_embedding(&self, provider: &str, content_hash: &str) -> Result<Option<Vec<f32>>> {
+        validate_provider(provider)?;
         if content_hash.is_empty() {
             return Ok(None);
         }
@@ -114,10 +151,12 @@ impl DocVectorStore {
     }
 
     pub fn count_vectors(&self, provider: Option<&str>) -> Result<usize> {
-        Ok(self.iter_records(provider, None)?.len())
+        validate_optional_provider(provider)?;
+        self.count_prefix(&vector_prefix(provider))
     }
 
     pub fn stats(&self, provider: Option<&str>) -> Result<VectorStoreStats> {
+        validate_optional_provider(provider)?;
         Ok(VectorStoreStats {
             raw_vectors: self.count_prefix(&vector_prefix(provider))?,
             cache_entries: self.count_prefix(&cache_prefix(provider))?,
@@ -130,6 +169,7 @@ impl DocVectorStore {
         dimension: usize,
         limit: Option<usize>,
     ) -> Result<HnswManifest> {
+        validate_provider(provider)?;
         let records = self.iter_records(Some(provider), limit)?;
         anyhow::ensure!(
             !records.is_empty(),
@@ -163,35 +203,44 @@ impl DocVectorStore {
         ef: usize,
         limit: Option<usize>,
     ) -> Result<Vec<HnswSearchHit>> {
+        validate_provider(provider)?;
         let records = self.iter_records(Some(provider), limit)?;
         if records.is_empty() || top_k == 0 {
             return Ok(Vec::new());
         }
+        let chunk_ids = chunk_ids_by_hnsw_id(&records);
         let mut hnsw = build_hnsw_index(&records, query.len())?;
         hnsw.set_searching_mode(true);
         let hits = hnsw.search(query, top_k, ef.max(top_k));
         Ok(hits
             .into_iter()
             .filter_map(|hit| {
-                records
-                    .iter()
-                    .find(|record| record.hnsw_id == hit.get_origin_id())
-                    .map(|record| HnswSearchHit {
-                        chunk_id: record.chunk_id.clone(),
+                chunk_id_for_hnsw_id(&chunk_ids, hit.get_origin_id()).map(|chunk_id| {
+                    HnswSearchHit {
+                        chunk_id: chunk_id.clone(),
                         distance: hit.get_distance(),
-                    })
+                    }
+                })
             })
             .collect())
     }
 
     pub fn latest_hnsw_manifest(&self, provider: &str) -> Result<Option<HnswManifest>> {
+        validate_provider(provider)?;
         let path = self.hnsw_manifest_path(provider);
         if !path.exists() {
             return Ok(None);
         }
         let bytes = std::fs::read(&path)
             .with_context(|| format!("read HNSW manifest {}", path.display()))?;
-        serde_json::from_slice(&bytes).context("parse HNSW manifest")
+        let manifest: HnswManifest =
+            serde_json::from_slice(&bytes).context("parse HNSW manifest")?;
+        anyhow::ensure!(
+            manifest.provider == provider,
+            "HNSW manifest provider mismatch: expected {provider}, got {}",
+            manifest.provider
+        );
+        Ok(Some(manifest))
     }
 
     fn iter_records(
@@ -331,6 +380,22 @@ fn decode_vector(bytes: &[u8]) -> Result<Vec<f32>> {
     Ok(vector)
 }
 
+fn validate_provider(provider: &str) -> Result<()> {
+    anyhow::ensure!(!provider.is_empty(), "provider must not be empty");
+    anyhow::ensure!(
+        !provider.contains('/'),
+        "provider must not contain the '/' separator"
+    );
+    Ok(())
+}
+
+fn validate_optional_provider(provider: Option<&str>) -> Result<()> {
+    if let Some(provider) = provider {
+        validate_provider(provider)?;
+    }
+    Ok(())
+}
+
 fn vector_key(provider: &str, chunk_id: &str) -> Vec<u8> {
     key3(VECTOR_PREFIX, provider, chunk_id)
 }
@@ -377,15 +442,18 @@ fn hnsw_id(chunk_id: &str) -> usize {
 
 fn safe_provider(provider: &str) -> String {
     provider
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-                ch
+        .bytes()
+        .fold(String::with_capacity(provider.len()), |mut safe, byte| {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_') {
+                safe.push(byte as char);
+            } else if byte == b'~' {
+                safe.push_str("~~");
             } else {
-                '_'
+                use std::fmt::Write;
+                write!(safe, "~{byte:02x}").expect("write to String cannot fail");
             }
+            safe
         })
-        .collect()
 }
 
 fn num_parallelism() -> i32 {
@@ -395,49 +463,4 @@ fn num_parallelism() -> i32 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rocksdb_store_round_trips_vectors_and_cache() {
-        let temp = tempfile::tempdir().unwrap();
-        let store = DocVectorStore::open(temp.path()).unwrap();
-        let rows = [VectorWrite {
-            chunk_id: "chunk-a",
-            content_hash: "hash-a",
-            provider: "test",
-            embedding: &[0.25, 0.75],
-        }];
-        assert_eq!(store.put_vectors(&rows).unwrap(), 1);
-        assert_eq!(store.stats(Some("test")).unwrap().raw_vectors, 1);
-        assert_eq!(
-            store.cached_embedding("test", "hash-a").unwrap().unwrap(),
-            vec![0.25, 0.75]
-        );
-    }
-
-    #[test]
-    fn rust_hnsw_search_returns_nearest_chunk() {
-        let temp = tempfile::tempdir().unwrap();
-        let store = DocVectorStore::open(temp.path()).unwrap();
-        let rows = [
-            VectorWrite {
-                chunk_id: "chunk-a",
-                content_hash: "hash-a",
-                provider: "test",
-                embedding: &[1.0, 0.0],
-            },
-            VectorWrite {
-                chunk_id: "chunk-b",
-                content_hash: "hash-b",
-                provider: "test",
-                embedding: &[0.0, 1.0],
-            },
-        ];
-        store.put_vectors(&rows).unwrap();
-        let hits = store
-            .search_in_memory("test", &[0.99, 0.01], 1, 16, None)
-            .unwrap();
-        assert_eq!(hits[0].chunk_id, "chunk-a");
-    }
-}
+mod tests;
