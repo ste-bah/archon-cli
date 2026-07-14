@@ -124,6 +124,39 @@
         );
     }
 
+    #[test]
+    fn inline_inventory_output_is_not_persisted_as_an_artifact() {
+        let mut result = WorkflowV2Result::accepted("inventory complete");
+        result.data = serde_json::json!({ "items": [{ "item_id": "INV-1" }] });
+        result.artifacts = vec![
+            archon_workflow::WorkflowV2Artifact {
+                id: "canonical-inventory".to_string(),
+                path: "inline:data.items".to_string(),
+                description: None,
+            },
+            archon_workflow::WorkflowV2Artifact {
+                id: "real-report".to_string(),
+                path: "artifacts/inventory.json".to_string(),
+                description: None,
+            },
+        ];
+        let execution = WorkflowV2CallExecution {
+            call: WorkflowV2HostCall {
+                id: "canonical-implementation-inventory".to_string(),
+                method: WorkflowV2HostMethod::Reduce,
+                write_mode: None,
+                options: WorkflowV2HostOptions::default(),
+            },
+            input: serde_json::Value::Null,
+            depends_on: Vec::new(),
+        };
+
+        let result = normalize_result_for_call(&execution, result);
+
+        assert_eq!(result.artifacts.len(), 1);
+        assert_eq!(result.artifacts[0].path, "artifacts/inventory.json");
+    }
+
     #[tokio::test]
     async fn dynamic_loop_host_calls_are_recorded_with_runtime_ids() {
         let temp = tempfile::tempdir().expect("tempdir");

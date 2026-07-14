@@ -24,6 +24,8 @@ mod tests;
 mod workflow_agent_select;
 #[path = "workflow_live_approval.rs"]
 mod workflow_live_approval;
+#[path = "workflow_live_artifact_refs.rs"]
+mod workflow_live_artifact_refs;
 #[cfg(test)]
 #[path = "workflow_live_canary_retry_tests.rs"]
 mod workflow_live_canary_retry_tests;

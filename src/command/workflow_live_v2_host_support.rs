@@ -310,7 +310,10 @@ fn artifact_paths_exist(v2_root: &Path, paths: &[String]) -> bool {
         .all(|path| artifact_path_exists(v2_root, path))
 }
 
-fn artifact_path_exists(v2_root: &Path, path: &str) -> bool {
+pub(super) fn artifact_path_exists(v2_root: &Path, path: &str) -> bool {
+    if super::workflow_live_artifact_refs::is_nonfilesystem_artifact_ref(path) {
+        return true;
+    }
     let path = Path::new(path);
     if path.exists() {
         return true;

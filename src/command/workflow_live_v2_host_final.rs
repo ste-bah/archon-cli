@@ -331,6 +331,9 @@ fn final_artifact_path_exists(raw: &str, project_root: Option<&Path>) -> bool {
     if raw.is_empty() {
         return false;
     }
+    if super::workflow_live_artifact_refs::is_nonfilesystem_artifact_ref(raw) {
+        return true;
+    }
     let path = Path::new(raw);
     if path.is_absolute() {
         return path.exists();

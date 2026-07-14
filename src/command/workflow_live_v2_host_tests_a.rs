@@ -10,7 +10,16 @@ use archon_workflow::{
 };
 
 use super::workflow_live_task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
-use super::workflow_live_v2_host::{execute_local_host_call, reconcile_final_task_statuses};
+use super::workflow_live_v2_host::{
+    artifact_path_exists, execute_local_host_call, reconcile_final_task_statuses,
+};
+
+#[test]
+fn inline_artifact_ref_is_not_reported_missing() {
+    let temp = tempfile::tempdir().expect("tempdir");
+
+    assert!(artifact_path_exists(temp.path(), "inline:data.items"));
+}
 
 #[test]
 fn save_and_require_artifact_are_local_host_calls() {
