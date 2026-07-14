@@ -123,21 +123,7 @@ pub(super) fn fail_closed_validation_record(
     record: &StoredDatasetRecord,
     report: &ValidationReport,
 ) -> Result<(), DataStoreError> {
-    let mut registry = read_json::<PersistentDatasetRegistry>(
-        &root.join(".archon/trading-lab/data/registry.json"),
-    )?;
-    if let Some(stored) = registry
-        .datasets
-        .get_mut(&registry_key(&record.dataset_id, &record.version))
-    {
-        stored.production_eligible = false;
-        stored.status = DatasetStatus::Degraded;
-    }
-    write_schema_json(
-        &root.join(".archon/trading-lab/data/registry.json"),
-        &registry,
-    )?;
-    update_metadata_from_validation(root, record, report)
+    sync_validation_record(root, record, report)
 }
 
 pub(super) fn sync_validation_record(
@@ -152,8 +138,8 @@ pub(super) fn sync_validation_record(
         .datasets
         .get_mut(&registry_key(&record.dataset_id, &record.version))
     {
-        stored.production_eligible = report.production_eligible;
-        stored.status = if report.production_eligible {
+        stored.production_eligible = validation_is_production_eligible(report);
+        stored.status = if stored.production_eligible {
             DatasetStatus::Healthy
         } else {
             DatasetStatus::Degraded
@@ -166,6 +152,30 @@ pub(super) fn sync_validation_record(
     update_metadata_from_validation(root, record, report)
 }
 
+pub(super) fn reconcile_versioned_from_validation(
+    versioned: &mut VersionedDataset,
+    report: &ValidationReport,
+) {
+    versioned.metadata.production_eligible = validation_is_production_eligible(report);
+    if !versioned.metadata.production_eligible
+        && !versioned
+            .metadata
+            .quality_status
+            .eq_ignore_ascii_case("diagnostic")
+    {
+        versioned.metadata.quality_status = "degraded".into();
+    }
+    versioned.status = if versioned.metadata.production_eligible {
+        DatasetStatus::Healthy
+    } else {
+        DatasetStatus::Degraded
+    };
+}
+
+fn validation_is_production_eligible(report: &ValidationReport) -> bool {
+    report.status == ValidationStatus::Passed && report.production_eligible
+}
+
 fn update_metadata_from_validation(
     root: &Path,
     record: &StoredDatasetRecord,
@@ -173,8 +183,8 @@ fn update_metadata_from_validation(
 ) -> Result<(), DataStoreError> {
     let metadata_path = root.join(&record.metadata_path);
     let mut metadata: DatasetMetadata = read_json(&metadata_path)?;
-    metadata.production_eligible = report.production_eligible;
-    if !report.production_eligible {
+    metadata.production_eligible = validation_is_production_eligible(report);
+    if !metadata.production_eligible {
         metadata.quality_status = "degraded".into();
     }
     write_schema_json(&metadata_path, &metadata)

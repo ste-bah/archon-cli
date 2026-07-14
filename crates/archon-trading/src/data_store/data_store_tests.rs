@@ -477,6 +477,6 @@ fn bar(timestamp: &str, close: f64) -> OhlcvBar {
         high: close + 1.0,
         low: close - 1.0,
         close,
-        volume: 1.0,
+        volume: close * 1_000.0,
     }
 }

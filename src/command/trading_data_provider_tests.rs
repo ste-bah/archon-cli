@@ -343,6 +343,57 @@ mod tests {
     }
 
     #[test]
+    fn d44_tradingview_zero_or_missing_volume_stays_degraded() {
+        let temp = tempfile::tempdir().unwrap();
+        let cli = temp
+            .path()
+            .join(".archon/tools/tradingview-mcp/src/cli/index.js");
+        std::fs::create_dir_all(cli.parent().unwrap()).unwrap();
+        std::fs::write(
+            &cli,
+            r#"console.log(JSON.stringify({bars:[
+                {ts:"2024-01-02T00:00:00Z",open:100,high:105,low:99,close:104,volume:0},
+                {ts:"2024-01-03T00:00:00Z",open:104,high:106,low:101,close:102}
+            ]}));"#,
+        )
+        .unwrap();
+
+        let text = fetch_native(
+            Some(&temp.path().to_path_buf()),
+            "tradingview",
+            "TVC:GOLD",
+            "1D",
+            "2024-01-01",
+            "2024-01-05",
+            "tradingview-GOLD-1D-raw",
+        )
+        .unwrap();
+
+        assert!(text.contains("\"production_eligible\": false"));
+        let lake = TradingDataLake::new(temp.path());
+        let registry = lake.load_registry().unwrap();
+        let record = registry.datasets.values().next().unwrap();
+        assert_eq!(
+            record.status,
+            archon_trading::data_lake::DatasetStatus::Degraded
+        );
+        assert!(!record.production_eligible);
+
+        let dataset = lake
+            .load_ohlcv(&record.dataset_id, &record.version)
+            .unwrap();
+        assert_eq!(dataset.bars.len(), 2);
+        assert!(dataset.bars.iter().all(|bar| bar.volume == 0.0));
+
+        let report: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(temp.path().join(&record.validation_path)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(report["status"], "failed");
+        assert_eq!(report["production_eligible"], false);
+    }
+
+    #[test]
     fn fetch_native_openbb_polygon_requires_credentials_fail_closed() {
         let _lock = env_lock();
         let _guard = EnvGuard::unset("POLYGON_API_KEY");

@@ -250,6 +250,41 @@ fn validation_summary_counts_duplicates_bad_ohlc_and_volume() {
 }
 
 #[test]
+fn d44_constant_volume_fails_validation_and_registry_reconciles_degraded() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let mut request = request();
+    for bar in &mut request.bars {
+        bar.volume = 1.0;
+    }
+
+    let record = lake.store_ohlcv(request).unwrap();
+    assert_eq!(record.status, DatasetStatus::Degraded);
+    assert!(!record.production_eligible);
+
+    let report: ValidationReport = read_json(&temp.path().join(&record.validation_path)).unwrap();
+    assert_eq!(report.status, ValidationStatus::Failed);
+    assert!(!report.production_eligible);
+    assert!(
+        report.checks.iter().any(|check| {
+            check.id == "ohlcv.volume" && check.status == ValidationStatus::Failed
+        })
+    );
+
+    let registry = lake.load_registry().unwrap();
+    let stored = registry
+        .datasets
+        .get(&registry_key(&record.dataset_id, &record.version))
+        .unwrap();
+    assert_eq!(stored.status, DatasetStatus::Degraded);
+    assert!(!stored.production_eligible);
+
+    let metadata: DatasetMetadata = read_json(&temp.path().join(&record.metadata_path)).unwrap();
+    assert_eq!(metadata.quality_status, "degraded");
+    assert!(!metadata.production_eligible);
+}
+
+#[test]
 fn validation_report_fails_closed_for_native_gate_invariants() {
     let mut metadata = request().metadata;
     metadata.native_interval = false;
@@ -290,6 +325,8 @@ fn failed_validation_still_writes_validation_report() {
     let temp = tempfile::tempdir().unwrap();
     let lake = TradingDataLake::new(temp.path());
     let record = lake.store_ohlcv(request()).unwrap();
+    assert_eq!(record.status, DatasetStatus::Healthy);
+    assert!(record.production_eligible);
     let metadata_path = temp.path().join(&record.metadata_path);
     let mut metadata: DatasetMetadata = read_json(&metadata_path).unwrap();
     metadata.provider.clear();
@@ -299,6 +336,18 @@ fn failed_validation_still_writes_validation_report() {
     let report: ValidationReport = read_json(&temp.path().join(&record.validation_path)).unwrap();
     assert_eq!(report.status, ValidationStatus::Failed);
     assert!(!report.production_eligible);
+
+    let registry = lake.load_registry().unwrap();
+    let stored = registry
+        .datasets
+        .get(&registry_key(&record.dataset_id, &record.version))
+        .unwrap();
+    assert_eq!(stored.status, DatasetStatus::Degraded);
+    assert!(!stored.production_eligible);
+
+    let metadata: DatasetMetadata = read_json(&metadata_path).unwrap();
+    assert_eq!(metadata.quality_status, "degraded");
+    assert!(!metadata.production_eligible);
 }
 
 #[test]
@@ -416,7 +465,7 @@ fn bar(timestamp: &str, close: f64) -> OhlcvBar {
         high: close + 1.0,
         low: close - 1.0,
         close,
-        volume: 1.0,
+        volume: close * 1_000.0,
     }
 }
 

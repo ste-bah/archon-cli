@@ -407,17 +407,7 @@ impl TradingDataLake {
         validate_metadata(&versioned.metadata)
             .map_err(|err| DataStoreError::InvalidMetadata(format!("{err:?}")))?;
         let validation = validation_report(&versioned.metadata, &bars, created_at.clone());
-        if validation.status != ValidationStatus::Passed {
-            versioned.metadata.production_eligible = false;
-            if !versioned
-                .metadata
-                .quality_status
-                .eq_ignore_ascii_case("diagnostic")
-            {
-                versioned.metadata.quality_status = "degraded".into();
-            }
-            versioned.status = DatasetStatus::Degraded;
-        }
+        reconcile_versioned_from_validation(&mut versioned, &validation);
         write_schema_json(&validation_path, &validation)?;
         write_schema_json(&metadata_path, &versioned.metadata)?;
         let record = record(

@@ -69,8 +69,8 @@ pub(super) fn validation_report(
     push_check(
         &mut checks,
         "ohlcv.volume",
-        summary.missing_volume_count == 0,
-        "volume is present and positive for production datasets",
+        summary.missing_volume_count == 0 && volume_is_non_degenerate(bars),
+        "volume is present, positive, and non-degenerate for production datasets",
     );
     push_check(
         &mut checks,
@@ -96,6 +96,20 @@ pub(super) fn validation_report(
         summary,
         validated_at,
     }
+}
+
+fn volume_is_non_degenerate(bars: &[OhlcvBar]) -> bool {
+    let Some(first) = bars.first().map(|bar| bar.volume) else {
+        return false;
+    };
+    bars.len() > 1
+        && first.is_finite()
+        && first > 0.0
+        && bars.iter().skip(1).any(|bar| {
+            bar.volume.is_finite()
+                && bar.volume > 0.0
+                && (bar.volume - first).abs() > f64::EPSILON * first.abs().max(1.0)
+        })
 }
 
 pub(super) fn validation_status(checks: &[ValidationCheck]) -> ValidationStatus {
