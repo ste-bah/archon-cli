@@ -6,7 +6,7 @@ use crate::anthropic_support::{
 };
 use crate::auth::{AuthError, AuthProvider, OAuthCredentials};
 use crate::identity::IdentityProvider;
-use crate::streaming::{StreamError, StreamEvent, parse_sse_event, split_sse_lines};
+use crate::streaming::StreamEvent;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -136,7 +136,7 @@ impl AnthropicClient {
                 request.request_origin.as_deref().unwrap_or("unknown"),
                 body.len()
             );
-            tracing::info!("API request body: {}", crate::debug_body::debug_body(&body));
+            tracing::debug!("API request body: {}", crate::debug_body::debug_body(&body));
 
             let response = req
                 .body(body.clone())
@@ -259,32 +259,9 @@ impl AnthropicClient {
         &self,
         response: reqwest::Response,
     ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, ApiError> {
-        let (tx, rx) = tokio::sync::mpsc::channel(256);
-
-        tokio::spawn(async move {
-            let text = response.text().await.unwrap_or_default();
-            let pairs = split_sse_lines(&text);
-            for (event_type, data) in pairs {
-                match parse_sse_event(event_type, data) {
-                    Ok(event) => {
-                        if tx.send(event).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(StreamError::UnknownEvent(_)) => {}
-                    Err(e) => {
-                        let _ = tx
-                            .send(StreamEvent::Error {
-                                error_type: "parse_error".into(),
-                                message: format!("{e}"),
-                            })
-                            .await;
-                    }
-                }
-            }
-        });
-
-        Ok(rx)
+        Ok(crate::anthropic_stream::spawn_anthropic_stream_reader(
+            response.bytes_stream(),
+        ))
     }
 
     /// Validate a list of beta strings against the API.

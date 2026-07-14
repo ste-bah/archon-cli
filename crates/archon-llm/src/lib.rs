@@ -2,6 +2,7 @@
 pub mod active;
 pub mod agentic;
 pub mod anthropic;
+pub(crate) mod anthropic_stream;
 pub(crate) mod anthropic_support;
 pub(crate) mod anthropic_url;
 pub mod auth;
