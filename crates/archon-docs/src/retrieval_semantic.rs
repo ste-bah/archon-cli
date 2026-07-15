@@ -87,7 +87,7 @@ fn rocksdb_hnsw_search(
         return Ok(None);
     }
     let hits = vector_store
-        .search_in_memory(provider_name, query_vec, top_k, 50, None)
+        .search_persisted_first(provider_name, query_vec, top_k, 50, None)
         .map_err(|e| DocsError::Retrieval {
             message: format!("Rust-HNSW search failed: {e}"),
         })?;

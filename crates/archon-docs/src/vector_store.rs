@@ -6,36 +6,24 @@ use hnsw_rs::prelude::{AnnT, DistCosine, Hnsw};
 use rust_rocksdb::{DB, Options, WriteBatch};
 use serde::{Deserialize, Serialize};
 
+mod config;
+mod hnsw_ids;
+mod persisted_hnsw;
+
+pub use config::default_store_dir;
+
+use hnsw_ids::{chunk_id_for_hnsw_id, chunk_ids_by_hnsw_id};
+#[cfg(test)]
+use hnsw_ids::{hit_resolution_probes, reset_hit_resolution_probes};
+
 const VECTOR_PREFIX: &str = "vec";
 const CACHE_PREFIX: &str = "cache";
 const ID_PREFIX: &str = "id";
-const DEFAULT_STORE_DIR: &str = "doc-vector-store";
 
 #[cfg(test)]
-thread_local! {
-    static HIT_RESOLUTION_PROBES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+fn persisted_hnsw_load_count() -> usize {
+    persisted_hnsw::load_count()
 }
-
-fn chunk_ids_by_hnsw_id(records: &[RawVectorRecord]) -> HashMap<usize, String> {
-    records
-        .iter()
-        .fold(HashMap::new(), |mut chunk_ids, record| {
-            chunk_ids
-                .entry(record.hnsw_id)
-                .or_insert_with(|| record.chunk_id.clone());
-            chunk_ids
-        })
-}
-
-fn chunk_id_for_hnsw_id(
-    chunk_ids: &std::collections::HashMap<usize, String>,
-    hnsw_id: usize,
-) -> Option<&String> {
-    #[cfg(test)]
-    HIT_RESOLUTION_PROBES.with(|probes| probes.set(probes.get() + 1));
-    chunk_ids.get(&hnsw_id)
-}
-
 #[derive(Clone, Debug)]
 pub struct VectorWrite<'a> {
     pub chunk_id: &'a str,
@@ -195,6 +183,33 @@ impl DocVectorStore {
         Ok(manifest)
     }
 
+    pub fn search_persisted_first(
+        &self,
+        provider: &str,
+        query: &[f32],
+        top_k: usize,
+        ef: usize,
+        limit: Option<usize>,
+    ) -> Result<Vec<HnswSearchHit>> {
+        validate_provider(provider)?;
+        let raw_count = self.count_vectors(Some(provider))?;
+        let manifest = self.latest_hnsw_manifest(provider)?;
+        if let Some(manifest) = manifest.as_ref()
+            && manifest.dimension == query.len()
+            && manifest.vector_count == raw_count
+        {
+            return persisted_hnsw::search(
+                self.hnsw_dir(provider),
+                manifest.clone(),
+                self.chunk_ids_by_hnsw_id(provider)?,
+                query.to_vec(),
+                top_k,
+                ef,
+            );
+        }
+        self.search_in_memory(provider, query, top_k, ef, limit)
+    }
+
     pub fn search_in_memory(
         &self,
         provider: &str,
@@ -241,6 +256,28 @@ impl DocVectorStore {
             manifest.provider
         );
         Ok(Some(manifest))
+    }
+
+    fn chunk_ids_by_hnsw_id(&self, provider: &str) -> Result<HashMap<usize, String>> {
+        let prefix = format!("{ID_PREFIX}/{provider}/");
+        let mut chunk_ids = HashMap::new();
+        for item in self.db.prefix_iterator(prefix.as_bytes()) {
+            let (key, value) = item.context("iterate RocksDB HNSW identifiers")?;
+            if !key.starts_with(prefix.as_bytes()) {
+                break;
+            }
+            let chunk_id = std::str::from_utf8(&key)
+                .ok()
+                .and_then(|key| key.strip_prefix(&prefix))
+                .context("parse RocksDB HNSW identifier key")?;
+            anyhow::ensure!(
+                value.len() == std::mem::size_of::<usize>(),
+                "HNSW identifier has invalid length for {chunk_id}"
+            );
+            let hnsw_id = usize::from_be_bytes(value.as_ref().try_into()?);
+            chunk_ids.entry(hnsw_id).or_insert_with(|| chunk_id.into());
+        }
+        Ok(chunk_ids)
     }
 
     fn iter_records(
@@ -297,37 +334,6 @@ impl DocVectorStore {
         std::fs::write(&path, bytes)
             .with_context(|| format!("write HNSW manifest {}", path.display()))
     }
-}
-
-pub fn default_store_dir() -> PathBuf {
-    if let Some(path) = std::env::var_os("ARCHON_DOC_VECTOR_STORE_DIR") {
-        return PathBuf::from(path);
-    }
-    #[cfg(test)]
-    {
-        std::env::temp_dir()
-            .join(format!("archon-{DEFAULT_STORE_DIR}-tests"))
-            .join(format!(
-                "test-{}-{}",
-                std::process::id(),
-                test_thread_suffix()
-            ))
-    }
-    #[cfg(not(test))]
-    {
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(".archon")
-            .join(DEFAULT_STORE_DIR)
-    }
-}
-
-#[cfg(test)]
-fn test_thread_suffix() -> String {
-    format!("{:?}", std::thread::current().id())
-        .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric())
-        .collect()
 }
 
 fn build_hnsw_index(
@@ -461,6 +467,9 @@ fn num_parallelism() -> i32 {
         .map(|count| count.get().min(8) as i32)
         .unwrap_or(2)
 }
+
+#[cfg(test)]
+mod persisted_hnsw_tests;
 
 #[cfg(test)]
 mod tests;

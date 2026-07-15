@@ -111,14 +111,14 @@ fn rust_hnsw_search_uses_one_identifier_probe_per_hit() {
         })
         .collect();
     store.put_vectors(&rows).unwrap();
-    HIT_RESOLUTION_PROBES.with(|probes| probes.set(0));
+    reset_hit_resolution_probes();
 
     let hits = store
         .search_in_memory("test", &[1.0, 0.0], 8, 16, None)
         .unwrap();
 
     assert_eq!(hits.len(), 8);
-    HIT_RESOLUTION_PROBES.with(|probes| assert_eq!(probes.get(), hits.len()));
+    assert_eq!(hit_resolution_probes(), hits.len());
 }
 #[test]
 fn chunk_ids_by_hnsw_id_preserves_first_chunk_id() {
