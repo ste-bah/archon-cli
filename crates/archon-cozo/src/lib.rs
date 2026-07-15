@@ -1,8 +1,9 @@
-use std::collections::BTreeMap;
+use std::cell::Cell;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::OpenOptions;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -13,8 +14,19 @@ const DEFAULT_MAX_ATTEMPTS: usize = 90;
 const DEFAULT_INITIAL_BACKOFF_MS: u64 = 100;
 const DEFAULT_MAX_BACKOFF_MS: u64 = 2_000;
 
-static COZO_PROCESS_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-static COZO_PANIC_HOOK_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+enum WriteLockKey {
+    Fallback,
+    Path(PathBuf),
+}
+
+static COZO_PROCESS_WRITE_LOCKS: OnceLock<Mutex<HashMap<WriteLockKey, Arc<Mutex<()>>>>> =
+    OnceLock::new();
+static COZO_PANIC_HOOK: OnceLock<()> = OnceLock::new();
+
+thread_local! {
+    static IN_GUARDED_COZO_OPERATION: Cell<usize> = const { Cell::new(0) };
+}
 
 #[derive(Clone, Debug)]
 pub struct CozoGuardConfig {
@@ -137,17 +149,55 @@ fn run_guarded_once<T>(
     run: &mut impl FnMut() -> Result<T>,
 ) -> Result<T> {
     if matches!(mutability, ScriptMutability::Mutable) {
-        let process_lock = COZO_PROCESS_WRITE_LOCK.get_or_init(|| Mutex::new(()));
-        let _process_guard = match process_lock.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        let process_lock = process_write_lock(config.write_lock_path.as_deref());
+        let _process_guard = lock_recovering_poison(&process_lock);
         if let Some(path) = &config.write_lock_path {
             return with_write_lock(path, context, || catch_guarded_operation(context, run));
         }
+        return catch_guarded_operation(context, run);
     }
 
     catch_guarded_operation(context, run)
+}
+
+fn process_write_lock(path: Option<&Path>) -> Arc<Mutex<()>> {
+    let key = path
+        .map(normalized_lock_path)
+        .map(WriteLockKey::Path)
+        .unwrap_or(WriteLockKey::Fallback);
+    let locks = COZO_PROCESS_WRITE_LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut locks = lock_recovering_poison(locks);
+    Arc::clone(locks.entry(key).or_insert_with(|| Arc::new(Mutex::new(()))))
+}
+
+fn normalized_lock_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| {
+        let path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map(|current_dir| current_dir.join(path))
+                .unwrap_or_else(|_| path.to_path_buf())
+        };
+        let mut normalized = PathBuf::new();
+        for component in path.components() {
+            match component {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    normalized.pop();
+                }
+                _ => normalized.push(component.as_os_str()),
+            }
+        }
+        normalized
+    })
+}
+
+fn lock_recovering_poison<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
 }
 
 pub fn with_write_lock<T>(
@@ -182,15 +232,9 @@ pub fn with_write_lock<T>(
 }
 
 fn catch_guarded_operation<T>(context: &str, run: &mut impl FnMut() -> Result<T>) -> Result<T> {
-    let hook_lock = COZO_PANIC_HOOK_LOCK.get_or_init(|| Mutex::new(()));
-    let _guard = match hook_lock.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    let hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
+    install_cozo_panic_hook();
+    let _guard = GuardedCozoOperation::enter();
     let result = catch_unwind(AssertUnwindSafe(run));
-    std::panic::set_hook(hook);
 
     match result {
         Ok(result) => result,
@@ -198,6 +242,33 @@ fn catch_guarded_operation<T>(context: &str, run: &mut impl FnMut() -> Result<T>
             "{context}: Cozo operation panicked: {}",
             panic_payload_message(payload)
         )),
+    }
+}
+
+fn install_cozo_panic_hook() {
+    COZO_PANIC_HOOK.get_or_init(|| {
+        let delegate = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |panic_info| {
+            let guarded = IN_GUARDED_COZO_OPERATION.with(|depth| depth.get() > 0);
+            if !guarded {
+                delegate(panic_info);
+            }
+        }));
+    });
+}
+
+struct GuardedCozoOperation;
+
+impl GuardedCozoOperation {
+    fn enter() -> Self {
+        IN_GUARDED_COZO_OPERATION.with(|depth| depth.set(depth.get() + 1));
+        Self
+    }
+}
+
+impl Drop for GuardedCozoOperation {
+    fn drop(&mut self) {
+        IN_GUARDED_COZO_OPERATION.with(|depth| depth.set(depth.get().saturating_sub(1)));
     }
 }
 
