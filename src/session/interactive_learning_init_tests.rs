@@ -1,31 +1,73 @@
+use anyhow::Result;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use super::interactive_learning_init::{initialize_schemas, initialize_with};
+use super::interactive_learning_init::{
+    BlockingInitialization, SchemaInitialization, initialize_schemas, initialize_with,
+};
+
+fn open_and_initialize(working_dir: std::path::PathBuf) -> Result<BlockingInitialization> {
+    let db_path = crate::command::store_paths::learning_db_path_for_dir(&working_dir);
+    let config = archon_cozo::CozoGuardConfig::for_interactive_db_path(&db_path);
+    let db = Arc::new(archon_cozo::open_sqlite_guarded(
+        &db_path.to_string_lossy(),
+        "test interactive learning db",
+        &config,
+    )?);
+    let schemas = initialize_schemas(&working_dir, db.as_ref());
+    Ok(BlockingInitialization { db, schemas })
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn interactive_learning_initialization_keeps_current_thread_runtime_responsive_while_open_blocks()
+ {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let (open_started_tx, open_started_rx) = mpsc::channel();
+    let (release_open_tx, release_open_rx) = mpsc::channel();
+    let (progress_tx, progress_rx) = mpsc::channel();
+    let (result_tx, result_rx) = mpsc::channel();
+
+    let coordinator = std::thread::spawn(move || {
+        open_started_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("open boundary entered");
+        let progressed = progress_rx.recv_timeout(Duration::from_millis(250)).is_ok();
+        release_open_tx.send(()).expect("release open boundary");
+        result_tx.send(progressed).expect("report runtime progress");
+    });
+
+    let initialization = initialize_with(temp_dir.path(), move |working_dir| {
+        open_started_tx.send(()).expect("announce open boundary");
+        release_open_rx.recv().expect("release open boundary");
+        open_and_initialize(working_dir)
+    });
+    let progress = async move {
+        let _ = progress_tx.send(());
+    };
+    let (databases, ()) = tokio::join!(initialization, progress);
+
+    coordinator.join().expect("coordinator joins");
+
+    assert!(
+        result_rx.recv().expect("runtime progress result"),
+        "another Tokio task must progress while the database open is held"
+    );
+    assert!(databases.pipeline.is_some());
+    assert!(databases.governed.is_some());
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn interactive_learning_initialization_opens_once_and_shares_db_instance() {
     let temp_dir = tempfile::tempdir().expect("temp dir");
     let opens = Arc::new(AtomicUsize::new(0));
-    let opens_for_open = Arc::clone(&opens);
+    let opens_for_init = Arc::clone(&opens);
 
-    let databases = initialize_with(
-        temp_dir.path(),
-        move |path| {
-            let opens = Arc::clone(&opens_for_open);
-            async move {
-                opens.fetch_add(1, Ordering::SeqCst);
-                archon_learning::cozo_guard::open_sqlite_guarded_async(
-                    &path,
-                    "test interactive learning db",
-                )
-                .await
-            }
-        },
-        super::interactive_learning_init::initialize_schemas,
-    )
+    let databases = initialize_with(temp_dir.path(), move |working_dir| {
+        opens_for_init.fetch_add(1, Ordering::SeqCst);
+        open_and_initialize(working_dir)
+    })
     .await;
 
     assert_eq!(opens.load(Ordering::SeqCst), 1, "database must open once");
@@ -35,38 +77,29 @@ async fn interactive_learning_initialization_opens_once_and_shares_db_instance()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn interactive_learning_schema_initialization_runs_on_blocking_thread() {
+async fn interactive_learning_initialization_runs_on_blocking_thread() {
     let temp_dir = tempfile::tempdir().expect("temp dir");
     let runtime_thread = std::thread::current().id();
-    let schema_thread = Arc::new(std::sync::Mutex::new(None));
-    let schema_thread_for_init = Arc::clone(&schema_thread);
+    let initialization_thread = Arc::new(std::sync::Mutex::new(None));
+    let initialization_thread_for_init = Arc::clone(&initialization_thread);
 
-    let databases = initialize_with(
-        temp_dir.path(),
-        |path| async move {
-            archon_learning::cozo_guard::open_sqlite_guarded_async(
-                &path,
-                "test interactive learning db",
-            )
-            .await
-        },
-        move |_working_dir, db| {
-            *schema_thread_for_init.lock().expect("schema thread lock") =
-                Some(std::thread::current().id());
-            super::interactive_learning_init::initialize_schemas(_working_dir, db)
-        },
-    )
+    let databases = initialize_with(temp_dir.path(), move |working_dir| {
+        *initialization_thread_for_init
+            .lock()
+            .expect("initialization thread lock") = Some(std::thread::current().id());
+        open_and_initialize(working_dir)
+    })
     .await;
 
     assert!(databases.pipeline.is_some());
     assert!(databases.governed.is_some());
     assert_ne!(
-        schema_thread
+        initialization_thread
             .lock()
-            .expect("schema thread lock")
-            .expect("schema initializer called"),
+            .expect("initialization thread lock")
+            .expect("initializer called"),
         runtime_thread,
-        "schema initialization must not run on the async runtime thread"
+        "database and schema initialization must not run on the async runtime thread"
     );
 }
 
@@ -74,20 +107,22 @@ async fn interactive_learning_schema_initialization_runs_on_blocking_thread() {
 async fn interactive_learning_partial_schema_failure_retains_the_healthy_role() {
     let temp_dir = tempfile::tempdir().expect("temp dir");
 
-    let databases = initialize_with(
-        temp_dir.path(),
-        |path| async move {
-            archon_learning::cozo_guard::open_sqlite_guarded_async(
-                &path,
-                "test interactive learning db",
-            )
-            .await
-        },
-        |_working_dir, _db| super::interactive_learning_init::SchemaInitialization {
-            pipeline: false,
-            governed: true,
-        },
-    )
+    let databases = initialize_with(temp_dir.path(), move |working_dir| {
+        let db_path = crate::command::store_paths::learning_db_path_for_dir(&working_dir);
+        let config = archon_cozo::CozoGuardConfig::for_interactive_db_path(&db_path);
+        let db = Arc::new(archon_cozo::open_sqlite_guarded(
+            &db_path.to_string_lossy(),
+            "test interactive learning db",
+            &config,
+        )?);
+        Ok(BlockingInitialization {
+            db,
+            schemas: SchemaInitialization {
+                pipeline: false,
+                governed: true,
+            },
+        })
+    })
     .await;
 
     assert!(databases.pipeline.is_none());
@@ -155,24 +190,15 @@ fn interactive_learning_schema_initialization_waits_for_held_sidecar_lock() {
 async fn interactive_learning_schema_join_failure_warns_and_disables_persistence() {
     let temp_dir = tempfile::tempdir().expect("temp dir");
 
-    let databases = initialize_with(
-        temp_dir.path(),
-        |path| async move {
-            archon_learning::cozo_guard::open_sqlite_guarded_async(
-                &path,
-                "test interactive learning db",
-            )
-            .await
-        },
-        |_working_dir, _db| -> super::interactive_learning_init::SchemaInitialization {
-            panic!("test blocking task panic")
-        },
-    )
+    let databases = initialize_with(temp_dir.path(), move |working_dir| {
+        let _ = working_dir;
+        panic!("test blocking task panic")
+    })
     .await;
 
     assert!(databases.pipeline.is_none());
     assert!(databases.governed.is_none());
     assert!(logs_contain(
-        "interactive learning schema initialization join failed"
+        "interactive learning initialization join failed"
     ));
 }

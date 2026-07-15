@@ -1,8 +1,7 @@
-use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use cozo::ScriptMutability;
 
 pub(super) struct InitializedDatabases {
@@ -15,67 +14,69 @@ pub(super) struct SchemaInitialization {
     pub(super) governed: bool,
 }
 
-pub(super) async fn initialize(working_dir: &Path) -> InitializedDatabases {
-    initialize_with(
-        working_dir,
-        |path| async move {
-            archon_learning::cozo_guard::open_sqlite_guarded_async(
-                &path,
-                "open interactive learning db",
-            )
-            .await
-        },
-        initialize_schemas,
-    )
-    .await
+pub(super) struct BlockingInitialization {
+    pub(super) db: Arc<cozo::DbInstance>,
+    pub(super) schemas: SchemaInitialization,
 }
 
-pub(super) async fn initialize_with<Open, OpenFuture, Initialize>(
+pub(super) async fn initialize(working_dir: &Path) -> InitializedDatabases {
+    initialize_with(working_dir, initialize_blocking).await
+}
+
+pub(super) async fn initialize_with<Initialize>(
     working_dir: &Path,
-    open: Open,
-    initialize_schemas: Initialize,
+    initialize_blocking: Initialize,
 ) -> InitializedDatabases
 where
-    Open: FnOnce(String) -> OpenFuture,
-    OpenFuture: Future<Output = Result<cozo::DbInstance>>,
-    Initialize: FnOnce(&Path, &cozo::DbInstance) -> SchemaInitialization + Send + 'static,
+    Initialize: FnOnce(PathBuf) -> Result<BlockingInitialization> + Send + 'static,
 {
-    let db_path = crate::command::store_paths::learning_db_path_for_dir(working_dir);
-    if let Some(parent) = db_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-
-    let db = match open(db_path.to_string_lossy().into_owned()).await {
-        Ok(db) => Arc::new(db),
-        Err(error) => {
-            tracing::warn!(error = %error, "CozoDB learning store unavailable; persistence disabled");
-            return InitializedDatabases {
-                pipeline: None,
-                governed: None,
-            };
-        }
-    };
-
-    let blocking_db = Arc::clone(&db);
-    let blocking_working_dir = PathBuf::from(working_dir);
+    let blocking_working_dir = working_dir.to_path_buf();
     match archon_tui::observability::spawn_blocking_named(
-        "interactive-learning-schema-init",
-        move || initialize_schemas(&blocking_working_dir, blocking_db.as_ref()),
+        "interactive-learning-initialize",
+        move || initialize_blocking(blocking_working_dir),
     )
     .await
     {
-        Ok(result) => InitializedDatabases {
-            pipeline: result.pipeline.then(|| Arc::clone(&db)),
-            governed: result.governed.then_some(db),
+        Ok(Ok(initialized)) => InitializedDatabases {
+            pipeline: initialized
+                .schemas
+                .pipeline
+                .then(|| Arc::clone(&initialized.db)),
+            governed: initialized.schemas.governed.then_some(initialized.db),
         },
+        Ok(Err(error)) => {
+            tracing::warn!(error = %error, "CozoDB learning store unavailable; persistence disabled");
+            InitializedDatabases {
+                pipeline: None,
+                governed: None,
+            }
+        }
         Err(error) => {
-            tracing::warn!(error = %error, "interactive learning schema initialization join failed; persistence disabled");
+            tracing::warn!(error = %error, "interactive learning initialization join failed; persistence disabled");
             InitializedDatabases {
                 pipeline: None,
                 governed: None,
             }
         }
     }
+}
+
+fn initialize_blocking(working_dir: PathBuf) -> Result<BlockingInitialization> {
+    let db_path = crate::command::store_paths::learning_db_path_for_dir(&working_dir);
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!("create interactive learning directory {}", parent.display())
+        })?;
+    }
+
+    let config = archon_cozo::CozoGuardConfig::for_interactive_db_path(&db_path);
+    let db = Arc::new(archon_cozo::open_sqlite_guarded(
+        &db_path.to_string_lossy(),
+        "open interactive learning db",
+        &config,
+    )?);
+    let schemas = initialize_schemas(&working_dir, db.as_ref());
+    Ok(BlockingInitialization { db, schemas })
 }
 
 pub(super) fn initialize_schemas(
