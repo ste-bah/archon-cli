@@ -5,7 +5,8 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use super::interactive_learning_init::{
-    BlockingInitialization, SchemaInitialization, initialize_schemas, initialize_with,
+    BlockingInitialization, SchemaInitialization, initialize_governed_schemas, initialize_schemas,
+    initialize_with,
 };
 
 fn open_and_initialize(working_dir: std::path::PathBuf) -> Result<BlockingInitialization> {
@@ -185,9 +186,77 @@ fn interactive_learning_schema_initialization_waits_for_held_sidecar_lock() {
     );
 }
 
+#[test]
+fn interactive_governed_schema_initialization_waits_for_held_sidecar_lock() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let db_path = crate::command::store_paths::learning_db_path_for_dir(temp_dir.path());
+    let db = archon_learning::cozo_guard::open_sqlite_guarded(
+        &db_path.to_string_lossy(),
+        "test interactive learning db",
+    )
+    .expect("open learning db");
+    let lock_path = archon_cozo::write_lock_path_for_db(&db_path);
+    let (locked_tx, locked_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let lock_holder = std::thread::spawn(move || {
+        archon_cozo::with_write_lock(&lock_path, "test lock holder", || {
+            locked_tx.send(()).expect("announce held lock");
+            release_rx.recv().expect("release held lock");
+            Ok(())
+        })
+    });
+    locked_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("sidecar lock acquired");
+
+    let (result_tx, result_rx) = mpsc::channel();
+    let config = archon_cozo::CozoGuardConfig::for_db_path(&db_path);
+    let initialization = std::thread::spawn(move || {
+        result_tx
+            .send(initialize_governed_schemas(&db, &config))
+            .expect("report governed schema initialization");
+    });
+
+    let completed_before_release = result_rx.recv_timeout(Duration::from_millis(100)).is_ok();
+    release_tx.send(()).expect("release lock");
+    lock_holder
+        .join()
+        .expect("lock holder joins")
+        .expect("lock holder succeeds");
+
+    assert!(
+        !completed_before_release,
+        "governed schemas must wait for the held same-path sidecar lock"
+    );
+    assert!(
+        result_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("governed schema initialization after lock release"),
+        "governed schemas initialize after lock release"
+    );
+    initialization.join().expect("schema thread joins");
+}
+
 #[tracing_test::traced_test]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn interactive_learning_schema_join_failure_warns_and_disables_persistence() {
+async fn interactive_learning_open_failure_warns_about_both_disabled_roles() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+
+    let databases = initialize_with(temp_dir.path(), move |_| {
+        Err(anyhow::anyhow!("test interactive learning db open failure"))
+    })
+    .await;
+
+    assert!(databases.pipeline.is_none());
+    assert!(databases.governed.is_none());
+    assert!(logs_contain(
+        "pipeline persistence and governed runtime evidence disabled"
+    ));
+}
+
+#[tracing_test::traced_test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn interactive_learning_schema_join_failure_warns_about_both_disabled_roles() {
     let temp_dir = tempfile::tempdir().expect("temp dir");
 
     let databases = initialize_with(temp_dir.path(), move |working_dir| {
@@ -199,6 +268,6 @@ async fn interactive_learning_schema_join_failure_warns_and_disables_persistence
     assert!(databases.pipeline.is_none());
     assert!(databases.governed.is_none());
     assert!(logs_contain(
-        "interactive learning initialization join failed"
+        "pipeline persistence and governed runtime evidence disabled"
     ));
 }

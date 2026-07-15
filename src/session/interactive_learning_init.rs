@@ -45,14 +45,20 @@ where
             governed: initialized.schemas.governed.then_some(initialized.db),
         },
         Ok(Err(error)) => {
-            tracing::warn!(error = %error, "CozoDB learning store unavailable; persistence disabled");
+            tracing::warn!(
+                error = %error,
+                "CozoDB learning store unavailable; pipeline persistence and governed runtime evidence disabled"
+            );
             InitializedDatabases {
                 pipeline: None,
                 governed: None,
             }
         }
         Err(error) => {
-            tracing::warn!(error = %error, "interactive learning initialization join failed; persistence disabled");
+            tracing::warn!(
+                error = %error,
+                "interactive learning initialization join failed; pipeline persistence and governed runtime evidence disabled"
+            );
             InitializedDatabases {
                 pipeline: None,
                 governed: None,
@@ -97,14 +103,26 @@ pub(super) fn initialize_schemas(
             false
         }
     };
-    let governed = match archon_learning::schema::ensure_learning_schema(db) {
+    let governed = initialize_governed_schemas(db, &guard_config);
+    SchemaInitialization { pipeline, governed }
+}
+
+pub(super) fn initialize_governed_schemas(
+    db: &cozo::DbInstance,
+    guard_config: &archon_cozo::CozoGuardConfig,
+) -> bool {
+    match archon_cozo::run_guarded(
+        "initialize interactive governed learning schemas",
+        ScriptMutability::Mutable,
+        &guard_config,
+        || archon_learning::schema::ensure_learning_schema(db),
+    ) {
         Ok(()) => true,
         Err(error) => {
             tracing::warn!(error = %error, "governed learning schema init failed; runtime evidence disabled");
             false
         }
-    };
-    SchemaInitialization { pipeline, governed }
+    }
 }
 
 fn initialize_pipeline_schemas_and_migrate(
