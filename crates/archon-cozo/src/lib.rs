@@ -140,7 +140,9 @@ pub fn run_guarded<T>(
             Ok(value) => return Ok(value),
             Err(error) => {
                 let last_error = format!("{error:#}");
-                if let Some(backoff) = retry_backoff(context, config, attempt, attempts, &last_error) {
+                if let Some(backoff) =
+                    retry_backoff(context, config, attempt, attempts, &last_error)
+                {
                     thread::sleep(backoff);
                     continue;
                 }
@@ -165,7 +167,9 @@ pub async fn run_guarded_async<T>(
             Ok(value) => return Ok(value),
             Err(error) => {
                 let last_error = format!("{error:#}");
-                if let Some(backoff) = retry_backoff(context, config, attempt, attempts, &last_error) {
+                if let Some(backoff) =
+                    retry_backoff(context, config, attempt, attempts, &last_error)
+                {
                     tokio::time::sleep(backoff).await;
                     continue;
                 }

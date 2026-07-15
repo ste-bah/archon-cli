@@ -93,13 +93,18 @@ async fn async_guarded_retry_yields_and_succeeds() {
         yielded_for_task.store(true, std::sync::atomic::Ordering::SeqCst);
     });
 
-    let retry = run_guarded_async("async retry", ScriptMutability::Immutable, &config, move || {
-        let attempt = attempts_for_run.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        if attempt == 0 {
-            return Err(anyhow!("database is locked"));
-        }
-        Ok("success")
-    });
+    let retry = run_guarded_async(
+        "async retry",
+        ScriptMutability::Immutable,
+        &config,
+        move || {
+            let attempt = attempts_for_run.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if attempt == 0 {
+                return Err(anyhow!("database is locked"));
+            }
+            Ok("success")
+        },
+    );
     tokio::pin!(retry);
 
     tokio::select! {
