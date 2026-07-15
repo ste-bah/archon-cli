@@ -67,10 +67,7 @@ fn metadata_json_contains_self_describing_paths_and_checksums() {
     assert_eq!(metadata.paths.raw, record.raw_path);
     assert_eq!(metadata.paths.raw_response, record.raw_response_path);
     assert_eq!(metadata.paths.raw_request, record.raw_request_path);
-    assert_eq!(
-        metadata.paths.redacted_headers,
-        record.redacted_headers_path
-    );
+    assert_eq!(metadata.paths.redacted_headers, record.redacted_headers_path);
     assert_eq!(metadata.paths.provider_notes, record.provider_notes_path);
     assert_eq!(metadata.paths.normalized, record.normalized_path);
     assert_eq!(metadata.paths.validation, record.validation_path);
@@ -84,11 +81,7 @@ fn metadata_json_contains_self_describing_paths_and_checksums() {
     assert_eq!(metadata.checksum, metadata.checksums.normalized_sha256);
     assert_eq!(record.metadata_checksum, metadata.checksums.metadata_sha256);
     assert_eq!(record.raw_checksum, metadata.checksums.raw_sha256);
-    assert!(
-        record
-            .dataset_path
-            .ends_with("manual-BTCUSD-1D-raw/20260101-fixture")
-    );
+    assert!(record.dataset_path.ends_with("manual-BTCUSD-1D-raw/20260101-fixture"));
     assert!(!metadata.checksums.metadata_sha256.is_empty());
     assert_eq!(metadata.source.license_notes, "research");
     assert_eq!(metadata.created_at, "2026-01-01T00:00:00Z");
