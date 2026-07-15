@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use anyhow::{Context, Result};
 use hnsw_rs::prelude::{AnnT, DistCosine, Hnsw};
@@ -7,6 +8,7 @@ use rust_rocksdb::{DB, Options, WriteBatch};
 use serde::{Deserialize, Serialize};
 
 mod config;
+mod generation;
 mod hnsw_ids;
 mod persisted_hnsw;
 
@@ -53,6 +55,8 @@ pub struct HnswManifest {
     pub vector_count: usize,
     pub dump_basename: String,
     pub created_at: String,
+    #[serde(default)]
+    pub provider_generation: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -64,6 +68,7 @@ pub struct HnswSearchHit {
 pub struct DocVectorStore {
     db: DB,
     root: PathBuf,
+    generation_lock: Mutex<()>,
 }
 
 impl DocVectorStore {
@@ -78,10 +83,14 @@ impl DocVectorStore {
         let mut options = Options::default();
         options.create_if_missing(true);
         options.set_max_open_files(256);
-        options.increase_parallelism(num_parallelism());
+        options.increase_parallelism(config::num_parallelism());
         let db = DB::open(&options, &root)
             .with_context(|| format!("open RocksDB vector store {}", root.display()))?;
-        Ok(Self { db, root })
+        Ok(Self {
+            db,
+            root,
+            generation_lock: Mutex::new(()),
+        })
     }
 
     pub fn put_vectors(&self, rows: &[VectorWrite<'_>]) -> Result<usize> {
@@ -91,8 +100,13 @@ impl DocVectorStore {
         if rows.is_empty() {
             return Ok(0);
         }
+        let _generation_lock = self
+            .generation_lock
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let mut batch = WriteBatch::default();
         let mut written_keys = HashSet::new();
+        let mut mutated_providers = HashSet::new();
         for row in rows {
             if row.embedding.is_empty() {
                 continue;
@@ -108,9 +122,14 @@ impl DocVectorStore {
                 batch.put(cache_key(row.provider, row.content_hash), &bytes);
             }
             written_keys.insert(vector_key);
+            mutated_providers.insert(row.provider);
         }
         if written_keys.is_empty() {
             return Ok(0);
+        }
+        for provider in mutated_providers {
+            let generation = generation::next(&self.db, provider)?;
+            batch.put(generation::key(provider), generation::encode(generation));
         }
         self.db
             .write(batch)
@@ -158,7 +177,12 @@ impl DocVectorStore {
         limit: Option<usize>,
     ) -> Result<HnswManifest> {
         validate_provider(provider)?;
+        let _generation_lock = self
+            .generation_lock
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let records = self.iter_records(Some(provider), limit)?;
+        let provider_generation = generation::current(&self.db, provider)?;
         anyhow::ensure!(
             !records.is_empty(),
             "no raw vectors found for provider {provider}"
@@ -178,6 +202,7 @@ impl DocVectorStore {
             vector_count: records.len(),
             dump_basename,
             created_at: chrono::Utc::now().to_rfc3339(),
+            provider_generation: Some(provider_generation),
         };
         self.write_hnsw_manifest(provider, &manifest)?;
         Ok(manifest)
@@ -193,10 +218,12 @@ impl DocVectorStore {
     ) -> Result<Vec<HnswSearchHit>> {
         validate_provider(provider)?;
         let raw_count = self.count_vectors(Some(provider))?;
+        let provider_generation = generation::current(&self.db, provider)?;
         let manifest = self.latest_hnsw_manifest(provider)?;
         if let Some(manifest) = manifest.as_ref()
             && manifest.dimension == query.len()
             && manifest.vector_count == raw_count
+            && manifest.provider_generation == Some(provider_generation)
         {
             return persisted_hnsw::search(
                 self.hnsw_dir(provider),
@@ -460,12 +487,6 @@ fn safe_provider(provider: &str) -> String {
             }
             safe
         })
-}
-
-fn num_parallelism() -> i32 {
-    std::thread::available_parallelism()
-        .map(|count| count.get().min(8) as i32)
-        .unwrap_or(2)
 }
 
 #[cfg(test)]

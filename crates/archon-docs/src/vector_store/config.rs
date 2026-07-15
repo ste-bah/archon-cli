@@ -25,6 +25,12 @@ pub fn default_store_dir() -> PathBuf {
     }
 }
 
+pub(super) fn num_parallelism() -> i32 {
+    std::thread::available_parallelism()
+        .map(|count| count.get().min(8) as i32)
+        .unwrap_or(2)
+}
+
 #[cfg(test)]
 pub(super) fn test_thread_suffix() -> String {
     format!("{:?}", std::thread::current().id())

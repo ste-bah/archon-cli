@@ -147,11 +147,12 @@ fn worker_loaded(
 
 fn manifest_identity(hnsw_dir: &std::path::Path, manifest: &HnswManifest) -> String {
     format!(
-        "{}:{}:{}:{}:{}",
+        "{}:{}:{}:{}:{:?}:{}",
         hnsw_dir.display(),
         manifest.provider,
         manifest.dimension,
         manifest.vector_count,
+        manifest.provider_generation,
         manifest.dump_basename
     )
 }

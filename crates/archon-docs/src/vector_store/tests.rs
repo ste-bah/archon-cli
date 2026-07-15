@@ -335,6 +335,7 @@ fn latest_hnsw_manifest_rejects_provider_mismatch() {
         vector_count: 1,
         dump_basename: "index".into(),
         created_at: "2026-07-13T00:00:00Z".into(),
+        provider_generation: Some(1),
     };
     std::fs::write(manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
 

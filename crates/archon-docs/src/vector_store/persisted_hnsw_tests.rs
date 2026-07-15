@@ -4,7 +4,9 @@ use super::*;
 
 fn persisted_hnsw_test_lock() -> MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
 }
 
 fn write_test_vectors(store: &DocVectorStore, provider: &str, rows: &[(&str, &[f32])]) {
@@ -67,6 +69,50 @@ fn stale_vector_count_uses_in_memory_fallback_and_sees_new_data() {
         .unwrap();
 
     assert_eq!(hits[0].chunk_id, "chunk-b");
+}
+
+#[test]
+fn same_key_replacement_uses_in_memory_fallback() {
+    let _lock = persisted_hnsw_test_lock();
+    let temp = tempfile::tempdir().unwrap();
+    let store = DocVectorStore::open(temp.path()).unwrap();
+    write_test_vectors(&store, "test", &[("chunk-a", &[1.0, 0.0])]);
+    store.build_hnsw("test", 2, None).unwrap();
+    write_test_vectors(&store, "test", &[("chunk-a", &[0.0, 1.0])]);
+
+    let hits = store
+        .search_persisted_first("test", &[0.0, 1.0], 1, 16, None)
+        .unwrap();
+
+    assert_eq!(hits[0].chunk_id, "chunk-a");
+    assert!(hits[0].distance < 0.01);
+}
+
+#[test]
+fn old_manifest_without_generation_is_compatible_but_stale() {
+    let _lock = persisted_hnsw_test_lock();
+    let temp = tempfile::tempdir().unwrap();
+    let store = DocVectorStore::open(temp.path()).unwrap();
+    write_test_vectors(&store, "test", &[("chunk-a", &[1.0, 0.0])]);
+    let manifest = store.build_hnsw("test", 2, None).unwrap();
+    let mut old_manifest = serde_json::to_value(manifest).unwrap();
+    old_manifest
+        .as_object_mut()
+        .unwrap()
+        .remove("provider_generation");
+    std::fs::write(
+        store.hnsw_manifest_path("test"),
+        serde_json::to_vec(&old_manifest).unwrap(),
+    )
+    .unwrap();
+    let loads_before = persisted_hnsw_load_count();
+
+    let hits = store
+        .search_persisted_first("test", &[1.0, 0.0], 1, 16, None)
+        .unwrap();
+
+    assert_eq!(hits[0].chunk_id, "chunk-a");
+    assert_eq!(persisted_hnsw_load_count(), loads_before);
 }
 
 #[test]
