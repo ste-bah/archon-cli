@@ -149,7 +149,7 @@ fn run_guarded_once<T>(
     run: &mut impl FnMut() -> Result<T>,
 ) -> Result<T> {
     if matches!(mutability, ScriptMutability::Mutable) {
-        let process_lock = process_write_lock(config.write_lock_path.as_deref());
+        let process_lock = process_write_lock(config.write_lock_path.as_deref())?;
         let _process_guard = lock_recovering_poison(&process_lock);
         if let Some(path) = &config.write_lock_path {
             return with_write_lock(path, context, || catch_guarded_operation(context, run));
@@ -160,37 +160,73 @@ fn run_guarded_once<T>(
     catch_guarded_operation(context, run)
 }
 
-fn process_write_lock(path: Option<&Path>) -> Arc<Mutex<()>> {
-    let key = path
-        .map(normalized_lock_path)
-        .map(WriteLockKey::Path)
-        .unwrap_or(WriteLockKey::Fallback);
+fn process_write_lock(path: Option<&Path>) -> Result<Arc<Mutex<()>>> {
+    let key = match path {
+        Some(path) => WriteLockKey::Path(normalized_lock_path(path)?),
+        None => WriteLockKey::Fallback,
+    };
     let locks = COZO_PROCESS_WRITE_LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
     let mut locks = lock_recovering_poison(locks);
-    Arc::clone(locks.entry(key).or_insert_with(|| Arc::new(Mutex::new(()))))
+    Ok(Arc::clone(
+        locks.entry(key).or_insert_with(|| Arc::new(Mutex::new(()))),
+    ))
 }
 
-fn normalized_lock_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| {
-        let path = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            std::env::current_dir()
-                .map(|current_dir| current_dir.join(path))
-                .unwrap_or_else(|_| path.to_path_buf())
-        };
-        let mut normalized = PathBuf::new();
-        for component in path.components() {
-            match component {
-                Component::CurDir => {}
-                Component::ParentDir => {
-                    normalized.pop();
+fn normalized_lock_path(path: &Path) -> Result<PathBuf> {
+    let path = absolute_normalized_path(path)?;
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let parent = canonicalize_existing_path(parent)?;
+    Ok(parent.join(path.file_name().unwrap_or_default()))
+}
+
+fn absolute_normalized_path(path: &Path) -> Result<PathBuf> {
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    Ok(lexically_normalized_path(&path))
+}
+
+fn canonicalize_existing_path(path: &Path) -> Result<PathBuf> {
+    let mut unresolved = Vec::new();
+    let mut existing = path;
+
+    loop {
+        match existing.canonicalize() {
+            Ok(mut normalized) => {
+                for component in unresolved.iter().rev() {
+                    normalized.push(component);
                 }
-                _ => normalized.push(component.as_os_str()),
+                return Ok(normalized);
+            }
+            Err(error) => {
+                let Some(name) = existing.file_name() else {
+                    return Err(error.into());
+                };
+                unresolved.push(name.to_os_string());
+                let Some(parent) = existing.parent() else {
+                    return Err(error.into());
+                };
+                existing = parent;
             }
         }
-        normalized
-    })
+    }
+}
+
+fn lexically_normalized_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
 }
 
 fn lock_recovering_poison<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {

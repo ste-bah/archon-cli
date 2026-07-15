@@ -106,6 +106,65 @@ fn writes_with_the_same_lock_path_are_serialized() {
     assert_eq!(peak, 1);
 }
 
+#[cfg(unix)]
+#[test]
+fn writes_through_symlinked_parent_are_serialized_after_lock_creation() {
+    use std::os::unix::fs::symlink;
+
+    let temp = TempDir::new().unwrap();
+    let real_parent = temp.path().join("real");
+    let alias_parent = temp.path().join("alias");
+    std::fs::create_dir(&real_parent).unwrap();
+    symlink(&real_parent, &alias_parent).unwrap();
+
+    let real_path = real_parent.join("shared.lock");
+    let alias_path = alias_parent.join("shared.lock");
+    let config = CozoGuardConfig {
+        max_attempts: 1,
+        initial_backoff: Duration::ZERO,
+        max_backoff: Duration::ZERO,
+        write_lock_path: Some(alias_path),
+    };
+    let (first_entered_tx, first_entered_rx) = mpsc::channel();
+    let (release_first_tx, release_first_rx) = mpsc::channel();
+    let first = thread::spawn(move || {
+        run_guarded("symlinked lock", ScriptMutability::Mutable, &config, || {
+            first_entered_tx.send(()).unwrap();
+            release_first_rx.recv().unwrap();
+            Ok(())
+        })
+    });
+    first_entered_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+
+    let (second_entered_tx, second_entered_rx) = mpsc::channel();
+    let second = thread::spawn(move || {
+        run_guarded(
+            "real lock",
+            ScriptMutability::Mutable,
+            &CozoGuardConfig {
+                max_attempts: 1,
+                initial_backoff: Duration::ZERO,
+                max_backoff: Duration::ZERO,
+                write_lock_path: Some(real_path),
+            },
+            || {
+                second_entered_tx.send(()).unwrap();
+                Ok(())
+            },
+        )
+    });
+
+    assert!(
+        second_entered_rx
+            .recv_timeout(Duration::from_millis(100))
+            .is_err(),
+        "real-path write bypassed the mutex"
+    );
+    release_first_tx.send(()).unwrap();
+    first.join().unwrap().unwrap();
+    second.join().unwrap().unwrap();
+}
+
 #[test]
 fn unkeyed_writes_are_serialized() {
     let peak = overlap_count(
