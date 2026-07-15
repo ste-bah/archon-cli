@@ -157,38 +157,9 @@ pub(super) async fn build(
         }
     };
 
-    let learning_cozo_db = {
-        let db_path = crate::command::store_paths::learning_db_path_for_dir(&working_dir);
-        if let Some(parent) = db_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        match archon_learning::cozo_guard::open_sqlite_guarded_async(
-            db_path.to_str().unwrap_or(""),
-            "open interactive learning db",
-        )
-        .await
-        {
-            Ok(db) => {
-                if let Err(e) = archon_pipeline::learning::schema::initialize_learning_schemas(&db)
-                {
-                    tracing::warn!(error = %e, "Learning schema init failed; retrain may not work");
-                } else {
-                    crate::command::pipeline_learning_migration::maybe_migrate_legacy_pipeline_learning_with_log(
-                        &working_dir,
-                        &db_path,
-                        &db,
-                        "interactive",
-                    );
-                }
-                Some(Arc::new(db))
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "CozoDB learning store unavailable; retrain disabled");
-                None
-            }
-        }
-    };
-    let governed_learning_db = super::open_governed_learning_db(&working_dir);
+    let initialized_learning = super::interactive_learning_init::initialize(&working_dir).await;
+    let learning_cozo_db = initialized_learning.pipeline;
+    let governed_learning_db = initialized_learning.governed;
 
     let auto_trainer = build_auto_trainer(config, &learning_cozo_db, memory.as_ref());
 

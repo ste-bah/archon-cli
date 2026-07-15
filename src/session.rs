@@ -25,6 +25,9 @@ mod gnn_auto_trainer_seed;
 mod interactive_agent;
 mod interactive_bootstrap;
 mod interactive_finish;
+mod interactive_learning_init;
+#[cfg(test)]
+mod interactive_learning_init_tests;
 mod interactive_setup;
 mod interactive_ui;
 mod model_selection;
