@@ -245,10 +245,7 @@ impl LlmClient for RetryAgentClient {
             collect_text(value, &mut prompt);
         }
         let content = self.respond(&prompt);
-        self.prompts
-            .lock()
-            .expect("prompt log")
-            .push(prompt.chars().take(1200).collect());
+        self.prompts.lock().expect("prompt log").push(prompt);
         Ok(LlmResponse {
             content,
             tool_uses: Vec::new(),

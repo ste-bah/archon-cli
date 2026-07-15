@@ -96,6 +96,7 @@ impl WorkflowV2AgentAdapter {
              repository_root: {repository_root}\n\
              project_artifact_root: {project_artifact_root}\n\
              project_artifact_roots: {artifact_roots}\n\
+             workflow_branch_evidence_root: {branch_evidence_root}\n\
              target_files: {target_files}\n\
              target_ownership_scopes: {target_ownership_scopes}\n\n\
              {project_artifact_paths}\
@@ -121,6 +122,11 @@ impl WorkflowV2AgentAdapter {
                 .as_deref()
                 .unwrap_or("<none>"),
             artifact_roots = artifact_roots,
+            branch_evidence_root = request
+                .project_artifacts
+                .branch_evidence_root
+                .as_deref()
+                .unwrap_or("<none>"),
             target_files = target_files,
             target_ownership_scopes = target_ownership_scopes,
             project_artifact_paths = project_artifact_paths,

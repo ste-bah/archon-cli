@@ -66,10 +66,12 @@ for key in sorted(required):
     if cell is None:
         failures.append(f'{{key[0]}}:{{key[1]}} missing coverage cell')
         continue
-    required_flags = cell.get('available') is True and cell.get('native_interval') is True and cell.get('production_eligible') is True
+    symbol = cell.get('symbol') or cell.get('provider_symbol')
+    interval = cell.get('interval') or cell.get('timeframe')
+    required_flags = cell.get('available') is True and cell.get('native_interval') is True and cell.get('production_eligible') is True and bool(symbol) and bool(interval)
     dataset_id, version = cell.get('dataset_id'), cell.get('version')
     if not required_flags or not dataset_id or not version or int(cell.get('row_count') or 0) <= 0:
-        failures.append(f'{{key[0]}}:{{key[1]}} unavailable/non-native/non-production/empty')
+        failures.append(f'{{key[0]}}:{{key[1]}} unavailable/non-native/non-production/empty/missing-symbol-or-interval')
         continue
     record = registry.get('datasets', {{}}).get(f'{{dataset_id}}:{{version}}')
     if not record or record.get('native_interval') is not True or record.get('production_eligible') is not True or record.get('status') != 'Healthy' or int(record.get('bars') or 0) <= 0:

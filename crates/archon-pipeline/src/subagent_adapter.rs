@@ -12,7 +12,9 @@ use async_trait::async_trait;
 
 use archon_llm::provider::{LlmProvider, LlmRequest};
 use archon_tools::agent_tool::{SubagentRequest, run_subagent, run_subagent_foreground};
-use archon_tools::provider_env::{ProviderEnvPolicy, provider_env_policy_from_marker};
+use archon_tools::provider_env::{
+    ProviderEnvPolicy, ProviderEnvSource, provider_env_policy_from_marker,
+};
 use archon_tools::subagent_executor::SubagentOutcome;
 use archon_tools::tool::ToolContext;
 
@@ -194,7 +196,7 @@ impl LlmClient for SubagentPipelineClient {
         let activity_model = self.activity_model(&request.agent.model);
         let allowed_tools = Self::allowed_tools(&request);
         let strict_workspace_boundary = Self::strict_workspace_boundary(&request, &allowed_tools);
-        let provider_env = workflow_provider_env_policy(&request);
+        let provider_env = workflow_provider_env_source(&request);
         let req = SubagentRequest {
             prompt,
             model: Some(activity_model),
@@ -269,6 +271,20 @@ impl LlmClient for SubagentPipelineClient {
                 "subagent auto-backgrounded before returning output"
             )),
         }
+    }
+}
+
+fn workflow_provider_env_source(request: &AgentExecutionRequest) -> Option<ProviderEnvSource> {
+    match (
+        workflow_provider_env_policy(request),
+        request.provider_env_resolution.clone(),
+    ) {
+        (Some(policy), Some(resolution)) => {
+            Some(ProviderEnvSource::ResolvedPolicy { policy, resolution })
+        }
+        (Some(policy), None) => Some(ProviderEnvSource::Policy(policy)),
+        (None, Some(resolution)) => Some(ProviderEnvSource::Resolution(resolution)),
+        (None, None) => None,
     }
 }
 
@@ -391,6 +407,7 @@ mod tests {
             allowed_tools: Vec::new(),
             timeout_secs: None,
             disable_auto_background: false,
+            provider_env_resolution: None,
         }
     }
 
@@ -461,5 +478,22 @@ mod tests {
         assert!(!SubagentPipelineClient::strict_workspace_boundary(
             &request, &tools
         ));
+    }
+
+    #[tokio::test]
+    async fn d47_markerless_final_gate_receives_run_scoped_provider_env() {
+        let policy = ProviderEnvPolicy {
+            required_keys: vec!["ARCHON_D47_FINAL_GATE_TEST".into()],
+            profile_sources: Vec::new(),
+            reason: Some("final gate regression".into()),
+        };
+        let resolution = archon_tools::provider_env::resolve_provider_env(&policy).await;
+        let mut request = request(ToolAccessLevel::Full);
+        request.pipeline_type = PipelineType::Workflow;
+        request.disable_auto_background = true;
+        request.provider_env_resolution = Some(resolution.clone());
+
+        let source = workflow_provider_env_source(&request).expect("provider env source");
+        assert_eq!(source, ProviderEnvSource::Resolution(resolution));
     }
 }

@@ -86,3 +86,22 @@ fn provider_env_result_stamp_persists_redacted_proof_only() {
     );
     assert!(!result.data.to_string().contains("secret"));
 }
+
+#[tokio::test]
+async fn d47_generated_provider_workflow_resolves_one_shared_key_set() {
+    let resolved = resolve_generated_workflow_provider_env([
+        "TASK-TDL-050".to_string(),
+        "TASK-TDL-080".to_string(),
+    ])
+    .await
+    .expect("provider workflow resolution");
+    let keys = resolved
+        .proof
+        .redacted_env_keys_checked
+        .iter()
+        .map(|proof| proof.key.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(keys, vec!["OPENBB_API_URL", "POLYGON_API_KEY"]);
+    assert!(!format!("{resolved:?}").contains("https://"));
+}

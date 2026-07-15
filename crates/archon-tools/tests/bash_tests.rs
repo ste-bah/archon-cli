@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use archon_tools::bash::BashTool;
+use archon_tools::provider_env::{ProviderEnvPolicy, resolve_provider_env};
 use archon_tools::tool::{PermissionLevel, Tool, ToolContext};
 
 fn test_ctx() -> ToolContext {
@@ -27,6 +28,40 @@ async fn bash_echo_hello() {
         .await;
     assert!(!result.is_error, "echo should succeed: {}", result.content);
     assert!(result.content.trim().contains("hello"));
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tokio::test]
+async fn resolved_provider_env_is_stable_across_multiple_subagent_shells() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let profile = temp.path().join("profile");
+    std::fs::write(
+        &profile,
+        "export ARCHON_TEST_PROVIDER_SNAPSHOT=first-value\n",
+    )
+    .expect("profile");
+    let policy = ProviderEnvPolicy {
+        required_keys: vec!["ARCHON_TEST_PROVIDER_SNAPSHOT".to_string()],
+        profile_sources: vec![profile.display().to_string()],
+        reason: Some("D47 regression".to_string()),
+    };
+    let resolution = resolve_provider_env(&policy).await;
+    std::fs::write(&profile, "unset ARCHON_TEST_PROVIDER_SNAPSHOT\n").expect("rewrite profile");
+    let tool = BashTool::default().with_provider_env_resolution(resolution);
+
+    for _ in 0..2 {
+        let result = tool
+            .execute(
+                json!({
+                    "command": "test -n \"${ARCHON_TEST_PROVIDER_SNAPSHOT:-}\" && echo present"
+                }),
+                &test_ctx(),
+            )
+            .await;
+        assert!(!result.is_error, "snapshot missing: {}", result.content);
+        assert_eq!(result.content.trim(), "present");
+        assert!(!result.content.contains("first-value"));
+    }
 }
 
 #[cfg(not(target_os = "windows"))]

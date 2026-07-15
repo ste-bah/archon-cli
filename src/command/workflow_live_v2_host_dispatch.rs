@@ -188,8 +188,11 @@ async fn run_single_v2_agent_call_in_repository(
         context.add_artifact_requirements(&request.input);
         request.project_artifacts = context;
     }
-    let provider_env =
-        workflow_live_provider_env::prepare_provider_env_for_v2_request(&mut request).await;
+    let provider_env = workflow_live_provider_env::prepare_provider_env_for_v2_request(
+        &mut request,
+        client.provider_env_resolution(),
+    )
+    .await;
     let call_client = client.with_provider_tier(provider_tier_for_v2_request(&request));
     match run_v2_agent_call_with_rejected_output_log(adapter, &call_client, &request, v2_store)
         .await

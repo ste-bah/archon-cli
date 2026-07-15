@@ -222,3 +222,25 @@ fn provider_remediation_requires_profile_grounded_redacted_proof() {
     assert!(prompt.contains("provider_env_proof"));
     assert!(prompt.contains("never credential values"));
 }
+
+#[test]
+fn d48_d49_verifier_prompts_search_branch_proofs_and_follow_manifest_pointer() {
+    let prompts = [
+        super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_PLAN_TASK,
+        super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_WAVE_TASK,
+        super::super::workflow_live_v2_lifecycle_prompts::RETRY_VERIFICATION_WAVE_TASK,
+        super::super::workflow_live_v2_lifecycle_prompts::FINAL_EVIDENCE_RECONCILIATION_TASK,
+        super::super::workflow_live_v2_lifecycle_prompts::FINAL_ZERO_GAP_AUDIT_TASK,
+    ];
+
+    assert!(
+        prompts
+            .iter()
+            .all(|prompt| prompt.contains("manifest.normalized_path"))
+    );
+    assert!(
+        prompts
+            .iter()
+            .all(|prompt| prompt.contains("workflow_branch_evidence_root"))
+    );
+}

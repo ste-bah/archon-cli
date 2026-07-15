@@ -197,9 +197,9 @@ fn provider_env_policy_is_internal_only() {
         run_in_background: false,
         cwd: None,
         isolation: None,
-        provider_env: Some(crate::provider_env::ProviderEnvPolicy::new(vec![
-            "POLYGON_API_KEY".to_string(),
-        ])),
+        provider_env: Some(crate::provider_env::ProviderEnvSource::Policy(
+            crate::provider_env::ProviderEnvPolicy::new(vec!["POLYGON_API_KEY".to_string()]),
+        )),
     };
     let json = serde_json::to_value(&request).unwrap();
     assert!(json.get("provider_env").is_none());

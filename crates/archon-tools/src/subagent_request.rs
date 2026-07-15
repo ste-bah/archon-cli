@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::provider_env::ProviderEnvPolicy;
+use crate::provider_env::ProviderEnvSource;
 
 /// A validated request to spawn a subagent. The `AgentTool` validates
 /// parameters and produces this struct so the outer agent loop can orchestrate
@@ -27,7 +27,7 @@ pub struct SubagentRequest {
     #[serde(default)]
     pub isolation: Option<String>,
     #[serde(default, skip_serializing, skip_deserializing)]
-    pub provider_env: Option<ProviderEnvPolicy>,
+    pub provider_env: Option<ProviderEnvSource>,
 }
 
 impl SubagentRequest {

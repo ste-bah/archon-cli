@@ -246,6 +246,13 @@ fn generated_v2_write_with_project_artifacts_gets_bash_and_project_root() {
     assert_eq!(
         stage
             .input
+            .get("workflow_branch_evidence_root")
+            .and_then(serde_json::Value::as_str),
+        req.project_artifacts.branch_evidence_root.as_deref()
+    );
+    assert_eq!(
+        stage
+            .input
             .get("stage_extra")
             .and_then(|value| value.get("required_tools"))
             .and_then(serde_json::Value::as_array)

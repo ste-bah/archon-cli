@@ -95,6 +95,27 @@ fn metadata_json_contains_self_describing_paths_and_checksums() {
 }
 
 #[test]
+fn d49_normalized_artifact_follows_manifest_pointer_without_literal_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let record = lake.store_ohlcv(request()).unwrap();
+    let manifest: serde_json::Value = read_json(&temp.path().join(&record.manifest_path)).unwrap();
+    let normalized_path = manifest["normalized_path"]
+        .as_str()
+        .expect("manifest normalized_path");
+
+    assert_eq!(normalized_path, record.normalized_path);
+    assert!(temp.path().join(normalized_path).is_file());
+    assert!(
+        !temp
+            .path()
+            .join(&record.dataset_path)
+            .join("normalized")
+            .exists()
+    );
+}
+
+#[test]
 fn identical_content_reuses_existing_dataset_version() {
     let temp = tempfile::tempdir().unwrap();
     let lake = TradingDataLake::new(temp.path());

@@ -81,6 +81,12 @@ fn d40_tdl_080_gets_substantive_registry_backed_coverage_verification() {
             .expect("command")
             .contains("lacks healthy registered native provenance")
     );
+    assert!(
+        substantive["focused_verification"]
+            .as_str()
+            .expect("command")
+            .contains("missing-symbol-or-interval")
+    );
     assert_eq!(
         substantive["provider_env_requirements"],
         serde_json::json!(["POLYGON_API_KEY"])

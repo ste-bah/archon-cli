@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use archon_pipeline::runner::{AgentExecutionRequest, LlmClient, PipelineType};
+use archon_tools::provider_env::ProviderEnvResolution;
 use archon_tui::app::TuiEvent;
 use archon_tui::event_channel::TuiEventSender;
 use archon_tui::events::{AgentActivityRole, AgentActivityStatus, AgentActivityUpdate};
@@ -27,6 +28,7 @@ pub(super) struct LiveV2AgentClient {
     run_id: String,
     target_repository_root: Option<String>,
     timeout_secs: Option<u64>,
+    provider_env_resolution: Option<ProviderEnvResolution>,
 }
 
 impl LiveV2AgentClient {
@@ -46,7 +48,20 @@ impl LiveV2AgentClient {
             run_id,
             target_repository_root,
             timeout_secs,
+            provider_env_resolution: None,
         }
+    }
+
+    pub(super) fn with_provider_env_resolution(
+        mut self,
+        provider_env_resolution: Option<ProviderEnvResolution>,
+    ) -> Self {
+        self.provider_env_resolution = provider_env_resolution;
+        self
+    }
+
+    pub(super) fn provider_env_resolution(&self) -> Option<&ProviderEnvResolution> {
+        self.provider_env_resolution.as_ref()
     }
 
     pub(super) fn with_provider_tier(&self, provider_tier: ProviderTier) -> Self {
@@ -58,6 +73,7 @@ impl LiveV2AgentClient {
             run_id: self.run_id.clone(),
             target_repository_root: self.target_repository_root.clone(),
             timeout_secs: self.timeout_secs,
+            provider_env_resolution: self.provider_env_resolution.clone(),
         }
     }
 
@@ -70,6 +86,7 @@ impl LiveV2AgentClient {
             run_id: self.run_id.clone(),
             target_repository_root: self.target_repository_root.clone(),
             timeout_secs,
+            provider_env_resolution: self.provider_env_resolution.clone(),
         }
     }
 
@@ -173,6 +190,7 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
             allowed_tools: allowed_tools(&stage_request),
             timeout_secs: self.timeout_secs,
             disable_auto_background: true,
+            provider_env_resolution: self.provider_env_resolution.clone(),
         };
         let response = match workflow_live_retry::run_agent_with_transient_retry(
             &self.llm,
@@ -323,6 +341,12 @@ fn insert_project_artifact_context(
         "project_artifact_roots".to_string(),
         serde_json::json!(request.project_artifacts.artifact_roots),
     );
+    if let Some(root) = request.project_artifacts.branch_evidence_root.clone() {
+        object.insert(
+            "workflow_branch_evidence_root".to_string(),
+            serde_json::Value::String(root),
+        );
+    }
     let resolved = request
         .project_artifacts
         .project_root

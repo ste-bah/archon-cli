@@ -269,6 +269,15 @@ async fn execute_generated_v2_run(
         target_repository_root: plan.target_repository_root.clone(),
         generated_config: plan.generated_config.clone(),
     };
+    let provider_env_resolution =
+        workflow_live_provider_env::resolve_generated_workflow_provider_env(
+            plan.task_universe
+                .as_ref()
+                .into_iter()
+                .flat_map(|universe| universe.tasks.iter())
+                .map(|task| task.canonical_task_id.clone()),
+        )
+        .await;
     let client = LiveV2AgentClient::new(
         llm,
         tui_tx.clone(),
@@ -276,7 +285,8 @@ async fn execute_generated_v2_run(
         run.id.clone(),
         runtime.target_repository_root.clone(),
         Some(u64::from(runtime.generated_config.host_call_timeout_secs)),
-    );
+    )
+    .with_provider_env_resolution(provider_env_resolution);
     let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
     let resume_completed_ids = if adopt_accepted_cache {
         plan.task_universe

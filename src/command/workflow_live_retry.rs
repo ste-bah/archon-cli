@@ -173,6 +173,7 @@ mod tests {
             allowed_tools: Vec::new(),
             timeout_secs: Some(7200),
             disable_auto_background,
+            provider_env_resolution: None,
         }
     }
 }

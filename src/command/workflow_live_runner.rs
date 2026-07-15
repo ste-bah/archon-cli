@@ -80,6 +80,7 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             allowed_tools: allowed_tools(&request),
             timeout_secs: None,
             disable_auto_background: false,
+            provider_env_resolution: None,
         };
         let response = match workflow_live_retry::run_agent_with_transient_retry(
             &self.llm,

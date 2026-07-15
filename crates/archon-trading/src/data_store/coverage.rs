@@ -153,7 +153,13 @@ pub(super) fn validate_coverage_matrix_complete(
     let missing = matrix
         .cells
         .iter()
-        .filter(|cell| !cell.available || cell.dataset_id.is_none() || !cell.production_eligible)
+        .filter(|cell| {
+            !cell.available
+                || cell.dataset_id.is_none()
+                || !cell.production_eligible
+                || cell.provider_symbol.trim().is_empty()
+                || cell.timeframe.trim().is_empty()
+        })
         .map(|cell| {
             format!(
                 "{}:{}: {}",
@@ -249,6 +255,48 @@ fn coverage_record_issues(
         Ok(())
     } else {
         Err(issues)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn eligible_cell(provider_symbol: &str, timeframe: &str) -> CoverageCell {
+        CoverageCell {
+            canonical_instrument: "ES".into(),
+            timeframe: timeframe.into(),
+            selected_provider: "tradingview".into(),
+            provider_symbol: provider_symbol.into(),
+            dataset_id: Some("tradingview-ES-1D-raw".into()),
+            version: Some("fixture".into()),
+            available: true,
+            native_interval: true,
+            production_eligible: true,
+            quality_status: "passed".into(),
+            row_count: 100,
+            coverage_start: "2026-01-01T00:00:00Z".into(),
+            coverage_end: "2026-04-10T00:00:00Z".into(),
+            fallback_reason: None,
+        }
+    }
+
+    fn matrix(cell: CoverageCell) -> CoverageMatrix {
+        CoverageMatrix {
+            schema_version: "archon-trading-coverage-v1".into(),
+            generated_at: "2026-07-15T00:00:00Z".into(),
+            instruments: vec!["ES".into()],
+            timeframes: vec!["1D".into()],
+            cells: vec![cell],
+            gaps: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn d47_production_eligible_coverage_requires_symbol_and_interval() {
+        assert!(validate_coverage_matrix_complete(&matrix(eligible_cell("", "1D"))).is_err());
+        assert!(validate_coverage_matrix_complete(&matrix(eligible_cell("ES1!", ""))).is_err());
+        assert!(validate_coverage_matrix_complete(&matrix(eligible_cell("ES1!", "1D"))).is_ok());
     }
 }
 

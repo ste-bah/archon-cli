@@ -1,7 +1,8 @@
 use std::collections::BTreeSet;
 
 use archon_tools::provider_env::{
-    ProviderEnvPolicy, ProviderEnvProof, provider_env_internal_marker, resolve_provider_env,
+    ProviderEnvPolicy, ProviderEnvProof, ProviderEnvResolution, provider_env_internal_marker,
+    resolve_provider_env,
 };
 use archon_workflow::{WorkflowV2AgentRequest, WorkflowV2Evidence, WorkflowV2EvidenceKind};
 
@@ -15,12 +16,16 @@ pub(super) struct PreparedProviderEnv {
 
 pub(super) async fn prepare_provider_env_for_v2_request(
     request: &mut WorkflowV2AgentRequest,
+    workflow_resolution: Option<&ProviderEnvResolution>,
 ) -> Option<PreparedProviderEnv> {
     let policy = provider_env_policy_from_input(&request.input)?;
     if policy.is_empty() {
         return None;
     }
-    let resolved = resolve_provider_env(&policy).await;
+    let resolved = match workflow_resolution.filter(|resolved| resolved.covers(&policy)) {
+        Some(resolved) => resolved.clone(),
+        None => resolve_provider_env(&policy).await,
+    };
     attach_provider_env_to_input(&mut request.input, &policy, &resolved.proof);
     request.constraints.push(
         "Provider-sensitive verification must report provider_env_proof with redacted key names only; never print or persist credential values.".to_string(),
@@ -29,6 +34,23 @@ pub(super) async fn prepare_provider_env_for_v2_request(
         policy,
         proof: resolved.proof,
     })
+}
+
+pub(super) async fn resolve_generated_workflow_provider_env(
+    canonical_task_ids: impl IntoIterator<Item = String>,
+) -> Option<ProviderEnvResolution> {
+    let ids = canonical_task_ids.into_iter().collect::<BTreeSet<_>>();
+    let mut keys = BTreeSet::new();
+    if ids.contains("TASK-TDL-050") || ids.contains("TASK-TDL-080") {
+        keys.insert("OPENBB_API_URL".to_string());
+        keys.insert("POLYGON_API_KEY".to_string());
+    }
+    if keys.is_empty() {
+        return None;
+    }
+    let mut policy = ProviderEnvPolicy::new(keys.into_iter().collect());
+    policy.reason = Some("generated workflow run-scoped provider environment".to_string());
+    Some(resolve_provider_env(&policy).await)
 }
 
 pub(super) fn provider_env_tool_markers(

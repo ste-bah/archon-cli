@@ -10,7 +10,7 @@ use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 use tokio::task::JoinHandle;
 
-use crate::provider_env::{ProviderEnvPolicy, ProviderEnvResolution};
+use crate::provider_env::{ProviderEnvPolicy, ProviderEnvResolution, ProviderEnvSource};
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
 const SENSITIVE_PATTERNS: &[&str] = &[
@@ -96,7 +96,7 @@ gtimeout() {
 pub struct BashTool {
     pub timeout_secs: u64,
     pub max_output_bytes: usize,
-    pub provider_env: Option<ProviderEnvPolicy>,
+    pub provider_env: Option<ProviderEnvSource>,
 }
 
 impl Default for BashTool {
@@ -111,6 +111,16 @@ impl Default for BashTool {
 
 impl BashTool {
     pub fn with_provider_env(mut self, provider_env: ProviderEnvPolicy) -> Self {
+        self.provider_env = Some(ProviderEnvSource::Policy(provider_env));
+        self
+    }
+
+    pub fn with_provider_env_resolution(mut self, provider_env: ProviderEnvResolution) -> Self {
+        self.provider_env = Some(ProviderEnvSource::Resolution(provider_env));
+        self
+    }
+
+    pub fn with_provider_env_source(mut self, provider_env: ProviderEnvSource) -> Self {
         self.provider_env = Some(provider_env);
         self
     }
@@ -313,8 +323,14 @@ impl Tool for BashTool {
     }
 }
 
-async fn provider_env_overlay(policy: Option<&ProviderEnvPolicy>) -> Option<ProviderEnvResolution> {
-    let policy = policy?;
+async fn provider_env_overlay(source: Option<&ProviderEnvSource>) -> Option<ProviderEnvResolution> {
+    let source = source?;
+    if let Some(resolved) = source.resolution()
+        && source.policy().is_none_or(|policy| resolved.covers(policy))
+    {
+        return Some(resolved.clone());
+    }
+    let policy = source.policy()?;
     Some(crate::provider_env::resolve_provider_env(policy).await)
 }
 

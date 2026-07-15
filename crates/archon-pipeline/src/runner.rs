@@ -325,6 +325,7 @@ pub struct AgentExecutionRequest {
     pub allowed_tools: Vec<String>,
     pub timeout_secs: Option<u64>,
     pub disable_auto_background: bool,
+    pub provider_env_resolution: Option<archon_tools::provider_env::ProviderEnvResolution>,
 }
 
 /// Abstraction over the underlying LLM transport. Concrete implementations

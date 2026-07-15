@@ -19,7 +19,7 @@ impl AgentSubagentExecutor {
             && tool_reg.get("Bash").is_some()
         {
             tool_reg.replace(Box::new(
-                archon_tools::bash::BashTool::default().with_provider_env(provider_env),
+                archon_tools::bash::BashTool::default().with_provider_env_source(provider_env),
             ));
         }
         let requested_cwd = super::paths::resolve_cwd(&self.working_dir, request.cwd.as_deref());

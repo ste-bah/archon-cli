@@ -18,6 +18,8 @@ pub struct WorkflowV2ProjectArtifactContext {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub artifact_roots: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_evidence_root: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy_version: Option<String>,
 }
 
@@ -52,6 +54,7 @@ pub fn project_artifact_context_from_v2_root(v2_root: &Path) -> WorkflowV2Projec
         project_root: project_root_for_v2_root(v2_root).map(|path| path.display().to_string()),
         run_id,
         artifact_roots,
+        branch_evidence_root: Some(v2_root.join("branches").display().to_string()),
         policy_version: Some(PROJECT_ARTIFACT_POLICY_VERSION.to_string()),
     }
 }
