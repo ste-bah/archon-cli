@@ -1,7 +1,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc;
+use std::time::Duration;
 
-use super::interactive_learning_init::initialize_with;
+use super::interactive_learning_init::{initialize_schemas, initialize_with};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn interactive_learning_initialization_opens_once_and_shares_db_instance() {
@@ -90,6 +92,62 @@ async fn interactive_learning_partial_schema_failure_retains_the_healthy_role() 
 
     assert!(databases.pipeline.is_none());
     assert!(databases.governed.is_some());
+}
+
+#[test]
+fn interactive_learning_schema_initialization_waits_for_held_sidecar_lock() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let db_path = crate::command::store_paths::learning_db_path_for_dir(temp_dir.path());
+    let db = archon_learning::cozo_guard::open_sqlite_guarded(
+        &db_path.to_string_lossy(),
+        "test interactive learning db",
+    )
+    .expect("open learning db");
+    let lock_path = archon_cozo::write_lock_path_for_db(&db_path);
+    let (locked_tx, locked_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let lock_holder = std::thread::spawn(move || {
+        archon_cozo::with_write_lock(&lock_path, "test lock holder", || {
+            locked_tx.send(()).expect("announce held lock");
+            release_rx.recv().expect("release held lock");
+            Ok(())
+        })
+    });
+    locked_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("sidecar lock acquired");
+
+    let (result_tx, result_rx) = mpsc::channel();
+    let working_dir = temp_dir.path().to_owned();
+    let initialization = std::thread::spawn(move || {
+        result_tx
+            .send(initialize_schemas(&working_dir, &db))
+            .expect("report schema initialization");
+    });
+
+    let completed_before_release = result_rx.recv_timeout(Duration::from_secs(2)).is_ok();
+    release_tx.send(()).expect("release lock");
+    lock_holder
+        .join()
+        .expect("lock holder joins")
+        .expect("lock holder succeeds");
+
+    assert!(
+        !completed_before_release,
+        "pipeline schemas must wait for the held sidecar lock"
+    );
+    let result = result_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("schema initialization after lock release");
+    initialization.join().expect("schema thread joins");
+    assert!(
+        result.pipeline,
+        "pipeline schemas initialize after lock release"
+    );
+    assert!(
+        result.governed,
+        "governed schemas remain independently available"
+    );
 }
 
 #[tracing_test::traced_test]

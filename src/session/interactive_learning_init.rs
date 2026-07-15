@@ -2,7 +2,8 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
+use cozo::ScriptMutability;
 
 pub(super) struct InitializedDatabases {
     pub(super) pipeline: Option<Arc<cozo::DbInstance>>,
@@ -81,16 +82,15 @@ pub(super) fn initialize_schemas(
     working_dir: &Path,
     db: &cozo::DbInstance,
 ) -> SchemaInitialization {
-    let pipeline = match archon_pipeline::learning::schema::initialize_learning_schemas(db) {
-        Ok(()) => {
-            crate::command::pipeline_learning_migration::maybe_migrate_legacy_pipeline_learning_with_log(
-                working_dir,
-                &crate::command::store_paths::learning_db_path_for_dir(working_dir),
-                db,
-                "interactive",
-            );
-            true
-        }
+    let db_path = crate::command::store_paths::learning_db_path_for_dir(working_dir);
+    let guard_config = archon_cozo::CozoGuardConfig::for_db_path(&db_path);
+    let pipeline = match archon_cozo::run_guarded(
+        "initialize interactive pipeline learning schemas",
+        ScriptMutability::Mutable,
+        &guard_config,
+        || initialize_pipeline_schemas_and_migrate(working_dir, &db_path, db),
+    ) {
+        Ok(()) => true,
         Err(error) => {
             tracing::warn!(error = %error, "Learning schema init failed; retrain may not work");
             false
@@ -104,4 +104,20 @@ pub(super) fn initialize_schemas(
         }
     };
     SchemaInitialization { pipeline, governed }
+}
+
+fn initialize_pipeline_schemas_and_migrate(
+    working_dir: &Path,
+    db_path: &Path,
+    db: &cozo::DbInstance,
+) -> Result<()> {
+    archon_pipeline::learning::schema::initialize_learning_schemas(db)
+        .map_err(|error| anyhow!(error))?;
+    crate::command::pipeline_learning_migration::maybe_migrate_legacy_pipeline_learning_with_log(
+        working_dir,
+        db_path,
+        db,
+        "interactive",
+    );
+    Ok(())
 }

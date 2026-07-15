@@ -302,6 +302,7 @@ dependencies = [
  "archon-consciousness",
  "archon-constellation",
  "archon-core",
+ "archon-cozo",
  "archon-docs",
  "archon-knowledge",
  "archon-leann",
