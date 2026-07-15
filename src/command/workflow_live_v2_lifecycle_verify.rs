@@ -158,9 +158,9 @@ impl LifecycleDriver {
             }
 
             let repeated = workflow_live_v2_lifecycle_verify_routing::repeated_gap_write_remediation_outcomes(
-                &evidence.verification,
-                &verification,
-            );
+                    &evidence.verification,
+                    &verification,
+                );
             if !repeated.is_empty() {
                 let call_id = format!(
                     "verification-repeated-gap-escalation-{wave_index}-{repair_attempt}"
@@ -250,15 +250,15 @@ impl LifecycleDriver {
                 continue;
             }
             let repair_source = workflow_live_v2_lifecycle_verify_routing::predicate_rewrite_inventory(
-                &repair_plan,
-                &verification,
-            )
-            .unwrap_or_else(|| repair_plan.clone());
+                    &repair_plan,
+                    &verification,
+                )
+                .unwrap_or_else(|| repair_plan.clone());
             let mut repair_inventory = contract.normalize_inventory(&repair_source);
             repair_inventory = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
-                &repair_inventory,
-                &verification,
-            );
+                    &repair_inventory,
+                    &verification,
+                );
             let allowed_task_ids: Vec<String> = support::unique(
                 plan_items
                     .iter()
@@ -299,9 +299,9 @@ impl LifecycleDriver {
                 );
                 repair_inventory = contract.normalize_inventory(&shape_repair);
                 repair_inventory = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
-                    &repair_inventory,
-                    &verification,
-                );
+                        &repair_inventory,
+                        &verification,
+                    );
                 repair_inventory = support::constrain_inventory_tasks(
                     &contract,
                     &repair_inventory,
@@ -322,7 +322,7 @@ impl LifecycleDriver {
             if support::array(repair_inventory.get("items")).is_empty() {
                 break;
             }
-            plan_items = support::verification_items(&contract, &repair_inventory);
+            plan_items = support::retry_verification_items(&contract, &repair_inventory);
             plan_items = workflow_live_v2_lifecycle_verify_options::prepare_verification_items(
                 plan_items,
                 self.project_artifact_root.as_deref(),

@@ -18,12 +18,19 @@ pub(super) fn reroute_unplanned_raw_task_identity(
             retained.push(failure);
             continue;
         };
-        if !is_unplanned_raw_task_identity_check(&failure, plan) {
+        let raw_task_identity_overreach = is_unplanned_raw_task_identity_check(&failure, plan);
+        let host_manifest_overreach = is_host_manifest_schema_overreach(&failure);
+        if !raw_task_identity_overreach && !host_manifest_overreach {
             retained.push(failure);
             continue;
         }
-        retries.push(corrected_retry(&failure, plan));
-        corrections.push(correction_record(&failure));
+        if host_manifest_overreach {
+            retries.push(corrected_host_manifest_retry(&failure, plan));
+            corrections.push(host_manifest_correction_record(&failure));
+        } else {
+            retries.push(corrected_retry(&failure, plan));
+            corrections.push(correction_record(&failure));
+        }
     }
     data.insert(
         "implementation_failures".to_string(),
@@ -112,6 +119,28 @@ fn plan_requires_task_identity(plan: &Value) -> bool {
     demands_task_identity(&searchable_text(&fields))
 }
 
+fn is_host_manifest_schema_overreach(failure: &Value) -> bool {
+    let text = searchable_text(failure);
+    references_host_patch_manifest(&text)
+        && [
+            "provider_env_proof",
+            "source_item_id",
+            "canonical_task_ids",
+            "normalized_path",
+            "write_coordination_scope",
+            "evidence field",
+        ]
+        .iter()
+        .any(|field| text.contains(field))
+}
+
+fn references_host_patch_manifest(text: &str) -> bool {
+    text.contains("write-coordination")
+        || text.contains("write coordination manifest")
+        || text.contains("patch_manifest.v1")
+        || text.contains("manifest-level proof")
+}
+
 fn searchable_text(value: &Value) -> String {
     serde_json::to_string(value)
         .unwrap_or_default()
@@ -138,12 +167,44 @@ fn corrected_retry(failure: &Value, plan: &Value) -> Value {
     })
 }
 
+fn corrected_host_manifest_retry(failure: &Value, plan: &Value) -> Value {
+    let source_id = failure
+        .get("source_item_id")
+        .and_then(Value::as_str)
+        .unwrap_or("verification-outcome");
+    serde_json::json!({
+        "item_id": format!("retry-host-manifest-overreach-{source_id}"),
+        "source_item_id": source_id,
+        "canonical_task_ids": support::strings_of(failure.get("canonical_task_ids")),
+        "source_residual_gap_ids": support::strings_of(failure.get("source_residual_gap_ids")),
+        "failed_predicate": failure.get("failed_predicate"),
+        "classification": "retryable_verification_shape_issue",
+        "verification_failure_class": "host_manifest_schema_overreach",
+        "focused_verification": [
+            "Validate only the archon.workflow.patch_manifest.v1 host schema fields: schema, run_id, stage_id, item_id, baseline_commit, patch_path, declared_target_files, changed_files, created_files, deleted_files, pre_hashes, post_hashes, verify_command, agent_artifact_path, and status.",
+            "Resolve provider_env_proof from the run-scoped workflow input or run evidence, never from the host patch manifest."
+        ],
+        "expected_evidence": plan.get("expected_evidence"),
+        "artifact_requirements": plan.get("artifact_requirements"),
+        "recommended_retry": "Rerun the original verification using the authoritative host manifest schema. Do not require provider_env_proof, source_item_id, canonical_task_ids, normalized_path, write_coordination_scope, or provider evidence fields inside the patch manifest."
+    })
+}
+
 fn correction_record(failure: &Value) -> Value {
     serde_json::json!({
         "source_item_id": failure.get("source_item_id"),
         "source_residual_gap_ids": failure.get("source_residual_gap_ids"),
         "classification": "artifact_contract_overreach",
         "reason": "raw provider payload task identity was not required by the source verification plan"
+    })
+}
+
+fn host_manifest_correction_record(failure: &Value) -> Value {
+    serde_json::json!({
+        "source_item_id": failure.get("source_item_id"),
+        "source_residual_gap_ids": failure.get("source_residual_gap_ids"),
+        "classification": "host_manifest_schema_overreach",
+        "reason": "verifier required fields outside the host-owned archon.workflow.patch_manifest.v1 schema"
     })
 }
 

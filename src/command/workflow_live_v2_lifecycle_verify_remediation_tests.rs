@@ -25,6 +25,136 @@ fn contract_fixture() -> (WorkflowV2TaskUniverse, serde_json::Value) {
 }
 
 #[test]
+fn transport_failed_inventory_reducer_is_retried_before_terminal() {
+    let failed = serde_json::json!({
+        "status": "failed",
+        "summary": "agent transport failed: reactive subagent compaction failed: no safe compaction boundary",
+        "data": { "error": "no safe compaction boundary" }
+    });
+
+    assert_eq!(
+        inventory_transport_route(&failed, 1, 2),
+        InventoryTransportRoute::Retry
+    );
+    assert_eq!(
+        inventory_transport_route(&failed, 2, 2),
+        InventoryTransportRoute::Exhausted(
+            "agent transport failed: reactive subagent compaction failed: no safe compaction boundary"
+                .to_string()
+        )
+    );
+
+    let recovered = serde_json::json!({
+        "status": "accepted",
+        "summary": "fresh reducer returned a remediation inventory",
+        "items": [{"item_id": "repair-one"}]
+    });
+    assert_eq!(
+        inventory_transport_route(&recovered, 2, 2),
+        InventoryTransportRoute::UseResult
+    );
+
+    let mut attempts = Vec::new();
+    support::record_repair_attempt(
+        &mut attempts,
+        "verification-remediation-inventory-1-1-regenerate-2",
+        "verification_remediation_inventory",
+        &[],
+        &failed,
+    );
+    assert_eq!(attempts[0]["reason"], failed["summary"]);
+}
+
+#[test]
+fn semantic_empty_inventory_is_not_retried_as_transport() {
+    let empty = serde_json::json!({
+        "status": "needs_review",
+        "summary": "no actionable implementation failures",
+        "items": []
+    });
+
+    assert_eq!(
+        inventory_transport_route(&empty, 1, 2),
+        InventoryTransportRoute::UseResult
+    );
+}
+
+#[test]
+fn transport_error_before_json_is_promoted_to_the_same_retry_route() {
+    let failed = transport_failure_result(
+        "reactive subagent compaction failed: no safe compaction boundary",
+    );
+
+    assert_eq!(
+        inventory_transport_route(&failed, 1, 2),
+        InventoryTransportRoute::Retry
+    );
+    assert!(
+        failed["summary"]
+            .as_str()
+            .is_some_and(|summary| summary.contains("no safe compaction boundary"))
+    );
+}
+
+#[test]
+fn slim_inventory_input_collapses_check_clones_and_records_count() {
+    let clones = (1..=10)
+        .map(|index| {
+            serde_json::json!({
+                "item_id": format!("verify-file-size-check-{index}"),
+                "status": "failed",
+                "result": {
+                    "status": "failed",
+                    "summary": "same focused predicate failed",
+                    "residual_gaps": [{"id": "gap-file-size", "description": "must pass"}]
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let slim = slim_verification_records(
+        &[serde_json::json!({
+            "kind": "verification-retry",
+            "result": { "status": "failed", "outcomes": clones }
+        })],
+        false,
+    );
+    let outcomes = slim[0]["result"]["outcomes"].as_array().unwrap();
+
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0]["duplicate_count"], 10);
+    assert_eq!(outcomes[0]["item_id"], "verify-file-size-check-1");
+}
+
+#[test]
+fn slim_inventory_input_preserves_distinct_gaps_under_one_stem() {
+    let outcomes = ["gap-a", "gap-b"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, gap_id)| {
+            serde_json::json!({
+                "item_id": format!("verify-source-check-{}", index + 1),
+                "status": "failed",
+                "result": {
+                    "status": "failed",
+                    "residual_gaps": [{"id": gap_id, "description": "distinct predicate"}]
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let (collapsed, omitted) = collapse_outcome_clones(&outcomes, 8);
+
+    assert_eq!(collapsed.len(), 2);
+    assert_eq!(omitted, 0);
+    assert!(
+        collapsed
+            .iter()
+            .all(|outcome| outcome["duplicate_count"] == 1)
+    );
+}
+
+#[test]
 fn mixed_triage_preserves_actionable_and_retry_routes() {
     let triage: serde_json::Value = serde_json::from_str(include_str!(
         "fixtures/wf3b9_verification_failure_triage_5_3.json"

@@ -3,6 +3,12 @@
 // splice/ownership splice). Do not edit copy without updating the agents'
 // structured-output expectations.
 
+pub(crate) const HOST_PATCH_MANIFEST_SCHEMA_GROUNDING: &str = "The host-owned archon.workflow.patch_manifest.v1 schema contains only schema, run_id, stage_id, item_id, baseline_commit, patch_path, declared_target_files, changed_files, created_files, deleted_files, pre_hashes, post_hashes, verify_command, agent_artifact_path, and status. provider_env_proof is run-scoped and must be resolved from workflow input or run evidence. source_item_id, canonical_task_ids, normalized_path, write_coordination_scope, and provider evidence are not patch-manifest fields and must never be required inside that manifest. Host-schema differences are verification-shape issues, never agent write-remediation work.";
+
+pub(crate) fn ground_host_manifest_schema(task: &str) -> String {
+    format!("{task} {HOST_PATCH_MANIFEST_SCHEMA_GROUNDING}")
+}
+
 pub(crate) const DISCOVERY_TASK: &str = "Run read-only discovery in parallel. Return structured summaries only: files read, commands run, task coverage, implementation gaps, artifact requirements, and risks. Do not accept implementation tasks from read-only work.";
 
 pub(crate) const DISCOVERY_ITEM_PRD_TASK_REVIEW: &str = "Read the PRD, decomposed task files, implementation slice, and context files. Return structured requirements, dependency evidence, task coverage requirements, verification requirements, artifact requirements, and residual risks. Distinguish repository source paths from project artifact/data paths under projectArtifactRoot.";

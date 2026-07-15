@@ -180,11 +180,16 @@ impl LifecycleDriver {
         tier: &str,
         task: &str,
     ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+        let grounded_task = if id.contains("verification") {
+            prompts::ground_host_manifest_schema(task)
+        } else {
+            task.to_string()
+        };
         self.call(
             "reduce",
             id,
             Some(source),
-            serde_json::json!({ "tier": tier, "task": task }),
+            serde_json::json!({ "tier": tier, "task": grounded_task }),
         )
         .await
     }

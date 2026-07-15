@@ -66,9 +66,12 @@ fn provider_env_result_stamp_persists_redacted_proof_only() {
         },
         proof: ProviderEnvProof {
             profile_sources_checked: vec!["~/.profile".to_string()],
+            profile_provenance: Vec::new(),
+            resolver: Default::default(),
             redacted_env_keys_checked: vec![archon_tools::provider_env::ProviderEnvKeyProof {
                 key: "POLYGON_API_KEY".to_string(),
                 state: archon_tools::provider_env::ProviderEnvKeyState::Present,
+                found_in: archon_tools::provider_env::ProviderEnvFoundIn::ProcessEnv,
             }],
             credential_state: archon_tools::provider_env::ProviderEnvCredentialState::Present,
             errors: Vec::new(),

@@ -1,0 +1,29 @@
+{
+  "verification_plan": [
+    {
+      "item_id": "verify-openbb-capability",
+      "source_item_id": "impl-openbb-capability",
+      "canonical_task_ids": ["TASK-TDL-050"],
+      "focused_verification": ["Run the focused OpenBB capability test"],
+      "expected_evidence": ["Focused target passes and run-scoped provider proof is present"]
+    }
+  ],
+  "triage": {
+    "status": "accepted",
+    "data": {
+      "implementation_failures": [
+        {
+          "item_id": "verify-openbb-capability-check-3",
+          "source_item_id": "verify-openbb-capability",
+          "canonical_task_ids": ["TASK-TDL-050"],
+          "classification": "actionable_implementation_failure",
+          "source_residual_gap_ids": ["manifest-provider-env-proof-absent"],
+          "failed_predicate": "write-coordination manifest lacks provider_env_proof, source_item_id, canonical_task_ids, normalized_path, and write_coordination_scope"
+        }
+      ],
+      "retry_items": [],
+      "superseded_items": [],
+      "terminal_blockers": []
+    }
+  }
+}
