@@ -25,6 +25,11 @@ pub fn open_sqlite_guarded(path: &str, context: &str) -> Result<DbInstance> {
     archon_cozo::open_sqlite_guarded(path, context, &config)
 }
 
+pub async fn open_sqlite_guarded_async(path: &str, context: &str) -> Result<DbInstance> {
+    let config = archon_cozo::CozoGuardConfig::for_interactive_db_path(path);
+    archon_cozo::open_sqlite_guarded_async(path, context, &config).await
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

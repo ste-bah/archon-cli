@@ -514,6 +514,7 @@ dependencies = [
  "cozo-ce",
  "fd-lock",
  "tempfile",
+ "tokio",
  "tracing",
 ]
 

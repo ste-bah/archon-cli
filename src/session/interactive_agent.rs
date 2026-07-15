@@ -162,10 +162,12 @@ pub(super) async fn build(
         if let Some(parent) = db_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        match archon_learning::cozo_guard::open_sqlite_guarded(
+        match archon_learning::cozo_guard::open_sqlite_guarded_async(
             db_path.to_str().unwrap_or(""),
             "open interactive learning db",
-        ) {
+        )
+        .await
+        {
             Ok(db) => {
                 if let Err(e) = archon_pipeline::learning::schema::initialize_learning_schemas(&db)
                 {
