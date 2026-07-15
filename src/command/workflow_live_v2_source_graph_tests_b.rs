@@ -335,21 +335,23 @@ fn d43_verification_remediation_allows_multiple_repairs_for_one_canonical_task()
             dependency_ids: Vec::new(),
             title: None,
             artifact_requirements: Vec::new(),
+            ..Default::default()
             },
         );
     }
     universe.tasks.push(
         super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
-        canonical_task_id: "TASK-TDL-130".to_string(),
-        aliases: Vec::new(),
-        source_path: "/tmp/tasks/TASK-TDL-130.md".to_string(),
-        dependency_ids: vec![
-            "TASK-TDL-090".to_string(),
-            "TASK-TDL-110".to_string(),
-            "TASK-TDL-120".to_string(),
-        ],
-        title: None,
-        artifact_requirements: Vec::new(),
+            canonical_task_id: "TASK-TDL-130".to_string(),
+            aliases: Vec::new(),
+            source_path: "/tmp/tasks/TASK-TDL-130.md".to_string(),
+            dependency_ids: vec![
+                "TASK-TDL-090".to_string(),
+                "TASK-TDL-110".to_string(),
+                "TASK-TDL-120".to_string(),
+            ],
+            title: None,
+            artifact_requirements: Vec::new(),
+            ..Default::default()
         },
     );
 

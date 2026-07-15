@@ -6,6 +6,7 @@ use std::sync::Mutex;
 #[derive(Default)]
 struct RecordingClient {
     last_request: Mutex<Option<AgentExecutionRequest>>,
+    requests: Mutex<Vec<AgentExecutionRequest>>,
 }
 
 #[async_trait::async_trait]
@@ -29,6 +30,10 @@ impl LlmClient for RecordingClient {
         &self,
         request: AgentExecutionRequest,
     ) -> anyhow::Result<archon_pipeline::runner::LlmResponse> {
+        self.requests
+            .lock()
+            .expect("requests lock")
+            .push(request.clone());
         *self.last_request.lock().expect("recording lock") = Some(request);
         Ok(archon_pipeline::runner::LlmResponse {
             content: "recorded".to_string(),
@@ -339,4 +344,58 @@ async fn generated_v2_agent_requests_are_foreground_with_configured_timeout() {
         recorded.disable_auto_background,
         "generated V2 awaited host calls must remain foreground-controlled"
     );
+}
+
+#[tokio::test]
+async fn d47_one_run_uses_identical_provider_presence_for_subagents_and_final_gate() {
+    let profile_dir = tempfile::tempdir().expect("profile dir");
+    let profile = profile_dir.path().join("profile");
+    std::fs::write(&profile, "export ARCHON_DEMO_PROVIDER_KEY=present-value\n").expect("profile");
+    let policy = archon_tools::provider_env::ProviderEnvPolicy {
+        required_keys: vec!["ARCHON_DEMO_PROVIDER_KEY".to_string()],
+        profile_sources: vec![profile.display().to_string()],
+        reason: Some("run-scoped invariant".to_string()),
+    };
+    let resolution = archon_tools::provider_env::resolve_provider_env(&policy).await;
+    let expected_proof = resolution.proof.clone();
+    let recorder = Arc::new(RecordingClient::default());
+    let (tui_tx, _tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    let client = LiveV2AgentClient::new(
+        recorder.clone(),
+        tui_tx,
+        Vec::new(),
+        "wf-provider-invariant".to_string(),
+        Some("/repo".to_string()),
+        Some(17),
+    )
+    .with_provider_env_resolution(Some(resolution));
+
+    let mut implementation = request(
+        WorkflowV2HostMethod::Implementation,
+        Some(WorkflowV2WriteMode::Coordinated),
+    );
+    implementation.call.id = "implementation-wave-1".to_string();
+    let mut verification = request(WorkflowV2HostMethod::Parallel, None);
+    verification.call.id = "verification-wave-1".to_string();
+    let mut final_gate = request(WorkflowV2HostMethod::Agent, None);
+    final_gate.call.id = "final-zero-gap-audit".to_string();
+
+    for request in [&implementation, &verification, &final_gate] {
+        client
+            .run_agent_request(request, request.task.clone())
+            .await
+            .expect("recorded workflow request");
+    }
+
+    let recorded = recorder.requests.lock().expect("requests lock");
+    assert_eq!(recorded.len(), 3);
+    for request in recorded.iter() {
+        let proof = &request
+            .provider_env_resolution
+            .as_ref()
+            .expect("run-scoped provider resolution")
+            .proof;
+        assert_eq!(proof, &expected_proof);
+    }
+    assert!(!format!("{expected_proof:?}").contains("present-value"));
 }

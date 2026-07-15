@@ -236,40 +236,32 @@ mod tests {
     }
 
     #[test]
-    fn coverage_reports_required_universe_as_json_and_text() {
+    fn coverage_refuses_to_publish_incomplete_required_universe() {
         let temp = tempfile::tempdir().unwrap();
-        let json = coverage(
+        let error = coverage(
             Some(&temp.path().to_path_buf()),
             "trading-core-v1",
             true,
             None,
         )
-        .unwrap();
-        assert!(json.contains("archon-trading-coverage-v1"));
-        assert!(json.contains("BTCUSDT"));
-        assert!(json.contains("fallback_reason"));
+        .expect_err("empty required universe must fail closed");
         assert!(
-            temp.path()
+            error
+                .to_string()
+                .contains("coverage matrix incomplete for trading-core-v1")
+        );
+        assert!(
+            !temp
+                .path()
                 .join(".archon/trading-lab/data/coverage/latest.json")
                 .exists()
         );
         assert!(
-            temp.path()
+            !temp
+                .path()
                 .join(".archon/trading-lab/data/coverage/latest.md")
                 .exists()
         );
-
-        let text = coverage(
-            Some(&temp.path().to_path_buf()),
-            "trading-core-v1",
-            false,
-            None,
-        )
-        .unwrap();
-        assert!(text.contains("Trading coverage matrix"));
-        assert!(text.contains("latest_json:"));
-        assert!(text.contains("latest_md:"));
-        assert!(text.contains("gaps: 30"));
     }
 
     #[test]

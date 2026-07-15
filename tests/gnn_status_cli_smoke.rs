@@ -17,6 +17,7 @@ fn gnn_status_cli_smoke() {
 
     let output = Command::new(bin)
         .current_dir(tmp.path())
+        .env("HOME", tmp.path())
         .env("XDG_CONFIG_HOME", &config_home)
         .env("XDG_DATA_HOME", &data_home)
         .args(["learning", "gnn", "status"])

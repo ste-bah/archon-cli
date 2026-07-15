@@ -158,6 +158,7 @@ impl LifecycleDriver {
             post_items,
             self.project_artifact_root.as_deref(),
             &evidence.implementation,
+            &self.task_universe,
         );
         *verification = self
             .parallel(

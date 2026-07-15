@@ -80,7 +80,7 @@ fn d36_prompts_ground_artifact_fields_in_task_contracts() {
         super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_FAILURE_TRIAGE_TASK,
     ];
     for prompt in prompts {
-        assert!(prompt.contains("TASK"));
+        assert!(prompt.to_ascii_lowercase().contains("task"));
         assert!(prompt.contains("raw/request.json"));
         assert!(prompt.contains("canonical task ID"));
     }

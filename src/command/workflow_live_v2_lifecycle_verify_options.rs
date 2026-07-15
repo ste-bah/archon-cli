@@ -6,8 +6,9 @@ pub(super) fn prepare_verification_items(
     mut items: Vec<Value>,
     project_artifact_root: Option<&str>,
     implementation_evidence: &[Value],
+    task_universe: &Value,
 ) -> Vec<Value> {
-    add_substantive_coverage_verification(&mut items, project_artifact_root);
+    add_declared_deliverable_verifications(&mut items, project_artifact_root, task_universe);
     let scopes =
         super::workflow_live_v2_lifecycle_verify_scope::manifest_scopes(implementation_evidence);
     items
@@ -27,39 +28,76 @@ pub(super) fn prepare_verification_items(
         .collect()
 }
 
-fn add_substantive_coverage_verification(
+fn add_declared_deliverable_verifications(
     items: &mut Vec<Value>,
     project_artifact_root: Option<&str>,
+    task_universe: &Value,
 ) {
-    let Some(source_item_id) = items.iter().find_map(|item| {
-        support::strings_of(item.get("canonical_task_ids"))
-            .iter()
-            .any(|task_id| task_id == "TASK-TDL-080")
-            .then(|| {
-                item.get("source_item_id")
-                    .and_then(Value::as_str)
-                    .unwrap_or("TASK-TDL-080")
-                    .to_string()
-            })
-    }) else {
-        return;
-    };
-    if items.iter().any(|item| {
-        item.get("item_id").and_then(Value::as_str)
-            == Some("verify-TASK-TDL-080-required-native-coverage")
-    }) {
-        return;
-    }
     let root = project_artifact_root.unwrap_or(".");
     let root_literal = serde_json::to_string(root).expect("project root JSON string");
-    let command = format!(
-        r#"python3 - <<'PY'
+    let tasks = support::array(task_universe.get("tasks"));
+    for task in tasks {
+        let Some(task_id) = task.get("canonical_task_id").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(source_item_id) = items.iter().find_map(|item| {
+            support::strings_of(item.get("canonical_task_ids"))
+                .iter()
+                .any(|candidate| candidate == task_id)
+                .then(|| {
+                    item.get("source_item_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or(task_id)
+                        .to_string()
+                })
+        }) else {
+            continue;
+        };
+        for contract in support::array(task.get("deliverable_contracts")) {
+            let Some(kind) = contract.get("kind").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(artifact_path) = contract.get("artifact_path").and_then(Value::as_str) else {
+                continue;
+            };
+            let item_id = format!(
+                "verify-{task_id}-{}",
+                kind.chars()
+                    .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+                    .collect::<String>()
+            );
+            if items
+                .iter()
+                .any(|item| item.get("item_id").and_then(Value::as_str) == Some(&item_id))
+            {
+                continue;
+            }
+            let contract_literal = serde_json::to_string(&contract).expect("contract JSON");
+            let command = format!(
+                r#"python3 - <<'PY'
 import json, pathlib, sys
 root = pathlib.Path({root_literal})
-coverage = json.loads((root / '.archon/trading-lab/data/coverage/latest.json').read_text())
-registry = json.loads((root / '.archon/trading-lab/data/registry.json').read_text())
-required = {{(instrument, timeframe) for instrument in ['ES','NQ','SPY','QQQ','BTCUSDT','ETHUSDT'] for timeframe in ['1W','1D','240','60','15']}}
-cells = {{(cell.get('canonical_instrument'), cell.get('timeframe')): cell for cell in coverage.get('cells', [])}}
+contract = json.loads({contract_literal:?})
+def resolve(value):
+    path = pathlib.Path(value)
+    return path if path.is_absolute() else root / path
+artifact_path = resolve(contract['artifact_path'])
+if not artifact_path.is_file() or artifact_path.stat().st_size == 0:
+    raise SystemExit(f'missing or empty declared deliverable: {{artifact_path}}')
+artifact = json.loads(artifact_path.read_text())
+registry = None
+if contract.get('registry_path'):
+    registry_path = resolve(contract['registry_path'])
+    if not registry_path.is_file():
+        raise SystemExit(f'missing declared registry: {{registry_path}}')
+    registry = json.loads(registry_path.read_text())
+if not contract.get('required_universe'):
+    print(json.dumps({{'status': 'declared_deliverable_present', 'artifact': str(artifact_path)}}))
+    raise SystemExit(0)
+required = {{(instrument, timeframe) for instrument in artifact.get('instruments', []) for timeframe in artifact.get('timeframes', [])}}
+if not required:
+    raise SystemExit('declared required universe is empty')
+cells = {{(cell.get('canonical_instrument'), cell.get('timeframe')): cell for cell in artifact.get('cells', [])}}
 failures = []
 for key in sorted(required):
     cell = cells.get(key)
@@ -73,30 +111,34 @@ for key in sorted(required):
     if not required_flags or not dataset_id or not version or int(cell.get('row_count') or 0) <= 0:
         failures.append(f'{{key[0]}}:{{key[1]}} unavailable/non-native/non-production/empty/missing-symbol-or-interval')
         continue
-    record = registry.get('datasets', {{}}).get(f'{{dataset_id}}:{{version}}')
-    if not record or record.get('native_interval') is not True or record.get('production_eligible') is not True or record.get('status') != 'Healthy' or int(record.get('bars') or 0) <= 0:
-        failures.append(f'{{key[0]}}:{{key[1]}} lacks healthy registered native provenance')
+    if registry is not None:
+        record = registry.get('datasets', {{}}).get(f'{{dataset_id}}:{{version}}')
+        if not record or record.get('native_interval') is not True or record.get('production_eligible') is not True or record.get('status') != 'Healthy' or int(record.get('bars') or 0) <= 0:
+            failures.append(f'{{key[0]}}:{{key[1]}} lacks healthy registered native provenance')
 extra = sorted(set(cells) - required)
-if failures or extra or coverage.get('gaps'):
-    print(json.dumps({{'failures': failures, 'extra_cells': extra, 'gap_count': len(coverage.get('gaps', []))}}, indent=2))
+if failures or extra or artifact.get('gaps'):
+    print(json.dumps({{'failures': failures, 'extra_cells': extra, 'gap_count': len(artifact.get('gaps', []))}}, indent=2))
     sys.exit(1)
 print(json.dumps({{'required_cells': len(required), 'registered_native_cells': len(required), 'status': 'production_eligible'}}, indent=2))
 PY"#
-    );
-    items.push(serde_json::json!({
-        "item_id": "verify-TASK-TDL-080-required-native-coverage",
-        "source_item_id": source_item_id,
-        "canonical_task_ids": ["TASK-TDL-080"],
-        "focused_verification": command,
-        "expected_evidence": "All 30 required universe cells are present, non-empty, native, production eligible, and resolve to Healthy registry records; gaps is empty; redacted provider_env_proof shows ~/.profile was sourced and POLYGON_API_KEY is present.",
-        "artifact_requirements": [
-            format!("{root}/.archon/trading-lab/data/coverage/latest.json"),
-            format!("{root}/.archon/trading-lab/data/registry.json")
-        ],
-        "provider_env_requirements": ["POLYGON_API_KEY"],
-        "profile_sources": ["~/.profile"],
-        "required_tools": ["mcp__tradingview__data_get_ohlcv"]
-    }));
+            );
+            let mut artifact_requirements = vec![artifact_path.to_string()];
+            if let Some(registry_path) = contract.get("registry_path").and_then(Value::as_str) {
+                artifact_requirements.push(registry_path.to_string());
+            }
+            items.push(serde_json::json!({
+                "item_id": item_id,
+                "source_item_id": source_item_id,
+                "canonical_task_ids": [task_id],
+                "focused_verification": command,
+                "expected_evidence": "The declared deliverable is non-empty and every declared required-universe cell is substantive, native, production eligible, gap-free, and registry-backed when a registry is declared.",
+                "artifact_requirements": artifact_requirements,
+                "provider_env_requirements": support::strings_of(task.get("required_env_keys")),
+                "required_tools": support::strings_of(task.get("required_tools")),
+                "deliverable_contract": contract,
+            }));
+        }
+    }
 }
 
 pub(super) fn verification_options(items: &[Value], task: &str, focused: bool) -> Value {

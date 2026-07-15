@@ -108,6 +108,7 @@ impl LifecycleDriver {
             items.to_vec(),
             self.project_artifact_root.as_deref(),
             &evidence.implementation,
+            &self.task_universe,
         );
         self.parallel(
             &id,

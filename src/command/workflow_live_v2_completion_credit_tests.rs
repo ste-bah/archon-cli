@@ -145,6 +145,7 @@ fn universe() -> WorkflowV2TaskUniverse {
                 dependency_ids: Vec::new(),
                 title: None,
                 artifact_requirements: Vec::new(),
+                ..Default::default()
             })
             .collect(),
     }

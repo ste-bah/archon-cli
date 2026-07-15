@@ -6,6 +6,8 @@ use archon_tools::provider_env::{
 };
 use archon_workflow::{WorkflowV2AgentRequest, WorkflowV2Evidence, WorkflowV2EvidenceKind};
 
+use super::super::workflow_live_task_universe::WorkflowV2TaskUniverse;
+
 pub(super) const PROVIDER_ENV_CONTRACT_VERSION: &str = "provider-env-proof-v1";
 
 #[derive(Debug, Clone)]
@@ -37,14 +39,13 @@ pub(super) async fn prepare_provider_env_for_v2_request(
 }
 
 pub(super) async fn resolve_generated_workflow_provider_env(
-    canonical_task_ids: impl IntoIterator<Item = String>,
+    task_universe: Option<&WorkflowV2TaskUniverse>,
 ) -> Option<ProviderEnvResolution> {
-    let ids = canonical_task_ids.into_iter().collect::<BTreeSet<_>>();
-    let mut keys = BTreeSet::new();
-    if ids.contains("TASK-TDL-050") || ids.contains("TASK-TDL-080") {
-        keys.insert("OPENBB_API_URL".to_string());
-        keys.insert("POLYGON_API_KEY".to_string());
-    }
+    let keys = task_universe
+        .into_iter()
+        .flat_map(|universe| &universe.tasks)
+        .flat_map(|task| task.required_env_keys.iter().cloned())
+        .collect::<BTreeSet<_>>();
     if keys.is_empty() {
         return None;
     }
@@ -118,9 +119,6 @@ pub(super) fn provider_env_policy_from_input(
     if let Some(item) = input.get("item") {
         keys.extend(provider_env_keys(item));
     }
-    if contains_canonical_task(input, "TASK-TDL-080") {
-        keys.push("POLYGON_API_KEY".to_string());
-    }
     let keys: Vec<String> = keys
         .into_iter()
         .collect::<BTreeSet<_>>()
@@ -133,32 +131,6 @@ pub(super) fn provider_env_policy_from_input(
     policy.profile_sources = profile_sources(input);
     policy.reason = Some("generated workflow provider-sensitive verification".to_string());
     Some(policy)
-}
-
-fn contains_canonical_task(value: &serde_json::Value, expected: &str) -> bool {
-    match value {
-        serde_json::Value::Array(values) => values
-            .iter()
-            .any(|value| contains_canonical_task(value, expected)),
-        serde_json::Value::Object(object) => {
-            let owns_task = [
-                "canonical_task_ids",
-                "canonicalTaskIds",
-                "task_id",
-                "taskId",
-            ]
-            .iter()
-            .filter_map(|key| object.get(*key))
-            .flat_map(value_strings)
-            .any(|task_id| task_id == expected);
-            owns_task
-                || object
-                    .get("item")
-                    .is_some_and(|item| contains_canonical_task(item, expected))
-        }
-        serde_json::Value::String(value) => value == expected,
-        _ => false,
-    }
 }
 
 fn provider_env_keys(value: &serde_json::Value) -> Vec<String> {
@@ -203,52 +175,16 @@ fn value_strings(value: &serde_json::Value) -> Vec<String> {
             .map(str::to_string)
             .collect(),
         serde_json::Value::Array(values) => values.iter().flat_map(value_strings).collect(),
-        serde_json::Value::Object(object) => {
-            let mut values = object
-                .get("required_keys")
-                .or_else(|| object.get("requiredKeys"))
-                .or_else(|| object.get("keys"))
-                .or_else(|| object.get("env_keys"))
-                .or_else(|| object.get("envKeys"))
-                .map(value_strings)
-                .unwrap_or_default();
-            values.extend(provider_key_hints(object));
-            values
-        }
+        serde_json::Value::Object(object) => object
+            .get("required_keys")
+            .or_else(|| object.get("requiredKeys"))
+            .or_else(|| object.get("keys"))
+            .or_else(|| object.get("env_keys"))
+            .or_else(|| object.get("envKeys"))
+            .map(value_strings)
+            .unwrap_or_default(),
         _ => Vec::new(),
     }
-}
-
-fn provider_key_hints(object: &serde_json::Map<String, serde_json::Value>) -> Vec<String> {
-    [
-        "provider",
-        "provider_name",
-        "providerName",
-        "provider_id",
-        "providerId",
-    ]
-    .iter()
-    .filter_map(|key| object.get(*key).and_then(serde_json::Value::as_str))
-    .flat_map(provider_keys_for_name)
-    .collect()
-}
-
-fn provider_keys_for_name(provider: &str) -> Vec<String> {
-    let normalized = provider.trim().to_ascii_lowercase();
-    let mut keys = Vec::new();
-    if normalized.contains("polygon") || normalized.contains("openbb") {
-        keys.push("POLYGON_API_KEY".to_string());
-    }
-    if normalized.contains("tiingo") {
-        keys.push("TIINGO_TOKEN".to_string());
-    }
-    if normalized.contains("fmp") || normalized.contains("financial modeling prep") {
-        keys.push("FMP_API_KEY".to_string());
-    }
-    if normalized.contains("finnhub") {
-        keys.push("FINNHUB_API_KEY".to_string());
-    }
-    keys
 }
 
 #[cfg(test)]

@@ -12,6 +12,7 @@ fn universe() -> WorkflowV2TaskUniverse {
                 dependency_ids: Vec::new(),
                 title: None,
                 artifact_requirements: Vec::new(),
+                ..Default::default()
             },
         ],
     }
@@ -101,6 +102,7 @@ fn fabel_contract() -> LifecycleContract<'static> {
                     dependency_ids: Vec::new(),
                     title: None,
                     artifact_requirements: Vec::new(),
+                    ..Default::default()
                 },
             ],
         })),

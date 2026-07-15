@@ -23,12 +23,13 @@ fn provider_env_policy_reads_generic_requirement_aliases() {
 }
 
 #[test]
-fn provider_env_policy_derives_key_from_provider_requirement_object() {
+fn provider_env_policy_reads_declared_keys_from_requirement_object() {
     let input = serde_json::json!({
         "item": {
             "provider_env_requirements": {
                 "credentials_required": "conditional",
                 "provider": "OpenBB/Polygon",
+                "required_keys": ["POLYGON_API_KEY"],
                 "requirements": [
                     "Inspect repository docs/scripts for actual credential keys.",
                     "Check only key presence without printing values."
@@ -44,7 +45,7 @@ fn provider_env_policy_derives_key_from_provider_requirement_object() {
 }
 
 #[test]
-fn d40_tdl_080_always_gets_profile_sourced_polygon_preflight() {
+fn undeclared_task_id_does_not_infer_provider_keys() {
     let input = serde_json::json!({
         "item": {
             "canonical_task_ids": ["TASK-TDL-080"],
@@ -52,10 +53,7 @@ fn d40_tdl_080_always_gets_profile_sourced_polygon_preflight() {
         }
     });
 
-    let policy = provider_env_policy_from_input(&input).expect("TDL-080 policy");
-
-    assert_eq!(policy.required_keys, vec!["POLYGON_API_KEY"]);
-    assert_eq!(policy.profile_sources, vec!["~/.profile"]);
+    assert!(provider_env_policy_from_input(&input).is_none());
 }
 
 #[test]
@@ -89,12 +87,27 @@ fn provider_env_result_stamp_persists_redacted_proof_only() {
 
 #[tokio::test]
 async fn d47_generated_provider_workflow_resolves_one_shared_key_set() {
-    let resolved = resolve_generated_workflow_provider_env([
-        "TASK-TDL-050".to_string(),
-        "TASK-TDL-080".to_string(),
-    ])
-    .await
-    .expect("provider workflow resolution");
+    let universe = WorkflowV2TaskUniverse {
+        schema_version: "workflow-v2-task-universe-v1".to_string(),
+        source_roots: vec!["tasks".to_string()],
+        tasks: vec![
+            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+                canonical_task_id: "TASK-ALPHA-011".to_string(),
+                source_path: "tasks/TASK-ALPHA-011.md".to_string(),
+                required_env_keys: vec!["POLYGON_API_KEY".to_string()],
+                ..Default::default()
+            },
+            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+                canonical_task_id: "TASK-ALPHA-019".to_string(),
+                source_path: "tasks/TASK-ALPHA-019.md".to_string(),
+                required_env_keys: vec!["OPENBB_API_URL".to_string()],
+                ..Default::default()
+            },
+        ],
+    };
+    let resolved = resolve_generated_workflow_provider_env(Some(&universe))
+        .await
+        .expect("provider workflow resolution");
     let keys = resolved
         .proof
         .redacted_env_keys_checked

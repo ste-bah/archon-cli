@@ -154,6 +154,7 @@ async function workflow(w) {
                     dependency_ids: Vec::new(),
                     title: None,
                     artifact_requirements: Vec::new(),
+                    ..Default::default()
                 },
                 super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
                     canonical_task_id: "TASK-TDL-010".to_string(),
@@ -162,6 +163,7 @@ async function workflow(w) {
                     dependency_ids: vec!["TASK-TDL-001".to_string()],
                     title: None,
                     artifact_requirements: Vec::new(),
+                    ..Default::default()
                 },
             ],
         }

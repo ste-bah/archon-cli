@@ -291,6 +291,7 @@ fn placeholder_task_universe() -> super::super::workflow_live_task_universe::Wor
                 dependency_ids: Vec::new(),
                 title: None,
                 artifact_requirements: Vec::new(),
+                ..Default::default()
             },
             super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-X-130".to_string(),
@@ -299,6 +300,7 @@ fn placeholder_task_universe() -> super::super::workflow_live_task_universe::Wor
                 dependency_ids: Vec::new(),
                 title: None,
                 artifact_requirements: Vec::new(),
+                ..Default::default()
             },
         ],
     }

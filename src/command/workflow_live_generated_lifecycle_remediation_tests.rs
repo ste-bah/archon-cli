@@ -12,6 +12,7 @@ fn test_universe() -> super::super::workflow_live_task_universe::WorkflowV2TaskU
                 dependency_ids: Vec::new(),
                 title: None,
                 artifact_requirements: Vec::new(),
+                ..Default::default()
             },
         ],
     }

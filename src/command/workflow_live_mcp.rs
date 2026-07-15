@@ -3,16 +3,6 @@ use std::path::{Path, PathBuf};
 
 use archon_workflow::StageRunRequest;
 
-const PROVIDER_TOOLS: &[&str] = &["tv_health_check", "chart_get_state", "data_get_ohlcv"];
-const PINE_TOOLS: &[&str] = &[
-    "pine_analyze",
-    "pine_check",
-    "pine_compile",
-    "pine_smart_compile",
-    "pine_get_errors",
-    "pine_get_console",
-];
-
 pub(super) fn allowed_mcp_tools(request: &StageRunRequest) -> Vec<String> {
     let project_root = project_root(request);
     let permitted = crate::command::workflow_mcp::explicitly_permitted_tools(&project_root);
@@ -27,21 +17,6 @@ pub(super) fn allowed_mcp_tools(request: &StageRunRequest) -> Vec<String> {
 fn requested_tools(request: &StageRunRequest) -> BTreeSet<String> {
     let mut tools = BTreeSet::new();
     collect_declared_tools(&request.input, &mut tools);
-    let ids = selected_task_ids(&request.input);
-    if ids.iter().any(|id| {
-        matches!(
-            id.as_str(),
-            "TASK-TDL-040" | "TASK-TDL-080" | "TASK-TDL-140"
-        )
-    }) {
-        tools.extend(PROVIDER_TOOLS.iter().map(|tool| (*tool).to_string()));
-    }
-    if ids
-        .iter()
-        .any(|id| matches!(id.as_str(), "TASK-TDL-120" | "TASK-TDL-140"))
-    {
-        tools.extend(PINE_TOOLS.iter().map(|tool| (*tool).to_string()));
-    }
     tools
 }
 
@@ -89,45 +64,6 @@ fn collect_strings(value: &serde_json::Value, output: &mut BTreeSet<String>) {
         }
         _ => {}
     }
-}
-
-fn selected_task_ids(value: &serde_json::Value) -> BTreeSet<String> {
-    let mut ids = BTreeSet::new();
-    collect_task_ids(value, None, &mut ids);
-    ids
-}
-
-fn collect_task_ids(
-    value: &serde_json::Value,
-    parent_key: Option<&str>,
-    ids: &mut BTreeSet<String>,
-) {
-    if parent_key.is_some_and(is_task_universe_field) {
-        return;
-    }
-    match value {
-        serde_json::Value::Object(object) => {
-            for (key, child) in object {
-                collect_task_ids(child, Some(key), ids);
-            }
-        }
-        serde_json::Value::Array(values) => {
-            for child in values {
-                collect_task_ids(child, parent_key, ids);
-            }
-        }
-        serde_json::Value::String(value) if value.starts_with("TASK-TDL-") => {
-            ids.insert(value.to_string());
-        }
-        _ => {}
-    }
-}
-
-fn is_task_universe_field(key: &str) -> bool {
-    matches!(
-        key,
-        "taskUniverse" | "task_universe" | "canonicalTaskUniverse"
-    )
 }
 
 fn project_root(request: &StageRunRequest) -> PathBuf {

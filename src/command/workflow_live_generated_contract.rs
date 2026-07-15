@@ -202,9 +202,10 @@ pub(super) fn normalize_generated_item_value_with_repo(
     if !canonical_task_ids.is_empty() {
         object.insert(
             "canonical_task_ids".to_string(),
-            serde_json::json!(canonical_task_ids),
+            serde_json::json!(&canonical_task_ids),
         );
     }
+    stamp_declared_capabilities(&mut object, &canonical_task_ids, task_universe);
     let dependency_ids = dependency_ids_from_generated_value(value, task_universe);
     object.insert(
         "dependency_ids".to_string(),
@@ -364,6 +365,46 @@ pub(super) fn normalize_generated_item_value_with_repo(
     NormalizedGeneratedItem {
         value: normalized_value,
         issues,
+    }
+}
+
+fn stamp_declared_capabilities(
+    object: &mut serde_json::Map<String, serde_json::Value>,
+    canonical_task_ids: &[String],
+    task_universe: Option<&WorkflowV2TaskUniverse>,
+) {
+    let Some(task_universe) = task_universe else {
+        return;
+    };
+    let selected = task_universe
+        .tasks
+        .iter()
+        .filter(|task| canonical_task_ids.contains(&task.canonical_task_id));
+    let mut required_env_keys = BTreeSet::new();
+    let mut required_tools = BTreeSet::new();
+    let mut deliverable_contracts = BTreeSet::new();
+    for task in selected {
+        required_env_keys.extend(task.required_env_keys.iter().cloned());
+        required_tools.extend(task.required_tools.iter().cloned());
+        deliverable_contracts.extend(task.deliverable_contracts.iter().cloned());
+    }
+    if !required_env_keys.is_empty() {
+        object.insert(
+            "required_env_keys".to_string(),
+            serde_json::json!(required_env_keys),
+        );
+    }
+    if !required_tools.is_empty() {
+        object.insert(
+            "required_tools".to_string(),
+            serde_json::json!(required_tools),
+        );
+    }
+    if !deliverable_contracts.is_empty() {
+        object.insert(
+            "deliverable_contracts".to_string(),
+            serde_json::json!(deliverable_contracts),
+        );
     }
 }
 

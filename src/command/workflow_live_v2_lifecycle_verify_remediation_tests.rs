@@ -12,6 +12,7 @@ fn contract_fixture() -> (WorkflowV2TaskUniverse, serde_json::Value) {
             dependency_ids: Vec::new(),
             title: None,
             artifact_requirements: Vec::new(),
+            ..Default::default()
         }],
     };
     let plan_item = serde_json::json!({
@@ -56,6 +57,7 @@ fn d46_execution_retry_is_scheduled_even_when_write_inventory_is_empty() {
             dependency_ids: Vec::new(),
             title: None,
             artifact_requirements: Vec::new(),
+            ..Default::default()
         }],
     };
     let contract = LifecycleContract {
@@ -446,6 +448,7 @@ fn d22_verification_remediation_source_items_satisfy_graph_contract() {
                 dependency_ids: vec!["TASK-TDL-030".to_string()],
                 title: None,
                 artifact_requirements: Vec::new(),
+                ..Default::default()
             },
             WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-030".to_string(),
@@ -454,6 +457,7 @@ fn d22_verification_remediation_source_items_satisfy_graph_contract() {
                 dependency_ids: Vec::new(),
                 title: None,
                 artifact_requirements: Vec::new(),
+                ..Default::default()
             },
         ],
     };

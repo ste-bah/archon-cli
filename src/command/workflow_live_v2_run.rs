@@ -271,11 +271,7 @@ async fn execute_generated_v2_run(
     };
     let provider_env_resolution =
         workflow_live_provider_env::resolve_generated_workflow_provider_env(
-            plan.task_universe
-                .as_ref()
-                .into_iter()
-                .flat_map(|universe| universe.tasks.iter())
-                .map(|task| task.canonical_task_id.clone()),
+            plan.task_universe.as_ref(),
         )
         .await;
     let client = LiveV2AgentClient::new(

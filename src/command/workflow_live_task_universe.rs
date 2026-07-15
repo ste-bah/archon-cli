@@ -22,7 +22,7 @@ impl WorkflowV2TaskUniverse {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct WorkflowV2TaskUniverseTask {
     pub(super) canonical_task_id: String,
     #[serde(default)]
@@ -36,6 +36,22 @@ pub(super) struct WorkflowV2TaskUniverseTask {
     /// the project artifact root). Part of the declared artifact contract.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) artifact_requirements: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) required_env_keys: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) required_tools: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) deliverable_contracts: Vec<WorkflowV2DeliverableContract>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub(super) struct WorkflowV2DeliverableContract {
+    pub(super) kind: String,
+    pub(super) artifact_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) registry_path: Option<String>,
+    #[serde(default)]
+    pub(super) required_universe: bool,
 }
 
 pub(super) fn extract_task_universe_for_generated_run(
@@ -79,7 +95,8 @@ pub(super) fn extract_task_universe_for_generated_run(
                 path: path.clone(),
                 source: err,
             })?;
-            let parsed = parse_task_file(&path, &raw)?;
+            let mut parsed = parse_task_file(&path, &raw)?;
+            merge_project_capabilities(&mut parsed, &path)?;
             raw_tasks.insert(parsed.canonical_task_id.clone(), parsed);
         }
     }
@@ -138,10 +155,7 @@ pub(super) fn extract_task_universe_for_generated_run(
 
 fn requires_authoritative_task_universe(task: &str) -> bool {
     let text = task.to_ascii_lowercase();
-    text.contains("decomposed prd")
-        || text.contains("task-tdl")
-        || text.contains("task-*.md")
-        || text.contains("/tasks/prd-")
+    text.contains("decomposed prd") || text.contains("task-*.md") || text.contains("/tasks/prd-")
 }
 
 fn task_roots_from_text(text: &str) -> Vec<PathBuf> {
@@ -243,7 +257,19 @@ fn parse_task_file(path: &Path, raw: &str) -> WorkflowResult<WorkflowV2TaskUnive
         }
         None => path_task_id,
     };
-    let dependency_ids = sorted_unique(first_list_field(raw, "depends_on"));
+    let metadata = task_metadata(raw);
+    let dependency_ids = sorted_unique({
+        let declared = metadata_strings(&metadata, "depends_on");
+        if declared.is_empty() {
+            first_list_field(raw, "depends_on")
+        } else {
+            declared
+        }
+    });
+    let deliverable_contracts = match metadata.get("deliverable_contracts") {
+        Some(value) => serde_json::from_value(value.clone())?,
+        None => Vec::new(),
+    };
     Ok(WorkflowV2TaskUniverseTask {
         canonical_task_id,
         aliases: Vec::new(),
@@ -256,7 +282,94 @@ fn parse_task_file(path: &Path, raw: &str) -> WorkflowResult<WorkflowV2TaskUnive
             .filter(|value| !value.is_empty())
             .map(str::to_string),
         artifact_requirements: declared_task_artifact_requirements(raw),
+        required_env_keys: sorted_unique(metadata_strings(&metadata, "required_env_keys")),
+        required_tools: sorted_unique(metadata_strings(&metadata, "required_tools")),
+        deliverable_contracts,
     })
+}
+
+fn task_metadata(raw: &str) -> serde_json::Value {
+    let mut yaml = String::new();
+    let mut in_yaml = false;
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed == "```yaml" || trimmed == "```yml" || trimmed == "---" && yaml.is_empty() {
+            in_yaml = true;
+            continue;
+        }
+        if in_yaml && (trimmed == "```" || trimmed == "---") {
+            break;
+        }
+        if in_yaml {
+            yaml.push_str(line);
+            yaml.push('\n');
+        }
+    }
+    serde_yaml_ng::from_str(&yaml).unwrap_or_else(|_| serde_json::json!({}))
+}
+
+fn metadata_strings(metadata: &serde_json::Value, field: &str) -> Vec<String> {
+    match metadata.get(field) {
+        Some(serde_json::Value::String(value)) => vec![value.clone()],
+        Some(serde_json::Value::Array(values)) => values
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .map(str::to_string)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn merge_project_capabilities(
+    task: &mut WorkflowV2TaskUniverseTask,
+    task_path: &Path,
+) -> WorkflowResult<()> {
+    let Some(project_root) = task_path
+        .ancestors()
+        .find(|ancestor| ancestor.join(".archon").is_dir())
+    else {
+        return Ok(());
+    };
+    let manifest_path = project_root.join(".archon/project.json");
+    if !manifest_path.is_file() {
+        return Ok(());
+    }
+    let raw = fs::read_to_string(&manifest_path).map_err(|source| WorkflowError::Io {
+        path: manifest_path.clone(),
+        source,
+    })?;
+    let manifest: serde_json::Value = serde_json::from_str(&raw)?;
+    task.required_env_keys = sorted_unique(
+        task.required_env_keys
+            .iter()
+            .cloned()
+            .chain(metadata_strings(&manifest, "required_env_keys"))
+            .collect(),
+    );
+    let mut project_tools = metadata_strings(&manifest, "required_tools");
+    if let Some(bundles) = manifest
+        .get("tool_bundles")
+        .and_then(serde_json::Value::as_object)
+    {
+        for tools in bundles.values() {
+            project_tools.extend(match tools {
+                serde_json::Value::Array(values) => values
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_string)
+                    .collect(),
+                _ => Vec::new(),
+            });
+        }
+    }
+    task.required_tools = sorted_unique(
+        task.required_tools
+            .iter()
+            .cloned()
+            .chain(project_tools)
+            .collect(),
+    );
+    Ok(())
 }
 
 /// Explicit artifact declarations in a TASK-*.md file: list items under an

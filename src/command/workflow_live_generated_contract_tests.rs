@@ -12,6 +12,7 @@ fn task_universe() -> WorkflowV2TaskUniverse {
                 dependency_ids: Vec::new(),
                 title: None,
                 artifact_requirements: Vec::new(),
+                ..Default::default()
             },
             super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-010".to_string(),
@@ -20,6 +21,7 @@ fn task_universe() -> WorkflowV2TaskUniverse {
                 dependency_ids: vec!["TASK-TDL-001".to_string()],
                 title: None,
                 artifact_requirements: Vec::new(),
+                ..Default::default()
             },
         ],
     }
@@ -34,6 +36,7 @@ fn tdl_task_universe() -> WorkflowV2TaskUniverse {
             dependency_ids: deps.iter().map(|dep| dep.to_string()).collect(),
             title: None,
             artifact_requirements: Vec::new(),
+            ..Default::default()
         }
     };
     WorkflowV2TaskUniverse {
@@ -65,6 +68,54 @@ fn tdl_task_universe() -> WorkflowV2TaskUniverse {
             task("TASK-TDL-140", &["TASK-TDL-130"]),
         ],
     }
+}
+
+#[test]
+fn neutral_prd_capabilities_are_stamped_without_task_id_heuristics() {
+    let universe = WorkflowV2TaskUniverse {
+        schema_version: "workflow-v2-task-universe-v1".to_string(),
+        source_roots: vec!["/tmp/demo-tasks".to_string()],
+        tasks: vec![
+            super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+                canonical_task_id: "TASK-DEMO-017".to_string(),
+                source_path: "/tmp/demo-tasks/TASK-DEMO-017.md".to_string(),
+                required_env_keys: vec!["DEMO_API_KEY".to_string()],
+                required_tools: vec!["fetch_demo_cells".to_string()],
+                deliverable_contracts: vec![
+                    super::super::workflow_live_task_universe::WorkflowV2DeliverableContract {
+                        kind: "required_universe_registry".to_string(),
+                        artifact_path: ".archon/demo/coverage.json".to_string(),
+                        registry_path: Some(".archon/demo/registry.json".to_string()),
+                        required_universe: true,
+                    },
+                ],
+                ..Default::default()
+            },
+        ],
+    };
+    let normalized = normalize_generated_item_value(
+        &serde_json::json!({
+            "item_id": "implement-demo-deliverable",
+            "canonical_task_ids": ["TASK-DEMO-017"],
+            "target_files": ["src/demo.rs"],
+            "focused_verification": ["cargo test demo"],
+            "expected_evidence": ["demo deliverable exists"]
+        }),
+        Some(&universe),
+    );
+
+    assert_eq!(
+        normalized.value["required_env_keys"],
+        serde_json::json!(["DEMO_API_KEY"])
+    );
+    assert_eq!(
+        normalized.value["required_tools"],
+        serde_json::json!(["fetch_demo_cells"])
+    );
+    assert_eq!(
+        normalized.value["deliverable_contracts"][0]["artifact_path"],
+        ".archon/demo/coverage.json"
+    );
 }
 
 include!("workflow_live_generated_contract_tests_a.rs");

@@ -23,6 +23,8 @@ struct CargoWaitRegistration {
 
 pub(crate) struct CargoTargetDirLock {
     _guard: OwnedMutexGuard<()>,
+    target_dir: PathBuf,
+    repair_incomplete_tree_sitter: bool,
 }
 
 pub(crate) async fn apply_cargo_target_dir_guard(
@@ -32,9 +34,7 @@ pub(crate) async fn apply_cargo_target_dir_guard(
     session_id: &str,
     cancel: Option<CancellationToken>,
 ) -> Result<Option<CargoTargetDirLock>, String> {
-    let Some(target_dir) =
-        guarded_cargo_target_dir(command, working_dir, env_has_cargo_target(env))
-    else {
+    let Some(target_dir) = guarded_cargo_target_dir(command, working_dir) else {
         return Ok(None);
     };
     if let Err(error) = std::fs::create_dir_all(&target_dir) {
@@ -45,12 +45,13 @@ pub(crate) async fn apply_cargo_target_dir_guard(
         );
         return Ok(None);
     }
-    env.push((
-        "CARGO_TARGET_DIR".to_string(),
-        target_dir.display().to_string(),
-    ));
+    env.retain(|(key, _)| key != "CARGO_TARGET_DIR" && key != "ARCHON_CARGO_TARGET_DIR");
+    let target_dir_value = target_dir.display().to_string();
+    env.push(("CARGO_TARGET_DIR".to_string(), target_dir_value.clone()));
+    env.push(("ARCHON_CARGO_TARGET_DIR".to_string(), target_dir_value));
     let mut wait = CargoWaitRegistration::begin(session_id);
-    let lock = lock_target_dir(target_dir, cancel).await?;
+    let mut lock = lock_target_dir(target_dir, cancel).await?;
+    lock.repair_incomplete_tree_sitter = incomplete_tree_sitter_build_output(&lock.target_dir);
     wait.finish();
     Ok(Some(lock))
 }
@@ -132,23 +133,54 @@ fn update_wait_state(session_id: &str, starting: bool) {
     }
 }
 
-fn guarded_cargo_target_dir(
-    command: &str,
-    working_dir: &Path,
-    env_already_has_target: bool,
-) -> Option<PathBuf> {
-    if env_already_has_target
-        || command.contains("CARGO_TARGET_DIR")
-        || !contains_shell_word(command, "cargo")
-        || !is_macos_external_volume(working_dir)
-    {
+fn guarded_cargo_target_dir(command: &str, working_dir: &Path) -> Option<PathBuf> {
+    if !contains_shell_word(command, "cargo") || !is_macos_external_volume(working_dir) {
         return None;
     }
     Some(local_target_root().join(stable_path_hash(&repository_identity(working_dir))))
 }
 
-fn env_has_cargo_target(env: &[(String, String)]) -> bool {
-    env.iter().any(|(key, _)| key == "CARGO_TARGET_DIR")
+pub(crate) fn enforce_host_cargo_target_dir(command: &str, guarded: bool) -> String {
+    if !guarded || !command.contains("CARGO_TARGET_DIR") {
+        return command.to_string();
+    }
+    let assignment =
+        regex::Regex::new(r#"\bCARGO_TARGET_DIR=(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s;&|)]+)"#)
+            .expect("valid Cargo target assignment regex");
+    assignment
+        .replace_all(command, r#"CARGO_TARGET_DIR="$${ARCHON_CARGO_TARGET_DIR}""#)
+        .into_owned()
+}
+
+pub(crate) fn cargo_cache_repair_prelude(lock: Option<&CargoTargetDirLock>) -> &'static str {
+    if lock.is_some_and(|lock| lock.repair_incomplete_tree_sitter) {
+        "cargo clean -p tree-sitter >/dev/null || exit $?"
+    } else {
+        ""
+    }
+}
+
+fn incomplete_tree_sitter_build_output(target_dir: &Path) -> bool {
+    ["debug", "release"].into_iter().any(|profile| {
+        let build_root = target_dir.join(profile).join("build");
+        std::fs::read_dir(build_root)
+            .ok()
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("tree-sitter-"))
+            })
+            .any(|path| {
+                let out = path.join("out");
+                path.join("invoked.timestamp").is_file()
+                    && out.join("libtree-sitter.a").is_file()
+                    && !out.join("stdlib-symbols.txt").is_file()
+            })
+    })
 }
 
 fn contains_shell_word(command: &str, needle: &str) -> bool {
@@ -259,7 +291,11 @@ async fn lock_target_dir(
         }
         None => lock.lock_owned().await,
     };
-    Ok(CargoTargetDirLock { _guard: guard })
+    Ok(CargoTargetDirLock {
+        _guard: guard,
+        target_dir,
+        repair_incomplete_tree_sitter: false,
+    })
 }
 
 #[cfg(test)]
@@ -320,24 +356,71 @@ mod tests {
     #[test]
     fn external_volume_cargo_gets_local_target_dir() {
         let target =
-            guarded_cargo_target_dir("cargo test", Path::new("/Volumes/Externalwork/demo"), false)
+            guarded_cargo_target_dir("cargo test", Path::new("/Volumes/Externalwork/demo"))
                 .expect("external Cargo command should be guarded");
         assert!(target.starts_with(local_target_root()));
     }
 
     #[test]
-    fn explicit_cargo_target_dir_is_preserved() {
-        assert!(
-            guarded_cargo_target_dir(
-                "CARGO_TARGET_DIR=/tmp/target cargo test",
-                Path::new("/Volumes/Externalwork/demo"),
-                false,
-            )
-            .is_none()
+    fn agent_cargo_target_assignment_is_replaced_by_host_value() {
+        let command = enforce_host_cargo_target_dir(
+            "CARGO_TARGET_DIR=target/task-demo cargo test -p demo",
+            true,
         );
+
+        assert!(!command.contains("target/task-demo"));
+        assert!(command.contains("CARGO_TARGET_DIR=\"${ARCHON_CARGO_TARGET_DIR}\""));
+    }
+
+    #[test]
+    fn unrelated_or_unguarded_command_is_unchanged() {
+        let command = "printf 'CARGO_TARGET_DIR=example'";
+        assert_eq!(enforce_host_cargo_target_dir(command, false), command);
+        assert_eq!(
+            enforce_host_cargo_target_dir("cargo test", true),
+            "cargo test"
+        );
+    }
+
+    #[test]
+    fn incomplete_tree_sitter_output_requests_scoped_cache_repair() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let build = temp.path().join("debug/build/tree-sitter-example/out");
+        std::fs::create_dir_all(&build).expect("build output");
+        std::fs::write(build.parent().unwrap().join("invoked.timestamp"), "").expect("stamp");
+        std::fs::write(build.join("libtree-sitter.a"), "").expect("library");
+
+        assert!(incomplete_tree_sitter_build_output(temp.path()));
+        std::fs::write(build.join("stdlib-symbols.txt"), "symbols").expect("symbols");
+        assert!(!incomplete_tree_sitter_build_output(temp.path()));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn inherited_cargo_target_dir_is_overridden() {
+        let mut env = vec![("CARGO_TARGET_DIR".to_string(), "/agent/target".to_string())];
+        let _lock = apply_cargo_target_dir_guard(
+            &mut env,
+            "CARGO_TARGET_DIR=target/task-demo cargo test",
+            Path::new("/Volumes/Externalwork/demo"),
+            "override-test",
+            None,
+        )
+        .await
+        .expect("guard")
+        .expect("external Cargo command should be guarded");
+        let target_values: Vec<&str> = env
+            .iter()
+            .filter(|(key, _)| key == "CARGO_TARGET_DIR")
+            .map(|(_, value)| value.as_str())
+            .collect();
+
+        assert_eq!(target_values.len(), 1);
+        assert_ne!(target_values[0], "/agent/target");
         assert!(
-            guarded_cargo_target_dir("cargo test", Path::new("/Volumes/Externalwork/demo"), true)
-                .is_none()
+            env.iter().any(|(key, value)| {
+                key == "ARCHON_CARGO_TARGET_DIR" && value == target_values[0]
+            })
         );
     }
 

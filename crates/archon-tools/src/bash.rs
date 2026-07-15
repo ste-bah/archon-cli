@@ -158,8 +158,6 @@ impl Tool for BashTool {
             Some(c) => c,
             None => return ToolResult::error("command is required and must be a string"),
         };
-        let command = command_with_compat_prelude(raw_command);
-
         let timeout_ms = effective_timeout_ms(
             input.get("timeout").and_then(|v| v.as_u64()),
             self.timeout_secs * 1000,
@@ -184,6 +182,18 @@ impl Tool for BashTool {
             Ok(lock) => lock,
             Err(message) => return ToolResult::error(message),
         };
+        let guarded_command = crate::cargo_target_env::enforce_host_cargo_target_dir(
+            raw_command,
+            _cargo_target_lock.is_some(),
+        );
+        let repair_prelude =
+            crate::cargo_target_env::cargo_cache_repair_prelude(_cargo_target_lock.as_ref());
+        let guarded_command = if repair_prelude.is_empty() {
+            guarded_command
+        } else {
+            format!("{repair_prelude}\n{guarded_command}")
+        };
+        let command = command_with_compat_prelude(&guarded_command);
 
         if let Some(sandbox) = &ctx.sandbox
             && let Some(result) = sandbox

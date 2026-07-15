@@ -237,7 +237,7 @@ mod tests {
 
         let scaffold = WorkflowGeneratedScaffold::decomposed_prd(
             workflow_js,
-            json!({"tasks": [{"canonical_task_id": "TASK-TDL-001"}]}),
+            json!({"tasks": [{"canonical_task_id": "TASK-DEMO-001"}]}),
             prompt_slots,
             manifest,
             Vec::new(),

@@ -133,6 +133,7 @@ fn task_universe_080() -> WorkflowV2TaskUniverse {
             dependency_ids: Vec::new(),
             title: None,
             artifact_requirements: Vec::new(),
+            ..Default::default()
         }],
     }
 }
@@ -148,6 +149,7 @@ fn task_universe_010() -> WorkflowV2TaskUniverse {
             dependency_ids: Vec::new(),
             title: None,
             artifact_requirements: Vec::new(),
+            ..Default::default()
         }],
     }
 }

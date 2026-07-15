@@ -88,6 +88,7 @@ impl LifecycleDriver {
             plan_items,
             self.project_artifact_root.as_deref(),
             &evidence.implementation,
+            &self.task_universe,
         );
 
         let mut verification = self
@@ -326,6 +327,7 @@ impl LifecycleDriver {
                 plan_items,
                 self.project_artifact_root.as_deref(),
                 &evidence.implementation,
+                &self.task_universe,
             );
             verification = self
                 .parallel(

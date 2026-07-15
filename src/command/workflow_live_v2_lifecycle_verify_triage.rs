@@ -191,6 +191,7 @@ impl LifecycleDriver {
             retry_items,
             self.project_artifact_root.as_deref(),
             &evidence.implementation,
+            &self.task_universe,
         );
         let retry_result = self
             .parallel(

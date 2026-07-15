@@ -86,9 +86,21 @@ fn demands_task_identity(text: &str) -> bool {
         || text.contains("task_id")
         || text.contains("canonical task")
         || text.contains("task identity")
-        || text.contains("task-tdl-") && text.contains("-specific")
-        || text.contains("identify task-tdl-")
-        || text.contains("identif") && text.contains("task-tdl-")
+        || contains_canonical_task_reference(text)
+            && (text.contains("-specific") || text.contains("identif"))
+}
+
+fn contains_canonical_task_reference(text: &str) -> bool {
+    text.split(|character: char| !character.is_ascii_alphanumeric() && character != '-')
+        .any(is_canonical_task_reference)
+}
+
+fn is_canonical_task_reference(candidate: &str) -> bool {
+    let mut parts = candidate.split('-');
+    matches!(parts.next(), Some(prefix) if prefix.eq_ignore_ascii_case("task"))
+        && matches!(parts.next(), Some(namespace) if !namespace.is_empty() && namespace.chars().all(|character| character.is_ascii_alphanumeric()))
+        && matches!(parts.next(), Some(sequence) if sequence.len() == 3 && sequence.chars().all(|character| character.is_ascii_digit()))
+        && parts.next().is_none()
 }
 
 fn plan_requires_task_identity(plan: &Value) -> bool {

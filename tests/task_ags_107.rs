@@ -122,28 +122,28 @@ fn tool_context_has_cancel_parent_field() {
 }
 
 // ---------------------------------------------------------------------------
-// Structural: agent_tool.rs propagates cancel_parent through ToolContext
+// Structural: subagent runner propagates cancel_parent through ToolContext
 // ---------------------------------------------------------------------------
 
-/// Verify that AgentTool::execute reads cancel_parent from ctx and
-/// uses it (via child_token or clone) when creating the CancellationToken
-/// for run_subagent.
+/// Verify that the subagent runtime derives a round token from cancel_parent
+/// and gives each dispatched tool a cascading child token.
 #[test]
 fn agent_tool_propagates_cancel_parent() {
-    let src = std::fs::read_to_string("crates/archon-tools/src/agent_tool.rs")
-        .expect("cannot read agent_tool.rs");
+    let runtime = std::fs::read_to_string("crates/archon-core/src/subagent/runner/runtime.rs")
+        .expect("cannot read subagent runner runtime.rs");
+    let tool_round =
+        std::fs::read_to_string("crates/archon-core/src/subagent/runner/runtime/tool_round.rs")
+            .expect("cannot read subagent runner tool_round.rs");
 
-    // cancel_parent must be referenced in agent_tool.rs
     assert!(
-        src.contains("cancel_parent"),
-        "TASK-AGS-107: agent_tool.rs must reference cancel_parent from ToolContext \
+        runtime.contains("cancel_parent"),
+        "TASK-AGS-107: the subagent runtime must reference cancel_parent from ToolContext \
          to propagate cancellation into run_subagent"
     );
 
-    // child_token() should be used for cascading cancellation
     assert!(
-        src.contains("child_token()"),
-        "TASK-AGS-107: agent_tool.rs must use child_token() to create a \
+        runtime.contains("child_token") && tool_round.contains("child_token()"),
+        "TASK-AGS-107: the subagent runtime must use child_token() to create a \
          cascading CancellationToken for the subagent"
     );
 }

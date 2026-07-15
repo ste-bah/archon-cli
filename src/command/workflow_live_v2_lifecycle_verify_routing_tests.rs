@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn every_triage_route_combination_has_a_defined_disposition() {
-    for mask in 0u8..8 {
+    for mask in 0u8..16 {
         for inventory_ready in [false, true] {
             let routes = VerificationTriageRoutes {
                 retry_items: ((mask & 1) != 0)
@@ -17,7 +17,19 @@ fn every_triage_route_combination_has_a_defined_disposition() {
                     .then(|| serde_json::json!({ "item_id": "write" }))
                     .into_iter()
                     .collect(),
-                terminal_blockers: Vec::new(),
+                terminal_blockers: ((mask & 8) != 0)
+                    .then(|| {
+                        if mask & 1 != 0 {
+                            serde_json::json!({
+                                "item_id": "terminal",
+                                "affected_retry_items": ["retry"]
+                            })
+                        } else {
+                            serde_json::json!({ "item_id": "terminal" })
+                        }
+                    })
+                    .into_iter()
+                    .collect(),
             };
             let plan = triage_route_plan(&routes);
             let inventory_route = remediation_inventory_route(&plan, inventory_ready);
@@ -25,19 +37,28 @@ fn every_triage_route_combination_has_a_defined_disposition() {
             assert_eq!(plan.run_retries, mask & 1 != 0, "mask={mask}");
             assert_eq!(plan.try_supersede, mask & 2 != 0, "mask={mask}");
             assert_eq!(plan.run_write_remediation, mask & 4 != 0, "mask={mask}");
-            assert!(!plan.terminal_blocked, "mask={mask}");
-            match (mask & 4 != 0, inventory_ready) {
-                (true, true) => assert_eq!(
+            assert_eq!(
+                plan.terminal_blocked,
+                mask & 8 != 0 && mask & 1 == 0,
+                "mask={mask}"
+            );
+            match (plan.terminal_blocked, mask & 4 != 0, inventory_ready) {
+                (true, _, _) => assert_eq!(
+                    inventory_route,
+                    RemediationInventoryRoute::Block,
+                    "mask={mask}"
+                ),
+                (false, true, true) => assert_eq!(
                     inventory_route,
                     RemediationInventoryRoute::RunWriteRemediation,
                     "mask={mask}"
                 ),
-                (true, false) => assert_eq!(
+                (false, true, false) => assert_eq!(
                     inventory_route,
                     RemediationInventoryRoute::RegenerateInventory,
                     "mask={mask}"
                 ),
-                (false, _) => assert_eq!(
+                (false, false, _) => assert_eq!(
                     inventory_route,
                     RemediationInventoryRoute::NotNeeded,
                     "mask={mask}"
@@ -48,20 +69,68 @@ fn every_triage_route_combination_has_a_defined_disposition() {
 }
 
 #[test]
-fn terminal_blocker_overrides_all_nonterminal_routes() {
+fn coextensive_terminal_blocker_does_not_orphan_retry_work() {
     let routes = VerificationTriageRoutes {
         retry_items: vec![serde_json::json!({ "item_id": "retry" })],
         superseded_items: vec![serde_json::json!({ "item_id": "supersede" })],
         implementation_failures: vec![serde_json::json!({ "item_id": "write" })],
-        terminal_blockers: vec![serde_json::json!({ "item_id": "terminal" })],
+        terminal_blockers: vec![serde_json::json!({
+            "item_id": "terminal",
+            "affected_retry_items": ["retry"]
+        })],
+    };
+    let plan = triage_route_plan(&routes);
+
+    assert!(!plan.terminal_blocked);
+    assert!(plan.run_retries);
+    assert!(plan.try_supersede);
+    assert!(plan.run_write_remediation);
+    assert_eq!(
+        remediation_inventory_route(&plan, true),
+        RemediationInventoryRoute::RunWriteRemediation
+    );
+}
+
+#[test]
+fn independent_terminal_blocker_remains_fail_closed() {
+    let routes = VerificationTriageRoutes {
+        retry_items: vec![serde_json::json!({ "item_id": "retry" })],
+        terminal_blockers: vec![serde_json::json!({
+            "item_id": "external-safety-blocker",
+            "affected_retry_items": ["different-item"]
+        })],
+        ..VerificationTriageRoutes::default()
     };
     let plan = triage_route_plan(&routes);
 
     assert!(plan.terminal_blocked);
     assert_eq!(
-        remediation_inventory_route(&plan, true),
+        remediation_inventory_route(&plan, false),
         RemediationInventoryRoute::Block
     );
+}
+
+#[test]
+fn terminal_blocker_blocks_only_when_no_actionable_route_remains() {
+    let routes = VerificationTriageRoutes {
+        terminal_blockers: vec![serde_json::json!({ "item_id": "terminal" })],
+        ..VerificationTriageRoutes::default()
+    };
+    let plan = triage_route_plan(&routes);
+
+    assert!(plan.terminal_blocked);
+    assert_eq!(
+        remediation_inventory_route(&plan, false),
+        RemediationInventoryRoute::Block
+    );
+}
+
+#[test]
+fn triage_prompt_forbids_first_sight_retryable_terminal_blockers() {
+    let prompt = super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_FAILURE_TRIAGE_TASK;
+
+    assert!(prompt.contains("Never emit a terminal_blocker"));
+    assert!(prompt.contains("at least two retry generations"));
 }
 
 #[test]
@@ -214,13 +283,33 @@ fn repair_prompt_requires_write_route_for_reproduced_failures() {
 }
 
 #[test]
-fn provider_remediation_requires_profile_grounded_redacted_proof() {
+fn provider_remediation_requires_host_grounded_redacted_proof() {
     let prompt =
         super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_REMEDIATION_WAVE_TASK;
 
-    assert!(prompt.contains("source ~/.profile"));
+    assert!(prompt.contains("host-injected run-scoped provider environment"));
     assert!(prompt.contains("provider_env_proof"));
     assert!(prompt.contains("never credential values"));
+}
+
+#[test]
+fn d45_keyless_and_or_unavailable_contracts_are_accepted_at_source() {
+    let prompts = [
+        super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_PLAN_TASK,
+        super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_WAVE_TASK,
+        super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_REMEDIATION_WAVE_TASK,
+    ];
+
+    assert!(
+        prompts
+            .iter()
+            .all(|prompt| prompt.contains("checked_keys=[]"))
+    );
+    assert!(
+        prompts
+            .iter()
+            .all(|prompt| prompt.contains("OR unavailable"))
+    );
 }
 
 #[test]

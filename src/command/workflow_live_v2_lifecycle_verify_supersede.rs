@@ -16,9 +16,6 @@ pub(super) fn try_supersede_verification(
     triage: &Value,
     triage_call_id: &str,
 ) -> Option<VerificationSupersede> {
-    if triage_has_blockers(triage) {
-        return None;
-    }
     let outcomes = support::outcomes_of(verification);
     let failed = support::non_accepted_outcomes(&outcomes);
     if failed.is_empty() {
@@ -52,12 +49,6 @@ pub(super) fn try_supersede_verification(
             "superseded": records,
         }),
     })
-}
-
-fn triage_has_blockers(triage: &Value) -> bool {
-    let data = triage_data(triage);
-    !support::array(data.and_then(|data| data.get("terminal_blockers"))).is_empty()
-        || !support::array(data.and_then(|data| data.get("terminalBlockers"))).is_empty()
 }
 
 fn supersede_records(

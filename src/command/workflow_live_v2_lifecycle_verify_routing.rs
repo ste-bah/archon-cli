@@ -53,13 +53,46 @@ pub(super) fn triage_routes(triage: &Value) -> VerificationTriageRoutes {
 }
 
 pub(super) fn triage_route_plan(routes: &VerificationTriageRoutes) -> VerificationTriageRoutePlan {
+    let run_retries = !routes.retry_items.is_empty();
+    let try_supersede =
+        !routes.superseded_items.is_empty() || routes.retry_items.iter().any(is_sibling_resolved);
+    let run_write_remediation = !routes.implementation_failures.is_empty();
+    let independent_terminal_blocker = routes
+        .terminal_blockers
+        .iter()
+        .any(|blocker| terminal_blocker_is_independent(blocker, &routes.retry_items));
     VerificationTriageRoutePlan {
-        run_retries: !routes.retry_items.is_empty(),
-        try_supersede: !routes.superseded_items.is_empty()
-            || routes.retry_items.iter().any(is_sibling_resolved),
-        run_write_remediation: !routes.implementation_failures.is_empty(),
-        terminal_blocked: !routes.terminal_blockers.is_empty(),
+        run_retries,
+        try_supersede,
+        run_write_remediation,
+        terminal_blocked: independent_terminal_blocker
+            || (!routes.terminal_blockers.is_empty()
+                && !run_retries
+                && !try_supersede
+                && !run_write_remediation),
     }
+}
+
+fn terminal_blocker_is_independent(blocker: &Value, retry_items: &[Value]) -> bool {
+    let affected = blocker
+        .get("affected_retry_items")
+        .or_else(|| blocker.get("affectedRetryItems"))
+        .map(|value| support::strings_of(Some(value)))
+        .unwrap_or_default();
+    if affected.is_empty() {
+        return true;
+    }
+    let retry_ids = retry_items
+        .iter()
+        .flat_map(|item| {
+            ["item_id", "source_item_id"]
+                .into_iter()
+                .filter_map(|key| item.get(key).and_then(Value::as_str))
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    !affected
+        .iter()
+        .any(|item_id| retry_ids.contains(item_id.as_str()))
 }
 
 pub(super) fn remediation_inventory_route(

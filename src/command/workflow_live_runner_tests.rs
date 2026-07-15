@@ -115,21 +115,26 @@ fn mcp_project() -> tempfile::TempDir {
 fn mcp_request(project: &std::path::Path, item: serde_json::Value) -> StageRunRequest {
     request(json!({
         "project_artifact_root": project,
-        "taskUniverse": {"tasks": [{"canonical_task_id": "TASK-TDL-040"}]},
         "item": item
     }))
 }
 
 #[test]
-fn d37_task_scoped_provider_and_pine_tools_are_exposed() {
+fn d37_declared_provider_and_pine_tools_are_exposed() {
     let project = mcp_project();
     let provider = mcp_request(
         project.path(),
-        json!({"canonical_task_ids": ["TASK-TDL-040"]}),
+        json!({
+            "canonical_task_ids": ["TASK-DEMO-017"],
+            "required_tools": ["data_get_ohlcv"]
+        }),
     );
     let pine = mcp_request(
         project.path(),
-        json!({"canonical_task_ids": ["TASK-TDL-120"]}),
+        json!({
+            "canonical_task_ids": ["TASK-DEMO-023"],
+            "required_tools": ["pine_compile", "pine_smart_compile"]
+        }),
     );
 
     let provider_tools = allowed_tools(&provider);
@@ -147,7 +152,7 @@ fn d37_declared_tools_are_honored_but_dangerous_policy_is_not() {
     let req = mcp_request(
         project.path(),
         json!({
-            "canonical_task_ids": ["TASK-TDL-001"],
+            "canonical_task_ids": ["TASK-DEMO-001"],
             "required_tools": ["pine_check", "alert_create"]
         }),
     );
