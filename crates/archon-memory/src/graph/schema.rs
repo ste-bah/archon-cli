@@ -59,6 +59,26 @@ impl MemoryGraph {
                 }
             })?;
 
+        self.db
+            .run_script(
+                ":create score_applications {
+                    memory_id: String,
+                    provenance_id: String
+                    =>
+                    applied_at: String
+                }",
+                Default::default(),
+                ScriptMutability::Mutable,
+            )
+            .or_else(|e| {
+                let msg = e.to_string();
+                if msg.contains("already exists") || msg.contains("conflicts") {
+                    Ok(empty_rows())
+                } else {
+                    Err(db_err(e))
+                }
+            })?;
+
         Ok(())
     }
 }

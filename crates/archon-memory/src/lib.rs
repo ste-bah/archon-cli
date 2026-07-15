@@ -19,5 +19,6 @@ pub use access::{
 pub use graph::MemoryGraph;
 pub use injection::MemoryInjector;
 pub use types::{
-    Memory, MemoryError, MemoryType, RelType, Relationship, SearchFilter, StoreMemoryRequest,
+    Memory, MemoryError, MemoryType, RelType, Relationship, SearchFilter, StoreMemoryOutcome,
+    StoreMemoryRequest,
 };

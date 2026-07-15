@@ -107,6 +107,23 @@ pub(crate) fn raw_to_memory(raw: RawRow) -> Result<Memory, MemoryError> {
     })
 }
 
+pub(crate) fn row_values_to_memory(row: &[DataValue]) -> Result<Memory, MemoryError> {
+    raw_to_memory(RawRow {
+        id: extract_str(&row[0]),
+        content: extract_str(&row[1]),
+        title: extract_str(&row[2]),
+        memory_type: extract_str(&row[3]),
+        importance: extract_f64(&row[4]),
+        tags: extract_str(&row[5]),
+        source_type: extract_str(&row[6]),
+        project_path: extract_str(&row[7]),
+        created_at: extract_str(&row[8]),
+        updated_at: extract_str(&row[9]),
+        access_count: extract_i64(&row[10]),
+        last_accessed: extract_str(&row[11]),
+    })
+}
+
 /// Read all memory rows from the database.
 pub(crate) fn read_all_memories(db: &DbInstance) -> Result<Vec<RawRow>, MemoryError> {
     let result = db

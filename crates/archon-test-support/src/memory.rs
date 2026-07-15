@@ -17,7 +17,9 @@
 use std::sync::{Arc, Mutex};
 
 use archon_memory::MemoryTrait;
-use archon_memory::types::{Memory, MemoryError, MemoryType, RelType, SearchFilter};
+use archon_memory::types::{
+    Memory, MemoryError, MemoryType, RelType, SearchFilter, StoreMemoryOutcome,
+};
 
 /// A single `store_memory` call recorded by [`MockMemoryTrait`]. Captures
 /// all seven arguments so regression guards can assert the full invariant.
@@ -78,8 +80,42 @@ impl MemoryTrait for MockMemoryTrait {
         Ok("mock-memory-id".to_string())
     }
 
+    fn store_memory_with_id_outcome(
+        &self,
+        _id: &str,
+        _content: &str,
+        _title: &str,
+        _memory_type: MemoryType,
+        _importance: f64,
+        _tags: &[String],
+        _source_type: &str,
+        _project_path: &str,
+    ) -> Result<StoreMemoryOutcome, MemoryError> {
+        unimplemented!(
+            "MockMemoryTrait: store_memory_with_id_outcome not used by save_agent_memory"
+        )
+    }
+
+    fn store_memory_with_id(
+        &self,
+        _id: &str,
+        _content: &str,
+        _title: &str,
+        _memory_type: MemoryType,
+        _importance: f64,
+        _tags: &[String],
+        _source_type: &str,
+        _project_path: &str,
+    ) -> Result<Memory, MemoryError> {
+        unimplemented!("MockMemoryTrait: store_memory_with_id not used by save_agent_memory")
+    }
+
     fn get_memory(&self, _id: &str) -> Result<Memory, MemoryError> {
         unimplemented!("MockMemoryTrait: get_memory not used by save_agent_memory")
+    }
+
+    fn inspect_memory(&self, id: &str) -> Result<Memory, MemoryError> {
+        Err(MemoryError::NotFound(id.to_string()))
     }
 
     fn update_memory(
@@ -91,8 +127,21 @@ impl MemoryTrait for MockMemoryTrait {
         unimplemented!("MockMemoryTrait: update_memory not used by save_agent_memory")
     }
 
-    fn update_importance(&self, _id: &str, _importance: f64) -> Result<(), MemoryError> {
-        unimplemented!("MockMemoryTrait: update_importance not used by save_agent_memory")
+    fn apply_importance_delta(
+        &self,
+        _id: &str,
+        _delta: f64,
+        _provenance_id: &str,
+    ) -> Result<Memory, MemoryError> {
+        unimplemented!("MockMemoryTrait: apply_importance_delta not used by save_agent_memory")
+    }
+
+    fn has_importance_application(
+        &self,
+        _memory_id: &str,
+        _provenance_id: &str,
+    ) -> Result<bool, MemoryError> {
+        unimplemented!("test double: has_importance_application not used")
     }
 
     fn delete_memory(&self, _id: &str) -> Result<(), MemoryError> {

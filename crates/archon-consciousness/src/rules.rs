@@ -96,11 +96,20 @@ pub enum RulesError {
     #[error("rule not found: {0}")]
     NotFound(String),
 
+    #[error("invalid rule score: {0}")]
+    InvalidScore(f64),
+
+    #[error("rule identity collision for {id}: {reason}")]
+    IdentityCollision { id: String, reason: String },
+
     #[error("memory graph error: {0}")]
     Memory(#[from] archon_memory::MemoryError),
 }
 
 // ── engine ───────────────────────────────────────────────────
+
+/// Maximum behavioral rules included in the system prompt.
+pub const MAX_PROMPT_RULES: usize = 10;
 
 /// Manages behavioral rules stored in the memory graph.
 pub struct RulesEngine<'g> {
@@ -142,6 +151,28 @@ impl<'g> RulesEngine<'g> {
         })
     }
 
+    /// Add a rule at a deterministic ID, or return the matching existing rule.
+    pub fn add_rule_with_id(
+        &self,
+        id: &str,
+        text: &str,
+        source: RuleSource,
+    ) -> Result<BehavioralRule, RulesError> {
+        let tags = vec![source.as_tag(), Trend::Stable.as_tag()];
+        let memory = self.graph.store_memory_with_id(
+            id,
+            text,
+            "",
+            MemoryType::Rule,
+            50.0,
+            &tags,
+            "rules_engine",
+            "",
+        )?;
+        validate_rule_identity(&memory, id, source)?;
+        memory_to_rule(memory)
+    }
+
     /// Retrieve all rules sorted by score descending.
     pub fn get_rules_sorted(&self) -> Result<Vec<BehavioralRule>, RulesError> {
         let filter = SearchFilter {
@@ -155,47 +186,75 @@ impl<'g> RulesEngine<'g> {
             .filter_map(|m| memory_to_rule(m).ok())
             .collect();
 
-        rules.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        rules.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.id.cmp(&b.id)));
         Ok(rules)
     }
 
-    /// Increment a rule's score by 5.0 (clamped to 100.0) and update
-    /// its `last_triggered` timestamp.
+    /// Increment a rule's score by 5.0 and record a new trigger event.
     pub fn reinforce_rule(&self, id: &str) -> Result<BehavioralRule, RulesError> {
-        let mem = self
-            .graph
-            .get_memory(id)
-            .map_err(|_| RulesError::NotFound(id.to_string()))?;
-        let new_score = (mem.importance + 5.0).min(100.0);
-        self.graph.update_importance(id, new_score)?;
-
-        // Update the last_triggered tag.
-        let now_str = Utc::now().to_rfc3339();
-        let mut tags: Vec<String> = mem
-            .tags
-            .iter()
-            .filter(|t| !t.starts_with("last_triggered:"))
-            .cloned()
-            .collect();
-        tags.push(format!("last_triggered:{now_str}"));
-        self.graph.update_memory(id, None, Some(&tags))?;
-
-        let updated = self.graph.get_memory(id)?;
-        memory_to_rule(updated).map_err(|_| RulesError::NotFound(id.to_string()))
+        let provenance_id = format!("rule-reinforcement:{}", uuid::Uuid::new_v4());
+        let updated = self.apply_score_delta(id, 5.0, &provenance_id)?;
+        self.record_last_triggered(&updated.id)?;
+        self.rule_from_graph(&updated.id)
     }
 
-    /// Decay all rule scores by `rate` (subtracted), clamping to 0.0.
+    /// Decay all rule scores by `rate` once for this invocation.
     pub fn decay_scores(&self, rate: f64) -> Result<(), RulesError> {
-        let rules = self.get_rules_sorted()?;
-        for rule in &rules {
-            let new_score = (rule.score - rate).max(0.0);
-            self.graph.update_importance(&rule.id, new_score)?;
+        if !rate.is_finite() || rate < 0.0 {
+            return Err(RulesError::InvalidScore(rate));
+        }
+        let run_id = uuid::Uuid::new_v4();
+        for rule in self.get_rules_sorted()? {
+            let provenance_id = format!("rule-decay:{run_id}:{}", rule.id);
+            self.apply_score_delta(&rule.id, -rate, &provenance_id)?;
         }
         Ok(())
+    }
+
+    /// Increase a rule's score by an explicit amount for one correction event.
+    pub fn boost_rule_by(
+        &self,
+        id: &str,
+        increment: f64,
+        provenance_id: &str,
+    ) -> Result<BehavioralRule, RulesError> {
+        self.apply_score_delta(id, increment, provenance_id)
+    }
+
+    /// Apply a score change against the persisted source of truth.
+    pub fn apply_score_delta(
+        &self,
+        id: &str,
+        delta: f64,
+        provenance_id: &str,
+    ) -> Result<BehavioralRule, RulesError> {
+        if !delta.is_finite() {
+            return Err(RulesError::InvalidScore(delta));
+        }
+        let updated = self
+            .graph
+            .apply_importance_delta(id, delta, provenance_id)
+            .map_err(|error| match error {
+                archon_memory::MemoryError::NotFound(_) => RulesError::NotFound(id.to_string()),
+                other => RulesError::Memory(other),
+            })?;
+        memory_to_rule(updated)
+    }
+
+    fn record_last_triggered(&self, id: &str) -> Result<(), RulesError> {
+        let memory = self.graph.get_memory(id)?;
+        let mut tags: Vec<String> = memory
+            .tags
+            .into_iter()
+            .filter(|tag| !tag.starts_with("last_triggered:"))
+            .collect();
+        tags.push(format!("last_triggered:{}", Utc::now().to_rfc3339()));
+        self.graph.update_memory(id, None, Some(&tags))?;
+        Ok(())
+    }
+
+    fn rule_from_graph(&self, id: &str) -> Result<BehavioralRule, RulesError> {
+        memory_to_rule(self.graph.get_memory(id)?).map_err(|_| RulesError::NotFound(id.to_string()))
     }
 
     /// Remove a rule from the graph.
@@ -210,20 +269,6 @@ impl<'g> RulesEngine<'g> {
         self.graph
             .update_memory(id, Some(text), None)
             .map_err(|_| RulesError::NotFound(id.to_string()))
-    }
-
-    /// Calculate the trend of a rule based on its current score vs a
-    /// reference threshold. In a full implementation this would compare
-    /// against a historical snapshot; here we use a simple heuristic:
-    /// score > 60 → Rising, score < 40 → Declining, else Stable.
-    pub fn calculate_trend(rule: &BehavioralRule) -> Trend {
-        if rule.score > 60.0 {
-            Trend::Rising
-        } else if rule.score < 40.0 {
-            Trend::Declining
-        } else {
-            Trend::Stable
-        }
     }
 
     /// Export current rule scores as a list of [`RuleScoreEntry`](crate::persistence::RuleScoreEntry).
@@ -251,6 +296,10 @@ impl<'g> RulesEngine<'g> {
         let mut imported = 0;
 
         for entry in scores {
+            if !is_valid_rule_score(entry.score) {
+                return Err(RulesError::InvalidScore(entry.score));
+            }
+
             // Match by rule_id first, fall back to text match.
             let target = current_rules
                 .iter()
@@ -258,7 +307,12 @@ impl<'g> RulesEngine<'g> {
                 .or_else(|| current_rules.iter().find(|r| r.text == entry.rule_text));
 
             if let Some(rule) = target {
-                self.graph.update_importance(&rule.id, entry.score)?;
+                let provenance_id = format!(
+                    "rule-import:{}:{}:{}",
+                    entry.rule_id, entry.rule_text, entry.score
+                );
+                let delta = entry.score - rule.score;
+                self.apply_score_delta(&rule.id, delta, &provenance_id)?;
                 imported += 1;
             }
         }
@@ -266,7 +320,7 @@ impl<'g> RulesEngine<'g> {
         Ok(imported)
     }
 
-    /// Render all rules into a block suitable for system-prompt
+    /// Render the highest-priority rules into a block suitable for system-prompt
     /// injection.
     pub fn format_for_prompt(&self) -> Result<String, RulesError> {
         let rules = self.get_rules_sorted()?;
@@ -275,13 +329,12 @@ impl<'g> RulesEngine<'g> {
         }
 
         let mut out = String::from("<behavioral_rules>\n## Rules (sorted by priority)\n");
-        for (i, r) in rules.iter().enumerate() {
-            let trend = Self::calculate_trend(r);
+        for (i, r) in rules.iter().take(MAX_PROMPT_RULES).enumerate() {
             out.push_str(&format!(
                 "{}. [score: {:.1} {}] {}\n",
                 i + 1,
                 r.score,
-                trend.arrow(),
+                r.trend.arrow(),
                 r.text,
             ));
         }
@@ -292,8 +345,48 @@ impl<'g> RulesEngine<'g> {
 
 // ── helpers ──────────────────────────────────────────────────
 
+fn is_valid_rule_score(score: f64) -> bool {
+    score.is_finite() && (0.0..=100.0).contains(&score)
+}
+
+fn validate_rule_identity(
+    memory: &archon_memory::Memory,
+    id: &str,
+    source: RuleSource,
+) -> Result<(), RulesError> {
+    let source_tag = source.as_tag();
+    let source_tags: Vec<_> = memory
+        .tags
+        .iter()
+        .filter(|tag| tag.starts_with("source:"))
+        .collect();
+    let trend_tags: Vec<_> = memory
+        .tags
+        .iter()
+        .filter(|tag| tag.starts_with("trend:"))
+        .collect();
+    let rule = memory_to_rule(memory.clone())?;
+    if memory.memory_type != MemoryType::Rule
+        || memory.source_type != "rules_engine"
+        || source_tags != [&source_tag]
+        || trend_tags.len() != 1
+        || Trend::from_tag(trend_tags[0]).is_none()
+        || rule.source != source
+    {
+        return Err(RulesError::IdentityCollision {
+            id: id.to_string(),
+            reason: "stored rule source or required tags differ".to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// Convert a [`Memory`] into a [`BehavioralRule`].
 fn memory_to_rule(m: archon_memory::Memory) -> Result<BehavioralRule, RulesError> {
+    if !is_valid_rule_score(m.importance) {
+        return Err(RulesError::InvalidScore(m.importance));
+    }
+
     let source = m
         .tags
         .iter()
@@ -323,231 +416,8 @@ fn memory_to_rule(m: archon_memory::Memory) -> Result<BehavioralRule, RulesError
     })
 }
 
-// ── tests ────────────────────────────────────────────────────
+// ── tests ────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use archon_memory::MemoryGraph;
-    use uuid::Uuid;
-
-    fn make_engine() -> (MemoryGraph, ()) {
-        let graph = MemoryGraph::in_memory().expect("in-memory graph should succeed");
-        (graph, ())
-    }
-
-    #[test]
-    fn add_and_get_rule() {
-        let (graph, _) = make_engine();
-        let engine = RulesEngine::new(&graph);
-
-        let rule = engine
-            .add_rule(
-                "Do not modify files without asking",
-                RuleSource::UserDefined,
-            )
-            .expect("add_rule should succeed");
-
-        assert_eq!(rule.text, "Do not modify files without asking");
-        assert!((rule.score - 50.0).abs() < f64::EPSILON);
-        assert_eq!(rule.source, RuleSource::UserDefined);
-        assert_eq!(rule.trend, Trend::Stable);
-
-        let all = engine.get_rules_sorted().expect("get_rules_sorted");
-        assert_eq!(all.len(), 1);
-        assert_eq!(all[0].id, rule.id);
-    }
-
-    #[test]
-    fn remove_rule() {
-        let (graph, _) = make_engine();
-        let engine = RulesEngine::new(&graph);
-
-        let rule = engine
-            .add_rule("temp rule", RuleSource::SystemDefault)
-            .expect("add");
-        engine.remove_rule(&rule.id).expect("remove");
-
-        let all = engine.get_rules_sorted().expect("list");
-        assert!(all.is_empty());
-    }
-
-    #[test]
-    fn remove_nonexistent_fails() {
-        let (graph, _) = make_engine();
-        let engine = RulesEngine::new(&graph);
-        let err = engine.remove_rule("no-such-id");
-        assert!(err.is_err());
-    }
-
-    #[test]
-    fn reinforce_increases_score() {
-        let (graph, _) = make_engine();
-        let engine = RulesEngine::new(&graph);
-
-        let rule = engine
-            .add_rule("be polite", RuleSource::CorrectionDerived)
-            .expect("add");
-        let reinforced = engine.reinforce_rule(&rule.id).expect("reinforce");
-
-        assert!((reinforced.score - 55.0).abs() < f64::EPSILON);
-        assert!(reinforced.last_triggered.is_some());
-    }
-
-    #[test]
-    fn reinforce_clamps_at_100() {
-        let (graph, _) = make_engine();
-        let engine = RulesEngine::new(&graph);
-
-        let rule = engine
-            .add_rule("max rule", RuleSource::UserDefined)
-            .expect("add");
-
-        // Set score close to max.
-        graph.update_importance(&rule.id, 98.0).expect("set score");
-
-        let reinforced = engine.reinforce_rule(&rule.id).expect("reinforce");
-        assert!((reinforced.score - 100.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn decay_reduces_scores() {
-        let (graph, _) = make_engine();
-        let engine = RulesEngine::new(&graph);
-
-        engine
-            .add_rule("rule a", RuleSource::SystemDefault)
-            .expect("add");
-        engine
-            .add_rule("rule b", RuleSource::SystemDefault)
-            .expect("add");
-
-        engine.decay_scores(10.0).expect("decay");
-
-        let rules = engine.get_rules_sorted().expect("list");
-        for r in &rules {
-            assert!((r.score - 40.0).abs() < f64::EPSILON);
-        }
-    }
-
-    #[test]
-    fn decay_clamps_at_zero() {
-        let (graph, _) = make_engine();
-        let engine = RulesEngine::new(&graph);
-
-        let rule = engine
-            .add_rule("low", RuleSource::SystemDefault)
-            .expect("add");
-        graph.update_importance(&rule.id, 3.0).expect("set");
-
-        engine.decay_scores(10.0).expect("decay");
-
-        let rules = engine.get_rules_sorted().expect("list");
-        assert!((rules[0].score).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn sorting_by_score_descending() {
-        let (graph, _) = make_engine();
-        let engine = RulesEngine::new(&graph);
-
-        let r1 = engine
-            .add_rule("low priority", RuleSource::SystemDefault)
-            .expect("add");
-        let r2 = engine
-            .add_rule("high priority", RuleSource::UserDefined)
-            .expect("add");
-
-        graph.update_importance(&r1.id, 20.0).expect("set");
-        graph.update_importance(&r2.id, 80.0).expect("set");
-
-        let rules = engine.get_rules_sorted().expect("list");
-        assert_eq!(rules.len(), 2);
-        assert_eq!(rules[0].id, r2.id);
-        assert_eq!(rules[1].id, r1.id);
-    }
-
-    #[test]
-    fn trend_calculation() {
-        let rule_high = BehavioralRule {
-            id: Uuid::new_v4().to_string(),
-            text: "high".into(),
-            score: 75.0,
-            trend: Trend::Stable,
-            source: RuleSource::SystemDefault,
-            created_at: Utc::now(),
-            last_triggered: None,
-        };
-        assert_eq!(RulesEngine::calculate_trend(&rule_high), Trend::Rising);
-
-        let rule_low = BehavioralRule {
-            id: Uuid::new_v4().to_string(),
-            text: "low".into(),
-            score: 25.0,
-            trend: Trend::Stable,
-            source: RuleSource::SystemDefault,
-            created_at: Utc::now(),
-            last_triggered: None,
-        };
-        assert_eq!(RulesEngine::calculate_trend(&rule_low), Trend::Declining);
-
-        let rule_mid = BehavioralRule {
-            id: Uuid::new_v4().to_string(),
-            text: "mid".into(),
-            score: 50.0,
-            trend: Trend::Stable,
-            source: RuleSource::SystemDefault,
-            created_at: Utc::now(),
-            last_triggered: None,
-        };
-        assert_eq!(RulesEngine::calculate_trend(&rule_mid), Trend::Stable);
-    }
-
-    #[test]
-    fn format_for_prompt_output() {
-        let (graph, _) = make_engine();
-        let engine = RulesEngine::new(&graph);
-
-        let r1 = engine
-            .add_rule("Ask before modifying", RuleSource::UserDefined)
-            .expect("add");
-        let r2 = engine
-            .add_rule("Explain reasoning", RuleSource::SystemDefault)
-            .expect("add");
-
-        graph.update_importance(&r1.id, 85.0).expect("set");
-        graph.update_importance(&r2.id, 45.0).expect("set");
-
-        let output = engine.format_for_prompt().expect("format");
-        assert!(output.starts_with("<behavioral_rules>"));
-        assert!(output.ends_with("</behavioral_rules>"));
-        assert!(output.contains("[score: 85.0 up]"));
-        assert!(output.contains("[score: 45.0 stable]"));
-        // Higher score should come first.
-        let pos_85 = output.find("85.0").expect("contains 85");
-        let pos_45 = output.find("45.0").expect("contains 45");
-        assert!(pos_85 < pos_45);
-    }
-
-    #[test]
-    fn format_empty_returns_empty_string() {
-        let (graph, _) = make_engine();
-        let engine = RulesEngine::new(&graph);
-        let output = engine.format_for_prompt().expect("format");
-        assert!(output.is_empty());
-    }
-
-    #[test]
-    fn update_rule_text() {
-        let (graph, _) = make_engine();
-        let engine = RulesEngine::new(&graph);
-
-        let rule = engine
-            .add_rule("old text", RuleSource::UserDefined)
-            .expect("add");
-        engine.update_rule(&rule.id, "new text").expect("update");
-
-        let rules = engine.get_rules_sorted().expect("list");
-        assert_eq!(rules[0].text, "new text");
-    }
-}
+#[path = "rules/tests.rs"]
+mod tests;

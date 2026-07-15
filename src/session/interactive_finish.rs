@@ -106,7 +106,11 @@ pub(super) async fn finish(
         ) {
             Ok(true) => {
                 tracing::info!("garden: starting auto-consolidation");
-                match archon_memory::garden::consolidate(memory.as_ref(), &config.memory.garden) {
+                match archon_memory::garden::consolidate_with_run_id(
+                    memory.as_ref(),
+                    &config.memory.garden,
+                    session_id,
+                ) {
                     Ok(report) => {
                         tracing::info!(
                             decayed = report.importance_decayed,

@@ -10,6 +10,7 @@ use crate::types::{Memory, MemoryError, MemoryType, RelType, SearchFilter};
 pub(super) fn phase_importance_decay(
     graph: &dyn MemoryTrait,
     decay_per_day: f64,
+    run_id: &str,
 ) -> Result<usize, MemoryError> {
     let now = Utc::now();
     let mut count = 0;
@@ -21,9 +22,10 @@ pub(super) fn phase_importance_decay(
             if days < 1 {
                 continue;
             }
-            let new_imp = (mem.importance - (days as f64 * decay_per_day)).max(0.0);
-            if new_imp < mem.importance {
-                if let Err(e) = graph.update_importance(&mem.id, new_imp) {
+            let delta = -(days as f64 * decay_per_day).min(mem.importance);
+            if delta < 0.0 {
+                let provenance_id = format!("garden-decay:{run_id}:{}", mem.id);
+                if let Err(e) = graph.apply_importance_delta(&mem.id, delta, &provenance_id) {
                     warn!(id = %mem.id, error = %e, "failed to decay importance");
                 } else {
                     count += 1;

@@ -19,6 +19,16 @@ pub struct Memory {
     pub last_accessed: Option<DateTime<Utc>>,
 }
 
+/// Authoritative result of storing a memory at a caller-selected ID.
+///
+/// `created` comes from the same database transaction that reads or creates
+/// `memory`, rather than a preflight read.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoreMemoryOutcome {
+    pub memory: Memory,
+    pub created: bool,
+}
+
 /// Categorisation of a memory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MemoryType {

@@ -1,5 +1,5 @@
 use crate::client::MemoryClient;
-use crate::types::{Memory, MemoryError, MemoryType, RelType, SearchFilter};
+use crate::types::{Memory, MemoryError, MemoryType, RelType, SearchFilter, StoreMemoryOutcome};
 
 use super::MemoryTrait;
 
@@ -54,8 +54,67 @@ impl MemoryTrait for MemoryClient {
             .ok_or_else(|| MemoryError::Database("expected string id".to_string()))
     }
 
+    fn store_memory_with_id_outcome(
+        &self,
+        id: &str,
+        content: &str,
+        title: &str,
+        memory_type: MemoryType,
+        importance: f64,
+        tags: &[String],
+        source_type: &str,
+        project_path: &str,
+    ) -> Result<StoreMemoryOutcome, MemoryError> {
+        let result = block_on_async(self.call(
+            "store_memory_with_id_outcome",
+            serde_json::json!({
+                "id": id,
+                "content": content,
+                "title": title,
+                "memory_type": format!("{memory_type}"),
+                "importance": importance,
+                "tags": tags,
+                "source_type": source_type,
+                "project_path": project_path,
+            }),
+        ))?;
+        serde_json::from_value(result).map_err(MemoryError::from)
+    }
+
+    fn store_memory_with_id(
+        &self,
+        id: &str,
+        content: &str,
+        title: &str,
+        memory_type: MemoryType,
+        importance: f64,
+        tags: &[String],
+        source_type: &str,
+        project_path: &str,
+    ) -> Result<Memory, MemoryError> {
+        let result = block_on_async(self.call(
+            "store_memory_with_id",
+            serde_json::json!({
+                "id": id,
+                "content": content,
+                "title": title,
+                "memory_type": format!("{memory_type}"),
+                "importance": importance,
+                "tags": tags,
+                "source_type": source_type,
+                "project_path": project_path,
+            }),
+        ))?;
+        serde_json::from_value(result).map_err(MemoryError::from)
+    }
+
     fn get_memory(&self, id: &str) -> Result<Memory, MemoryError> {
         let result = block_on_async(self.call("get_memory", serde_json::json!({"id": id})))?;
+        serde_json::from_value(result).map_err(MemoryError::from)
+    }
+
+    fn inspect_memory(&self, id: &str) -> Result<Memory, MemoryError> {
+        let result = block_on_async(self.call("inspect_memory", serde_json::json!({"id": id})))?;
         serde_json::from_value(result).map_err(MemoryError::from)
     }
 
@@ -76,12 +135,38 @@ impl MemoryTrait for MemoryClient {
         Ok(())
     }
 
-    fn update_importance(&self, id: &str, importance: f64) -> Result<(), MemoryError> {
-        block_on_async(self.call(
-            "update_importance",
-            serde_json::json!({"id": id, "importance": importance}),
+    fn apply_importance_delta(
+        &self,
+        id: &str,
+        delta: f64,
+        provenance_id: &str,
+    ) -> Result<Memory, MemoryError> {
+        let result = block_on_async(self.call(
+            "apply_importance_delta",
+            serde_json::json!({
+                "id": id,
+                "delta": delta,
+                "provenance_id": provenance_id,
+            }),
         ))?;
-        Ok(())
+        serde_json::from_value(result).map_err(MemoryError::from)
+    }
+
+    fn has_importance_application(
+        &self,
+        memory_id: &str,
+        provenance_id: &str,
+    ) -> Result<bool, MemoryError> {
+        let result = block_on_async(self.call(
+            "has_importance_application",
+            serde_json::json!({
+                "memory_id": memory_id,
+                "provenance_id": provenance_id,
+            }),
+        ))?;
+        result
+            .as_bool()
+            .ok_or_else(|| MemoryError::Database("expected boolean application status".to_string()))
     }
 
     fn delete_memory(&self, id: &str) -> Result<(), MemoryError> {

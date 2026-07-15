@@ -9,17 +9,21 @@ pub archon_memory::access::MemoryAccess::Remote(archon_memory::client::MemoryCli
 impl archon_memory::access::MemoryAccess
 pub fn archon_memory::access::MemoryAccess::graph(&self) -> core::option::Option<&alloc::sync::Arc<archon_memory::graph::MemoryGraph>>
 impl archon_memory::access::MemoryTrait for archon_memory::access::MemoryAccess
+pub fn archon_memory::access::MemoryAccess::apply_importance_delta(&self, id: &str, delta: f64, provenance_id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::clear_all(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::create_relationship(&self, from_id: &str, to_id: &str, rel_type: archon_memory::types::RelType, context: core::option::Option<&str>, strength: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::delete_memory(&self, id: &str) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::get_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::get_related_memories(&self, id: &str, depth: u32) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::has_importance_application(&self, memory_id: &str, provenance_id: &str) -> core::result::Result<bool, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::inspect_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::list_recent(&self, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::memory_count(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::recall_memories(&self, query: &str, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::search_memories(&self, filter: &archon_memory::types::SearchFilter) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::store_memory(&self, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<alloc::string::String, archon_memory::types::MemoryError>
-pub fn archon_memory::access::MemoryAccess::update_importance(&self, id: &str, importance: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::store_memory_with_id(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::store_memory_with_id_outcome(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::update_memory(&self, id: &str, content: core::option::Option<&str>, tags: core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl !core::marker::Freeze for archon_memory::access::MemoryAccess
 impl core::marker::Send for archon_memory::access::MemoryAccess
@@ -29,58 +33,77 @@ impl core::marker::UnsafeUnpin for archon_memory::access::MemoryAccess
 impl !core::panic::unwind_safe::RefUnwindSafe for archon_memory::access::MemoryAccess
 impl !core::panic::unwind_safe::UnwindSafe for archon_memory::access::MemoryAccess
 pub trait archon_memory::access::MemoryTrait: core::marker::Send + core::marker::Sync
+pub fn archon_memory::access::MemoryTrait::apply_importance_delta(&self, id: &str, delta: f64, provenance_id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryTrait::clear_all(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryTrait::create_relationship(&self, from_id: &str, to_id: &str, rel_type: archon_memory::types::RelType, context: core::option::Option<&str>, strength: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryTrait::delete_memory(&self, id: &str) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryTrait::get_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryTrait::get_related_memories(&self, id: &str, depth: u32) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryTrait::has_importance_application(&self, memory_id: &str, provenance_id: &str) -> core::result::Result<bool, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryTrait::inspect_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryTrait::list_recent(&self, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryTrait::memory_count(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryTrait::recall_memories(&self, query: &str, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryTrait::search_memories(&self, filter: &archon_memory::types::SearchFilter) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryTrait::store_memory(&self, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<alloc::string::String, archon_memory::types::MemoryError>
-pub fn archon_memory::access::MemoryTrait::update_importance(&self, id: &str, importance: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryTrait::store_memory_with_id(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryTrait::store_memory_with_id_outcome(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryTrait::update_memory(&self, id: &str, content: core::option::Option<&str>, tags: core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl archon_memory::access::MemoryTrait for archon_memory::access::MemoryAccess
+pub fn archon_memory::access::MemoryAccess::apply_importance_delta(&self, id: &str, delta: f64, provenance_id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::clear_all(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::create_relationship(&self, from_id: &str, to_id: &str, rel_type: archon_memory::types::RelType, context: core::option::Option<&str>, strength: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::delete_memory(&self, id: &str) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::get_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::get_related_memories(&self, id: &str, depth: u32) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::has_importance_application(&self, memory_id: &str, provenance_id: &str) -> core::result::Result<bool, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::inspect_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::list_recent(&self, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::memory_count(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::recall_memories(&self, query: &str, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::search_memories(&self, filter: &archon_memory::types::SearchFilter) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::store_memory(&self, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<alloc::string::String, archon_memory::types::MemoryError>
-pub fn archon_memory::access::MemoryAccess::update_importance(&self, id: &str, importance: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::store_memory_with_id(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::store_memory_with_id_outcome(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::update_memory(&self, id: &str, content: core::option::Option<&str>, tags: core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl archon_memory::access::MemoryTrait for archon_memory::client::MemoryClient
+pub fn archon_memory::client::MemoryClient::apply_importance_delta(&self, id: &str, delta: f64, provenance_id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::clear_all(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::create_relationship(&self, from_id: &str, to_id: &str, rel_type: archon_memory::types::RelType, context: core::option::Option<&str>, strength: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::delete_memory(&self, id: &str) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::get_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::get_related_memories(&self, id: &str, depth: u32) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+pub fn archon_memory::client::MemoryClient::has_importance_application(&self, memory_id: &str, provenance_id: &str) -> core::result::Result<bool, archon_memory::types::MemoryError>
+pub fn archon_memory::client::MemoryClient::inspect_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::list_recent(&self, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::memory_count(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::recall_memories(&self, query: &str, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::search_memories(&self, filter: &archon_memory::types::SearchFilter) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::store_memory(&self, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<alloc::string::String, archon_memory::types::MemoryError>
-pub fn archon_memory::client::MemoryClient::update_importance(&self, id: &str, importance: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
+pub fn archon_memory::client::MemoryClient::store_memory_with_id(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
+pub fn archon_memory::client::MemoryClient::store_memory_with_id_outcome(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::update_memory(&self, id: &str, content: core::option::Option<&str>, tags: core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl archon_memory::access::MemoryTrait for archon_memory::graph::MemoryGraph
+pub fn archon_memory::graph::MemoryGraph::apply_importance_delta(&self, id: &str, delta: f64, provenance_id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::clear_all(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::create_relationship(&self, from_id: &str, to_id: &str, rel_type: archon_memory::types::RelType, context: core::option::Option<&str>, strength: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::delete_memory(&self, id: &str) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::get_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::get_related_memories(&self, id: &str, depth: u32) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::has_importance_application(&self, memory_id: &str, provenance_id: &str) -> core::result::Result<bool, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::inspect_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::list_recent(&self, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::memory_count(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::recall_memories(&self, query: &str, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::search_memories(&self, filter: &archon_memory::types::SearchFilter) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::store_memory(&self, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<alloc::string::String, archon_memory::types::MemoryError>
-pub fn archon_memory::graph::MemoryGraph::update_importance(&self, id: &str, importance: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::store_memory_with_id(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::store_memory_with_id_outcome(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::update_memory(&self, id: &str, content: core::option::Option<&str>, tags: core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
+pub fn archon_memory::access::default_memory_data_dir() -> std::path::PathBuf
 pub async fn archon_memory::access::open_memory(data_dir: &std::path::Path) -> core::result::Result<archon_memory::access::MemoryAccess, archon_memory::types::MemoryError>
+pub async fn archon_memory::access::open_memory_with_db_path(data_dir: &std::path::Path, db_path: &std::path::Path) -> core::result::Result<archon_memory::access::MemoryAccess, archon_memory::types::MemoryError>
+pub fn archon_memory::access::resolve_memory_paths(configured: core::option::Option<&str>) -> (std::path::PathBuf, std::path::PathBuf)
 pub mod archon_memory::client
 pub struct archon_memory::client::MemoryClient
 impl archon_memory::client::MemoryClient
@@ -88,17 +111,21 @@ pub async fn archon_memory::client::MemoryClient::call(&self, method: &str, para
 pub async fn archon_memory::client::MemoryClient::connect(addr: core::net::socket_addr::SocketAddr) -> core::result::Result<Self, archon_memory::types::MemoryError>
 pub async fn archon_memory::client::MemoryClient::ping(&self) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl archon_memory::access::MemoryTrait for archon_memory::client::MemoryClient
+pub fn archon_memory::client::MemoryClient::apply_importance_delta(&self, id: &str, delta: f64, provenance_id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::clear_all(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::create_relationship(&self, from_id: &str, to_id: &str, rel_type: archon_memory::types::RelType, context: core::option::Option<&str>, strength: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::delete_memory(&self, id: &str) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::get_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::get_related_memories(&self, id: &str, depth: u32) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+pub fn archon_memory::client::MemoryClient::has_importance_application(&self, memory_id: &str, provenance_id: &str) -> core::result::Result<bool, archon_memory::types::MemoryError>
+pub fn archon_memory::client::MemoryClient::inspect_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::list_recent(&self, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::memory_count(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::recall_memories(&self, query: &str, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::search_memories(&self, filter: &archon_memory::types::SearchFilter) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::store_memory(&self, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<alloc::string::String, archon_memory::types::MemoryError>
-pub fn archon_memory::client::MemoryClient::update_importance(&self, id: &str, importance: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
+pub fn archon_memory::client::MemoryClient::store_memory_with_id(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
+pub fn archon_memory::client::MemoryClient::store_memory_with_id_outcome(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::update_memory(&self, id: &str, content: core::option::Option<&str>, tags: core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl !core::marker::Freeze for archon_memory::client::MemoryClient
 impl core::marker::Send for archon_memory::client::MemoryClient
@@ -319,42 +346,56 @@ impl core::marker::UnsafeUnpin for archon_memory::garden::GardenReport
 impl core::panic::unwind_safe::RefUnwindSafe for archon_memory::garden::GardenReport
 impl core::panic::unwind_safe::UnwindSafe for archon_memory::garden::GardenReport
 pub fn archon_memory::garden::consolidate(graph: &dyn archon_memory::access::MemoryTrait, config: &archon_memory::garden::GardenConfig) -> core::result::Result<archon_memory::garden::GardenReport, archon_memory::types::MemoryError>
+pub fn archon_memory::garden::consolidate_with_run_id(graph: &dyn archon_memory::access::MemoryTrait, config: &archon_memory::garden::GardenConfig, run_id: &str) -> core::result::Result<archon_memory::garden::GardenReport, archon_memory::types::MemoryError>
 pub fn archon_memory::garden::format_garden_stats(graph: &dyn archon_memory::access::MemoryTrait, top_n: usize) -> core::result::Result<alloc::string::String, archon_memory::types::MemoryError>
 pub fn archon_memory::garden::generate_briefing(graph: &dyn archon_memory::access::MemoryTrait, limit: usize) -> core::result::Result<alloc::string::String, archon_memory::types::MemoryError>
 pub fn archon_memory::garden::should_auto_consolidate(graph: &dyn archon_memory::access::MemoryTrait, min_hours: u32) -> core::result::Result<bool, archon_memory::types::MemoryError>
 pub mod archon_memory::graph
 pub struct archon_memory::graph::MemoryGraph
 impl archon_memory::graph::MemoryGraph
-pub fn archon_memory::graph::MemoryGraph::clear_all(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
-pub fn archon_memory::graph::MemoryGraph::create_relationship(&self, from_id: &str, to_id: &str, rel_type: archon_memory::types::RelType, context: core::option::Option<&str>, strength: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
-pub fn archon_memory::graph::MemoryGraph::db(&self) -> &cozo_ce::DbInstance
+pub fn archon_memory::graph::MemoryGraph::apply_importance_delta(&self, id: &str, delta: f64, provenance_id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::delete_memory(&self, id: &str) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::get_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
-pub fn archon_memory::graph::MemoryGraph::get_related_memories(&self, id: &str, depth: u32) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
-pub fn archon_memory::graph::MemoryGraph::in_memory() -> core::result::Result<Self, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::has_importance_application(&self, memory_id: &str, provenance_id: &str) -> core::result::Result<bool, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::store_memory(&self, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<alloc::string::String, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::store_memory_with_id(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::store_memory_with_id_outcome(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::update_memory(&self, id: &str, content: core::option::Option<&str>, tags: core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
+impl archon_memory::graph::MemoryGraph
+pub fn archon_memory::graph::MemoryGraph::clear_all(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::list_recent(&self, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::memory_count(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::recall_memories(&self, query: &str, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::search_memories(&self, filter: &archon_memory::types::SearchFilter) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+impl archon_memory::graph::MemoryGraph
+pub fn archon_memory::graph::MemoryGraph::create_relationship(&self, from_id: &str, to_id: &str, rel_type: archon_memory::types::RelType, context: core::option::Option<&str>, strength: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
+impl archon_memory::graph::MemoryGraph
+pub fn archon_memory::graph::MemoryGraph::db(&self) -> &cozo_ce::DbInstance
+pub fn archon_memory::graph::MemoryGraph::in_memory() -> core::result::Result<Self, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::open<P: core::convert::AsRef<std::path::Path>>(path: P) -> core::result::Result<Self, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::open_default() -> core::result::Result<Self, archon_memory::types::MemoryError>
-pub fn archon_memory::graph::MemoryGraph::recall_memories(&self, query: &str, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
-pub fn archon_memory::graph::MemoryGraph::search_memories(&self, filter: &archon_memory::types::SearchFilter) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+impl archon_memory::graph::MemoryGraph
+pub fn archon_memory::graph::MemoryGraph::get_related_memories(&self, id: &str, depth: u32) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+impl archon_memory::graph::MemoryGraph
+pub fn archon_memory::graph::MemoryGraph::reindex_all_embeddings(&self) -> core::result::Result<(usize, usize, usize), archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::set_embedding_provider(&self, provider: alloc::sync::Arc<dyn archon_memory::embedding::EmbeddingProvider>) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::set_hybrid_alpha(&self, alpha: f32)
-pub fn archon_memory::graph::MemoryGraph::store_memory(&self, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<alloc::string::String, archon_memory::types::MemoryError>
-pub fn archon_memory::graph::MemoryGraph::update_importance(&self, id: &str, importance: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
-pub fn archon_memory::graph::MemoryGraph::update_memory(&self, id: &str, content: core::option::Option<&str>, tags: core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl archon_memory::access::MemoryTrait for archon_memory::graph::MemoryGraph
+pub fn archon_memory::graph::MemoryGraph::apply_importance_delta(&self, id: &str, delta: f64, provenance_id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::clear_all(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::create_relationship(&self, from_id: &str, to_id: &str, rel_type: archon_memory::types::RelType, context: core::option::Option<&str>, strength: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::delete_memory(&self, id: &str) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::get_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::get_related_memories(&self, id: &str, depth: u32) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::has_importance_application(&self, memory_id: &str, provenance_id: &str) -> core::result::Result<bool, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::inspect_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::list_recent(&self, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::memory_count(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::recall_memories(&self, query: &str, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::search_memories(&self, filter: &archon_memory::types::SearchFilter) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::store_memory(&self, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<alloc::string::String, archon_memory::types::MemoryError>
-pub fn archon_memory::graph::MemoryGraph::update_importance(&self, id: &str, importance: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::store_memory_with_id(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::store_memory_with_id_outcome(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::update_memory(&self, id: &str, content: core::option::Option<&str>, tags: core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl !core::marker::Freeze for archon_memory::graph::MemoryGraph
 impl core::marker::Send for archon_memory::graph::MemoryGraph
@@ -620,6 +661,43 @@ impl core::marker::Unpin for archon_memory::types::SearchFilter
 impl core::marker::UnsafeUnpin for archon_memory::types::SearchFilter
 impl core::panic::unwind_safe::RefUnwindSafe for archon_memory::types::SearchFilter
 impl core::panic::unwind_safe::UnwindSafe for archon_memory::types::SearchFilter
+pub struct archon_memory::types::StoreMemoryOutcome
+pub archon_memory::types::StoreMemoryOutcome::created: bool
+pub archon_memory::types::StoreMemoryOutcome::memory: archon_memory::types::Memory
+impl core::clone::Clone for archon_memory::types::StoreMemoryOutcome
+pub fn archon_memory::types::StoreMemoryOutcome::clone(&self) -> archon_memory::types::StoreMemoryOutcome
+impl core::fmt::Debug for archon_memory::types::StoreMemoryOutcome
+pub fn archon_memory::types::StoreMemoryOutcome::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for archon_memory::types::StoreMemoryOutcome
+pub fn archon_memory::types::StoreMemoryOutcome::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for archon_memory::types::StoreMemoryOutcome
+pub fn archon_memory::types::StoreMemoryOutcome::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for archon_memory::types::StoreMemoryOutcome
+impl core::marker::Send for archon_memory::types::StoreMemoryOutcome
+impl core::marker::Sync for archon_memory::types::StoreMemoryOutcome
+impl core::marker::Unpin for archon_memory::types::StoreMemoryOutcome
+impl core::marker::UnsafeUnpin for archon_memory::types::StoreMemoryOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for archon_memory::types::StoreMemoryOutcome
+impl core::panic::unwind_safe::UnwindSafe for archon_memory::types::StoreMemoryOutcome
+pub struct archon_memory::types::StoreMemoryRequest<'a>
+pub archon_memory::types::StoreMemoryRequest::content: &'a str
+pub archon_memory::types::StoreMemoryRequest::importance: f64
+pub archon_memory::types::StoreMemoryRequest::memory_type: archon_memory::types::MemoryType
+pub archon_memory::types::StoreMemoryRequest::project_path: &'a str
+pub archon_memory::types::StoreMemoryRequest::source_type: &'a str
+pub archon_memory::types::StoreMemoryRequest::tags: &'a [alloc::string::String]
+pub archon_memory::types::StoreMemoryRequest::title: &'a str
+impl<'a> core::clone::Clone for archon_memory::types::StoreMemoryRequest<'a>
+pub fn archon_memory::types::StoreMemoryRequest<'a>::clone(&self) -> archon_memory::types::StoreMemoryRequest<'a>
+impl<'a> core::fmt::Debug for archon_memory::types::StoreMemoryRequest<'a>
+pub fn archon_memory::types::StoreMemoryRequest<'a>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Freeze for archon_memory::types::StoreMemoryRequest<'a>
+impl<'a> core::marker::Send for archon_memory::types::StoreMemoryRequest<'a>
+impl<'a> core::marker::Sync for archon_memory::types::StoreMemoryRequest<'a>
+impl<'a> core::marker::Unpin for archon_memory::types::StoreMemoryRequest<'a>
+impl<'a> core::marker::UnsafeUnpin for archon_memory::types::StoreMemoryRequest<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for archon_memory::types::StoreMemoryRequest<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for archon_memory::types::StoreMemoryRequest<'a>
 pub mod archon_memory::vector_search
 pub fn archon_memory::vector_search::delete_embedding(db: &cozo_ce::DbInstance, memory_id: &str) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::vector_search::init_embedding_schema(db: &cozo_ce::DbInstance, dim: usize) -> core::result::Result<(), archon_memory::types::MemoryError>
@@ -633,17 +711,21 @@ pub archon_memory::MemoryAccess::Remote(archon_memory::client::MemoryClient)
 impl archon_memory::access::MemoryAccess
 pub fn archon_memory::access::MemoryAccess::graph(&self) -> core::option::Option<&alloc::sync::Arc<archon_memory::graph::MemoryGraph>>
 impl archon_memory::access::MemoryTrait for archon_memory::access::MemoryAccess
+pub fn archon_memory::access::MemoryAccess::apply_importance_delta(&self, id: &str, delta: f64, provenance_id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::clear_all(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::create_relationship(&self, from_id: &str, to_id: &str, rel_type: archon_memory::types::RelType, context: core::option::Option<&str>, strength: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::delete_memory(&self, id: &str) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::get_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::get_related_memories(&self, id: &str, depth: u32) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::has_importance_application(&self, memory_id: &str, provenance_id: &str) -> core::result::Result<bool, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::inspect_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::list_recent(&self, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::memory_count(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::recall_memories(&self, query: &str, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::search_memories(&self, filter: &archon_memory::types::SearchFilter) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::store_memory(&self, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<alloc::string::String, archon_memory::types::MemoryError>
-pub fn archon_memory::access::MemoryAccess::update_importance(&self, id: &str, importance: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::store_memory_with_id(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::store_memory_with_id_outcome(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::update_memory(&self, id: &str, content: core::option::Option<&str>, tags: core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl !core::marker::Freeze for archon_memory::access::MemoryAccess
 impl core::marker::Send for archon_memory::access::MemoryAccess
@@ -775,36 +857,49 @@ impl core::panic::unwind_safe::RefUnwindSafe for archon_memory::types::Memory
 impl core::panic::unwind_safe::UnwindSafe for archon_memory::types::Memory
 pub struct archon_memory::MemoryGraph
 impl archon_memory::graph::MemoryGraph
-pub fn archon_memory::graph::MemoryGraph::clear_all(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
-pub fn archon_memory::graph::MemoryGraph::create_relationship(&self, from_id: &str, to_id: &str, rel_type: archon_memory::types::RelType, context: core::option::Option<&str>, strength: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
-pub fn archon_memory::graph::MemoryGraph::db(&self) -> &cozo_ce::DbInstance
+pub fn archon_memory::graph::MemoryGraph::apply_importance_delta(&self, id: &str, delta: f64, provenance_id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::delete_memory(&self, id: &str) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::get_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
-pub fn archon_memory::graph::MemoryGraph::get_related_memories(&self, id: &str, depth: u32) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
-pub fn archon_memory::graph::MemoryGraph::in_memory() -> core::result::Result<Self, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::has_importance_application(&self, memory_id: &str, provenance_id: &str) -> core::result::Result<bool, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::store_memory(&self, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<alloc::string::String, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::store_memory_with_id(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::store_memory_with_id_outcome(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::update_memory(&self, id: &str, content: core::option::Option<&str>, tags: core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
+impl archon_memory::graph::MemoryGraph
+pub fn archon_memory::graph::MemoryGraph::clear_all(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::list_recent(&self, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::memory_count(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::recall_memories(&self, query: &str, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::search_memories(&self, filter: &archon_memory::types::SearchFilter) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+impl archon_memory::graph::MemoryGraph
+pub fn archon_memory::graph::MemoryGraph::create_relationship(&self, from_id: &str, to_id: &str, rel_type: archon_memory::types::RelType, context: core::option::Option<&str>, strength: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
+impl archon_memory::graph::MemoryGraph
+pub fn archon_memory::graph::MemoryGraph::db(&self) -> &cozo_ce::DbInstance
+pub fn archon_memory::graph::MemoryGraph::in_memory() -> core::result::Result<Self, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::open<P: core::convert::AsRef<std::path::Path>>(path: P) -> core::result::Result<Self, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::open_default() -> core::result::Result<Self, archon_memory::types::MemoryError>
-pub fn archon_memory::graph::MemoryGraph::recall_memories(&self, query: &str, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
-pub fn archon_memory::graph::MemoryGraph::search_memories(&self, filter: &archon_memory::types::SearchFilter) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+impl archon_memory::graph::MemoryGraph
+pub fn archon_memory::graph::MemoryGraph::get_related_memories(&self, id: &str, depth: u32) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+impl archon_memory::graph::MemoryGraph
+pub fn archon_memory::graph::MemoryGraph::reindex_all_embeddings(&self) -> core::result::Result<(usize, usize, usize), archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::set_embedding_provider(&self, provider: alloc::sync::Arc<dyn archon_memory::embedding::EmbeddingProvider>) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::set_hybrid_alpha(&self, alpha: f32)
-pub fn archon_memory::graph::MemoryGraph::store_memory(&self, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<alloc::string::String, archon_memory::types::MemoryError>
-pub fn archon_memory::graph::MemoryGraph::update_importance(&self, id: &str, importance: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
-pub fn archon_memory::graph::MemoryGraph::update_memory(&self, id: &str, content: core::option::Option<&str>, tags: core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl archon_memory::access::MemoryTrait for archon_memory::graph::MemoryGraph
+pub fn archon_memory::graph::MemoryGraph::apply_importance_delta(&self, id: &str, delta: f64, provenance_id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::clear_all(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::create_relationship(&self, from_id: &str, to_id: &str, rel_type: archon_memory::types::RelType, context: core::option::Option<&str>, strength: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::delete_memory(&self, id: &str) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::get_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::get_related_memories(&self, id: &str, depth: u32) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::has_importance_application(&self, memory_id: &str, provenance_id: &str) -> core::result::Result<bool, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::inspect_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::list_recent(&self, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::memory_count(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::recall_memories(&self, query: &str, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::search_memories(&self, filter: &archon_memory::types::SearchFilter) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::store_memory(&self, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<alloc::string::String, archon_memory::types::MemoryError>
-pub fn archon_memory::graph::MemoryGraph::update_importance(&self, id: &str, importance: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::store_memory_with_id(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::store_memory_with_id_outcome(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::update_memory(&self, id: &str, content: core::option::Option<&str>, tags: core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl !core::marker::Freeze for archon_memory::graph::MemoryGraph
 impl core::marker::Send for archon_memory::graph::MemoryGraph
@@ -873,56 +968,112 @@ impl core::marker::Unpin for archon_memory::types::SearchFilter
 impl core::marker::UnsafeUnpin for archon_memory::types::SearchFilter
 impl core::panic::unwind_safe::RefUnwindSafe for archon_memory::types::SearchFilter
 impl core::panic::unwind_safe::UnwindSafe for archon_memory::types::SearchFilter
+pub struct archon_memory::StoreMemoryOutcome
+pub archon_memory::StoreMemoryOutcome::created: bool
+pub archon_memory::StoreMemoryOutcome::memory: archon_memory::types::Memory
+impl core::clone::Clone for archon_memory::types::StoreMemoryOutcome
+pub fn archon_memory::types::StoreMemoryOutcome::clone(&self) -> archon_memory::types::StoreMemoryOutcome
+impl core::fmt::Debug for archon_memory::types::StoreMemoryOutcome
+pub fn archon_memory::types::StoreMemoryOutcome::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for archon_memory::types::StoreMemoryOutcome
+pub fn archon_memory::types::StoreMemoryOutcome::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for archon_memory::types::StoreMemoryOutcome
+pub fn archon_memory::types::StoreMemoryOutcome::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for archon_memory::types::StoreMemoryOutcome
+impl core::marker::Send for archon_memory::types::StoreMemoryOutcome
+impl core::marker::Sync for archon_memory::types::StoreMemoryOutcome
+impl core::marker::Unpin for archon_memory::types::StoreMemoryOutcome
+impl core::marker::UnsafeUnpin for archon_memory::types::StoreMemoryOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for archon_memory::types::StoreMemoryOutcome
+impl core::panic::unwind_safe::UnwindSafe for archon_memory::types::StoreMemoryOutcome
+pub struct archon_memory::StoreMemoryRequest<'a>
+pub archon_memory::StoreMemoryRequest::content: &'a str
+pub archon_memory::StoreMemoryRequest::importance: f64
+pub archon_memory::StoreMemoryRequest::memory_type: archon_memory::types::MemoryType
+pub archon_memory::StoreMemoryRequest::project_path: &'a str
+pub archon_memory::StoreMemoryRequest::source_type: &'a str
+pub archon_memory::StoreMemoryRequest::tags: &'a [alloc::string::String]
+pub archon_memory::StoreMemoryRequest::title: &'a str
+impl<'a> core::clone::Clone for archon_memory::types::StoreMemoryRequest<'a>
+pub fn archon_memory::types::StoreMemoryRequest<'a>::clone(&self) -> archon_memory::types::StoreMemoryRequest<'a>
+impl<'a> core::fmt::Debug for archon_memory::types::StoreMemoryRequest<'a>
+pub fn archon_memory::types::StoreMemoryRequest<'a>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Freeze for archon_memory::types::StoreMemoryRequest<'a>
+impl<'a> core::marker::Send for archon_memory::types::StoreMemoryRequest<'a>
+impl<'a> core::marker::Sync for archon_memory::types::StoreMemoryRequest<'a>
+impl<'a> core::marker::Unpin for archon_memory::types::StoreMemoryRequest<'a>
+impl<'a> core::marker::UnsafeUnpin for archon_memory::types::StoreMemoryRequest<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for archon_memory::types::StoreMemoryRequest<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for archon_memory::types::StoreMemoryRequest<'a>
 pub trait archon_memory::MemoryTrait: core::marker::Send + core::marker::Sync
+pub fn archon_memory::MemoryTrait::apply_importance_delta(&self, id: &str, delta: f64, provenance_id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::MemoryTrait::clear_all(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::MemoryTrait::create_relationship(&self, from_id: &str, to_id: &str, rel_type: archon_memory::types::RelType, context: core::option::Option<&str>, strength: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::MemoryTrait::delete_memory(&self, id: &str) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::MemoryTrait::get_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::MemoryTrait::get_related_memories(&self, id: &str, depth: u32) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+pub fn archon_memory::MemoryTrait::has_importance_application(&self, memory_id: &str, provenance_id: &str) -> core::result::Result<bool, archon_memory::types::MemoryError>
+pub fn archon_memory::MemoryTrait::inspect_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::MemoryTrait::list_recent(&self, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::MemoryTrait::memory_count(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::MemoryTrait::recall_memories(&self, query: &str, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::MemoryTrait::search_memories(&self, filter: &archon_memory::types::SearchFilter) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::MemoryTrait::store_memory(&self, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<alloc::string::String, archon_memory::types::MemoryError>
-pub fn archon_memory::MemoryTrait::update_importance(&self, id: &str, importance: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
+pub fn archon_memory::MemoryTrait::store_memory_with_id(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
+pub fn archon_memory::MemoryTrait::store_memory_with_id_outcome(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
 pub fn archon_memory::MemoryTrait::update_memory(&self, id: &str, content: core::option::Option<&str>, tags: core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl archon_memory::access::MemoryTrait for archon_memory::access::MemoryAccess
+pub fn archon_memory::access::MemoryAccess::apply_importance_delta(&self, id: &str, delta: f64, provenance_id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::clear_all(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::create_relationship(&self, from_id: &str, to_id: &str, rel_type: archon_memory::types::RelType, context: core::option::Option<&str>, strength: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::delete_memory(&self, id: &str) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::get_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::get_related_memories(&self, id: &str, depth: u32) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::has_importance_application(&self, memory_id: &str, provenance_id: &str) -> core::result::Result<bool, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::inspect_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::list_recent(&self, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::memory_count(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::recall_memories(&self, query: &str, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::search_memories(&self, filter: &archon_memory::types::SearchFilter) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::store_memory(&self, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<alloc::string::String, archon_memory::types::MemoryError>
-pub fn archon_memory::access::MemoryAccess::update_importance(&self, id: &str, importance: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::store_memory_with_id(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::store_memory_with_id_outcome(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::update_memory(&self, id: &str, content: core::option::Option<&str>, tags: core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl archon_memory::access::MemoryTrait for archon_memory::client::MemoryClient
+pub fn archon_memory::client::MemoryClient::apply_importance_delta(&self, id: &str, delta: f64, provenance_id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::clear_all(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::create_relationship(&self, from_id: &str, to_id: &str, rel_type: archon_memory::types::RelType, context: core::option::Option<&str>, strength: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::delete_memory(&self, id: &str) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::get_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::get_related_memories(&self, id: &str, depth: u32) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+pub fn archon_memory::client::MemoryClient::has_importance_application(&self, memory_id: &str, provenance_id: &str) -> core::result::Result<bool, archon_memory::types::MemoryError>
+pub fn archon_memory::client::MemoryClient::inspect_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::list_recent(&self, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::memory_count(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::recall_memories(&self, query: &str, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::search_memories(&self, filter: &archon_memory::types::SearchFilter) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::store_memory(&self, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<alloc::string::String, archon_memory::types::MemoryError>
-pub fn archon_memory::client::MemoryClient::update_importance(&self, id: &str, importance: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
+pub fn archon_memory::client::MemoryClient::store_memory_with_id(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
+pub fn archon_memory::client::MemoryClient::store_memory_with_id_outcome(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::update_memory(&self, id: &str, content: core::option::Option<&str>, tags: core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl archon_memory::access::MemoryTrait for archon_memory::graph::MemoryGraph
+pub fn archon_memory::graph::MemoryGraph::apply_importance_delta(&self, id: &str, delta: f64, provenance_id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::clear_all(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::create_relationship(&self, from_id: &str, to_id: &str, rel_type: archon_memory::types::RelType, context: core::option::Option<&str>, strength: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::delete_memory(&self, id: &str) -> core::result::Result<(), archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::get_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::get_related_memories(&self, id: &str, depth: u32) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::has_importance_application(&self, memory_id: &str, provenance_id: &str) -> core::result::Result<bool, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::inspect_memory(&self, id: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::list_recent(&self, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::memory_count(&self) -> core::result::Result<usize, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::recall_memories(&self, query: &str, limit: usize) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::search_memories(&self, filter: &archon_memory::types::SearchFilter) -> core::result::Result<alloc::vec::Vec<archon_memory::types::Memory>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::store_memory(&self, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<alloc::string::String, archon_memory::types::MemoryError>
-pub fn archon_memory::graph::MemoryGraph::update_importance(&self, id: &str, importance: f64) -> core::result::Result<(), archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::store_memory_with_id(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::store_memory_with_id_outcome(&self, id: &str, content: &str, title: &str, memory_type: archon_memory::types::MemoryType, importance: f64, tags: &[alloc::string::String], source_type: &str, project_path: &str) -> core::result::Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::update_memory(&self, id: &str, content: core::option::Option<&str>, tags: core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
+pub fn archon_memory::default_memory_data_dir() -> std::path::PathBuf
 pub async fn archon_memory::open_memory(data_dir: &std::path::Path) -> core::result::Result<archon_memory::access::MemoryAccess, archon_memory::types::MemoryError>
+pub async fn archon_memory::open_memory_with_db_path(data_dir: &std::path::Path, db_path: &std::path::Path) -> core::result::Result<archon_memory::access::MemoryAccess, archon_memory::types::MemoryError>
+pub fn archon_memory::resolve_memory_paths(configured: core::option::Option<&str>) -> (std::path::PathBuf, std::path::PathBuf)

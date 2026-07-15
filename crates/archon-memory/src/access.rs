@@ -13,11 +13,28 @@ use tracing::{debug, info, warn};
 use crate::client::MemoryClient;
 use crate::graph::MemoryGraph;
 use crate::server::MemoryServer;
-use crate::types::{Memory, MemoryError, MemoryType, RelType, SearchFilter};
+use crate::types::{Memory, MemoryError, MemoryType, RelType, SearchFilter, StoreMemoryOutcome};
 
 mod client_impl;
 #[cfg(test)]
 mod tests;
+mod trait_impl;
+
+// ── MemoryAccess enum ──────────────────────────────────────────
+
+/// Unified access to the memory graph, either direct or via TCP.
+///
+/// Both variants implement [`MemoryTrait`], so callers can use
+/// `MemoryAccess` polymorphically without caring which mode is active.
+pub enum MemoryAccess {
+    /// This process owns the CozoDB instance and TCP server.
+    Direct {
+        graph: Arc<MemoryGraph>,
+        _server_handle: tokio::task::JoinHandle<()>,
+    },
+    /// This process connects to an existing memory server.
+    Remote(MemoryClient),
+}
 
 // ── trait ──────────────────────────────────────────────────────
 
@@ -38,7 +55,36 @@ pub trait MemoryTrait: Send + Sync {
         project_path: &str,
     ) -> Result<String, MemoryError>;
 
+    #[allow(clippy::too_many_arguments)]
+    fn store_memory_with_id_outcome(
+        &self,
+        id: &str,
+        content: &str,
+        title: &str,
+        memory_type: MemoryType,
+        importance: f64,
+        tags: &[String],
+        source_type: &str,
+        project_path: &str,
+    ) -> Result<StoreMemoryOutcome, MemoryError>;
+
+    #[allow(clippy::too_many_arguments)]
+    fn store_memory_with_id(
+        &self,
+        id: &str,
+        content: &str,
+        title: &str,
+        memory_type: MemoryType,
+        importance: f64,
+        tags: &[String],
+        source_type: &str,
+        project_path: &str,
+    ) -> Result<Memory, MemoryError>;
+
     fn get_memory(&self, id: &str) -> Result<Memory, MemoryError>;
+
+    /// Retrieve a single memory without updating its access metadata.
+    fn inspect_memory(&self, id: &str) -> Result<Memory, MemoryError>;
 
     fn update_memory(
         &self,
@@ -47,7 +93,20 @@ pub trait MemoryTrait: Send + Sync {
         tags: Option<&[String]>,
     ) -> Result<(), MemoryError>;
 
-    fn update_importance(&self, id: &str, importance: f64) -> Result<(), MemoryError>;
+    fn apply_importance_delta(
+        &self,
+        id: &str,
+        delta: f64,
+        provenance_id: &str,
+    ) -> Result<Memory, MemoryError>;
+
+    /// Return whether this memory has durably recorded an importance delta
+    /// for the given immutable provenance identifier.
+    fn has_importance_application(
+        &self,
+        memory_id: &str,
+        provenance_id: &str,
+    ) -> Result<bool, MemoryError>;
 
     fn delete_memory(&self, id: &str) -> Result<(), MemoryError>;
 
@@ -71,242 +130,6 @@ pub trait MemoryTrait: Send + Sync {
     fn clear_all(&self) -> Result<usize, MemoryError>;
 
     fn get_related_memories(&self, id: &str, depth: u32) -> Result<Vec<Memory>, MemoryError>;
-}
-
-// ── MemoryGraph impl ───────────────────────────────────────────
-
-impl MemoryTrait for MemoryGraph {
-    fn store_memory(
-        &self,
-        content: &str,
-        title: &str,
-        memory_type: MemoryType,
-        importance: f64,
-        tags: &[String],
-        source_type: &str,
-        project_path: &str,
-    ) -> Result<String, MemoryError> {
-        MemoryGraph::store_memory(
-            self,
-            content,
-            title,
-            memory_type,
-            importance,
-            tags,
-            source_type,
-            project_path,
-        )
-    }
-
-    fn get_memory(&self, id: &str) -> Result<Memory, MemoryError> {
-        MemoryGraph::get_memory(self, id)
-    }
-
-    fn update_memory(
-        &self,
-        id: &str,
-        content: Option<&str>,
-        tags: Option<&[String]>,
-    ) -> Result<(), MemoryError> {
-        MemoryGraph::update_memory(self, id, content, tags)
-    }
-
-    fn update_importance(&self, id: &str, importance: f64) -> Result<(), MemoryError> {
-        MemoryGraph::update_importance(self, id, importance)
-    }
-
-    fn delete_memory(&self, id: &str) -> Result<(), MemoryError> {
-        MemoryGraph::delete_memory(self, id)
-    }
-
-    fn create_relationship(
-        &self,
-        from_id: &str,
-        to_id: &str,
-        rel_type: RelType,
-        context: Option<&str>,
-        strength: f64,
-    ) -> Result<(), MemoryError> {
-        MemoryGraph::create_relationship(self, from_id, to_id, rel_type, context, strength)
-    }
-
-    fn recall_memories(&self, query: &str, limit: usize) -> Result<Vec<Memory>, MemoryError> {
-        MemoryGraph::recall_memories(self, query, limit)
-    }
-
-    fn search_memories(&self, filter: &SearchFilter) -> Result<Vec<Memory>, MemoryError> {
-        MemoryGraph::search_memories(self, filter)
-    }
-
-    fn list_recent(&self, limit: usize) -> Result<Vec<Memory>, MemoryError> {
-        MemoryGraph::list_recent(self, limit)
-    }
-
-    fn memory_count(&self) -> Result<usize, MemoryError> {
-        MemoryGraph::memory_count(self)
-    }
-
-    fn clear_all(&self) -> Result<usize, MemoryError> {
-        MemoryGraph::clear_all(self)
-    }
-
-    fn get_related_memories(&self, id: &str, depth: u32) -> Result<Vec<Memory>, MemoryError> {
-        MemoryGraph::get_related_memories(self, id, depth)
-    }
-}
-
-// ── MemoryAccess enum ──────────────────────────────────────────
-
-/// Unified access to the memory graph, either direct or via TCP.
-///
-/// Both variants implement [`MemoryTrait`], so callers can use
-/// `MemoryAccess` polymorphically without caring which mode is active.
-pub enum MemoryAccess {
-    /// This process owns the CozoDB instance and TCP server.
-    Direct {
-        graph: Arc<MemoryGraph>,
-        _server_handle: tokio::task::JoinHandle<()>,
-    },
-    /// This process connects to an existing memory server.
-    Remote(MemoryClient),
-}
-
-impl MemoryAccess {
-    /// Return the underlying [`MemoryGraph`] if this is a `Direct` access,
-    /// or `None` for a `Remote` client.
-    pub fn graph(&self) -> Option<&Arc<MemoryGraph>> {
-        match self {
-            Self::Direct { graph, .. } => Some(graph),
-            Self::Remote(_) => None,
-        }
-    }
-}
-
-impl MemoryTrait for MemoryAccess {
-    fn store_memory(
-        &self,
-        content: &str,
-        title: &str,
-        memory_type: MemoryType,
-        importance: f64,
-        tags: &[String],
-        source_type: &str,
-        project_path: &str,
-    ) -> Result<String, MemoryError> {
-        match self {
-            Self::Direct { graph, .. } => graph.store_memory(
-                content,
-                title,
-                memory_type,
-                importance,
-                tags,
-                source_type,
-                project_path,
-            ),
-            Self::Remote(client) => client.store_memory(
-                content,
-                title,
-                memory_type,
-                importance,
-                tags,
-                source_type,
-                project_path,
-            ),
-        }
-    }
-
-    fn get_memory(&self, id: &str) -> Result<Memory, MemoryError> {
-        match self {
-            Self::Direct { graph, .. } => graph.get_memory(id),
-            Self::Remote(client) => client.get_memory(id),
-        }
-    }
-
-    fn update_memory(
-        &self,
-        id: &str,
-        content: Option<&str>,
-        tags: Option<&[String]>,
-    ) -> Result<(), MemoryError> {
-        match self {
-            Self::Direct { graph, .. } => graph.update_memory(id, content, tags),
-            Self::Remote(client) => client.update_memory(id, content, tags),
-        }
-    }
-
-    fn update_importance(&self, id: &str, importance: f64) -> Result<(), MemoryError> {
-        match self {
-            Self::Direct { graph, .. } => graph.update_importance(id, importance),
-            Self::Remote(client) => client.update_importance(id, importance),
-        }
-    }
-
-    fn delete_memory(&self, id: &str) -> Result<(), MemoryError> {
-        match self {
-            Self::Direct { graph, .. } => graph.delete_memory(id),
-            Self::Remote(client) => client.delete_memory(id),
-        }
-    }
-
-    fn create_relationship(
-        &self,
-        from_id: &str,
-        to_id: &str,
-        rel_type: RelType,
-        context: Option<&str>,
-        strength: f64,
-    ) -> Result<(), MemoryError> {
-        match self {
-            Self::Direct { graph, .. } => {
-                graph.create_relationship(from_id, to_id, rel_type, context, strength)
-            }
-            Self::Remote(client) => {
-                client.create_relationship(from_id, to_id, rel_type, context, strength)
-            }
-        }
-    }
-
-    fn recall_memories(&self, query: &str, limit: usize) -> Result<Vec<Memory>, MemoryError> {
-        match self {
-            Self::Direct { graph, .. } => graph.recall_memories(query, limit),
-            Self::Remote(client) => client.recall_memories(query, limit),
-        }
-    }
-
-    fn search_memories(&self, filter: &SearchFilter) -> Result<Vec<Memory>, MemoryError> {
-        match self {
-            Self::Direct { graph, .. } => graph.search_memories(filter),
-            Self::Remote(client) => client.search_memories(filter),
-        }
-    }
-
-    fn list_recent(&self, limit: usize) -> Result<Vec<Memory>, MemoryError> {
-        match self {
-            Self::Direct { graph, .. } => graph.list_recent(limit),
-            Self::Remote(client) => client.list_recent(limit),
-        }
-    }
-
-    fn memory_count(&self) -> Result<usize, MemoryError> {
-        match self {
-            Self::Direct { graph, .. } => graph.memory_count(),
-            Self::Remote(client) => client.memory_count(),
-        }
-    }
-
-    fn clear_all(&self) -> Result<usize, MemoryError> {
-        match self {
-            Self::Direct { graph, .. } => graph.clear_all(),
-            Self::Remote(client) => client.clear_all(),
-        }
-    }
-
-    fn get_related_memories(&self, id: &str, depth: u32) -> Result<Vec<Memory>, MemoryError> {
-        match self {
-            Self::Direct { graph, .. } => graph.get_related_memories(id, depth),
-            Self::Remote(client) => client.get_related_memories(id, depth),
-        }
-    }
 }
 
 // ── factory ────────────────────────────────────────────────────

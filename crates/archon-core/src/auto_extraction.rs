@@ -190,7 +190,41 @@ mod tests {
         ) -> Result<String, archon_memory::types::MemoryError> {
             Ok("test-id".into())
         }
+        fn store_memory_with_id_outcome(
+            &self,
+            _id: &str,
+            _content: &str,
+            _title: &str,
+            _memory_type: archon_memory::types::MemoryType,
+            _importance: f64,
+            _tags: &[String],
+            _source_type: &str,
+            _project_path: &str,
+        ) -> Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
+        {
+            Err(archon_memory::types::MemoryError::NotFound("test".into()))
+        }
+
+        fn store_memory_with_id(
+            &self,
+            _id: &str,
+            _content: &str,
+            _title: &str,
+            _memory_type: archon_memory::types::MemoryType,
+            _importance: f64,
+            _tags: &[String],
+            _source_type: &str,
+            _project_path: &str,
+        ) -> Result<archon_memory::types::Memory, archon_memory::types::MemoryError> {
+            Err(archon_memory::types::MemoryError::NotFound("test".into()))
+        }
         fn get_memory(
+            &self,
+            _id: &str,
+        ) -> Result<archon_memory::types::Memory, archon_memory::types::MemoryError> {
+            Err(archon_memory::types::MemoryError::NotFound("test".into()))
+        }
+        fn inspect_memory(
             &self,
             _id: &str,
         ) -> Result<archon_memory::types::Memory, archon_memory::types::MemoryError> {
@@ -204,13 +238,22 @@ mod tests {
         ) -> Result<(), archon_memory::types::MemoryError> {
             Ok(())
         }
-        fn update_importance(
+        fn apply_importance_delta(
             &self,
             _id: &str,
-            _importance: f64,
-        ) -> Result<(), archon_memory::types::MemoryError> {
-            Ok(())
+            _delta: f64,
+            _provenance_id: &str,
+        ) -> Result<archon_memory::types::Memory, archon_memory::types::MemoryError> {
+            Err(archon_memory::types::MemoryError::NotFound("test".into()))
         }
+        fn has_importance_application(
+            &self,
+            _memory_id: &str,
+            _provenance_id: &str,
+        ) -> Result<bool, archon_memory::types::MemoryError> {
+            unimplemented!("test double: has_importance_application not used")
+        }
+
         fn delete_memory(&self, _id: &str) -> Result<(), archon_memory::types::MemoryError> {
             Ok(())
         }

@@ -150,9 +150,63 @@ fn dispatch(graph: &MemoryGraph, method: &str, params: &Value) -> Result<Value, 
             Ok(Value::String(id))
         }
 
+        "store_memory_with_id_outcome" => {
+            let id = str_param(params, "id")?;
+            let content = str_param(params, "content")?;
+            let title = str_param(params, "title")?;
+            let memory_type = memory_type_param(params, "memory_type")?;
+            let importance = f64_param(params, "importance")?;
+            let tags = string_array_param(params, "tags")?;
+            let source_type = str_param(params, "source_type")?;
+            let project_path = str_param(params, "project_path")?;
+            let outcome = graph
+                .store_memory_with_id_outcome(
+                    &id,
+                    &content,
+                    &title,
+                    memory_type,
+                    importance,
+                    &tags,
+                    &source_type,
+                    &project_path,
+                )
+                .map_err(|error| error.to_string())?;
+            serde_json::to_value(outcome).map_err(|error| error.to_string())
+        }
+
+        "store_memory_with_id" => {
+            let id = str_param(params, "id")?;
+            let content = str_param(params, "content")?;
+            let title = str_param(params, "title")?;
+            let memory_type = memory_type_param(params, "memory_type")?;
+            let importance = f64_param(params, "importance")?;
+            let tags = string_array_param(params, "tags")?;
+            let source_type = str_param(params, "source_type")?;
+            let project_path = str_param(params, "project_path")?;
+            let memory = graph
+                .store_memory_with_id(
+                    &id,
+                    &content,
+                    &title,
+                    memory_type,
+                    importance,
+                    &tags,
+                    &source_type,
+                    &project_path,
+                )
+                .map_err(|error| error.to_string())?;
+            serde_json::to_value(memory).map_err(|error| error.to_string())
+        }
+
         "get_memory" => {
             let id = str_param(params, "id")?;
             let mem = graph.get_memory(&id).map_err(|e| e.to_string())?;
+            serde_json::to_value(mem).map_err(|e| e.to_string())
+        }
+
+        "inspect_memory" => {
+            let id = str_param(params, "id")?;
+            let mem = graph.read_memory(&id).map_err(|e| e.to_string())?;
             serde_json::to_value(mem).map_err(|e| e.to_string())
         }
 
@@ -166,13 +220,23 @@ fn dispatch(graph: &MemoryGraph, method: &str, params: &Value) -> Result<Value, 
             Ok(Value::Null)
         }
 
-        "update_importance" => {
+        "apply_importance_delta" => {
             let id = str_param(params, "id")?;
-            let importance = f64_param(params, "importance")?;
-            graph
-                .update_importance(&id, importance)
-                .map_err(|e| e.to_string())?;
-            Ok(Value::Null)
+            let delta = f64_param(params, "delta")?;
+            let provenance_id = str_param(params, "provenance_id")?;
+            let memory = graph
+                .apply_importance_delta(&id, delta, &provenance_id)
+                .map_err(|error| error.to_string())?;
+            serde_json::to_value(memory).map_err(|error| error.to_string())
+        }
+
+        "has_importance_application" => {
+            let memory_id = str_param(params, "memory_id")?;
+            let provenance_id = str_param(params, "provenance_id")?;
+            let applied = graph
+                .has_importance_application(&memory_id, &provenance_id)
+                .map_err(|error| error.to_string())?;
+            Ok(Value::Bool(applied))
         }
 
         "delete_memory" => {
