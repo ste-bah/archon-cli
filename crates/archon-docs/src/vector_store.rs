@@ -11,10 +11,15 @@ mod config;
 mod generation;
 mod hnsw_ids;
 mod persisted_hnsw;
+mod search;
+#[cfg(test)]
+mod test_hooks;
 
 pub use config::default_store_dir;
 
-use hnsw_ids::{chunk_id_for_hnsw_id, chunk_ids_by_hnsw_id};
+use hnsw_ids::chunk_id_for_hnsw_id;
+#[cfg(test)]
+use hnsw_ids::chunk_ids_by_hnsw_id;
 #[cfg(test)]
 use hnsw_ids::{hit_resolution_probes, reset_hit_resolution_probes};
 
@@ -68,7 +73,7 @@ pub struct HnswSearchHit {
 pub struct DocVectorStore {
     db: DB,
     root: PathBuf,
-    generation_lock: Mutex<()>,
+    snapshot_fence: Mutex<()>,
 }
 
 impl DocVectorStore {
@@ -89,7 +94,7 @@ impl DocVectorStore {
         Ok(Self {
             db,
             root,
-            generation_lock: Mutex::new(()),
+            snapshot_fence: Mutex::new(()),
         })
     }
 
@@ -100,8 +105,8 @@ impl DocVectorStore {
         if rows.is_empty() {
             return Ok(0);
         }
-        let _generation_lock = self
-            .generation_lock
+        let _snapshot_fence = self
+            .snapshot_fence
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         let mut batch = WriteBatch::default();
@@ -177,8 +182,8 @@ impl DocVectorStore {
         limit: Option<usize>,
     ) -> Result<HnswManifest> {
         validate_provider(provider)?;
-        let _generation_lock = self
-            .generation_lock
+        let _snapshot_fence = self
+            .snapshot_fence
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         let records = self.iter_records(Some(provider), limit)?;
@@ -208,65 +213,6 @@ impl DocVectorStore {
         Ok(manifest)
     }
 
-    pub fn search_persisted_first(
-        &self,
-        provider: &str,
-        query: &[f32],
-        top_k: usize,
-        ef: usize,
-        limit: Option<usize>,
-    ) -> Result<Vec<HnswSearchHit>> {
-        validate_provider(provider)?;
-        let raw_count = self.count_vectors(Some(provider))?;
-        let provider_generation = generation::current(&self.db, provider)?;
-        let manifest = self.latest_hnsw_manifest(provider)?;
-        if let Some(manifest) = manifest.as_ref()
-            && manifest.dimension == query.len()
-            && manifest.vector_count == raw_count
-            && manifest.provider_generation == Some(provider_generation)
-        {
-            return persisted_hnsw::search(
-                self.hnsw_dir(provider),
-                manifest.clone(),
-                self.chunk_ids_by_hnsw_id(provider)?,
-                query.to_vec(),
-                top_k,
-                ef,
-            );
-        }
-        self.search_in_memory(provider, query, top_k, ef, limit)
-    }
-
-    pub fn search_in_memory(
-        &self,
-        provider: &str,
-        query: &[f32],
-        top_k: usize,
-        ef: usize,
-        limit: Option<usize>,
-    ) -> Result<Vec<HnswSearchHit>> {
-        validate_provider(provider)?;
-        let records = self.iter_records(Some(provider), limit)?;
-        if records.is_empty() || top_k == 0 {
-            return Ok(Vec::new());
-        }
-        let chunk_ids = chunk_ids_by_hnsw_id(&records);
-        let mut hnsw = build_hnsw_index(&records, query.len())?;
-        hnsw.set_searching_mode(true);
-        let hits = hnsw.search(query, top_k, ef.max(top_k));
-        Ok(hits
-            .into_iter()
-            .filter_map(|hit| {
-                chunk_id_for_hnsw_id(&chunk_ids, hit.get_origin_id()).map(|chunk_id| {
-                    HnswSearchHit {
-                        chunk_id: chunk_id.clone(),
-                        distance: hit.get_distance(),
-                    }
-                })
-            })
-            .collect())
-    }
-
     pub fn latest_hnsw_manifest(&self, provider: &str) -> Result<Option<HnswManifest>> {
         validate_provider(provider)?;
         let path = self.hnsw_manifest_path(provider);
@@ -285,7 +231,7 @@ impl DocVectorStore {
         Ok(Some(manifest))
     }
 
-    fn chunk_ids_by_hnsw_id(&self, provider: &str) -> Result<HashMap<usize, String>> {
+    pub(crate) fn chunk_ids_by_hnsw_id(&self, provider: &str) -> Result<HashMap<usize, String>> {
         let prefix = format!("{ID_PREFIX}/{provider}/");
         let mut chunk_ids = HashMap::new();
         for item in self.db.prefix_iterator(prefix.as_bytes()) {

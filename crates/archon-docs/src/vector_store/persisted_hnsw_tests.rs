@@ -162,6 +162,99 @@ fn provider_or_dimension_mismatch_uses_in_memory_fallback() {
 }
 
 #[test]
+fn missing_identifier_for_persisted_hit_returns_error() {
+    let _lock = persisted_hnsw_test_lock();
+    let temp = tempfile::tempdir().unwrap();
+    let store = DocVectorStore::open(temp.path()).unwrap();
+    write_test_vectors(&store, "test", &[("chunk-a", &[1.0, 0.0])]);
+    store.build_hnsw("test", 2, None).unwrap();
+    store.db.delete(id_key("test", "chunk-a")).unwrap();
+
+    let error = store
+        .search_persisted_first("test", &[1.0, 0.0], 1, 16, None)
+        .unwrap_err();
+
+    assert!(error.to_string().contains("missing chunk ID"));
+}
+
+#[test]
+fn stale_manifest_clears_persisted_snapshot_cache() {
+    let _lock = persisted_hnsw_test_lock();
+    persisted_hnsw::clear();
+    let temp = tempfile::tempdir().unwrap();
+    let store = DocVectorStore::open(temp.path()).unwrap();
+    write_test_vectors(&store, "test", &[("chunk-a", &[1.0, 0.0])]);
+    store.build_hnsw("test", 2, None).unwrap();
+    store
+        .search_persisted_first("test", &[1.0, 0.0], 1, 16, None)
+        .unwrap();
+    assert!(persisted_hnsw::cache_present());
+
+    write_test_vectors(&store, "test", &[("chunk-b", &[0.0, 1.0])]);
+    store
+        .search_persisted_first("test", &[0.0, 1.0], 1, 16, None)
+        .unwrap();
+
+    assert!(!persisted_hnsw::cache_present());
+    assert_eq!(persisted_hnsw::worker_count(), 0);
+}
+
+#[test]
+fn persisted_search_holds_snapshot_fence_until_result_is_ready() {
+    let _lock = persisted_hnsw_test_lock();
+    let temp = tempfile::tempdir().unwrap();
+    let store = std::sync::Arc::new(DocVectorStore::open(temp.path()).unwrap());
+    write_test_vectors(&store, "test", &[("chunk-a", &[1.0, 0.0])]);
+    store.build_hnsw("test", 2, None).unwrap();
+    let (fence_acquired, release_fence) = test_hooks::install_snapshot_fence_hook();
+
+    let search_store = store.clone();
+    let search = std::thread::spawn(move || {
+        search_store
+            .search_persisted_first("test", &[1.0, 0.0], 1, 16, None)
+            .unwrap()
+    });
+    fence_acquired.recv().unwrap();
+    assert!(store.snapshot_fence.try_lock().is_err());
+    let writer_store = store.clone();
+    let writer = std::thread::spawn(move || {
+        write_test_vectors(&writer_store, "test", &[("chunk-a", &[0.0, 1.0])]);
+    });
+    release_fence.send(()).unwrap();
+
+    assert_eq!(search.join().unwrap()[0].chunk_id, "chunk-a");
+    writer.join().unwrap();
+    test_hooks::clear_snapshot_fence_hook();
+}
+
+#[test]
+fn persisted_snapshot_cache_is_shared_across_search_threads() {
+    let _lock = persisted_hnsw_test_lock();
+    let temp = tempfile::tempdir().unwrap();
+    let store = std::sync::Arc::new(DocVectorStore::open(temp.path()).unwrap());
+    write_test_vectors(&store, "test", &[("chunk-a", &[1.0, 0.0])]);
+    store.build_hnsw("test", 2, None).unwrap();
+    let loads_before = persisted_hnsw_load_count();
+
+    let first_store = store.clone();
+    let first = std::thread::spawn(move || {
+        first_store
+            .search_persisted_first("test", &[1.0, 0.0], 1, 16, None)
+            .unwrap()
+    });
+    let second_store = store.clone();
+    let second = std::thread::spawn(move || {
+        second_store
+            .search_persisted_first("test", &[1.0, 0.0], 1, 16, None)
+            .unwrap()
+    });
+
+    assert_eq!(first.join().unwrap()[0].chunk_id, "chunk-a");
+    assert_eq!(second.join().unwrap()[0].chunk_id, "chunk-a");
+    assert_eq!(persisted_hnsw_load_count(), loads_before + 1);
+}
+
+#[test]
 fn repeated_persisted_search_reuses_loaded_snapshot() {
     let _lock = persisted_hnsw_test_lock();
     let temp = tempfile::tempdir().unwrap();
