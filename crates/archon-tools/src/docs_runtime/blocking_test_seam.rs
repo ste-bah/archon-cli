@@ -1,58 +1,69 @@
 use std::sync::{Mutex, OnceLock, mpsc};
 
-use super::docs_runtime_tests::BlockingHookControl;
+use super::docs_runtime_tests::WaitHookControl;
 
-enum BlockingHook {
+enum WaitHook {
     Block {
         operation: String,
         entered: mpsc::Sender<()>,
         release: mpsc::Receiver<()>,
     },
-    Panic {
-        operation: String,
-    },
 }
 
-static HOOK: OnceLock<Mutex<Option<BlockingHook>>> = OnceLock::new();
+static WAIT_HOOK: OnceLock<Mutex<Option<WaitHook>>> = OnceLock::new();
+static PANIC_HOOK: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
-pub(super) fn install_blocking_hook(operation: &str) -> BlockingHookControl {
+pub(super) fn install_docs_db_wait_hook(operation: &str) -> WaitHookControl {
     let (entered_tx, entered) = mpsc::channel();
     let (release, release_rx) = mpsc::channel();
-    *hook().lock().unwrap_or_else(|error| error.into_inner()) = Some(BlockingHook::Block {
+    *wait_hook()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = Some(WaitHook::Block {
         operation: operation.into(),
         entered: entered_tx,
         release: release_rx,
     });
-    BlockingHookControl { entered, release }
+    WaitHookControl { entered, release }
 }
 
 pub(super) fn install_blocking_panic(operation: &str) {
-    *hook().lock().unwrap_or_else(|error| error.into_inner()) = Some(BlockingHook::Panic {
-        operation: operation.into(),
-    });
+    *panic_hook()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = Some(operation.into());
 }
 
-pub(super) fn run_hook(operation: &str) {
-    let mut hook = hook().lock().unwrap_or_else(|error| error.into_inner());
+pub(super) fn run_wait_hook(operation: &str) {
+    let mut hook = wait_hook()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     match hook.take() {
-        Some(BlockingHook::Block {
+        Some(WaitHook::Block {
             operation: expected,
             entered,
             release,
         }) if expected == operation => {
-            entered.send(()).unwrap();
-            release.recv().unwrap();
-        }
-        Some(BlockingHook::Panic {
-            operation: expected,
-        }) if expected == operation => {
-            panic!("test blocking task panic");
+            let _ = entered.send(());
+            let _ = release.recv_timeout(std::time::Duration::from_secs(1));
         }
         Some(other) => *hook = Some(other),
         None => {}
     }
 }
 
-fn hook() -> &'static Mutex<Option<BlockingHook>> {
-    HOOK.get_or_init(|| Mutex::new(None))
+pub(super) fn run_panic_hook(operation: &str) {
+    let mut hook = panic_hook()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if hook.as_deref() == Some(operation) {
+        hook.take();
+        panic!("test blocking task panic");
+    }
+}
+
+fn wait_hook() -> &'static Mutex<Option<WaitHook>> {
+    WAIT_HOOK.get_or_init(|| Mutex::new(None))
+}
+
+fn panic_hook() -> &'static Mutex<Option<String>> {
+    PANIC_HOOK.get_or_init(|| Mutex::new(None))
 }

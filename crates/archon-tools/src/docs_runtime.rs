@@ -18,7 +18,7 @@ pub(crate) async fn run_search(args: Vec<String>, ctx: &ToolContext) -> ToolResu
     run_blocking("docs search", move || {
         let cwd = effective_working_dir(working_dir);
         let db_path = docs_db_path(&cwd);
-        let db = match open_docs_db(&db_path) {
+        let db = match open_docs_db("docs search", &db_path) {
             Ok(db) => db,
             Err(error) => return ToolResult::error(error),
         };
@@ -40,7 +40,7 @@ pub(crate) async fn run_list(limit: usize, ctx: &ToolContext) -> ToolResult {
     run_blocking("docs list", move || {
         let cwd = effective_working_dir(working_dir);
         let db_path = docs_db_path(&cwd);
-        let db = match open_docs_db(&db_path) {
+        let db = match open_docs_db("docs list", &db_path) {
             Ok(db) => db,
             Err(error) => return ToolResult::error(error),
         };
@@ -57,7 +57,7 @@ pub(crate) async fn run_get(document_id: String, ctx: &ToolContext) -> ToolResul
     run_blocking("docs get", move || {
         let cwd = effective_working_dir(working_dir);
         let db_path = docs_db_path(&cwd);
-        let db = match open_docs_db(&db_path) {
+        let db = match open_docs_db("docs get", &db_path) {
             Ok(db) => db,
             Err(error) => return ToolResult::error(error),
         };
@@ -79,7 +79,7 @@ pub(crate) async fn run_answer(args: Vec<String>, ctx: &ToolContext) -> ToolResu
     run_blocking("docs answer", move || {
         let cwd = effective_working_dir(working_dir);
         let db_path = docs_db_path(&cwd);
-        let db = match open_docs_db(&db_path) {
+        let db = match open_docs_db("docs answer", &db_path) {
             Ok(db) => db,
             Err(error) => return ToolResult::error(error),
         };
@@ -138,7 +138,8 @@ fn expect_arg(iter: &mut impl Iterator<Item = String>, expected: &str) -> Result
     }
 }
 
-fn open_docs_db(db_path: &Path) -> Result<DbInstance, String> {
+fn open_docs_db(operation: &str, db_path: &Path) -> Result<DbInstance, String> {
+    docs_db_wait_hook(operation);
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("create docs DB dir {}: {error}", parent.display()))?;
@@ -157,7 +158,7 @@ async fn run_blocking(
     operation_fn: impl FnOnce() -> ToolResult + Send + 'static,
 ) -> ToolResult {
     match tokio::task::spawn_blocking(move || {
-        run_blocking_hook(operation);
+        run_blocking_panic_hook(operation);
         operation_fn()
     })
     .await
@@ -364,12 +365,20 @@ fn format_search_error(error: archon_docs::errors::DocsError) -> String {
 }
 
 #[cfg(test)]
-fn run_blocking_hook(operation: &str) {
-    blocking_test_seam::run_hook(operation);
+fn docs_db_wait_hook(operation: &str) {
+    blocking_test_seam::run_wait_hook(operation);
 }
 
 #[cfg(not(test))]
-fn run_blocking_hook(_operation: &str) {}
+fn docs_db_wait_hook(_operation: &str) {}
+
+#[cfg(test)]
+fn run_blocking_panic_hook(operation: &str) {
+    blocking_test_seam::run_panic_hook(operation);
+}
+
+#[cfg(not(test))]
+fn run_blocking_panic_hook(_operation: &str) {}
 
 #[cfg(test)]
 mod blocking_test_seam;
