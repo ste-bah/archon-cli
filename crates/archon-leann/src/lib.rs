@@ -1,6 +1,7 @@
 //! Archon LeANN — native semantic code search and indexing.
 
 pub mod chunker;
+mod index_storage;
 pub mod indexer;
 pub mod language;
 pub mod metadata;
