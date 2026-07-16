@@ -518,8 +518,59 @@ pub(super) fn record_repair_attempt(
         "artifact_paths_checked": raw_strings(result, &["artifact_paths", "artifactPaths", "artifacts"]),
         "redacted_env_keys_checked": raw_strings(result, &["env_keys_checked", "envKeysChecked", "redacted_env_keys_checked", "redactedEnvKeysChecked"]),
         "evidence_refs": raw_strings(result, &["evidence_refs", "evidenceRefs", "proof_references", "proofReferences", "proof_refs", "proofRefs"]),
+        "routing": compact_routing_fields(result),
         "reason": result.get("summary").and_then(Value::as_str).unwrap_or("repair or investigation result recorded"),
     }));
+}
+
+fn compact_routing_fields(result: &Value) -> Value {
+    let data = result
+        .get("data")
+        .or_else(|| result.get("result").and_then(|inner| inner.get("data")))
+        .unwrap_or(result);
+    let mut routing = serde_json::Map::new();
+    for key in [
+        "retry_items",
+        "retryItems",
+        "implementation_failures",
+        "terminal_blockers",
+        "terminalBlockers",
+    ] {
+        if let Some(value) = data.get(key).filter(|value| present(Some(value))) {
+            routing.insert(
+                key.to_string(),
+                Value::Array(
+                    array(Some(value))
+                        .iter()
+                        .map(compact_routing_item)
+                        .collect(),
+                ),
+            );
+        }
+    }
+    for key in [
+        "failure_class",
+        "failure_kind",
+        "transport_attempts",
+        "max_transport_attempts",
+    ] {
+        if let Some(value) = data.get(key) {
+            routing.insert(key.to_string(), value.clone());
+        }
+    }
+    Value::Object(routing)
+}
+
+fn compact_routing_item(item: &Value) -> Value {
+    serde_json::json!({
+        "item_id": item.get("item_id").or_else(|| item.get("id")),
+        "source_item_id": item.get("source_item_id"),
+        "canonical_task_ids": item.get("canonical_task_ids"),
+        "source_residual_gap_ids": item.get("source_residual_gap_ids"),
+        "failure_class": item.get("failure_class"),
+        "failure_kind": item.get("failure_kind"),
+        "classification": item.get("classification"),
+    })
 }
 
 #[path = "workflow_live_generated_lifecycle_outcomes.rs"]

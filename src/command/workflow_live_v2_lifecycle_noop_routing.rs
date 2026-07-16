@@ -210,7 +210,7 @@ pub(super) fn reclassify_inventory_contradicted_noops(
         .into_iter()
         .map(|item| {
             if support::work_type_for(&item) != "verified_noop"
-                || !noop_item_is_implementable(&item)
+                || !noop_item_has_authoritative_acceptance_criteria(contract, &item)
                 || !inventory_contradicts_noop(contract, &item, &gaps, &task_coverage)
             {
                 return item;
@@ -237,6 +237,7 @@ pub(super) fn route_refuted_noops(
     ready_noop_items: &[Value],
     accepted_ids: &BTreeSet<String>,
     failed_outcomes: &[Value],
+    completed_ids: &BTreeSet<String>,
     reclassified_ids: &mut BTreeSet<String>,
 ) -> NoopProofExhaustionRoute {
     let semantic_refuted_ids = semantic_refuted_task_ids(contract, failed_outcomes);
@@ -245,7 +246,7 @@ pub(super) fn route_refuted_noops(
         && failed_outcomes.iter().any(semantic_noop_refutation);
     let mut implementation_items = Vec::new();
     for item in ready_noop_items {
-        if !noop_item_is_implementable(item) {
+        if !noop_item_is_implementable(contract, item, completed_ids) {
             continue;
         }
         let ids = contract
@@ -394,9 +395,30 @@ fn collect_explicit_task_ids(value: &Value, ids: &mut BTreeSet<String>) {
     }
 }
 
-fn noop_item_is_implementable(item: &Value) -> bool {
-    support::present(item.get("target_files"))
-        || support::present(item.get("artifact_requirements"))
+fn noop_item_is_implementable(
+    contract: &LifecycleContract<'_>,
+    item: &Value,
+    completed_ids: &BTreeSet<String>,
+) -> bool {
+    noop_item_has_authoritative_acceptance_criteria(contract, item)
+        && contract
+            .dependency_ids_for(item)
+            .iter()
+            .all(|dependency_id| completed_ids.contains(dependency_id))
+}
+
+fn noop_item_has_authoritative_acceptance_criteria(
+    contract: &LifecycleContract<'_>,
+    item: &Value,
+) -> bool {
+    let task_ids = contract.canonical_ids_for(item);
+    !task_ids.is_empty()
+        && contract
+            .task_universe
+            .tasks
+            .iter()
+            .filter(|task| task_ids.contains(&task.canonical_task_id))
+            .all(|task| !task.acceptance_criteria.is_empty())
 }
 
 fn implementation_item(

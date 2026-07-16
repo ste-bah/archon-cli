@@ -8,6 +8,8 @@ use super::super::workflow_live_generated_lifecycle_support as support;
 use super::super::workflow_live_generated_lifecycle_support::LifecycleContract;
 use self::workflow_live_v2_lifecycle_prompts as prompts;
 
+const TERMINAL_GATE_REROUTE_MARKER: &str = "workflow terminal gate reroute:";
+
 impl WorkflowV2ScriptRunner {
     /// Run the decomposed-PRD lifecycle natively. `harness_source` is the
     /// recorded scaffold (hash identity for reuse/metadata); it is NOT
@@ -102,10 +104,11 @@ struct LifecycleDriver {
     target_repository_root: Option<String>,
     project_artifact_root: Option<String>,
     governed_learning_context: serde_json::Value,
-    resume_completed_ids: std::collections::BTreeSet<String>,
     max_repair_iterations: usize,
     max_investigation_iterations: usize,
     max_dependency_waves: usize,
+    runtime_state:
+        std::sync::Mutex<workflow_live_v2_lifecycle_terminal_gate::TerminalGateState>,
 }
 
 /// Mutable evidence bundles — the JS lifecycle's top-level arrays.
@@ -138,12 +141,17 @@ impl LifecycleDriver {
             target_repository_root,
             project_artifact_root,
             governed_learning_context,
-            resume_completed_ids,
             max_repair_iterations: usize::from(generated_config.max_repair_iterations.clamp(1, 8)),
             max_investigation_iterations: usize::from(
                 generated_config.max_investigation_iterations.clamp(1, 8),
             ),
             max_dependency_waves: canonical.saturating_mul(3).max(1),
+            runtime_state: std::sync::Mutex::new(
+                workflow_live_v2_lifecycle_terminal_gate::TerminalGateState {
+                    completed_ids: resume_completed_ids.clone(),
+                    ..Default::default()
+                },
+            ),
         }
     }
 
@@ -306,9 +314,61 @@ impl LifecycleDriver {
         id: &str,
         source: Option<serde_json::Value>,
         status: &str,
-        inputs: serde_json::Value,
+        mut inputs: serde_json::Value,
         task: &str,
     ) -> archon_workflow::WorkflowResult<()> {
+        if id.starts_with("blocked-") {
+            // Claims remain fail-closed. Scheduling remains fail-open because
+            // attempted work still faces implementation, verification, triage,
+            // review, and final evidence gates before it can earn acceptance.
+            let decision = {
+                let mut state = self
+                    .runtime_state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                workflow_live_v2_lifecycle_terminal_gate::decide(
+                    &self.contract(),
+                    id,
+                    &inputs,
+                    &mut state,
+                )
+            };
+            if let workflow_live_v2_lifecycle_terminal_gate::TerminalGateDecision::Reroute(
+                event,
+            ) = decision
+            {
+                let reroute_count = event
+                    .get("reroute_count")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(1);
+                self.call(
+                    "checkpoint",
+                    &format!("terminal-gate-reroute-{id}-{reroute_count}"),
+                    Some(event),
+                    serde_json::json!({
+                        "task": "Record host-side terminal-gate reroute evidence."
+                    }),
+                )
+                .await?;
+                return Err(WorkflowError::StageFailed(format!(
+                    "{TERMINAL_GATE_REROUTE_MARKER} {id}"
+                )));
+            }
+            let terminal_gate_events = self
+                .runtime_state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .events
+                .clone();
+            if let Some(object) = inputs.as_object_mut()
+                && !terminal_gate_events.is_empty()
+            {
+                object.insert(
+                    "terminalGateEvidence".to_string(),
+                    serde_json::Value::Array(terminal_gate_events),
+                );
+            }
+        }
         self.call(
             "finalReport",
             id,
@@ -320,6 +380,15 @@ impl LifecycleDriver {
     }
 
     async fn run(&self) -> archon_workflow::WorkflowResult<()> {
+        loop {
+            match self.run_once().await {
+                Err(error) if is_terminal_gate_reroute(&error) => continue,
+                result => return result,
+            }
+        }
+    }
+
+    async fn run_once(&self) -> archon_workflow::WorkflowResult<()> {
         let discovery_items = self.discovery_items();
         let discovery = self
             .parallel(
@@ -385,11 +454,25 @@ impl LifecycleDriver {
                 .await;
         }
 
-        let inventory = self
-            .run_dependency_waves(inventory, &discovery, &mut evidence)
-            .await?;
-        self.run_review_and_final_gates(&inventory, &mut evidence)
-            .await
+        let inventory = loop {
+            match self
+                .run_dependency_waves(inventory.clone(), &discovery, &mut evidence)
+                .await
+            {
+                Ok(inventory) => break inventory,
+                Err(error) if is_terminal_gate_reroute(&error) => continue,
+                Err(error) => return Err(error),
+            }
+        };
+        loop {
+            match self
+                .run_review_and_final_gates(&inventory, &mut evidence)
+                .await
+            {
+                Err(error) if is_terminal_gate_reroute(&error) => continue,
+                result => return result,
+            }
+        }
     }
 
     fn discovery_items(&self) -> Vec<serde_json::Value> {
@@ -536,4 +619,8 @@ impl LifecycleDriver {
         }
         Ok(inventory)
     }
+}
+
+fn is_terminal_gate_reroute(error: &WorkflowError) -> bool {
+    error.to_string().contains(TERMINAL_GATE_REROUTE_MARKER)
 }

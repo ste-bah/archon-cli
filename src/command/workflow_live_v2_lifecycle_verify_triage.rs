@@ -251,12 +251,24 @@ fn record_triage_retry(
     retry_items: Vec<serde_json::Value>,
     verification: &serde_json::Value,
 ) {
+    let producer_call_id = match producer {
+        workflow_live_v2_lifecycle_verify_routing::RetryProducer::Triage => {
+            format!("verification-failure-triage-{wave_index}-{repair_attempt}")
+        }
+        workflow_live_v2_lifecycle_verify_routing::RetryProducer::Retriage => {
+            format!("verification-failure-retriage-{wave_index}-{repair_attempt}")
+        }
+        workflow_live_v2_lifecycle_verify_routing::RetryProducer::RepairPlan => {
+            format!("verification-repair-plan-{wave_index}-{repair_attempt}")
+        }
+    };
     evidence.verification.push(serde_json::json!({
         "kind": "verification-triage-retry",
         "implementationWaveIndex": wave_index,
         "dependencyIteration": dependency_iteration,
         "verificationRepairAttempt": repair_attempt,
         "retryProducer": producer.label(),
+        "producerCallId": producer_call_id,
         "verificationPlan": { "items": retry_items },
         "result": verification,
     }));

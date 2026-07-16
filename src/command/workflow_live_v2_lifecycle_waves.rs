@@ -11,12 +11,35 @@ impl LifecycleDriver {
         evidence: &mut LifecycleEvidence,
     ) -> archon_workflow::WorkflowResult<serde_json::Value> {
         let contract = self.contract();
+        let pending_implementation_items = {
+            let mut state = self
+                .runtime_state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            std::mem::take(&mut state.pending_implementation_items)
+        };
+        inventory =
+            workflow_live_v2_lifecycle_terminal_gate::apply_pending_implementation_items(
+                &contract,
+                &inventory,
+                pending_implementation_items,
+            );
         let (reconciled_inventory, mut noop_reclassified_ids) =
             workflow_live_v2_lifecycle_noop_routing::reclassify_inventory_contradicted_noops(
                 &contract,
                 &inventory,
             );
         inventory = reconciled_inventory;
+        {
+            let mut state = self
+                .runtime_state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            noop_reclassified_ids.extend(state.noop_reclassified_ids.iter().cloned());
+            state
+                .noop_reclassified_ids
+                .extend(noop_reclassified_ids.iter().cloned());
+        }
         if !noop_reclassified_ids.is_empty() {
             evidence.implementation.push(serde_json::json!({
                 "kind": "noop-inventory-contradiction-reclassification",
@@ -24,7 +47,12 @@ impl LifecycleDriver {
             }));
         }
         let mut remaining_items = support::array(inventory.get("items"));
-        let mut completed_ids = self.resume_completed_ids.clone();
+        let mut completed_ids = self
+            .runtime_state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .completed_ids
+            .clone();
         remaining_items.retain(|item| !support::item_is_completed(&contract, item, &completed_ids));
         let mut dependency_iteration = 1usize;
         let mut implementation_wave_index = 1usize;
@@ -80,6 +108,7 @@ impl LifecycleDriver {
                 ready_implementation_items.extend(
                     self.run_noop_proofs(
                         &ready_noop_items,
+                        &completed_ids,
                         dependency_iteration,
                         &mut accepted_this_wave,
                         &mut noop_reclassified_ids,
@@ -87,7 +116,20 @@ impl LifecycleDriver {
                     )
                     .await?,
                 );
+                self.runtime_state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .noop_reclassified_ids
+                    .extend(noop_reclassified_ids.iter().cloned());
             }
+            ready_implementation_items = self
+                .discover_implementation_targets(
+                    ready_implementation_items,
+                    discovery,
+                    dependency_iteration,
+                    evidence,
+                )
+                .await?;
 
             let current_implementation_wave_index = implementation_wave_index;
             let mut implementation_candidate_ids: Vec<String> = Vec::new();
@@ -161,7 +203,12 @@ impl LifecycleDriver {
                 }
             }
             for id in newly_completed {
-                completed_ids.insert(id);
+                completed_ids.insert(id.clone());
+                self.runtime_state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .completed_ids
+                    .insert(id);
             }
             remaining_items.retain(|item| {
                 !support::item_is_completed(&contract, item, &completed_ids)
@@ -249,6 +296,7 @@ impl LifecycleDriver {
     async fn run_noop_proofs(
         &self,
         ready_noop_items: &[serde_json::Value],
+        completed_ids: &std::collections::BTreeSet<String>,
         dependency_iteration: usize,
         accepted_this_wave: &mut std::collections::BTreeSet<String>,
         noop_reclassified_ids: &mut std::collections::BTreeSet<String>,
@@ -370,6 +418,7 @@ impl LifecycleDriver {
                 &ready_noop_items,
                 accepted_this_wave,
                 &failed,
+                completed_ids,
                 noop_reclassified_ids,
             ) {
                 workflow_live_v2_lifecycle_noop_routing::NoopProofExhaustionRoute::ScheduleImplementation(
@@ -409,6 +458,77 @@ impl LifecycleDriver {
             }
         }
         Ok(Vec::new())
+    }
+
+    async fn discover_implementation_targets(
+        &self,
+        items: Vec<serde_json::Value>,
+        discovery: &serde_json::Value,
+        dependency_iteration: usize,
+        evidence: &mut LifecycleEvidence,
+    ) -> archon_workflow::WorkflowResult<Vec<serde_json::Value>> {
+        if items
+            .iter()
+            .all(|item| support::present(item.get("target_files")))
+        {
+            return Ok(items);
+        }
+
+        let contract = self.contract();
+        let mut inventory = contract.normalize_inventory(&serde_json::json!({ "items": items }));
+        let mut attempt = 1usize;
+        while support::array(inventory.get("items"))
+            .iter()
+            .any(|item| {
+                support::work_type_for(item) == "implementation"
+                    && !support::present(item.get("target_files"))
+            })
+            && attempt <= self.max_investigation_iterations
+        {
+            let issues = support::array(inventory.get("items"))
+                .into_iter()
+                .filter(|item| {
+                    support::work_type_for(item) == "implementation"
+                        && !support::present(item.get("target_files"))
+                })
+                .map(|item| {
+                    serde_json::json!({
+                        "kind": "target_file_discovery",
+                        "field": "target_files",
+                        "item_id": item.get("item_id").or_else(|| item.get("id")),
+                        "canonical_task_ids": item.get("canonical_task_ids"),
+                        "message": "implementation item requires repository-owned target discovery before scheduling",
+                    })
+                })
+                .collect::<Vec<_>>();
+            let call_id =
+                format!("target-file-discovery-wave-{dependency_iteration}-{attempt}");
+            let repair = self
+                .reduce(
+                    &call_id,
+                    serde_json::json!([
+                        self.task_universe,
+                        inventory,
+                        issues,
+                        discovery
+                    ]),
+                    "analysis",
+                    prompts::TARGET_FILE_DISCOVERY_TASK,
+                )
+                .await?;
+            support::record_repair_attempt(
+                &mut evidence.repair_attempts,
+                &call_id,
+                "target_file_discovery",
+                &issues,
+                &repair,
+            );
+            inventory = contract.normalize_inventory(&support::merge_inventory_repair(
+                &contract, &inventory, &repair,
+            ));
+            attempt += 1;
+        }
+        Ok(support::array(inventory.get("items")))
     }
 
     async fn repair_wave_completion_evidence(

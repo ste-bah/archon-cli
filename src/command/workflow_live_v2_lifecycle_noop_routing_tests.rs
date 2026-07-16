@@ -114,7 +114,9 @@ fn refuted_noop_after_bounded_repairs_routes_to_implementation() {
             .len(),
         3
     );
-    let ready = support::array(fixture["inventory"].get("items"));
+    let mut ready = support::array(fixture["inventory"].get("items"));
+    ready[0]["target_files"] = serde_json::json!([]);
+    ready[0]["artifact_requirements"] = serde_json::json!([]);
     let failed = support::array(fixture.get("failed_noop_outcomes"));
     let mut reclassified = BTreeSet::new();
 
@@ -123,6 +125,7 @@ fn refuted_noop_after_bounded_repairs_routes_to_implementation() {
         &ready,
         &BTreeSet::new(),
         &failed,
+        &BTreeSet::new(),
         &mut reclassified,
     );
 
@@ -133,12 +136,55 @@ fn refuted_noop_after_bounded_repairs_routes_to_implementation() {
     assert_eq!(items[0]["work_type"], "implementation");
     assert_eq!(items[0]["canonical_task_ids"][0], "TASK-TDL-001");
     assert_eq!(items[0]["noop_reclassification"]["count"], 1);
-    assert!(
-        !items[0]["artifact_requirements"]
-            .as_array()
-            .unwrap()
-            .is_empty()
+    assert_eq!(items[0]["target_files"], serde_json::json!([]));
+    assert_eq!(items[0]["artifact_requirements"], serde_json::json!([]));
+}
+
+#[test]
+fn refuted_noop_waits_for_dependencies_before_implementation() {
+    let (mut universe, fixture) = contract();
+    universe.tasks[0].dependency_ids = vec!["TASK-TDL-000".to_string()];
+    universe.tasks.insert(
+        0,
+        WorkflowV2TaskUniverseTask {
+            canonical_task_id: "TASK-TDL-000".to_string(),
+            source_path: "tasks/TASK-TDL-000.md".to_string(),
+            acceptance_criteria: vec!["Prerequisite is complete.".to_string()],
+            ..Default::default()
+        },
     );
+    let contract = LifecycleContract {
+        task_universe: &universe,
+        target_repository_root: Some("/repo"),
+    };
+    let mut ready = support::array(fixture["inventory"].get("items"));
+    ready[0]["dependency_ids"] = serde_json::json!(["TASK-TDL-000"]);
+    let failed = support::array(fixture.get("failed_noop_outcomes"));
+
+    assert_eq!(
+        route_refuted_noops(
+            &contract,
+            &ready,
+            &BTreeSet::new(),
+            &failed,
+            &BTreeSet::new(),
+            &mut BTreeSet::new(),
+        ),
+        NoopProofExhaustionRoute::Block
+    );
+
+    let completed = BTreeSet::from(["TASK-TDL-000".to_string()]);
+    assert!(matches!(
+        route_refuted_noops(
+            &contract,
+            &ready,
+            &BTreeSet::new(),
+            &failed,
+            &completed,
+            &mut BTreeSet::new(),
+        ),
+        NoopProofExhaustionRoute::ScheduleImplementation(_)
+    ));
 }
 
 #[test]
@@ -158,6 +204,7 @@ fn noop_reclassification_is_bounded_once_per_task() {
             &ready,
             &BTreeSet::new(),
             &failed,
+            &BTreeSet::new(),
             &mut reclassified,
         ),
         NoopProofExhaustionRoute::ScheduleImplementation(_)
@@ -168,6 +215,7 @@ fn noop_reclassification_is_bounded_once_per_task() {
             &ready,
             &BTreeSet::new(),
             &failed,
+            &BTreeSet::new(),
             &mut reclassified,
         ),
         NoopProofExhaustionRoute::Block
@@ -196,6 +244,7 @@ fn transport_failure_does_not_reclassify_noop_as_implementation() {
             &ready,
             &BTreeSet::new(),
             &failed,
+            &BTreeSet::new(),
             &mut BTreeSet::new(),
         ),
         NoopProofExhaustionRoute::Block
@@ -233,6 +282,7 @@ fn mixed_noop_failures_reclassify_only_the_task_with_a_semantic_gap() {
         &ready,
         &BTreeSet::new(),
         &failed,
+        &BTreeSet::new(),
         &mut BTreeSet::new(),
     ) else {
         panic!("semantic gap must schedule implementation");

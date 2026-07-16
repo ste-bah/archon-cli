@@ -304,6 +304,8 @@ mod workflow_live_v2_lifecycle_prompts;
 mod workflow_live_v2_lifecycle_review_remediation;
 #[path = "workflow_live_v2_lifecycle_review_verification.rs"]
 mod workflow_live_v2_lifecycle_review_verification;
+#[path = "workflow_live_v2_lifecycle_terminal_gate.rs"]
+mod workflow_live_v2_lifecycle_terminal_gate;
 #[path = "workflow_live_v2_lifecycle_verify_invariants.rs"]
 mod workflow_live_v2_lifecycle_verify_invariants;
 #[path = "workflow_live_v2_lifecycle_verify_merge.rs"]
@@ -344,6 +346,9 @@ include!("workflow_live_v2_lifecycle_review.rs");
 #[cfg(test)]
 #[path = "workflow_live_v2_script_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "workflow_live_v2_lifecycle_e2e_tests.rs"]
+mod workflow_live_v2_lifecycle_e2e_tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_lifecycle_review_remediation_tests.rs"]
 mod workflow_live_v2_lifecycle_review_remediation_tests;
