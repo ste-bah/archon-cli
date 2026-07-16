@@ -87,6 +87,17 @@ pub enum HookCommandType {
 }
 
 // ---------------------------------------------------------------------------
+// HookFailurePolicy — behavior when a hook cannot execute
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HookFailurePolicy {
+    Allow,
+    Block,
+}
+
+// ---------------------------------------------------------------------------
 // HookConfig — new field structure: exit-code semantics, no blocking, no priority
 // ---------------------------------------------------------------------------
 
@@ -121,10 +132,39 @@ pub struct HookConfig {
     /// Env var names allowed for interpolation in header values.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_env_vars: Vec<String>,
+    /// Behavior when the hook cannot spawn, times out, or encounters I/O failure.
+    /// Defaults by event: gating events block; observational events allow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_failure: Option<HookFailurePolicy>,
     /// Whether this hook is enabled. Default `true`. Can be overridden per-id
     /// via `[overrides]` in `.archon/hooks.local.toml`.
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+}
+
+impl HookConfig {
+    pub(crate) fn failure_policy(&self, event_name: &str) -> HookFailurePolicy {
+        self.on_failure.unwrap_or_else(|| {
+            if is_gating_event(event_name) {
+                HookFailurePolicy::Block
+            } else {
+                HookFailurePolicy::Allow
+            }
+        })
+    }
+
+    pub(crate) fn failure_result(&self, event_name: &str, error: &str) -> HookResult {
+        match self.failure_policy(event_name) {
+            HookFailurePolicy::Allow => HookResult::allow(),
+            HookFailurePolicy::Block => {
+                HookResult::block(format!("hook '{}' failed: {error}", self.command))
+            }
+        }
+    }
+}
+
+fn is_gating_event(event_name: &str) -> bool {
+    event_name == "PreToolUse"
 }
 
 fn default_enabled() -> bool {

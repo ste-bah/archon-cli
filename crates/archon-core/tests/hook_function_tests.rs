@@ -16,6 +16,7 @@ fn function_hook(command: &str) -> HookConfig {
         status_message: None,
         headers: HashMap::new(),
         allowed_env_vars: Vec::new(),
+        on_failure: None,
         enabled: true,
     }
 }

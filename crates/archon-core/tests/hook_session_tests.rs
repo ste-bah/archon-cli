@@ -43,6 +43,7 @@ fn make_hook_config(exit_code: i32) -> HookConfig {
         status_message: None,
         headers: HashMap::new(),
         allowed_env_vars: Vec::new(),
+        on_failure: None,
         enabled: true,
     }
 }
@@ -206,6 +207,7 @@ async fn test_session_hooks_merged_with_persistent() {
                 status_message: None,
                 headers: HashMap::new(),
                 allowed_env_vars: Vec::new(),
+                on_failure: None,
                 enabled: true,
             }],
         }],

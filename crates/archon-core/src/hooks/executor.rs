@@ -85,10 +85,12 @@ impl std::fmt::Display for RunError {
 /// **Exit code semantics:**
 /// - `0` → `HookResult { outcome: Success, .. }` (may include stdout JSON fields)
 /// - `2` → `HookResult { outcome: Blocking, reason: stderr, .. }`
-/// - Any other code or error → `HookResult { outcome: NonBlockingError, .. }` (logged)
+/// - Any other code → `HookResult { outcome: NonBlockingError, .. }` (logged)
+/// - Spawn, I/O, or timeout failure → configured/event-default failure policy
 ///
-/// If `config.async == Some(true)`, the command is spawned in the background
-/// and a Success result is returned immediately without waiting.
+/// If `config.async == Some(true)` and the hook's failure policy allows it,
+/// the command is spawned in the background and a Success result is returned
+/// immediately without waiting.
 pub(crate) async fn execute_hook(
     config: &HookConfig,
     input: &serde_json::Value,
@@ -108,8 +110,13 @@ pub(crate) async fn execute_hook(
 
     // Http hooks use a different execution path
     if matches!(config.hook_type, super::types::HookCommandType::Http) {
-        let client = reqwest::Client::new();
-        return super::http::execute_http_hook(config, input, &client).await;
+        return super::http::execute_http_hook_for_event(
+            config,
+            input,
+            super::http::shared_client(),
+            event_name,
+        )
+        .await;
     }
 
     // Prompt hooks: run command, capture stdout as plain text (NOT JSON-parsed)
@@ -117,8 +124,11 @@ pub(crate) async fn execute_hook(
         return execute_prompt_hook(config, input, cwd, session_id, event_name).await;
     }
 
-    // Async: fire-and-forget, return Allow immediately.
-    if config.r#async == Some(true) {
+    // Fire-and-forget is only compatible with fail-open behavior. Hooks whose
+    // failures block must finish before the guarded operation can proceed.
+    if config.r#async == Some(true)
+        && config.failure_policy(event_name) == super::types::HookFailurePolicy::Allow
+    {
         spawn_background(
             config.command.clone(),
             input.clone(),
@@ -151,14 +161,7 @@ pub(crate) async fn execute_hook(
     .await
     {
         Ok(output) => interpret_exit_code(&config.command, output),
-        Err(e) => {
-            tracing::warn!(
-                hook = %config.command,
-                error = %e,
-                "hook execution failed (non-blocking, returning Allow)"
-            );
-            HookResult::allow()
-        }
+        Err(e) => hook_failure_result(config, event_name, &e),
     }
 }
 
@@ -201,16 +204,20 @@ async fn execute_agent_hook(
     .await
     {
         Ok(output) => interpret_exit_code(&config.command, output),
-        Err(e) => {
-            tracing::warn!(
-                hook = %config.command,
-                error = %e,
-                "agent hook execution failed (fail-open, returning Allow)"
-            );
-            HookResult::allow()
-        }
+        Err(e) => hook_failure_result(config, event_name, &e),
     }
     // AgentGuard dropped here -> set_in_hook_agent(false)
+}
+
+fn hook_failure_result(config: &HookConfig, event_name: &str, error: &RunError) -> HookResult {
+    tracing::warn!(
+        hook = %config.command,
+        error = %error,
+        policy = ?config.failure_policy(event_name),
+        "hook execution failed"
+    );
+
+    config.failure_result(event_name, &error.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -347,15 +354,25 @@ async fn run_command(
         .spawn()
         .map_err(|e| RunError::Spawn(format!("{command}: {e}")))?;
 
-    // Write payload to stdin then drop so the child gets EOF.
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(payload_bytes).await;
-    }
+    // Write payload to stdin then drop so the child gets EOF. A successful
+    // short-lived hook may close stdin before reading it; defer BrokenPipe
+    // handling until its exit status is known.
+    let write_error = if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(payload_bytes).await.err()
+    } else {
+        None
+    };
 
     let timeout = std::time::Duration::from_secs(u64::from(timeout_secs));
 
     match tokio::time::timeout(timeout, child.wait_with_output()).await {
         Ok(Ok(output)) => {
+            if let Some(error) = write_error
+                && (error.kind() != std::io::ErrorKind::BrokenPipe || !output.status.success())
+            {
+                return Err(RunError::Io(error.to_string()));
+            }
+
             let exit_code = output.status.code().unwrap_or(-1);
             let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
             let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
@@ -402,15 +419,7 @@ async fn execute_prompt_hook(
     .await
     {
         Ok(output) => match output.exit_code {
-            2 => {
-                let reason = if output.stderr.trim().is_empty() {
-                    format!("prompt hook '{}' blocked (exit 2)", config.command)
-                } else {
-                    output.stderr.trim().to_owned()
-                };
-                HookResult::block(reason)
-            }
-            _ => {
+            0 => {
                 let trimmed = output.stdout.trim();
                 let additional_context = if trimmed.is_empty() {
                     None
@@ -422,15 +431,29 @@ async fn execute_prompt_hook(
                     ..HookResult::allow()
                 }
             }
+            2 => {
+                let reason = if output.stderr.trim().is_empty() {
+                    format!("prompt hook '{}' blocked (exit 2)", config.command)
+                } else {
+                    output.stderr.trim().to_owned()
+                };
+                HookResult::block(reason)
+            }
+            code => {
+                tracing::warn!(
+                    hook = %config.command,
+                    exit_code = code,
+                    stderr = %output.stderr.trim(),
+                    "prompt hook exited with non-zero code"
+                );
+                HookResult {
+                    outcome: HookOutcome::NonBlockingError,
+                    reason: Some(format!("exit code {code}")),
+                    ..Default::default()
+                }
+            }
         },
-        Err(e) => {
-            tracing::warn!(
-                hook = %config.command,
-                error = %e,
-                "prompt hook execution failed (non-blocking, returning Allow)"
-            );
-            HookResult::allow()
-        }
+        Err(e) => hook_failure_result(config, event_name, &e),
     }
 }
 

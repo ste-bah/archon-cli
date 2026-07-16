@@ -28,7 +28,8 @@ pub use registry::{HookRegistry, HookSummary, compute_hook_id};
 pub use toml_loader::{load_hooks_from_toml, parse_hooks_toml};
 pub use types::{
     AggregatedHookResult, ElicitationAction, HookCommandType, HookConfig, HookError, HookEvent,
-    HookExecutionConfig, HookMatcher, HookOutcome, HookResult, HookType, HooksSettings,
-    PermissionBehavior, PermissionUpdate, PermissionUpdateDestination, SourceAuthority,
+    HookExecutionConfig, HookFailurePolicy, HookMatcher, HookOutcome, HookResult, HookType,
+    HooksSettings, PermissionBehavior, PermissionUpdate, PermissionUpdateDestination,
+    SourceAuthority,
 };
 pub use watch::FileWatchManager;

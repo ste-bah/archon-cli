@@ -40,6 +40,7 @@ fn command_hook(cmd: &str) -> HookConfig {
         status_message: None,
         headers: Default::default(),
         allowed_env_vars: Vec::new(),
+        on_failure: None,
         enabled: true,
     }
 }
@@ -72,6 +73,7 @@ fn function_hook(name: &str) -> HookConfig {
         status_message: None,
         headers: Default::default(),
         allowed_env_vars: Vec::new(),
+        on_failure: None,
         enabled: true,
     }
 }
@@ -103,6 +105,7 @@ async fn test_agent_hook_spawns_and_parses_response() {
         status_message: None,
         headers: Default::default(),
         allowed_env_vars: Vec::new(),
+        on_failure: None,
         enabled: true,
     };
 
@@ -622,6 +625,7 @@ async fn test_session_hook_timeout_clamped_to_budget() {
         status_message: None,
         headers: Default::default(),
         allowed_env_vars: Vec::new(),
+        on_failure: None,
         enabled: true,
     };
     registry.register_session_hook("clamp-test", HookEvent::PreToolUse, slow_hook);

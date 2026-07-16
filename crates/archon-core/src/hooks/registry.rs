@@ -323,25 +323,14 @@ impl HookRegistry {
             // a matcher were expanded via the HookEntry. The matcher filter
             // is per-HookEntry. For correctness, we need it.
 
-            // Check aggregate timeout budget before executing.
-            if budget_start.elapsed() >= budget {
-                tracing::warn!(
-                    hook = %hook.command,
-                    event = %event_name,
-                    "aggregate timeout budget exhausted; skipping hook (fail-open)"
-                );
-                skipped += 1;
-                continue;
-            }
-
-            // Evaluate if_condition filter.
+            // Evaluate eligibility before budget accounting. A non-matching or
+            // already-fired hook is not a timeout-skipped execution failure.
             if let Some(ref cond) = hook.if_condition
                 && !condition::evaluate(cond, &input)
             {
                 continue;
             }
 
-            // Check once: skip if this hook has already fired.
             let once_key = make_once_key(&event_name, &pending_hook.source, &hook.command);
             if hook.once == Some(true) {
                 let already_fired = self
@@ -352,6 +341,17 @@ impl HookRegistry {
                 if already_fired {
                     continue;
                 }
+            }
+
+            if budget_start.elapsed() >= budget {
+                tracing::warn!(
+                    hook = %hook.command,
+                    event = %event_name,
+                    "aggregate timeout budget exhausted; applying hook failure policy"
+                );
+                skipped += 1;
+                aggregated.merge(hook.failure_result(&event_name, "aggregate timeout exhausted"));
+                continue;
             }
 
             // Clamp per-hook timeout to remaining budget.
@@ -409,9 +409,10 @@ impl HookRegistry {
                 tracing::warn!(
                     hook = %config.command,
                     event = %event_name,
-                    "aggregate timeout budget exhausted; skipping session hook"
+                    "aggregate timeout budget exhausted; applying session hook failure policy"
                 );
                 aggregated.skipped_count += 1;
+                aggregated.merge(config.failure_result(&event_name, "aggregate timeout exhausted"));
                 continue;
             }
 
@@ -914,6 +915,7 @@ mod summaries_tests {
             status_message: None,
             headers: std::collections::HashMap::new(),
             allowed_env_vars: Vec::new(),
+            on_failure: None,
             enabled: true,
         }
     }

@@ -31,6 +31,7 @@ fn agent_hook_config(command: &str, timeout: Option<u32>) -> HookConfig {
         status_message: None,
         headers: Default::default(),
         allowed_env_vars: Vec::new(),
+        on_failure: None,
         enabled: true,
     }
 }
@@ -47,6 +48,7 @@ fn command_hook_config(command: &str) -> HookConfig {
         status_message: None,
         headers: Default::default(),
         allowed_env_vars: Vec::new(),
+        on_failure: None,
         enabled: true,
     }
 }
@@ -244,8 +246,8 @@ fn test_agent_hook_mutex_serialization() {
     assert!(!r2.is_blocked());
 }
 
-/// Agent hook with short timeout and a long-running command should time out
-/// and return default (fail-open) result.
+/// Agent hook with short timeout and a long-running command should fail closed
+/// for a gating event.
 #[cfg(unix)]
 #[tokio::test]
 async fn test_agent_hook_timeout() {
@@ -261,8 +263,10 @@ async fn test_agent_hook_timeout() {
         .await;
     let elapsed = start.elapsed();
 
-    // Should not block (fail-open on timeout).
-    assert!(!result.is_blocked(), "timed-out agent hook must fail-open");
+    assert!(
+        result.is_blocked(),
+        "timed-out gating hook must fail closed"
+    );
     // Should complete in ~1-2s, not 5s.
     assert!(
         elapsed.as_secs() < 4,

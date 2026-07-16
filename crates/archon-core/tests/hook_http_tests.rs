@@ -13,7 +13,8 @@
 /// - interpolate_env_vars: non-allowed vars left as-is
 /// - is_localhost: various URLs classified correctly
 use archon_core::hooks::{
-    HookCommandType, HookConfig, HookOutcome, execute_http_hook, interpolate_env_vars, is_localhost,
+    HookCommandType, HookConfig, HookFailurePolicy, HookOutcome, execute_http_hook,
+    interpolate_env_vars, is_localhost,
 };
 use axum::Router;
 use axum::body::Body;
@@ -35,6 +36,7 @@ fn http_config(url: &str) -> HookConfig {
         status_message: None,
         headers: Default::default(),
         allowed_env_vars: Default::default(),
+        on_failure: None,
         enabled: true,
     }
 }
@@ -100,9 +102,8 @@ async fn test_http_hook_timeout() {
 
     let result = execute_http_hook(&config, &context, &client).await;
 
-    // Fail-open: timeout should produce Success, not Blocking
-    assert_eq!(result.outcome, HookOutcome::Success);
-    assert!(!result.is_blocking());
+    assert_eq!(result.outcome, HookOutcome::Blocking);
+    assert!(result.is_blocking());
 }
 
 //3. test_http_hook_network_error
@@ -110,7 +111,8 @@ async fn test_http_hook_timeout() {
 #[tokio::test]
 async fn test_http_hook_network_error() {
     // Port 1 is almost certainly not listening
-    let config = http_config("http://127.0.0.1:1/hook");
+    let mut config = http_config("http://127.0.0.1:1/hook");
+    config.on_failure = Some(HookFailurePolicy::Allow);
     let context = json!({"event": "PreToolUse"});
     let client = reqwest::Client::new();
 
@@ -137,7 +139,8 @@ async fn test_http_hook_body_limit() {
     })
     .await;
 
-    let config = http_config(&url);
+    let mut config = http_config(&url);
+    config.on_failure = Some(HookFailurePolicy::Allow);
     let context = json!({"event": "PreToolUse"});
     let client = reqwest::Client::new();
 
@@ -153,7 +156,8 @@ async fn test_http_hook_body_limit() {
 #[tokio::test]
 async fn test_http_hook_tls_required() {
     // A plain HTTP URL to a non-localhost host should be rejected
-    let config = http_config("http://example.com/hook");
+    let mut config = http_config("http://example.com/hook");
+    config.on_failure = Some(HookFailurePolicy::Allow);
     let context = json!({"event": "PreToolUse"});
     let client = reqwest::Client::new();
 
@@ -359,7 +363,8 @@ async fn test_http_hook_posts_context_json() {
 async fn test_http_hook_non_json_response() {
     let url = start_mock_server(|| async { "not json at all" }).await;
 
-    let config = http_config(&url);
+    let mut config = http_config(&url);
+    config.on_failure = Some(HookFailurePolicy::Allow);
     let context = json!({"event": "PreToolUse"});
     let client = reqwest::Client::new();
 

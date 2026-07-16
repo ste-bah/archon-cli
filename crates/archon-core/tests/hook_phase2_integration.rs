@@ -45,6 +45,7 @@ fn make_registry_with_type(
                 status_message: None,
                 headers: Default::default(),
                 allowed_env_vars: Default::default(),
+                on_failure: None,
                 enabled: true,
             }],
         }],
@@ -68,6 +69,7 @@ fn make_multi_hook_registry(event: HookEvent, hooks: Vec<(&str, HookCommandType)
             status_message: None,
             headers: Default::default(),
             allowed_env_vars: Default::default(),
+            on_failure: None,
             enabled: true,
         })
         .collect();
@@ -134,6 +136,7 @@ async fn test_phase2_http_hook_end_to_end() {
         status_message: None,
         headers: Default::default(),
         allowed_env_vars: Default::default(),
+        on_failure: None,
         enabled: true,
     };
 

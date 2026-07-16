@@ -5,7 +5,8 @@
 /// - The captured text becomes `additional_context` in the HookResult
 /// - Exit code 2 → Blocking (stderr as reason)
 /// - Empty/whitespace stdout → no additional_context (None)
-/// - Any other exit code → HookResult::allow() with additional_context from stdout
+/// - Exit code 0 → HookResult::allow() with additional_context from stdout
+/// - Other nonzero exit codes → NonBlockingError without additional_context
 use archon_core::hooks::{HookCommandType, HookConfig, HookEvent, HookMatcher, HookRegistry};
 
 // ---------------------------------------------------------------------------
@@ -29,6 +30,7 @@ fn make_prompt_registry(event: HookEvent, cmd: &str) -> HookRegistry {
                 status_message: None,
                 headers: Default::default(),
                 allowed_env_vars: Default::default(),
+                on_failure: None,
                 enabled: true,
             }],
         }],
@@ -105,6 +107,19 @@ async fn test_prompt_hook_exit_2_blocks() {
     assert!(
         result.additional_contexts.is_empty(),
         "blocked prompt hook should not produce additional_context"
+    );
+}
+
+/// Prompt hook with a nonzero, non-blocking exit reports an error and discards stdout context.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_prompt_hook_nonzero_exit_is_non_blocking_error() {
+    let registry = make_prompt_registry(HookEvent::PostToolUse, "echo 'partial context'; exit 1");
+    let result = fire_prompt_hook(&registry, HookEvent::PostToolUse).await;
+
+    assert!(!result.is_blocked());
+    assert!(
+        result.additional_contexts.is_empty(),
+        "failed prompt stdout must not be presented as successful context"
     );
 }
 

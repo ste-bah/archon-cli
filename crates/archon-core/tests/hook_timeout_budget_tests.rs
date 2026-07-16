@@ -6,7 +6,7 @@
 /// - Skipped count incremented on budget exhaustion
 /// - Fast hooks all complete within budget (skipped_count stays 0)
 /// - Per-hook timeout clamped to remaining budget
-/// - Budget-exhausted hooks return Success (fail-open)
+/// - Budget-exhausted hooks apply their configured/event-default failure policy
 /// - HookExecutionConfig serialization round-trip
 use archon_core::hooks::{
     AggregatedHookResult, HookCommandType, HookConfig, HookEvent, HookExecutionConfig, HookMatcher,
@@ -31,6 +31,7 @@ fn cmd_hook(command: &str, timeout: Option<u32>) -> HookConfig {
         status_message: None,
         headers: HashMap::new(),
         allowed_env_vars: Vec::new(),
+        on_failure: None,
         enabled: true,
     }
 }
@@ -169,24 +170,21 @@ async fn test_per_hook_timeout_clamped_to_remaining_budget() {
 }
 
 // ---------------------------------------------------------------------------
-// test_budget_exhausted_returns_success_failopen
+// test_budget_exhausted_applies_default_failure_policy
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn test_budget_exhausted_returns_success_failopen() {
-    // Budget = 1ms so hooks get skipped.
+async fn test_budget_exhausted_applies_default_failure_policy() {
     let config = HookExecutionConfig {
         aggregate_timeout_ms: 1,
     };
     let registry = HookRegistry::with_config(config);
 
-    // Register a hook that would block (exit 2) if it ran.
-    // But since budget is exhausted, it should be skipped with Success (fail-open).
     registry.register_matchers(
         HookEvent::PreToolUse,
         vec![matcher_with_hooks(vec![
-            cmd_hook("sleep 0.01", Some(5)), // first hook eats the budget
-            cmd_hook("exit 2", Some(5)),     // this would block, but should be skipped
+            cmd_hook("sleep 0.01", Some(5)),
+            cmd_hook("exit 0", Some(5)),
         ])],
         None,
     );
@@ -197,11 +195,104 @@ async fn test_budget_exhausted_returns_success_failopen() {
         .execute_hooks(HookEvent::PreToolUse, input, &cwd, "test-session")
         .await;
 
-    // The blocking hook was skipped, so result should NOT be blocked.
+    assert!(result.skipped_count > 0);
     assert!(
-        !result.is_blocked(),
-        "Skipped hooks should fail-open (not block)"
+        result.is_blocked(),
+        "budget-exhausted PreToolUse hooks must use the default block policy"
     );
+}
+
+#[tokio::test]
+async fn test_budget_exhausted_respects_explicit_allow_policy() {
+    let config = HookExecutionConfig {
+        aggregate_timeout_ms: 1,
+    };
+    let registry = HookRegistry::with_config(config);
+    let mut skipped_hook = cmd_hook("exit 0", Some(5));
+    skipped_hook.on_failure = Some(archon_core::hooks::HookFailurePolicy::Allow);
+
+    registry.register_matchers(
+        HookEvent::PreToolUse,
+        vec![matcher_with_hooks(vec![
+            cmd_hook("sleep 0.01", Some(5)),
+            skipped_hook,
+        ])],
+        None,
+    );
+
+    let result = registry
+        .execute_hooks(
+            HookEvent::PreToolUse,
+            serde_json::json!({"tool_name": "Bash"}),
+            &PathBuf::from("/tmp"),
+            "test-session",
+        )
+        .await;
+
+    assert!(result.skipped_count > 0);
+    assert!(!result.is_blocked());
+}
+
+#[tokio::test]
+async fn test_budget_exhaustion_does_not_apply_policy_to_non_matching_hook() {
+    let registry = HookRegistry::with_config(HookExecutionConfig {
+        aggregate_timeout_ms: 1,
+    });
+    let mut non_matching = cmd_hook("exit 0", Some(5));
+    non_matching.if_condition = Some("Read".to_string());
+
+    registry.register_matchers(
+        HookEvent::PreToolUse,
+        vec![matcher_with_hooks(vec![
+            cmd_hook("sleep 0.01", Some(5)),
+            non_matching,
+        ])],
+        None,
+    );
+
+    let result = registry
+        .execute_hooks(
+            HookEvent::PreToolUse,
+            serde_json::json!({"tool_name": "Bash"}),
+            &PathBuf::from("/tmp"),
+            "test-session",
+        )
+        .await;
+
+    assert!(!result.is_blocked());
+    assert_eq!(
+        result.skipped_count, 0,
+        "a hook that does not match is ineligible, not timeout-skipped"
+    );
+}
+
+#[tokio::test]
+async fn test_observational_budget_exhaustion_remains_non_blocking() {
+    let config = HookExecutionConfig {
+        aggregate_timeout_ms: 1,
+    };
+    let registry = HookRegistry::with_config(config);
+
+    registry.register_matchers(
+        HookEvent::PostToolUse,
+        vec![matcher_with_hooks(vec![
+            cmd_hook("sleep 0.01", Some(5)),
+            cmd_hook("exit 0", Some(5)),
+        ])],
+        None,
+    );
+
+    let result = registry
+        .execute_hooks(
+            HookEvent::PostToolUse,
+            serde_json::json!({"tool_name": "Bash"}),
+            &PathBuf::from("/tmp"),
+            "test-session",
+        )
+        .await;
+
+    assert!(result.skipped_count > 0);
+    assert!(!result.is_blocked());
 }
 
 // ---------------------------------------------------------------------------
