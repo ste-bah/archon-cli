@@ -1,4 +1,9 @@
 use super::*;
+
+#[cfg(not(test))]
+const SERIES_OVERLAP_MIN_ROWS: usize = 5;
+#[cfg(test)]
+const SERIES_OVERLAP_MIN_ROWS: usize = 2;
 pub(super) fn trading_core_instruments() -> Vec<String> {
     ["ES", "NQ", "SPY", "QQQ", "BTCUSDT", "ETHUSDT"]
         .into_iter()
@@ -248,6 +253,7 @@ fn coverage_record_issues(
         Ok(dataset) => {
             append_dataset_gate_issues(&lake.root, record, &dataset, &mut issues);
             append_coverage_identity_issues(&dataset.metadata, instrument, timeframe, &mut issues);
+            append_series_overlap_issues(record, &dataset, &mut issues);
         }
         Err(error) => issues.push(format!("dataset unreadable: {error:?}")),
     }
@@ -255,6 +261,25 @@ fn coverage_record_issues(
         Ok(())
     } else {
         Err(issues)
+    }
+}
+
+fn append_series_overlap_issues(
+    record: &StoredDatasetRecord,
+    dataset: &StoredOhlcvDataset,
+    issues: &mut Vec<String>,
+) {
+    if record.bars < SERIES_OVERLAP_MIN_ROWS {
+        issues.push(format!(
+            "registry bars {} below required series overlap minimum {}",
+            record.bars, SERIES_OVERLAP_MIN_ROWS
+        ));
+    }
+    if dataset.bars.len() < SERIES_OVERLAP_MIN_ROWS {
+        issues.push(format!(
+            "normalized payload rows {} below required series overlap minimum {}",
+            dataset.bars.len(), SERIES_OVERLAP_MIN_ROWS
+        ));
     }
 }
 

@@ -37,13 +37,7 @@ pub(crate) fn fetch_native(
 }
 
 fn unavailable_provider_report(
-    root: &Path,
-    provider: &str,
-    symbol: &str,
-    timeframe: &str,
-    start: &str,
-    end: &str,
-    dataset_id: &str,
+    root: &Path, provider: &str, symbol: &str, timeframe: &str, start: &str, end: &str, dataset_id: &str,
 ) -> Result<String> {
     let checked_at = chrono::Utc::now().to_rfc3339();
     let result = TradingDataLake::new(root)
@@ -54,39 +48,19 @@ fn unavailable_provider_report(
         .clone()
         .unwrap_or_else(|| "provider-native fetch unavailable".into());
     if provider.trim().eq_ignore_ascii_case("stooq") {
-        reason = format!(
-            "provider_blocked_or_unavailable: {reason}; exact native Stooq data was not directly supplied and resampling is refused"
-        );
+        reason = format!("provider_blocked_or_unavailable: {reason}; exact native Stooq data was not directly supplied and resampling is refused");
     }
-    let report = json!({
-        "provider": result.provider,
-        "symbol": result.symbol,
-        "timeframe": result.timeframe,
-        "checked_at": result.checked_at,
-        "native_interval": result.native_interval,
-        "production_eligible": result.production_eligible,
-        "can_fetch": result.can_fetch,
-        "credential_state": result.credential_state,
-        "missing_credentials": result.missing_credentials,
-        "provider_blocked": result.provider_blocked,
-        "unsupported": result.unsupported,
-        "unavailable_reason": reason,
-        "quality_status": provider_quality_status(provider),
-        "start": start,
-        "end": end,
-        "dataset_id": dataset_id,
-        "fail_closed_behavior": "no dataset registry entry is written until provider-native fetch returns complete artifacts"
-    });
+    let report = json!({ "provider": result.provider, "symbol": result.symbol, "timeframe": result.timeframe,
+        "checked_at": result.checked_at, "native_interval": result.native_interval, "production_eligible": result.production_eligible,
+        "can_fetch": result.can_fetch, "credential_state": result.credential_state, "missing_credentials": result.missing_credentials,
+        "provider_blocked": result.provider_blocked, "unsupported": result.unsupported, "unavailable_reason": reason,
+        "quality_status": provider_quality_status(provider), "start": start, "end": end, "dataset_id": dataset_id,
+        "fail_closed_behavior": "no dataset registry entry is written until provider-native fetch returns complete artifacts" });
     write_or_render(&report, None)
 }
 
 fn fetch_tradingview_native(
-    root: &Path,
-    symbol: &str,
-    timeframe: &str,
-    start: &str,
-    end: &str,
-    dataset_id: &str,
+    root: &Path, symbol: &str, timeframe: &str, start: &str, end: &str, dataset_id: &str,
 ) -> Result<String> {
     let response = match tradingview_response(root, symbol, timeframe) {
         Ok(response) => response,
@@ -319,12 +293,7 @@ fn tv_number(row: &Value, field: &str) -> Result<f64> {
         .ok_or_else(|| anyhow!("TradingView candle missing numeric `{field}`"))
 }
 
-fn tradingview_metadata(
-    dataset_id: &str,
-    symbol: &str,
-    timeframe: &str,
-    bars: &[OhlcvBar],
-) -> DatasetMetadata {
+fn tradingview_metadata(dataset_id: &str, symbol: &str, timeframe: &str, bars: &[OhlcvBar]) -> DatasetMetadata {
     let rows = bars.len() as u64;
     DatasetMetadata {
         schema_version: "archon-trading-dataset-v1".into(),
@@ -410,30 +379,16 @@ fn tradingview_request(symbol: &str, timeframe: &str, start: &str, end: &str) ->
 }
 
 fn tradingview_success(
-    symbol: &str,
-    timeframe: &str,
-    start: &str,
-    end: &str,
-    dataset_id: &str,
+    symbol: &str, timeframe: &str, start: &str, end: &str, dataset_id: &str,
     record: &archon_trading::data_store::StoredDatasetRecord,
 ) -> Value {
     json!({
-        "provider": "tradingview",
-        "symbol": symbol,
-        "timeframe": timeframe,
-        "start": start,
-        "end": end,
-        "dataset_id": dataset_id,
-        "can_fetch": true,
-        "native_interval": true,
-        "mcp_state": "available",
-        "mcp_status": "success",
-        "provider_symbol": symbol,
-        "exact_native_timeframe": timeframe,
-        "captured_bars": record.bars,
-        "quality_status": "passed",
-        "production_eligible": true,
-        "stored_ohlcv": record,
+        "provider": "tradingview", "symbol": symbol, "timeframe": timeframe,
+        "start": start, "end": end, "dataset_id": dataset_id,
+        "can_fetch": true, "native_interval": true, "mcp_state": "available",
+        "mcp_status": "success", "provider_symbol": symbol,
+        "exact_native_timeframe": timeframe, "captured_bars": record.bars,
+        "quality_status": "passed", "production_eligible": true, "stored_ohlcv": record,
         "fail_closed_behavior": "dataset was registered only after TradingView MCP response parsed, validated, and artifact writes completed"
     })
 }
@@ -448,29 +403,15 @@ fn tradingview_provider_notes(symbol: &str, timeframe: &str, bars: usize) -> Str
 }
 
 fn tradingview_unavailable(
-    symbol: &str,
-    timeframe: &str,
-    start: &str,
-    end: &str,
-    dataset_id: &str,
-    reason: &str,
+    symbol: &str, timeframe: &str, start: &str, end: &str, dataset_id: &str, reason: &str,
 ) -> Result<String> {
     write_or_render(
         &json!({
-            "provider": "tradingview",
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "start": start,
-            "end": end,
-            "dataset_id": dataset_id,
-            "can_fetch": false,
-            "historical_supported": false,
-            "current_snapshot_supported": false,
-            "native_interval": false,
-            "unavailable_reason": reason,
-            "quality_status": "unavailable",
-            "production_eligible": false,
-            "provider_blocked_or_unavailable": true,
+            "provider": "tradingview", "symbol": symbol, "timeframe": timeframe,
+            "start": start, "end": end, "dataset_id": dataset_id,
+            "can_fetch": false, "historical_supported": false,
+            "current_snapshot_supported": false, "native_interval": false, "unavailable_reason": reason,
+            "quality_status": "unavailable", "production_eligible": false, "provider_blocked_or_unavailable": true,
             "fail_closed_behavior": "no dataset registry entry is written until TradingView MCP returns complete native OHLCV artifacts"
         }),
         None,
@@ -530,22 +471,14 @@ fn readable_coverage(
     matrix: &archon_trading::data_lake::CoverageMatrix,
     lake: &TradingDataLake,
 ) -> String {
-    let mut lines = vec![
-        format!("Trading coverage matrix ({})", matrix.schema_version),
-        format!("generated_at: {}", matrix.generated_at),
-        format!("instruments: {}", matrix.instruments.join(", ")),
+    let mut lines = [format!("Trading coverage matrix ({})", matrix.schema_version),
+        format!("generated_at: {}", matrix.generated_at), format!("instruments: {}", matrix.instruments.join(", ")),
         format!("timeframes: {}", matrix.timeframes.join(", ")),
+        format!("latest_json: {}", lake.coverage_dir().join("latest.json").display()), format!("latest_md: {}", lake.coverage_dir().join("latest.md").display())]
+    .into_iter()
+    .collect::<Vec<_>>();
+    lines.extend(matrix.cells.iter().map(|cell| {
         format!(
-            "latest_json: {}",
-            lake.coverage_dir().join("latest.json").display()
-        ),
-        format!(
-            "latest_md: {}",
-            lake.coverage_dir().join("latest.md").display()
-        ),
-    ];
-    for cell in &matrix.cells {
-        lines.push(format!(
             "{} {} provider={} available={} native={} quality={} rows={} reason={}",
             cell.canonical_instrument,
             cell.timeframe,
@@ -555,8 +488,8 @@ fn readable_coverage(
             cell.quality_status,
             cell.row_count,
             cell.fallback_reason.as_deref().unwrap_or("none")
-        ));
-    }
+        )
+    }));
     lines.push(format!("gaps: {}", matrix.gaps.len()));
     lines.join("\n")
 }
