@@ -5,6 +5,7 @@ pub mod compile;
 pub mod ingest;
 mod ingest_storage;
 pub mod lint;
+mod provenance_storage;
 pub mod query;
 pub mod schema;
 

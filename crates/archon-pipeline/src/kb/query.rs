@@ -399,34 +399,19 @@ impl QueryEngine {
             now,
         )?;
 
-        // Create DerivedFrom edges to source nodes. When this content was
-        // already filed, attach any new provenance to the existing owner.
-        for source_id in source_node_ids {
-            let edge_id = format!("edge-{}", uuid::Uuid::new_v4());
-            let mut edge_params = BTreeMap::new();
-            edge_params.insert("edge_id".into(), DataValue::from(edge_id.as_str()));
-            edge_params.insert(
-                "source_node_id".into(),
-                DataValue::from(filed_node_id.as_str()),
+        // Attach provenance to the canonical answer owner. Failure is best effort:
+        // answer filing is already committed and must remain visible.
+        if let Err(error) = super::provenance_storage::persist_derived_from_edges(
+            &self.db,
+            &filed_node_id,
+            source_node_ids,
+            now,
+        ) {
+            warn!(
+                owner_id = %filed_node_id,
+                error = %error,
+                "Failed to batch DerivedFrom provenance edges"
             );
-            edge_params.insert("target_node_id".into(), DataValue::from(source_id.as_str()));
-            edge_params.insert("edge_type".into(), DataValue::from("DerivedFrom"));
-            edge_params.insert("created_at".into(), DataValue::from(now));
-
-            if let Err(e) = self.db.run_script(
-                "?[edge_id, source_node_id, target_node_id, edge_type, created_at] <- \
-                 [[$edge_id, $source_node_id, $target_node_id, $edge_type, $created_at]] \
-                 :put kb_edges { edge_id => source_node_id, target_node_id, edge_type, \
-                 created_at }",
-                edge_params,
-                ScriptMutability::Mutable,
-            ) {
-                warn!(
-                    source_id = %source_id,
-                    error = %e,
-                    "Failed to create DerivedFrom edge"
-                );
-            }
         }
 
         Ok(filed_node_id)
@@ -491,6 +476,9 @@ fn str_to_node_type(s: &str) -> KbNodeType {
     }
 }
 
+#[cfg(test)]
+#[path = "query_provenance_tests.rs"]
+mod query_provenance_tests;
 #[cfg(test)]
 #[path = "query_tests.rs"]
 mod query_tests;
