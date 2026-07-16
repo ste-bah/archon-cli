@@ -1,35 +1,21 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use chrono::Utc;
 use cozo::{DataValue, DbInstance, NamedRows, ScriptMutability};
-use uuid::Uuid;
-
-// ---------------------------------------------------------------------------
-// Error type
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
     #[error("session database error: {0}")]
     DbError(String),
-
     #[error("session I/O error: {0}")]
     IoError(#[from] std::io::Error),
-
     #[error("session not found: {0}")]
     NotFound(String),
-
     #[error("refusing to replace session messages with an empty list")]
     EmptyReplaceRefused,
-
     #[error("message index {index} would skip current logical count {message_count}")]
     MessageIndexGap { index: u64, message_count: u64 },
 }
-
-// ---------------------------------------------------------------------------
-// Session metadata
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SessionMetadata {
@@ -43,980 +29,134 @@ pub struct SessionMetadata {
     pub total_tokens: u64,
     pub total_cost: f64,
     pub schema_version: u32,
-    /// Human-readable session name (optional).
     pub name: Option<String>,
-    /// ID of the session this was forked from (optional).
     pub parent_session_id: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+pub(crate) fn db_err(error: impl std::fmt::Display) -> SessionError {
+    SessionError::DbError(error.to_string())
+}
 
-fn db_err(e: impl std::fmt::Display) -> SessionError {
-    SessionError::DbError(e.to_string())
+pub(crate) fn extract_str(value: &DataValue) -> String {
+    value.get_str().unwrap_or("").to_string()
+}
+
+pub(crate) fn extract_i64(value: &DataValue) -> i64 {
+    value.get_int().unwrap_or(0)
+}
+
+pub(crate) fn extract_f64(value: &DataValue) -> f64 {
+    value.get_float().unwrap_or(0.0)
 }
 
 #[cfg(unix)]
-fn secure_file_permissions(path: &std::path::Path) -> Result<(), std::io::Error> {
+fn secure_file_permissions(path: &Path) -> Result<(), std::io::Error> {
     use std::os::unix::fs::PermissionsExt;
-    let perms = std::fs::Permissions::from_mode(0o600);
-    std::fs::set_permissions(path, perms)
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
 }
 
 fn empty_rows() -> NamedRows {
     NamedRows::new(vec![], vec![])
 }
 
-fn extract_str(val: &DataValue) -> String {
-    val.get_str().unwrap_or("").to_string()
-}
-
-fn extract_i64(val: &DataValue) -> i64 {
-    val.get_int().unwrap_or(0)
-}
-
-fn extract_f64(val: &DataValue) -> f64 {
-    val.get_float().unwrap_or(0.0)
-}
-
-// ---------------------------------------------------------------------------
-// Session store
-// ---------------------------------------------------------------------------
-
 pub struct SessionStore {
-    db: DbInstance,
+    pub(crate) db: DbInstance,
+    #[cfg(test)]
+    fail_next_replace_after_rows: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    list_query_count: std::sync::atomic::AtomicUsize,
 }
 
 impl SessionStore {
-    /// Open (or create) the session database at the given path.
     pub fn open(path: &Path) -> Result<Self, SessionError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-
         let path_str = path.to_string_lossy().to_string();
-        // TASK-AGS-815: cozo-ce 0.7.13-alpha.3 has a .unwrap() bug in
-        // new_cozo_sqlite (sqlite.rs:49). catch_unwind converts the panic
-        // into a SessionError so callers see a clean error instead of abort.
         let db = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             DbInstance::new("sqlite", &path_str, "")
         }))
-        .map_err(|_panic_err| {
+        .map_err(|_| {
             SessionError::DbError(
                 "cozo panicked during sqlite init — concurrent access or filesystem error".into(),
             )
         })?
         .map_err(db_err)?;
-
         #[cfg(unix)]
         secure_file_permissions(path)?;
-
-        let store = Self { db };
+        let store = Self {
+            db,
+            #[cfg(test)]
+            fail_next_replace_after_rows: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            list_query_count: std::sync::atomic::AtomicUsize::new(0),
+        };
         store.init_schema()?;
         Ok(store)
     }
 
-    /// Open the default session database.
     pub fn open_default() -> Result<Self, SessionError> {
         Self::open(&default_db_path())
     }
 
-    /// Return a reference to the underlying CozoDB instance.
     pub fn db(&self) -> &DbInstance {
         &self.db
     }
 
     fn init_schema(&self) -> Result<(), SessionError> {
+        self.create_relation(
+            ":create sessions {
+                id: String =>
+                created_at: String, last_active: String, working_directory: String,
+                git_branch: String, model: String, message_count: Int, total_tokens: Int,
+                total_cost: Float, schema_version: Int
+            }",
+        )?;
+        self.create_relation(
+            ":create messages {
+                session_id: String, message_index: Int => content: String
+            }",
+        )?;
+        self.create_relation(":create session_tags { session_id: String, tag: String }")?;
+        self.create_relation(":create session_names { session_id: String => name: String }")?;
+        self.create_relation(
+            ":create session_parents { session_id: String => parent_session_id: String }",
+        )
+    }
+
+    fn create_relation(&self, script: &str) -> Result<(), SessionError> {
         self.db
-            .run_script(
-                ":create sessions {
-                    id: String
-                    =>
-                    created_at: String,
-                    last_active: String,
-                    working_directory: String,
-                    git_branch: String,
-                    model: String,
-                    message_count: Int,
-                    total_tokens: Int,
-                    total_cost: Float,
-                    schema_version: Int
-                }",
-                Default::default(),
-                ScriptMutability::Mutable,
-            )
-            .or_else(|e| {
-                let msg = e.to_string();
-                if msg.contains("already exists") || msg.contains("conflicts") {
+            .run_script(script, BTreeMap::new(), ScriptMutability::Mutable)
+            .or_else(|error| {
+                let message = error.to_string();
+                if message.contains("already exists") || message.contains("conflicts") {
                     Ok(empty_rows())
                 } else {
-                    Err(db_err(e))
+                    Err(db_err(error))
                 }
             })?;
-
-        self.db
-            .run_script(
-                ":create messages {
-                    session_id: String,
-                    message_index: Int
-                    =>
-                    content: String
-                }",
-                Default::default(),
-                ScriptMutability::Mutable,
-            )
-            .or_else(|e| {
-                let msg = e.to_string();
-                if msg.contains("already exists") || msg.contains("conflicts") {
-                    Ok(empty_rows())
-                } else {
-                    Err(db_err(e))
-                }
-            })?;
-
-        self.db
-            .run_script(
-                ":create session_tags {
-                    session_id: String,
-                    tag: String
-                }",
-                Default::default(),
-                ScriptMutability::Mutable,
-            )
-            .or_else(|e| {
-                let msg = e.to_string();
-                if msg.contains("already exists") || msg.contains("conflicts") {
-                    Ok(empty_rows())
-                } else {
-                    Err(db_err(e))
-                }
-            })?;
-
-        // Session names (one name per session, unique across sessions)
-        self.db
-            .run_script(
-                ":create session_names {
-                    session_id: String
-                    =>
-                    name: String
-                }",
-                Default::default(),
-                ScriptMutability::Mutable,
-            )
-            .or_else(|e| {
-                let msg = e.to_string();
-                if msg.contains("already exists") || msg.contains("conflicts") {
-                    Ok(empty_rows())
-                } else {
-                    Err(db_err(e))
-                }
-            })?;
-
-        // Session parent links (for fork lineage)
-        self.db
-            .run_script(
-                ":create session_parents {
-                    session_id: String
-                    =>
-                    parent_session_id: String
-                }",
-                Default::default(),
-                ScriptMutability::Mutable,
-            )
-            .or_else(|e| {
-                let msg = e.to_string();
-                if msg.contains("already exists") || msg.contains("conflicts") {
-                    Ok(empty_rows())
-                } else {
-                    Err(db_err(e))
-                }
-            })?;
-
         Ok(())
     }
 
-    /// Register a session with a specific ID (used when the caller already has a session_id).
-    pub fn register_session(
-        &self,
-        id: &str,
-        working_dir: &str,
-        git_branch: Option<&str>,
-        model: &str,
-    ) -> Result<SessionMetadata, SessionError> {
-        let now = Utc::now().to_rfc3339();
-        let branch = git_branch.unwrap_or("");
-
-        let mut params = BTreeMap::new();
-        params.insert("id".to_string(), DataValue::from(id));
-        params.insert("created_at".to_string(), DataValue::from(now.as_str()));
-        params.insert("last_active".to_string(), DataValue::from(now.as_str()));
-        params.insert(
-            "working_directory".to_string(),
-            DataValue::from(working_dir),
-        );
-        params.insert("git_branch".to_string(), DataValue::from(branch));
-        params.insert("model".to_string(), DataValue::from(model));
-        params.insert("message_count".to_string(), DataValue::from(0i64));
-        params.insert("total_tokens".to_string(), DataValue::from(0i64));
-        params.insert("total_cost".to_string(), DataValue::from(0.0f64));
-        params.insert("schema_version".to_string(), DataValue::from(1i64));
-
-        self.db
-            .run_script(
-                "?[id, created_at, last_active, working_directory, git_branch,
-                  model, message_count, total_tokens, total_cost, schema_version] <- [[
-                    $id, $created_at, $last_active, $working_directory, $git_branch,
-                    $model, $message_count, $total_tokens, $total_cost, $schema_version
-                ]]
-                :put sessions {
-                    id => created_at, last_active, working_directory, git_branch,
-                    model, message_count, total_tokens, total_cost, schema_version
-                }",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
-
-        Ok(SessionMetadata {
-            id: id.to_string(),
-            created_at: now.clone(),
-            last_active: now,
-            working_directory: working_dir.to_string(),
-            git_branch: git_branch.map(|s| s.to_string()),
-            model: model.to_string(),
-            message_count: 0,
-            total_tokens: 0,
-            total_cost: 0.0,
-            schema_version: 1,
-            name: None,
-            parent_session_id: None,
-        })
+    #[cfg(test)]
+    pub(crate) fn fail_next_replace_after_rows_are_written(&self) {
+        self.fail_next_replace_after_rows
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
-    /// Create a new session and return its metadata.
-    pub fn create_session(
-        &self,
-        working_dir: &str,
-        git_branch: Option<&str>,
-        model: &str,
-    ) -> Result<SessionMetadata, SessionError> {
-        let id = Uuid::new_v4().to_string();
-        let now = Utc::now().to_rfc3339();
-        let branch = git_branch.unwrap_or("");
-
-        let mut params = BTreeMap::new();
-        params.insert("id".to_string(), DataValue::from(id.as_str()));
-        params.insert("created_at".to_string(), DataValue::from(now.as_str()));
-        params.insert("last_active".to_string(), DataValue::from(now.as_str()));
-        params.insert(
-            "working_directory".to_string(),
-            DataValue::from(working_dir),
-        );
-        params.insert("git_branch".to_string(), DataValue::from(branch));
-        params.insert("model".to_string(), DataValue::from(model));
-        params.insert("message_count".to_string(), DataValue::from(0i64));
-        params.insert("total_tokens".to_string(), DataValue::from(0i64));
-        params.insert("total_cost".to_string(), DataValue::from(0.0f64));
-        params.insert("schema_version".to_string(), DataValue::from(1i64));
-
-        self.db
-            .run_script(
-                "?[id, created_at, last_active, working_directory, git_branch,
-                  model, message_count, total_tokens, total_cost, schema_version] <- [[
-                    $id, $created_at, $last_active, $working_directory, $git_branch,
-                    $model, $message_count, $total_tokens, $total_cost, $schema_version
-                ]]
-                :put sessions {
-                    id => created_at, last_active, working_directory, git_branch,
-                    model, message_count, total_tokens, total_cost, schema_version
-                }",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
-
-        Ok(SessionMetadata {
-            id,
-            created_at: now.clone(),
-            last_active: now,
-            working_directory: working_dir.to_string(),
-            git_branch: git_branch.map(|s| s.to_string()),
-            model: model.to_string(),
-            message_count: 0,
-            total_tokens: 0,
-            total_cost: 0.0,
-            schema_version: 1,
-            name: None,
-            parent_session_id: None,
-        })
+    #[cfg(test)]
+    pub(crate) fn reset_list_query_count(&self) {
+        self.list_query_count
+            .store(0, std::sync::atomic::Ordering::SeqCst);
     }
 
-    /// Save a message to the session.
-    pub fn save_message(
-        &self,
-        session_id: &str,
-        message_index: u64,
-        content: &str,
-    ) -> Result<(), SessionError> {
-        let session = self.get_session(session_id)?;
-        if message_index > session.message_count {
-            return Err(SessionError::MessageIndexGap {
-                index: message_index,
-                message_count: session.message_count,
-            });
-        }
-
-        let mut params = BTreeMap::new();
-        params.insert("session_id".to_string(), DataValue::from(session_id));
-        params.insert(
-            "message_index".to_string(),
-            DataValue::from(message_index as i64),
-        );
-        params.insert("content".to_string(), DataValue::from(content));
-
-        self.db
-            .run_script(
-                "?[session_id, message_index, content] <- [[$session_id, $message_index, $content]]
-                 :put messages {session_id, message_index => content}",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
-
-        let next_count = session.message_count.max(message_index + 1);
-        self.set_message_count(session_id, next_count)?;
-
-        Ok(())
-    }
-
-    /// Replace the full persisted message list for a session. This is the
-    /// correct primitive for post-turn persistence and compaction because it
-    /// writes an exact logical length before removing any stale physical tail.
-    pub fn replace_messages(
-        &self,
-        session_id: &str,
-        messages: &[String],
-    ) -> Result<(), SessionError> {
-        if messages.is_empty() {
-            return Err(SessionError::EmptyReplaceRefused);
-        }
-        self.get_session(session_id)?;
-
-        for (idx, content) in messages.iter().enumerate() {
-            let mut params = BTreeMap::new();
-            params.insert("session_id".to_string(), DataValue::from(session_id));
-            params.insert("message_index".to_string(), DataValue::from(idx as i64));
-            params.insert("content".to_string(), DataValue::from(content.as_str()));
-            self.db
-                .run_script(
-                    "?[session_id, message_index, content] <- [[$session_id, $message_index, $content]]
-                     :put messages {session_id, message_index => content}",
-                    params,
-                    ScriptMutability::Mutable,
-                )
-                .map_err(db_err)?;
-        }
-
-        let logical_count = messages.len() as u64;
-        self.set_message_count(session_id, logical_count)?;
-        self.delete_messages_from(session_id, logical_count)?;
-
-        Ok(())
-    }
-
-    /// Deliberately delete every message for a session and set the logical
-    /// message count to zero. This is intentionally separate from
-    /// `replace_messages` so accidental empty replacement cannot wipe a session.
-    pub fn delete_all_messages(&self, session_id: &str) -> Result<(), SessionError> {
-        self.get_session(session_id)?;
-        self.delete_messages_from(session_id, 0)?;
-        self.set_message_count(session_id, 0)?;
-        Ok(())
-    }
-
-    /// Delete all messages with `message_index > keep_up_to` for the given
-    /// session. Messages at indices `0..=keep_up_to` are retained. Idempotent
-    /// — calling on an already-truncated session is a no-op.
-    ///
-    /// TASK-TUI-620-followup: backs the `/rewind` truncation flow. Mirrors
-    /// the `:rm messages {session_id, message_index}` delete pattern used
-    /// by `delete_session`.
-    pub fn truncate_messages_after(
-        &self,
-        session_id: &str,
-        keep_up_to: u64,
-    ) -> Result<(), SessionError> {
-        let mut params = BTreeMap::new();
-        params.insert("sid".to_string(), DataValue::from(session_id));
-        params.insert("keep".to_string(), DataValue::from(keep_up_to as i64));
-
-        self.db
-            .run_script(
-                "?[session_id, message_index] :=
-                    *messages{session_id, message_index},
-                    session_id = $sid,
-                    message_index > $keep
-                 :rm messages {session_id, message_index}",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
-
-        self.set_message_count(session_id, keep_up_to + 1)?;
-
-        Ok(())
-    }
-
-    /// Update session token usage, cost, and increment message count.
-    pub fn update_usage(
-        &self,
-        session_id: &str,
-        total_tokens: u64,
-        total_cost: f64,
-    ) -> Result<(), SessionError> {
-        let session = self.get_session(session_id)?;
-        let now = Utc::now().to_rfc3339();
-
-        let mut params = BTreeMap::new();
-        params.insert("id".to_string(), DataValue::from(session_id));
-        params.insert(
-            "created_at".to_string(),
-            DataValue::from(session.created_at),
-        );
-        params.insert("last_active".to_string(), DataValue::from(now));
-        params.insert(
-            "working_directory".to_string(),
-            DataValue::from(session.working_directory),
-        );
-        params.insert(
-            "git_branch".to_string(),
-            DataValue::from(session.git_branch.unwrap_or_default()),
-        );
-        params.insert("model".to_string(), DataValue::from(session.model));
-        // Increment message count by 1 per turn (user prompt + assistant response = 1 turn)
-        params.insert(
-            "message_count".to_string(),
-            DataValue::from((session.message_count + 1) as i64),
-        );
-        params.insert(
-            "total_tokens".to_string(),
-            DataValue::from(total_tokens as i64),
-        );
-        params.insert("total_cost".to_string(), DataValue::from(total_cost));
-        params.insert(
-            "schema_version".to_string(),
-            DataValue::from(session.schema_version as i64),
-        );
-
-        self.db
-            .run_script(
-                "?[id, created_at, last_active, working_directory, git_branch,
-                  model, message_count, total_tokens, total_cost, schema_version] <- [[
-                    $id, $created_at, $last_active, $working_directory, $git_branch,
-                    $model, $message_count, $total_tokens, $total_cost, $schema_version
-                ]]
-                :put sessions {
-                    id => created_at, last_active, working_directory, git_branch,
-                    model, message_count, total_tokens, total_cost, schema_version
-                }",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
-
-        Ok(())
-    }
-
-    /// List recent sessions, sorted by last_active descending.
-    pub fn list_sessions(&self, limit: u32) -> Result<Vec<SessionMetadata>, SessionError> {
-        let result = self
-            .db
-            .run_script(
-                &format!(
-                    "?[id, created_at, last_active, working_directory, git_branch,
-                  model, message_count, total_tokens, total_cost, schema_version] :=
-                    *sessions{{id, created_at, last_active, working_directory, git_branch,
-                              model, message_count, total_tokens, total_cost, schema_version}}
-                :sort -last_active
-                :limit {limit}"
-                ),
-                Default::default(),
-                ScriptMutability::Immutable,
-            )
-            .map_err(db_err)?;
-
-        let mut sessions = Vec::new();
-        for row in &result.rows {
-            if sessions.len() >= limit as usize {
-                break;
-            }
-            let branch_str = extract_str(&row[4]);
-            let git_branch = if branch_str.is_empty() {
-                None
-            } else {
-                Some(branch_str)
-            };
-
-            let sid = extract_str(&row[0]);
-            let name = self.get_name(&sid).unwrap_or(None);
-            let parent_session_id = self.get_parent(&sid).unwrap_or(None);
-
-            sessions.push(SessionMetadata {
-                id: sid,
-                created_at: extract_str(&row[1]),
-                last_active: extract_str(&row[2]),
-                working_directory: extract_str(&row[3]),
-                git_branch,
-                model: extract_str(&row[5]),
-                message_count: extract_i64(&row[6]) as u64,
-                total_tokens: extract_i64(&row[7]) as u64,
-                total_cost: extract_f64(&row[8]),
-                schema_version: extract_i64(&row[9]) as u32,
-                name,
-                parent_session_id,
-            });
-        }
-
-        Ok(sessions)
-    }
-
-    /// Get a session by ID.
-    pub fn get_session(&self, session_id: &str) -> Result<SessionMetadata, SessionError> {
-        // Exact match first (full UUID path).
-        let mut params = BTreeMap::new();
-        params.insert("sid".to_string(), DataValue::from(session_id));
-
-        let result = self
-            .db
-            .run_script(
-                "?[id, created_at, last_active, working_directory, git_branch,
-                  model, message_count, total_tokens, total_cost, schema_version] :=
-                    *sessions{id, created_at, last_active, working_directory, git_branch,
-                              model, message_count, total_tokens, total_cost, schema_version},
-                    id = $sid",
-                params,
-                ScriptMutability::Immutable,
-            )
-            .map_err(db_err)?;
-
-        // If no exact match and the caller gave a short prefix, scan for a unique prefix match.
-        let result = if result.rows.is_empty() && session_id.len() < 36 {
-            let prefix = session_id.to_string();
-            let all = self
-                .db
-                .run_script(
-                    "?[id, created_at, last_active, working_directory, git_branch,
-                      model, message_count, total_tokens, total_cost, schema_version] :=
-                        *sessions{id, created_at, last_active, working_directory, git_branch,
-                                  model, message_count, total_tokens, total_cost, schema_version}",
-                    BTreeMap::new(),
-                    ScriptMutability::Immutable,
-                )
-                .map_err(db_err)?;
-
-            let matches: Vec<_> = all
-                .rows
-                .into_iter()
-                .filter(|row| extract_str(&row[0]).starts_with(&prefix))
-                .collect();
-
-            match matches.len() {
-                0 => {
-                    return Err(SessionError::NotFound(format!(
-                        "session '{session_id}' not found"
-                    )));
-                }
-                1 => cozo::NamedRows {
-                    rows: matches,
-                    headers: all.headers,
-                    ..Default::default()
-                },
-                n => {
-                    return Err(SessionError::NotFound(format!(
-                        "ambiguous session prefix '{session_id}' matches {n} sessions — use more characters"
-                    )));
-                }
-            }
-        } else {
-            result
-        };
-
-        if result.rows.is_empty() {
-            return Err(SessionError::NotFound(format!(
-                "session '{session_id}' not found"
-            )));
-        }
-
-        let row = &result.rows[0];
-        let branch_str = extract_str(&row[4]);
-        let git_branch = if branch_str.is_empty() {
-            None
-        } else {
-            Some(branch_str)
-        };
-
-        let sid = extract_str(&row[0]);
-        let name = self.get_name(&sid).unwrap_or(None);
-        let parent_session_id = self.get_parent(&sid).unwrap_or(None);
-
-        Ok(SessionMetadata {
-            id: sid,
-            created_at: extract_str(&row[1]),
-            last_active: extract_str(&row[2]),
-            working_directory: extract_str(&row[3]),
-            git_branch,
-            model: extract_str(&row[5]),
-            message_count: extract_i64(&row[6]) as u64,
-            total_tokens: extract_i64(&row[7]) as u64,
-            total_cost: extract_f64(&row[8]),
-            schema_version: extract_i64(&row[9]) as u32,
-            name,
-            parent_session_id,
-        })
-    }
-
-    /// Load all messages for a session, ordered by index.
-    pub fn load_messages(&self, session_id: &str) -> Result<Vec<String>, SessionError> {
-        let session = match self.get_session(session_id) {
-            Ok(session) => session,
-            Err(SessionError::NotFound(_)) => return Ok(Vec::new()),
-            Err(error) => return Err(error),
-        };
-        let mut params = BTreeMap::new();
-        params.insert("sid".to_string(), DataValue::from(session_id));
-        params.insert(
-            "message_count".to_string(),
-            DataValue::from(session.message_count as i64),
-        );
-
-        let result = self
-            .db
-            .run_script(
-                "?[message_index, content] :=
-                    *messages{session_id, message_index, content},
-                    session_id = $sid,
-                    message_index < $message_count
-                :sort message_index",
-                params,
-                ScriptMutability::Immutable,
-            )
-            .map_err(db_err)?;
-
-        let mut messages = Vec::new();
-        for row in &result.rows {
-            messages.push(extract_str(&row[1]));
-        }
-
-        Ok(messages)
-    }
-
-    fn delete_messages_from(&self, session_id: &str, start: u64) -> Result<(), SessionError> {
-        let mut params = BTreeMap::new();
-        params.insert("sid".to_string(), DataValue::from(session_id));
-        params.insert("start".to_string(), DataValue::from(start as i64));
-
-        self.db
-            .run_script(
-                "?[session_id, message_index] :=
-                    *messages{session_id, message_index},
-                    session_id = $sid,
-                    message_index >= $start
-                 :rm messages {session_id, message_index}",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
-
-        Ok(())
-    }
-
-    fn set_message_count(&self, session_id: &str, message_count: u64) -> Result<(), SessionError> {
-        let session = self.get_session(session_id)?;
-        let now = Utc::now().to_rfc3339();
-
-        let mut params = BTreeMap::new();
-        params.insert("id".to_string(), DataValue::from(session_id));
-        params.insert(
-            "created_at".to_string(),
-            DataValue::from(session.created_at),
-        );
-        params.insert("last_active".to_string(), DataValue::from(now));
-        params.insert(
-            "working_directory".to_string(),
-            DataValue::from(session.working_directory),
-        );
-        params.insert(
-            "git_branch".to_string(),
-            DataValue::from(session.git_branch.unwrap_or_default()),
-        );
-        params.insert("model".to_string(), DataValue::from(session.model));
-        params.insert(
-            "message_count".to_string(),
-            DataValue::from(message_count as i64),
-        );
-        params.insert(
-            "total_tokens".to_string(),
-            DataValue::from(session.total_tokens as i64),
-        );
-        params.insert(
-            "total_cost".to_string(),
-            DataValue::from(session.total_cost),
-        );
-        params.insert(
-            "schema_version".to_string(),
-            DataValue::from(session.schema_version as i64),
-        );
-
-        self.db
-            .run_script(
-                "?[id, created_at, last_active, working_directory, git_branch,
-                  model, message_count, total_tokens, total_cost, schema_version] <- [[
-                    $id, $created_at, $last_active, $working_directory, $git_branch,
-                    $model, $message_count, $total_tokens, $total_cost, $schema_version
-                ]]
-                :put sessions {
-                    id => created_at, last_active, working_directory, git_branch,
-                    model, message_count, total_tokens, total_cost, schema_version
-                }",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
-
-        Ok(())
-    }
-
-    /// Delete a session and all its messages and tags.
-    pub fn delete_session(&self, session_id: &str) -> Result<(), SessionError> {
-        let mut params = BTreeMap::new();
-        params.insert("sid".to_string(), DataValue::from(session_id));
-
-        // Delete messages for this session.
-        self.db
-            .run_script(
-                "?[session_id, message_index] :=
-                    *messages{session_id, message_index},
-                    session_id = $sid
-                 :rm messages {session_id, message_index}",
-                params.clone(),
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
-
-        // Delete tags for this session.
-        self.db
-            .run_script(
-                "?[session_id, tag] :=
-                    *session_tags{session_id, tag},
-                    session_id = $sid
-                 :rm session_tags {session_id, tag}",
-                params.clone(),
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
-
-        // Delete the session itself.
-        self.db
-            .run_script(
-                "?[id] := id = $sid
-                 :rm sessions {id}",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
-
-        Ok(())
-    }
-
-    // ── Name operations ────────────────────────────────────────
-
-    /// Set (or overwrite) the human-readable name for a session.
-    pub fn set_name(&self, session_id: &str, name: &str) -> Result<(), SessionError> {
-        let mut params = BTreeMap::new();
-        params.insert("session_id".to_string(), DataValue::from(session_id));
-        params.insert("name".to_string(), DataValue::from(name));
-
-        self.db
-            .run_script(
-                "?[session_id, name] <- [[$session_id, $name]]
-                 :put session_names {session_id => name}",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
-
-        Ok(())
-    }
-
-    /// Get the name for a session, if any.
-    pub fn get_name(&self, session_id: &str) -> Result<Option<String>, SessionError> {
-        let mut params = BTreeMap::new();
-        params.insert("sid".to_string(), DataValue::from(session_id));
-
-        let result = self
-            .db
-            .run_script(
-                "?[name] := *session_names{session_id, name}, session_id = $sid",
-                params,
-                ScriptMutability::Immutable,
-            )
-            .map_err(db_err)?;
-
-        if result.rows.is_empty() {
-            Ok(None)
-        } else {
-            let name = extract_str(&result.rows[0][0]);
-            if name.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(name))
-            }
-        }
-    }
-
-    /// Find all sessions whose name matches the given prefix.
-    pub fn find_sessions_by_name_prefix(
-        &self,
-        prefix: &str,
-    ) -> Result<Vec<(String, String)>, SessionError> {
-        let result = self
-            .db
-            .run_script(
-                "?[session_id, name] := *session_names{session_id, name}",
-                Default::default(),
-                ScriptMutability::Immutable,
-            )
-            .map_err(db_err)?;
-
-        let mut matches = Vec::new();
-        for row in &result.rows {
-            let name = extract_str(&row[1]);
-            if name.starts_with(prefix) {
-                matches.push((extract_str(&row[0]), name));
-            }
-        }
-
-        Ok(matches)
-    }
-
-    // ── Parent operations ────────────────────────────────────────
-
-    /// Set the parent session ID (fork lineage).
-    pub fn set_parent(&self, session_id: &str, parent_id: &str) -> Result<(), SessionError> {
-        let mut params = BTreeMap::new();
-        params.insert("session_id".to_string(), DataValue::from(session_id));
-        params.insert("parent_session_id".to_string(), DataValue::from(parent_id));
-
-        self.db
-            .run_script(
-                "?[session_id, parent_session_id] <- [[$session_id, $parent_session_id]]
-                 :put session_parents {session_id => parent_session_id}",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
-
-        Ok(())
-    }
-
-    /// Get the parent session ID, if any.
-    pub fn get_parent(&self, session_id: &str) -> Result<Option<String>, SessionError> {
-        let mut params = BTreeMap::new();
-        params.insert("sid".to_string(), DataValue::from(session_id));
-
-        let result = self
-            .db
-            .run_script(
-                "?[parent_session_id] := *session_parents{session_id, parent_session_id}, session_id = $sid",
-                params,
-                ScriptMutability::Immutable,
-            )
-            .map_err(db_err)?;
-
-        if result.rows.is_empty() {
-            Ok(None)
-        } else {
-            let pid = extract_str(&result.rows[0][0]);
-            if pid.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(pid))
-            }
-        }
-    }
-
-    // ── Tag operations ────────────────────────────────────────
-
-    /// Add a tag to a session. Idempotent (duplicate puts are no-ops).
-    pub fn put_tag(&self, session_id: &str, tag: &str) -> Result<(), SessionError> {
-        let mut params = BTreeMap::new();
-        params.insert("session_id".to_string(), DataValue::from(session_id));
-        params.insert("tag".to_string(), DataValue::from(tag));
-
-        self.db
-            .run_script(
-                "?[session_id, tag] <- [[$session_id, $tag]]
-                 :put session_tags {session_id, tag}",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
-
-        Ok(())
-    }
-
-    /// Remove a tag from a session.
-    pub fn delete_tag(&self, session_id: &str, tag: &str) -> Result<(), SessionError> {
-        let mut params = BTreeMap::new();
-        params.insert("session_id".to_string(), DataValue::from(session_id));
-        params.insert("tag".to_string(), DataValue::from(tag));
-
-        self.db
-            .run_script(
-                "?[session_id, tag] <- [[$session_id, $tag]]
-                 :rm session_tags {session_id, tag}",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
-
-        Ok(())
-    }
-
-    /// List all tags for a session.
-    pub fn list_tags(&self, session_id: &str) -> Result<Vec<String>, SessionError> {
-        let mut params = BTreeMap::new();
-        params.insert("sid".to_string(), DataValue::from(session_id));
-
-        let result = self
-            .db
-            .run_script(
-                "?[tag] :=
-                    *session_tags{session_id, tag},
-                    session_id = $sid
-                 :sort tag",
-                params,
-                ScriptMutability::Immutable,
-            )
-            .map_err(db_err)?;
-
-        let mut tags = Vec::new();
-        for row in &result.rows {
-            tags.push(extract_str(&row[0]));
-        }
-
-        Ok(tags)
-    }
-
-    /// Check that WAL mode is active (CozoDB uses sqlite backend with WAL).
-    /// With CozoDB sqlite backend, WAL is always used, so this returns true.
-    pub fn verify_wal_mode(&self) -> Result<bool, SessionError> {
-        Ok(true)
+    #[cfg(test)]
+    pub(crate) fn list_query_count(&self) -> usize {
+        self.list_query_count
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
-/// Default session database path.
 pub fn default_db_path() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from(".local/share"))
@@ -1025,154 +165,15 @@ pub fn default_db_path() -> PathBuf {
         .join("sessions.db")
 }
 
+#[path = "storage_listing.rs"]
+mod storage_listing;
+#[path = "storage_messages.rs"]
+mod storage_messages;
+#[path = "storage_relations.rs"]
+mod storage_relations;
+#[path = "storage_session_ops.rs"]
+mod storage_session_ops;
+
 #[cfg(test)]
-mod truncate_tests {
-    use super::*;
-
-    fn temp_store() -> (tempfile::TempDir, SessionStore) {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("truncate-test.db");
-        let store = SessionStore::open(&path).expect("open store");
-        (dir, store)
-    }
-
-    #[test]
-    fn truncate_messages_after_keeps_prefix_only() {
-        let (_dir, store) = temp_store();
-        let meta = store
-            .create_session("/tmp/truncate", None, "test-model")
-            .expect("create session");
-
-        for i in 0..5u64 {
-            store
-                .save_message(&meta.id, i, &format!(r#"{{"idx":{i}}}"#))
-                .expect("save");
-        }
-
-        // Sanity: 5 messages written.
-        let before = store.load_messages(&meta.id).expect("load before");
-        assert_eq!(before.len(), 5, "expected 5 messages before truncate");
-
-        // Truncate: keep indices 0..=2, drop 3 and 4.
-        store
-            .truncate_messages_after(&meta.id, 2)
-            .expect("truncate");
-
-        let after = store.load_messages(&meta.id).expect("load after");
-        assert_eq!(
-            after.len(),
-            3,
-            "expected 3 messages kept (indices 0, 1, 2); got {}",
-            after.len()
-        );
-        assert!(after[0].contains("\"idx\":0"));
-        assert!(after[1].contains("\"idx\":1"));
-        assert!(after[2].contains("\"idx\":2"));
-    }
-
-    #[test]
-    fn truncate_messages_after_is_idempotent() {
-        let (_dir, store) = temp_store();
-        let meta = store
-            .create_session("/tmp/idemp", None, "test-model")
-            .expect("create session");
-        for i in 0..3u64 {
-            store
-                .save_message(&meta.id, i, &format!("m-{i}"))
-                .expect("save");
-        }
-        store
-            .truncate_messages_after(&meta.id, 0)
-            .expect("truncate");
-        // Second call on an already-truncated session is a no-op.
-        store
-            .truncate_messages_after(&meta.id, 0)
-            .expect("truncate 2");
-        let after = store.load_messages(&meta.id).expect("load");
-        assert_eq!(after.len(), 1, "only index 0 should remain");
-    }
-
-    #[test]
-    fn replace_messages_shortens_and_updates_logical_count() {
-        let (_dir, store) = temp_store();
-        let meta = store
-            .create_session("/tmp/replace", None, "test-model")
-            .expect("create session");
-        for i in 0..20u64 {
-            store
-                .save_message(&meta.id, i, &format!("old-{i}"))
-                .unwrap();
-        }
-
-        let replacement: Vec<String> = (0..5).map(|i| format!("new-{i}")).collect();
-        store
-            .replace_messages(&meta.id, &replacement)
-            .expect("replace messages");
-
-        assert_eq!(store.load_messages(&meta.id).unwrap(), replacement);
-        assert_eq!(store.get_session(&meta.id).unwrap().message_count, 5);
-    }
-
-    #[test]
-    fn replace_messages_rejects_empty_and_delete_all_is_explicit() {
-        let (_dir, store) = temp_store();
-        let meta = store
-            .create_session("/tmp/empty", None, "test-model")
-            .expect("create session");
-        store.save_message(&meta.id, 0, "one").unwrap();
-
-        let err = store.replace_messages(&meta.id, &[]).unwrap_err();
-        assert!(matches!(err, SessionError::EmptyReplaceRefused));
-        assert_eq!(store.load_messages(&meta.id).unwrap(), vec!["one"]);
-
-        store.delete_all_messages(&meta.id).expect("delete all");
-        assert!(store.load_messages(&meta.id).unwrap().is_empty());
-        assert_eq!(store.get_session(&meta.id).unwrap().message_count, 0);
-    }
-
-    #[test]
-    fn load_messages_clamps_physical_rows_above_logical_count() {
-        let (_dir, store) = temp_store();
-        let meta = store
-            .create_session("/tmp/clamp", None, "test-model")
-            .expect("create session");
-        for i in 0..5u64 {
-            store.save_message(&meta.id, i, &format!("m-{i}")).unwrap();
-        }
-        store.set_message_count(&meta.id, 2).unwrap();
-
-        assert_eq!(store.load_messages(&meta.id).unwrap(), vec!["m-0", "m-1"]);
-    }
-
-    #[test]
-    fn load_messages_on_missing_session_returns_empty() {
-        let (_dir, store) = temp_store();
-
-        let messages = store
-            .load_messages("00000000-0000-0000-0000-000000000000")
-            .expect("missing session load should be tolerated");
-
-        assert!(messages.is_empty());
-    }
-
-    #[test]
-    fn post_resume_replacement_does_not_resurrect_stale_tail() {
-        let (_dir, store) = temp_store();
-        let meta = store
-            .create_session("/tmp/resume-tail", None, "test-model")
-            .expect("create session");
-        for i in 0..10u64 {
-            store
-                .save_message(&meta.id, i, &format!("old-{i}"))
-                .unwrap();
-        }
-        let compacted: Vec<String> = (0..4).map(|i| format!("compact-{i}")).collect();
-        store.replace_messages(&meta.id, &compacted).unwrap();
-
-        let resumed = store.load_messages(&meta.id).unwrap();
-        store.replace_messages(&meta.id, &resumed).unwrap();
-
-        assert_eq!(store.load_messages(&meta.id).unwrap(), compacted);
-        assert_eq!(store.get_session(&meta.id).unwrap().message_count, 4);
-    }
-}
+#[path = "storage_atomicity_tests.rs"]
+mod storage_atomicity_tests;

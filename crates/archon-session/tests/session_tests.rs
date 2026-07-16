@@ -113,6 +113,34 @@ fn get_nonexistent_session() {
 }
 
 #[test]
+fn get_session_resolves_unique_short_id_prefix() {
+    let (dir, store) = temp_db();
+    let meta = store.create_session("/tmp", None, "m").expect("create");
+
+    let resolved = store.get_session(&meta.id[..8]).expect("resolve prefix");
+    assert_eq!(resolved.id, meta.id);
+
+    cleanup(&dir);
+}
+
+#[test]
+fn get_session_rejects_ambiguous_short_id_prefix() {
+    let (dir, store) = temp_db();
+    store
+        .register_session("shared-prefix-first", "/tmp", None, "m")
+        .expect("create first");
+    store
+        .register_session("shared-prefix-second", "/tmp", None, "m")
+        .expect("create second");
+
+    let error = store.get_session("shared-prefix").unwrap_err();
+    assert!(error.to_string().contains("ambiguous session prefix"));
+    assert!(error.to_string().contains("matches 2 sessions"));
+
+    cleanup(&dir);
+}
+
+#[test]
 fn update_usage() {
     let (dir, store) = temp_db();
     let meta = store.create_session("/tmp", None, "m").expect("create");
