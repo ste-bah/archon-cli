@@ -14,6 +14,7 @@ use async_trait::async_trait;
 use cozo::DbInstance;
 use tokio::sync::mpsc::Receiver;
 
+use super::learning_store;
 use super::provider_event_record::provider_event_record;
 use super::provider_limit_windows;
 
@@ -29,10 +30,8 @@ pub(crate) struct ProviderRuntimeEventRecorder {
 
 impl ProviderRuntimeEventRecorder {
     pub(crate) fn default_learning_store() -> Self {
-        match open_learning_db() {
-            Ok(db) => Self {
-                db: Some(Arc::new(db)),
-            },
+        match learning_store::acquire_default() {
+            Ok(db) => Self { db: Some(db) },
             Err(error) => {
                 tracing::warn!(%error, "provider runtime event store unavailable");
                 Self { db: None }
@@ -398,17 +397,6 @@ fn runtime_field(runtime: Option<&serde_json::Value>, field: &str) -> Option<Str
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
-}
-
-fn open_learning_db() -> Result<DbInstance> {
-    let path = crate::command::store_paths::learning_db_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let path_str = path.to_string_lossy().to_string();
-    let db = archon_learning::cozo_guard::open_sqlite_guarded(&path_str, "open learning db")?;
-    archon_learning::schema::ensure_learning_schema(&db)?;
-    Ok(db)
 }
 
 fn base_event(

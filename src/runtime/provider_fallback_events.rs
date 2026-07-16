@@ -1,10 +1,9 @@
 //! Persist explicit provider fallback decisions.
 
-use anyhow::Result;
+use super::learning_store;
 use archon_llm::runtime::{
     ProviderRuntimeEvent, ProviderRuntimeEventType, ProviderRuntimeSeverity,
 };
-use cozo::DbInstance;
 
 pub(crate) fn record_provider_fallback_selected(
     provider_id: &str,
@@ -48,8 +47,17 @@ pub(crate) fn record_provider_construction_fallback_denied(
     reason_code: &str,
     metadata: serde_json::Value,
 ) {
-    let Ok(db) = open_learning_db() else {
-        return;
+    let db = match learning_store::acquire_default() {
+        Ok(db) => db,
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                provider = target_provider,
+                event_action = "construction_fallback_denied",
+                "provider fallback event persistence unavailable"
+            );
+            return;
+        }
     };
     let event = ProviderRuntimeEvent::new(
         target_provider,
@@ -76,8 +84,17 @@ fn record_provider_fallback_decision(
     reason_code: &str,
     metadata: serde_json::Value,
 ) {
-    let Ok(db) = open_learning_db() else {
-        return;
+    let db = match learning_store::acquire_default() {
+        Ok(db) => db,
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                provider = provider_id,
+                event_action = ?event_type,
+                "provider fallback event persistence unavailable"
+            );
+            return;
+        }
     };
     let event = ProviderRuntimeEvent::new(provider_id, to_runtime_mode, event_type, severity)
         .with_reason(reason_code)
@@ -88,17 +105,6 @@ fn record_provider_fallback_decision(
     {
         tracing::warn!(%error, provider_id, "provider fallback event persistence failed");
     }
-}
-
-fn open_learning_db() -> Result<DbInstance> {
-    let path = crate::command::store_paths::learning_db_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let path_str = path.to_string_lossy().to_string();
-    let db = archon_learning::cozo_guard::open_sqlite_guarded(&path_str, "open learning db")?;
-    archon_learning::schema::ensure_learning_schema(&db)?;
-    Ok(db)
 }
 
 #[cfg(test)]

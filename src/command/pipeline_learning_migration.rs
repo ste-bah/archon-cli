@@ -395,6 +395,9 @@ mod tests {
 
     #[test]
     fn migrates_legacy_rocksdb_rows_into_sqlite_learning_store_once() {
+        let _env_lock = crate::command::store_paths::LEARNING_DB_ENV_LOCK
+            .lock()
+            .expect("learning DB environment lock");
         let temp = tempfile::tempdir().expect("tempdir");
         let cwd = temp.path();
         let source_path = legacy_pipeline_learning_path(cwd);

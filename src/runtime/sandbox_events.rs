@@ -1,7 +1,7 @@
 //! Sandbox audit-event bridge for the governed learning Cozo store.
 
+use crate::runtime::learning_store;
 use anyhow::Result;
-use cozo::DbInstance;
 
 pub(crate) fn record_sandbox_cli_event(
     config: &archon_core::sandbox::SandboxConfig,
@@ -10,9 +10,7 @@ pub(crate) fn record_sandbox_cli_event(
     reason_code: &str,
 ) -> Result<()> {
     let event = build_sandbox_cli_event(config, backend_override, decision, reason_code)?;
-    let db_path = learning_db_path()?;
-    let db = open_learning_db(&db_path)?;
-    archon_learning::schema::ensure_learning_schema(&db)?;
+    let db = learning_store::acquire_default()?;
     archon_learning::sandbox_runtime_events::insert_sandbox_runtime_event(&db, &event)
 }
 
@@ -85,18 +83,6 @@ fn network_mode(
         archon_core::sandbox::SandboxBackendKind::Docker => Some(config.docker.network.clone()),
         _ => None,
     }
-}
-
-fn learning_db_path() -> Result<std::path::PathBuf> {
-    Ok(crate::command::store_paths::learning_db_path())
-}
-
-fn open_learning_db(path: &std::path::Path) -> Result<DbInstance> {
-    let path_str = path.to_string_lossy().to_string();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    archon_learning::cozo_guard::open_sqlite_guarded(&path_str, "open learning db")
 }
 
 #[cfg(test)]

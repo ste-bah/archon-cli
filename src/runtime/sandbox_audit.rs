@@ -4,6 +4,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use crate::runtime::learning_store;
 use archon_permissions::sandbox::{SandboxBackend, SandboxCommandRequest, SandboxCommandResult};
 use cozo::DbInstance;
 
@@ -36,13 +37,27 @@ pub(crate) fn audit_sandbox_backend(
     run_id: impl Into<String>,
     agent_type: impl Into<String>,
 ) -> Arc<dyn SandboxBackend> {
+    let run_id = run_id.into();
+    let agent_type = agent_type.into();
+    let db = match learning_store::acquire_default() {
+        Ok(db) => Some(db),
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                %run_id,
+                %agent_type,
+                "sandbox audit persistence unavailable"
+            );
+            None
+        }
+    };
     Arc::new(AuditedSandboxBackend::new(
         inner,
         config.sandbox.clone(),
         config.clone(),
-        run_id.into(),
-        agent_type.into(),
-        open_learning_db().ok().map(Arc::new),
+        run_id,
+        agent_type,
+        db,
     ))
 }
 
@@ -233,17 +248,6 @@ impl SandboxBackend for AuditedSandboxBackend {
             result
         })
     }
-}
-
-fn open_learning_db() -> anyhow::Result<DbInstance> {
-    let path = crate::command::store_paths::learning_db_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let path_str = path.to_string_lossy().to_string();
-    let db = archon_learning::cozo_guard::open_sqlite_guarded(&path_str, "open learning db")?;
-    archon_learning::schema::ensure_learning_schema(&db)?;
-    Ok(db)
 }
 
 fn sandbox_profile_id(config: &archon_core::sandbox::SandboxConfig, backend_kind: &str) -> String {

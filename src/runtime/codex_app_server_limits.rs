@@ -2,31 +2,57 @@
 
 use std::collections::HashSet;
 
+use super::learning_store;
 use archon_learning::provider_rate_limits::ProviderRateLimitWindowRecord;
 use chrono::{DateTime, TimeZone, Utc};
-use cozo::DbInstance;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 const PROVIDER_ID: &str = "openai-codex";
 const WINDOW_KEYS: [&str; 2] = ["primary", "secondary"];
 
-pub(crate) fn record_rate_limits(params: &Value, model_id: Option<&str>) {
-    let observed_at = Utc::now();
-    let windows = build_rate_limit_windows(params, model_id, observed_at);
+pub(crate) async fn record_rate_limits(params: &Value, model_id: Option<&str>) {
+    let result = record_rate_limits_with(
+        params.clone(),
+        model_id.map(str::to_owned),
+        |params, model_id| record_rate_limits_blocking(&params, model_id.as_deref()),
+    )
+    .await;
+    if let Err(error) = result {
+        tracing::warn!(%error, provider = PROVIDER_ID, "Codex app-server rate limit recorder task failed");
+    }
+}
+
+async fn record_rate_limits_with(
+    params: Value,
+    model_id: Option<String>,
+    record: impl FnOnce(Value, Option<String>) + Send + 'static,
+) -> Result<(), tokio::task::JoinError> {
+    tokio::task::spawn_blocking(move || record(params, model_id)).await
+}
+
+fn record_rate_limits_blocking(params: &Value, model_id: Option<&str>) {
+    if let Err(error) =
+        record_rate_limits_with_store(params, model_id, learning_store::acquire_default)
+    {
+        tracing::warn!(%error, provider = PROVIDER_ID, "Codex app-server rate limit persistence failed");
+    }
+}
+
+fn record_rate_limits_with_store(
+    params: &Value,
+    model_id: Option<&str>,
+    acquire_store: impl FnOnce() -> anyhow::Result<std::sync::Arc<cozo::DbInstance>>,
+) -> anyhow::Result<()> {
+    let windows = build_rate_limit_windows(params, model_id, Utc::now());
     if windows.is_empty() {
-        return;
+        return Ok(());
     }
-    let Ok(db) = open_learning_db() else {
-        return;
-    };
+    let db = acquire_store()?;
     for window in windows {
-        if let Err(error) =
-            archon_learning::provider_rate_limits::insert_provider_rate_limit_window(&db, &window)
-        {
-            tracing::warn!(%error, provider = PROVIDER_ID, "Codex app-server rate limit persistence failed");
-        }
+        archon_learning::provider_rate_limits::insert_provider_rate_limit_window(&db, &window)?;
     }
+    Ok(())
 }
 
 fn build_rate_limit_windows(
@@ -231,20 +257,115 @@ fn read_number(value: &Value, key: &str) -> Option<f64> {
     value.get(key).and_then(Value::as_f64)
 }
 
-fn open_learning_db() -> anyhow::Result<DbInstance> {
-    let path = crate::command::store_paths::learning_db_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let path_str = path.to_string_lossy().to_string();
-    let db = archon_learning::cozo_guard::open_sqlite_guarded(&path_str, "open learning db")?;
-    archon_learning::schema::ensure_learning_schema(&db)?;
-    Ok(db)
-}
-
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
+
+    #[test]
+    fn repeated_recorder_events_share_one_cached_open_and_schema_ensure() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("learning-state.db");
+        super::learning_store::clear_for_tests(&path);
+        let opens = Arc::new(AtomicUsize::new(0));
+        let ensures = Arc::new(AtomicUsize::new(0));
+        let first = serde_json::json!({
+            "limitId": "codex",
+            "limitName": "Codex",
+            "primary": {"usedPercent": 100.0, "resetsAt": 1770000000}
+        });
+        let second = serde_json::json!({
+            "limitId": "codex",
+            "limitName": "Codex",
+            "primary": {"usedPercent": 90.0, "resetsAt": 1770003600}
+        });
+
+        record_rate_limits_with_store(&first, Some("gpt-5.4"), {
+            let path = path.clone();
+            let opens = Arc::clone(&opens);
+            let ensures = Arc::clone(&ensures);
+            move || cached_test_store(&path, opens, ensures)
+        })?;
+        record_rate_limits_with_store(&second, Some("gpt-5.4"), {
+            let path = path.clone();
+            let opens = Arc::clone(&opens);
+            let ensures = Arc::clone(&ensures);
+            move || cached_test_store(&path, opens, ensures)
+        })?;
+
+        let db = super::learning_store::acquire_for_path(&path)?;
+        let windows = archon_learning::provider_rate_limits::list_provider_rate_limit_windows(
+            &db,
+            PROVIDER_ID,
+        )?;
+        assert_eq!(opens.load(Ordering::SeqCst), 1);
+        assert_eq!(ensures.load(Ordering::SeqCst), 1);
+        assert_eq!(windows.len(), 2, "read back both persisted recorder events");
+        assert_eq!(
+            windows[0].raw_redacted_json["source"],
+            "codex_app_server_notification"
+        );
+        super::learning_store::clear_for_tests(&path);
+        Ok(())
+    }
+
+    fn cached_test_store(
+        path: &Path,
+        opens: Arc<AtomicUsize>,
+        ensures: Arc<AtomicUsize>,
+    ) -> anyhow::Result<Arc<cozo::DbInstance>> {
+        super::learning_store::acquire_for_path_with(path, move |path| {
+            opens.fetch_add(1, Ordering::SeqCst);
+            let db = cozo::DbInstance::new("sqlite", path, "")
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            ensures.fetch_add(1, Ordering::SeqCst);
+            archon_learning::schema::ensure_learning_schema(&db)?;
+            Ok(db)
+        })
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn notification_first_acquisition_runs_off_the_async_executor() {
+        let notification = serde_json::json!({
+            "limitId": "codex",
+            "primary": {"usedPercent": 100.0, "resetsAt": 1770000000}
+        });
+        let executor_thread = std::thread::current().id();
+        let (thread_tx, thread_rx) = tokio::sync::oneshot::channel();
+
+        let work = tokio::spawn(record_rate_limits_with(
+            notification,
+            Some("gpt-5.4".to_string()),
+            move |_, _| {
+                thread_tx
+                    .send(std::thread::current().id())
+                    .expect("report recorder thread");
+            },
+        ));
+
+        let recorder_thread = thread_rx.await.expect("recorder runs");
+        work.await
+            .expect("recorder future joins")
+            .expect("blocking task joins");
+        assert_ne!(recorder_thread, executor_thread);
+    }
+
+    #[tokio::test]
+    async fn recorder_surfaces_a_panicking_worker_as_a_join_error() {
+        let result = record_rate_limits_with(Value::Null, None, |_, _| {
+            panic!("injected recorder panic");
+        })
+        .await;
+
+        assert!(
+            result
+                .expect_err("panic must surface through join")
+                .is_panic()
+        );
+    }
 
     #[test]
     fn extracts_nested_codex_rate_limit_windows() {

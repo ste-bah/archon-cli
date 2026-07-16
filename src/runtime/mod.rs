@@ -15,6 +15,7 @@ pub(crate) mod codex_model;
 pub(crate) mod codex_provider;
 pub(crate) mod codex_strategy;
 pub(crate) mod hooks;
+pub(crate) mod learning_store;
 pub(crate) mod llm;
 pub(crate) mod llm_non_anthropic;
 pub(crate) mod permission_events;

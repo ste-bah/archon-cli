@@ -391,6 +391,9 @@ mod tests {
 
     #[test]
     fn pipeline_learning_schema_defaults_to_project_learning_store() {
+        let _env_lock = crate::command::store_paths::LEARNING_DB_ENV_LOCK
+            .lock()
+            .expect("learning DB environment lock");
         let temp = tempfile::tempdir().expect("tempdir");
         let db = open_pipeline_learning_db(temp.path()).expect("pipeline db");
 

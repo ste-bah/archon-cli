@@ -25,6 +25,16 @@ pub fn open_sqlite_guarded(path: &str, context: &str) -> Result<DbInstance> {
     archon_cozo::open_sqlite_guarded(path, context, &config)
 }
 
+pub fn ensure_learning_schema_guarded(db: &DbInstance, path: &std::path::Path) -> Result<()> {
+    let config = archon_cozo::CozoGuardConfig::for_db_path(path);
+    archon_cozo::run_guarded(
+        "ensure governed learning schema",
+        ScriptMutability::Mutable,
+        &config,
+        || crate::schema::ensure_learning_schema(db),
+    )
+}
+
 pub async fn open_sqlite_guarded_async(path: &str, context: &str) -> Result<DbInstance> {
     let config = archon_cozo::CozoGuardConfig::for_interactive_db_path(path);
     archon_cozo::open_sqlite_guarded_async(path, context, &config).await

@@ -253,7 +253,15 @@ fn process_write_lock(path: Option<&Path>) -> Result<Arc<Mutex<()>>> {
 }
 
 fn normalized_lock_path(path: &Path) -> Result<PathBuf> {
-    let path = absolute_normalized_path(path)?;
+    canonical_resource_path(path)
+}
+
+/// Return a stable path key for a possibly absent resource.
+///
+/// The parent is created and canonicalized so relative paths, `.`/`..`, and
+/// symlinked parents resolve to one process-wide resource identity.
+pub fn canonical_resource_path(path: impl AsRef<Path>) -> Result<PathBuf> {
+    let path = absolute_normalized_path(path.as_ref())?;
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(parent)?;
     let parent = canonicalize_existing_path(parent)?;

@@ -1,5 +1,6 @@
 //! Cozo-backed provider auth profile selection.
 
+use super::learning_store;
 use anyhow::Result;
 use archon_learning::provider_auth_profiles::{
     ProviderAuthProfileRecord, list_provider_auth_profiles,
@@ -48,19 +49,33 @@ pub(crate) fn select_provider_auth_profile_from_db(
 }
 
 pub(crate) fn selected_provider_auth_profile_id(provider_id: &str) -> Option<String> {
-    let path = crate::command::store_paths::learning_db_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).ok()?;
-    }
-    let path_str = path.to_string_lossy().to_string();
-    let db =
-        archon_learning::cozo_guard::open_sqlite_guarded(&path_str, "open learning db").ok()?;
-    archon_learning::schema::ensure_learning_schema(&db).ok()?;
+    let db = match learning_store::acquire_default() {
+        Ok(db) => db,
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                provider = provider_id,
+                operation = "acquire_learning_store",
+                "provider auth profile selection unavailable"
+            );
+            return None;
+        }
+    };
     let allowed = default_auth_kinds(provider_id);
-    select_provider_auth_profile_from_db(&db, provider_id, &allowed, None)
-        .ok()?
-        .selected
-        .map(|selection| selection.profile.profile_id)
+    match select_provider_auth_profile_from_db(&db, provider_id, &allowed, None) {
+        Ok(report) => report
+            .selected
+            .map(|selection| selection.profile.profile_id),
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                provider = provider_id,
+                operation = "query_auth_profiles",
+                "provider auth profile selection unavailable"
+            );
+            None
+        }
+    }
 }
 
 pub(crate) fn default_auth_kinds(provider_id: &str) -> Vec<&'static str> {

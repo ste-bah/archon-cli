@@ -5,8 +5,8 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use super::interactive_learning_init::{
-    BlockingInitialization, SchemaInitialization, initialize_governed_schemas, initialize_schemas,
-    initialize_with,
+    BlockingInitialization, SchemaInitialization, initialize, initialize_governed_schemas,
+    initialize_schemas, initialize_with,
 };
 
 fn open_and_initialize(working_dir: std::path::PathBuf) -> Result<BlockingInitialization> {
@@ -57,6 +57,23 @@ async fn interactive_learning_initialization_keeps_current_thread_runtime_respon
     );
     assert!(databases.pipeline.is_some());
     assert!(databases.governed.is_some());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn interactive_learning_initialization_reuses_runtime_cache_handle() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let db_path = crate::command::store_paths::learning_db_path_for_dir(temp_dir.path());
+    crate::runtime::learning_store::clear_for_tests(&db_path);
+    let cached = crate::runtime::learning_store::acquire_for_dir(temp_dir.path())
+        .expect("cached learning store");
+
+    let databases = initialize(temp_dir.path()).await;
+
+    let pipeline = databases.pipeline.expect("pipeline schema available");
+    let governed = databases.governed.expect("governed schema available");
+    assert!(Arc::ptr_eq(&cached, &pipeline));
+    assert!(Arc::ptr_eq(&cached, &governed));
+    crate::runtime::learning_store::clear_for_tests(&db_path);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -132,6 +149,9 @@ async fn interactive_learning_partial_schema_failure_retains_the_healthy_role() 
 
 #[test]
 fn interactive_learning_schema_initialization_waits_for_held_sidecar_lock() {
+    let _learning_db_env_guard = crate::command::store_paths::LEARNING_DB_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let temp_dir = tempfile::tempdir().expect("temp dir");
     let db_path = crate::command::store_paths::learning_db_path_for_dir(temp_dir.path());
     let db = archon_learning::cozo_guard::open_sqlite_guarded(

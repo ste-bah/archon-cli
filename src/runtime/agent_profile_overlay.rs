@@ -1,5 +1,6 @@
 //! Runtime bridge from Cozo-backed profile versions into agent definitions.
 
+use crate::runtime::learning_store;
 use anyhow::Result;
 use cozo::DbInstance;
 
@@ -15,9 +16,7 @@ pub(crate) fn apply_active_profile_overlay_if_enabled(
         return Ok(None);
     }
 
-    let db_path = learning_db_path()?;
-    let db = open_learning_db(&db_path)?;
-    archon_learning::schema::ensure_learning_schema(&db)?;
+    let db = learning_store::acquire_default()?;
     hydrate_agent_meta_from_ledger(&db, agent)?;
     let Some(active) = archon_learning::agent_profile_versions::get_active_agent_profile_version(
         &db,
@@ -100,18 +99,6 @@ fn average(values: impl Iterator<Item = f64>) -> Option<f64> {
 
 fn bool_score(value: bool) -> f64 {
     if value { 1.0 } else { 0.0 }
-}
-
-fn learning_db_path() -> Result<std::path::PathBuf> {
-    Ok(crate::command::store_paths::learning_db_path())
-}
-
-fn open_learning_db(path: &std::path::Path) -> Result<DbInstance> {
-    let path_str = path.to_string_lossy().to_string();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    archon_learning::cozo_guard::open_sqlite_guarded(&path_str, "open learning db")
 }
 
 #[cfg(test)]

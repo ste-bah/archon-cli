@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use cozo::ScriptMutability;
 
 pub(super) struct InitializedDatabases {
@@ -69,22 +69,41 @@ where
 
 fn initialize_blocking(working_dir: PathBuf) -> Result<BlockingInitialization> {
     let db_path = crate::command::store_paths::learning_db_path_for_dir(&working_dir);
-    if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| {
-            format!("create interactive learning directory {}", parent.display())
-        })?;
-    }
-
-    let config = archon_cozo::CozoGuardConfig::for_interactive_db_path(&db_path);
-    let db = Arc::new(archon_cozo::open_sqlite_guarded(
-        &db_path.to_string_lossy(),
-        "open interactive learning db",
-        &config,
-    )?);
-    let schemas = initialize_schemas(&working_dir, db.as_ref());
+    let db = crate::runtime::learning_store::acquire_for_path_with(&db_path, |path| {
+        let config = archon_cozo::CozoGuardConfig::for_interactive_db_path(path);
+        let db = archon_cozo::open_sqlite_guarded(
+            &path.to_string_lossy(),
+            "open interactive learning db",
+            &config,
+        )?;
+        archon_learning::cozo_guard::ensure_learning_schema_guarded(&db, path)?;
+        Ok(db)
+    })?;
+    let schemas = SchemaInitialization {
+        pipeline: initialize_pipeline_schemas(&working_dir, db.as_ref()),
+        governed: true,
+    };
     Ok(BlockingInitialization { db, schemas })
 }
 
+fn initialize_pipeline_schemas(working_dir: &Path, db: &cozo::DbInstance) -> bool {
+    let db_path = crate::command::store_paths::learning_db_path_for_dir(working_dir);
+    let guard_config = archon_cozo::CozoGuardConfig::for_db_path(&db_path);
+    match archon_cozo::run_guarded(
+        "initialize interactive pipeline learning schemas",
+        ScriptMutability::Mutable,
+        &guard_config,
+        || initialize_pipeline_schemas_and_migrate(working_dir, &db_path, db),
+    ) {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!(error = %error, "Learning schema init failed; retrain may not work");
+            false
+        }
+    }
+}
+
+#[cfg(test)]
 pub(super) fn initialize_schemas(
     working_dir: &Path,
     db: &cozo::DbInstance,
@@ -107,6 +126,7 @@ pub(super) fn initialize_schemas(
     SchemaInitialization { pipeline, governed }
 }
 
+#[cfg(test)]
 pub(super) fn initialize_governed_schemas(
     db: &cozo::DbInstance,
     guard_config: &archon_cozo::CozoGuardConfig,

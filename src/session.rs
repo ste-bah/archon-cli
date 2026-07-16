@@ -87,28 +87,11 @@ fn session_sandbox_backend(
 }
 
 fn open_governed_learning_db(working_dir: &std::path::Path) -> Option<Arc<cozo::DbInstance>> {
-    let db_path = crate::command::store_paths::learning_db_path_for_dir(working_dir);
-    if let Some(parent) = db_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    match archon_learning::cozo_guard::open_sqlite_guarded(
-        db_path.to_string_lossy().as_ref(),
-        "open governed learning db",
-    ) {
-        Ok(db) => {
-            if let Err(e) = archon_learning::schema::ensure_learning_schema(&db) {
-                tracing::warn!(
-                    error = %e,
-                    "governed learning schema init failed; runtime evidence disabled"
-                );
-                None
-            } else {
-                Some(Arc::new(db))
-            }
-        }
-        Err(e) => {
+    match crate::runtime::learning_store::acquire_for_dir(working_dir) {
+        Ok(db) => Some(db),
+        Err(error) => {
             tracing::warn!(
-                error = %e,
+                %error,
                 "governed learning store unavailable; runtime evidence disabled"
             );
             None
@@ -435,7 +418,14 @@ pub(crate) async fn run_interactive_session(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Mutex, OnceLock};
+
     use super::*;
+
+    fn anthropic_model_env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn active_session_model_uses_configured_codex_default_when_claude_default_would_leak() {
@@ -468,8 +458,22 @@ mod tests {
 
     #[test]
     fn active_session_model_preserves_anthropic_default() {
+        let _env_lock = anthropic_model_env_lock()
+            .lock()
+            .expect("Anthropic model environment lock");
+        let previous = std::env::var_os("ANTHROPIC_MODEL");
+        unsafe {
+            std::env::remove_var("ANTHROPIC_MODEL");
+        }
         let config = archon_core::config::ArchonConfig::default();
+        let model = active_session_model(&config);
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var("ANTHROPIC_MODEL", value),
+                None => std::env::remove_var("ANTHROPIC_MODEL"),
+            }
+        }
 
-        assert_eq!(active_session_model(&config), config.api.default_model);
+        assert_eq!(model, config.api.default_model);
     }
 }
