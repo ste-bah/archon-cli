@@ -159,8 +159,12 @@ pub(super) async fn finish(
     }
     let auto_eval = archon_permissions::auto::AutoModeEvaluator::new(
         archon_permissions::auto::AutoModeConfig {
+            safe_commands: config.permissions.safe_commands.clone(),
+            risky_commands: config.permissions.risky_commands.clone(),
+            dangerous_commands: config.permissions.dangerous_commands.clone(),
+            allow_paths: config.permissions.allow_paths.clone(),
+            deny_paths: config.permissions.deny_paths.clone(),
             project_dir: Some(working_dir.clone()),
-            ..Default::default()
         },
     );
     agent.set_auto_evaluator(auto_eval);

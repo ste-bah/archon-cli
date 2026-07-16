@@ -41,6 +41,9 @@ pub(super) async fn prepare(
     registry.replace(Box::new(archon_tools::bash::BashTool {
         timeout_secs: config.tools.bash_timeout,
         max_output_bytes: config.tools.bash_max_output,
+        safe_commands: config.permissions.safe_commands.clone(),
+        risky_commands: config.permissions.risky_commands.clone(),
+        dangerous_commands: config.permissions.dangerous_commands.clone(),
     }));
     apply_tool_filters(&mut registry, resolved_flags);
 

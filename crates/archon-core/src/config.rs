@@ -644,7 +644,7 @@ pub struct ToolsConfig {
 impl Default for ToolsConfig {
     fn default() -> Self {
         Self {
-            bash_timeout: 86400,
+            bash_timeout: 600,
             bash_max_output: 102400,
             max_concurrency: 4,
         }

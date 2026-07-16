@@ -48,6 +48,9 @@ pub(super) async fn build_session_agent(
     registry.replace(Box::new(archon_tools::bash::BashTool {
         timeout_secs: config.tools.bash_timeout,
         max_output_bytes: config.tools.bash_max_output,
+        safe_commands: config.permissions.safe_commands.clone(),
+        risky_commands: config.permissions.risky_commands.clone(),
+        dangerous_commands: config.permissions.dangerous_commands.clone(),
     }));
     apply_tool_filters(&mut registry, resolved_flags);
 
@@ -181,8 +184,12 @@ pub(super) async fn build_session_agent(
     agent.set_hook_registry(Arc::clone(&hook_registry_arc));
     agent.set_auto_evaluator(archon_permissions::auto::AutoModeEvaluator::new(
         archon_permissions::auto::AutoModeConfig {
+            safe_commands: config.permissions.safe_commands.clone(),
+            risky_commands: config.permissions.risky_commands.clone(),
+            dangerous_commands: config.permissions.dangerous_commands.clone(),
+            allow_paths: config.permissions.allow_paths.clone(),
+            deny_paths: config.permissions.deny_paths.clone(),
             project_dir: Some(working_dir),
-            ..Default::default()
         },
     ));
     agent.install_subagent_executor();

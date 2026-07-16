@@ -305,15 +305,15 @@ Tool execution defaults.
 
 ```toml
 [tools]
-bash_timeout = 86400
+bash_timeout = 600
 bash_max_output = 102400
 max_concurrency = 4
 ```
 
 | Field | Default | What / Why |
 |---|---|---|
-| `bash_timeout` | `86400` (seconds, 24h) | Hard timeout for `Bash` tool invocations. The runtime has no smaller coded maximum, so Archon defaults to a practical one-day ceiling for long builds, indexing, and audits. Tools wrapping long ops should still prefer streaming via `Monitor` when progress visibility matters. |
-| `bash_max_output` | `102400` (bytes, ~100KB) | Maximum bytes of stdout captured per Bash call. Output beyond this is truncated. Raise if you're parsing large logs; lower to keep token spend down. |
+| `bash_timeout` | `600` (seconds, 10m) | Maximum timeout for `Bash` tool invocations. A shorter per-command `timeout` is honored; larger requests are clamped to this configured ceiling. Increase only for commands that legitimately need a longer hard limit. |
+| `bash_max_output` | `102400` (bytes, ~100KB) | Maximum combined bytes of stdout and stderr captured per Bash call. Output beyond this is truncated. Raise if you're parsing large logs; lower to keep token spend down. |
 | `max_concurrency` | `4` | Maximum concurrent tool invocations the parent agent runs in parallel via `join_all`. Higher = faster multi-tool turns, more memory pressure. WSL2 tolerates 2-4; native machines can go higher. |
 
 ### Subagent Turn Limits
