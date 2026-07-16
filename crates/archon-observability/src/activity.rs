@@ -4,7 +4,7 @@
 //! exact lifecycle order without scraping human-facing strings.
 
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -266,7 +266,7 @@ impl AgentActivitySink for InMemoryActivitySink {
 #[derive(Debug, Clone)]
 pub struct JsonlActivitySink {
     path: PathBuf,
-    writer_lock: Arc<Mutex<()>>,
+    writer: Arc<Mutex<Option<BufWriter<File>>>>,
 }
 
 impl JsonlActivitySink {
@@ -274,7 +274,7 @@ impl JsonlActivitySink {
     pub fn new(path: impl Into<PathBuf>) -> Self {
         Self {
             path: path.into(),
-            writer_lock: Arc::new(Mutex::new(())),
+            writer: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -286,7 +286,7 @@ impl JsonlActivitySink {
 
 impl AgentActivitySink for JsonlActivitySink {
     fn emit(&self, event: AgentActivityEvent) {
-        if let Err(error) = append_activity_event(&self.path, &self.writer_lock, event) {
+        if let Err(error) = append_activity_event(&self.path, &self.writer, event) {
             tracing::warn!(
                 error = %error,
                 path = %self.path.display(),
@@ -322,20 +322,41 @@ pub fn read_activity_jsonl(path: impl AsRef<Path>) -> anyhow::Result<Vec<AgentAc
 
 fn append_activity_event(
     path: &Path,
-    writer_lock: &Mutex<()>,
+    writer_state: &Mutex<Option<BufWriter<File>>>,
     event: AgentActivityEvent,
 ) -> anyhow::Result<()> {
-    let _guard = writer_lock
+    let mut writer = writer_state
         .lock()
         .expect("activity jsonl writer mutex poisoned");
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+    append_activity_event_with_writer(&mut writer, event, || {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        Ok(BufWriter::new(file))
+    })
+}
+
+fn append_activity_event_with_writer<W: Write>(
+    writer: &mut Option<W>,
+    event: AgentActivityEvent,
+    open: impl FnOnce() -> anyhow::Result<W>,
+) -> anyhow::Result<()> {
+    if writer.is_none() {
+        *writer = Some(open()?);
     }
-    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-    let redacted = redact_activity_event(event);
-    serde_json::to_writer(&mut file, &redacted)?;
-    file.write_all(b"\n")?;
-    Ok(())
+    let mut line = serde_json::to_vec(&redact_activity_event(event))?;
+    line.push(b'\n');
+    let result = (|| {
+        let writer = writer.as_mut().expect("activity writer initialized");
+        writer.write_all(&line)?;
+        writer.flush()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        *writer = None;
+    }
+    result
 }
 
 fn redact_activity_event(mut event: AgentActivityEvent) -> AgentActivityEvent {
@@ -427,6 +448,122 @@ mod tests {
         ));
 
         assert_eq!(sink.len(), 1);
+    }
+
+    #[test]
+    fn jsonl_writer_opens_once_across_multiple_events() {
+        use std::cell::Cell;
+        use std::io::Cursor;
+
+        let opens = Cell::new(0);
+        let mut writer: Option<Cursor<Vec<u8>>> = None;
+
+        for message in ["first", "second"] {
+            append_activity_event_with_writer(
+                &mut writer,
+                AgentActivityEvent::new(
+                    "session-1",
+                    AgentActivityKind::ToolCompleted,
+                    AgentActivityStatus::Completed,
+                    message,
+                ),
+                || {
+                    opens.set(opens.get() + 1);
+                    Ok(Cursor::new(Vec::new()))
+                },
+            )
+            .expect("append event");
+        }
+
+        assert_eq!(opens.get(), 1);
+        let output = String::from_utf8(writer.unwrap().into_inner()).expect("utf8 jsonl");
+        assert_eq!(output.lines().count(), 2);
+    }
+
+    #[test]
+    fn jsonl_writer_reopens_after_write_failure() {
+        struct TestWriter {
+            fail: bool,
+        }
+
+        impl Write for TestWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if self.fail {
+                    return Err(std::io::Error::other("synthetic write failure"));
+                }
+                Ok(bytes.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let mut opens = 0;
+        let mut writer = None;
+        let mut append = |message| {
+            append_activity_event_with_writer(
+                &mut writer,
+                AgentActivityEvent::new(
+                    "session-1",
+                    AgentActivityKind::ToolCompleted,
+                    AgentActivityStatus::Completed,
+                    message,
+                ),
+                || {
+                    opens += 1;
+                    Ok(TestWriter { fail: opens == 1 })
+                },
+            )
+        };
+
+        assert!(append("first").is_err());
+        append("second").expect("reopen after failure");
+        assert_eq!(opens, 2);
+    }
+
+    #[test]
+    fn jsonl_writer_reopens_after_flush_failure() {
+        struct TestWriter {
+            fail_flush: bool,
+        }
+
+        impl Write for TestWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                Ok(bytes.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                if self.fail_flush {
+                    return Err(std::io::Error::other("synthetic flush failure"));
+                }
+                Ok(())
+            }
+        }
+
+        let mut opens = 0;
+        let mut writer = None;
+        let mut append = |message| {
+            append_activity_event_with_writer(
+                &mut writer,
+                AgentActivityEvent::new(
+                    "session-1",
+                    AgentActivityKind::ToolCompleted,
+                    AgentActivityStatus::Completed,
+                    message,
+                ),
+                || {
+                    opens += 1;
+                    Ok(TestWriter {
+                        fail_flush: opens == 1,
+                    })
+                },
+            )
+        };
+
+        assert!(append("first").is_err());
+        append("second").expect("reopen after flush failure");
+        assert_eq!(opens, 2);
     }
 
     #[test]
