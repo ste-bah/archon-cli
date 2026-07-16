@@ -131,6 +131,54 @@ impl EmbeddingProvider for WrongDimensionEmbedder {
     }
 }
 
+struct ThreadRecordingEmbedder {
+    thread_ids: Mutex<Vec<std::thread::ThreadId>>,
+}
+
+impl EmbeddingProvider for ThreadRecordingEmbedder {
+    fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, MemoryError> {
+        self.thread_ids
+            .lock()
+            .unwrap()
+            .push(std::thread::current().id());
+        Ok(texts.iter().map(|_| vec![0.0; 8]).collect())
+    }
+
+    fn dimensions(&self) -> usize {
+        8
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn async_repository_indexing_runs_embedding_off_executor_thread() {
+    let db = test_db();
+    let mut indexer = mock_indexer(db);
+    indexer.ensure_schema().unwrap();
+    let embedder = Arc::new(ThreadRecordingEmbedder {
+        thread_ids: Mutex::new(Vec::new()),
+    });
+    indexer.embedder = embedder.clone();
+    let tmp = tempfile::tempdir().unwrap();
+    write_rust(&tmp.path().join("thread.rs"), "fn indexed() {}\n");
+    let executor_thread = std::thread::current().id();
+
+    indexer
+        .index_repository(
+            tmp.path(),
+            &crate::metadata::IndexConfig {
+                root_path: tmp.path().to_path_buf(),
+                include_patterns: Vec::new(),
+                exclude_patterns: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let thread_ids = embedder.thread_ids.lock().unwrap();
+    assert_eq!(thread_ids.len(), 1);
+    assert_ne!(thread_ids[0], executor_thread);
+}
+
 #[tokio::test]
 async fn unchanged_file_uses_keyed_file_state() {
     let db = test_db();

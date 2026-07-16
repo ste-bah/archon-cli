@@ -73,6 +73,7 @@ struct PendingFile {
 }
 
 /// Repository and single-file indexing: walk, chunk, embed, store in CozoDB HNSW.
+#[derive(Clone)]
 pub struct Indexer {
     db: DbInstance,
     embedder: Arc<dyn EmbeddingProvider>,
@@ -111,9 +112,14 @@ impl Indexer {
         self.file_store().ensure_schema()
     }
 
-    /// Index an entire repository directory tree.
+    /// Index an entire repository directory tree without blocking the async executor.
     pub async fn index_repository(&self, root: &Path, config: &IndexConfig) -> Result<IndexStats> {
-        self.index_repository_blocking(root, config)
+        let indexer = self.clone();
+        let root = root.to_path_buf();
+        let config = config.clone();
+        tokio::task::spawn_blocking(move || indexer.index_repository_blocking(&root, &config))
+            .await
+            .map_err(|error| anyhow::anyhow!("repository indexing task failed: {error}"))?
     }
 
     /// Synchronous repository indexing for callers that explicitly offload LEANN work.
