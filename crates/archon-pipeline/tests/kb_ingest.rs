@@ -379,6 +379,32 @@ mod ingest_tests {
     }
 
     #[tokio::test]
+    async fn binary_pdf_returns_read_error_instead_of_empty_success() {
+        let db = mem_db();
+        let ingester = test_ingester(db);
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("binary.pdf");
+        std::fs::write(&path, [0xff, 0xfe, 0xfd]).unwrap();
+
+        let error = ingester.ingest_pdf(&path, "test").await.unwrap_err();
+
+        assert!(error.to_string().contains("PDF text ingestion failed"));
+    }
+
+    #[tokio::test]
+    async fn url_ingest_returns_explicit_unsupported_error() {
+        let db = mem_db();
+        let ingester = test_ingester(db);
+
+        let error = ingester
+            .ingest_url("https://example.com/docs", "test")
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("URL ingestion is not supported"));
+    }
+
+    #[tokio::test]
     async fn empty_file_produces_no_nodes() {
         let db = mem_db();
         let ingester = test_ingester(db.clone());

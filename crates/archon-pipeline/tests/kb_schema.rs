@@ -342,11 +342,13 @@ async fn test_knowledge_base_api_surface() {
     let db = mem_db();
     let kb = KnowledgeBase::new(db).unwrap();
 
-    // All 9 methods should be callable and return Ok
-    let ingest_result = kb
-        .ingest(&IngestSource::Url("https://example.com".into()))
-        .await;
-    assert!(ingest_result.is_ok());
+    // All 9 methods should be callable and return Ok for supported inputs.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("api-surface.txt");
+    std::fs::write(&path, "API surface content.").unwrap();
+    let ingest_result = kb.ingest(&IngestSource::FilePath(path)).await.unwrap();
+    assert_eq!(ingest_result.nodes_created, 1);
+    assert_eq!(ingest_result.chunks_processed, 1);
 
     let compile_result = kb.compile().await;
     assert!(compile_result.is_ok());

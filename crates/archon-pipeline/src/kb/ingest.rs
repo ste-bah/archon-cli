@@ -69,12 +69,11 @@ impl Ingester {
         self.store_chunks(&chunks, &source, domain_tag).await
     }
 
-    /// Ingest a PDF file. Splits at page boundaries.
+    /// Ingest a `.pdf` path only when its contents are valid UTF-8 text.
+    /// Binary PDF extraction is not implemented and returns a read error.
     pub async fn ingest_pdf(&self, path: &Path, domain_tag: &str) -> Result<IngestResult> {
-        // PDF reading requires external tooling; for now extract as text if possible.
-        // Falls back to treating the file as text (will produce garbled output for
-        // binary PDFs, but won't crash).
-        let content = std::fs::read_to_string(path).unwrap_or_default();
+        let content = std::fs::read_to_string(path)
+            .map_err(|error| anyhow::anyhow!("PDF text ingestion failed: {error}"))?;
         if content.is_empty() {
             return Ok(IngestResult::default());
         }
@@ -85,12 +84,10 @@ impl Ingester {
         self.store_chunks(&chunks, &source, domain_tag).await
     }
 
-    /// Ingest from a URL: fetch HTML, convert to markdown, then process.
+    /// Return an explicit error because URL ingestion is not implemented.
     pub async fn ingest_url(&self, url: &str, domain_tag: &str) -> Result<IngestResult> {
-        // URL fetching is deferred to integration with archon-cli's WebFetch.
-        // For now, return empty result without error.
         let _ = (url, domain_tag);
-        Ok(IngestResult::default())
+        anyhow::bail!("URL ingestion is not supported")
     }
 
     /// Ingest a plain text file. Splits at blank-line paragraphs.
