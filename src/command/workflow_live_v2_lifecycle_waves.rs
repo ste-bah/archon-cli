@@ -11,6 +11,18 @@ impl LifecycleDriver {
         evidence: &mut LifecycleEvidence,
     ) -> archon_workflow::WorkflowResult<serde_json::Value> {
         let contract = self.contract();
+        let (reconciled_inventory, mut noop_reclassified_ids) =
+            workflow_live_v2_lifecycle_noop_routing::reclassify_inventory_contradicted_noops(
+                &contract,
+                &inventory,
+            );
+        inventory = reconciled_inventory;
+        if !noop_reclassified_ids.is_empty() {
+            evidence.implementation.push(serde_json::json!({
+                "kind": "noop-inventory-contradiction-reclassification",
+                "canonical_task_ids": noop_reclassified_ids,
+            }));
+        }
         let mut remaining_items = support::array(inventory.get("items"));
         let mut completed_ids = self.resume_completed_ids.clone();
         remaining_items.retain(|item| !support::item_is_completed(&contract, item, &completed_ids));
@@ -57,7 +69,7 @@ impl LifecycleDriver {
                 .filter(|item| support::work_type_for(item) == "verified_noop")
                 .cloned()
                 .collect();
-            let ready_implementation_items: Vec<serde_json::Value> = ready_items
+            let mut ready_implementation_items: Vec<serde_json::Value> = ready_items
                 .iter()
                 .filter(|item| support::work_type_for(item) == "implementation")
                 .cloned()
@@ -65,13 +77,16 @@ impl LifecycleDriver {
             let mut accepted_this_wave: std::collections::BTreeSet<String> = Default::default();
 
             if !ready_noop_items.is_empty() {
-                self.run_noop_proofs(
-                    &ready_noop_items,
-                    dependency_iteration,
-                    &mut accepted_this_wave,
-                    evidence,
-                )
-                .await?;
+                ready_implementation_items.extend(
+                    self.run_noop_proofs(
+                        &ready_noop_items,
+                        dependency_iteration,
+                        &mut accepted_this_wave,
+                        &mut noop_reclassified_ids,
+                        evidence,
+                    )
+                    .await?,
+                );
             }
 
             let current_implementation_wave_index = implementation_wave_index;
@@ -236,8 +251,9 @@ impl LifecycleDriver {
         ready_noop_items: &[serde_json::Value],
         dependency_iteration: usize,
         accepted_this_wave: &mut std::collections::BTreeSet<String>,
+        noop_reclassified_ids: &mut std::collections::BTreeSet<String>,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<()> {
+    ) -> archon_workflow::WorkflowResult<Vec<serde_json::Value>> {
         let contract = self.contract();
         let noop_options = |task: &str| {
             serde_json::json!({
@@ -328,24 +344,50 @@ impl LifecycleDriver {
             }
         }
         if !failed.is_empty() {
-            return self
-                .final_report(
-                    &format!("blocked-noop-proof-failed-{dependency_iteration}"),
-                    None,
-                    "needs_review",
-                    serde_json::json!({
-                        "taskUniverse": self.task_universe,
-                        "readyNoopItems": ready_noop_items,
-                        "noopProof": noop_proof,
-                        "failedNoopProof": failed,
-                        "verificationEvidence": evidence.verification,
-                        "repair_attempts": evidence.repair_attempts,
-                    }),
-                    prompts::BLOCKED_NOOP_PROOF_FAILED_TASK,
-                )
-                .await;
+            match workflow_live_v2_lifecycle_noop_routing::route_refuted_noops(
+                &contract,
+                ready_noop_items,
+                accepted_this_wave,
+                &failed,
+                noop_reclassified_ids,
+            ) {
+                workflow_live_v2_lifecycle_noop_routing::NoopProofExhaustionRoute::ScheduleImplementation(
+                    items,
+                ) => {
+                    evidence.implementation.push(serde_json::json!({
+                        "kind": "noop-proof-refutation-reclassification",
+                        "dependencyIteration": dependency_iteration,
+                        "canonical_task_ids": items
+                            .iter()
+                            .flat_map(|item| contract.canonical_ids_for(item))
+                            .collect::<Vec<_>>(),
+                        "items": items,
+                    }));
+                    return Ok(items);
+                }
+                workflow_live_v2_lifecycle_noop_routing::NoopProofExhaustionRoute::Block => {
+                    return self
+                        .final_report(
+                            &format!("blocked-noop-proof-failed-{dependency_iteration}"),
+                            None,
+                            "needs_review",
+                            serde_json::json!({
+                                "taskUniverse": self.task_universe,
+                                "readyNoopItems": ready_noop_items,
+                                "noopProof": noop_proof,
+                                "failedNoopProof": failed,
+                                "noopReclassifiedTaskIds": noop_reclassified_ids,
+                                "verificationEvidence": evidence.verification,
+                                "repair_attempts": evidence.repair_attempts,
+                            }),
+                            prompts::BLOCKED_NOOP_PROOF_FAILED_TASK,
+                        )
+                        .await
+                        .map(|()| Vec::new());
+                }
+            }
         }
-        Ok(())
+        Ok(Vec::new())
     }
 
     async fn repair_wave_completion_evidence(

@@ -49,7 +49,7 @@ pub(crate) const NOOP_EVIDENCE_REPAIR_TASK: &str = "Repair failed dependency-rea
 
 pub(crate) const NOOP_PROOF_REVERIFICATION_TASK: &str = "Re-verify repaired dependency-ready no-op proof against PRD/TASK criteria. Do not modify files. Return item_id, canonical_task_ids, accepted/noop only with concrete proof refs, artifacts checked, commands if any, and residual gaps.";
 
-pub(crate) const BLOCKED_NOOP_PROOF_FAILED_TASK: &str = "Stop because dependency-ready no-op proof did not produce accepted/noop evidence after bounded JS-owned evidence repair and re-verification. Report exact proof gaps.";
+pub(crate) const BLOCKED_NOOP_PROOF_FAILED_TASK: &str = "Stop only because dependency-ready no-op proof was refuted after bounded evidence repair and the task cannot be scheduled as implementation work, or it was already reclassified once and its normal implementation lifecycle owns the remaining failure. Report exact proof gaps and why no implementation route remains.";
 
 pub(crate) const IMPLEMENTATION_WAVE_TASK: &str = "Implement only the assigned dependency-ready item. For an item declaring a required-universe deliverable contract, consume its declared environment, use its declared live tools, and regenerate the deliverable so every declared identity and substantive predicate is satisfied. An empty or gap-only required universe is actionable work and cannot be accepted or noop; accepted/noop requires the generated contract verification plus redacted provider_env_proof for any declared keys. Return one structured outcome per item with item_id, canonical_task_ids, snake_case status, evidence, changed files, commands/tests, artifacts, and residual gaps. Use accepted or noop only with concrete task-linked proof.";
 

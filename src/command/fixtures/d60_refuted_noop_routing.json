@@ -1,0 +1,69 @@
+{
+  "inventory": {
+    "items": [
+      {
+        "item_id": "noop-TASK-TDL-001-data-lake-gap-audit",
+        "work_type": "verified_noop",
+        "canonical_task_ids": ["TASK-TDL-001"],
+        "dependency_ids": [],
+        "acceptance_criteria": [
+          "Map the current implementation and gaps to every normative requirement."
+        ],
+        "artifact_requirements": [
+          "project/artifacts/gap-audit-current.json"
+        ],
+        "noop_proof": "Inherited discovery claim says the audit is complete.",
+        "noop_proof_refs": [
+          "workflow/branches/initial-readonly-discovery.json"
+        ]
+      }
+    ],
+    "residual_gaps": [
+      {
+        "id": "GAP-DL-REGISTRY-CURRENT",
+        "description": "The current registry artifact is absent."
+      },
+      {
+        "id": "GAP-DL-COVERAGE-LATEST",
+        "description": "The current coverage artifact is absent."
+      }
+    ]
+  },
+  "noop_repair_rounds": [
+    {
+      "call_id": "noop-evidence-repair-1-1",
+      "status": "accepted"
+    },
+    {
+      "call_id": "noop-evidence-repair-1-2",
+      "status": "needs_review"
+    },
+    {
+      "call_id": "noop-evidence-repair-1-3",
+      "status": "needs_review"
+    }
+  ],
+  "failed_noop_outcomes": [
+    {
+      "item_id": "proof-gap-TASK-TDL-001-normative-map-missing",
+      "status": "needs_review",
+      "result": {
+        "status": "needs_review",
+        "summary": "The inherited noop claim is refuted.",
+        "residual_gaps": [
+          {
+            "id": "GAP-NOOP-NORMATIVE-MAP-MISSING",
+            "description": "The required normative requirement map is missing.",
+            "severity": "blocking"
+          }
+        ],
+        "task_coverage": [
+          {
+            "task_id": "TASK-TDL-001",
+            "status": "partial"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -296,6 +296,8 @@ include!("workflow_live_v2_script_verification.rs");
 
 #[path = "workflow_live_v2_deliverable_contract.rs"]
 mod workflow_live_v2_deliverable_contract;
+#[path = "workflow_live_v2_lifecycle_noop_routing.rs"]
+mod workflow_live_v2_lifecycle_noop_routing;
 #[path = "workflow_live_v2_lifecycle_prompts.rs"]
 mod workflow_live_v2_lifecycle_prompts;
 #[path = "workflow_live_v2_lifecycle_review_remediation.rs"]
