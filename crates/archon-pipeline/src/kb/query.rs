@@ -1,4 +1,4 @@
-//! KB Q&A query engine — embed, search, gather context, synthesize, file answers.
+//! KB Q&A query engine — text search, gather context, synthesize, file answers.
 //!
 //! Implements REQ-KB-003. NFR: search < 500ms, Q&A < 5s.
 
@@ -77,7 +77,8 @@ pub struct QaSource {
 pub trait QaSynthesizer: Send + Sync {
     async fn synthesize(&self, question: &str, context: &str) -> Result<String>;
 }
-/// Trait for computing query embeddings.
+/// Deprecated compatibility surface for the former unwired embedding configuration.
+#[deprecated(note = "KB queries use text matching; this configuration has no effect")]
 pub trait QueryEmbedder: Send + Sync {
     fn embed_query(&self, text: &str) -> Result<Vec<f32>>;
 }
@@ -88,7 +89,6 @@ pub trait QueryEmbedder: Send + Sync {
 pub struct QueryEngine {
     db: cozo::DbInstance,
     synthesizer: Option<Box<dyn QaSynthesizer>>,
-    embedder: Option<Box<dyn QueryEmbedder>>,
 }
 
 impl QueryEngine {
@@ -96,7 +96,6 @@ impl QueryEngine {
         Self {
             db,
             synthesizer: None,
-            embedder: None,
         }
     }
 
@@ -105,8 +104,9 @@ impl QueryEngine {
         self
     }
 
-    pub fn with_embedder(mut self, embedder: Box<dyn QueryEmbedder>) -> Self {
-        self.embedder = Some(embedder);
+    #[deprecated(note = "KB queries use text matching; this configuration has no effect")]
+    #[allow(deprecated)]
+    pub fn with_embedder(self, _embedder: Box<dyn QueryEmbedder>) -> Self {
         self
     }
 
@@ -174,8 +174,7 @@ impl QueryEngine {
         })
     }
 
-    /// Search KB nodes using text matching (fallback when no embedder).
-    /// When embedder is available, uses HNSW vector search.
+    /// Search KB nodes using text matching.
     /// Answer-type nodes get a 0.9x score penalty (EC-PIPE-018).
     pub fn search_nodes(
         &self,

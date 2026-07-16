@@ -243,7 +243,8 @@ impl KnowledgeBase {
     /// Search for nodes matching the given query string (simple text search).
     ///
     /// This is the non-LLM search: filters nodes by title/content containing
-    /// the query substring. For semantic HNSW search, use `query()` instead.
+    /// the query substring. Use `query()` for text retrieval with graph context
+    /// and optional answer synthesis.
     pub async fn search(&self, query: &str, limit: usize) -> Result<Vec<KbNode>> {
         let mut params = std::collections::BTreeMap::new();
         params.insert("q".to_string(), cozo::DataValue::from(query));

@@ -85,6 +85,7 @@ pub const KB_EDGES_SCHEMA: &str = "
 }
 ";
 
+#[deprecated(note = "KB schema initialization no longer creates unused embedding storage")]
 pub const KB_EMBEDDINGS_SCHEMA: &str = "
 :create kb_embeddings {
     node_id: String
@@ -93,7 +94,8 @@ pub const KB_EMBEDDINGS_SCHEMA: &str = "
 }
 ";
 
-/// Generate the CozoScript to create an HNSW index on embeddings.
+/// Generate the legacy CozoScript HNSW index definition.
+#[deprecated(note = "KB queries use text matching; this helper is retained for compatibility")]
 pub fn hnsw_index_script(dim: usize) -> String {
     format!(
         "::hnsw create kb_embeddings:semantic_idx {{ \
@@ -107,15 +109,10 @@ pub fn hnsw_index_script(dim: usize) -> String {
     )
 }
 
-/// Create all KB relations in the database. Idempotent — silently ignores
+/// Create all active KB relations in the database. Idempotent — silently ignores
 /// "already exists" errors so calling twice is safe.
 pub fn ensure_kb_schema(db: &cozo::DbInstance) -> Result<()> {
-    for script in [
-        KB_NODES_SCHEMA,
-        KB_CONTENT_HASHES_SCHEMA,
-        KB_EDGES_SCHEMA,
-        KB_EMBEDDINGS_SCHEMA,
-    ] {
+    for script in [KB_NODES_SCHEMA, KB_CONTENT_HASHES_SCHEMA, KB_EDGES_SCHEMA] {
         match db.run_script(script, Default::default(), ScriptMutability::Mutable) {
             Ok(_) => {}
             Err(e) => {

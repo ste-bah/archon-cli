@@ -41,8 +41,8 @@ fn test_ensure_kb_schema_creates_relations() {
         "kb_edges relation should exist"
     );
     assert!(
-        names.contains(&"kb_embeddings".to_string()),
-        "kb_embeddings relation should exist"
+        !names.contains(&"kb_embeddings".to_string()),
+        "unused kb_embeddings relation should not be created"
     );
     assert!(
         names.contains(&"kb_content_hashes".to_string()),
