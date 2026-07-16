@@ -377,8 +377,8 @@ impl QueryEngine {
         source_node_ids: &[String],
     ) -> Result<String> {
         let node_id = format!("answer-{}", uuid::Uuid::new_v4());
-        let title = if question.len() > 100 {
-            format!("{}...", &question[..97])
+        let title = if question.chars().count() > 100 {
+            format!("{}...", question.chars().take(97).collect::<String>())
         } else {
             question.to_string()
         };

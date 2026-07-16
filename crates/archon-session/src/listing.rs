@@ -17,25 +17,25 @@ pub fn format_session_list(sessions: &[SessionMetadata]) -> String {
     ));
 
     for s in sessions {
-        let id_short = if s.id.len() > 8 { &s.id[..8] } else { &s.id };
+        let id_short: String = s.id.chars().take(8).collect();
         let name_display = s.name.as_deref().unwrap_or("-");
         // Truncate name to 18 chars for column alignment
-        let name_truncated = if name_display.len() > 18 {
-            format!("{}...", &name_display[..15])
+        let name_truncated = if name_display.chars().count() > 18 {
+            format!("{}...", name_display.chars().take(15).collect::<String>())
         } else {
             name_display.to_string()
         };
         // Show just the date portion from RFC 3339
-        let date = if s.last_active.len() >= 10 {
-            &s.last_active[..10]
-        } else {
-            &s.last_active
-        };
+        let date: String = s.last_active.chars().take(10).collect();
         // Truncate directory
-        let dir = if s.working_directory.len() > 28 {
+        let directory_chars = s.working_directory.chars().count();
+        let dir = if directory_chars > 28 {
             format!(
                 "...{}",
-                &s.working_directory[s.working_directory.len() - 25..]
+                s.working_directory
+                    .chars()
+                    .skip(directory_chars - 25)
+                    .collect::<String>()
             )
         } else {
             s.working_directory.clone()

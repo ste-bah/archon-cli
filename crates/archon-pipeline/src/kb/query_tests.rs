@@ -124,6 +124,33 @@ async fn test_search_nodes_answer_penalty() {
     );
 }
 
+#[test]
+fn file_answer_truncates_multibyte_question_on_character_boundaries() {
+    let db = test_db();
+    let engine = QueryEngine::new(db.clone());
+    let question: String = (0..101)
+        .map(|offset| char::from_u32(0x4e00 + offset).unwrap())
+        .collect();
+    let synth_answer = SynthesizedAnswer {
+        answer_text: "Unicode title answer.".to_string(),
+        source_citations: vec![],
+    };
+
+    let filed_id = engine.file_answer(&question, &synth_answer, &[]).unwrap();
+
+    let mut params = BTreeMap::new();
+    params.insert("nid".into(), DataValue::from(filed_id.as_str()));
+    let result = db
+        .run_script(
+            "?[title] := *kb_nodes{node_id, title}, node_id = $nid",
+            params,
+            ScriptMutability::Immutable,
+        )
+        .unwrap();
+    let expected_title = format!("{}...", question.chars().take(97).collect::<String>());
+    assert_eq!(result.rows[0][0].get_str(), Some(expected_title.as_str()));
+}
+
 #[tokio::test]
 async fn test_file_answer_creates_node() {
     let db = test_db();
