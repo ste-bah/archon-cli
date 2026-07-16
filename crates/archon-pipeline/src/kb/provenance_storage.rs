@@ -132,7 +132,7 @@ pub(super) struct BatchCounts {
 
 #[cfg(test)]
 mod test_state {
-    use std::sync::{Mutex, OnceLock};
+    use std::cell::RefCell;
 
     use super::BatchCounts;
 
@@ -142,31 +142,26 @@ mod test_state {
         pub(super) fail_after_batch_write: bool,
     }
 
-    pub(super) fn state() -> &'static Mutex<State> {
-        static STATE: OnceLock<Mutex<State>> = OnceLock::new();
-        STATE.get_or_init(|| Mutex::new(State::default()))
+    std::thread_local! {
+        pub(super) static STATE: RefCell<State> = RefCell::new(State::default());
     }
 }
 
 fn record_write_attempt() {
     #[cfg(test)]
-    {
-        test_state::state().lock().unwrap().counts.write_queries += 1;
-    }
+    test_state::STATE.with(|state| state.borrow_mut().counts.write_queries += 1);
 }
 
 fn record_post_batch_write() {
     #[cfg(test)]
-    {
-        test_state::state().lock().unwrap().counts.post_batch_writes += 1;
-    }
+    test_state::STATE.with(|state| state.borrow_mut().counts.post_batch_writes += 1);
 }
 
 fn should_fail_after_batch_write() -> bool {
     #[cfg(test)]
     {
-        let mut state = test_state::state().lock().unwrap();
-        return std::mem::take(&mut state.fail_after_batch_write);
+        return test_state::STATE
+            .with(|state| std::mem::take(&mut state.borrow_mut().fail_after_batch_write));
     }
     #[cfg(not(test))]
     false
@@ -177,14 +172,14 @@ pub(super) mod test_support {
     use super::{BatchCounts, test_state};
 
     pub(crate) fn reset() {
-        *test_state::state().lock().unwrap() = Default::default();
+        test_state::STATE.with(|state| *state.borrow_mut() = Default::default());
     }
 
     pub(crate) fn counts() -> BatchCounts {
-        test_state::state().lock().unwrap().counts
+        test_state::STATE.with(|state| state.borrow().counts)
     }
 
     pub(crate) fn fail_after_batch_write() {
-        test_state::state().lock().unwrap().fail_after_batch_write = true;
+        test_state::STATE.with(|state| state.borrow_mut().fail_after_batch_write = true);
     }
 }
