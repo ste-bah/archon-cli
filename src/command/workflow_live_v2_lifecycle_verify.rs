@@ -225,10 +225,25 @@ impl LifecycleDriver {
                 &support::outcomes_of(&verification),
                 &repair_plan,
             );
+            let source_outcomes =
+                support::non_accepted_outcomes(&support::outcomes_of(&verification));
             let routed = workflow_live_v2_lifecycle_verify_routing::write_remediation_outcomes(
                 &repair_plan,
                 &verification,
             );
+            let repair_retried = self
+                .run_producer_retry(
+                    &repair_plan,
+                    workflow_live_v2_lifecycle_verify_routing::RetryProducer::RepairPlan,
+                    &plan_items,
+                    &source_outcomes,
+                    wave_index,
+                    dependency_iteration,
+                    repair_attempt,
+                    &mut verification,
+                    evidence,
+                )
+                .await?;
             if !routed.is_empty() {
                 let continue_loop = self
                     .run_write_verification_remediation(
@@ -243,9 +258,13 @@ impl LifecycleDriver {
                         &repair_plan,
                     )
                     .await?;
-                if !continue_loop {
+                if !continue_loop && !repair_retried {
                     break;
                 }
+                repair_attempt += 1;
+                continue;
+            }
+            if repair_retried {
                 repair_attempt += 1;
                 continue;
             }

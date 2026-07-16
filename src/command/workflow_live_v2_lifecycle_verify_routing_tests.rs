@@ -1,6 +1,26 @@
 use super::*;
 
 #[test]
+fn every_retry_producer_with_items_routes_to_execution() {
+    for producer in [
+        RetryProducer::Triage,
+        RetryProducer::Retriage,
+        RetryProducer::RepairPlan,
+    ] {
+        assert_eq!(
+            retry_consumption_route(producer, &[serde_json::json!({ "item_id": "retry" })]),
+            RetryConsumptionRoute::RunRetries,
+            "producer={producer:?}"
+        );
+        assert_eq!(
+            retry_consumption_route(producer, &[]),
+            RetryConsumptionRoute::NotNeeded,
+            "producer={producer:?}"
+        );
+    }
+}
+
+#[test]
 fn every_triage_route_combination_has_a_defined_disposition() {
     for mask in 0u8..16 {
         for inventory_ready in [false, true] {

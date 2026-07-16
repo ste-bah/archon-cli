@@ -14,6 +14,11 @@ pub(super) fn enforce_retry_invariants(inventory: &Value, verification: &Value) 
     for mut item in support::array(object.get("items")) {
         if let Some(source) = matching_failed_outcome(&item, &failed) {
             stamp_retry_invariant(&mut item, source);
+        } else if self_contained_retry_matches_failed_task(&item, &failed) {
+            // Re-triage and repair-plan reducers may identify the implementation
+            // source while merged verification outcomes carry generated check IDs.
+            // Preserve a complete retry invariant when the failed task identity
+            // still overlaps instead of orphaning otherwise schedulable work.
         } else {
             issues.push(invariant_issue(
                 &item,
@@ -26,6 +31,35 @@ pub(super) fn enforce_retry_invariants(inventory: &Value, verification: &Value) 
     object.insert("items".to_string(), Value::Array(items));
     object.insert("unresolved_issues".to_string(), Value::Array(issues));
     Value::Object(object)
+}
+
+fn self_contained_retry_matches_failed_task(item: &Value, failed: &[Value]) -> bool {
+    let gaps = support::strings_of(item.get("source_residual_gap_ids"));
+    let predicate = item
+        .get("failed_predicate")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty());
+    if gaps.is_empty() || !predicate {
+        return false;
+    }
+    let item_tasks = retry_task_ids(item);
+    !item_tasks.is_empty()
+        && failed.iter().any(|outcome| {
+            retry_task_ids(outcome)
+                .iter()
+                .any(|id| item_tasks.contains(id))
+        })
+}
+
+fn retry_task_ids(value: &Value) -> Vec<String> {
+    let mut ids = support::strings_of(value.get("canonical_task_ids"));
+    ids.extend(support::strings_of(
+        value
+            .get("result")
+            .and_then(|result| result.get("data"))
+            .and_then(|data| data.get("canonical_task_ids")),
+    ));
+    support::unique(ids)
 }
 
 fn retry_invariant_contract_issue(issue: &Value) -> bool {

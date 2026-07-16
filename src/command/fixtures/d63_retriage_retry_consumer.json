@@ -1,0 +1,75 @@
+{
+  "plan_items": [
+    {
+      "item_id": "verify-coverage-artifacts",
+      "canonical_task_ids": ["TASK-TDL-080"],
+      "focused_verification": ["verify declared coverage artifacts"],
+      "expected_evidence": ["coverage contract result"]
+    }
+  ],
+  "source_outcomes": [
+    {
+      "item_id": "verification-wave-post-remediation-focused-tests",
+      "status": "needs_review",
+      "canonical_task_ids": ["TASK-TDL-080"],
+      "result": {
+        "status": "needs_review",
+        "residual_gaps": [
+          {
+            "id": "coverage-artifact-zero-available-cells",
+            "description": "coverage contains no available cells"
+          }
+        ]
+      }
+    },
+    {
+      "item_id": "verification-wave-post-remediation-contract",
+      "status": "failed",
+      "canonical_task_ids": ["TASK-TDL-080"],
+      "result": {
+        "status": "failed",
+        "residual_gaps": [
+          {
+            "id": "required-universe-contract-failures",
+            "description": "declared contract checks failed"
+          }
+        ]
+      }
+    }
+  ],
+  "retriage": {
+    "status": "accepted",
+    "data": {
+      "implementation_failures": [],
+      "retry_items": [
+        {
+          "item_id": "retry-focused-tests",
+          "source_item_id": "impl-coverage-artifacts",
+          "canonical_task_ids": ["TASK-TDL-080"],
+          "classification": "retry_with_repository_verified_exact_test_names",
+          "source_residual_gap_ids": [
+            "coverage-artifact-zero-available-cells"
+          ],
+          "failed_predicate": "coverage contains no available cells",
+          "focused_verification": ["run corrected focused tests"],
+          "expected_evidence": ["intended tests execute"]
+        },
+        {
+          "item_id": "retry-required-universe-contract",
+          "source_item_id": "impl-coverage-artifacts",
+          "canonical_task_ids": ["TASK-TDL-080"],
+          "classification": "retry_with_corrected_verification_shape",
+          "source_residual_gap_ids": [
+            "required-universe-contract-failures"
+          ],
+          "failed_predicate": "declared contract checks failed",
+          "focused_verification": ["run corrected contract check"],
+          "expected_evidence": ["contract predicate results"]
+        }
+      ],
+      "superseded_items": [],
+      "terminal_blockers": []
+    }
+  },
+  "terminal_call": "blocked-verification-failed-2"
+}

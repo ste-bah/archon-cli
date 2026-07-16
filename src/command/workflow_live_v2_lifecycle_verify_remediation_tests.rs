@@ -253,9 +253,10 @@ fn d46_execution_retry_is_scheduled_even_when_write_inventory_is_empty() {
     };
     let failed = vec![fixture["failed_outcome"].clone()];
 
-    let retries = triage_retry_items(
+    let retries = producer_retry_items(
         &contract,
         &fixture["triage"],
+        workflow_live_v2_lifecycle_verify_routing::RetryProducer::Triage,
         &[fixture["plan_item"].clone()],
         &failed,
     )
@@ -345,7 +346,13 @@ fn fabel_triage_retry_items_keep_only_required_reruns() {
         "verification-wave-1-1-VERIFY-TDL-010-003-project-registry-artifact-contract-check-7",
         "gap-healthy-dataset-required-artifact-path-fields",
     )];
-    let retry_items = triage_retry_items(&contract, &triage, &[plan_item], &source_outcomes);
+    let retry_items = producer_retry_items(
+        &contract,
+        &triage,
+        workflow_live_v2_lifecycle_verify_routing::RetryProducer::Triage,
+        &[plan_item],
+        &source_outcomes,
+    );
 
     assert!(
         retry_items.is_none(),
@@ -497,8 +504,14 @@ fn d32_corrected_retries_validate_against_every_failed_outcome() {
     let retry_items: Vec<serde_json::Value> = failed.iter().map(corrected_retry_item).collect();
     let triage = serde_json::json!({ "data": { "retry_items": retry_items } });
 
-    let retries = triage_retry_items(&contract, &triage, &[plan_item], &failed)
-        .expect("all corrected retries should validate");
+    let retries = producer_retry_items(
+        &contract,
+        &triage,
+        workflow_live_v2_lifecycle_verify_routing::RetryProducer::Retriage,
+        &[plan_item],
+        &failed,
+    )
+    .expect("all corrected retries should validate");
 
     assert_eq!(retries.len(), 4);
     assert!(
@@ -507,6 +520,55 @@ fn d32_corrected_retries_validate_against_every_failed_outcome() {
             &fixture["verification"],
             &triage,
         )
+    );
+}
+
+#[test]
+fn d63_retriage_retries_survive_generated_outcome_ids_and_remain_distinct() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/d63_retriage_retry_consumer.json"))
+            .expect("D63 fixture");
+    let universe = WorkflowV2TaskUniverse {
+        schema_version: "workflow-v2-task-universe-v1".to_string(),
+        source_roots: Vec::new(),
+        tasks: vec![WorkflowV2TaskUniverseTask {
+            canonical_task_id: "TASK-TDL-080".to_string(),
+            aliases: Vec::new(),
+            source_path: "tasks/TASK-TDL-080.md".to_string(),
+            dependency_ids: Vec::new(),
+            title: None,
+            artifact_requirements: Vec::new(),
+            ..Default::default()
+        }],
+    };
+    let contract = LifecycleContract {
+        task_universe: &universe,
+        target_repository_root: Some("/repo"),
+    };
+    let plan_items = support::array(fixture.get("plan_items"));
+    let source_outcomes = support::array(fixture.get("source_outcomes"));
+
+    let retries = producer_retry_items(
+        &contract,
+        &fixture["retriage"],
+        workflow_live_v2_lifecycle_verify_routing::RetryProducer::Retriage,
+        &plan_items,
+        &source_outcomes,
+    )
+    .expect("retriage retry items must be schedulable");
+
+    assert_eq!(retries.len(), 2);
+    assert_ne!(retries[0]["item_id"], retries[1]["item_id"]);
+    assert_eq!(
+        workflow_live_v2_lifecycle_verify_routing::retry_consumption_route(
+            workflow_live_v2_lifecycle_verify_routing::RetryProducer::Retriage,
+            &retries,
+        ),
+        workflow_live_v2_lifecycle_verify_routing::RetryConsumptionRoute::RunRetries
+    );
+    assert_eq!(
+        fixture["terminal_call"], "blocked-verification-failed-2",
+        "fixture documents the pre-D63 terminal that must follow retry execution now"
     );
 }
 

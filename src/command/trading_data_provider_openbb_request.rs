@@ -1,7 +1,69 @@
 use std::cmp::min;
 use std::collections::BTreeMap;
 
+use archon_trading::data_lake::ProviderHistoryHorizon;
+
 use super::metadata::credential_state;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct FetchWindowSelection {
+    pub(super) requested_start: String,
+    pub(super) requested_end: String,
+    pub(super) effective_start: String,
+    pub(super) effective_end: String,
+    pub(super) status: &'static str,
+    pub(super) history_horizon: Option<ProviderHistoryHorizon>,
+}
+
+pub(super) fn select_fetch_window(
+    start: &str,
+    end: &str,
+    history_horizon: Option<ProviderHistoryHorizon>,
+) -> FetchWindowSelection {
+    let requested_start = date_part(start);
+    let requested_end = date_part(end);
+    let Some(horizon) = history_horizon else {
+        return FetchWindowSelection {
+            effective_start: requested_start.clone(),
+            effective_end: requested_end.clone(),
+            requested_start,
+            requested_end,
+            status: "requested-window",
+            history_horizon: None,
+        };
+    };
+    let outside = requested_start < horizon.start
+        || requested_end > horizon.end
+        || requested_end < horizon.start
+        || requested_start > horizon.end;
+    if !outside {
+        return FetchWindowSelection {
+            effective_start: requested_start.clone(),
+            effective_end: requested_end.clone(),
+            requested_start,
+            requested_end,
+            status: "requested-window",
+            history_horizon: Some(horizon),
+        };
+    }
+    let mut effective_start = requested_start
+        .as_str()
+        .max(horizon.start.as_str())
+        .to_string();
+    let mut effective_end = requested_end.as_str().min(horizon.end.as_str()).to_string();
+    if effective_start > effective_end {
+        effective_start = horizon.start.clone();
+        effective_end = horizon.end.clone();
+    }
+    FetchWindowSelection {
+        requested_start,
+        requested_end,
+        effective_start,
+        effective_end,
+        status: "window-outside-entitlement",
+        history_horizon: Some(horizon),
+    }
+}
 
 pub(super) struct OpenBbNativeRequest {
     pub(super) endpoint: &'static str,

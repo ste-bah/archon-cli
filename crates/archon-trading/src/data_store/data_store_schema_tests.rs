@@ -52,6 +52,7 @@ fn capability_result(checked_at: &str) -> ProviderCapabilityResult {
         can_fetch: false,
         current_snapshot_supported: false,
         historical_supported: true,
+        history_horizon: None,
         requires_credentials: true,
         missing_credentials: true,
         provider_blocked: false,

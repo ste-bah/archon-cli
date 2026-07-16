@@ -66,10 +66,64 @@ mod tests {
         assert!(result.can_fetch);
         assert!(result.native_interval);
         assert!(result.unavailable_reason.is_none());
+        let horizon = result.history_horizon.as_ref().expect("verified history horizon");
+        assert!(horizon.start < horizon.end);
+        assert_eq!(horizon.basis, "successful_recent_capability_probe");
         let records: BTreeMap<_, _> = TradingDataLake::new(temp.path())
             .load_capabilities()
             .unwrap();
         assert!(records.values().any(|record| record.can_fetch));
+    }
+
+    #[test]
+    fn fetch_native_uses_recent_capability_horizon_instead_of_stale_window() {
+        let _lock = env_lock();
+        let server = openbb_server(
+            json!({"results": [
+                {"date":"2025-07-02","open":472.16,"high":473.67,"low":470.49,"close":472.65,"volume":123623700},
+                {"date":"2025-07-03","open":470.43,"high":471.19,"low":468.17,"close":468.79,"volume":103585900}
+            ], "provider": "polygon"}),
+            &["start_date=2025-07-01", "end_date=2026-07-01", "provider=polygon"],
+        );
+        let _guard = EnvGuard::set("POLYGON_API_KEY", "redacted-test-key");
+        let temp = tempfile::tempdir().unwrap();
+        let mut capability = archon_trading::data_lake::can_fetch_symbol_timeframe(
+            "openbb", "SPY", "1D", "2026-07-01T00:00:00Z",
+        );
+        capability.history_horizon = Some(archon_trading::data_lake::ProviderHistoryHorizon {
+            start: "2025-07-01".into(), end: "2026-07-01".into(),
+            basis: "fixture_entitlement".into(),
+        });
+        TradingDataLake::new(temp.path()).persist_capability_result(capability).unwrap();
+        let text = fetch_native_with_base_url(
+            temp.path(), &server.base_url, "openbb", "SPY", "1D",
+            "2024-01-01", "2024-06-01", "openbb-SPY-1D-raw",
+        ).unwrap();
+        server.join();
+        assert!(text.contains("\"window_status\": \"window-outside-entitlement\""));
+        assert!(text.contains("\"start\": \"2025-07-01\""));
+        assert!(text.contains("\"end\": \"2026-07-01\""));
+        assert!(text.contains("20250701-native_polygon_1D"));
+    }
+
+    #[test]
+    fn outside_entitlement_failure_is_distinct_from_generic_no_content() {
+        let _lock = env_lock();
+        let _guard = EnvGuard::set("POLYGON_API_KEY", "redacted-test-key");
+        let temp = tempfile::tempdir().unwrap();
+        let mut capability = archon_trading::data_lake::can_fetch_symbol_timeframe(
+            "openbb", "SPY", "1D", "2026-07-01T00:00:00Z",
+        );
+        capability.history_horizon = Some(archon_trading::data_lake::ProviderHistoryHorizon {
+            start: "2025-07-01".into(), end: "2026-07-01".into(), basis: "fixture".into(),
+        });
+        TradingDataLake::new(temp.path()).persist_capability_result(capability).unwrap();
+        let text = fetch_native_with_base_url(
+            temp.path(), "http://127.0.0.1:9", "openbb", "SPY", "1D",
+            "2024-01-01", "2024-06-01", "openbb-SPY-1D-raw",
+        ).unwrap();
+        assert!(text.contains("window-outside-entitlement: requested 2024-01-01..2024-06-01"));
+        assert!(text.contains("OpenBB API request failed"));
     }
 
     #[test]

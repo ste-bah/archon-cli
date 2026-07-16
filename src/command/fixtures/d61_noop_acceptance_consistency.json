@@ -1,0 +1,19 @@
+{
+  "previously_refuted": {
+    "status": "needs_review",
+    "canonical_task_ids": ["TASK-TDL-001"],
+    "evidence": ["gap-audit-current.json"],
+    "residual_gaps": [
+      {
+        "id": "normative-map-missing",
+        "description": "The required normative requirement map is missing."
+      }
+    ]
+  },
+  "previously_accepted": {
+    "status": "noop",
+    "canonical_task_ids": ["TASK-TDL-001"],
+    "evidence": ["acceptance-report.md", "activeContext.md"],
+    "summary": "A downstream report says the audit task is accepted."
+  }
+}

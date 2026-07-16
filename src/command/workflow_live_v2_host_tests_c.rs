@@ -132,6 +132,7 @@ fn task_universe_080() -> WorkflowV2TaskUniverse {
             source_path: "/tmp/tasks/TASK-TDL-080.md".to_string(),
             dependency_ids: Vec::new(),
             title: None,
+            acceptance_criteria: vec!["Coverage proof is current and complete.".to_string()],
             artifact_requirements: Vec::new(),
             ..Default::default()
         }],
@@ -148,6 +149,7 @@ fn task_universe_010() -> WorkflowV2TaskUniverse {
             source_path: "/tmp/tasks/TASK-TDL-010.md".to_string(),
             dependency_ids: Vec::new(),
             title: None,
+            acceptance_criteria: vec!["Registry schema proof is current and complete.".to_string()],
             artifact_requirements: Vec::new(),
             ..Default::default()
         }],

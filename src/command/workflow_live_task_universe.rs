@@ -32,6 +32,8 @@ pub(super) struct WorkflowV2TaskUniverseTask {
     pub(super) dependency_ids: Vec<String>,
     #[serde(default)]
     pub(super) title: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) acceptance_criteria: Vec<String>,
     /// Explicit artifact declarations from the task file (paths relative to
     /// the project artifact root). Part of the declared artifact contract.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -343,6 +345,7 @@ fn parse_task_file(path: &Path, raw: &str) -> WorkflowResult<WorkflowV2TaskUnive
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string),
+        acceptance_criteria: declared_task_section_items(raw, "acceptance criteria"),
         artifact_requirements: declared_task_artifact_requirements(raw),
         required_env_keys: sorted_unique(metadata_strings(&metadata, "required_env_keys")),
         required_tools: sorted_unique(metadata_strings(&metadata, "required_tools")),
@@ -464,6 +467,34 @@ fn declared_task_artifact_requirements(raw: &str) -> Vec<String> {
         }
     }
     sorted_unique(requirements)
+}
+
+fn declared_task_section_items(raw: &str, section: &str) -> Vec<String> {
+    let mut items = Vec::new();
+    let mut in_section = false;
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if let Some(heading) = trimmed.strip_prefix('#') {
+            in_section = heading
+                .trim_start_matches('#')
+                .trim()
+                .eq_ignore_ascii_case(section);
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        if let Some(item) = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "))
+        {
+            let item = item.trim();
+            if !item.is_empty() {
+                items.push(item.to_string());
+            }
+        }
+    }
+    sorted_unique(items)
 }
 
 fn first_field(raw: &str, field: &str) -> Option<String> {

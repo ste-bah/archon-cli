@@ -154,7 +154,10 @@ fn collect_source_results(
             }
         }
         serde_json::Value::Object(object) => {
-            if let Some(result) = object.get("result").filter(|value| is_workflow_result_value(value)) {
+            if let Some(result) = object
+                .get("result")
+                .filter(|value| is_workflow_result_value(value))
+            {
                 push_source_result(result, results)?;
             } else if is_workflow_result_value(value) {
                 push_source_result(value, results)?;
@@ -183,7 +186,10 @@ fn source_result_has_concrete_evidence(result: &WorkflowV2Result) -> bool {
         .evidence
         .iter()
         .any(|evidence| !evidence.summary.trim().is_empty())
-        || result.commands_run.iter().any(|command| !command.command.trim().is_empty())
+        || result
+            .commands_run
+            .iter()
+            .any(|command| !command.command.trim().is_empty())
         || result.task_coverage.iter().any(|coverage| {
             coverage
                 .evidence
@@ -250,8 +256,9 @@ fn authoritative_task_ids(task_universe: Option<&WorkflowV2TaskUniverse>) -> Opt
 fn completion_ledger_state(
     v2_store: &WorkflowV2ResultStore,
     required_task_ids: BTreeSet<String>,
+    task_universe: Option<&WorkflowV2TaskUniverse>,
 ) -> archon_workflow::WorkflowResult<(BTreeSet<String>, BTreeSet<String>, Vec<String>)> {
-    let (credit, mut artifact_gaps) = validated_completion_credit(v2_store)?;
+    let (credit, mut artifact_gaps) = validated_completion_credit(v2_store, task_universe)?;
     let completed = credit
         .completed_ids()
         .intersection(&required_task_ids)
@@ -268,14 +275,29 @@ fn completion_ledger_state(
 
 fn validated_completion_credit(
     v2_store: &WorkflowV2ResultStore,
+    task_universe: Option<&WorkflowV2TaskUniverse>,
 ) -> archon_workflow::WorkflowResult<(CompletionCredit, Vec<String>)> {
     let mut credit = CompletionCredit::default();
     let mut gaps = Vec::new();
     for record in v2_store.load_call_records()? {
-        collect_valid_credit(v2_store, &record.completion_evidence, &mut credit, &mut gaps);
+        collect_valid_credit(
+            v2_store,
+            &record.completion_evidence,
+            Some(&record.result),
+            task_universe,
+            &mut credit,
+            &mut gaps,
+        );
     }
     for outcome in v2_store.load_branch_outcomes()? {
-        collect_valid_credit(v2_store, &outcome.completion_evidence, &mut credit, &mut gaps);
+        collect_valid_credit(
+            v2_store,
+            &outcome.completion_evidence,
+            outcome.result.as_ref(),
+            task_universe,
+            &mut credit,
+            &mut gaps,
+        );
     }
     Ok((credit, gaps))
 }
@@ -283,14 +305,32 @@ fn validated_completion_credit(
 fn collect_valid_credit(
     store: &WorkflowV2ResultStore,
     evidence: &[archon_workflow::WorkflowV2TaskCompletionEvidence],
+    result: Option<&WorkflowV2Result>,
+    task_universe: Option<&WorkflowV2TaskUniverse>,
     credit: &mut CompletionCredit,
     gaps: &mut Vec<String>,
 ) {
     for item in evidence {
-        if artifact_paths_exist(store.root(), &item.artifact_paths) {
+        let is_noop_credit = matches!(
+            item.evidence_kind,
+            archon_workflow::WorkflowV2TaskCompletionEvidenceKind::VerifiedNoop
+        ) || (item.evidence_kind
+            == archon_workflow::WorkflowV2TaskCompletionEvidenceKind::ImplementationCandidate
+            && item.status == WorkflowV2Status::Noop);
+        let noop_criteria_valid = !is_noop_credit
+            || noop_acceptance_criteria_satisfied(&item.task_id, result, task_universe);
+        if artifact_paths_exist(store.root(), &item.artifact_paths) && noop_criteria_valid {
             credit.record(item);
         } else {
-            gaps.push(format!("{}:missing artifact evidence", item.task_id));
+            gaps.push(format!(
+                "{}:{}",
+                item.task_id,
+                if noop_criteria_valid {
+                    "missing artifact evidence"
+                } else {
+                    "noop acceptance criteria were not explicitly satisfied"
+                }
+            ));
         }
     }
 }

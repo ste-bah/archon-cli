@@ -114,6 +114,19 @@ fn final_report_is_derived_from_typed_inputs_and_saved() {
         exit_code: Some(0),
         output_summary: "passed".to_string(),
     });
+    result.artifacts.push(archon_workflow::WorkflowV2Artifact {
+        id: "coverage-history".to_string(),
+        path: ".archon/trading-lab/data/coverage/history/not-written.json".to_string(),
+        description: Some("optional display reference".to_string()),
+    });
+    result.data = serde_json::json!({
+        "acceptance_criteria_results": [{
+            "task_id": "TASK-TDL-080",
+            "criterion": "Coverage proof is current and complete.",
+            "status": "passed",
+            "evidence_refs": [".archon/trading-lab/data/coverage/latest.json"]
+        }]
+    });
     result.task_coverage.push(WorkflowV2TaskCoverage {
         task_id: "T001".to_string(),
         status: WorkflowV2TaskCoverageStatus::Accepted,
@@ -232,5 +245,12 @@ fn final_report_counts_project_relative_noop_evidence_and_ignores_placeholders()
     assert_eq!(
         report.data["missing_tasks"].as_array().map(Vec::len),
         Some(0)
+    );
+    assert!(
+        report.data["artifacts"]
+            .as_array()
+            .is_some_and(|artifacts| artifacts.iter().all(|artifact| {
+                artifact["id"] != "coverage-history"
+            }))
     );
 }

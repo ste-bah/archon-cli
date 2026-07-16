@@ -2,6 +2,29 @@ use serde_json::Value;
 
 use crate::command::workflow_live::workflow_live_generated_lifecycle_support as support;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RetryProducer {
+    Triage,
+    Retriage,
+    RepairPlan,
+}
+
+impl RetryProducer {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::Triage => "triage",
+            Self::Retriage => "retriage",
+            Self::RepairPlan => "repair-plan",
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum RetryConsumptionRoute {
+    NotNeeded,
+    RunRetries,
+}
+
 #[derive(Debug, Default)]
 pub(super) struct VerificationTriageRoutes {
     pub(super) implementation_failures: Vec<Value>,
@@ -35,9 +58,7 @@ pub(super) fn triage_routes(triage: &Value) -> VerificationTriageRoutes {
             .filter(is_actionable_classification),
     );
     dedup_items(&mut implementation_failures);
-    let mut retry_items = support::array(data.get("retry_items"));
-    retry_items.extend(support::array(data.get("retryItems")));
-    dedup_items(&mut retry_items);
+    let retry_items = retry_items(triage);
     let mut superseded_items = support::array(data.get("superseded_items"));
     superseded_items.extend(support::array(data.get("supersededItems")));
     dedup_items(&mut superseded_items);
@@ -49,6 +70,25 @@ pub(super) fn triage_routes(triage: &Value) -> VerificationTriageRoutes {
         retry_items,
         superseded_items,
         terminal_blockers,
+    }
+}
+
+pub(super) fn retry_items(producer_output: &Value) -> Vec<Value> {
+    let data = triage_data(producer_output);
+    let mut retry_items = support::array(data.get("retry_items"));
+    retry_items.extend(support::array(data.get("retryItems")));
+    dedup_items(&mut retry_items);
+    retry_items
+}
+
+pub(super) fn retry_consumption_route(
+    _producer: RetryProducer,
+    retry_items: &[Value],
+) -> RetryConsumptionRoute {
+    if retry_items.is_empty() {
+        RetryConsumptionRoute::NotNeeded
+    } else {
+        RetryConsumptionRoute::RunRetries
     }
 }
 

@@ -336,6 +336,7 @@ fn capability(
         "exact_native_support": exact_native_support,
         "current_snapshot_supported": result.current_snapshot_supported,
         "historical_supported": result.historical_supported,
+        "history_horizon": result.history_horizon,
         "requires_credentials": result.requires_credentials,
         "missing_credentials": result.missing_credentials,
         "provider_blocked": result.provider_blocked,

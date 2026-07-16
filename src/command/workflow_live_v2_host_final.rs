@@ -151,7 +151,7 @@ fn guard_final_report_against_dynamic_wave_evidence(
                 .filter(|id| !id.trim().is_empty()),
         );
     }
-    let (credit, _) = validated_completion_credit(v2_store)?;
+    let (credit, _) = validated_completion_credit(v2_store, task_universe)?;
     let implementation_ids = credit.implementation;
     let verification_ids = credit.verification;
     let noop_ids = credit.noop;
@@ -292,19 +292,9 @@ fn command_key(command: &archon_workflow::WorkflowV2CommandRecord) -> String {
 
 fn guard_final_report_artifact_paths_exist(report: &mut WorkflowV2FinalReport, v2_root: &Path) {
     let project_root = project_root_for_v2_root(v2_root);
-    let missing = missing_final_artifact_refs(report, project_root.as_deref());
-    if missing.is_empty() {
-        return;
-    }
-    report.status = WorkflowV2Status::NeedsReview;
-    report.residual_gaps.push(WorkflowV2ResidualGap {
-        id: "final_report_missing_artifact_paths".to_string(),
-        description: format!(
-            "final report cannot accept referenced artifact paths that do not exist: {}",
-            missing.join(", ")
-        ),
-        severity: Some("blocking".to_string()),
-    });
+    report
+        .artifacts
+        .retain(|artifact| final_artifact_path_exists(artifact.path.trim(), project_root.as_deref()));
 }
 
 fn project_root_for_v2_root(v2_root: &Path) -> Option<PathBuf> {
@@ -313,18 +303,6 @@ fn project_root_for_v2_root(v2_root: &Path) -> Option<PathBuf> {
         .find(|ancestor| ancestor.file_name().is_some_and(|name| name == ".archon"))
         .and_then(Path::parent)
         .map(Path::to_path_buf)
-}
-
-fn missing_final_artifact_refs(
-    report: &WorkflowV2FinalReport,
-    project_root: Option<&Path>,
-) -> Vec<String> {
-    report
-        .artifacts
-        .iter()
-        .filter(|artifact| !final_artifact_path_exists(artifact.path.trim(), project_root))
-        .map(|artifact| final_artifact_ref_label(&artifact.id, artifact.path.trim()))
-        .collect()
 }
 
 fn final_artifact_path_exists(raw: &str, project_root: Option<&Path>) -> bool {
@@ -339,14 +317,6 @@ fn final_artifact_path_exists(raw: &str, project_root: Option<&Path>) -> bool {
         return path.exists();
     }
     project_root.is_some_and(|root| root.join(path).exists()) || path.exists()
-}
-
-fn final_artifact_ref_label(id: &str, path: &str) -> String {
-    if path.is_empty() {
-        format!("{id}:<empty-path>")
-    } else {
-        format!("{id}:{path}")
-    }
 }
 
 fn merge_sorted_strings(mut existing: Vec<String>, extra: BTreeSet<String>) -> Vec<String> {
@@ -378,7 +348,11 @@ fn final_acceptance_gate_result(
         return Ok(result);
     };
     let (completed, missing, artifact_gaps) =
-        completion_ledger_state(v2_store, required_task_ids.iter().cloned().collect())?;
+        completion_ledger_state(
+            v2_store,
+            required_task_ids.iter().cloned().collect(),
+            task_universe,
+        )?;
     if failed_inputs == 0 && missing.is_empty() && artifact_gaps.is_empty() && checked_inputs > 0 {
         let mut result = WorkflowV2Result::accepted(format!(
             "final acceptance gate '{}' accepted {} authoritative task(s)",

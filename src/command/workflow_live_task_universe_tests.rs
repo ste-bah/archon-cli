@@ -32,6 +32,31 @@ fn universe_comes_from_task_files_not_reducer_items() {
 }
 
 #[test]
+fn task_universe_carries_authoritative_acceptance_criteria() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        temp.path().join("TASK-TDL-001-foundation.md"),
+        "# Foundation\n\ntask_id: TASK-TDL-001\ndepends_on: []\n\n## Acceptance Criteria\n\n- First exact criterion.\n- Second exact criterion with `literal` text.\n\n## Focused Tests\n\n- ignored test bullet\n",
+    )
+    .expect("task");
+
+    let universe = extract_task_universe_for_generated_run(&format!(
+        "Implement the decomposed PRD at {}",
+        temp.path().display()
+    ))
+    .expect("extract")
+    .expect("universe");
+
+    assert_eq!(
+        universe.tasks[0].acceptance_criteria,
+        vec![
+            "First exact criterion.".to_string(),
+            "Second exact criterion with `literal` text.".to_string(),
+        ]
+    );
+}
+
+#[test]
 fn prd_task_references_must_have_matching_task_files() {
     let temp = tempfile::tempdir().expect("tempdir");
     let prd = temp.path().join("PRD.md");

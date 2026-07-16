@@ -120,6 +120,13 @@ impl<'de> Deserialize<'de> for ValidationReport {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderHistoryHorizon {
+    pub start: String,
+    pub end: String,
+    pub basis: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderCapabilityResult {
     pub provider: String,
     pub symbol: String,
@@ -136,6 +143,8 @@ pub struct ProviderCapabilityResult {
     pub current_snapshot_supported: bool,
     #[serde(default)]
     pub historical_supported: bool,
+    #[serde(default)]
+    pub history_horizon: Option<ProviderHistoryHorizon>,
     #[serde(default)]
     pub requires_credentials: bool,
     #[serde(default)]
@@ -295,6 +304,7 @@ pub fn can_fetch_symbol_timeframe(
         can_fetch,
         current_snapshot_supported: supported_provider && !missing_input,
         historical_supported: supported_provider && exact_native_interval && !missing_input,
+        history_horizon: None,
         requires_credentials,
         missing_credentials,
         provider_blocked,

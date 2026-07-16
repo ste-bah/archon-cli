@@ -11,6 +11,12 @@ fn contract() -> (WorkflowV2TaskUniverse, Value) {
             canonical_task_id: "TASK-TDL-001".to_string(),
             source_path: "tasks/TASK-TDL-001.md".to_string(),
             title: Some("Data Lake Gap Audit".to_string()),
+            acceptance_criteria: vec![
+                "Gap report maps current code and missing implementation to every normative requirement."
+                    .to_string(),
+                "Existing registry behavior is documented honestly.".to_string(),
+                "No storage-root change is proposed.".to_string(),
+            ],
             artifact_requirements: vec!["project/artifacts/gap-audit-current.json".to_string()],
             ..Default::default()
         }],
@@ -18,6 +24,80 @@ fn contract() -> (WorkflowV2TaskUniverse, Value) {
     let fixture = serde_json::from_str(include_str!("fixtures/d60_refuted_noop_routing.json"))
         .expect("D60 fixture");
     (universe, fixture)
+}
+
+#[test]
+fn d61_host_pins_criteria_and_refutes_both_inconsistent_canary_shapes() {
+    let (universe, fixture) = contract();
+    let contract = LifecycleContract {
+        task_universe: &universe,
+        target_repository_root: Some("/repo"),
+    };
+    let canary: Value = serde_json::from_str(include_str!(
+        "fixtures/d61_noop_acceptance_consistency.json"
+    ))
+    .expect("D61 fixture");
+    let ready = pin_noop_acceptance_criteria(
+        &contract,
+        &support::array(fixture["inventory"].get("items")),
+    );
+
+    assert_eq!(
+        ready[0]["acceptance_criteria"],
+        serde_json::json!([
+            "Gap report maps current code and missing implementation to every normative requirement.",
+            "Existing registry behavior is documented honestly.",
+            "No storage-root change is proposed."
+        ])
+    );
+    for outcome in ["previously_refuted", "previously_accepted"] {
+        let enforced =
+            enforce_noop_acceptance_criteria(&contract, &ready, &[canary[outcome].clone()]);
+        assert_eq!(enforced[0]["status"], "needs_review", "{outcome}");
+        if outcome == "previously_accepted" {
+            assert!(
+                support::array(enforced[0].get("residual_gaps"))
+                    .iter()
+                    .any(|gap| gap["id"] == "noop-acceptance-criteria-unsatisfied"),
+                "{outcome}"
+            );
+        }
+    }
+}
+
+#[test]
+fn noop_credit_requires_one_exact_evidenced_result_per_criterion() {
+    let (universe, fixture) = contract();
+    let contract = LifecycleContract {
+        task_universe: &universe,
+        target_repository_root: Some("/repo"),
+    };
+    let ready = pin_noop_acceptance_criteria(
+        &contract,
+        &support::array(fixture["inventory"].get("items")),
+    );
+    let results = universe.tasks[0]
+        .acceptance_criteria
+        .iter()
+        .map(|criterion| {
+            serde_json::json!({
+                "task_id": "TASK-TDL-001",
+                "criterion": criterion,
+                "status": "passed",
+                "evidence_refs": ["project/artifacts/gap-audit-current.json"],
+            })
+        })
+        .collect::<Vec<_>>();
+    let outcome = serde_json::json!({
+        "status": "noop",
+        "canonical_task_ids": ["TASK-TDL-001"],
+        "evidence": ["project/artifacts/gap-audit-current.json"],
+        "acceptance_criteria_results": results,
+    });
+
+    let enforced = enforce_noop_acceptance_criteria(&contract, &ready, &[outcome]);
+
+    assert_eq!(enforced[0]["status"], "noop");
 }
 
 #[test]

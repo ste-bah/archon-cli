@@ -1,6 +1,7 @@
 use anyhow::Result;
 use archon_trading::data_lake::{
     CoverageWindow, DataType, DatasetMetadata, GapSummary, ProviderCapabilityResult,
+    ProviderHistoryHorizon,
 };
 use archon_trading::ohlcv::OhlcvBar;
 use serde_json::json;
@@ -8,7 +9,7 @@ use std::collections::BTreeMap;
 
 use crate::command::trading_io::write_or_render;
 
-use super::request::{OpenBbNativeRequest, is_crypto, is_future};
+use super::request::{FetchWindowSelection, OpenBbNativeRequest, is_crypto, is_future};
 
 pub(super) fn native_metadata_from_bars(
     dataset_id: &str,
@@ -78,18 +79,40 @@ pub(super) fn unavailable_report(
     end: &str,
     dataset_id: &str,
     reason: &str,
+    window: &FetchWindowSelection,
 ) -> Result<String> {
     let missing_credentials = is_missing_credentials_reason(reason);
+    let unavailable_reason = if window.status == "window-outside-entitlement" {
+        format!(
+            "window-outside-entitlement: requested {}..{}; effective {}..{}; provider response: {reason}",
+            window.requested_start,
+            window.requested_end,
+            window.effective_start,
+            window.effective_end,
+        )
+    } else {
+        reason.to_string()
+    };
     let report = json!({
         "provider": provider.trim().to_ascii_lowercase(),
         "symbol": symbol,
         "timeframe": timeframe,
         "start": start,
         "end": end,
+        "requested_window": {
+            "start": window.requested_start,
+            "end": window.requested_end,
+        },
+        "effective_window": {
+            "start": window.effective_start,
+            "end": window.effective_end,
+        },
+        "window_status": window.status,
+        "history_horizon": window.history_horizon,
         "dataset_id": dataset_id,
         "can_fetch": false,
         "native_interval": false,
-        "unavailable_reason": reason,
+        "unavailable_reason": unavailable_reason,
         "quality_status": provider_quality_status(provider),
         "production_eligible": false,
         "provider_blocked_or_unavailable": true,
@@ -100,6 +123,16 @@ pub(super) fn unavailable_report(
         "fail_closed_behavior": "no dataset registry entry is written unless provider-native fetch returns complete artifacts"
     });
     write_or_render(&report, None)
+}
+
+pub(super) fn probed_history_horizon(now: chrono::DateTime<chrono::Utc>) -> ProviderHistoryHorizon {
+    let end = now.date_naive();
+    let start = end - chrono::Duration::days(365);
+    ProviderHistoryHorizon {
+        start: start.format("%Y-%m-%d").to_string(),
+        end: end.format("%Y-%m-%d").to_string(),
+        basis: "successful_recent_capability_probe".into(),
+    }
 }
 
 pub(super) fn native_quality_status(provider: &str) -> &'static str {

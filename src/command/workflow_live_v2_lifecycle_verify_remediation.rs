@@ -617,13 +617,22 @@ impl LifecycleDriver {
     }
 }
 
-fn triage_retry_items(
+fn producer_retry_items(
     contract: &LifecycleContract<'_>,
-    triage: &serde_json::Value,
+    producer_output: &serde_json::Value,
+    producer: workflow_live_v2_lifecycle_verify_routing::RetryProducer,
     plan_items: &[serde_json::Value],
     source_outcomes: &[serde_json::Value],
 ) -> Option<Vec<serde_json::Value>> {
-    let retry_items = workflow_live_v2_lifecycle_verify_routing::triage_routes(triage).retry_items;
+    let retry_items =
+        workflow_live_v2_lifecycle_verify_routing::retry_items(producer_output);
+    if workflow_live_v2_lifecycle_verify_routing::retry_consumption_route(
+        producer,
+        &retry_items,
+    ) == workflow_live_v2_lifecycle_verify_routing::RetryConsumptionRoute::NotNeeded
+    {
+        return None;
+    }
     let inventory = contract.normalize_inventory(&serde_json::json!({ "items": retry_items }));
     let inventory = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
         &inventory,

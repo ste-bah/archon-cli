@@ -10,7 +10,9 @@ use archon_workflow::{
 };
 
 use super::workflow_live_task_universe::WorkflowV2TaskUniverse;
-use super::workflow_live_v2_completion_credit::CompletionCredit;
+use super::workflow_live_v2_completion_credit::{
+    CompletionCredit, noop_acceptance_criteria_satisfied,
+};
 
 include!("workflow_live_v2_host_local.rs");
 

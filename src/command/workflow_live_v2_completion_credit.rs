@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use archon_workflow::{
-    WorkflowError, WorkflowV2HostMethod, WorkflowV2ResultStore, WorkflowV2Status,
+    WorkflowError, WorkflowV2HostMethod, WorkflowV2Result, WorkflowV2ResultStore, WorkflowV2Status,
     WorkflowV2TaskCompletionEvidence, WorkflowV2TaskCompletionEvidenceKind,
 };
 
@@ -74,7 +74,12 @@ pub(super) fn prepare_resume_credit(
     store: &WorkflowV2ResultStore,
     universe: &WorkflowV2TaskUniverse,
 ) -> archon_workflow::WorkflowResult<BTreeSet<String>> {
-    let mut completed = CompletionCredit::from_store(store)?.completed_ids();
+    let mut credit = CompletionCredit::from_store(store)?;
+    let verified_noops = verified_noop_task_ids(store, universe)?;
+    credit
+        .noop
+        .retain(|task_id| verified_noops.contains(task_id));
+    let mut completed = credit.completed_ids();
     apply_terminal_report_credit(store, &mut completed)?;
     let authoritative = universe
         .tasks
@@ -86,13 +91,140 @@ pub(super) fn prepare_resume_credit(
     Ok(completed)
 }
 
+pub(super) fn noop_acceptance_criteria_satisfied(
+    task_id: &str,
+    result: Option<&WorkflowV2Result>,
+    universe: Option<&WorkflowV2TaskUniverse>,
+) -> bool {
+    let Some(universe) = universe else {
+        return true;
+    };
+    let Some(task) = universe
+        .tasks
+        .iter()
+        .find(|task| task.canonical_task_id == task_id)
+    else {
+        return false;
+    };
+    if task.acceptance_criteria.is_empty() {
+        return false;
+    }
+    let Some(result) = result else {
+        return false;
+    };
+    let mut criterion_results = Vec::new();
+    collect_criterion_results(&result.data, &mut criterion_results);
+    task.acceptance_criteria.iter().all(|criterion| {
+        criterion_results.iter().any(|entry| {
+            entry
+                .get("criterion")
+                .or_else(|| entry.get("acceptance_criterion"))
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|value| value.trim() == criterion.trim())
+                && entry
+                    .get("task_id")
+                    .or_else(|| entry.get("canonical_task_id"))
+                    .and_then(serde_json::Value::as_str)
+                    .is_none_or(|value| value == task_id)
+                && criterion_status_passed(entry)
+                && entry.get("evidence_refs").is_some_and(value_present)
+        })
+    })
+}
+
+fn verified_noop_task_ids(
+    store: &WorkflowV2ResultStore,
+    universe: &WorkflowV2TaskUniverse,
+) -> archon_workflow::WorkflowResult<BTreeSet<String>> {
+    let mut verified = BTreeSet::new();
+    for record in store.load_call_records()? {
+        record_verified_noops(
+            &mut verified,
+            &record.completion_evidence,
+            Some(&record.result),
+            universe,
+        );
+    }
+    for outcome in store.load_branch_outcomes()? {
+        record_verified_noops(
+            &mut verified,
+            &outcome.completion_evidence,
+            outcome.result.as_ref(),
+            universe,
+        );
+    }
+    Ok(verified)
+}
+
+fn record_verified_noops(
+    verified: &mut BTreeSet<String>,
+    evidence: &[WorkflowV2TaskCompletionEvidence],
+    result: Option<&WorkflowV2Result>,
+    universe: &WorkflowV2TaskUniverse,
+) {
+    for item in evidence.iter().filter(|item| {
+        item.evidence_kind == WorkflowV2TaskCompletionEvidenceKind::VerifiedNoop
+            || (item.evidence_kind == WorkflowV2TaskCompletionEvidenceKind::ImplementationCandidate
+                && item.status == WorkflowV2Status::Noop)
+    }) {
+        if noop_acceptance_criteria_satisfied(&item.task_id, result, Some(universe)) {
+            verified.insert(item.task_id.clone());
+        }
+    }
+}
+
+fn collect_criterion_results(value: &serde_json::Value, results: &mut Vec<serde_json::Value>) {
+    match value {
+        serde_json::Value::Object(object) => {
+            for (key, child) in object {
+                if matches!(
+                    key.as_str(),
+                    "acceptance_criteria_results" | "criterion_results"
+                ) && let Some(items) = child.as_array()
+                {
+                    results.extend(items.iter().cloned());
+                }
+                collect_criterion_results(child, results);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_criterion_results(item, results);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn criterion_status_passed(value: &serde_json::Value) -> bool {
+    value
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|status| {
+            matches!(
+                status.to_ascii_lowercase().as_str(),
+                "accepted" | "complete" | "completed" | "pass" | "passed" | "satisfied"
+            )
+        })
+}
+
+fn value_present(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Null => false,
+        serde_json::Value::String(value) => !value.trim().is_empty(),
+        serde_json::Value::Array(values) => !values.is_empty(),
+        serde_json::Value::Object(values) => !values.is_empty(),
+        _ => true,
+    }
+}
+
 fn apply_terminal_report_credit(
     store: &WorkflowV2ResultStore,
     completed: &mut BTreeSet<String>,
 ) -> archon_workflow::WorkflowResult<()> {
     for record in terminal_records(store)? {
         let data = &record.result.data;
-        for task_id in task_ids(data, &["accepted_tasks", "noop_tasks"]) {
+        for task_id in task_ids(data, &["accepted_tasks"]) {
             completed.insert(task_id);
         }
         for task_id in task_ids(data, &["failed_tasks", "blocked_tasks"]) {

@@ -25,7 +25,7 @@ impl LifecycleDriver {
                 evidence,
             )
             .await?;
-        let (triage, triage_id) = self
+        let (triage, triage_id, retry_producer) = self
             .bounded_verification_retriage(
                 triage,
                 &triage_id,
@@ -39,12 +39,10 @@ impl LifecycleDriver {
             .await?;
         let routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(&triage);
         let route_plan = workflow_live_v2_lifecycle_verify_routing::triage_route_plan(&routes);
-        if route_plan.terminal_blocked {
-            return Ok(false);
-        }
         let retried = if route_plan.run_retries {
-            self.run_triage_retry(
+            self.run_producer_retry(
                 &triage,
+                retry_producer,
                 plan_items,
                 &failed_outcomes,
                 wave_index,
@@ -57,6 +55,9 @@ impl LifecycleDriver {
         } else {
             false
         };
+        if route_plan.terminal_blocked && !retried {
+            return Ok(false);
+        }
         let superseded = if route_plan.try_supersede {
             workflow_live_v2_lifecycle_verify_supersede::try_supersede_verification(
                 &self.contract(),
@@ -77,7 +78,8 @@ impl LifecycleDriver {
         if !route_plan.run_write_remediation {
             return Ok(retried || superseded);
         }
-        self.run_write_verification_remediation(
+        let remediated = self
+            .run_write_verification_remediation(
             ready_items,
             plan_items,
             &routes.implementation_failures,
@@ -88,7 +90,8 @@ impl LifecycleDriver {
             evidence,
             &triage,
         )
-        .await
+        .await?;
+        Ok(retried || superseded || remediated)
     }
 
     async fn verification_failure_triage(
@@ -135,11 +138,19 @@ impl LifecycleDriver {
         repair_attempt: usize,
         verification: &serde_json::Value,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<(serde_json::Value, String)> {
+    ) -> archon_workflow::WorkflowResult<(
+        serde_json::Value,
+        String,
+        workflow_live_v2_lifecycle_verify_routing::RetryProducer,
+    )> {
         if !workflow_live_v2_lifecycle_verify_retriage::needs_bounded_retriage(
             &self.contract(), verification, &triage,
         ) {
-            return Ok((triage, triage_id.to_string()));
+            return Ok((
+                triage,
+                triage_id.to_string(),
+                workflow_live_v2_lifecycle_verify_routing::RetryProducer::Triage,
+            ));
         }
         let id = format!("verification-failure-retriage-{wave_index}-{repair_attempt}");
         let feedback = workflow_live_v2_lifecycle_verify_retriage::retriage_feedback(
@@ -163,13 +174,18 @@ impl LifecycleDriver {
             actionable,
             &retriage,
         );
-        Ok((retriage, id))
+        Ok((
+            retriage,
+            id,
+            workflow_live_v2_lifecycle_verify_routing::RetryProducer::Retriage,
+        ))
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn run_triage_retry(
+    async fn run_producer_retry(
         &self,
-        triage: &serde_json::Value,
+        producer_output: &serde_json::Value,
+        producer: workflow_live_v2_lifecycle_verify_routing::RetryProducer,
         plan_items: &[serde_json::Value],
         source_outcomes: &[serde_json::Value],
         wave_index: usize,
@@ -179,9 +195,10 @@ impl LifecycleDriver {
         evidence: &mut LifecycleEvidence,
     ) -> archon_workflow::WorkflowResult<bool> {
         let contract = self.contract();
-        let Some(retry_items) = triage_retry_items(
+        let Some(retry_items) = producer_retry_items(
             &contract,
-            triage,
+            producer_output,
+            producer,
             plan_items,
             source_outcomes,
         ) else {
@@ -195,7 +212,10 @@ impl LifecycleDriver {
         );
         let retry_result = self
             .parallel(
-                &format!("verification-wave-{wave_index}-triage-retry-{repair_attempt}"),
+                &format!(
+                    "verification-wave-{wave_index}-{}-retry-{repair_attempt}",
+                    producer.label()
+                ),
                 serde_json::json!(&retry_items),
                 workflow_live_v2_lifecycle_verify_options::verification_options(
                     &retry_items,
@@ -210,7 +230,13 @@ impl LifecycleDriver {
             &retry_items,
         );
         record_triage_retry(
-            evidence, wave_index, dependency_iteration, repair_attempt, retry_items, verification,
+            evidence,
+            producer,
+            wave_index,
+            dependency_iteration,
+            repair_attempt,
+            retry_items,
+            verification,
         );
         Ok(true)
     }
@@ -218,6 +244,7 @@ impl LifecycleDriver {
 
 fn record_triage_retry(
     evidence: &mut LifecycleEvidence,
+    producer: workflow_live_v2_lifecycle_verify_routing::RetryProducer,
     wave_index: usize,
     dependency_iteration: usize,
     repair_attempt: usize,
@@ -229,6 +256,7 @@ fn record_triage_retry(
         "implementationWaveIndex": wave_index,
         "dependencyIteration": dependency_iteration,
         "verificationRepairAttempt": repair_attempt,
+        "retryProducer": producer.label(),
         "verificationPlan": { "items": retry_items },
         "result": verification,
     }));

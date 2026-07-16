@@ -158,6 +158,10 @@ gaps_field = contract.get('gaps_field')
 gaps = get_field(artifact, gaps_field, []) if gaps_field else []
 if gaps:
     failures.append(f'declared deliverable contains {len(gaps)} gap record(s)')
+gap_identities = {
+    tuple(get_field(gap, field) for field in identity_fields)
+    for gap in gaps if isinstance(gap, dict)
+}
 
 records = get_field(registry, contract.get('registry_records_field'), {}) if registry else {}
 if registry is not None and not isinstance(records, dict):
@@ -173,6 +177,8 @@ for identity, cell in sorted(
     for field in contract.get('required_true_fields', []):
         if get_field(cell, field) is not True:
             failures.append(f'{label} required true field failed: {field}')
+    if identity in gap_identities:
+        continue
     for field in contract.get('required_nonempty_fields', []):
         if get_field(cell, field) in (None, '', []):
             failures.append(f'{label} required non-empty field failed: {field}')

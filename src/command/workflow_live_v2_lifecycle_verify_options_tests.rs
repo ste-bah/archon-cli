@@ -307,6 +307,70 @@ fn neutral_declared_verifier_executes_for_clean_contract_driven_series() {
 }
 
 #[test]
+fn declared_gap_rows_do_not_require_healthy_dataset_references() {
+    let project = tempfile::tempdir().expect("project");
+    write_json(
+        &project.path().join(".archon/demo/coverage.json"),
+        &serde_json::json!({
+            "instruments": ["ALPHA"],
+            "timeframes": ["1D"],
+            "cells": [{
+                "canonical_instrument": "ALPHA",
+                "timeframe": "1D",
+                "provider_symbol": "EXCHANGE:ALPHA",
+                "available": false,
+                "production_eligible": false,
+                "row_count": 0
+            }],
+            "gaps": [{
+                "canonical_instrument": "ALPHA",
+                "timeframe": "1D",
+                "reason": "provider unavailable"
+            }]
+        }),
+    );
+    write_json(
+        &project.path().join(".archon/demo/registry.json"),
+        &serde_json::json!({"datasets": {}}),
+    );
+    let items = vec![serde_json::json!({
+        "item_id": "verify-demo",
+        "source_item_id": "implement-demo",
+        "canonical_task_ids": ["TASK-DEMO-017"]
+    })];
+    let universe = serde_json::json!({"tasks": [{
+        "canonical_task_id": "TASK-DEMO-017",
+        "deliverable_contracts": [record_series_contract()]
+    }]});
+    let prepared = prepare_verification_items(items, project.path().to_str(), &[], &universe);
+    let command = prepared
+        .iter()
+        .find(|item| item["item_id"] == "verify-TASK-DEMO-017-required-universe-registry")
+        .and_then(|item| item["focused_verification"].as_str())
+        .expect("generated verifier");
+
+    let result = std::process::Command::new("/bin/zsh")
+        .args(["-c", command])
+        .output()
+        .expect("execute verifier");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+
+    assert!(!result.status.success());
+    assert!(
+        stdout.contains("declared deliverable contains 1 gap record"),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("required non-empty field failed"),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("has no declared registry record"),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn wf9_contaminated_fixture_replay_fails_substantive_contract() {
     let project = tempfile::tempdir().expect("project");
     let artifact_path = project.path().join(".archon/demo/coverage.json");

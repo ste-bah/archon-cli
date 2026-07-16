@@ -20,6 +20,14 @@ fn blocked_final_report_preserves_prior_dynamic_wave_completion_evidence() {
         exit_code: Some(0),
         output_summary: "passed".to_string(),
     });
+    result.data = serde_json::json!({
+        "acceptance_criteria_results": [{
+            "task_id": "TASK-TDL-010",
+            "criterion": "Registry schema proof is current and complete.",
+            "status": "passed",
+            "evidence_refs": ["focused registry evidence"]
+        }]
+    });
     let evidence = WorkflowV2TaskCompletionEvidence::new(
         "TASK-TDL-010",
         WorkflowV2TaskCompletionEvidenceKind::VerifiedNoop,
@@ -105,7 +113,7 @@ fn blocked_final_report_preserves_prior_dynamic_wave_completion_evidence() {
 }
 
 #[test]
-fn final_report_counts_branch_level_noop_credit_after_resume() {
+fn final_report_rejects_branch_level_noop_without_criteria_results() {
     let temp = tempfile::tempdir().expect("tempdir");
     let store = WorkflowV2ResultStore::new(temp.path());
     let evidence = WorkflowV2TaskCompletionEvidence::new(
@@ -139,9 +147,11 @@ fn final_report_counts_branch_level_noop_credit_after_resume() {
         .expect("final")
         .expect("local result");
 
-    assert!(report.data["missing_tasks"].as_array().is_some_and(Vec::is_empty));
-    assert!(report.data["noop_tasks"].as_array().is_some_and(|tasks| {
+    assert!(report.data["missing_tasks"].as_array().is_some_and(|tasks| {
         tasks.iter().any(|task| task == "TASK-TDL-010")
+    }));
+    assert!(report.data["noop_tasks"].as_array().is_some_and(|tasks| {
+        tasks.iter().all(|task| task != "TASK-TDL-010")
     }));
 }
 

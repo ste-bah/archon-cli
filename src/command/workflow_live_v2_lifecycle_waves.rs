@@ -255,6 +255,11 @@ impl LifecycleDriver {
         evidence: &mut LifecycleEvidence,
     ) -> archon_workflow::WorkflowResult<Vec<serde_json::Value>> {
         let contract = self.contract();
+        let ready_noop_items =
+            workflow_live_v2_lifecycle_noop_routing::pin_noop_acceptance_criteria(
+                &contract,
+                ready_noop_items,
+            );
         let noop_options = |task: &str| {
             serde_json::json!({
                 "tier": "analysis",
@@ -266,7 +271,7 @@ impl LifecycleDriver {
         let noop_proof = self
             .parallel(
                 &format!("noop-proof-verification-{dependency_iteration}"),
-                serde_json::json!(ready_noop_items),
+                serde_json::json!(&ready_noop_items),
                 noop_options(prompts::NOOP_PROOF_VERIFICATION_TASK),
             )
             .await?;
@@ -276,17 +281,23 @@ impl LifecycleDriver {
             "readyNoopItems": ready_noop_items,
             "result": noop_proof,
         }));
+        let noop_outcomes =
+            workflow_live_v2_lifecycle_noop_routing::enforce_noop_acceptance_criteria(
+                &contract,
+                &ready_noop_items,
+                &support::outcomes_of(&noop_proof),
+            );
         for id in support::matching_accepted_noop_ids(
             &contract,
-            ready_noop_items,
-            &support::outcomes_of(&noop_proof),
+            &ready_noop_items,
+            &noop_outcomes,
         ) {
             accepted_this_wave.insert(id);
         }
-        let mut failed = support::non_accepted_outcomes(&support::outcomes_of(&noop_proof));
+        let mut failed = support::non_accepted_outcomes(&noop_outcomes);
         if !failed.is_empty() {
             let mut attempt = 1usize;
-            let mut retry_items: Vec<serde_json::Value> = ready_noop_items.to_vec();
+            let mut retry_items = ready_noop_items.clone();
             while !failed.is_empty() && attempt <= self.max_repair_iterations {
                 let repair_id = format!("noop-evidence-repair-{dependency_iteration}-{attempt}");
                 let repair = self
@@ -314,7 +325,11 @@ impl LifecycleDriver {
                     &serde_json::json!({ "items": retry_items }),
                     &repair,
                 );
-                retry_items = support::array(merged.get("items"));
+                retry_items =
+                    workflow_live_v2_lifecycle_noop_routing::pin_noop_acceptance_criteria(
+                        &contract,
+                        &support::array(merged.get("items")),
+                    );
                 if retry_items.is_empty() {
                     break;
                 }
@@ -332,21 +347,27 @@ impl LifecycleDriver {
                     "noopRetryItems": retry_items,
                     "result": reverification,
                 }));
+                let reverification_outcomes =
+                    workflow_live_v2_lifecycle_noop_routing::enforce_noop_acceptance_criteria(
+                        &contract,
+                        &retry_items,
+                        &support::outcomes_of(&reverification),
+                    );
                 for id in support::matching_accepted_noop_ids(
                     &contract,
                     &retry_items,
-                    &support::outcomes_of(&reverification),
+                    &reverification_outcomes,
                 ) {
                     accepted_this_wave.insert(id);
                 }
-                failed = support::non_accepted_outcomes(&support::outcomes_of(&reverification));
+                failed = support::non_accepted_outcomes(&reverification_outcomes);
                 attempt += 1;
             }
         }
         if !failed.is_empty() {
             match workflow_live_v2_lifecycle_noop_routing::route_refuted_noops(
                 &contract,
-                ready_noop_items,
+                &ready_noop_items,
                 accepted_this_wave,
                 &failed,
                 noop_reclassified_ids,

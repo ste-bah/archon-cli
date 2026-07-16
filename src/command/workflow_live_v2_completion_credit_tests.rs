@@ -45,7 +45,7 @@ fn resume_credit_excludes_blocked_terminal_claims_and_archives_terminals() {
 
     let completed = prepare_resume_credit(&store, &universe()).expect("resume credit");
 
-    assert_eq!(completed, set(&["TASK-ONE", "TASK-TWO", "TASK-BLOCKED"]));
+    assert_eq!(completed, set(&["TASK-TWO", "TASK-BLOCKED"]));
     assert!(
         store
             .load_call_record("blocked-old")
