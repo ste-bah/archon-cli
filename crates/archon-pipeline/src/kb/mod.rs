@@ -1,7 +1,9 @@
 //! Knowledge base — ingest, organize, and query external documents.
 
+mod answer_storage;
 pub mod compile;
 pub mod ingest;
+mod ingest_storage;
 pub mod lint;
 pub mod query;
 pub mod schema;
@@ -265,7 +267,7 @@ impl KnowledgeBase {
     /// 1. Find all nodes that have a DerivedFrom edge pointing to this node
     /// 2. Delete those derived nodes (recursively)
     /// 3. Delete all edges where this node is source or target
-    /// 4. Delete the node itself
+    /// 4. Atomically remove the node and its owned content-hash reservation
     pub async fn delete(&self, node_id: &str) -> Result<()> {
         let mut params = std::collections::BTreeMap::new();
         params.insert("nid".to_string(), cozo::DataValue::from(node_id));
@@ -301,15 +303,51 @@ impl KnowledgeBase {
             )
             .map_err(|e| anyhow::anyhow!("delete edges failed: {}", e))?;
 
-        // 4. Delete the node itself
-        self.db.run_script(
+        // 4. Remove the node and its hash mapping in one transaction. The
+        // mapping is conditional so deleting a legacy duplicate never removes
+        // another node's keyed ownership reservation.
+        let transaction = self.db.multi_transaction(true);
+        let content_hash = transaction
+            .run_script(
+                "?[content_hash] := *kb_nodes{node_id, content_hash}, node_id = $nid",
+                params.clone(),
+            )
+            .map_err(|error| anyhow::anyhow!("read node before deletion failed: {error}"))?
+            .rows
+            .first()
+            .and_then(|row| row[0].get_str())
+            .map(str::to_owned);
+        if let Err(error) = transaction.run_script(
             "?[node_id, node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at] := \
              *kb_nodes{node_id, node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at}, \
              node_id = $nid \
              :rm kb_nodes { node_id => node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at }",
-            params,
-            cozo::ScriptMutability::Mutable,
-        ).map_err(|e| anyhow::anyhow!("delete node failed: {}", e))?;
+            params.clone(),
+        ) {
+            let _ = transaction.abort();
+            return Err(anyhow::anyhow!("delete node failed: {error}"));
+        }
+        if let Some(content_hash) = content_hash
+            && !content_hash.is_empty()
+        {
+            let mut hash_params = std::collections::BTreeMap::new();
+            hash_params.insert("chash".to_string(), cozo::DataValue::from(content_hash));
+            hash_params.insert("nid".to_string(), cozo::DataValue::from(node_id));
+            if let Err(error) = transaction.run_script(
+                "?[content_hash, node_id] := *kb_content_hashes{content_hash, node_id}, \
+                 content_hash = $chash, node_id = $nid \
+                 :rm kb_content_hashes { content_hash => node_id }",
+                hash_params,
+            ) {
+                let _ = transaction.abort();
+                return Err(anyhow::anyhow!(
+                    "delete content-hash mapping failed: {error}"
+                ));
+            }
+        }
+        transaction
+            .commit()
+            .map_err(|error| anyhow::anyhow!("commit node deletion failed: {error}"))?;
 
         Ok(())
     }

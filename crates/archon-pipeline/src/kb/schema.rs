@@ -1,7 +1,9 @@
 //! CozoDB schema definitions and Rust types for the knowledge base.
 
+use std::collections::BTreeMap;
+
 use anyhow::Result;
-use cozo::ScriptMutability;
+use cozo::{DataValue, ScriptMutability};
 use serde::{Deserialize, Serialize};
 
 // --- Rust types mirroring schema ---
@@ -65,6 +67,13 @@ pub const KB_NODES_SCHEMA: &str = "
 }
 ";
 
+pub const KB_CONTENT_HASHES_SCHEMA: &str = "
+:create kb_content_hashes {
+    content_hash: String
+    =>
+    node_id: String
+}
+";
 pub const KB_EDGES_SCHEMA: &str = "
 :create kb_edges {
     edge_id: String
@@ -101,7 +110,12 @@ pub fn hnsw_index_script(dim: usize) -> String {
 /// Create all KB relations in the database. Idempotent — silently ignores
 /// "already exists" errors so calling twice is safe.
 pub fn ensure_kb_schema(db: &cozo::DbInstance) -> Result<()> {
-    for script in [KB_NODES_SCHEMA, KB_EDGES_SCHEMA, KB_EMBEDDINGS_SCHEMA] {
+    for script in [
+        KB_NODES_SCHEMA,
+        KB_CONTENT_HASHES_SCHEMA,
+        KB_EDGES_SCHEMA,
+        KB_EMBEDDINGS_SCHEMA,
+    ] {
         match db.run_script(script, Default::default(), ScriptMutability::Mutable) {
             Ok(_) => {}
             Err(e) => {
@@ -114,5 +128,50 @@ pub fn ensure_kb_schema(db: &cozo::DbInstance) -> Result<()> {
             }
         }
     }
+    backfill_content_hashes(db)
+}
+
+/// Populate the keyed hash relation for legacy databases. For a legacy hash
+/// shared by multiple nodes, the lexicographically smallest node ID is kept.
+fn backfill_content_hashes(db: &cozo::DbInstance) -> Result<()> {
+    let nodes = db
+        .run_script(
+            "?[content_hash, node_id] := *kb_nodes{node_id, content_hash}",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .map_err(|error| anyhow::anyhow!("read legacy KB content hashes failed: {error}"))?;
+    let mut chosen = std::collections::BTreeMap::new();
+    for row in nodes.rows {
+        let (Some(content_hash), Some(node_id)) = (row[0].get_str(), row[1].get_str()) else {
+            continue;
+        };
+        if content_hash.is_empty() {
+            continue;
+        }
+        chosen
+            .entry(content_hash.to_owned())
+            .and_modify(|current: &mut String| {
+                if node_id < current.as_str() {
+                    *current = node_id.to_owned();
+                }
+            })
+            .or_insert_with(|| node_id.to_owned());
+    }
+    if chosen.is_empty() {
+        return Ok(());
+    }
+    let rows = chosen
+        .into_iter()
+        .map(|(content_hash, node_id)| DataValue::List(vec![content_hash.into(), node_id.into()]))
+        .collect();
+    let mut params = BTreeMap::new();
+    params.insert("rows".to_string(), DataValue::List(rows));
+    db.run_script(
+        "?[content_hash, node_id] <- $rows\n         :put kb_content_hashes { content_hash => node_id }",
+        params,
+        ScriptMutability::Mutable,
+    )
+    .map_err(|error| anyhow::anyhow!("KB content hash backfill failed: {error}"))?;
     Ok(())
 }

@@ -3,14 +3,13 @@
 //! Implements REQ-KB-001. Heading-aware chunking, SHA-256 deduplication,
 //! batch storage in CozoDB.
 
-use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::Result;
-use cozo::{DataValue, DbInstance, ScriptMutability};
+use cozo::DbInstance;
 use sha2::{Digest, Sha256};
 
-use super::schema::KbNodeType;
+use super::ingest_storage::{ChunkData, ChunkStorage};
 use super::{IngestResult, IngestSource};
 
 // ---------------------------------------------------------------------------
@@ -19,7 +18,7 @@ use super::{IngestResult, IngestSource};
 
 /// Document ingester for the knowledge base.
 pub struct Ingester {
-    db: DbInstance,
+    storage: ChunkStorage,
 }
 
 impl Ingester {
@@ -27,7 +26,9 @@ impl Ingester {
     ///
     /// Assumes `ensure_kb_schema()` has already been called.
     pub fn new(db: DbInstance) -> Result<Self> {
-        Ok(Self { db })
+        Ok(Self {
+            storage: ChunkStorage::new(db),
+        })
     }
 
     /// Dispatch to source-specific handler.
@@ -142,85 +143,23 @@ impl Ingester {
         source: &str,
         domain_tag: &str,
     ) -> Result<IngestResult> {
-        let mut result = IngestResult {
-            chunks_processed: chunks.len(),
-            ..Default::default()
-        };
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs_f64();
-
-        for (idx, chunk) in chunks.iter().enumerate() {
-            let content_hash = sha256_hex(&chunk.content);
-
-            // Check for duplicate by content_hash
-            if self.hash_exists(&content_hash)? {
-                continue; // skip exact duplicate
-            }
-
-            let node_id = uuid::Uuid::new_v4().to_string();
-            let node_type = node_type_str(&KbNodeType::Raw);
-
-            let mut params = BTreeMap::new();
-            params.insert("nid".to_string(), DataValue::from(node_id.as_str()));
-            params.insert("ntype".to_string(), DataValue::from(node_type));
-            params.insert("source".to_string(), DataValue::from(source));
-            params.insert("dtag".to_string(), DataValue::from(domain_tag));
-            params.insert("title".to_string(), DataValue::from(chunk.title.as_str()));
-            params.insert(
-                "content".to_string(),
-                DataValue::from(chunk.content.as_str()),
-            );
-            params.insert("chash".to_string(), DataValue::from(content_hash.as_str()));
-            params.insert("cidx".to_string(), DataValue::from(idx as i64));
-            params.insert("cat".to_string(), DataValue::from(now));
-            params.insert("uat".to_string(), DataValue::from(now));
-
-            self.db
-                .run_script(
-                    "?[node_id, node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at] \
-                     <- [[$nid, $ntype, $source, $dtag, $title, $content, $chash, $cidx, $cat, $uat]]
-                     :put kb_nodes { node_id => node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at }",
-                    params,
-                    ScriptMutability::Mutable,
-                )
-                .map_err(|e| anyhow::anyhow!("insert kb_node failed: {}", e))?;
-
-            result.nodes_created += 1;
-        }
-
-        Ok(result)
+        self.storage.store(chunks, source, domain_tag, sha256_hex)
     }
 
-    /// Check if a content hash already exists in kb_nodes.
-    fn hash_exists(&self, content_hash: &str) -> Result<bool> {
-        let mut params = BTreeMap::new();
-        params.insert("ch".to_string(), DataValue::from(content_hash));
+    #[doc(hidden)]
+    pub fn fail_next_batch_after_hash_write_for_tests(&self) {
+        self.storage.fail_next_batch_after_hash_write_for_tests();
+    }
 
-        let result = self
-            .db
-            .run_script(
-                "?[node_id] := *kb_nodes{node_id, content_hash}, content_hash = $ch",
-                params,
-                ScriptMutability::Immutable,
-            )
-            .map_err(|e| anyhow::anyhow!("hash check failed: {}", e))?;
-
-        Ok(!result.rows.is_empty())
+    #[doc(hidden)]
+    pub fn transaction_count_for_tests(&self) -> usize {
+        self.storage.transaction_count_for_tests()
     }
 }
 
 // ---------------------------------------------------------------------------
 // Chunking functions
 // ---------------------------------------------------------------------------
-
-/// A chunk of document content ready for storage.
-struct ChunkData {
-    title: String,
-    content: String,
-}
 
 /// Split markdown content at `#` headings.
 ///
@@ -356,15 +295,4 @@ fn sha256_hex(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     hex::encode(hasher.finalize())
-}
-
-/// Convert KbNodeType to string for CozoDB storage.
-fn node_type_str(t: &KbNodeType) -> &'static str {
-    match t {
-        KbNodeType::Raw => "raw",
-        KbNodeType::Compiled => "compiled",
-        KbNodeType::Concept => "concept",
-        KbNodeType::Answer => "answer",
-        KbNodeType::Index => "index",
-    }
 }

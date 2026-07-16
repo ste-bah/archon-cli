@@ -30,6 +30,17 @@ fn count_nodes(db: &DbInstance) -> usize {
     result.rows[0][0].get_int().unwrap_or(0) as usize
 }
 
+fn count_content_hashes(db: &DbInstance) -> usize {
+    let result = db
+        .run_script(
+            "?[count(content_hash)] := *kb_content_hashes{content_hash}",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .expect("content-hash count query");
+    result.rows[0][0].get_int().unwrap_or(0) as usize
+}
+
 /// Query nodes by source path.
 fn nodes_by_source(db: &DbInstance, source: &str) -> Vec<Vec<DataValue>> {
     let mut params = BTreeMap::new();
@@ -129,13 +140,32 @@ mod ingest_tests {
 
         // Ingest again — should detect duplicates
         let result2 = ingester.ingest_markdown(&md_file, "test").await.unwrap();
-        assert_eq!(
-            result2.nodes_created, 0,
-            "duplicate ingest should create 0 new nodes, but created {}",
-            result2.nodes_created
-        );
+        assert_eq!(result2.nodes_created, 0);
+        assert_eq!(count_nodes(&db), result1.nodes_created);
     }
 
+    #[tokio::test]
+    async fn duplicate_input_chunks_keep_first_chunk_index_and_single_hash_row() {
+        let db = mem_db();
+        let ingester = test_ingester(db.clone());
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("duplicates.md");
+        std::fs::write(
+            &path,
+            "# Same\n\nRepeated content.\n\n# Same\n\nRepeated content.\n",
+        )
+        .unwrap();
+
+        let result = ingester.ingest_markdown(&path, "test").await.unwrap();
+        let source = path.to_string_lossy().to_string();
+        let rows = nodes_by_source(&db, &source);
+
+        assert_eq!(result.chunks_processed, 2);
+        assert_eq!(result.nodes_created, 1);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][3].get_int(), Some(0));
+        assert_eq!(count_content_hashes(&db), 1);
+    }
     #[tokio::test]
     async fn directory_ingest_recursive() {
         let db = mem_db();
@@ -271,6 +301,81 @@ mod ingest_tests {
         for (i, idx) in indices.iter().enumerate() {
             assert_eq!(*idx, i as i64, "chunk_index should be sequential");
         }
+    }
+
+    #[tokio::test]
+    async fn bounded_batches_use_one_transaction_per_64_unique_chunks() {
+        let db = mem_db();
+        let ingester = test_ingester(db.clone());
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("batches.md");
+        let content = (0..65)
+            .map(|index| format!("# Chunk {index}\n\nUnique content {index}.\n"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&path, content).unwrap();
+
+        let result = ingester.ingest_markdown(&path, "test").await.unwrap();
+
+        assert_eq!(result.nodes_created, 65);
+        assert_eq!(ingester.transaction_count_for_tests(), 2);
+        assert_eq!(count_nodes(&db), 65);
+        assert_eq!(count_content_hashes(&db), 65);
+    }
+
+    #[tokio::test]
+    async fn failed_batch_rolls_back_nodes_and_hash_reservations() {
+        let db = mem_db();
+        let ingester = test_ingester(db.clone());
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("rollback.md");
+        std::fs::write(&path, "# One\n\nTransaction content.\n").unwrap();
+        ingester.fail_next_batch_after_hash_write_for_tests();
+
+        let error = ingester.ingest_markdown(&path, "test").await.unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("injected KB ingest batch failure")
+        );
+        assert_eq!(count_nodes(&db), 0);
+        assert_eq!(count_content_hashes(&db), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_ingest_of_same_hash_creates_one_node() {
+        let db = mem_db();
+        ensure_kb_schema(&db).unwrap();
+        let first = Ingester::new(db.clone()).unwrap();
+        let second = Ingester::new(db.clone()).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("concurrent.md");
+        std::fs::write(&path, "# One\n\nShared content.\n").unwrap();
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let first_runtime = tokio::runtime::Handle::current();
+        let second_runtime = first_runtime.clone();
+        let first_barrier = barrier.clone();
+        let second_barrier = barrier.clone();
+        let first_path = path.clone();
+        let second_path = path.clone();
+
+        let first_task = tokio::task::spawn_blocking(move || {
+            first_barrier.wait();
+            first_runtime.block_on(first.ingest_markdown(&first_path, "test"))
+        });
+        let second_task = tokio::task::spawn_blocking(move || {
+            second_barrier.wait();
+            second_runtime.block_on(second.ingest_markdown(&second_path, "test"))
+        });
+        let (first, second) = tokio::join!(first_task, second_task);
+        let created =
+            first.unwrap().unwrap().nodes_created + second.unwrap().unwrap().nodes_created;
+
+        assert_eq!(created, 1);
+        assert_eq!(count_nodes(&db), 1);
+        assert_eq!(count_content_hashes(&db), 1);
     }
 
     #[tokio::test]

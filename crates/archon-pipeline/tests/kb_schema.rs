@@ -1,4 +1,4 @@
-use archon_pipeline::kb::schema::{KbEdgeType, KbNodeType, ensure_kb_schema};
+use archon_pipeline::kb::schema::{KB_NODES_SCHEMA, KbEdgeType, KbNodeType, ensure_kb_schema};
 use archon_pipeline::kb::{IngestSource, KnowledgeBase, QueryOptions};
 use cozo::{DbInstance, ScriptMutability};
 use std::path::PathBuf;
@@ -44,6 +44,10 @@ fn test_ensure_kb_schema_creates_relations() {
         names.contains(&"kb_embeddings".to_string()),
         "kb_embeddings relation should exist"
     );
+    assert!(
+        names.contains(&"kb_content_hashes".to_string()),
+        "kb_content_hashes relation should exist"
+    );
 }
 
 #[test]
@@ -52,6 +56,160 @@ fn test_ensure_kb_schema_is_idempotent() {
     ensure_kb_schema(&db).unwrap();
     // Second call must not error
     ensure_kb_schema(&db).unwrap();
+}
+
+#[test]
+fn test_ensure_kb_schema_backfills_content_hashes_deterministically() {
+    let db = mem_db();
+    db.run_script(
+        KB_NODES_SCHEMA,
+        Default::default(),
+        ScriptMutability::Mutable,
+    )
+    .unwrap();
+    db.run_script(
+        r#"
+        ?[node_id, node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at] <- [
+            ["z-node", "Raw", "legacy", "test", "Z", "same", "duplicate", 1, 1.0, 1.0],
+            ["a-node", "Raw", "legacy", "test", "A", "same", "duplicate", 0, 1.0, 1.0]
+        ]
+        :put kb_nodes { node_id => node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at }
+        "#,
+        Default::default(),
+        ScriptMutability::Mutable,
+    )
+    .unwrap();
+
+    ensure_kb_schema(&db).unwrap();
+    ensure_kb_schema(&db).unwrap();
+
+    let result = db
+        .run_script(
+            "?[node_id] := *kb_content_hashes{content_hash, node_id}, content_hash = 'duplicate'",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .unwrap();
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0][0].get_str(), Some("a-node"));
+}
+#[test]
+fn test_ensure_kb_schema_skips_empty_content_hash_sentinels() {
+    let db = mem_db();
+    db.run_script(
+        KB_NODES_SCHEMA,
+        Default::default(),
+        ScriptMutability::Mutable,
+    )
+    .unwrap();
+    db.run_script(
+        r#"
+        ?[node_id, node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at] <- [
+            ["compiled-a", "compiled", "compiler", "test", "A", "summary a", "", 0, 1.0, 1.0],
+            ["compiled-b", "compiled", "compiler", "test", "B", "summary b", "", 1, 1.0, 1.0]
+        ]
+        :put kb_nodes { node_id => node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at }
+        "#,
+        Default::default(),
+        ScriptMutability::Mutable,
+    )
+    .unwrap();
+
+    ensure_kb_schema(&db).unwrap();
+
+    let result = db
+        .run_script(
+            "?[node_id] := *kb_content_hashes{content_hash, node_id}, content_hash = ''",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .unwrap();
+    assert!(result.rows.is_empty());
+}
+
+#[tokio::test]
+async fn deleting_owned_hash_node_releases_hash_for_reingest() {
+    let db = mem_db();
+    let kb = KnowledgeBase::new(db.clone()).unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("owned.md");
+    std::fs::write(&path, "# Owned\n\nReusable content.").unwrap();
+
+    assert_eq!(
+        kb.ingest(&IngestSource::FilePath(path.clone()))
+            .await
+            .unwrap()
+            .nodes_created,
+        1
+    );
+    let node_id = db
+        .run_script(
+            "?[node_id] := *kb_nodes{node_id}",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .unwrap()
+        .rows[0][0]
+        .get_str()
+        .unwrap()
+        .to_string();
+
+    kb.delete(&node_id).await.unwrap();
+
+    assert_eq!(
+        db.run_script(
+            "?[content_hash] := *kb_content_hashes{content_hash}",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .unwrap()
+        .rows
+        .len(),
+        0
+    );
+    assert_eq!(
+        kb.ingest(&IngestSource::FilePath(path))
+            .await
+            .unwrap()
+            .nodes_created,
+        1
+    );
+}
+
+#[tokio::test]
+async fn deleting_non_owner_legacy_duplicate_preserves_hash_mapping() {
+    let db = mem_db();
+    ensure_kb_schema(&db).unwrap();
+    db.run_script(
+        r#"
+        ?[node_id, node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at] <- [
+            ["a-owner", "raw", "legacy", "", "owner", "same", "shared-hash", 0, 1.0, 1.0],
+            ["z-duplicate", "raw", "legacy", "", "duplicate", "same", "shared-hash", 1, 1.0, 1.0]
+        ]
+        :put kb_nodes { node_id => node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at }
+        "#,
+        Default::default(),
+        ScriptMutability::Mutable,
+    )
+    .unwrap();
+    db.run_script(
+        "?[content_hash, node_id] <- [[\"shared-hash\", \"a-owner\"]]\n         :put kb_content_hashes { content_hash => node_id }",
+        Default::default(),
+        ScriptMutability::Mutable,
+    )
+    .unwrap();
+    let kb = KnowledgeBase::new(db.clone()).unwrap();
+
+    kb.delete("z-duplicate").await.unwrap();
+
+    let mapping = db
+        .run_script(
+            "?[node_id] := *kb_content_hashes{content_hash, node_id}, content_hash = 'shared-hash'",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .unwrap();
+    assert_eq!(mapping.rows[0][0].get_str(), Some("a-owner"));
 }
 
 #[test]
