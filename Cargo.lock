@@ -504,6 +504,7 @@ dependencies = [
  "walkdir",
  "wasmtime",
  "wat",
+ "which",
  "wiremock",
 ]
 

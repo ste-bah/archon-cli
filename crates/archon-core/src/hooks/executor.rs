@@ -332,8 +332,9 @@ async fn run_command(
     event_name: &str,
     timeout_secs: u32,
 ) -> Result<CommandOutput, RunError> {
-    let mut child = Command::new("sh")
-        .arg("-c")
+    let shell = super::shell::resolve_hook_shell();
+    let mut child = Command::new(&shell.program)
+        .arg(shell.command_arg)
         .arg(command)
         .current_dir(cwd)
         .env("ARCHON_SESSION_ID", session_id)
