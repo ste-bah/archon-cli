@@ -16,6 +16,7 @@ pub mod provenance;
 pub mod schema;
 pub mod source;
 pub mod store;
+pub(crate) mod subprocess;
 pub mod summary;
 pub mod transcript;
 pub mod visual;
