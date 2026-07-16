@@ -171,6 +171,10 @@ fn classify_single_command(
         }
     }
 
+    if has_dangerous_find_predicate(command) {
+        return CommandClass::Dangerous;
+    }
+
     // Check defaults
     for cmd in DEFAULT_DANGEROUS {
         if lower.starts_with(&cmd.to_lowercase()) {
@@ -190,6 +194,84 @@ fn classify_single_command(
 
     // Unknown commands default to risky
     CommandClass::Risky
+}
+
+fn has_dangerous_find_predicate(command: &str) -> bool {
+    let tokens = shell_tokens(command);
+    if tokens.first().is_none_or(|token| token != "find") {
+        return false;
+    }
+
+    let mut index = 1;
+    while index < tokens.len() {
+        let token = tokens[index].as_str();
+        if matches!(token, "-delete" | "-exec" | "-execdir") {
+            return true;
+        }
+        if find_predicate_consumes_argument(token) {
+            index += 1;
+        }
+        index += 1;
+    }
+
+    false
+}
+
+fn find_predicate_consumes_argument(predicate: &str) -> bool {
+    matches!(
+        predicate,
+        "-name"
+            | "-iname"
+            | "-path"
+            | "-ipath"
+            | "-regex"
+            | "-iregex"
+            | "-lname"
+            | "-ilname"
+            | "-wholename"
+            | "-iwholename"
+    )
+}
+
+fn shell_tokens(command: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+
+    for ch in command.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+        } else if ch == '\\' && quote != Some('\'') {
+            escaped = true;
+        } else if matches!(ch, '\'' | '"') {
+            if quote == Some(ch) {
+                quote = None;
+            } else if quote.is_none() {
+                quote = Some(ch);
+            } else {
+                current.push(ch);
+            }
+        } else if matches!(ch, '>' | '<' | '&') && quote.is_none() {
+            if !current.is_empty() {
+                tokens.push(current.to_lowercase());
+                current.clear();
+            }
+        } else if ch.is_whitespace() && quote.is_none() {
+            if !current.is_empty() {
+                tokens.push(current.to_lowercase());
+                current.clear();
+            }
+        } else {
+            current.push(ch);
+        }
+    }
+
+    if !current.is_empty() {
+        tokens.push(current.to_lowercase());
+    }
+    tokens
 }
 
 /// Return the more dangerous of two classifications.
