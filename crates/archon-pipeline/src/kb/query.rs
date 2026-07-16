@@ -183,7 +183,7 @@ impl QueryEngine {
         type_filter: Option<&[KbNodeType]>,
     ) -> Result<Vec<ScoredKbNode>> {
         let mut params = BTreeMap::new();
-        params.insert("q".to_string(), DataValue::from(query_text));
+        params.insert("q".to_string(), DataValue::from(query_text.to_lowercase()));
         // Over-fetch so post-filter still has enough results
         params.insert("lim".to_string(), DataValue::from((limit * 3) as i64));
 
@@ -194,7 +194,8 @@ impl QueryEngine {
                  content_hash, chunk_index, created_at, updated_at] := \
                  *kb_nodes{node_id, node_type, source, domain_tag, title, content, \
                  content_hash, chunk_index, created_at, updated_at}, \
-                 (str_includes(title, $q) or str_includes(content, $q)) \
+                 (str_includes(lowercase(title), $q) or \
+                  str_includes(lowercase(content), $q)) \
                  :limit $lim",
                 params,
                 ScriptMutability::Immutable,

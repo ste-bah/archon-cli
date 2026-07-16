@@ -79,6 +79,19 @@ async fn test_search_nodes_finds_matching() {
 }
 
 #[tokio::test]
+async fn search_nodes_matches_case_insensitively() {
+    let db = test_db();
+    insert_test_node(&db, "n1", "raw", "Rust Programming", "A systems language.");
+
+    let engine = QueryEngine::new(db);
+    let results = engine.search_nodes("rust", 10, None).unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].node.node_id, "n1");
+    assert!(results[0].score > 0.0);
+}
+
+#[tokio::test]
 async fn test_search_nodes_answer_penalty() {
     let db = test_db();
     insert_test_node(
