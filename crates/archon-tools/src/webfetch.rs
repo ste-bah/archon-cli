@@ -1,6 +1,7 @@
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 use std::time::Duration;
 
+use futures_util::{Stream, StreamExt};
 use regex::Regex;
 use serde_json::json;
 
@@ -10,6 +11,14 @@ static RE_SCRIPT: OnceLock<Regex> = OnceLock::new();
 static RE_STYLE: OnceLock<Regex> = OnceLock::new();
 static RE_TAGS: OnceLock<Regex> = OnceLock::new();
 static RE_WS: OnceLock<Regex> = OnceLock::new();
+static HTTP_CLIENT: LazyLock<Result<reqwest::Client, String>> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .timeout(TIMEOUT)
+        .redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS))
+        .user_agent(USER_AGENT)
+        .build()
+        .map_err(|error| error.to_string())
+});
 
 /// Maximum response body size in bytes (1 MB).
 const MAX_BODY_BYTES: usize = 1_024 * 1_024;
@@ -22,6 +31,29 @@ const MAX_REDIRECTS: usize = 5;
 
 /// User-Agent header value.
 const USER_AGENT: &str = "archon-cli/0.1.0";
+
+fn shared_client() -> Result<&'static reqwest::Client, &'static str> {
+    HTTP_CLIENT.as_ref().map_err(String::as_str)
+}
+
+async fn collect_body_bounded<S, B, E>(mut stream: S, limit: usize) -> Result<(Vec<u8>, bool), E>
+where
+    S: Stream<Item = Result<B, E>> + Unpin,
+    B: AsRef<[u8]>,
+{
+    let mut body = Vec::with_capacity(limit);
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        let chunk = chunk.as_ref();
+        let remaining = limit - body.len();
+        if chunk.len() > remaining {
+            body.extend_from_slice(&chunk[..remaining]);
+            return Ok((body, true));
+        }
+        body.extend_from_slice(chunk);
+    }
+    Ok((body, false))
+}
 
 pub struct WebFetchTool;
 
@@ -95,14 +127,11 @@ impl Tool for WebFetchTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
 
-        let client = match reqwest::Client::builder()
-            .timeout(TIMEOUT)
-            .redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS))
-            .user_agent(USER_AGENT)
-            .build()
-        {
-            Ok(c) => c,
-            Err(e) => return ToolResult::error(format!("Failed to create HTTP client: {e}")),
+        let client = match shared_client() {
+            Ok(client) => client,
+            Err(error) => {
+                return ToolResult::error(format!("Failed to create HTTP client: {error}"));
+            }
         };
 
         let response = match client.get(url).send().await {
@@ -130,20 +159,15 @@ impl Tool for WebFetchTool {
             ));
         }
 
-        // Read body with size limit
-        let bytes = match response.bytes().await {
-            Ok(b) => b,
-            Err(e) => return ToolResult::error(format!("Failed to read response body: {e}")),
-        };
+        let (body_bytes, truncated) =
+            match collect_body_bounded(response.bytes_stream(), MAX_BODY_BYTES).await {
+                Ok(body) => body,
+                Err(error) => {
+                    return ToolResult::error(format!("Failed to read response body: {error}"));
+                }
+            };
 
-        let truncated = bytes.len() > MAX_BODY_BYTES;
-        let body_bytes = if truncated {
-            &bytes[..MAX_BODY_BYTES]
-        } else {
-            &bytes[..]
-        };
-
-        let body = String::from_utf8_lossy(body_bytes).into_owned();
+        let body = String::from_utf8_lossy(&body_bytes).into_owned();
 
         let mut result = if extract { extract_text(&body) } else { body };
 
@@ -229,6 +253,51 @@ mod tests {
         let html = "<p>A &amp; B &lt; C &gt; D</p>";
         let text = extract_text(html);
         assert!(text.contains("A & B < C > D"));
+    }
+
+    #[tokio::test]
+    async fn bounded_body_reader_stops_at_limit() {
+        let stream = futures_util::stream::iter([
+            Ok::<_, std::io::Error>(b"abcd".to_vec()),
+            Ok(b"efgh".to_vec()),
+            Err(std::io::Error::other("stream polled after body limit")),
+        ]);
+
+        let (body, truncated) = collect_body_bounded(stream, 6).await.unwrap();
+
+        assert_eq!(body, b"abcdef");
+        assert!(truncated);
+    }
+
+    #[tokio::test]
+    async fn bounded_body_reader_does_not_truncate_at_exact_limit() {
+        let stream = futures_util::stream::iter([Ok::<_, std::io::Error>(b"abcdef".to_vec())]);
+
+        let (body, truncated) = collect_body_bounded(stream, 6).await.unwrap();
+
+        assert_eq!(body, b"abcdef");
+        assert!(!truncated);
+    }
+
+    #[tokio::test]
+    async fn bounded_body_reader_propagates_errors_before_limit() {
+        let stream = futures_util::stream::iter([
+            Ok::<_, std::io::Error>(b"abcd".to_vec()),
+            Err(std::io::Error::other("stream failed")),
+        ]);
+
+        let error = collect_body_bounded(stream, 6).await.unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::Other);
+        assert_eq!(error.to_string(), "stream failed");
+    }
+
+    #[test]
+    fn webfetch_reuses_one_http_client() {
+        assert!(std::ptr::eq(
+            shared_client().unwrap(),
+            shared_client().unwrap()
+        ));
     }
 
     #[tokio::test]
