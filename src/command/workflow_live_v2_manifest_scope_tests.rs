@@ -44,3 +44,23 @@ fn undeclared_manifest_change_still_fails_closed() {
         "write-coordination-scope-escape"
     );
 }
+
+#[test]
+fn idempotent_noop_accepts_declared_files_with_no_observed_writes() {
+    let input = serde_json::json!({
+        "focused_verification": "verify ownership diff scope for noop",
+        "canonical_task_ids": ["TASK-001"],
+        "write_coordination_scope": {
+            "declared_target_files": ["src/owned.rs", "src/also-owned.rs"],
+            "changed_files": [],
+            "created_files": [],
+            "deleted_files": [],
+            "status": {"status": "idempotent_noop"}
+        }
+    });
+
+    let result = manifest_scope_verification_result(&input).expect("scope result");
+
+    assert_eq!(result.status, WorkflowV2Status::Accepted);
+    assert_eq!(result.commands_run[0].exit_code, Some(0));
+}

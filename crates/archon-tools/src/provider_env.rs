@@ -69,10 +69,22 @@ pub struct ProviderEnvProfileProof {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ProviderEnvResolverProof {
+    #[serde(default)]
+    pub status: ProviderEnvResolverStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_status: Option<i32>,
     #[serde(default)]
     pub stderr: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderEnvResolverStatus {
+    #[default]
+    NotNeeded,
+    Succeeded,
+    Failed,
+    TimedOut,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -322,14 +334,20 @@ async fn profile_values_with_timeout(
         Err(_) => {
             return ProfileAttempt {
                 values: BTreeMap::new(),
-                resolver: ProviderEnvResolverProof::default(),
+                resolver: ProviderEnvResolverProof {
+                    status: ProviderEnvResolverStatus::TimedOut,
+                    ..ProviderEnvResolverProof::default()
+                },
                 error: Some("provider env profile preflight timed out".to_string()),
             };
         }
         Ok(Err(error)) => {
             return ProfileAttempt {
                 values: BTreeMap::new(),
-                resolver: ProviderEnvResolverProof::default(),
+                resolver: ProviderEnvResolverProof {
+                    status: ProviderEnvResolverStatus::Failed,
+                    ..ProviderEnvResolverProof::default()
+                },
                 error: Some(format!("provider env profile preflight failed: {error}")),
             };
         }
@@ -341,6 +359,11 @@ async fn profile_values_with_timeout(
         "<redacted:provider-profile-stderr>".to_string()
     };
     let resolver = ProviderEnvResolverProof {
+        status: if output.status.success() {
+            ProviderEnvResolverStatus::Succeeded
+        } else {
+            ProviderEnvResolverStatus::Failed
+        },
         exit_status: output.status.code(),
         stderr,
     };
@@ -365,7 +388,10 @@ async fn profile_values_with_timeout(
         },
         Err(error) => ProfileAttempt {
             values: BTreeMap::new(),
-            resolver,
+            resolver: ProviderEnvResolverProof {
+                status: ProviderEnvResolverStatus::Failed,
+                ..resolver
+            },
             error: Some(error),
         },
     }

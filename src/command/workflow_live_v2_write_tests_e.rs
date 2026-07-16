@@ -26,6 +26,14 @@ fn unsafe_path_still_classifies_as_safety() {
 }
 
 #[test]
+fn coordinator_undeclared_patch_wording_is_branch_scoped_safety_data() {
+    let error = "patch writes undeclared path 'src/other.rs'";
+
+    assert!(is_write_branch_validation_error(error));
+    assert_eq!(write_branch_error_kind(error), BranchFailureKind::Safety);
+}
+
+#[test]
 fn compound_repair_failure_uses_root_rejection_kind() {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "fixtures/d26_compound_repair_failure.json"

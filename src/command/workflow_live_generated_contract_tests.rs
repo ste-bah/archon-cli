@@ -87,6 +87,7 @@ fn neutral_prd_capabilities_are_stamped_without_task_id_heuristics() {
                         artifact_path: ".archon/demo/coverage.json".to_string(),
                         registry_path: Some(".archon/demo/registry.json".to_string()),
                         required_universe: true,
+                        ..Default::default()
                     },
                 ],
                 ..Default::default()

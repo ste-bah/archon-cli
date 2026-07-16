@@ -30,6 +30,10 @@ async fn profile_preflight_reports_present_key_without_value() {
         ProviderEnvFoundIn::Profile
     );
     assert_eq!(resolved.proof.resolver.exit_status, Some(0));
+    assert_eq!(
+        resolved.proof.resolver.status,
+        ProviderEnvResolverStatus::Succeeded
+    );
     assert!(resolved.proof.resolver.stderr.is_empty());
     assert_eq!(resolved.proof.profile_provenance.len(), 1);
     assert!(resolved.proof.profile_provenance[0].exists);
@@ -169,6 +173,21 @@ async fn profile_timeout_is_resolution_error_not_missing() {
     );
     assert_eq!(resolved.proof.errors.len(), 1);
     assert!(resolved.proof.errors[0].contains("timed out"));
+    assert_eq!(
+        resolved.proof.resolver.status,
+        ProviderEnvResolverStatus::TimedOut
+    );
+}
+
+#[test]
+fn resolver_status_defaults_for_legacy_redacted_proofs() {
+    let proof: ProviderEnvResolverProof = serde_json::from_value(serde_json::json!({
+        "exit_status": 0,
+        "stderr": ""
+    }))
+    .expect("legacy resolver proof");
+
+    assert_eq!(proof.status, ProviderEnvResolverStatus::NotNeeded);
 }
 
 #[test]

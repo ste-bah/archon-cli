@@ -82,6 +82,8 @@ fn semantic_empty_inventory_is_not_retried_as_transport() {
 #[test]
 fn transport_error_before_json_is_promoted_to_the_same_retry_route() {
     let failed = transport_failure_result(
+        "verification-remediation-inventory-4-1",
+        1,
         "reactive subagent compaction failed: no safe compaction boundary",
     );
 
@@ -94,6 +96,61 @@ fn transport_error_before_json_is_promoted_to_the_same_retry_route() {
             .as_str()
             .is_some_and(|summary| summary.contains("no safe compaction boundary"))
     );
+}
+
+#[test]
+fn exhausted_transport_is_an_explicit_infrastructure_blocker() {
+    let failed = transport_failure_result(
+        "verification-failure-triage-7-1",
+        2,
+        "reactive subagent compaction failed: no safe compaction boundary",
+    );
+
+    assert_eq!(failed["status"], "failed");
+    assert_eq!(failed["data"]["failure_class"], "transport_infrastructure");
+    assert_eq!(failed["data"]["transport_exhausted"], true);
+    assert_eq!(failed["data"]["transport_attempts"], 2);
+    assert_eq!(
+        failed["data"]["terminal_blockers"][0]["classification"],
+        "transport_infrastructure_exhausted"
+    );
+    let routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(&failed);
+    let plan = workflow_live_v2_lifecycle_verify_routing::triage_route_plan(&routes);
+    assert!(routes.implementation_failures.is_empty());
+    assert!(routes.retry_items.is_empty());
+    assert_eq!(routes.terminal_blockers.len(), 1);
+    assert!(plan.terminal_blocked);
+}
+
+#[test]
+fn every_lifecycle_reducer_uses_the_common_transport_retry_path() {
+    let lifecycle = include_str!("workflow_live_v2_lifecycle.rs");
+    let reducer_call_sites = [
+        "workflow_live_v2_lifecycle_impl.rs",
+        "workflow_live_v2_lifecycle_review.rs",
+        "workflow_live_v2_lifecycle_review_verification.rs",
+        "workflow_live_v2_lifecycle_verify.rs",
+        "workflow_live_v2_lifecycle_verify_outcome_repair_driver.rs",
+        "workflow_live_v2_lifecycle_verify_remediation.rs",
+        "workflow_live_v2_lifecycle_verify_triage.rs",
+        "workflow_live_v2_lifecycle_waves.rs",
+    ];
+
+    assert!(lifecycle.contains("for attempt in 1..=max_transport_attempts"));
+    assert!(lifecycle.contains("transport_failure_summary(&result)"));
+    assert!(lifecycle.contains("source_pack_value(&source)"));
+    for source in reducer_call_sites {
+        let text = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("src/command")
+                .join(source),
+        )
+        .expect("read lifecycle reducer source");
+        assert!(
+            !text.contains(".call(\"reduce\""),
+            "{source} bypasses LifecycleDriver::reduce"
+        );
+    }
 }
 
 #[test]

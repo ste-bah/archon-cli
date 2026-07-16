@@ -120,6 +120,8 @@ fn coverage_matrix_refuses_false_positive_failed_validation_cell() {
     let mut report: ValidationReport = read_json(&validation_path).unwrap();
     report.status = ValidationStatus::Failed;
     report.production_eligible = false;
+    report.checks[0].status = ValidationStatus::Failed;
+    report.checks[0].severity = ValidationSeverity::Error;
     write_json(&validation_path, &report).unwrap();
 
     let matrix = lake
@@ -137,6 +139,64 @@ fn coverage_matrix_refuses_false_positive_failed_validation_cell() {
         .as_deref()
         .unwrap()
         .contains("validation status is not passed"));
+}
+
+#[test]
+fn contradictory_validation_report_is_rejected_on_load() {
+    let value = serde_json::json!({
+        "schema": "archon-trading-validation-v1",
+        "dataset_id": "demo",
+        "version": "v1",
+        "status": "passed",
+        "native_interval": true,
+        "production_eligible": true,
+        "checks": [{
+            "id": "payload.integrity",
+            "status": "failed",
+            "severity": "error",
+            "message": "failed"
+        }],
+        "summary": {
+            "row_count": 1,
+            "duplicate_timestamp_count": 0,
+            "gap_count": 0,
+            "bad_ohlc_count": 0,
+            "missing_volume_count": 0
+        },
+        "validated_at": "2026-01-01T00:00:00Z"
+    });
+
+    let error = serde_json::from_value::<ValidationReport>(value)
+        .expect_err("contradictory validation must fail");
+
+    assert!(error.to_string().contains("contradicts its checks"));
+}
+
+#[test]
+fn registry_load_downgrades_stale_healthy_record_from_failed_validation_artifact() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let record = lake.store_ohlcv(spy_request()).unwrap();
+    let validation_path = temp.path().join(&record.validation_path);
+    let mut validation: serde_json::Value = read_json(&validation_path).unwrap();
+    validation["status"] = serde_json::json!("passed");
+    validation["production_eligible"] = serde_json::json!(true);
+    validation["checks"][0]["status"] = serde_json::json!("failed");
+    validation["checks"][0]["severity"] = serde_json::json!("error");
+    write_json(&validation_path, &validation).unwrap();
+
+    let registry = lake.load_registry().unwrap();
+    let key = registry_key(&record.dataset_id, &record.version);
+    let stored = registry.datasets.get(&key).unwrap();
+
+    assert_eq!(stored.status, DatasetStatus::Degraded);
+    assert!(!stored.production_eligible);
+    let persisted: PersistentDatasetRegistry = read_json(&lake.registry_path()).unwrap();
+    assert_eq!(
+        persisted.datasets.get(&key).unwrap().status,
+        DatasetStatus::Degraded
+    );
+    assert!(!persisted.datasets.get(&key).unwrap().production_eligible);
 }
 
 #[test]

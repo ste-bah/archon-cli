@@ -10,6 +10,8 @@ use crate::command::trading_data::data_error;
 use crate::command::trading_io::write_or_render;
 use crate::command::trading_tools::{checked_text, project_root, run_node_script, tv_cli};
 
+const TRADINGVIEW_REQUESTED_BARS: usize = 100;
+
 pub(crate) fn fetch_native(
     target: Option<&PathBuf>,
     provider: &str,
@@ -86,12 +88,22 @@ fn fetch_tradingview_native(
     end: &str,
     dataset_id: &str,
 ) -> Result<String> {
-    let response = match tradingview_response(root, symbol, timeframe, start, end) {
+    let response = match tradingview_response(root, symbol, timeframe) {
         Ok(response) => response,
         Err(reason) => {
             return tradingview_unavailable(symbol, timeframe, start, end, dataset_id, &reason);
         }
     };
+    if let Err(reason) = validate_tradingview_response_identity(&response, symbol, timeframe) {
+        return tradingview_unavailable(
+            symbol,
+            timeframe,
+            start,
+            end,
+            dataset_id,
+            &reason.to_string(),
+        );
+    }
     let bars = match bars_from_tradingview_response(&response) {
         Ok(bars) => bars,
         Err(reason) => {
@@ -105,6 +117,20 @@ fn fetch_tradingview_native(
             );
         }
     };
+    if bars.len() < TRADINGVIEW_REQUESTED_BARS {
+        return tradingview_unavailable(
+            symbol,
+            timeframe,
+            start,
+            end,
+            dataset_id,
+            &format!(
+                "TradingView row shortfall: requested={} actual={}",
+                TRADINGVIEW_REQUESTED_BARS,
+                bars.len()
+            ),
+        );
+    }
     let captured_bars = bars.len();
     let fetched_at = chrono::Utc::now().to_rfc3339();
     let record = TradingDataLake::new(root)
@@ -134,8 +160,6 @@ fn tradingview_response(
     root: &Path,
     symbol: &str,
     timeframe: &str,
-    start: &str,
-    end: &str,
 ) -> Result<Vec<u8>, String> {
     if !matches!(timeframe.trim(), "1W" | "1D" | "240" | "60" | "15") {
         return Err(format!(
@@ -145,16 +169,10 @@ fn tradingview_response(
     if let Ok(path) = std::env::var("ARCHON_TRADINGVIEW_OHLCV_FIXTURE") {
         return std::fs::read(path).map_err(|err| format!("TradingView fixture unreadable: {err}"));
     }
-    run_tradingview_cli(root, symbol, timeframe, start, end)
+    run_tradingview_cli(root, symbol, timeframe)
 }
 
-fn run_tradingview_cli(
-    root: &Path,
-    symbol: &str,
-    timeframe: &str,
-    start: &str,
-    end: &str,
-) -> Result<Vec<u8>, String> {
+fn run_tradingview_cli(root: &Path, symbol: &str, timeframe: &str) -> Result<Vec<u8>, String> {
     let cli = tv_cli(root);
     if !cli.is_file() {
         return Err(format!(
@@ -169,13 +187,16 @@ fn run_tradingview_cli(
         symbol.into(),
         "--timeframe".into(),
         timeframe.into(),
-        "--start".into(),
-        start.into(),
-        "--end".into(),
-        end.into(),
-        "--json".into(),
+        "--count".into(),
+        TRADINGVIEW_REQUESTED_BARS.to_string(),
     ];
-    let output = run_node_script(root, &cli, &args).map_err(|err| err.to_string())?;
+    let output = match run_node_script(root, &cli, &args) {
+        Ok(output) => output,
+        Err(error) => {
+            return fallback_tradingview_fixture_from_cli(&cli)
+                .ok_or_else(|| error.to_string());
+        }
+    };
     match checked_text(output, "TradingView MCP CLI") {
         Ok(text) => Ok(text.into_bytes()),
         Err(err) => fallback_tradingview_fixture_from_cli(&cli).ok_or_else(|| err.to_string()),
@@ -211,6 +232,52 @@ fn bars_from_tradingview_response(body: &[u8]) -> Result<Vec<OhlcvBar>> {
         .collect::<Result<Vec<_>>>()?;
     validate_bars(&bars).map_err(|err| anyhow!("invalid TradingView OHLCV data: {err:?}"))?;
     Ok(bars)
+}
+
+fn validate_tradingview_response_identity(
+    body: &[u8],
+    requested_symbol: &str,
+    requested_timeframe: &str,
+) -> Result<()> {
+    let value: Value = serde_json::from_slice(body)?;
+    let actual_symbol = value
+        .get("symbol")
+        .or_else(|| value.get("actual_symbol"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow!("TradingView response missing authoritative symbol"))?;
+    let actual_timeframe = value
+        .get("timeframe")
+        .or_else(|| value.get("actual_timeframe"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow!("TradingView response missing authoritative timeframe"))?;
+    if !actual_symbol.eq_ignore_ascii_case(requested_symbol.trim()) {
+        return Err(anyhow!(
+            "TradingView response symbol mismatch: requested={} actual={actual_symbol}",
+            requested_symbol.trim()
+        ));
+    }
+    if normalized_tradingview_timeframe(actual_timeframe)
+        != normalized_tradingview_timeframe(requested_timeframe)
+    {
+        return Err(anyhow!(
+            "TradingView response timeframe mismatch: requested={} actual={actual_timeframe}",
+            requested_timeframe.trim()
+        ));
+    }
+    Ok(())
+}
+
+fn normalized_tradingview_timeframe(value: &str) -> String {
+    match value.trim().to_ascii_uppercase().as_str() {
+        "D" => "1D".into(),
+        "W" => "1W".into(),
+        "M" => "1M".into(),
+        value => value.to_string(),
+    }
 }
 
 fn tradingview_bar(row: &Value) -> Result<OhlcvBar> {
@@ -336,6 +403,7 @@ fn tradingview_request(symbol: &str, timeframe: &str, start: &str, end: &str) ->
         "tool": "tradingview-mcp native ohlcv",
         "symbol": symbol,
         "timeframe": timeframe,
+        "count": TRADINGVIEW_REQUESTED_BARS,
         "start": start,
         "end": end,
     })

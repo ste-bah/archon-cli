@@ -85,6 +85,10 @@ fn provider_env_result_stamp_persists_redacted_proof_only() {
         result.data["provider_env_proof"]["credential_state"],
         serde_json::json!("present")
     );
+    assert_eq!(
+        result.data["provider_env_proof"]["resolver"]["status"],
+        serde_json::json!("not_needed")
+    );
     assert!(!result.data.to_string().contains("secret"));
 }
 

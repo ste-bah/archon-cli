@@ -173,7 +173,7 @@ pub(super) fn reconcile_versioned_from_validation(
 }
 
 fn validation_is_production_eligible(report: &ValidationReport) -> bool {
-    report.status == ValidationStatus::Passed && report.production_eligible
+    report.allows_production()
 }
 
 fn update_metadata_from_validation(

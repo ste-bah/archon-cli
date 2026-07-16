@@ -443,9 +443,28 @@ impl TradingDataLake {
     }
 
     fn load_verified_registry(&self) -> Result<PersistentDatasetRegistry, DataStoreError> {
-        let registry = self.load_registry_migration(false)?.registry;
-        for record in registry.datasets.values() {
+        let mut registry = self.load_registry_migration(false)?.registry;
+        let mut reconciled = false;
+        for record in registry.datasets.values_mut() {
             verify_artifacts(&self.root, record)?;
+            let validation =
+                read_json::<ValidationReport>(&self.root.join(&record.validation_path));
+            let production_eligible = validation
+                .as_ref()
+                .is_ok_and(ValidationReport::allows_production);
+            let status = if production_eligible {
+                DatasetStatus::Healthy
+            } else {
+                DatasetStatus::Degraded
+            };
+            if record.production_eligible != production_eligible || record.status != status {
+                record.production_eligible = production_eligible;
+                record.status = status;
+                reconciled = true;
+            }
+        }
+        if reconciled {
+            write_schema_json(&self.registry_path(), &registry)?;
         }
         Ok(registry)
     }

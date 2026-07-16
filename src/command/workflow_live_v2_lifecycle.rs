@@ -185,13 +185,48 @@ impl LifecycleDriver {
         } else {
             task.to_string()
         };
-        self.call(
-            "reduce",
+        let max_transport_attempts = 2;
+        let mut last_transport_failure = None;
+        for attempt in 1..=max_transport_attempts {
+            let call_id = if attempt == 1 {
+                id.to_string()
+            } else {
+                format!("{id}-transport-retry-{attempt}")
+            };
+            let attempt_source = if attempt == 1 {
+                source.clone()
+            } else {
+                super::workflow_live_v2_data::source_pack_value(&source)
+            };
+            match self
+                .call(
+                    "reduce",
+                    &call_id,
+                    Some(attempt_source),
+                    serde_json::json!({ "tier": tier, "task": grounded_task }),
+                )
+                .await
+            {
+                Ok(result) => {
+                    if let Some(error) = transport_failure_summary(&result) {
+                        last_transport_failure = Some(error);
+                        continue;
+                    }
+                    return Ok(result);
+                }
+                Err(error) if is_transport_failure_text(&error.to_string()) => {
+                    last_transport_failure = Some(error.to_string());
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(transport_failure_result(
             id,
-            Some(source),
-            serde_json::json!({ "tier": tier, "task": grounded_task }),
-        )
-        .await
+            max_transport_attempts,
+            last_transport_failure.as_deref().unwrap_or(
+                "reducer transport failed without a recorded transport error",
+            ),
+        ))
     }
 
     async fn parallel(

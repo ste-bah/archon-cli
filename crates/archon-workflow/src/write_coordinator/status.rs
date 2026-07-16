@@ -98,12 +98,12 @@ pub fn read_status(
             }
         }
     }
-    if let Some((command, duration_ms)) = latest_verify_result(&tests_dir) {
-        verify_command = command;
-        verify_duration_ms = duration_ms;
-    }
     if failed > 0 {
         last_apply = "failed".into();
+        if let Some((command, duration_ms)) = latest_verify_result(&tests_dir) {
+            verify_command = command;
+            verify_duration_ms = duration_ms;
+        }
     } else if accepted > 0 && pending == 0 {
         last_apply = "applied".into();
     }

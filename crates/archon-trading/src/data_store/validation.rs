@@ -113,17 +113,7 @@ fn volume_is_non_degenerate(bars: &[OhlcvBar]) -> bool {
 }
 
 pub(super) fn validation_status(checks: &[ValidationCheck]) -> ValidationStatus {
-    if checks.iter().any(|check| {
-        check.status == ValidationStatus::Failed && check.severity == ValidationSeverity::Error
-    }) {
-        ValidationStatus::Failed
-    } else if checks.iter().any(|check| {
-        check.status == ValidationStatus::Failed && check.severity == ValidationSeverity::Warning
-    }) {
-        ValidationStatus::Degraded
-    } else {
-        ValidationStatus::Passed
-    }
+    ValidationReport::status_from_checks(checks)
 }
 
 pub(super) fn validation_summary(

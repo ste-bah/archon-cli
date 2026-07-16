@@ -1,6 +1,6 @@
 use super::{normalize_timeframe, provider_supports_native_timeframe, unavailable_reason};
 use crate::ohlcv::OhlcvBar;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -35,7 +35,7 @@ pub struct ValidationSummary {
     pub missing_volume_count: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ValidationReport {
     #[serde(rename = "schema", alias = "schema_version")]
     pub schema_version: String,
@@ -47,6 +47,76 @@ pub struct ValidationReport {
     pub checks: Vec<ValidationCheck>,
     pub summary: ValidationSummary,
     pub validated_at: String,
+}
+
+impl ValidationReport {
+    pub fn status_from_checks(checks: &[ValidationCheck]) -> ValidationStatus {
+        if checks.iter().any(|check| {
+            check.status == ValidationStatus::Failed && check.severity == ValidationSeverity::Error
+        }) {
+            ValidationStatus::Failed
+        } else if checks
+            .iter()
+            .any(|check| check.status == ValidationStatus::Failed)
+        {
+            ValidationStatus::Degraded
+        } else {
+            ValidationStatus::Passed
+        }
+    }
+
+    pub fn is_consistent(&self) -> bool {
+        self.status == Self::status_from_checks(&self.checks)
+            && (!self.production_eligible
+                || (self.status == ValidationStatus::Passed && self.native_interval))
+    }
+
+    pub fn allows_production(&self) -> bool {
+        self.is_consistent()
+            && self.status == ValidationStatus::Passed
+            && self.native_interval
+            && self.production_eligible
+    }
+}
+
+impl<'de> Deserialize<'de> for ValidationReport {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            #[serde(rename = "schema", alias = "schema_version")]
+            schema_version: String,
+            dataset_id: String,
+            version: String,
+            status: ValidationStatus,
+            native_interval: bool,
+            production_eligible: bool,
+            checks: Vec<ValidationCheck>,
+            summary: ValidationSummary,
+            validated_at: String,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let report = Self {
+            schema_version: wire.schema_version,
+            dataset_id: wire.dataset_id,
+            version: wire.version,
+            status: wire.status,
+            native_interval: wire.native_interval,
+            production_eligible: wire.production_eligible,
+            checks: wire.checks,
+            summary: wire.summary,
+            validated_at: wire.validated_at,
+        };
+        if !report.is_consistent() {
+            return Err(serde::de::Error::custom(
+                "validation report status/production eligibility contradicts its checks",
+            ));
+        }
+        Ok(report)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

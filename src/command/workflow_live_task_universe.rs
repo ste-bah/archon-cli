@@ -52,6 +52,68 @@ pub(super) struct WorkflowV2DeliverableContract {
     pub(super) registry_path: Option<String>,
     #[serde(default)]
     pub(super) required_universe: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) data_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) universe_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) cells_field: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) cell_identity_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) required_true_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) required_nonempty_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) positive_count_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) gaps_field: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) registry_records_field: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) registry_key_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) registry_required_true_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) registry_status_field: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) registry_allowed_statuses: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) registry_count_field: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(super) registry_identity_fields: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) payload_path_field: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) payload_format: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) required_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) non_constant_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) series_value_fields: Vec<String>,
+    #[serde(default)]
+    pub(super) series_overlap_min_rows: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) request_path_field: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) requested_count_field: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) response_path_field: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(super) response_identity_fields: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) validation_path_field: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) validation_status_field: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) validation_checks_field: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) validation_check_status_field: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) validation_failed_values: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) validation_passed_values: Vec<String>,
 }
 
 pub(super) fn extract_task_universe_for_generated_run(

@@ -75,15 +75,15 @@ fn explicit_task_id_artifact_contract_remains_actionable() {
 
 #[test]
 fn d36_prompts_ground_artifact_fields_in_task_contracts() {
-    let prompts = [
-        super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_PLAN_TASK,
-        super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_FAILURE_TRIAGE_TASK,
-    ];
-    for prompt in prompts {
-        assert!(prompt.to_ascii_lowercase().contains("task"));
-        assert!(prompt.contains("raw/request.json"));
-        assert!(prompt.contains("canonical task ID"));
-    }
+    let plan = super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_PLAN_TASK;
+    let triage = super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_FAILURE_TRIAGE_TASK;
+
+    assert!(plan.to_ascii_lowercase().contains("task"));
+    assert!(plan.contains("Raw external payloads"));
+    assert!(plan.contains("canonical task IDs"));
+    assert!(triage.to_ascii_lowercase().contains("task"));
+    assert!(triage.contains("raw/request.json"));
+    assert!(triage.contains("canonical task ID"));
 }
 
 #[test]

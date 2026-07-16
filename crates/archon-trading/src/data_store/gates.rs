@@ -79,12 +79,7 @@ pub(super) fn append_dataset_gate_issues(
 }
 
 fn validation_report_allows_production(report: &ValidationReport) -> bool {
-    report.status == ValidationStatus::Passed
-        && report.native_interval
-        && report.production_eligible
-        && report.checks.iter().all(|check| {
-            check.status != ValidationStatus::Failed || check.severity != ValidationSeverity::Error
-        })
+    report.allows_production()
 }
 
 pub(super) struct ArtifactPaths<'a> {

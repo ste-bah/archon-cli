@@ -2,6 +2,67 @@ use super::workflow_live_v2_lifecycle_verify_options::{
     prepare_verification_items, verification_options, write_wave_parallelism,
 };
 
+fn record_series_contract() -> serde_json::Value {
+    serde_json::json!({
+        "kind": "required_universe_registry",
+        "artifact_path": ".archon/demo/coverage.json",
+        "registry_path": ".archon/demo/registry.json",
+        "required_universe": true,
+        "data_kind": "record_series",
+        "universe_fields": ["instruments", "timeframes"],
+        "cells_field": "cells",
+        "cell_identity_fields": ["canonical_instrument", "timeframe"],
+        "required_true_fields": ["available", "production_eligible"],
+        "required_nonempty_fields": ["provider_symbol", "dataset_id", "version"],
+        "positive_count_fields": ["row_count"],
+        "gaps_field": "gaps",
+        "registry_records_field": "datasets",
+        "registry_key_fields": ["dataset_id", "version"],
+        "registry_required_true_fields": ["production_eligible"],
+        "registry_status_field": "status",
+        "registry_allowed_statuses": ["Healthy"],
+        "registry_count_field": "rows",
+        "registry_identity_fields": {
+            "canonical_instrument": "symbol",
+            "timeframe": "timeframe"
+        },
+        "payload_path_field": "payload_path",
+        "payload_format": "jsonl",
+        "required_fields": ["timestamp", "value", "measure"],
+        "non_constant_fields": ["value", "measure"],
+        "series_value_fields": ["value", "measure"],
+        "series_overlap_min_rows": 2,
+        "request_path_field": "request_path",
+        "requested_count_field": "count",
+        "response_path_field": "response_path",
+        "response_identity_fields": {
+            "provider_symbol": "symbol",
+            "timeframe": "timeframe"
+        },
+        "validation_path_field": "validation_path",
+        "validation_status_field": "status",
+        "validation_checks_field": "checks",
+        "validation_check_status_field": "status",
+        "validation_failed_values": ["failed"],
+        "validation_passed_values": ["passed"]
+    })
+}
+
+fn write_json(path: &std::path::Path, value: &serde_json::Value) {
+    std::fs::create_dir_all(path.parent().expect("parent")).expect("directory");
+    std::fs::write(path, value.to_string()).expect("JSON artifact");
+}
+
+fn write_jsonl(path: &std::path::Path, rows: &[serde_json::Value]) {
+    std::fs::create_dir_all(path.parent().expect("parent")).expect("directory");
+    let body = rows
+        .iter()
+        .map(serde_json::Value::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(path, format!("{body}\n")).expect("JSONL artifact");
+}
+
 #[test]
 fn verification_items_receive_the_runtime_project_root() {
     let items = vec![serde_json::json!({
@@ -78,12 +139,7 @@ fn declared_required_universe_gets_substantive_registry_backed_verification() {
         "canonical_task_id": "TASK-DEMO-080",
         "required_env_keys": ["DEMO_API_KEY"],
         "required_tools": ["mcp__demo__fetch_cells"],
-        "deliverable_contracts": [{
-            "kind": "required_universe_registry",
-            "artifact_path": ".archon/demo/coverage.json",
-            "registry_path": ".archon/demo/registry.json",
-            "required_universe": true
-        }]
+        "deliverable_contracts": [record_series_contract()]
     }]});
 
     let prepared = prepare_verification_items(items, Some("/runtime/project"), &[], &universe);
@@ -96,13 +152,13 @@ fn declared_required_universe_gets_substantive_registry_backed_verification() {
         substantive["focused_verification"]
             .as_str()
             .expect("command")
-            .contains("lacks healthy registered native provenance")
+            .contains("payload field is constant or absent")
     );
     assert!(
         substantive["focused_verification"]
             .as_str()
             .expect("command")
-            .contains("missing-symbol-or-interval")
+            .contains("internally inconsistent")
     );
     assert_eq!(
         substantive["provider_env_requirements"],
@@ -115,43 +171,114 @@ fn declared_required_universe_gets_substantive_registry_backed_verification() {
 }
 
 #[test]
-fn neutral_declared_verifier_executes_and_fails_closed_on_empty_cells() {
+fn neutral_declared_verifier_executes_for_clean_contract_driven_series() {
     let project = tempfile::tempdir().expect("project");
     let artifact_path = project.path().join(".archon/demo/coverage.json");
     let registry_path = project.path().join(".archon/demo/registry.json");
-    std::fs::create_dir_all(artifact_path.parent().expect("artifact parent"))
-        .expect("artifact directory");
     let artifact = serde_json::json!({
-        "instruments": ["DEMO"],
+        "instruments": ["ALPHA", "BETA"],
         "timeframes": ["1D"],
-        "cells": [{
-            "canonical_instrument": "DEMO",
-            "timeframe": "1D",
-            "available": true,
-            "native_interval": true,
-            "production_eligible": true,
-            "symbol": "DEMO",
-            "interval": "1D",
-            "row_count": 2,
-            "dataset_id": "demo-native",
-            "version": "v1"
-        }],
+        "cells": [
+            {
+                "canonical_instrument": "ALPHA",
+                "timeframe": "1D",
+                "provider_symbol": "EXCHANGE:ALPHA",
+                "available": true,
+                "production_eligible": true,
+                "row_count": 2,
+                "dataset_id": "alpha",
+                "version": "v1"
+            },
+            {
+                "canonical_instrument": "BETA",
+                "timeframe": "1D",
+                "provider_symbol": "EXCHANGE:BETA",
+                "available": true,
+                "production_eligible": true,
+                "row_count": 2,
+                "dataset_id": "beta",
+                "version": "v1"
+            }
+        ],
         "gaps": []
     });
-    std::fs::write(&artifact_path, artifact.to_string()).expect("artifact");
-    std::fs::write(
+    write_json(&artifact_path, &artifact);
+    let validation = serde_json::json!({
+        "status": "passed",
+        "checks": [{"status": "passed"}]
+    });
+    for (name, symbol, rows) in [
+        (
+            "alpha",
+            "ALPHA",
+            vec![
+                serde_json::json!({"timestamp": 1, "value": 10, "measure": 100}),
+                serde_json::json!({"timestamp": 2, "value": 11, "measure": 110}),
+            ],
+        ),
+        (
+            "beta",
+            "BETA",
+            vec![
+                serde_json::json!({"timestamp": 1, "value": 20, "measure": 200}),
+                serde_json::json!({"timestamp": 2, "value": 22, "measure": 220}),
+            ],
+        ),
+    ] {
+        write_jsonl(
+            &project
+                .path()
+                .join(format!(".archon/demo/{name}/payload.jsonl")),
+            &rows,
+        );
+        write_json(
+            &project
+                .path()
+                .join(format!(".archon/demo/{name}/request.json")),
+            &serde_json::json!({"count": 2}),
+        );
+        write_json(
+            &project
+                .path()
+                .join(format!(".archon/demo/{name}/response.json")),
+            &serde_json::json!({"symbol": format!("EXCHANGE:{symbol}"), "timeframe": "1D"}),
+        );
+        write_json(
+            &project
+                .path()
+                .join(format!(".archon/demo/{name}/validation.json")),
+            &validation,
+        );
+    }
+    write_json(
         &registry_path,
-        serde_json::json!({
-            "datasets": {"demo-native:v1": {
-                "native_interval": true,
+        &serde_json::json!({
+            "datasets": {
+              "alpha:v1": {
                 "production_eligible": true,
                 "status": "Healthy",
-                "bars": 2
-            }}
-        })
-        .to_string(),
-    )
-    .expect("registry");
+                "rows": 2,
+                "symbol": "ALPHA",
+                "timeframe": "1D",
+                "payload_path": ".archon/demo/alpha/payload.jsonl",
+                "request_path": ".archon/demo/alpha/request.json",
+                "response_path": ".archon/demo/alpha/response.json",
+                "validation_path": ".archon/demo/alpha/validation.json"
+              },
+              "beta:v1": {
+                "production_eligible": true,
+                "status": "Healthy",
+                "rows": 2,
+                "symbol": "BETA",
+                "timeframe": "1D",
+                "payload_path": ".archon/demo/beta/payload.jsonl",
+                "request_path": ".archon/demo/beta/request.json",
+                "response_path": ".archon/demo/beta/response.json",
+                "validation_path": ".archon/demo/beta/validation.json"
+              }
+            }
+        }),
+    );
     let items = vec![serde_json::json!({
         "item_id": "verify-demo",
         "source_item_id": "implement-demo",
@@ -159,12 +286,7 @@ fn neutral_declared_verifier_executes_and_fails_closed_on_empty_cells() {
     })];
     let universe = serde_json::json!({"tasks": [{
         "canonical_task_id": "TASK-DEMO-017",
-        "deliverable_contracts": [{
-            "kind": "required_universe_registry",
-            "artifact_path": ".archon/demo/coverage.json",
-            "registry_path": ".archon/demo/registry.json",
-            "required_universe": true
-        }]
+        "deliverable_contracts": [record_series_contract()]
     }]});
     let prepared = prepare_verification_items(items, project.path().to_str(), &[], &universe);
     let command = prepared
@@ -182,15 +304,103 @@ fn neutral_declared_verifier_executes_and_fails_closed_on_empty_cells() {
         "{}",
         String::from_utf8_lossy(&passing.stderr)
     );
+}
 
-    let mut empty = artifact;
-    empty["cells"][0]["row_count"] = serde_json::json!(0);
-    std::fs::write(&artifact_path, empty.to_string()).expect("empty artifact");
+#[test]
+fn wf9_contaminated_fixture_replay_fails_substantive_contract() {
+    let project = tempfile::tempdir().expect("project");
+    let artifact_path = project.path().join(".archon/demo/coverage.json");
+    let registry_path = project.path().join(".archon/demo/registry.json");
+    write_json(
+        &artifact_path,
+        &serde_json::json!({
+            "instruments": ["ALPHA", "BETA"],
+            "timeframes": ["1D"],
+            "cells": [
+                {"canonical_instrument": "ALPHA", "timeframe": "1D", "provider_symbol": "EXCHANGE:ALPHA", "available": true, "production_eligible": true, "row_count": 3, "dataset_id": "alpha", "version": "v1"},
+                {"canonical_instrument": "BETA", "timeframe": "1D", "provider_symbol": "EXCHANGE:BETA", "available": true, "production_eligible": true, "row_count": 3, "dataset_id": "beta", "version": "v1"}
+            ],
+            "gaps": []
+        }),
+    );
+    let contaminated_alpha = vec![
+        serde_json::json!({"timestamp": 1, "value": 5108.36, "measure": 0}),
+        serde_json::json!({"timestamp": 2, "value": 5225.66, "measure": 0}),
+        serde_json::json!({"timestamp": 3, "value": 5142.43, "measure": 0}),
+    ];
+    let contaminated_beta = vec![
+        serde_json::json!({"timestamp": 10, "value": 5225.66, "measure": 0}),
+        serde_json::json!({"timestamp": 11, "value": 5142.43, "measure": 0}),
+        serde_json::json!({"timestamp": 12, "value": 5164.31, "measure": 0}),
+    ];
+    for (name, rows) in [("alpha", &contaminated_alpha), ("beta", &contaminated_beta)] {
+        write_jsonl(
+            &project
+                .path()
+                .join(format!(".archon/demo/{name}/payload.jsonl")),
+            rows,
+        );
+        write_json(
+            &project
+                .path()
+                .join(format!(".archon/demo/{name}/request.json")),
+            &serde_json::json!({"count": 100}),
+        );
+        write_json(
+            &project
+                .path()
+                .join(format!(".archon/demo/{name}/response.json")),
+            &serde_json::json!({"symbol": "EXCHANGE:ALPHA", "timeframe": "1D"}),
+        );
+        write_json(
+            &project
+                .path()
+                .join(format!(".archon/demo/{name}/validation.json")),
+            &serde_json::json!({
+                "status": "passed",
+                "checks": [{"status": "failed"}]
+            }),
+        );
+    }
+    write_json(
+        &registry_path,
+        &serde_json::json!({
+            "datasets": {
+              "alpha:v1": {"production_eligible": true, "status": "Healthy", "rows": 3, "symbol": "ALPHA", "timeframe": "1D", "payload_path": ".archon/demo/alpha/payload.jsonl", "request_path": ".archon/demo/alpha/request.json", "response_path": ".archon/demo/alpha/response.json", "validation_path": ".archon/demo/alpha/validation.json"},
+              "beta:v1": {"production_eligible": true, "status": "Healthy", "rows": 3, "symbol": "BETA", "timeframe": "1D", "payload_path": ".archon/demo/beta/payload.jsonl", "request_path": ".archon/demo/beta/request.json", "response_path": ".archon/demo/beta/response.json", "validation_path": ".archon/demo/beta/validation.json"}
+            }
+        }),
+    );
+    let items = vec![serde_json::json!({
+        "item_id": "verify-demo",
+        "source_item_id": "implement-demo",
+        "canonical_task_ids": ["TASK-DEMO-017"]
+    })];
+    let universe = serde_json::json!({"tasks": [{
+        "canonical_task_id": "TASK-DEMO-017",
+        "deliverable_contracts": [record_series_contract()]
+    }]});
+    let prepared = prepare_verification_items(items, project.path().to_str(), &[], &universe);
+    let command = prepared
+        .iter()
+        .find(|item| item["item_id"] == "verify-TASK-DEMO-017-required-universe-registry")
+        .and_then(|item| item["focused_verification"].as_str())
+        .expect("generated verifier");
+
     let failing = std::process::Command::new("/bin/zsh")
         .args(["-c", command])
         .output()
-        .expect("execute failing verifier");
+        .expect("execute contaminated verifier");
+    let stdout = String::from_utf8_lossy(&failing.stdout);
+
     assert!(!failing.status.success());
+    assert!(stdout.contains("internally inconsistent"), "{stdout}");
+    assert!(stdout.contains("below requested count"), "{stdout}");
+    assert!(stdout.contains("constant or absent"), "{stdout}");
+    assert!(
+        stdout.contains("share a declared payload-series window"),
+        "{stdout}"
+    );
 }
 
 #[test]

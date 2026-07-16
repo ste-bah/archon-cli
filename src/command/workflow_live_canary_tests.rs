@@ -478,8 +478,11 @@ async fn canary_wf_afae6bee_regression() {
          block instead of completing or failing a single call with a \
          structured error. Output:\n{output}",
     );
+    let terminal_report = output.contains("Workflow V2 complete:")
+        || (output.contains("Workflow V2 needs review:")
+            && output.contains("failed_call: blocked-final-readiness"));
     assert!(
-        output.contains("Workflow V2 complete:"),
-        "canary run must end with a final report either way. Output:\n{output}",
+        terminal_report,
+        "canary run must end with final acceptance or an explicit final-readiness block. Output:\n{output}",
     );
 }

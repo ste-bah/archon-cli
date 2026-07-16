@@ -114,7 +114,7 @@ impl LifecycleDriver {
             {
                 Ok(result) => result,
                 Err(error) if is_transport_failure_text(&error.to_string()) => {
-                    transport_failure_result(&error.to_string())
+                    transport_failure_result(&call_id, 1, &error.to_string())
                 }
                 Err(error) => return Err(error),
             };
@@ -144,13 +144,28 @@ impl LifecycleDriver {
     }
 }
 
-fn transport_failure_result(error: &str) -> serde_json::Value {
+fn transport_failure_result(
+    call_id: &str,
+    attempts: usize,
+    error: &str,
+) -> serde_json::Value {
     serde_json::json!({
         "status": "failed",
-        "summary": format!("agent transport failed: {error}"),
+        "summary": format!(
+            "reducer transport exhausted after {attempts} attempt(s) for '{call_id}': {error}"
+        ),
         "data": {
             "error": error,
             "failure_class": "transport_infrastructure",
+            "transport_exhausted": true,
+            "transport_attempts": attempts,
+            "terminal_blockers": [{
+                "id": format!("transport-exhausted-{call_id}"),
+                "classification": "transport_infrastructure_exhausted",
+                "description": error,
+                "call_id": call_id,
+                "attempts": attempts,
+            }],
         }
     })
 }
@@ -203,6 +218,7 @@ fn transport_failure_summary(result: &serde_json::Value) -> Option<String> {
 fn is_transport_failure_text(text: &str) -> bool {
     let text = text.to_ascii_lowercase();
     text.contains("agent transport failed")
+        || text.contains("reducer transport exhausted")
         || text.contains("no safe compaction boundary")
         || text.contains("reactive subagent compaction failed")
         || text.contains("connection reset")

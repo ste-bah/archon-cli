@@ -34,7 +34,6 @@ fn add_declared_deliverable_verifications(
     task_universe: &Value,
 ) {
     let root = project_artifact_root.unwrap_or(".");
-    let root_literal = serde_json::to_string(root).expect("project root JSON string");
     let tasks = support::array(task_universe.get("tasks"));
     for task in tasks {
         let Some(task_id) = task.get("canonical_task_id").and_then(Value::as_str) else {
@@ -72,56 +71,8 @@ fn add_declared_deliverable_verifications(
             {
                 continue;
             }
-            let contract_literal = serde_json::to_string(&contract).expect("contract JSON");
-            let command = format!(
-                r#"python3 - <<'PY'
-import json, pathlib, sys
-root = pathlib.Path({root_literal})
-contract = json.loads({contract_literal:?})
-def resolve(value):
-    path = pathlib.Path(value)
-    return path if path.is_absolute() else root / path
-artifact_path = resolve(contract['artifact_path'])
-if not artifact_path.is_file() or artifact_path.stat().st_size == 0:
-    raise SystemExit(f'missing or empty declared deliverable: {{artifact_path}}')
-artifact = json.loads(artifact_path.read_text())
-registry = None
-if contract.get('registry_path'):
-    registry_path = resolve(contract['registry_path'])
-    if not registry_path.is_file():
-        raise SystemExit(f'missing declared registry: {{registry_path}}')
-    registry = json.loads(registry_path.read_text())
-if not contract.get('required_universe'):
-    print(json.dumps({{'status': 'declared_deliverable_present', 'artifact': str(artifact_path)}}))
-    raise SystemExit(0)
-required = {{(instrument, timeframe) for instrument in artifact.get('instruments', []) for timeframe in artifact.get('timeframes', [])}}
-if not required:
-    raise SystemExit('declared required universe is empty')
-cells = {{(cell.get('canonical_instrument'), cell.get('timeframe')): cell for cell in artifact.get('cells', [])}}
-failures = []
-for key in sorted(required):
-    cell = cells.get(key)
-    if cell is None:
-        failures.append(f'{{key[0]}}:{{key[1]}} missing coverage cell')
-        continue
-    symbol = cell.get('symbol') or cell.get('provider_symbol')
-    interval = cell.get('interval') or cell.get('timeframe')
-    required_flags = cell.get('available') is True and cell.get('native_interval') is True and cell.get('production_eligible') is True and bool(symbol) and bool(interval)
-    dataset_id, version = cell.get('dataset_id'), cell.get('version')
-    if not required_flags or not dataset_id or not version or int(cell.get('row_count') or 0) <= 0:
-        failures.append(f'{{key[0]}}:{{key[1]}} unavailable/non-native/non-production/empty/missing-symbol-or-interval')
-        continue
-    if registry is not None:
-        record = registry.get('datasets', {{}}).get(f'{{dataset_id}}:{{version}}')
-        if not record or record.get('native_interval') is not True or record.get('production_eligible') is not True or record.get('status') != 'Healthy' or int(record.get('bars') or 0) <= 0:
-            failures.append(f'{{key[0]}}:{{key[1]}} lacks healthy registered native provenance')
-extra = sorted(set(cells) - required)
-if failures or extra or artifact.get('gaps'):
-    print(json.dumps({{'failures': failures, 'extra_cells': extra, 'gap_count': len(artifact.get('gaps', []))}}, indent=2))
-    sys.exit(1)
-print(json.dumps({{'required_cells': len(required), 'registered_native_cells': len(required), 'status': 'production_eligible'}}, indent=2))
-PY"#
-            );
+            let command =
+                super::workflow_live_v2_deliverable_contract::verification_command(root, &contract);
             let mut artifact_requirements = vec![artifact_path.to_string()];
             if let Some(registry_path) = contract.get("registry_path").and_then(Value::as_str) {
                 artifact_requirements.push(registry_path.to_string());
@@ -131,7 +82,7 @@ PY"#
                 "source_item_id": source_item_id,
                 "canonical_task_ids": [task_id],
                 "focused_verification": command,
-                "expected_evidence": "The declared deliverable is non-empty and every declared required-universe cell is substantive, native, production eligible, gap-free, and registry-backed when a registry is declared.",
+                "expected_evidence": "The declared deliverable is non-empty and its generated contract verification passes every declared identity, field, count, internal-consistency, payload-substance, cross-identity, registry, and gap predicate.",
                 "artifact_requirements": artifact_requirements,
                 "provider_env_requirements": support::strings_of(task.get("required_env_keys")),
                 "required_tools": support::strings_of(task.get("required_tools")),

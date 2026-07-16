@@ -138,6 +138,40 @@ deliverable_contracts:
     artifact_path: .archon/demo/coverage.json
     registry_path: .archon/demo/registry.json
     required_universe: true
+    data_kind: record_series
+    universe_fields: [instruments, intervals]
+    cells_field: cells
+    cell_identity_fields: [instrument, interval]
+    required_true_fields: [available, eligible]
+    required_nonempty_fields: [dataset_id, version]
+    positive_count_fields: [row_count]
+    gaps_field: gaps
+    registry_records_field: datasets
+    registry_key_fields: [dataset_id, version]
+    registry_required_true_fields: [eligible]
+    registry_status_field: status
+    registry_allowed_statuses: [Healthy]
+    registry_count_field: rows
+    registry_identity_fields:
+      instrument: symbol
+      interval: timeframe
+    payload_path_field: normalized_path
+    payload_format: jsonl
+    required_fields: [timestamp, value, measure]
+    non_constant_fields: [value, measure]
+    series_value_fields: [value, measure]
+    series_overlap_min_rows: 3
+    request_path_field: request_path
+    requested_count_field: count
+    response_path_field: response_path
+    response_identity_fields:
+      instrument: symbol
+    validation_path_field: validation_path
+    validation_status_field: status
+    validation_checks_field: checks
+    validation_check_status_field: status
+    validation_failed_values: [failed]
+    validation_passed_values: [passed]
 ```
 "#,
     )
@@ -161,7 +195,36 @@ deliverable_contracts:
         vec!["fetch_demo".to_string(), "project_probe".to_string()]
     );
     assert_eq!(task.deliverable_contracts.len(), 1);
-    assert!(task.deliverable_contracts[0].required_universe);
+    let contract = &task.deliverable_contracts[0];
+    assert!(contract.required_universe);
+    assert_eq!(contract.data_kind.as_deref(), Some("record_series"));
+    assert_eq!(
+        contract.universe_fields,
+        vec!["instruments".to_string(), "intervals".to_string()]
+    );
+    assert_eq!(
+        contract.non_constant_fields,
+        vec!["value".to_string(), "measure".to_string()]
+    );
+    assert_eq!(contract.series_overlap_min_rows, 3);
+    assert_eq!(
+        contract
+            .registry_identity_fields
+            .get("instrument")
+            .map(String::as_str),
+        Some("symbol")
+    );
+    assert_eq!(
+        contract
+            .response_identity_fields
+            .get("instrument")
+            .map(String::as_str),
+        Some("symbol")
+    );
+    assert_eq!(
+        contract.validation_failed_values,
+        vec!["failed".to_string()]
+    );
 }
 
 #[test]
@@ -180,6 +243,11 @@ fn runtime_workflow_code_contains_no_fixture_task_ids() {
         assert!(
             !runtime_only.to_ascii_lowercase().contains("task-tdl"),
             "fixture task id leaked into runtime source {}",
+            path.display()
+        );
+        assert!(
+            !runtime_only.to_ascii_lowercase().contains("trading-lab"),
+            "fixture product path leaked into runtime source {}",
             path.display()
         );
     }
