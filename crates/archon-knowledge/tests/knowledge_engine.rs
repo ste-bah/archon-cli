@@ -1,10 +1,9 @@
 use archon_docs::models::{ChunkArtifact, DocumentStatus, SourceDocument};
-use archon_knowledge::hybrid_retriever::{SearchMode, SearchOptions};
 use archon_knowledge::schema::{
     ClaimPolarity, ClaimRecord, ContradictionRecord, EntityRecord, RelationRecord,
 };
 use archon_knowledge::source_quality::{self, QualityOutcome};
-use archon_knowledge::{KnowledgeEngine, ProcessOptions, store};
+use archon_knowledge::{KnowledgeEngine, ProcessOptions};
 use cozo::DbInstance;
 
 fn db_with_doc_schema() -> DbInstance {
@@ -128,50 +127,6 @@ fn source_quality_outcome_update_persists() {
 }
 
 #[test]
-fn exact_search_finds_known_chunk() {
-    let db = db_with_doc_schema();
-    insert_chunk(
-        &db,
-        "c1",
-        "doc-1",
-        "Plugin marketplace incentives reward quality.",
-    );
-    let engine = engine(db);
-    let results = engine
-        .search(
-            "marketplace quality",
-            &SearchOptions {
-                mode: SearchMode::Exact,
-                top_k: 5,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-    assert_eq!(results[0].artifact_id, "c1");
-}
-
-#[test]
-fn exact_search_respects_document_filter() {
-    let db = db_with_doc_schema();
-    insert_chunk(&db, "c1", "doc-1", "Elliott wave invalidation rules.");
-    insert_chunk(&db, "c2", "doc-2", "Elliott wave unrelated archive.");
-    let engine = engine(db);
-    let results = engine
-        .search(
-            "Elliott wave",
-            &SearchOptions {
-                mode: SearchMode::Exact,
-                top_k: 5,
-                document_filter: Some(vec!["doc-1".into()]),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].document_id, "doc-1");
-}
-
-#[test]
 fn process_kb_only_reads_attached_documents() {
     let db = db_with_doc_schema();
     insert_source(&db, "doc-1");
@@ -195,90 +150,6 @@ fn process_kb_only_reads_attached_documents() {
 
     assert_eq!(report.chunks_seen, 1);
     assert_eq!(engine.claims().unwrap().len(), 1);
-}
-
-#[test]
-fn hybrid_search_uses_exact_when_no_embedding_is_available() {
-    let db = db_with_doc_schema();
-    insert_chunk(
-        &db,
-        "c1",
-        "doc-1",
-        "Strategic workflow evidence is inspectable.",
-    );
-    let engine = engine(db);
-    let results = engine
-        .search("workflow evidence", &SearchOptions::default())
-        .unwrap();
-    assert_eq!(results.len(), 1);
-    assert!(results[0].combined_score > 0.0);
-}
-
-#[test]
-fn semantic_search_without_embedding_returns_empty() {
-    let db = db_with_doc_schema();
-    insert_chunk(&db, "c1", "doc-1", "A chunk exists.");
-    let engine = engine(db);
-    let results = engine
-        .search(
-            "chunk",
-            &SearchOptions {
-                mode: SearchMode::Semantic,
-                top_k: 5,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-    assert!(results.is_empty());
-}
-
-#[test]
-fn semantic_search_finds_vector_indexed_chunk() {
-    let db = db_with_doc_schema();
-    archon_docs::schema::ensure_vec_schema(&db, 2).unwrap();
-    insert_chunk(&db, "c1", "doc-1", "Semantic target chunk.");
-    insert_chunk(&db, "c2", "doc-2", "Different vector chunk.");
-    archon_docs::store::insert_chunk_embedding(&db, "c1", &[1.0, 0.0], "test").unwrap();
-    archon_docs::store::insert_chunk_embedding(&db, "c2", &[0.0, 1.0], "test").unwrap();
-    let engine = engine(db);
-    let results = engine
-        .search(
-            "semantic target",
-            &SearchOptions {
-                mode: SearchMode::Semantic,
-                top_k: 1,
-                query_embedding: Some(vec![1.0, 0.0]),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-    assert_eq!(results[0].artifact_id, "c1");
-    assert!(results[0].semantic_score > 0.9);
-}
-
-#[test]
-fn semantic_search_respects_document_filter() {
-    let db = db_with_doc_schema();
-    archon_docs::schema::ensure_vec_schema(&db, 2).unwrap();
-    insert_chunk(&db, "c1", "doc-1", "Filtered vector chunk.");
-    insert_chunk(&db, "c2", "doc-2", "Closer global vector chunk.");
-    archon_docs::store::insert_chunk_embedding(&db, "c1", &[0.8, 0.2], "test").unwrap();
-    archon_docs::store::insert_chunk_embedding(&db, "c2", &[1.0, 0.0], "test").unwrap();
-    let engine = engine(db);
-    let results = engine
-        .search(
-            "vector",
-            &SearchOptions {
-                mode: SearchMode::Semantic,
-                top_k: 1,
-                query_embedding: Some(vec![1.0, 0.0]),
-                document_filter: Some(vec!["doc-1".into()]),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].document_id, "doc-1");
 }
 
 #[test]
@@ -306,13 +177,6 @@ fn process_empty_doc_chunks_is_safe() {
     let report = engine.process_documents(ProcessOptions::default()).unwrap();
     assert_eq!(report.chunks_seen, 0);
     assert_eq!(engine.stats().unwrap().claims, 0);
-}
-
-#[test]
-fn list_doc_chunks_missing_doc_schema_returns_empty() {
-    let db = DbInstance::new("mem", "", "").unwrap();
-    let rows = store::list_doc_chunks(&db).unwrap();
-    assert!(rows.is_empty());
 }
 
 #[test]

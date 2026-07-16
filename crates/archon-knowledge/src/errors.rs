@@ -8,6 +8,8 @@ pub enum KnowledgeError {
     Store(String),
     #[error("invalid search mode: {0}")]
     InvalidSearchMode(String),
+    #[error("invalid search options: {0}")]
+    InvalidSearchOptions(String),
 }
 
 pub type Result<T> = std::result::Result<T, KnowledgeError>;

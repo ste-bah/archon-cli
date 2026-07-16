@@ -15,6 +15,7 @@ pub fn ensure_doc_schema(db: &DbInstance) -> Result<()> {
     ensure_doc_pages(db)?;
     ensure_doc_chunks(db)?;
     ensure_doc_chunk_fts(db)?;
+    ensure_doc_chunk_exact_fts(db)?;
     ensure_doc_image_descriptions(db)?;
     ensure_doc_pdf_metrics(db)?;
     ensure_doc_provenance_edges(db)?;
@@ -143,6 +144,18 @@ fn ensure_doc_chunk_fts(db: &DbInstance) -> Result<()> {
             extract_filter: content != "",
             tokenizer: Simple,
             filters: [Lowercase, Stemmer('english'), Stopwords('en')],
+        }"#,
+    )
+}
+
+fn ensure_doc_chunk_exact_fts(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#"::fts create doc_chunks:chunk_exact_fts {
+            extractor: content,
+            extract_filter: content != "",
+            tokenizer: NGram(2, 2, false),
+            filters: [Lowercase],
         }"#,
     )
 }

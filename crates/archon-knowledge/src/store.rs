@@ -34,6 +34,74 @@ pub fn list_doc_chunks(db: &DbInstance) -> Result<Vec<DocumentChunk>> {
     }
 }
 
+pub fn search_doc_chunks_fts(
+    db: &DbInstance,
+    query: &str,
+    limit: usize,
+    document_filter: Option<&[String]>,
+) -> Result<Vec<DocumentChunk>> {
+    if query.is_empty() || limit == 0 {
+        return Ok(Vec::new());
+    }
+    let limit = i64::try_from(limit).map_err(|_| {
+        KnowledgeError::InvalidSearchOptions("limit exceeds CozoDB's signed integer range".into())
+    })?;
+    let mut params = BTreeMap::new();
+    params.insert("query".into(), DataValue::from(query));
+    params.insert("limit".into(), DataValue::from(limit));
+    let filter_parameter = if let Some(document_ids) = document_filter {
+        params.insert(
+            "document_ids".into(),
+            DataValue::List(
+                document_ids
+                    .iter()
+                    .map(|id| DataValue::from(id.as_str()))
+                    .collect(),
+            ),
+        );
+        ", filter: is_in(document_id, $document_ids)"
+    } else {
+        ""
+    };
+    let script = format!(
+        "?[score, chunk_id, document_id, content, content_hash] := \
+         ~doc_chunks:chunk_exact_fts {{chunk_id, document_id, artifact_id, chunk_index, \
+         page_start, page_end, content, content_hash, embedding_status | \
+         query: $query, k: $limit, score_kind: 'tf_idf', bind_score: score{filter_parameter} \
+         }} :order -score"
+    );
+    match db.run_script(&script, params, ScriptMutability::Immutable) {
+        Ok(result) => Ok(result
+            .rows
+            .iter()
+            .map(|row| row_to_doc_chunk(&row[1..]))
+            .collect()),
+        Err(e) if relation_missing(&e.to_string()) => Ok(Vec::new()),
+        Err(e) => Err(KnowledgeError::Store(format!(
+            "search doc_chunks FTS failed: {e}"
+        ))),
+    }
+}
+
+pub fn count_doc_chunks(db: &DbInstance) -> Result<usize> {
+    match db.run_script(
+        "?[count(chunk_id)] := *doc_chunks{chunk_id}",
+        Default::default(),
+        ScriptMutability::Immutable,
+    ) {
+        Ok(result) => Ok(result
+            .rows
+            .first()
+            .and_then(|row| row.first())
+            .and_then(DataValue::get_int)
+            .unwrap_or(0) as usize),
+        Err(e) if relation_missing(&e.to_string()) => Ok(0),
+        Err(e) => Err(KnowledgeError::Store(format!(
+            "count doc_chunks failed: {e}"
+        ))),
+    }
+}
+
 pub fn list_doc_chunks_for_kb(db: &DbInstance, kb_id: &str) -> Result<Vec<DocumentChunk>> {
     let mut params = BTreeMap::new();
     params.insert("kid".into(), DataValue::from(kb_id));
@@ -395,8 +463,33 @@ fn int_col(row: &[DataValue], idx: usize) -> i64 {
     row.get(idx).and_then(DataValue::get_int).unwrap_or(0)
 }
 
-fn relation_missing(message: &str) -> bool {
+pub(crate) fn relation_missing(message: &str) -> bool {
     message.contains("Cannot find requested stored relation")
-        || message.contains("not found")
-        || message.contains("does not exist")
+        || (message.contains("Index ") && message.contains(" not found on relation "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::relation_missing;
+
+    #[test]
+    fn relation_missing_recognizes_absent_relation() {
+        assert!(relation_missing(
+            "Cannot find requested stored relation 'doc_chunks'"
+        ));
+    }
+
+    #[test]
+    fn relation_missing_recognizes_absent_index() {
+        assert!(relation_missing(
+            "Index chunk_embedding_idx not found on relation vec_text_chunks"
+        ));
+    }
+
+    #[test]
+    fn relation_missing_does_not_mask_vector_index_corruption() {
+        assert!(!relation_missing(
+            "Indexed vector not found, this signifies a bug in the index implementation"
+        ));
+    }
 }
