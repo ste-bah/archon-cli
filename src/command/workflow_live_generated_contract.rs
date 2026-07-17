@@ -54,6 +54,12 @@ pub(super) struct NormalizedGeneratedInventory {
     pub(super) issues: Vec<GeneratedContractIssue>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct CanonicalIdNormalization {
+    pub(super) canonical_ids: Vec<String>,
+    pub(super) unresolved_ids: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default)]
 struct ContractTaskUniverse {
     canonical: BTreeSet<String>,
@@ -102,7 +108,23 @@ impl ContractTaskUniverse {
         if self.canonical.is_empty() {
             return Some(trimmed.to_string());
         }
-        self.aliases.get(trimmed).cloned()
+        let mut matches = self
+            .aliases
+            .iter()
+            .filter(|(alias, _)| alias.eq_ignore_ascii_case(trimmed))
+            .map(|(_, canonical)| canonical.clone())
+            .collect::<BTreeSet<_>>();
+        for canonical in &self.canonical {
+            let Some((_, suffix)) = canonical.split_once('-') else {
+                continue;
+            };
+            if suffix.contains('-') && suffix.eq_ignore_ascii_case(trimmed) {
+                matches.insert(canonical.clone());
+            }
+        }
+        (matches.len() == 1)
+            .then(|| matches.into_iter().next())
+            .flatten()
     }
 
     fn dependencies_for(&self, task_id: &str) -> Vec<String> {
@@ -198,7 +220,14 @@ pub(super) fn normalize_generated_item_value_with_repo(
     ) {
         object.insert("work_type".to_string(), serde_json::json!(work_type));
     }
-    let canonical_task_ids = canonical_task_ids_from_generated_value(value, task_universe);
+    let raw_canonical_task_ids = raw_canonical_task_ids_from_generated_value(value);
+    let canonical_id_normalization =
+        normalize_canonical_ids(task_universe, raw_canonical_task_ids.clone());
+    let canonical_task_ids = if canonical_id_normalization.canonical_ids.is_empty() {
+        embedded_task_ids_from_generated_value(value, &universe)
+    } else {
+        canonical_id_normalization.canonical_ids.clone()
+    };
     if !canonical_task_ids.is_empty() {
         object.insert(
             "canonical_task_ids".to_string(),
@@ -361,7 +390,20 @@ pub(super) fn normalize_generated_item_value_with_repo(
     normalize_remediation_context(value, &mut object);
 
     let normalized_value = serde_json::Value::Object(object);
-    let issues = generated_item_issues(&normalized_value, &universe, target_repository_root);
+    let mut issues = generated_item_issues(&normalized_value, &universe, target_repository_root);
+    if !canonical_id_normalization.unresolved_ids.is_empty() {
+        issues.push(GeneratedContractIssue {
+            kind: GeneratedContractIssueKind::TaskUniverseReconcile,
+            field: "canonical_task_ids".to_string(),
+            message: format!(
+                "inventory item has unresolvable canonical task IDs: {}",
+                canonical_id_normalization.unresolved_ids.join(", ")
+            ),
+            item_id,
+            canonical_task_ids: raw_canonical_task_ids,
+        });
+    }
+    let issues = dedupe_issues(issues);
     NormalizedGeneratedItem {
         value: normalized_value,
         issues,
@@ -413,28 +455,58 @@ pub(super) fn canonical_task_ids_from_generated_value(
     task_universe: Option<&WorkflowV2TaskUniverse>,
 ) -> Vec<String> {
     let universe = ContractTaskUniverse::from_authoritative(task_universe);
-    let explicit = sorted_unique(
-        raw_strings_from_aliases(
-            value,
-            &[
-                "canonical_task_ids",
-                "canonicalTaskIds",
-                "canonical_task_id",
-                "canonicalTaskId",
-                "task_ids",
-                "taskIds",
-                "task_id",
-                "taskId",
-            ],
-        )
-        .into_iter()
-        .filter_map(|id| universe.resolve(&id))
-        .collect(),
-    );
+    let explicit = normalize_canonical_ids(
+        task_universe,
+        raw_canonical_task_ids_from_generated_value(value),
+    )
+    .canonical_ids;
     if !explicit.is_empty() {
         return explicit;
     }
     embedded_task_ids_from_generated_value(value, &universe)
+}
+
+pub(super) fn normalize_canonical_ids(
+    task_universe: Option<&WorkflowV2TaskUniverse>,
+    ids: impl IntoIterator<Item = String>,
+) -> CanonicalIdNormalization {
+    let universe = ContractTaskUniverse::from_authoritative(task_universe);
+    let mut canonical_ids = BTreeSet::new();
+    let mut unresolved_ids = BTreeSet::new();
+    for id in ids {
+        let id = id.trim();
+        if id.is_empty() {
+            continue;
+        }
+        match universe.resolve(id) {
+            Some(canonical) => {
+                canonical_ids.insert(canonical);
+            }
+            None => {
+                unresolved_ids.insert(id.to_string());
+            }
+        }
+    }
+    CanonicalIdNormalization {
+        canonical_ids: canonical_ids.into_iter().collect(),
+        unresolved_ids: unresolved_ids.into_iter().collect(),
+    }
+}
+
+fn raw_canonical_task_ids_from_generated_value(value: &serde_json::Value) -> Vec<String> {
+    raw_strings_from_aliases(
+        value,
+        &[
+            "canonical_task_ids",
+            "canonicalTaskIds",
+            "canonical_task_id",
+            "canonicalTaskId",
+            "task_ids",
+            "taskIds",
+            "task_id",
+            "taskId",
+        ],
+    )
 }
 
 pub(super) fn dependency_ids_from_generated_value(

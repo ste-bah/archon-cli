@@ -17,11 +17,52 @@ pub(super) fn schema_artifact_value<T: Serialize>(
         .and_then(|value| value.as_str().map(str::to_string))
         .filter(|schema| !schema.trim().is_empty())
         .ok_or_else(|| DataStoreError::InvalidMetadata("artifact schema is required".into()))?;
+    canonicalize_dataset_status_casing(&schema, &mut object);
     object.insert("schema".into(), serde_json::Value::String(schema));
     if is_validation_report(&object) {
         add_validation_report_fields(&mut object);
     }
     Ok(serde_json::Value::Object(object))
+}
+
+fn canonicalize_dataset_status_casing(
+    schema: &str,
+    object: &mut serde_json::Map<String, serde_json::Value>,
+) {
+    if !matches!(schema, REGISTRY_SCHEMA_V1 | REGISTRY_SCHEMA_V2) {
+        return;
+    }
+    canonicalize_status_field(object);
+    if let Some(datasets) = object
+        .get_mut("datasets")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for record in datasets
+            .values_mut()
+            .filter_map(serde_json::Value::as_object_mut)
+        {
+            canonicalize_status_field(record);
+        }
+    }
+}
+
+fn canonicalize_status_field(object: &mut serde_json::Map<String, serde_json::Value>) {
+    let Some(status) = object.get_mut("status") else {
+        return;
+    };
+    let Some(raw) = status.as_str() else {
+        return;
+    };
+    let canonical = if raw.eq_ignore_ascii_case("healthy") {
+        Some("Healthy")
+    } else if raw.eq_ignore_ascii_case("degraded") {
+        Some("Degraded")
+    } else {
+        None
+    };
+    if let Some(canonical) = canonical {
+        *status = serde_json::Value::String(canonical.to_string());
+    }
 }
 
 fn is_validation_report(object: &serde_json::Map<String, serde_json::Value>) -> bool {

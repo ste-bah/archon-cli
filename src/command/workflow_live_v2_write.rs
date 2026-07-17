@@ -66,9 +66,11 @@ pub(super) async fn run_write_capable_v2_fanout(
     let all_plan = planner
         .plan(&all_write_items)
         .map_err(|err| WorkflowError::SpecInvalid(err.to_string()))?;
+    let all_branches = branches.clone();
     let (reused_outcomes, branches) =
         split_reusable_branch_outcomes(v2_store, &execution.call.id, branches)?;
-    let reused_results = branch_results_from_outcomes(&reused_outcomes);
+    let mut reused_results = branch_results_from_outcomes(&reused_outcomes);
+    revalidate_reused_artifact_results(&all_branches, &mut reused_results, target_repository_root);
     if branches.is_empty() {
         return Ok(result_from_write_fanout(
             &execution.call,
@@ -150,6 +152,36 @@ pub(super) async fn run_write_capable_v2_fanout(
             "write-capable fanout '{}' requires explicit write mode serial, coordinated, or worktree",
             execution.call.id
         ))),
+    }
+}
+
+fn revalidate_reused_artifact_results(
+    branches: &[archon_workflow::WorkflowV2FanoutItem],
+    results: &mut [WorkflowV2Result],
+    target_repository_root: Option<&str>,
+) {
+    let Some(root) = target_repository_root else {
+        return;
+    };
+    for result in results {
+        let Some(item_id) = result
+            .data
+            .get("branch_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        let Some(branch) = branches.iter().find(|branch| branch.id == item_id) else {
+            continue;
+        };
+        if let Err(error) =
+            verify_declared_artifacts_for_result(&branch.input, result, Path::new(root))
+        {
+            *result = write_branch_validation_error_result(&item_id, Some(&branch.input), &error);
+        }
     }
 }
 

@@ -178,7 +178,8 @@ impl LifecycleDriver {
             .host
             .execute(method.to_string(), payload.to_string())
             .await?;
-        serde_json::from_str(&json).map_err(Into::into)
+        let value: serde_json::Value = serde_json::from_str(&json)?;
+        Ok(self.contract().normalize_canonical_id_fields(&value))
     }
 
     async fn reduce(

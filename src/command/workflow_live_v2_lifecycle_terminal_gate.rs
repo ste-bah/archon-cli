@@ -77,6 +77,12 @@ pub(super) fn decide(
         kinds.push("transport_retry_budget");
     }
 
+    let accepted_unverified = accepted_unverified_implementation_items(contract, inputs, state);
+    if !accepted_unverified.is_empty() {
+        kinds.push("accepted_unverified_implementation");
+        work.extend(accepted_unverified);
+    }
+
     kinds.sort_unstable();
     kinds.dedup();
     if kinds.is_empty() {
@@ -253,6 +259,65 @@ fn has_retryable_transport_failure(value: &Value) -> bool {
     }
 }
 
+fn accepted_unverified_implementation_items(
+    contract: &LifecycleContract<'_>,
+    inputs: &Value,
+    state: &TerminalGateState,
+) -> Vec<Value> {
+    let ready_items = support::array(
+        inputs
+            .get("readyImplementationItems")
+            .or_else(|| inputs.get("ready_implementation_items")),
+    );
+    if ready_items.is_empty() {
+        return Vec::new();
+    }
+    let Some(wave) = inputs
+        .get("wave")
+        .or_else(|| inputs.get("implementationWave"))
+    else {
+        return Vec::new();
+    };
+    let accepted_ids =
+        support::matching_accepted_ids(contract, &ready_items, &support::outcomes_of(wave))
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+    if accepted_ids.is_empty() {
+        return Vec::new();
+    }
+    let scheduled_ids = verification_scheduled_ids(contract, inputs);
+    ready_items
+        .into_iter()
+        .filter(|item| {
+            contract.canonical_ids_for(item).iter().any(|id| {
+                accepted_ids.contains(id)
+                    && !state.completed_ids.contains(id)
+                    && !scheduled_ids.contains(id)
+            })
+        })
+        .collect()
+}
+
+fn verification_scheduled_ids(
+    contract: &LifecycleContract<'_>,
+    inputs: &Value,
+) -> BTreeSet<String> {
+    let evidence = inputs
+        .get("verificationEvidence")
+        .or_else(|| inputs.get("verification_evidence"));
+    let mut ids = BTreeSet::new();
+    for event in support::array(evidence) {
+        let plan_items = event
+            .get("verificationPlan")
+            .or_else(|| event.get("verification_plan"))
+            .and_then(|plan| plan.get("items"));
+        for item in support::array(plan_items) {
+            ids.extend(contract.canonical_ids_for(&item));
+        }
+    }
+    ids
+}
+
 fn item_id(item: &Value) -> Option<String> {
     item.get("item_id")
         .or_else(|| item.get("id"))
@@ -403,5 +468,42 @@ mod tests {
 
         assert_eq!(event["work"][0]["item_id"], "retry-one");
         assert!(event.to_string().find("must-not-persist").is_none());
+    }
+
+    #[test]
+    fn no_completion_reroutes_accepted_implementation_with_bare_unverified_id() {
+        let universe = universe();
+        let contract = LifecycleContract {
+            task_universe: &universe,
+            target_repository_root: Some("/repo"),
+        };
+        let inputs = serde_json::json!({
+            "readyImplementationItems": [{
+                "item_id": "implementation-example",
+                "work_type": "implementation",
+                "canonical_task_ids": ["TASK-EX-001"],
+            }],
+            "wave": {
+                "outcomes": [{
+                    "item_id": "implementation-wave-implementation-example",
+                    "canonical_task_ids": ["EX-001"],
+                    "status": "accepted",
+                    "evidence": [{"kind": "inspection", "summary": "implemented"}],
+                }],
+            },
+            "verificationEvidence": [],
+        });
+        let mut state = TerminalGateState::default();
+
+        let TerminalGateDecision::Reroute(event) =
+            decide(&contract, "blocked-no-completion-1", &inputs, &mut state)
+        else {
+            panic!("accepted unverified implementation must reroute");
+        };
+
+        assert_eq!(
+            event["schedulable_work_kinds"],
+            serde_json::json!(["accepted_unverified_implementation"])
+        );
     }
 }

@@ -67,6 +67,72 @@ fn repair_merge_accepts_placeholder_artifacts_as_expected_evidence() {
 }
 
 #[test]
+fn repair_merge_normalizes_prefix_stripped_canonical_id() {
+    let universe = universe();
+    let contract = LifecycleContract {
+        task_universe: &universe,
+        target_repository_root: Some("/repo"),
+    };
+    let inventory = contract.normalize_inventory(&serde_json::json!({
+        "items": [{
+            "item_id": "implementation-x",
+            "work_type": "implementation",
+            "canonical_task_ids": ["TASK-X-020"],
+            "dependency_ids": [],
+            "target_files": ["src/lib.rs"],
+            "acceptance_criteria": ["implemented"],
+            "focused_verification": ["cargo test focused"],
+            "artifact_requirements": [],
+        }]
+    }));
+    let repair = serde_json::json!({
+        "items": [{
+            "item_id": "implementation-x",
+            "canonical_task_ids": ["X-020"],
+            "target_files": ["src/repaired.rs"],
+        }]
+    });
+
+    let merged =
+        contract.normalize_inventory(&merge_inventory_repair(&contract, &inventory, &repair));
+    let item = &array(merged.get("items"))[0];
+
+    assert_eq!(
+        item["canonical_task_ids"],
+        serde_json::json!(["TASK-X-020"])
+    );
+    assert_eq!(item["target_files"], serde_json::json!(["src/repaired.rs"]));
+}
+
+#[test]
+fn host_result_normalization_stamps_bare_ids_and_surfaces_unknown_ids() {
+    let universe = universe();
+    let contract = LifecycleContract {
+        task_universe: &universe,
+        target_repository_root: Some("/repo"),
+    };
+    let value = contract.normalize_canonical_id_fields(&serde_json::json!({
+        "outcomes": [
+            {"canonical_task_ids": ["X-020"]},
+            {"canonical_task_ids": ["UNKNOWN-020"]},
+        ]
+    }));
+
+    assert_eq!(
+        value["outcomes"][0]["canonical_task_ids"],
+        serde_json::json!(["TASK-X-020"])
+    );
+    assert_eq!(
+        value["outcomes"][1]["canonical_id_repair_issues"][0]["unresolved_ids"],
+        serde_json::json!(["UNKNOWN-020"])
+    );
+    assert_eq!(
+        value["outcomes"][1]["canonical_task_ids"],
+        serde_json::json!([])
+    );
+}
+
+#[test]
 fn fabel_verification_plan_schedules_one_branch_per_item() {
     let contract = fabel_contract();
     let value: serde_json::Value =

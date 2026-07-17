@@ -22,9 +22,10 @@ fn tag_branch_result(result: &mut WorkflowV2Result, item_id: &str) {
     object
         .entry("item_id".to_string())
         .or_insert_with(|| serde_json::Value::String(item_id.to_string()));
-    object
-        .entry("branch_id".to_string())
-        .or_insert_with(|| serde_json::Value::String(item_id.to_string()));
+    object.insert(
+        "branch_id".to_string(),
+        serde_json::Value::String(item_id.to_string()),
+    );
     result.data = serde_json::Value::Object(object);
 }
 

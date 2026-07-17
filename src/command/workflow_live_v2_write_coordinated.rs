@@ -119,12 +119,10 @@ async fn run_coordinated_v2_write_fanout(
                     return Err(WorkflowError::SpecInvalid(err.to_string()));
                 }
             }
-            if matches!(
-                result.status,
-                WorkflowV2Status::Accepted | WorkflowV2Status::Noop
-            ) && let Some(root) = target_repository_root
+            if let Some(root) = target_repository_root
                 && let Some(input) = branch_input_for_assignment(&branches, &assignment.item_id)
-                && let Err(error) = run_declared_artifact_verifiers(input, Path::new(root))
+                && let Err(error) =
+                    verify_declared_artifacts_for_result(input, &result, Path::new(root))
             {
                 result = write_branch_validation_error_result(
                     &assignment.item_id,

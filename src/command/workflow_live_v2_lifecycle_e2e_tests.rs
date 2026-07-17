@@ -193,7 +193,7 @@ impl LlmClient for CannedLifecycleLlm {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn real_decomposed_lifecycle_demotes_discovers_implements_and_reaches_terminal() {
+async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_terminal() {
     let started = Instant::now();
     let temp = tempfile::tempdir().expect("tempdir");
     let repo = temp.path().join("repo");
@@ -297,6 +297,13 @@ async fn real_decomposed_lifecycle_demotes_discovers_implements_and_reaches_term
             .calls
             .iter()
             .any(|call| call.id == "implementation-wave-1")
+    );
+    assert!(
+        summary
+            .calls
+            .iter()
+            .any(|call| call.id == "verification-wave-1"),
+        "accepted implementation with a prefix-stripped ID was not scheduled for verification"
     );
     assert!(
         summary
@@ -705,6 +712,11 @@ fn implementation_result(
     } else {
         anyhow::bail!("target file missing")
     }
+    let reported_task_id = if task_id == "TASK-EX-003" {
+        "EX-003"
+    } else {
+        task_id.as_str()
+    };
     let mut result = accepted_result(
         "implementation branch changed its declared target",
         serde_json::json!({
@@ -712,7 +724,7 @@ fn implementation_result(
                 .get("item_id")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or(call_id),
-            "canonical_task_ids": [task_id],
+            "canonical_task_ids": [reported_task_id],
         }),
         vec![coverage(&task_id, "accepted")],
         vec![test_command("true", true, "implementation fixture passed")],

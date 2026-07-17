@@ -40,6 +40,23 @@ fn schema_artifact_requires_a_declared_schema() {
     assert!(matches!(error, DataStoreError::InvalidMetadata(_)));
 }
 
+#[test]
+fn registry_writer_stamps_canonical_dataset_status_casing() {
+    let value = serde_json::json!({
+        "schema": REGISTRY_SCHEMA_V2,
+        "datasets": {
+            "one:v1": {"status": "healthy"},
+            "two:v1": {"status": "DEGRADED"},
+        },
+    });
+
+    let artifact = schema_artifact_value(&value).unwrap();
+
+    assert_eq!(artifact["datasets"]["one:v1"]["status"], "Healthy");
+    assert_eq!(artifact["datasets"]["two:v1"]["status"], "Degraded");
+    assert!(serde_json::from_value::<DatasetStatus>(serde_json::json!("healthy")).is_err());
+}
+
 fn capability_result(checked_at: &str) -> ProviderCapabilityResult {
     ProviderCapabilityResult {
         provider: "polygon".into(),

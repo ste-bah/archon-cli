@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use serde_json::Value;
 
 use super::workflow_live_generated_contract::{
-    GeneratedContractIssue, normalize_generated_inventory_value_with_repo,
+    GeneratedContractIssue, normalize_canonical_ids, normalize_generated_inventory_value_with_repo,
     normalize_generated_item_value_with_repo,
 };
 use super::workflow_live_task_universe::WorkflowV2TaskUniverse;
@@ -101,11 +101,53 @@ impl LifecycleContract<'_> {
     }
 
     pub(super) fn canonical_ids_for(&self, item: &Value) -> Vec<String> {
-        let universe = self.canonical_universe();
-        strings_of(item.get("canonical_task_ids"))
-            .into_iter()
-            .filter(|id| universe.contains(id))
-            .collect()
+        normalize_canonical_ids(
+            Some(self.task_universe),
+            strings_of(item.get("canonical_task_ids")),
+        )
+        .canonical_ids
+    }
+
+    pub(super) fn normalize_canonical_id_fields(&self, value: &Value) -> Value {
+        match value {
+            Value::Object(object) => {
+                let mut object = object
+                    .iter()
+                    .map(|(key, value)| (key.clone(), self.normalize_canonical_id_fields(value)))
+                    .collect::<serde_json::Map<_, _>>();
+                let raw_ids = ["canonical_task_ids", "canonicalTaskIds"]
+                    .iter()
+                    .find_map(|key| object.get(*key))
+                    .map(|value| strings_of(Some(value)))
+                    .unwrap_or_default();
+                if !raw_ids.is_empty() {
+                    let normalized = normalize_canonical_ids(Some(self.task_universe), raw_ids);
+                    object.insert(
+                        "canonical_task_ids".to_string(),
+                        serde_json::json!(normalized.canonical_ids),
+                    );
+                    object.remove("canonicalTaskIds");
+                    if !normalized.unresolved_ids.is_empty() {
+                        object.insert(
+                            "canonical_id_repair_issues".to_string(),
+                            serde_json::json!([{
+                                "kind": "task_universe_reconcile",
+                                "field": "canonical_task_ids",
+                                "unresolved_ids": normalized.unresolved_ids,
+                            }]),
+                        );
+                    }
+                }
+                Value::Object(object)
+            }
+            Value::Array(values) => Value::Array(
+                values
+                    .iter()
+                    .map(|value| self.normalize_canonical_id_fields(value))
+                    .collect(),
+            ),
+            _ => value.clone(),
+        }
     }
 
     pub(super) fn dependency_ids_for(&self, item: &Value) -> Vec<String> {

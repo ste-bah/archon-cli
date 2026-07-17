@@ -165,11 +165,11 @@ fn validate_worktree_branch_result(
             return Err(WorkflowError::SpecInvalid(err.to_string()));
         }
     }
-    if matches!(
-        result.status,
-        WorkflowV2Status::Accepted | WorkflowV2Status::Noop
-    ) && let Err(error) =
-        run_declared_artifact_verifiers(&branch.execution.input, &branch.workspace_root)
+    if let Err(error) = verify_declared_artifacts_for_result(
+        &branch.execution.input,
+        result,
+        &branch.workspace_root,
+    )
     {
         persist_rejected_worktree_result(
             v2_store,
@@ -185,6 +185,28 @@ fn validate_worktree_branch_result(
         );
     }
     Ok(())
+}
+
+fn verify_declared_artifacts_for_result(
+    input: &serde_json::Value,
+    result: &WorkflowV2Result,
+    workspace_root: &Path,
+) -> Result<(), String> {
+    if !result_requires_declared_artifact_verification(result) {
+        return Ok(());
+    }
+    run_declared_artifact_verifiers(input, workspace_root)
+}
+
+fn result_requires_declared_artifact_verification(result: &WorkflowV2Result) -> bool {
+    matches!(
+        result.status,
+        WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+    ) || result
+        .data
+        .get("idempotent_noop")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
 }
 
 fn run_declared_artifact_verifiers(

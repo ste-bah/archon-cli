@@ -80,12 +80,12 @@ async fn run_serial_v2_write_fanout(
                 return Err(WorkflowError::SpecInvalid(err.to_string()));
             }
         }
-        if matches!(
-            result.status,
-            WorkflowV2Status::Accepted | WorkflowV2Status::Noop
-        ) && let Some(root) = target_repository_root
-            && let Err(error) =
-                run_declared_artifact_verifiers(&branch_execution.input, Path::new(root))
+        if let Some(root) = target_repository_root
+            && let Err(error) = verify_declared_artifacts_for_result(
+                &branch_execution.input,
+                &result,
+                Path::new(root),
+            )
         {
             result = write_branch_validation_error_result(
                 &branch_id,

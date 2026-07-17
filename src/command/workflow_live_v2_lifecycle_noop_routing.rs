@@ -502,7 +502,7 @@ fn implementation_item(
             "refuted_claim": refuted_claim,
         }),
     );
-    Value::Object(object)
+    contract.normalize_item(&Value::Object(object))
 }
 
 fn compact_failure_records(records: &[Value]) -> Value {

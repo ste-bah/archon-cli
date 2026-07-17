@@ -24,6 +24,31 @@ fn declared_artifact_verifier_rejects_unsigned_branch_output() {
         .expect("verified branch output");
 }
 
+#[test]
+fn idempotent_noop_artifact_claim_runs_declared_verifier() {
+    let workspace = tempfile::tempdir().expect("workspace");
+    let registry = workspace.path().join("registry.json");
+    std::fs::write(
+        &registry,
+        r#"{"schema":"fixture","datasets":{"one":{"status":"healthy"}}}"#,
+    )
+    .expect("case-mangled registry");
+    let input = serde_json::json!({
+        "item": {
+            "artifact_verification_commands": [
+                "test \"$(sed -n 's/.*\\\"status\\\":\\\"\\([^\\\"]*\\)\\\".*/\\1/p' registry.json)\" = Healthy"
+            ]
+        }
+    });
+    let mut result = WorkflowV2Result::noop("artifact already exists");
+    result.data = serde_json::json!({"idempotent_noop": true});
+
+    let error = verify_declared_artifacts_for_result(&input, &result, workspace.path())
+        .expect_err("case-mangled idempotent artifact must be rejected");
+
+    assert!(error.contains("declared artifact verifier failed"));
+}
+
 fn wf66_preflight_result() -> Option<WorkflowV2Result> {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "fixtures/wf66_remediation_wave_1_3_source_preflight.json"
