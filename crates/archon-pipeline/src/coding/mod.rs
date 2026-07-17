@@ -16,6 +16,8 @@ mod orphan_gate_python_import_tests;
 #[cfg(test)]
 mod orphan_gate_tests;
 pub mod quality;
+#[cfg(test)]
+mod quality_markdown_tests;
 pub mod rlm;
 pub mod wiring;
 
