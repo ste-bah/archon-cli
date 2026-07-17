@@ -12,7 +12,6 @@ use ratatui::{
 };
 
 use crate::app::App;
-use crate::output::OutputBuffer;
 use crate::splash;
 
 use super::cursor::set_input_cursor;
@@ -42,18 +41,14 @@ pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
     let output_area =
         crate::agent_activity::render_rail_if_needed(frame, &app.agent_activity, area, &app.theme);
 
-    let visible_height = output_area.height;
     let output_width = output_area.width.saturating_sub(1); // -1 for scrollbar
     let thinking_lines = app.thinking_lines(output_width);
-    let thinking_height = reserved_thinking_height(&thinking_lines, output_width, visible_height);
-    let transcript_height = visible_height
-        .saturating_sub(thinking_height)
-        .max((visible_height > 0) as u16);
+    let regions = output_regions(app, output_area);
+    let transcript_area = regions.transcript;
+    let transcript_height = transcript_area.height;
     let rendered_view = app
         .output
         .rendered_view(&app.theme, output_width, transcript_height);
-    let mut output_lines: Vec<Line<'_>> = rendered_view.lines;
-    output_lines.extend(thinking_lines);
     let total_wrapped = rendered_view.total_wrapped;
     let scroll_y = rendered_view.global_scroll_y;
 
@@ -63,11 +58,22 @@ pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(t.border)
     };
 
-    let output_widget = Paragraph::new(output_lines)
+    let output_widget = Paragraph::new(rendered_view.lines)
         .block(Block::default().borders(Borders::NONE).style(border_style))
         .wrap(Wrap { trim: false })
         .scroll((rendered_view.paragraph_scroll_y, 0));
-    frame.render_widget(output_widget, output_area);
+    frame.render_widget(output_widget, transcript_area);
+
+    if regions.thinking.height > 0 {
+        let start = app
+            .thinking
+            .effective_scroll(thinking_lines.len(), regions.thinking.height);
+        let end = start
+            .saturating_add(regions.thinking.height as usize)
+            .min(thinking_lines.len());
+        let thinking_widget = Paragraph::new(thinking_lines[start..end].to_vec());
+        frame.render_widget(thinking_widget, regions.thinking);
+    }
 
     if total_wrapped > transcript_height {
         let mut scrollbar_state =
@@ -75,24 +81,72 @@ pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
                 .position(scroll_y as usize);
         let scrollbar =
             Scrollbar::new(ScrollbarOrientation::VerticalRight).style(Style::default().fg(t.muted));
-        frame.render_stateful_widget(scrollbar, output_area, &mut scrollbar_state);
+        frame.render_stateful_widget(scrollbar, transcript_area, &mut scrollbar_state);
     }
 }
 
-fn reserved_thinking_height(lines: &[Line<'_>], width: u16, visible_height: u16) -> u16 {
+#[derive(Clone, Copy)]
+pub(crate) struct OutputRegions {
+    pub transcript: Rect,
+    pub thinking: Rect,
+}
+
+pub(crate) fn output_regions(app: &App, output_area: Rect) -> OutputRegions {
+    let output_width = output_area.width.saturating_sub(1);
+    let thinking_lines = app.thinking_lines(output_width);
+    let thinking_height =
+        reserved_thinking_height(&thinking_lines, output_area.height, app.thinking.expanded);
+    let transcript_height = output_area
+        .height
+        .saturating_sub(thinking_height)
+        .max((output_area.height > 0) as u16);
+    OutputRegions {
+        transcript: Rect {
+            height: transcript_height,
+            ..output_area
+        },
+        thinking: Rect {
+            y: output_area.y.saturating_add(transcript_height),
+            height: output_area.height.saturating_sub(transcript_height),
+            ..output_area
+        },
+    }
+}
+
+fn reserved_thinking_height(lines: &[Line<'_>], visible_height: u16, expanded: bool) -> u16 {
     if lines.is_empty() || visible_height == 0 {
         return 0;
     }
-    let raw_lines = lines.iter().map(line_text).collect::<Vec<_>>();
-    let refs = raw_lines.iter().map(String::as_str).collect::<Vec<_>>();
-    OutputBuffer::count_wrapped_rows(&refs, width).min(visible_height.saturating_sub(1))
+    let cap = if expanded {
+        thinking_height_cap(visible_height)
+    } else {
+        visible_height.saturating_sub(1)
+    };
+    lines.len().min(cap as usize) as u16
 }
 
-fn line_text(line: &Line<'_>) -> String {
-    line.spans
-        .iter()
-        .map(|span| span.content.as_ref())
-        .collect()
+fn thinking_height_cap(visible_height: u16) -> u16 {
+    visible_height
+        .div_ceil(3)
+        .min(visible_height.saturating_sub(1))
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::text::Line;
+
+    use super::{reserved_thinking_height, thinking_height_cap};
+
+    #[test]
+    fn expanded_thinking_is_capped_at_about_one_third_of_viewport() {
+        let lines = (0..40)
+            .map(|index| Line::from(format!("thought {index}")))
+            .collect::<Vec<_>>();
+
+        assert_eq!(thinking_height_cap(30), 10);
+        assert_eq!(reserved_thinking_height(&lines, 30, true), 10);
+        assert_eq!(thinking_height_cap(31), 11);
+    }
 }
 
 pub(crate) fn input_prefix(app: &App) -> String {

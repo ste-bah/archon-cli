@@ -86,6 +86,22 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
             app.input.move_right();
             KeyResult::Nothing
         }
+        Action::ScrollUp if app.thinking.active && app.thinking.expanded => {
+            app.thinking.scroll_up(10);
+            KeyResult::Nothing
+        }
+        Action::ScrollDown if app.thinking.active && app.thinking.expanded => {
+            app.thinking.scroll_down(10);
+            KeyResult::Nothing
+        }
+        Action::ScrollTop if app.thinking.active && app.thinking.expanded => {
+            app.thinking.scroll_to_top();
+            KeyResult::Nothing
+        }
+        Action::ScrollBottom if app.thinking.active && app.thinking.expanded => {
+            app.thinking.scroll_to_bottom();
+            KeyResult::Nothing
+        }
         Action::ScrollUp => {
             app.output.scroll_up(10);
             KeyResult::Nothing
@@ -212,4 +228,29 @@ fn handle_activity_key(app: &mut App, action: &Action) -> KeyResult {
         _ => {}
     }
     KeyResult::Nothing
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    use super::*;
+
+    #[test]
+    fn expanded_active_thinking_scrolls_without_moving_transcript() {
+        let mut app = App::new();
+        app.thinking.active = true;
+        app.thinking.expanded = true;
+        let keymap = KeyMap::default();
+
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
+            &keymap,
+        );
+
+        assert_eq!(app.thinking.scroll_offset, 10);
+        assert_eq!(app.output.scroll_offset, 0);
+        assert!(!app.output.scroll_locked);
+    }
 }

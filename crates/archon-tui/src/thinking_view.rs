@@ -10,7 +10,7 @@ pub(crate) fn thinking_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         return Vec::new();
     }
     if app.thinking.expanded {
-        return expanded_lines(&app.thinking.accumulated, app);
+        return expanded_lines(&app.thinking.accumulated, width, app);
     }
     vec![
         animated_header(app),
@@ -47,16 +47,38 @@ fn tail_preview(text: &str, width: u16, app: &App) -> Line<'static> {
     ))
 }
 
-fn expanded_lines(text: &str, app: &App) -> Vec<Line<'static>> {
+fn expanded_lines(text: &str, width: u16, app: &App) -> Vec<Line<'static>> {
     let style = Style::default()
         .fg(app.theme.muted)
         .add_modifier(Modifier::ITALIC);
+    let content_width = width.saturating_sub(2) as usize;
     std::iter::once(Line::from(Span::styled("- Thinking:", style)))
-        .chain(
-            text.lines()
-                .map(|line| Line::from(Span::styled(format!("  {line}"), style))),
-        )
+        .chain(text.lines().flat_map(|line| {
+            wrap_display_rows(line, content_width)
+                .into_iter()
+                .map(move |row| Line::from(Span::styled(format!("  {row}"), style)))
+        }))
         .collect()
+}
+
+fn wrap_display_rows(text: &str, width: usize) -> Vec<String> {
+    if width == 0 || text.is_empty() {
+        return vec![String::new()];
+    }
+    let mut rows = Vec::new();
+    let mut row = String::new();
+    let mut row_width: usize = 0;
+    for grapheme in text.graphemes(true) {
+        let grapheme_width = UnicodeWidthStr::width(grapheme);
+        if !row.is_empty() && row_width.saturating_add(grapheme_width) > width {
+            rows.push(std::mem::take(&mut row));
+            row_width = 0;
+        }
+        row.push_str(grapheme);
+        row_width = row_width.saturating_add(grapheme_width);
+    }
+    rows.push(row);
+    rows
 }
 
 fn display_width_tail(text: &str, width: usize) -> String {

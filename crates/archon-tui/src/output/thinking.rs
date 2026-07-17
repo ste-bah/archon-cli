@@ -29,6 +29,12 @@ pub struct ThinkingState {
     pub start: Option<Instant>,
     /// Duration of the most recent completed thinking run, in milliseconds.
     pub last_duration_ms: u64,
+    /// Wrapped rows scrolled up from the bottom of the expanded active block.
+    pub scroll_offset: usize,
+    /// Absolute wrapped-row position used after jumping to the top.
+    scroll_from_top: Option<usize>,
+    /// Whether expanded thinking is detached from auto-follow.
+    pub scroll_locked: bool,
 }
 
 impl Default for ThinkingState {
@@ -49,6 +55,9 @@ impl ThinkingState {
             dot_offset: 0,
             start: None,
             last_duration_ms: 0,
+            scroll_offset: 0,
+            scroll_from_top: None,
+            scroll_locked: false,
         }
     }
 
@@ -57,6 +66,7 @@ impl ThinkingState {
         if !self.active {
             self.active = true;
             self.expanded = false;
+            self.reset_scroll();
             self.start = Some(Instant::now());
         }
         self.accumulated.push_str(text);
@@ -72,6 +82,7 @@ impl ThinkingState {
                 .unwrap_or(0);
             self.active = false;
             self.start = None;
+            self.reset_scroll();
         }
     }
 
@@ -86,6 +97,55 @@ impl ThinkingState {
     /// Toggle between expanded and collapsed views.
     pub fn toggle_expand(&mut self) {
         self.expanded = !self.expanded;
+        self.reset_scroll();
+    }
+
+    pub fn scroll_up(&mut self, amount: u16) {
+        if let Some(position) = self.scroll_from_top.as_mut() {
+            *position = position.saturating_sub(amount as usize);
+        } else {
+            self.scroll_offset = self.scroll_offset.saturating_add(amount as usize);
+        }
+        self.scroll_locked = true;
+    }
+
+    pub fn scroll_down(&mut self, amount: u16) {
+        if let Some(position) = self.scroll_from_top.as_mut() {
+            *position = position.saturating_add(amount as usize);
+            return;
+        }
+        self.scroll_offset = self.scroll_offset.saturating_sub(amount as usize);
+        if self.scroll_offset == 0 {
+            self.scroll_locked = false;
+        }
+    }
+
+    pub fn scroll_to_top(&mut self) {
+        self.scroll_offset = 0;
+        self.scroll_from_top = Some(0);
+        self.scroll_locked = true;
+    }
+
+    pub fn scroll_to_bottom(&mut self) {
+        self.reset_scroll();
+    }
+
+    pub fn effective_scroll(&self, total_rows: usize, visible_height: u16) -> usize {
+        let max_scroll = total_rows.saturating_sub(visible_height as usize);
+        if let Some(position) = self.scroll_from_top {
+            return position.min(max_scroll);
+        }
+        if self.scroll_locked {
+            max_scroll.saturating_sub(self.scroll_offset)
+        } else {
+            max_scroll
+        }
+    }
+
+    fn reset_scroll(&mut self) {
+        self.scroll_offset = 0;
+        self.scroll_from_top = None;
+        self.scroll_locked = false;
     }
 
     /// Reset for the next thinking block.
@@ -96,6 +156,7 @@ impl ThinkingState {
         self.dot_offset = 0;
         self.start = None;
         self.last_duration_ms = 0;
+        self.reset_scroll();
     }
 
     /// The bright-dot index for the 3-dot Knight Rider bounce (0,1,2,1,0,…).
@@ -184,6 +245,72 @@ mod tests {
         let mut ts = ThinkingState::new();
         ts.tick_thinking();
         assert_eq!(ts.dot_offset, 0);
+    }
+
+    #[test]
+    fn thinking_scroll_state_resets_on_collapse_completion_and_new_block() {
+        let mut ts = ThinkingState::new();
+        ts.on_thinking_delta("first block");
+        ts.toggle_expand();
+        ts.scroll_up(10);
+        assert_eq!(ts.scroll_offset, 10);
+        assert!(ts.scroll_locked);
+
+        ts.toggle_expand();
+        assert_eq!(ts.scroll_offset, 0);
+        assert!(!ts.scroll_locked);
+
+        ts.toggle_expand();
+        ts.scroll_up(4);
+        ts.on_thinking_complete();
+        assert_eq!(ts.scroll_offset, 0);
+        assert!(!ts.scroll_locked);
+
+        ts.accumulated.clear();
+        ts.on_thinking_delta("second block");
+        assert_eq!(ts.scroll_offset, 0);
+        assert!(!ts.scroll_locked);
+    }
+
+    #[test]
+    fn thinking_scroll_effective_position_clamps_from_bottom() {
+        let mut ts = ThinkingState::new();
+        ts.active = true;
+        ts.expanded = true;
+        assert_eq!(ts.effective_scroll(30, 10), 20);
+
+        ts.scroll_up(6);
+        assert_eq!(ts.effective_scroll(30, 10), 14);
+        ts.scroll_to_top();
+        assert_eq!(ts.effective_scroll(30, 10), 0);
+        ts.scroll_to_bottom();
+        assert_eq!(ts.effective_scroll(30, 10), 20);
+    }
+
+    #[test]
+    fn thinking_scroll_supports_more_than_u16_wrapped_rows() {
+        let mut ts = ThinkingState::new();
+        ts.active = true;
+        ts.expanded = true;
+
+        assert_eq!(ts.effective_scroll(70_000, 10), 69_990);
+        ts.scroll_up(60_000);
+        ts.scroll_up(5_540);
+        assert_eq!(ts.effective_scroll(70_000, 10), 4_450);
+        ts.scroll_to_top();
+        assert_eq!(ts.effective_scroll(70_000, 10), 0);
+    }
+
+    #[test]
+    fn thinking_can_scroll_down_after_jumping_to_top() {
+        let mut ts = ThinkingState::new();
+        ts.active = true;
+        ts.expanded = true;
+        ts.scroll_to_top();
+        assert_eq!(ts.effective_scroll(70_000, 10), 0);
+
+        ts.scroll_down(10);
+        assert_eq!(ts.effective_scroll(70_000, 10), 10);
     }
 
     #[test]
