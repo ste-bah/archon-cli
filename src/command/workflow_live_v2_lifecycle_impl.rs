@@ -165,17 +165,18 @@ impl LifecycleDriver {
                 &unresolved,
                 &followup_raw,
             );
-            let followup_inventory = remediation::filter_remediation_inventory_by_task_ids(
-                &contract,
-                &remediation::normalize_remediation_inventory_for_sources(
-                    &contract,
-                    &followup_raw,
+            let followup_inventory = self
+                .enforce_outcome_repair_accounting(
+                    &call_id,
+                    followup_raw,
+                    &unresolved,
                     &support::array(remediation_inventory.get("items")),
                     ready_implementation_items,
                     &format!("remediation-wave-{wave_index}"),
-                ),
-                &remediation_task_ids,
-            );
+                    &remediation_task_ids,
+                    evidence,
+                )
+                .await?;
             if !remediation::remediation_inventory_ready(&followup_inventory) {
                 unscheduled_followup = Some(followup_inventory);
                 break;

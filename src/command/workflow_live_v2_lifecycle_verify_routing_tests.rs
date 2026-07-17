@@ -21,6 +21,19 @@ fn every_retry_producer_with_items_routes_to_execution() {
 }
 
 #[test]
+fn direct_camel_case_routes_are_canonicalized() {
+    let triage = harvest_nested_triage_routes(&serde_json::json!({
+        "implementationFailures": [{"item_id": "failed-check"}]
+    }));
+
+    assert_eq!(
+        triage["implementation_failures"],
+        serde_json::json!([{"item_id": "failed-check"}])
+    );
+    assert_eq!(triage_routes(&triage).implementation_failures.len(), 1);
+}
+
+#[test]
 fn every_triage_route_combination_has_a_defined_disposition() {
     for mask in 0u8..16 {
         for inventory_ready in [false, true] {
@@ -352,4 +365,61 @@ fn d48_d49_verifier_prompts_search_branch_proofs_and_follow_manifest_pointer() {
             .iter()
             .all(|prompt| prompt.contains("workflow_branch_evidence_root"))
     );
+}
+
+#[test]
+fn d69_routes_nested_under_items_container_are_harvested() {
+    // wf-98c76722 fixture shape: the reducer authored a valid actionable item
+    // but nested it under data.items.implementation_failures.
+    let triage = serde_json::json!({
+        "data": {
+            "items": {
+                "implementation_failures": [{
+                    "item_id": "triage-impl-TASK-EX-001-stale-evidence",
+                    "canonical_task_ids": ["TASK-EX-001"],
+                    "classification": "actionable_implementation_failure",
+                }]
+            }
+        }
+    });
+    let routes = triage_routes(&triage);
+    assert!(
+        routes.implementation_failures.is_empty(),
+        "raw read is empty"
+    );
+    let harvested = harvest_nested_triage_routes(&triage);
+    let routes = triage_routes(&harvested);
+    assert_eq!(routes.implementation_failures.len(), 1);
+}
+
+#[test]
+fn d69_nested_camel_case_routes_are_harvested_and_deduped() {
+    let item = serde_json::json!({ "item_id": "retry-check", "classification": "retryable_verification_shape_issue" });
+    let triage = serde_json::json!({
+        "result": { "data": {
+            "retry_items": [item],
+            "triage": { "retryItems": [item] }
+        }}
+    });
+    let harvested = harvest_nested_triage_routes(&triage);
+    let routes = triage_routes(&harvested);
+    assert_eq!(routes.retry_items.len(), 1, "hoisted duplicate is deduped");
+}
+
+#[test]
+fn d69_unaccounted_failed_outcomes_require_shape_repair() {
+    let failed =
+        [serde_json::json!({ "item_id": "verify-TASK-EX-001-evidence", "status": "failed" })];
+    let empty_triage = serde_json::json!({ "data": {
+        "retry_items": [], "implementation_failures": [],
+        "superseded_items": [], "terminal_blockers": []
+    }});
+    assert_eq!(unaccounted_failed_outcomes(&empty_triage, &failed).len(), 1);
+    let accounted = serde_json::json!({ "data": {
+        "implementation_failures": [{
+            "item_id": "triage-impl-stale",
+            "source_item_id": "verify-TASK-EX-001-evidence",
+        }]
+    }});
+    assert!(unaccounted_failed_outcomes(&accounted, &failed).is_empty());
 }

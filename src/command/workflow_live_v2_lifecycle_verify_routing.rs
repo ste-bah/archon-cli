@@ -49,9 +49,113 @@ pub(super) enum RemediationInventoryRoute {
     Block,
 }
 
+const ROUTE_KEY_ALIASES: [(&str, &[&str]); 4] = [
+    ("retry_items", &["retry_items", "retryItems"]),
+    (
+        "implementation_failures",
+        &["implementation_failures", "implementationFailures"],
+    ),
+    ("superseded_items", &["superseded_items", "supersededItems"]),
+    (
+        "terminal_blockers",
+        &["terminal_blockers", "terminalBlockers"],
+    ),
+];
+
+const ROUTE_CONTAINER_KEYS: [&str; 3] = ["items", "triage", "routes"];
+
+/// Hoist route arrays that reducers nested under known containers (e.g.
+/// `data.items.implementation_failures`) into the canonical top-level
+/// collections. Consumers only read the canonical collections; without this
+/// a nested-but-valid triage reads as empty routes.
+pub(super) fn harvest_nested_triage_routes(triage: &Value) -> Value {
+    let mut harvested = triage.clone();
+    let Some(data) = data_object_mut(&mut harvested) else {
+        return harvested;
+    };
+    let mut hoisted: Vec<(String, Vec<Value>)> = Vec::new();
+    for (canonical, aliases) in ROUTE_KEY_ALIASES {
+        let found = aliases
+            .iter()
+            .flat_map(|alias| support::array(data.get(*alias)))
+            .collect::<Vec<_>>();
+        if !found.is_empty() {
+            hoisted.push((canonical.to_string(), found));
+        }
+    }
+    for container_key in ROUTE_CONTAINER_KEYS {
+        let Some(container) = data.get(container_key).filter(|value| value.is_object()) else {
+            continue;
+        };
+        for (canonical, aliases) in ROUTE_KEY_ALIASES {
+            let mut found: Vec<Value> = Vec::new();
+            for alias in aliases {
+                found.extend(support::array(container.get(*alias)));
+            }
+            if !found.is_empty() {
+                hoisted.push((canonical.to_string(), found));
+            }
+        }
+    }
+    for (canonical, found) in hoisted {
+        let mut merged = support::array(data.get(canonical.as_str()));
+        merged.extend(found);
+        dedup_items(&mut merged);
+        data.insert(canonical, Value::Array(merged));
+    }
+    harvested
+}
+
+/// Non-accepted verification outcomes that no canonical triage route array
+/// accounts for. A triage leaving failures unaccounted is a shape failure to
+/// repair, never an empty result to consume.
+pub(super) fn unaccounted_failed_outcomes(triage: &Value, failed_outcomes: &[Value]) -> Vec<Value> {
+    let routes = triage_routes(triage);
+    let mut routed_ids: std::collections::BTreeSet<String> = Default::default();
+    for items in [
+        &routes.retry_items,
+        &routes.implementation_failures,
+        &routes.superseded_items,
+        &routes.terminal_blockers,
+    ] {
+        for item in items {
+            routed_ids.extend(
+                super::workflow_live_v2_lifecycle_verify_invariants::verification_item_ids(item),
+            );
+        }
+    }
+    failed_outcomes
+        .iter()
+        .filter(|outcome| {
+            super::workflow_live_v2_lifecycle_verify_invariants::verification_item_ids(outcome)
+                .iter()
+                .all(|id| !routed_ids.contains(id))
+        })
+        .cloned()
+        .collect()
+}
+
+fn data_object_mut(triage: &mut Value) -> Option<&mut serde_json::Map<String, Value>> {
+    if triage.get("data").is_some() {
+        return triage.get_mut("data").and_then(Value::as_object_mut);
+    }
+    if triage
+        .get("result")
+        .and_then(|result| result.get("data"))
+        .is_some()
+    {
+        return triage
+            .get_mut("result")
+            .and_then(|result| result.get_mut("data"))
+            .and_then(Value::as_object_mut);
+    }
+    triage.as_object_mut()
+}
+
 pub(super) fn triage_routes(triage: &Value) -> VerificationTriageRoutes {
     let data = triage_data(triage);
     let mut implementation_failures = support::array(data.get("implementation_failures"));
+    implementation_failures.extend(support::array(data.get("implementationFailures")));
     implementation_failures.extend(
         support::array(data.get("items"))
             .into_iter()

@@ -133,12 +133,17 @@ impl LifecycleDriver {
             remediation_attempt,
             (repair_attempt > 1).then_some(repair_attempt - 1),
         );
-        let normalized = remediation::normalize_remediation_inventory_for_sources(
-            &self.contract(), &raw, &source_items, ready_items, &source_call_id,
-        );
-        Ok(remediation::filter_remediation_inventory_by_task_ids(
-            &self.contract(), &normalized, allowed,
-        ))
+        self.enforce_outcome_repair_accounting(
+            &call_id,
+            raw,
+            repairable,
+            &source_items,
+            ready_items,
+            &source_call_id,
+            allowed,
+            evidence,
+        )
+        .await
     }
 
     #[allow(clippy::too_many_arguments)]

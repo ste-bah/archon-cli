@@ -117,6 +117,9 @@ impl LifecycleDriver {
             triage,
             plan_items,
         );
+        let triage = self
+            .enforce_triage_accounting(triage_id, actionable, triage, evidence)
+            .await?;
         support::record_repair_attempt(
             &mut evidence.repair_attempts,
             triage_id,
@@ -125,6 +128,57 @@ impl LifecycleDriver {
             &triage,
         );
         Ok(triage)
+    }
+
+    /// Triage boundary contract: harvest routes reducers nested under known
+    /// containers, then require every non-accepted outcome to be accounted
+    /// for in a canonical route array. Unaccounted outcomes get one bounded
+    /// shape-repair re-ask; the repair is adopted only if it accounts for
+    /// more of them.
+    async fn enforce_triage_accounting(
+        &self,
+        triage_id: &str,
+        failed_outcomes: &[serde_json::Value],
+        triage: serde_json::Value,
+        evidence: &mut LifecycleEvidence,
+    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+        let triage =
+            workflow_live_v2_lifecycle_verify_routing::harvest_nested_triage_routes(&triage);
+        let unaccounted = workflow_live_v2_lifecycle_verify_routing::unaccounted_failed_outcomes(
+            &triage,
+            failed_outcomes,
+        );
+        if unaccounted.is_empty() {
+            return Ok(triage);
+        }
+        let repair_id = format!("{triage_id}-shape-repair-1");
+        let repaired = self
+            .reduce(
+                &repair_id,
+                serde_json::json!([&unaccounted, &triage]),
+                "reducer",
+                prompts::VERIFICATION_TRIAGE_SHAPE_REPAIR_TASK,
+            )
+            .await?;
+        let repaired =
+            workflow_live_v2_lifecycle_verify_routing::harvest_nested_triage_routes(&repaired);
+        support::record_repair_attempt(
+            &mut evidence.repair_attempts,
+            &repair_id,
+            "verification_triage_shape_repair",
+            &unaccounted,
+            &repaired,
+        );
+        let still_unaccounted =
+            workflow_live_v2_lifecycle_verify_routing::unaccounted_failed_outcomes(
+                &repaired,
+                failed_outcomes,
+            );
+        if still_unaccounted.len() < unaccounted.len() {
+            Ok(repaired)
+        } else {
+            Ok(triage)
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -166,6 +220,9 @@ impl LifecycleDriver {
                 "reducer",
                 prompts::VERIFICATION_FAILURE_RETRIAGE_TASK,
             )
+            .await?;
+        let retriage = self
+            .enforce_triage_accounting(&id, actionable, retriage, evidence)
             .await?;
         support::record_repair_attempt(
             &mut evidence.repair_attempts,

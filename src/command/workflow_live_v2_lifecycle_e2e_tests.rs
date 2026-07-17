@@ -20,6 +20,7 @@ struct CannedLifecycleLlm {
     calls: Mutex<Vec<String>>,
     deliverable_contract_executed: AtomicBool,
     inventory_calls: AtomicUsize,
+    verification_failure_emitted: AtomicBool,
 }
 
 #[async_trait::async_trait]
@@ -112,6 +113,50 @@ impl LlmClient for CannedLifecycleLlm {
                 Vec::new(),
                 Vec::new(),
             )
+        } else if call_id.starts_with("verification-failure-triage-") {
+            accepted_result(
+                "nested verification failure route",
+                serde_json::json!({
+                    "items": {
+                        "implementation_failures": [{
+                            "item_id": "verify-plain",
+                            "source_item_id": "verify-plain",
+                            "canonical_task_ids": ["TASK-EX-003"],
+                            "classification": "implementation_failure",
+                            "failure_status": "needs_review",
+                            "failure_evidence": "the first focused check failed",
+                            "required_fix": "re-apply the neutral implementation",
+                        }]
+                    }
+                }),
+                Vec::new(),
+                Vec::new(),
+            )
+        } else if call_id.starts_with("verification-remediation-inventory-") {
+            accepted_result(
+                "verification remediation inventory",
+                serde_json::json!({
+                    "items": [verification_remediation_item()],
+                    "unresolved_issues": [],
+                }),
+                Vec::new(),
+                Vec::new(),
+            )
+        } else if call_id.starts_with("post-remediation-verification-plan-") {
+            accepted_result(
+                "post-remediation focused plan",
+                serde_json::json!({
+                    "items": [
+                        verification_item("verify-refuted-remediated", "TASK-EX-002", "src/refuted.rs"),
+                        verification_item("verify-plain-remediated", "TASK-EX-003", "src/plain.rs"),
+                        verification_item("verify-contract-remediated", "TASK-EX-004", "src/contract.rs"),
+                        verification_item("verify-artifact-remediated", "TASK-EX-005", "../.archon/artifacts/artifact-only.json"),
+                    ],
+                    "unresolved_issues": [],
+                }),
+                Vec::new(),
+                Vec::new(),
+            )
         } else if call_id == "wave-completion-evidence-repair-1" {
             accepted_result(
                 "wave completion is already represented by verification evidence",
@@ -160,14 +205,22 @@ impl LlmClient for CannedLifecycleLlm {
         } else if request
             .task
             .contains("Implement only the assigned dependency-ready item")
+            || request
+                .task
+                .contains("Fix only the assigned focused-verification failure")
         {
             implementation_result(&request, &input, &call_id)?
-        } else if request.task.contains("Run focused verification only") {
+        } else if request.task.contains("Run focused verification only")
+            || request
+                .task
+                .contains("Run focused post-remediation verification only")
+        {
             verification_result(
                 &request,
                 &input,
                 &call_id,
                 &self.deliverable_contract_executed,
+                &self.verification_failure_emitted,
             )?
         } else if matches!(
             call_id.as_str(),
@@ -231,6 +284,7 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
         calls: Mutex::new(Vec::new()),
         deliverable_contract_executed: AtomicBool::new(false),
         inventory_calls: AtomicUsize::new(0),
+        verification_failure_emitted: AtomicBool::new(false),
     });
     let client = LiveV2AgentClient::new(
         llm.clone(),
@@ -304,6 +358,20 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
             .iter()
             .any(|call| call.id == "verification-wave-1"),
         "accepted implementation with a prefix-stripped ID was not scheduled for verification"
+    );
+    assert!(
+        summary
+            .calls
+            .iter()
+            .any(|call| call.id.starts_with("verification-remediation-inventory-")),
+        "nested triage route did not schedule remediation"
+    );
+    assert!(
+        summary
+            .calls
+            .iter()
+            .any(|call| call.id.starts_with("verification-wave-1-post-remediation-")),
+        "remediation did not proceed to focused verification"
     );
     assert!(
         summary
@@ -396,6 +464,7 @@ async fn failed_final_report_emits_host_built_fallback() {
         calls: Mutex::new(Vec::new()),
         deliverable_contract_executed: AtomicBool::new(false),
         inventory_calls: AtomicUsize::new(0),
+        verification_failure_emitted: AtomicBool::new(false),
     });
     let client = LiveV2AgentClient::new(llm, tui_tx, Vec::new(), run.id.clone(), None, Some(30));
     let generated_config = archon_core::config::GeneratedWorkflowConfig {
@@ -593,6 +662,22 @@ fn verification_item(item_id: &str, task_id: &str, target_file: &str) -> serde_j
     })
 }
 
+fn verification_remediation_item() -> serde_json::Value {
+    serde_json::json!({
+        "item_id": "remediate-plain",
+        "source_item_id": "implementation-plain",
+        "work_type": "implementation",
+        "canonical_task_ids": ["TASK-EX-003"],
+        "dependency_ids": [],
+        "target_files": ["src/plain.rs"],
+        "failure_status": "needs_review",
+        "failure_evidence": "the first focused check failed",
+        "required_fix": "re-apply the neutral implementation",
+        "focused_verification": "test -f src/plain.rs",
+        "artifact_requirements": [],
+    })
+}
+
 fn noop_proof_result(call_id: &str) -> serde_json::Value {
     if call_id.ends_with("noop-legit") {
         serde_json::json!({
@@ -753,6 +838,7 @@ fn verification_result(
     input: &serde_json::Value,
     call_id: &str,
     deliverable_contract_executed: &AtomicBool,
+    verification_failure_emitted: &AtomicBool,
 ) -> Result<serde_json::Value> {
     let item = find_item(input).ok_or_else(|| anyhow::anyhow!("verification item missing"))?;
     let task_id = first_string(item.get("canonical_task_ids"))
@@ -773,11 +859,18 @@ fn verification_result(
     if item.get("deliverable_contract").is_some() {
         deliverable_contract_executed.store(true, Ordering::SeqCst);
     }
-    let succeeded = output.status.success();
+    let forced_failure = task_id == "TASK-EX-003"
+        && !call_id.contains("post-remediation")
+        && !verification_failure_emitted.swap(true, Ordering::SeqCst);
+    let succeeded = output.status.success() && !forced_failure;
     let summary = if succeeded {
         String::from_utf8_lossy(&output.stdout).trim().to_string()
     } else {
-        String::from_utf8_lossy(&output.stderr).trim().to_string()
+        if forced_failure {
+            "synthetic first-attempt verification failure".to_string()
+        } else {
+            String::from_utf8_lossy(&output.stderr).trim().to_string()
+        }
     };
     let mut result = accepted_result(
         "focused verification executed",

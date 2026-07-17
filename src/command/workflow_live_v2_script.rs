@@ -296,6 +296,8 @@ include!("workflow_live_v2_script_verification.rs");
 
 #[path = "workflow_live_v2_deliverable_contract.rs"]
 mod workflow_live_v2_deliverable_contract;
+#[path = "workflow_live_v2_lifecycle_boundary_repair.rs"]
+mod workflow_live_v2_lifecycle_boundary_repair;
 #[path = "workflow_live_v2_lifecycle_noop_routing.rs"]
 mod workflow_live_v2_lifecycle_noop_routing;
 #[path = "workflow_live_v2_lifecycle_prompts.rs"]
@@ -332,6 +334,8 @@ include!("workflow_live_v2_lifecycle.rs");
 include!("workflow_live_v2_lifecycle_waves.rs");
 
 include!("workflow_live_v2_lifecycle_impl.rs");
+
+include!("workflow_live_v2_lifecycle_boundary_repair_driver.rs");
 
 include!("workflow_live_v2_lifecycle_verify.rs");
 

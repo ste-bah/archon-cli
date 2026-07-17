@@ -227,9 +227,10 @@ impl LifecycleDriver {
         evidence: &mut LifecycleEvidence,
     ) -> archon_workflow::WorkflowResult<()> {
         let mut final_iteration = 1usize;
-        let mut reconciliation = self
+        let reconciliation_id = format!("final-evidence-reconciliation-{final_iteration}");
+        let reconciliation = self
             .reduce(
-                &format!("final-evidence-reconciliation-{final_iteration}"),
+                &reconciliation_id,
                 serde_json::json!([
                     self.task_universe,
                     inventory,
@@ -243,10 +244,15 @@ impl LifecycleDriver {
                 prompts::FINAL_EVIDENCE_RECONCILIATION_TASK,
             )
             .await?;
-        while !support::array(reconciliation.get("items")).is_empty()
+        let mut reconciliation = self
+            .enforce_final_reconciliation_shape(&reconciliation_id, reconciliation, evidence)
+            .await?;
+        while !workflow_live_v2_lifecycle_boundary_repair::collection_items(&reconciliation)
+            .is_empty()
             && final_iteration <= self.max_repair_iterations
         {
-            let items = support::array(reconciliation.get("items"));
+            let items =
+                workflow_live_v2_lifecycle_boundary_repair::collection_items(&reconciliation);
             let repair_id = format!("completion-claim-repair-{final_iteration}");
             let claim_repair = self
                 .reduce(
@@ -315,9 +321,11 @@ impl LifecycleDriver {
                 }));
             }
             final_iteration += 1;
-            reconciliation = self
+            let reconciliation_id =
+                format!("final-evidence-reconciliation-{final_iteration}");
+            let next_reconciliation = self
                 .reduce(
-                    &format!("final-evidence-reconciliation-{final_iteration}"),
+                    &reconciliation_id,
                     serde_json::json!([
                         self.task_universe,
                         inventory,
@@ -332,8 +340,16 @@ impl LifecycleDriver {
                     prompts::FINAL_EVIDENCE_RE_RECONCILIATION_TASK,
                 )
                 .await?;
+            reconciliation = self
+                .enforce_final_reconciliation_shape(
+                    &reconciliation_id,
+                    next_reconciliation,
+                    evidence,
+                )
+                .await?;
         }
-        if !support::array(reconciliation.get("items")).is_empty() {
+        if !workflow_live_v2_lifecycle_boundary_repair::collection_items(&reconciliation).is_empty()
+        {
             return self
                 .final_report(
                     "blocked-final-evidence-reconciliation",
