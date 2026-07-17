@@ -8,10 +8,13 @@ use archon_memory::MemoryTrait;
 use archon_memory::types::{MemoryType, RelType, SearchFilter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::rules::{RuleSource, RulesEngine};
+
+const CORRECTION_DERIVED_RULE_ID: &str = "rule:correction:generic-v1";
+const CORRECTION_DERIVED_RULE_TEXT: &str =
+    "Review the approach that triggered this correction before repeating it.";
 
 // ── public types ─────────────────────────────────────────────
 
@@ -124,8 +127,8 @@ impl<'g> CorrectionTracker<'g> {
     /// * If `rule_id` is `Some`, creates a `CausedBy` edge from the
     ///   correction to the rule and increments the rule's score by
     ///   `severity_multiplier * 5.0` (clamped to 100).
-    /// * If `rule_id` is `None`, a new `CorrectionDerived` rule is
-    ///   auto-created from the correction content and linked.
+    /// * If `rule_id` is `None`, a deterministic `CorrectionDerived` rule is
+    ///   created or reused without copying correction text into the rule body.
     pub fn record_correction(
         &self,
         correction_type: CorrectionType,
@@ -153,10 +156,8 @@ impl<'g> CorrectionTracker<'g> {
         rule_id: Option<&str>,
     ) -> Result<Correction, CorrectionError> {
         let severity = correction_type.severity_multiplier();
-        let effective_rule_id = rule_id.map_or_else(
-            || derived_rule_id(&normalize_correction_content(content)),
-            str::to_string,
-        );
+        let effective_rule_id =
+            rule_id.map_or_else(|| CORRECTION_DERIVED_RULE_ID.to_string(), str::to_string);
         let tags = vec![
             correction_type.as_tag(),
             format!("severity:{severity}"),
@@ -184,7 +185,7 @@ impl<'g> CorrectionTracker<'g> {
 
         let target_resolution = match rule_id {
             Some(id) => self.validate_explicit_rule(id),
-            None => self.resolve_derived_rule(content).map(|_| ()),
+            None => self.resolve_derived_rule(&effective_rule_id).map(|_| ()),
         };
         if let Err(cause) = target_resolution {
             return Err(self.compensate_new_claim_failure(cause, &correction.id, outcome.created));
@@ -284,14 +285,12 @@ impl<'g> CorrectionTracker<'g> {
 
     fn resolve_derived_rule(
         &self,
-        content: &str,
+        id: &str,
     ) -> Result<crate::rules::BehavioralRule, CorrectionError> {
-        let normalized = normalize_correction_content(content);
-        let id = derived_rule_id(&normalized);
         self.rules
             .add_rule_with_id(
-                &id,
-                &format!("Avoid: {normalized}"),
+                id,
+                CORRECTION_DERIVED_RULE_TEXT,
                 RuleSource::CorrectionDerived,
             )
             .map_err(CorrectionError::from)
@@ -363,19 +362,6 @@ fn validate_correction_identity(
         ));
     }
     Ok(())
-}
-
-fn normalize_correction_content(content: &str) -> String {
-    content
-        .split_whitespace()
-        .map(str::to_lowercase)
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn derived_rule_id(normalized_content: &str) -> String {
-    let digest = Sha256::digest(normalized_content.as_bytes());
-    format!("rule:correction:{digest:x}")
 }
 
 fn is_known_severity(severity: f64) -> bool {

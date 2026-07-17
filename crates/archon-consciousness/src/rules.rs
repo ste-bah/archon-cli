@@ -111,6 +111,9 @@ pub enum RulesError {
 /// Maximum behavioral rules included in the system prompt.
 pub const MAX_PROMPT_RULES: usize = 10;
 
+/// Rules below this attention score are retired from prompt injection.
+pub const MIN_PROMPT_RULE_SCORE: f64 = 5.0;
+
 /// Manages behavioral rules stored in the memory graph.
 pub struct RulesEngine<'g> {
     graph: &'g dyn MemoryTrait,
@@ -169,7 +172,7 @@ impl<'g> RulesEngine<'g> {
             "rules_engine",
             "",
         )?;
-        validate_rule_identity(&memory, id, source)?;
+        validate_rule_identity(&memory, id, text, source)?;
         memory_to_rule(memory)
     }
 
@@ -300,11 +303,13 @@ impl<'g> RulesEngine<'g> {
                 return Err(RulesError::InvalidScore(entry.score));
             }
 
-            // Match by rule_id first, fall back to text match.
-            let target = current_rules
+            // Match by rule_id first, then only use an unambiguous legacy text match.
+            let id_match = current_rules.iter().find(|rule| rule.id == entry.rule_id);
+            let text_matches: Vec<_> = current_rules
                 .iter()
-                .find(|r| r.id == entry.rule_id)
-                .or_else(|| current_rules.iter().find(|r| r.text == entry.rule_text));
+                .filter(|rule| rule.text == entry.rule_text)
+                .collect();
+            let target = id_match.or_else(|| (text_matches.len() == 1).then_some(text_matches[0]));
 
             if let Some(rule) = target {
                 let provenance_id = format!(
@@ -323,13 +328,18 @@ impl<'g> RulesEngine<'g> {
     /// Render the highest-priority rules into a block suitable for system-prompt
     /// injection.
     pub fn format_for_prompt(&self) -> Result<String, RulesError> {
-        let rules = self.get_rules_sorted()?;
-        if rules.is_empty() {
+        let prompt_rules: Vec<_> = self
+            .get_rules_sorted()?
+            .into_iter()
+            .filter(|rule| rule.score >= MIN_PROMPT_RULE_SCORE)
+            .take(MAX_PROMPT_RULES)
+            .collect();
+        if prompt_rules.is_empty() {
             return Ok(String::new());
         }
 
         let mut out = String::from("<behavioral_rules>\n## Rules (sorted by priority)\n");
-        for (i, r) in rules.iter().take(MAX_PROMPT_RULES).enumerate() {
+        for (i, r) in prompt_rules.iter().enumerate() {
             out.push_str(&format!(
                 "{}. [score: {:.1} {}] {}\n",
                 i + 1,
@@ -352,6 +362,7 @@ fn is_valid_rule_score(score: f64) -> bool {
 fn validate_rule_identity(
     memory: &archon_memory::Memory,
     id: &str,
+    expected_text: &str,
     source: RuleSource,
 ) -> Result<(), RulesError> {
     let source_tag = source.as_tag();
@@ -367,6 +378,7 @@ fn validate_rule_identity(
         .collect();
     let rule = memory_to_rule(memory.clone())?;
     if memory.memory_type != MemoryType::Rule
+        || memory.content != expected_text
         || memory.source_type != "rules_engine"
         || source_tags != [&source_tag]
         || trend_tags.len() != 1
@@ -375,7 +387,7 @@ fn validate_rule_identity(
     {
         return Err(RulesError::IdentityCollision {
             id: id.to_string(),
-            reason: "stored rule source or required tags differ".to_string(),
+            reason: "stored rule text, source, or required tags differ".to_string(),
         });
     }
     Ok(())

@@ -162,6 +162,43 @@ fn decay_persists_declining_trend_for_reload() {
 }
 
 #[test]
+fn format_for_prompt_includes_score_floor_and_excludes_score_below_it() {
+    let (graph, _) = make_engine();
+    let engine = RulesEngine::new(&graph);
+    let below = engine
+        .add_rule("below prompt floor", RuleSource::CorrectionDerived)
+        .expect("add below-floor rule");
+    let at_floor = engine
+        .add_rule("at prompt floor", RuleSource::CorrectionDerived)
+        .expect("add floor rule");
+    graph
+        .apply_importance_delta(&below.id, -45.1, "fixture:score-4.9")
+        .expect("set score to 4.9");
+    graph
+        .apply_importance_delta(&at_floor.id, -45.0, "fixture:score-5.0")
+        .expect("set score to 5.0");
+
+    let prompt = engine.format_for_prompt().expect("format prompt");
+
+    assert!(!prompt.contains("below prompt floor"));
+    assert!(prompt.contains("at prompt floor"));
+}
+
+#[test]
+fn format_for_prompt_omits_rules_below_score_floor() {
+    let (graph, _) = make_engine();
+    let engine = RulesEngine::new(&graph);
+    let rule = engine
+        .add_rule("retired rule", RuleSource::CorrectionDerived)
+        .expect("add rule");
+    graph
+        .apply_importance_delta(&rule.id, -46.0, "fixture:below-prompt-floor")
+        .expect("lower score");
+
+    assert_eq!(engine.format_for_prompt().expect("format prompt"), "");
+}
+
+#[test]
 fn format_for_prompt_keeps_only_the_top_ten_rules() {
     let (graph, _) = make_engine();
     let engine = RulesEngine::new(&graph);
@@ -173,7 +210,7 @@ fn format_for_prompt_keeps_only_the_top_ten_rules() {
             .import_scores(&[crate::persistence::RuleScoreEntry {
                 rule_id: rule.id,
                 rule_text: format!("rule {index}"),
-                score: index as f64,
+                score: (index + 5) as f64,
             }])
             .expect("persist priority");
     }

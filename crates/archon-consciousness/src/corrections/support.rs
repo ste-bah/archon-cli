@@ -15,12 +15,6 @@ struct FailingMemory<'a> {
     failure_point: FailurePoint,
 }
 
-struct SynchronizedMemory {
-    inner: std::sync::Arc<MemoryGraph>,
-    correction_id: String,
-    preflight_barrier: std::sync::Barrier,
-}
-
 struct OwnershipRaceMemory {
     inner: std::sync::Arc<MemoryGraph>,
     correction_id: String,
@@ -43,16 +37,6 @@ impl OwnershipRaceMemory {
             creator_boosted: std::sync::Condvar::new(),
             creator_finished_boost: std::sync::Mutex::new(false),
             boost_turn: std::sync::atomic::AtomicUsize::new(0),
-        }
-    }
-}
-
-impl SynchronizedMemory {
-    fn new(inner: std::sync::Arc<MemoryGraph>, correction_id: &str) -> Self {
-        Self {
-            inner,
-            correction_id: correction_id.to_string(),
-            preflight_barrier: std::sync::Barrier::new(2),
         }
     }
 }

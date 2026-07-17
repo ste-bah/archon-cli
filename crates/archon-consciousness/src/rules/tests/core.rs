@@ -1,4 +1,36 @@
 #[test]
+fn correction_derived_rule_identity_requires_expected_text() {
+    let (graph, _) = make_engine();
+    graph
+        .store_memory_with_id(
+            "rule:wrong-content",
+            "unexpected rule text",
+            "",
+            MemoryType::Rule,
+            50.0,
+            &[
+                "source:correction_derived".to_string(),
+                "trend:stable".to_string(),
+            ],
+            "rules_engine",
+            "",
+        )
+        .expect("seed colliding rule");
+    let stored = graph
+        .get_memory("rule:wrong-content")
+        .expect("read colliding rule");
+
+    let result = validate_rule_identity(
+        &stored,
+        "rule:wrong-content",
+        "expected generic derived rule text",
+        RuleSource::CorrectionDerived,
+    );
+
+    assert!(matches!(result, Err(RulesError::IdentityCollision { .. })));
+}
+
+#[test]
 fn add_and_get_rule() {
     let (graph, _) = make_engine();
     let engine = RulesEngine::new(&graph);

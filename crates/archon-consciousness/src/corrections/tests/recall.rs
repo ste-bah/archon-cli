@@ -1,10 +1,43 @@
 #[test]
+fn derived_rule_collision_with_wrong_content_rejects_before_correction_mutation() {
+    let (graph, _) = make_tracker();
+    let content = "Use Edit before modifying config files";
+    let rule_id = CORRECTION_DERIVED_RULE_ID;
+    graph
+        .store_memory_with_id(
+            &rule_id,
+            "wrong generic rule text",
+            "",
+            MemoryType::Rule,
+            50.0,
+            &[
+                "source:correction_derived".to_string(),
+                "trend:stable".to_string(),
+            ],
+            "rules_engine",
+            "",
+        )
+        .expect("seed wrong-content rule");
+    let tracker = CorrectionTracker::new(&graph);
+
+    let result = tracker.record_correction_with_id(
+        "correction:derived-content-collision",
+        CorrectionType::ApproachCorrection,
+        content,
+        "test",
+        None,
+    );
+
+    assert!(result.is_err(), "wrong-content generic rule must reject");
+    assert_eq!(graph.memory_count().expect("count memories"), 1);
+}
+
+#[test]
 fn derived_rule_collision_with_user_source_rejects_before_correction_mutation() {
     let (graph, _) = make_tracker();
     let content = "Use Edit before modifying config files";
-    let normalized = normalize_correction_content(content);
-    let rule_id = derived_rule_id(&normalized);
-    let rule_text = format!("Avoid: {normalized}");
+    let rule_id = CORRECTION_DERIVED_RULE_ID;
+    let rule_text = CORRECTION_DERIVED_RULE_TEXT;
     graph
         .store_memory_with_id(
             &rule_id,
@@ -104,6 +137,116 @@ fn equivalent_corrections_reuse_one_derived_rule() {
             .expect("read correction relationship");
         assert!(related.iter().any(|memory| memory.id == rule_id));
     }
+}
+
+#[test]
+fn similar_corrections_reuse_one_derived_rule() {
+    let (graph, _) = make_tracker();
+    let tracker = CorrectionTracker::new(&graph);
+
+    let first = tracker
+        .record_correction(
+            CorrectionType::ApproachCorrection,
+            "Use Edit before modifying config files",
+            "first session",
+            None,
+        )
+        .expect("record first correction");
+    let second = tracker
+        .record_correction(
+            CorrectionType::ApproachCorrection,
+            "Use Edit before modifying configuration files",
+            "second session",
+            None,
+        )
+        .expect("record similar correction");
+
+    assert_eq!(first.rule_id, second.rule_id);
+    let rules = RulesEngine::new(&graph)
+        .get_rules_sorted()
+        .expect("list rules");
+    assert_eq!(
+        rules
+            .iter()
+            .filter(|rule| rule.source == RuleSource::CorrectionDerived)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn automatic_similarity_reuse_ignores_explicit_user_rule_target() {
+    let (graph, _) = make_tracker();
+    let user_rule = RulesEngine::new(&graph)
+        .add_rule("User-authored edit guidance", RuleSource::UserDefined)
+        .expect("add user rule");
+    let tracker = CorrectionTracker::new(&graph);
+
+    tracker
+        .record_correction(
+            CorrectionType::ApproachCorrection,
+            "Use Edit before modifying config files",
+            "explicit session",
+            Some(&user_rule.id),
+        )
+        .expect("record explicit correction");
+    let automatic = tracker
+        .record_correction(
+            CorrectionType::ApproachCorrection,
+            "Use Edit before modifying configuration files",
+            "automatic session",
+            None,
+        )
+        .expect("record automatic correction");
+
+    let automatic_rule_id = automatic.rule_id.as_deref().expect("derived rule");
+    assert_ne!(automatic_rule_id, user_rule.id);
+    let automatic_rule = graph
+        .get_memory(automatic_rule_id)
+        .expect("read automatic rule");
+    assert_eq!(automatic_rule.memory_type, MemoryType::Rule);
+    assert_eq!(automatic_rule.content, CORRECTION_DERIVED_RULE_TEXT);
+    assert!(automatic_rule
+        .tags
+        .iter()
+        .any(|tag| tag == "source:correction_derived"));
+    assert_eq!(
+        automatic_rule
+            .tags
+            .iter()
+            .filter(|tag| tag.starts_with("trend:"))
+            .count(),
+        1
+    );
+    assert_eq!(automatic_rule.source_type, "rules_engine");
+    assert_eq!(
+        graph.get_memory(&user_rule.id).expect("read user rule").importance,
+        60.0,
+        "only the explicit correction boosts the user rule"
+    );
+}
+
+#[test]
+fn correction_derived_rule_does_not_embed_raw_user_text() {
+    let (graph, _) = make_tracker();
+    let tracker = CorrectionTracker::new(&graph);
+    let raw = "No, use Edit on /private/customer-alpha/secret-config.toml";
+
+    let correction = tracker
+        .record_correction(
+            CorrectionType::ApproachCorrection,
+            raw,
+            "coding session",
+            None,
+        )
+        .expect("record correction");
+
+    let rule = graph
+        .get_memory(correction.rule_id.as_deref().expect("derived rule"))
+        .expect("load derived rule");
+    assert_eq!(rule.content, "Review the approach that triggered this correction before repeating it.");
+    assert!(!rule.content.contains("customer-alpha"));
+    assert_eq!(graph.get_memory(&correction.id).unwrap().content, raw);
 }
 
 #[test]

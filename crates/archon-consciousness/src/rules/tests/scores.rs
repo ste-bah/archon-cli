@@ -1,4 +1,34 @@
 #[test]
+fn import_scores_skips_ambiguous_text_fallback_when_rule_id_is_missing() {
+    let (graph, _) = make_engine();
+    let engine = RulesEngine::new(&graph);
+    let first = engine
+        .add_rule("Review before changing files", RuleSource::UserDefined)
+        .expect("add first rule");
+    let second = engine
+        .add_rule("Review before changing files", RuleSource::CorrectionDerived)
+        .expect("add second rule");
+
+    let imported = engine
+        .import_scores(&[crate::persistence::RuleScoreEntry {
+            rule_id: "missing:legacy-rule".to_string(),
+            rule_text: "Review before changing files".to_string(),
+            score: 80.0,
+        }])
+        .expect("ambiguous legacy score should skip");
+
+    assert_eq!(imported, 0);
+    assert_eq!(
+        graph.get_memory(&first.id).expect("read first rule").importance,
+        50.0
+    );
+    assert_eq!(
+        graph.get_memory(&second.id).expect("read second rule").importance,
+        50.0
+    );
+}
+
+#[test]
 fn score_mutations_persist_exactly_one_trend_tag() {
     let (graph, _) = make_engine();
     let engine = RulesEngine::new(&graph);

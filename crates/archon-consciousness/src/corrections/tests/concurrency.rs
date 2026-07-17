@@ -1,4 +1,69 @@
 #[test]
+fn concurrent_similar_corrections_reuse_one_derived_rule() {
+    use std::sync::{Arc, Barrier};
+
+    let graph = Arc::new(MemoryGraph::in_memory().expect("in-memory graph"));
+    let barrier = Arc::new(Barrier::new(2));
+    let requests = [
+        (
+            "correction:concurrent-config",
+            "Use Edit before modifying config files",
+        ),
+        (
+            "correction:concurrent-configuration",
+            "Use Edit before modifying configuration files",
+        ),
+    ];
+
+    let handles: Vec<_> = requests
+        .into_iter()
+        .map(|(correction_id, content)| {
+            let graph = Arc::clone(&graph);
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                CorrectionTracker::new(graph.as_ref()).record_correction_with_id(
+                    correction_id,
+                    CorrectionType::ApproachCorrection,
+                    content,
+                    "concurrent session",
+                    None,
+                )
+            })
+        })
+        .collect();
+
+    let corrections: Vec<_> = handles
+        .into_iter()
+        .map(|handle| {
+            handle
+                .join()
+                .expect("correction worker panicked")
+                .expect("record")
+        })
+        .collect();
+    let rule_id = corrections[0]
+        .rule_id
+        .as_deref()
+        .expect("first derived rule");
+    assert!(
+        corrections
+            .iter()
+            .all(|correction| correction.rule_id.as_deref() == Some(rule_id)),
+        "similar concurrent corrections must converge on one rule"
+    );
+    assert_eq!(
+        RulesEngine::new(graph.as_ref())
+            .get_rules_sorted()
+            .expect("list rules")
+            .iter()
+            .filter(|rule| rule.source == RuleSource::CorrectionDerived)
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn concurrent_equivalent_corrections_create_one_derived_rule() {
     use std::sync::{Arc, Barrier};
 
@@ -72,11 +137,11 @@ fn concurrent_equivalent_corrections_create_one_derived_rule() {
 
 #[test]
 fn concurrent_same_id_divergent_corrections_leave_no_losing_derived_rule() {
-    use std::sync::Arc;
+    use std::sync::{Arc, Barrier};
 
     let graph = Arc::new(MemoryGraph::in_memory().expect("in-memory graph"));
     let correction_id = "correction:concurrent-collision";
-    let synchronized = Arc::new(SynchronizedMemory::new(Arc::clone(&graph), correction_id));
+    let start = Arc::new(Barrier::new(2));
     let requests = [
         "Use Edit before modifying config files",
         "Use a dry run before modifying config files",
@@ -85,9 +150,11 @@ fn concurrent_same_id_divergent_corrections_leave_no_losing_derived_rule() {
     let handles: Vec<_> = requests
         .into_iter()
         .map(|content| {
-            let synchronized = Arc::clone(&synchronized);
+            let graph = Arc::clone(&graph);
+            let start = Arc::clone(&start);
             std::thread::spawn(move || {
-                CorrectionTracker::new(synchronized.as_ref()).record_correction_with_id(
+                start.wait();
+                CorrectionTracker::new(graph.as_ref()).record_correction_with_id(
                     correction_id,
                     CorrectionType::ApproachCorrection,
                     content,
