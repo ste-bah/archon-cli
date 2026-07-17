@@ -5,7 +5,7 @@ edition.workspace = true
 
 [dependencies]
 ratatui.workspace = true
-crossterm.workspace = true
+crossterm = { workspace = true, features = ["event-stream"] }
 serde.workspace = true
 tokio.workspace = true
 tracing.workspace = true
@@ -60,6 +60,7 @@ qrcode = { version = "0.14.1", default-features = false }
 jemalloc-ctl = "0.5"
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 insta = { workspace = true }
 criterion.workspace = true
 futures = "0.3"

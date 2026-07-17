@@ -95,6 +95,18 @@ where
     crate::event_loop::run_inner(config, terminal).await
 }
 
+/// Headless backend-injection seam for tests that use `TestBackend` and have
+/// no crossterm terminal-event source.
+pub async fn run_with_backend_without_terminal_events<B>(
+    config: AppConfig,
+    terminal: &mut ratatui::Terminal<B>,
+) -> Result<(), io::Error>
+where
+    B: ratatui::backend::Backend,
+{
+    crate::event_loop::run_inner_without_terminal_events(config, terminal).await
+}
+
 /// The main TUI application state.
 pub struct App {
     pub output: OutputBuffer,

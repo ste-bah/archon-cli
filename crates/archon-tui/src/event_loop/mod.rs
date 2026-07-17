@@ -61,7 +61,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use archon_core::agent::TimestampedEvent;
-use crossterm::event::{self};
+use crossterm::event::EventStream;
 use ratatui::Terminal;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -69,7 +69,13 @@ use crate::app::{App, AppConfig, TuiEvent};
 use crate::event_channel::TuiEventReceiver;
 use crate::task_dispatch::{AgentDispatcher, AgentRouter, CancelOutcome, TurnRunner};
 
+use driver::{
+    IDLE_TICK_CADENCE, LoopEvent, TickScheduler, animation_cadence, drain_tui_events,
+    next_loop_event,
+};
+
 mod ask_user;
+mod driver;
 mod input;
 mod mouse;
 mod tui_events;
@@ -174,8 +180,8 @@ pub async fn run_event_loop(cfg: EventLoopConfig) -> Result<()> {
 
 /// Backend-generic event loop body (TUI-310 extraction from `app.rs`).
 ///
-/// Shared by [`crate::app::run`] (production crossterm path) and
-/// [`crate::app::run_with_backend`] (test injection path).
+/// The public generic [`crate::app::run_with_backend`] entry retains live
+/// terminal input by calling [`run_inner`].
 ///
 /// **No terminal lifecycle here**: this helper assumes raw mode / alternate
 /// screen / mouse capture have already been arranged (or are not needed, for
@@ -189,6 +195,31 @@ pub async fn run_event_loop(cfg: EventLoopConfig) -> Result<()> {
 pub(crate) async fn run_inner<B>(
     config: AppConfig,
     terminal: &mut Terminal<B>,
+) -> Result<(), io::Error>
+where
+    B: ratatui::backend::Backend,
+{
+    run_inner_with_terminal_events(config, terminal, Some(EventStream::new())).await
+}
+
+/// Backend-generic loop body with optional terminal input.
+///
+/// `run_with_backend_without_terminal_events` passes `None`; generic callers
+/// use [`run_inner`] with an [`EventStream`].
+pub(crate) async fn run_inner_without_terminal_events<B>(
+    config: AppConfig,
+    terminal: &mut Terminal<B>,
+) -> Result<(), io::Error>
+where
+    B: ratatui::backend::Backend,
+{
+    run_inner_with_terminal_events(config, terminal, None).await
+}
+
+async fn run_inner_with_terminal_events<B>(
+    config: AppConfig,
+    terminal: &mut Terminal<B>,
+    mut terminal_events: Option<EventStream>,
 ) -> Result<(), io::Error>
 where
     B: ratatui::backend::Backend,
@@ -232,66 +263,48 @@ where
     }
 
     let keymap = crate::keybindings::KeyMap::default();
+    let mut tick_scheduler = TickScheduler::new(IDLE_TICK_CADENCE);
 
     loop {
-        // Draw UI
         terminal.draw(|frame| crate::render::draw(frame, &mut app))?;
+        tick_scheduler.reconfigure(animation_cadence(&app));
 
-        // Handle events: use shorter poll when animation is active
-        let timeout = if app.input.ultrathink.active || app.thinking.active {
-            std::time::Duration::from_millis(80) // 12.5fps — smooth for bounce cycle
-        } else {
-            std::time::Duration::from_millis(250) // 4fps — poll returns immediately on events
-        };
-
-        // Check for agent events (non-blocking)
-        while let Ok(tui_event) = event_rx.try_recv() {
-            // TASK #218 TUI-EVENT-BACKPRESSURE-MONITORING: count drains for
-            // observability + stall detection. The sender side now bounds the
-            // queue and counts shed progress events; this drain counter still
-            // tells operators whether rendering is returning to event drain.
-            crate::observability::record_tui_event_drain(tui_event.variant_name());
-            tui_events::handle_tui_event(&mut app, tui_event, &input_tx).await;
+        match next_loop_event(terminal_events.as_mut(), &mut event_rx, &mut tick_scheduler).await {
+            LoopEvent::Terminal(event) => {
+                input::handle_key_event(
+                    &mut app,
+                    event,
+                    &input_tx,
+                    btw_tx.as_ref(),
+                    permission_tx.as_ref(),
+                    ask_user_tx.as_ref(),
+                    &keymap,
+                )
+                .await;
+            }
+            LoopEvent::TerminalStreamError(error) => {
+                // Non-TTY backends cannot provide crossterm input. Match the
+                // previous poll-error behavior by continuing with TUI events
+                // and animation ticks instead of failing the render loop.
+                tracing::warn!(error = %error, "terminal event stream unavailable; disabling input stream");
+                terminal_events = None;
+            }
+            LoopEvent::TerminalStreamClosed => {
+                tracing::warn!("terminal event stream closed; disabling input stream");
+                terminal_events = None;
+            }
+            LoopEvent::Tui(tui_event) => {
+                drain_tui_events(&mut app, tui_event, &mut event_rx, &input_tx).await;
+            }
+            LoopEvent::TuiChannelClosed => break,
+            LoopEvent::Tick => {
+                app.input.ultrathink.tick();
+                app.thinking.tick_thinking();
+            }
         }
 
         if app.should_quit {
             break;
-        }
-
-        // Check for keyboard input; tick animations on timeout.
-        //
-        // `event::poll` returns an error in non-tty environments (e.g.
-        // integration tests driving the TUI through
-        // `run_with_backend` + `TestBackend`): crossterm can't open an
-        // input reader without a real stdin. Treat any poll error as
-        // "no key available" and fall through to the animation-tick
-        // branch — we still honour the timeout by sleeping for it,
-        // so scripted event senders get a chance to deliver the next
-        // frame worth of events.
-        let poll_result = event::poll(timeout);
-        let has_event = match poll_result {
-            Ok(v) => v,
-            Err(_) => {
-                tokio::time::sleep(timeout).await;
-                false
-            }
-        };
-        if has_event {
-            let ev = event::read()?;
-            input::handle_key_event(
-                &mut app,
-                ev,
-                &input_tx,
-                btw_tx.as_ref(),
-                permission_tx.as_ref(),
-                ask_user_tx.as_ref(),
-                &keymap,
-            )
-            .await;
-        } else {
-            // No key event — tick animations
-            app.input.ultrathink.tick();
-            app.thinking.tick_thinking();
         }
     }
 

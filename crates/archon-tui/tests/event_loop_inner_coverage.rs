@@ -20,7 +20,10 @@
 
 use std::time::Duration;
 
-use archon_tui::app::{AppConfig, McpServerEntry, SessionPickerEntry, TuiEvent, run_with_backend};
+use archon_tui::app::{
+    AppConfig, McpServerEntry, SessionPickerEntry, TuiEvent,
+    run_with_backend_without_terminal_events,
+};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use tokio::sync::mpsc;
@@ -39,9 +42,9 @@ fn buffer_nonempty(terminal: &Terminal<TestBackend>) -> bool {
     false
 }
 
-/// Drive `run_with_backend` through a wide event surface and verify the
-/// loop exits cleanly on `TuiEvent::Done`. Each `send` below hits a
-/// distinct arm of the event dispatch match inside `run_inner`.
+/// Drive the explicitly headless backend seam through a wide event surface and verify the
+/// loop exits cleanly on `TuiEvent::Done`. Each `send` below hits a distinct arm of the
+/// event dispatch match inside `run_inner`.
 ///
 /// TASK-200: `#[serial]` because this test dispatches `TuiEvent::Resize
 /// { cols: 100, rows: 30 }` which writes to the process-global
@@ -50,7 +53,7 @@ fn buffer_nonempty(terminal: &Terminal<TestBackend>) -> bool {
 /// `#[serial]` tests elsewhere in the crate's test graph.
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn run_with_backend_walks_wide_event_surface() {
+async fn headless_backend_walks_wide_event_surface() {
     let (event_tx, event_rx) = archon_tui::event_channel::bounded_tui_event_channel();
     let (input_tx, _input_rx) = mpsc::channel::<String>(16);
 
@@ -170,7 +173,7 @@ async fn run_with_backend_walks_wide_event_surface() {
 
     let result = tokio::time::timeout(
         Duration::from_secs(10),
-        run_with_backend(config, &mut terminal),
+        run_with_backend_without_terminal_events(config, &mut terminal),
     )
     .await;
 
@@ -179,7 +182,7 @@ async fn run_with_backend_walks_wide_event_surface() {
     let run_result = result.expect("run_with_backend timed out");
     assert!(
         run_result.is_ok(),
-        "run_with_backend returned error: {:?}",
+        "headless backend returned error: {:?}",
         run_result.err()
     );
     assert!(
