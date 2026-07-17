@@ -63,6 +63,187 @@ fn write_jsonl(path: &std::path::Path, rows: &[serde_json::Value]) {
     std::fs::write(path, format!("{body}\n")).expect("JSONL artifact");
 }
 
+fn parameterized_source_contract() -> serde_json::Value {
+    serde_json::json!({
+        "kind": "instance_report",
+        "artifact_path": ".archon/demo/instances/<instance-id>/report.json",
+        "instance_source_path": ".archon/demo/instances.json",
+        "instance_source_records_field": "records",
+        "instance_artifact_field": "report_path",
+        "validation_status_field": "status",
+        "validation_checks_field": "checks",
+        "validation_check_status_field": "status",
+        "validation_failed_values": ["failed"],
+        "validation_passed_values": ["passed"]
+    })
+}
+
+fn parameterized_verifier(project: &std::path::Path) -> String {
+    let items = vec![serde_json::json!({
+        "item_id": "verify-instance-source",
+        "source_item_id": "implement-instance-source",
+        "canonical_task_ids": ["TASK-DEMO-INSTANCE"]
+    })];
+    let universe = serde_json::json!({"tasks": [{
+        "canonical_task_id": "TASK-DEMO-INSTANCE",
+        "deliverable_contracts": [parameterized_source_contract()]
+    }]});
+    prepare_verification_items(items, project.to_str(), &[], &universe)
+        .into_iter()
+        .find(|item| item["item_id"] == "verify-TASK-DEMO-INSTANCE-instance-report")
+        .and_then(|item| item["focused_verification"].as_str().map(str::to_string))
+        .expect("generated parameterized verifier")
+}
+
+fn run_verifier(command: &str) -> std::process::Output {
+    std::process::Command::new("/bin/zsh")
+        .args(["-c", command])
+        .output()
+        .expect("execute generated verifier")
+}
+
+#[test]
+fn parameterized_source_contract_covers_empty_valid_missing_and_inconsistent_instances() {
+    let project = tempfile::tempdir().expect("project");
+    let source = project.path().join(".archon/demo/instances.json");
+    let valid_report = project
+        .path()
+        .join(".archon/demo/instances/alpha/report.json");
+    let inconsistent_report = project
+        .path()
+        .join(".archon/demo/instances/beta/report.json");
+    let missing_report = ".archon/demo/instances/missing/report.json";
+    let command = parameterized_verifier(project.path());
+
+    write_json(
+        &inconsistent_report,
+        &serde_json::json!({
+            "status": "passed",
+            "checks": [{"status": "failed"}]
+        }),
+    );
+    write_json(&source, &serde_json::json!({"records": {}}));
+    let empty = run_verifier(&command);
+    assert!(
+        empty.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&empty.stdout),
+        String::from_utf8_lossy(&empty.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&empty.stdout).contains("\"instance_count\": 0"),
+        "{}",
+        String::from_utf8_lossy(&empty.stdout)
+    );
+
+    write_json(
+        &valid_report,
+        &serde_json::json!({
+            "status": "passed",
+            "checks": [{"status": "passed"}]
+        }),
+    );
+    write_json(
+        &source,
+        &serde_json::json!({"records": {
+            "alpha": {"report_path": ".archon/demo/instances/alpha/report.json"}
+        }}),
+    );
+    let valid = run_verifier(&command);
+    assert!(
+        valid.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&valid.stdout),
+        String::from_utf8_lossy(&valid.stderr)
+    );
+
+    write_json(
+        &source,
+        &serde_json::json!({"records": {
+            "missing": {"report_path": missing_report}
+        }}),
+    );
+    let missing = run_verifier(&command);
+    assert!(!missing.status.success());
+    assert!(
+        String::from_utf8_lossy(&missing.stdout).contains("missing or empty"),
+        "{}",
+        String::from_utf8_lossy(&missing.stdout)
+    );
+
+    write_json(
+        &source,
+        &serde_json::json!({"records": {
+            "beta": {"report_path": ".archon/demo/instances/beta/report.json"}
+        }}),
+    );
+    let inconsistent = run_verifier(&command);
+    assert!(!inconsistent.status.success());
+    assert!(
+        String::from_utf8_lossy(&inconsistent.stdout).contains("internally inconsistent"),
+        "{}",
+        String::from_utf8_lossy(&inconsistent.stdout)
+    );
+}
+
+#[test]
+fn parameterized_contract_honors_min_instances() {
+    let project = tempfile::tempdir().expect("project");
+    write_json(
+        &project.path().join(".archon/demo/instances.json"),
+        &serde_json::json!({"records": {}}),
+    );
+    let mut contract = parameterized_source_contract();
+    contract["min_instances"] = serde_json::json!(1);
+    let command = super::workflow_live_v2_deliverable_contract::verification_command(
+        project.path().to_str().expect("project path"),
+        &contract,
+    );
+
+    let result = run_verifier(&command);
+
+    assert!(!result.status.success());
+    assert!(
+        String::from_utf8_lossy(&result.stdout).contains("requires >= 1 instance"),
+        "{}",
+        String::from_utf8_lossy(&result.stdout)
+    );
+}
+
+#[test]
+fn parameterized_glob_fallback_is_vacuous_and_validates_matches() {
+    let project = tempfile::tempdir().expect("project");
+    let contract = serde_json::json!({
+        "kind": "instance_report",
+        "artifact_path": ".archon/demo/glob/<instance-id>/report.json",
+        "validation_status_field": "status",
+        "validation_checks_field": "checks",
+        "validation_check_status_field": "status",
+        "validation_failed_values": ["failed"],
+        "validation_passed_values": ["passed"]
+    });
+    let command = super::workflow_live_v2_deliverable_contract::verification_command(
+        project.path().to_str().expect("project path"),
+        &contract,
+    );
+
+    assert!(run_verifier(&command).status.success());
+    write_json(
+        &project.path().join(".archon/demo/glob/alpha/report.json"),
+        &serde_json::json!({
+            "status": "passed",
+            "checks": [{"status": "failed"}]
+        }),
+    );
+    let inconsistent = run_verifier(&command);
+    assert!(!inconsistent.status.success());
+    assert!(
+        String::from_utf8_lossy(&inconsistent.stdout).contains("internally inconsistent"),
+        "{}",
+        String::from_utf8_lossy(&inconsistent.stdout)
+    );
+}
+
 #[test]
 fn verification_items_receive_the_runtime_project_root() {
     let items = vec![serde_json::json!({

@@ -54,6 +54,14 @@ pub(super) struct WorkflowV2DeliverableContract {
     pub(super) typed_verifier_command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) registry_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) instance_source_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) instance_source_records_field: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) instance_artifact_field: Option<String>,
+    #[serde(default)]
+    pub(super) min_instances: usize,
     #[serde(default)]
     pub(super) required_universe: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]

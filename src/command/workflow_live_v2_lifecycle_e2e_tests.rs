@@ -19,6 +19,7 @@ use crate::command::workflow_live::workflow_live_task_universe::{
 struct CannedLifecycleLlm {
     calls: Mutex<Vec<String>>,
     deliverable_contract_executed: AtomicBool,
+    parameterized_contract_executed: AtomicBool,
     inventory_calls: AtomicUsize,
     verification_failure_emitted: AtomicBool,
 }
@@ -107,6 +108,7 @@ impl LlmClient for CannedLifecycleLlm {
                         verification_item("verify-plain", "TASK-EX-003", "src/plain.rs"),
                         verification_item("verify-contract-source", "TASK-EX-004", "src/contract.rs"),
                         verification_item("verify-artifact-only", "TASK-EX-005", "../.archon/artifacts/artifact-only.json"),
+                        verification_item("verify-parameterized", "TASK-EX-006", "src/parameterized.rs"),
                     ],
                     "unresolved_issues": [],
                 }),
@@ -166,6 +168,7 @@ impl LlmClient for CannedLifecycleLlm {
                         verification_item("verify-plain-remediated", "TASK-EX-003", "src/plain.rs"),
                         verification_item("verify-contract-remediated", "TASK-EX-004", "src/contract.rs"),
                         verification_item("verify-artifact-remediated", "TASK-EX-005", "../.archon/artifacts/artifact-only.json"),
+                        verification_item("verify-parameterized-remediated", "TASK-EX-006", "src/parameterized.rs"),
                     ],
                     "unresolved_issues": [],
                 }),
@@ -235,6 +238,7 @@ impl LlmClient for CannedLifecycleLlm {
                 &input,
                 &call_id,
                 &self.deliverable_contract_executed,
+                &self.parameterized_contract_executed,
                 &self.verification_failure_emitted,
             )?
         } else if matches!(
@@ -266,7 +270,12 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
     let temp = tempfile::tempdir().expect("tempdir");
     let repo = temp.path().join("repo");
     std::fs::create_dir_all(repo.join("src")).expect("repo src");
-    for path in ["src/refuted.rs", "src/plain.rs", "src/contract.rs"] {
+    for path in [
+        "src/refuted.rs",
+        "src/plain.rs",
+        "src/contract.rs",
+        "src/parameterized.rs",
+    ] {
         std::fs::write(repo.join(path), "// pending\n").expect("seed source");
     }
     init_git_repo(&repo);
@@ -276,6 +285,11 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
         r#"{"status":"ready","records":[{"id":"example","value":1}]}"#,
     )
     .expect("stub artifact");
+    std::fs::write(
+        temp.path().join(".archon/artifacts/instances.json"),
+        r#"{"records":{}}"#,
+    )
+    .expect("empty instance source");
 
     let spec = WorkflowSpec {
         schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
@@ -298,6 +312,7 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
     let llm = Arc::new(CannedLifecycleLlm {
         calls: Mutex::new(Vec::new()),
         deliverable_contract_executed: AtomicBool::new(false),
+        parameterized_contract_executed: AtomicBool::new(false),
         inventory_calls: AtomicUsize::new(0),
         verification_failure_emitted: AtomicBool::new(false),
     });
@@ -416,6 +431,10 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
         "declared deliverable contract verification command did not execute"
     );
     assert!(
+        llm.parameterized_contract_executed.load(Ordering::SeqCst),
+        "vacuous source-backed parameterized contract did not traverse lifecycle verification"
+    );
+    assert!(
         std::fs::read_to_string(repo.join("src/refuted.rs"))
             .expect("refuted implementation")
             .contains("implemented_TASK_EX_002")
@@ -432,7 +451,7 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
         .expect("final record");
     assert_eq!(final_record.status, WorkflowV2Status::Accepted);
     let report = &final_record.result.data;
-    assert_eq!(report["accepted_tasks"].as_array().map(Vec::len), Some(4));
+    assert_eq!(report["accepted_tasks"].as_array().map(Vec::len), Some(5));
     assert_eq!(report["noop_tasks"], serde_json::json!(["TASK-EX-001"]));
     assert!(report["failed_tasks"].as_array().is_some_and(Vec::is_empty));
     assert!(
@@ -486,6 +505,7 @@ async fn failed_final_report_emits_host_built_fallback() {
     let llm = Arc::new(CannedLifecycleLlm {
         calls: Mutex::new(Vec::new()),
         deliverable_contract_executed: AtomicBool::new(false),
+        parameterized_contract_executed: AtomicBool::new(false),
         inventory_calls: AtomicUsize::new(0),
         verification_failure_emitted: AtomicBool::new(false),
     });
@@ -597,6 +617,25 @@ fn synthetic_task_universe(root: &std::path::Path) -> WorkflowV2TaskUniverse {
         artifact_path: ".archon/artifacts/artifact-only.json".to_string(),
         ..Default::default()
     }];
+    let mut parameterized_task = task(
+        "TASK-EX-006",
+        "Parameterized instance reports are contract-verified.",
+    );
+    parameterized_task.artifact_requirements =
+        vec![".archon/artifacts/instances/<instance-id>/report.json".to_string()];
+    parameterized_task.deliverable_contracts = vec![WorkflowV2DeliverableContract {
+        kind: "instance_report".to_string(),
+        artifact_path: ".archon/artifacts/instances/<instance-id>/report.json".to_string(),
+        instance_source_path: Some(".archon/artifacts/instances.json".to_string()),
+        instance_source_records_field: Some("records".to_string()),
+        instance_artifact_field: Some("report_path".to_string()),
+        validation_status_field: Some("status".to_string()),
+        validation_checks_field: Some("checks".to_string()),
+        validation_check_status_field: Some("status".to_string()),
+        validation_failed_values: vec!["failed".to_string()],
+        validation_passed_values: vec!["passed".to_string()],
+        ..Default::default()
+    }];
     WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: vec![root.join("tasks").display().to_string()],
@@ -606,6 +645,7 @@ fn synthetic_task_universe(root: &std::path::Path) -> WorkflowV2TaskUniverse {
             task("TASK-EX-003", "Plain implementation is present."),
             contract_task,
             artifact_only_task,
+            parameterized_task,
         ],
     }
 }
@@ -653,6 +693,12 @@ fn synthetic_inventory_items() -> Vec<serde_json::Value> {
             "TASK-EX-004",
             "src/contract.rs",
             "Declared artifact verification passes.",
+        ),
+        implementation_item(
+            "implementation-parameterized",
+            "TASK-EX-006",
+            "src/parameterized.rs",
+            "Parameterized instance reports are contract-verified.",
         ),
     ]
 }
@@ -866,6 +912,7 @@ fn verification_result(
     input: &serde_json::Value,
     call_id: &str,
     deliverable_contract_executed: &AtomicBool,
+    parameterized_contract_executed: &AtomicBool,
     verification_failure_emitted: &AtomicBool,
 ) -> Result<serde_json::Value> {
     let item = find_item(input).ok_or_else(|| anyhow::anyhow!("verification item missing"))?;
@@ -886,6 +933,14 @@ fn verification_result(
         .output()?;
     if item.get("deliverable_contract").is_some() {
         deliverable_contract_executed.store(true, Ordering::SeqCst);
+    }
+    if item
+        .get("deliverable_contract")
+        .and_then(|contract| contract.get("kind"))
+        .and_then(serde_json::Value::as_str)
+        == Some("instance_report")
+    {
+        parameterized_contract_executed.store(true, Ordering::SeqCst);
     }
     let forced_failure = task_id == "TASK-EX-003"
         && !call_id.contains("post-remediation")
@@ -1011,6 +1066,7 @@ fn all_task_coverage() -> Vec<serde_json::Value> {
         coverage("TASK-EX-003", "accepted"),
         coverage("TASK-EX-004", "accepted"),
         coverage("TASK-EX-005", "accepted"),
+        coverage("TASK-EX-006", "accepted"),
     ]
 }
 

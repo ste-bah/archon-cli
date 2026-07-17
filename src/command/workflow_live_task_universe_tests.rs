@@ -162,6 +162,10 @@ deliverable_contracts:
   - kind: required_universe_registry
     artifact_path: .archon/demo/coverage.json
     registry_path: .archon/demo/registry.json
+    instance_source_path: .archon/demo/instances.json
+    instance_source_records_field: records
+    instance_artifact_field: report_path
+    min_instances: 2
     required_universe: true
     data_kind: record_series
     universe_fields: [instruments, intervals]
@@ -222,6 +226,19 @@ deliverable_contracts:
     assert_eq!(task.deliverable_contracts.len(), 1);
     let contract = &task.deliverable_contracts[0];
     assert!(contract.required_universe);
+    assert_eq!(
+        contract.instance_source_path.as_deref(),
+        Some(".archon/demo/instances.json")
+    );
+    assert_eq!(
+        contract.instance_source_records_field.as_deref(),
+        Some("records")
+    );
+    assert_eq!(
+        contract.instance_artifact_field.as_deref(),
+        Some("report_path")
+    );
+    assert_eq!(contract.min_instances, 2);
     assert_eq!(contract.data_kind.as_deref(), Some("record_series"));
     assert_eq!(
         contract.universe_fields,

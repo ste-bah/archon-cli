@@ -117,6 +117,83 @@ def internal_consistency(value, label):
             f'{label} is internally inconsistent: overall={overall} with {len(failed_checks)} failed check(s)'
         )
 
+import glob as _glob
+import re as _re
+
+def has_placeholder(text):
+    return '<' in str(text) and '>' in str(text)
+
+def source_instances(art_field, source_path_value, records_field):
+    # Precise per-instance resolution: instances are the entries of a declared
+    # source-of-truth collection (e.g. the registry). Each entry names its own
+    # artifact via art_field. Ignores filesystem orphans (files not backed by an
+    # entry are not THIS contract's deliverables); detects entries whose artifact
+    # is missing. Zero entries -> zero required instances (vacuous).
+    source = load_json(resolve(source_path_value), 'declared instance source')
+    records = get_field(source, records_field, {}) if source else {}
+    if isinstance(records, dict):
+        record_iter = list(records.items())
+    elif isinstance(records, list):
+        record_iter = list(enumerate(records))
+    else:
+        failures.append(f'instance source records field is not a collection: {records_field}')
+        record_iter = []
+    paths = []
+    for key, record in record_iter:
+        ref = get_field(record, art_field) if isinstance(record, dict) else None
+        if not ref:
+            failures.append(f'source entry {key} has no artifact reference field {art_field}')
+            continue
+        paths.append(resolve(ref))
+    return paths
+
+def glob_instances(pattern_text):
+    # Fallback when no source collection is declared: every <segment> is a
+    # wildcard. Weaker than source-bound (cannot detect a missing instance,
+    # and will inspect filesystem orphans) but still generic and fail-closed.
+    pattern = _re.sub(r'<[^>]+>', '*', str(pattern_text))
+    base = pathlib.Path(pattern)
+    concrete = str(base) if base.is_absolute() else str(root / base)
+    return sorted(pathlib.Path(match) for match in _glob.glob(concrete))
+
+# Parameterized deliverable path (e.g. .../<dataset-id>/<version>/x.json): one
+# artifact per runtime-determined instance. Generic across any PRD. Prefer a
+# declared source collection; fall back to glob. Zero instances is vacuously
+# satisfied unless the contract declares min_instances. required_universe
+# contracts keep the single-file path below (their instances are enumerated via
+# the registry records loop already present further down).
+raw_artifact_path = str(contract.get('artifact_path') or '')
+if has_placeholder(raw_artifact_path) and not contract.get('required_universe'):
+    art_field = contract.get('instance_artifact_field')
+    source_path_value = contract.get('instance_source_path') or contract.get('registry_path')
+    records_field = contract.get('instance_source_records_field') or contract.get('registry_records_field')
+    if art_field and source_path_value and records_field:
+        instance_paths = source_instances(art_field, source_path_value, records_field)
+    else:
+        instance_paths = glob_instances(raw_artifact_path)
+    try:
+        min_instances = int(contract.get('min_instances', 0) or 0)
+    except (TypeError, ValueError):
+        min_instances = 0
+    if len(instance_paths) < min_instances:
+        failures.append(
+            f'declared deliverable requires >= {min_instances} instance(s), '
+            f'found {len(instance_paths)} for {raw_artifact_path}'
+        )
+    for instance in instance_paths:
+        instance_artifact = load_json(instance, f'declared deliverable instance {instance}')
+        if instance_artifact is not None:
+            internal_consistency(instance_artifact, f'declared deliverable instance {instance}')
+    if failures:
+        print(json.dumps({'failures': failures}, indent=2))
+        raise SystemExit(1)
+    print(json.dumps({
+        'status': 'declared_deliverable_instances_present',
+        'pattern': raw_artifact_path,
+        'instance_count': len(instance_paths),
+    }))
+    raise SystemExit(0)
+
 artifact_path = resolve(contract['artifact_path'])
 artifact = load_json(artifact_path, 'declared deliverable')
 if artifact is None:
