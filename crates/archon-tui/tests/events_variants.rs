@@ -25,6 +25,7 @@ fn tool_complete_variant() {
         id: "tool-1".into(),
         success: true,
         output: "file contents".into(),
+        transcript_summary: None,
     };
 }
 

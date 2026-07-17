@@ -40,8 +40,8 @@ fn app_tool_lifecycle() {
     assert_eq!(app.active_tool.as_deref(), Some("Read"));
     app.on_tool_complete("Read", "tool-123", true, "file contents here");
     assert!(app.active_tool.is_none());
-    // Successful tool calls do NOT append to output (no noise)
-    assert!(app.output.all_lines().is_empty());
+    // Successful tool calls leave a collapsed marker in the transcript.
+    assert!(app.output.all_lines()[0].starts_with("● Read ✓"));
     // But the tool output state is tracked
     assert_eq!(app.tool_outputs.len(), 1);
     assert_eq!(app.tool_outputs[0].tool_name, "Read");

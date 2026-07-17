@@ -101,7 +101,9 @@ fn format_agent_event_stream_json(event: &AgentEvent) -> Option<String> {
             &serde_json::json!({"name": name, "id": id}),
         )),
 
-        AgentEvent::ToolCallComplete { name, id, result } => Some(format_stream_event(
+        AgentEvent::ToolCallComplete {
+            name, id, result, ..
+        } => Some(format_stream_event(
             "tool_result",
             &serde_json::json!({
                 "name": name,

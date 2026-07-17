@@ -77,11 +77,17 @@ pub(super) fn spawn_agent_event_forwarder(
                     }
                     AgentEvent::ThinkingDelta(text) => TuiEvent::ThinkingDelta(text),
                     AgentEvent::ToolCallStarted { name, id } => TuiEvent::ToolStart { name, id },
-                    AgentEvent::ToolCallComplete { name, id, result } => TuiEvent::ToolComplete {
+                    AgentEvent::ToolCallComplete {
+                        name,
+                        id,
+                        result,
+                        transcript_summary,
+                    } => TuiEvent::ToolComplete {
                         name,
                         id,
                         success: !result.is_error,
                         output: result.content,
+                        transcript_summary,
                     },
                     AgentEvent::ContextPressureUpdated {
                         tokens_used,

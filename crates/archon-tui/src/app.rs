@@ -265,9 +265,25 @@ impl App {
         if self.active_tool.as_deref() == Some(name) {
             self.active_tool = None;
         }
-        // Find the matching tool output and mark complete
-        if let Some(tool_state) = self.tool_outputs.iter_mut().rev().find(|t| t.tool_id == id) {
-            tool_state.complete(output, !success);
+        let tool_index = self.tool_outputs.iter().position(|tool| tool.tool_id == id);
+        if let Some(index) = tool_index {
+            let (duration_ms, summary) = {
+                let tool_state = &mut self.tool_outputs[index];
+                tool_state.complete(output, !success);
+                (tool_state.duration_ms(), tool_state.summary.clone())
+            };
+            if success {
+                let marker_line = self.output.line_count();
+                let summary = summary
+                    .map(|summary| format!("({summary})"))
+                    .unwrap_or_default();
+                self.output.append_line(&format!(
+                    "● {name}{summary} ✓ {} ({} lines)",
+                    format_duration(duration_ms),
+                    output.lines().count()
+                ));
+                self.tool_outputs[index].marker_line = Some(marker_line);
+            }
         }
         self.push_parent_activity_tool_result(name, output, !success);
         crate::agent_activity::tool_completed(&mut self.agent_activity, name, id, success);
@@ -279,17 +295,6 @@ impl App {
                 self.output
                     .append_line(&format!("[tool] {name} failed:\n{output}"));
             }
-        }
-    }
-
-    /// Toggle expand/collapse on the last tool output, or a specific one by index.
-    pub fn toggle_tool_output(&mut self, index: Option<usize>) {
-        if let Some(idx) = index {
-            if let Some(tool) = self.tool_outputs.get_mut(idx) {
-                tool.toggle_expand();
-            }
-        } else if let Some(tool) = self.tool_outputs.last_mut() {
-            tool.toggle_expand();
         }
     }
 
@@ -438,7 +443,7 @@ impl App {
         };
         self.output.insert_lines_after(marker_line, &lines);
         self.thinking_blocks[index].expanded = true;
-        self.shift_later_thinking_markers(index, lines.len() as isize);
+        self.shift_markers_after(marker_line, lines.len() as isize);
     }
 
     fn collapse_all_thinking_blocks(&mut self) {
@@ -458,13 +463,7 @@ impl App {
         let line_count = block.text.lines().count();
         self.output.remove_lines_after(marker_line, line_count);
         self.thinking_blocks[index].expanded = false;
-        self.shift_later_thinking_markers(index, -(line_count as isize));
-    }
-
-    fn shift_later_thinking_markers(&mut self, index: usize, delta: isize) {
-        for block in self.thinking_blocks.iter_mut().skip(index + 1) {
-            block.marker_line = block.marker_line.saturating_add_signed(delta);
-        }
+        self.shift_markers_after(marker_line, -(line_count as isize));
     }
 
     // -- rendering helpers --------------------------------------------------

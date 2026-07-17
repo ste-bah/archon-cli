@@ -97,6 +97,7 @@ async fn headless_backend_walks_wide_event_surface() {
             id: "tool-1".into(),
             success: true,
             output: "ok".into(),
+            transcript_summary: None,
         });
         let _ = event_tx.send(TuiEvent::ToolStart {
             name: "Edit".into(),
@@ -107,6 +108,7 @@ async fn headless_backend_walks_wide_event_surface() {
             id: "tool-2".into(),
             success: false,
             output: "permission denied".into(),
+            transcript_summary: None,
         });
         // Turn complete — triggers pending_input drain path.
         let _ = event_tx.send(TuiEvent::TurnComplete {

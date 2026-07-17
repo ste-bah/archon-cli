@@ -233,6 +233,7 @@ fn format_agent_event_tool_call_complete_stream_json() {
         name: "Bash".into(),
         id: "tool_1".into(),
         result: ToolResult::success("output here"),
+        transcript_summary: None,
     };
     let result = format_agent_event(&event, &OutputFormat::StreamJson);
     assert!(result.is_some());

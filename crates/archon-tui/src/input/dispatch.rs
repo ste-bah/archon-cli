@@ -46,6 +46,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
             app.toggle_thinking();
             KeyResult::Nothing
         }
+        Action::ToggleToolOutput => {
+            app.toggle_tool_output(None);
+            KeyResult::Nothing
+        }
         Action::VoiceHotkey => {
             crate::voice::pipeline::fire_trigger_for_hotkey();
             KeyResult::Nothing

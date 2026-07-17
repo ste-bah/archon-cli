@@ -31,7 +31,9 @@ pub(super) async fn handle_tui_event(
             id,
             success,
             output,
+            transcript_summary,
         } => {
+            app.set_tool_summary(&id, transcript_summary);
             app.on_tool_complete(&name, &id, success, &output);
         }
         TuiEvent::TurnComplete {

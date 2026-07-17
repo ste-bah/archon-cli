@@ -20,6 +20,9 @@ pub mod permissions;
 #[cfg(test)]
 mod thinking_archive_tests;
 mod thinking_view;
+mod tool_transcript;
+#[cfg(test)]
+mod tool_transcript_tests;
 // TASK-TUI-628: sandbox module — logical Bubble-mode permission check.
 pub mod sandbox;
 pub mod splash;

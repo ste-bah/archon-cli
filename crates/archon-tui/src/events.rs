@@ -343,6 +343,7 @@ pub enum TuiEvent {
         id: String,
         success: bool,
         output: String,
+        transcript_summary: Option<String>,
     },
     TurnComplete {
         input_tokens: u64,

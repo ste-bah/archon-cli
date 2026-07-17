@@ -89,6 +89,7 @@ impl Agent {
             name: tool.name.clone(),
             id: tool.id.clone(),
             result: result.clone(),
+            transcript_summary: None,
         })
         .await;
         self.state

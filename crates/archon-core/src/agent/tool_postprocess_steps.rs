@@ -1,4 +1,4 @@
-use super::tool_types::PreflightResult;
+use super::tool_types::{PreflightResult, tool_transcript_summary};
 use super::*;
 
 #[derive(Default)]
@@ -366,6 +366,7 @@ impl Agent {
             name: pre.tool_name.clone(),
             id: pre.tool_id.clone(),
             result: result.clone(),
+            transcript_summary: tool_transcript_summary(&pre.tool_name, &pre.input),
         })
         .await;
         self.update_inner_voice_for_tool(&pre.tool_name, result)

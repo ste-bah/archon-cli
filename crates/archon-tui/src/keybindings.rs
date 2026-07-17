@@ -34,6 +34,8 @@ pub enum Action {
     Escape,
     /// Ctrl+T = toggle thinking display expand/collapse.
     ToggleThinking,
+    /// Ctrl+E = toggle the latest completed tool transcript excerpt.
+    ToggleToolOutput,
     /// Ctrl+V = voice hotkey trigger.
     VoiceHotkey,
     /// Ctrl+\ = toggle split pane layout.
@@ -88,6 +90,10 @@ impl Default for KeyMap {
         bindings.insert(
             KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL),
             Action::ToggleThinking,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL),
+            Action::ToggleToolOutput,
         );
         bindings.insert(
             KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL),

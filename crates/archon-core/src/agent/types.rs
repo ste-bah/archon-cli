@@ -53,6 +53,7 @@ pub enum AgentEvent {
         name: String,
         id: String,
         result: ToolResult,
+        transcript_summary: Option<String>,
     },
     PermissionRequired {
         tool: String,

@@ -59,6 +59,7 @@ fn priority_classifies_state_transitions_as_state() {
                 content: "ok".into(),
                 is_error: false,
             },
+            transcript_summary: None,
         }),
         Priority::State
     );
