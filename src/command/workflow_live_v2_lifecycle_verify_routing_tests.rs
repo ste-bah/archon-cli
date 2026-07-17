@@ -1,3 +1,4 @@
+use super::super::triage_failed_outcomes;
 use super::*;
 
 #[test]
@@ -422,4 +423,35 @@ fn d69_unaccounted_failed_outcomes_require_shape_repair() {
         }]
     }});
     assert!(unaccounted_failed_outcomes(&accounted, &failed).is_empty());
+}
+
+#[test]
+fn d71_post_remediation_envelope_supplies_non_vacuous_triage_denominator() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/d71_post_remediation_triage_envelope.json"
+    ))
+    .expect("D71 fixture");
+    let failed = triage_failed_outcomes(&fixture["verification"]);
+
+    assert_eq!(failed.len(), 1);
+    assert_eq!(failed[0]["item_id"], "verify-TASK-EX-001-artifact");
+    let harvested = harvest_nested_triage_routes(&fixture["canary_triage"]);
+    assert!(unaccounted_failed_outcomes(&harvested, &failed).is_empty());
+
+    let empty_routes = serde_json::json!({"data": {
+        "implementation_failures": [], "retry_items": [],
+        "superseded_items": [], "terminal_blockers": []
+    }});
+    assert_eq!(unaccounted_failed_outcomes(&empty_routes, &failed).len(), 1);
+}
+
+#[test]
+fn d71_nonaccepted_empty_envelope_surfaces_wiring_failure() {
+    let failed = triage_failed_outcomes(&serde_json::json!({
+        "status": "needs_review",
+        "summary": "merged verification lost branch outcomes"
+    }));
+
+    assert_eq!(failed.len(), 1);
+    assert_eq!(failed[0]["failure_kind"], "triage_denominator_wiring_error");
 }

@@ -300,6 +300,15 @@ impl LifecycleDriver {
                             requirements.push(serde_json::Value::String(declared.clone()));
                         }
                     }
+                    for declared in &task.deliverable_contracts {
+                        let path = declared.artifact_path.trim();
+                        let already = requirements
+                            .iter()
+                            .any(|entry| entry.as_str() == Some(path));
+                        if !path.is_empty() && !already {
+                            requirements.push(serde_json::Value::String(path.to_string()));
+                        }
+                    }
                     if let Some(root) = self.project_artifact_root.as_deref() {
                         for declared in &task.deliverable_contracts {
                             let value = serde_json::to_value(declared)

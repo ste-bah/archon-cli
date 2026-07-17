@@ -74,17 +74,31 @@ pub(crate) fn matching_accepted_ids(
         .collect()
 }
 
-/// JS `outcomes` accessor: `result.outcomes || result.items || [result]`.
+/// Outcome accessor across the host's known direct and merged envelopes.
 pub(crate) fn outcomes_of(result: &Value) -> Vec<Value> {
-    let outcomes = array(result.get("outcomes"));
-    if !outcomes.is_empty() {
-        return outcomes;
-    }
-    let items = array(result.get("items"));
-    if !items.is_empty() {
-        return items;
+    for envelope in known_result_envelopes(result) {
+        for key in ["outcomes", "items"] {
+            let values = array(envelope.get(key));
+            if !values.is_empty() {
+                return values;
+            }
+        }
     }
     vec![result.clone()]
+}
+
+fn known_result_envelopes(result: &Value) -> Vec<&Value> {
+    let mut envelopes = vec![result];
+    if let Some(inner) = result.get("result") {
+        envelopes.push(inner);
+    }
+    let roots = envelopes.clone();
+    for root in roots {
+        if let Some(data) = root.get("data") {
+            envelopes.push(data);
+        }
+    }
+    envelopes
 }
 
 pub(crate) fn work_type_for(item: &Value) -> &str {

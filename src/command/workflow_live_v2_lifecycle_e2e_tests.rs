@@ -113,21 +113,36 @@ impl LlmClient for CannedLifecycleLlm {
                 Vec::new(),
                 Vec::new(),
             )
+        } else if call_id.starts_with("verification-failure-triage-")
+            && call_id.ends_with("-shape-repair-1")
+        {
+            accepted_result(
+                "shape repair accounts for the concrete failed outcome",
+                serde_json::json!({
+                    "implementation_failures": [{
+                        "item_id": "verify-plain",
+                        "source_item_id": "verify-plain",
+                        "canonical_task_ids": ["TASK-EX-003"],
+                        "classification": "implementation_failure",
+                        "failure_status": "needs_review",
+                        "failure_evidence": "the first focused check failed",
+                        "required_fix": "re-apply the neutral implementation",
+                    }],
+                    "retry_items": [],
+                    "superseded_items": [],
+                    "terminal_blockers": [],
+                }),
+                Vec::new(),
+                Vec::new(),
+            )
         } else if call_id.starts_with("verification-failure-triage-") {
             accepted_result(
-                "nested verification failure route",
+                "malformed triage omitted every canonical route",
                 serde_json::json!({
-                    "items": {
-                        "implementation_failures": [{
-                            "item_id": "verify-plain",
-                            "source_item_id": "verify-plain",
-                            "canonical_task_ids": ["TASK-EX-003"],
-                            "classification": "implementation_failure",
-                            "failure_status": "needs_review",
-                            "failure_evidence": "the first focused check failed",
-                            "required_fix": "re-apply the neutral implementation",
-                        }]
-                    }
+                    "implementation_failures": [],
+                    "retry_items": [],
+                    "superseded_items": [],
+                    "terminal_blockers": [],
                 }),
                 Vec::new(),
                 Vec::new(),
@@ -363,8 +378,16 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
         summary
             .calls
             .iter()
+            .any(|call| call.id.starts_with("verification-failure-triage-")
+                && call.id.ends_with("-shape-repair-1")),
+        "empty triage routes did not trigger bounded shape repair"
+    );
+    assert!(
+        summary
+            .calls
+            .iter()
             .any(|call| call.id.starts_with("verification-remediation-inventory-")),
-        "nested triage route did not schedule remediation"
+        "shape-repaired triage route did not schedule remediation"
     );
     assert!(
         summary
@@ -569,6 +592,11 @@ fn synthetic_task_universe(root: &std::path::Path) -> WorkflowV2TaskUniverse {
     let mut artifact_only_task = task("TASK-EX-005", "Artifact-only output is produced.");
     artifact_only_task.artifact_requirements =
         vec![".archon/artifacts/artifact-only.json".to_string()];
+    artifact_only_task.deliverable_contracts = vec![WorkflowV2DeliverableContract {
+        kind: "artifact-only".to_string(),
+        artifact_path: ".archon/artifacts/artifact-only.json".to_string(),
+        ..Default::default()
+    }];
     WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: vec![root.join("tasks").display().to_string()],

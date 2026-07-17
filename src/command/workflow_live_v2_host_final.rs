@@ -11,6 +11,7 @@ fn final_report_result(
         .build(paths, &required_task_ids, &source_results)
         .map_err(|err| WorkflowError::SpecInvalid(err.to_string()))?;
     guard_final_report_artifact_paths_exist(&mut report, v2_store.root());
+    guard_final_report_blocker_freshness(&mut report, v2_store.root());
     guard_final_report_against_dynamic_wave_evidence(&mut report, v2_store, task_universe)?;
     reconcile_final_task_statuses(&mut report, &required_task_ids);
     let report_path = artifact_path(
@@ -65,6 +66,31 @@ fn final_report_result(
     }
     result.data = data;
     Ok(result)
+}
+
+fn guard_final_report_blocker_freshness(report: &mut WorkflowV2FinalReport, v2_root: &Path) {
+    let mut superseded = Vec::new();
+    report.residual_gaps.retain(|gap| {
+        let contradictions = contradicted_existence_claims(v2_root, &gap.description);
+        if contradictions.is_empty() {
+            return true;
+        }
+        superseded.push(format!(
+            "superseded by current state: blocker {} dropped; {}",
+            gap.id,
+            contradictions.join("; ")
+        ));
+        false
+    });
+    if superseded.is_empty() {
+        return;
+    }
+    report.review_findings.extend(superseded);
+    let mut by_id = std::collections::BTreeMap::new();
+    for gap in &report.residual_gaps {
+        by_id.entry(gap.id.clone()).or_insert_with(|| gap.clone());
+    }
+    report.review_blockers = by_id.into_values().collect();
 }
 
 fn final_report_source_results(results: Vec<WorkflowV2Result>) -> Vec<WorkflowV2Result> {

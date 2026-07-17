@@ -12,6 +12,7 @@ use archon_workflow::{
 use super::workflow_live_task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
 use super::workflow_live_v2_host::{
     artifact_path_exists, execute_local_host_call, reconcile_final_task_statuses,
+    validated_completion_credit,
 };
 
 #[test]

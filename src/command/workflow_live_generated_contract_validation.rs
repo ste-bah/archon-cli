@@ -71,6 +71,18 @@ fn generated_item_issues(
         }
         return issues;
     }
+    if !universe.canonical.is_empty()
+        && !value_present(value.get("target_files"))
+        && !universe.has_deliverable_contract(&canonical_task_ids)
+        && !explicit_no_artifact_verified_noop(value, &work_type)
+        && artifact_producing_intent(value)
+    {
+        issues.push(make_issue(
+            GeneratedContractIssueKind::ArtifactRequirementsDiscovery,
+            "deliverable_contracts",
+            "task produces artifacts but declares no deliverable contract and no target_files",
+        ));
+    }
     match work_type.as_str() {
         "implementation" => {
             if let Some(message) = target_files_issue(value, target_repository_root) {
@@ -148,6 +160,49 @@ fn generated_item_issues(
         ));
     }
     issues
+}
+
+fn explicit_no_artifact_verified_noop(value: &serde_json::Value, work_type: &str) -> bool {
+    work_type == "verified_noop"
+        && value
+            .get("artifact_requirements")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(Vec::is_empty)
+}
+
+fn artifact_producing_intent(value: &serde_json::Value) -> bool {
+    if value_present(value.get("artifact_requirements"))
+        || value_present(value.get("artifacts"))
+    {
+        return true;
+    }
+    let text = [
+        "acceptance_criteria",
+        "expected_evidence",
+        "required_fix",
+        "noop_proof",
+        "noop_proof_refs",
+        "evidence",
+        "summary",
+    ]
+    .into_iter()
+    .filter_map(|key| value.get(key))
+    .map(serde_json::Value::to_string)
+    .collect::<Vec<_>>()
+    .join(" ")
+    .to_ascii_lowercase();
+    let artifact_noun = [
+        "artifact", "report", "registry", "manifest", "dataset", "output file",
+    ]
+    .iter()
+    .any(|term| text.contains(term));
+    let production_or_claim = [
+        "produce", "write", "create", "generate", "persist", "update", "emit", "exists",
+        "present", "missing", "absent",
+    ]
+    .iter()
+    .any(|term| text.contains(term));
+    artifact_noun && production_or_claim
 }
 
 

@@ -65,6 +65,7 @@ struct ContractTaskUniverse {
     canonical: BTreeSet<String>,
     aliases: BTreeMap<String, String>,
     dependencies: BTreeMap<String, Vec<String>>,
+    tasks_with_deliverable_contracts: BTreeSet<String>,
 }
 
 impl ContractTaskUniverse {
@@ -83,8 +84,18 @@ impl ContractTaskUniverse {
                 task.canonical_task_id.clone(),
                 sorted_unique(task.dependency_ids.clone()),
             );
+            if !task.deliverable_contracts.is_empty() {
+                out.tasks_with_deliverable_contracts
+                    .insert(task.canonical_task_id.clone());
+            }
         }
         out
+    }
+
+    fn has_deliverable_contract(&self, task_ids: &[String]) -> bool {
+        task_ids
+            .iter()
+            .any(|id| self.tasks_with_deliverable_contracts.contains(id))
     }
 
     fn add_canonical(&mut self, task_id: &str) {

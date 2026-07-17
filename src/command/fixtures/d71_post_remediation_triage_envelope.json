@@ -1,0 +1,44 @@
+{
+  "verification": {
+    "status": "needs_review",
+    "summary": "fanout completed with one branch finding",
+    "data": {
+      "outcomes": [
+        {
+          "item_id": "verify-TASK-EX-001-scope",
+          "status": "accepted",
+          "summary": "scope passed"
+        },
+        {
+          "item_id": "verify-TASK-EX-001-artifact",
+          "status": "needs_review",
+          "summary": "artifact existence claim is stale",
+          "residual_gaps": [
+            {
+              "id": "artifact-state-mismatch",
+              "description": "artifact state must be reconciled"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "canary_triage": {
+    "status": "needs_review",
+    "data": {
+      "items": {
+        "implementation_failures": [
+          {
+            "item_id": "triage-TASK-EX-001-artifact",
+            "source_item_id": "verify-TASK-EX-001-artifact",
+            "canonical_task_ids": ["TASK-EX-001"],
+            "classification": "actionable_implementation_failure"
+          }
+        ],
+        "retry_items": [],
+        "superseded_items": [],
+        "terminal_blockers": []
+      }
+    }
+  }
+}

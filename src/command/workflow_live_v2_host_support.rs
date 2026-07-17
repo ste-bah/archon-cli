@@ -273,7 +273,7 @@ fn completion_ledger_state(
     Ok((completed, missing, artifact_gaps))
 }
 
-fn validated_completion_credit(
+pub(super) fn validated_completion_credit(
     v2_store: &WorkflowV2ResultStore,
     task_universe: Option<&WorkflowV2TaskUniverse>,
 ) -> archon_workflow::WorkflowResult<(CompletionCredit, Vec<String>)> {
@@ -319,20 +319,137 @@ fn collect_valid_credit(
             && item.status == WorkflowV2Status::Noop);
         let noop_criteria_valid = !is_noop_credit
             || noop_acceptance_criteria_satisfied(&item.task_id, result, task_universe);
-        if artifact_paths_exist(store.root(), &item.artifact_paths) && noop_criteria_valid {
+        let contradicted_claims = contradicted_artifact_existence_claims(
+            store.root(),
+            &item.artifact_paths,
+        );
+        if artifact_paths_exist(store.root(), &item.artifact_paths)
+            && noop_criteria_valid
+            && contradicted_claims.is_empty()
+        {
             credit.record(item);
         } else {
-            gaps.push(format!(
-                "{}:{}",
-                item.task_id,
-                if noop_criteria_valid {
-                    "missing artifact evidence"
-                } else {
-                    "noop acceptance criteria were not explicitly satisfied"
+            if !contradicted_claims.is_empty() {
+                for contradiction in contradicted_claims {
+                    gaps.push(format!("{}:{}", item.task_id, contradiction));
                 }
-            ));
+            } else {
+                gaps.push(format!(
+                    "{}:{}",
+                    item.task_id,
+                    if noop_criteria_valid {
+                        "missing artifact evidence"
+                    } else {
+                        "noop acceptance criteria were not explicitly satisfied"
+                    }
+                ));
+            }
         }
     }
+}
+
+fn contradicted_artifact_existence_claims(v2_root: &Path, paths: &[String]) -> Vec<String> {
+    let mut contradictions = Vec::new();
+    for path in paths {
+        let Some(resolved) = resolve_artifact_path(v2_root, path) else {
+            continue;
+        };
+        if !matches!(
+            resolved.extension().and_then(|ext| ext.to_str()),
+            Some("json" | "jsonl" | "md" | "txt")
+        ) {
+            continue;
+        }
+        let Ok(metadata) = fs::metadata(&resolved) else {
+            continue;
+        };
+        if metadata.len() > 1_048_576 {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&resolved) else {
+            continue;
+        };
+        contradictions.extend(contradicted_existence_claims(v2_root, &text));
+    }
+    contradictions.sort();
+    contradictions.dedup();
+    contradictions
+}
+
+fn contradicted_existence_claims(v2_root: &Path, text: &str) -> Vec<String> {
+    let mut contradictions = Vec::new();
+    for line in text.lines() {
+        let lower = line.to_ascii_lowercase();
+        let expected = if [" missing", " absent", "does not exist", "not found"]
+            .iter()
+            .any(|term| lower.contains(term))
+        {
+            Some(false)
+        } else if [" exists", " present", "found at"]
+            .iter()
+            .any(|term| lower.contains(term))
+        {
+            Some(true)
+        } else {
+            None
+        };
+        let Some(expected) = expected else {
+            continue;
+        };
+        for path in filesystem_paths_in_text(line) {
+            let actual = artifact_path_exists(v2_root, &path);
+            if actual != expected {
+                contradictions.push(format!(
+                    "artifact existence claim contradicted by disk: path={path}; claimed={}; actual={}",
+                    if expected { "exists" } else { "missing" },
+                    if actual { "exists" } else { "missing" },
+                ));
+            }
+        }
+    }
+    contradictions
+}
+
+fn filesystem_paths_in_text(text: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    for raw in text.split_whitespace() {
+        let mut token = raw.trim_matches(|ch: char| {
+            matches!(ch, '`' | '\'' | '"' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';')
+        });
+        if let Some((_, value)) = token.split_once('=') {
+            token = value;
+        }
+        let token = token.trim_end_matches(['.', ':']);
+        let looks_like_path = token.starts_with('/')
+            || token.starts_with(".archon/")
+            || token.starts_with("./")
+            || (token.contains('/')
+                && [".json", ".jsonl", ".md", ".txt", ".pine", ".csv", ".zip"]
+                    .iter()
+                    .any(|extension| token.ends_with(extension)));
+        if looks_like_path && !artifact_path_is_placeholder(token) {
+            paths.push(token.to_string());
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn resolve_artifact_path(v2_root: &Path, raw: &str) -> Option<PathBuf> {
+    if super::workflow_live_artifact_refs::is_nonfilesystem_artifact_ref(raw) {
+        return None;
+    }
+    let path = Path::new(raw);
+    if path.is_absolute() {
+        return path.exists().then(|| path.to_path_buf());
+    }
+    let candidates = [
+        v2_root.parent().map(|root| root.join(path)),
+        project_root_for_v2(v2_root).map(|root| root.join(path)),
+        repository_root_for_v2(v2_root).map(|root| root.join(path)),
+    ];
+    candidates.into_iter().flatten().find(|path| path.exists())
 }
 
 fn artifact_paths_exist(v2_root: &Path, paths: &[String]) -> bool {

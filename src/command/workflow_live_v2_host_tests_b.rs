@@ -197,6 +197,101 @@ fn final_report_rejects_branch_credit_with_missing_artifact() {
 }
 
 #[test]
+fn d70_completion_credit_rejects_artifact_claim_contradicted_by_disk() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("project");
+    let v2_root = project.join(".archon/workflows/wf-d70/v2");
+    let registry = project.join(".archon/trading-lab/data/registry.json");
+    let evidence_path = project.join(".archon/trading-lab/data/audit.md");
+    std::fs::create_dir_all(registry.parent().expect("registry parent")).expect("data dir");
+    std::fs::create_dir_all(v2_root.join("results")).expect("result dir");
+    std::fs::write(&registry, "{}\n").expect("registry");
+    std::fs::write(
+        &evidence_path,
+        "The active registry `.archon/trading-lab/data/registry.json` is absent.\n",
+    )
+    .expect("audit artifact");
+    let store = WorkflowV2ResultStore::new(&v2_root);
+    let mut evidence = WorkflowV2TaskCompletionEvidence::new(
+        "TASK-TDL-010",
+        WorkflowV2TaskCompletionEvidenceKind::ImplementationCandidate,
+        "implementation-wave-1",
+        "impl-TASK-TDL-010",
+        WorkflowV2Status::Accepted,
+    );
+    evidence.artifact_paths = vec![evidence_path.display().to_string()];
+    store
+        .save_branch_outcome(
+            "implementation-wave-1",
+            &WorkflowV2BranchOutcome {
+                item_id: "impl-TASK-TDL-010".to_string(),
+                role: "coder".to_string(),
+                status: WorkflowV2Status::Accepted,
+                result: None,
+                error: None,
+                failure_kind: None,
+                item_input_hash: None,
+                completion_evidence: vec![evidence],
+            },
+        )
+        .expect("branch outcome");
+
+    let (credit, gaps) = validated_completion_credit(&store, Some(&task_universe_010()))
+        .expect("validated credit");
+
+    assert!(!credit.implementation.contains("TASK-TDL-010"));
+    assert!(gaps.iter().any(|gap| {
+        gap.contains("artifact existence claim contradicted by disk")
+            && gap.contains("actual=exists")
+    }));
+}
+
+#[test]
+fn d70_final_report_drops_stale_missing_blocker_with_record() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("project");
+    let v2_root = project.join(".archon/workflows/wf-d70/v2");
+    let registry = project.join(".archon/trading-lab/data/registry.json");
+    std::fs::create_dir_all(registry.parent().expect("registry parent")).expect("data dir");
+    std::fs::create_dir_all(v2_root.join("results")).expect("result dir");
+    std::fs::write(&registry, "{}\n").expect("registry");
+    let store = WorkflowV2ResultStore::new(&v2_root);
+    let mut source = WorkflowV2Result {
+        status: WorkflowV2Status::NeedsReview,
+        summary: "stale blocker fixture".to_string(),
+        ..WorkflowV2Result::default()
+    };
+    source.residual_gaps.push(WorkflowV2ResidualGap {
+        id: "registry-missing".to_string(),
+        description: format!("Active registry is missing at {}", registry.display()),
+        severity: Some("blocking".to_string()),
+    });
+    let final_report = WorkflowV2CallExecution {
+        input: serde_json::json!({"source_data": source}),
+        ..execution(
+            "blocked-verification-failed-1",
+            WorkflowV2HostMethod::FinalReport,
+            None,
+        )
+    };
+
+    let report = execute_local_host_call(&final_report, &store, None)
+        .expect("final")
+        .expect("local result");
+
+    assert!(report.data["residual_gaps"]
+        .as_array()
+        .is_some_and(|gaps| gaps.iter().all(|gap| gap["id"] != "registry-missing")));
+    assert!(report.data["review_findings"]
+        .as_array()
+        .is_some_and(|findings| findings.iter().any(|finding| {
+            finding
+                .as_str()
+                .is_some_and(|text| text.contains("superseded by current state"))
+        })));
+}
+
+#[test]
 fn final_report_accepts_repository_relative_focused_verification_artifacts() {
     let temp = tempfile::tempdir().expect("tempdir");
     let project_root = temp.path().join("project-1");
