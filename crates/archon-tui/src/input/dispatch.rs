@@ -43,7 +43,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
         }
         // Grouped single-mutation actions — each calls a no-arg method and returns Nothing
         Action::ToggleThinking => {
-            app.thinking.toggle_expand();
+            app.toggle_thinking();
             KeyResult::Nothing
         }
         Action::VoiceHotkey => {

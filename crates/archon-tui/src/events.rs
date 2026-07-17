@@ -356,6 +356,8 @@ pub enum TuiEvent {
     /// Emitted by main.rs after a slash command completes.
     SlashCommandComplete,
     ThinkingToggle(bool),
+    /// Open the completed thinking archive overlay.
+    OpenThinkingArchive,
     ModelChanged(String),
     BtwResponse(String),
     PermissionPrompt {
@@ -443,6 +445,7 @@ impl TuiEvent {
             Self::GenerationStarted => "GenerationStarted",
             Self::SlashCommandComplete => "SlashCommandComplete",
             Self::ThinkingToggle(_) => "ThinkingToggle",
+            Self::OpenThinkingArchive => "OpenThinkingArchive",
             Self::ModelChanged(_) => "ModelChanged",
             Self::BtwResponse(_) => "BtwResponse",
             Self::PermissionPrompt { .. } => "PermissionPrompt",

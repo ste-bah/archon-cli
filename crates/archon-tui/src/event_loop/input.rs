@@ -27,6 +27,9 @@ pub(super) async fn handle_key_event(
             if !should_process_key_event(&key) {
                 return;
             }
+            if super::thinking_archive::handle_key(app, key.code) {
+                return;
+            }
             // Handle session picker — Up/Down/Enter/Esc
             if app.session_picker.is_some() {
                 match key.code {

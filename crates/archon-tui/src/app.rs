@@ -4,13 +4,11 @@ use crossterm::ExecutableCommand;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture, KeyEvent, KeyEventKind};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
 
 use crate::agent_activity::AgentActivityRow;
 use crate::events::AgentActivityUpdate;
 use crate::input::InputHandler;
-use crate::output::{OutputBuffer, ThinkingState, ToolOutputState};
+use crate::output::{OutputBuffer, ThinkingBlock, ThinkingState, ToolOutputState};
 use crate::splash::ActivityEntry;
 use crate::split_pane::SplitPaneManager;
 use crate::status::StatusBar;
@@ -113,6 +111,8 @@ pub struct App {
     pub input: InputHandler,
     pub status: StatusBar,
     pub thinking: ThinkingState,
+    pub thinking_blocks: Vec<ThinkingBlock>,
+    pub thinking_archive: Option<usize>,
     pub theme: Theme,
     pub should_quit: bool,
     pub is_generating: bool,
@@ -168,6 +168,8 @@ impl Default for App {
             input: InputHandler::new(),
             status: StatusBar::default(),
             thinking: ThinkingState::new(),
+            thinking_blocks: Vec::new(),
+            thinking_archive: None,
             theme: intj_theme(),
             should_quit: false,
             is_generating: false,
@@ -220,6 +222,7 @@ impl App {
             && self.session_picker.is_none()
             && self.mcp_manager.is_none()
             && self.message_selector.is_none()
+            && self.thinking_archive.is_none()
             && self.skills_menu.is_none()
             && self.file_picker.is_none()
             && self.search_results.is_none()
@@ -238,15 +241,10 @@ impl App {
     }
 
     pub fn on_thinking_delta(&mut self, text: &str) {
-        // Always track timing (for accurate "Thought for Xs" display).
-        // Only accumulate text when show_thinking is on.
         if !self.thinking.active {
-            self.thinking.active = true;
-            self.thinking.start = Some(std::time::Instant::now());
+            self.collapse_all_thinking_blocks();
         }
-        if self.show_thinking {
-            self.thinking.accumulated.push_str(text);
-        }
+        self.thinking.on_thinking_delta(text);
         self.push_parent_activity_thinking(text);
     }
 
@@ -303,8 +301,6 @@ impl App {
         self.output.append_line("");
         self.push_parent_activity_status("turn complete");
         crate::agent_activity::turn_completed(&mut self.agent_activity);
-        // Reset thinking for the next turn.
-        self.thinking.reset();
     }
 
     pub fn on_error(&mut self, message: &str) {
@@ -344,95 +340,149 @@ impl App {
         crate::agent_activity::apply_update(&mut self.agent_activity, update);
     }
 
-    /// Finalize the current thinking block. The summary is rendered as a
-    /// separate indicator by `thinking_lines()` — nothing is appended to
-    /// the output buffer so we avoid cluttering tool output with repeated
-    /// "+ Thought for 0ms" lines.
+    /// Finalize the current thinking block exactly once.
     fn finish_thinking(&mut self) {
+        if !self.thinking.active {
+            return;
+        }
         self.thinking.on_thinking_complete();
+        let duration_ms = self.thinking.last_duration_ms;
+        let text = std::mem::take(&mut self.thinking.accumulated);
+        let marker_line = self.output.line_count();
+        self.output
+            .append_line(&format!("✻ Thought for {}", format_duration(duration_ms)));
+        self.thinking_blocks.push(ThinkingBlock {
+            text,
+            duration_ms,
+            marker_line,
+            expanded: false,
+        });
+        self.thinking.expanded = false;
+        self.thinking.dot_offset = 0;
+    }
+
+    pub fn toggle_thinking(&mut self) {
+        if self.thinking.active {
+            self.thinking.toggle_expand();
+        } else {
+            self.toggle_latest_thinking_block();
+        }
+    }
+
+    pub fn open_thinking_archive(&mut self) {
+        self.thinking_archive = self.thinking_blocks.len().checked_sub(1);
+    }
+
+    pub fn close_thinking_archive(&mut self) {
+        self.thinking_archive = None;
+    }
+
+    pub fn select_previous_thinking_block(&mut self) {
+        if let Some(selected) = self.thinking_archive.as_mut() {
+            *selected = selected.saturating_sub(1);
+        }
+    }
+
+    pub fn select_next_thinking_block(&mut self) {
+        if let Some(selected) = self.thinking_archive.as_mut() {
+            *selected = (*selected + 1).min(self.thinking_blocks.len().saturating_sub(1));
+        }
+    }
+
+    pub fn thinking_archive_selection(&self) -> Option<usize> {
+        self.thinking_archive
+    }
+
+    pub fn thinking_archive_block(&self) -> Option<&ThinkingBlock> {
+        self.thinking_archive
+            .and_then(|selected| self.thinking_blocks.get(selected))
+    }
+
+    pub fn expand_selected_thinking_block(&mut self) {
+        let Some(selected) = self.thinking_archive.take() else {
+            return;
+        };
+        self.expand_thinking_block(selected);
+    }
+
+    fn toggle_latest_thinking_block(&mut self) {
+        let Some(index) = self.thinking_blocks.len().checked_sub(1) else {
+            return;
+        };
+        if self.thinking_blocks[index].expanded {
+            self.collapse_thinking_block(index);
+        } else {
+            self.expand_thinking_block(index);
+        }
+    }
+
+    fn expand_thinking_block(&mut self, index: usize) {
+        if self
+            .thinking_blocks
+            .get(index)
+            .is_none_or(|block| block.expanded)
+        {
+            return;
+        }
+        self.collapse_all_thinking_blocks();
+        let (marker_line, lines) = {
+            let block = &self.thinking_blocks[index];
+            (
+                block.marker_line,
+                block
+                    .text
+                    .lines()
+                    .map(|line| format!("  {line}"))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        self.output.insert_lines_after(marker_line, &lines);
+        self.thinking_blocks[index].expanded = true;
+        self.shift_later_thinking_markers(index, lines.len() as isize);
+    }
+
+    fn collapse_all_thinking_blocks(&mut self) {
+        if let Some(index) = self.thinking_blocks.iter().position(|block| block.expanded) {
+            self.collapse_thinking_block(index);
+        }
+    }
+
+    fn collapse_thinking_block(&mut self, index: usize) {
+        let Some(block) = self.thinking_blocks.get(index) else {
+            return;
+        };
+        if !block.expanded {
+            return;
+        }
+        let marker_line = block.marker_line;
+        let line_count = block.text.lines().count();
+        self.output.remove_lines_after(marker_line, line_count);
+        self.thinking_blocks[index].expanded = false;
+        self.shift_later_thinking_markers(index, -(line_count as isize));
+    }
+
+    fn shift_later_thinking_markers(&mut self, index: usize, delta: isize) {
+        for block in self.thinking_blocks.iter_mut().skip(index + 1) {
+            block.marker_line = block.marker_line.saturating_add_signed(delta);
+        }
     }
 
     // -- rendering helpers --------------------------------------------------
 
-    /// Build the `Line`s for the thinking indicator (inserted into the output
-    /// area at the bottom, before the cursor).
-    pub fn thinking_lines(&self) -> Vec<Line<'_>> {
-        let t = &self.theme;
-        if self.thinking.active {
-            if self.thinking.expanded {
-                // Expanded: show full text in dim italic
-                let mut lines = vec![Line::from(Span::styled(
-                    "- Thinking:",
-                    Style::default().fg(t.muted).add_modifier(Modifier::ITALIC),
-                ))];
-                for text_line in self.thinking.accumulated.lines() {
-                    lines.push(Line::from(Span::styled(
-                        format!("  {text_line}"),
-                        Style::default().fg(t.muted).add_modifier(Modifier::ITALIC),
-                    )));
-                }
-                lines
-            } else {
-                // Collapsed: single line with animated dots
-                let bright = self.thinking.bright_dot_index();
-                let mut spans = vec![Span::styled(
-                    "+ Thinking",
-                    Style::default().fg(t.thinking_dot),
-                )];
-                for i in 0..3u8 {
-                    let color = if i as usize == bright {
-                        t.thinking_dot_bright
-                    } else {
-                        t.thinking_dot
-                    };
-                    spans.push(Span::styled(".", Style::default().fg(color)));
-                }
-                vec![Line::from(spans)]
-            }
-        } else if self.thinking.last_duration_ms > 0 && !self.thinking.expanded {
-            // Completed, collapsed summary — always shown regardless of show_thinking
-            let ms = self.thinking.last_duration_ms;
-            let duration_str = if ms >= 1000 {
-                format!("{:.1}s", ms as f64 / 1000.0)
-            } else {
-                format!("{ms}ms")
-            };
-            if self.thinking.has_content() {
-                let chars = self.thinking.accumulated.len();
-                vec![Line::from(Span::styled(
-                    format!("+ Thought for {duration_str} ({chars} chars)"),
-                    Style::default().fg(t.muted),
-                ))]
-            } else {
-                // Thinking text was hidden, but still show the duration
-                vec![Line::from(Span::styled(
-                    format!("+ Thought for {duration_str}"),
-                    Style::default().fg(t.muted),
-                ))]
-            }
-        } else if self.thinking.has_content() && self.thinking.expanded {
-            // Completed but user expanded
-            let mut lines = vec![Line::from(Span::styled(
-                "- Thinking (complete):",
-                Style::default().fg(t.muted).add_modifier(Modifier::ITALIC),
-            ))];
-            for text_line in self.thinking.accumulated.lines() {
-                lines.push(Line::from(Span::styled(
-                    format!("  {text_line}"),
-                    Style::default().fg(t.muted).add_modifier(Modifier::ITALIC),
-                )));
-            }
-            lines
-        } else {
-            Vec::new()
-        }
+    /// Build the `Line`s for the active thinking indicator (inserted into the
+    /// output area at the bottom, before the cursor).
+    pub fn thinking_lines(&self, width: u16) -> Vec<ratatui::text::Line<'static>> {
+        crate::thinking_view::thinking_lines(self, width)
     }
 }
 
-// REM-2d: `SessionPicker`, `McpManagerView`, `McpManager`, `SplashConfig`
-// relocated to sibling module `crate::app_modals` to keep `app.rs` under
-// the 500-line ceiling. See the `pub use crate::app_modals::{...}` at the
-// top of this file.
+pub(crate) fn format_duration(duration_ms: u64) -> String {
+    if duration_ms >= 1000 {
+        format!("{:.1}s", duration_ms as f64 / 1000.0)
+    } else {
+        format!("{duration_ms}ms")
+    }
+}
 
 /// Returns `true` when a [`KeyEvent`] should be processed.
 ///

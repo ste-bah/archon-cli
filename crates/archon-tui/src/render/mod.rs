@@ -68,6 +68,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // Overlays: MCP manager
     body::draw_mcp_manager(frame, app);
 
+    // Overlays: thinking archive
+    body::draw_thinking_archive(frame, app);
+
     // Overlays: message selector (TASK-TUI-620 /rewind)
     body::draw_message_selector(frame, app);
 

@@ -76,6 +76,7 @@ pub(super) async fn handle_tui_event(
         TuiEvent::ThinkingToggle(enabled) => {
             app.show_thinking = enabled;
         }
+        TuiEvent::OpenThinkingArchive => app.open_thinking_archive(),
         TuiEvent::ModelChanged(model) => {
             app.status.model = model;
         }
@@ -388,6 +389,20 @@ mod tests {
 
         assert_eq!(app.status.context_tokens_used, 121_000);
         assert_eq!(app.status.context_name.as_deref(), Some("main"));
+    }
+
+    #[tokio::test]
+    async fn open_thinking_archive_event_selects_the_latest_block() {
+        let mut app = App::new();
+        app.on_thinking_delta("first thought");
+        app.on_turn_complete();
+        app.on_thinking_delta("second thought");
+        app.on_turn_complete();
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+
+        handle_tui_event(&mut app, TuiEvent::OpenThinkingArchive, &tx).await;
+
+        assert_eq!(app.thinking_archive_selection(), Some(1));
     }
 
     #[tokio::test]

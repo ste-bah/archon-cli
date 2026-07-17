@@ -134,6 +134,10 @@ impl CommandHandler for ThinkingHandler {
             // `Some("off")` mirrors the legacy `"/thinking off"` arm
             // at slash.rs:83.
             Some("off") => false,
+            Some("archive") => {
+                let _ = ctx.tui_tx.send(TuiEvent::OpenThinkingArchive);
+                return Ok(());
+            }
             // Unknown arg: silent return. NO state change, NO events,
             // NO error message. Preserves legacy fall-through at
             // shipped slash.rs:75-90 (any non-on/off arg fell through
@@ -281,6 +285,31 @@ mod tests {
             "empty args must emit TextDelta containing 'Thinking display enabled.', \
              got: {:?}",
             events
+        );
+    }
+
+    #[test]
+    fn thinking_handler_archive_opens_the_archive_without_changing_display_state() {
+        let (mut ctx, mut rx) = make_thinking_ctx(false);
+
+        ThinkingHandler
+            .execute(&mut ctx, &[String::from("archive")])
+            .unwrap();
+
+        assert!(
+            !ctx.show_thinking
+                .as_ref()
+                .expect("fixture supplies show_thinking")
+                .load(Ordering::Relaxed),
+            "archive must not alter the thinking display preference"
+        );
+        assert!(
+            matches!(rx.try_recv(), Ok(TuiEvent::OpenThinkingArchive)),
+            "archive must emit the archive-open event"
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "archive emits no informational text"
         );
     }
 

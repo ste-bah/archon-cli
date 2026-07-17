@@ -21,7 +21,7 @@ use super::layout::{input_scroll_for_cursor, wrapped_cursor_position};
 mod pickers;
 pub use pickers::{
     draw_file_picker, draw_mcp_manager, draw_message_selector, draw_search_results,
-    draw_session_picker, draw_skills_menu,
+    draw_session_picker, draw_skills_menu, draw_thinking_archive,
 };
 
 /// Render the output area (top section with scrollable content).
@@ -44,7 +44,7 @@ pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
 
     let visible_height = output_area.height;
     let output_width = output_area.width.saturating_sub(1); // -1 for scrollbar
-    let thinking_lines = app.thinking_lines();
+    let thinking_lines = app.thinking_lines(output_width);
     let thinking_height = reserved_thinking_height(&thinking_lines, output_width, visible_height);
     let transcript_height = visible_height
         .saturating_sub(thinking_height)

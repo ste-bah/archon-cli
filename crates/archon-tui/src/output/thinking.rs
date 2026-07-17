@@ -5,10 +5,19 @@
 
 use std::time::Instant;
 
+/// A completed, bounded thinking block retained for the current session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThinkingBlock {
+    pub text: String,
+    pub duration_ms: u64,
+    pub marker_line: usize,
+    pub expanded: bool,
+}
+
 /// Tracks the collapsible thinking display.
 #[derive(Debug, Clone)]
 pub struct ThinkingState {
-    /// Full accumulated thinking text.
+    /// Full accumulated thinking text for the active block.
     pub accumulated: String,
     /// Currently receiving thinking deltas.
     pub active: bool,
@@ -29,6 +38,9 @@ impl Default for ThinkingState {
 }
 
 impl ThinkingState {
+    /// Maximum UTF-8 bytes retained for one active thinking block.
+    pub const MAX_CAPTURE_BYTES: usize = 256 * 1024;
+
     pub fn new() -> Self {
         Self {
             accumulated: String::new(),
@@ -44,9 +56,11 @@ impl ThinkingState {
     pub fn on_thinking_delta(&mut self, text: &str) {
         if !self.active {
             self.active = true;
+            self.expanded = false;
             self.start = Some(Instant::now());
         }
         self.accumulated.push_str(text);
+        self.retain_bounded_tail();
     }
 
     /// Mark the thinking phase as complete.
@@ -95,6 +109,17 @@ impl ThinkingState {
     pub fn has_content(&self) -> bool {
         !self.accumulated.is_empty()
     }
+
+    fn retain_bounded_tail(&mut self) {
+        if self.accumulated.len() <= Self::MAX_CAPTURE_BYTES {
+            return;
+        }
+        let mut start = self.accumulated.len() - Self::MAX_CAPTURE_BYTES;
+        while !self.accumulated.is_char_boundary(start) {
+            start += 1;
+        }
+        self.accumulated.drain(..start);
+    }
 }
 
 #[cfg(test)]
@@ -116,7 +141,6 @@ mod tests {
         ts.on_thinking_delta("thought");
         ts.on_thinking_complete();
         assert!(!ts.active);
-        // duration should be >= 0 (near-instant in tests)
         assert!(ts.last_duration_ms < 1000);
     }
 
@@ -134,16 +158,15 @@ mod tests {
     fn thinking_bright_dot_bounces() {
         let mut ts = ThinkingState::new();
         ts.active = true;
-        // frame 0 -> dot 0
         assert_eq!(ts.bright_dot_index(), 0);
         ts.dot_offset = 1;
         assert_eq!(ts.bright_dot_index(), 1);
         ts.dot_offset = 2;
         assert_eq!(ts.bright_dot_index(), 2);
         ts.dot_offset = 3;
-        assert_eq!(ts.bright_dot_index(), 1); // bounce back
+        assert_eq!(ts.bright_dot_index(), 1);
         ts.dot_offset = 4;
-        assert_eq!(ts.bright_dot_index(), 0); // back to start
+        assert_eq!(ts.bright_dot_index(), 0);
     }
 
     #[test]

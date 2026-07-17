@@ -111,6 +111,8 @@ rust-rocksdb = { version = "0.34.0", default-features = false }
 # the pre-LIFT archon-tui pins bit-for-bit — no version bump hidden in this LIFT.
 hdrhistogram = "7.5"
 parking_lot = "0.12"
+unicode-segmentation = "1"
+unicode-width = "0.2"
 
 # TASK-AGS-006: dev-only test/bench deps (not opted into by any crate yet).
 # - insta:            snapshot testing (REQ-FOR-PRESERVE-D8)

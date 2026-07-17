@@ -275,8 +275,8 @@ fn thinking_tracks_timing_even_when_hidden() {
     app.on_thinking_delta("hidden thought");
     assert!(app.thinking.active);
     assert!(app.thinking.start.is_some());
-    // Text NOT accumulated when hidden
-    assert!(app.thinking.accumulated.is_empty());
+    // Text remains captured even though its display is hidden.
+    assert_eq!(app.thinking.accumulated, "hidden thought");
 }
 
 #[test]
@@ -286,11 +286,12 @@ fn thinking_completes_on_text_delta() {
     app.on_thinking_delta("deep thought");
     assert!(app.thinking.active);
     app.on_text_delta("answer");
-    // Thinking should now be complete; summary is rendered by
-    // thinking_lines(), NOT appended to the output buffer.
-    assert!(!app.thinking.active);
+    // Thinking completion appends one durable transcript marker.
     let lines = app.output.all_lines();
-    assert!(!lines.iter().any(|l| l.contains("Thought for")));
+    assert_eq!(
+        lines.iter().filter(|l| l.contains("Thought for")).count(),
+        1
+    );
     assert!(lines.iter().any(|l| l.contains("answer")));
 }
 
@@ -300,9 +301,13 @@ fn thinking_completes_on_turn_complete() {
     app.on_thinking_delta("pondering");
     app.on_turn_complete();
     assert!(!app.thinking.active);
-    // Summary is rendered separately — not in the output buffer.
+    // Completion appends one transcript marker and retains the archive.
     let lines = app.output.all_lines();
-    assert!(!lines.iter().any(|l| l.contains("Thought for")));
+    assert_eq!(
+        lines.iter().filter(|l| l.contains("Thought for")).count(),
+        1
+    );
+    assert_eq!(app.thinking_blocks.len(), 1);
 }
 
 #[test]

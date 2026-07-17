@@ -36,6 +36,8 @@ futures-util = { workspace = true }
 # archon-observability (new owning crate for ChannelMetrics) and archon-tui
 # stay version-aligned. Pins unchanged — parking_lot = 0.12, hdrhistogram = 7.5.
 parking_lot = { workspace = true }
+unicode-segmentation.workspace = true
+unicode-width.workspace = true
 hdrhistogram = { workspace = true }
 tempfile = "3.12"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

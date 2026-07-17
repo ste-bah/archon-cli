@@ -15,8 +15,9 @@ mod sanitize;
 mod scroll;
 mod thinking;
 mod tool_output;
+mod transcript_edit;
 
 pub use buffer::OutputBuffer;
 pub use render_cache::RenderedOutputView;
-pub use thinking::ThinkingState;
+pub use thinking::{ThinkingBlock, ThinkingState};
 pub use tool_output::{ToolDisplayStatus, ToolOutputState};

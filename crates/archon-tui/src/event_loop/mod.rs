@@ -78,6 +78,7 @@ mod ask_user;
 mod driver;
 mod input;
 mod mouse;
+pub(crate) mod thinking_archive;
 mod tui_events;
 
 /// Configuration passed to [`run_event_loop`]. Field order and types

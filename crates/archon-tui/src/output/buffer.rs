@@ -15,7 +15,7 @@ use crate::theme::Theme;
 /// Output buffer -- append-only text buffer for streaming display.
 #[derive(Debug)]
 pub struct OutputBuffer {
-    lines: Vec<String>,
+    pub(super) lines: Vec<String>,
     current_line: String,
     revision: u64,
     render_cache: RefCell<Option<RenderCache>>,
@@ -169,7 +169,7 @@ impl OutputBuffer {
         }
     }
 
-    fn mark_dirty(&mut self) {
+    pub(super) fn mark_dirty(&mut self) {
         self.revision = self.revision.wrapping_add(1);
         *self.render_cache.borrow_mut() = None;
         *self.wrap_cache.borrow_mut() = None;
