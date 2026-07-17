@@ -279,9 +279,34 @@ fn test_file_detection() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// 4. Gate pass/fail logic
-// ---------------------------------------------------------------------------
+#[test]
+fn windows_and_mixed_separator_test_paths_are_exempt() {
+    let scanner = ForbiddenPatternScanner::new();
+    for path in [
+        "src\\tests\\foo.rs",
+        "src\\test\\bar.rs",
+        "src\\tests\\test_helper.rs",
+        "src/tests\\mixed.rs",
+    ] {
+        assert!(
+            ForbiddenPatternScanner::is_test_file(path),
+            "{path} should be a test file"
+        );
+        assert!(
+            scanner
+                .scan_content(path, "// placeholder test helper\n")
+                .is_empty()
+        );
+    }
+
+    let production_path = "src\\contest\\foo.rs";
+    assert!(!ForbiddenPatternScanner::is_test_file(production_path));
+    assert!(
+        !scanner
+            .scan_content(production_path, "// placeholder production code\n")
+            .is_empty()
+    );
+}
 
 #[test]
 fn gate_passed_true_when_no_matches() {

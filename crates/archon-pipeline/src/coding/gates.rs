@@ -118,13 +118,15 @@ impl ForbiddenPatternScanner {
 
     /// Returns `true` if the given path looks like a test file.
     pub fn is_test_file(path: &str) -> bool {
+        let path = path.replace('\\', "/");
+
         // Path component checks
         if path.contains("/test/") || path.contains("/tests/") {
             return true;
         }
 
         // Extract the filename (last component)
-        let filename = path.rsplit('/').next().unwrap_or(path);
+        let filename = path.rsplit('/').next().unwrap_or(&path);
 
         // Suffix patterns
         if filename.ends_with("_test.rs")
