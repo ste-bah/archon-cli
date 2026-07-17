@@ -7,6 +7,9 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
+
+use super::compilation_gate::{CleanupOutcome, CommandExecution, CommandSpec};
 
 use anyhow::Result;
 use regex::Regex;
@@ -235,6 +238,9 @@ pub struct GateFailure {
 /// Gate that runs `cargo build` or `npm run build` and requires exit code 0.
 pub struct CompilationGate;
 
+const COMPILATION_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const MAX_TIMEOUT_EVIDENCE_BYTES: usize = 1_024;
+
 impl CompilationGate {
     /// Execute the build command. Returns gate result with full compiler output.
     pub async fn run(&self, project_root: &Path, language: Language) -> GateResultRecord {
@@ -242,55 +248,158 @@ impl CompilationGate {
             Language::Rust => ("cargo", vec!["build"]),
             Language::TypeScript => ("npm", vec!["run", "build"]),
         };
+        self.run_command(
+            CommandSpec::new(cmd, args.into_iter().map(str::to_owned), project_root),
+            COMPILATION_TIMEOUT,
+        )
+        .await
+    }
 
-        let output = Command::new(cmd)
-            .args(&args)
-            .current_dir(project_root)
-            .output();
-
-        match output {
-            Ok(out) => {
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                let combined = format!("STDOUT:\n{}\nSTDERR:\n{}", stdout, stderr);
-                let passed = out.status.success();
-
-                let failures = if passed {
-                    vec![]
-                } else {
-                    vec![GateFailure {
-                        description: "Compilation failed".into(),
-                        file: None,
-                        details: combined.clone(),
-                    }]
-                };
-
-                GateResultRecord {
-                    gate_name: "compilation".into(),
-                    gate_passed: passed,
-                    evidence: combined,
-                    failures,
-                    timestamp: now_iso8601(),
-                }
+    pub(crate) async fn run_command(
+        &self,
+        command: CommandSpec,
+        timeout: Duration,
+    ) -> GateResultRecord {
+        let command_display = command.display();
+        let program_display = command.program_display();
+        match super::compilation_gate::execute(command, timeout).await {
+            Ok(CommandExecution::Completed(out)) => compilation_result(out),
+            Ok(CommandExecution::TimedOut(cleanup)) => {
+                compilation_timeout_result(&command_display, timeout, cleanup)
             }
-            Err(e) => GateResultRecord {
-                gate_name: "compilation".into(),
-                gate_passed: false,
-                evidence: format!("Failed to execute {}: {}", cmd, e),
-                failures: vec![GateFailure {
-                    description: "Build command failed to execute".into(),
-                    file: None,
-                    details: e.to_string(),
-                }],
-                timestamp: now_iso8601(),
-            },
+            Err(e) => compilation_spawn_failure_result(&program_display, e),
         }
     }
 }
 
-// ===========================================================================
-// Orphan Detection Gate (REQ-IMPROVE-008)
-// ===========================================================================
+fn compilation_result(out: std::process::Output) -> GateResultRecord {
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let evidence = format!("STDOUT:\n{}\nSTDERR:\n{}", stdout, stderr);
+    let gate_passed = out.status.success();
+    let failures = (!gate_passed)
+        .then(|| GateFailure {
+            description: "Compilation failed".into(),
+            file: None,
+            details: evidence.clone(),
+        })
+        .into_iter()
+        .collect();
+
+    GateResultRecord {
+        gate_name: "compilation".into(),
+        gate_passed,
+        evidence,
+        failures,
+        timestamp: now_iso8601(),
+    }
+}
+
+fn compilation_timeout_result(
+    command: &str,
+    timeout: Duration,
+    cleanup: CleanupOutcome,
+) -> GateResultRecord {
+    let cleanup_evidence = cleanup.evidence();
+    let prefix = "Compilation timeout: command `";
+    let suffix = format!(
+        "` exceeded limit {}; {cleanup_evidence}.",
+        format_timeout(timeout),
+    );
+    let command = truncate_for_timeout_evidence(
+        command,
+        MAX_TIMEOUT_EVIDENCE_BYTES.saturating_sub(prefix.len() + suffix.len()),
+    );
+    let evidence = format!("{prefix}{command}{suffix}");
+    GateResultRecord {
+        gate_name: "compilation".into(),
+        gate_passed: false,
+        failures: vec![GateFailure {
+            description: "Compilation timed out".into(),
+            file: None,
+            details: evidence.clone(),
+        }],
+        evidence,
+        timestamp: now_iso8601(),
+    }
+}
+
+fn compilation_spawn_failure_result(command: &str, error: std::io::Error) -> GateResultRecord {
+    GateResultRecord {
+        gate_name: "compilation".into(),
+        gate_passed: false,
+        evidence: format!("Failed to execute {command}: {error}"),
+        failures: vec![GateFailure {
+            description: "Build command failed to execute".into(),
+            file: None,
+            details: error.to_string(),
+        }],
+        timestamp: now_iso8601(),
+    }
+}
+
+fn format_timeout(timeout: Duration) -> String {
+    if timeout.as_secs() > 0 && timeout.subsec_millis() == 0 {
+        format!("{}s", timeout.as_secs())
+    } else {
+        format!("{}ms", timeout.as_millis())
+    }
+}
+
+fn truncate_for_timeout_evidence(value: &str, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_owned();
+    }
+
+    let end = value
+        .char_indices()
+        .map(|(index, _)| index)
+        .take_while(|index| *index <= max_bytes.saturating_sub(3))
+        .last()
+        .unwrap_or(0);
+    format!("{}...", &value[..end])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::compilation_gate::ChildReap;
+    use super::{CleanupOutcome, MAX_TIMEOUT_EVIDENCE_BYTES, compilation_timeout_result};
+    use std::time::Duration;
+
+    #[test]
+    fn compilation_timeout_evidence_is_bounded() {
+        let result = compilation_timeout_result(
+            &"x".repeat(2_000),
+            Duration::from_millis(100),
+            CleanupOutcome::TerminationRequestAccepted {
+                reap: ChildReap::Succeeded,
+            },
+        );
+
+        assert!(result.evidence.len() <= MAX_TIMEOUT_EVIDENCE_BYTES);
+        assert!(result.evidence.contains("...` exceeded limit"));
+    }
+    #[test]
+    fn compilation_timeout_surfaces_reap_failure_without_output() {
+        let result = compilation_timeout_result(
+            "cargo build",
+            Duration::from_millis(100),
+            CleanupOutcome::TerminationRequestAccepted {
+                reap: ChildReap::Failed,
+            },
+        );
+
+        assert!(!result.gate_passed);
+        assert_eq!(result.failures[0].description, "Compilation timed out");
+        assert_eq!(
+            result.failures[0].details,
+            "Compilation timeout: command `cargo build` exceeded limit 100ms; direct child termination request accepted; direct child reap failed."
+        );
+        assert_eq!(result.failures[0].details, result.evidence);
+        assert!(!result.evidence.contains("STDOUT:"));
+        assert!(!result.evidence.contains("STDERR:"));
+    }
+}
 
 /// Gate that checks every new file is referenced by at least one other file.
 pub struct OrphanDetectionGate;

@@ -2,6 +2,7 @@
 
 pub mod agents;
 pub mod algorithm;
+mod compilation_gate;
 pub mod contract;
 pub mod evidence;
 pub mod facade;
