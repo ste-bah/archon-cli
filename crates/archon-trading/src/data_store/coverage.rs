@@ -83,6 +83,7 @@ pub(super) fn coverage_cell(
         provider_symbol: provider_symbol(instrument, &selected.provider),
         dataset_id: None,
         version: None,
+        dataset_checksum: None,
         available: false,
         native_interval: selected.native_interval,
         production_eligible: false,
@@ -106,6 +107,7 @@ fn available_coverage_cell(
         provider_symbol: provider_symbol(instrument, &record.provider),
         dataset_id: Some(record.dataset_id.clone()),
         version: Some(record.version.clone()),
+        dataset_checksum: Some(record.checksum.clone()),
         available: true,
         native_interval: true,
         production_eligible: true,
@@ -161,6 +163,7 @@ pub(super) fn validate_coverage_matrix_complete(
         .filter(|cell| {
             !cell.available
                 || cell.dataset_id.is_none()
+                || cell.dataset_checksum.as_deref().is_none_or(str::is_empty)
                 || !cell.production_eligible
                 || cell.provider_symbol.trim().is_empty()
                 || cell.timeframe.trim().is_empty()
@@ -278,7 +281,8 @@ fn append_series_overlap_issues(
     if dataset.bars.len() < SERIES_OVERLAP_MIN_ROWS {
         issues.push(format!(
             "normalized payload rows {} below required series overlap minimum {}",
-            dataset.bars.len(), SERIES_OVERLAP_MIN_ROWS
+            dataset.bars.len(),
+            SERIES_OVERLAP_MIN_ROWS
         ));
     }
 }
@@ -402,6 +406,7 @@ mod tests {
             provider_symbol: provider_symbol.into(),
             dataset_id: Some("tradingview-ES-1D-raw".into()),
             version: Some("fixture".into()),
+            dataset_checksum: Some("fixture-checksum".into()),
             available: true,
             native_interval: true,
             production_eligible: true,

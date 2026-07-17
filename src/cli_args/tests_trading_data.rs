@@ -450,3 +450,41 @@ fn trading_data_fetch_native_requires_all_mandatory_flags() {
         assert!(Cli::try_parse_from(args).is_err());
     }
 }
+
+#[test]
+fn trading_data_typed_artifact_verifiers_parse() {
+    let artifact = Cli::try_parse_from([
+        "archon",
+        "trading",
+        "data",
+        "verify-artifact",
+        ".archon/data/datasets/example/v1",
+    ])
+    .expect("verify-artifact parse");
+    assert!(matches!(
+        artifact.command,
+        Some(Commands::Trading {
+            action: TradingCliAction::Data {
+                action: TradingCliDataAction::VerifyArtifact { .. }
+            }
+        })
+    ));
+
+    let coverage = Cli::try_parse_from([
+        "archon",
+        "trading",
+        "data",
+        "verify-coverage",
+        "coverage.json",
+        "registry.json",
+    ])
+    .expect("verify-coverage parse");
+    assert!(matches!(
+        coverage.command,
+        Some(Commands::Trading {
+            action: TradingCliAction::Data {
+                action: TradingCliDataAction::VerifyCoverage { .. }
+            }
+        })
+    ));
+}

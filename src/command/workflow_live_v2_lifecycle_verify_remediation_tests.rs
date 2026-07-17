@@ -212,6 +212,89 @@ fn slim_inventory_input_preserves_distinct_gaps_under_one_stem() {
 }
 
 #[test]
+fn oversized_verification_reducers_use_distinct_slim_retry_payloads() {
+    let items = (0..80)
+        .map(|index| {
+            serde_json::json!({
+                "item_id": format!("verify-{index}"),
+                "evidence_blob": "x".repeat(1024)
+            })
+        })
+        .collect::<Vec<_>>();
+    let records = (0..12)
+        .map(|index| {
+            serde_json::json!({
+                "kind": "verification",
+                "result": {
+                    "status": "failed",
+                    "outcomes": items,
+                    "summary": format!("attempt {index}")
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    let sources = [
+        (
+            "verification-failure-triage-1-1",
+            serde_json::json!([{}, items, items, items, records, records]),
+        ),
+        (
+            "verification-failure-retriage-1-1",
+            serde_json::json!([{}, items, items, {
+                "failed_outcome_ids": items,
+                "failed_outcomes": items,
+                "rejected_triage": {"outcomes": items}
+            }]),
+        ),
+        (
+            "verification-repair-plan-1-1",
+            serde_json::json!([{}, items, {"outcomes": items}, records]),
+        ),
+    ];
+
+    for (id, source) in sources {
+        let normal = slim_reducer_source(id, &source, false);
+        let retry = slim_reducer_source(id, &source, true);
+        assert!(
+            serde_json::to_vec(&normal).unwrap().len() < serde_json::to_vec(&source).unwrap().len()
+        );
+        assert!(
+            serde_json::to_vec(&retry).unwrap().len() < serde_json::to_vec(&normal).unwrap().len()
+        );
+    }
+}
+
+#[test]
+fn final_report_input_normalizes_nested_null_collections_only() {
+    let mut input = serde_json::json!({
+        "triage": {
+            "outcomes": null,
+            "retry_items": null,
+            "data": null
+        },
+        "task_coverage": null
+    });
+
+    normalize_null_report_collections(&mut input);
+
+    assert_eq!(input["triage"]["outcomes"], serde_json::json!([]));
+    assert_eq!(input["triage"]["retry_items"], serde_json::json!([]));
+    assert_eq!(input["task_coverage"], serde_json::json!([]));
+    assert!(input["triage"]["data"].is_null());
+}
+
+#[test]
+fn failed_final_report_terminal_marker_routes_to_host_fallback() {
+    assert!(terminal_marker_requires_report_fallback(Some(
+        WorkflowV2Status::Failed
+    )));
+    assert!(!terminal_marker_requires_report_fallback(Some(
+        WorkflowV2Status::NeedsReview
+    )));
+    assert!(!terminal_marker_requires_report_fallback(None));
+}
+
+#[test]
 fn mixed_triage_preserves_actionable_and_retry_routes() {
     let triage: serde_json::Value = serde_json::from_str(include_str!(
         "fixtures/wf3b9_verification_failure_triage_5_3.json"

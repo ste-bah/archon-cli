@@ -71,6 +71,17 @@ impl LifecycleDriver {
                     )
                     .await?;
                 if repaired {
+                    inventory = preserve_host_pinned_implementation(
+                        &contract,
+                        &inventory,
+                        &noop_reclassified_ids,
+                    );
+                    remaining_items = support::array(inventory.get("items"))
+                        .into_iter()
+                        .filter(|item| {
+                            !support::item_is_completed(&contract, item, &completed_ids)
+                        })
+                        .collect();
                     continue;
                 }
                 return self
@@ -127,6 +138,7 @@ impl LifecycleDriver {
                     ready_implementation_items,
                     discovery,
                     dependency_iteration,
+                    &noop_reclassified_ids,
                     evidence,
                 )
                 .await?;
@@ -465,12 +477,18 @@ impl LifecycleDriver {
         items: Vec<serde_json::Value>,
         discovery: &serde_json::Value,
         dependency_iteration: usize,
+        noop_reclassified_ids: &std::collections::BTreeSet<String>,
         evidence: &mut LifecycleEvidence,
     ) -> archon_workflow::WorkflowResult<Vec<serde_json::Value>> {
-        if items
-            .iter()
-            .all(|item| support::present(item.get("target_files")))
-        {
+        let items = support::array(Some(
+            &self.with_declared_task_artifacts(serde_json::Value::Array(items)),
+        ));
+        let items = preserve_host_pinned_items(
+            &self.contract(),
+            items,
+            noop_reclassified_ids,
+        );
+        if items.iter().all(item_has_write_ownership) {
             return Ok(items);
         }
 
@@ -481,7 +499,7 @@ impl LifecycleDriver {
             .iter()
             .any(|item| {
                 support::work_type_for(item) == "implementation"
-                    && !support::present(item.get("target_files"))
+                    && !item_has_write_ownership(item)
             })
             && attempt <= self.max_investigation_iterations
         {
@@ -489,7 +507,7 @@ impl LifecycleDriver {
                 .into_iter()
                 .filter(|item| {
                     support::work_type_for(item) == "implementation"
-                        && !support::present(item.get("target_files"))
+                        && !item_has_write_ownership(item)
                 })
                 .map(|item| {
                     serde_json::json!({
@@ -526,9 +544,34 @@ impl LifecycleDriver {
             inventory = contract.normalize_inventory(&support::merge_inventory_repair(
                 &contract, &inventory, &repair,
             ));
+            inventory = preserve_host_pinned_implementation(
+                &contract,
+                &inventory,
+                noop_reclassified_ids,
+            );
+            let mut enriched_inventory = inventory.as_object().cloned().unwrap_or_default();
+            enriched_inventory.insert(
+                "items".to_string(),
+                self.with_declared_task_artifacts(serde_json::Value::Array(support::array(
+                    inventory.get("items"),
+                ))),
+            );
+            inventory = contract
+                .normalize_inventory(&serde_json::Value::Object(enriched_inventory));
             attempt += 1;
         }
-        Ok(support::array(inventory.get("items")))
+        let items = support::array(inventory.get("items"));
+        let (schedulable, unresolved): (Vec<_>, Vec<_>) = items
+            .into_iter()
+            .partition(item_has_write_ownership);
+        if !unresolved.is_empty() {
+            evidence.implementation.push(serde_json::json!({
+                "kind": "implementation-ownership-discovery-pending",
+                "dependencyIteration": dependency_iteration,
+                "items": unresolved,
+            }));
+        }
+        Ok(schedulable)
     }
 
     async fn repair_wave_completion_evidence(
@@ -581,6 +624,52 @@ impl LifecycleDriver {
                 .collect(),
         )
     }
+}
+
+fn item_has_write_ownership(item: &serde_json::Value) -> bool {
+    support::present(item.get("target_files"))
+        || support::present(item.get("artifact_requirements"))
+}
+
+fn preserve_host_pinned_implementation(
+    contract: &LifecycleContract<'_>,
+    inventory: &serde_json::Value,
+    noop_reclassified_ids: &std::collections::BTreeSet<String>,
+) -> serde_json::Value {
+    let mut object = inventory.as_object().cloned().unwrap_or_default();
+    object.insert(
+        "items".to_string(),
+        serde_json::Value::Array(preserve_host_pinned_items(
+            contract,
+            support::array(inventory.get("items")),
+            noop_reclassified_ids,
+        )),
+    );
+    contract.normalize_inventory(&serde_json::Value::Object(object))
+}
+
+fn preserve_host_pinned_items(
+    contract: &LifecycleContract<'_>,
+    items: Vec<serde_json::Value>,
+    noop_reclassified_ids: &std::collections::BTreeSet<String>,
+) -> Vec<serde_json::Value> {
+    items
+        .into_iter()
+        .map(|mut item| {
+            if contract
+                .canonical_ids_for(&item)
+                .iter()
+                .any(|id| noop_reclassified_ids.contains(id))
+                && let Some(object) = item.as_object_mut()
+            {
+                object.insert(
+                    "work_type".to_string(),
+                    serde_json::Value::String("implementation".to_string()),
+                );
+            }
+            item
+        })
+        .collect()
 }
 
 /// JS `generatedContractInventoryGraphIssues(remainingItems, completedIds)` —

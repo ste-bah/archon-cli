@@ -5,6 +5,7 @@ pub(super) fn record(
     versioned: &VersionedDataset,
     bars: &[OhlcvBar],
     paths: ArtifactPaths<'_>,
+    validation: &ValidationReport,
     created_at: String,
 ) -> Result<StoredDatasetRecord, DataStoreError> {
     Ok(StoredDatasetRecord {
@@ -17,6 +18,7 @@ pub(super) fn record(
         )?,
         metadata_checksum: versioned.metadata.checksums.metadata_sha256.clone(),
         raw_checksum: versioned.metadata.checksums.raw_sha256.clone(),
+        validation_checksum: validation.content_sha256.clone(),
         raw_response_path: relative(root, paths.raw)?,
         raw_request_path: dataset_raw_artifact_path(root, paths.raw, "request.json")?,
         redacted_headers_path: dataset_raw_artifact_path(root, paths.raw, "headers.redacted.json")?,
@@ -110,7 +112,7 @@ fn dataset_raw_artifact_path(
     relative(root, &raw_dir.join(file_name))
 }
 
-fn metadata_sha256(metadata: &DatasetMetadata) -> Result<String, DataStoreError> {
+pub(super) fn metadata_sha256(metadata: &DatasetMetadata) -> Result<String, DataStoreError> {
     let mut canonical = metadata.clone();
     canonical.checksums.metadata_sha256.clear();
     serde_json::to_vec(&canonical)

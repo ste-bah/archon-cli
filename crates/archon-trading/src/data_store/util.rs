@@ -51,12 +51,50 @@ pub(super) fn verify_artifacts(
     if record.dataset_path.trim().is_empty()
         || record.metadata_checksum.trim().is_empty()
         || record.raw_checksum.trim().is_empty()
+        || record.validation_checksum.trim().is_empty()
     {
         return Err(DataStoreError::IncompleteArtifactContract(
             record.dataset_id.clone(),
         ));
     }
+    let metadata: DatasetMetadata = read_json(&root.join(&record.metadata_path))?;
+    let validation: ValidationReport = read_json(&root.join(&record.validation_path))?;
+    let manifest: StoredDatasetRecord = read_json(&root.join(&record.manifest_path))?;
+    let normalized = std::fs::read(root.join(&record.normalized_path)).map_err(io_error)?;
+    let raw = std::fs::read(root.join(&record.raw_response_path)).map_err(io_error)?;
+    let normalized_sha256 = bytes_checksum(&normalized);
+    let raw_sha256 = bytes_checksum(&raw);
+    let metadata_sha256 = metadata_sha256(&metadata)?;
+    let validation_sha256 = ValidationReport::content_hash(&normalized_sha256, &validation.checks);
+    let valid = record == &manifest
+        && record.dataset_id == metadata.dataset_id
+        && record.version == metadata.version
+        && validation.dataset_id == record.dataset_id
+        && validation.version == record.version
+        && record.checksum == normalized_sha256
+        && metadata.checksum == normalized_sha256
+        && metadata.checksums.normalized_sha256 == normalized_sha256
+        && record.raw_checksum == raw_sha256
+        && metadata.checksums.raw_sha256 == raw_sha256
+        && record.metadata_checksum == metadata_sha256
+        && metadata.checksums.metadata_sha256 == metadata_sha256
+        && record.validation_checksum == validation_sha256
+        && validation.content_sha256 == validation_sha256;
+    if !valid {
+        return Err(DataStoreError::IncompleteArtifactContract(format!(
+            "checksum chain mismatch for {}:{}",
+            record.dataset_id, record.version
+        )));
+    }
     Ok(())
+}
+
+pub(super) fn project_root_for_artifact(path: &Path) -> Result<PathBuf, DataStoreError> {
+    path.ancestors()
+        .find(|ancestor| ancestor.file_name().is_some_and(|name| name == ".archon"))
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .ok_or(DataStoreError::InvalidPath)
 }
 
 pub(super) fn required_raw_artifact_paths(record: &StoredDatasetRecord) -> Vec<String> {

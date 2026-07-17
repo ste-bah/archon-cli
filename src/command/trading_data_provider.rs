@@ -37,7 +37,13 @@ pub(crate) fn fetch_native(
 }
 
 fn unavailable_provider_report(
-    root: &Path, provider: &str, symbol: &str, timeframe: &str, start: &str, end: &str, dataset_id: &str,
+    root: &Path,
+    provider: &str,
+    symbol: &str,
+    timeframe: &str,
+    start: &str,
+    end: &str,
+    dataset_id: &str,
 ) -> Result<String> {
     let checked_at = chrono::Utc::now().to_rfc3339();
     let result = TradingDataLake::new(root)
@@ -48,7 +54,9 @@ fn unavailable_provider_report(
         .clone()
         .unwrap_or_else(|| "provider-native fetch unavailable".into());
     if provider.trim().eq_ignore_ascii_case("stooq") {
-        reason = format!("provider_blocked_or_unavailable: {reason}; exact native Stooq data was not directly supplied and resampling is refused");
+        reason = format!(
+            "provider_blocked_or_unavailable: {reason}; exact native Stooq data was not directly supplied and resampling is refused"
+        );
     }
     let report = json!({ "provider": result.provider, "symbol": result.symbol, "timeframe": result.timeframe,
         "checked_at": result.checked_at, "native_interval": result.native_interval, "production_eligible": result.production_eligible,
@@ -60,7 +68,12 @@ fn unavailable_provider_report(
 }
 
 fn fetch_tradingview_native(
-    root: &Path, symbol: &str, timeframe: &str, start: &str, end: &str, dataset_id: &str,
+    root: &Path,
+    symbol: &str,
+    timeframe: &str,
+    start: &str,
+    end: &str,
+    dataset_id: &str,
 ) -> Result<String> {
     let response = match tradingview_response(root, symbol, timeframe) {
         Ok(response) => response,
@@ -130,11 +143,7 @@ fn fetch_tradingview_native(
     )
 }
 
-fn tradingview_response(
-    root: &Path,
-    symbol: &str,
-    timeframe: &str,
-) -> Result<Vec<u8>, String> {
+fn tradingview_response(root: &Path, symbol: &str, timeframe: &str) -> Result<Vec<u8>, String> {
     if !matches!(timeframe.trim(), "1W" | "1D" | "240" | "60" | "15") {
         return Err(format!(
             "TradingView exact native timeframe `{timeframe}` is unsupported"
@@ -167,8 +176,7 @@ fn run_tradingview_cli(root: &Path, symbol: &str, timeframe: &str) -> Result<Vec
     let output = match run_node_script(root, &cli, &args) {
         Ok(output) => output,
         Err(error) => {
-            return fallback_tradingview_fixture_from_cli(&cli)
-                .ok_or_else(|| error.to_string());
+            return fallback_tradingview_fixture_from_cli(&cli).ok_or_else(|| error.to_string());
         }
     };
     match checked_text(output, "TradingView MCP CLI") {
@@ -293,7 +301,12 @@ fn tv_number(row: &Value, field: &str) -> Result<f64> {
         .ok_or_else(|| anyhow!("TradingView candle missing numeric `{field}`"))
 }
 
-fn tradingview_metadata(dataset_id: &str, symbol: &str, timeframe: &str, bars: &[OhlcvBar]) -> DatasetMetadata {
+fn tradingview_metadata(
+    dataset_id: &str,
+    symbol: &str,
+    timeframe: &str,
+    bars: &[OhlcvBar],
+) -> DatasetMetadata {
     let rows = bars.len() as u64;
     DatasetMetadata {
         schema_version: "archon-trading-dataset-v1".into(),
@@ -379,7 +392,11 @@ fn tradingview_request(symbol: &str, timeframe: &str, start: &str, end: &str) ->
 }
 
 fn tradingview_success(
-    symbol: &str, timeframe: &str, start: &str, end: &str, dataset_id: &str,
+    symbol: &str,
+    timeframe: &str,
+    start: &str,
+    end: &str,
+    dataset_id: &str,
     record: &archon_trading::data_store::StoredDatasetRecord,
 ) -> Value {
     json!({
@@ -403,7 +420,12 @@ fn tradingview_provider_notes(symbol: &str, timeframe: &str, bars: usize) -> Str
 }
 
 fn tradingview_unavailable(
-    symbol: &str, timeframe: &str, start: &str, end: &str, dataset_id: &str, reason: &str,
+    symbol: &str,
+    timeframe: &str,
+    start: &str,
+    end: &str,
+    dataset_id: &str,
+    reason: &str,
 ) -> Result<String> {
     write_or_render(
         &json!({
@@ -471,10 +493,20 @@ fn readable_coverage(
     matrix: &archon_trading::data_lake::CoverageMatrix,
     lake: &TradingDataLake,
 ) -> String {
-    let mut lines = [format!("Trading coverage matrix ({})", matrix.schema_version),
-        format!("generated_at: {}", matrix.generated_at), format!("instruments: {}", matrix.instruments.join(", ")),
+    let mut lines = [
+        format!("Trading coverage matrix ({})", matrix.schema_version),
+        format!("generated_at: {}", matrix.generated_at),
+        format!("instruments: {}", matrix.instruments.join(", ")),
         format!("timeframes: {}", matrix.timeframes.join(", ")),
-        format!("latest_json: {}", lake.coverage_dir().join("latest.json").display()), format!("latest_md: {}", lake.coverage_dir().join("latest.md").display())]
+        format!(
+            "latest_json: {}",
+            lake.coverage_dir().join("latest.json").display()
+        ),
+        format!(
+            "latest_md: {}",
+            lake.coverage_dir().join("latest.md").display()
+        ),
+    ]
     .into_iter()
     .collect::<Vec<_>>();
     lines.extend(matrix.cells.iter().map(|cell| {

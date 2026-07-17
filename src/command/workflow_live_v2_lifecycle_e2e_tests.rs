@@ -74,15 +74,17 @@ impl LlmClient for CannedLifecycleLlm {
                 }),
             )
         } else if call_id.starts_with("target-file-discovery-wave-") {
+            let mut attempted_flip = implementation_item(
+                "implementation-refuted-noop-refutable",
+                "TASK-EX-002",
+                "src/refuted.rs",
+                "Refuted work is implemented.",
+            );
+            attempted_flip["work_type"] = serde_json::json!("verified_noop");
             accepted_result(
-                "target discovery resolved the demoted noop",
+                "target discovery attempted to restore the demoted noop",
                 serde_json::json!({
-                    "items": [implementation_item(
-                        "implementation-refuted-noop-refutable",
-                        "TASK-EX-002",
-                        "src/refuted.rs",
-                        "Refuted work is implemented."
-                    )],
+                    "items": [attempted_flip],
                     "unresolved_issues": [],
                 }),
                 Vec::new(),
@@ -103,6 +105,7 @@ impl LlmClient for CannedLifecycleLlm {
                         verification_item("verify-refuted", "TASK-EX-002", "src/refuted.rs"),
                         verification_item("verify-plain", "TASK-EX-003", "src/plain.rs"),
                         verification_item("verify-contract-source", "TASK-EX-004", "src/contract.rs"),
+                        verification_item("verify-artifact-only", "TASK-EX-005", "../.archon/artifacts/artifact-only.json"),
                     ],
                     "unresolved_issues": [],
                 }),
@@ -319,6 +322,11 @@ async fn real_decomposed_lifecycle_demotes_discovers_implements_and_reaches_term
             .expect("refuted implementation")
             .contains("implemented_TASK_EX_002")
     );
+    assert!(
+        temp.path()
+            .join(".archon/artifacts/artifact-only.json")
+            .is_file()
+    );
 
     let final_record = v2_store
         .load_call_record("final-acceptance-report")
@@ -326,7 +334,7 @@ async fn real_decomposed_lifecycle_demotes_discovers_implements_and_reaches_term
         .expect("final record");
     assert_eq!(final_record.status, WorkflowV2Status::Accepted);
     let report = &final_record.result.data;
-    assert_eq!(report["accepted_tasks"].as_array().map(Vec::len), Some(3));
+    assert_eq!(report["accepted_tasks"].as_array().map(Vec::len), Some(4));
     assert_eq!(report["noop_tasks"], serde_json::json!(["TASK-EX-001"]));
     assert!(report["failed_tasks"].as_array().is_some_and(Vec::is_empty));
     assert!(
@@ -344,6 +352,122 @@ async fn real_decomposed_lifecycle_demotes_discovers_implements_and_reaches_term
         "harness took {:?}",
         started.elapsed()
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_final_report_emits_host_built_fallback() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let spec = WorkflowSpec {
+        schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
+        name: "final-report-fallback-e2e".to_string(),
+        task: "Force the terminal report fallback path.".to_string(),
+        target_repository_root: None,
+        max_parallelism: 1,
+        max_agents: 1,
+        provider_tiers: BTreeMap::new(),
+        stages: Vec::new(),
+        artifact_policy: Default::default(),
+        permissions: BTreeMap::new(),
+        quality_gates: BTreeMap::new(),
+        learning_hooks: Vec::new(),
+    };
+    let universe = WorkflowV2TaskUniverse {
+        schema_version: "workflow-v2-task-universe-v1".to_string(),
+        source_roots: Vec::new(),
+        tasks: vec![WorkflowV2TaskUniverseTask {
+            canonical_task_id: "TASK-EX-FALLBACK".to_string(),
+            source_path: "tasks/TASK-EX-FALLBACK.md".to_string(),
+            acceptance_criteria: vec!["A terminal report is persisted.".to_string()],
+            ..Default::default()
+        }],
+    };
+    let workflow_store = WorkflowStore::new(temp.path().join(".archon/workflows"));
+    let run = workflow_store.create_run(spec.clone()).expect("run");
+    let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
+    let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+    let llm = Arc::new(CannedLifecycleLlm {
+        calls: Mutex::new(Vec::new()),
+        deliverable_contract_executed: AtomicBool::new(false),
+        inventory_calls: AtomicUsize::new(0),
+    });
+    let client = LiveV2AgentClient::new(llm, tui_tx, Vec::new(), run.id.clone(), None, Some(30));
+    let generated_config = archon_core::config::GeneratedWorkflowConfig {
+        max_repair_iterations: 1,
+        max_investigation_iterations: 1,
+        verification_branch_timeout_secs: 30,
+        host_call_timeout_secs: 30,
+    };
+    let runner = WorkflowV2ScriptRunner::new(
+        spec.task,
+        WorkflowV2ScriptRuntime {
+            target_repository_root: None,
+            generated_config: generated_config.clone(),
+        },
+        WorkflowV2AgentAdapter::new(),
+        client,
+        v2_store.clone(),
+        workflow_store,
+        run.id,
+        true,
+        Some(universe.clone()),
+        None,
+    );
+    let host = Arc::new(WorkflowScriptHost {
+        scaffold_hash: workflow_scaffold_hash("# final report fallback fixture"),
+        runner,
+        accumulator: Arc::new(tokio::sync::Mutex::new(WorkflowScriptAccumulator::default())),
+    });
+    let driver = LifecycleDriver::new(
+        host,
+        universe,
+        None,
+        Some(temp.path().display().to_string()),
+        serde_json::json!([]),
+        Default::default(),
+        &generated_config,
+    );
+
+    let result = driver
+        .final_report(
+            "forced-report-failure",
+            None,
+            "needs_review",
+            serde_json::json!([{
+                "status": "failed",
+                "summary": "forced malformed reducer result",
+                "commands_run": "not-a-sequence"
+            }]),
+            "Emit a terminal report even when reducer evidence is malformed.",
+        )
+        .await;
+
+    assert!(
+        result
+            .expect_err("fallback report should terminate needs-review lifecycle")
+            .to_string()
+            .contains(TERMINAL_HOST_CALL_MARKER)
+    );
+    assert_eq!(
+        v2_store
+            .load_call_record("forced-report-failure")
+            .expect("failed report record load")
+            .expect("failed report record")
+            .status,
+        WorkflowV2Status::Failed
+    );
+    let fallback = v2_store
+        .load_call_record("forced-report-failure-host-fallback")
+        .expect("fallback record load")
+        .expect("fallback record");
+    assert_eq!(fallback.status, WorkflowV2Status::NeedsReview);
+    assert_eq!(
+        fallback.result.data["missing_tasks"],
+        serde_json::json!(["TASK-EX-FALLBACK"])
+    );
+    assert!(fallback.result.artifacts.iter().any(|artifact| {
+        artifact.id == "forced-report-failure-host-fallback"
+            && std::path::Path::new(&artifact.path).is_file()
+    }));
 }
 
 fn synthetic_task_universe(root: &std::path::Path) -> WorkflowV2TaskUniverse {
@@ -366,6 +490,9 @@ fn synthetic_task_universe(root: &std::path::Path) -> WorkflowV2TaskUniverse {
         required_universe: false,
         ..Default::default()
     }];
+    let mut artifact_only_task = task("TASK-EX-005", "Artifact-only output is produced.");
+    artifact_only_task.artifact_requirements =
+        vec![".archon/artifacts/artifact-only.json".to_string()];
     WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: vec![root.join("tasks").display().to_string()],
@@ -374,6 +501,7 @@ fn synthetic_task_universe(root: &std::path::Path) -> WorkflowV2TaskUniverse {
             task("TASK-EX-002", "Refuted work is implemented."),
             task("TASK-EX-003", "Plain implementation is present."),
             contract_task,
+            artifact_only_task,
         ],
     }
 }
@@ -398,6 +526,16 @@ fn synthetic_inventory_items() -> Vec<serde_json::Value> {
             "acceptance_criteria": ["Refuted work is implemented."],
             "noop_proof": "unsupported inherited claim",
             "noop_proof_refs": ["fixture:missing-evidence"],
+            "artifact_requirements": [],
+        }),
+        serde_json::json!({
+            "item_id": "noop-artifact-only",
+            "work_type": "verified_noop",
+            "canonical_task_ids": ["TASK-EX-005"],
+            "dependency_ids": [],
+            "acceptance_criteria": ["Artifact-only output is produced."],
+            "noop_proof": "unsupported inherited artifact claim",
+            "noop_proof_refs": ["fixture:missing-artifact"],
             "artifact_requirements": [],
         }),
         implementation_item(
@@ -476,6 +614,32 @@ fn noop_proof_result(call_id: &str) -> serde_json::Value {
                 }],
             },
         })
+    } else if call_id.contains("artifact-only") {
+        serde_json::json!({
+            "status": "needs_review",
+            "summary": "artifact-only noop claim is refuted",
+            "evidence": [{"kind": "inspection", "summary": "required artifact is absent"}],
+            "artifacts": [],
+            "commands_run": [],
+            "files_read": [],
+            "files_changed": [],
+            "task_coverage": [{
+                "task_id": "TASK-EX-005",
+                "status": "missing",
+                "summary": "artifact is absent",
+                "evidence": [],
+            }],
+            "residual_gaps": [{
+                "id": "gap-refuted-artifact-noop",
+                "description": "the declared artifact does not exist",
+                "severity": "blocking",
+            }],
+            "data": {
+                "item_id": call_id,
+                "canonical_task_ids": ["TASK-EX-005"],
+                "proof_gap": true,
+            },
+        })
     } else {
         serde_json::json!({
             "status": "needs_review",
@@ -513,23 +677,34 @@ fn implementation_result(
     let item = find_item(input).ok_or_else(|| anyhow::anyhow!("implementation item missing"))?;
     let task_id = first_string(item.get("canonical_task_ids"))
         .ok_or_else(|| anyhow::anyhow!("canonical task id missing"))?;
-    let target_file = first_string(item.get("target_files"))
-        .ok_or_else(|| anyhow::anyhow!("target file missing"))?;
+    let target_file = first_string(item.get("target_files"));
     let cwd = request
         .cwd
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("cwd missing"))?;
-    let target = cwd.join(&target_file);
-    if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent)?;
+    if let Some(target_file) = target_file.as_deref() {
+        let target = cwd.join(target_file);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(
+            &target,
+            format!(
+                "pub fn implemented_{}() -> bool {{ true }}\n",
+                task_id.replace('-', "_")
+            ),
+        )?;
+    } else if task_id == "TASK-EX-005" {
+        let project_root = find_string_key(input, "project_artifact_root")
+            .or_else(|| find_string_key(input, "project_root"))
+            .ok_or_else(|| anyhow::anyhow!("project artifact root missing"))?;
+        std::fs::write(
+            std::path::Path::new(&project_root).join(".archon/artifacts/artifact-only.json"),
+            "{\"status\":\"produced\"}\n",
+        )?;
+    } else {
+        anyhow::bail!("target file missing")
     }
-    std::fs::write(
-        &target,
-        format!(
-            "pub fn implemented_{}() -> bool {{ true }}\n",
-            task_id.replace('-', "_")
-        ),
-    )?;
     let mut result = accepted_result(
         "implementation branch changed its declared target",
         serde_json::json!({
@@ -541,8 +716,10 @@ fn implementation_result(
         }),
         vec![coverage(&task_id, "accepted")],
         vec![test_command("true", true, "implementation fixture passed")],
-    )
-    .with_files_changed(vec![target_file]);
+    );
+    if let Some(target_file) = target_file {
+        result = result.with_files_changed(vec![target_file]);
+    }
     if task_id == "TASK-EX-004" {
         let project_root = find_string_key(input, "project_artifact_root")
             .or_else(|| find_string_key(input, "project_root"))
@@ -700,6 +877,7 @@ fn all_task_coverage() -> Vec<serde_json::Value> {
         coverage("TASK-EX-002", "accepted"),
         coverage("TASK-EX-003", "accepted"),
         coverage("TASK-EX-004", "accepted"),
+        coverage("TASK-EX-005", "accepted"),
     ]
 }
 

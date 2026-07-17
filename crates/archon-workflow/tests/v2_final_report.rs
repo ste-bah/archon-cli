@@ -23,6 +23,24 @@ fn successful_report_includes_paths_commands_artifacts_and_status() {
 }
 
 #[test]
+fn omitted_report_collections_deserialize_as_empty() {
+    let report: archon_workflow::WorkflowV2FinalReport =
+        serde_json::from_value(serde_json::json!({
+            "status": "needs_review",
+            "paths": {
+                "harness_path": "/run/workflow.js",
+                "run_state_path": "/run/state.json",
+                "event_log_path": "/run/events.jsonl"
+            }
+        }))
+        .expect("minimal report");
+
+    assert!(report.task_coverage.is_empty());
+    assert!(report.accepted_tasks.is_empty());
+    assert!(report.residual_gaps.is_empty());
+}
+
+#[test]
 fn failed_required_task_prevents_success() {
     let report = WorkflowV2FinalReportBuilder::new()
         .build(

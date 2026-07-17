@@ -1,18 +1,14 @@
 use super::*;
 use crate::data_lake::{CoverageWindow, DataType, GapSummary};
-
 #[test]
 fn first_dataset_write_initializes_missing_registry_under_data_root() {
     let temp = tempfile::tempdir().unwrap();
     let lake = TradingDataLake::new(temp.path());
     assert!(!lake.registry_path().exists());
-
     lake.store_ohlcv(request()).unwrap();
-
     assert_eq!(lake.registry_path(), lake.data_root().join("registry.json"));
     assert!(lake.registry_path().exists());
 }
-
 #[test]
 fn stores_and_loads_ohlcv_dataset() {
     let temp = tempfile::tempdir().unwrap();
@@ -56,7 +52,6 @@ fn stores_and_loads_ohlcv_dataset() {
         );
     }
 }
-
 #[test]
 fn metadata_json_contains_self_describing_paths_and_checksums() {
     let temp = tempfile::tempdir().unwrap();
@@ -67,7 +62,10 @@ fn metadata_json_contains_self_describing_paths_and_checksums() {
     assert_eq!(metadata.paths.raw, record.raw_path);
     assert_eq!(metadata.paths.raw_response, record.raw_response_path);
     assert_eq!(metadata.paths.raw_request, record.raw_request_path);
-    assert_eq!(metadata.paths.redacted_headers, record.redacted_headers_path);
+    assert_eq!(
+        metadata.paths.redacted_headers,
+        record.redacted_headers_path
+    );
     assert_eq!(metadata.paths.provider_notes, record.provider_notes_path);
     assert_eq!(metadata.paths.normalized, record.normalized_path);
     assert_eq!(metadata.paths.validation, record.validation_path);
@@ -81,7 +79,11 @@ fn metadata_json_contains_self_describing_paths_and_checksums() {
     assert_eq!(metadata.checksum, metadata.checksums.normalized_sha256);
     assert_eq!(record.metadata_checksum, metadata.checksums.metadata_sha256);
     assert_eq!(record.raw_checksum, metadata.checksums.raw_sha256);
-    assert!(record.dataset_path.ends_with("manual-BTCUSD-1D-raw/20260101-fixture"));
+    assert!(
+        record
+            .dataset_path
+            .ends_with("manual-BTCUSD-1D-raw/20260101-fixture")
+    );
     assert!(!metadata.checksums.metadata_sha256.is_empty());
     assert_eq!(metadata.source.license_notes, "research");
     assert_eq!(metadata.created_at, "2026-01-01T00:00:00Z");
@@ -367,8 +369,8 @@ fn load_ohlcv_fails_closed_when_artifact_metadata_is_incomplete() {
     let result = lake.load_ohlcv("manual-BTCUSD-1D-raw", "20260101-fixture");
     assert!(matches!(
         result,
-        Err(DataStoreError::InvalidMetadata(message))
-            if message.contains("MissingField") && message.contains("checksums.raw_sha256")
+        Err(DataStoreError::IncompleteArtifactContract(message))
+            if message.contains("checksum chain mismatch")
     ));
 }
 

@@ -1,5 +1,5 @@
 use super::{normalize_timeframe, provider_supports_native_timeframe, unavailable_reason};
-use crate::ohlcv::OhlcvBar;
+use crate::ohlcv::{OhlcvBar, bytes_checksum};
 use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,6 +45,7 @@ pub struct ValidationReport {
     pub native_interval: bool,
     pub production_eligible: bool,
     pub checks: Vec<ValidationCheck>,
+    pub content_sha256: String,
     pub summary: ValidationSummary,
     pub validated_at: String,
 }
@@ -66,9 +67,19 @@ impl ValidationReport {
     }
 
     pub fn is_consistent(&self) -> bool {
-        self.status == Self::status_from_checks(&self.checks)
+        !self.content_sha256.trim().is_empty()
+            && self.status == Self::status_from_checks(&self.checks)
             && (!self.production_eligible
                 || (self.status == ValidationStatus::Passed && self.native_interval))
+    }
+
+    pub fn content_hash(normalized_sha256: &str, checks: &[ValidationCheck]) -> String {
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "normalized_sha256": normalized_sha256,
+            "checks": checks,
+        }))
+        .unwrap_or_default();
+        bytes_checksum(&bytes)
     }
 
     pub fn allows_production(&self) -> bool {
@@ -94,6 +105,8 @@ impl<'de> Deserialize<'de> for ValidationReport {
             native_interval: bool,
             production_eligible: bool,
             checks: Vec<ValidationCheck>,
+            #[serde(default)]
+            content_sha256: String,
             summary: ValidationSummary,
             validated_at: String,
         }
@@ -107,6 +120,7 @@ impl<'de> Deserialize<'de> for ValidationReport {
             native_interval: wire.native_interval,
             production_eligible: wire.production_eligible,
             checks: wire.checks,
+            content_sha256: wire.content_sha256,
             summary: wire.summary,
             validated_at: wire.validated_at,
         };
@@ -187,6 +201,8 @@ pub struct CoverageCell {
     pub provider_symbol: String,
     pub dataset_id: Option<String>,
     pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dataset_checksum: Option<String>,
     pub available: bool,
     pub native_interval: bool,
     pub production_eligible: bool,

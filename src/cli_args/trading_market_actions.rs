@@ -290,6 +290,18 @@ pub enum TradingCliDataAction {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Verify one pipeline-produced dataset artifact directory using typed contracts
+    VerifyArtifact {
+        /// Dataset version directory containing manifest.json
+        dataset_dir: PathBuf,
+    },
+    /// Verify coverage, registry linkage, and every referenced dataset checksum chain
+    VerifyCoverage {
+        /// Coverage JSON artifact
+        coverage: PathBuf,
+        /// Dataset registry JSON artifact
+        registry: PathBuf,
+    },
     /// Export stored normalized OHLCV bars as JSON
     #[command(alias = "export-ohlcv")]
     Export {

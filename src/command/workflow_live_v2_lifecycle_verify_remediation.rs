@@ -249,7 +249,89 @@ fn verification_remediation_inventory_source(
     ])
 }
 
-fn slim_items(items: &[serde_json::Value], limit: usize) -> Vec<serde_json::Value> {
+pub(super) fn uses_verification_slimming(id: &str) -> bool {
+    id.starts_with("verification-failure-triage-")
+        || id.starts_with("verification-failure-retriage-")
+        || (id.starts_with("verification-repair-plan-")
+            && !id.starts_with("verification-repair-plan-repair-"))
+}
+
+pub(super) fn slim_reducer_source(
+    id: &str,
+    source: &serde_json::Value,
+    aggressive: bool,
+) -> serde_json::Value {
+    if !uses_verification_slimming(id) {
+        return source.clone();
+    }
+    let values = source.as_array().cloned().unwrap_or_default();
+    let item_limit = if aggressive { 16 } else { 48 };
+    let at = |index: usize| values.get(index).cloned().unwrap_or(serde_json::Value::Null);
+    if id.starts_with("verification-failure-triage-") {
+        return serde_json::json!([
+            at(0),
+            slim_items(&support::array(values.get(1)), item_limit),
+            slim_items(&support::array(values.get(2)), item_limit),
+            slim_items(&support::array(values.get(3)), item_limit),
+            slim_verification_records(&support::array(values.get(4)), aggressive),
+            slim_verification_records(&support::array(values.get(5)), aggressive),
+        ]);
+    }
+    if id.starts_with("verification-failure-retriage-") {
+        return serde_json::json!([
+            at(0),
+            slim_items(&support::array(values.get(1)), item_limit),
+            slim_items(&support::array(values.get(2)), item_limit),
+            slim_retriage_feedback(values.get(3), item_limit),
+        ]);
+    }
+    serde_json::json!([
+        at(0),
+        slim_items(&support::array(values.get(1)), item_limit),
+        slim_result_with_outcomes(values.get(2).unwrap_or(&serde_json::Value::Null), item_limit),
+        slim_verification_records(&support::array(values.get(3)), aggressive),
+    ])
+}
+
+fn slim_retriage_feedback(value: Option<&serde_json::Value>, limit: usize) -> serde_json::Value {
+    let Some(value) = value.and_then(serde_json::Value::as_object) else {
+        return serde_json::Value::Null;
+    };
+    let mut out = serde_json::Map::new();
+    for key in ["issue", "required_route", "instruction"] {
+        if let Some(value) = value.get(key) {
+            out.insert(key.to_string(), value.clone());
+        }
+    }
+    out.insert(
+        "failed_outcome_ids".to_string(),
+        serde_json::Value::Array(
+            support::array(value.get("failed_outcome_ids"))
+                .into_iter()
+                .take(limit)
+                .collect(),
+        ),
+    );
+    out.insert(
+        "failed_outcomes".to_string(),
+        serde_json::Value::Array(
+            support::array(value.get("failed_outcomes"))
+                .iter()
+                .take(limit)
+                .map(slim_outcome)
+                .collect(),
+        ),
+    );
+    if let Some(triage) = value.get("rejected_triage") {
+        out.insert(
+            "rejected_triage".to_string(),
+            slim_result_with_outcomes(triage, limit),
+        );
+    }
+    serde_json::Value::Object(out)
+}
+
+pub(super) fn slim_items(items: &[serde_json::Value], limit: usize) -> Vec<serde_json::Value> {
     let mut seen = std::collections::BTreeSet::new();
     items
         .iter()
@@ -262,7 +344,7 @@ fn slim_items(items: &[serde_json::Value], limit: usize) -> Vec<serde_json::Valu
         .collect()
 }
 
-fn slim_verification_records(
+pub(super) fn slim_verification_records(
     records: &[serde_json::Value],
     aggressive: bool,
 ) -> Vec<serde_json::Value> {

@@ -75,11 +75,12 @@ fn coverage_cell_unavailable_reason_includes_selected_provider_and_capability() 
         .unwrap();
     assert!(!cell.available);
     assert_eq!(cell.selected_provider, "tradingview");
-    assert!(cell
-        .fallback_reason
-        .as_deref()
-        .unwrap()
-        .contains("no provider-native validated registry dataset"));
+    assert!(
+        cell.fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("no provider-native validated registry dataset")
+    );
 }
 
 #[test]
@@ -103,11 +104,12 @@ fn coverage_matrix_refuses_false_positive_non_native_cell() {
 
     assert!(!cell.available);
     assert!(cell.dataset_id.is_none());
-    assert!(cell
-        .fallback_reason
-        .as_deref()
-        .unwrap()
-        .contains("native_interval=false"));
+    assert!(
+        cell.fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("native_interval=false")
+    );
 }
 
 #[test]
@@ -134,11 +136,12 @@ fn coverage_matrix_refuses_false_positive_failed_validation_cell() {
         .unwrap();
 
     assert!(!cell.available);
-    assert!(cell
-        .fallback_reason
-        .as_deref()
-        .unwrap()
-        .contains("validation status is not passed"));
+    assert!(
+        cell.fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("checksum chain mismatch")
+    );
 }
 
 #[test]
@@ -173,7 +176,7 @@ fn contradictory_validation_report_is_rejected_on_load() {
 }
 
 #[test]
-fn registry_load_downgrades_stale_healthy_record_from_failed_validation_artifact() {
+fn registry_load_rejects_contradictory_validation_artifact() {
     let temp = tempfile::tempdir().unwrap();
     let lake = TradingDataLake::new(temp.path());
     let record = lake.store_ohlcv(spy_request()).unwrap();
@@ -185,18 +188,13 @@ fn registry_load_downgrades_stale_healthy_record_from_failed_validation_artifact
     validation["checks"][0]["severity"] = serde_json::json!("error");
     write_json(&validation_path, &validation).unwrap();
 
-    let registry = lake.load_registry().unwrap();
-    let key = registry_key(&record.dataset_id, &record.version);
-    let stored = registry.datasets.get(&key).unwrap();
-
-    assert_eq!(stored.status, DatasetStatus::Degraded);
-    assert!(!stored.production_eligible);
-    let persisted: PersistentDatasetRegistry = read_json(&lake.registry_path()).unwrap();
-    assert_eq!(
-        persisted.datasets.get(&key).unwrap().status,
-        DatasetStatus::Degraded
-    );
-    assert!(!persisted.datasets.get(&key).unwrap().production_eligible);
+    let error = lake
+        .load_registry()
+        .expect_err("contradictory validation must fail closed");
+    assert!(matches!(
+        error,
+        DataStoreError::Json(message) if message.contains("contradicts its checks")
+    ));
 }
 
 #[test]
@@ -220,11 +218,12 @@ fn coverage_matrix_refuses_false_positive_checksum_mismatch_cell() {
         .unwrap();
 
     assert!(!cell.available);
-    assert!(cell
-        .fallback_reason
-        .as_deref()
-        .unwrap()
-        .contains("checksum mismatch"));
+    assert!(
+        cell.fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("checksum chain mismatch")
+    );
 }
 
 #[test]
@@ -245,11 +244,12 @@ fn coverage_matrix_refuses_false_positive_missing_artifact_cell() {
         .unwrap();
 
     assert!(!cell.available);
-    assert!(cell
-        .fallback_reason
-        .as_deref()
-        .unwrap()
-        .contains("missing artifact"));
+    assert!(
+        cell.fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("missing artifact")
+    );
 }
 
 #[test]
@@ -298,9 +298,11 @@ fn registry_schema_v2_preserves_v1_readability_and_blocks_unknown_schema() {
 
     let migrated = lake.load_registry().unwrap();
     assert_eq!(migrated.schema_version, REGISTRY_SCHEMA_V2);
-    assert!(migrated
-        .datasets
-        .contains_key(&registry_key(&existing.dataset_id, &existing.version)));
+    assert!(
+        migrated
+            .datasets
+            .contains_key(&registry_key(&existing.dataset_id, &existing.version))
+    );
 
     let mut unknown = migrated;
     unknown.schema_version = "archon-trading-data-registry-v999".into();
@@ -310,78 +312,6 @@ fn registry_schema_v2_preserves_v1_readability_and_blocks_unknown_schema() {
         Err(DataStoreError::InvalidRegistrySchema(schema))
             if schema == "archon-trading-data-registry-v999"
     ));
-}
-
-#[test]
-fn artifact_contract_healthy_registry_entries_point_to_existing_artifacts() {
-    let temp = tempfile::tempdir().unwrap();
-    let lake = TradingDataLake::new(temp.path());
-    let record = lake.store_ohlcv(request()).unwrap();
-    let registry = lake.load_registry().unwrap();
-    let stored = registry
-        .datasets
-        .get(&registry_key(&record.dataset_id, &record.version))
-        .unwrap();
-
-    assert_eq!(stored.status, DatasetStatus::Healthy);
-    assert_eq!(stored.provider, "manual");
-    assert_eq!(stored.symbol, "BTCUSD");
-    assert_eq!(stored.timeframe, "1D");
-    assert!(stored.native_interval);
-    assert!(stored.production_eligible);
-    for path in [
-        &stored.metadata_path,
-        &stored.validation_path,
-        &stored.manifest_path,
-        &stored.normalized_path,
-        &stored.raw_response_path,
-        &stored.raw_request_path,
-        &stored.redacted_headers_path,
-        &stored.provider_notes_path,
-    ] {
-        assert!(!path.trim().is_empty(), "empty artifact path");
-        assert!(temp.path().join(path).exists(), "missing artifact {path}");
-    }
-}
-
-#[test]
-fn raw_response_contract_supports_prd_filenames() {
-    assert_eq!(raw_filename(OhlcvFormat::Json), "response.json");
-    assert_eq!(raw_filename(OhlcvFormat::Csv), "response.csv");
-    assert_eq!(raw_filename(OhlcvFormat::Zip), "response.zip");
-    assert_eq!(raw_filename(OhlcvFormat::Txt), "response.txt");
-}
-
-#[test]
-fn derived_resampled_diagnostic_candles_are_not_production_eligible() {
-    let temp = tempfile::tempdir().unwrap();
-    let lake = TradingDataLake::new(temp.path());
-    let mut request = request();
-    request.metadata.dataset_id = "manual-BTCUSD-1D-resampled".into();
-    request.metadata.price_basis = "resampled".into();
-    request.metadata.production_eligible = true;
-    lake.store_ohlcv(request).unwrap();
-
-    let dataset = lake
-        .load_ohlcv("manual-BTCUSD-1D-resampled", "20260101-fixture")
-        .unwrap();
-    assert!(!dataset.metadata.production_eligible);
-    assert_eq!(dataset.metadata.quality_status, "diagnostic");
-    let report: ValidationReport =
-        read_json(&temp.path().join(&dataset.record.validation_path)).unwrap();
-    assert_eq!(report.status, ValidationStatus::Failed);
-    assert!(!report.production_eligible);
-    assert!(report.checks.iter().any(|check| {
-        check.id == "metadata.not_derived_or_resampled" && check.status == ValidationStatus::Failed
-    }));
-    let gate = lake
-        .backtest_data_gate("manual-BTCUSD-1D-resampled", "20260101-fixture", true)
-        .unwrap();
-    assert!(!gate.promotion_eligible);
-    assert!(gate
-        .issues
-        .iter()
-        .any(|issue| { issue.contains("derived/resampled diagnostic candles") }));
 }
 
 #[test]
@@ -437,7 +367,7 @@ fn invalid_fixture_bars_are_rejected_before_storage() {
     ));
 }
 
-fn request() -> StoreOhlcvRequest {
+pub(super) fn request() -> StoreOhlcvRequest {
     StoreOhlcvRequest {
         metadata: DatasetMetadata {
             schema_version: "archon-trading-dataset-v2".into(),

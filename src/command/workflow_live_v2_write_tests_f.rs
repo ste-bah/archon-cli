@@ -8,6 +8,22 @@ fn wf66_inherited_undeclared_path_evidence_does_not_block_isolated_worktree() {
     );
 }
 
+#[test]
+fn declared_artifact_verifier_rejects_unsigned_branch_output() {
+    let workspace = tempfile::tempdir().expect("workspace");
+    let accepted = serde_json::json!({
+        "item": {"artifact_verification_commands": ["test -f signed-artifact"]}
+    });
+    let rejected = run_declared_artifact_verifiers(&accepted, workspace.path())
+        .expect_err("missing signed artifact must fail");
+    assert!(rejected.contains("declared artifact verifier failed"));
+
+    std::fs::write(workspace.path().join("signed-artifact"), "signed\n")
+        .expect("signed fixture");
+    run_declared_artifact_verifiers(&accepted, workspace.path())
+        .expect("verified branch output");
+}
+
 fn wf66_preflight_result() -> Option<WorkflowV2Result> {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "fixtures/wf66_remediation_wave_1_3_source_preflight.json"

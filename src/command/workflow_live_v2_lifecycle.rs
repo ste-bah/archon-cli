@@ -194,6 +194,7 @@ impl LifecycleDriver {
             task.to_string()
         };
         let max_transport_attempts = 2;
+        let source = slim_reducer_source(id, &source, false);
         let mut last_transport_failure = None;
         for attempt in 1..=max_transport_attempts {
             let call_id = if attempt == 1 {
@@ -203,6 +204,8 @@ impl LifecycleDriver {
             };
             let attempt_source = if attempt == 1 {
                 source.clone()
+            } else if uses_verification_slimming(id) {
+                slim_reducer_source(id, &source, true)
             } else {
                 super::workflow_live_v2_data::source_pack_value(&source)
             };
@@ -282,6 +285,8 @@ impl LifecycleDriver {
             .map(|item| {
                 let ids = contract.canonical_ids_for(&item);
                 let mut requirements = support::array(item.get("artifact_requirements"));
+                let mut verifier_commands =
+                    support::strings_of(item.get("artifact_verification_commands"));
                 for task in &self.universe.tasks {
                     if !ids.contains(&task.canonical_task_id) {
                         continue;
@@ -294,11 +299,29 @@ impl LifecycleDriver {
                             requirements.push(serde_json::Value::String(declared.clone()));
                         }
                     }
+                    if let Some(root) = self.project_artifact_root.as_deref() {
+                        for declared in &task.deliverable_contracts {
+                            let value = serde_json::to_value(declared)
+                                .unwrap_or(serde_json::Value::Null);
+                            if let Some(command) =
+                                workflow_live_v2_deliverable_contract::typed_verification_command(
+                                    root, &value,
+                                )
+                                && !verifier_commands.contains(&command)
+                            {
+                                verifier_commands.push(command);
+                            }
+                        }
+                    }
                 }
                 let mut object = item.as_object().cloned().unwrap_or_default();
                 object.insert(
                     "artifact_requirements".to_string(),
                     serde_json::Value::Array(requirements),
+                );
+                object.insert(
+                    "artifact_verification_commands".to_string(),
+                    serde_json::json!(verifier_commands),
                 );
                 serde_json::Value::Object(object)
             })
@@ -369,11 +392,83 @@ impl LifecycleDriver {
                 );
             }
         }
-        self.call(
+        normalize_null_report_collections(&mut inputs);
+        let result = self.call(
             "finalReport",
             id,
             source,
             serde_json::json!({ "status": status, "inputs": inputs, "task": task }),
+        )
+        .await;
+        let report_error = match result {
+            Ok(_) => return Ok(()),
+            Err(error) if error.to_string().contains(TERMINAL_HOST_CALL_MARKER) => {
+                let recorded_status = self
+                    .host
+                    .runner
+                    .v2_store
+                    .load_call_record(id)?
+                    .map(|record| record.status);
+                if !terminal_marker_requires_report_fallback(recorded_status) {
+                    return Err(error);
+                }
+                error
+            }
+            Err(error) => error,
+        };
+        let (completed_ids, terminal_gate_events) = {
+            let state = self
+                .runtime_state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            (
+                state.completed_ids.iter().cloned().collect::<Vec<_>>(),
+                state.events.clone(),
+            )
+        };
+        let required_ids = self
+            .universe
+            .tasks
+            .iter()
+            .map(|task| task.canonical_task_id.clone())
+            .collect::<Vec<_>>();
+        let missing_ids = required_ids
+            .iter()
+            .filter(|id| !completed_ids.contains(id))
+            .cloned()
+            .collect::<Vec<_>>();
+        let fallback_id = format!("{id}-host-fallback");
+        let fallback_result = serde_json::json!({
+                    "status": "needs_review",
+                    "summary": format!("host fallback report after '{id}' failed to build: {report_error}"),
+                    "evidence": [],
+                    "artifacts": [],
+                    "commands_run": [],
+                    "files_read": [],
+                    "files_changed": [],
+                    "task_coverage": [],
+                    "residual_gaps": [{
+                        "id": "final_report_construction_failed",
+                        "description": report_error.to_string(),
+                        "severity": "blocking"
+                    }],
+                    "data": {
+                        "original_report_id": id,
+                        "requested_status": status,
+                        "completed_task_ids": completed_ids,
+                        "missing_task_ids": missing_ids,
+                        "terminal_gate_events": terminal_gate_events,
+                    }
+        });
+        self.call(
+            "finalReport",
+            &fallback_id,
+            None,
+            serde_json::json!({
+                "status": "needs_review",
+                "inputs": [fallback_result],
+                "task": "Emit the minimal host-built terminal report after report construction failed."
+            }),
         )
         .await
         .map(|_| ())
@@ -619,6 +714,60 @@ impl LifecycleDriver {
         }
         Ok(inventory)
     }
+}
+
+fn normalize_null_report_collections(value: &mut serde_json::Value) {
+    const COLLECTION_FIELDS: &[&str] = &[
+        "accepted_tasks",
+        "actionable",
+        "artifact_requirements",
+        "artifacts",
+        "blocked_tasks",
+        "canonical_task_ids",
+        "commands_run",
+        "completed_ids",
+        "dependency_ids",
+        "evidence",
+        "failed_tasks",
+        "files_changed",
+        "files_read",
+        "focused_verification",
+        "items",
+        "missing_tasks",
+        "noop_tasks",
+        "outcomes",
+        "remediation_actions",
+        "repair_attempts",
+        "residual_gaps",
+        "retry_items",
+        "review_blockers",
+        "review_findings",
+        "target_files",
+        "task_coverage",
+        "tests_run",
+        "unresolved_issues",
+    ];
+    match value {
+        serde_json::Value::Object(object) => {
+            for (key, child) in object {
+                if child.is_null() && COLLECTION_FIELDS.contains(&key.as_str()) {
+                    *child = serde_json::Value::Array(Vec::new());
+                } else {
+                    normalize_null_report_collections(child);
+                }
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for child in values {
+                normalize_null_report_collections(child);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn terminal_marker_requires_report_fallback(status: Option<WorkflowV2Status>) -> bool {
+    status == Some(WorkflowV2Status::Failed)
 }
 
 fn is_terminal_gate_reroute(error: &WorkflowError) -> bool {

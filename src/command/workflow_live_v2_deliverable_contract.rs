@@ -5,9 +5,41 @@ pub(super) fn verification_command(root: &str, contract: &Value) -> String {
     let contract_json = serde_json::to_string(contract).expect("deliverable contract JSON");
     let contract_literal =
         serde_json::to_string(&contract_json).expect("deliverable contract JSON literal");
-    VERIFIER
+    let verifier = VERIFIER
         .replace("__PROJECT_ROOT__", &root_literal)
-        .replace("__CONTRACT_JSON__", &contract_literal)
+        .replace("__CONTRACT_JSON__", &contract_literal);
+    let Some(command) = typed_verification_command(root, contract) else {
+        return verifier;
+    };
+    format!("{command}\n{verifier}")
+}
+
+pub(super) fn typed_verification_command(root: &str, contract: &Value) -> Option<String> {
+    let command = contract.get("typed_verifier_command")?.as_str()?.trim();
+    if command.is_empty() {
+        return None;
+    }
+    let artifact = resolve_contract_path(root, contract.get("artifact_path"));
+    let registry = resolve_contract_path(root, contract.get("registry_path"));
+    Some(
+        command
+            .replace("{artifact_path}", &shell_quote(&artifact))
+            .replace("{registry_path}", &shell_quote(&registry)),
+    )
+}
+
+fn resolve_contract_path(root: &str, value: Option<&Value>) -> String {
+    let value = value.and_then(Value::as_str).unwrap_or_default();
+    let path = std::path::Path::new(value);
+    if path.is_absolute() {
+        value.to_string()
+    } else {
+        std::path::Path::new(root).join(path).display().to_string()
+    }
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 const VERIFIER: &str = r#"python3 - <<'PY'
@@ -169,6 +201,7 @@ if registry is not None and not isinstance(records, dict):
     records = {}
 
 series = []
+step_series = []
 for identity, cell in sorted(
     indexed.items(),
     key=lambda item: tuple(str(part) for part in item[0]),
@@ -307,6 +340,20 @@ for identity, cell in sorted(
             json.dumps(tokens, separators=(',', ':')).encode()
         ).hexdigest()
         series.append((identity, digest, tokens))
+        field_steps = []
+        for field in signature_fields:
+            try:
+                values = [float(get_field(row, field)) for row in rows if isinstance(row, dict)]
+            except (TypeError, ValueError):
+                continue
+            if len(values) < 3:
+                continue
+            steps = tuple(round(values[index] - values[index - 1], 12) for index in range(1, len(values)))
+            if steps and len(set(steps)) == 1:
+                failures.append(f'{label} payload field has a constant first difference: {field}')
+            field_steps.append((field, steps))
+        if field_steps:
+            step_series.append((identity, tuple(field_steps)))
 
 overlap_rows = int(contract.get('series_overlap_min_rows') or 0)
 for index, (identity, digest, tokens) in enumerate(series):
@@ -329,6 +376,13 @@ for index, (identity, digest, tokens) in enumerate(series):
                 failures.append(
                     f'distinct cells {other_identity} and {identity} share a declared payload-series window'
                 )
+
+for index, (identity, steps) in enumerate(step_series):
+    for other_identity, other_steps in step_series[:index]:
+        if steps == other_steps:
+            failures.append(
+                f'distinct cells {other_identity} and {identity} have identical declared field-step series'
+            )
 
 if failures:
     print(json.dumps({'status': 'failed', 'failure_count': len(failures), 'failures': failures}, indent=2))

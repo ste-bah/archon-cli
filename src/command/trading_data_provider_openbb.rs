@@ -37,7 +37,7 @@ pub(crate) fn fetch_native_with_base_url(
 ) -> Result<String> {
     let history_horizon = load_history_horizon(root, provider, symbol, timeframe);
     let window = select_fetch_window(start, end, history_horizon);
-    let request = match openbb_native_request(
+    let mut request = match openbb_native_request(
         provider,
         symbol,
         timeframe,
@@ -52,6 +52,9 @@ pub(crate) fn fetch_native_with_base_url(
             );
         }
     };
+    request
+        .credential_state
+        .insert("OPENBB_API_URL".into(), !base_url.trim().is_empty());
     let response = match fetch_openbb_response(base_url, &request) {
         Ok(response) => response,
         Err(reason) => {
@@ -166,7 +169,7 @@ fn probe_openbb(
     timeframe: &str,
 ) -> Result<archon_trading::data_lake::ProviderHistoryHorizon, String> {
     let history_horizon = probed_history_horizon(Utc::now());
-    let request = openbb_native_request(
+    let mut request = openbb_native_request(
         provider,
         symbol,
         timeframe,
@@ -174,6 +177,9 @@ fn probe_openbb(
         &history_horizon.end,
         2,
     )?;
+    request
+        .credential_state
+        .insert("OPENBB_API_URL".into(), !base_url.trim().is_empty());
     let response = fetch_openbb_response(base_url, &request)?;
     bars_from_openbb_response(&response.body)
         .map(|_| history_horizon)

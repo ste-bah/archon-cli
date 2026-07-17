@@ -85,6 +85,8 @@ pub(super) fn validation_report(
         "OHLCV bars are sorted, unique, finite, and sane",
     );
     let status = validation_status(&checks);
+    let content_sha256 =
+        ValidationReport::content_hash(&metadata.checksums.normalized_sha256, &checks);
     ValidationReport {
         schema_version: "archon-trading-validation-v1".into(),
         dataset_id: metadata.dataset_id.clone(),
@@ -93,6 +95,7 @@ pub(super) fn validation_report(
         native_interval: metadata.native_interval,
         production_eligible: metadata.production_eligible && status == ValidationStatus::Passed,
         checks,
+        content_sha256,
         summary,
         validated_at,
     }

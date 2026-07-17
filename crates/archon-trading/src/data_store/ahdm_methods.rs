@@ -14,6 +14,55 @@ fn coverage_run_id(run_prefix: &str, cell: &CoverageCell) -> String {
         safe_path(&cell.timeframe)
     )
 }
+fn ahdm_backtest_request(record: &StoredDatasetRecord, quantity: f64) -> OhlcvBacktestRequest {
+    OhlcvBacktestRequest {
+        dataset: OhlcvDatasetRef {
+            dataset_id: record.dataset_id.clone(),
+            version: record.version.clone(),
+            checksum: record.checksum.clone(),
+            status: record.status,
+        },
+        rule: OhlcvBacktestRule::CloseMomentum,
+        quantity,
+        exploratory: false,
+        source: EvidenceSource::NativeHarness,
+        fast_len: 10,
+        slow_len: 30,
+    }
+}
+
+fn ahdm_backtest_config(
+    config: &BacktestConfig,
+    manifest: &serde_json::Value,
+    gate: &BacktestDataGateReport,
+    dataset_ref: &serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({"schema_version": "archon-ahdm-backtest-config-v1", "config": config, "dataset": dataset_ref, "shared_rule_manifest": manifest, "data_gate": gate, "config_hash": config.config_hash(), "manifest_hash": bytes_checksum(manifest.to_string().as_bytes())})
+}
+
+fn ahdm_backtest_report(
+    report: &OhlcvBacktestReport,
+    manifest_hash: &str,
+    gate: &BacktestDataGateReport,
+    dataset_ref: &serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({"schema_version": "archon-ahdm-backtest-report-v1", "report": report, "dataset": dataset_ref, "data_gate": gate, "shared_rule_manifest_hash": manifest_hash, "diagnostic": false, "promotion_eligible": report.promotion_eligible && gate.promotion_eligible})
+}
+
+fn ahdm_backtest_dataset_ref(dataset: &StoredOhlcvDataset) -> serde_json::Value {
+    serde_json::json!({
+        "dataset_id": dataset.record.dataset_id,
+        "version": dataset.record.version,
+        "provider": dataset.record.provider,
+        "timeframe": dataset.metadata.timeframe,
+        "native_interval": dataset.metadata.native_interval,
+        "production_eligible": dataset.metadata.production_eligible,
+        "validation_path": dataset.record.validation_path,
+        "normalized_path": dataset.record.normalized_path,
+        "raw_path": dataset.record.raw_path,
+    })
+}
+
 impl TradingDataLake {
     pub fn write_ahdm_evidence_inventory(
         &self,
@@ -81,6 +130,28 @@ impl TradingDataLake {
                     "fail_closed": true,
                     "reason": "write_ahdm_pine_artifacts does not call provider-sensitive Pine tooling; external compile evidence must be recorded separately"
                 },
+                "required_tooling": [
+                    {"name": "pine_analyze", "available": false, "required_for_readiness": true},
+                    {"name": "pine_check", "available": false, "required_for_readiness": true},
+                    {"name": "pine_compile", "available": false, "required_for_readiness": true},
+                    {"name": "pine_get_console", "available": false, "required_for_readiness": false},
+                    {"name": "pine_get_errors", "available": false, "required_for_readiness": false},
+                    {"name": "pine_smart_compile", "available": false, "required_for_readiness": true}
+                ],
+                "residual_gaps": [
+                    {
+                        "id": "GAP-AHDM-PINE-TOOLING-001",
+                        "task_id": "TASK-TDL-120",
+                        "area": "pine_compile_readiness",
+                        "description": "Pine static analysis/check/compile evidence has not been supplied by TradingView tooling for these generated artifacts.",
+                        "severity": "blocker",
+                        "fail_closed": true,
+                        "fail_closed_behavior": "Pine readiness and paper/live promotion evidence remain unsatisfied until external Pine tooling records successful checks for the exact artifact hashes.",
+                        "blocks": ["pine_readiness", "paper_trading_promotion", "live_trading_promotion"],
+                        "owner": "Archon",
+                        "created_at": generated_at
+                    }
+                ],
                 "shared_manifest_traceability": {
                     "native_and_pine_parity_key": manifest["native_and_pine_parity_key"].clone(),
                     "native_manifest_source": "crates/archon-trading/src/data_store/ahdm.rs::ahdm_rule_manifest",

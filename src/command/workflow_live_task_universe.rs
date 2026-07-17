@@ -51,6 +51,8 @@ pub(super) struct WorkflowV2DeliverableContract {
     pub(super) kind: String,
     pub(super) artifact_path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) typed_verifier_command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) registry_path: Option<String>,
     #[serde(default)]
     pub(super) required_universe: bool,

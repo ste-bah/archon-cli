@@ -22,8 +22,21 @@ pub(super) fn ahdm_citations(generated_at: &str, coverage_gaps: Vec<String>) -> 
         ],
         "secondary_non_authoritative_kbs": ["trading-elliott-wave"],
         "rules": ahdm_rule_manifest(generated_at)["rules"].clone(),
+        "inventory_gate": {
+            "status": "blocked_fail_closed",
+            "promotion_allowed": false,
+            "fail_closed_behavior": "KB inventory can be generated for audit, but cannot promote StrategySpec/readiness unless data coverage and citation gates pass",
+            "required_prerequisites": {
+                "citation_or_hypothesis_policy_passed": true,
+                "data_coverage_gate_passed": coverage_gaps.is_empty(),
+                "hypothesis_rules_absent": false,
+                "native_backtest_gate_passed": false
+            }
+        },
+        "promotion_allowed": false,
         "coverage_gaps": coverage_gaps,
-        "residual_gaps": [residual_gap("GAP-AHDM-DATA-001", "data", "Trading Data Lake coverage is incomplete when coverage_gaps is non-empty", "Promotion-oriented strategy work and production backtests are refused until coverage gaps are closed", generated_at)]
+        "residual_gaps": [residual_gap("GAP-AHDM-DATA-001", "data", "Trading Data Lake coverage is incomplete when coverage_gaps is non-empty", "Promotion-oriented strategy work and production backtests are refused until coverage gaps are closed", generated_at),
+            residual_gap("GAP-AHDM-KB-HYPOTHESIS-001", "kb", "At least one AHDM rule remains classified as hypothesis", "Hypothesis rules remain research-only and cannot satisfy promotion gates", generated_at)]
     })
 }
 
@@ -110,12 +123,38 @@ pub(super) fn ahdm_inventory_markdown(citations: &serde_json::Value, gaps: &[Str
             ));
         }
     }
+    text.push_str("\n## Inventory Gate\n\n");
+    if let Some(gate) = citations
+        .get("inventory_gate")
+        .and_then(serde_json::Value::as_object)
+    {
+        text.push_str(&format!(
+            "- status={}\n- promotion_allowed={}\n- fail_closed_behavior={}\n",
+            gate.get("status").unwrap_or(&serde_json::Value::Null),
+            gate.get("promotion_allowed")
+                .unwrap_or(&serde_json::Value::Null),
+            gate.get("fail_closed_behavior")
+                .unwrap_or(&serde_json::Value::Null)
+        ));
+    }
     text.push_str("\n## Data Coverage Gaps\n\n");
     if gaps.is_empty() {
         text.push_str("- none recorded by coverage matrix\n");
     } else {
         for gap in gaps {
             text.push_str(&format!("- {gap}\n"));
+        }
+    }
+    text.push_str("\n## Residual Gaps\n\n");
+    if let Some(residual_gaps) = citations
+        .get("residual_gaps")
+        .and_then(serde_json::Value::as_array)
+    {
+        for gap in residual_gaps {
+            text.push_str(&format!(
+                "- `{}`: {}\n",
+                gap["id"], gap["fail_closed_behavior"]
+            ));
         }
     }
     text
@@ -142,6 +181,7 @@ pub(super) fn ahdm_strategy_spec(
     let manifest = ahdm_rule_manifest(generated_at);
     serde_json::json!({
         "schema_version": "archon-ahdm-strategy-spec-v1",
+        "schema": "archon-ahdm-strategy-spec-v1",
         "strategy_id": "AHDM-v1",
         "generated_at": generated_at,
         "confidence": {
@@ -167,11 +207,26 @@ pub(super) fn ahdm_strategy_spec(
         "instrument_universe": ["ES", "NQ", "SPY", "QQQ", "BTCUSDT", "ETHUSDT"],
         "timeframe_stack": ["1W", "1D", "240", "60", "15"],
         "required_datasets": datasets,
+        "dataset_reference_policy": {
+            "reference_type": "registered_dataset_id_and_version",
+            "loose_file_references_allowed": false,
+            "missing_refs_behavior": "no_trade_fail_closed"
+        },
         "daily_bias_formula": manifest["rules"].clone(),
         "confidence_scoring": {"type": "score_not_probability", "sum_weights": 100, "no_trade_below": 0.55, "paper_consideration_min": 0.70},
         "invalidation_logic": "entry invalidates on missing required evidence, broken setup level, or data gate failure",
         "stop_logic": "deterministic setup invalidation stop from shared manifest; no live order placement",
         "tp_logic": {"tp1": "first planned objective", "tp2": "second planned objective", "tp3": "final planned objective"},
+        "prd_section_27": {
+            "strategy": "AHDM-v1",
+            "bias_components": "exact weighted initial_bias.components sum to 100",
+            "entry_models": ["liquidity_sweep_reversal", "trend_continuation_pullback", "range_mean_reversion"],
+            "dataset_references": "registered dataset_id/version records only; loose files are not evidence",
+            "confidence": "score, not probability",
+            "no_trade_rule": "confidence < 0.55 or missing required evidence",
+            "paper_gate": "confidence >= 0.70 and backtest gates passed",
+            "live_trading": "out_of_scope"
+        },
         "no_trade_filters": ["confidence < 0.55 -> no_trade", "missing required evidence", "coverage gap", "non-native or degraded dataset", "failed backtest gate"],
         "position_sizing": {"risk_fraction": 0.005, "max_fraction": 0.01, "formula": "min(account_equity*risk_fraction/abs(entry-stop), account_equity*max_fraction/entry)", "promotion_claim": false},
         "slippage_cost_assumptions": {"fees": "from BacktestConfig", "spread_bps": "from BacktestConfig", "slippage_bps": "from BacktestConfig", "market_impact_bps": "from BacktestConfig"},
@@ -439,56 +494,4 @@ pub(super) fn diagnostic_artifacts_do_not_promote(
         .values()
         .filter(|record| record.status == DatasetStatus::Degraded)
         .all(|record| record.status != DatasetStatus::Healthy))
-}
-
-pub(super) fn ahdm_backtest_request(
-    record: &StoredDatasetRecord,
-    quantity: f64,
-) -> OhlcvBacktestRequest {
-    OhlcvBacktestRequest {
-        dataset: OhlcvDatasetRef {
-            dataset_id: record.dataset_id.clone(),
-            version: record.version.clone(),
-            checksum: record.checksum.clone(),
-            status: record.status,
-        },
-        rule: OhlcvBacktestRule::CloseMomentum,
-        quantity,
-        exploratory: false,
-        source: EvidenceSource::NativeHarness,
-        fast_len: 10,
-        slow_len: 30,
-    }
-}
-
-pub(super) fn ahdm_backtest_config(
-    config: &BacktestConfig,
-    manifest: &serde_json::Value,
-    gate: &BacktestDataGateReport,
-    dataset_ref: &serde_json::Value,
-) -> serde_json::Value {
-    serde_json::json!({"schema_version": "archon-ahdm-backtest-config-v1", "config": config, "dataset": dataset_ref, "shared_rule_manifest": manifest, "data_gate": gate, "config_hash": config.config_hash(), "manifest_hash": bytes_checksum(manifest.to_string().as_bytes())})
-}
-
-pub(super) fn ahdm_backtest_report(
-    report: &OhlcvBacktestReport,
-    manifest_hash: &str,
-    gate: &BacktestDataGateReport,
-    dataset_ref: &serde_json::Value,
-) -> serde_json::Value {
-    serde_json::json!({"schema_version": "archon-ahdm-backtest-report-v1", "report": report, "dataset": dataset_ref, "data_gate": gate, "shared_rule_manifest_hash": manifest_hash, "diagnostic": false, "promotion_eligible": report.promotion_eligible && gate.promotion_eligible})
-}
-
-pub(super) fn ahdm_backtest_dataset_ref(dataset: &StoredOhlcvDataset) -> serde_json::Value {
-    serde_json::json!({
-        "dataset_id": dataset.record.dataset_id,
-        "version": dataset.record.version,
-        "provider": dataset.record.provider,
-        "timeframe": dataset.metadata.timeframe,
-        "native_interval": dataset.metadata.native_interval,
-        "production_eligible": dataset.metadata.production_eligible,
-        "validation_path": dataset.record.validation_path,
-        "normalized_path": dataset.record.normalized_path,
-        "raw_path": dataset.record.raw_path,
-    })
 }

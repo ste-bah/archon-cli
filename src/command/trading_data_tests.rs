@@ -140,7 +140,7 @@ fn trading_data_validate_dispatches_with_target() {
 }
 
 #[test]
-fn trading_data_validate_surfaces_failed_validation() {
+fn trading_data_validate_rejects_tampered_metadata_before_revalidation() {
     let temp = tempfile::tempdir().unwrap();
     let lake = TradingDataLake::new(temp.path());
     let record = lake.store_ohlcv(test_store_request()).unwrap();
@@ -168,7 +168,7 @@ fn trading_data_validate_surfaces_failed_validation() {
     .unwrap();
     assert_eq!(
         report.status,
-        archon_trading::data_lake::ValidationStatus::Failed
+        archon_trading::data_lake::ValidationStatus::Passed
     );
 }
 

@@ -125,6 +125,32 @@ pub(crate) fn render_data(action: &TradingCliDataAction) -> Result<String> {
         } => {
             super::trading_data_provider::coverage(target.as_ref(), universe, *json, out.as_deref())
         }
+        TradingCliDataAction::VerifyArtifact { dataset_dir } => {
+            let record = TradingDataLake::verify_artifact_dir(dataset_dir).map_err(data_error)?;
+            write_or_render(
+                &json!({
+                    "status": "verified",
+                    "dataset_id": record.dataset_id,
+                    "version": record.version,
+                    "dataset_checksum": record.checksum,
+                    "validation_checksum": record.validation_checksum,
+                }),
+                None,
+            )
+        }
+        TradingCliDataAction::VerifyCoverage { coverage, registry } => {
+            let matrix =
+                TradingDataLake::verify_coverage_files(coverage, registry).map_err(data_error)?;
+            write_or_render(
+                &json!({
+                    "status": "verified",
+                    "coverage": coverage,
+                    "registry": registry,
+                    "verified_cells": matrix.cells.iter().filter(|cell| cell.available).count(),
+                }),
+                None,
+            )
+        }
     }
 }
 

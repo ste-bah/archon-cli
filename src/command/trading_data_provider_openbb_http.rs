@@ -76,10 +76,16 @@ fn require_credentials(request: &OpenBbNativeRequest) -> Result<(), String> {
     if request.openbb_provider.eq_ignore_ascii_case("yfinance") {
         return Ok(());
     }
-    if !request.credential_state.values().any(|set| *set) {
+    let missing = request
+        .credential_state
+        .iter()
+        .filter_map(|(key, present)| (!present).then_some(key.as_str()))
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
         return Err(format!(
-            "OpenBB credentials unavailable for {}; env keys checked: {}",
+            "OpenBB credentials unavailable for {}; missing env keys: {}; env keys checked: {}",
             request.openbb_provider,
+            missing.join(","),
             credential_env_keys(request).join(",")
         ));
     }

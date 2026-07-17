@@ -80,6 +80,19 @@ async fn run_serial_v2_write_fanout(
                 return Err(WorkflowError::SpecInvalid(err.to_string()));
             }
         }
+        if matches!(
+            result.status,
+            WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+        ) && let Some(root) = target_repository_root
+            && let Err(error) =
+                run_declared_artifact_verifiers(&branch_execution.input, Path::new(root))
+        {
+            result = write_branch_validation_error_result(
+                &branch_id,
+                Some(&branch_execution.input),
+                &error,
+            );
+        }
         tag_branch_result(&mut result, &branch_id);
         normalize_write_branch_contract_result(&mut result);
         save_write_branch_outcome(

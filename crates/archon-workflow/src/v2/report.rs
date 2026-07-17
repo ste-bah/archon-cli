@@ -20,21 +20,35 @@ pub struct WorkflowV2ReportPaths {
 pub struct WorkflowV2FinalReport {
     pub status: WorkflowV2Status,
     pub paths: WorkflowV2ReportPaths,
+    #[serde(default)]
     pub task_coverage: Vec<WorkflowV2TaskCoverage>,
+    #[serde(default)]
     pub files_read: Vec<WorkflowV2FileRecord>,
+    #[serde(default)]
     pub files_changed: Vec<WorkflowV2FileRecord>,
+    #[serde(default)]
     pub commands_run: Vec<WorkflowV2CommandRecord>,
+    #[serde(default)]
     pub tests_run: Vec<WorkflowV2CommandRecord>,
+    #[serde(default)]
     pub review_findings: Vec<String>,
+    #[serde(default)]
     pub remediation_actions: Vec<String>,
+    #[serde(default)]
     pub artifacts: Vec<WorkflowV2Artifact>,
+    #[serde(default)]
     pub accepted_tasks: Vec<String>,
+    #[serde(default)]
     pub noop_tasks: Vec<String>,
+    #[serde(default)]
     pub failed_tasks: Vec<String>,
+    #[serde(default)]
     pub blocked_tasks: Vec<String>,
+    #[serde(default)]
     pub missing_tasks: Vec<String>,
     #[serde(default)]
     pub review_blockers: Vec<WorkflowV2ResidualGap>,
+    #[serde(default)]
     pub residual_gaps: Vec<WorkflowV2ResidualGap>,
 }
 

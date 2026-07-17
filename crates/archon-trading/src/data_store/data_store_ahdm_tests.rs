@@ -271,7 +271,7 @@ fn d44_constant_volume_fails_validation_and_registry_reconciles_degraded() {
         })
     );
 
-    let registry = lake.load_registry().unwrap();
+    let registry: PersistentDatasetRegistry = read_json(&lake.registry_path()).unwrap();
     let stored = registry
         .datasets
         .get(&registry_key(&record.dataset_id, &record.version))
@@ -321,7 +321,7 @@ fn validation_report_fails_closed_for_native_gate_invariants() {
 }
 
 #[test]
-fn failed_validation_still_writes_validation_report() {
+fn tampered_metadata_is_rejected_before_revalidation() {
     let temp = tempfile::tempdir().unwrap();
     let lake = TradingDataLake::new(temp.path());
     let record = lake.store_ohlcv(request()).unwrap();
@@ -332,22 +332,25 @@ fn failed_validation_still_writes_validation_report() {
     metadata.provider.clear();
     write_json(&metadata_path, &metadata).unwrap();
     let result = lake.validate_ohlcv("polygon-BTCUSD-1D-raw", "20260101-fixture", "now".into());
-    assert!(matches!(result, Err(DataStoreError::InvalidOhlcv(_))));
+    assert!(matches!(
+        result,
+        Err(DataStoreError::IncompleteArtifactContract(message))
+            if message.contains("checksum chain mismatch")
+    ));
     let report: ValidationReport = read_json(&temp.path().join(&record.validation_path)).unwrap();
-    assert_eq!(report.status, ValidationStatus::Failed);
-    assert!(!report.production_eligible);
+    assert_eq!(report.status, ValidationStatus::Passed);
+    assert!(report.production_eligible);
 
-    let registry = lake.load_registry().unwrap();
+    let registry: PersistentDatasetRegistry = read_json(&lake.registry_path()).unwrap();
     let stored = registry
         .datasets
         .get(&registry_key(&record.dataset_id, &record.version))
         .unwrap();
-    assert_eq!(stored.status, DatasetStatus::Degraded);
-    assert!(!stored.production_eligible);
+    assert_eq!(stored.status, DatasetStatus::Healthy);
+    assert!(stored.production_eligible);
 
     let metadata: DatasetMetadata = read_json(&metadata_path).unwrap();
-    assert_eq!(metadata.quality_status, "degraded");
-    assert!(!metadata.production_eligible);
+    assert!(metadata.provider.is_empty());
 }
 
 #[test]
@@ -401,8 +404,8 @@ fn backtest_gate_refuses_checksum_mismatch() {
     let result = lake.backtest_data_gate("polygon-BTCUSD-1D-raw", "20260101-fixture", false);
     assert!(matches!(
         result,
-        Err(DataStoreError::InvalidMetadata(message))
-            if message.contains("checksum mismatch")
+        Err(DataStoreError::IncompleteArtifactContract(message))
+            if message.contains("checksum chain mismatch")
     ));
 }
 

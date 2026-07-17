@@ -165,6 +165,57 @@ fn validate_worktree_branch_result(
             return Err(WorkflowError::SpecInvalid(err.to_string()));
         }
     }
+    if matches!(
+        result.status,
+        WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+    ) && let Err(error) =
+        run_declared_artifact_verifiers(&branch.execution.input, &branch.workspace_root)
+    {
+        persist_rejected_worktree_result(
+            v2_store,
+            &branch.id,
+            "artifact_verification",
+            result,
+            &error,
+        );
+        *result = write_branch_validation_error_result(
+            &branch.id,
+            Some(&branch.execution.input),
+            &error,
+        );
+    }
+    Ok(())
+}
+
+fn run_declared_artifact_verifiers(
+    input: &serde_json::Value,
+    workspace_root: &Path,
+) -> Result<(), String> {
+    let commands = input
+        .get("item")
+        .and_then(|item| item.get("artifact_verification_commands"))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|command| !command.is_empty());
+    for command in commands {
+        let output = std::process::Command::new("sh")
+            .arg("-lc")
+            .arg(command)
+            .current_dir(workspace_root)
+            .output()
+            .map_err(|error| format!("artifact verifier could not start: {error}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "declared artifact verifier failed with {}: {}{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout).trim(),
+                String::from_utf8_lossy(&output.stderr).trim(),
+            ));
+        }
+    }
     Ok(())
 }
 

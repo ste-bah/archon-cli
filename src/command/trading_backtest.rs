@@ -267,6 +267,7 @@ mod tests {
             schema_version: "archon-trading-data-registry-v2".into(),
             dataset_path: "datasets/btc-1d/v1".into(),
             metadata_checksum: "metadata-checksum".into(),
+            validation_checksum: "validation-checksum".into(),
             raw_checksum: "raw-checksum".into(),
             raw_response_path: "raw/response.json".into(),
             raw_request_path: "raw/request.json".into(),

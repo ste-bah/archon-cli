@@ -2,6 +2,9 @@ use super::super::super::super::workflow_live_task_universe::{
     WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask,
 };
 use super::*;
+use crate::command::workflow_live::workflow_live_v2::workflow_live_v2_script::{
+    item_has_write_ownership, preserve_host_pinned_implementation,
+};
 
 fn contract() -> (WorkflowV2TaskUniverse, Value) {
     let universe = WorkflowV2TaskUniverse {
@@ -63,6 +66,33 @@ fn d61_host_pins_criteria_and_refutes_both_inconsistent_canary_shapes() {
             );
         }
     }
+}
+
+#[test]
+fn discovery_merge_cannot_flip_host_demoted_work_back_to_noop() {
+    let (universe, _) = contract();
+    let lifecycle_contract = LifecycleContract {
+        task_universe: &universe,
+        target_repository_root: Some("/repo"),
+    };
+    let inventory = serde_json::json!({"items": [{
+        "item_id": "refuted-noop",
+        "work_type": "verified_noop",
+        "canonical_task_ids": ["TASK-TDL-001"],
+        "dependency_ids": [],
+        "acceptance_criteria": [
+            "Gap report maps current code and missing implementation to every normative requirement.",
+            "Existing registry behavior is documented honestly.",
+            "No storage-root change is proposed."
+        ],
+        "artifact_requirements": ["project/artifacts/gap-audit-current.json"]
+    }]});
+    let demoted = std::collections::BTreeSet::from(["TASK-TDL-001".to_string()]);
+
+    let pinned = preserve_host_pinned_implementation(&lifecycle_contract, &inventory, &demoted);
+    let item = &pinned["items"][0];
+    assert_eq!(item["work_type"], "implementation");
+    assert!(item_has_write_ownership(item));
 }
 
 #[test]
@@ -137,7 +167,10 @@ fn refuted_noop_after_bounded_repairs_routes_to_implementation() {
     assert_eq!(items[0]["canonical_task_ids"][0], "TASK-TDL-001");
     assert_eq!(items[0]["noop_reclassification"]["count"], 1);
     assert_eq!(items[0]["target_files"], serde_json::json!([]));
-    assert_eq!(items[0]["artifact_requirements"], serde_json::json!([]));
+    assert_eq!(
+        items[0]["artifact_requirements"],
+        serde_json::json!(["project/artifacts/gap-audit-current.json"])
+    );
 }
 
 #[test]

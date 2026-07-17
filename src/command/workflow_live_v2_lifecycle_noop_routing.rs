@@ -223,7 +223,7 @@ pub(super) fn reclassify_inventory_contradicted_noops(
             if ids.is_empty() {
                 item
             } else {
-                implementation_item(&item, ids, "inventory_contradiction", &gaps)
+                implementation_item(contract, &item, ids, "inventory_contradiction", &gaps)
             }
         })
         .collect::<Vec<_>>();
@@ -263,6 +263,7 @@ pub(super) fn route_refuted_noops(
         }
         reclassified_ids.extend(ids.iter().cloned());
         implementation_items.push(implementation_item(
+            contract,
             item,
             ids,
             "bounded_noop_proof_refutation",
@@ -422,6 +423,7 @@ fn noop_item_has_authoritative_acceptance_criteria(
 }
 
 fn implementation_item(
+    contract: &LifecycleContract<'_>,
     item: &Value,
     canonical_task_ids: Vec<String>,
     source: &str,
@@ -447,7 +449,7 @@ fn implementation_item(
     );
     object.insert(
         "canonical_task_ids".to_string(),
-        serde_json::json!(canonical_task_ids),
+        serde_json::json!(&canonical_task_ids),
     );
     object.insert(
         "work_type".to_string(),
@@ -456,6 +458,18 @@ fn implementation_item(
     object
         .entry("target_files".to_string())
         .or_insert_with(|| Value::Array(Vec::new()));
+    let mut artifact_requirements = support::strings_of(object.get("artifact_requirements"));
+    for task in &contract.task_universe.tasks {
+        if canonical_task_ids.contains(&task.canonical_task_id) {
+            artifact_requirements.extend(task.artifact_requirements.iter().cloned());
+        }
+    }
+    artifact_requirements.sort();
+    artifact_requirements.dedup();
+    object.insert(
+        "artifact_requirements".to_string(),
+        serde_json::json!(artifact_requirements),
+    );
     if !support::present(object.get("focused_verification")) {
         object.insert(
             "focused_verification".to_string(),

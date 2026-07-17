@@ -309,7 +309,7 @@ pub(super) fn credential_state(openbb_provider: &str) -> BTreeMap<String, bool> 
 
 pub(super) fn credential_env_keys_for(openbb_provider: &str) -> Vec<&'static str> {
     match openbb_provider.trim().to_ascii_lowercase().as_str() {
-        "openbb" | "polygon" => vec!["POLYGON_API_KEY"],
+        "openbb" | "polygon" => vec!["OPENBB_API_URL", "POLYGON_API_KEY"],
         _ => vec!["OPENBB_API_KEY"],
     }
 }

@@ -84,10 +84,28 @@ fn migrate_record(
     fill_migration_metadata_fields(record, &metadata);
     if write_reports {
         write_migration_raw_contract(root, record)?;
+        refresh_migration_checksum_chain(root, record, &mut metadata)?;
         persist_migrated_metadata(&metadata_path, &metadata)?;
         write_migration_validation(root, record, &metadata)?;
     }
     Ok(record.validation_path.clone())
+}
+
+fn refresh_migration_checksum_chain(
+    root: &Path,
+    record: &mut StoredDatasetRecord,
+    metadata: &mut DatasetMetadata,
+) -> Result<(), DataStoreError> {
+    let normalized = checksum_file(root, &record.normalized_path)?;
+    let raw = checksum_file(root, &record.raw_response_path)?;
+    metadata.checksum = normalized.clone();
+    metadata.checksums.normalized_sha256 = normalized.clone();
+    metadata.checksums.raw_sha256 = raw.clone();
+    metadata.checksums.metadata_sha256 = metadata_sha256(metadata)?;
+    record.checksum = normalized;
+    record.raw_checksum = raw;
+    record.metadata_checksum = metadata.checksums.metadata_sha256.clone();
+    Ok(())
 }
 
 fn read_migration_metadata(
@@ -227,10 +245,11 @@ fn persist_migrated_metadata(
 
 fn write_migration_validation(
     root: &Path,
-    record: &StoredDatasetRecord,
+    record: &mut StoredDatasetRecord,
     metadata: &DatasetMetadata,
 ) -> Result<(), DataStoreError> {
     let report = migration_validation_report(metadata, record);
+    record.validation_checksum = report.content_sha256.clone();
     write_schema_json(&root.join(&record.validation_path), &report)?;
     write_schema_json(&root.join(&record.manifest_path), record)
 }
@@ -239,6 +258,7 @@ fn migration_validation_report(
     metadata: &DatasetMetadata,
     record: &StoredDatasetRecord,
 ) -> ValidationReport {
+    let checks = migration_checks();
     ValidationReport {
         schema_version: "archon-trading-validation-v1".into(),
         dataset_id: record.dataset_id.clone(),
@@ -246,7 +266,11 @@ fn migration_validation_report(
         status: ValidationStatus::Degraded,
         native_interval: false,
         production_eligible: false,
-        checks: migration_checks(),
+        content_sha256: ValidationReport::content_hash(
+            &metadata.checksums.normalized_sha256,
+            &checks,
+        ),
+        checks,
         summary: ValidationSummary {
             row_count: record.bars as u64,
             duplicate_timestamp_count: 0,
