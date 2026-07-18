@@ -424,7 +424,7 @@ fn filesystem_paths_in_text(text: &str) -> Vec<String> {
             || token.starts_with(".archon/")
             || token.starts_with("./")
             || (token.contains('/')
-                && [".json", ".jsonl", ".md", ".txt", ".pine", ".csv", ".zip"]
+                && [".json", ".jsonl", ".md", ".txt", ".csv", ".zip"]
                     .iter()
                     .any(|extension| token.ends_with(extension)));
         if looks_like_path && !artifact_path_is_placeholder(token) {

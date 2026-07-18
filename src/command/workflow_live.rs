@@ -63,6 +63,8 @@ mod workflow_live_runner;
 #[cfg(test)]
 #[path = "workflow_live_runner_tests.rs"]
 mod workflow_live_runner_tests;
+#[path = "workflow_live_semantic_preservation.rs"]
+mod workflow_live_semantic_preservation;
 #[path = "workflow_live_task_universe.rs"]
 mod workflow_live_task_universe;
 #[cfg(test)]

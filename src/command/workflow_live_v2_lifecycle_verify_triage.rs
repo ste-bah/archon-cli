@@ -173,6 +173,23 @@ impl LifecycleDriver {
                 &repaired,
                 failed_outcomes,
             );
+        // D74: a shape repair that accounts for more outcomes is still rejected
+        // when it rewrote or dropped the semantic identity of already-routed
+        // entries; the original triage stays authoritative.
+        let preservation = semantic_preservation::check_items(
+            &semantic_preservation::canonical_route_entries(&triage),
+            &semantic_preservation::canonical_route_entries(&repaired),
+        );
+        if !preservation.passed() {
+            support::record_repair_attempt(
+                &mut evidence.repair_attempts,
+                &repair_id,
+                "semantic_preservation_rejected",
+                &semantic_preservation::violation_issues(&preservation.violations),
+                &repaired,
+            );
+            return Ok(triage);
+        }
         if still_unaccounted.len() < unaccounted.len() {
             Ok(repaired)
         } else {

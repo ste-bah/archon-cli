@@ -67,9 +67,12 @@ fn non_cargo_review_verification_keeps_default_parallelism() {
 }
 
 #[test]
-fn review_verification_prompt_grounds_backtest_run_markers() {
+fn review_verification_prompt_grounds_run_artifact_markers() {
+    // D75: the run-artifact grounding is domain-neutral — a directory counts
+    // as a concrete run artifact only via its declared config/manifest or
+    // explicit readiness/acceptance evidence, for ANY PRD's artifact layout.
     assert!(prompts::REVIEW_REMEDIATION_WAVE_TASK.contains("workflow run artifact directory"));
-    assert!(prompts::REVIEW_VERIFICATION_PLAN_TASK.contains("config.json"));
+    assert!(prompts::REVIEW_VERIFICATION_PLAN_TASK.contains("declared config/manifest file"));
     assert!(prompts::REVIEW_VERIFICATION_PLAN_TASK.contains("hygiene residual gaps"));
-    assert!(prompts::REVIEW_VERIFICATION_WAVE_TASK.contains("Paper-readiness blockers"));
+    assert!(prompts::REVIEW_VERIFICATION_WAVE_TASK.contains("Declared readiness blockers"));
 }

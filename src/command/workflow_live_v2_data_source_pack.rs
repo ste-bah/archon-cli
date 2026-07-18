@@ -46,6 +46,9 @@ fn pack_outcome(value: &serde_json::Value) -> serde_json::Value {
         return compact_unknown_source_value(value);
     };
     let mut packed = serde_json::Map::new();
+    // D74 companion: the triage/repair prompts order reducers to preserve gap
+    // identity and classification — so the packer must not strip those fields
+    // from their inputs.
     for key in [
         "item_id",
         "id",
@@ -54,6 +57,20 @@ fn pack_outcome(value: &serde_json::Value) -> serde_json::Value {
         "dependency_ids",
         "status",
         "failure_kind",
+        "failure_status",
+        "failure_evidence",
+        "failed_predicate",
+        "source_residual_gap_ids",
+        "classification",
+        "verification_failure_class",
+        "pass_fail_count",
+        "matched_test_check_names",
+        "error",
+        "expected_evidence",
+        "focused_verification",
+        "recommended_retry",
+        "provider_env_proof",
+        "acceptance_criteria_results",
         "summary",
         "evidence",
         "completion_evidence",
@@ -76,9 +93,25 @@ fn pack_result_like_object(
     object: &serde_json::Map<String, serde_json::Value>,
 ) -> serde_json::Value {
     let mut packed = serde_json::Map::new();
+    // Result-like objects can BE outcomes (top-level status+summary); keep
+    // their identity and verification-semantic fields alongside the result
+    // projection so triage inputs never lose what routing must preserve.
     for key in [
         "status",
         "summary",
+        "item_id",
+        "id",
+        "source_item_id",
+        "canonical_task_ids",
+        "failure_kind",
+        "failed_predicate",
+        "source_residual_gap_ids",
+        "classification",
+        "verification_failure_class",
+        "pass_fail_count",
+        "matched_test_check_names",
+        "error",
+        "provider_env_proof",
         "evidence",
         "artifacts",
         "commands_run",

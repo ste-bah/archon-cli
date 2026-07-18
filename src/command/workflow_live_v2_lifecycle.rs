@@ -6,6 +6,7 @@
 use super::super::workflow_live_generated_lifecycle_remediation as remediation;
 use super::super::workflow_live_generated_lifecycle_support as support;
 use super::super::workflow_live_generated_lifecycle_support::LifecycleContract;
+use super::super::workflow_live_semantic_preservation as semantic_preservation;
 use self::workflow_live_v2_lifecycle_prompts as prompts;
 
 const TERMINAL_GATE_REROUTE_MARKER: &str = "workflow terminal gate reroute:";
@@ -234,6 +235,7 @@ impl LifecycleDriver {
         }
         Ok(transport_failure_result(
             id,
+            max_transport_attempts,
             max_transport_attempts,
             last_transport_failure.as_deref().unwrap_or(
                 "reducer transport failed without a recorded transport error",

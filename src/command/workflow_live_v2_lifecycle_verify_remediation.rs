@@ -114,7 +114,12 @@ impl LifecycleDriver {
             {
                 Ok(result) => result,
                 Err(error) if is_transport_failure_text(&error.to_string()) => {
-                    transport_failure_result(&call_id, 1, &error.to_string())
+                    transport_failure_result(
+                        &call_id,
+                        transport_attempt,
+                        max_transport_attempts,
+                        &error.to_string(),
+                    )
                 }
                 Err(error) => return Err(error),
             };
@@ -147,24 +152,30 @@ impl LifecycleDriver {
 fn transport_failure_result(
     call_id: &str,
     attempts: usize,
+    max_attempts: usize,
     error: &str,
 ) -> serde_json::Value {
+    // The terminal gate's transport_retry_budget work-kind fires only when it
+    // can see attempts < max_transport_attempts on one object — both fields
+    // must travel together or the budget is dead-wired.
     serde_json::json!({
         "status": "failed",
         "summary": format!(
-            "reducer transport exhausted after {attempts} attempt(s) for '{call_id}': {error}"
+            "reducer transport failed at attempt {attempts} of {max_attempts} for '{call_id}': {error}"
         ),
         "data": {
             "error": error,
             "failure_class": "transport_infrastructure",
-            "transport_exhausted": true,
+            "transport_exhausted": attempts >= max_attempts,
             "transport_attempts": attempts,
+            "max_transport_attempts": max_attempts,
             "terminal_blockers": [{
                 "id": format!("transport-exhausted-{call_id}"),
                 "classification": "transport_infrastructure_exhausted",
                 "description": error,
                 "call_id": call_id,
                 "attempts": attempts,
+                "max_transport_attempts": max_attempts,
             }],
         }
     })
@@ -695,7 +706,30 @@ impl LifecycleDriver {
             &issues,
             &repair,
         );
-        Ok(self.contract().normalize_inventory(&repair))
+        let candidate = self.contract().normalize_inventory(&repair);
+        // D74: keep the previous plan when the repair rewrote or dropped the
+        // semantic identity of existing plan items; violations flow into the
+        // next bounded attempt as unresolved issues.
+        let preservation = semantic_preservation::check_items(
+            &support::array(post_plan.get("items")),
+            &support::array(candidate.get("items")),
+        );
+        if preservation.passed() {
+            return Ok(candidate);
+        }
+        support::record_repair_attempt(
+            &mut evidence.repair_attempts,
+            &repair_id,
+            "semantic_preservation_rejected",
+            &semantic_preservation::violation_issues(&preservation.violations),
+            &candidate,
+        );
+        let mut rejected = post_plan;
+        semantic_preservation::append_preservation_issues(
+            &mut rejected,
+            &preservation.violations,
+        );
+        Ok(rejected)
     }
 }
 

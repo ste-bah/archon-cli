@@ -31,6 +31,14 @@ pub fn output_reports_failed_verification(body: &str) -> Option<String> {
     output_reports_failed_verification_with_options(body, true, true)
 }
 
+/// True when the text reports a test command that matched zero tests — a
+/// filtered run that executed nothing is never verification evidence. Exposed
+/// so the read-only focused-verification path applies the same fail-closed
+/// rule as write-output validation.
+pub fn output_reports_zero_matched_tests(body: &str) -> bool {
+    context_output_test_counts::reports_zero_test_filter(body, &body.to_ascii_lowercase())
+}
+
 pub fn output_reports_failed_execution(body: &str) -> Option<String> {
     output_reports_failed_verification_with_options(body, false, true)
 }
@@ -160,13 +168,19 @@ fn reports_conditional_completion(lower: &str) -> bool {
         "accepted without implementing",
         "implementation is accepted without",
         "no verified source writer",
-        "paper_trading_ready`: `false`",
-        "\"paper_trading_ready\":false",
-        "\"paper_trading_ready\": false",
         "status: **not ready",
-        "not ready for paper trading",
     ];
-    PHRASES.iter().any(|phrase| lower.contains(phrase))
+    PHRASES.iter().any(|phrase| lower.contains(phrase)) || reports_readiness_flag_false(lower)
+}
+
+/// Generic readiness contradiction: any `*_ready` flag reported false (JSON or
+/// backticked markdown) while the output otherwise claims completion — covers
+/// deployment_ready, production_ready, and any domain-specific readiness flag
+/// without naming a domain.
+fn reports_readiness_flag_false(lower: &str) -> bool {
+    ["_ready\":false", "_ready\": false", "_ready`: `false`"]
+        .iter()
+        .any(|needle| lower.contains(needle))
 }
 
 fn reports_accepted_false(body: &str, lower: &str) -> bool {

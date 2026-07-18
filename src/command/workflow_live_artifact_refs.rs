@@ -1,12 +1,17 @@
 use archon_workflow::WorkflowV2Result;
 
+/// Schemes whose artifacts genuinely live outside the filesystem. An
+/// allowlist, not a shape check: existence validation is one leg of
+/// completion credit, so an arbitrary `whatever:` prefix must not bypass it.
+const NONFILESYSTEM_SCHEMES: &[&str] = &["inline", "data", "http", "https", "mcp"];
+
 pub(super) fn is_nonfilesystem_artifact_ref(raw: &str) -> bool {
     let Some((scheme, _)) = raw.trim().split_once(':') else {
         return false;
     };
-    let mut chars = scheme.chars();
-    chars.next().is_some_and(|first| first.is_ascii_lowercase())
-        && chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit())
+    NONFILESYSTEM_SCHEMES
+        .iter()
+        .any(|known| scheme.eq_ignore_ascii_case(known))
 }
 
 pub(super) fn retain_filesystem_artifacts(result: &mut WorkflowV2Result) {
@@ -20,11 +25,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recognizes_only_nonfilesystem_scheme_refs() {
+    fn recognizes_only_allowlisted_nonfilesystem_scheme_refs() {
         assert!(is_nonfilesystem_artifact_ref("inline:data.items"));
         assert!(is_nonfilesystem_artifact_ref("https://example.test/report"));
+        assert!(is_nonfilesystem_artifact_ref("mcp:chart-snapshot"));
         assert!(!is_nonfilesystem_artifact_ref("artifacts/report.json"));
         assert!(!is_nonfilesystem_artifact_ref("/tmp/report.json"));
-        assert!(!is_nonfilesystem_artifact_ref("Upper:value"));
+        assert!(!is_nonfilesystem_artifact_ref("notes:whatever"));
+        assert!(!is_nonfilesystem_artifact_ref("evidence:claimed"));
     }
 }

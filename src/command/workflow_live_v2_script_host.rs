@@ -30,8 +30,14 @@ impl WorkflowScriptHost {
                     source_metadata.source_fingerprint.as_deref(),
                     Some(&self.scaffold_hash),
                 );
+            // Frontier adoption must not resurrect results whose dynamic
+            // source graph diverged: when this call requires source metadata,
+            // the recorded fingerprint has to match the current one.
             let frontier_reuse = self.runner.adopt_accepted_cache
-                && frontier_resume_record_reusable(&record, &self.scaffold_hash);
+                && frontier_resume_record_reusable(&record, &self.scaffold_hash)
+                && (!source_metadata.source_metadata_required
+                    || (source_metadata.source_fingerprint.is_some()
+                        && record.source_fingerprint == source_metadata.source_fingerprint));
             if (strict_reuse || frontier_reuse)
                 && reusable_record_has_required_completion_evidence(&record)
             {

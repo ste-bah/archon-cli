@@ -271,27 +271,84 @@ deliverable_contracts:
 
 #[test]
 fn runtime_workflow_code_contains_no_fixture_task_ids() {
-    let command_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/command");
-    for entry in fs::read_dir(&command_dir).expect("read command sources") {
+    // D52/D75 gate: the generic workflow runtime must carry NO fixture ids,
+    // fixture paths, or fixture-domain vocabulary. Ids/paths would break other
+    // PRDs outright; domain vocabulary is how fixture assumptions quietly
+    // fossilize into "generic" prompts and detectors.
+    const FIXTURE_LITERALS: &[&str] = &["task-tdl", "trading-lab"];
+    const DOMAIN_VOCABULARY: &[&str] = &[
+        "backtest",
+        "paper trading",
+        "paper-trading",
+        "paper_trading",
+        "paper-readiness",
+        "pine",
+        "ohlcv",
+        "polygon",
+        "tradingview",
+        "openbb",
+    ];
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut runtime_sources = Vec::new();
+    for entry in fs::read_dir(manifest_dir.join("src/command")).expect("read command sources") {
         let path = entry.expect("source entry").path();
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        if !name.starts_with("workflow_live") || !name.ends_with(".rs") || name.contains("_tests") {
+        if name.starts_with("workflow_live") && name.ends_with(".rs") && !name.contains("_tests") {
+            runtime_sources.push(path);
+        }
+    }
+    collect_workflow_crate_sources(
+        &manifest_dir.join("crates/archon-workflow/src"),
+        &mut runtime_sources,
+    );
+    assert!(
+        !runtime_sources.is_empty(),
+        "gate found no runtime sources to scan"
+    );
+    for path in runtime_sources {
+        let source = fs::read_to_string(&path).expect("read runtime source");
+        let runtime_only = source
+            .split("\n#[cfg(test)]")
+            .next()
+            .unwrap_or(&source)
+            .to_ascii_lowercase();
+        for literal in FIXTURE_LITERALS {
+            assert!(
+                !runtime_only.contains(literal),
+                "fixture literal '{literal}' leaked into runtime source {}",
+                path.display()
+            );
+        }
+        for word in DOMAIN_VOCABULARY {
+            assert!(
+                !runtime_only.contains(word),
+                "fixture-domain vocabulary '{word}' leaked into runtime source {}",
+                path.display()
+            );
+        }
+    }
+}
+
+fn collect_workflow_crate_sources(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if path.is_dir() {
+            if !name.contains("fixture") && !name.contains("tests") {
+                collect_workflow_crate_sources(&path, out);
+            }
             continue;
         }
-        let source = fs::read_to_string(&path).expect("read runtime source");
-        let runtime_only = source.split("\n#[cfg(test)]").next().unwrap_or(&source);
-        assert!(
-            !runtime_only.to_ascii_lowercase().contains("task-tdl"),
-            "fixture task id leaked into runtime source {}",
-            path.display()
-        );
-        assert!(
-            !runtime_only.to_ascii_lowercase().contains("trading-lab"),
-            "fixture product path leaked into runtime source {}",
-            path.display()
-        );
+        if name.ends_with(".rs") && !name.contains("_tests") && name != "tests.rs" {
+            out.push(path);
+        }
     }
 }
 

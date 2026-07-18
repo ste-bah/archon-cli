@@ -303,20 +303,10 @@ pub(super) fn merge_inventory_repair(
         let tombstone = ["remove", "tombstone", "deleted"]
             .iter()
             .any(|key| repair_item.get(*key) == Some(&Value::Bool(true)));
-        if let Some(matched_key) = &matched
-            && tombstone
-            && present(repair_item.get("evidence"))
-        {
-            let existing = merged.get(matched_key).cloned();
-            if let Some(existing) = existing {
-                if let Some(existing_primary) = primary_key(&existing) {
-                    merged.remove(&existing_primary);
-                    order.retain(|key| key != &existing_primary);
-                }
-                for alias in item_keys(&existing) {
-                    merged.remove(&alias);
-                }
-            }
+        if tombstone {
+            // D74: no repair prompt grants item removal — a tombstone must not
+            // shed scheduled work (and never becomes a new item). Genuine
+            // completion is proven through the noop/verification lifecycle.
             continue;
         }
         if let Some(matched_key) = matched {
@@ -324,6 +314,13 @@ pub(super) fn merge_inventory_repair(
             let mut combined = existing.as_object().cloned().unwrap_or_default();
             for (key, value) in repair_item.as_object().cloned().unwrap_or_default() {
                 combined.insert(key, value);
+            }
+            // D74: identity fields on a host-known item survive the merge; a
+            // repair may add them when absent but never reassign them.
+            for protected in ["canonical_task_ids", "source_item_id"] {
+                if let Some(value) = existing.get(protected).filter(|value| present(Some(value))) {
+                    combined.insert(protected.to_string(), value.clone());
+                }
             }
             let combined = Value::Object(combined);
             if let Some(existing_primary) = primary_key(&existing) {

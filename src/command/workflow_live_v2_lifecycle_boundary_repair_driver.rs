@@ -64,6 +64,22 @@ impl LifecycleDriver {
                 &repaired_inventory,
                 failed_outcomes,
             );
+        // D74: structural improvement alone is not adoption — the repair must
+        // also preserve the semantic identity of the items it reshaped.
+        let preservation = semantic_preservation::check_items(
+            &support::array(inventory.get("items")),
+            &support::array(repaired_inventory.get("items")),
+        );
+        if !preservation.passed() {
+            support::record_repair_attempt(
+                &mut evidence.repair_attempts,
+                &repair_id,
+                "semantic_preservation_rejected",
+                &semantic_preservation::violation_issues(&preservation.violations),
+                &repaired_inventory,
+            );
+            return Ok(inventory);
+        }
         if repaired_quality < quality {
             Ok(repaired_inventory)
         } else {
@@ -114,6 +130,23 @@ impl LifecycleDriver {
         let repaired_quality = workflow_live_v2_lifecycle_boundary_repair::reconciliation_quality(
             &repaired,
         );
+        // D74: reconciliation issues must survive the shape repair with their
+        // identity and classification intact — dropping or reclassifying an
+        // issue is how a false green would sneak past the final gates.
+        let preservation = semantic_preservation::check_items(
+            &workflow_live_v2_lifecycle_boundary_repair::collection_items(&reconciliation),
+            &workflow_live_v2_lifecycle_boundary_repair::collection_items(&repaired),
+        );
+        if !preservation.passed() {
+            support::record_repair_attempt(
+                &mut evidence.final_evidence_repair_attempts,
+                &repair_id,
+                "semantic_preservation_rejected",
+                &semantic_preservation::violation_issues(&preservation.violations),
+                &repaired,
+            );
+            return Ok(reconciliation);
+        }
         if repaired_quality.defect_count() < quality.defect_count() {
             Ok(repaired)
         } else {

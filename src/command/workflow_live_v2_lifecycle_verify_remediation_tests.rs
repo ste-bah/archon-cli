@@ -84,6 +84,7 @@ fn transport_error_before_json_is_promoted_to_the_same_retry_route() {
     let failed = transport_failure_result(
         "verification-remediation-inventory-4-1",
         1,
+        2,
         "reactive subagent compaction failed: no safe compaction boundary",
     );
 
@@ -91,6 +92,8 @@ fn transport_error_before_json_is_promoted_to_the_same_retry_route() {
         inventory_transport_route(&failed, 1, 2),
         InventoryTransportRoute::Retry
     );
+    assert_eq!(failed["data"]["transport_exhausted"], false);
+    assert_eq!(failed["data"]["max_transport_attempts"], 2);
     assert!(
         failed["summary"]
             .as_str()
@@ -103,6 +106,7 @@ fn exhausted_transport_is_an_explicit_infrastructure_blocker() {
     let failed = transport_failure_result(
         "verification-failure-triage-7-1",
         2,
+        2,
         "reactive subagent compaction failed: no safe compaction boundary",
     );
 
@@ -110,6 +114,7 @@ fn exhausted_transport_is_an_explicit_infrastructure_blocker() {
     assert_eq!(failed["data"]["failure_class"], "transport_infrastructure");
     assert_eq!(failed["data"]["transport_exhausted"], true);
     assert_eq!(failed["data"]["transport_attempts"], 2);
+    assert_eq!(failed["data"]["max_transport_attempts"], 2);
     assert_eq!(
         failed["data"]["terminal_blockers"][0]["classification"],
         "transport_infrastructure_exhausted"

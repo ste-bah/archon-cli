@@ -8,20 +8,34 @@ use anyhow::Result;
 use archon_pipeline::runner::{AgentExecutionRequest, LlmClient, LlmResponse};
 use archon_tui::event_channel::bounded_tui_event_channel;
 use archon_workflow::{
-    WorkflowSpec, WorkflowStore, WorkflowV2AgentAdapter, WorkflowV2ResultStore, WorkflowV2Status,
+    BranchFailureKind, WorkflowSpec, WorkflowStore, WorkflowV2AgentAdapter,
+    WorkflowV2BranchOutcome, WorkflowV2CommandKind, WorkflowV2CommandRecord,
+    WorkflowV2CommandStatus, WorkflowV2Result, WorkflowV2ResultStore, WorkflowV2Status,
 };
 
 use super::*;
 use crate::command::workflow_live::workflow_live_task_universe::{
     WorkflowV2DeliverableContract, WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask,
 };
+use crate::command::workflow_live::workflow_live_v2::workflow_live_v2_verification;
 
 struct CannedLifecycleLlm {
+    scenario: CannedLifecycleScenario,
     calls: Mutex<Vec<String>>,
     deliverable_contract_executed: AtomicBool,
     parameterized_contract_executed: AtomicBool,
     inventory_calls: AtomicUsize,
     verification_failure_emitted: AtomicBool,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum CannedLifecycleScenario {
+    #[default]
+    FullLifecycle,
+    TriagePreservation,
+    RepairPlanPreservation,
+    ZeroTestRetry,
+    InventoryTombstone,
 }
 
 #[async_trait::async_trait]
@@ -47,7 +61,91 @@ impl LlmClient for CannedLifecycleLlm {
         self.calls.lock().expect("calls lock").push(call_id.clone());
         let input = prompt_input(&prompt);
 
-        let content = if call_id == "canonical-implementation-inventory" {
+        let content = if self.scenario == CannedLifecycleScenario::TriagePreservation
+            && call_id == "semantic-triage-shape-repair-1"
+        {
+            accepted_result(
+                "shape repair accounted for more outcomes but rewrote a predicate",
+                serde_json::json!({
+                    "implementation_failures": [{
+                        "item_id": "failed-one",
+                        "source_item_id": "source-one",
+                        "canonical_task_ids": ["TASK-EX-BOUNDARY"],
+                        "classification": "implementation_failure",
+                        "failed_predicate": "mutated predicate",
+                        "source_residual_gap_ids": ["gap-one"],
+                    }],
+                    "retry_items": [{
+                        "item_id": "failed-two",
+                        "source_item_id": "source-two",
+                        "canonical_task_ids": ["TASK-EX-BOUNDARY"],
+                        "classification": "retryable_verification_shape_issue",
+                        "failed_predicate": "second predicate",
+                        "source_residual_gap_ids": ["gap-two"],
+                    }],
+                    "superseded_items": [],
+                    "terminal_blockers": [],
+                }),
+                Vec::new(),
+                Vec::new(),
+            )
+        } else if self.scenario == CannedLifecycleScenario::RepairPlanPreservation
+            && call_id == "post-remediation-verification-plan-repair-1-1-1"
+        {
+            accepted_result(
+                "shape repair dropped source gap identity",
+                serde_json::json!({
+                    "items": [{
+                        "item_id": "retry-check",
+                        "source_item_id": "source-check",
+                        "canonical_task_ids": ["TASK-EX-BOUNDARY"],
+                        "classification": "retryable_verification_shape_issue",
+                        "failed_predicate": "focused check passes",
+                        "focused_verification": "cargo test focused_check -- --exact",
+                    }],
+                    "unresolved_issues": [],
+                }),
+                Vec::new(),
+                Vec::new(),
+            )
+        } else if self.scenario == CannedLifecycleScenario::ZeroTestRetry
+            && call_id == "zero-test-triage-shape-repair-1"
+        {
+            accepted_result(
+                "zero-match verification routed to an informative retry",
+                serde_json::json!({
+                    "implementation_failures": [],
+                    "retry_items": [{
+                        "item_id": "zero-check",
+                        "source_item_id": "source-zero-check",
+                        "canonical_task_ids": ["TASK-EX-BOUNDARY"],
+                        "classification": "retryable_verification_shape_issue",
+                        "failed_predicate": "the focused test must match at least one test",
+                        "source_residual_gap_ids": ["zero_test_match_verification"],
+                    }],
+                    "superseded_items": [],
+                    "terminal_blockers": [],
+                }),
+                Vec::new(),
+                Vec::new(),
+            )
+        } else if self.scenario == CannedLifecycleScenario::InventoryTombstone
+            && call_id == "inventory-shape-repair-1"
+        {
+            accepted_result(
+                "inventory repair attempted to tombstone scheduled work",
+                serde_json::json!({
+                    "items": [{
+                        "item_id": "scheduled-item",
+                        "canonical_task_ids": ["TASK-EX-BOUNDARY"],
+                        "tombstone": true,
+                    }],
+                    "unresolved_issues": [],
+                }),
+                Vec::new(),
+                Vec::new(),
+            )
+        } else if call_id == "canonical-implementation-inventory" {
             if self.inventory_calls.fetch_add(1, Ordering::SeqCst) == 0 {
                 needs_review_result(
                     "malformed inventory exposes schedulable retry work",
@@ -310,6 +408,7 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
     let (tui_tx, _tui_rx) = bounded_tui_event_channel();
     let llm = Arc::new(CannedLifecycleLlm {
+        scenario: CannedLifecycleScenario::FullLifecycle,
         calls: Mutex::new(Vec::new()),
         deliverable_contract_executed: AtomicBool::new(false),
         parameterized_contract_executed: AtomicBool::new(false),
@@ -503,6 +602,7 @@ async fn failed_final_report_emits_host_built_fallback() {
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
     let (tui_tx, _tui_rx) = bounded_tui_event_channel();
     let llm = Arc::new(CannedLifecycleLlm {
+        scenario: CannedLifecycleScenario::FullLifecycle,
         calls: Mutex::new(Vec::new()),
         deliverable_contract_executed: AtomicBool::new(false),
         parameterized_contract_executed: AtomicBool::new(false),
@@ -587,6 +687,315 @@ async fn failed_final_report_emits_host_built_fallback() {
         artifact.id == "forced-report-failure-host-fallback"
             && std::path::Path::new(&artifact.path).is_file()
     }));
+}
+
+#[tokio::test]
+async fn triage_shape_repair_cannot_trade_predicate_identity_for_better_accounting() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let (driver, llm) = boundary_driver(&temp, CannedLifecycleScenario::TriagePreservation);
+    let original = serde_json::json!({
+        "implementation_failures": [{
+            "item_id": "failed-one",
+            "source_item_id": "source-one",
+            "canonical_task_ids": ["TASK-EX-BOUNDARY"],
+            "classification": "implementation_failure",
+            "failed_predicate": "original predicate",
+            "source_residual_gap_ids": ["gap-one"],
+        }],
+        "retry_items": [],
+        "superseded_items": [],
+        "terminal_blockers": [],
+    });
+    let failed_outcomes = vec![
+        serde_json::json!({"item_id": "failed-one"}),
+        serde_json::json!({"item_id": "failed-two"}),
+    ];
+    let mut evidence = LifecycleEvidence::default();
+
+    let retained = driver
+        .enforce_triage_accounting(
+            "semantic-triage",
+            &failed_outcomes,
+            original.clone(),
+            &mut evidence,
+        )
+        .await
+        .expect("triage repair");
+
+    let routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(&retained);
+    assert_eq!(routes.implementation_failures.len(), 1);
+    assert!(routes.retry_items.is_empty());
+    assert_eq!(
+        routes.implementation_failures[0]["failed_predicate"],
+        "original predicate"
+    );
+    assert!(evidence.repair_attempts.iter().any(|attempt| {
+        attempt["call_id"] == "semantic-triage-shape-repair-1"
+            && attempt["issue_kind"] == "semantic_preservation_rejected"
+    }));
+    assert_eq!(
+        llm.calls.lock().expect("calls lock").as_slice(),
+        ["semantic-triage-shape-repair-1"]
+    );
+}
+
+#[tokio::test]
+async fn repair_plan_shape_repair_cannot_drop_source_gap_identity() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let (driver, llm) = boundary_driver(&temp, CannedLifecycleScenario::RepairPlanPreservation);
+    let post_plan = serde_json::json!({
+        "items": [{
+            "item_id": "retry-check",
+            "source_item_id": "source-check",
+            "canonical_task_ids": ["TASK-EX-BOUNDARY"],
+            "classification": "retryable_verification_shape_issue",
+            "failed_predicate": "focused check passes",
+            "source_residual_gap_ids": ["gap-check"],
+            "focused_verification": "cargo test focused_check -- --exact",
+        }],
+        "unresolved_issues": [{
+            "kind": "inventory_shape_repair",
+            "field": "items",
+            "message": "repair the plan shape",
+        }],
+    });
+    let mut evidence = LifecycleEvidence::default();
+
+    let retained = driver
+        .repair_post_remediation_plan_once(
+            &serde_json::json!({"items": []}),
+            &serde_json::json!({"outcomes": []}),
+            post_plan,
+            1,
+            &1,
+            1,
+            &mut evidence,
+        )
+        .await
+        .expect("post-remediation plan repair");
+
+    assert_eq!(
+        retained["items"][0]["source_residual_gap_ids"],
+        serde_json::json!(["gap-check"])
+    );
+    assert!(
+        retained["unresolved_issues"]
+            .as_array()
+            .is_some_and(|issues| issues.iter().any(|issue| {
+                issue["kind"] == "semantic_preservation"
+                    && issue["message"]
+                        .as_str()
+                        .is_some_and(|message| message.contains("source_residual_gap_ids"))
+            }))
+    );
+    assert!(evidence.repair_attempts.iter().any(|attempt| {
+        attempt["call_id"] == "post-remediation-verification-plan-repair-1-1-1"
+            && attempt["issue_kind"] == "semantic_preservation_rejected"
+    }));
+    assert_eq!(
+        llm.calls.lock().expect("calls lock").as_slice(),
+        ["post-remediation-verification-plan-repair-1-1-1"]
+    );
+}
+
+#[tokio::test]
+async fn accepted_zero_match_verification_is_demoted_and_routed_to_retry() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let (driver, llm) = boundary_driver(&temp, CannedLifecycleScenario::ZeroTestRetry);
+    let mut result = WorkflowV2Result::accepted("focused verification claimed acceptance");
+    result.commands_run.push(WorkflowV2CommandRecord {
+        kind: WorkflowV2CommandKind::Test,
+        command: "cargo test missing_check -- --exact".to_string(),
+        status: WorkflowV2CommandStatus::Succeeded,
+        exit_code: Some(0),
+        output_summary:
+            "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out"
+                .to_string(),
+    });
+    result.data = serde_json::json!({
+        "source_item_id": "source-zero-check",
+        "canonical_task_ids": ["TASK-EX-BOUNDARY"],
+    });
+    let mut outcome = WorkflowV2BranchOutcome {
+        item_id: "zero-check".to_string(),
+        role: "verifier".to_string(),
+        status: WorkflowV2Status::Accepted,
+        result: Some(result),
+        error: None,
+        failure_kind: None,
+        item_input_hash: Some("zero-test-input".to_string()),
+        completion_evidence: Vec::new(),
+    };
+    workflow_live_v2_verification::normalize_focused_verification_outcome(
+        "verification-wave-1-1",
+        &mut outcome,
+    );
+
+    assert_eq!(outcome.status, WorkflowV2Status::NeedsReview);
+    assert_eq!(outcome.failure_kind, Some(BranchFailureKind::Semantic));
+    assert_eq!(
+        outcome.result.as_ref().expect("result").data["zero_test_match"],
+        true
+    );
+
+    let failed_outcomes = vec![serde_json::to_value(&outcome).expect("serialize outcome")];
+    let mut evidence = LifecycleEvidence::default();
+    let triage = driver
+        .enforce_triage_accounting(
+            "zero-test-triage",
+            &failed_outcomes,
+            serde_json::json!({
+                "implementation_failures": [],
+                "retry_items": [],
+                "superseded_items": [],
+                "terminal_blockers": [],
+            }),
+            &mut evidence,
+        )
+        .await
+        .expect("zero-test triage repair");
+
+    let routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(&triage);
+    assert_eq!(routes.retry_items.len(), 1);
+    assert_eq!(
+        routes.retry_items[0]["classification"],
+        "retryable_verification_shape_issue"
+    );
+    assert_eq!(
+        llm.calls.lock().expect("calls lock").as_slice(),
+        ["zero-test-triage-shape-repair-1"]
+    );
+}
+
+#[tokio::test]
+async fn inventory_repair_tombstone_cannot_remove_scheduled_work() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let (driver, llm) = boundary_driver(&temp, CannedLifecycleScenario::InventoryTombstone);
+    let inventory = serde_json::json!({
+        "items": [{
+            "item_id": "scheduled-item",
+            "work_type": "implementation",
+            "canonical_task_ids": ["TASK-EX-BOUNDARY"],
+            "dependency_ids": [],
+            "target_files": ["src/boundary.rs"],
+            "acceptance_criteria": ["Scheduled work survives inventory repair."],
+            "focused_verification": "cargo test boundary_check -- --exact",
+            "artifact_requirements": [],
+        }],
+        "unresolved_issues": [{
+            "kind": "inventory_shape_repair",
+            "field": "items",
+            "message": "exercise the bounded inventory repair",
+        }],
+    });
+    let mut evidence = LifecycleEvidence::default();
+
+    let repaired = driver
+        .repair_inventory(inventory, &serde_json::json!([]), &mut evidence)
+        .await
+        .expect("inventory repair");
+
+    assert_eq!(repaired["items"].as_array().map(Vec::len), Some(1));
+    assert_eq!(repaired["items"][0]["item_id"], "scheduled-item");
+    assert_eq!(
+        repaired["items"][0]["canonical_task_ids"],
+        serde_json::json!(["TASK-EX-BOUNDARY"])
+    );
+    assert!(
+        repaired["unresolved_issues"]
+            .as_array()
+            .is_some_and(Vec::is_empty)
+    );
+    assert_eq!(
+        llm.calls.lock().expect("calls lock").as_slice(),
+        ["inventory-shape-repair-1"]
+    );
+}
+
+fn boundary_driver(
+    temp: &tempfile::TempDir,
+    scenario: CannedLifecycleScenario,
+) -> (LifecycleDriver, Arc<CannedLifecycleLlm>) {
+    let universe = WorkflowV2TaskUniverse {
+        schema_version: "workflow-v2-task-universe-v1".to_string(),
+        source_roots: Vec::new(),
+        tasks: vec![WorkflowV2TaskUniverseTask {
+            canonical_task_id: "TASK-EX-BOUNDARY".to_string(),
+            source_path: "tasks/TASK-EX-BOUNDARY.md".to_string(),
+            acceptance_criteria: vec!["Boundary behavior remains semantic.".to_string()],
+            ..Default::default()
+        }],
+    };
+    let spec = WorkflowSpec {
+        schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
+        name: "boundary-preservation-e2e".to_string(),
+        task: "Exercise a neutral lifecycle boundary fixture.".to_string(),
+        target_repository_root: None,
+        max_parallelism: 1,
+        max_agents: 1,
+        provider_tiers: BTreeMap::new(),
+        stages: Vec::new(),
+        artifact_policy: Default::default(),
+        permissions: BTreeMap::new(),
+        quality_gates: BTreeMap::new(),
+        learning_hooks: Vec::new(),
+    };
+    let workflow_store = WorkflowStore::new(temp.path().join(".archon/workflows"));
+    let run = workflow_store.create_run(spec.clone()).expect("run");
+    let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
+    let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+    let llm = Arc::new(CannedLifecycleLlm {
+        scenario,
+        calls: Mutex::new(Vec::new()),
+        deliverable_contract_executed: AtomicBool::new(false),
+        parameterized_contract_executed: AtomicBool::new(false),
+        inventory_calls: AtomicUsize::new(0),
+        verification_failure_emitted: AtomicBool::new(false),
+    });
+    let client = LiveV2AgentClient::new(
+        llm.clone(),
+        tui_tx,
+        Vec::new(),
+        run.id.clone(),
+        None,
+        Some(30),
+    );
+    let generated_config = archon_core::config::GeneratedWorkflowConfig {
+        max_repair_iterations: 1,
+        max_investigation_iterations: 1,
+        verification_branch_timeout_secs: 30,
+        host_call_timeout_secs: 30,
+    };
+    let runner = WorkflowV2ScriptRunner::new(
+        spec.task,
+        WorkflowV2ScriptRuntime {
+            target_repository_root: None,
+            generated_config: generated_config.clone(),
+        },
+        WorkflowV2AgentAdapter::new(),
+        client,
+        v2_store,
+        workflow_store,
+        run.id,
+        true,
+        Some(universe.clone()),
+        None,
+    );
+    let host = Arc::new(WorkflowScriptHost {
+        scaffold_hash: workflow_scaffold_hash("# boundary preservation fixture"),
+        runner,
+        accumulator: Arc::new(tokio::sync::Mutex::new(WorkflowScriptAccumulator::default())),
+    });
+    let driver = LifecycleDriver::new(
+        host,
+        universe,
+        None,
+        Some(temp.path().display().to_string()),
+        serde_json::json!([]),
+        Default::default(),
+        &generated_config,
+    );
+    (driver, llm)
 }
 
 fn synthetic_task_universe(root: &std::path::Path) -> WorkflowV2TaskUniverse {

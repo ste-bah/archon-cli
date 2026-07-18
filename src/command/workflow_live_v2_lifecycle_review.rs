@@ -95,8 +95,30 @@ impl LifecycleDriver {
                     &issues,
                     &repair,
                 );
-                review_remediation_inventory =
+                let candidate =
                     remediation::normalize_review_remediation_inventory(&contract, &repair);
+                // D74: adopt the repaired inventory only when it preserves the
+                // semantic identity of the items being reshaped; otherwise the
+                // violations feed the next bounded attempt as issues.
+                let preservation = semantic_preservation::check_items(
+                    &support::array(review_remediation_inventory.get("items")),
+                    &support::array(candidate.get("items")),
+                );
+                if preservation.passed() {
+                    review_remediation_inventory = candidate;
+                } else {
+                    support::record_repair_attempt(
+                        &mut evidence.repair_attempts,
+                        &call_id,
+                        "semantic_preservation_rejected",
+                        &semantic_preservation::violation_issues(&preservation.violations),
+                        &candidate,
+                    );
+                    semantic_preservation::append_preservation_issues(
+                        &mut review_remediation_inventory,
+                        &preservation.violations,
+                    );
+                }
                 repair_attempt += 1;
             }
             if support::array(review_remediation_inventory.get("items")).is_empty()

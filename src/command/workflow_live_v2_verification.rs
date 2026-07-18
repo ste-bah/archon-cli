@@ -43,6 +43,10 @@ pub(super) fn normalize_focused_verification_outcome(
         outcome.status,
         WorkflowV2Status::Accepted | WorkflowV2Status::Noop
     ) {
+        // D73 companion: a verification that only ran test commands matching
+        // zero tests proved nothing — the same fail-closed rule the write
+        // path applies via patch validation.
+        demote_zero_test_acceptance(outcome);
         return;
     }
     if !should_accept_duplicate_pass {
@@ -90,6 +94,52 @@ pub(super) fn normalize_focused_verification_outcome(
     outcome.status = WorkflowV2Status::Accepted;
     outcome.failure_kind = None;
     outcome.error = None;
+}
+
+/// Demote an accepted/noop focused-verification outcome whose only test
+/// evidence is commands that matched zero tests. A run that executed nothing
+/// cannot verify anything; triage routes it as a retry with corrected names.
+fn demote_zero_test_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
+    let Some(result) = outcome.result.as_mut() else {
+        return;
+    };
+    let test_commands: Vec<_> = result
+        .commands_run
+        .iter()
+        .filter(|command| command.kind == archon_workflow::WorkflowV2CommandKind::Test)
+        .collect();
+    if test_commands.is_empty() {
+        return;
+    }
+    let all_zero_matched = test_commands.iter().all(|command| {
+        archon_workflow::context::output_reports_zero_matched_tests(&command.output_summary)
+    });
+    if !all_zero_matched {
+        return;
+    }
+    result.status = WorkflowV2Status::NeedsReview;
+    result.residual_gaps.push(
+        archon_workflow::WorkflowV2ResidualGap {
+            id: "zero_test_match_verification".to_string(),
+            description:
+                "every test command in this focused verification matched zero tests; a run that executed nothing is not verification evidence"
+                    .to_string(),
+            severity: Some("review".to_string()),
+        },
+    );
+    result.evidence.push(WorkflowV2Evidence::new(
+        WorkflowV2EvidenceKind::Review,
+        "accepted verification demoted: filtered test commands matched zero tests",
+    ));
+    let mut data = result.data.as_object().cloned().unwrap_or_default();
+    data.insert("zero_test_match".to_string(), serde_json::json!(true));
+    data.insert(
+        "verification_failure_class".to_string(),
+        serde_json::json!("retryable_verification_shape_issue"),
+    );
+    result.data = serde_json::Value::Object(data);
+    outcome.status = WorkflowV2Status::NeedsReview;
+    outcome.failure_kind = Some(BranchFailureKind::Semantic);
 }
 
 fn stamp_focused_verification_result(result: &mut WorkflowV2Result) {

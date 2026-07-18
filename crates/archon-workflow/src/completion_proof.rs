@@ -190,11 +190,25 @@ fn evidence_text_is_concrete(text: &str) -> bool {
         return false;
     }
     [
-        ".rs", ".md", ".toml", ".json", ".yaml", ".yml", ".lock", ".txt", ".csv", ".jsonl",
-        ".pine", "src/", "crates/", "tests/", "tasks/", "context/", "cargo ", "git ", "rg ", "::",
+        ".rs", ".md", ".toml", ".json", ".yaml", ".yml", ".lock", ".txt", ".csv", ".jsonl", "src/",
+        "crates/", "tests/", "tasks/", "context/", "cargo ", "git ", "rg ", "::",
     ]
     .iter()
     .any(|marker| text.contains(marker))
+        || text_contains_path_like_token(text)
+}
+
+/// Language/domain-neutral path evidence: any token shaped like a relative
+/// file path (a slash plus a dot-extension in the final segment) counts,
+/// regardless of extension.
+fn text_contains_path_like_token(text: &str) -> bool {
+    text.split_whitespace().any(|token| {
+        token.contains('/')
+            && token
+                .rsplit('/')
+                .next()
+                .is_some_and(|name| name.contains('.') && !name.ends_with('.'))
+    })
 }
 
 fn has_any_text_key(object: &serde_json::Map<String, Value>, keys: &[&str]) -> bool {

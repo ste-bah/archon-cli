@@ -316,16 +316,38 @@ impl LifecycleDriver {
                     &issues,
                     &shape_repair,
                 );
-                repair_inventory = contract.normalize_inventory(&shape_repair);
-                repair_inventory = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
-                        &repair_inventory,
-                        &verification,
-                    );
-                repair_inventory = support::constrain_inventory_tasks(
+                let mut candidate = contract.normalize_inventory(&shape_repair);
+                candidate = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
+                    &candidate,
+                    &verification,
+                );
+                candidate = support::constrain_inventory_tasks(
                     &contract,
-                    &repair_inventory,
+                    &candidate,
                     &allowed_task_ids,
                 );
+                // D74: a shape repair is adopted only when it preserves the
+                // semantic identity of the items it reshaped; otherwise the
+                // violations feed the next bounded attempt as issues.
+                let preservation = semantic_preservation::check_items(
+                    &support::array(repair_inventory.get("items")),
+                    &support::array(candidate.get("items")),
+                );
+                if preservation.passed() {
+                    repair_inventory = candidate;
+                } else {
+                    support::record_repair_attempt(
+                        &mut evidence.repair_attempts,
+                        &shape_call_id,
+                        "semantic_preservation_rejected",
+                        &semantic_preservation::violation_issues(&preservation.violations),
+                        &candidate,
+                    );
+                    semantic_preservation::append_preservation_issues(
+                        &mut repair_inventory,
+                        &preservation.violations,
+                    );
+                }
                 shape_attempt += 1;
             }
             if !support::verification_inventory_ready(&repair_inventory)
