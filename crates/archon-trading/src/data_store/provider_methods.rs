@@ -59,7 +59,7 @@ impl TradingDataLake {
         let artifact = serde_json::json!({
             "schema_version": PROVIDER_CAPABILITIES_SCHEMA,
             "checked_at": checked_at,
-            "capabilities": records,
+            "capabilities": enriched_capability_records(records),
         });
         write_schema_json(&self.provider_capabilities_path(), &artifact)
     }
@@ -220,6 +220,127 @@ fn provider_environment_status(provider: &str) -> serde_json::Value {
 
 fn env_status(key: &str) -> &'static str {
     if std::env::var_os(key).is_some() {
+        "present"
+    } else {
+        "missing"
+    }
+}
+
+fn enriched_capability_records(
+    records: &BTreeMap<String, ProviderCapabilityResult>,
+) -> BTreeMap<String, serde_json::Value> {
+    records
+        .iter()
+        .map(|(key, result)| (key.clone(), enriched_capability_record(result)))
+        .collect()
+}
+
+fn enriched_capability_record(result: &ProviderCapabilityResult) -> serde_json::Value {
+    let mut value = serde_json::to_value(result).unwrap_or_else(|_| serde_json::json!({}));
+    let Some(object) = value.as_object_mut() else {
+        return value;
+    };
+    object.insert(
+        "capability_state".into(),
+        serde_json::Value::String(capability_state(result).into()),
+    );
+    object.insert(
+        "provider_env_proof".into(),
+        provider_env_proof(&result.provider),
+    );
+    object.insert("registry_backed".into(), serde_json::Value::Bool(false));
+    object.insert(
+        "registry_status".into(),
+        serde_json::Value::String("Unavailable".into()),
+    );
+    object.insert("registry_dataset_id".into(), serde_json::Value::Null);
+    object.insert("registry_version".into(), serde_json::Value::Null);
+    object.insert("registry_key".into(), serde_json::Value::Null);
+    object.insert(
+        "fail_closed_behavior".into(),
+        serde_json::Value::String(
+            "unavailable capability probes persist proof only and do not write production dataset registry entries".into(),
+        ),
+    );
+    object.insert(
+        "validation".into(),
+        serde_json::json!({"status": if result.can_fetch { "passed" } else { "failed_closed" }}),
+    );
+    if result.provider == "provider_state" && result.timeframe == "snapshot" {
+        object.insert(
+            "snapshot_freshness".into(),
+            serde_json::Value::String(snapshot_freshness_label(result).into()),
+        );
+    }
+    value
+}
+
+fn capability_state(result: &ProviderCapabilityResult) -> &'static str {
+    if result.provider == "provider_state" && result.timeframe == "snapshot" {
+        return snapshot_freshness_label(result);
+    }
+    if result.can_fetch {
+        "can_fetch"
+    } else if result.provider_blocked {
+        "provider_blocked"
+    } else if result.missing_credentials {
+        "missing_credentials"
+    } else if result.unsupported {
+        "unsupported"
+    } else {
+        "unavailable"
+    }
+}
+
+fn snapshot_freshness_label(result: &ProviderCapabilityResult) -> &'static str {
+    if result
+        .unavailable_reason
+        .as_deref()
+        .is_some_and(|reason| reason.contains("stale"))
+    {
+        "stale"
+    } else {
+        "missing"
+    }
+}
+
+fn provider_env_proof(provider: &str) -> serde_json::Value {
+    let normalized = provider.trim().to_ascii_lowercase();
+    let keys: &[&str] = match normalized.as_str() {
+        "openbb" | "polygon" => &["POLYGON_API_KEY", "OPENBB_API_URL"],
+        "stooq" => &[
+            "POLYGON_API_KEY",
+            "OPENBB_API_KEY",
+            "OPENBB_API_URL",
+            "ARCHON_TRADINGVIEW_OHLCV_FIXTURE",
+        ],
+        "tradingview" => &["ARCHON_TRADINGVIEW_OHLCV_FIXTURE"],
+        _ => &[],
+    };
+    let checked_keys = keys
+        .iter()
+        .map(|key| serde_json::json!({"name": key, "presence": env_presence(key)}))
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "checked_keys": checked_keys,
+        "credential_state": env_credential_state(keys),
+        "redaction": "credential values omitted; only key names and presence states are recorded"
+    })
+}
+
+fn env_presence(key: &str) -> &'static str {
+    if std::env::var_os(key).is_some() {
+        "present"
+    } else {
+        "missing"
+    }
+}
+
+fn env_credential_state(keys: &[&str]) -> &'static str {
+    if keys.is_empty() {
+        return "not_required";
+    }
+    if keys.iter().any(|key| std::env::var_os(key).is_some()) {
         "present"
     } else {
         "missing"
