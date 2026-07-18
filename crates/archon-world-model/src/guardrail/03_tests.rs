@@ -81,6 +81,119 @@ mod tests {
     }
 
     #[test]
+    fn tool_action_classifies_each_unquoted_shell_chain_segment() {
+        let surface = WorldAdvisorSurface::InteractiveSession;
+
+        assert_eq!(
+            classify_tool_action(
+                "Bash",
+                &serde_json::json!({"command": "cargo test && git push origin main"}),
+                surface,
+            ),
+            RuntimeTaskClass::ExternalSideEffect,
+        );
+        assert_eq!(
+            classify_tool_action(
+                "Bash",
+                &serde_json::json!({"command": "cargo test; rm -rf generated"}),
+                surface,
+            ),
+            RuntimeTaskClass::DataMutation,
+        );
+        assert_eq!(
+            classify_tool_action(
+                "Bash",
+                &serde_json::json!({"command": "echo done | rm target"}),
+                surface,
+            ),
+            RuntimeTaskClass::DataMutation,
+        );
+        assert_eq!(
+            classify_tool_action(
+                "Bash",
+                &serde_json::json!({"command": "cargo test & git push origin main"}),
+                surface,
+            ),
+            RuntimeTaskClass::ExternalSideEffect,
+        );
+        assert_eq!(
+            classify_tool_action(
+                "Bash",
+                &serde_json::json!({"command": "echo rm\\ target; git push origin main"}),
+                surface,
+            ),
+            RuntimeTaskClass::ExternalSideEffect,
+        );
+        assert_eq!(
+            classify_tool_action(
+                "Bash",
+                &serde_json::json!({"command": "echo \\\"rm target; git push\\\""}),
+                surface,
+            ),
+            RuntimeTaskClass::GeneralAnswer,
+        );
+        assert_eq!(
+            classify_tool_action(
+                "Bash",
+                &serde_json::json!({"command": "echo 'rm target | git push'"}),
+                surface,
+            ),
+            RuntimeTaskClass::GeneralAnswer,
+        );
+    }
+
+    #[test]
+    fn tool_action_normalizes_executables_and_unwraps_shell_commands() {
+        let surface = WorldAdvisorSurface::InteractiveSession;
+
+        for command in [
+            "git -C /repo push origin main",
+            "/usr/bin/git push origin main",
+            r"C:\\Git\\bin\\git.exe push origin main",
+            r"C:\\Git\\bin\\GIT.EXE push origin main",
+        ] {
+            assert_eq!(
+                classify_tool_action("Bash", &serde_json::json!({"command": command}), surface),
+                RuntimeTaskClass::ExternalSideEffect,
+                "{command}",
+            );
+        }
+        for command in ["/bin/rm generated", "bash -lc 'cargo test && git push origin main'"] {
+            assert_eq!(
+                classify_tool_action("Bash", &serde_json::json!({"command": command}), surface),
+                if command.starts_with("bash") {
+                    RuntimeTaskClass::ExternalSideEffect
+                } else {
+                    RuntimeTaskClass::DataMutation
+                },
+                "{command}",
+            );
+        }
+    }
+
+    #[test]
+    fn tool_action_ignores_sql_keywords_inside_string_literals() {
+        let surface = WorldAdvisorSurface::InteractiveSession;
+
+        assert_eq!(
+            classify_tool_action(
+                "Bash",
+                &serde_json::json!({"command": "psql -c \"SELECT 'DELETE'\""}),
+                surface,
+            ),
+            RuntimeTaskClass::GeneralAnswer,
+        );
+        assert_eq!(
+            classify_tool_action(
+                "Bash",
+                &serde_json::json!({"command": "psql -c 'DROP TABLE archived_events'"}),
+                surface,
+            ),
+            RuntimeTaskClass::DataMutation,
+        );
+    }
+
+    #[test]
     fn tool_action_classifies_executable_sql_deletion() {
         assert_eq!(
             classify_tool_action(
@@ -135,15 +248,21 @@ mod tests {
         let decision = decide_guardrail(&action, None, context, &policy);
 
         assert!(!decision.allowed_to_finalize);
-        assert!(decision
-            .required_actions
-            .contains(&GuardrailRequiredAction::RunTests));
-        assert!(decision
-            .required_actions
-            .contains(&GuardrailRequiredAction::RunBuild));
-        assert!(decision
-            .reason_codes
-            .contains(&GuardrailReasonCode::PredictedVerificationNeededHigh));
+        assert!(
+            decision
+                .required_actions
+                .contains(&GuardrailRequiredAction::RunTests)
+        );
+        assert!(
+            decision
+                .required_actions
+                .contains(&GuardrailRequiredAction::RunBuild)
+        );
+        assert!(
+            decision
+                .reason_codes
+                .contains(&GuardrailReasonCode::PredictedVerificationNeededHigh)
+        );
     }
 
     #[test]
@@ -325,12 +444,16 @@ mod tests {
         assert!(fail_open.allowed_to_continue);
         assert!(fail_open.allowed_to_finalize);
         assert!(fail_open.required_actions.is_empty());
-        assert!(fail_open
-            .reason_codes
-            .contains(&GuardrailReasonCode::GuardrailOverheadExceeded));
-        assert!(fail_open
-            .reason_codes
-            .contains(&GuardrailReasonCode::PredictedVerificationNeededHigh));
+        assert!(
+            fail_open
+                .reason_codes
+                .contains(&GuardrailReasonCode::GuardrailOverheadExceeded)
+        );
+        assert!(
+            fail_open
+                .reason_codes
+                .contains(&GuardrailReasonCode::PredictedVerificationNeededHigh)
+        );
     }
 
     #[test]
