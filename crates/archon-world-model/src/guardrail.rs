@@ -7,5 +7,6 @@
 include!("guardrail/00_types.rs");
 include!("guardrail/01_decision.rs");
 include!("guardrail/02_task_classifier.rs");
+include!("guardrail/03_command_identity.rs");
 include!("guardrail/02_io_helpers.rs");
 include!("guardrail/03_tests.rs");

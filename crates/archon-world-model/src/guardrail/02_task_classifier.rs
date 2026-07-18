@@ -1,3 +1,6 @@
+const MAX_SHELL_SUBSTITUTION_DEPTH: usize = 8;
+const MAX_COMMAND_WRAPPER_DEPTH: usize = 8;
+
 pub fn classify_task(_summary: &str, surface: WorldAdvisorSurface) -> RuntimeTaskClass {
     match surface {
         WorldAdvisorSurface::VerificationRun => RuntimeTaskClass::VerificationOnly,
@@ -40,7 +43,16 @@ fn is_delete_or_remove_tool(tool_name: &str) -> bool {
 }
 
 fn classify_bash_command(input: &serde_json::Value) -> RuntimeTaskClass {
-    let Some(command) = input.get("command").and_then(serde_json::Value::as_str) else {
+    input
+        .get("command")
+        .and_then(serde_json::Value::as_str)
+        .map_or(RuntimeTaskClass::GeneralAnswer, |command| {
+            classify_shell_command(command, 0)
+        })
+}
+
+fn classify_shell_command(command: &str, depth: usize) -> RuntimeTaskClass {
+    let Some(subcommands) = extract_shell_subcommands(command, depth) else {
         return RuntimeTaskClass::GeneralAnswer;
     };
     let Some(segments) = split_shell_chain(command) else {
@@ -50,25 +62,233 @@ fn classify_bash_command(input: &serde_json::Value) -> RuntimeTaskClass {
     segments
         .iter()
         .map(|segment| classify_bash_segment(segment))
+        .chain(
+            subcommands
+                .into_iter()
+                .map(|subcommand| classify_shell_command(subcommand, depth + 1)),
+        )
         .max_by_key(|class| class_priority(*class))
         .unwrap_or(RuntimeTaskClass::GeneralAnswer)
+}
+
+fn extract_shell_subcommands(command: &str, depth: usize) -> Option<Vec<&str>> {
+    let mut subcommands = Vec::new();
+    let mut quote = None;
+    let mut escaped = false;
+    let bytes = command.as_bytes();
+    let mut index = 0;
+
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if escaped {
+            escaped = false;
+            index += 1;
+            continue;
+        }
+        if byte == b'\\' && quote != Some(b'\'') {
+            escaped = true;
+        } else if matches!(byte, b'\'' | b'"') {
+            quote = toggle_quote(quote, byte);
+        } else if quote != Some(b'\'') && matches!(byte, b'$' | b'`') {
+            if depth >= MAX_SHELL_SUBSTITUTION_DEPTH {
+                return None;
+            }
+            let (subcommand, next) = if byte == b'$' && bytes.get(index + 1) == Some(&b'(') {
+                parenthesized_subcommand(command, index)?
+            } else if byte == b'`' {
+                backtick_subcommand(command, index)?
+            } else {
+                index += 1;
+                continue;
+            };
+            subcommands.push(subcommand);
+            index = next;
+            continue;
+        }
+        index += 1;
+    }
+
+    if quote.is_some() || escaped {
+        None
+    } else {
+        Some(subcommands)
+    }
+}
+
+fn toggle_quote(quote: Option<u8>, byte: u8) -> Option<u8> {
+    match quote {
+        Some(current) if current == byte => None,
+        None => Some(byte),
+        current => current,
+    }
+}
+
+fn parenthesized_subcommand(command: &str, start: usize) -> Option<(&str, usize)> {
+    let bytes = command.as_bytes();
+    let mut quote = None;
+    let mut escaped = false;
+    let mut nesting = 1;
+    let mut index = start + 2;
+
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if escaped {
+            escaped = false;
+        } else if byte == b'\\' && quote != Some(b'\'') {
+            escaped = true;
+        } else if matches!(byte, b'\'' | b'"') {
+            quote = toggle_quote(quote, byte);
+        } else if quote.is_none() && byte == b'(' {
+            nesting += 1;
+        } else if quote.is_none() && byte == b')' {
+            nesting -= 1;
+            if nesting == 0 {
+                return Some((&command[start + 2..index], index + 1));
+            }
+        }
+        index += 1;
+    }
+
+    None
+}
+
+fn backtick_subcommand(command: &str, start: usize) -> Option<(&str, usize)> {
+    let bytes = command.as_bytes();
+    let mut quote = None;
+    let mut escaped = false;
+    let mut index = start + 1;
+
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if escaped {
+            escaped = false;
+        } else if byte == b'\\' && quote != Some(b'\'') {
+            escaped = true;
+        } else if matches!(byte, b'\'' | b'"') {
+            quote = toggle_quote(quote, byte);
+        } else if quote.is_none() && byte == b'`' {
+            return Some((&command[start + 1..index], index + 1));
+        }
+        index += 1;
+    }
+
+    None
 }
 
 fn classify_bash_segment(command: &str) -> RuntimeTaskClass {
     let Some(tokens) = command_tokens(command) else {
         return RuntimeTaskClass::GeneralAnswer;
     };
-    if let Some(inner) = shell_command(&tokens) {
-        return classify_bash_command(&serde_json::json!({ "command": inner }));
+    let Some(tokens) = normalize_command_wrappers(&tokens) else {
+        return RuntimeTaskClass::GeneralAnswer;
+    };
+    if let Some(inner) = shell_command(tokens) {
+        return classify_shell_command(inner, 0);
     }
-    if is_destructive_command(&tokens) {
+    if is_destructive_command(tokens) {
         RuntimeTaskClass::DataMutation
-    } else if is_external_command(&tokens) {
+    } else if is_external_command(tokens) {
         RuntimeTaskClass::ExternalSideEffect
-    } else if is_verification_command(&tokens) {
+    } else if is_verification_command(tokens) {
         RuntimeTaskClass::VerificationOnly
     } else {
         RuntimeTaskClass::GeneralAnswer
+    }
+}
+
+fn normalize_command_wrappers(tokens: &[String]) -> Option<&[String]> {
+    let mut command = tokens;
+    for _ in 0..MAX_COMMAND_WRAPPER_DEPTH {
+        let executable = command.first().map(|token| executable_name(token))?;
+        command = match executable.as_str() {
+            "env" => unwrap_env(command)?,
+            "sudo" => unwrap_sudo(command)?,
+            "command" => unwrap_command(command)?,
+            _ => return Some(command),
+        };
+    }
+    None
+}
+
+fn unwrap_env(tokens: &[String]) -> Option<&[String]> {
+    let mut index = 1;
+    while let Some(token) = tokens.get(index) {
+        match token.as_str() {
+            "--" => return tokens.get(index + 1..),
+            "-i" | "--ignore-environment" => index += 1,
+            "-u" | "--unset" | "-C" | "--chdir" => {
+                tokens.get(index + 1)?;
+                index += 2;
+            }
+            _ if token.starts_with("--unset=") || token.starts_with("--chdir=") => index += 1,
+            _ if token.starts_with('-') => return None,
+            _ if is_environment_assignment(token) => index += 1,
+            _ => return tokens.get(index..),
+        }
+    }
+    None
+}
+
+fn is_environment_assignment(token: &str) -> bool {
+    let Some((name, _)) = token.split_once('=') else {
+        return false;
+    };
+    let mut characters = name.bytes();
+    matches!(characters.next(), Some(b'a'..=b'z' | b'A'..=b'Z' | b'_'))
+        && characters.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+fn unwrap_sudo(tokens: &[String]) -> Option<&[String]> {
+    let mut index = 1;
+    while let Some(token) = tokens.get(index) {
+        match token.as_str() {
+            "--" => return tokens.get(index + 1..),
+            "-b" | "-E" | "-e" | "-H" | "-K" | "-k" | "-n" | "-S" | "-s" | "-V" | "-v"
+            | "--background" | "--preserve-env" | "--set-home" | "--reset-timestamp"
+            | "--remove-timestamp" | "--non-interactive" | "--stdin" | "--shell" | "--version"
+            | "--validate" => index += 1,
+            "-u" | "--user" | "-g" | "--group" | "-h" | "--host" | "-C" | "--close-from" | "-r"
+            | "--role" | "-t" | "--type" | "-T" | "--command-timeout" | "-R" | "--chroot"
+            | "-D" | "--chdir" => {
+                tokens.get(index + 1)?;
+                index += 2;
+            }
+            _ if starts_sudo_option_with_value(token) => index += 1,
+            _ if token.starts_with('-') => return None,
+            _ => return tokens.get(index..),
+        }
+    }
+    None
+}
+
+fn starts_sudo_option_with_value(token: &str) -> bool {
+    [
+        "--user=",
+        "--group=",
+        "--host=",
+        "--close-from=",
+        "--role=",
+        "--type=",
+        "--command-timeout=",
+        "--chroot=",
+        "--chdir=",
+    ]
+    .iter()
+    .any(|prefix| token.starts_with(prefix))
+        || matches!(
+            token.as_bytes().first(),
+            Some(b'u' | b'g' | b'h' | b'C' | b'r' | b't' | b'T' | b'R' | b'D')
+        ) && token.starts_with('-')
+            && token.len() > 2
+}
+
+fn unwrap_command(tokens: &[String]) -> Option<&[String]> {
+    match tokens.get(1).map(String::as_str) {
+        Some("--") => tokens.get(2..),
+        Some("-p") => tokens.get(2..),
+        Some(option) if option.starts_with('-') => None,
+        Some(_) => tokens.get(1..),
+        None => None,
     }
 }
 
@@ -77,7 +297,11 @@ fn shell_command(tokens: &[String]) -> Option<&str> {
     if !matches!(executable.as_str(), "bash" | "sh") {
         return None;
     }
-    let flag_count = tokens.iter().skip(1).take_while(|token| token.starts_with('-')).count();
+    let flag_count = tokens
+        .iter()
+        .skip(1)
+        .take_while(|token| token.starts_with('-'))
+        .count();
     tokens
         .get(1..=flag_count)
         .filter(|flags| flags.iter().any(|flag| flag.contains('c')))
@@ -114,11 +338,7 @@ fn split_shell_chain(command: &str) -> Option<Vec<&str>> {
         } else if byte == b'\\' && quote != Some(b'\'') {
             escaped = true;
         } else if matches!(byte, b'\'' | b'"') {
-            quote = match quote {
-                Some(current) if current == byte => None,
-                None => Some(byte),
-                current => current,
-            };
+            quote = toggle_quote(quote, byte);
         } else if quote.is_none() && matches!(byte, b';' | b'\n' | b'|' | b'&') {
             push_segment(&mut segments, &command[start..index]);
             if matches!(byte, b'|' | b'&') && bytes.get(index + 1) == Some(&byte) {
@@ -188,99 +408,4 @@ fn executable_name(token: &str) -> String {
         .strip_suffix(".exe")
         .unwrap_or(basename)
         .to_owned()
-}
-
-fn git_subcommand(tokens: &[String]) -> Option<&str> {
-    let mut index = 1;
-    while let Some(token) = tokens.get(index) {
-        if !token.starts_with('-') {
-            return Some(token);
-        }
-        index += 1;
-        if matches!(token.as_str(), "-C" | "-c" | "--git-dir" | "--work-tree") {
-            index += 1;
-        }
-    }
-    None
-}
-
-fn is_verification_command(tokens: &[String]) -> bool {
-    let Some(executable) = tokens.first().map(|token| executable_name(token)) else {
-        return false;
-    };
-    let operation = tokens.get(1).map(String::as_str);
-    matches!(
-        (executable.as_str(), operation),
-        ("cargo", Some("test" | "check" | "build" | "clippy" | "fmt")) | ("pytest", _)
-    ) || matches!(
-        (executable.as_str(), operation, tokens.get(2).map(String::as_str)),
-        ("npm" | "pnpm" | "yarn" | "bun", Some("test"), _)
-            | ("npm" | "pnpm" | "yarn" | "bun", Some("run"), Some("test" | "build" | "lint" | "typecheck"))
-    )
-}
-
-fn is_external_command(tokens: &[String]) -> bool {
-    let Some(executable) = tokens.first().map(|token| executable_name(token)) else {
-        return false;
-    };
-    (executable == "git" && git_subcommand(tokens) == Some("push"))
-        || matches!(executable.as_str(), "deploy" | "publish")
-        || matches!(
-            (executable.as_str(), tokens.get(1).map(String::as_str)),
-            ("npm" | "pnpm" | "yarn" | "bun", Some("publish" | "deploy"))
-        )
-}
-
-fn is_destructive_command(tokens: &[String]) -> bool {
-    tokens
-        .first()
-        .is_some_and(|token| executable_name(token) == "rm")
-        || has_executable_sql_mutation(tokens)
-}
-
-fn has_executable_sql_mutation(tokens: &[String]) -> bool {
-    let Some((database_client, arguments)) = tokens.split_first() else {
-        return false;
-    };
-    is_database_client(database_client)
-        && sql_command_argument(arguments).is_some_and(has_sql_mutation)
-}
-
-fn is_database_client(command: &str) -> bool {
-    matches!(
-        executable_name(command).as_str(),
-        "psql" | "sqlite3" | "mysql" | "mariadb" | "sqlcmd"
-    )
-}
-
-fn sql_command_argument(arguments: &[String]) -> Option<&str> {
-    arguments
-        .windows(2)
-        .find(|pair| matches!(pair[0].as_str(), "-c" | "--command" | "-e" | "-Q"))
-        .map(|pair| pair[1].as_str())
-}
-
-fn has_sql_mutation(sql: &str) -> bool {
-    let mut word = String::new();
-    let mut in_literal = false;
-    let mut characters = sql.chars().peekable();
-
-    while let Some(character) = characters.next() {
-        if character == '\'' {
-            if in_literal && characters.peek() == Some(&'\'') {
-                characters.next();
-            } else {
-                in_literal = !in_literal;
-            }
-        } else if !in_literal && character.is_ascii_alphabetic() {
-            word.push(character.to_ascii_uppercase());
-        } else if !in_literal && !word.is_empty() {
-            if matches!(word.as_str(), "DROP" | "DELETE") {
-                return true;
-            }
-            word.clear();
-        }
-    }
-
-    !in_literal && matches!(word.as_str(), "DROP" | "DELETE")
 }
