@@ -169,10 +169,25 @@ async function __archonRun() {{
     throw new Error("workflow.js must export or define function workflow(w)");
   }}
   const meta = typeof __workflowMeta !== "undefined" ? __workflowMeta : undefined;
-  const result = await workflow(meta ? __archonPrimitives(__archonW) : __archonW);
+  const api = meta ? __archonPrimitives(__archonW) : __archonW;
+  if (meta) {{
+    // Top-level Claude Code scripts use the primitives as bare globals.
+    globalThis.agent = api.agent;
+    globalThis.agents = api.agents;
+    globalThis.phase = api.phase;
+    globalThis.log = api.log;
+    globalThis.pipeline = api.pipeline;
+    globalThis.w = api.w;
+  }}
+  const result = await workflow(api);
+  if (meta && globalThis.__archonMarkers) {{
+    // phase()/log() markers need no await in scripts; the runner flushes
+    // them so they are journaled before completion.
+    await Promise.all(globalThis.__archonMarkers);
+  }}
   if (__archonPendingCalls.size > 0) {{
     const dropped = [...__archonPendingCalls].join(", ");
-    throw new Error(`workflow returned while ${{__archonPendingCalls.size}} host call(s) were still pending (${{dropped}}); await every agent/phase/log/pipeline call — fire-and-forget drops real work`);
+    throw new Error(`workflow returned while ${{__archonPendingCalls.size}} host call(s) were still pending (${{dropped}}); await every agent call — fire-and-forget drops real work`);
   }}
   return JSON.stringify(result ?? null);
 }}

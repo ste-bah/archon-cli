@@ -10,6 +10,11 @@ const V3_PRIMITIVES_JS: &str = r#"
 function __archonPrimitives(w) {
   let ordinal = 0;
   let phaseIndex = 0;
+  // phase()/log() are UI/journal markers: Claude Code scripts call them
+  // without await. Their checkpoint promises are collected here and flushed
+  // by the runner after the workflow returns, so they can neither be dropped
+  // nor trip the pending-call guard.
+  globalThis.__archonMarkers = [];
   const slug = (text) =>
     String(text).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "step";
   const agent = async (prompt, opts = {}) => {
@@ -44,17 +49,72 @@ function __archonPrimitives(w) {
       targetFiles: opts.targetFiles || [],
     });
   };
-  const phase = async (title) => {
-    phaseIndex += 1;
-    return await w.checkpoint(`phase-${phaseIndex}-${slug(title)}`, {
-      task: `Phase: ${String(title).slice(0, 200)}`,
+  // Batch form: N specs through ONE host fanout/parallel call, so the HOST
+  // controls safe concurrency (worktree isolation, build-lock serialization).
+  const agents = async (specs, opts = {}) => {
+    if (!Array.isArray(specs) || specs.length === 0) {
+      throw new Error("agents(specs, opts) requires a non-empty array of {prompt, label, ...} specs");
+    }
+    ordinal += 1;
+    const id = `${slug(opts.label || "agents")}-${ordinal}`;
+    const cargoish = specs.some((spec) =>
+      [spec.prompt, ...(spec.focusedTests || [])].join(" ").includes("cargo "));
+    const items = specs.map((spec, index) => {
+      if (typeof spec.prompt !== "string" || spec.prompt.trim() === "") {
+        throw new Error("every agents() spec requires a non-empty prompt");
+      }
+      return {
+        item_id: `${id}-${slug(spec.label || `item-${index + 1}`)}`,
+        canonical_task_ids: spec.taskIds || [],
+        task: spec.prompt,
+        instructions: spec.prompt,
+        target_files: spec.targetFiles || [],
+        focused_verification: spec.focusedTests || [],
+        artifact_requirements: spec.artifacts || [],
+        work_type: opts.write ? "implementation" : "verification",
+      };
+    });
+    if (opts.write) {
+      return await w.fanout(id, items, {
+        write: "worktree",
+        itemKind: "implementation",
+        tier: opts.tier || "coder",
+        targetFilesFromItem: true,
+        maxParallelism: cargoish ? 1 : opts.maxParallelism,
+        task: opts.task || "Execute every item in this batch.",
+      });
+    }
+    return await w.parallel(id, items, {
+      tier: opts.tier || "coder",
+      maxParallelism: cargoish ? 1 : opts.maxParallelism,
+      task: opts.task || "Execute every item in this batch.",
     });
   };
-  const log = async (message) => {
+  const phase = (title, body) => {
+    phaseIndex += 1;
+    const marker = w.checkpoint(`phase-${phaseIndex}-${slug(title)}`, {
+      task: `Phase: ${String(title).slice(0, 200)}`,
+    });
+    globalThis.__archonMarkers.push(marker);
+    // Three valid styles: bare `phase('T')` (Claude Code form, no await
+    // needed), `await phase('T')`, or `await phase('T', async () => {...})`
+    // which runs and awaits the body and returns its result — silently
+    // ignoring a body function would drop entire phases of real work.
+    if (typeof body === "function") {
+      return (async () => {
+        await marker;
+        return await body();
+      })();
+    }
+    return marker;
+  };
+  const log = (message) => {
     ordinal += 1;
-    return await w.checkpoint(`log-${ordinal}`, {
+    const marker = w.checkpoint(`log-${ordinal}`, {
       task: `Log: ${String(message).slice(0, 400)}`,
     });
+    globalThis.__archonMarkers.push(marker);
+    return marker;
   };
   const pipeline = async (items, stages) => {
     if (!Array.isArray(items) || !Array.isArray(stages)) {
@@ -70,7 +130,7 @@ function __archonPrimitives(w) {
     }
     return results;
   };
-  return Object.freeze({ agent, phase, log, pipeline, w });
+  return Object.freeze({ agent, agents, phase, log, pipeline, w });
 }
 "#;
 
@@ -80,6 +140,17 @@ fn normalize_workflow_export(source: &str) -> String {
     // global flag __archonRun uses to hand the script the primitive API.
     if let Some(offset) = workflow_meta_marker_offset(&normalized) {
         normalized.replace_range(offset..offset + "export const meta".len(), "const meta");
+        // The genuine Claude Code script shape is TOP-LEVEL code after the
+        // meta export — no wrapper function. Wrap everything after the meta
+        // statement so top-level `await` and `return` become legal, with the
+        // primitives available as globals.
+        if !has_workflow_function_declaration(&normalized) {
+            let body_start = statement_end_offset(&normalized, offset);
+            let body = normalized.split_off(body_start);
+            normalized.push_str("\nasync function workflow() {\n");
+            normalized.push_str(&body);
+            normalized.push_str("\n}");
+        }
         normalized.insert_str(0, "globalThis.__workflowMeta = true;\n");
     }
     // QuickJS evaluates non-module source: neutralize the default export
@@ -104,6 +175,60 @@ fn normalize_workflow_export(source: &str) -> String {
     normalized
         .replace("export default workflow;", "")
         .replace("export default workflow", "")
+}
+
+fn has_workflow_function_declaration(source: &str) -> bool {
+    source.lines().any(|line| {
+        let line = line.trim_start();
+        [
+            "export default async function workflow",
+            "export default function workflow",
+            "async function workflow",
+            "function workflow",
+        ]
+        .iter()
+        .any(|declaration| line.starts_with(declaration))
+    })
+}
+
+/// Offset just past the end of the statement starting at `start` — the
+/// balanced close of its first `{...}` block plus an optional trailing `;`.
+/// Quote- and escape-aware so braces inside meta strings don't miscount.
+fn statement_end_offset(source: &str, start: usize) -> usize {
+    let bytes = &source[start..];
+    let Some(open) = bytes.find('{') else {
+        return source.len();
+    };
+    let mut depth = 0usize;
+    let mut in_string: Option<char> = None;
+    let mut escaped = false;
+    for (offset, ch) in bytes[open..].char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' if in_string.is_some() => escaped = true,
+            '"' | '\'' | '`' => match in_string {
+                Some(quote) if quote == ch => in_string = None,
+                None => in_string = Some(ch),
+                _ => {}
+            },
+            '{' if in_string.is_none() => depth += 1,
+            '}' if in_string.is_none() => {
+                depth -= 1;
+                if depth == 0 {
+                    let mut end = start + open + offset + ch.len_utf8();
+                    if source[end..].starts_with(';') {
+                        end += 1;
+                    }
+                    return end;
+                }
+            }
+            _ => {}
+        }
+    }
+    source.len()
 }
 
 fn workflow_meta_marker_offset(source: &str) -> Option<usize> {

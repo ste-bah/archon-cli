@@ -152,12 +152,28 @@ async function workflow(w) {
         let authored_script = r#"export const meta = {
   name: 'authored-demo',
   description: 'authored by the canned planner',
-  phases: [{ title: 'Only', detail: 'phase and log only' }],
+  phases: [{ title: 'Only', detail: 'one phase with real agent work' }],
 }
-export default async function workflow({ phase, log }) {
+export default async function workflow({ agent, phase, log }) {
   await phase("Authored Phase");
-  await log("authored ran");
-  return { accepted: [], blocked: [], notes: "authored demo complete" };
+  const review = await agent("Review the plan and reply with a short confirmation.", {
+    label: "demo-review",
+  });
+  const adversarial = await agent("Try to falsify the demo claim.", {
+    label: "adversarial-review",
+    tier: "critic",
+  });
+  const coverage = await agent("Audit the source coverage of the demo.", {
+    label: "coverage-audit",
+  });
+  await log(`authored ran: ${review && review.status}`);
+  return {
+    accepted: [],
+    blocked: [],
+    adversarial_findings: [adversarial.summary],
+    uncovered_requirements: [coverage.summary],
+    notes: "authored demo complete",
+  };
 }
 "#;
         let temp = tempfile::tempdir().expect("tempdir");
@@ -193,7 +209,7 @@ export default async function workflow({ phase, log }) {
             .join("authored-workflow.js");
 
         let summary = runner
-            .run_authored_script_lifecycle(authored_path.clone())
+            .run_authored_script_lifecycle(authored_path.clone(), serde_json::Value::Null)
             .await
             .expect("authored lifecycle summary");
 
@@ -245,7 +261,7 @@ export default async function workflow(){return {accepted:[],blocked:[],notes:'o
         assert!(
             validate_authored_task_accounting(
                 Some(
-                    r#"{"accepted":["TASK-001"],"blocked":[{"taskId":"TASK-002","reason":"provider entitlement denied"}]}"#,
+                    r#"{"accepted":["TASK-001"],"blocked":[{"taskId":"TASK-002","reason":"provider entitlement denied"}],"adversarial_findings":[],"uncovered_requirements":[]}"#,
                 ),
                 &expected,
             )
@@ -280,7 +296,9 @@ export default async function workflow(){return {accepted:[],blocked:[],notes:'o
         let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
         let (tui_tx, _tui_rx) = bounded_tui_event_channel();
         let client = LiveV2AgentClient::new(
-            Arc::new(PanicLlm),
+            Arc::new(SlowAcceptedLlm {
+                delay: Duration::from_secs(30),
+            }),
             tui_tx,
             Vec::new(),
             run.id.clone(),
@@ -304,9 +322,9 @@ export default async function workflow(){return {accepted:[],blocked:[],notes:'o
             .run(
                 r#"
 export const meta = { name: 'dropped-call-demo', phases: [{ title: 'One' }] }
-export default async function workflow({ phase, log }) {
-  // Fire-and-forget: the phase checkpoint is started but never awaited.
-  phase("Dropped Phase");
+export default async function workflow({ agent }) {
+  // Real work MUST be awaited: this slow agent call is dropped mid-flight.
+  agent("Do something important that is never awaited.", { label: "orphaned-work" });
   return { accepted: [], blocked: [], notes: "returned early" };
 }
 "#,
@@ -320,4 +338,64 @@ export default async function workflow({ phase, log }) {
             summary.failed_call.as_deref() == Some("workflow.js") || !next_action.is_empty(),
             "run must be marked a script failure"
         );
+    }
+
+    #[tokio::test]
+    async fn phase_with_body_callback_runs_and_awaits_the_body() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let spec = test_spec();
+        let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
+        let run = workflow_store.create_run(spec.clone()).expect("run");
+        let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
+        let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+        let client = LiveV2AgentClient::new(
+            Arc::new(PanicLlm),
+            tui_tx,
+            Vec::new(),
+            run.id.clone(),
+            None,
+            None,
+        );
+        let runner = WorkflowV2ScriptRunner::new(
+            "phase body".to_string(),
+            test_runtime(&spec),
+            WorkflowV2AgentAdapter::new(),
+            client,
+            v2_store.clone(),
+            workflow_store,
+            run.id.clone(),
+            true,
+            None,
+            None,
+        );
+
+        let summary = runner
+            .run(
+                r#"
+export const meta = { name: 'phase-body-demo', phases: [{ title: 'One' }] }
+export default async function workflow({ phase, log }) {
+  const value = await phase("With Body", async () => {
+    await log("inside the body");
+    return 41 + 1;
+  });
+  if (value !== 42) {
+    throw new Error(`phase body result not returned: ${value}`);
+  }
+  return { accepted: [], blocked: [], notes: "body ran" };
+}
+"#,
+            )
+            .await
+            .expect("summary");
+
+        // The body's log call proves the callback executed and was awaited.
+        assert!(
+            v2_store
+                .load_call_record("log-1")
+                .expect("log record")
+                .is_some(),
+            "phase body must run"
+        );
+        let result = summary.script_result.expect("script result");
+        assert!(result.contains("body ran"));
     }
