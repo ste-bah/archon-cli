@@ -30,6 +30,8 @@ pub fn classify_tool_action(
         return RuntimeTaskClass::DataMutation;
     }
     match tool_name.as_str() {
+        "applypatch" => RuntimeTaskClass::CodingChange,
+        "largeeditdeletesection" => RuntimeTaskClass::DataMutation,
         "edit" | "write" | "notebookedit" => RuntimeTaskClass::CodingChange,
         "webfetch" | "websearch" => RuntimeTaskClass::ResearchAnswer,
         "bash" => classify_bash_command(input),

@@ -1,4 +1,26 @@
 #[test]
+fn tool_action_maps_registered_mutating_tool_names_exactly() {
+    let empty = serde_json::json!({});
+    let surface = WorldAdvisorSurface::InteractiveSession;
+
+    assert_eq!(
+        classify_tool_action("ApplyPatch", &empty, surface),
+        RuntimeTaskClass::CodingChange,
+    );
+    assert_eq!(
+        classify_tool_action("applypatch", &empty, surface),
+        RuntimeTaskClass::CodingChange,
+    );
+    assert_eq!(
+        classify_tool_action("LargeEditDeleteSection", &empty, surface),
+        RuntimeTaskClass::DataMutation,
+    );
+    assert_eq!(
+        classify_tool_action("largeeditdeletesection", &empty, surface),
+        RuntimeTaskClass::DataMutation,
+    );
+}
+#[test]
 fn task_classification_uses_surface_not_prompt_prose() {
     assert_eq!(
         classify_task(
