@@ -40,7 +40,7 @@ Primitives:
     label: '<short-kebab-label>'          // required; call ids derive from it deterministically
     write: true,                          // spawn a WRITE agent in a sealed worktree through the write gauntlet
     taskIds: ['<canonical task id>'],     // required when write:true
-    targetFiles: ['path/one.ext'],        // files the write agent owns
+    targetFiles: ['path/one.ext'],        // LITERAL repo-relative file paths ONLY (never descriptions); the write agent owns exactly these
     focusedTests: ['exact test command'], // write:true — commands proving the change; must match >0 tests
     artifacts: ['relative/artifact.path'],// artifacts the work must produce
     tier: 'coder' | 'reducer' | 'analysis' | 'critic'   // 'critic' routes to the dedicated adversarial reviewer

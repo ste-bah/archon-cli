@@ -142,6 +142,9 @@ fn dry_run_call_from_payload(
     })?;
     reject_agent_routing_overrides(&request.id, &request.options)?;
     let (options, write_mode) = parse_script_options(&request.options)?;
+    if write_mode.is_some() {
+        reject_malformed_write_targets(&request.id, request.source.as_ref())?;
+    }
     if method == WorkflowV2HostMethod::Implementation && write_mode.is_none() {
         return Err(WorkflowError::SpecInvalid(format!(
             "w.implementation('{}') requires explicit write mode serial, coordinated, or worktree",
@@ -183,6 +186,48 @@ fn record_policy_error(
     if let Ok(mut recorder) = recorder.lock() {
         recorder.policy_error.get_or_insert(error.to_string());
     }
+}
+
+// Policy: write items must declare literal repo-relative target file paths.
+// Enforced at the host boundary (mirrors normalize_target: no whitespace, no
+// traversal, no absolute paths; globs add nothing but late ownership
+// mismatches) so prose targets fail the pre-flight even when script-side
+// sugar is bypassed via raw w.fanout or a catch block.
+fn reject_malformed_write_targets(
+    call_id: &str,
+    source: Option<&serde_json::Value>,
+) -> archon_workflow::WorkflowResult<()> {
+    let items = source.and_then(serde_json::Value::as_array);
+    for item in items.into_iter().flatten() {
+        let targets = item
+            .get("target_files")
+            .or_else(|| item.get("targetFiles"))
+            .and_then(serde_json::Value::as_array);
+        let Some(targets) = targets else { continue };
+        for target in targets {
+            let Some(target) = target.as_str() else {
+                return Err(WorkflowError::SpecInvalid(format!(
+                    "write call '{call_id}': target_files entries must be strings"
+                )));
+            };
+            let trimmed = target.trim();
+            let malformed = trimmed.is_empty()
+                || trimmed.chars().any(char::is_whitespace)
+                || trimmed.starts_with('/')
+                || trimmed.split('/').any(|part| part == "..");
+            if malformed {
+                return Err(WorkflowError::SpecInvalid(format!(
+                    "write call '{call_id}': target_files entries must be literal repo-relative file paths (got {trimmed:?})"
+                )));
+            }
+            if trimmed.contains(['*', '?', '[']) {
+                return Err(WorkflowError::SpecInvalid(format!(
+                    "write call '{call_id}': target_files entry {trimmed:?} looks like a glob — ownership matching is literal, list the exact files"
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn dry_run_stub_result(method: WorkflowV2HostMethod) -> String {

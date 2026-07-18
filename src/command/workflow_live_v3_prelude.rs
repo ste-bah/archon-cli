@@ -17,6 +17,27 @@ function __archonPrimitives(w) {
   globalThis.__archonMarkers = [];
   const slug = (text) =>
     String(text).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "step";
+  // Early UX guard mirroring the HOST rule (authoritative copy runs in the
+  // dry-run recorder): literal repo-relative paths — no whitespace, no
+  // traversal, not absolute, no globs. Extensionless files like Makefile are
+  // valid. Write work requires a non-empty list.
+  const assertPathList = (list, what, requireNonEmpty) => {
+    if (requireNonEmpty && (!Array.isArray(list) || list.length === 0)) {
+      throw new Error(`${what} must list at least one literal repo-relative file path for write work`);
+    }
+    for (const entry of list || []) {
+      const bad =
+        typeof entry !== "string" ||
+        entry.trim() === "" ||
+        /\s/.test(entry) ||
+        entry.startsWith("/") ||
+        entry.split("/").includes("..") ||
+        /[*?\[]/.test(entry);
+      if (bad) {
+        throw new Error(`${what} entries must be literal repo-relative file paths (no whitespace, traversal, globs, or absolute paths; got: ${JSON.stringify(entry).slice(0, 120)})`);
+      }
+    }
+  };
   const agent = async (prompt, opts = {}) => {
     if (typeof prompt !== "string" || prompt.trim() === "") {
       throw new Error("agent(prompt, opts) requires a non-empty prompt string");
@@ -24,6 +45,7 @@ function __archonPrimitives(w) {
     ordinal += 1;
     const id = `${slug(opts.label || "agent")}-${ordinal}`;
     if (opts.write) {
+      assertPathList(opts.targetFiles, "agent() targetFiles", true);
       const item = {
         item_id: id,
         canonical_task_ids: opts.taskIds || [],
@@ -62,6 +84,9 @@ function __archonPrimitives(w) {
     const items = specs.map((spec, index) => {
       if (typeof spec.prompt !== "string" || spec.prompt.trim() === "") {
         throw new Error("every agents() spec requires a non-empty prompt");
+      }
+      if (opts.write) {
+        assertPathList(spec.targetFiles, "agents() spec targetFiles", true);
       }
       return {
         item_id: `${id}-${slug(spec.label || `item-${index + 1}`)}`,
