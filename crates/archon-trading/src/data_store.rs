@@ -169,6 +169,7 @@ impl TradingDataLake {
         }
         fail_closed_non_native_production_metadata(&mut metadata);
         fail_closed_derived_or_resampled_metadata(&mut metadata);
+        fail_closed_yfinance_fallback_metadata(&mut metadata);
         let versioned = VersionedDataset {
             content_hash: metadata.checksum.clone(),
             status: status_from_metadata(&metadata),
@@ -375,9 +376,8 @@ impl TradingDataLake {
             verify_artifacts(&self.root, record)?;
             let validation =
                 read_json::<ValidationReport>(&self.root.join(&record.validation_path));
-            let production_eligible = validation
-                .as_ref()
-                .is_ok_and(ValidationReport::allows_production);
+            let production_eligible =
+                registry_record_allows_production(record, validation.as_ref());
             let status = if production_eligible {
                 DatasetStatus::Healthy
             } else {
@@ -423,6 +423,16 @@ impl TradingDataLake {
             .join(safe_path(dataset_id))
             .join(safe_path(version))
     }
+}
+
+fn registry_record_allows_production(
+    record: &StoredDatasetRecord,
+    validation: Result<&ValidationReport, &DataStoreError>,
+) -> bool {
+    record.native_interval
+        && record.production_eligible
+        && !record.provider.trim().eq_ignore_ascii_case("yfinance")
+        && validation.is_ok_and(ValidationReport::allows_production)
 }
 
 #[cfg(test)]

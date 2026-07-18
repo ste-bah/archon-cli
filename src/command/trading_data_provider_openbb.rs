@@ -123,6 +123,7 @@ pub(crate) fn fetch_native_with_base_url(
         "quality_status": native_quality_status(provider),
         "production_eligible": !provider.trim().eq_ignore_ascii_case("yfinance"),
         "stored_ohlcv": record,
+        "diagnostic_only": provider.trim().eq_ignore_ascii_case("yfinance"),
         "fail_closed_behavior": "dataset was registered only after provider response parsed, validated, and artifact writes completed"
     });
     write_or_render(&report, None)

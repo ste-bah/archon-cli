@@ -103,6 +103,13 @@ pub(super) fn fail_closed_derived_or_resampled_metadata(metadata: &mut DatasetMe
     }
 }
 
+pub(super) fn fail_closed_yfinance_fallback_metadata(metadata: &mut DatasetMetadata) {
+    if metadata.provider.trim().eq_ignore_ascii_case("yfinance") {
+        metadata.production_eligible = false;
+        metadata.quality_status = "degraded".into();
+    }
+}
+
 fn dataset_raw_artifact_path(
     root: &Path,
     raw_path: &Path,
@@ -133,6 +140,8 @@ pub(super) fn sync_validation_record(
     record: &StoredDatasetRecord,
     report: &ValidationReport,
 ) -> Result<(), DataStoreError> {
+    let metadata_path = root.join(&record.metadata_path);
+    let metadata: DatasetMetadata = read_json(&metadata_path)?;
     let mut registry = read_json::<PersistentDatasetRegistry>(
         &root.join(".archon/trading-lab/data/registry.json"),
     )?;
@@ -140,7 +149,7 @@ pub(super) fn sync_validation_record(
         .datasets
         .get_mut(&registry_key(&record.dataset_id, &record.version))
     {
-        stored.production_eligible = validation_is_production_eligible(report);
+        stored.production_eligible = validation_is_production_eligible(report, &metadata);
         stored.status = if stored.production_eligible {
             DatasetStatus::Healthy
         } else {
@@ -158,12 +167,14 @@ pub(super) fn reconcile_versioned_from_validation(
     versioned: &mut VersionedDataset,
     report: &ValidationReport,
 ) {
-    versioned.metadata.production_eligible = validation_is_production_eligible(report);
+    versioned.metadata.production_eligible =
+        validation_is_production_eligible(report, &versioned.metadata);
     if !versioned.metadata.production_eligible
         && !versioned
             .metadata
             .quality_status
             .eq_ignore_ascii_case("diagnostic")
+        && !metadata_is_yfinance_degraded_fallback(&versioned.metadata)
     {
         versioned.metadata.quality_status = "degraded".into();
     }
@@ -174,8 +185,11 @@ pub(super) fn reconcile_versioned_from_validation(
     };
 }
 
-fn validation_is_production_eligible(report: &ValidationReport) -> bool {
-    report.allows_production()
+fn validation_is_production_eligible(
+    report: &ValidationReport,
+    metadata: &DatasetMetadata,
+) -> bool {
+    report.allows_production() && metadata_can_satisfy_production(metadata)
 }
 
 fn update_metadata_from_validation(
@@ -185,8 +199,8 @@ fn update_metadata_from_validation(
 ) -> Result<(), DataStoreError> {
     let metadata_path = root.join(&record.metadata_path);
     let mut metadata: DatasetMetadata = read_json(&metadata_path)?;
-    metadata.production_eligible = validation_is_production_eligible(report);
-    if !metadata.production_eligible {
+    metadata.production_eligible = validation_is_production_eligible(report, &metadata);
+    if !metadata.production_eligible && !metadata_is_yfinance_degraded_fallback(&metadata) {
         metadata.quality_status = "degraded".into();
     }
     write_schema_json(&metadata_path, &metadata)

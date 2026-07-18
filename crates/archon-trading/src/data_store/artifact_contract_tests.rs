@@ -75,6 +75,43 @@ fn derived_resampled_diagnostic_candles_are_not_production_eligible() {
 }
 
 #[test]
+fn yfinance_fallback_artifacts_are_degraded_and_never_production_eligible() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let mut request = request();
+    request.metadata.dataset_id = "yfinance-BTCUSD-1D-raw".into();
+    request.metadata.provider = "yfinance".into();
+    request.metadata.provider_symbol = "BTC-USD".into();
+    request.metadata.production_eligible = true;
+    request.metadata.quality_status = "passed".into();
+    lake.store_ohlcv(request).unwrap();
+
+    let dataset = lake
+        .load_ohlcv("yfinance-BTCUSD-1D-raw", "20260101-fixture")
+        .unwrap();
+    assert!(!dataset.metadata.production_eligible);
+    assert_eq!(dataset.metadata.quality_status, "degraded");
+    assert_eq!(dataset.record.status, DatasetStatus::Degraded);
+    assert!(!dataset.record.production_eligible);
+    let report: ValidationReport =
+        read_json(&temp.path().join(&dataset.record.validation_path)).unwrap();
+    assert_eq!(report.status, ValidationStatus::Failed);
+    assert!(!report.production_eligible);
+    assert!(report.checks.iter().any(|check| {
+        check.id == "metadata.not_yfinance_fallback" && check.status == ValidationStatus::Failed
+    }));
+    let gate = lake
+        .backtest_data_gate("yfinance-BTCUSD-1D-raw", "20260101-fixture", true)
+        .unwrap();
+    assert!(!gate.promotion_eligible);
+    assert!(
+        gate.issues
+            .iter()
+            .any(|issue| issue.contains("yfinance degraded fallback"))
+    );
+}
+
+#[test]
 fn typed_artifact_verifier_accepts_pipeline_output_and_rejects_fabricated_validation() {
     let temp = tempfile::tempdir().unwrap();
     let lake = TradingDataLake::new(temp.path());
@@ -92,6 +129,59 @@ fn typed_artifact_verifier_accepts_pipeline_output_and_rejects_fabricated_valida
     write_json(&validation_path, &fabricated).unwrap();
 
     assert!(TradingDataLake::verify_artifact_dir(&dataset_dir).is_err());
+}
+
+#[test]
+fn registry_load_degrades_record_when_native_interval_is_missing() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let record = lake.store_ohlcv(request()).unwrap();
+    let mut registry = lake.load_registry().unwrap();
+    let stored = registry
+        .datasets
+        .get_mut(&registry_key(&record.dataset_id, &record.version))
+        .unwrap();
+    stored.native_interval = false;
+    stored.production_eligible = true;
+    stored.status = DatasetStatus::Healthy;
+    let manifest_path = temp.path().join(&stored.manifest_path);
+    write_json(&manifest_path, stored).unwrap();
+    write_json(&lake.registry_path(), &registry).unwrap();
+
+    let reconciled = lake.load_registry().unwrap();
+    let stored = reconciled
+        .datasets
+        .get(&registry_key(&record.dataset_id, &record.version))
+        .unwrap();
+
+    assert!(!stored.production_eligible);
+    assert_eq!(stored.status, DatasetStatus::Degraded);
+}
+
+#[test]
+fn registry_load_degrades_record_when_production_eligible_is_missing() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let record = lake.store_ohlcv(request()).unwrap();
+    let mut registry = lake.load_registry().unwrap();
+    let stored = registry
+        .datasets
+        .get_mut(&registry_key(&record.dataset_id, &record.version))
+        .unwrap();
+    stored.production_eligible = false;
+    stored.status = DatasetStatus::Healthy;
+    let manifest_path = temp.path().join(&stored.manifest_path);
+    write_json(&manifest_path, stored).unwrap();
+    write_json(&lake.registry_path(), &registry).unwrap();
+
+    let reconciled = lake.load_registry().unwrap();
+    let stored = reconciled
+        .datasets
+        .get(&registry_key(&record.dataset_id, &record.version))
+        .unwrap();
+
+    assert!(!stored.production_eligible);
+    assert_eq!(stored.status, DatasetStatus::Degraded);
 }
 
 #[test]

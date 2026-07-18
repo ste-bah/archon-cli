@@ -127,12 +127,8 @@ fn fetch_tradingview_native(
             raw_body: response,
             raw_format: OhlcvFormat::Json,
             raw_request: tradingview_request(symbol, timeframe, start, end),
-            redacted_headers: json!({
-                "mcp_state": "available",
-                "mcp_status": "success",
-                "native_timeframe": timeframe.trim(),
-                "captured_bars": captured_bars
-            }),
+            redacted_headers: json!({ "mcp_state": "available", "mcp_status": "success",
+                "native_timeframe": timeframe.trim(), "captured_bars": captured_bars }),
             provider_notes: tradingview_provider_notes(symbol, timeframe, captured_bars),
             created_at: fetched_at,
         })

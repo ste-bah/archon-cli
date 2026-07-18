@@ -31,6 +31,9 @@ pub(super) fn append_dataset_gate_issues(
     if metadata_is_derived_or_resampled_diagnostic(&dataset.metadata) {
         issues.push("derived/resampled diagnostic candles cannot satisfy production gates".into());
     }
+    if metadata_is_yfinance_degraded_fallback(&dataset.metadata) {
+        issues.push("yfinance degraded fallback artifacts cannot satisfy production gates".into());
+    }
     if dataset
         .metadata
         .provider

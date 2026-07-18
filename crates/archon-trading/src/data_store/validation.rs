@@ -38,9 +38,15 @@ pub(super) fn validation_report(
     );
     push_check(
         &mut checks,
+        "metadata.not_yfinance_fallback",
+        !metadata_is_yfinance_degraded_fallback(metadata),
+        "yfinance fallback artifacts are diagnostic-only and cannot satisfy production gates",
+    );
+    push_check(
+        &mut checks,
         "metadata.production_eligible",
-        metadata.production_eligible && !metadata_is_derived_or_resampled_diagnostic(metadata),
-        "dataset is marked production eligible only for native production data",
+        metadata.production_eligible && metadata_can_satisfy_production(metadata),
+        "dataset is marked production eligible only for native non-diagnostic production data",
     );
     push_check(
         &mut checks,
@@ -213,6 +219,18 @@ pub(super) fn metadata_is_derived_or_resampled_diagnostic(metadata: &DatasetMeta
             .to_ascii_lowercase()
             .contains("resampled")
         || metadata.dataset_id.to_ascii_lowercase().contains("derived")
+}
+
+pub(super) fn metadata_is_yfinance_degraded_fallback(metadata: &DatasetMetadata) -> bool {
+    metadata.provider.trim().eq_ignore_ascii_case("yfinance")
+        || metadata
+            .quality_status
+            .eq_ignore_ascii_case("degraded_fallback")
+}
+
+pub(super) fn metadata_can_satisfy_production(metadata: &DatasetMetadata) -> bool {
+    !metadata_is_derived_or_resampled_diagnostic(metadata)
+        && !metadata_is_yfinance_degraded_fallback(metadata)
 }
 
 fn all_non_empty(values: &[&str]) -> bool {
