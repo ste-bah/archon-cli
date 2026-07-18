@@ -1,4 +1,110 @@
 #[test]
+fn predict_next_persists_missing_runtime_action_before_inference() {
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let config = test_config();
+    let trained = candidate::render_train(&config, temp.path(), true, None).unwrap();
+    let candidate_id = candidate_id_from(&trained);
+
+    let rendered = render_predict_next_with_state(
+        &config,
+        temp.path(),
+        archon_world_model::ColdStartStats {
+            rows: 1_000,
+            sessions: 50,
+            observed_days: 7,
+        },
+        Some(candidate_id),
+        "runtime-session",
+        "runtime-action",
+        "execute the selected agent evolution command",
+    );
+
+    assert!(
+        rendered.contains("Inference: active_checkpoint"),
+        "{rendered}"
+    );
+    let rows = archon_world_model::storage::WorldModelStore::open(temp.path())
+        .unwrap()
+        .load_rows()
+        .unwrap();
+    let action = rows
+        .iter()
+        .find(|row| {
+            row.redacted_excerpt.as_deref()
+                == Some(
+                    "operation=runtime-action input=execute the selected agent evolution command",
+                )
+        })
+        .expect("runtime action must be persisted before inference");
+    assert!(action.row_id.starts_with("world-runtime-action-"));
+    assert_ne!(action.row_id, "runtime-action");
+    assert_eq!(action.session_id, "runtime-session");
+    assert_eq!(
+        action.action_kind,
+        archon_world_model::schema::WorldActionKind::AgentAttempt
+    );
+    assert_eq!(
+        action.source,
+        archon_world_model::schema::WorldTraceSource::Conversation
+    );
+    assert_eq!(
+        action.redacted_excerpt.as_deref(),
+        Some("operation=runtime-action input=execute the selected agent evolution command")
+    );
+}
+
+#[test]
+fn predict_next_uses_persisted_trace_context_and_planned_action() {
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let store = archon_world_model::storage::WorldModelStore::open(temp.path()).unwrap();
+    let mut planned = archon_world_model::WorldTraceRow::new(
+        "session-1",
+        archon_world_model::schema::WorldActionKind::PlanUpdate,
+    )
+    .with_row_id("planned-action");
+    planned.redacted_excerpt = Some("apply the reviewed migration".into());
+    store.persist_rows(&[planned]).unwrap();
+
+    let config = jepa_test_config();
+    let trained = candidate::render_train_jepa(&config, temp.path(), true, None).unwrap();
+    let candidate_id = candidate_id_from(&trained);
+    let registry = archon_world_model::registry::ModelRegistry::open(temp.path()).unwrap();
+    registry
+        .promote_model_kind(&candidate_id, "jepa_transition")
+        .unwrap();
+
+    let rendered = render_predict_next_with_state(
+        &config,
+        temp.path(),
+        archon_world_model::ColdStartStats {
+            rows: 1_000,
+            sessions: 50,
+            observed_days: 7,
+        },
+        Some(candidate_id),
+        "session-1",
+        "planned-action",
+        "summary echo must not become model input",
+    );
+
+    let prediction_id = prediction_id_from(&rendered);
+    let persisted = predict::load_prediction(temp.path(), &prediction_id)
+        .unwrap()
+        .expect("prediction should be persisted");
+    assert_eq!(persisted.action_summary, "apply the reviewed migration");
+    assert!(
+        !persisted
+            .evidence_refs
+            .contains(&"world_row:planned-action".into())
+    );
+    assert!(persisted.evidence_refs.contains(&"world_row:r2".into()));
+    assert!(persisted.evidence_refs.contains(&"world_row:r3".into()));
+    assert!(!persisted.evidence_refs.contains(&"world_row:r1".into()));
+}
+
+#[test]
 fn predict_next_uses_active_jepa_model_when_configured() {
     let temp = tempfile::tempdir().unwrap();
     seed_training_rows(temp.path());
@@ -19,8 +125,8 @@ fn predict_next_uses_active_jepa_model_when_configured() {
             observed_days: 7,
         },
         Some(candidate_id.clone()),
-        "s1",
-        "a1",
+        "session-1",
+        "r1",
         "run tests",
     );
 
@@ -84,8 +190,8 @@ fn predict_next_uses_active_jepa_cuda_model() {
             observed_days: 7,
         },
         Some(candidate_id),
-        "s1",
-        "a1",
+        "session-1",
+        "r1",
         "run tests",
     );
 
@@ -140,8 +246,8 @@ fn predict_next_uses_active_jepa_metal_model() {
             observed_days: 7,
         },
         Some(candidate_id),
-        "s1",
-        "a1",
+        "session-1",
+        "r1",
         "run tests",
     );
 
@@ -208,8 +314,8 @@ fn predict_next_fails_open_for_accelerator_jepa_without_native_runtime() {
             observed_days: 7,
         },
         Some(candidate_id),
-        "s1",
-        "a1",
+        "session-1",
+        "r1",
         "run tests",
     );
 
@@ -220,6 +326,7 @@ fn predict_next_fails_open_for_accelerator_jepa_without_native_runtime() {
 #[test]
 fn predict_next_fails_open_when_jepa_pointer_missing() {
     let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
     let mut config = test_config();
     config.learning.world_model.model_kind = "jepa_transition".into();
 
@@ -232,8 +339,8 @@ fn predict_next_fails_open_when_jepa_pointer_missing() {
             observed_days: 7,
         },
         Some("missing-jepa".into()),
-        "s1",
-        "a1",
+        "session-1",
+        "r1",
         "run tests",
     );
 

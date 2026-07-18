@@ -185,8 +185,26 @@ pub fn examples_from_rows_with_representation_adapter(
     rows: &[WorldTraceRow],
     adapter: &dyn WorldRepresentationAdapter,
 ) -> Result<Vec<LatentTransitionExample>> {
+    examples_from_rows_with_representation_adapter_and_context(rows, adapter, 1)
+}
+
+pub fn examples_from_rows_with_representation_adapter_and_context(
+    rows: &[WorldTraceRow],
+    adapter: &dyn WorldRepresentationAdapter,
+    context_rows: usize,
+) -> Result<Vec<LatentTransitionExample>> {
+    examples_from_rows_with_representation_adapter_controlled(rows, adapter, context_rows, None)
+}
+
+pub fn examples_from_rows_with_representation_adapter_controlled(
+    rows: &[WorldTraceRow],
+    adapter: &dyn WorldRepresentationAdapter,
+    context_rows: usize,
+    should_stop: Option<&dyn Fn() -> bool>,
+) -> Result<Vec<LatentTransitionExample>> {
+    check_training_stop(should_stop, "representation transition scan")?;
     let builder = TraceWindowBuilder::new(rows);
-    let transitions = builder.adjacent_transitions(1, 1, 1)?;
+    let transitions = builder.adjacent_transitions(context_rows, 1, 1)?;
 
     // Batch the three encode passes so downstream adapters (e.g. CachedEmbeddingAdapter) can
     // issue a single inner embed_batch call per pass rather than N singular embed calls.
@@ -196,12 +214,15 @@ pub fn examples_from_rows_with_representation_adapter(
     let mut examples = Vec::with_capacity(transitions.len());
 
     for chunk in transitions.chunks(BATCH_SIZE) {
+        check_training_stop(should_stop, "representation state embedding")?;
         let contexts: Vec<_> = chunk.iter().map(|t| t.context.clone()).collect();
         let actions: Vec<_> = chunk.iter().map(|t| t.action.clone()).collect();
         let targets: Vec<_> = chunk.iter().map(|t| t.target.clone()).collect();
 
         let states = adapter.encode_state_batch(&contexts)?;
+        check_training_stop(should_stop, "representation action embedding")?;
         let action_vecs = adapter.encode_action_batch(&actions)?;
+        check_training_stop(should_stop, "representation target embedding")?;
         let next_states = adapter.encode_target_batch(&targets)?;
 
         for (i, transition) in chunk.iter().enumerate() {
@@ -342,6 +363,26 @@ mod tests {
         assert_eq!(examples[0].state.len(), 4);
         assert_eq!(examples[0].action.len(), 4);
         assert_eq!(examples[0].next_state.len(), 4);
+    }
+
+    #[test]
+    fn controlled_representation_example_build_stops_before_embedding() {
+        let first = WorldTraceRow::new("session-1", WorldActionKind::ToolCall).with_row_id("r1");
+        let second =
+            WorldTraceRow::new("session-1", WorldActionKind::Verification).with_row_id("r2");
+        let adapter = GenericEmbeddingRepresentationAdapter::new(Box::new(
+            DeterministicHashEmbeddingAdapter::new(4).unwrap(),
+        ));
+
+        let error = examples_from_rows_with_representation_adapter_controlled(
+            &[first, second],
+            &adapter,
+            1,
+            Some(&|| true),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("stopped or timed out"));
     }
 
     #[test]

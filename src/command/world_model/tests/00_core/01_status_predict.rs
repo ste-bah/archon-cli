@@ -77,8 +77,8 @@ fn predict_next_fails_open_when_cold() {
         temp.path(),
         archon_world_model::ColdStartStats::default(),
         None,
-        "s1",
-        "a1",
+        "session-1",
+        "r1",
         "run tests",
     );
 
@@ -98,8 +98,8 @@ fn predict_next_fails_open_without_active_model() {
             observed_days: 7,
         },
         None,
-        "s1",
-        "a1",
+        "session-1",
+        "r1",
         "run tests",
     );
 
@@ -123,8 +123,8 @@ fn predict_next_uses_active_model_when_ready() {
             observed_days: 7,
         },
         Some(candidate_id.clone()),
-        "s1",
-        "a1",
+        "session-1",
+        "r1",
         "run tests",
     );
 
@@ -137,10 +137,10 @@ fn predict_next_uses_active_model_when_ready() {
     assert!(explained.contains(&format!("Prediction: {prediction_id}")));
     assert!(explained.contains("Predicted next state:"));
     assert!(explained.contains("Outcome: pending"));
-    assert!(explained.contains("Evidence refs: runtime_action:a1"));
     let persisted = predict::load_prediction(temp.path(), &prediction_id)
         .unwrap()
         .expect("prediction should be persisted");
+    assert!(persisted.evidence_refs.is_empty());
     assert!(
         persisted
             .guardrail_scores
@@ -148,6 +148,64 @@ fn predict_next_uses_active_model_when_ready() {
             .predicted_verification_needed
             .is_some()
     );
+}
+
+#[test]
+fn repeated_runtime_action_ref_uses_current_candidate_action() {
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let config = test_config();
+    let trained = candidate::render_train(&config, temp.path(), true, None).unwrap();
+    let candidate_id = candidate_id_from(&trained);
+    let stats = archon_world_model::ColdStartStats {
+        rows: 1_000,
+        sessions: 50,
+        observed_days: 7,
+    };
+
+    let first = render_predict_next_with_state(
+        &config,
+        temp.path(),
+        stats,
+        Some(candidate_id.clone()),
+        "runtime-session",
+        "static-action-ref",
+        "first candidate action",
+    );
+    assert!(first.contains("Inference: active_checkpoint"), "{first}");
+    let second = render_predict_next_with_state(
+        &config,
+        temp.path(),
+        stats,
+        Some(candidate_id),
+        "runtime-session",
+        "static-action-ref",
+        "second candidate action",
+    );
+    let prediction_id = prediction_id_from(&second);
+    let prediction = predict::load_prediction(temp.path(), &prediction_id)
+        .unwrap()
+        .expect("second prediction should be persisted");
+
+    assert_eq!(
+        prediction.action_summary,
+        "operation=static-action-ref input=second candidate action"
+    );
+    let rows = archon_world_model::storage::WorldModelStore::open(temp.path())
+        .unwrap()
+        .load_rows()
+        .unwrap();
+    let runtime_rows = rows
+        .iter()
+        .filter(|row| {
+            row.session_id == "runtime-session"
+                && row.redacted_excerpt.as_deref().is_some_and(|summary| {
+                    summary.starts_with("operation=static-action-ref input=")
+                })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(runtime_rows.len(), 2);
+    assert_ne!(runtime_rows[0].row_id, runtime_rows[1].row_id);
 }
 
 #[test]
@@ -165,8 +223,8 @@ fn record_outcome_links_actual_result_to_prediction() {
             observed_days: 7,
         },
         Some(candidate_id),
-        "s1",
-        "a1",
+        "session-1",
+        "r1",
         "run tests",
     );
     let prediction_id = prediction_id_from(&rendered);

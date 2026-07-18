@@ -104,14 +104,17 @@ fn render_latent_trainer_tick(
     let registry = ModelRegistry::open(root)?;
     let schedule =
         latent_training_schedule(root, stats.rows, registry.candidate_count()? as u64, last_training_age_ms)?;
-    let adapter = build_embedding_adapter(config)?;
+    let adapter = archon_world_model::GenericEmbeddingRepresentationAdapter::new(
+        build_embedding_adapter(config)?,
+    );
     emit_trainer_progress(progress, "latent_train_start", "running latent trainer tick");
     let run = archon_world_model::trainer::run_dynamic_training_once_controlled(
         root,
         config.learning.world_model.state_dim,
         backend.selected,
         config.learning.world_model.training.allow_cpu_fallback,
-        adapter.as_ref(),
+        &adapter,
+        config.learning.world_model.jepa.context_window_rows,
         policy,
         trigger_policy,
         archon_world_model::trainer::TrainerRuntimeSnapshot {

@@ -6,8 +6,8 @@ use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::BackendKind;
-use crate::embedding::WorldEmbeddingAdapter;
 use crate::registry::ModelRegistry;
+use crate::representation::WorldRepresentationAdapter;
 use crate::storage::WorldModelStore;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -163,7 +163,8 @@ pub fn run_dynamic_training_once(
     state_dim: usize,
     backend: BackendKind,
     allow_cpu_fallback: bool,
-    adapter: &dyn WorldEmbeddingAdapter,
+    adapter: &dyn WorldRepresentationAdapter,
+    context_rows: usize,
     policy: DynamicTrainerPolicy,
     trigger_policy: DynamicTrainerTriggerPolicy,
     runtime: TrainerRuntimeSnapshot,
@@ -175,6 +176,7 @@ pub fn run_dynamic_training_once(
         backend,
         allow_cpu_fallback,
         adapter,
+        context_rows,
         policy,
         trigger_policy,
         runtime,
@@ -188,7 +190,8 @@ pub fn run_dynamic_training_once_controlled(
     state_dim: usize,
     backend: BackendKind,
     allow_cpu_fallback: bool,
-    adapter: &dyn WorldEmbeddingAdapter,
+    adapter: &dyn WorldRepresentationAdapter,
+    context_rows: usize,
     policy: DynamicTrainerPolicy,
     trigger_policy: DynamicTrainerTriggerPolicy,
     runtime: TrainerRuntimeSnapshot,
@@ -208,8 +211,12 @@ pub fn run_dynamic_training_once_controlled(
     check_training_stop(should_stop, "world-model row load")?;
     let rows = WorldModelStore::open(root)?.load_rows()?;
     check_training_stop(should_stop, "world-model example build")?;
-    let examples =
-        crate::train::examples_from_rows_with_adapter_controlled(&rows, adapter, should_stop)?;
+    let examples = crate::train::examples_from_rows_with_representation_adapter_controlled(
+        &rows,
+        adapter,
+        context_rows,
+        should_stop,
+    )?;
     if examples.is_empty() {
         decision = decision_with_reason(policy, TrainerDecisionReason::NotEnoughRows);
         return Ok(report(decision, trigger, rows.len(), 0, None, None, None));
@@ -365,6 +372,7 @@ mod tests {
     #[test]
     fn dynamic_training_tick_writes_candidate_when_triggered() {
         use crate::embedding::DeterministicHashEmbeddingAdapter;
+        use crate::representation::GenericEmbeddingRepresentationAdapter;
         use crate::schema::{WorldActionKind, WorldTraceRow};
 
         let temp = tempfile::tempdir().unwrap();
@@ -374,7 +382,9 @@ mod tests {
         let mut second = WorldTraceRow::new("s1", WorldActionKind::Verification).with_row_id("r2");
         second.redacted_excerpt = Some("tests passed".into());
         store.persist_rows(&[first, second]).unwrap();
-        let adapter = DeterministicHashEmbeddingAdapter::new(4).unwrap();
+        let adapter = GenericEmbeddingRepresentationAdapter::new(Box::new(
+            DeterministicHashEmbeddingAdapter::new(4).unwrap(),
+        ));
 
         let run = run_dynamic_training_once(
             temp.path(),
@@ -382,6 +392,7 @@ mod tests {
             BackendKind::Cpu,
             true,
             &adapter,
+            1,
             DynamicTrainerPolicy::default(),
             DynamicTrainerTriggerPolicy::default(),
             idle_snapshot(),

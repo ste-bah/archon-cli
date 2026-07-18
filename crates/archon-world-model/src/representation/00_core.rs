@@ -200,6 +200,15 @@ impl TraceWindowBuilder {
         self.context_window_at(index, context_rows)
     }
 
+    pub fn prior_context_window(
+        &self,
+        anchor_row_id: &str,
+        context_rows: usize,
+    ) -> Result<TraceWindow> {
+        let index = self.index_of(anchor_row_id)?;
+        self.prior_context_window_at(index, context_rows)
+    }
+
     pub fn target_window(
         &self,
         anchor_row_id: &str,
@@ -230,7 +239,7 @@ impl TraceWindowBuilder {
             }
 
             transitions.push(TraceTransition {
-                context: self.context_window_at(index, context_rows)?,
+                context: self.prior_context_window_at(index, context_rows)?,
                 action: TraceAction::from_row(current),
                 target: self.target_window_at(index, target_rows, horizon)?,
                 labels: target.labels.clone(),
@@ -245,6 +254,15 @@ impl TraceWindowBuilder {
             .iter()
             .position(|row| row.row_id == row_id)
             .ok_or_else(|| anyhow::anyhow!("trace row not found: {row_id}"))
+    }
+
+    fn prior_context_window_at(&self, index: usize, context_rows: usize) -> Result<TraceWindow> {
+        if context_rows == 0 {
+            bail!("context_rows must be greater than zero");
+        }
+        let (session_start, _) = self.session_bounds(index);
+        let start = index.saturating_sub(context_rows).max(session_start);
+        self.window_from_range_allow_empty(index, start, index, 0)
     }
 
     fn context_window_at(&self, index: usize, context_rows: usize) -> Result<TraceWindow> {
@@ -274,14 +292,14 @@ impl TraceWindowBuilder {
         self.window_from_range(index, start, end, horizon)
     }
 
-    fn window_from_range(
+    fn window_from_range_allow_empty(
         &self,
         anchor_index: usize,
         start: usize,
         end: usize,
         horizon: usize,
     ) -> Result<TraceWindow> {
-        if start >= end || end > self.rows.len() {
+        if start > end || end > self.rows.len() {
             bail!("invalid trace window range");
         }
         let anchor = &self.rows[anchor_index];
@@ -292,6 +310,19 @@ impl TraceWindowBuilder {
             horizon,
             graph_context: graph_context_for_row(&self.rows, anchor),
         })
+    }
+
+    fn window_from_range(
+        &self,
+        anchor_index: usize,
+        start: usize,
+        end: usize,
+        horizon: usize,
+    ) -> Result<TraceWindow> {
+        if start >= end {
+            bail!("invalid trace window range");
+        }
+        self.window_from_range_allow_empty(anchor_index, start, end, horizon)
     }
 
     fn session_bounds(&self, index: usize) -> (usize, usize) {

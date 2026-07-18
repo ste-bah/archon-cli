@@ -175,6 +175,58 @@ pub(crate) fn record_runtime_counterfactual_advice(
     runtime_counterfactual_advice(config, surface, task, choices).ok()
 }
 
+fn surface_record_for_prediction(
+    surface: archon_world_model::integration::WorldAdvisorSurface,
+    session_id: &str,
+    action_ref: &str,
+    summary: &str,
+    prediction: super::predict::PersistedPrediction,
+) -> archon_world_model::integration::WorldAdvisorSurfaceRecord {
+    archon_world_model::integration::WorldAdvisorSurfaceRecord {
+        surface,
+        prediction: Some(archon_world_model::WorldPrediction {
+            prediction_id: prediction.prediction_id,
+            model_id: prediction.model_id,
+            predicted_next_state_summary: prediction.predicted_next_state_summary,
+            guardrail_scores: prediction.guardrail_scores,
+            evidence_refs: prediction.evidence_refs,
+            created_at: prediction.created_at,
+        }),
+        unavailable: None,
+        session_id: Some(session_id.to_string()),
+        action_ref: Some(action_ref.to_string()),
+        action_summary: Some(summary.to_string()),
+        continue_foreground_flow: true,
+        created_at: chrono::Utc::now(),
+    }
+}
+
+fn fallback_advisory_record(
+    config: &archon_core::config::ArchonConfig,
+    surface: archon_world_model::integration::WorldAdvisorSurface,
+    stats: archon_world_model::ColdStartStats,
+    active_model_id: Option<String>,
+    session_id: &str,
+    action_ref: &str,
+    summary: &str,
+) -> archon_world_model::integration::WorldAdvisorSurfaceRecord {
+    let advisor = archon_world_model::WorldAdvisor::new(
+        archon_world_model::WorldAdvisorConfig {
+            thresholds: super::cold_start_thresholds(config),
+            active_model_id,
+            training_in_progress: false,
+        },
+        stats,
+    );
+    let decision = advisor.evaluate(&archon_world_model::WorldAdvisorContext {
+        session_id: session_id.to_string(),
+        action_ref: action_ref.to_string(),
+        action_summary: summary.to_string(),
+    });
+    archon_world_model::integration::WorldAdvisorSurfaceRecord::from_decision(surface, decision)
+        .with_context(session_id, action_ref, summary)
+}
+
 fn runtime_advisory_record(
     config: &archon_core::config::ArchonConfig,
     surface: archon_world_model::integration::WorldAdvisorSurface,
@@ -198,28 +250,15 @@ fn runtime_advisory_record(
         &root,
         stats,
         active_model_id.clone(),
+        surface,
         session_id,
         action_ref,
         summary,
     ) {
         Ok(Some((prediction, _))) => {
-            return Ok(archon_world_model::integration::WorldAdvisorSurfaceRecord {
-                surface,
-                prediction: Some(archon_world_model::WorldPrediction {
-                    prediction_id: prediction.prediction_id,
-                    model_id: prediction.model_id,
-                    predicted_next_state_summary: prediction.predicted_next_state_summary,
-                    guardrail_scores: prediction.guardrail_scores,
-                    evidence_refs: prediction.evidence_refs,
-                    created_at: prediction.created_at,
-                }),
-                unavailable: None,
-                session_id: Some(session_id.to_string()),
-                action_ref: Some(action_ref.to_string()),
-                action_summary: Some(summary.to_string()),
-                continue_foreground_flow: true,
-                created_at: chrono::Utc::now(),
-            });
+            return Ok(surface_record_for_prediction(
+                surface, session_id, action_ref, summary, prediction,
+            ));
         }
         Ok(None) => {}
         Err(error) => {
@@ -232,25 +271,15 @@ fn runtime_advisory_record(
             );
         }
     }
-    let advisor = archon_world_model::WorldAdvisor::new(
-        archon_world_model::WorldAdvisorConfig {
-            thresholds: super::cold_start_thresholds(config),
-            active_model_id,
-            training_in_progress: false,
-        },
+    Ok(fallback_advisory_record(
+        config,
+        surface,
         stats,
-    );
-    let decision = advisor.evaluate(&archon_world_model::WorldAdvisorContext {
-        session_id: session_id.to_string(),
-        action_ref: action_ref.to_string(),
-        action_summary: summary.to_string(),
-    });
-    Ok(
-        archon_world_model::integration::WorldAdvisorSurfaceRecord::from_decision(
-            surface, decision,
-        )
-        .with_context(session_id, action_ref, summary),
-    )
+        active_model_id,
+        session_id,
+        action_ref,
+        summary,
+    ))
 }
 
 fn runtime_unavailable_reason_from_error(
