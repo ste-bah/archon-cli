@@ -124,6 +124,9 @@ async fn test_dispatcher_does_not_block_on_inflight_turn() {
             match outcome {
                 TurnOutcome::Completed => outcomes.push("completed".to_string()),
                 TurnOutcome::Cancelled => outcomes.push("cancelled".to_string()),
+                TurnOutcome::FinalizationBlocked(message) => {
+                    panic!("unexpected finalization block: {message}")
+                }
                 TurnOutcome::Failed(err) => panic!("unexpected turn failure: {err}"),
             }
         }

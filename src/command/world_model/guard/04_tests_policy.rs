@@ -290,6 +290,18 @@ fn failed_revision_persistence_keeps_prior_runtime_classification() {
     assert!(!current.classified_from_tool);
     assert_eq!(current.task_class, archon_world_model::RuntimeTaskClass::GeneralAnswer);
     assert_eq!(current.decision, initial.decision);
+    assert!(
+        turn_requirements_for_action("persist-fail-session", "persist-fail-action")
+            .is_some_and(|requirements| requirements.contains("could not be persisted"))
+    );
+    assert!(matches!(
+        turn_finalization_verdict_at_root(
+            temp.path(),
+            "persist-fail-session",
+            "persist-fail-action",
+        ),
+        archon_core::agent::TurnFinalizationVerdict::Blocked { .. }
+    ));
     clear_active_guardrail("persist-fail-session", "persist-fail-action");
 }
 

@@ -36,6 +36,7 @@ async fn preflight_observer_receives_first_allowed_tool_with_final_input() {
     let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
     let observed_for_callback = Arc::clone(&observed);
     agent.set_guardrail_action_id(Some("action-1".to_string()));
+    agent.set_turn_requirement_reminder(Some("old requirement".into()));
     agent.set_first_tool_action_callback(Arc::new(move |action_id, name, id, input| {
         observed_for_callback.lock().unwrap().push((
             action_id.to_string(),
@@ -43,6 +44,7 @@ async fn preflight_observer_receives_first_allowed_tool_with_final_input() {
             id.to_string(),
             input.clone(),
         ));
+        Some("reclassified requirement".into())
     }));
     let pending = [
         PendingToolCall {
@@ -68,5 +70,9 @@ async fn preflight_observer_receives_first_allowed_tool_with_final_input() {
             "tool-1".to_string(),
             serde_json::json!({"file_path": "/after-hook", "content": "updated"}),
         )]
+    );
+    assert_eq!(
+        agent.turn_requirement_reminder.as_deref(),
+        Some("reclassified requirement")
     );
 }

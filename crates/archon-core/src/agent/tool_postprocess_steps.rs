@@ -55,7 +55,9 @@ impl Agent {
             }
             "ExitPlanMode" => {
                 self.restore_mode_after_plan().await;
-                self.persist_latest_plan_from_assistant();
+                if !self.buffers_finalization_text() {
+                    self.persist_latest_plan_from_assistant();
+                }
                 result
             }
             _ => result,
@@ -71,7 +73,7 @@ impl Agent {
         self.state.mode = AgentMode::Normal;
     }
 
-    fn persist_latest_plan_from_assistant(&self) {
+    pub(super) fn persist_latest_plan_from_assistant(&self) {
         let Some(ref plan_store) = self.plan_store else {
             return;
         };

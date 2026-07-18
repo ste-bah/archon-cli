@@ -198,7 +198,7 @@ fn classify_single_command(
 
 fn has_dangerous_find_predicate(command: &str) -> bool {
     let tokens = shell_tokens(command);
-    if tokens.first().is_none_or(|token| token != "find") {
+    if !is_find_executable(command, tokens.first().map(String::as_str)) {
         return false;
     }
 
@@ -208,29 +208,36 @@ fn has_dangerous_find_predicate(command: &str) -> bool {
         if matches!(token, "-delete" | "-exec" | "-execdir") {
             return true;
         }
-        if find_predicate_consumes_argument(token) {
-            index += 1;
-        }
-        index += 1;
+        index += 1 + find_predicate_argument_count(token);
     }
 
     false
 }
 
-fn find_predicate_consumes_argument(predicate: &str) -> bool {
-    matches!(
-        predicate,
-        "-name"
-            | "-iname"
-            | "-path"
-            | "-ipath"
-            | "-regex"
-            | "-iregex"
-            | "-lname"
-            | "-ilname"
-            | "-wholename"
-            | "-iwholename"
-    )
+fn is_find_executable(command: &str, parsed_executable: Option<&str>) -> bool {
+    parsed_executable
+        .and_then(|token| token.rsplit('/').next())
+        .is_some_and(|basename| basename == "find")
+        || command
+            .split_whitespace()
+            .next()
+            .map(|token| token.trim_matches(['\'', '"']).to_ascii_lowercase())
+            .and_then(|token| token.rsplit('\\').next().map(str::to_string))
+            .is_some_and(|basename| basename == "find")
+}
+
+fn find_predicate_argument_count(predicate: &str) -> usize {
+    match predicate {
+        "-fprintf" => 2,
+        "-amin" | "-anewer" | "-atime" | "-cmin" | "-cnewer" | "-ctime" | "-fls" | "-fprint"
+        | "-fprint0" | "-fstype" | "-gid" | "-group" | "-ilname" | "-iname" | "-inum"
+        | "-ipath" | "-iregex" | "-iwholename" | "-links" | "-lname" | "-maxdepth"
+        | "-mindepth" | "-mmin" | "-mtime" | "-name" | "-newer" | "-path" | "-perm" | "-printf"
+        | "-regex" | "-samefile" | "-size" | "-type" | "-uid" | "-used" | "-user"
+        | "-wholename" | "-xtype" | "-files0-from" => 1,
+        value if value.starts_with("-newer") => 1,
+        _ => 0,
+    }
 }
 
 fn shell_tokens(command: &str) -> Vec<String> {

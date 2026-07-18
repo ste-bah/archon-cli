@@ -16,6 +16,42 @@ pub enum CompletionState {
     NotRun,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RequiredEvidenceKind {
+    Tests,
+    Build,
+    Lint,
+    Typecheck,
+    Verifier,
+    PlanReview,
+    SourceEvidence,
+    ManualOutcome,
+    HumanApproval,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RequiredEvidenceStatus {
+    Passed,
+    Failed,
+    Missing,
+    Skipped,
+    Unknown,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RequiredEvidence {
+    pub kind: RequiredEvidenceKind,
+    pub status: RequiredEvidenceStatus,
+    pub sequence: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RequiredEvidenceCheck {
+    pub allowed: bool,
+    pub missing: Vec<RequiredEvidenceKind>,
+    pub failed: Vec<RequiredEvidenceKind>,
+}
+
 // ── CompletionClaim (§10.2) ──────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]

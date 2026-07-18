@@ -215,6 +215,31 @@ mod tests {
     }
 
     #[test]
+    fn finalization_breaks_equal_timestamp_ties_by_idempotency_key() {
+        let mut decision = WorldGuardrailDecision::default();
+        decision.mode = WorldGuardrailMode::Guarded;
+        decision.allowed_to_finalize = false;
+        decision.required_actions = vec![GuardrailRequiredAction::RunTests];
+        let created_at = Utc::now();
+        let passed = VerificationOutcome {
+            kind: VerificationKind::UnitTests,
+            status: VerificationStatus::Passed,
+            idempotency_key: "verification:z-passed".into(),
+            created_at,
+            ..VerificationOutcome::default()
+        };
+        let failed = VerificationOutcome {
+            kind: VerificationKind::UnitTests,
+            status: VerificationStatus::Failed,
+            idempotency_key: "verification:a-failed".into(),
+            created_at,
+            ..VerificationOutcome::default()
+        };
+
+        assert!(finalization_allowed(&decision, &[passed, failed]));
+    }
+
+    #[test]
     fn guardrail_overhead_budget_fails_open_without_double_decision() {
         let policy = WorldGuardrailPolicyConfig::default();
         let action = WorldGuardedAction::new(

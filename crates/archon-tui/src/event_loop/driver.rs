@@ -45,8 +45,7 @@ impl TickScheduler {
     }
 
     fn interval_from_now(cadence: Duration) -> tokio::time::Interval {
-        let mut interval =
-            tokio::time::interval_at(tokio::time::Instant::now() + cadence, cadence);
+        let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + cadence, cadence);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         interval
     }
@@ -190,13 +189,7 @@ mod tests {
         let keymap = crate::keybindings::KeyMap::default();
         if let LoopEvent::Terminal(event) = event {
             super::super::input::handle_key_event(
-                &mut app,
-                event,
-                &input_tx,
-                None,
-                None,
-                None,
-                &keymap,
+                &mut app, event, &input_tx, None, None, None, &keymap,
             )
             .await;
         } else {

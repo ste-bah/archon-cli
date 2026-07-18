@@ -2,7 +2,7 @@
 fn derived_rule_collision_with_wrong_content_rejects_before_correction_mutation() {
     let (graph, _) = make_tracker();
     let content = "Use Edit before modifying config files";
-    let rule_id = CORRECTION_DERIVED_RULE_ID;
+    let rule_id = APPROACH_RULE.0;
     graph
         .store_memory_with_id(
             &rule_id,
@@ -36,8 +36,8 @@ fn derived_rule_collision_with_wrong_content_rejects_before_correction_mutation(
 fn derived_rule_collision_with_user_source_rejects_before_correction_mutation() {
     let (graph, _) = make_tracker();
     let content = "Use Edit before modifying config files";
-    let rule_id = CORRECTION_DERIVED_RULE_ID;
-    let rule_text = CORRECTION_DERIVED_RULE_TEXT;
+    let rule_id = APPROACH_RULE.0;
+    let rule_text = APPROACH_RULE.1;
     graph
         .store_memory_with_id(
             &rule_id,
@@ -205,7 +205,7 @@ fn automatic_similarity_reuse_ignores_explicit_user_rule_target() {
         .get_memory(automatic_rule_id)
         .expect("read automatic rule");
     assert_eq!(automatic_rule.memory_type, MemoryType::Rule);
-    assert_eq!(automatic_rule.content, CORRECTION_DERIVED_RULE_TEXT);
+    assert_eq!(automatic_rule.content, APPROACH_RULE.1);
     assert!(automatic_rule
         .tags
         .iter()
@@ -244,7 +244,7 @@ fn correction_derived_rule_does_not_embed_raw_user_text() {
     let rule = graph
         .get_memory(correction.rule_id.as_deref().expect("derived rule"))
         .expect("load derived rule");
-    assert_eq!(rule.content, "Review the approach that triggered this correction before repeating it.");
+    assert_eq!(rule.content, APPROACH_RULE.1);
     assert!(!rule.content.contains("customer-alpha"));
     assert_eq!(graph.get_memory(&correction.id).unwrap().content, raw);
 }

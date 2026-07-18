@@ -371,9 +371,10 @@ pub fn finalization_allowed(
     let mut latest_by_kind = BTreeMap::<String, &VerificationOutcome>::new();
     for outcome in verification_outcomes {
         let key = verification_kind_key(&outcome.kind);
-        let replace = latest_by_kind
-            .get(&key)
-            .is_none_or(|existing| existing.created_at <= outcome.created_at);
+        let replace = latest_by_kind.get(&key).is_none_or(|existing| {
+            (existing.created_at, existing.idempotency_key.as_str())
+                <= (outcome.created_at, outcome.idempotency_key.as_str())
+        });
         if replace {
             latest_by_kind.insert(key, outcome);
         }

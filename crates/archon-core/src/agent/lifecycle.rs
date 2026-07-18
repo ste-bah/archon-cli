@@ -59,7 +59,9 @@ impl Agent {
             record_user_correction_event_callback: None,
             record_reasoning_turn_callback: None,
             first_tool_action_callback: None,
+            turn_finalization_callback: None,
             guardrail_action_id: None,
+            turn_requirement_reminder: None,
             reasoning_evidence_refs: Vec::new(),
             current_situation: None,
             cognitive_store: None,
@@ -338,6 +340,14 @@ impl Agent {
 
     pub fn set_first_tool_action_callback(&mut self, cb: FirstToolActionCallback) {
         self.first_tool_action_callback = Some(cb);
+    }
+
+    pub fn set_turn_finalization_callback(&mut self, cb: TurnFinalizationCallback) {
+        self.turn_finalization_callback = Some(cb);
+    }
+
+    pub fn set_turn_requirement_reminder(&mut self, reminder: Option<String>) {
+        self.turn_requirement_reminder = reminder.filter(|value| !value.trim().is_empty());
     }
 
     pub fn set_guardrail_action_id(&mut self, action_id: Option<String>) {

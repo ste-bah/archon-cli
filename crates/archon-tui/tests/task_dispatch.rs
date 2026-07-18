@@ -59,11 +59,13 @@ fn dispatch_result_variants_are_exhaustive() {
 fn turn_outcome_variants_are_exhaustive() {
     let a = TurnOutcome::Completed;
     let b = TurnOutcome::Cancelled;
-    let c = TurnOutcome::Failed("boom".into());
-    for v in [a, b, c] {
+    let c = TurnOutcome::FinalizationBlocked("verify".into());
+    let d = TurnOutcome::Failed("boom".into());
+    for v in [a, b, c, d] {
         match v {
             TurnOutcome::Completed => {}
             TurnOutcome::Cancelled => {}
+            TurnOutcome::FinalizationBlocked(_) => {}
             TurnOutcome::Failed(_) => {}
         }
     }

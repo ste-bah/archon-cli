@@ -78,7 +78,16 @@ pub fn is_safe_in_default_mode(name: &str) -> bool {
     is_default_safe_tool(name)
 }
 
-pub type FirstToolActionCallback = Arc<dyn Fn(&str, &str, &str, &serde_json::Value) + Send + Sync>;
+pub type FirstToolActionCallback =
+    Arc<dyn Fn(&str, &str, &str, &serde_json::Value) -> Option<String> + Send + Sync>;
+pub type TurnFinalizationCallback =
+    Arc<dyn Fn(&str, &str) -> TurnFinalizationVerdict + Send + Sync>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TurnFinalizationVerdict {
+    Allowed,
+    Blocked { repair_prompt: String },
+}
 
 #[derive(Debug)]
 pub(super) struct PendingToolCall {
@@ -152,7 +161,9 @@ pub struct Agent {
         Option<Arc<dyn Fn(UserCorrectionEventPayload) + Send + Sync>>,
     record_reasoning_turn_callback: Option<Arc<dyn Fn(ReasoningTurnEventPayload) + Send + Sync>>,
     first_tool_action_callback: Option<FirstToolActionCallback>,
+    turn_finalization_callback: Option<TurnFinalizationCallback>,
     guardrail_action_id: Option<String>,
+    turn_requirement_reminder: Option<String>,
     reasoning_evidence_refs: Vec<ReasoningEvidenceEventPayload>,
     current_situation: Option<archon_cognitive::Situation>,
     cognitive_store: Option<Arc<std::sync::Mutex<archon_cognitive::PersistentCognitiveStore>>>,

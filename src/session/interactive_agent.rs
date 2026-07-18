@@ -205,8 +205,19 @@ pub(super) async fn build(
                 tool_use_id,
                 input,
             );
+            crate::command::world_model::turn_requirements_for_action(
+                &guardrail_session_id,
+                action_id,
+            )
         },
     ));
+    let finalization_session_id = session_id.to_string();
+    agent.set_turn_finalization_callback(Arc::new(move |action_id, _output| {
+        crate::command::world_model::turn_finalization_verdict_for_action(
+            &finalization_session_id,
+            action_id,
+        )
+    }));
     let metrics = Arc::new(archon_tui::observability::ChannelMetrics::default());
     let metrics_sink: Arc<dyn ChannelMetricSink> = metrics.clone();
     agent.set_channel_metrics(metrics_sink);

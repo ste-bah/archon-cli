@@ -2,6 +2,7 @@ static ACTIVE_GUARDRAILS: OnceLock<Mutex<HashMap<String, VecDeque<RuntimeGuardra
     OnceLock::new();
 static ACTIVE_OBSERVATIONS: OnceLock<Mutex<HashMap<String, GuardrailRuntimeObservations>>> =
     OnceLock::new();
+static ACTIVE_RECLASSIFICATION_FAILURES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 const HIGH_SURPRISE_STATUS_THRESHOLD: f32 = 0.30;
 
 #[derive(Debug, Clone, Default)]
@@ -20,6 +21,32 @@ fn active_guardrails() -> &'static Mutex<HashMap<String, VecDeque<RuntimeGuardra
 
 fn active_observations() -> &'static Mutex<HashMap<String, GuardrailRuntimeObservations>> {
     ACTIVE_OBSERVATIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn active_reclassification_failures() -> &'static Mutex<HashMap<String, String>> {
+    ACTIVE_RECLASSIFICATION_FAILURES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn reclassification_failure(action_id: &str) -> Option<String> {
+    active_reclassification_failures()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(action_id)
+        .cloned()
+}
+
+fn record_reclassification_failure(action_id: &str, message: String) {
+    active_reclassification_failures()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(action_id.to_string(), message);
+}
+
+fn clear_reclassification_failure(action_id: &str) {
+    active_reclassification_failures()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(action_id);
 }
 
 pub(crate) fn active_guardrail_for_session(session_id: &str) -> Option<RuntimeGuardrailRecord> {
@@ -105,6 +132,7 @@ fn clear_active_guardrail(session_id: &str, action_id: &str) {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(action_id);
+        clear_reclassification_failure(action_id);
     }
 }
 
@@ -191,8 +219,13 @@ fn reclassify_active_guardrail_at_root(
             action_id = %revised.action.action_id,
             "failed to persist tool-classified guardrail revision"
         );
+        record_reclassification_failure(
+            &revised.action.action_id,
+            format!("Tool-based guardrail reclassification could not be persisted: {error}"),
+        );
         return;
     }
+    clear_reclassification_failure(&revised.action.action_id);
     remember_active_guardrail(&revised);
 }
 
@@ -204,8 +237,15 @@ pub(crate) fn reclassify_active_guardrail_for_session(
     tool_use_id: &str,
     input: &serde_json::Value,
 ) {
-    let Ok(root) = super::world_model_root() else {
-        return;
+    let root = match super::world_model_root() {
+        Ok(root) => root,
+        Err(error) => {
+            record_reclassification_failure(
+                action_id,
+                format!("Tool-based guardrail reclassification storage is unavailable: {error}"),
+            );
+            return;
+        }
     };
     reclassify_active_guardrail_at_root(
         config,

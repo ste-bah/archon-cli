@@ -138,7 +138,11 @@ impl AgentHandle {
             }
 
             let mut guard = agent.lock().await;
+            let turn_requirement_reminder = guardrail_action_id.as_deref().and_then(|action_id| {
+                crate::command::world_model::turn_requirements_for_action(&session_id, action_id)
+            });
             guard.set_guardrail_action_id(guardrail_action_id);
+            guard.set_turn_requirement_reminder(turn_requirement_reminder);
             guard.set_cancel_token(Some(cancel));
             let result = guard
                 .process_message(&prompt)
@@ -146,6 +150,7 @@ impl AgentHandle {
                 .map_err(anyhow::Error::from);
             guard.set_cancel_token(None);
             guard.set_guardrail_action_id(None);
+            guard.set_turn_requirement_reminder(None);
             drop(guard);
             {
                 let mut slot = cancel_slot.lock().unwrap_or_else(|p| p.into_inner());

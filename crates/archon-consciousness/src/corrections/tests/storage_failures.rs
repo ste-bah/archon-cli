@@ -137,11 +137,11 @@ fn score_update_failure_removes_correction_relationship_from_existing_rule() {
 #[test]
 fn correction_store_failure_keeps_deterministic_derived_rule() {
     let (graph, _) = make_tracker();
-    let derived_rule_id = CORRECTION_DERIVED_RULE_ID;
+    let derived_rule_id = APPROACH_RULE.0;
     RulesEngine::new(&graph)
         .add_rule_with_id(
             derived_rule_id,
-            CORRECTION_DERIVED_RULE_TEXT,
+            APPROACH_RULE.1,
             RuleSource::CorrectionDerived,
         )
         .expect("seed deterministic rule");

@@ -17,7 +17,7 @@ pub(super) struct PreparedTurnRequest {
 
 pub(super) struct StreamRound {
     pub(super) text_content: String,
-    thinking_content: String,
+    pub(super) thinking_content: String,
     thinking_signature: String,
     pub(super) pending_tools: Vec<PendingToolCall>,
     pub(super) usage_acc: UsageAccumulator,
@@ -67,6 +67,7 @@ impl Agent {
         let mut system = self.inject_memories();
         self.inject_inner_voice(&mut system).await;
         self.inject_critical_reminder(&mut system);
+        self.inject_turn_requirements(&mut system);
 
         let active_model = self.active_model().await;
         let effort = self.turn_effort(user_input).await;
@@ -196,11 +197,15 @@ impl Agent {
                 }
                 StreamEvent::TextDelta { text, .. } => {
                     round.text_content.push_str(&text);
-                    self.send_event(AgentEvent::TextDelta(text)).await;
+                    if !self.buffers_finalization_text() {
+                        self.send_event(AgentEvent::TextDelta(text)).await;
+                    }
                 }
                 StreamEvent::ThinkingDelta { thinking, .. } => {
                     round.thinking_content.push_str(&thinking);
-                    self.send_event(AgentEvent::ThinkingDelta(thinking)).await;
+                    if !self.buffers_finalization_text() {
+                        self.send_event(AgentEvent::ThinkingDelta(thinking)).await;
+                    }
                 }
                 StreamEvent::InputJsonDelta {
                     index,
@@ -247,24 +252,81 @@ impl Agent {
     }
 
     pub(super) fn add_assistant_stream_round(&mut self, round: &StreamRound) {
-        let mut assistant_content = Vec::new();
+        self.insert_assistant_stream_round(self.state.messages.len(), round, true);
+    }
+
+    pub(super) fn insert_assistant_stream_round(
+        &mut self,
+        index: usize,
+        round: &StreamRound,
+        include_drafts: bool,
+    ) {
+        let mut assistant_content = self.stream_round_drafts(round, include_drafts);
+        for tool in &round.pending_tools {
+            assistant_content.push(self.assistant_tool_use_block(tool));
+        }
+        self.state.messages.insert(
+            index,
+            serde_json::json!({
+                "role": "assistant",
+                "content": assistant_content,
+            }),
+        );
+    }
+
+    pub(super) fn prepend_stream_round_drafts(&mut self, index: usize, round: &StreamRound) {
+        let drafts = self.stream_round_drafts(round, true);
+        let Some(content) = self.state.messages[index]["content"].as_array_mut() else {
+            return;
+        };
+        content.splice(0..0, drafts);
+    }
+
+    pub(super) fn persist_guarded_plan_after_draft_admission(&self, round: &StreamRound) {
+        let exited_plan = round
+            .pending_tools
+            .iter()
+            .any(|tool| tool.name == "ExitPlanMode" && self.tool_result_passed(&tool.id));
+        if exited_plan {
+            self.persist_latest_plan_from_assistant();
+        }
+    }
+
+    fn tool_result_passed(&self, tool_id: &str) -> bool {
+        self.state.messages.iter().rev().any(|message| {
+            message["content"].as_array().is_some_and(|blocks| {
+                blocks.iter().any(|block| {
+                    block["type"] == "tool_result"
+                        && block["tool_use_id"] == tool_id
+                        && block["is_error"] == false
+                })
+            })
+        })
+    }
+
+    fn stream_round_drafts(
+        &self,
+        round: &StreamRound,
+        include_drafts: bool,
+    ) -> Vec<serde_json::Value> {
+        if !include_drafts {
+            return Vec::new();
+        }
+        let mut drafts = Vec::new();
         if !round.thinking_content.is_empty() {
-            assistant_content.push(serde_json::json!({
+            drafts.push(serde_json::json!({
                 "type": "thinking",
                 "thinking": round.thinking_content,
                 "signature": round.thinking_signature,
             }));
         }
         if !round.text_content.is_empty() {
-            assistant_content.push(serde_json::json!({
+            drafts.push(serde_json::json!({
                 "type": "text",
                 "text": round.text_content,
             }));
         }
-        for tool in &round.pending_tools {
-            assistant_content.push(self.assistant_tool_use_block(tool));
-        }
-        self.state.add_assistant_message(assistant_content);
+        drafts
     }
 }
 

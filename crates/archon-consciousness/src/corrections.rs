@@ -12,9 +12,26 @@ use thiserror::Error;
 
 use crate::rules::{RuleSource, RulesEngine};
 
-const CORRECTION_DERIVED_RULE_ID: &str = "rule:correction:generic-v1";
-const CORRECTION_DERIVED_RULE_TEXT: &str =
-    "Review the approach that triggered this correction before repeating it.";
+const FACTUAL_RULE: (&str, &str) = (
+    "rule:correction:factual-error:v2",
+    "Verify factual claims against available evidence before presenting them.",
+);
+const APPROACH_RULE: (&str, &str) = (
+    "rule:correction:approach-correction:v2",
+    "Review the chosen approach against the user's goal before continuing.",
+);
+const REPEATED_INSTRUCTION_RULE: (&str, &str) = (
+    "rule:correction:repeated-instruction:v2",
+    "Re-read and follow relevant user instructions before acting.",
+);
+const FORBIDDEN_ACTION_RULE: (&str, &str) = (
+    "rule:correction:did-forbidden-action:v2",
+    "Check constraints and permissions before performing a potentially forbidden action.",
+);
+const PERMISSION_RULE: (&str, &str) = (
+    "rule:correction:acted-without-permission:v2",
+    "Obtain explicit user approval before actions that require confirmation.",
+);
 
 // ── public types ─────────────────────────────────────────────
 
@@ -63,6 +80,16 @@ impl CorrectionType {
             "ctype:did_forbidden_action" => Some(Self::DidForbiddenAction),
             "ctype:acted_without_permission" => Some(Self::ActedWithoutPermission),
             _ => None,
+        }
+    }
+
+    fn derived_rule(self) -> (&'static str, &'static str) {
+        match self {
+            Self::FactualError => FACTUAL_RULE,
+            Self::ApproachCorrection => APPROACH_RULE,
+            Self::RepeatedInstruction => REPEATED_INSTRUCTION_RULE,
+            Self::DidForbiddenAction => FORBIDDEN_ACTION_RULE,
+            Self::ActedWithoutPermission => PERMISSION_RULE,
         }
     }
 }
@@ -156,8 +183,8 @@ impl<'g> CorrectionTracker<'g> {
         rule_id: Option<&str>,
     ) -> Result<Correction, CorrectionError> {
         let severity = correction_type.severity_multiplier();
-        let effective_rule_id =
-            rule_id.map_or_else(|| CORRECTION_DERIVED_RULE_ID.to_string(), str::to_string);
+        let derived_rule = correction_type.derived_rule();
+        let effective_rule_id = rule_id.map_or_else(|| derived_rule.0.to_string(), str::to_string);
         let tags = vec![
             correction_type.as_tag(),
             format!("severity:{severity}"),
@@ -185,7 +212,9 @@ impl<'g> CorrectionTracker<'g> {
 
         let target_resolution = match rule_id {
             Some(id) => self.validate_explicit_rule(id),
-            None => self.resolve_derived_rule(&effective_rule_id).map(|_| ()),
+            None => self
+                .resolve_derived_rule(derived_rule.0, derived_rule.1)
+                .map(|_| ()),
         };
         if let Err(cause) = target_resolution {
             return Err(self.compensate_new_claim_failure(cause, &correction.id, outcome.created));
@@ -286,13 +315,10 @@ impl<'g> CorrectionTracker<'g> {
     fn resolve_derived_rule(
         &self,
         id: &str,
+        text: &str,
     ) -> Result<crate::rules::BehavioralRule, CorrectionError> {
         self.rules
-            .add_rule_with_id(
-                id,
-                CORRECTION_DERIVED_RULE_TEXT,
-                RuleSource::CorrectionDerived,
-            )
+            .add_rule_with_id(id, text, RuleSource::CorrectionDerived)
             .map_err(CorrectionError::from)
     }
 

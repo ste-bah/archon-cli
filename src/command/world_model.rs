@@ -18,11 +18,12 @@ mod status;
 mod trainer_runtime;
 
 pub(crate) use guard::{
-    RuntimeGuardrailRecord, activate_guardrail_for_action, active_guardrail_for_session, begin_guarded_action,
-    forced_repair_prompt, reclassify_active_guardrail_for_session,
+    RuntimeGuardrailRecord, activate_guardrail_for_action, active_guardrail_for_session,
+    begin_guarded_action, forced_repair_prompt, reclassify_active_guardrail_for_session,
     record_guardrail_completion_outcome, record_guardrail_pipeline_steps,
     record_guardrail_provider_incident_for_session, record_guardrail_reasoning_quality_event,
     record_guardrail_tool_result_for_session, record_guardrail_turn_outcome,
+    turn_finalization_verdict_for_action, turn_requirements_for_action,
 };
 pub(crate) use runtime::{
     record_provider_runtime_advisory, record_runtime_advisory,

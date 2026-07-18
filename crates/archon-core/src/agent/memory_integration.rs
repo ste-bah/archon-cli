@@ -26,6 +26,15 @@ impl Agent {
         }
     }
 
+    pub(super) fn inject_turn_requirements(&self, system: &mut Vec<serde_json::Value>) {
+        if let Some(ref reminder) = self.turn_requirement_reminder {
+            system.push(serde_json::json!({
+                "type": "text",
+                "text": format!("<guardrail-requirements>{reminder}</guardrail-requirements>"),
+            }));
+        }
+    }
+
     /// GAP 7: Inject recalled memories into the system prompt for this turn.
     pub(super) fn inject_memories(&mut self) -> Vec<serde_json::Value> {
         let mut system = self.config.system_prompt.clone();

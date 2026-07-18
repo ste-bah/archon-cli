@@ -87,6 +87,7 @@ pub enum DispatchResult {
 pub enum TurnOutcome {
     Completed,
     Cancelled,
+    FinalizationBlocked(String),
     Failed(String),
 }
 
@@ -261,7 +262,15 @@ impl AgentDispatcher {
         use futures_util::future::FutureExt;
         let outcome = match handle.now_or_never() {
             Some(Ok(Ok(()))) => TurnOutcome::Completed,
-            Some(Ok(Err(app_err))) => TurnOutcome::Failed(format!("{app_err}")),
+            Some(Ok(Err(app_err))) => app_err
+                .downcast_ref::<archon_core::agent::AgentLoopError>()
+                .and_then(|error| match error {
+                    archon_core::agent::AgentLoopError::FinalizationBlocked(message) => {
+                        Some(TurnOutcome::FinalizationBlocked(message.clone()))
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| TurnOutcome::Failed(format!("{app_err}"))),
             Some(Err(join_err)) if join_err.is_cancelled() => TurnOutcome::Cancelled,
             Some(Err(join_err)) if join_err.is_panic() => {
                 let payload = join_err.into_panic();

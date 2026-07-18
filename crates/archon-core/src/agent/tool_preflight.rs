@@ -18,7 +18,8 @@ impl Agent {
             self.guardrail_action_id.as_deref(),
             allowed.first(),
         ) {
-            callback(action_id, &first.tool_name, &first.tool_id, &first.input);
+            self.turn_requirement_reminder =
+                callback(action_id, &first.tool_name, &first.tool_id, &first.input);
         }
         allowed
     }

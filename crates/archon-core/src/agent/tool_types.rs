@@ -52,8 +52,9 @@ mod tests {
         );
 
         let long_command = "é".repeat(100);
-        let summary = tool_transcript_summary("Bash", &serde_json::json!({ "command": long_command }))
-            .expect("Bash command summary");
+        let summary =
+            tool_transcript_summary("Bash", &serde_json::json!({ "command": long_command }))
+                .expect("Bash command summary");
         assert!(summary.ends_with('…'));
         assert_eq!(summary.chars().count(), 80);
         assert!(!summary.contains("secret"));
@@ -65,6 +66,9 @@ mod tests {
             tool_transcript_summary("Read", &serde_json::json!({ "command": "cat secret" })),
             None
         );
-        assert_eq!(tool_transcript_summary("Bash", &serde_json::json!({ "args": "x" })), None);
+        assert_eq!(
+            tool_transcript_summary("Bash", &serde_json::json!({ "args": "x" })),
+            None
+        );
     }
 }

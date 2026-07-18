@@ -75,6 +75,7 @@ async fn poll_completed_turn(ctx: LoopInputContext<'_>) {
         match &outcome {
             archon_tui::TurnOutcome::Completed => "completed",
             archon_tui::TurnOutcome::Cancelled => "cancelled",
+            archon_tui::TurnOutcome::FinalizationBlocked(_) => "finalization_blocked",
             archon_tui::TurnOutcome::Failed(_) => "failed",
         }
     );

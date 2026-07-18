@@ -9,6 +9,9 @@ pub enum AgentLoopError {
 
     #[error("tool dispatch error: {0}")]
     ToolError(String),
+
+    #[error("turn finalization blocked: {0}")]
+    FinalizationBlocked(String),
 }
 
 // ---------------------------------------------------------------------------
