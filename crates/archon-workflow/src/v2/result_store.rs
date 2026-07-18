@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,7 @@ use crate::{WorkflowError, WorkflowResult};
 use super::{WorkflowV2BranchOutcome, WorkflowV2HostCall, WorkflowV2Result, WorkflowV2Status};
 
 const RESULT_SCHEMA_VERSION: &str = "workflow-result-v2";
+static SUPERSEDED_ARCHIVE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone)]
 pub struct WorkflowV2ResultStore {
@@ -84,6 +86,9 @@ impl WorkflowV2ResultStore {
         let path = self.result_path(&record.call.id);
         let mut clean = sanitize_for_persistence(record)?;
         clean.output_hash = stable_result_hash(&clean.result);
+        archive_superseded_json(&path, |existing: &WorkflowV2CallRecord| {
+            existing.input_hash == clean.input_hash && existing.attempt == clean.attempt
+        })?;
         write_json(&path, &clean)
     }
 
@@ -94,6 +99,14 @@ impl WorkflowV2ResultStore {
     ) -> WorkflowResult<PathBuf> {
         let path = self.branch_outcome_path(call_id, &outcome.item_id);
         let clean = sanitize_for_persistence(outcome)?;
+        archive_superseded_json(&path, |existing: &WorkflowV2BranchOutcome| {
+            match (&existing.item_input_hash, &clean.item_input_hash) {
+                (Some(old), Some(new)) => old == new,
+                // Missing identity on either side: treat as an in-place update
+                // of the same execution, never a supersede.
+                _ => true,
+            }
+        })?;
         write_json(&path, &clean)?;
         Ok(path)
     }
@@ -289,6 +302,44 @@ fn load_rejected_output_log(path: &Path) -> WorkflowResult<WorkflowV2RejectedOut
     }
     let raw = fs::read_to_string(path).map_err(|err| WorkflowError::io(path, err))?;
     serde_json::from_str(&raw).map_err(Into::into)
+}
+
+/// D79: a call id re-executed by a later cycle (e.g. a terminal-gate reroute)
+/// must never silently destroy the prior record — post-run adjudication is
+/// built on this history. When a NEW execution claims an occupied slot, the
+/// existing file moves into a `superseded/` sibling directory first; an
+/// unreadable existing file is archived rather than clobbered.
+fn archive_superseded_json<T: DeserializeOwned>(
+    path: &Path,
+    same_execution: impl FnOnce(&T) -> bool,
+) -> WorkflowResult<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    if let Ok(raw) = fs::read_to_string(path)
+        && let Ok(existing) = serde_json::from_str::<T>(&raw)
+        && same_execution(&existing)
+    {
+        return Ok(());
+    }
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let dir = parent.join("superseded");
+    fs::create_dir_all(&dir).map_err(|err| WorkflowError::io(&dir, err))?;
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("record");
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or_default();
+    let sequence = SUPERSEDED_ARCHIVE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let target = dir.join(format!(
+        "{stem}-{stamp}-{}-{sequence}.json",
+        std::process::id()
+    ));
+    fs::rename(path, &target).map_err(|err| WorkflowError::io(&target, err))?;
+    Ok(())
 }
 
 include!("result_store_records.rs");

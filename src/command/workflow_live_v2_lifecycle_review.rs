@@ -114,6 +114,8 @@ impl LifecycleDriver {
                         &semantic_preservation::violation_issues(&preservation.violations),
                         &candidate,
                     );
+                    self.record_preservation_rejection(&call_id, &preservation.violations)
+                        .await?;
                     semantic_preservation::append_preservation_issues(
                         &mut review_remediation_inventory,
                         &preservation.violations,

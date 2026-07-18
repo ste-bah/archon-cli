@@ -65,7 +65,15 @@ fn output_reports_failed_verification_with_options(
     }
     if check_zero_test_filter && context_output_test_counts::reports_zero_test_filter(body, &lower)
     {
-        return Some("agent output reports a filtered test command matched zero tests".to_string());
+        // D77: carry the offending command into the typed error so bounded
+        // repair loops receive actionable feedback instead of a generic
+        // sentence they cannot converge on.
+        let mut reason =
+            "agent output reports a filtered test command matched zero tests".to_string();
+        if let Some(evidence) = context_output_test_counts::zero_test_filter_evidence(body) {
+            reason.push_str(&format!(" ({evidence})"));
+        }
+        return Some(reason);
     }
     if require_acceptance_evidence && reports_accepted_without_evidence(body, &lower) {
         return Some(

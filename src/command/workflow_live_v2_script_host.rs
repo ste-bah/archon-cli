@@ -403,6 +403,7 @@ impl WorkflowScriptHost {
             failed_call: acc.failed_call.clone(),
             failed_result_path: acc.failed_result_path.clone(),
             next_action: acc.next_action.clone(),
+            script_result: None,
         }
     }
 

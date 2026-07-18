@@ -161,6 +161,13 @@ fn artifact_text_has_pattern(text: &str) -> bool {
         .any(|ch| matches!(ch, '*' | '?' | '[' | ']' | '{' | '}' | '<' | '>'))
 }
 
+/// A path carrying template placeholders or glob syntax can never be checked
+/// for literal existence; callers must exclude it from literal artifact
+/// evidence and rely on pattern-based deliverable contracts instead.
+pub(crate) fn artifact_path_is_templated(raw: &str) -> bool {
+    artifact_text_has_pattern(raw.trim())
+}
+
 fn dedupe_values(values: Vec<Value>) -> Vec<Value> {
     let mut seen = BTreeSet::new();
     values

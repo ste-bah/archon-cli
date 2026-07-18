@@ -298,3 +298,123 @@ fn save_wave<const D: usize, const C: usize>(
     .with_source_metadata(Some(format!("source-{call_id}")), Some(graph));
     store.save_call_record(&record).expect("save wave");
 }
+
+#[test]
+fn superseding_execution_archives_prior_call_record() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path());
+    let first = WorkflowV2CallRecord::new(
+        "wf-test",
+        call("implementation-wave-1"),
+        0,
+        "input-original".to_string(),
+        WorkflowV2Result::accepted("original cycle"),
+        Vec::new(),
+    );
+    store.save_call_record(&first).expect("save first");
+
+    // Same-execution re-save (e.g. an invalidation stamp) keeps the slot.
+    let mut stamped = first.clone();
+    stamped.invalidated_by = Some("upstream".to_string());
+    store
+        .save_call_record(&stamped)
+        .expect("re-save same execution");
+    let superseded_dir = temp.path().join("results").join("superseded");
+    assert!(!superseded_dir.exists(), "in-place update must not archive");
+
+    // A rerouted cycle reusing the id is a NEW execution: prior record archives.
+    let rerouted = WorkflowV2CallRecord::new(
+        "wf-test",
+        call("implementation-wave-1"),
+        0,
+        "input-reroute".to_string(),
+        WorkflowV2Result::accepted("rerouted cycle"),
+        Vec::new(),
+    );
+    store.save_call_record(&rerouted).expect("save rerouted");
+
+    let latest = store
+        .load_call_record("implementation-wave-1")
+        .expect("load")
+        .expect("record");
+    assert_eq!(latest.input_hash, "input-reroute");
+    let archived: Vec<_> = std::fs::read_dir(&superseded_dir)
+        .expect("superseded dir")
+        .flatten()
+        .collect();
+    assert_eq!(archived.len(), 1, "original record must be archived");
+    let raw = std::fs::read_to_string(archived[0].path()).expect("archived record");
+    assert!(raw.contains("input-original"));
+    // The archive directory must not pollute load_call_records.
+    let all = store.load_call_records().expect("load all");
+    assert_eq!(all.len(), 1);
+}
+
+#[test]
+fn rapid_superseding_executions_preserve_every_prior_record() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path());
+    for cycle in 0..5 {
+        let record = WorkflowV2CallRecord::new(
+            "wf-test",
+            call("implementation-wave-rapid"),
+            0,
+            format!("input-{cycle}"),
+            WorkflowV2Result::accepted(format!("cycle {cycle}")),
+            Vec::new(),
+        );
+        store.save_call_record(&record).expect("save cycle");
+    }
+
+    let superseded_dir = temp.path().join("results").join("superseded");
+    assert_eq!(
+        std::fs::read_dir(superseded_dir).expect("archive").count(),
+        4,
+        "every displaced record must retain a unique archive slot"
+    );
+}
+
+#[test]
+fn superseding_execution_archives_prior_branch_outcome() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path());
+    let outcome = WorkflowV2BranchOutcome {
+        item_id: "impl-item-1".to_string(),
+        role: "coder".to_string(),
+        status: WorkflowV2Status::Accepted,
+        result: Some(WorkflowV2Result::accepted("original")),
+        error: None,
+        failure_kind: None,
+        item_input_hash: Some("hash-a".to_string()),
+        completion_evidence: Vec::new(),
+    };
+    store
+        .save_branch_outcome("implementation-wave-1", &outcome)
+        .expect("save first");
+
+    // Same-hash re-save is an in-place update.
+    store
+        .save_branch_outcome("implementation-wave-1", &outcome)
+        .expect("re-save");
+    let superseded_dir = temp
+        .path()
+        .join("branches")
+        .join("implementation-wave-1")
+        .join("superseded");
+    assert!(!superseded_dir.exists());
+
+    let mut rerouted = outcome.clone();
+    rerouted.item_input_hash = Some("hash-b".to_string());
+    rerouted.result = Some(WorkflowV2Result::accepted("rerouted"));
+    store
+        .save_branch_outcome("implementation-wave-1", &rerouted)
+        .expect("save rerouted");
+    assert_eq!(
+        std::fs::read_dir(&superseded_dir).expect("dir").count(),
+        1,
+        "prior outcome must be archived"
+    );
+    // Archived subdirectory must not pollute load_branch_outcomes.
+    let outcomes = store.load_branch_outcomes().expect("load outcomes");
+    assert_eq!(outcomes.len(), 1);
+}

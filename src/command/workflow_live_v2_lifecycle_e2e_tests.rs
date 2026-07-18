@@ -737,6 +737,36 @@ async fn triage_shape_repair_cannot_trade_predicate_identity_for_better_accounti
         llm.calls.lock().expect("calls lock").as_slice(),
         ["semantic-triage-shape-repair-1"]
     );
+    // D78: the rejection must persist as a monitor-visible typed record, not
+    // only in in-memory repair-attempt evidence.
+    assert!(
+        persisted_semantic_rejection_record(temp.path(), "semantic-triage-shape-repair-1"),
+        "expected a persisted semantic-preservation rejection record"
+    );
+}
+
+fn persisted_semantic_rejection_record(root: &std::path::Path, repair_id: &str) -> bool {
+    fn walk(dir: &std::path::Path, needle: &str) -> bool {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return false;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if walk(&path, needle) {
+                    return true;
+                }
+            } else if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.contains(needle))
+            {
+                return true;
+            }
+        }
+        false
+    }
+    walk(root, &format!("{repair_id}-semantic-preservation-rejected"))
 }
 
 #[tokio::test]

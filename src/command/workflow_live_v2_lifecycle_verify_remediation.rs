@@ -724,6 +724,8 @@ impl LifecycleDriver {
             &semantic_preservation::violation_issues(&preservation.violations),
             &candidate,
         );
+        self.record_preservation_rejection(&repair_id, &preservation.violations)
+            .await?;
         let mut rejected = post_plan;
         semantic_preservation::append_preservation_issues(
             &mut rejected,

@@ -312,10 +312,17 @@ async fn execute_generated_v2_run(
     )
     .with_frontier_resume(adopt_accepted_cache)
     .with_resume_completed_ids(resume_completed_ids);
-    // Decomposed-PRD runs execute the Rust lifecycle natively; the recorded
-    // scaffold source remains the hash/reuse identity. QuickJS interprets only
-    // LLM-authored scripts.
-    let run_result = if plan.task_universe.is_some() {
+    // Decomposed-PRD runs default to the Rust lifecycle. v3 script mode
+    // (ARCHON_SCRIPT_LIFECYCLE=1) instead AUTHORS a workflow.js from the
+    // task universe and executes it — composition as code, no reducer relay.
+    let script_lifecycle = std::env::var("ARCHON_SCRIPT_LIFECYCLE")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let run_result = if plan.task_universe.is_some() && script_lifecycle {
+        runner
+            .run_authored_script_lifecycle(store.run_dir(&run.id).join("authored-workflow.js"))
+            .await
+    } else if plan.task_universe.is_some() {
         runner
             .run_decomposed_lifecycle(
                 &plan.harness_source,

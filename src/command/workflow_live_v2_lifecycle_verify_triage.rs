@@ -188,6 +188,8 @@ impl LifecycleDriver {
                 &semantic_preservation::violation_issues(&preservation.violations),
                 &repaired,
             );
+            self.record_preservation_rejection(&repair_id, &preservation.violations)
+                .await?;
             return Ok(triage);
         }
         if still_unaccounted.len() < unaccounted.len() {

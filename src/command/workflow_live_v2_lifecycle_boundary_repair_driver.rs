@@ -1,4 +1,30 @@
 impl LifecycleDriver {
+    /// D78: persist a monitor-visible typed record whenever the host rejects
+    /// an LLM repair for semantic-preservation violations. Rejections
+    /// otherwise live only in in-memory repair-attempt evidence until the
+    /// terminal report, leaving external observers unable to distinguish a
+    /// rejected repair's raw envelope from adopted state.
+    async fn record_preservation_rejection(
+        &self,
+        repair_id: &str,
+        violations: &[String],
+    ) -> archon_workflow::WorkflowResult<()> {
+        self.call(
+            "checkpoint",
+            &format!("{repair_id}-semantic-preservation-rejected"),
+            Some(serde_json::json!({
+                "repair_call_id": repair_id,
+                "adopted": false,
+                "violations": violations,
+            })),
+            serde_json::json!({
+                "task": "Record host-side semantic-preservation rejection evidence."
+            }),
+        )
+        .await
+        .map(|_| ())
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn enforce_outcome_repair_accounting(
         &self,
@@ -78,6 +104,8 @@ impl LifecycleDriver {
                 &semantic_preservation::violation_issues(&preservation.violations),
                 &repaired_inventory,
             );
+            self.record_preservation_rejection(&repair_id, &preservation.violations)
+                .await?;
             return Ok(inventory);
         }
         if repaired_quality < quality {
@@ -145,6 +173,8 @@ impl LifecycleDriver {
                 &semantic_preservation::violation_issues(&preservation.violations),
                 &repaired,
             );
+            self.record_preservation_rejection(&repair_id, &preservation.violations)
+                .await?;
             return Ok(reconciliation);
         }
         if repaired_quality.defect_count() < quality.defect_count() {

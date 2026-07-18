@@ -41,6 +41,9 @@ pub(super) struct WorkflowV2ScriptSummary {
     pub(super) failed_call: Option<String>,
     pub(super) failed_result_path: Option<String>,
     pub(super) next_action: Option<String>,
+    /// The script's own return value (JSON text). Consumed by the v3
+    /// authoring bootstrap to hand back the authored workflow source.
+    pub(super) script_result: Option<String>,
 }
 
 #[derive(Clone)]
@@ -188,8 +191,9 @@ impl WorkflowV2ScriptRunner {
             })
             .await;
         match js_result {
-            Ok(_) => {
-                let summary = host.summary().await;
+            Ok(result) => {
+                let mut summary = host.summary().await;
+                summary.script_result = Some(result);
                 host.emit_terminal_status(summary.status);
                 Ok(summary)
             }
@@ -292,6 +296,8 @@ include!("workflow_live_v2_script_host.rs");
 
 include!("workflow_live_v2_script_helpers.rs");
 
+include!("workflow_live_v3_prelude.rs");
+
 include!("workflow_live_v2_script_verification.rs");
 
 #[path = "workflow_live_v2_deliverable_contract.rs"]
@@ -330,6 +336,10 @@ mod workflow_live_v2_lifecycle_verify_supersede;
 include!("workflow_live_v2_script_dry_run.rs");
 
 include!("workflow_live_v2_lifecycle.rs");
+
+include!("workflow_live_v3_orchestrated.rs");
+
+include!("workflow_live_v3_author.rs");
 
 include!("workflow_live_v2_lifecycle_waves.rs");
 

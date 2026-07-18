@@ -3,8 +3,9 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    WorkflowV2Artifact, WorkflowV2ResidualGap, WorkflowV2Result, WorkflowV2Status,
-    WorkflowV2WriteSafetyError, project_artifact_contract::artifact_requirement_paths,
+    WorkflowV2Artifact, WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2ResidualGap,
+    WorkflowV2Result, WorkflowV2Status, WorkflowV2WriteSafetyError,
+    project_artifact_contract::{artifact_path_is_templated, artifact_requirement_paths},
 };
 
 pub const PROJECT_ARTIFACT_POLICY_VERSION: &str = "workflow-v2-project-artifacts-v2";
@@ -44,6 +45,7 @@ impl WorkflowV2ProjectArtifactContext {
 enum ProjectArtifactPath {
     Existing(String),
     Missing(String),
+    Templated(String),
     NotArtifact,
 }
 
@@ -87,6 +89,7 @@ fn normalize_changed_project_artifacts(
                 artifacts.push(artifact_from_file(path, file.purpose))
             }
             ProjectArtifactPath::Missing(path) => note_missing_project_artifact(result, &path),
+            ProjectArtifactPath::Templated(path) => note_templated_project_artifact(result, &path),
             ProjectArtifactPath::NotArtifact => retained.push(file),
         }
     }
@@ -110,6 +113,7 @@ fn normalize_declared_project_artifacts(
                 retained.push(artifact);
             }
             ProjectArtifactPath::Missing(path) => note_missing_project_artifact(result, &path),
+            ProjectArtifactPath::Templated(path) => note_templated_project_artifact(result, &path),
             ProjectArtifactPath::NotArtifact => retained.push(artifact),
         }
     }
@@ -160,6 +164,9 @@ fn classify_project_artifact_path(
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Ok(ProjectArtifactPath::NotArtifact);
+    }
+    if artifact_path_is_templated(trimmed) {
+        return templated_artifact_path(item_id, trimmed, &project_root, context);
     }
     if Path::new(trimmed).is_absolute() {
         return absolute_artifact_path(item_id, trimmed, &project_root, context);
@@ -444,6 +451,19 @@ fn push_unique_artifact(result: &mut WorkflowV2Result, artifact: WorkflowV2Artif
     result.artifacts.push(artifact);
 }
 
+/// A templated path (placeholder tokens) is a contract shape, not a checkable
+/// artifact; noting it as "missing" would manufacture unsatisfiable gaps.
+fn note_templated_project_artifact(result: &mut WorkflowV2Result, path: &str) {
+    let summary =
+        format!("templated artifact requirement excluded from literal evidence checks: {path}");
+    if !result.evidence.iter().any(|entry| entry.summary == summary) {
+        result.evidence.push(WorkflowV2Evidence::new(
+            WorkflowV2EvidenceKind::Inspection,
+            summary,
+        ));
+    }
+}
+
 fn note_missing_project_artifact(result: &mut WorkflowV2Result, path: &str) {
     let id = format!("missing_project_artifact_{}", artifact_id_for_path(path));
     if !result.residual_gaps.iter().any(|gap| gap.id == id) {
@@ -467,3 +487,5 @@ fn unsafe_target(item_id: &str, target: &str) -> WorkflowV2WriteSafetyError {
         target: target.to_string(),
     }
 }
+
+include!("project_artifacts_templated.rs");

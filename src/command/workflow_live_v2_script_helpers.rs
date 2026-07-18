@@ -80,6 +80,7 @@ fn string_array(value: &serde_json::Value) -> Vec<String> {
 
 fn script_source(harness_source: &str, script_args: Option<&serde_json::Value>) -> String {
     let normalized = normalize_workflow_export(harness_source);
+    let v3_primitives = V3_PRIMITIVES_JS;
     let args_literal = script_args
         .map(|value| serde_json::to_string(value).unwrap_or_else(|_| "undefined".to_string()))
         .unwrap_or_else(|| "undefined".to_string());
@@ -150,44 +151,20 @@ async function __archonCall(method, id, source, options) {{
   return JSON.parse(json);
 }}
 
+{v3_primitives}
+
 async function __archonRun() {{
   if (typeof workflow !== "function") {{
     throw new Error("workflow.js must export or define function workflow(w)");
   }}
-  const result = await workflow(__archonW);
+  const meta = typeof __workflowMeta !== "undefined" ? __workflowMeta : undefined;
+  const result = await workflow(meta ? __archonPrimitives(__archonW) : __archonW);
   return JSON.stringify(result ?? null);
 }}
 
 __archonRun()
 "#
     )
-}
-
-fn normalize_workflow_export(source: &str) -> String {
-    let trimmed = source.trim();
-    if trimmed.starts_with("export default async function workflow") {
-        return trimmed.replacen(
-            "export default async function workflow",
-            "async function workflow",
-            1,
-        );
-    }
-    if trimmed.starts_with("export default function workflow") {
-        return trimmed.replacen("export default function workflow", "function workflow", 1);
-    }
-    if trimmed.starts_with("export default async function(") {
-        return trimmed.replacen(
-            "export default async function",
-            "async function workflow",
-            1,
-        );
-    }
-    if trimmed.starts_with("export default function(") {
-        return trimmed.replacen("export default function", "function workflow", 1);
-    }
-    trimmed
-        .replace("export default workflow;", "")
-        .replace("export default workflow", "")
 }
 
 fn result_view_json(result: &WorkflowV2Result) -> archon_workflow::WorkflowResult<String> {

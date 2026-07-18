@@ -72,7 +72,17 @@ impl WorkflowV2ScriptRunner {
             resume_completed_ids,
             &generated_config,
         );
-        match driver.run().await {
+        // v3: ONE persistent orchestrator conversation instead of the v2
+        // reducer relay. Opt-in via env until certified as the default.
+        let orchestrated = std::env::var("ARCHON_ORCHESTRATED_LIFECYCLE")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let outcome = if orchestrated {
+            driver.run_orchestrated().await
+        } else {
+            driver.run().await
+        };
+        match outcome {
             Ok(()) => {
                 let summary = host.summary().await;
                 host.emit_terminal_status(summary.status);
