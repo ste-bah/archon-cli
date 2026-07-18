@@ -7,8 +7,8 @@ use archon_tui::render;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
-fn render_once(app: &mut App) -> String {
-    let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("TestBackend");
+fn render_at_width(app: &mut App, width: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, 30)).expect("TestBackend");
     terminal
         .draw(|frame| render::draw(frame, app))
         .expect("draw");
@@ -22,6 +22,10 @@ fn render_once(app: &mut App) -> String {
         rendered.push('\n');
     }
     rendered
+}
+
+fn render_once(app: &mut App) -> String {
+    render_at_width(app, 100)
 }
 
 #[test]
@@ -57,6 +61,71 @@ fn output_scrollbar_renders_when_content_overflows() {
     let rendered_at_bottom = render_once(&mut app);
     assert!(!rendered.is_empty());
     assert!(!rendered_at_bottom.is_empty());
+}
+
+#[test]
+fn scroll_lock_footer_counts_new_wrapped_rows_until_follow_resumes() {
+    let mut app = App::new();
+    app.show_splash = false;
+    for index in 0..40 {
+        app.output.append_line(&format!("existing-{index:02}"));
+    }
+    let initial = render_once(&mut app);
+    assert!(!initial.contains("new lines"));
+
+    app.output.scroll_up(10);
+    for index in 0..42 {
+        app.output.append_line(&format!("new-{index:02}"));
+    }
+    let locked = render_once(&mut app);
+    assert!(
+        locked.contains("▼ 42 new lines — PageDown/End to follow"),
+        "buffer:\n{locked}"
+    );
+
+    app.output.scroll_to_bottom();
+    let following = render_once(&mut app);
+    assert!(!following.contains("new lines"), "buffer:\n{following}");
+}
+
+#[test]
+fn transcript_wrap_geometry_matches_reserved_scrollbar_column() {
+    let mut app = App::new();
+    app.show_splash = false;
+    app.output.append_line("1234567890");
+
+    let rendered = render_at_width(&mut app, 10);
+    let mut lines = rendered.lines();
+
+    assert_eq!(lines.next(), Some("123456789 "));
+    assert_eq!(lines.next(), Some("0         "));
+}
+
+#[test]
+fn scroll_lock_footer_does_not_replace_last_transcript_row() {
+    let mut app = App::new();
+    app.show_splash = false;
+    for index in 0..30 {
+        app.output.append_line(&format!("existing-{index:02}"));
+    }
+    app.output.scroll_up(10);
+    let before = render_once(&mut app);
+    assert!(
+        before
+            .lines()
+            .nth(22)
+            .is_some_and(|line| line.trim().is_empty()),
+        "locked footer row must already be reserved; buffer:\n{before}"
+    );
+
+    app.output.append_line("new-arrival");
+    let rendered = render_once(&mut app);
+
+    assert!(rendered.contains("existing-21"), "buffer:\n{rendered}");
+    assert!(
+        rendered.contains("▼ 1 new lines — PageDown/End to follow"),
+        "buffer:\n{rendered}"
+    );
 }
 
 #[test]

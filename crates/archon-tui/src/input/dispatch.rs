@@ -111,8 +111,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
             KeyResult::Nothing
         }
         Action::ScrollTop => {
-            app.output.scroll_offset = u16::MAX;
-            app.output.scroll_locked = true;
+            app.output.scroll_to_top();
             KeyResult::Nothing
         }
         Action::ScrollBottom => {

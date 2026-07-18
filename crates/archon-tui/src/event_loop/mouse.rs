@@ -56,13 +56,14 @@ fn scroll_output_from_bar(app: &mut App, column: u16, row: u16) -> bool {
     let Some(output_area) = current_output_area(app) else {
         return false;
     };
-    let area = crate::render::body::output_regions(app, output_area).transcript;
+    let output_regions = crate::render::body::output_regions(app, output_area);
+    let (area, _) = crate::render::body::transcript_regions(app, output_regions.transcript);
     if !is_output_scrollbar_hit(area, column, row) {
         return false;
     }
     let width = area.width.saturating_sub(1).max(1);
     let view = app.output.rendered_view(&app.theme, width, area.height);
-    if view.total_wrapped <= area.height {
+    if view.total_wrapped <= area.height as usize {
         return false;
     }
     app.output.scroll_to_viewport_row(

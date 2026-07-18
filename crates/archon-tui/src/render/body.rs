@@ -25,8 +25,6 @@ pub use pickers::{
 
 /// Render the output area (top section with scrollable content).
 pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
-    let t = &app.theme;
-
     if app.show_splash {
         splash::draw_splash(
             frame.buffer_mut(),
@@ -40,49 +38,92 @@ pub fn draw_output_area(frame: &mut Frame, app: &App, area: Rect) {
 
     let output_area =
         crate::agent_activity::render_rail_if_needed(frame, &app.agent_activity, area, &app.theme);
+    draw_output_content(frame, app, output_area);
+}
 
-    let output_width = output_area.width.saturating_sub(1); // -1 for scrollbar
+fn draw_output_content(frame: &mut Frame, app: &App, output_area: Rect) {
+    let output_width = output_area.width.saturating_sub(1);
     let thinking_lines = app.thinking_lines(output_width);
     let regions = output_regions(app, output_area);
-    let transcript_area = regions.transcript;
-    let transcript_height = transcript_area.height;
-    let rendered_view = app
+    let (transcript_area, footer_area) = transcript_regions(app, regions.transcript);
+    draw_transcript(frame, app, output_width, transcript_area, footer_area);
+    draw_active_thinking(frame, app, &thinking_lines, regions.thinking);
+}
+
+fn draw_transcript(frame: &mut Frame, app: &App, width: u16, area: Rect, footer_area: Rect) {
+    let view = app.output.rendered_view(&app.theme, width, area.height);
+    let new_rows = app
         .output
-        .rendered_view(&app.theme, output_width, transcript_height);
-    let total_wrapped = rendered_view.total_wrapped;
-    let scroll_y = rendered_view.global_scroll_y;
-
-    let border_style = if app.output.scroll_locked {
-        Style::default().fg(t.warning)
+        .new_wrapped_rows(view.total_wrapped, width, &app.theme);
+    let border_color = if app.output.scroll_locked {
+        app.theme.warning
     } else {
-        Style::default().fg(t.border)
+        app.theme.border
     };
-
-    let output_widget = Paragraph::new(rendered_view.lines)
-        .block(Block::default().borders(Borders::NONE).style(border_style))
+    let widget = Paragraph::new(view.lines)
+        .block(
+            Block::default()
+                .borders(Borders::NONE)
+                .style(Style::default().fg(border_color)),
+        )
         .wrap(Wrap { trim: false })
-        .scroll((rendered_view.paragraph_scroll_y, 0));
-    frame.render_widget(output_widget, transcript_area);
+        .scroll((view.paragraph_scroll_y, 0));
+    let paragraph_area = Rect { width, ..area };
+    frame.render_widget(widget, paragraph_area);
+    draw_output_scrollbar(frame, app, area, view.total_wrapped, view.global_scroll_y);
+    draw_locked_footer(frame, app, footer_area, new_rows);
+}
 
-    if regions.thinking.height > 0 {
-        let start = app
-            .thinking
-            .effective_scroll(thinking_lines.len(), regions.thinking.height);
-        let end = start
-            .saturating_add(regions.thinking.height as usize)
-            .min(thinking_lines.len());
-        let thinking_widget = Paragraph::new(thinking_lines[start..end].to_vec());
-        frame.render_widget(thinking_widget, regions.thinking);
+fn draw_active_thinking(frame: &mut Frame, app: &App, lines: &[Line<'static>], area: Rect) {
+    if area.height == 0 {
+        return;
     }
+    let start = app.thinking.effective_scroll(lines.len(), area.height);
+    let end = start.saturating_add(area.height as usize).min(lines.len());
+    frame.render_widget(Paragraph::new(lines[start..end].to_vec()), area);
+}
 
-    if total_wrapped > transcript_height {
-        let mut scrollbar_state =
-            ScrollbarState::new(total_wrapped.saturating_sub(transcript_height) as usize)
-                .position(scroll_y as usize);
-        let scrollbar =
-            Scrollbar::new(ScrollbarOrientation::VerticalRight).style(Style::default().fg(t.muted));
-        frame.render_stateful_widget(scrollbar, transcript_area, &mut scrollbar_state);
+fn draw_output_scrollbar(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+    total_wrapped: usize,
+    scroll_y: usize,
+) {
+    if total_wrapped <= area.height as usize {
+        return;
     }
+    let mut state =
+        ScrollbarState::new(total_wrapped.saturating_sub(area.height as usize)).position(scroll_y);
+    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .style(Style::default().fg(app.theme.muted));
+    frame.render_stateful_widget(scrollbar, area, &mut state);
+}
+
+fn draw_locked_footer(frame: &mut Frame, app: &App, area: Rect, new_rows: usize) {
+    if !app.output.scroll_locked || new_rows == 0 {
+        return;
+    }
+    let footer = Paragraph::new(format!("▼ {new_rows} new lines — PageDown/End to follow"))
+        .style(Style::default().fg(app.theme.warning));
+    frame.render_widget(footer, area);
+}
+
+pub(crate) fn transcript_regions(app: &App, area: Rect) -> (Rect, Rect) {
+    if !app.output.scroll_locked || area.height == 0 {
+        return (area, Rect::new(area.x, area.bottom(), area.width, 0));
+    }
+    let transcript = Rect {
+        height: area.height.saturating_sub(1),
+        ..area
+    };
+    let footer = Rect {
+        y: transcript.bottom(),
+        width: area.width.saturating_sub(1),
+        height: 1,
+        ..area
+    };
+    (transcript, footer)
 }
 
 #[derive(Clone, Copy)]

@@ -10,6 +10,8 @@
 //! - `buffer` — `OutputBuffer` (append-only streaming buffer with scroll math).
 
 mod buffer;
+#[cfg(test)]
+mod buffer_tests;
 mod render_cache;
 mod sanitize;
 mod scroll;
