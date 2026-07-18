@@ -100,6 +100,7 @@
             ),
             decision,
             task_class: archon_world_model::RuntimeTaskClass::CodingChange,
+            classified_from_tool: false,
         };
         remember_active_guardrail(&record);
 
@@ -143,6 +144,7 @@
             ),
             decision,
             task_class: archon_world_model::RuntimeTaskClass::CodingChange,
+            classified_from_tool: false,
         };
         remember_active_guardrail(&record);
         let event = archon_reasoning_quality::ReasoningQualityEvent {

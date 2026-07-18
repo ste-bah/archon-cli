@@ -106,7 +106,7 @@ fn maybe_spawn_guardrail_repair(
         ));
         match dispatcher.lock().unwrap().spawn_turn(
             repair_prompt,
-            adapter.clone() as Arc<dyn archon_tui::TurnRunner>,
+            adapter.scoped_turn_runner(guardrail.action.action_id.clone()),
         ) {
             archon_tui::DispatchResult::Running { .. } => {
                 tracing::debug!("spawned guardrail repair turn");

@@ -58,6 +58,8 @@ impl Agent {
             record_correction_callback: None,
             record_user_correction_event_callback: None,
             record_reasoning_turn_callback: None,
+            first_tool_action_callback: None,
+            guardrail_action_id: None,
             reasoning_evidence_refs: Vec::new(),
             current_situation: None,
             cognitive_store: None,
@@ -332,6 +334,14 @@ impl Agent {
         cb: Arc<dyn Fn(ReasoningTurnEventPayload) + Send + Sync>,
     ) {
         self.record_reasoning_turn_callback = Some(cb);
+    }
+
+    pub fn set_first_tool_action_callback(&mut self, cb: FirstToolActionCallback) {
+        self.first_tool_action_callback = Some(cb);
+    }
+
+    pub fn set_guardrail_action_id(&mut self, action_id: Option<String>) {
+        self.guardrail_action_id = action_id;
     }
 
     /// Wire the personality-mirror update hook (TASK #245).

@@ -72,6 +72,13 @@ impl Default for WorldGuardrailDecision {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorldGuardrailRevision {
+    pub action: WorldGuardedAction,
+    pub decision: WorldGuardrailDecision,
+    pub idempotency_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VerificationOutcome {
     pub schema_version: u32,

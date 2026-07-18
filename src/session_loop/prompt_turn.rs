@@ -54,10 +54,15 @@ pub(super) async fn dispatch_user_prompt(
         )));
     }
 
-    match dispatcher.lock().unwrap().spawn_turn(
-        effective_input,
-        adapter.clone() as Arc<dyn archon_tui::TurnRunner>,
-    ) {
+    let turn_runner: Arc<dyn archon_tui::TurnRunner> = guardrail
+        .as_ref()
+        .map(|record| adapter.scoped_turn_runner(record.action.action_id.clone()))
+        .unwrap_or_else(|| adapter.clone());
+    match dispatcher
+        .lock()
+        .unwrap()
+        .spawn_turn(effective_input, turn_runner)
+    {
         archon_tui::DispatchResult::Running { .. } => {
             tracing::debug!("spawned agent turn");
         }

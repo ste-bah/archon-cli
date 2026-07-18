@@ -102,6 +102,7 @@ pub(crate) fn run_session_loop(
 
         let adapter = Arc::new(crate::agent_handle::AgentHandle::new(
             Arc::clone(&agent),
+            session_id_for_input.clone(),
             auto_capture,
             auto_trainer.clone(),
         ));

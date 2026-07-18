@@ -193,6 +193,20 @@ pub(super) async fn build(
         agent_event_tx,
         agent_registry,
     );
+    let guardrail_config = config.clone();
+    let guardrail_session_id = session_id.to_string();
+    agent.set_first_tool_action_callback(Arc::new(
+        move |action_id, tool_name, tool_use_id, input| {
+            crate::command::world_model::reclassify_active_guardrail_for_session(
+                &guardrail_config,
+                &guardrail_session_id,
+                action_id,
+                tool_name,
+                tool_use_id,
+                input,
+            );
+        },
+    ));
     let metrics = Arc::new(archon_tui::observability::ChannelMetrics::default());
     let metrics_sink: Arc<dyn ChannelMetricSink> = metrics.clone();
     agent.set_channel_metrics(metrics_sink);

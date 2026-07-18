@@ -393,6 +393,8 @@ mod tests {
         assert!(saw_error_without_summary);
     }
 
+    include!("permission_gate_observer_test.rs");
+
     #[tokio::test]
     async fn preflight_sandbox_check_uses_hook_mutated_input() {
         let mut registry = ToolRegistry::new();

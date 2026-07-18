@@ -48,15 +48,21 @@ mod tests {
         let decision = decide_guardrail(&action, None, context, &policy);
 
         assert!(!decision.allowed_to_finalize);
-        assert!(decision
-            .required_actions
-            .contains(&GuardrailRequiredAction::RunTests));
-        assert!(decision
-            .required_actions
-            .contains(&GuardrailRequiredAction::RunBuild));
-        assert!(decision
-            .reason_codes
-            .contains(&GuardrailReasonCode::PredictedVerificationNeededHigh));
+        assert!(
+            decision
+                .required_actions
+                .contains(&GuardrailRequiredAction::RunTests)
+        );
+        assert!(
+            decision
+                .required_actions
+                .contains(&GuardrailRequiredAction::RunBuild)
+        );
+        assert!(
+            decision
+                .reason_codes
+                .contains(&GuardrailReasonCode::PredictedVerificationNeededHigh)
+        );
     }
 
     #[test]
@@ -238,12 +244,16 @@ mod tests {
         assert!(fail_open.allowed_to_continue);
         assert!(fail_open.allowed_to_finalize);
         assert!(fail_open.required_actions.is_empty());
-        assert!(fail_open
-            .reason_codes
-            .contains(&GuardrailReasonCode::GuardrailOverheadExceeded));
-        assert!(fail_open
-            .reason_codes
-            .contains(&GuardrailReasonCode::PredictedVerificationNeededHigh));
+        assert!(
+            fail_open
+                .reason_codes
+                .contains(&GuardrailReasonCode::GuardrailOverheadExceeded)
+        );
+        assert!(
+            fail_open
+                .reason_codes
+                .contains(&GuardrailReasonCode::PredictedVerificationNeededHigh)
+        );
     }
 
     #[test]
@@ -304,6 +314,69 @@ mod tests {
         assert_eq!(counts.verifications, 1);
         assert_eq!(counts.outcomes, 1);
         assert_eq!(counts.advisor_unavailable_decisions, 1);
+    }
+
+    #[test]
+    fn guarded_action_loader_returns_latest_revision_per_action() {
+        let temp = tempfile::tempdir().unwrap();
+        let action = WorldGuardedAction::new(
+            "s1",
+            WorldAdvisorSurface::InteractiveSession,
+            GuardedActionKind::UserRequest,
+            "build",
+            "build",
+        );
+        let mut revised = action.clone();
+        revised.idempotency_key = format!("{}:tool", action.idempotency_key);
+        revised.verification_plan = vec![VerificationRequirement {
+            requirement_id: "req-tests".into(),
+            kind: VerificationKind::UnitTests,
+            command_hint: Some("cargo test".into()),
+            applies_to: vec![action.action_id.clone()],
+            required_for_final: true,
+        }];
+
+        let ledger = append_guarded_action(temp.path(), &action).unwrap();
+        append_guarded_action(temp.path(), &revised).unwrap();
+
+        assert_eq!(std::fs::read_to_string(ledger).unwrap().lines().count(), 2);
+        let loaded = load_guarded_actions(temp.path()).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].action_id, action.action_id);
+        assert_eq!(loaded[0].verification_plan, revised.verification_plan);
+    }
+
+    #[test]
+    fn guardrail_revision_persists_action_and_decision_together() {
+        let temp = tempfile::tempdir().unwrap();
+        let action = WorldGuardedAction::new(
+            "s1",
+            WorldAdvisorSurface::InteractiveSession,
+            GuardedActionKind::UserRequest,
+            "build",
+            "build",
+        );
+        let original_decision = WorldGuardrailDecision::unavailable(&action);
+        append_guardrail_decision(temp.path(), &original_decision).unwrap();
+        let mut revised = action.clone();
+        revised.verification_plan = vec![VerificationRequirement::new(VerificationKind::UnitTests)];
+        let mut decision = WorldGuardrailDecision::unavailable(&revised);
+        decision.required_actions = vec![GuardrailRequiredAction::RunTests];
+
+        let ledger = append_guardrail_revision(
+            temp.path(),
+            revised.clone(),
+            decision.clone(),
+            "revision-1".into(),
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read_to_string(ledger).unwrap().lines().count(), 1);
+        assert_eq!(load_guarded_actions(temp.path()).unwrap(), vec![revised]);
+        assert_eq!(
+            load_guardrail_decisions(temp.path()).unwrap(),
+            vec![decision]
+        );
     }
 
     #[test]

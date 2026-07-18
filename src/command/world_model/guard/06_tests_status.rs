@@ -148,6 +148,7 @@
             ),
             decision,
             task_class: archon_world_model::RuntimeTaskClass::CodingChange,
+            classified_from_tool: false,
         };
 
         let prompt = forced_repair_prompt(&record).expect("blocked record should force repair");
