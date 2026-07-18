@@ -186,11 +186,17 @@ fn record_policy_error(
 }
 
 fn dry_run_stub_result(method: WorkflowV2HostMethod) -> String {
+    // The stub must carry the same envelope keys the live result view exposes
+    // ({status, summary, data, result, ...}): reference-following scripts read
+    // `x.result`/`x.data` fields, and a stub without them throws in the
+    // pre-flight rehearsal, falsely rejecting a script that runs fine live.
     serde_json::json!({
         "status": "accepted",
         "summary": format!("dry-run stub result for w.{}", method.as_str()),
         "items": [],
         "outcomes": [],
+        "data": {},
+        "result": { "status": "accepted", "summary": "dry-run stub", "data": {} },
         "dry_run": true,
     })
     .to_string()

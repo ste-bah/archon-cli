@@ -18,7 +18,19 @@ Shape — top-level script, exactly like this (no wrapper function):
   phase('Second Phase')
   const second = await agent(`...uses ${first.summary} verbatim...`, { label: 'second-step' })
 
-  return { accepted: [...], blocked: [...], notes: '...' }
+  phase('Review')
+  const adversarial = await agent('Try to FALSIFY every accepted claim above using the actual files and tests: ...', { label: 'adversarial-review', tier: 'critic' })
+  const coverage = await agent('Compare the source requirements document against the task list; name every requirement no task covers: ...', { label: 'coverage-audit' })
+
+  return {
+    accepted: acceptedTaskIds,
+    blocked: blockedTasks,
+    adversarial_findings: findingsFrom(adversarial),
+    uncovered_requirements: gapsFrom(coverage),
+    notes: 'short honest summary',
+  }
+  // (acceptedTaskIds/blockedTasks are arrays you build during the run;
+  //  findingsFrom/gapsFrom are your own small helpers reading the envelopes.)
 
 Statements run at the top level: bare phase()/log() (no await needed), `await agent(...)`, and a final top-level `return`.
 
@@ -31,7 +43,7 @@ Primitives:
     targetFiles: ['path/one.ext'],        // files the write agent owns
     focusedTests: ['exact test command'], // write:true — commands proving the change; must match >0 tests
     artifacts: ['relative/artifact.path'],// artifacts the work must produce
-    tier: 'coder' | 'reducer' | 'analysis'
+    tier: 'coder' | 'reducer' | 'analysis' | 'critic'   // 'critic' routes to the dedicated adversarial reviewer
   }
   Without write:true the agent is read-only (verification, judgment, exploration).
   AGENT SELECTION IS AUTOMATIC: the host picks the best registry agent from the stage type, tier, and prompt
@@ -49,7 +61,7 @@ Primitives:
 
 Rules the script must follow:
 - AWAIT EVERY agent(), agents(), pipeline(), and phase-with-body call. Never fire-and-forget real work: a workflow that returns while work is pending FAILS the run with a dropped-call error. (Bare phase()/log() markers are the only calls that need no await.)
-- SEQUENTIAL vs PARALLEL: tasks connected by dependency_ids or touching the same files run SEQUENTIALLY (await one before starting the next). INDEPENDENT tasks may run concurrently — prefer `await agents([...])` (one host call, host-managed safe parallelism); `await Promise.all([...agent()...])` is acceptable for independent READ-ONLY work only. Never parallelize write work outside agents().
+- SEQUENTIAL vs PARALLEL: tasks connected by dependency_ids or touching the same files run SEQUENTIALLY (await one before starting the next). INDEPENDENT tasks may run concurrently — prefer `await agents([...])` (one host call, host-managed safe parallelism); `await Promise.all([...agent()...])` is acceptable for independent READ-ONLY work only. Never parallelize write work outside agents(). EXCEPTION: the two mandated reviews below must be SEPARATE top-level `await agent(...)` calls — never inside agents() batches, never write:true, never conditional — placed AFTER all task work.
 - Work tasks in dependency order (each task in the universe lists dependency_ids).
 - For each task: implement with a write agent, then verify with a read-only agent whose prompt names EXACT, module-qualified test commands; a test filter matching zero tests is never evidence.
 - Read every returned envelope. If status is not accepted/noop, the envelope carries the verbatim gate error: retry with SPECIFIC corrected instructions (exact command, exact path), at most 3 retries per task, then record the task as blocked with the evidence.
@@ -149,7 +161,12 @@ impl WorkflowV2ScriptRunner {
             })
             .unwrap_or_default();
         let summary = self.run(&authored_source).await?;
-        validate_mandatory_review_calls(&summary.calls).map_err(WorkflowError::SpecInvalid)?;
+        validate_mandatory_review_calls(&summary.calls).map_err(|reason| {
+            WorkflowError::SpecInvalid(format!(
+                "the executed run violated the mandated-review contract ({reason}); the live call sequence diverged from the pre-flight plan (likely conditional review calls) — delete {} to re-author with unconditional reviews",
+                authored_path.display()
+            ))
+        })?;
         validate_authored_task_accounting(summary.script_result.as_deref(), &expected_task_ids)?;
         Ok(summary)
     }
@@ -166,7 +183,7 @@ impl WorkflowV2ScriptRunner {
             "author_task": V3_AUTHOR_TASK,
             "learning_context": governed_learning_context,
             "retry_feedback": retry_feedback.map(|reason| format!(
-                "Your previous script was REJECTED before execution: {reason}. Fix exactly that defect and return the corrected complete script."
+                "Your previous script was REJECTED before execution: {reason}. Fix EVERY defect listed and return the corrected complete script."
             )),
         }));
         let summary = bootstrap.run(V3_AUTHOR_BOOTSTRAP).await?;
@@ -221,23 +238,122 @@ async fn validate_authored_plan(source: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Single source of truth for the mandated post-work reviews. The reference
+/// text, the validator, the accounting fields, and the tests all derive from
+/// these constants — a drift-guard unit test pins the reference against them.
+pub(super) const MANDATED_REVIEWS: [(&str, &str, bool); 2] = [
+    ("adversarial-review", "adversarial review", true),
+    ("coverage-audit", "source-coverage audit", false),
+];
+pub(super) const MANDATED_RESULT_FIELDS: [&str; 2] =
+    ["adversarial_findings", "uncovered_requirements"];
+const CRITIC_TIER: &str = "critic";
+
+pub(super) fn mandate_call_hint(label: &str, requires_critic: bool) -> String {
+    if requires_critic {
+        format!("await agent(..., {{ label: '{label}', tier: '{CRITIC_TIER}' }})")
+    } else {
+        format!("await agent(..., {{ label: '{label}' }})")
+    }
+}
+
+/// The prelude mints agent ids as `<label>-<ordinal>`; a mandate matches only
+/// that exact shape (or the bare label), never labels that merely extend it.
+fn call_id_matches_label(id: &str, label: &str) -> bool {
+    if id == label {
+        return true;
+    }
+    id.strip_prefix(label)
+        .and_then(|rest| rest.strip_prefix('-'))
+        .is_some_and(|ordinal| !ordinal.is_empty() && ordinal.bytes().all(|b| b.is_ascii_digit()))
+}
+
+fn is_mandated_review_call(call: &WorkflowV2HostCall) -> bool {
+    call.method == WorkflowV2HostMethod::Agent
+        && MANDATED_REVIEWS
+            .iter()
+            .any(|(label, _, _)| call_id_matches_label(&call.id, label))
+}
+
+fn is_task_work_call(call: &WorkflowV2HostCall) -> bool {
+    !is_mandated_review_call(call)
+        && matches!(
+            call.method,
+            WorkflowV2HostMethod::Agent
+                | WorkflowV2HostMethod::Fanout
+                | WorkflowV2HostMethod::Implementation
+                | WorkflowV2HostMethod::Parallel
+        )
+}
+
+/// Enforce the mandated reviews on the EXECUTED/PLANNED call sequence:
+/// present, as separate top-level read-only agent() calls, with the critic
+/// tier where required, positioned AFTER all task work. Reports EVERY defect
+/// in one error and names the ACTUAL cause for near-misses.
 fn validate_mandatory_review_calls(planned: &[WorkflowV2HostCall]) -> Result<(), String> {
-    for (label, purpose) in [
-        ("adversarial-review", "adversarial review"),
-        ("coverage-audit", "source-coverage audit"),
-    ] {
-        let prefix = format!("{label}-");
-        let present = planned.iter().any(|call| {
-            call.method == WorkflowV2HostMethod::Agent
-                && (call.id == label || call.id.starts_with(&prefix))
+    let last_work = planned.iter().rposition(is_task_work_call);
+    let mut defects: Vec<String> = Vec::new();
+    for (label, purpose, requires_critic) in MANDATED_REVIEWS {
+        let hint = mandate_call_hint(label, requires_critic);
+        let matched = planned.iter().enumerate().find(|(_, call)| {
+            call.method == WorkflowV2HostMethod::Agent && call_id_matches_label(&call.id, label)
         });
-        if !present {
-            return Err(format!(
-                "the script omitted the mandatory {purpose} agent with label `{label}`"
+        let Some((index, call)) = matched else {
+            // Near-miss diagnosis: the label exists but under the wrong call
+            // kind (agents() batch → Parallel, write:true → Fanout), or only
+            // as an extended label — name the real defect, not "omitted".
+            if let Some(wrong_kind) = planned.iter().find(|call| {
+                call.method != WorkflowV2HostMethod::Agent
+                    && call_id_matches_label(&call.id, label)
+            }) {
+                defects.push(format!(
+                    "the {purpose} labeled `{label}` ran as w.{} — the mandated reviews must be SEPARATE top-level read-only agent() calls, never inside agents() batches and never with write:true; use: {hint}",
+                    wrong_kind.method.as_str()
+                ));
+            } else if let Some(extended) = planned.iter().find(|call| {
+                call.method == WorkflowV2HostMethod::Agent
+                    && call.id.starts_with(label)
+                    && !call_id_matches_label(&call.id, label)
+            }) {
+                defects.push(format!(
+                    "no {purpose} agent with the exact label `{label}` (found `{}` — extended labels do not count); use: {hint}",
+                    extended.id
+                ));
+            } else {
+                defects.push(format!(
+                    "the mandatory {purpose} agent with exact label `{label}` is missing; add: {hint}"
+                ));
+            }
+            continue;
+        };
+        if requires_critic
+            && !call
+                .options
+                .role
+                .as_deref()
+                .is_some_and(|role| role.eq_ignore_ascii_case(CRITIC_TIER))
+        {
+            defects.push(format!(
+                "the {purpose} agent `{}` must use tier '{CRITIC_TIER}' so it routes to the dedicated adversarial reviewer; use: {hint}",
+                call.id
+            ));
+        }
+        if let Some(last_work) = last_work
+            && index < last_work
+        {
+            defects.push(format!(
+                "the {purpose} agent `{}` runs BEFORE task work finishes — both mandated reviews must come after ALL agent, implementation, fanout, and parallel calls",
+                call.id
             ));
         }
     }
-    Ok(())
+    if defects.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "mandated-review defects (fix EVERY one): {}",
+        defects.join("; AND ")
+    ))
 }
 
 fn validate_authored_workflow_source(source: &str) -> archon_workflow::WorkflowResult<String> {
@@ -288,7 +404,7 @@ fn validate_authored_task_accounting(
     // The adversarial review and source-coverage audit are mandatory: their
     // output arrays must be present (possibly empty) — a run that never ran
     // them cannot produce honest completeness claims.
-    for field in ["adversarial_findings", "uncovered_requirements"] {
+    for field in MANDATED_RESULT_FIELDS {
         if value.get(field).and_then(serde_json::Value::as_array).is_none() {
             return Err(WorkflowError::SpecInvalid(format!(
                 "authored workflow accounting omitted `{field}` — the adversarial review and source-coverage audit agents are mandatory"

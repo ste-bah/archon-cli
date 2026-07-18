@@ -269,3 +269,138 @@ return { batch_status: batch && batch.status }
         let result = summary.script_result.expect("script result");
         assert!(result.contains("batch_status"));
     }
+
+    #[test]
+    fn missing_mandates_are_reported_together() {
+        let planned = vec![agent_call("implement-something-1", None)];
+        let error = validate_mandatory_review_calls(&planned).expect_err("both missing");
+        for (label, _, _) in MANDATED_REVIEWS {
+            assert!(error.contains(label), "{error}");
+        }
+        assert!(error.contains("fix EVERY one"), "{error}");
+    }
+
+    #[test]
+    fn complete_mandates_pass_and_partial_reports_only_the_missing_one() {
+        let complete = vec![
+            work_call("implement-task-1"),
+            agent_call("adversarial-review-7", Some("critic")),
+            agent_call("coverage-audit-8", None),
+        ];
+        validate_mandatory_review_calls(&complete).expect("complete plan passes");
+
+        let partial = vec![
+            work_call("implement-task-1"),
+            agent_call("adversarial-review-7", Some("critic")),
+        ];
+        let error = validate_mandatory_review_calls(&partial).expect_err("coverage missing");
+        assert!(error.contains("coverage-audit"), "{error}");
+        assert!(!error.contains("`adversarial-review` is missing"), "{error}");
+    }
+
+    #[test]
+    fn extended_labels_never_satisfy_a_mandate() {
+        let sneaky = vec![
+            work_call("implement-task-1"),
+            agent_call("adversarial-review-skip-2", Some("critic")),
+            agent_call("coverage-audit-prep-3", None),
+        ];
+        let error = validate_mandatory_review_calls(&sneaky).expect_err("extended labels");
+        assert!(error.contains("extended labels do not count"), "{error}");
+        assert!(error.contains("adversarial-review-skip-2"), "{error}");
+        assert!(error.contains("coverage-audit-prep-3"), "{error}");
+    }
+
+    #[test]
+    fn wrong_call_kind_is_named_not_reported_as_omitted() {
+        let mut batch = agent_call("adversarial-review-4", Some("critic"));
+        batch.method = WorkflowV2HostMethod::Parallel;
+        let mut written = agent_call("coverage-audit-5", None);
+        written.method = WorkflowV2HostMethod::Fanout;
+        let planned = vec![work_call("implement-task-1"), batch, written];
+        let error = validate_mandatory_review_calls(&planned).expect_err("wrong kinds");
+        assert!(error.contains("SEPARATE top-level read-only agent()"), "{error}");
+        assert!(!error.contains("is missing"), "{error}");
+    }
+
+    #[test]
+    fn adversarial_review_requires_the_critic_tier() {
+        let planned = vec![
+            work_call("implement-task-1"),
+            agent_call("adversarial-review-2", Some("coder")),
+            agent_call("coverage-audit-3", None),
+        ];
+        let error = validate_mandatory_review_calls(&planned).expect_err("tier enforced");
+        assert!(error.contains("tier 'critic'"), "{error}");
+    }
+
+    #[test]
+    fn reviews_before_task_work_are_rejected() {
+        let planned = vec![
+            agent_call("adversarial-review-1", Some("critic")),
+            agent_call("coverage-audit-2", None),
+            work_call("implement-task-3"),
+        ];
+        let error = validate_mandatory_review_calls(&planned).expect_err("position enforced");
+        assert!(error.contains("BEFORE task work"), "{error}");
+    }
+
+    #[test]
+    fn reviews_before_final_read_only_verification_are_rejected() {
+        let planned = vec![
+            work_call("implement-task-1"),
+            agent_call("adversarial-review-2", Some("critic")),
+            agent_call("coverage-audit-3", None),
+            agent_call("verify-task-4", None),
+        ];
+        let error = validate_mandatory_review_calls(&planned).expect_err("reviews must be last");
+        assert!(error.contains("BEFORE task work"), "{error}");
+        assert!(error.contains("agent"), "{error}");
+    }
+
+    #[test]
+    fn reference_and_validator_share_the_mandate_contract() {
+        for (label, _, requires_critic) in MANDATED_REVIEWS {
+            assert!(
+                V3_PRIMITIVE_REFERENCE.contains(&format!("label: '{label}'")),
+                "reference must show the mandated label {label}"
+            );
+            if requires_critic {
+                assert!(
+                    V3_PRIMITIVE_REFERENCE.contains(&format!("label: '{label}', tier: 'critic'")),
+                    "reference must show the critic tier on {label}"
+                );
+            }
+        }
+        for field in MANDATED_RESULT_FIELDS {
+            assert!(
+                V3_PRIMITIVE_REFERENCE.contains(field),
+                "reference must document the {field} return field"
+            );
+        }
+        assert!(
+            V3_PRIMITIVE_REFERENCE.contains("'critic'   // 'critic' routes"),
+            "the tier enum must include critic"
+        );
+    }
+
+    fn agent_call(id: &str, role: Option<&str>) -> WorkflowV2HostCall {
+        WorkflowV2HostCall {
+            id: id.to_string(),
+            method: WorkflowV2HostMethod::Agent,
+            write_mode: None,
+            options: WorkflowV2HostOptions {
+                role: role.map(str::to_string),
+                ..Default::default()
+            },
+        }
+    }
+
+    fn work_call(id: &str) -> WorkflowV2HostCall {
+        WorkflowV2HostCall {
+            id: id.to_string(),
+            method: WorkflowV2HostMethod::Fanout,
+            write_mode: None,
+            options: WorkflowV2HostOptions::default(),
+        }
+    }
