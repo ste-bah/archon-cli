@@ -28,13 +28,14 @@ Primitives:
 - await pipeline(items, [async stage(item) => next, ...]) -> results  // same stages over each item, sequentially
 
 Rules the script must follow:
+- AWAIT EVERY CALL. Every agent()/phase()/log()/pipeline() invocation must be awaited before the function that made it returns. Never fire-and-forget, never start phase bodies concurrently, never collect un-awaited promises for later: a workflow that returns with calls still pending FAILS the whole run with a dropped-call error. Sequential `await` per step is the required style.
 - Work tasks in dependency order (each task in the universe lists dependency_ids).
 - For each task: implement with a write agent, then verify with a read-only agent whose prompt names EXACT, module-qualified test commands; a test filter matching zero tests is never evidence.
 - Read every returned envelope. If status is not accepted/noop, the envelope carries the verbatim gate error: retry with SPECIFIC corrected instructions (exact command, exact path), at most 3 retries per task, then record the task as blocked with the evidence.
 - Never edit an existing artifact instance to satisfy a check; produce new artifacts through the real pipeline.
 - An honest block naming a real gap is success; fabricated acceptance is failure.
 - Deterministic code only (no Math.random, no Date.now); pass any needed timestamps via prompts.
-- Return { accepted: [...taskIds], blocked: [{ taskId, reason }], notes: '<short honest summary>' }."#;
+- Return { accepted: [...taskIds], blocked: [{ taskId, reason }], notes: '<short honest summary>' } accounting for EVERY task id in the universe exactly once across accepted+blocked."#;
 
 const V3_AUTHOR_TASK: &str = r#"Author a complete workflow.js orchestration script for the provided decomposed task universe, following the dialect reference exactly. The script must cover EVERY task in the universe: implement, verify, and honestly account for each one. Reply with a JSON object whose data.workflow_js field contains ONLY the complete script text (no fences, no commentary)."#;
 

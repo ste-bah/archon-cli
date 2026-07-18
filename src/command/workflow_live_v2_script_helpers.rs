@@ -139,6 +139,11 @@ function __archonMaybeSourceCall(method, id, sourceOrOptions, options) {{
   return __archonCall(method, id, sourceOrOptions, options || {{}});
 }}
 
+// Every host call registers synchronously and deregisters on completion. A
+// workflow that returns while calls are pending dropped real work on the
+// floor (fire-and-forget async): fail closed, naming the dropped calls.
+const __archonPendingCalls = new Set();
+
 async function __archonCall(method, id, source, options) {{
   if (typeof id !== "string" || id.trim() === "") {{
     throw new Error(`w.${{method}} requires a non-empty string id`);
@@ -147,8 +152,14 @@ async function __archonCall(method, id, source, options) {{
   if (source !== undefined) {{
     payload.source = source;
   }}
-  const json = await __archonHost(method, JSON.stringify(payload));
-  return JSON.parse(json);
+  const pendingKey = `${{method}}:${{id}}`;
+  __archonPendingCalls.add(pendingKey);
+  try {{
+    const json = await __archonHost(method, JSON.stringify(payload));
+    return JSON.parse(json);
+  }} finally {{
+    __archonPendingCalls.delete(pendingKey);
+  }}
 }}
 
 {v3_primitives}
@@ -159,6 +170,10 @@ async function __archonRun() {{
   }}
   const meta = typeof __workflowMeta !== "undefined" ? __workflowMeta : undefined;
   const result = await workflow(meta ? __archonPrimitives(__archonW) : __archonW);
+  if (__archonPendingCalls.size > 0) {{
+    const dropped = [...__archonPendingCalls].join(", ");
+    throw new Error(`workflow returned while ${{__archonPendingCalls.size}} host call(s) were still pending (${{dropped}}); await every agent/phase/log/pipeline call — fire-and-forget drops real work`);
+  }}
   return JSON.stringify(result ?? null);
 }}
 

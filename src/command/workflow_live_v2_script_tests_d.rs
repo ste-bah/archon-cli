@@ -270,3 +270,54 @@ export default async function workflow(){return {accepted:[],blocked:[],notes:'o
             "accepted and blocked sets must be disjoint"
         );
     }
+
+    #[tokio::test]
+    async fn workflow_returning_with_pending_calls_fails_with_dropped_call_error() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let spec = test_spec();
+        let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
+        let run = workflow_store.create_run(spec.clone()).expect("run");
+        let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
+        let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+        let client = LiveV2AgentClient::new(
+            Arc::new(PanicLlm),
+            tui_tx,
+            Vec::new(),
+            run.id.clone(),
+            None,
+            None,
+        );
+        let runner = WorkflowV2ScriptRunner::new(
+            "fire and forget".to_string(),
+            test_runtime(&spec),
+            WorkflowV2AgentAdapter::new(),
+            client,
+            v2_store.clone(),
+            workflow_store,
+            run.id.clone(),
+            true,
+            None,
+            None,
+        );
+
+        let summary = runner
+            .run(
+                r#"
+export const meta = { name: 'dropped-call-demo', phases: [{ title: 'One' }] }
+export default async function workflow({ phase, log }) {
+  // Fire-and-forget: the phase checkpoint is started but never awaited.
+  phase("Dropped Phase");
+  return { accepted: [], blocked: [], notes: "returned early" };
+}
+"#,
+            )
+            .await
+            .expect("summary");
+
+        assert_eq!(summary.status, WorkflowV2Status::Failed);
+        let next_action = summary.next_action.unwrap_or_default();
+        assert!(
+            summary.failed_call.as_deref() == Some("workflow.js") || !next_action.is_empty(),
+            "run must be marked a script failure"
+        );
+    }
