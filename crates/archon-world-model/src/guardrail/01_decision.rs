@@ -256,41 +256,6 @@ pub fn risk_tier(score: f32, policy: &WorldGuardrailPolicyConfig) -> WorldRiskTi
     }
 }
 
-pub fn classify_task(summary: &str, surface: WorldAdvisorSurface) -> RuntimeTaskClass {
-    if matches!(surface, WorldAdvisorSurface::VerificationRun) {
-        return RuntimeTaskClass::VerificationOnly;
-    }
-    let lower = summary.to_ascii_lowercase();
-    let has_any = |terms: &[&str]| terms.iter().any(|term| lower.contains(term));
-    if has_any(&["refactor", "rename module", "clean up"]) {
-        RuntimeTaskClass::Refactor
-    } else if has_any(&["debug", "bug", "fix", "failing", "failed test"]) {
-        RuntimeTaskClass::Debugging
-    } else if has_any(&[
-        "code",
-        "implement",
-        "build",
-        "python",
-        "rust",
-        "typescript",
-        "app",
-        "coding",
-    ]) {
-        RuntimeTaskClass::CodingChange
-    } else if has_any(&["research", "source", "citation", "verify claim", "look up"]) {
-        RuntimeTaskClass::ResearchAnswer
-    } else if matches!(
-        surface,
-        WorldAdvisorSurface::Pipeline | WorldAdvisorSurface::PipelineStep
-    ) {
-        RuntimeTaskClass::PipelineExecution
-    } else if has_any(&["delete", "deploy", "publish", "send", "external"]) {
-        RuntimeTaskClass::ExternalSideEffect
-    } else {
-        RuntimeTaskClass::GeneralAnswer
-    }
-}
-
 pub fn default_scores_for_task(task_class: RuntimeTaskClass) -> GuardrailRiskScores {
     match task_class {
         RuntimeTaskClass::CodingChange
@@ -473,4 +438,3 @@ fn verification_kind_key(kind: &VerificationKind) -> String {
         VerificationKind::Custom(value) => format!("custom:{value}"),
     }
 }
-

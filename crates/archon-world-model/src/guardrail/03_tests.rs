@@ -24,23 +24,90 @@ mod tests {
     }
 
     #[test]
-    fn pipeline_step_classification_preserves_coding_and_research_tasks() {
+    fn task_classification_uses_surface_not_prompt_prose() {
         assert_eq!(
             classify_task(
-                "coding pipeline: implement authentication",
+                "coding pipeline: implement authentication and research citations",
                 WorldAdvisorSurface::PipelineStep,
             ),
+            RuntimeTaskClass::PipelineExecution,
+        );
+        assert_eq!(
+            classify_task("fix failing tests", WorldAdvisorSurface::InteractiveSession),
+            RuntimeTaskClass::GeneralAnswer,
+        );
+        assert_eq!(
+            classify_task("anything", WorldAdvisorSurface::CodingTask),
+            RuntimeTaskClass::CodingChange,
+        );
+    }
+
+    #[test]
+    fn tool_action_classification_uses_structured_tool_identity() {
+        let empty = serde_json::json!({});
+
+        assert_eq!(
+            classify_tool_action("Edit", &empty, WorldAdvisorSurface::InteractiveSession),
             RuntimeTaskClass::CodingChange,
         );
         assert_eq!(
-            classify_task(
-                "research pipeline: verify citation sources",
-                WorldAdvisorSurface::PipelineStep,
-            ),
+            classify_tool_action("WebSearch", &empty, WorldAdvisorSurface::InteractiveSession),
             RuntimeTaskClass::ResearchAnswer,
         );
         assert_eq!(
-            classify_task("pipeline batch", WorldAdvisorSurface::PipelineStep),
+            classify_tool_action(
+                "Bash",
+                &serde_json::json!({"command": "cargo test -p archon-world-model"}),
+                WorldAdvisorSurface::InteractiveSession,
+            ),
+            RuntimeTaskClass::VerificationOnly,
+        );
+        assert_eq!(
+            classify_tool_action(
+                "Bash",
+                &serde_json::json!({"command": "git push origin main"}),
+                WorldAdvisorSurface::InteractiveSession,
+            ),
+            RuntimeTaskClass::ExternalSideEffect,
+        );
+        assert_eq!(
+            classify_tool_action(
+                "Bash",
+                &serde_json::json!({"command": "rm generated-output"}),
+                WorldAdvisorSurface::InteractiveSession,
+            ),
+            RuntimeTaskClass::DataMutation,
+        );
+    }
+
+    #[test]
+    fn tool_action_classifies_executable_sql_deletion() {
+        assert_eq!(
+            classify_tool_action(
+                "Bash",
+                &serde_json::json!({"command": "psql -c \"DROP TABLE archived_events\""}),
+                WorldAdvisorSurface::InteractiveSession,
+            ),
+            RuntimeTaskClass::DataMutation,
+        );
+    }
+
+    #[test]
+    fn tool_action_surface_overrides_take_priority() {
+        assert_eq!(
+            classify_tool_action(
+                "Edit",
+                &serde_json::json!({}),
+                WorldAdvisorSurface::VerificationRun,
+            ),
+            RuntimeTaskClass::VerificationOnly,
+        );
+        assert_eq!(
+            classify_tool_action(
+                "WebSearch",
+                &serde_json::json!({}),
+                WorldAdvisorSurface::Pipeline,
+            ),
             RuntimeTaskClass::PipelineExecution,
         );
     }
@@ -68,21 +135,15 @@ mod tests {
         let decision = decide_guardrail(&action, None, context, &policy);
 
         assert!(!decision.allowed_to_finalize);
-        assert!(
-            decision
-                .required_actions
-                .contains(&GuardrailRequiredAction::RunTests)
-        );
-        assert!(
-            decision
-                .required_actions
-                .contains(&GuardrailRequiredAction::RunBuild)
-        );
-        assert!(
-            decision
-                .reason_codes
-                .contains(&GuardrailReasonCode::PredictedVerificationNeededHigh)
-        );
+        assert!(decision
+            .required_actions
+            .contains(&GuardrailRequiredAction::RunTests));
+        assert!(decision
+            .required_actions
+            .contains(&GuardrailRequiredAction::RunBuild));
+        assert!(decision
+            .reason_codes
+            .contains(&GuardrailReasonCode::PredictedVerificationNeededHigh));
     }
 
     #[test]
@@ -264,16 +325,12 @@ mod tests {
         assert!(fail_open.allowed_to_continue);
         assert!(fail_open.allowed_to_finalize);
         assert!(fail_open.required_actions.is_empty());
-        assert!(
-            fail_open
-                .reason_codes
-                .contains(&GuardrailReasonCode::GuardrailOverheadExceeded)
-        );
-        assert!(
-            fail_open
-                .reason_codes
-                .contains(&GuardrailReasonCode::PredictedVerificationNeededHigh)
-        );
+        assert!(fail_open
+            .reason_codes
+            .contains(&GuardrailReasonCode::GuardrailOverheadExceeded));
+        assert!(fail_open
+            .reason_codes
+            .contains(&GuardrailReasonCode::PredictedVerificationNeededHigh));
     }
 
     #[test]

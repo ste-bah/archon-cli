@@ -41,7 +41,7 @@ pub use guardrail::{
     GuardrailRiskScores, GuardrailStatusCounts, RuntimeTaskClass, VerificationKind,
     VerificationOutcome, VerificationRequirement, VerificationStatus, WorldGuardedAction,
     WorldGuardrailDecision, WorldGuardrailMode, WorldGuardrailOutcome, WorldGuardrailPolicyConfig,
-    WorldGuardrailPredictionContext, WorldRiskTier,
+    WorldGuardrailPredictionContext, WorldRiskTier, classify_tool_action,
 };
 pub use jepa::{
     CandleCudaJepaBackend, CpuJepaBackend, EncodedJepaTrainingExample, JEPA_MODEL_KIND,
