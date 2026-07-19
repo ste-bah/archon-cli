@@ -27,6 +27,7 @@ pub enum WorkflowEventKind {
     StageStarted,
     StageCompleted,
     StageFailed,
+    StageStalled,
     StageSkipped,
     ForcedAccepted,
     Resumed,
@@ -118,6 +119,7 @@ pub fn sanitize_value(value: Value) -> Value {
     match value {
         Value::Object(map) => Value::Object(sanitize_map(map)),
         Value::Array(items) => Value::Array(items.into_iter().map(sanitize_value).collect()),
+        Value::String(text) => Value::String(redact_secret_like_text(&text)),
         other => other,
     }
 }
@@ -144,4 +146,48 @@ pub fn contains_forbidden_field(value: &Value) -> bool {
         Value::Array(items) => items.iter().any(contains_forbidden_field),
         _ => false,
     }
+}
+
+fn redact_secret_like_text(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut token = String::new();
+    for ch in input.chars() {
+        if ch.is_whitespace() {
+            push_redacted_token(&mut out, &token);
+            token.clear();
+            out.push(ch);
+        } else {
+            token.push(ch);
+        }
+    }
+    push_redacted_token(&mut out, &token);
+    out
+}
+
+fn push_redacted_token(out: &mut String, token: &str) {
+    if token.is_empty() {
+        return;
+    }
+    if looks_secret_like(token) {
+        out.push_str("<redacted>");
+    } else {
+        out.push_str(token);
+    }
+}
+
+fn looks_secret_like(part: &str) -> bool {
+    let trimmed = part.trim_matches(|ch: char| {
+        matches!(ch, '"' | '\'' | '`' | ',' | ';' | ')' | '(' | '[' | ']')
+    });
+    let lower = trimmed.to_ascii_lowercase();
+    lower.starts_with("authorization:")
+        || lower.starts_with("api_key=")
+        || lower.starts_with("apikey=")
+        || lower.starts_with("token=")
+        || lower.starts_with("access_token=")
+        || lower.starts_with("refresh_token=")
+        || lower.starts_with("password=")
+        || lower.starts_with("secret=")
+        || lower.starts_with("sk-ant-")
+        || (lower.starts_with("sk-") && trimmed.len() >= 20)
 }

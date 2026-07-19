@@ -1,0 +1,26 @@
+{
+  "data": {
+    "excluded_failures": [
+      {
+        "artifact_requirements": [
+          "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry.json",
+          "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry-migration-report.json"
+        ],
+        "canonical_task_ids": [
+          "TASK-TDL-010"
+        ],
+        "failure_evidence": "The failed check required processed_path, features_path, labels_path, quality_report_path, and contract_path on every Healthy dataset, while the registry uses dataset_path, manifest_path, metadata_path, normalized_path, raw_path, raw_request_path, raw_response_path, redacted_headers_path, provider_notes_path, and validation_path. Later accepted retries verified the actual TASK-TDL-010 artifact contract with schema archon-trading-data-registry-v2, healthy_checked=4, datasets=4, migrated=1, skipped=1, failed=0.",
+        "failure_status": "excluded_verification_shape_mismatch",
+        "focused_verification": "If needed, rerun the accepted focused registry artifact contract inspection against /Volumes/Externalwork/archon-cli/project-1 using the registry's actual required path fields.",
+        "item_id": "verification-wave-1-1-VERIFY-TDL-010-003-project-registry-artifact-contract-check-7",
+        "required_fix": "No implementation fix assigned; do not create write-capable remediation for an unproven implementation defect.",
+        "source_item_id": "IMPL-TDL-010-REGISTRY-SCHEMA-ARTIFACT-CONTRACT-VERIFY"
+      }
+    ],
+    "items": [],
+    "reason": "No actionable implementation failures proven by focused verification; failed semantic check is classified as verification-shape mismatch and was contradicted by later accepted focused retries using the actual registry artifact contract.",
+    "remediation_inventory_status": "empty"
+  },
+  "status": "noop",
+  "summary": "No write-capable remediation items were created because focused verification does not prove an actionable implementation failure. The only remaining failed outcome is a semantic verification-shape failure that required artifact fields outside the accepted TASK-TDL-010 registry contract; multiple later focused retries accepted the implementation using the registry's actual required artifact fields."
+}

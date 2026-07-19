@@ -1,0 +1,29 @@
+{
+  "status": "accepted",
+  "result": {
+    "status": "accepted",
+    "summary": "The failed focused verification is repairable as retryable command shape/target selection, not product-code failure.",
+    "data": {
+      "items": [
+        {
+          "canonical_task_ids": [
+            "TASK-TDL-010"
+          ],
+          "classification": "verification_repair_allowed",
+          "expected_evidence": [
+            "Cargo output shows the intended focused test passed with 0 failures.",
+            "Evidence summary ties the focused test to the task acceptance criteria."
+          ],
+          "id": "retry-verify-cli-parse-prd-commands",
+          "not_write_remediation": true,
+          "reason": "Original focused verification used an invalid package target; the workspace package and focused test are known.",
+          "repair_type": "retryable_command_shape",
+          "retry_commands": [
+            "cargo test -p archon-cli-workspace cli_args::tests::trading_data_prd_commands_parse -- --nocapture"
+          ],
+          "source_failed_item_id": "verification-wave-1-2-verify-cli-parse-prd-commands"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "call_id": "remediation-wave-size-policy",
+  "branch_id": "impl-size-policy-followup",
+  "old_error": "workflow stage failed: source file 'src/command/provider.rs' is 539 lines, exceeds max 500",
+  "expected_failure_kind": "contract",
+  "expected_status": "needs_review"
+}

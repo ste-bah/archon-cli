@@ -32,7 +32,7 @@ pub struct PromotionEvidence {
     pub config_hash: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct EvidenceSummary {
     pub accepted_oos: usize,
     pub accepted_walk_forward: usize,
@@ -132,20 +132,6 @@ pub fn summarize_evidence(evidence: &[PromotionEvidence]) -> EvidenceSummary {
         }
     }
     summary
-}
-
-impl Default for EvidenceSummary {
-    fn default() -> Self {
-        Self {
-            accepted_oos: 0,
-            accepted_walk_forward: 0,
-            excluded_exploratory: 0,
-            excluded_research_only: 0,
-            excluded_strategy_tester: 0,
-            excluded_unpersisted: 0,
-            excluded_degraded: 0,
-        }
-    }
 }
 
 fn apply_exclusions(item: &PromotionEvidence, summary: &mut EvidenceSummary) {

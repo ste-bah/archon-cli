@@ -220,6 +220,6 @@ fn assert_placeholder(actual: &serde_json::Value, marker: &str, path: &str) {
     match marker {
         "{{UUID}}" => assert!(!value.is_empty()),
         "{{REASONING_ENCRYPTED}}" => assert!(!value.is_empty()),
-        other => assert!(false, "unsupported placeholder {other} at {path}"),
+        other => panic!("unsupported placeholder {other} at {path}"),
     }
 }

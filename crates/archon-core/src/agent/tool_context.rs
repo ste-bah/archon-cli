@@ -12,7 +12,8 @@ impl Agent {
         // enforce the fork-in-fork guard without crossing the
         // `state.messages` boundary into archon-tools.
         let in_fork = crate::agents::built_in::is_in_fork_child_by_messages(&self.state.messages);
-        let ctx = ToolContext {
+
+        ToolContext {
             working_dir: self.config.working_dir.clone(),
             session_id: self.config.session_id.clone(),
             mode: effective_mode,
@@ -29,7 +30,6 @@ impl Agent {
             // both dispatch sites.
             sandbox: self.config.sandbox.clone(),
             activity_sink: self.provider_model_activity_sink(active_model),
-        };
-        ctx
+        }
     }
 }

@@ -149,12 +149,12 @@ fn recent_proposable_reflections(
     rows.rows
         .iter()
         .filter(|row| row[10].get_bool() == Some(true))
-        .filter_map(row_to_reflection)
+        .filter_map(|row| row_to_reflection(row))
         .take(50)
         .collect()
 }
 
-fn row_to_reflection(row: &Vec<DataValue>) -> Option<ReflectionRecord> {
+fn row_to_reflection(row: &[DataValue]) -> Option<ReflectionRecord> {
     Some(ReflectionRecord {
         reflection_id: str_col(row, 0),
         session_id: str_col(row, 1),

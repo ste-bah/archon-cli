@@ -1,0 +1,12 @@
+{
+  "item_id": "remediation-project-artifact",
+  "canonical_task_ids": ["TASK-ARTIFACT-001"],
+  "dependency_ids": [],
+  "source_item_id": "review-gap-project-artifact",
+  "failure_status": "missing_project_artifact",
+  "failure_evidence": ["A required runtime project artifact is missing."],
+  "required_fix": "Create or update the runtime project artifact evidence without editing repository source.",
+  "target_files": [],
+  "focused_verification": ["Verify the project artifact exists and matches the expected evidence contract."],
+  "artifact_requirements": [".archon/workflows/example/artifacts/evidence.json"]
+}

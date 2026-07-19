@@ -21,6 +21,8 @@ pub struct WorkflowConfig {
     pub allow_saved_templates: bool,
     #[serde(default = "default_local_provider_max_agents")]
     pub local_provider_max_agents: u32,
+    #[serde(default = "default_missing_unit_remediation_attempts")]
+    pub missing_unit_remediation_max_attempts: u32,
     #[serde(default)]
     pub provider_tiers: BTreeMap<ProviderTier, String>,
     #[serde(default)]
@@ -37,6 +39,7 @@ impl Default for WorkflowConfig {
             allow_generated_workflow_specs: true,
             allow_saved_templates: true,
             local_provider_max_agents: default_local_provider_max_agents(),
+            missing_unit_remediation_max_attempts: default_missing_unit_remediation_attempts(),
             provider_tiers: default_provider_tiers(),
             write_coordinator: WriteCoordinatorConfig::default(),
         }
@@ -70,6 +73,10 @@ fn default_allow_templates() -> bool {
 /// OQ-DWF-003 provisional default: conservative cap for local-only providers.
 fn default_local_provider_max_agents() -> u32 {
     4
+}
+
+fn default_missing_unit_remediation_attempts() -> u32 {
+    2
 }
 
 pub fn default_provider_tiers() -> BTreeMap<ProviderTier, String> {

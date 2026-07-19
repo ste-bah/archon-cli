@@ -1,0 +1,32 @@
+{
+  "status": "accepted",
+  "summary": "Verification repair returned direct retry_items under data.",
+  "data": {
+    "retry_items": [
+      {
+        "acceptance_rule": "When required, cargo check must exit 0. If no source files changed, evidence may explicitly record this item as skipped because TASK-TDL-001 was audit-only/noop.",
+        "action": "Replace failed semantic outcome with explicit skipped focused verification evidence; do not edit product code or artifact content.",
+        "canonical_task_ids": ["TASK-TDL-001"],
+        "commands_run_entry": {
+          "command": "cargo check --workspace --tests -j1",
+          "exit_code": 0,
+          "kind": "test",
+          "output_summary": "Skipped by condition: no source files changed for TASK-TDL-001 remediation; TASK-TDL-001 was audit-only/noop.",
+          "status": "skipped"
+        },
+        "item_id": "verification-wave-1-verify-TASK-TDL-001-conditional-workspace-check",
+        "required_completion_evidence": {
+          "artifact_paths": [],
+          "command_refs": ["cargo check --workspace --tests -j1"],
+          "evidence_kind": "focused_verification",
+          "evidence_refs": [
+            "Conditional workspace check skipped because TASK-TDL-001 implementation was audit-only/noop and no source files changed for TASK-TDL-001 remediation.",
+            "The implementation outcome reported no source edits were required; therefore the conditional cargo check was not required by the verification requirement."
+          ],
+          "status": "noop"
+        },
+        "source_failed_item_id": "verification-wave-1-verify-TASK-TDL-001-conditional-workspace-check"
+      }
+    ]
+  }
+}

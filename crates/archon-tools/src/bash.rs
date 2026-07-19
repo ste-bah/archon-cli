@@ -10,9 +10,9 @@ use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 use tokio::task::JoinHandle;
 
+use crate::provider_env::{ProviderEnvPolicy, ProviderEnvResolution, ProviderEnvSource};
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
-/// Sensitive environment variable patterns to strip before spawning.
 const SENSITIVE_PATTERNS: &[&str] = &[
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
@@ -23,7 +23,6 @@ const SENSITIVE_PATTERNS: &[&str] = &[
     "_CREDENTIAL",
 ];
 
-/// Environment variables to always pass through.
 const PASSTHROUGH_VARS: &[&str] = &[
     "PATH",
     "HOME",
@@ -103,12 +102,14 @@ gtimeout() {
 }
 "#;
 
+#[derive(Clone)]
 pub struct BashTool {
     pub timeout_secs: u64,
     pub max_output_bytes: usize,
     pub safe_commands: Vec<String>,
     pub risky_commands: Vec<String>,
     pub dangerous_commands: Vec<String>,
+    pub provider_env: Option<ProviderEnvSource>,
 }
 
 impl Default for BashTool {
@@ -119,7 +120,25 @@ impl Default for BashTool {
             safe_commands: Vec::new(),
             risky_commands: Vec::new(),
             dangerous_commands: Vec::new(),
+            provider_env: None,
         }
+    }
+}
+
+impl BashTool {
+    pub fn with_provider_env(mut self, provider_env: ProviderEnvPolicy) -> Self {
+        self.provider_env = Some(ProviderEnvSource::Policy(provider_env));
+        self
+    }
+
+    pub fn with_provider_env_resolution(mut self, provider_env: ProviderEnvResolution) -> Self {
+        self.provider_env = Some(ProviderEnvSource::Resolution(provider_env));
+        self
+    }
+
+    pub fn with_provider_env_source(mut self, provider_env: ProviderEnvSource) -> Self {
+        self.provider_env = Some(provider_env);
+        self
     }
 }
 
@@ -151,20 +170,46 @@ impl Tool for BashTool {
     }
 
     async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
-        let command = match input.get("command").and_then(|v| v.as_str()) {
+        let raw_command = match input.get("command").and_then(|v| v.as_str()) {
             Some(c) => c,
             None => return ToolResult::error("command is required and must be a string"),
         };
-        let command = command_with_compat_prelude(command);
-
         let timeout_ms = effective_timeout_ms(
             input.get("timeout").and_then(|v| v.as_u64()),
             self.timeout_secs * 1000,
         );
 
-        // Build sanitized environment
         let mut env_vars = sanitized_env();
         ensure_env_default(&mut env_vars, "CARGO_INCREMENTAL", "0");
+        crate::workflow_resource_env::apply_workflow_resource_defaults(&mut env_vars, raw_command);
+        let provider_env = provider_env_overlay(self.provider_env.as_ref()).await;
+        if let Some(provider_env) = &provider_env {
+            provider_env.apply_to_env(&mut env_vars);
+        }
+        let _cargo_target_lock = match crate::cargo_target_env::apply_cargo_target_dir_guard(
+            &mut env_vars,
+            raw_command,
+            &ctx.working_dir,
+            &ctx.session_id,
+            ctx.cancel_parent.clone(),
+        )
+        .await
+        {
+            Ok(lock) => lock,
+            Err(message) => return ToolResult::error(message),
+        };
+        let guarded_command = crate::cargo_target_env::enforce_host_cargo_target_dir(
+            raw_command,
+            _cargo_target_lock.is_some(),
+        );
+        let repair_prelude =
+            crate::cargo_target_env::cargo_cache_repair_prelude(_cargo_target_lock.as_ref());
+        let guarded_command = if repair_prelude.is_empty() {
+            guarded_command
+        } else {
+            format!("{repair_prelude}\n{guarded_command}")
+        };
+        let command = command_with_compat_prelude(&guarded_command);
 
         if let Some(sandbox) = &ctx.sandbox
             && let Some(result) = sandbox
@@ -178,7 +223,7 @@ impl Tool for BashTool {
                 .await
         {
             return ToolResult {
-                content: result.content,
+                content: redact_provider_env_output(provider_env.as_ref(), result.content),
                 is_error: result.is_error,
             };
         }
@@ -194,6 +239,7 @@ impl Tool for BashTool {
             .stdin(Stdio::null());
         #[cfg(unix)]
         cmd.process_group(0); // new process group for clean kill
+        cmd.kill_on_drop(true);
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => return ToolResult::error(format!("Failed to spawn bash: {e}")),
@@ -211,8 +257,22 @@ impl Tool for BashTool {
         let cancel_token = ctx.cancel_parent.clone().unwrap_or_default();
 
         let remaining_output = Arc::new(AtomicUsize::new(self.max_output_bytes));
-        let stdout_task = spawn_pipe_reader(child.stdout.take(), Arc::clone(&remaining_output));
-        let stderr_task = spawn_pipe_reader(child.stderr.take(), remaining_output);
+        let stdout_bytes = Arc::new(AtomicUsize::new(0));
+        let stderr_bytes = Arc::new(AtomicUsize::new(0));
+        let heartbeat = crate::bash_observability::start_bash_heartbeat(
+            ctx,
+            child.id(),
+            timeout_ms,
+            raw_command,
+            Arc::clone(&stdout_bytes),
+            Arc::clone(&stderr_bytes),
+        );
+        let stdout_task = spawn_pipe_reader(
+            child.stdout.take(),
+            Arc::clone(&remaining_output),
+            stdout_bytes,
+        );
+        let stderr_task = spawn_pipe_reader(child.stderr.take(), remaining_output, stderr_bytes);
 
         enum BashOutcome {
             Done(std::io::Result<std::process::ExitStatus>),
@@ -230,6 +290,7 @@ impl Tool for BashTool {
                 Err(_) => BashOutcome::Timeout,
             }
         };
+        crate::bash_observability::stop_bash_heartbeat(heartbeat);
 
         match outcome {
             BashOutcome::Done(status) => {
@@ -249,11 +310,14 @@ impl Tool for BashTool {
 
                 if exit_code != 0 {
                     ToolResult {
-                        content: format!("Exit code {exit_code}\n{output}"),
+                        content: redact_provider_env_output(
+                            provider_env.as_ref(),
+                            format!("Exit code {exit_code}\n{output}"),
+                        ),
                         is_error: true,
                     }
                 } else {
-                    ToolResult::success(output)
+                    ToolResult::success(redact_provider_env_output(provider_env.as_ref(), output))
                 }
             }
             BashOutcome::Timeout => {
@@ -284,6 +348,30 @@ impl Tool for BashTool {
             archon_permissions::classifier::CommandClass::Dangerous => PermissionLevel::Dangerous,
         }
     }
+
+    fn with_provider_env_source(&self, provider_env: ProviderEnvSource) -> Option<Box<dyn Tool>> {
+        Some(Box::new(
+            self.clone().with_provider_env_source(provider_env),
+        ))
+    }
+}
+
+async fn provider_env_overlay(source: Option<&ProviderEnvSource>) -> Option<ProviderEnvResolution> {
+    let source = source?;
+    if let Some(resolved) = source.resolution()
+        && source.policy().is_none_or(|policy| resolved.covers(policy))
+    {
+        return Some(resolved.clone());
+    }
+    let policy = source.policy()?;
+    Some(crate::provider_env::resolve_provider_env(policy).await)
+}
+
+fn redact_provider_env_output(
+    provider_env: Option<&ProviderEnvResolution>,
+    output: String,
+) -> String {
+    provider_env.map_or(output.clone(), |env| env.redact_text(&output))
 }
 
 fn effective_timeout_ms(requested_ms: Option<u64>, configured_ms: u64) -> u64 {
@@ -295,7 +383,11 @@ struct CapturedPipe {
     truncated: bool,
 }
 
-fn spawn_pipe_reader<T>(pipe: Option<T>, remaining: Arc<AtomicUsize>) -> JoinHandle<CapturedPipe>
+fn spawn_pipe_reader<T>(
+    pipe: Option<T>,
+    remaining: Arc<AtomicUsize>,
+    byte_count: Arc<AtomicUsize>,
+) -> JoinHandle<CapturedPipe>
 where
     T: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
@@ -309,6 +401,7 @@ where
                     Ok(0) | Err(_) => break,
                     Ok(read) => read,
                 };
+                byte_count.fetch_add(read, Ordering::Relaxed);
                 let retained = reserve_output_bytes(&remaining, read);
                 bytes.extend_from_slice(&chunk[..retained]);
                 truncated |= retained < read;
@@ -361,17 +454,18 @@ async fn terminate_child(child: &mut Child, reason: &str) {
         let _ = child.kill().await;
     }
 
-    if tokio::time::timeout(Duration::from_millis(500), child.wait())
+    let exited = tokio::time::timeout(Duration::from_millis(500), child.wait())
         .await
-        .is_ok()
-    {
-        return;
-    }
+        .is_ok();
 
     #[cfg(unix)]
     if let Some(pid) = pid {
         signal_process_group(pid, libc::SIGKILL);
     }
+    if exited {
+        return;
+    }
+
     let _ = child.kill().await;
     let _ = child.wait().await;
     tracing::info!(reason, "bash: terminated process group");
@@ -391,19 +485,15 @@ fn command_with_compat_prelude(command: &str) -> String {
     format!("{BASH_COMPAT_PRELUDE}\n{SHELL_TIMEOUT_PRELUDE}\n{command}")
 }
 
-/// Build a sanitized environment map.
-/// Public so PowerShell tool can reuse the same sanitization.
 pub fn sanitized_env() -> Vec<(String, String)> {
     let mut env = Vec::new();
 
     for (key, value) in std::env::vars() {
-        // Check if this is a passthrough var
         if PASSTHROUGH_VARS.contains(&key.as_str()) {
             env.push((key, value));
             continue;
         }
 
-        // Check if this matches a sensitive pattern
         let upper = key.to_uppercase();
         let is_sensitive = SENSITIVE_PATTERNS
             .iter()
@@ -424,153 +514,5 @@ fn ensure_env_default(env: &mut Vec<(String, String)>, key: &str, value: &str) {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use super::*;
-
-    fn ctx() -> ToolContext {
-        ToolContext {
-            working_dir: PathBuf::from("."),
-            ..ToolContext::default()
-        }
-    }
-
-    #[test]
-    fn bash_program_selection_prefers_path_discovery() {
-        let bash = PathBuf::from("/usr/local/bin/bash");
-        let bash_exe = PathBuf::from(r"C:\Program Files\Git\bin\bash.exe");
-        assert_eq!(
-            select_bash_program(Some(bash.clone()), Some(bash_exe.clone())),
-            bash
-        );
-        assert_eq!(select_bash_program(None, Some(bash_exe.clone())), bash_exe);
-        assert_eq!(select_bash_program(None, None), PathBuf::from("bash"));
-    }
-
-    #[tokio::test]
-    async fn pipe_reader_caps_storage_and_drains_remaining_bytes() {
-        let (mut writer, reader) = tokio::io::duplex(64);
-        let task = spawn_pipe_reader(Some(reader), Arc::new(AtomicUsize::new(5)));
-        tokio::spawn(async move {
-            use tokio::io::AsyncWriteExt;
-            writer.write_all(b"abcdefghij").await.unwrap();
-        })
-        .await
-        .unwrap();
-
-        let captured = task.await.unwrap();
-        assert_eq!(captured.bytes, b"abcde");
-        assert!(captured.truncated);
-    }
-
-    #[tokio::test]
-    async fn pipe_readers_share_one_total_capture_budget() {
-        let remaining = Arc::new(AtomicUsize::new(6));
-        let (mut stdout_writer, stdout_reader) = tokio::io::duplex(64);
-        let (mut stderr_writer, stderr_reader) = tokio::io::duplex(64);
-        let stdout_task = spawn_pipe_reader(Some(stdout_reader), Arc::clone(&remaining));
-        let stderr_task = spawn_pipe_reader(Some(stderr_reader), remaining);
-
-        let stdout_write = tokio::spawn(async move {
-            use tokio::io::AsyncWriteExt;
-            stdout_writer.write_all(b"stdout").await.unwrap();
-        });
-        let stderr_write = tokio::spawn(async move {
-            use tokio::io::AsyncWriteExt;
-            stderr_writer.write_all(b"stderr").await.unwrap();
-        });
-        stdout_write.await.unwrap();
-        stderr_write.await.unwrap();
-
-        let (stdout, stderr) = join_output(stdout_task, stderr_task).await;
-        assert_eq!(stdout.bytes.len() + stderr.bytes.len(), 6);
-        assert!(stdout.truncated || stderr.truncated);
-    }
-
-    #[tokio::test]
-    async fn printf_format_starting_with_dash_succeeds() {
-        let tool = BashTool {
-            timeout_secs: 1,
-            max_output_bytes: 1024,
-            ..Default::default()
-        };
-
-        let result = tool
-            .execute(json!({"command": "printf '--- heading ---\\n'"}), &ctx())
-            .await;
-
-        assert!(!result.is_error, "{}", result.content);
-        assert_eq!(result.content, "--- heading ---\n");
-    }
-
-    #[tokio::test]
-    async fn printf_wrapper_preserves_dash_dash_and_v() {
-        let tool = BashTool {
-            timeout_secs: 1,
-            max_output_bytes: 1024,
-            ..Default::default()
-        };
-
-        let result = tool
-            .execute(
-                json!({"command": "printf -- '--- one ---\\n'; printf -v label 'two'; printf '%s\\n' \"$label\""}),
-                &ctx(),
-            )
-            .await;
-
-        assert!(!result.is_error, "{}", result.content);
-        assert_eq!(result.content, "--- one ---\ntwo\n");
-    }
-
-    #[tokio::test]
-    #[cfg(unix)]
-    async fn timeout_kills_background_process_group() {
-        let dir = tempfile::tempdir().unwrap();
-        let pid_file = dir.path().join("child.pid");
-        let tool = BashTool {
-            timeout_secs: 1,
-            max_output_bytes: 1024,
-            ..Default::default()
-        };
-        let result = tool
-            .execute(
-                json!({
-                    "command": format!("sleep 30 & echo $! > {}; wait", pid_file.display()),
-                    "timeout": 100
-                }),
-                &ToolContext {
-                    working_dir: dir.path().to_path_buf(),
-                    ..ToolContext::default()
-                },
-            )
-            .await;
-
-        assert!(result.is_error, "command should time out");
-        let pid = std::fs::read_to_string(&pid_file)
-            .unwrap()
-            .trim()
-            .to_string();
-        for _ in 0..20 {
-            if !process_exists(&pid) {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        let _ = std::process::Command::new("kill")
-            .arg("-9")
-            .arg(&pid)
-            .status();
-        panic!("background sleep process survived Bash timeout: pid={pid}");
-    }
-
-    #[cfg(unix)]
-    fn process_exists(pid: &str) -> bool {
-        std::process::Command::new("kill")
-            .arg("-0")
-            .arg(pid)
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
-    }
-}
+#[path = "bash_tests.rs"]
+mod tests;

@@ -546,7 +546,7 @@ The trainer is idle-aware. Defaults:
 enabled = true
 idle_required_ms = 300000
 battery_suspend_below_percent = 30
-min_throttle_ms = 3600000
+min_throttle_ms = 86400000
 ```
 
 That means:
@@ -555,7 +555,7 @@ That means:
 |---|---|
 | `idle_required_ms = 300000` | Wait for 5 minutes without foreground activity. |
 | `battery_suspend_below_percent = 30` | Avoid training on low unplugged battery. |
-| `min_throttle_ms = 3600000` | Avoid training more than once per hour. |
+| `min_throttle_ms = 86400000` | Avoid training more than once per day. |
 
 Run one manual tick when validating the loop:
 

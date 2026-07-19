@@ -12,7 +12,7 @@ pub enum KillChannel {
     OutOfBandCli,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct CancelReport {
     pub requested: usize,
     pub cancelled: usize,
@@ -44,15 +44,6 @@ pub struct KillSwitch {
 impl Default for KillSwitch {
     fn default() -> Self {
         Self::new(|| Ok(CancelReport::default()))
-    }
-}
-
-impl Default for CancelReport {
-    fn default() -> Self {
-        Self {
-            requested: 0,
-            cancelled: 0,
-        }
     }
 }
 

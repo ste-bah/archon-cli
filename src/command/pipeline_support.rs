@@ -2,8 +2,15 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
+use archon_core::agent::AgentConfig;
+use archon_core::agents::AgentRegistry;
 use archon_core::config::ArchonConfig;
+use archon_core::dispatch::create_default_registry;
 use archon_core::env_vars::ArchonEnvVars;
+use archon_core::subagent::SubagentManager;
+use archon_core::subagent_executor::AgentSubagentExecutor;
+use archon_llm::identity::{IdentityMode, IdentityProvider};
+use archon_llm::provider::LlmProvider;
 use archon_pipeline::audit::store::PipelineBundleStore;
 use archon_pipeline::audit::types::PipelineEvent;
 use archon_pipeline::learning::causal::CausalMemory;
@@ -12,7 +19,8 @@ use archon_pipeline::learning::integration::{LearningIntegration, LearningIntegr
 use archon_pipeline::learning::patterns::PatternStore;
 use archon_pipeline::learning::reasoning::{ReasoningBank, ReasoningBankConfig, ReasoningBankDeps};
 use archon_pipeline::learning::reflexion::ReflexionInjector;
-use archon_pipeline::runner::PipelineType;
+use archon_pipeline::runner::{LlmClient, PipelineType};
+use archon_tools::tool::{AgentMode, ToolContext};
 use chrono::Utc;
 
 use crate::runtime::llm::build_configured_llm_provider;
@@ -24,6 +32,109 @@ pub(crate) async fn build_pipeline_adapter(
 ) -> Result<archon_pipeline::llm_adapter::ProviderLlmAdapter> {
     let provider = build_configured_llm_provider(config, env_vars, origin).await?;
     Ok(archon_pipeline::llm_adapter::ProviderLlmAdapter::new(provider).with_origin(origin))
+}
+
+pub(crate) async fn build_subagent_pipeline_adapter(
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+    origin: &str,
+    cwd: &Path,
+    session_id: &str,
+) -> Result<Arc<dyn LlmClient>> {
+    let provider = build_configured_llm_provider(config, env_vars, origin).await?;
+    let raw: Arc<dyn LlmClient> = Arc::new(
+        archon_pipeline::llm_adapter::ProviderLlmAdapter::new(Arc::clone(&provider))
+            .with_origin(origin),
+    );
+    let agent_config = workflow_cli_agent_config(config, cwd, session_id);
+    install_workflow_cli_subagent_executor(
+        config,
+        Arc::clone(&provider),
+        cwd,
+        session_id,
+        agent_config.clone(),
+    )
+    .await;
+    let tool_context = ToolContext {
+        working_dir: cwd.to_path_buf(),
+        session_id: session_id.to_string(),
+        mode: AgentMode::Normal,
+        extra_dirs: Vec::new(),
+        in_fork: false,
+        nested: false,
+        cancel_parent: agent_config.cancel_token.clone(),
+        sandbox: agent_config.sandbox.clone(),
+        activity_sink: agent_config.activity_sink.clone(),
+    };
+    Ok(Arc::new(
+        archon_pipeline::subagent_adapter::SubagentPipelineClient::with_provider(
+            raw,
+            tool_context,
+            provider,
+        ),
+    ))
+}
+
+fn workflow_cli_agent_config(config: &ArchonConfig, cwd: &Path, session_id: &str) -> AgentConfig {
+    AgentConfig {
+        working_dir: cwd.to_path_buf(),
+        session_id: session_id.to_string(),
+        max_tool_concurrency: config.tools.max_concurrency as usize,
+        max_subagent_concurrency: config.subagent.max_concurrent.max(1),
+        context: config.context.clone(),
+        ..AgentConfig::default()
+    }
+}
+
+async fn install_workflow_cli_subagent_executor(
+    config: &ArchonConfig,
+    provider: Arc<dyn LlmProvider>,
+    cwd: &Path,
+    session_id: &str,
+    mut agent_config: AgentConfig,
+) {
+    let mut registry = create_default_registry(cwd.to_path_buf(), None);
+    registry.replace(Box::new(archon_tools::bash::BashTool {
+        timeout_secs: config.tools.bash_timeout,
+        max_output_bytes: config.tools.bash_max_output,
+        safe_commands: config.permissions.safe_commands.clone(),
+        risky_commands: config.permissions.risky_commands.clone(),
+        dangerous_commands: config.permissions.dangerous_commands.clone(),
+        provider_env: None,
+    }));
+    crate::command::workflow_mcp::install_project_tools(
+        cwd,
+        &mut registry,
+        &mut agent_config.permission_rules,
+    )
+    .await;
+    let subagent_manager = Arc::new(tokio::sync::Mutex::new(SubagentManager::new(
+        agent_config.max_subagent_concurrency,
+    )));
+    let agent_registry = Arc::new(std::sync::RwLock::new(AgentRegistry::load(cwd)));
+    let identity = Arc::new(IdentityProvider::new(
+        IdentityMode::Clean,
+        session_id.to_string(),
+        String::new(),
+        String::new(),
+    ));
+    let executor = AgentSubagentExecutor::new(
+        provider,
+        registry,
+        subagent_manager,
+        agent_registry,
+        None,
+        None,
+        cwd.to_path_buf(),
+        session_id.to_string(),
+        agent_config.model.clone(),
+        agent_config.system_prompt.clone(),
+        Arc::clone(&agent_config.permission_mode),
+        Arc::new(tokio::sync::Mutex::new(None)),
+        Arc::new(agent_config),
+        identity,
+    );
+    archon_tools::subagent_executor::install_subagent_executor(Arc::new(executor));
 }
 
 pub(crate) async fn init_leann(cwd: &Path) -> Option<archon_pipeline::runner::LeannIntegration> {
@@ -386,26 +497,5 @@ fn build_pipeline_auto_trainer_from_db(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn pipeline_learning_schema_defaults_to_project_learning_store() {
-        let _env_lock = crate::command::store_paths::LEARNING_DB_ENV_LOCK
-            .lock()
-            .expect("learning DB environment lock");
-        let temp = tempfile::tempdir().expect("tempdir");
-        let db = open_pipeline_learning_db(temp.path()).expect("pipeline db");
-
-        archon_learning::schema::ensure_learning_schema(db.as_ref())
-            .expect("governed learning schema");
-
-        assert!(
-            temp.path()
-                .join(".archon")
-                .join("learning-state.db")
-                .exists()
-        );
-        assert!(!temp.path().join(".archon").join("archon-data.db").exists());
-    }
-}
+#[path = "pipeline_support_tests.rs"]
+mod pipeline_support_tests;

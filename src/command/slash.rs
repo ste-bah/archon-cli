@@ -83,7 +83,10 @@ pub(crate) fn handle_slash_command<'a>(
         // that gap here at the dispatch site where .await is legal.
         let mut __cmd_ctx =
             crate::command::context::build_command_context(input, tui_tx.clone(), ctx).await;
-        let _ = ctx.dispatcher.dispatch(&mut __cmd_ctx, input);
+        let dispatch_result = ctx.dispatcher.dispatch(&mut __cmd_ctx, input);
+        if dispatch_result.is_err() {
+            return dispatcher_recognizes;
+        }
         // TASK-AGS-808 effect-slot drain. Handlers that need to write to
         // async-guarded shared state (e.g. /model mutating
         // `model_override_shared`) stash a CommandEffect in

@@ -131,15 +131,15 @@ impl Agent {
                 // GHOST-006: sandbox pre-check (main-agent sequential path).
                 let result = if pre.sandbox_prechecked {
                     crate::dispatch::emit_tool_activity(
-                        &ctx,
+                        ctx,
                         pre.tool_arc.name(),
                         AgentActivityKind::ToolStarted,
                         AgentActivityStatus::Running,
                     );
                     let started_at = Instant::now();
-                    let result = pre.tool_arc.execute(pre.input.clone(), &ctx).await;
+                    let result = pre.tool_arc.execute(pre.input.clone(), ctx).await;
                     emit_tool_result_activity(
-                        &ctx,
+                        ctx,
                         pre.tool_arc.name(),
                         &result,
                         started_at.elapsed(),
@@ -149,7 +149,7 @@ impl Agent {
                     match backend.check(pre.tool_arc.name(), &pre.input) {
                         Err(reason) => {
                             crate::dispatch::emit_tool_activity(
-                                &ctx,
+                                ctx,
                                 pre.tool_arc.name(),
                                 AgentActivityKind::ToolFailed,
                                 AgentActivityStatus::Failed,
@@ -158,15 +158,15 @@ impl Agent {
                         }
                         Ok(()) => {
                             crate::dispatch::emit_tool_activity(
-                                &ctx,
+                                ctx,
                                 pre.tool_arc.name(),
                                 AgentActivityKind::ToolStarted,
                                 AgentActivityStatus::Running,
                             );
                             let started_at = Instant::now();
-                            let result = pre.tool_arc.execute(pre.input.clone(), &ctx).await;
+                            let result = pre.tool_arc.execute(pre.input.clone(), ctx).await;
                             emit_tool_result_activity(
-                                &ctx,
+                                ctx,
                                 pre.tool_arc.name(),
                                 &result,
                                 started_at.elapsed(),
@@ -176,15 +176,15 @@ impl Agent {
                     }
                 } else {
                     crate::dispatch::emit_tool_activity(
-                        &ctx,
+                        ctx,
                         pre.tool_arc.name(),
                         AgentActivityKind::ToolStarted,
                         AgentActivityStatus::Running,
                     );
                     let started_at = Instant::now();
-                    let result = pre.tool_arc.execute(pre.input.clone(), &ctx).await;
+                    let result = pre.tool_arc.execute(pre.input.clone(), ctx).await;
                     emit_tool_result_activity(
-                        &ctx,
+                        ctx,
                         pre.tool_arc.name(),
                         &result,
                         started_at.elapsed(),

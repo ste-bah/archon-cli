@@ -225,6 +225,7 @@ fn fail_if_indexing_failed(db: &DbInstance) -> Result<(), DocsError> {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn hybrid_search(
     db: &DbInstance,
     query: &str,

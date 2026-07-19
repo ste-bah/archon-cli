@@ -48,6 +48,7 @@ fn plan_for(root: &Path, targets: &[&str]) -> WritePlan {
         canonical_root: root.to_path_buf(),
         isolated_root: root.join(".archon/wc/run1/impl-0"),
         target_files,
+        target_dir_scopes: Vec::new(),
         target_files_source: TargetFilesSource::Item,
         read_context_files: vec![],
         verify_inputs: vec![],
@@ -74,6 +75,20 @@ fn clean_repo_creates_workspace_with_baseline_commit() {
         "// original\n"
     );
     assert!(!ws.baseline_commit.is_empty());
+}
+
+#[test]
+fn retry_replaces_existing_item_worktree() {
+    let repo = canonical_repo();
+    let root = repo.path();
+    let plan = plan_for(root, &["src/lib.rs"]);
+    let baseline = capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
+    create_item_workspace(root, &plan, &baseline).expect("first workspace");
+    assert!(plan.isolated_root.exists());
+
+    let second = create_item_workspace(root, &plan, &baseline).expect("retry workspace");
+    assert!(plan.isolated_root.exists());
+    assert!(!second.baseline_commit.is_empty());
 }
 
 #[test]
@@ -138,6 +153,61 @@ fn verify_input_untracked_copied_and_captured() {
     assert!(baseline.untracked_files.contains_key("fixture.json"));
     create_item_workspace(root, &plan, &baseline).expect("workspace");
     assert!(plan.isolated_root.join("fixture.json").exists());
+}
+
+#[test]
+fn safe_untracked_rust_support_module_copied() {
+    let repo = canonical_repo();
+    let root = repo.path();
+    std::fs::write(root.join("src/lib.rs"), "pub mod generated_sanitize;\n").expect("edit");
+    std::fs::write(
+        root.join("src/generated_sanitize.rs"),
+        "pub fn sanitize() {}\n",
+    )
+    .expect("write module");
+    let plan = plan_for(root, &["src/lib.rs"]);
+    let baseline = capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
+    assert!(
+        baseline
+            .untracked_files
+            .contains_key("src/generated_sanitize.rs"),
+        "compile-relevant untracked Rust module must be captured"
+    );
+    create_item_workspace(root, &plan, &baseline).expect("workspace");
+    assert!(
+        plan.isolated_root
+            .join("src/generated_sanitize.rs")
+            .exists(),
+        "isolated worktree must include the support module"
+    );
+}
+
+#[test]
+fn safe_untracked_gradle_java_support_files_copied() {
+    let repo = canonical_repo();
+    let root = repo.path();
+    std::fs::write(root.join("build.gradle.kts"), "plugins { java }\n").expect("gradle");
+    std::fs::create_dir_all(root.join("src/main/java/demo")).expect("mkdir");
+    std::fs::write(
+        root.join("src/main/java/demo/App.java"),
+        "package demo; public class App {}\n",
+    )
+    .expect("java");
+    let plan = plan_for(root, &["src/lib.rs"]);
+    let baseline = capture_canonical_baseline(root, &plan, &[], &default_cfg()).expect("capture");
+    assert!(baseline.untracked_files.contains_key("build.gradle.kts"));
+    assert!(
+        baseline
+            .untracked_files
+            .contains_key("src/main/java/demo/App.java")
+    );
+    create_item_workspace(root, &plan, &baseline).expect("workspace");
+    assert!(plan.isolated_root.join("build.gradle.kts").exists());
+    assert!(
+        plan.isolated_root
+            .join("src/main/java/demo/App.java")
+            .exists()
+    );
 }
 
 #[test]

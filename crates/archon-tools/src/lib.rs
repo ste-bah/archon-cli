@@ -12,6 +12,9 @@ pub use background_agents::{
     PollOutcome, cancel_background_agent, poll_background_agent, spawn_gc_task,
 };
 pub mod bash;
+pub(crate) mod bash_observability;
+pub(crate) mod cargo_target_env;
+pub use cargo_target_env::{current_timeout_exempt_cargo_wait, take_timeout_exempt_cargo_wait};
 pub mod concurrency;
 pub mod config_tool;
 pub mod docs;
@@ -28,6 +31,7 @@ pub mod monitor;
 pub(crate) mod path_guard;
 pub mod plan_mode;
 pub mod powershell;
+pub mod provider_env;
 pub mod push_notification;
 pub mod registry;
 pub mod sleep;
@@ -36,6 +40,7 @@ pub mod tool;
 
 pub mod toolsearch;
 pub mod webfetch;
+pub(crate) mod workflow_resource_env;
 
 pub mod agent_tool;
 // TASK-AGS-105: SubagentExecutor trait + OnceLock registry. The
@@ -44,6 +49,7 @@ pub mod agent_tool;
 pub mod git;
 pub mod send_message;
 pub mod subagent_executor;
+pub mod subagent_request;
 pub mod validation;
 
 pub mod task_create;

@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use archon_session::background::{BackgroundSessionInfo, sessions_dir};
 use archon_session::registry;
@@ -13,12 +13,12 @@ fn temp_sessions_dir() -> PathBuf {
     dir
 }
 
-fn cleanup(dir: &PathBuf) {
+fn cleanup(dir: &Path) {
     let _ = fs::remove_dir_all(dir);
 }
 
 /// Write a status JSON file into the given directory.
-fn write_status(dir: &PathBuf, id: &str, name: &str, status: &str, started_at: &str) {
+fn write_status(dir: &Path, id: &str, name: &str, status: &str, started_at: &str) {
     let info = serde_json::json!({
         "id": id,
         "name": name,

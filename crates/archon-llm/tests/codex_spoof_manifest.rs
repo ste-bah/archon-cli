@@ -55,8 +55,10 @@ fn bundled_manifest_is_valid_and_legal() {
 #[test]
 fn legal_guardrail_rejects_openai_product_impersonation() {
     for value in ["ChatGPT-Mac/1", "chatgpt/1", "OpenAI-Codex/1", "openai/1"] {
-        let mut spoof = SpoofConfig::default();
-        spoof.user_agent = value.into();
+        let spoof = SpoofConfig {
+            user_agent: value.into(),
+            ..Default::default()
+        };
         assert!(matches!(
             spoof.validate(),
             Err(SpoofError::ImpersonationRejected { .. })
@@ -66,12 +68,16 @@ fn legal_guardrail_rejects_openai_product_impersonation() {
 
 #[test]
 fn extra_headers_reject_reserved_names_and_impersonating_values() {
-    let mut spoof = SpoofConfig::default();
-    spoof.extra_headers = BTreeMap::from([("Authorization".into(), "x".into())]);
+    let spoof = SpoofConfig {
+        extra_headers: BTreeMap::from([("Authorization".into(), "x".into())]),
+        ..Default::default()
+    };
     assert!(matches!(spoof.validate(), Err(SpoofError::Validation(_))));
 
-    let mut spoof = SpoofConfig::default();
-    spoof.extra_headers = BTreeMap::from([("x-client".into(), "OpenAI-Codex/1".into())]);
+    let spoof = SpoofConfig {
+        extra_headers: BTreeMap::from([("x-client".into(), "OpenAI-Codex/1".into())]),
+        ..Default::default()
+    };
     assert!(matches!(
         spoof.validate(),
         Err(SpoofError::ImpersonationRejected { .. })

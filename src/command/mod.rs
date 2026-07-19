@@ -113,6 +113,7 @@ pub(crate) mod pipeline_slash;
 pub(crate) mod pipeline_slash_progress;
 pub(crate) mod pipeline_support;
 pub(crate) mod provider_gate;
+pub(crate) mod workflow_mcp;
 // TASK-TUI-626: /plan Plan Mode toggle via SNAPSHOT+EFFECT pattern.
 pub(crate) mod plan;
 // TASK-P0-B.3 (#174): plan-file I/O shim (re-exports from archon_core).
@@ -179,6 +180,10 @@ pub(crate) mod team;
 pub(crate) mod trading;
 pub(crate) mod trading_backtest;
 pub(crate) mod trading_data;
+pub(crate) mod trading_data_provider;
+pub(crate) mod trading_data_provider_openbb;
+#[cfg(test)]
+pub(crate) mod trading_data_provider_tests;
 pub(crate) mod trading_io;
 pub(crate) mod trading_live;
 pub(crate) mod trading_openbb;
@@ -211,7 +216,6 @@ pub(crate) mod web;
 pub(crate) mod web_chat;
 pub(crate) mod workflow;
 pub(crate) mod workflow_live;
-pub(crate) mod workflow_world_learning;
 pub(crate) mod world_model;
 
 // TASK-AGS-800 (Stage 6, Q1=A): spec-name discoverability shim.

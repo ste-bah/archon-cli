@@ -73,7 +73,9 @@ pub(super) async fn dispatch_user_prompt(
             tracing::error!("dispatch rejected: {error}");
         }
     }
-    queue.push_back(PostTurnAction::PersistSession { guardrail });
+    queue.push_back(PostTurnAction::PersistSession {
+        guardrail: guardrail.map(Box::new),
+    });
 }
 
 fn begin_prompt_guardrail(

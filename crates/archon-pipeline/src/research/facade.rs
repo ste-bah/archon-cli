@@ -571,9 +571,9 @@ mod tests {
             ),
         }
 
-        for i in 0..RESEARCH_AGENTS.len() {
+        for agent in RESEARCH_AGENTS {
             let agent_info = ResearchFacade::to_agent_info(
-                &RESEARCH_AGENTS[i],
+                agent,
                 &archon_core::config::AnthropicModelsConfig::default(),
             );
             let result = make_agent_result("output");

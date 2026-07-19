@@ -281,6 +281,22 @@ impl TradingKnowledgeBase {
         self.claims.get(claim_id).map(|claim| claim.status)
     }
 
+    pub fn claim_counts_for_production_proof(&self, claim_id: &str) -> bool {
+        self.claims.get(claim_id).is_some_and(|claim| {
+            claim.status == ClaimStatus::Verified && citation_matches(&self.chunks, claim)
+        })
+    }
+
+    pub fn research_only_claims(&self) -> Vec<String> {
+        self.claims
+            .values()
+            .filter(|claim| {
+                claim.status != ClaimStatus::Verified || !citation_matches(&self.chunks, claim)
+            })
+            .map(|claim| claim.claim_id.clone())
+            .collect()
+    }
+
     fn validate_citation(&self, claim: &KnowledgeClaim) -> Result<(), KbError> {
         let chunk = self
             .chunks
@@ -399,4 +415,84 @@ fn normalize(value: &str) -> String {
 
 fn hash_bytes(bytes: &[u8]) -> String {
     blake3::hash(bytes).to_hex().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kb_cited_claim_counts_for_production_proof() {
+        let mut kb = TradingKnowledgeBase::new();
+        let chunk = chunk(&mut kb, "cited", b"native evidence");
+        kb.add_claim(claim("rule", chunk)).unwrap();
+        assert_eq!(kb.claim_status("rule"), Some(ClaimStatus::Verified));
+        assert!(kb.claim_counts_for_production_proof("rule"));
+        assert!(kb.research_only_claims().is_empty());
+    }
+
+    #[test]
+    fn kb_uncited_claim_is_rejected_as_research_only() {
+        let mut kb = TradingKnowledgeBase::new();
+        let missing = SourceChunk {
+            chunk_id: "missing".to_string(),
+            topic: TradingKbTopic::Backtesting,
+            media_kind: MediaKind::Research,
+            content_hash: hash_bytes(b"unregistered"),
+            extraction_state: ExtractionState::Clean,
+            source_uri: "research://missing".to_string(),
+        };
+        assert_eq!(
+            kb.add_claim(claim("uncited", missing)),
+            Err(KbError::CitationMissing)
+        );
+        assert!(!kb.claim_counts_for_production_proof("uncited"));
+    }
+
+    #[test]
+    fn kb_hypothesis_claim_cannot_count_for_production_proof() {
+        let mut kb = TradingKnowledgeBase::new();
+        let chunk = chunk(&mut kb, "mutable", b"original evidence");
+        kb.add_claim(claim("hypothesis", chunk)).unwrap();
+        kb.ingest_chunk(
+            "mutable",
+            TradingKbTopic::Backtesting,
+            MediaKind::Research,
+            b"changed evidence",
+            "research://mutable",
+            ExtractionState::Clean,
+        )
+        .unwrap();
+        assert_eq!(kb.verify_claim_integrity(), vec!["hypothesis".to_string()]);
+        assert!(!kb.claim_counts_for_production_proof("hypothesis"));
+        assert_eq!(kb.research_only_claims(), vec!["hypothesis".to_string()]);
+    }
+
+    fn chunk(kb: &mut TradingKnowledgeBase, id: &str, bytes: &[u8]) -> SourceChunk {
+        kb.ingest_chunk(
+            id,
+            TradingKbTopic::Backtesting,
+            MediaKind::Research,
+            bytes,
+            format!("research://{id}"),
+            ExtractionState::Clean,
+        )
+        .unwrap()
+    }
+
+    fn claim(claim_id: &str, chunk: SourceChunk) -> KnowledgeClaim {
+        KnowledgeClaim {
+            claim_id: claim_id.to_string(),
+            topic: chunk.topic,
+            subject: "ahdm-rule".to_string(),
+            statement: "AHDM rule claim".to_string(),
+            polarity: ClaimPolarity::Supports,
+            citation: Citation {
+                chunk_id: chunk.chunk_id,
+                chunk_hash: chunk.content_hash,
+            },
+            status: ClaimStatus::UnverifiedHypothesis,
+            referenced_by_non_retired_strategy: false,
+        }
+    }
 }

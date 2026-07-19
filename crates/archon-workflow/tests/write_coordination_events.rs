@@ -24,6 +24,7 @@ fn plan(item: &str, wave: u32) -> PlanRecord {
     PlanRecord {
         item_id: item.into(),
         wave_id: wave,
+        work_unit_ids: vec![format!("{item}-unit")],
         target_files: vec!["src/a.rs".into()],
         changed_files: vec!["src/a.rs".into()],
         post_hashes: BTreeMap::from([("src/a.rs".to_string(), "blake3abc123".to_string())]),
@@ -41,6 +42,7 @@ fn applied_outcome() -> CoordinatedOutcome {
             apply_record: None,
             verify: Some(VerifyResult {
                 exit: 0,
+                command: None,
                 stdout_tail: String::new(),
                 stderr_tail: String::new(),
                 duration_ms: 1,
@@ -157,20 +159,42 @@ fn serial_fallback_reason_strings() {
 }
 
 #[test]
-fn conflict_kind_has_eight_variants() {
-    // Compile-time enumeration of all 8 (exhaustive match) proves the count.
+fn conflict_kind_has_nine_variants() {
+    // Compile-time enumeration of all 9 (exhaustive match) proves the count.
     use WriteCoordinationConflictKind::*;
     let all = [
         StaleBaseline,
         PatchApplyConflict,
         SecretDetected,
         UndeclaredWrite,
+        DynamicTargetAdoptionLimit,
         FileTooLarge,
         PatchTooLarge,
         OutputNotUsable,
         ConflictGraphViolation,
     ];
-    assert_eq!(all.len(), 8);
+    assert_eq!(all.len(), 9);
+}
+
+#[test]
+fn dynamic_target_adoption_limit_classifies_distinctly() {
+    let mut outcome = applied_outcome();
+    outcome.item_status.insert(
+        "i0".to_string(),
+        ManifestStatus::Failed {
+            reason: "dynamic target adoption limit reached at undeclared path 'src/new.rs' after 2 adopted target(s), max 2".into(),
+        },
+    );
+    let events = build_write_coordination_events(&outcome).unwrap();
+    let conflict = events
+        .iter()
+        .find(|(kind, _)| *kind == WorkflowEventKind::WriteCoordinationPatchConflict)
+        .expect("conflict event");
+
+    assert_eq!(
+        conflict.1["conflict_kind"],
+        serde_json::json!("dynamic_target_adoption_limit")
+    );
 }
 
 #[test]
@@ -291,6 +315,12 @@ fn status_render_active_six_lines() {
         items_accepted: 1,
         apply_state: "applied".into(),
         fallback_reason: None,
+        failed_item: None,
+        failure_reason: None,
+        failed_worktree: None,
+        manifest_path: None,
+        verify_command: None,
+        verify_duration_ms: None,
     };
     assert_eq!(render_compact(&s).lines().count(), 6);
 }
@@ -309,6 +339,12 @@ fn status_render_fallback_one_line() {
         items_accepted: 0,
         apply_state: "n/a".into(),
         fallback_reason: Some("non_git_root".into()),
+        failed_item: None,
+        failure_reason: None,
+        failed_worktree: None,
+        manifest_path: None,
+        verify_command: None,
+        verify_duration_ms: None,
     };
     let out = render_compact(&s);
     assert_eq!(out.lines().count(), 1);

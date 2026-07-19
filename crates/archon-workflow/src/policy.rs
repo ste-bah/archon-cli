@@ -21,6 +21,8 @@ pub struct WorkflowPolicy {
     pub max_agents_per_run: u32,
     #[serde(default = "default_local_provider_max_agents")]
     pub local_provider_max_agents: u32,
+    #[serde(default = "default_missing_unit_remediation_attempts")]
+    pub missing_unit_remediation_max_attempts: u32,
     #[serde(default)]
     pub write_coordinator: WriteCoordinatorConfig,
     #[serde(default = "default_true")]
@@ -43,6 +45,7 @@ impl Default for WorkflowPolicy {
             max_parallelism: default_max_parallelism(),
             max_agents_per_run: default_max_agents(),
             local_provider_max_agents: default_local_provider_max_agents(),
+            missing_unit_remediation_max_attempts: default_missing_unit_remediation_attempts(),
             write_coordinator: WriteCoordinatorConfig::default(),
             require_human_for_dangerous_tools: true,
             require_human_for_policy_mutation: true,
@@ -64,7 +67,10 @@ impl WorkflowPolicy {
     /// (e.g. `local_provider_max_agents`, OQ-DWF-003) reach the executor.
     pub fn from_config(config: &WorkflowConfig) -> Self {
         Self {
+            max_parallelism: config.default_max_parallelism,
+            max_agents_per_run: config.default_max_agents,
             local_provider_max_agents: config.local_provider_max_agents,
+            missing_unit_remediation_max_attempts: config.missing_unit_remediation_max_attempts,
             write_coordinator: config.write_coordinator.clone(),
             ..Self::default()
         }
@@ -151,4 +157,8 @@ fn default_max_agents() -> u32 {
 /// OQ-DWF-003 provisional default cap for local-only provider fan-out.
 fn default_local_provider_max_agents() -> u32 {
     4
+}
+
+fn default_missing_unit_remediation_attempts() -> u32 {
+    2
 }

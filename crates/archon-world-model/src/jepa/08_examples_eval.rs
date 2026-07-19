@@ -131,6 +131,9 @@ fn singular_value_effective_rank_ratio(latents: &[Vec<f32>], means: &[f64]) -> R
     Ok((effective_rank / dim as f64).clamp(0.0, 1.0) as f32)
 }
 
+// Symmetric-matrix construction: row/column indices are independent and the
+// loop writes both mirror cells, so index loops are the clearest correct form.
+#[allow(clippy::needless_range_loop)]
 fn mean_centered_gram_matrix(latents: &[Vec<f32>], means: &[f64]) -> Vec<Vec<f64>> {
     let sample_count = latents.len();
     let dim = means.len();
@@ -169,6 +172,9 @@ fn centered_latent(latents: &[Vec<f32>], means: &[f64], row_idx: usize, feature_
     f64::from(latents[row_idx][feature_idx]) - means[feature_idx]
 }
 
+// Jacobi rotations read and write four symmetric cells per step; index loops
+// are the clearest correct form for this numeric kernel.
+#[allow(clippy::needless_range_loop)]
 fn jacobi_symmetric_eigenvalues(mut matrix: Vec<Vec<f64>>) -> Vec<f64> {
     let size = matrix.len();
     if size == 0 {

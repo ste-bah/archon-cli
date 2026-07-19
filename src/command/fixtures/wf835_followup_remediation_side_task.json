@@ -1,0 +1,27 @@
+{
+  "original_unresolved_task_ids": ["TASK-TDL-010"],
+  "items": [
+    {
+      "item_id": "follow-up-remediate-unrelated-task",
+      "canonical_task_ids": ["TASK-TDL-001"],
+      "source_item_id": "impl-TASK-TDL-001",
+      "failure_status": "needs_review",
+      "failure_evidence": ["unrelated side-track item"],
+      "required_fix": "should be filtered out before follow-up fanout",
+      "target_files": ["docs/context.md"],
+      "focused_verification": ["focused check"],
+      "artifact_requirements": []
+    },
+    {
+      "item_id": "follow-up-remediate-original-task",
+      "canonical_task_ids": ["TASK-TDL-010"],
+      "source_item_id": "impl-TASK-TDL-010",
+      "failure_status": "needs_review",
+      "failure_evidence": ["original unresolved remediation item"],
+      "required_fix": "safe follow-up remediation",
+      "target_files": ["src/lib.rs"],
+      "focused_verification": ["focused check"],
+      "artifact_requirements": []
+    }
+  ]
+}

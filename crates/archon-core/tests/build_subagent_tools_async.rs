@@ -82,6 +82,7 @@ async fn build_subagent_tools_does_not_panic_from_async_context() {
         run_in_background: false,
         cwd: None,
         isolation: None,
+        provider_env: None,
     };
 
     // This must not panic with "Cannot block ... is being used to drive

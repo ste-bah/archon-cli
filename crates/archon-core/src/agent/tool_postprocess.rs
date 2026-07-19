@@ -11,7 +11,7 @@ impl Agent {
         active_model: &str,
     ) -> Option<String> {
         let mut flow = PostprocessFlow::default();
-        for (pre, result) in allowed.iter().zip(dispatch_results.into_iter()) {
+        for (pre, result) in allowed.iter().zip(dispatch_results) {
             self.postprocess_single_tool(pre, result, ctx, active_model, &mut flow)
                 .await;
         }

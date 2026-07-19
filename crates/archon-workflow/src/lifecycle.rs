@@ -1,4 +1,6 @@
 use std::collections::BTreeSet;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use serde_json::json;
@@ -76,24 +78,55 @@ impl LifecycleController {
     }
 
     pub fn apply(&self, run_id: &str, action: LifecycleAction) -> WorkflowResult<WorkflowRun> {
-        let mut run = self.store.load_state(run_id)?;
-        let forced_record = forced_accept_record(&action);
-        let event = apply_action(&mut run, action)?;
-        run.updated_at = Utc::now();
-        self.store.save_state(&run)?;
-        if let Some(record) = forced_record {
-            persistence::record_forced_accept(
-                &self.store,
-                &run.id,
-                &record.stage_id,
-                &record.forced_by,
-                &record.rationale,
-                &record.source,
-            )?;
-        }
-        emit_lifecycle_event(&self.store, &run.id, event)?;
-        Ok(run)
+        self.store.with_run_lock(run_id, |store| {
+            let mut run = store.load_state(run_id)?;
+            let cancellation = if matches!(action, LifecycleAction::Cancel) {
+                Some(crate::command_execution::cancel_running_commands(
+                    store, &run,
+                )?)
+            } else {
+                None
+            };
+            let archive = restart_archive_plan(&run, &action);
+            let forced_record = forced_accept_record(&action);
+            let mut event = apply_action(&mut run, action)?;
+            run.generation = run.generation.saturating_add(1);
+            event.1["generation"] = serde_json::json!(run.generation);
+            if let Some(archive) = archive {
+                let archived = archive_restart_evidence(store, &run.id, &archive)?;
+                event.1["archived_attempt_evidence"] = serde_json::to_value(archived)?;
+            }
+            if let Some(summary) = cancellation {
+                event.1["command_cancellation"] = serde_json::to_value(summary)?;
+            }
+            run.updated_at = Utc::now();
+            store.save_state(&run)?;
+            if let Some(record) = forced_record {
+                persistence::record_forced_accept(
+                    store,
+                    &run.id,
+                    &record.stage_id,
+                    &record.forced_by,
+                    &record.rationale,
+                    &record.source,
+                )?;
+            }
+            emit_lifecycle_event(store, &run.id, event)?;
+            Ok(run)
+        })
     }
+}
+
+#[derive(Debug)]
+struct RestartArchivePlan {
+    stages: BTreeSet<String>,
+    item_ids: BTreeSet<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct RestartArchiveSummary {
+    archived_paths: Vec<String>,
+    archive_root: Option<String>,
 }
 
 struct ForcedAcceptRecord {
@@ -120,6 +153,29 @@ fn forced_accept_record(action: &LifecycleAction) -> Option<ForcedAcceptRecord> 
     }
 }
 
+fn restart_archive_plan(run: &WorkflowRun, action: &LifecycleAction) -> Option<RestartArchivePlan> {
+    match action {
+        LifecycleAction::RestartStage(stage_id) => {
+            let stages = dependent_stage_ids(run, stage_id);
+            let item_ids = run
+                .items
+                .iter()
+                .filter(|(_, item)| stages.contains(&item.stage_id))
+                .map(|(id, _)| id.clone())
+                .collect();
+            Some(RestartArchivePlan { stages, item_ids })
+        }
+        LifecycleAction::RestartItem { stage_id, item_id } => {
+            let stages = dependent_stage_ids(run, stage_id);
+            Some(RestartArchivePlan {
+                stages,
+                item_ids: BTreeSet::from([item_id.clone()]),
+            })
+        }
+        _ => None,
+    }
+}
+
 fn apply_action(
     run: &mut WorkflowRun,
     action: LifecycleAction,
@@ -127,6 +183,13 @@ fn apply_action(
     match action {
         LifecycleAction::Resume => {
             run.status = RunStatus::Running;
+            for stage in run.stages.values_mut() {
+                if stage.status == StageStatus::Paused {
+                    stage.status = StageStatus::Pending;
+                    stage.error = None;
+                    stage.completed_at = None;
+                }
+            }
             Ok((WorkflowEventKind::Resumed, json!({"action": "resume"})))
         }
         LifecycleAction::Pause => {
@@ -135,6 +198,7 @@ fn apply_action(
         }
         LifecycleAction::Cancel => {
             run.status = RunStatus::Cancelled;
+            mark_queued_work_cancelled(run);
             Ok((WorkflowEventKind::Cancelled, json!({"action": "cancel"})))
         }
         LifecycleAction::RestartStage(stage_id) => {
@@ -268,6 +332,123 @@ fn force_accept_stage(run: &mut WorkflowRun, stage_id: &str) -> WorkflowResult<(
         run.status = RunStatus::Running;
     }
     Ok(())
+}
+
+fn mark_queued_work_cancelled(run: &mut WorkflowRun) {
+    for stage in run.stages.values_mut() {
+        if matches!(stage.status, StageStatus::Pending | StageStatus::Running) {
+            stage.status = StageStatus::Cancelled;
+            stage.completed_at.get_or_insert_with(Utc::now);
+            stage.error.get_or_insert_with(|| "cancelled".to_string());
+        }
+    }
+    for item in run.items.values_mut() {
+        if matches!(item.status, StageStatus::Pending | StageStatus::Running) {
+            item.status = StageStatus::Cancelled;
+            item.error.get_or_insert_with(|| "cancelled".to_string());
+        }
+    }
+}
+
+fn archive_restart_evidence(
+    store: &WorkflowStore,
+    run_id: &str,
+    plan: &RestartArchivePlan,
+) -> WorkflowResult<RestartArchiveSummary> {
+    let root = store.run_dir(run_id);
+    let archive_root = PathBuf::from("archived-attempts")
+        .join(format!("restart-{}", Utc::now().timestamp_millis()));
+    let mut archived = Vec::new();
+    let rels = restart_evidence_paths(&root, plan);
+    for rel in rels {
+        if !root.join(&rel).exists() {
+            continue;
+        }
+        let dst = archive_root.join(&rel);
+        move_run_path(&root, &rel, &dst)?;
+        archived.push(rel.display().to_string());
+    }
+    Ok(RestartArchiveSummary {
+        archive_root: (!archived.is_empty()).then(|| archive_root.display().to_string()),
+        archived_paths: archived,
+    })
+}
+
+fn restart_evidence_paths(root: &Path, plan: &RestartArchivePlan) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for stage in &plan.stages {
+        out.extend(stage_evidence_paths(root, stage));
+    }
+    for item in &plan.item_ids {
+        out.extend(item_evidence_paths(root, item));
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn stage_evidence_paths(root: &Path, stage: &str) -> Vec<PathBuf> {
+    let safe = crate::store::safe_path_component(stage);
+    let mut out = vec![
+        PathBuf::from("agent-outputs").join(stage),
+        PathBuf::from("prompts").join(stage),
+        PathBuf::from("command-executions").join(&safe),
+        PathBuf::from("write-coordination/stages").join(stage),
+    ];
+    out.extend(stage_artifact_paths(root, &safe));
+    out
+}
+
+fn item_evidence_paths(root: &Path, item: &str) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for dir in ["agent-outputs", "prompts"] {
+        out.extend(nested_item_files(root, dir, item));
+    }
+    out.push(
+        PathBuf::from("write-coordination")
+            .join("items")
+            .join(crate::store::safe_path_component(item)),
+    );
+    out
+}
+
+fn stage_artifact_paths(root: &Path, safe_stage: &str) -> Vec<PathBuf> {
+    let dir = root.join("artifacts").join(safe_stage);
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|entry| {
+            PathBuf::from("artifacts")
+                .join(safe_stage)
+                .join(entry.file_name())
+        })
+        .collect()
+}
+
+fn nested_item_files(root: &Path, dir: &str, item: &str) -> Vec<PathBuf> {
+    let Ok(stages) = fs::read_dir(root.join(dir)) else {
+        return Vec::new();
+    };
+    stages
+        .flatten()
+        .map(|stage| {
+            PathBuf::from(dir)
+                .join(stage.file_name())
+                .join(format!("{item}.json"))
+        })
+        .filter(|rel| root.join(rel).exists())
+        .collect()
+}
+
+fn move_run_path(root: &Path, src_rel: &Path, dst_rel: &Path) -> WorkflowResult<()> {
+    let src = root.join(src_rel);
+    let dst = root.join(dst_rel);
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent).map_err(|err| WorkflowError::io(parent, err))?;
+    }
+    fs::rename(&src, &dst).map_err(|err| WorkflowError::io(&dst, err))
 }
 
 fn emit_lifecycle_event(

@@ -399,10 +399,7 @@ fn cmp(left: &Value, op: &CmpOp, right: &Value) -> bool {
             _ => false,
         },
         // Cross-type comparisons always false
-        _ => match op {
-            CmpOp::Neq => true,
-            _ => false,
-        },
+        _ => matches!(op, CmpOp::Neq),
     }
 }
 

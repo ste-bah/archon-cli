@@ -49,6 +49,7 @@ fn plan_for(root: &Path, targets: &[&str]) -> WritePlan {
         canonical_root: root.to_path_buf(),
         isolated_root: root.join(".archon/wc/run1/impl-0"),
         target_files: targets.iter().map(|t| np(t, root)).collect(),
+        target_dir_scopes: Vec::new(),
         target_files_source: TargetFilesSource::Item,
         read_context_files: vec![],
         verify_inputs: vec![],
@@ -178,6 +179,32 @@ fn undeclared_write_rejected() {
 }
 
 #[test]
+fn manifest_config_requires_explicit_ownership() {
+    let repo = canonical_repo();
+    let plan = plan_for(repo.path(), &["src/lib.rs"]);
+    let captured = manual_capture(b"+chrono = \"0.4\"\n", &["Cargo.toml"]);
+    match validate_patch(&captured, &plan, &cfg(), "ok") {
+        Err(PatchError::UndeclaredWrite { path }) => assert_eq!(path, "Cargo.toml"),
+        other => panic!("expected undeclared manifest rejection, got {other:?}"),
+    }
+}
+
+#[test]
+fn explicitly_owned_manifest_config_is_allowed() {
+    let repo = canonical_repo();
+    let plan = plan_for(repo.path(), &["Cargo.toml"]);
+    std::fs::create_dir_all(&plan.isolated_root).expect("isolated root");
+    std::fs::write(
+        plan.isolated_root.join("Cargo.toml"),
+        "[package]\nname = \"x\"\n",
+    )
+    .expect("manifest");
+    let captured = manual_capture(b"+[package]\n", &["Cargo.toml"]);
+
+    validate_patch(&captured, &plan, &cfg(), "ok").expect("explicit manifest ownership passes");
+}
+
+#[test]
 fn patch_too_large_rejected() {
     let repo = canonical_repo();
     let plan = plan_for(repo.path(), &["src/lib.rs"]);
@@ -212,6 +239,50 @@ fn file_too_large_rejected() {
             assert_eq!(max, 1024);
         }
         other => panic!("expected FileTooLarge, got {other:?}"),
+    }
+}
+
+#[test]
+fn source_file_too_many_lines_rejected() {
+    let (_repo, plan, _ws, _baseline) = isolate(&["src/lib.rs"]);
+    let body = (0..501)
+        .map(|idx| format!("// line {idx}\n"))
+        .collect::<String>();
+    std::fs::write(plan.isolated_root.join("src/lib.rs"), body).expect("large source");
+    let captured = manual_capture(b"+small patch\n", &["src/lib.rs"]);
+    match validate_patch(&captured, &plan, &cfg(), "ok") {
+        Err(PatchError::FileTooManyLines { path, lines, max }) => {
+            assert_eq!(path, "src/lib.rs");
+            assert_eq!(lines, 501);
+            assert_eq!(max, 500);
+        }
+        other => panic!("expected FileTooManyLines, got {other:?}"),
+    }
+}
+
+#[test]
+fn function_too_complex_rejected() {
+    let (_repo, plan, _ws, _baseline) = isolate(&["src/lib.rs"]);
+    let mut body = String::from("fn heavy() {\n");
+    for idx in 0..16 {
+        body.push_str(&format!("    if cond_{idx} {{}}\n"));
+    }
+    body.push_str("}\n");
+    std::fs::write(plan.isolated_root.join("src/lib.rs"), body).expect("complex source");
+    let captured = manual_capture(b"+small patch\n", &["src/lib.rs"]);
+    match validate_patch(&captured, &plan, &cfg(), "ok") {
+        Err(PatchError::FunctionTooComplex {
+            path,
+            function,
+            complexity,
+            max,
+        }) => {
+            assert_eq!(path, "src/lib.rs");
+            assert_eq!(function, "heavy");
+            assert_eq!(complexity, 17);
+            assert_eq!(max, 15);
+        }
+        other => panic!("expected FunctionTooComplex, got {other:?}"),
     }
 }
 
@@ -257,12 +328,21 @@ fn empty_patch_idempotent_noop_ok() {
 }
 
 #[test]
-fn empty_patch_without_noop_rejected() {
+fn empty_patch_with_usable_text_is_noop_ok() {
     let (_repo, plan, _ws, _baseline) = isolate(&["src/lib.rs"]);
     let captured = manual_capture(b"", &[]);
-    match validate_patch(&captured, &plan, &cfg(), "just text") {
-        Err(PatchError::EmptyPatch) => {}
-        other => panic!("expected EmptyPatch, got {other:?}"),
+    validate_patch(&captured, &plan, &cfg(), "No missing work found.")
+        .expect("usable empty output is an idempotent no-op");
+}
+
+#[test]
+fn empty_patch_with_blocked_output_rejected() {
+    let (_repo, plan, _ws, _baseline) = isolate(&["src/lib.rs"]);
+    let captured = manual_capture(b"", &[]);
+    let blocked = "**Status:** blocked\nMissing required evidence.";
+    match validate_patch(&captured, &plan, &cfg(), blocked) {
+        Err(PatchError::OutputNotUsable { .. }) => {}
+        other => panic!("expected OutputNotUsable, got {other:?}"),
     }
 }
 
@@ -287,16 +367,38 @@ fn symlink_escape_rejected() {
 }
 
 #[test]
-fn output_not_usable_rejected() {
+fn blocked_output_after_patch_is_verification_failure() {
     let (_repo, plan, _ws, _baseline) = isolate(&["src/lib.rs"]);
     std::fs::write(plan.isolated_root.join("src/lib.rs"), "// edited\n").ok();
     let captured = manual_capture(b"@@\n+// edited\n", &["src/lib.rs"]);
-    // A body that self-reports blocked must be rejected by ensure_output_usable.
     let blocked = "**Status:** blocked\nMissing required evidence.";
     match validate_patch(&captured, &plan, &cfg(), blocked) {
-        Err(PatchError::OutputNotUsable { .. }) => {}
-        other => panic!("blocked body must surface OutputNotUsable, got {other:?}"),
+        Err(PatchError::VerificationBlockedAfterPatch { .. }) => {}
+        other => panic!("blocked body after patch must be retained evidence, got {other:?}"),
     }
+}
+
+#[test]
+fn accepted_tests_evidence_after_patch_is_allowed() {
+    let (_repo, plan, _ws, _baseline) = isolate(&["src/lib.rs"]);
+    std::fs::write(plan.isolated_root.join("src/lib.rs"), "// edited\n").ok();
+    let captured = manual_capture(b"@@\n+// edited\n", &["src/lib.rs"]);
+    let body = r#"{
+        "status": "accepted",
+        "changed_files": ["src/lib.rs"],
+        "line_counts": {"src/lib.rs": 42},
+        "residual_gaps": [],
+        "tests": [
+            {
+                "command": "cargo test --bin archon trading_data_provider_tests -- --nocapture",
+                "exit_status": 0,
+                "output": "7 passed; 0 failed"
+            }
+        ]
+    }"#;
+
+    validate_patch(&captured, &plan, &cfg(), body)
+        .expect("accepted implementation output with tests evidence must pass");
 }
 
 #[test]

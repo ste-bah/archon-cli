@@ -63,6 +63,9 @@ impl TuiEventSender {
     /// The queue is hard-bounded. When full, progress events are shed before
     /// state events. If the queue is entirely state events, the oldest event is
     /// dropped as a last-resort RSS safety valve.
+    // The failed event is returned to the caller (mpsc convention), so the
+    // error size is inherent to the contract.
+    #[allow(clippy::result_large_err)]
     pub fn send(&self, event: TuiEvent) -> Result<(), SendError<TuiEvent>> {
         if self.inner.closed.load(Ordering::Acquire) {
             return Err(SendError(event));

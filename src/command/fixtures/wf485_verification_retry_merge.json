@@ -1,0 +1,29 @@
+{
+  "initial": {
+    "status": "needs_review",
+    "outcomes": [
+      {"item_id":"verify-040-tests","status":"accepted","canonical_task_ids":["TASK-TDL-040"]},
+      {"item_id":"verify-040-artifact","status":"failed","canonical_task_ids":["TASK-TDL-040"],"residual_gaps":[{"id":"empty-normalized-artifact","description":"normalized artifact is empty"}]},
+      {"item_id":"verify-050-tests","status":"accepted","canonical_task_ids":["TASK-TDL-050"]},
+      {"item_id":"verify-050-runtime","status":"accepted","canonical_task_ids":["TASK-TDL-050"]},
+      {"item_id":"verify-050-artifact","status":"failed","canonical_task_ids":["TASK-TDL-050"],"residual_gaps":[{"id":"empty-provider-artifact","description":"provider artifact is empty"}]},
+      {"item_id":"verify-060-tests","status":"accepted","canonical_task_ids":["TASK-TDL-060"]},
+      {"item_id":"verify-060-artifact","status":"accepted","canonical_task_ids":["TASK-TDL-060"]},
+      {"item_id":"verify-070-tests","status":"accepted","canonical_task_ids":["TASK-TDL-070"]},
+      {"item_id":"verify-070-artifact","status":"failed","canonical_task_ids":["TASK-TDL-070"]}
+    ]
+  },
+  "retry_items": [
+    {
+      "item_id":"retry-050-artifact",
+      "source_item_id":"verify-050-artifact",
+      "canonical_task_ids":["TASK-TDL-050"]
+    }
+  ],
+  "retry_result": {
+    "status":"accepted",
+    "outcomes":[
+      {"item_id":"retry-wave-retry-050-artifact","source_item_id":"verify-050-artifact","status":"accepted","canonical_task_ids":["TASK-TDL-050"]}
+    ]
+  }
+}

@@ -148,8 +148,7 @@ fn wrapped_line_cursor_position(line: &str, width: usize) -> (usize, usize) {
 fn clamp_input_height(size: Rect, desired_height: u16) -> u16 {
     let terminal_cap = size.height.saturating_sub(5).max(MIN_INPUT_HEIGHT);
     desired_height
-        .max(MIN_INPUT_HEIGHT)
-        .min(MAX_INPUT_HEIGHT)
+        .clamp(MIN_INPUT_HEIGHT, MAX_INPUT_HEIGHT)
         .min(terminal_cap)
 }
 

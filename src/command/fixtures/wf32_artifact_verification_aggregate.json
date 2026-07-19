@@ -1,0 +1,46 @@
+{
+  "status": "accepted",
+  "summary": "artifact-only focused verification completed",
+  "evidence": [
+    {
+      "kind": "artifact",
+      "summary": "required artifact fields matched"
+    }
+  ],
+  "artifacts": [],
+  "commands_run": [],
+  "files_read": [],
+  "files_changed": [],
+  "task_coverage": [
+    {
+      "task_id": "TASK-FIXTURE-030",
+      "status": "accepted",
+      "summary": "artifact contract verified",
+      "evidence": [
+        {
+          "kind": "artifact",
+          "summary": "concrete artifact evidence"
+        }
+      ]
+    }
+  ],
+  "residual_gaps": [],
+  "data": {
+    "outcomes": [
+      {
+        "status": "accepted",
+        "completion_evidence": [
+          {
+            "task_id": "TASK-FIXTURE-030",
+            "status": "accepted",
+            "evidence_kind": "focused_verification",
+            "source_fingerprint": "focused-verification-evidence-v2",
+            "artifact_paths": [".archon/data/provider-capabilities.json"],
+            "command_refs": [],
+            "evidence_refs": ["required artifact fields matched"]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "status": "accepted",
+  "summary": "Verification repair returned retry items with retry_command and completion_evidence_shape.",
+  "data": {
+    "items": [
+      {
+        "canonical_task_ids": ["TASK-TDL-010"],
+        "completion_evidence_shape": {
+          "artifact_paths": ["terminal output"],
+          "command_refs": [
+            "cargo test -p archon-cli-workspace cli_args::tests::trading_data_prd_commands_parse -- --nocapture"
+          ],
+          "evidence_kind": "focused_verification",
+          "task_id": "TASK-TDL-010"
+        },
+        "expected_evidence": [
+          "Cargo test output shows cli_args::tests::trading_data_prd_commands_parse passed with 1 intended test passed and 0 failed."
+        ],
+        "id": "repair-verify-tdl-010-cli-parse-prd-commands",
+        "repair_kind": "retryable_command_shape",
+        "retry_command": "cargo test -p archon-cli-workspace cli_args::tests::trading_data_prd_commands_parse -- --nocapture",
+        "source_item_id": "verify-tdl-010-cli-parse-prd-commands"
+      },
+      {
+        "canonical_task_ids": ["TASK-TDL-010"],
+        "completion_evidence_shape": {
+          "artifact_paths": [".archon/trading-lab/data/registry.json", "terminal output"],
+          "command_refs": [
+            "cargo test -p archon-cli-workspace command::trading_data::tests::trading_data_list_json_dispatches_to_registry -- --nocapture"
+          ],
+          "evidence_kind": "focused_verification",
+          "task_id": "TASK-TDL-010"
+        },
+        "expected_evidence": [
+          "Cargo test output shows command::trading_data::tests::trading_data_list_json_dispatches_to_registry passed with 1 intended test passed and 0 failed."
+        ],
+        "id": "repair-verify-tdl-010-cli-list-dispatch",
+        "repair_kind": "target_selection_and_evidence_shape",
+        "retry_command": "cargo test -p archon-cli-workspace command::trading_data::tests::trading_data_list_json_dispatches_to_registry -- --nocapture",
+        "source_item_id": "verify-tdl-010-cli-list-dispatch"
+      }
+    ]
+  }
+}

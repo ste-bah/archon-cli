@@ -302,6 +302,7 @@ fn subagent_manager_register_before_run_complete_after() {
         run_in_background: false,
         cwd: None,
         isolation: None,
+        provider_env: None,
     };
 
     // Register returns ID
@@ -338,6 +339,7 @@ fn subagent_manager_max_concurrent_enforced() {
         run_in_background: false,
         cwd: None,
         isolation: None,
+        provider_env: None,
     };
 
     let id1 = mgr.register(req()).expect("first register ok");

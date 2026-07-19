@@ -1,0 +1,48 @@
+{
+  "status": "failed",
+  "summary": "write-capable fanout failed with branch safety failures",
+  "residual_gaps": [
+    {
+      "id": "write_fanout_failed_review_remediation_wave",
+      "description": "write-capable fanout hit terminal branch safety/execution failure",
+      "severity": "blocking"
+    }
+  ],
+  "data": {
+    "items": [
+      {
+        "item_id": "review-remediation-wave-1-remediation-a",
+        "status": "failed",
+        "summary": "artifact-only branch lost ownership metadata",
+        "data": {
+          "failure_kind": "safety",
+          "branch_error_from_runtime": true
+        },
+        "residual_gaps": [
+          {
+            "id": "invalid_write_branch_output_a",
+            "description": "declares no target ownership",
+            "severity": "blocking"
+          }
+        ]
+      },
+      {
+        "item_id": "review-remediation-wave-1-remediation-b",
+        "status": "accepted",
+        "summary": "sibling remediation accepted",
+        "evidence": [
+          {
+            "kind": "implementation",
+            "summary": "created review remediation artifact"
+          }
+        ],
+        "artifacts": [
+          {
+            "id": "artifact-b",
+            "path": ".archon/workflows/wf-test/artifacts/review.json"
+          }
+        ]
+      }
+    ]
+  }
+}

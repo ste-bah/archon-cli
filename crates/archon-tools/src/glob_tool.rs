@@ -77,7 +77,7 @@ impl Tool for GlobTool {
         }
 
         // Sort by mtime, newest first
-        files.sort_by(|a, b| b.1.cmp(&a.1));
+        files.sort_by_key(|entry| std::cmp::Reverse(entry.1));
 
         if files.is_empty() {
             return ToolResult::success("No files matched the pattern.");

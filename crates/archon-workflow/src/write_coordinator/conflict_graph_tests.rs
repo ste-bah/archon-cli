@@ -16,6 +16,7 @@ fn plan(id: &str, keys: &[ResourceKey], source: TargetFilesSource) -> WritePlan 
         canonical_root: PathBuf::from("/repo"),
         isolated_root: PathBuf::from("/repo/.archon/wc").join(id),
         target_files: vec![NormalizedPathStub::path(id)],
+        target_dir_scopes: Vec::new(),
         target_files_source: source,
         read_context_files: vec![],
         verify_inputs: vec![],

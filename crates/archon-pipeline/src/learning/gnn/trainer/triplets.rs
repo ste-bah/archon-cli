@@ -18,7 +18,7 @@ impl GnnTrainer {
 
         let (l1, l2, l3) = enhancer.get_weights();
         let mut total_loss = 0.0_f32;
-        let mut accumulated_grads: Option<Vec<(Vec<Vec<f32>>, Vec<f32>)>> = None;
+        let mut accumulated_grads: Option<super::gradients::LayerGradList> = None;
 
         for triplet in &batch.triplets {
             let anchor = enhancer.enhance(&triplet.anchor, None, None, true);

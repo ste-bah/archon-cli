@@ -1,0 +1,134 @@
+{
+  "verification": {
+    "status": "needs_review",
+    "outcomes": [
+      {
+        "item_id": "verification-wave-4-cli-check-1",
+        "status": "failed",
+        "canonical_task_ids": ["TASK-TDL-010"],
+        "result": {
+          "residual_gaps": [
+            {
+              "id": "missing-provider-only-parse-test-match",
+              "description": "The requested test filter matched zero tests; the existing candidate is trading_data_validation_and_provider_commands_parse."
+            }
+          ],
+          "data": {
+            "verification_failure_class": "retryable_verification_issue",
+            "pass_fail_count": {
+              "intended_target_failed": 0,
+              "intended_target_missing": 1
+            },
+            "matched_test_check_names": {
+              "failed": [],
+              "missing": ["trading_data_provider_commands_parse"],
+              "passed": []
+            }
+          }
+        }
+      },
+      {
+        "item_id": "verification-wave-4-cli-check-3",
+        "status": "failed",
+        "canonical_task_ids": ["TASK-TDL-010"],
+        "result": {
+          "residual_gaps": [
+            {
+              "id": "focused-test-filter-no-match",
+              "description": "The stale filter matched zero tests; repository search found trading_data_validation_and_provider_commands_parse."
+            }
+          ],
+          "data": {
+            "verification_failure_class": "focused_test_filter_matched_zero_tests"
+          }
+        }
+      },
+      {
+        "item_id": "verification-wave-4-cli-check-5",
+        "status": "failed",
+        "canonical_task_ids": ["TASK-TDL-010"],
+        "result": {
+          "residual_gaps": [
+            {
+              "id": "gap-no-focused-test-match",
+              "description": "No test matched the stale filter."
+            }
+          ],
+          "data": {
+            "verification_failure_class": "focused_test_filter_matched_zero_tests"
+          }
+        }
+      },
+      {
+        "item_id": "verification-wave-4-cli-check-7",
+        "status": "failed",
+        "canonical_task_ids": ["TASK-TDL-010"],
+        "result": {
+          "residual_gaps": [
+            {
+              "id": "gap-no-matching-focused-test",
+              "description": "The requested focused test filter ran zero tests."
+            }
+          ],
+          "data": {
+            "verification_failure_class": "focused_test_filter_matched_zero_tests"
+          }
+        }
+      },
+      {
+        "item_id": "verification-wave-4-cli-check-2",
+        "status": "accepted",
+        "canonical_task_ids": ["TASK-TDL-010"],
+        "result": {
+          "summary": "The existing corrected parse test passed."
+        }
+      }
+    ]
+  },
+  "triage": {
+    "status": "accepted",
+    "data": {
+      "implementation_failures": [],
+      "retry_items": [],
+      "superseded_items": [
+        {
+          "item_id": "verification-wave-4-cli-check-3",
+          "source_item_id": "verify-cli",
+          "canonical_task_ids": ["TASK-TDL-010"],
+          "classification": "retry_resolved_by_sibling_evidence",
+          "source_residual_gap_ids": ["focused-test-filter-no-match"],
+          "failed_predicate": "The stale filter matched zero tests.",
+          "focused_verification": ["cargo test trading_data_provider_commands_parse"],
+          "expected_evidence": ["An existing exact test name runs and passes."]
+        },
+        {
+          "item_id": "verification-wave-4-cli-check-5",
+          "source_item_id": "verify-cli",
+          "canonical_task_ids": ["TASK-TDL-010"],
+          "classification": "retry_resolved_by_sibling_evidence",
+          "source_residual_gap_ids": ["gap-no-focused-test-match"],
+          "failed_predicate": "No test matched the stale filter.",
+          "focused_verification": ["cargo test trading_data_provider_commands_parse"],
+          "expected_evidence": ["An existing exact test name runs and passes."]
+        },
+        {
+          "item_id": "verification-wave-4-cli-check-7",
+          "source_item_id": "verify-cli",
+          "canonical_task_ids": ["TASK-TDL-010"],
+          "classification": "retry_resolved_by_sibling_evidence",
+          "source_residual_gap_ids": ["gap-no-matching-focused-test"],
+          "failed_predicate": "The requested focused test filter ran zero tests.",
+          "focused_verification": ["cargo test trading_data_provider_commands_parse"],
+          "expected_evidence": ["An existing exact test name runs and passes."]
+        }
+      ],
+      "terminal_blockers": []
+    }
+  },
+  "remediation_inventory": {
+    "status": "accepted",
+    "data": {
+      "items": []
+    }
+  }
+}

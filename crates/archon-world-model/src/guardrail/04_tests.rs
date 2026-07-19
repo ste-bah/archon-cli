@@ -93,10 +93,12 @@ mod tests {
 
     #[test]
     fn finalization_requires_passed_verification_when_blocking() {
-        let mut decision = WorldGuardrailDecision::default();
-        decision.mode = WorldGuardrailMode::Guarded;
-        decision.allowed_to_finalize = false;
-        decision.required_actions = vec![GuardrailRequiredAction::RunTests];
+        let decision = WorldGuardrailDecision {
+            mode: WorldGuardrailMode::Guarded,
+            allowed_to_finalize: false,
+            required_actions: vec![GuardrailRequiredAction::RunTests],
+            ..Default::default()
+        };
 
         assert!(!finalization_allowed(&decision, &[]));
         assert!(!finalization_allowed(
@@ -119,10 +121,12 @@ mod tests {
 
     #[test]
     fn finalization_allows_explicitly_skipped_verification() {
-        let mut decision = WorldGuardrailDecision::default();
-        decision.mode = WorldGuardrailMode::Guarded;
-        decision.allowed_to_finalize = false;
-        decision.required_actions = vec![GuardrailRequiredAction::RunTests];
+        let decision = WorldGuardrailDecision {
+            mode: WorldGuardrailMode::Guarded,
+            allowed_to_finalize: false,
+            required_actions: vec![GuardrailRequiredAction::RunTests],
+            ..Default::default()
+        };
 
         assert!(finalization_allowed(
             &decision,
@@ -138,10 +142,12 @@ mod tests {
 
     #[test]
     fn finalization_rejects_bare_skipped_verification() {
-        let mut decision = WorldGuardrailDecision::default();
-        decision.mode = WorldGuardrailMode::Guarded;
-        decision.allowed_to_finalize = false;
-        decision.required_actions = vec![GuardrailRequiredAction::RunTests];
+        let decision = WorldGuardrailDecision {
+            mode: WorldGuardrailMode::Guarded,
+            allowed_to_finalize: false,
+            required_actions: vec![GuardrailRequiredAction::RunTests],
+            ..Default::default()
+        };
 
         assert!(!finalization_allowed(
             &decision,
@@ -156,10 +162,12 @@ mod tests {
 
     #[test]
     fn finalization_accepts_explicit_verifier_record() {
-        let mut decision = WorldGuardrailDecision::default();
-        decision.mode = WorldGuardrailMode::Guarded;
-        decision.allowed_to_finalize = false;
-        decision.required_actions = vec![GuardrailRequiredAction::RunVerifier];
+        let decision = WorldGuardrailDecision {
+            mode: WorldGuardrailMode::Guarded,
+            allowed_to_finalize: false,
+            required_actions: vec![GuardrailRequiredAction::RunVerifier],
+            ..Default::default()
+        };
 
         assert!(finalization_allowed(
             &decision,
@@ -175,9 +183,11 @@ mod tests {
 
     #[test]
     fn finalization_uses_latest_outcome_for_each_required_kind() {
-        let mut decision = WorldGuardrailDecision::default();
-        decision.mode = WorldGuardrailMode::Guarded;
-        decision.allowed_to_finalize = false;
+        let mut decision = WorldGuardrailDecision {
+            mode: WorldGuardrailMode::Guarded,
+            allowed_to_finalize: false,
+            ..Default::default()
+        };
         decision.required_actions = vec![
             GuardrailRequiredAction::RunTests,
             GuardrailRequiredAction::RunBuild,

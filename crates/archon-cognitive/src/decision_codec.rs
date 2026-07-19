@@ -42,10 +42,10 @@ pub(crate) fn query_script(filter: &str) -> String {
 }
 
 pub(crate) fn rows_to_decisions(rows: NamedRows) -> Result<Vec<DecisionRecord>, CognitiveError> {
-    rows.rows.iter().map(row_to_decision).collect()
+    rows.rows.iter().map(|row| row_to_decision(row)).collect()
 }
 
-pub(crate) fn row_to_decision(row: &Vec<DataValue>) -> Result<DecisionRecord, CognitiveError> {
+pub(crate) fn row_to_decision(row: &[DataValue]) -> Result<DecisionRecord, CognitiveError> {
     Ok(DecisionRecord {
         decision_id: str_col(row, 0),
         situation_id: str_col(row, 1),

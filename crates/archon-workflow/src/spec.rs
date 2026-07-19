@@ -3,7 +3,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{WorkflowError, WorkflowResult};
-use crate::generated::{normalize_generated_spec, sanitize_generated_value};
 use crate::spec_deser::{
     deserialize_learning_hooks, deserialize_permissions, deserialize_provider_tiers,
     deserialize_quality_gates,
@@ -87,6 +86,8 @@ pub struct StageSpec {
     pub max_parallelism: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item_kind: Option<StageKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
     #[serde(default, flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, serde_json::Value>,
 }
@@ -128,18 +129,6 @@ fn default_max_agents() -> u32 {
 impl WorkflowSpec {
     pub fn from_yaml(input: &str) -> WorkflowResult<Self> {
         let spec: Self = serde_yaml_ng::from_str(input)?;
-        spec.validate()?;
-        Ok(spec)
-    }
-
-    pub fn from_generated_yaml(input: &str, fallback_task: &str) -> WorkflowResult<Self> {
-        let mut value: serde_json::Value = serde_yaml_ng::from_str(input)?;
-        sanitize_generated_value(&mut value);
-        let mut spec: Self = serde_json::from_value(value)?;
-        if spec.task.trim().is_empty() {
-            spec.task = fallback_task.to_string();
-        }
-        normalize_generated_spec(&mut spec);
         spec.validate()?;
         Ok(spec)
     }
@@ -284,6 +273,15 @@ impl WorkflowSpec {
             if let Some(error) = crate::spec_inference::missing_item_kind_error(stage) {
                 return Err(WorkflowError::SpecInvalid(error));
             }
+            if let Some(filter) = stage.filter.as_deref() {
+                if stage.kind != StageKind::Fanout {
+                    return Err(WorkflowError::SpecInvalid(format!(
+                        "stage '{}' filter is only supported on fanout stages",
+                        stage.id
+                    )));
+                }
+                crate::item_filter::validate_filter(&stage.id, filter)?;
+            }
             match stage.kind {
                 StageKind::Agent => {}
                 StageKind::Fanout => {
@@ -300,6 +298,7 @@ impl WorkflowSpec {
                             stage.id
                         )));
                     }
+                    crate::spec_work_units::validate_inline_implementation_work_units(stage)?;
                 }
                 StageKind::Reduce => {}
                 StageKind::Condition => require(stage, stage.condition.as_deref(), "condition")?,
@@ -311,6 +310,7 @@ impl WorkflowSpec {
                             stage.id
                         )));
                     }
+                    crate::spec_work_units::validate_direct_implementation_work_units(stage)?;
                 }
                 StageKind::Checkpoint | StageKind::QualityGate | StageKind::HumanGate => {}
             }

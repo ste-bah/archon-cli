@@ -49,6 +49,20 @@ impl ToolRegistry {
         self.tools.get(name).cloned()
     }
 
+    pub fn attach_provider_env_to_bash(
+        &mut self,
+        provider_env: archon_tools::provider_env::ProviderEnvSource,
+    ) -> bool {
+        let Some(bash) = self.tools.get("Bash") else {
+            return false;
+        };
+        let Some(configured) = bash.with_provider_env_source(provider_env) else {
+            return false;
+        };
+        self.replace(configured);
+        true
+    }
+
     /// Get all tool names.
     pub fn tool_names(&self) -> Vec<&str> {
         self.tools.keys().map(|s| s.as_str()).collect()
@@ -82,7 +96,7 @@ impl ToolRegistry {
     /// Get tool definitions for API request (JSON schemas).
     pub fn tool_definitions(&self) -> Vec<serde_json::Value> {
         let mut tools: Vec<_> = self.tools.iter().collect();
-        tools.sort_by(|(left, _), (right, _)| left.cmp(right));
+        tools.sort_by_key(|(left, _)| *left);
         tools
             .into_iter()
             .map(|(_, tool)| {
@@ -396,6 +410,7 @@ pub fn create_default_registry(
 mod tests {
     use super::*;
     use archon_observability::{AgentActivityKind, InMemoryActivitySink};
+    use archon_tools::provider_env::{ProviderEnvPolicy, ProviderEnvSource};
     use archon_tools::tool::{AgentMode, PermissionLevel};
 
     struct ReplaceTestTool(&'static str);
@@ -435,6 +450,37 @@ mod tests {
             .find(|tool| tool["name"] == "ReplaceTest")
             .expect("replacement tool should be registered");
         assert_eq!(definition["description"], "second");
+    }
+
+    #[test]
+    fn provider_env_overlay_preserves_registered_bash_policy() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(archon_tools::bash::BashTool {
+            timeout_secs: 17,
+            max_output_bytes: 23,
+            safe_commands: vec!["echo safe".to_string()],
+            risky_commands: vec!["echo risky".to_string()],
+            dangerous_commands: vec!["echo dangerous".to_string()],
+            provider_env: None,
+        }));
+        let source = ProviderEnvSource::Policy(ProviderEnvPolicy::new(vec![
+            "ARCHON_TEST_PROVIDER_KEY".to_string(),
+        ]));
+
+        assert!(registry.attach_provider_env_to_bash(source));
+        let bash = registry.get("Bash").expect("Bash remains registered");
+        assert_eq!(
+            bash.permission_level(&serde_json::json!({"command": "echo safe value"})),
+            PermissionLevel::Safe
+        );
+        assert_eq!(
+            bash.permission_level(&serde_json::json!({"command": "echo risky value"})),
+            PermissionLevel::Risky
+        );
+        assert_eq!(
+            bash.permission_level(&serde_json::json!({"command": "echo dangerous value"})),
+            PermissionLevel::Dangerous
+        );
     }
 
     #[test]

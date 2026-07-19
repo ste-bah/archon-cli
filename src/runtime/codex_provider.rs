@@ -39,7 +39,13 @@ pub(super) async fn build_direct_codex_provider(
     surface: &str,
 ) -> Result<Arc<dyn LlmProvider>> {
     let codex_cfg = crate::command::auth::codex_config_from_core(&config.providers.openai_codex);
-    let http = reqwest::Client::new();
+    // Workflow subagents are long-lived and issue many streamed requests. Do
+    // not return an SSE connection to an idle pool after a cancelled/stalled
+    // stream; the next branch must establish a fresh transport.
+    let http = reqwest::Client::builder()
+        .pool_max_idle_per_host(0)
+        .build()
+        .context("failed to construct direct Codex HTTP client")?;
     let resolution = archon_llm::providers::codex::spoof::resolve(&codex_cfg, &http)
         .await
         .with_context(|| format!("failed to resolve Codex spoof identity for {surface}"))?;

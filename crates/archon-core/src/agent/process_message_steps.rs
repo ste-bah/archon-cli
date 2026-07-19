@@ -15,6 +15,7 @@ pub(super) struct PreparedTurnRequest {
     pub(super) context_window: u64,
 }
 
+#[derive(Default)]
 pub(super) struct StreamRound {
     pub(super) text_content: String,
     pub(super) thinking_content: String,
@@ -327,17 +328,5 @@ impl Agent {
             }));
         }
         drafts
-    }
-}
-
-impl Default for StreamRound {
-    fn default() -> Self {
-        Self {
-            text_content: String::new(),
-            thinking_content: String::new(),
-            thinking_signature: String::new(),
-            pending_tools: Vec::new(),
-            usage_acc: UsageAccumulator::default(),
-        }
     }
 }

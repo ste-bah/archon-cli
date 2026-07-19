@@ -589,12 +589,14 @@ mod tests {
              got: {msg}"
         );
 
-        // No TextDelta emitted on the Err path — the handler short-
-        // circuits before try_send.
+        // The handler emits no TextDelta, but the dispatcher makes the
+        // propagated error visible and completes the slash-command lifecycle.
         let events = drain(&mut rx);
-        assert!(
-            events.is_empty(),
-            "Err path must not emit any TuiEvent, got: {events:?}"
-        );
+        assert_eq!(events.len(), 2, "unexpected dispatcher events: {events:?}");
+        match &events[0] {
+            TuiEvent::Error(error) => assert_eq!(error, &format!("Command /doctor failed: {msg}")),
+            other => panic!("expected dispatcher error event, got {other:?}"),
+        }
+        assert!(matches!(events[1], TuiEvent::SlashCommandComplete));
     }
 }

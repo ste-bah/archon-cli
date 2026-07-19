@@ -1,0 +1,35 @@
+{
+  "source_data": [
+    {
+      "artifact_requirements": [".archon/trading-lab/strategies/AHDM-v1/backtests"],
+      "canonical_task_ids": ["TASK-TDL-130"],
+      "dependency_ids": ["TASK-TDL-090", "TASK-TDL-110", "TASK-TDL-120"],
+      "failure_evidence": ["required native dataset has no replayable backtest"],
+      "failure_status": "failed",
+      "focused_verification": ["verify registered native dataset backtest coverage"],
+      "item_id": "rem-verification-wave-10-verify-TASK-TDL-130-registry-strategy-coverage-semantic",
+      "required_fix": "regenerate backtests from the registered native dataset",
+      "source_item_id": "verification-wave-10-verify-TASK-TDL-130-registry-strategy-coverage",
+      "target_files": ["src/command/trading_backtest.rs"],
+      "verification_requirements": ["registered native dataset has replayable evidence"]
+    },
+    {
+      "artifact_requirements": [".archon/trading-lab/strategies/AHDM-v1/rule-manifest.json"],
+      "canonical_task_ids": ["TASK-TDL-130"],
+      "dependency_ids": ["TASK-TDL-090", "TASK-TDL-110", "TASK-TDL-120"],
+      "failure_evidence": ["backtest rule-manifest hash is stale"],
+      "failure_status": "failed",
+      "focused_verification": ["verify backtest and shared rule-manifest parity"],
+      "item_id": "rem-verification-wave-10-verify-TASK-TDL-130-rule-manifest-parity-semantic",
+      "required_fix": "regenerate backtest evidence with the current rule manifest",
+      "source_item_id": "verification-wave-10-verify-TASK-TDL-130-rule-manifest-parity",
+      "target_files": ["src/command/trading_backtest.rs"],
+      "verification_requirements": ["backtest config and report match the shared rule manifest"]
+    }
+  ],
+  "rejected": {
+    "data": {
+      "source_metadata_invalid": "source graph canonical task 'TASK-TDL-130' is assigned by multiple source items"
+    }
+  }
+}

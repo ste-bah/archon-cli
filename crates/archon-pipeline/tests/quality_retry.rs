@@ -42,6 +42,8 @@ fn make_agent(key: &str, critical: bool, threshold: f64) -> AgentInfo {
     }
 }
 
+type ScoringFuture = Pin<Box<dyn Future<Output = Result<(String, QualityScore)>>>>;
+
 /// Creates a closure that returns predetermined scores per attempt.
 ///
 /// Each call increments the counter and returns the score at that index.
@@ -49,7 +51,7 @@ fn make_agent(key: &str, critical: bool, threshold: f64) -> AgentInfo {
 fn make_scoring_agent(
     scores: Vec<f64>,
     counter: Arc<AtomicU32>,
-) -> impl Fn(String) -> Pin<Box<dyn Future<Output = Result<(String, QualityScore)>>>> {
+) -> impl Fn(String) -> ScoringFuture {
     move |_feedback| {
         let attempt = counter.fetch_add(1, Ordering::SeqCst) as usize;
         let score = scores.get(attempt).copied().unwrap_or(0.0);
@@ -71,7 +73,7 @@ fn make_scoring_agent_with_feedback_capture(
     scores: Vec<f64>,
     counter: Arc<AtomicU32>,
     feedbacks: Arc<std::sync::Mutex<Vec<String>>>,
-) -> impl Fn(String) -> Pin<Box<dyn Future<Output = Result<(String, QualityScore)>>>> {
+) -> impl Fn(String) -> ScoringFuture {
     move |feedback| {
         let attempt = counter.fetch_add(1, Ordering::SeqCst) as usize;
         let score = scores.get(attempt).copied().unwrap_or(0.0);

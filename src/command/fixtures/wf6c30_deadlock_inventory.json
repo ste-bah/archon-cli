@@ -1,0 +1,196 @@
+{
+  "items": [
+    {
+      "acceptance_criteria": [
+        "Registry v2 and v1-readable migration are acceptance-proven, idempotent, and fail closed for unknown native/production fields.",
+        "Registered dataset versions point only to complete artifact contracts: metadata.json, validation.json, manifest.json, ohlcv.jsonl, raw response/request/redacted headers/provider notes.",
+        "Validation reports fail production eligibility for timestamp, duplicate, OHLC, volume, metadata, checksum, or missing artifact errors.",
+        "Backtest gates refuse missing, invalid, non-native, degraded, metadata-incomplete, checksum-mismatched, or loose-file datasets; diagnostic override remains exploratory and cannot promote.",
+        "Owned CLI commands parse and dispatch with --target support; TUI aliases are discovered and tested rather than assumed."
+      ],
+      "artifact_requirements": [
+        ".archon/trading-lab/data/registry.json must be v2 after migration.",
+        "Each healthy dataset version must contain metadata.json, validation.json, manifest.json, ohlcv.jsonl, raw/response.*, raw/request.json, raw/headers.redacted.json, and raw/provider-notes.md.",
+        "Validation reports must be referenced from registry records.",
+        "Diagnostic backtest reports must list every overridden issue and mark promotion_eligible=false."
+      ],
+      "canonical_task_ids": [
+        "TASK-TDL-010",
+        "TASK-TDL-020",
+        "TASK-TDL-090"
+      ],
+      "dependency_ids": [
+        "TASK-TDL-001",
+        "TASK-TDL-010",
+        "TASK-TDL-020",
+        "TASK-TDL-080"
+      ],
+      "focused_verification": [
+        "Run focused registry migration/idempotency tests.",
+        "Run focused artifact-contract and validation fixture tests for invalid timestamps, duplicates, bad OHLC, missing metadata, and volume failures.",
+        "Run focused backtest data gate tests for invalid/degraded/non-native/checksum/loose path refusal.",
+        "Run CLI parse tests for list --json, export, validate, and backtest diagnostic/promotion paths.",
+        "Run TUI slash-alias routing tests for owned data commands."
+      ],
+      "item_id": "TDL-STORAGE-VALIDATION-BACKTEST-GATES",
+      "target_files": [
+        "/Volumes/Externalwork/archon-cli/archon-cli/crates/archon-trading/src/data_lake.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/crates/archon-trading/src/data_store.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/crates/archon-trading/src/data_store/validation.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/crates/archon-trading/src/data_store/gates.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/src/command/trading_data.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/src/command/trading_backtest.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/src/cli_args/trading_market_actions.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/src/cli_args/tests.rs"
+      ],
+      "work_type": "implementation"
+    },
+    {
+      "acceptance_criteria": [
+        "Provider capability checks persist redacted-safe can_fetch=false results for missing credentials, blocks, unsupported intervals, 401/403/404, and provider errors.",
+        "TradingView fetch uses exact native timeframes only, records MCP/chart limitations honestly, persists full artifacts on success, and writes no healthy registry entry on unavailable/partial results.",
+        "OpenBB/Polygon detects credential presence before full fetch, never mislabels provider identity, records adjusted/unadjusted/session metadata, and redacts secrets.",
+        "Stooq exact-native support either ingests direct native data with full artifacts or records provider_blocked_or_unavailable; no bot bypass or resampling path may create production-eligible data.",
+        "yfinance fallback is always degraded/non-promotion, writes fallback metadata when successful, and cannot satisfy promotion gates even under diagnostic override.",
+        "Snapshot artifacts include provider timestamp/captured_at metadata and stale-after-5-min fail-closed classification.",
+        "Owned CLI and TUI provider command paths parse, dispatch, and test all required mandatory flags."
+      ],
+      "artifact_requirements": [
+        ".archon/trading-lab/data/provider-capabilities.json with checked_at, unavailable reasons, native_interval, and fail-closed can_fetch state.",
+        "Successful provider-native dataset versions must satisfy TASK-TDL-010 artifact contract.",
+        "Snapshots must be stored under .archon/trading-lab/data/snapshots/<provider>/<symbol>/ with captured timestamp metadata.",
+        "Unavailable provider outcomes must be stored/reported as capability, coverage, or residual-gap records, not healthy dataset registry entries."
+      ],
+      "canonical_task_ids": [
+        "TASK-TDL-030",
+        "TASK-TDL-040",
+        "TASK-TDL-050",
+        "TASK-TDL-060",
+        "TASK-TDL-070"
+      ],
+      "dependency_ids": [
+        "TASK-TDL-020",
+        "TASK-TDL-030"
+      ],
+      "focused_verification": [
+        "Run provider capability persistence/redaction tests.",
+        "Run mocked TradingView MCP capability/native ingest/snapshot/staleness tests.",
+        "Run OpenBB/Polygon missing-credential, redaction, and fixture normalization tests.",
+        "Run Stooq CSV fixture, non-data HTML/block fixture, and native interval refusal tests.",
+        "Run yfinance fallback metadata, interval limitation, and promotion refusal tests.",
+        "Run CLI parse and TUI alias tests for fetch-native and snapshot provider paths."
+      ],
+      "item_id": "TDL-PROVIDER-NATIVE-INGEST-AND-CAPABILITY",
+      "target_files": [
+        "/Volumes/Externalwork/archon-cli/archon-cli/crates/archon-trading/src/data_lake.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/crates/archon-trading/src/data_store.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/crates/archon-trading/src/data_store/provider_methods.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/src/command/trading_data_provider.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/src/command/trading_data_provider_openbb.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/crates/archon-trading/src/adapters/openbb.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/src/cli_args/trading_market_actions.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/src/cli_args/tests.rs"
+      ],
+      "work_type": "implementation"
+    },
+    {
+      "acceptance_criteria": [
+        "Coverage matrix covers ES, NQ, SPY, QQQ, BTCUSDT, and ETHUSDT across 1W, 1D, 240, 60, and 15.",
+        "Coverage JSON schema matches PRD §23 and text report is human-readable.",
+        "Provider selection order and freshness defaults are applied; snapshots older than 5 minutes are stale.",
+        "Gaps include exact reasons and are not treated as pass conditions.",
+        "--target is supported consistently.",
+        "/trading data coverage ... has TUI parity and tested routing."
+      ],
+      "artifact_requirements": [
+        ".archon/trading-lab/data/coverage/<run-or-timestamp>/coverage.json or equivalent durable JSON report path must exist.",
+        "Readable coverage report artifact must exist or be emitted with an output path when requested.",
+        "Coverage gaps must list canonical instrument, timeframe, selected provider/fallback, native status, row count, quality status, freshness, and reason."
+      ],
+      "canonical_task_ids": [
+        "TASK-TDL-080"
+      ],
+      "dependency_ids": [
+        "TASK-TDL-040",
+        "TASK-TDL-050",
+        "TASK-TDL-060",
+        "TASK-TDL-070"
+      ],
+      "focused_verification": [
+        "Run coverage matrix generation test for the full trading-core-v1 universe/timeframe grid.",
+        "Run provider selection order and freshness classification tests.",
+        "Run JSON/text output tests.",
+        "Run CLI parse test for data coverage --universe trading-core-v1 --json.",
+        "Run TUI /trading data coverage alias routing test."
+      ],
+      "item_id": "TDL-COVERAGE-MATRIX-ACCEPTANCE",
+      "target_files": [
+        "/Volumes/Externalwork/archon-cli/archon-cli/crates/archon-trading/src/data_store/coverage.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/crates/archon-trading/src/data_store/coverage_methods.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/crates/archon-trading/src/data_store.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/src/command/trading_data_provider.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/src/command/trading_data.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/src/cli_args/trading_market_actions.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/src/cli_args/tests.rs"
+      ],
+      "work_type": "implementation"
+    },
+    {
+      "acceptance_criteria": [
+        "AHDM evidence inventory is generated only after coverage/backtest gate availability is checked; incomplete coverage records gaps and blocks promotion-oriented strategy work.",
+        "Every rule in citations.json is cited or explicitly hypothesis; hypotheses are barred from promotion.",
+        "StrategySpec references registered dataset ids/versions, not loose files, and includes exact PRD weights, evidence requirements, thresholds, entry models, sizing/risk, promotion gates, and residual gaps.",
+        "Pine indicator/strategy artifacts are generated from the shared rule manifest; Pine results remain exploratory only; unavailable compile tooling creates a fail-closed residual gap.",
+        "AHDM native backtest consumes registered validated datasets and the shared manifest, writes required replay artifacts, and refuses invalid/non-native/degraded data unless diagnostic-only.",
+        "Adversarial review and paper-trading readiness reports check all PRD done-definition items; failed gates block readiness promotion; no live trading or high-probability claim is made."
+      ],
+      "artifact_requirements": [
+        ".archon/trading-lab/strategies/AHDM-v1/evidence/kb-rule-inventory.md",
+        ".archon/trading-lab/strategies/AHDM-v1/evidence/citations.json",
+        ".archon/trading-lab/strategies/AHDM-v1/strategy-spec.json",
+        ".archon/trading-lab/strategies/AHDM-v1/pine/AHDM-v1-indicator.pine",
+        ".archon/trading-lab/strategies/AHDM-v1/pine/AHDM-v1-strategy.pine",
+        ".archon/trading-lab/strategies/AHDM-v1/pine/compile-report.json",
+        ".archon/trading-lab/strategies/AHDM-v1/backtests/<run-id>/config.json",
+        ".archon/trading-lab/strategies/AHDM-v1/backtests/<run-id>/report.json",
+        ".archon/trading-lab/strategies/AHDM-v1/backtests/<run-id>/trades.jsonl",
+        ".archon/trading-lab/strategies/AHDM-v1/backtests/<run-id>/equity_curve.jsonl",
+        ".archon/trading-lab/strategies/AHDM-v1/backtests/<run-id>/adversarial-review.md",
+        ".archon/trading-lab/strategies/AHDM-v1/readiness/paper-trading-readiness.md"
+      ],
+      "canonical_task_ids": [
+        "TASK-TDL-100",
+        "TASK-TDL-110",
+        "TASK-TDL-120",
+        "TASK-TDL-130",
+        "TASK-TDL-140"
+      ],
+      "dependency_ids": [
+        "TASK-TDL-080",
+        "TASK-TDL-090",
+        "TASK-TDL-100",
+        "TASK-TDL-110",
+        "TASK-TDL-120",
+        "TASK-TDL-130"
+      ],
+      "focused_verification": [
+        "Run citation artifact shape and rule inventory validation tests.",
+        "Run StrategySpec schema, dataset reference, weight sum, entry model, no-trade threshold, and risk sizing tests.",
+        "Run Pine artifact generation and static structure tests; run compile/check only if tooling exists and record fail-closed otherwise.",
+        "Run AHDM native backtest happy-path fixture, refusal, replayability, costs/slippage, and shared manifest parity tests.",
+        "Run readiness/adversarial artifact path and residual gap schema tests."
+      ],
+      "item_id": "AHDM-EVIDENCE-SPEC-PINE-BACKTEST-READINESS",
+      "target_files": [
+        "/Volumes/Externalwork/archon-cli/archon-cli/crates/archon-trading/src/data_store/ahdm.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/crates/archon-trading/src/data_store/ahdm_methods.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/crates/archon-trading/src/data_store.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/src/command/trading_backtest.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/src/command/trading_spec.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/src/command/trading_workflow.rs",
+        "/Volumes/Externalwork/archon-cli/archon-cli/src/cli_args/trading_market_actions.rs"
+      ],
+      "work_type": "implementation"
+    }
+  ]
+}

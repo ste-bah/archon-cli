@@ -52,20 +52,20 @@ impl OpenShellConfig {
         if self.binary.contains('\0') {
             return Err("sandbox.openshell.binary must not contain NUL".into());
         }
-        if let Some(gateway) = self.gateway.as_deref() {
-            if gateway.contains('\0') {
-                return Err("sandbox.openshell.gateway must not contain NUL".into());
-            }
+        if let Some(gateway) = self.gateway.as_deref()
+            && gateway.contains('\0')
+        {
+            return Err("sandbox.openshell.gateway must not contain NUL".into());
         }
-        if let Some(workdir) = self.remote_workdir.as_deref() {
-            if workdir.contains('\0') {
-                return Err("sandbox.openshell.remote_workdir must not contain NUL".into());
-            }
+        if let Some(workdir) = self.remote_workdir.as_deref()
+            && workdir.contains('\0')
+        {
+            return Err("sandbox.openshell.remote_workdir must not contain NUL".into());
         }
-        if let Some(policy) = self.policy.as_deref() {
-            if policy.contains('\0') {
-                return Err("sandbox.openshell.policy must not contain NUL".into());
-            }
+        if let Some(policy) = self.policy.as_deref()
+            && policy.contains('\0')
+        {
+            return Err("sandbox.openshell.policy must not contain NUL".into());
         }
         match self.workspace_mode.as_str() {
             "mirror" | "remote" | "upload" => Ok(()),
@@ -356,10 +356,10 @@ fn apply_openshell_env_policy(cmd: &mut TokioCommand, config: &OpenShellConfig) 
     ] {
         cmd.env_remove(name);
     }
-    if let Some(gateway) = config.gateway.as_deref().map(str::trim) {
-        if !gateway.is_empty() {
-            cmd.env("OPENSHELL_GATEWAY", gateway);
-        }
+    if let Some(gateway) = config.gateway.as_deref().map(str::trim)
+        && !gateway.is_empty()
+    {
+        cmd.env("OPENSHELL_GATEWAY", gateway);
     }
 }
 

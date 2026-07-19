@@ -1,0 +1,20 @@
+{
+  "run_id": "wf-e2c68368-d4fc-4509-980c-930f05775015",
+  "call_id": "implementation-wave-1",
+  "branch_id": "implementation-wave-1-impl-TASK-TDL-001-gap-audit",
+  "reported_changed_file": ".archon/workflows/wf-e2c68368-d4fc-4509-980c-930f05775015/artifacts/impl-TASK-TDL-001-gap-audit.json",
+  "old_error": "implementation agent changed files outside declared target_files: write target '.archon/workflows/wf-e2c68368-d4fc-4509-980c-930f05775015/artifacts/impl-TASK-TDL-001-gap-audit.json' for item 'implementation-wave-1-impl-TASK-TDL-001-gap-audit' is unsafe",
+  "source_item": {
+    "item_id": "impl-TASK-TDL-001-gap-audit",
+    "canonical_task_ids": [
+      "TASK-TDL-001"
+    ],
+    "target_files": [
+      "crates/archon-trading/src/data_store.rs",
+      "src/command/trading_data.rs"
+    ],
+    "artifact_requirements": [
+      "Gap audit JSON under the workflow artifact root must exist before task acceptance."
+    ]
+  }
+}

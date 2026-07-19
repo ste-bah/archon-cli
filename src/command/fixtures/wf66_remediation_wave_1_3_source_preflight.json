@@ -1,0 +1,36 @@
+{
+  "run_id": "wf-66d59996-eadd-43cf-80cb-0d4055d594fc",
+  "call_id": "remediation-wave-1-3",
+  "items": [
+    {
+      "item_id": "remediation-wave-1-3-item-a",
+      "canonical_task_ids": ["TASK-A"],
+      "target_files": [
+        "src/shared.rs",
+        "src/large_tests.rs",
+        "src/feature_a.rs"
+      ]
+    },
+    {
+      "item_id": "remediation-wave-1-3-item-b",
+      "canonical_task_ids": ["TASK-B"],
+      "target_files": [
+        "src/shared.rs",
+        "src/large_tests.rs",
+        "src/feature_a.rs"
+      ],
+      "failure_evidence": [
+        "previous branch changed undeclared path 'src/provider_command.rs'"
+      ]
+    },
+    {
+      "item_id": "remediation-wave-1-3-item-c",
+      "canonical_task_ids": ["TASK-C"],
+      "target_files": [
+        "src/shared.rs",
+        "src/large_tests.rs",
+        "src/feature_a.rs"
+      ]
+    }
+  ]
+}

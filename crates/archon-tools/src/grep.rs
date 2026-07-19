@@ -212,12 +212,11 @@ fn walk_dir(
             if matches_glob(base, &path, matcher) {
                 files.push(path);
             }
-        } else if path.is_dir() {
-            if !skip_dir(&entry.file_name().to_string_lossy())
-                && walk_dir(base, &path, matcher, files)
-            {
-                return true;
-            }
+        } else if path.is_dir()
+            && !skip_dir(&entry.file_name().to_string_lossy())
+            && walk_dir(base, &path, matcher, files)
+        {
+            return true;
         }
     }
     false

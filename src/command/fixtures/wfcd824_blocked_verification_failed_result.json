@@ -1,0 +1,22 @@
+{
+  "status": "needs_review",
+  "summary": "final report 'blocked-verification-failed-1' produced status NeedsReview",
+  "residual_gaps": [
+    {
+      "id": "final_report_not_accepted_blocked-verification-failed-1",
+      "description": "failed=[]; blocked=[]; missing=[\"TASK-TDL-020\"]; residual_gaps=9",
+      "severity": "review"
+    }
+  ],
+  "data": {
+    "status": "needs_review",
+    "missing_tasks": ["TASK-TDL-020"],
+    "residual_gaps": [
+      {
+        "id": "missing_evidence_artifact_TASK-TDL-010",
+        "description": "task TASK-TDL-010 references missing artifact evidence",
+        "severity": "review"
+      }
+    ]
+  }
+}

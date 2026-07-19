@@ -1,5 +1,52 @@
 use super::*;
 
+struct SilentStreamProvider {
+    senders: Mutex<Vec<mpsc::Sender<StreamEvent>>>,
+}
+
+#[async_trait::async_trait]
+impl LlmProvider for SilentStreamProvider {
+    fn name(&self) -> &str {
+        "silent-stream"
+    }
+
+    fn models(&self) -> Vec<ModelInfo> {
+        vec![]
+    }
+
+    fn supports_feature(&self, _: ProviderFeature) -> bool {
+        false
+    }
+
+    async fn stream(&self, _request: LlmRequest) -> Result<mpsc::Receiver<StreamEvent>, LlmError> {
+        let (tx, rx) = mpsc::channel(1);
+        self.senders.lock().unwrap().push(tx);
+        Ok(rx)
+    }
+
+    async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
+        unreachable!("tests use streaming")
+    }
+}
+
+#[tokio::test]
+async fn d41_total_wall_clock_times_out_silent_llm_stream() {
+    let provider = Arc::new(SilentStreamProvider {
+        senders: Mutex::new(Vec::new()),
+    });
+    let mut runner = make_runner(provider, 2);
+    runner.timeout_secs = 1;
+
+    let started = Instant::now();
+    let error = runner.run("wait forever").await.unwrap_err();
+
+    assert!(
+        error.to_string().contains("during LLM inference"),
+        "{error}"
+    );
+    assert!(started.elapsed() < Duration::from_secs(3));
+}
+
 #[tokio::test]
 async fn text_only_returns_immediately() {
     let provider = Arc::new(MockProvider::new(vec![text_response(

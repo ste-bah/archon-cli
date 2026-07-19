@@ -1,4 +1,3 @@
-use std::future;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 struct HangingExecutor {
     started: Arc<AtomicBool>,
     dropped: Arc<AtomicBool>,
+    observed_cancel: Arc<AtomicBool>,
     inner_complete: Arc<AtomicBool>,
     visible_complete: Arc<AtomicBool>,
 }
@@ -36,14 +36,15 @@ impl SubagentExecutor for HangingExecutor {
         _subagent_id: String,
         _request: SubagentRequest,
         _ctx: ToolContext,
-        _cancel: CancellationToken,
+        cancel: CancellationToken,
     ) -> Result<String, ExecutorError> {
         let _marker = DropMarker {
             dropped: Arc::clone(&self.dropped),
         };
         self.started.store(true, Ordering::SeqCst);
-        future::pending::<()>().await;
-        unreachable!("pending executor should only finish when aborted");
+        cancel.cancelled().await;
+        self.observed_cancel.store(true, Ordering::SeqCst);
+        Err(ExecutorError::Internal("cancelled after cleanup".into()))
     }
 
     async fn on_inner_complete(&self, _subagent_id: String, _result: Result<String, String>) {
@@ -93,10 +94,11 @@ async fn wait_for(flag: &AtomicBool) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn cancelling_subagent_aborts_executor_task() {
+async fn cancelling_foreground_subagent_waits_for_executor_cleanup() {
     let executor = Arc::new(HangingExecutor {
         started: Arc::new(AtomicBool::new(false)),
         dropped: Arc::new(AtomicBool::new(false)),
+        observed_cancel: Arc::new(AtomicBool::new(false)),
         inner_complete: Arc::new(AtomicBool::new(false)),
         visible_complete: Arc::new(AtomicBool::new(false)),
     });
@@ -115,6 +117,7 @@ async fn cancelling_subagent_aborts_executor_task() {
             run_in_background: false,
             cwd: None,
             isolation: None,
+            provider_env: None,
         },
         cancel.clone(),
         make_ctx(),
@@ -125,9 +128,10 @@ async fn cancelling_subagent_aborts_executor_task() {
 
     let outcome = tokio::time::timeout(Duration::from_secs(2), handle)
         .await
-        .expect("run_subagent should return promptly after cancellation")
+        .expect("run_subagent should return after foreground cleanup")
         .expect("run_subagent task should not panic");
     assert!(matches!(outcome, SubagentOutcome::Cancelled));
+    wait_for(&executor.observed_cancel).await;
     wait_for(&executor.dropped).await;
     wait_for(&executor.inner_complete).await;
     wait_for(&executor.visible_complete).await;

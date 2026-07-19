@@ -51,6 +51,7 @@ pub(super) async fn build_session_agent(
         safe_commands: config.permissions.safe_commands.clone(),
         risky_commands: config.permissions.risky_commands.clone(),
         dangerous_commands: config.permissions.dangerous_commands.clone(),
+        provider_env: None,
     }));
     apply_tool_filters(&mut registry, resolved_flags);
 

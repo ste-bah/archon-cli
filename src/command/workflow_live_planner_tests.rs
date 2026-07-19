@@ -1,0 +1,92 @@
+use archon_workflow::{
+    ProviderTier, StageKind, WorkflowRun, WorkflowV2HostCall, WorkflowV2HostMethod,
+    WorkflowV2HostOptions,
+};
+use serde_json::json;
+
+use super::WorkflowScriptPlan;
+
+#[test]
+fn approval_metadata_round_trips_conditional_host_calls_without_duplicate_fields() {
+    let mut options = WorkflowV2HostOptions {
+        task: Some("Check whether the dynamic script needs user input.".to_string()),
+        ..Default::default()
+    };
+    options.extra.insert(
+        "condition".to_string(),
+        json!("plannedItems.length === 0 && proofReview.status !== \"accepted\""),
+    );
+    options
+        .extra
+        .insert("runtime_loop".to_string(), json!("while"));
+    options.extra.insert(
+        "input".to_string(),
+        json!("must not flatten over StageSpec.input"),
+    );
+
+    let plan = WorkflowScriptPlan::generated(
+        "Implement a decomposed PRD",
+        "async function workflow(w) { if (plannedItems.length === 0) { await w.humanGate('missing-plan-escalation'); } }",
+        vec![WorkflowV2HostCall {
+            id: "missing-plan-escalation".to_string(),
+            method: WorkflowV2HostMethod::HumanGate,
+            write_mode: None,
+            options,
+        }],
+        None,
+        archon_core::config::GeneratedWorkflowConfig::default(),
+    );
+
+    let spec = plan.approval_metadata_spec();
+    let yaml = spec.to_yaml().expect("metadata YAML serializes");
+    let parsed_spec =
+        archon_workflow::WorkflowSpec::from_yaml(&yaml).expect("metadata YAML parses");
+    let stage = parsed_spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "missing-plan-escalation")
+        .expect("metadata stage exists");
+    assert_eq!(
+        stage.condition.as_deref(),
+        Some("plannedItems.length === 0 && proofReview.status !== \"accepted\"")
+    );
+    assert_eq!(stage.input["runtime"], "script_first_v2");
+    assert_eq!(stage.extra.get("runtime_loop"), Some(&json!("while")));
+    assert!(!stage.extra.contains_key("input"));
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let run = WorkflowRun::new(parsed_spec, temp.path());
+    let encoded = serde_json::to_string_pretty(&run).expect("run state serializes");
+    serde_json::from_str::<WorkflowRun>(&encoded).expect("run state parses");
+}
+
+#[test]
+fn approval_metadata_surfaces_declared_w_tool_requirements() {
+    let mut options = WorkflowV2HostOptions::default();
+    options
+        .extra
+        .insert("tool".to_string(), json!("requireArtifact"));
+    let plan = WorkflowScriptPlan::generated(
+        "Inspect declared tool metadata",
+        "export default async function workflow(w) { await w.tool('require-final-artifact', { tool: 'requireArtifact' }); }",
+        vec![WorkflowV2HostCall {
+            id: "require-final-artifact".to_string(),
+            method: WorkflowV2HostMethod::Tool,
+            write_mode: None,
+            options,
+        }],
+        None,
+        archon_core::config::GeneratedWorkflowConfig::default(),
+    );
+
+    let spec = plan.approval_metadata_spec();
+    let stage = spec
+        .stages
+        .iter()
+        .find(|stage| stage.id == "require-final-artifact")
+        .expect("tool metadata stage");
+
+    assert_eq!(stage.kind, StageKind::Tool);
+    assert_eq!(stage.tool.as_deref(), Some("requireArtifact"));
+    assert_eq!(stage.provider_tier, Some(ProviderTier::Local));
+}

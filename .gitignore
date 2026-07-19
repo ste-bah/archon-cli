@@ -1,5 +1,7 @@
 # Rust build output
 /target/
+.archon/
+artifacts/
 **/*.rs.bk
 
 # Node / Gradle / Swift build artifacts (SDK clients)
@@ -88,6 +90,9 @@ FORENSIC-TASK-DECOMPOSITION.yaml
 *:Zone.Identifier
 .archon/leann.db
 .archon/learning.db/
+.archon/archon-data.db*
+.archon/cognitive/
+.archon/learning-state.db*
 crates/archon-tui/tests/snapshots/tui_snapshots__splash_empty_activity.snap.new
 crates/archon-tui/tests/snapshots/tui_snapshots__splash_with_activity.snap.new
 archon

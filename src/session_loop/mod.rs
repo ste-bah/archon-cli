@@ -17,7 +17,9 @@
 //! helper modules (hooks, tui_events, slash_commands). See the
 //! commit body for the full rationale.
 
+use std::borrow::Cow;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use archon_core::agent::Agent;
 use archon_llm::effort::EffortState;
@@ -107,6 +109,13 @@ pub(crate) fn run_session_loop(
             auto_trainer.clone(),
         ));
         *cancel_handle_slot.lock().unwrap() = Some(Arc::clone(&adapter));
+        let activity_cwd = cmd_ctx.working_dir.clone();
+        crate::command::cognitive_daemon::record_archon_activity(
+            &config,
+            &activity_cwd,
+            "session_start",
+        );
+        let mut last_busy_activity = Instant::now();
 
         let mut post_turn_queue: std::collections::VecDeque<PostTurnAction> =
             std::collections::VecDeque::new();
@@ -125,6 +134,17 @@ pub(crate) fn run_session_loop(
         let shutdown_in_progress = std::sync::atomic::AtomicBool::new(false);
 
         loop {
+            if last_busy_activity.elapsed() >= Duration::from_secs(30)
+                && dispatcher_has_work(&agent_dispatcher)
+            {
+                crate::command::cognitive_daemon::record_archon_activity(
+                    &config,
+                    &activity_cwd,
+                    "agent_busy",
+                );
+                last_busy_activity = Instant::now();
+            }
+
             let input = match next_loop_input(LoopInputContext {
                 poll_tick: &mut poll_tick,
                 user_input_rx: &mut user_input_rx,
@@ -147,6 +167,11 @@ pub(crate) fn run_session_loop(
                 LoopInput::Continue => continue,
                 LoopInput::Stop => break,
             };
+            crate::command::cognitive_daemon::record_archon_activity(
+                &config,
+                &activity_cwd,
+                "user_input",
+            );
 
             if handle_control_input(
                 &input,
@@ -166,38 +191,66 @@ pub(crate) fn run_session_loop(
                 continue;
             }
 
-            if !slash_commands_disabled && let Some(slash_input) = slash_input(&input) {
-                if dispatch_slash_or_skill(
-                    slash_input,
-                    SlashDispatchContext {
-                        agent: &agent,
-                        api_url: &api_url,
-                        input_tui_tx: &input_tui_tx,
-                        session_store: &session_store_for_input,
-                        session_id: &session_id_for_input,
-                        persist_personality,
-                        personality_history_limit,
-                        session_start_confidence,
-                        session_start_instant,
-                        fast_mode: &mut fast_mode,
-                        effort_state: &mut effort_state,
-                        cmd_ctx: &mut cmd_ctx,
-                        dispatcher: &agent_dispatcher,
-                        adapter: &adapter,
-                        post_turn_queue: &mut post_turn_queue,
-                    },
-                )
-                .await
-                .is_handled()
-                {
+            if let Some(slash_input) = slash_input(&input) {
+                let slash_input = slash_input.as_ref();
+                if slash_commands_disabled {
+                    tracing::warn!(
+                        command = slash_command_name(slash_input),
+                        input_len = slash_input.len(),
+                        "slash command rejected because slash commands are disabled"
+                    );
+                    let _ = input_tui_tx.send(TuiEvent::Error(format!(
+                        "Slash command `{}` was not run because slash commands are disabled.",
+                        slash_command_name(slash_input)
+                    )));
+                    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
+                    continue;
+                } else {
+                    tracing::info!(
+                        command = slash_command_name(slash_input),
+                        input_len = slash_input.len(),
+                        "slash command dispatch starting"
+                    );
+                    if dispatch_slash_or_skill(
+                        slash_input,
+                        SlashDispatchContext {
+                            agent: &agent,
+                            api_url: &api_url,
+                            input_tui_tx: &input_tui_tx,
+                            session_store: &session_store_for_input,
+                            session_id: &session_id_for_input,
+                            persist_personality,
+                            personality_history_limit,
+                            session_start_confidence,
+                            session_start_instant,
+                            fast_mode: &mut fast_mode,
+                            effort_state: &mut effort_state,
+                            cmd_ctx: &mut cmd_ctx,
+                            dispatcher: &agent_dispatcher,
+                            adapter: &adapter,
+                            post_turn_queue: &mut post_turn_queue,
+                        },
+                    )
+                    .await
+                    .is_handled()
+                    {
+                        tracing::info!(
+                            command = slash_command_name(slash_input),
+                            "slash command dispatch handled"
+                        );
+                        continue;
+                    }
+                    tracing::warn!(
+                        command = slash_command_name(slash_input),
+                        "slash command dispatch unhandled"
+                    );
+                    let _ = input_tui_tx.send(TuiEvent::TextDelta(format!(
+                        "\nUnknown slash command `{}`. Type /help for available commands.\n",
+                        slash_command_name(slash_input)
+                    )));
+                    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
                     continue;
                 }
-                let _ = input_tui_tx.send(TuiEvent::TextDelta(format!(
-                    "\nUnknown slash command `{}`. Type /help for available commands.\n",
-                    slash_command_name(slash_input)
-                )));
-                let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
-                continue;
             }
 
             dispatch_user_prompt(
@@ -219,9 +272,63 @@ pub(crate) fn run_session_loop(
     })
 }
 
-fn slash_input(input: &str) -> Option<&str> {
-    let trimmed = input.trim_start();
-    trimmed.starts_with('/').then_some(trimmed)
+fn dispatcher_has_work(dispatcher: &Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>) -> bool {
+    let dispatcher = dispatcher.lock().unwrap();
+    dispatcher.is_busy() || dispatcher.queue_len() > 0
+}
+
+fn slash_input(input: &str) -> Option<Cow<'_, str>> {
+    let trimmed = input.trim_start_matches(|ch: char| ch.is_whitespace() || ch == '\u{feff}');
+    let prompt_stripped = strip_prompt_marker(trimmed);
+    if let Some(workflow) =
+        workflow_cli_input(prompt_stripped).or_else(|| workflow_cli_input(trimmed))
+    {
+        return Some(workflow);
+    }
+    if prompt_stripped.starts_with('/') {
+        return Some(Cow::Borrowed(prompt_stripped));
+    }
+    if trimmed.starts_with('/') {
+        return Some(Cow::Borrowed(trimmed));
+    }
+    None
+}
+
+fn strip_prompt_marker(input: &str) -> &str {
+    [">", "$", "%"]
+        .iter()
+        .find_map(|marker| {
+            input.strip_prefix(marker).and_then(|rest| {
+                rest.chars()
+                    .next()
+                    .is_some_and(char::is_whitespace)
+                    .then_some(rest)
+            })
+        })
+        .map(str::trim_start)
+        .unwrap_or(input)
+}
+
+fn workflow_cli_input(input: &str) -> Option<Cow<'_, str>> {
+    let executable = input.split_whitespace().next()?;
+    let after_executable = input.strip_prefix(executable)?.trim_start();
+    let command = after_executable.split_whitespace().next()?;
+    if command != "workflow" || !is_archon_executable(executable) {
+        return None;
+    }
+    let rest = after_executable
+        .strip_prefix(command)
+        .unwrap_or("")
+        .trim_start();
+    if rest.is_empty() {
+        Some(Cow::Borrowed("/workflow"))
+    } else {
+        Some(Cow::Owned(format!("/workflow {rest}")))
+    }
+}
+
+fn is_archon_executable(executable: &str) -> bool {
+    matches!(executable, "archon" | "./archon") || executable.ends_with("/archon")
 }
 
 fn slash_command_name(input: &str) -> &str {
@@ -236,7 +343,7 @@ mod tests {
     fn slash_input_allows_leading_whitespace() {
         assert_eq!(
             slash_input("  /cognitive daemon start"),
-            Some("/cognitive daemon start")
+            Some(std::borrow::Cow::Borrowed("/cognitive daemon start"))
         );
     }
 
@@ -248,5 +355,33 @@ mod tests {
     #[test]
     fn slash_command_name_returns_first_token() {
         assert_eq!(slash_command_name("/cognitive daemon start"), "/cognitive");
+    }
+
+    #[test]
+    fn slash_input_accepts_copied_tui_prompt_marker() {
+        assert_eq!(
+            slash_input("> /workflow run --live build it"),
+            Some(std::borrow::Cow::Borrowed("/workflow run --live build it"))
+        );
+    }
+
+    #[test]
+    fn slash_input_normalizes_tui_cli_workflow_command() {
+        assert_eq!(
+            slash_input("./archon workflow resume --live wf-123"),
+            Some(std::borrow::Cow::Owned(
+                "/workflow resume --live wf-123".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn slash_input_normalizes_absolute_cli_workflow_command() {
+        assert_eq!(
+            slash_input("/tmp/project/archon workflow run --live do work"),
+            Some(std::borrow::Cow::Owned(
+                "/workflow run --live do work".to_string()
+            ))
+        );
     }
 }

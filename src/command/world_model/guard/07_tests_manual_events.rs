@@ -9,15 +9,17 @@
             "build app",
         );
         action.action_id = "manual-approve-action".into();
-        let mut decision = archon_world_model::WorldGuardrailDecision::default();
-        decision.action_id = action.action_id.clone();
-        decision.surface = action.surface;
-        decision.mode = archon_world_model::WorldGuardrailMode::Guarded;
-        decision.allowed_to_finalize = false;
-        decision.required_actions = vec![
-            archon_world_model::GuardrailRequiredAction::RunTests,
-            archon_world_model::GuardrailRequiredAction::RunBuild,
-        ];
+        let decision = archon_world_model::WorldGuardrailDecision {
+            action_id: action.action_id.clone(),
+            surface: action.surface,
+            mode: archon_world_model::WorldGuardrailMode::Guarded,
+            allowed_to_finalize: false,
+            required_actions: vec![
+                archon_world_model::GuardrailRequiredAction::RunTests,
+                archon_world_model::GuardrailRequiredAction::RunBuild,
+            ],
+            ..Default::default()
+        };
         action.verification_plan = verification_plan_for_decision(&action.action_id, &decision);
         archon_world_model::guardrail::append_guarded_action(temp.path(), &action).unwrap();
         archon_world_model::guardrail::append_guardrail_decision(temp.path(), &decision).unwrap();
@@ -56,9 +58,11 @@
             "build app",
         );
         action.action_id = "manual-skip-action".into();
-        let mut decision = archon_world_model::WorldGuardrailDecision::default();
-        decision.action_id = action.action_id.clone();
-        decision.required_actions = vec![archon_world_model::GuardrailRequiredAction::RunTests];
+        let decision = archon_world_model::WorldGuardrailDecision {
+            action_id: action.action_id.clone(),
+            required_actions: vec![archon_world_model::GuardrailRequiredAction::RunTests],
+            ..Default::default()
+        };
         action.verification_plan = verification_plan_for_decision(&action.action_id, &decision);
         let requirement_id = action.verification_plan[0].requirement_id.clone();
         archon_world_model::guardrail::append_guarded_action(temp.path(), &action).unwrap();
@@ -90,8 +94,10 @@
             "build app",
         );
         action.action_id = format!("a-{}", uuid::Uuid::new_v4());
-        let mut decision = archon_world_model::WorldGuardrailDecision::default();
-        decision.action_id = action.action_id.clone();
+        let decision = archon_world_model::WorldGuardrailDecision {
+            action_id: action.action_id.clone(),
+            ..Default::default()
+        };
         let record = RuntimeGuardrailRecord {
             action,
             advisory: archon_world_model::integration::WorldAdvisorSurfaceRecord::unavailable(
@@ -134,8 +140,10 @@
             "build app",
         );
         action.action_id = format!("a-{}", uuid::Uuid::new_v4());
-        let mut decision = archon_world_model::WorldGuardrailDecision::default();
-        decision.action_id = action.action_id.clone();
+        let decision = archon_world_model::WorldGuardrailDecision {
+            action_id: action.action_id.clone(),
+            ..Default::default()
+        };
         let record = RuntimeGuardrailRecord {
             action,
             advisory: archon_world_model::integration::WorldAdvisorSurfaceRecord::unavailable(

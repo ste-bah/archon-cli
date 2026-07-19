@@ -1,0 +1,51 @@
+{
+  "status": "needs_review",
+  "data": {
+    "items": [
+      {
+        "item_id": "REMEDIATE-VALIDATION-ARTIFACT-FIELDS",
+        "source_item_id": "verification-source-actionable",
+        "canonical_task_ids": ["TASK-FIXTURE-050"],
+        "classification": "actionable_implementation_failure",
+        "focused_verification": ["Inspect the declared validation artifact."],
+        "expected_evidence": ["Required top-level validation fields exist."],
+        "failed_predicate": "Required top-level validation fields are missing.",
+        "required_fix": "Write the missing top-level validation fields.",
+        "source_residual_gap_ids": ["validation-fields-missing"]
+      }
+    ],
+    "retry_items": [
+      {
+        "item_id": "RETRY-ARTIFACT-1",
+        "source_item_id": "verification-source-retry",
+        "canonical_task_ids": ["TASK-FIXTURE-060"],
+        "classification": "retryable_verification_shape_issue",
+        "focused_verification": ["Inspect artifact one."],
+        "expected_evidence": ["Artifact one evidence."],
+        "failed_predicate": "Artifact root was absent.",
+        "source_residual_gap_ids": ["missing-artifact-root"]
+      },
+      {
+        "item_id": "RETRY-ARTIFACT-2",
+        "source_item_id": "verification-source-retry",
+        "canonical_task_ids": ["TASK-FIXTURE-060"],
+        "classification": "retryable_verification_shape_issue",
+        "focused_verification": ["Inspect artifact two."],
+        "expected_evidence": ["Artifact two evidence."],
+        "failed_predicate": "Artifact root was absent.",
+        "source_residual_gap_ids": ["missing-artifact-root"]
+      },
+      {
+        "item_id": "RETRY-ARTIFACT-3",
+        "source_item_id": "verification-source-retry",
+        "canonical_task_ids": ["TASK-FIXTURE-060"],
+        "classification": "retryable_verification_shape_issue",
+        "focused_verification": ["Inspect artifact three."],
+        "expected_evidence": ["Artifact three evidence."],
+        "failed_predicate": "Artifact root was absent.",
+        "source_residual_gap_ids": ["missing-artifact-root"]
+      }
+    ],
+    "terminal_blockers": []
+  }
+}

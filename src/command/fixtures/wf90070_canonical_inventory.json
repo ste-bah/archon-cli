@@ -1,0 +1,42 @@
+{
+  "items": [
+    {
+      "id": "noop-foundation-task",
+      "canonical_task_id": "TASK-TDL-001",
+      "dependencies": [],
+      "work_type": "verified_noop",
+      "acceptance_criteria": [
+        "Foundation task already has concrete implementation evidence."
+      ],
+      "noop_proof": {
+        "summary": "Existing implementation satisfies the foundation acceptance criteria."
+      },
+      "proof_references": [
+        {
+          "path": "src/command/workflow_live_generated_scaffold.rs"
+        }
+      ],
+      "artifact_requirements": []
+    },
+    {
+      "id": "implement-registry-v2",
+      "task_ids": [
+        "TASK-TDL-010"
+      ],
+      "depends_on": [
+        "TASK-TDL-001"
+      ],
+      "work_type": "implementation",
+      "targetFiles": [
+        "src/trading/registry.rs"
+      ],
+      "acceptanceCriteria": [
+        "Registry schema v2 is implemented with migration support."
+      ],
+      "focused_tests": [
+        "cargo test -p archon-trading registry_schema_v2"
+      ],
+      "artifact_requirements": []
+    }
+  ]
+}

@@ -285,6 +285,9 @@ async fn execute_prepared_wave_agent(
             system: prepared.system.clone(),
             tools: prepared.tools.clone(),
             allowed_tools: Vec::new(),
+            timeout_secs: None,
+            disable_auto_background: false,
+            provider_env_resolution: None,
         })
         .await
     {
@@ -434,6 +437,9 @@ async fn run_wave_attempt(
             system,
             tools,
             allowed_tools: Vec::new(),
+            timeout_secs: None,
+            disable_auto_background: false,
+            provider_env_resolution: None,
         })
         .await?;
     let mut result = AgentResult {

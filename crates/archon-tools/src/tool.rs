@@ -141,4 +141,12 @@ pub trait Tool: Send + Sync {
 
     /// Classify the permission level for a specific invocation.
     fn permission_level(&self, input: &serde_json::Value) -> PermissionLevel;
+
+    /// Clone this tool with a provider environment overlay when supported.
+    fn with_provider_env_source(
+        &self,
+        _provider_env: crate::provider_env::ProviderEnvSource,
+    ) -> Option<Box<dyn Tool>> {
+        None
+    }
 }

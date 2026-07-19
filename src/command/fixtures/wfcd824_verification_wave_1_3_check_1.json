@@ -1,0 +1,80 @@
+{
+  "item_id": "verification-wave-1-3-RETRY-VER-TDL-010-009-001-check-1",
+  "role": "coder",
+  "status": "needs_review",
+  "failure_kind": "semantic",
+  "item_input_hash": "fixture-old-contract-hash-check-1",
+  "result": {
+    "status": "needs_review",
+    "summary": "Focused verification command exited 0, and required CLI parse artifacts are present, but cargo output reported the targeted test passing in two harnesses rather than exactly one targeted test passed.",
+    "evidence": [
+      {
+        "kind": "inspection",
+        "summary": "Found test cli_args::tests::trading_parse_tests::trading_data_prd_commands_parse with assertions for trading data list --target /tmp/project --json, export with dataset_id/version/out, and export-ohlcv alias parsing into Export.",
+        "source": "src/cli_args/tests.rs:659"
+      },
+      {
+        "kind": "test",
+        "summary": "Focused cargo test exited 0, but output included two occurrences of the targeted test passing: one with 51 filtered out and one with 1162 filtered out.",
+        "source": "cd /Volumes/Externalwork/archon-cli/archon-cli && cargo test -p archon-cli-workspace cli_args::tests::trading_parse_tests::trading_data_prd_commands_parse -- --exact"
+      }
+    ],
+    "artifacts": [
+      {
+        "id": "cli-args-trading-parse-test",
+        "path": "src/cli_args/tests.rs",
+        "description": "Contains targeted trading data PRD CLI parse test."
+      },
+      {
+        "id": "trading-market-actions-cli-data",
+        "path": "src/cli_args/trading_market_actions.rs",
+        "description": "Contains TradingCliDataAction List and Export command definitions."
+      }
+    ],
+    "commands_run": [
+      {
+        "kind": "test",
+        "command": "cd /Volumes/Externalwork/archon-cli/archon-cli && cargo test -p archon-cli-workspace cli_args::tests::trading_parse_tests::trading_data_prd_commands_parse -- --exact",
+        "status": "succeeded",
+        "exit_code": 0,
+        "output_summary": "Command exited 0. Output showed test cli_args::tests::trading_parse_tests::trading_data_prd_commands_parse ... ok twice, with summaries 1 passed; 0 failed; 51 filtered out and 1 passed; 0 failed; 1162 filtered out, followed by other harnesses running 0 tests."
+      }
+    ],
+    "files_read": [
+      {
+        "path": "src/cli_args/tests.rs",
+        "purpose": "Verified targeted test existence and assertions."
+      },
+      {
+        "path": "src/cli_args/trading_market_actions.rs",
+        "purpose": "Verified List and Export action field definitions and export-ohlcv alias."
+      }
+    ],
+    "task_coverage": [
+      {
+        "task_id": "TASK-TDL-010",
+        "status": "partial",
+        "summary": "CLI parse implementation artifacts are present and focused command succeeds, but observed output does not satisfy the exact evidence requirement of exactly one targeted test passed.",
+        "evidence": [
+          {
+            "kind": "test",
+            "summary": "Focused verification command exited 0 but reported two matching targeted test passes."
+          }
+        ]
+      }
+    ],
+    "residual_gaps": [
+      {
+        "id": "duplicate-targeted-test-pass-output",
+        "description": "Concrete expected evidence requires exactly one targeted test passed, but cargo test output reported cli_args::tests::trading_parse_tests::trading_data_prd_commands_parse passing twice.",
+        "severity": "medium"
+      }
+    ],
+    "data": {
+      "canonical_task_ids": ["TASK-TDL-010"],
+      "focused_verification_executed": true,
+      "item_id": "RETRY-VER-TDL-010-009-001-check-1",
+      "source_item_id": "VER-TDL-010-009"
+    }
+  }
+}

@@ -54,7 +54,7 @@ fn log_system_block_sizes(request: &archon_llm::provider::LlmRequest) {
             (index, serialized_len(block), preview)
         })
         .collect();
-    blocks.sort_by(|left, right| right.1.cmp(&left.1));
+    blocks.sort_by_key(|block| std::cmp::Reverse(block.1));
 
     for (rank, (index, bytes, preview)) in blocks.into_iter().take(8).enumerate() {
         tracing::info!(

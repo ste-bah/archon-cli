@@ -101,21 +101,6 @@ impl CheckpointStore {
         Ok(store)
     }
 
-    /// Create an in-memory checkpoint store (useful for tests).
-    #[cfg(test)]
-    fn in_memory() -> Result<Self, CheckpointError> {
-        Self::in_memory_with_limit(DEFAULT_MAX_SNAPSHOTS)
-    }
-
-    /// Create an in-memory checkpoint store with a custom limit.
-    #[cfg(test)]
-    fn in_memory_with_limit(max_snapshots: u32) -> Result<Self, CheckpointError> {
-        let db = DbInstance::new("mem", "", "").map_err(db_err)?;
-        let store = Self { db, max_snapshots };
-        store.init_schema()?;
-        Ok(store)
-    }
-
     fn init_schema(&self) -> Result<(), CheckpointError> {
         self.db
             .run_script(

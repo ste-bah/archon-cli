@@ -165,6 +165,7 @@ async fn classify_routes_background_flag() {
         run_in_background: true,
         cwd: None,
         isolation: None,
+        provider_env: None,
     };
     let fg_req = SubagentRequest {
         run_in_background: false,
@@ -229,6 +230,7 @@ async fn agent_tool_foreground_invokes_run_to_completion() {
         run_in_background: false,
         cwd: None,
         isolation: None,
+        provider_env: None,
     };
     assert!(matches!(
         exec.classify(&fg_req),

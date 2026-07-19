@@ -181,7 +181,7 @@ pub fn list_agent_profile_versions(
         .iter()
         .map(|row| row_to_profile_version(row))
         .collect();
-    versions.sort_by(|a, b| b.version_number.cmp(&a.version_number));
+    versions.sort_by_key(|version| std::cmp::Reverse(version.version_number));
     Ok(versions)
 }
 

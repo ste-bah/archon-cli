@@ -10,8 +10,7 @@ use crate::store::{self, ChunkTimeRef};
 
 pub async fn generate_video_summary(
     provider: &dyn LlmProvider,
-    video_id: &str,
-    document_id: &str,
+    (video_id, document_id): (&str, &str),
     transcript_text: &str,
     visual_evidence: &str,
     duration_ms: i64,

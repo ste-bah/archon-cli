@@ -12,6 +12,9 @@ use super::super::triplets_loss::TripletBatch;
 use super::super::weights::WeightStore;
 use super::types::{AutoTrainer, AutoTrainerConfig, TrainerState};
 
+type SampleProvider = Arc<dyn Fn() -> Vec<TrajectoryWithFeedback> + Send + Sync>;
+type TripletProvider = Arc<dyn Fn() -> TripletBatch + Send + Sync>;
+
 impl AutoTrainer {
     pub(super) async fn run_loop(
         config: AutoTrainerConfig,
@@ -19,10 +22,8 @@ impl AutoTrainer {
         enhancer: Arc<GnnEnhancer>,
         weight_store: Arc<WeightStore>,
         train_cfg: TrainingConfig,
-        sample_provider: Arc<dyn Fn() -> Vec<TrajectoryWithFeedback> + Send + Sync>,
-        triplet_provider: Arc<dyn Fn() -> TripletBatch + Send + Sync>,
-        cancel: CancellationToken,
-        training_cancel: Arc<AtomicBool>,
+        (sample_provider, triplet_provider): (SampleProvider, TripletProvider),
+        (cancel, training_cancel): (CancellationToken, Arc<AtomicBool>),
     ) {
         let mut tick = tokio::time::interval(Duration::from_millis(config.tick_interval_ms));
         // Skip the initial immediate tick — wait for the first interval

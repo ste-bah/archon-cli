@@ -145,11 +145,13 @@
             applies_to: vec![action.action_id.clone()],
             required_for_final: true,
         }];
-        let mut decision = archon_world_model::WorldGuardrailDecision::default();
-        decision.action_id = action.action_id.clone();
-        decision.required_actions = vec![required];
-        decision.mode = archon_world_model::WorldGuardrailMode::Guarded;
-        decision.allowed_to_finalize = false;
+        let decision = archon_world_model::WorldGuardrailDecision {
+            action_id: action.action_id.clone(),
+            required_actions: vec![required],
+            mode: archon_world_model::WorldGuardrailMode::Guarded,
+            allowed_to_finalize: false,
+            ..Default::default()
+        };
         RuntimeGuardrailRecord {
             action,
             advisory: archon_world_model::integration::WorldAdvisorSurfaceRecord::unavailable(

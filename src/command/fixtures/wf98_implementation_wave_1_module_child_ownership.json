@@ -1,0 +1,16 @@
+{
+  "run_id": "wf-98e440a8-f88b-4fa6-abb2-7a7c908c7d74",
+  "call_id": "implementation-wave-1",
+  "branch_id": "implementation-wave-1-inventory-tdl-010-registry-schema-v2",
+  "source_item": {
+    "id": "inventory-tdl-010-registry-schema-v2",
+    "canonical_task_ids": [
+      "TASK-TDL-010"
+    ],
+    "target_files": [
+      "crates/archon-trading/src/data_store.rs"
+    ]
+  },
+  "changed_file": "crates/archon-trading/src/data_store/io.rs",
+  "old_error": "implementation agent changed files outside declared target_files: write item 'implementation-wave-1-inventory-tdl-010-registry-schema-v2' changed undeclared path 'crates/archon-trading/src/data_store/io.rs'"
+}

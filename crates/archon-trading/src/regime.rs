@@ -43,9 +43,9 @@ pub fn classify_return_points(returns: &[f64]) -> Result<Vec<VolatilityPoint>, R
         if is_boundary(previous_complete_vol, realized_vol) {
             regime_id += 1;
         }
-        if is_boundary(previous_complete_vol, realized_vol) {
-            previous_complete_vol = realized_vol;
-        } else if previous_complete_vol.is_none() && realized_vol.is_some() {
+        if is_boundary(previous_complete_vol, realized_vol)
+            || (previous_complete_vol.is_none() && realized_vol.is_some())
+        {
             previous_complete_vol = realized_vol;
         }
         points.push(VolatilityPoint {
@@ -110,7 +110,7 @@ fn realized_vol_at(returns: &[f64], session_index: usize, window: usize) -> Opti
 
 fn is_boundary(previous: Option<f64>, current: Option<f64>) -> bool {
     match (previous, current) {
-        (Some(previous), Some(current)) if previous == 0.0 => current > 0.0,
+        (Some(0.0), Some(current)) => current > 0.0,
         (Some(previous), Some(current)) => boundary_ratio(previous, current) >= 0.5,
         _ => false,
     }

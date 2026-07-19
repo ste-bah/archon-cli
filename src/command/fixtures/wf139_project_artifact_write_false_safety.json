@@ -1,0 +1,20 @@
+{
+  "run_id": "wf-13944956-2ce5-48b4-8166-8b55dde73114",
+  "call_id": "implementation-wave-1",
+  "branch_id": "implementation-wave-1-impl-TASK-TDL-001-gap-audit",
+  "reported_changed_file": ".archon/workflows/wf-13944956-2ce5-48b4-8166-8b55dde73114-tdl-001-gap-audit.json",
+  "old_error": "implementation agent changed files outside declared target_files: write item 'implementation-wave-1-impl-TASK-TDL-001-gap-audit' changed undeclared path '.archon/workflows/wf-13944956-2ce5-48b4-8166-8b55dde73114-tdl-001-gap-audit.json'",
+  "source_item": {
+    "item_id": "impl-TASK-TDL-001-gap-audit",
+    "canonical_task_ids": [
+      "TASK-TDL-001"
+    ],
+    "target_files": [
+      "crates/archon-trading/src/data_store.rs",
+      "src/command/trading_data.rs"
+    ],
+    "artifact_requirements": [
+      "Audit report artifact must record commands_run, env keys checked without secrets, data root, registry path, dataset count, provider capability state, and downstream residual gaps."
+    ]
+  }
+}

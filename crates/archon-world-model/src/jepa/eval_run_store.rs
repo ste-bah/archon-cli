@@ -384,10 +384,7 @@ impl JepaEvalRunStore {
                                 // ---- Grandchild: redirect stdio and exec ----
 
                                 // stdin -> /dev/null
-                                let devnull = libc::open(
-                                    b"/dev/null\0".as_ptr() as *const libc::c_char,
-                                    libc::O_RDONLY,
-                                );
+                                let devnull = libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY);
                                 if devnull >= 0 {
                                     libc::dup2(devnull, 0);
                                     libc::close(devnull);

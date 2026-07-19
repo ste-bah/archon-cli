@@ -328,7 +328,7 @@ fn source_context_for_chapter(session: &PipelineSession, chapter: &ChapterDefini
             (score, agent.key.as_str(), result.output.as_str())
         })
         .collect::<Vec<_>>();
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by_key(|entry| std::cmp::Reverse(entry.0));
     scored
         .into_iter()
         .filter(|(score, key, _)| {

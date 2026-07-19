@@ -63,6 +63,7 @@ impl LearningEventType {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "RetrievalUsed" => Some(Self::RetrievalUsed),
@@ -128,6 +129,7 @@ impl RiskLevel {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "Low" => Some(Self::Low),
@@ -172,6 +174,7 @@ impl BehaviourManifestKind {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "RetrievalProfile" => Some(Self::RetrievalProfile),
@@ -225,6 +228,7 @@ impl PolicyDecision {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "AutoApplied" => Some(Self::AutoApplied),
@@ -257,6 +261,7 @@ impl ProposalStatus {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "Pending" => Some(Self::Pending),

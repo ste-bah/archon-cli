@@ -2,8 +2,11 @@ use super::super::backprop;
 use super::super::math::ActivationType;
 use super::super::{GnnEnhancer, LayerActivationCache, LayerWeights};
 
+/// Per-layer (weight, bias) gradient pairs accumulated across a batch.
+pub(super) type LayerGradList = Vec<(Vec<Vec<f32>>, Vec<f32>)>;
+
 pub(super) fn accumulate_embedding_grads(
-    accumulated: &mut Option<Vec<(Vec<Vec<f32>>, Vec<f32>)>>,
+    accumulated: &mut Option<LayerGradList>,
     caches: &[LayerActivationCache],
     weights: [&LayerWeights; 3],
     grad: &[f32],
@@ -21,8 +24,7 @@ pub(super) fn accumulate_embedding_grads(
             ActivationType::Tanh,
         ],
     );
-    let layer_grads: Vec<(Vec<Vec<f32>>, Vec<f32>)> =
-        grads.into_iter().map(|grad| (grad.dw, grad.db)).collect();
+    let layer_grads: LayerGradList = grads.into_iter().map(|grad| (grad.dw, grad.db)).collect();
     match accumulated {
         Some(acc) => add_grads_in_place(acc, &layer_grads),
         None => *accumulated = Some(layer_grads),

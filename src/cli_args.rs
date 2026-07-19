@@ -52,3 +52,5 @@ mod permissions_parse_tests;
 mod sandbox_parse_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod trading_backtest_parse_tests;

@@ -342,7 +342,7 @@ fn recent_dir_names(root: &Path, limit: usize) -> Vec<String> {
             Some((modified, entry.file_name().to_string_lossy().to_string()))
         })
         .collect();
-    dirs.sort_by(|a, b| b.0.cmp(&a.0));
+    dirs.sort_by_key(|dir| std::cmp::Reverse(dir.0));
     dirs.into_iter().take(limit).map(|(_, name)| name).collect()
 }
 

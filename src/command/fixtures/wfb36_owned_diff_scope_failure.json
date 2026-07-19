@@ -1,0 +1,15 @@
+{
+  "item_id": "failed-owned-scope",
+  "status": "failed",
+  "summary": "Focused verification incorrectly used shared-tree git status.",
+  "residual_gaps": [
+    {
+      "id": "owned-diff-scope",
+      "description": "The shared working tree contains changes from accepted sibling branches."
+    }
+  ],
+  "data": {
+    "verification_failure_class": "retryable_verification_issue",
+    "verification_failure_next_action": "retry_verification"
+  }
+}

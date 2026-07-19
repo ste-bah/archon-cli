@@ -65,8 +65,7 @@ async fn enabled_summary_writes_single_video_summary_chunk() {
 
     let summary = generate_video_summary(
         &MockLlm { fail: false },
-        "video-1",
-        "doc-1",
+        ("video-1", "doc-1"),
         "spoken evidence",
         "visual evidence",
         9_000,
@@ -90,8 +89,7 @@ async fn disabled_or_failing_summary_does_not_error() {
     let disabled = archon_policy::EffectivePolicy::default();
     let none = generate_video_summary(
         &MockLlm { fail: false },
-        "video-1",
-        "doc-1",
+        ("video-1", "doc-1"),
         "spoken",
         "visual",
         9_000,
@@ -104,8 +102,7 @@ async fn disabled_or_failing_summary_does_not_error() {
 
     let failed = generate_video_summary(
         &MockLlm { fail: true },
-        "video-1",
-        "doc-1",
+        ("video-1", "doc-1"),
         "spoken",
         "visual",
         9_000,

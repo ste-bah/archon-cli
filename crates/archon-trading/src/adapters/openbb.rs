@@ -72,6 +72,13 @@ pub struct GovernedDataset {
     pub promotion_eligible: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapabilityUnavailableReason {
+    Unauthorized,
+    Forbidden,
+    NotFound,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpenBbError {
     NotAllowlisted,
@@ -82,6 +89,7 @@ pub enum OpenBbError {
     SecretMaterialRejected,
     TransportUnavailable,
     LakeRejected,
+    StatusUnavailable(CapabilityUnavailableReason),
 }
 
 impl OpenBbError {
@@ -95,6 +103,15 @@ impl OpenBbError {
             Self::SecretMaterialRejected => "ERR-OPENBB-SECRET-MATERIAL",
             Self::TransportUnavailable => "ERR-OPENBB-TRANSPORT-UNAVAILABLE",
             Self::LakeRejected => "ERR-OPENBB-LAKE-REJECTED",
+            Self::StatusUnavailable(CapabilityUnavailableReason::Unauthorized) => {
+                "ERR-OPENBB-UNAUTHORIZED"
+            }
+            Self::StatusUnavailable(CapabilityUnavailableReason::Forbidden) => {
+                "ERR-OPENBB-FORBIDDEN"
+            }
+            Self::StatusUnavailable(CapabilityUnavailableReason::NotFound) => {
+                "ERR-OPENBB-NOT-FOUND"
+            }
         }
     }
 }
@@ -197,8 +214,10 @@ impl OpenBbGateway {
         self.lake_registry
             .register(metadata.clone())
             .map_err(|_| OpenBbError::LakeRejected)?;
+        let metadata_eligible = metadata.production_eligible && metadata.native_interval;
         Ok(GovernedDataset {
-            promotion_eligible: provenance.license_tier != LicenseTier::ResearchOnly
+            promotion_eligible: metadata_eligible
+                && provenance.license_tier != LicenseTier::ResearchOnly
                 && response.quality.promotion_safe(),
             provenance,
             metadata,
@@ -215,6 +234,7 @@ fn priority_fetch<T: OpenBbTransport>(
     match transport.rest(request) {
         Ok(response) => Ok((OpenBbRoute::Rest, response)),
         Err(OpenBbError::RateLimited) => Err(OpenBbError::RateLimited),
+        Err(error @ OpenBbError::StatusUnavailable(_)) => Err(error),
         Err(_) => match transport.sdk(request) {
             Ok(response) => Ok((OpenBbRoute::Sdk, response)),
             Err(_) if mode == AccessMode::Research => transport
@@ -286,12 +306,28 @@ fn dataset_metadata(
     response: &OpenBbResponse,
     provenance: &OpenBbProvenance,
 ) -> DatasetMetadata {
+    let checksum = provenance.checksum.clone();
+    let provider = provider_key(request.provider);
+    let symbol = metadata_or(&response.metadata, "symbol", "UNKNOWN");
+    let timeframe = metadata_or(&response.metadata, "timeframe", "unknown");
+    let price_basis = metadata_or(&response.metadata, "price_basis", "raw");
+    let quality_status = quality_status(request.provider, &response.metadata);
     DatasetMetadata {
-        dataset_id: request.cache_key.clone(),
-        provider: format!("{:?}", request.provider),
+        schema_version: "archon-trading-dataset-v1".into(),
+        dataset_id: derived_dataset_id(&provider, &symbol, &timeframe, &price_basis),
+        version: metadata_or(&response.metadata, "version", "19700101-openbb_native"),
+        canonical_instrument: symbol.clone(),
+        asset_class: metadata_or(&response.metadata, "asset_class", "unknown"),
+        provider: provider.clone(),
+        provider_symbol: metadata_or(&response.metadata, "provider_symbol", "UNKNOWN"),
+        timeframe,
+        native_interval: metadata_bool(&response.metadata, "native_interval"),
+        production_eligible: production_eligible(request.provider, &response.metadata),
+        price_basis,
+        session: metadata_or(&response.metadata, "session", "provider_default"),
         data_type: request.lake_data_type,
         symbol_map: BTreeMap::from([(
-            metadata_or(&response.metadata, "symbol", "UNKNOWN"),
+            symbol,
             metadata_or(&response.metadata, "provider_symbol", "UNKNOWN"),
         )]),
         timezone: metadata_or(&response.metadata, "timezone", "UTC"),
@@ -307,9 +343,90 @@ fn dataset_metadata(
             missing_bars: parse_u64(response.metadata.get("missing_bars"), 0),
             expected_bars: parse_u64(response.metadata.get("expected_bars"), 1),
         },
-        checksum: provenance.checksum.clone(),
-        version: request.schema_version.clone(),
+        checksum: checksum.clone(),
+        checksums: dataset_checksums(&checksum),
+        paths: dataset_paths(&request.cache_key),
+        source: dataset_source(request, provenance, &provider),
+        quality_status,
+        created_at: String::new(),
         optional: false,
+    }
+}
+
+fn provider_key(provider: Provider) -> String {
+    match provider {
+        Provider::YFinance => "yfinance",
+        Provider::Polygon => "polygon",
+        Provider::Edgar => "edgar",
+        Provider::Fred => "fred",
+        Provider::Cftc => "cftc",
+        Provider::Finra => "finra",
+        Provider::NasdaqDataLink => "nasdaq_data_link",
+        Provider::Intrinio => "intrinio",
+        Provider::Alpaca => "alpaca",
+    }
+    .into()
+}
+
+fn derived_dataset_id(provider: &str, symbol: &str, timeframe: &str, price_basis: &str) -> String {
+    format!(
+        "{}-{}-{}-{}",
+        safe_identifier(provider),
+        safe_identifier(symbol),
+        safe_identifier(timeframe),
+        safe_identifier(price_basis)
+    )
+}
+
+fn safe_identifier(value: &str) -> String {
+    value
+        .trim()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+fn dataset_checksums(checksum: &str) -> crate::data_lake::DatasetChecksums {
+    crate::data_lake::DatasetChecksums {
+        raw_sha256: checksum.into(),
+        normalized_sha256: checksum.into(),
+        metadata_sha256: checksum.into(),
+    }
+}
+
+fn dataset_paths(cache_key: &str) -> crate::data_lake::DatasetArtifactPaths {
+    let base = format!("openbb://{}", safe_identifier(cache_key));
+    crate::data_lake::DatasetArtifactPaths {
+        raw: format!("{base}/raw/response.json"),
+        raw_response: format!("{base}/raw/response.json"),
+        raw_request: format!("{base}/raw/request.json"),
+        redacted_headers: format!("{base}/raw/headers.redacted.json"),
+        provider_notes: format!("{base}/raw/provider-notes.md"),
+        normalized: format!("{base}/ohlcv.jsonl"),
+        validation: format!("{base}/validation.json"),
+        manifest: format!("{base}/manifest.json"),
+    }
+}
+
+fn dataset_source(
+    request: &OpenBbRequest,
+    provenance: &OpenBbProvenance,
+    native_provider: &str,
+) -> crate::data_lake::DatasetSourceMetadata {
+    crate::data_lake::DatasetSourceMetadata {
+        license_notes: format!("{:?}", provenance.license_tier),
+        url_or_endpoint: format!(
+            "openbb://{native_provider}{}",
+            request.endpoint.trim_start_matches("/api/v1")
+        ),
+        retrieved_at: provenance.timestamp.clone(),
+        credential_required: provenance.license_tier == LicenseTier::Licensed,
     }
 }
 
@@ -318,6 +435,22 @@ fn metadata_or(metadata: &BTreeMap<String, String>, key: &str, fallback: &str) -
         .get(key)
         .cloned()
         .unwrap_or_else(|| fallback.into())
+}
+
+fn metadata_bool(metadata: &BTreeMap<String, String>, key: &str) -> bool {
+    metadata.get(key).is_some_and(|value| value == "true")
+}
+
+fn production_eligible(provider: Provider, metadata: &BTreeMap<String, String>) -> bool {
+    provider != Provider::YFinance && metadata_bool(metadata, "production_eligible")
+}
+
+fn quality_status(provider: Provider, metadata: &BTreeMap<String, String>) -> String {
+    if provider == Provider::YFinance {
+        "degraded".into()
+    } else {
+        metadata_or(metadata, "quality_status", "degraded")
+    }
 }
 
 fn parse_u64(value: Option<&String>, fallback: u64) -> u64 {

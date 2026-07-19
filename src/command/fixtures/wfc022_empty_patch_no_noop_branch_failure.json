@@ -1,0 +1,7 @@
+{
+  "call_id": "implementation-wave-2",
+  "branch_id": "implementation-wave-2-inv-TDL-010-registry-schema-migration",
+  "old_error": "patch is empty and item did not declare idempotent_noop",
+  "expected_status": "needs_review",
+  "expected_failure_kind": "contract"
+}

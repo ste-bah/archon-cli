@@ -62,6 +62,7 @@ fn prepare(
             .iter()
             .map(|t| normalize_target(t, repo).unwrap())
             .collect(),
+        target_dir_scopes: Vec::new(),
         target_files_source: TargetFilesSource::Item,
         read_context_files: vec![],
         verify_inputs: vec![],
@@ -236,7 +237,7 @@ fn stale_baseline_unchanged_file_ignored() {
 }
 
 #[test]
-fn patch_conflict_cleans_canonical() {
+fn patch_conflict_restores_pre_apply_dirty_content() {
     let repo = canonical_repo();
     let (m, _pre) = prepare(
         repo.path(),
@@ -266,15 +267,10 @@ fn patch_conflict_cleans_canonical() {
     )
     .expect("apply");
     assert_eq!(rec.items_failed.len(), 1, "apply should conflict");
-    // Cleanup restored canonical to HEAD: git diff empty.
-    let diff = std::process::Command::new("git")
-        .current_dir(repo.path())
-        .args(["diff", "--name-only"])
-        .output()
-        .unwrap();
-    assert!(
-        String::from_utf8_lossy(&diff.stdout).trim().is_empty(),
-        "canonical must be clean after conflict cleanup"
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("src/lib.rs")).unwrap(),
+        "// drifted conflict\n",
+        "canonical dirty content must be restored after conflict cleanup"
     );
 }
 
@@ -322,7 +318,25 @@ fn verify_none_is_noop_success() {
     let repo = canonical_repo();
     let v = run_wave_verify(repo.path(), None, 0, &run_root_of(repo.path()), "impl").expect("noop");
     assert_eq!(v.exit, 0);
+    assert_eq!(v.command, None);
     assert!(v.stdout_tail.is_empty());
+}
+
+#[test]
+fn verify_success_records_command() {
+    let repo = canonical_repo();
+    let v = run_wave_verify(
+        repo.path(),
+        Some("printf ok"),
+        1,
+        &run_root_of(repo.path()),
+        "impl",
+    )
+    .expect("verify");
+
+    assert_eq!(v.exit, 0);
+    assert_eq!(v.command.as_deref(), Some("printf ok"));
+    assert_eq!(v.stdout_tail, "ok");
 }
 
 #[test]

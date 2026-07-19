@@ -1,0 +1,26 @@
+[
+  {
+    "item_id": "rem-review-gap-one",
+    "canonical_task_ids": ["TASK-TDL-050"],
+    "dependency_ids": ["TASK-TDL-020"],
+    "source_item_id": "review-gap-one",
+    "failure_status": "blocking",
+    "failure_evidence": "First project artifact gap for the same final task.",
+    "required_fix": "Materialize the first project artifact evidence set.",
+    "target_files": [],
+    "focused_verification": ["Verify first project artifact evidence exists."],
+    "artifact_requirements": [".archon/artifacts/review-gap-one.json"]
+  },
+  {
+    "item_id": "rem-review-gap-two",
+    "canonical_task_ids": ["TASK-TDL-050"],
+    "dependency_ids": ["TASK-TDL-020"],
+    "source_item_id": "review-gap-two",
+    "failure_status": "blocking",
+    "failure_evidence": "Second independent project artifact gap for the same final task.",
+    "required_fix": "Materialize the second project artifact evidence set.",
+    "target_files": [],
+    "focused_verification": ["Verify second project artifact evidence exists."],
+    "artifact_requirements": [".archon/artifacts/review-gap-two.json"]
+  }
+]

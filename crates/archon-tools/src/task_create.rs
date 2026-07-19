@@ -152,6 +152,7 @@ impl Tool for TaskCreateTool {
             run_in_background,
             cwd,
             isolation: None,
+            provider_env: None,
         };
 
         // TASK-AGS-105 Section 2h: route through SubagentExecutor with

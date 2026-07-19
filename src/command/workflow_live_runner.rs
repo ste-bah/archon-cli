@@ -13,6 +13,7 @@ use archon_workflow::{
 };
 
 use super::workflow_agent_select::select_workflow_agent_key;
+use super::workflow_live_items::{item_output_needs_schema_repair, repair_item_output};
 use super::workflow_live_prompt::workflow_prompt;
 use super::workflow_live_retry;
 
@@ -60,11 +61,11 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             "stage running",
         );
         let agent_request = AgentExecutionRequest {
-            session_id: request.run_id.clone(),
+            session_id: workflow_agent_session_id(&request),
             pipeline_type: PipelineType::Workflow,
             task: request.task.clone(),
             cwd: request_target_repository_root(&request),
-            ordinal: request.attempt as usize,
+            ordinal: workflow_agent_ordinal(&request),
             attempt: request.attempt as usize,
             agent,
             messages: vec![serde_json::json!({
@@ -73,14 +74,17 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             })],
             system: vec![serde_json::json!({
                 "type": "text",
-                "text": "You are an Archon dynamic workflow stage agent. Return only useful public output for the stage artifact. Do not include private reasoning, hidden chain-of-thought, credentials, or provider internals.",
+                "text": workflow_stage_system_context(&request),
             })],
             tools: Vec::new(),
             allowed_tools: allowed_tools(&request),
+            timeout_secs: None,
+            disable_auto_background: false,
+            provider_env_resolution: None,
         };
         let response = match workflow_live_retry::run_agent_with_transient_retry(
             &self.llm,
-            agent_request,
+            agent_request.clone(),
             |attempt| {
                 self.emit_activity(
                     &request,
@@ -107,6 +111,49 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
                 return Err(err);
             }
         };
+        let response = if item_output_needs_schema_repair(&request, &response.content) {
+            self.emit_activity(
+                &request,
+                &agent_name,
+                &provider_id,
+                &resolved_model,
+                AgentActivityStatus::Running,
+                "stage repairing invalid item output",
+            );
+            match repair_item_output(
+                &self.llm,
+                &request,
+                &agent_request,
+                response,
+                |attempt| {
+                    self.emit_activity(
+                        &request,
+                        &agent_name,
+                        &provider_id,
+                        &resolved_model,
+                        AgentActivityStatus::Running,
+                        &format!("stage item-output repair retrying after transient provider error ({attempt}/3)"),
+                    );
+                },
+            )
+            .await
+            {
+                Ok(response) => response,
+                Err(err) => {
+                    self.emit_activity(
+                        &request,
+                        &agent_name,
+                        &provider_id,
+                        &resolved_model,
+                        AgentActivityStatus::Failed,
+                        "stage failed item-output repair",
+                    );
+                    return Err(err);
+                }
+            }
+        } else {
+            response
+        };
         self.emit_activity(
             &request,
             &agent_name,
@@ -120,8 +167,69 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
         output.resolved_model = Some(resolved_model);
         output.tokens_in = response.tokens_in;
         output.tokens_out = response.tokens_out;
+        output.tool_uses = response
+            .tool_uses
+            .into_iter()
+            .map(|entry| {
+                serde_json::json!({
+                    "tool_name": entry.tool_name,
+                    "input": entry.input,
+                    "output": entry.output,
+                })
+            })
+            .collect();
         Ok(output)
     }
+}
+
+pub(crate) fn workflow_agent_ordinal(request: &StageRunRequest) -> usize {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in request.stage_id.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let suffix = (hash % 999_983) as usize + 1;
+    (request.attempt.max(1) as usize)
+        .saturating_mul(1_000_000)
+        .saturating_add(suffix)
+}
+
+pub(crate) fn workflow_agent_session_id(request: &StageRunRequest) -> String {
+    format!(
+        "{}-stage-{}-attempt-{}",
+        request.run_id,
+        sanitize_agent_session_component(&request.stage_id),
+        request.attempt.max(1)
+    )
+}
+
+fn sanitize_agent_session_component(value: &str) -> String {
+    let mut out = String::with_capacity(value.len().min(96));
+    for ch in value.chars() {
+        if out.len() >= 96 {
+            break;
+        }
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+            out.push(ch);
+        } else {
+            out.push('-');
+        }
+    }
+    let trimmed = out.trim_matches('-');
+    if trimmed.is_empty() {
+        "stage".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+pub(crate) fn workflow_stage_system_context(request: &StageRunRequest) -> String {
+    format!(
+        "You are an Archon dynamic workflow stage agent. This is a fresh workflow stage invocation for run '{}', stage '{}', attempt {}. Ignore any restored conversational context, prior subagent memory, or earlier session summary that conflicts with this invocation. Follow only the current Workflow Task, Evidence Contract, Stage Input, and output schema. Do not ask what to do next, do not stop at a confirmation question, and do not return restored-context summaries. Return only useful public output for the stage artifact. Do not include private reasoning, hidden chain-of-thought, credentials, or provider internals.",
+        request.run_id,
+        request.stage_id,
+        request.attempt.max(1)
+    )
 }
 
 pub(crate) fn request_target_repository_root(request: &StageRunRequest) -> Option<PathBuf> {
@@ -151,10 +259,7 @@ impl PipelineWorkflowRunner {
                 role: AgentActivityRole::Subagent,
                 status,
                 current_tool: None,
-                detail: Some(format!(
-                    "{detail} provider_tier={:?}",
-                    request.provider_tier
-                )),
+                detail: Some(activity_detail(request, detail)),
                 run_id: Some(request.run_id.clone()),
                 parent_id: None,
                 artifact_id: None,
@@ -165,7 +270,32 @@ impl PipelineWorkflowRunner {
     }
 }
 
-fn workflow_agent(request: &StageRunRequest, model: &str, agent_names: &[String]) -> AgentInfo {
+pub(super) fn activity_detail(request: &StageRunRequest, detail: &str) -> String {
+    let cwd = request_target_repository_root(request)
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "default".to_string());
+    format!(
+        "{detail} stage={} provider_tier={:?} cwd={} tool_mode={}",
+        request.stage_id,
+        request.provider_tier,
+        cwd,
+        workflow_tool_mode(request)
+    )
+}
+
+fn workflow_tool_mode(request: &StageRunRequest) -> &'static str {
+    if matches!(request.stage_kind, StageKind::Implementation) || command_execution_stage(request) {
+        "full"
+    } else {
+        "read_only"
+    }
+}
+
+pub(crate) fn workflow_agent(
+    request: &StageRunRequest,
+    model: &str,
+    agent_names: &[String],
+) -> AgentInfo {
     let key = select_workflow_agent_key(request, agent_names);
     AgentInfo {
         display_name: key.replace('-', " "),
@@ -202,7 +332,9 @@ pub(crate) fn allowed_tools(request: &StageRunRequest) -> Vec<String> {
             "DocGet",
         ],
     };
-    tools.into_iter().map(str::to_string).collect()
+    let mut tools = tools.into_iter().map(str::to_string).collect::<Vec<_>>();
+    tools.extend(super::workflow_live_mcp::allowed_mcp_tools(request));
+    tools
 }
 
 fn implementation_tools(request: &StageRunRequest) -> Vec<&'static str> {
@@ -220,44 +352,80 @@ fn implementation_tools(request: &StageRunRequest) -> Vec<&'static str> {
         "LargeEditCommit",
         "LargeEditAbort",
     ];
-    if !write_coordination_enabled(request) {
+    if !write_coordination_enabled(request) || command_execution_stage(request) {
         tools.push("Bash");
     }
     tools
 }
 
-fn write_coordination_enabled(request: &StageRunRequest) -> bool {
-    request
-        .input
-        .get("write_coordination")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
+pub(super) fn write_coordination_enabled(request: &StageRunRequest) -> bool {
+    match request.input.get("write_coordination") {
+        Some(serde_json::Value::Bool(enabled)) => *enabled,
+        Some(value) => value
+            .get("enabled")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        None => false,
+    }
 }
 
 pub(crate) fn command_execution_stage(request: &StageRunRequest) -> bool {
     if stage_extra_requests_bash(request) {
         return true;
     }
+    // Typed V2 calls decide from declared fields: focused-verification waves
+    // run commands; every other read-only call gets no shell. Prose sniffing
+    // is reserved for requests without a typed call.
+    if request.input.get("v2_call").is_some() {
+        let id = request.stage_id.to_ascii_lowercase().replace('-', "_");
+        if id.starts_with("verification_wave_") || id.starts_with("review_verification_wave_") {
+            return true;
+        }
+        if generated_v2_read_only_call(request) {
+            return false;
+        }
+    }
     if command_execution_stage_id(&request.stage_id) {
         return true;
     }
     let haystack = format!(
-        "{}\n{}\n{}",
+        "{}\n{}\n{}\n{}",
         request.stage_id,
         request.task,
         request
             .input
             .get("stage_task")
             .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
+            .unwrap_or_default(),
+        request.input
     )
     .to_ascii_lowercase();
     command_execution_text(&haystack)
 }
 
+fn generated_v2_read_only_call(request: &StageRunRequest) -> bool {
+    let Some(v2_call) = request.input.get("v2_call") else {
+        return false;
+    };
+    let write_mode = v2_call.get("write_mode");
+    if write_mode.is_some_and(|value| !value.is_null()) {
+        return false;
+    }
+    let method = v2_call
+        .get("method")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    matches!(
+        method,
+        "agent" | "fanout" | "parallel" | "reduce" | "finalReport" | "qualityGate" | "humanGate"
+    )
+}
+
 fn command_execution_stage_id(stage_id: &str) -> bool {
     let id = stage_id.to_ascii_lowercase().replace('-', "_");
-    id.ends_with("_tests")
+    id.starts_with("verification_wave_")
+        || id.starts_with("review_verification_wave_")
+        || id.ends_with("_tests")
         || id.contains("_post_tests")
         || id.contains("_focused_tests")
         || id.contains("_verification")
@@ -312,18 +480,6 @@ fn text_values(value: &serde_json::Value) -> Vec<&str> {
             .collect(),
         _ => Vec::new(),
     }
-}
-
-pub(crate) fn extract_yaml(content: &str) -> String {
-    if let Some(start) = content.find("```") {
-        let after = &content[start + 3..];
-        let after = after.strip_prefix("yaml").unwrap_or(after);
-        let after = after.strip_prefix('\n').unwrap_or(after);
-        if let Some(end) = after.find("```") {
-            return after[..end].trim().to_string();
-        }
-    }
-    content.trim().to_string()
 }
 
 pub(crate) fn tier_model_alias(tier: ProviderTier) -> &'static str {

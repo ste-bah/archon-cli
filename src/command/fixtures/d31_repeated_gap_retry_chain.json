@@ -1,0 +1,94 @@
+{
+  "repair_plans": [
+    {
+      "generation": 1,
+      "route": "retry_verification"
+    },
+    {
+      "generation": 2,
+      "route": "predicate_unsatisfiable_as_written"
+    },
+    {
+      "generation": 3,
+      "route": "retry_verification"
+    }
+  ],
+  "retry_generations": [
+    {
+      "kind": "verification-retry",
+      "result": {
+        "outcomes": [
+          {
+            "item_id": "retry-generation-1",
+            "status": "failed",
+            "result": {
+              "status": "failed",
+              "residual_gaps": [
+                {
+                  "id": "coverage-matrix-incomplete",
+                  "description": "Focused coverage test failed deterministically."
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "kind": "verification-retry",
+      "result": {
+        "outcomes": [
+          {
+            "item_id": "retry-generation-2",
+            "status": "failed",
+            "result": {
+              "status": "failed",
+              "data": {
+                "source_residual_gap_ids": ["coverage-matrix-incomplete"]
+              },
+              "residual_gaps": [
+                {
+                  "id": "coverage-matrix-incomplete",
+                  "description": "The same focused coverage test still fails."
+                }
+              ]
+            }
+          },
+          {
+            "item_id": "unrelated-retry",
+            "status": "failed",
+            "result": {
+              "status": "failed",
+              "residual_gaps": [
+                {
+                  "id": "command-shape-mismatch",
+                  "description": "A different check selected no tests."
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "kind": "verification-retry",
+      "result": {
+        "outcomes": [
+          {
+            "item_id": "retry-generation-3",
+            "status": "failed",
+            "result": {
+              "status": "failed",
+              "residual_gaps": [
+                {
+                  "id": "coverage-matrix-incomplete",
+                  "description": "The coverage test remains red."
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

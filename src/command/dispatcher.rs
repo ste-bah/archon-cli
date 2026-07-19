@@ -103,7 +103,17 @@ impl Dispatcher {
         };
 
         match self.registry.get(&parsed.name) {
-            Some(handler) => handler.execute(ctx, &parsed.raw_args),
+            Some(handler) => match handler.execute(ctx, &parsed.raw_args) {
+                Ok(()) => Ok(()),
+                Err(error) => {
+                    ctx.emit(archon_tui::app::TuiEvent::Error(format!(
+                        "Command /{} failed: {error}",
+                        parsed.name
+                    )));
+                    ctx.emit(archon_tui::app::TuiEvent::SlashCommandComplete);
+                    Err(error)
+                }
+            },
             None => {
                 // TASK-AGS-804: delegate message assembly to the
                 // dedicated formatter, which owns the zero / one /
@@ -206,6 +216,16 @@ mod tests {
         }
     }
 
+    struct FailingHandler;
+    impl CommandHandler for FailingHandler {
+        fn execute(&self, _ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
+            anyhow::bail!("workflow command requires working directory context")
+        }
+        fn description(&self) -> &str {
+            "failing handler (test only)"
+        }
+    }
+
     #[test]
     fn dispatch_recognized_command_returns_ok() {
         // WITNESS: a recognized command must (a) return Ok, and (b)
@@ -249,6 +269,37 @@ mod tests {
             Ok(ev) => panic!("unexpected event emitted: {ev:?}"),
             Err(e) => panic!("unexpected channel error: {e:?}"),
         }
+    }
+
+    #[test]
+    fn dispatch_recognized_handler_error_is_user_visible() {
+        let mut b = RegistryBuilder::new();
+        b.insert_primary("workflow", Arc::new(FailingHandler));
+        let registry = Arc::new(b.build());
+        let dispatcher = Dispatcher::new(registry);
+        let (mut ctx, mut rx) = make_ctx();
+
+        let result = dispatcher.dispatch(&mut ctx, "/workflow run --live build the PRD");
+
+        assert!(result.is_err(), "handler error must still propagate");
+        let ev = rx.try_recv().expect("handler error event must be emitted");
+        match ev {
+            TuiEvent::Error(msg) => {
+                assert!(
+                    msg.contains("Command /workflow failed"),
+                    "error should identify the failed slash command, got: {msg}"
+                );
+                assert!(
+                    msg.contains("workflow command requires working directory context"),
+                    "error should preserve the handler failure, got: {msg}"
+                );
+            }
+            other => panic!("expected TuiEvent::Error, got {other:?}"),
+        }
+        assert!(
+            matches!(rx.try_recv(), Ok(TuiEvent::SlashCommandComplete)),
+            "handler error must complete the slash-command lifecycle"
+        );
     }
 
     #[test]

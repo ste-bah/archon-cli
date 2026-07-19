@@ -32,7 +32,11 @@ fn workflow_live_status_write_coordination_renders() {
     let apply_dir = store
         .run_dir(run_id)
         .join("write-coordination/stages/implement/apply");
+    let manifest_dir = store
+        .run_dir(run_id)
+        .join("write-coordination/stages/implement/manifests");
     std::fs::create_dir_all(&apply_dir).unwrap();
+    std::fs::create_dir_all(&manifest_dir).unwrap();
 
     let record = ApplyRecord {
         wave_id: 0,
@@ -42,6 +46,7 @@ fn workflow_live_status_write_coordination_renders() {
         items_failed: vec![],
         verify_result: Some(VerifyResult {
             exit: 0,
+            command: None,
             stdout_tail: String::new(),
             stderr_tail: String::new(),
             duration_ms: 1,
@@ -52,6 +57,13 @@ fn workflow_live_status_write_coordination_renders() {
         serde_json::to_vec_pretty(&record).unwrap(),
     )
     .unwrap();
+    for item_id in ["implement-0", "implement-1"] {
+        std::fs::write(
+            manifest_dir.join(format!("{item_id}.json")),
+            applied_manifest(item_id),
+        )
+        .unwrap();
+    }
 
     let stages = coordinated_stage_ids(&store, run_id);
     assert!(stages.contains(&"implement".to_string()));
@@ -68,4 +80,26 @@ fn workflow_live_status_write_coordination_renders() {
     // git helper kept honest for parity with other workspace tests.
     let repo = tempfile::tempdir().unwrap();
     git(&["init", "-q"], repo.path());
+}
+
+fn applied_manifest(item_id: &str) -> String {
+    format!(
+        r#"{{
+          "schema":"archon.workflow.patch_manifest.v1",
+          "run_id":"run-live",
+          "stage_id":"implement",
+          "item_id":"{item_id}",
+          "baseline_commit":"abc",
+          "patch_path":"patches/{item_id}.patch",
+          "declared_target_files":["src/lib.rs"],
+          "changed_files":["src/lib.rs"],
+          "created_files":[],
+          "deleted_files":[],
+          "pre_hashes":{{}},
+          "post_hashes":{{}},
+          "verify_command":null,
+          "agent_artifact_path":null,
+          "status":{{"status":"applied"}}
+        }}"#
+    )
 }

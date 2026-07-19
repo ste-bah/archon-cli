@@ -42,8 +42,14 @@ pub enum WorkflowError {
     PolicyDenied(String),
     #[error("provider tier '{0}' could not be resolved")]
     ProviderTierUnresolved(String),
+    #[error("workflow stage blocked: {0}")]
+    StageBlocked(String),
     #[error("workflow stage failed: {0}")]
     StageFailed(String),
+    #[error("workflow paused by run control: {0}")]
+    ControlPaused(String),
+    #[error("workflow cancelled by run control: {0}")]
+    ControlCancelled(String),
     #[error("workflow template is unsafe: {0}")]
     UnsafeTemplate(String),
     #[error("io error at {path}: {source}")]

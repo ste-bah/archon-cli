@@ -153,8 +153,10 @@ mod tests {
 
     #[test]
     fn replay_submit_requires_paper_market_intent() {
-        let mut intent = OrderIntent::default();
-        intent.mode = TradingMode::LivePilot;
+        let intent = OrderIntent {
+            mode: TradingMode::LivePilot,
+            ..Default::default()
+        };
         let mut transport = RecordingTransport { calls: Vec::new() };
         let err = adapter(true, true)
             .submit_replay(
@@ -169,12 +171,14 @@ mod tests {
 
     #[test]
     fn replay_submit_rejects_non_market_orders() {
-        let mut intent = OrderIntent::default();
-        intent.order_type = OrderType::Limit;
-        intent.prices = OrderPrices {
-            reference: 10.0,
-            limit: Some(9.5),
-            stop: None,
+        let intent = OrderIntent {
+            order_type: OrderType::Limit,
+            prices: OrderPrices {
+                reference: 10.0,
+                limit: Some(9.5),
+                stop: None,
+            },
+            ..Default::default()
         };
         let mut transport = RecordingTransport { calls: Vec::new() };
         let err = adapter(true, true)
@@ -212,8 +216,10 @@ mod tests {
 
     #[test]
     fn replay_submit_calls_terminal_interaction_with_trade_action() {
-        let mut intent = OrderIntent::default();
-        intent.side = OrderSide::Sell;
+        let intent = OrderIntent {
+            side: OrderSide::Sell,
+            ..Default::default()
+        };
         let mut transport = RecordingTransport { calls: Vec::new() };
         let receipt = adapter(true, true)
             .submit_replay(

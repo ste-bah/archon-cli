@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, FileText, Gauge, Pause, Play, RotateCcw, ShieldCheck, Workflow, X } from "lucide-react";
+import { Boxes, Code2, FileText, Gauge, Pause, Play, RotateCcw, ShieldCheck, Workflow, Wrench, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { apiClient } from "../api/client";
-import type { WorkflowRunSummary, WorkflowStageView, WorkflowWebSummary } from "../api/generated/web";
+import type { WorkflowAgentView, WorkflowApprovalView, WorkflowBundleView, WorkflowRunSummary, WorkflowStageView, WorkflowV2BranchView, WorkflowV2ResultView, WorkflowWebSummary } from "../api/generated/web";
 import { StatusPill } from "../components/StatusPill";
 import "./PipelinePage.css";
 
@@ -115,6 +115,11 @@ export function WorkflowPage({ workflows }: WorkflowPageProps) {
           <StatusPill tone={control.isError ? "warn" : "muted"}>{control.isPending ? "busy" : "gated"}</StatusPill>
         </div>
         <div className="pipeline-list">
+          <ControlButton icon={<ShieldCheck size={16} />} label="Run Once" onClick={() => submitControl("approve-run-once")} />
+          <ControlButton icon={<ShieldCheck size={16} />} label="Always" onClick={() => submitControl("approve-always")} />
+          <ControlButton icon={<X size={16} />} label="Deny" onClick={() => submitControl("deny-workflow")} />
+          <ControlButton icon={<Play size={16} />} label="Continue" onClick={() => submitControl("continue")} />
+          <ControlButton icon={<Wrench size={16} />} label="Repair" onClick={() => submitControl("repair")} />
           <ControlButton icon={<Play size={16} />} label="Resume" onClick={() => submitControl("resume")} />
           <ControlButton icon={<Pause size={16} />} label="Pause" onClick={() => submitControl("pause")} />
           <ControlButton icon={<X size={16} />} label="Cancel" onClick={() => submitControl("cancel")} />
@@ -127,10 +132,82 @@ export function WorkflowPage({ workflows }: WorkflowPageProps) {
           <h3>{selectedRun?.name ?? "Workflow detail"}</h3>
           <StatusPill tone={statusTone(selectedRun?.status ?? "missing")}>{selectedRun?.status ?? "missing"}</StatusPill>
         </div>
+        {detail.data?.bundle && <BundleSummary bundle={detail.data.bundle} />}
+        {detail.data?.approval && <ApprovalSummary approval={detail.data.approval} />}
         <div className="pipeline-list">
           {detail.data?.stages.map((stage) => (
             <StageRow key={stage.id} stage={stage} onAction={submitStageControl} />
           )) ?? <EmptyRow>{detail.isLoading ? "Loading workflow detail." : "Select a run."}</EmptyRow>}
+        </div>
+      </section>
+
+      <section className="panel panel--wide">
+        <div className="panel-heading">
+          <h3>Generated harness</h3>
+          <StatusPill tone={detail.data?.harness ? "good" : "muted"}>{detail.data?.harness ? "available" : "missing"}</StatusPill>
+        </div>
+        {detail.data?.harness ? (
+          <pre className="pipeline-code">{detail.data.harness}</pre>
+        ) : (
+          <EmptyRow>No harness recorded for this run.</EmptyRow>
+        )}
+      </section>
+
+      <section className="panel panel--wide">
+        <div className="panel-heading">
+          <h3>Compiled spec</h3>
+          <StatusPill tone={detail.data?.compiledSpec ? "good" : "muted"}>{detail.data?.compiledSpec ? "available" : "missing"}</StatusPill>
+        </div>
+        {detail.data?.compiledSpec ? (
+          <pre className="pipeline-code">{detail.data.compiledSpec}</pre>
+        ) : (
+          <EmptyRow>No compiled workflow spec recorded for this run.</EmptyRow>
+        )}
+      </section>
+
+      <section className="panel panel--wide">
+        <div className="panel-heading">
+          <h3>Agent details</h3>
+          <StatusPill>{detail.data?.agents.length ?? 0} records</StatusPill>
+        </div>
+        <div className="pipeline-list">
+          {detail.data?.agents.length ? (
+            detail.data.agents.map((agent) => (
+              <AgentRow key={`${agent.stageId}:${agent.itemId}`} agent={agent} onAction={submitAgentControl} />
+            ))
+          ) : (
+            <EmptyRow>No agent records for this run.</EmptyRow>
+          )}
+        </div>
+      </section>
+
+      <section className="panel panel--wide">
+        <div className="panel-heading">
+          <h3>Generated calls</h3>
+          <StatusPill>{detail.data?.v2Results.length ?? 0} calls</StatusPill>
+        </div>
+        <div className="pipeline-list">
+          {detail.data?.v2Results.length ? (
+            detail.data.v2Results.map((result) => <V2ResultRow key={result.callId} result={result} />)
+          ) : (
+            <EmptyRow>No generated call records for this run.</EmptyRow>
+          )}
+        </div>
+      </section>
+
+      <section className="panel panel--wide">
+        <div className="panel-heading">
+          <h3>Generated branches</h3>
+          <StatusPill>{detail.data?.v2Branches.length ?? 0} branches</StatusPill>
+        </div>
+        <div className="pipeline-list">
+          {detail.data?.v2Branches.length ? (
+            detail.data.v2Branches.map((branch) => (
+              <V2BranchRow key={`${branch.callId}:${branch.itemId}`} branch={branch} onAction={submitV2BranchControl} />
+            ))
+          ) : (
+            <EmptyRow>No generated branch records for this run.</EmptyRow>
+          )}
         </div>
       </section>
 
@@ -193,6 +270,7 @@ export function WorkflowPage({ workflows }: WorkflowPageProps) {
       runId: selectedRun.id,
       action,
       stageId: null,
+      itemId: null,
       rationale: null,
       confirmationToken,
     });
@@ -210,8 +288,135 @@ export function WorkflowPage({ workflows }: WorkflowPageProps) {
     if (!confirmationToken) {
       return;
     }
-    control.mutate({ runId: selectedRun.id, action, stageId: stage.id, rationale, confirmationToken });
+    control.mutate({ runId: selectedRun.id, action, stageId: stage.id, itemId: null, rationale, confirmationToken });
   }
+
+  function submitAgentControl(action: string, agent: WorkflowAgentView) {
+    if (!selectedRun?.id) {
+      return;
+    }
+    const confirmationToken = window.prompt(`Confirm ${action} for ${agent.stageId}/${agent.itemId}`);
+    if (!confirmationToken) {
+      return;
+    }
+    control.mutate({
+      runId: selectedRun.id,
+      action,
+      stageId: agent.stageId,
+      itemId: agent.itemId,
+      rationale: null,
+      confirmationToken,
+    });
+  }
+
+  function submitV2BranchControl(action: string, branch: WorkflowV2BranchView) {
+    if (!selectedRun?.id) {
+      return;
+    }
+    const confirmationToken = window.prompt(`Confirm ${action} for ${branch.callId}/${branch.itemId}`);
+    if (!confirmationToken) {
+      return;
+    }
+    control.mutate({
+      runId: selectedRun.id,
+      action,
+      stageId: branch.callId,
+      itemId: branch.itemId,
+      rationale: null,
+      confirmationToken,
+    });
+  }
+}
+
+function BundleSummary({ bundle }: { bundle: WorkflowBundleView }) {
+  return (
+    <div className="workflow-bundle">
+      <Code2 size={16} aria-hidden="true" />
+      <span>{bundle.workflowPath}</span>
+      <span>{bundle.compiledSpecPath}</span>
+      <span>{bundle.phaseCount} phases</span>
+      <span>{bundle.maxParallelism} parallel</span>
+      <span>{bundle.writeCapableStages.length} write stages</span>
+    </div>
+  );
+}
+
+function ApprovalSummary({ approval }: { approval: WorkflowApprovalView }) {
+  const writeStages = approval.writeCapableStages.length ? approval.writeCapableStages.join(", ") : "none";
+  const external = approval.externalRequirements.length ? approval.externalRequirements.join(", ") : "none";
+  return (
+    <div className="workflow-bundle">
+      <ShieldCheck size={16} aria-hidden="true" />
+      <span>{approval.decision ?? "pending"}</span>
+      <span>{approval.decidedBy ?? "no decision"}</span>
+      <span>{approval.phaseCount} phases</span>
+      <span>{approval.maxAgents} agents</span>
+      <span>write: {writeStages}</span>
+      <span>external: {external}</span>
+    </div>
+  );
+}
+
+function AgentRow({ agent, onAction }: { agent: WorkflowAgentView; onAction: (action: string, agent: WorkflowAgentView) => void }) {
+  const promptMeta = [
+    agent.inputHash ? `input ${shortHash(agent.inputHash)}` : null,
+    agent.promptHash ? `prompt ${shortHash(agent.promptHash)}` : null,
+    agent.promptPath ?? null,
+  ].filter(Boolean).join(" · ");
+  return (
+    <div className="pipeline-row">
+      <div>
+        <strong>{agent.stageId} / {agent.itemId}</strong>
+        <span>{agent.provider ?? "provider"} · {agent.model ?? "model"} · {agent.tokensIn + agent.tokensOut} tokens</span>
+        {promptMeta && <small>{promptMeta}</small>}
+        {agent.resultPreview && <small>{agent.resultPreview}</small>}
+        {agent.error && <small>{agent.error}</small>}
+        {agent.recentPublicToolCalls.length > 0 && (
+          <small>{agent.recentPublicToolCalls.length} recent public tool calls captured</small>
+        )}
+      </div>
+      <div className="pipeline-row__actions">
+        <StatusPill tone={statusTone(agent.status)}>{agent.status}</StatusPill>
+        <button type="button" onClick={() => onAction("restart-item", agent)} aria-label={`Restart ${agent.stageId}/${agent.itemId}`}>
+          <RotateCcw size={15} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function V2ResultRow({ result }: { result: WorkflowV2ResultView }) {
+  return (
+    <div className="pipeline-row">
+      <div>
+        <strong>{result.callId}</strong>
+        <span>{result.branchCount} branches · {result.artifactCount} artifacts</span>
+        {result.summary && <small>{result.summary}</small>}
+        <small>{result.resultPath}</small>
+      </div>
+      <StatusPill tone={statusTone(result.status)}>{result.status}</StatusPill>
+    </div>
+  );
+}
+
+function V2BranchRow({ branch, onAction }: { branch: WorkflowV2BranchView; onAction: (action: string, branch: WorkflowV2BranchView) => void }) {
+  return (
+    <div className="pipeline-row">
+      <div>
+        <strong>{branch.callId} / {branch.itemId}</strong>
+        <span>{branch.role}</span>
+        {branch.summary && <small>{branch.summary}</small>}
+        {branch.error && <small>{branch.error}</small>}
+        <small>{branch.outputPath}</small>
+      </div>
+      <div className="pipeline-row__actions">
+        <StatusPill tone={statusTone(branch.status)}>{branch.status}</StatusPill>
+        <button type="button" onClick={() => onAction("restart-item", branch)} aria-label={`Restart ${branch.callId}/${branch.itemId}`}>
+          <RotateCcw size={15} />
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function RunSummary({ run }: { run: WorkflowRunSummary }) {
@@ -225,11 +430,16 @@ function RunSummary({ run }: { run: WorkflowRunSummary }) {
 }
 
 function StageRow({ stage, onAction }: { stage: WorkflowStageView; onAction: (action: string, stage: WorkflowStageView) => void }) {
+  const timing = [
+    stage.startedAt ? `started ${stage.startedAt}` : null,
+    stage.completedAt ? `completed ${stage.completedAt}` : null,
+  ].filter(Boolean).join(" · ");
   return (
     <div className="pipeline-row">
       <div>
         <strong>{stage.id}</strong>
         <span>attempts={stage.attempt} artifacts={stage.artifacts}</span>
+        {timing && <small>{timing}</small>}
         {stage.error && <small>{stage.error}</small>}
       </div>
       <div className="pipeline-row__actions">
@@ -243,6 +453,10 @@ function StageRow({ stage, onAction }: { stage: WorkflowStageView; onAction: (ac
       </div>
     </div>
   );
+}
+
+function shortHash(value: string) {
+  return value.slice(0, 12);
 }
 
 function ControlButton({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
@@ -278,7 +492,7 @@ function EmptyRow({ children }: { children: React.ReactNode }) {
 }
 
 function statusTone(status: string): "good" | "warn" | "muted" {
-  if (["accepted", "completed", "gated", "running", "forcedaccepted"].includes(status)) {
+  if (["accepted", "completed", "gated", "running", "forcedaccepted", "forced_accepted"].includes(status)) {
     return "good";
   }
   if (["failed", "blocked", "cancelled"].includes(status)) {

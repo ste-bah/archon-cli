@@ -18,6 +18,8 @@ pub enum CommandAction {
     },
     RunTemplate {
         name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        args: Option<serde_json::Value>,
     },
     Status {
         run_id: String,
@@ -25,10 +27,25 @@ pub enum CommandAction {
     Resume {
         run_id: String,
     },
+    Continue {
+        run_id: String,
+    },
+    Repair {
+        run_id: String,
+    },
     Pause {
         run_id: String,
     },
     Cancel {
+        run_id: String,
+    },
+    ApproveRunOnce {
+        run_id: String,
+    },
+    ApproveAlways {
+        run_id: String,
+    },
+    DenyWorkflow {
         run_id: String,
     },
     RestartAgent {
@@ -39,6 +56,10 @@ pub enum CommandAction {
     RestartStage {
         run_id: String,
         stage_id: String,
+    },
+    RestartTask {
+        run_id: String,
+        task_id: String,
     },
     ForceAccept {
         run_id: String,
@@ -77,6 +98,7 @@ impl WorkflowCommand {
             },
             "run-template" | "from-template" => CommandAction::RunTemplate {
                 name: required(tail, 0, "template name")?,
+                args: template_args(&tail[1..])?,
             },
             "status" => CommandAction::Status {
                 run_id: required(tail, 0, "run id")?,
@@ -84,10 +106,25 @@ impl WorkflowCommand {
             "resume" => CommandAction::Resume {
                 run_id: required(tail, 0, "run id")?,
             },
+            "continue" => CommandAction::Continue {
+                run_id: required(tail, 0, "run id")?,
+            },
+            "repair" => CommandAction::Repair {
+                run_id: required(tail, 0, "run id")?,
+            },
             "pause" => CommandAction::Pause {
                 run_id: required(tail, 0, "run id")?,
             },
             "cancel" => CommandAction::Cancel {
+                run_id: required(tail, 0, "run id")?,
+            },
+            "approve-run-once" | "approve-once" => CommandAction::ApproveRunOnce {
+                run_id: required(tail, 0, "run id")?,
+            },
+            "approve-always" => CommandAction::ApproveAlways {
+                run_id: required(tail, 0, "run id")?,
+            },
+            "deny-workflow" | "deny" => CommandAction::DenyWorkflow {
                 run_id: required(tail, 0, "run id")?,
             },
             "restart-agent" => CommandAction::RestartAgent {
@@ -98,6 +135,16 @@ impl WorkflowCommand {
             "restart-stage" => CommandAction::RestartStage {
                 run_id: required(tail, 0, "run id")?,
                 stage_id: required(tail, 1, "stage id")?,
+            },
+            "restart" if tail.first().is_some_and(|arg| arg == "task") => {
+                CommandAction::RestartTask {
+                    run_id: required(tail, 1, "run id")?,
+                    task_id: required(tail, 2, "task id")?,
+                }
+            }
+            "restart-task" => CommandAction::RestartTask {
+                run_id: required(tail, 0, "run id")?,
+                task_id: required(tail, 1, "task id")?,
             },
             "force-accept" | "force-continue" => CommandAction::ForceAccept {
                 run_id: required(tail, 0, "run id")?,
@@ -139,11 +186,22 @@ fn parse_run(args: &[String]) -> WorkflowResult<CommandAction> {
     if flag(&args, "--from-template") {
         return Ok(CommandAction::RunTemplate {
             name: required(&args, 1, "template name")?,
+            args: template_args(&args[2..])?,
         });
     }
     Ok(CommandAction::Run {
         task: join_task(&args)?,
     })
+}
+
+fn template_args(args: &[String]) -> WorkflowResult<Option<serde_json::Value>> {
+    if args.is_empty() {
+        return Ok(None);
+    }
+    let raw = join_task(args)?;
+    Ok(Some(
+        serde_json::from_str(&raw).unwrap_or(serde_json::Value::String(raw)),
+    ))
 }
 
 fn without_live_flag(args: &[String]) -> Vec<String> {
@@ -216,7 +274,56 @@ mod tests {
         assert_eq!(
             parse(&["run", "--from-template", "repo-audit"]),
             CommandAction::RunTemplate {
-                name: "repo-audit".into()
+                name: "repo-audit".into(),
+                args: None,
+            }
+        );
+        assert_eq!(
+            parse(&["run", "--from-template", "repo-audit", "{\"issue\":1024}"]),
+            CommandAction::RunTemplate {
+                name: "repo-audit".into(),
+                args: Some(serde_json::json!({ "issue": 1024 })),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_high_level_recovery_commands() {
+        assert_eq!(
+            parse(&["continue", "wf-123"]),
+            CommandAction::Continue {
+                run_id: "wf-123".into()
+            }
+        );
+        assert_eq!(
+            parse(&["repair", "wf-123"]),
+            CommandAction::Repair {
+                run_id: "wf-123".into()
+            }
+        );
+        assert_eq!(
+            parse(&["restart", "task", "wf-123", "T010"]),
+            CommandAction::RestartTask {
+                run_id: "wf-123".into(),
+                task_id: "T010".into()
+            }
+        );
+        assert_eq!(
+            parse(&["restart-task", "wf-123", "T010"]),
+            CommandAction::RestartTask {
+                run_id: "wf-123".into(),
+                task_id: "T010".into()
+            }
+        );
+    }
+
+    #[test]
+    fn keeps_internal_restart_stage_command_available() {
+        assert_eq!(
+            parse(&["restart-stage", "wf-123", "implement-T010"]),
+            CommandAction::RestartStage {
+                run_id: "wf-123".into(),
+                stage_id: "implement-T010".into()
             }
         );
     }

@@ -9,6 +9,7 @@ use crate::models::ChunkArtifact;
 use crate::store;
 use crate::vector_store::{DocVectorStore, VectorWrite};
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn store_batch(
     db: &DbInstance,
     chunks: &[ChunkArtifact],
@@ -189,6 +190,7 @@ pub(crate) fn mark_batch_failed(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn store_batch_individually(
     db: &DbInstance,
     chunks: &[ChunkArtifact],

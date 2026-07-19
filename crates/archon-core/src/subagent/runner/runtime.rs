@@ -33,7 +33,7 @@ impl SubagentRunner {
         };
 
         let started = Instant::now();
-        let deadline = started + Duration::from_secs(self.timeout_secs);
+        let mut deadline = started + Duration::from_secs(self.timeout_secs);
         let mut auto_compact = crate::agent::AutoCompactState::default();
         let mut cumulative_billable_tokens = 0_u64;
         let mut last_known_context_tokens = 0_u64;
@@ -69,28 +69,68 @@ impl SubagentRunner {
                 return Ok("[Agent shutdown requested]".to_string());
             }
 
-            let prepared_request = prepare_request_round(
-                self,
-                &mut messages,
-                &mut auto_compact,
-                &mut last_known_context_tokens,
-                &mut proactive_pressure_attempted,
-                reasoning_encrypted.clone(),
+            let request_deadline = tokio::time::Instant::from_std(
+                deadline
+                    + archon_tools::current_timeout_exempt_cargo_wait(
+                        &self.tool_context.session_id,
+                    ),
+            );
+            let prepared_request = tokio::time::timeout_at(
+                request_deadline,
+                prepare_request_round(
+                    self,
+                    &mut messages,
+                    &mut auto_compact,
+                    &mut last_known_context_tokens,
+                    &mut proactive_pressure_attempted,
+                    reasoning_encrypted.clone(),
+                ),
             )
-            .await;
-            let stream = collect_stream_round(
+            .await
+            .map_err(|_| {
+                let elapsed = started.elapsed().as_secs();
+                anyhow::anyhow!(
+                    "Subagent wall-clock timeout: {elapsed}s elapsed (cap: {}s) while preparing LLM request at turn {}/{}",
+                    self.timeout_secs,
+                    turn,
+                    self.max_turns,
+                )
+            })?;
+            let inference_deadline = tokio::time::Instant::from_std(
+                deadline
+                    + archon_tools::current_timeout_exempt_cargo_wait(
+                        &self.tool_context.session_id,
+                    ),
+            );
+            let stream = tokio::time::timeout_at(
+                inference_deadline,
+                collect_stream_round(
                 self,
                 &mut messages,
                 &mut auto_compact,
-                &mut reactive_overflow_retried,
-                &mut reactive_rate_limit_retried,
-                &mut last_known_context_tokens,
+                (
+                    &mut reactive_overflow_retried,
+                    &mut reactive_rate_limit_retried,
+                    &mut last_known_context_tokens,
+                ),
                 prepared_request.request,
-                prepared_request.request_body_bytes,
-                prepared_request.large_retry_body_bytes,
+                (
+                    prepared_request.request_body_bytes,
+                    prepared_request.large_retry_body_bytes,
+                ),
                 &prepared_request.telemetry,
+                ),
             )
-            .await?;
+            .await
+            .map_err(|_| {
+                let elapsed = started.elapsed().as_secs();
+                anyhow::anyhow!(
+                    "Subagent wall-clock timeout: {elapsed}s elapsed (cap: {}s) during LLM inference at turn {}/{}",
+                    self.timeout_secs,
+                    turn,
+                    self.max_turns,
+                )
+            })??;
             if stream.retry_after_compact {
                 continue;
             }
@@ -114,14 +154,36 @@ impl SubagentRunner {
                 return Ok(stream.text_content);
             }
 
-            replay_tool_round(
-                self,
-                &mut messages,
-                stream.text_content,
-                stream.thinking_blocks,
-                stream.pending_tools,
+            let round_cancel = self
+                .tool_context
+                .cancel_parent
+                .as_ref()
+                .map(tokio_util::sync::CancellationToken::child_token)
+                .unwrap_or_default();
+            let finished = await_tool_round(
+                replay_tool_round(
+                    self,
+                    &mut messages,
+                    stream.text_content,
+                    stream.thinking_blocks,
+                    stream.pending_tools,
+                    round_cancel.clone(),
+                ),
+                round_cancel,
+                &self.tool_context.session_id,
+                deadline,
             )
             .await;
+            deadline += archon_tools::take_timeout_exempt_cargo_wait(&self.tool_context.session_id);
+            if !finished {
+                let elapsed = started.elapsed().as_secs();
+                anyhow::bail!(
+                    "Subagent wall-clock timeout: {elapsed}s elapsed (cap: {}s) during tool round at turn {}/{}",
+                    self.timeout_secs,
+                    turn,
+                    self.max_turns,
+                );
+            }
         }
 
         self.emit_activity_stream(
@@ -131,6 +193,36 @@ impl SubagentRunner {
             true,
         );
         anyhow::bail!("Subagent reached max turns ({})", self.max_turns)
+    }
+}
+
+async fn await_tool_round<F>(
+    future: F,
+    round_cancel: tokio_util::sync::CancellationToken,
+    session_id: &str,
+    deadline: Instant,
+) -> bool
+where
+    F: std::future::Future<Output = ()>,
+{
+    tokio::pin!(future);
+    loop {
+        let exempt = archon_tools::current_timeout_exempt_cargo_wait(session_id);
+        let adjusted = tokio::time::Instant::from_std(deadline + exempt);
+        tokio::select! {
+            biased;
+            _ = tokio::time::sleep_until(adjusted) => {
+                let refreshed = archon_tools::current_timeout_exempt_cargo_wait(session_id);
+                if Instant::now() < deadline + refreshed {
+                    continue;
+                }
+                round_cancel.cancel();
+                let cleanup = Duration::from_secs(2);
+                let _ = tokio::time::timeout(cleanup, &mut future).await;
+                return false;
+            }
+            _ = &mut future => return true,
+        }
     }
 }
 

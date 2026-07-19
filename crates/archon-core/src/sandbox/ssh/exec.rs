@@ -19,10 +19,10 @@ pub(super) fn ssh_command_args(
         "-o".into(),
         "PermitLocalCommand=no".into(),
     ];
-    if let Some(key_file) = config.key_file.as_deref().map(str::trim) {
-        if !key_file.is_empty() {
-            args.extend(["-i".into(), key_file.into()]);
-        }
+    if let Some(key_file) = config.key_file.as_deref().map(str::trim)
+        && !key_file.is_empty()
+    {
+        args.extend(["-i".into(), key_file.into()]);
     }
     args.push(ssh_target(config)?);
     args.push(remote_bash_command(config, request)?);

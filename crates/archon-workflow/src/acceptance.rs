@@ -24,6 +24,15 @@ pub enum AcceptanceOutcome {
     Rejected(String),
 }
 
+/// Captured result for a focused stage verification command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct VerifyCommandReport {
+    pub command: String,
+    pub exit_code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+}
+
 impl AcceptanceOutcome {
     pub fn is_accepted(&self) -> bool {
         matches!(self, AcceptanceOutcome::Accepted)
@@ -34,6 +43,29 @@ impl AcceptanceOutcome {
             AcceptanceOutcome::Accepted => None,
             AcceptanceOutcome::Rejected(reason) => Some(reason.as_str()),
         }
+    }
+}
+
+impl VerifyCommandReport {
+    pub(crate) fn success(&self) -> bool {
+        self.exit_code == Some(0)
+            && !command_is_discovery_only(&self.command)
+            && !output_reports_zero_work(&self.stdout, &self.stderr)
+    }
+
+    pub(crate) fn failure_reason(&self) -> String {
+        if self.exit_code == Some(0) && command_is_discovery_only(&self.command) {
+            return "verify_command is discovery/list-only and cannot prove completion".into();
+        }
+        if self.exit_code == Some(0) && output_reports_zero_work(&self.stdout, &self.stderr) {
+            return "verify_command produced zero-test/no-op output and cannot prove completion"
+                .into();
+        }
+        let code = self
+            .exit_code
+            .map(|code| code.to_string())
+            .unwrap_or_else(|| "signal".to_string());
+        format!("verify_command exited with status {code}")
     }
 }
 
@@ -66,12 +98,27 @@ pub fn mutated_targets(before: &TargetFingerprints, after: &TargetFingerprints) 
 /// Run the stage verification command in `root`. Returns `Ok(())` on exit 0,
 /// otherwise an error describing the failure. `None` command always passes.
 pub fn run_verify_command(root: &Path, command: Option<&str>) -> Result<(), String> {
-    let Some(command) = command else {
+    let Some(report) = run_verify_command_capture(root, command)? else {
         return Ok(());
+    };
+    if report.success() {
+        return Ok(());
+    }
+    Err(report.failure_reason())
+}
+
+/// Run the stage verification command in `root` and return captured output.
+/// `None` and empty commands return `Ok(None)`.
+pub(crate) fn run_verify_command_capture(
+    root: &Path,
+    command: Option<&str>,
+) -> Result<Option<VerifyCommandReport>, String> {
+    let Some(command) = command else {
+        return Ok(None);
     };
     let command = command.trim();
     if command.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
     let output = Command::new("sh")
         .arg("-c")
@@ -79,15 +126,12 @@ pub fn run_verify_command(root: &Path, command: Option<&str>) -> Result<(), Stri
         .current_dir(root)
         .output()
         .map_err(|err| format!("verify_command failed to launch: {err}"))?;
-    if output.status.success() {
-        return Ok(());
-    }
-    let code = output
-        .status
-        .code()
-        .map(|c| c.to_string())
-        .unwrap_or_else(|| "signal".to_string());
-    Err(format!("verify_command exited with status {code}"))
+    Ok(Some(VerifyCommandReport {
+        command: command.to_string(),
+        exit_code: output.status.code(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    }))
 }
 
 /// Combine the mutation check and verification into a single acceptance verdict.
@@ -131,6 +175,41 @@ fn resolve(root: &Path, target: &str) -> PathBuf {
     }
 }
 
+fn command_is_discovery_only(command: &str) -> bool {
+    let command = command.to_ascii_lowercase();
+    [
+        "--list",
+        " --list-tests",
+        " list-tests",
+        " test list",
+        "--collect-only",
+        " collect-only",
+        " gradle tasks",
+        "go test -list",
+        "dotnet test --list-tests",
+    ]
+    .iter()
+    .any(|needle| command.contains(needle))
+}
+
+fn output_reports_zero_work(stdout: &str, stderr: &str) -> bool {
+    let text = format!("{stdout}\n{stderr}").to_ascii_lowercase();
+    [
+        "running 0 tests",
+        "0 passed; 0 failed",
+        "0 examples",
+        "0 checks",
+        "no tests collected",
+        "no matching tests",
+        "no tests ran",
+        "0 tests run",
+        "0 tests completed",
+        "test result: ok. 0 passed",
+    ]
+    .iter()
+    .any(|needle| text.contains(needle))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,6 +242,20 @@ mod tests {
         let root = std::env::temp_dir();
         let err = run_verify_command(&root, Some("exit 3")).unwrap_err();
         assert!(err.contains('3'), "reason should carry exit code: {err}");
+    }
+
+    #[test]
+    fn verify_command_list_only_is_not_completion_evidence() {
+        let root = std::env::temp_dir();
+        let err = run_verify_command(&root, Some("printf listed; true --list")).unwrap_err();
+        assert!(err.contains("discovery/list-only"), "{err}");
+    }
+
+    #[test]
+    fn verify_command_zero_work_output_is_not_completion_evidence() {
+        let root = std::env::temp_dir();
+        let err = run_verify_command(&root, Some("printf 'running 0 tests\\n'")).unwrap_err();
+        assert!(err.contains("zero-test/no-op"), "{err}");
     }
 
     #[test]

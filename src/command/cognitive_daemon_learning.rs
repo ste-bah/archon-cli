@@ -69,11 +69,31 @@ impl DaemonJob for WorldModelTrainerJob {
     }
 
     fn run(&mut self) -> Result<DaemonJobReport, CognitiveError> {
+        if let Some(summary) = learning_skip_summary(
+            &self.cognitive_root,
+            self.name(),
+            self.config
+                .learning
+                .world_model
+                .auto_trainer
+                .idle_required_ms,
+            self.config
+                .learning
+                .world_model
+                .auto_trainer
+                .min_throttle_ms,
+        ) {
+            let event = ledger::LearningDaemonEvent::new(self.name(), "skipped", &summary);
+            append_event(&self.cognitive_root, &event);
+            return Ok(report(self.name(), true, summary));
+        }
+
         let stop_path = self.stop_path.clone();
         let stop_requested = || stop_path.exists();
-        match crate::command::world_model::run_daemon_trainer_tick_controlled(
+        match crate::command::world_model::run_daemon_trainer_tick_controlled_with_activity(
             &self.config,
             &stop_requested,
+            archon_activity_age_ms(&self.cognitive_root),
         ) {
             Ok(summary) => {
                 let event = ledger::LearningDaemonEvent::new(self.name(), "ok", &summary);
@@ -111,6 +131,19 @@ impl DaemonJob for GnnAutoTrainerJob {
 
 impl GnnAutoTrainerJob {
     fn run_inner(&self) -> GnnJobOutcome {
+        if let Some(summary) = learning_skip_summary(
+            &self.cognitive_root,
+            self.name(),
+            self.config
+                .learning
+                .world_model
+                .auto_trainer
+                .idle_required_ms,
+            self.config.learning.gnn.auto_trainer.min_throttle_ms,
+        ) {
+            return GnnJobOutcome::skipped(summary);
+        }
+
         let db = match open_learning_db(&self.cwd) {
             Ok(db) => db,
             Err(error) => return GnnJobOutcome::failed(retry_summary(error.to_string())),
@@ -160,6 +193,18 @@ struct GnnJobOutcome {
 }
 
 impl GnnJobOutcome {
+    fn skipped(summary: String) -> Self {
+        Self {
+            ok: true,
+            status: "skipped".into(),
+            summary,
+            trained: false,
+            run_id: None,
+            total_memories: None,
+            total_corrections: None,
+        }
+    }
+
     fn failed(summary: String) -> Self {
         Self {
             ok: false,
@@ -171,6 +216,56 @@ impl GnnJobOutcome {
             total_corrections: None,
         }
     }
+}
+
+fn learning_skip_summary(
+    cognitive_root: &Path,
+    job: &str,
+    idle_required_ms: u64,
+    min_throttle_ms: u64,
+) -> Option<String> {
+    if let Some(age_ms) = archon_activity_age_ms(cognitive_root)
+        && age_ms < idle_required_ms
+    {
+        return Some(format!(
+            "archon active; deferred until idle age reaches {idle_required_ms}ms (current {age_ms}ms)"
+        ));
+    }
+
+    latest_non_skipped_event_age_ms(cognitive_root, job)
+        .filter(|age_ms| *age_ms < min_throttle_ms)
+        .map(|age_ms| {
+            format!("daily training throttle; next eligible after {min_throttle_ms}ms (current {age_ms}ms)")
+        })
+}
+
+fn latest_non_skipped_event_age_ms(cognitive_root: &Path, job: &str) -> Option<u64> {
+    ledger::latest(cognitive_root, 512)
+        .into_iter()
+        .find(|event| event.job == job && !event.status.starts_with("skipped"))
+        .and_then(|event| elapsed_ms_since(event.created_at))
+}
+
+fn archon_activity_age_ms(cognitive_root: &Path) -> Option<u64> {
+    let raw = std::fs::read_to_string(
+        cognitive_root.join(crate::command::cognitive_daemon::ARCHON_ACTIVITY_FILE),
+    )
+    .ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let updated_at = value.get("updated_at")?.as_str()?;
+    let updated_at = chrono::DateTime::parse_from_rfc3339(updated_at)
+        .ok()?
+        .with_timezone(&chrono::Utc);
+    elapsed_ms_since(updated_at)
+}
+
+fn elapsed_ms_since(created_at: chrono::DateTime<chrono::Utc>) -> Option<u64> {
+    Some(
+        chrono::Utc::now()
+            .signed_duration_since(created_at)
+            .num_milliseconds()
+            .max(0) as u64,
+    )
 }
 
 #[derive(Default)]
@@ -356,5 +451,35 @@ mod tests {
         let summary = retry_summary("database is locked (code 5)".into());
 
         assert!(summary.contains("deferred until next daemon tick"));
+    }
+
+    #[test]
+    fn learning_skip_summary_defers_when_archon_is_active() {
+        let temp = tempfile::tempdir().unwrap();
+        let marker = serde_json::json!({
+            "updated_at": chrono::Utc::now().to_rfc3339(),
+            "reason": "test",
+        });
+        std::fs::write(
+            temp.path()
+                .join(crate::command::cognitive_daemon::ARCHON_ACTIVITY_FILE),
+            serde_json::to_vec(&marker).unwrap(),
+        )
+        .unwrap();
+
+        let summary = learning_skip_summary(temp.path(), WORLD_JOB, 300_000, 86_400_000).unwrap();
+
+        assert!(summary.contains("archon active"));
+    }
+
+    #[test]
+    fn learning_skip_summary_applies_daily_throttle() {
+        let temp = tempfile::tempdir().unwrap();
+        let event = ledger::LearningDaemonEvent::new(WORLD_JOB, "ok", "trained");
+        ledger::append(temp.path(), &event).unwrap();
+
+        let summary = learning_skip_summary(temp.path(), WORLD_JOB, 0, 86_400_000).unwrap();
+
+        assert!(summary.contains("daily training throttle"));
     }
 }

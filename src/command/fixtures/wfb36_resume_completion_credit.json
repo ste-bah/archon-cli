@@ -1,0 +1,7 @@
+{
+  "accepted_tasks": ["TASK-TWO", "TASK-BLOCKED"],
+  "noop_tasks": ["TASK-ONE"],
+  "failed_tasks": ["TASK-BLOCKED"],
+  "blocked_tasks": [],
+  "missing_tasks": ["TASK-MISSING"]
+}

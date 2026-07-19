@@ -41,7 +41,14 @@ pub async fn forward_codex_sse<S, B>(
 {
     let mut buffer = String::new();
 
-    while let Some(chunk) = byte_stream.next().await {
+    loop {
+        let chunk = tokio::select! {
+            _ = tx.closed() => return,
+            chunk = byte_stream.next() => chunk,
+        };
+        let Some(chunk) = chunk else {
+            break;
+        };
         let chunk = match chunk {
             Ok(chunk) => chunk,
             Err(e) => {
@@ -71,5 +78,24 @@ pub async fn forward_codex_sse<S, B>(
                 "Codex SSE stream closed mid-frame".into(),
             )))
             .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn d41_dropping_receiver_cancels_stalled_response_body() {
+        let stream = futures_util::stream::pending::<Result<Vec<u8>, reqwest::Error>>();
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        let forward = tokio::spawn(forward_codex_sse(stream, tx));
+
+        drop(rx);
+
+        tokio::time::timeout(std::time::Duration::from_millis(250), forward)
+            .await
+            .expect("stalled SSE body should be dropped when its receiver closes")
+            .expect("forward task should exit cleanly");
     }
 }

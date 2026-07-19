@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 pub const PHASE4_MANUAL_APPROVAL_REQUIRED: bool = true;
 const SUPPORTED_JURISDICTIONS: &[&str] = &["US", "UK", "EU", "CA", "AU"];
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct LiveTradingConfig {
     pub enabled: bool,
     pub compliance_jurisdiction: Option<String>,
@@ -75,15 +75,6 @@ pub enum LiveEnablementError {
     ProductionEvidenceMissing(&'static str),
     CertificationFailed,
     Phase5Prereq(Vec<&'static str>),
-}
-
-impl Default for LiveTradingConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            compliance_jurisdiction: None,
-        }
-    }
 }
 
 impl LiveTradingConfig {

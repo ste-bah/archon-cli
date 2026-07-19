@@ -1,0 +1,18 @@
+{
+  "do_not_remediate_with_code": true,
+  "failed_item_id": "verification-wave-1-verify-TASK-TDL-010-tui-slash-command-registry",
+  "rationale": "The originally requested test target is absent, but the existing focused TUI test covers the same acceptance criteria.",
+  "repair_kind": "target_selection",
+  "retry_plan": [
+    {
+      "command": "cd /Volumes/Externalwork/archon-cli/archon-cli && cargo test -p archon-tui filter_trading_data_aliases",
+      "evidence_to_capture": [
+        "Exact command",
+        "Exit code",
+        "Output line showing filter_trading_data_aliases ... ok"
+      ],
+      "expected_result": "Exit 0 with test filter_trading_data_aliases passing."
+    }
+  ],
+  "source_item_id": "TASK-TDL-010"
+}

@@ -114,8 +114,10 @@ fn brief_thinking_no_ellipsis() {
 
 #[test]
 fn status_bar_verbose_true_no_brief_indicator() {
-    let mut bar = StatusBar::default();
-    bar.verbose = true;
+    let bar = StatusBar {
+        verbose: true,
+        ..Default::default()
+    };
     let formatted = bar.format();
     assert!(
         !formatted.contains("[brief]"),
@@ -125,8 +127,10 @@ fn status_bar_verbose_true_no_brief_indicator() {
 
 #[test]
 fn status_bar_verbose_false_shows_brief_indicator() {
-    let mut bar = StatusBar::default();
-    bar.verbose = false;
+    let bar = StatusBar {
+        verbose: false,
+        ..Default::default()
+    };
     let formatted = bar.format();
     assert!(
         formatted.contains("[brief]"),

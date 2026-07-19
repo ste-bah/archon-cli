@@ -323,7 +323,7 @@ pub fn index_chunk(db: &DbInstance, chunk: &ChunkArtifact) -> Result<(), DocsErr
             message: format!("failed to ensure vec schema: {e}"),
         }
     })?;
-    let vectors = match provider.embed_chunks(&[chunk.content.clone()]) {
+    let vectors = match provider.embed_chunks(std::slice::from_ref(&chunk.content)) {
         Ok(vectors) => vectors,
         Err(error) => {
             let _ = store::update_chunk_embedding_status(db, &chunk.chunk_id, "failed");

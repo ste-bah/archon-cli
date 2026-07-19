@@ -17,7 +17,7 @@ impl ClaimPolarity {
         }
     }
 
-    pub fn from_str(value: &str) -> Self {
+    pub fn parse(value: &str) -> Self {
         if value == "negative" {
             Self::Negative
         } else {
@@ -203,7 +203,7 @@ mod tests {
     #[test]
     fn claim_polarity_round_trips_labels() {
         assert_eq!(ClaimPolarity::Positive.as_str(), "positive");
-        assert_eq!(ClaimPolarity::from_str("negative"), ClaimPolarity::Negative);
-        assert_eq!(ClaimPolarity::from_str("other"), ClaimPolarity::Positive);
+        assert_eq!(ClaimPolarity::parse("negative"), ClaimPolarity::Negative);
+        assert_eq!(ClaimPolarity::parse("other"), ClaimPolarity::Positive);
     }
 }

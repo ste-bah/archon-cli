@@ -16,7 +16,8 @@ impl Agent {
         //   B. Stopped in state, has transcript -> resume
         //   C. Evicted from state, transcript on disk -> resume
         //   D. No transcript -> error
-        let result = if !result.is_error && pre.tool_name == "SendMessage" {
+
+        if !result.is_error && pre.tool_name == "SendMessage" {
             match serde_json::from_str::<SendMessageRequest>(&result.content) {
                 Ok(req) => match req.message_type.as_str() {
                     "text" => {
@@ -90,6 +91,7 @@ impl Agent {
                                     run_in_background: true,
                                     cwd: None,
                                     isolation: None,
+                                    provider_env: None,
                                 };
                                     let resume_json =
                                         serde_json::to_string(&resume_request).unwrap_or_default();
@@ -233,7 +235,6 @@ impl Agent {
             }
         } else {
             result
-        };
-        result
+        }
     }
 }

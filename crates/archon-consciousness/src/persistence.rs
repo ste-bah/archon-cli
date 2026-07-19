@@ -155,7 +155,7 @@ pub fn load_latest_snapshot(
     }
 
     // Sort by created_at descending (newest first).
-    memories.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    memories.sort_by_key(|memory| std::cmp::Reverse(memory.created_at));
 
     Ok(try_deserialize(&memories[0].content))
 }
@@ -211,7 +211,7 @@ pub fn compute_trends(
     }
 
     // Sort by created_at descending, take most recent `window`.
-    memories.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    memories.sort_by_key(|memory| std::cmp::Reverse(memory.created_at));
     memories.truncate(window);
 
     // Deserialize all snapshots (skip failures).
@@ -293,7 +293,7 @@ pub fn compute_trends(
         .into_iter()
         .filter(|(_, count)| *count >= 2)
         .collect();
-    persistent_struggles.sort_by(|a, b| b.1.cmp(&a.1));
+    persistent_struggles.sort_by_key(|struggle| std::cmp::Reverse(struggle.1));
 
     // Reliable successes: same logic.
     let mut success_counts: HashMap<String, u32> = HashMap::new();
@@ -306,7 +306,7 @@ pub fn compute_trends(
         .into_iter()
         .filter(|(_, count)| *count >= 2)
         .collect();
-    reliable_successes.sort_by(|a, b| b.1.cmp(&a.1));
+    reliable_successes.sort_by_key(|success| std::cmp::Reverse(success.1));
 
     Ok(PersonalityTrends {
         avg_confidence_end,

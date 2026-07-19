@@ -13,9 +13,15 @@ fn explicit_blocked_status_is_blocked() {
 }
 
 #[test]
-fn inline_blocked_status_after_prose_is_blocked() {
-    let body = "Running focused checks in the target repository.status: blocked\n\nmissing_evidence:\n- No tool execution results are available in this stage attempt.";
+fn indented_blocked_status_field_is_blocked() {
+    let body = "Running focused checks in the target repository.\n  status: blocked\n\nmissing_evidence:\n- No tool execution results are available in this stage attempt.";
     assert!(output_reports_blocked(body).is_some());
+}
+
+#[test]
+fn quoted_status_blocked_inside_review_finding_is_not_blocked() {
+    let body = "Status: accepted_with_must_fix_constraints\n\nDiscover artifact says the task file still says `status: blocked`, but current source contradicts it.";
+    assert_eq!(output_reports_blocked(body), None);
 }
 
 #[test]
@@ -109,6 +115,38 @@ Failed inputs: 0
 }
 
 #[test]
+fn emergency_completed_focused_tests_with_positive_matches_do_not_block() {
+    let body = r#"{
+        "status": "completed_with_emerg_condition",
+        "summary": {"commands_run": 2, "passed": 2, "failed": 0},
+        "results": [
+            {
+                "command": "cargo test --bin archon trading_data_provider_tests -- --nocapture",
+                "exit_status": 0,
+                "stdout": "test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 124 filtered out."
+            },
+            {
+                "command": "cargo test --bin archon focused_case -- --nocapture",
+                "exit_status": 0,
+                "stdout": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1007 filtered out."
+            }
+        ],
+        "residual_gaps": []
+    }"#;
+
+    assert_eq!(output_reports_failed_verification(body), None);
+}
+
+#[test]
+fn all_filtered_rust_test_summary_blocks() {
+    let body = "\
+Focused tests completed.
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 87 filtered out.
+";
+    assert!(output_reports_failed_verification(body).is_some());
+}
+
+#[test]
 fn non_final_attempt_failures_do_not_block_completed_json() {
     let body = r#"
 {
@@ -137,6 +175,29 @@ fn final_failed_test_result_still_blocks_json() {
   ]
 }
 "#;
+
+    assert!(output_reports_failed_verification(body).is_some());
+}
+
+#[test]
+fn conditional_acceptance_blocks_final_quality_gate() {
+    let body = "\
+status: verified
+The repository implementation is conditionally accepted.
+Residual gaps are treated as a non-blocking fail-closed deferral.
+";
+
+    assert!(output_reports_failed_verification(body).is_some());
+}
+
+#[test]
+fn not_ready_readiness_output_blocks_final_quality_gate() {
+    let body = "\
+# Paper Trading Readiness
+Status: **not ready for paper trading**
+
+`paper_trading_ready`: `false`
+";
 
     assert!(output_reports_failed_verification(body).is_some());
 }

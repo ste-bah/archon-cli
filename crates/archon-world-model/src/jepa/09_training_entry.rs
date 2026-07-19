@@ -1,3 +1,6 @@
+/// Optional (phase, detail) progress callback for JEPA training.
+pub type JepaProgressObserver<'a> = Option<&'a dyn Fn(&str, &str)>;
+
 pub fn train_jepa_candidate(
     rows: &[WorldTraceRow],
     config: &JepaTrainingConfig,
@@ -43,7 +46,7 @@ pub fn train_jepa_candidate_with_backend_observed(
     requested_backend: BackendKind,
     allow_cpu_fallback: bool,
     should_stop: Option<&dyn Fn() -> bool>,
-    progress: Option<&dyn Fn(&str, &str)>,
+    progress: JepaProgressObserver,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     let status = crate::backend::select_runtime_backend(requested_backend, allow_cpu_fallback);
     emit_jepa_progress(
@@ -75,7 +78,7 @@ fn train_jepa_candidate_with_backend_status(
     status: BackendStatus,
     allow_cpu_fallback: bool,
     should_stop: Option<&dyn Fn() -> bool>,
-    progress: Option<&dyn Fn(&str, &str)>,
+    progress: JepaProgressObserver,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     #[cfg(all(test, feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
     let _jepa_training_test_lock = JEPA_TRAINING_TEST_LOCK
@@ -120,7 +123,7 @@ fn train_cuda_or_fallback(
     status: BackendStatus,
     allow_cpu_fallback: bool,
     should_stop: Option<&dyn Fn() -> bool>,
-    progress: Option<&dyn Fn(&str, &str)>,
+    progress: JepaProgressObserver,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     match train_jepa_candidate_with_tensor_backend(
         rows,
@@ -153,7 +156,7 @@ fn train_cuda_or_fallback(
     status: BackendStatus,
     allow_cpu_fallback: bool,
     should_stop: Option<&dyn Fn() -> bool>,
-    progress: Option<&dyn Fn(&str, &str)>,
+    progress: JepaProgressObserver,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     train_uncompiled_backend_or_fallback(
         rows,
@@ -173,7 +176,7 @@ fn train_metal_or_fallback(
     status: BackendStatus,
     allow_cpu_fallback: bool,
     should_stop: Option<&dyn Fn() -> bool>,
-    progress: Option<&dyn Fn(&str, &str)>,
+    progress: JepaProgressObserver,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     match train_jepa_candidate_with_tensor_backend(
         rows,
@@ -206,7 +209,7 @@ fn train_metal_or_fallback(
     status: BackendStatus,
     allow_cpu_fallback: bool,
     should_stop: Option<&dyn Fn() -> bool>,
-    progress: Option<&dyn Fn(&str, &str)>,
+    progress: JepaProgressObserver,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     train_uncompiled_backend_or_fallback(
         rows,
@@ -225,7 +228,7 @@ fn train_uncompiled_backend_or_fallback(
     status: BackendStatus,
     allow_cpu_fallback: bool,
     should_stop: Option<&dyn Fn() -> bool>,
-    progress: Option<&dyn Fn(&str, &str)>,
+    progress: JepaProgressObserver,
     backend_name: &str,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     if !allow_cpu_fallback {
@@ -247,7 +250,7 @@ fn train_jepa_candidate_cpu(
     config: &JepaTrainingConfig,
     backend_status: BackendStatus,
     should_stop: Option<&dyn Fn() -> bool>,
-    progress: Option<&dyn Fn(&str, &str)>,
+    progress: JepaProgressObserver,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     train_jepa_candidate_with_tensor_backend(
         rows,
@@ -259,7 +262,7 @@ fn train_jepa_candidate_cpu(
     )
 }
 
-fn emit_jepa_progress(progress: Option<&dyn Fn(&str, &str)>, stage: &str, detail: &str) {
+fn emit_jepa_progress(progress: JepaProgressObserver, stage: &str, detail: &str) {
     if let Some(progress) = progress {
         progress(stage, detail);
     }

@@ -1,0 +1,39 @@
+{
+  "status": "needs_review",
+  "summary": "Repaired artifact requirements using task files. Artifact requirements now contain only project artifact paths; prose verification expectations are separated into expected_evidence.",
+  "data": {
+    "items": [
+      {
+        "item_id": "inventory-validation-reports-native-gates",
+        "work_type": "implementation",
+        "canonical_task_ids": ["TASK-X-020"],
+        "target_files": ["src/data_lake.rs"],
+        "acceptance_criteria": ["validation report generation exists"],
+        "focused_verification": ["validation report generation test"],
+        "artifact_requirements": [
+          ".archon/trading-lab/data/datasets/<dataset-id>/<version>/validation.json"
+        ],
+        "expected_evidence": [
+          "Validation report schema matches the task contract."
+        ]
+      },
+      {
+        "item_id": "inventory-native-backtest",
+        "work_type": "implementation",
+        "canonical_task_ids": ["TASK-X-130"],
+        "target_files": ["src/backtest.rs"],
+        "acceptance_criteria": ["native backtest artifacts are replayable"],
+        "focused_verification": ["native backtest happy-path test"],
+        "artifact_requirements": [
+          {
+            "path": ".archon/trading-lab/strategies/example/backtests/<run-id>/report.json",
+            "description": "backtest report pattern"
+          }
+        ],
+        "expected_evidence": [
+          "Backtest report records dataset versions and strategy config hash."
+        ]
+      }
+    ]
+  }
+}

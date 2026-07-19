@@ -111,16 +111,13 @@ impl Agent {
             }
 
             self.emit_turn_request_started(&prepared).await;
-            let rx = match self
+            let StreamOpenOutcome::Stream(rx) = self
                 .open_turn_stream(
                     &prepared,
                     &mut reactive_overflow_retried,
                     &mut reactive_rate_limit_retried,
                 )
-                .await?
-            {
-                StreamOpenOutcome::Stream(rx) => rx,
-            };
+                .await?;
 
             let round = match self
                 .collect_stream_round(

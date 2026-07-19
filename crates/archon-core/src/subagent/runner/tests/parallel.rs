@@ -1,4 +1,5 @@
 use super::*;
+use archon_tools::bash::BashTool;
 
 // ── v0.1.12: parallel tool dispatch regression test ──────────
 
@@ -139,4 +140,71 @@ async fn parallel_tool_dispatch_concurrent_and_order_preserved() {
         "{}ms — expected <900ms for 3×400ms concurrent (serial would be ~900ms)",
         elapsed.as_millis()
     );
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tool_round_timeout_kills_bash_process_group() {
+    let dir = tempfile::tempdir().unwrap();
+    let pid_file = dir.path().join("sleep.pid");
+    let command = format!("sleep 30 & echo $! > '{}'; wait", pid_file.display());
+    let input = serde_json::json!({"command": command}).to_string();
+    let provider = Arc::new(MockProvider::new(vec![tool_use_response(
+        "bash-timeout",
+        "Bash",
+        &input,
+    )]));
+    let mut registry = ToolRegistry::new();
+    registry.register(Box::new(BashTool {
+        timeout_secs: 60,
+        max_output_bytes: 1024,
+        provider_env: None,
+        ..Default::default()
+    }));
+    let registry = Arc::new(registry);
+    let runner = SubagentRunner::new(
+        provider,
+        "test".into(),
+        registry.tool_definitions(),
+        registry,
+        ToolContext {
+            working_dir: dir.path().to_path_buf(),
+            session_id: "tool-round-timeout".into(),
+            ..ToolContext::default()
+        },
+        "mock".into(),
+        5,
+        2,
+        Arc::new(AgentConfig::default()),
+        Arc::new(IdentityProvider::new(
+            IdentityMode::Clean,
+            "test".into(),
+            String::new(),
+            String::new(),
+        )),
+    );
+
+    let started = std::time::Instant::now();
+    let error = runner.run("run the command").await.unwrap_err();
+    assert!(error.to_string().contains("during tool round"), "{error}");
+    assert!(started.elapsed() < std::time::Duration::from_secs(6));
+    let pid = std::fs::read_to_string(pid_file).unwrap();
+    assert_process_stopped(pid.trim()).await;
+}
+
+#[cfg(unix)]
+async fn assert_process_stopped(pid: &str) {
+    for _ in 0..20 {
+        let alive = std::process::Command::new("kill")
+            .args(["-0", pid])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+        if !alive {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("timed-out tool descendant survived: pid={pid}");
 }

@@ -396,7 +396,7 @@ fn row_to_claim(row: &[DataValue]) -> ClaimRecord {
         text: str_col(row, 3),
         normalized_subject: str_col(row, 4),
         normalized_predicate: str_col(row, 5),
-        polarity: ClaimPolarity::from_str(&str_col(row, 6)),
+        polarity: ClaimPolarity::parse(&str_col(row, 6)),
         confidence: float_col(row, 7),
         created_at: str_col(row, 8),
     }

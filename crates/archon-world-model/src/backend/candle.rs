@@ -268,8 +268,10 @@ fn candle_fit_transition_model_on_device(
         state_dim,
         backend,
         rows as u64,
-        state_weights.to_vec1::<f32>()?,
-        action_weights.to_vec1::<f32>()?,
+        (
+            state_weights.to_vec1::<f32>()?,
+            action_weights.to_vec1::<f32>()?,
+        ),
         transition_bias.to_vec1::<f32>()?,
         mean_delta.to_vec1::<f32>()?,
         examples,

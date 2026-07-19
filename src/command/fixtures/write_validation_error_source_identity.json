@@ -1,0 +1,10 @@
+{
+  "branch_id": "impl-generic-contract-branch",
+  "input": {
+    "item": {
+      "item_id": "impl-generic-contract-branch",
+      "canonical_task_ids": ["TASK-GENERIC-001"]
+    }
+  },
+  "error": "verification blocked after patch: agent output declares failed verification status"
+}

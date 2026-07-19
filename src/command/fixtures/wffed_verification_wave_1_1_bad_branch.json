@@ -1,0 +1,164 @@
+{
+  "error": null,
+  "failure_kind": "semantic",
+  "item_id": "verification-wave-1-1-VERIFY-TDL-010-003-project-registry-artifact-contract-check-7",
+  "item_input_hash": "6d78bcb36db3647db9c8de90f6244a00c3ded93530223f11e1418dc9c52b2fd6",
+  "result": {
+    "artifacts": [
+      {
+        "description": "Trading data registry artifact checked",
+        "id": "registry-json",
+        "path": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry.json"
+      },
+      {
+        "description": "Registry migration report artifact checked",
+        "id": "registry-migration-report-json",
+        "path": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry-migration-report.json"
+      }
+    ],
+    "commands_run": [
+      {
+        "command": "python3 - <<'PY'\nimport json\nfrom pathlib import Path\nroot = Path('/Volumes/Externalwork/archon-cli/project-1')\nregistry_path = root / '.archon/trading-lab/data/registry.json'\nreport_path = root / '.archon/trading-lab/data/registry-migration-report.json'\nprint(f'registry_exists={registry_path.is_file()} path={registry_path}')\nprint(f'report_exists={report_path.is_file()} path={report_path}')\nif not registry_path.is_file() or not report_path.is_file():\n    raise SystemExit(2)\nregistry = json.loads(registry_path.read_text())\nreport = json.loads(report_path.read_text())\nprint(f\"schema={registry.get('schema_version')}\")\nprint(f\"migration_schema={report.get('schema_version')}\")\n# locate datasets\ndatasets = registry.get('datasets')\nif isinstance(datasets, dict):\n    dataset_items = list(datasets.items())\nelif isinstance(datasets, list):\n    dataset_items = [(str(d.get('id') or d.get('dataset_id') or i), d) for i, d in enumerate(datasets)]\nelse:\n    dataset_items = []\nrequired_path_fields = [\n    'raw_path', 'processed_path', 'features_path', 'labels_path',\n    'metadata_path', 'manifest_path', 'quality_report_path', 'contract_path'\n]\nhealthy_checked = 0\nfailures = []\nfor dataset_id, dataset in dataset_items:\n    status = dataset.get('status') or dataset.get('health') or dataset.get('state')\n    if status != 'Healthy':\n        continue\n    healthy_checked += 1\n    native_interval = dataset.get('native_interval') is True\n    production_eligible = dataset.get('production_eligible') is True\n    path_container = dataset.get('artifacts') if isinstance(dataset.get('artifacts'), dict) else dataset\n    missing_fields = []\n    missing_files = []\n    checked_fields = []\n    for field in required_path_fields:\n        value = path_container.get(field) if isinstance(path_container, dict) else None\n        if not value:\n            missing_fields.append(field)\n            continue\n        checked_fields.append(field)\n        p = Path(value)\n        if not p.is_absolute():\n            p = root / p\n        try:\n            p.relative_to(root)\n        except ValueError:\n            missing_files.append(f'{field}:outside_project_root:{p}')\n            continue\n        if not p.exists():\n            missing_files.append(f'{field}:missing:{p}')\n    ok = native_interval and production_eligible and not missing_fields and not missing_files\n    print(f\"healthy_dataset id={dataset_id} native_interval={native_interval} production_eligible={production_eligible} checked_path_fields={len(checked_fields)} missing_fields={missing_fields} missing_files={missing_files} ok={ok}\")\n    if not ok:\n        failures.append(dataset_id)\nsummary = report.get('summary') if isinstance(report.get('summary'), dict) else report\nmigrated = summary.get('migrated')\nskipped = summary.get('skipped')\nfailed = summary.get('failed', 0)\nprint(f\"healthy_checked={healthy_checked}\")\nprint(f\"datasets={len(dataset_items)}\")\nprint(f\"migrated={migrated}\")\nprint(f\"skipped={skipped}\")\nprint(f\"failed={failed}\")\nif registry.get('schema_version') != 'archon-trading-data-registry-v2':\n    raise SystemExit(3)\nif report.get('schema_version') != 'archon-trading-data-registry-v2':\n    raise SystemExit(4)\nif failed not in (0, None):\n    raise SystemExit(5)\nif failures:\n    raise SystemExit(6)\nPY",
+        "exit_code": 6,
+        "kind": "test",
+        "output_summary": "Matched checks: registry_exists=True, report_exists=True, schema=archon-trading-data-registry-v2, migration_schema=archon-trading-data-registry-v2, healthy_checked=4, datasets=4, migrated=1, skipped=1, failed=0. Pass count 6/7 verification groups; fail count 1/7. Failed focused artifact path group: 4 Healthy datasets missing processed_path, features_path, labels_path, quality_report_path, and contract_path.",
+        "status": "failed"
+      },
+      {
+        "command": "python3 - <<'PY'\nimport json\nfrom pathlib import Path\nroot=Path('/Volumes/Externalwork/archon-cli/project-1')\nfor rel in ['.archon/trading-lab/data/registry.json','.archon/trading-lab/data/registry-migration-report.json']:\n p=root/rel\n print('---',p)\n data=json.loads(p.read_text())\n if rel.endswith('registry.json'):\n  print('top_keys', sorted(data.keys()))\n  datasets=data.get('datasets', {})\n  items=datasets.items() if isinstance(datasets, dict) else enumerate(datasets)\n  for k,d in items:\n   print('dataset',k,'keys',sorted(d.keys()))\n   print('artifact_paths', json.dumps(d.get('artifact_paths', d.get('artifacts', {})), indent=2, sort_keys=True))\n else:\n  print(json.dumps(data, indent=2, sort_keys=True)[:4000])\nPY",
+        "exit_code": 0,
+        "kind": "inspect",
+        "output_summary": "Confirmed registry top-level keys and dataset key sets. All 4 dataset records have no artifact_paths/artifacts container. Migration report contains schema_version archon-trading-data-registry-v2, migrated=1, skipped=1, failed=0.",
+        "status": "succeeded"
+      },
+      {
+        "command": "Grep pattern='registry_exists|healthy_checked|native_interval|production_eligible|registry-migration-report|artifact path' path=/Volumes/Externalwork/archon-cli/project-1",
+        "exit_code": 0,
+        "kind": "inspect",
+        "output_summary": "Supplemental read-only search found related project evidence references; no file modifications performed.",
+        "status": "succeeded"
+      }
+    ],
+    "data": {
+      "artifacts_checked": [
+        "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry.json",
+        "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry-migration-report.json"
+      ],
+      "canonical_task_ids": [
+        "TASK-TDL-010"
+      ],
+      "fail_count": 1,
+      "failed_datasets": [
+        "manual-BTCUSD-1D-raw:20260101-fixture",
+        "manual-SPY-1D-raw:20260615-compliance",
+        "polygon-SPY-15-raw:20260708-proof",
+        "tradingview-ES-1D-raw:20260708-proof"
+      ],
+      "focused_verification_executed": [
+        "Run the focused Python registry artifact contract inspection against /Volumes/Externalwork/archon-cli/project-1 as project root.",
+        "Confirm registry schema_version is archon-trading-data-registry-v2.",
+        "Confirm each Healthy dataset has native_interval=true, production_eligible=true, and all required artifact path fields exist under the project root.",
+        "Confirm the migration report schema_version is archon-trading-data-registry-v2 and failed is 0 or absent."
+      ],
+      "item_id": "VERIFY-TDL-010-003-project-registry-artifact-contract-check-7",
+      "matched_test_check_names": [
+        "registry_exists",
+        "report_exists",
+        "schema",
+        "migration_schema",
+        "healthy_checked",
+        "datasets",
+        "migrated",
+        "skipped",
+        "failed",
+        "healthy_dataset_native_interval",
+        "healthy_dataset_production_eligible",
+        "healthy_dataset_required_artifact_paths"
+      ],
+      "missing_required_artifact_path_fields": [
+        "processed_path",
+        "features_path",
+        "labels_path",
+        "quality_report_path",
+        "contract_path"
+      ],
+      "pass_count": 11,
+      "source_item_id": "IMPL-TDL-010-REGISTRY-SCHEMA-ARTIFACT-CONTRACT-VERIFY",
+      "verification_evidence_contract_version": "focused-verification-evidence-v2",
+      "verification_failure_class": "actionable_implementation_failure",
+      "verification_failure_next_action": "write_remediation",
+      "verification_failure_reason": "focused verification found 0 intended failing check(s)",
+      "verification_remediation_required": true
+    },
+    "evidence": [
+      {
+        "kind": "inspection",
+        "source": "python3 focused registry artifact contract inspection",
+        "summary": "registry_exists=True and report_exists=True for required artifacts under /Volumes/Externalwork/archon-cli/project-1."
+      },
+      {
+        "kind": "inspection",
+        "source": "python3 focused registry artifact contract inspection",
+        "summary": "schema=archon-trading-data-registry-v2 and migration_schema=archon-trading-data-registry-v2."
+      },
+      {
+        "kind": "inspection",
+        "source": "python3 focused registry artifact contract inspection",
+        "summary": "healthy_checked=4, datasets=4, migrated=1, skipped=1, failed=0."
+      },
+      {
+        "kind": "inspection",
+        "source": "python3 focused registry artifact contract inspection",
+        "summary": "Focused check matched 4 Healthy datasets; each had native_interval=True and production_eligible=True, but each checked only 3 required path fields and missed processed_path, features_path, labels_path, quality_report_path, and contract_path."
+      },
+      {
+        "kind": "inspection",
+        "source": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry.json",
+        "summary": "Registry dataset records contain raw_path, metadata_path, manifest_path, normalized_path, dataset_path, validation_path, raw_request_path, raw_response_path, redacted_headers_path, and provider_notes_path, but no artifacts/artifact_paths container and no processed_path/features_path/labels_path/quality_report_path/contract_path keys."
+      }
+    ],
+    "files_changed": [],
+    "files_read": [
+      {
+        "path": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry.json",
+        "purpose": "Focused registry schema, dataset count, Healthy dataset flags, and artifact path field verification"
+      },
+      {
+        "path": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry-migration-report.json",
+        "purpose": "Migration schema and failed/migrated/skipped count verification"
+      }
+    ],
+    "residual_gaps": [
+      {
+        "description": "Every Healthy registry dataset lacks required artifact path fields processed_path, features_path, labels_path, quality_report_path, and contract_path under the project root, so the focused artifact contract is not fully satisfied.",
+        "id": "gap-healthy-dataset-required-artifact-path-fields",
+        "severity": "high"
+      }
+    ],
+    "status": "failed",
+    "summary": "Focused registry artifact contract verification executed read-only against /Volumes/Externalwork/archon-cli/project-1. Required registry and migration report artifacts exist, both schemas match archon-trading-data-registry-v2, dataset/report counts match expected evidence, and migration failed=0. Verification failed because all 4 Healthy datasets have native_interval=true and production_eligible=true but are missing required artifact path fields under the project root.",
+    "task_coverage": [
+      {
+        "evidence": [
+          {
+            "kind": "implementation",
+            "summary": "registry_exists=True; report_exists=True; schema and migration_schema both archon-trading-data-registry-v2; healthy_checked=4; datasets=4; migrated=1; skipped=1; failed=0."
+          },
+          {
+            "kind": "implementation",
+            "summary": "All 4 Healthy datasets have native_interval=true and production_eligible=true."
+          },
+          {
+            "kind": "implementation",
+            "summary": "All 4 Healthy datasets are missing processed_path, features_path, labels_path, quality_report_path, and contract_path required by this focused verification."
+          }
+        ],
+        "status": "partial",
+        "summary": "Registry and migration report artifacts exist and satisfy schema/count expectations, but focused Healthy dataset artifact path contract check failed for missing required artifact path fields.",
+        "task_id": "TASK-TDL-010"
+      }
+    ]
+  },
+  "role": "coder",
+  "status": "failed"
+}

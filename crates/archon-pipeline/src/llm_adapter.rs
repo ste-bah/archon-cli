@@ -11,7 +11,7 @@ use archon_llm::provider::{LlmProvider, LlmRequest};
 use archon_llm::streaming::StreamEvent;
 use tokio::sync::mpsc::Receiver;
 
-use crate::runner::{LlmClient, LlmResponse, ToolUseEntry};
+use crate::runner::{AgentExecutionRequest, LlmClient, LlmResponse, ToolUseEntry};
 
 // ---------------------------------------------------------------------------
 // Adapter
@@ -154,6 +154,19 @@ impl LlmClient for ProviderLlmAdapter {
 
         collect_stream(rx).await
     }
+
+    async fn run_agent(&self, request: AgentExecutionRequest) -> Result<LlmResponse> {
+        if let Some(cwd) = request.cwd.as_ref() {
+            anyhow::bail!(
+                "ProviderLlmAdapter cannot execute cwd-bound agent request for '{}'; wrap it in SubagentPipelineClient so cwd '{}' becomes the subagent workspace root",
+                request.agent.key,
+                cwd.display()
+            );
+        }
+        let model = request.agent.model.clone();
+        self.send_message(request.messages, request.system, request.tools, &model)
+            .await
+    }
 }
 
 async fn collect_stream(mut rx: Receiver<StreamEvent>) -> Result<LlmResponse> {
@@ -257,6 +270,7 @@ async fn collect_stream(mut rx: Receiver<StreamEvent>) -> Result<LlmResponse> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runner::{AgentInfo, PipelineType, ToolAccessLevel};
     use archon_llm::provider::{LlmError, ModelInfo, ProviderFeature};
     use archon_llm::types::Usage;
 
@@ -344,6 +358,53 @@ mod tests {
 
         assert_eq!(response.content, "pipeline-ok");
         assert_eq!(response.tokens_in, 7);
+    }
+
+    #[tokio::test]
+    async fn provider_adapter_rejects_cwd_bound_agent_requests() {
+        let provider = Arc::new(FakeProvider {
+            name: "openai-codex",
+            model: "gpt-5.4",
+            context_window: 123_456,
+            seen_model: std::sync::Mutex::new(None),
+            seen_messages: std::sync::Mutex::new(Vec::new()),
+        });
+        let adapter = ProviderLlmAdapter::new(provider);
+
+        let err = adapter
+            .run_agent(AgentExecutionRequest {
+                session_id: "s".into(),
+                pipeline_type: PipelineType::Workflow,
+                task: "edit repo".into(),
+                cwd: Some("/target/repo".into()),
+                ordinal: 1,
+                attempt: 1,
+                agent: AgentInfo {
+                    key: "coder".into(),
+                    display_name: "Coder".into(),
+                    model: "sonnet".into(),
+                    phase: 0,
+                    critical: false,
+                    parallelizable: false,
+                    quality_threshold: 0.5,
+                    tool_access_level: ToolAccessLevel::Full,
+                },
+                messages: Vec::new(),
+                system: Vec::new(),
+                tools: Vec::new(),
+                allowed_tools: Vec::new(),
+                timeout_secs: None,
+                disable_auto_background: false,
+                provider_env_resolution: None,
+            })
+            .await
+            .expect_err("raw provider adapter must not ignore cwd-bound agents");
+
+        assert!(
+            err.to_string()
+                .contains("wrap it in SubagentPipelineClient"),
+            "{err}"
+        );
     }
 
     #[tokio::test]

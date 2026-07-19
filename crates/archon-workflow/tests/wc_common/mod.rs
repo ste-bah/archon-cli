@@ -13,8 +13,8 @@ use archon_workflow::write_coordinator::{
     WriteBoundaryProbe, WriteCoordinatorConfig, resolve_write_coordinator_runtime,
 };
 use archon_workflow::{
-    StageRunOutput, StageRunRequest, WorkflowExecutor, WorkflowPolicy, WorkflowSpec,
-    WorkflowStageRunner, WorkflowStore,
+    StageKind, StageRunOutput, StageRunRequest, WorkflowPolicy, WorkflowSpec, WorkflowStageRunner,
+    WorkflowStore,
 };
 
 pub type AgentAction = Arc<dyn Fn(&Path, &str, &[String]) -> String + Send + Sync>;
@@ -91,6 +91,25 @@ impl WorkflowStageRunner for MockAgentRunner {
             })
             .unwrap_or_default();
         let body = (self.action)(Path::new(root), &request.stage_id, &declared);
+        if request.stage_kind == StageKind::Implementation && !body.trim_start().starts_with('{') {
+            let task_id = request.input["fanout_item"]["task_id"]
+                .as_str()
+                .unwrap_or(&request.stage_id);
+            let body = serde_json::json!({
+                "status": "implemented",
+                "implemented_task_ids": [task_id],
+                "changed_files": declared,
+                "commands_run": [{
+                    "role": "verification",
+                    "command": "generic verify coordinated item",
+                    "exit_status": 0
+                }],
+                "summary": body,
+                "residual_gaps": []
+            })
+            .to_string();
+            return Ok(StageRunOutput::markdown(body));
+        }
         Ok(StageRunOutput::markdown(body))
     }
 }
@@ -144,7 +163,7 @@ pub fn spec_yaml(canonical: &Path, targets: &[(&str, &[&str])]) -> WorkflowSpec 
                 .iter()
                 .map(|f| format!("              - \"{f}\"\n"))
                 .collect::<String>();
-            format!("        - name: \"{name}\"\n          target_files:\n{list}")
+            format!("        - task_id: \"{name}\"\n          name: \"{name}\"\n          target_files:\n{list}")
         })
         .collect();
     WorkflowSpec::from_yaml(&format!(
@@ -175,7 +194,7 @@ pub fn plan_inputs(targets: &[(&str, &[&str])]) -> Vec<PlanInput> {
         .map(|(idx, (_n, files))| PlanInput {
             item: FanoutItem {
                 id: format!("implement-{idx}"),
-                payload: serde_json::json!({ "target_files": files }),
+                payload: serde_json::json!({ "task_id": format!("task-{idx}"), "target_files": files }),
             },
             target_files: files.iter().map(|f| f.to_string()).collect(),
         })
@@ -200,8 +219,9 @@ pub fn run_coordinated(
 ) -> Result<Harness, FanoutError> {
     let store = WorkflowStore::project(canonical);
     let policy = permissive_policy();
-    let executor = WorkflowExecutor::new(store.clone(), policy.clone());
-    let run = executor.start(spec_yaml(canonical, targets)).unwrap();
+    let spec = spec_yaml(canonical, targets);
+    spec.validate().unwrap();
+    let run = store.create_run(spec).unwrap();
     let run_root = store.run_dir(&run.id);
     let runtime = resolve_write_coordinator_runtime(canonical, cfg);
     let outcome = {

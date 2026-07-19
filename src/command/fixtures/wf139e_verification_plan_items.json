@@ -1,0 +1,35 @@
+[
+  {
+    "id": "verify-TASK-TDL-010-registry-migration",
+    "task_ids": ["TASK-TDL-010"],
+    "commands": [
+      {
+        "command": "cargo test -p archon-trading registry -- --nocapture",
+        "kind": "test",
+        "required_evidence": "Exit code 0 and registry migration tests pass."
+      }
+    ],
+    "expected_artifacts": []
+  },
+  {
+    "id": "verify-TASK-TDL-010-artifact-contract",
+    "task_ids": ["TASK-TDL-010"],
+    "commands": ["cargo test -p archon-trading artifact_contract -- --nocapture"],
+    "artifact_checks": [".archon/trading-lab/data/registry.json"]
+  },
+  {
+    "id": "verify-TASK-TDL-010-cli-parse",
+    "task_ids": ["TASK-TDL-010"],
+    "commands": ["cargo test --bin archon cli_args::tests::trading_parse_tests::trading_data_prd_commands_parse -- --nocapture"],
+    "expected_artifacts": []
+  },
+  {
+    "id": "verify-TASK-TDL-010-manual-ingest-export-fixture",
+    "task_ids": ["TASK-TDL-010"],
+    "manual_fixture_steps": ["ingest fixture", "list registry", "export dataset"],
+    "artifact_checks": [
+      "$TEMP_ROOT/.archon/trading-lab/data/registry.json",
+      "$TEMP_ROOT/export.json"
+    ]
+  }
+]
