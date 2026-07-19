@@ -71,7 +71,7 @@ return {
   work,
 }
 "#;
-        let error = validate_authored_plan(fabricated)
+        let error = validate_authored_plan(fabricated, &Default::default())
             .await
             .expect_err("arrays cannot substitute for mandatory review agents");
         assert!(error.contains("adversarial-review"), "unexpected error: {error}");
@@ -83,7 +83,7 @@ await agent('Falsify the claims.', { label: 'adversarial-review', tier: 'critic'
 await agent('Audit source coverage.', { label: 'coverage-audit' })
 return { accepted: [], blocked: [], adversarial_findings: [], uncovered_requirements: [] }
 "#;
-        validate_authored_plan(complete)
+        validate_authored_plan(complete, &Default::default())
             .await
             .expect("both mandatory agents satisfy pre-flight");
     }

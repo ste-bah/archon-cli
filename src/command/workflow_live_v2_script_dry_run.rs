@@ -13,6 +13,8 @@ const WORKFLOW_DRY_RUN_WATCHDOG: Duration = Duration::from_secs(10);
 #[derive(Default)]
 struct WorkflowDryRunRecorder {
     calls: Vec<WorkflowV2HostCall>,
+    /// (task id, write call id) pairs — coverage AND duplicate detection.
+    write_task_claims: Vec<(String, String)>,
     policy_error: Option<String>,
 }
 
@@ -20,6 +22,17 @@ pub(crate) async fn dry_run_workflow_plan(
     harness_source: &str,
     script_args: Option<&serde_json::Value>,
 ) -> archon_workflow::WorkflowResult<Vec<WorkflowV2HostCall>> {
+    dry_run_workflow_plan_details(harness_source, script_args)
+        .await
+        .map(|(calls, _)| calls)
+}
+
+/// Plan plus (task id, write call id) claims — the authoring pre-flight
+/// requires every universe task claimed by exactly one write call.
+pub(crate) async fn dry_run_workflow_plan_details(
+    harness_source: &str,
+    script_args: Option<&serde_json::Value>,
+) -> archon_workflow::WorkflowResult<(Vec<WorkflowV2HostCall>, Vec<(String, String)>)> {
     let source = script_source(harness_source, script_args);
     tokio::task::spawn_blocking(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -38,7 +51,7 @@ pub(crate) async fn dry_run_workflow_plan(
 
 async fn dry_run_on_current_thread(
     source: String,
-) -> archon_workflow::WorkflowResult<Vec<WorkflowV2HostCall>> {
+) -> archon_workflow::WorkflowResult<(Vec<WorkflowV2HostCall>, Vec<(String, String)>)> {
     let recorder = Arc::new(StdMutex::new(WorkflowDryRunRecorder::default()));
     let runtime = AsyncRuntime::new()
         .map_err(|err| WorkflowError::SpecInvalid(format!("quickjs runtime failed: {err}")))?;
@@ -104,7 +117,7 @@ async fn dry_run_on_current_thread(
             "workflow.js declares no executable host calls".to_string(),
         ));
     }
-    Ok(recorder.calls.clone())
+    Ok((recorder.calls.clone(), recorder.write_task_claims.clone()))
 }
 
 fn record_dry_run_call(
@@ -128,6 +141,47 @@ fn record_dry_run_call(
         return Err(WorkflowError::SpecInvalid(error));
     }
     let method = call.method;
+    if call.write_mode.is_some()
+        && let Ok(request) = serde_json::from_str::<ScriptHostRequest>(payload)
+    {
+        for item in request
+            .source
+            .as_ref()
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            // Same alias tolerance as the live credit path: every present
+            // key contributes (no or_else shadowing), arrays or single
+            // strings alike.
+            for key in [
+                "canonical_task_ids",
+                "canonicalTaskIds",
+                "canonical_task_id",
+                "canonicalTaskId",
+                "task_ids",
+                "taskIds",
+                "task_id",
+                "taskId",
+            ] {
+                match item.get(key) {
+                    Some(serde_json::Value::Array(ids)) => {
+                        for id in ids.iter().filter_map(serde_json::Value::as_str) {
+                            recorder
+                                .write_task_claims
+                                .push((id.to_string(), call.id.clone()));
+                        }
+                    }
+                    Some(serde_json::Value::String(id)) => {
+                        recorder
+                            .write_task_claims
+                            .push((id.clone(), call.id.clone()));
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
     recorder.calls.push(call);
     Ok(dry_run_stub_result(method))
 }

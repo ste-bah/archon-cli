@@ -38,6 +38,12 @@ fn parse_script_options(
                 options.required_artifacts = artifact_requirements(value);
             }
             "write" | "writeMode" | "write_mode" => {
+                if value.as_bool() == Some(true) {
+                    return Err(WorkflowError::SpecInvalid(
+                        "workflow.js write mode must be a string ('serial' | 'coordinated' | 'worktree'); `write: true` is only valid in the agent()/agents() primitives"
+                            .to_string(),
+                    ));
+                }
                 if let Some(raw) = value.as_str() {
                     if raw.eq_ignore_ascii_case("none") {
                         write_mode = None;
@@ -57,7 +63,6 @@ fn parse_script_options(
     }
     Ok((options, write_mode))
 }
-
 fn string_value(value: &serde_json::Value) -> Option<String> {
     value
         .as_str()
@@ -65,7 +70,6 @@ fn string_value(value: &serde_json::Value) -> Option<String> {
         .filter(|value| !value.is_empty())
         .map(str::to_string)
 }
-
 fn string_array(value: &serde_json::Value) -> Vec<String> {
     value
         .as_array()
@@ -77,7 +81,6 @@ fn string_array(value: &serde_json::Value) -> Vec<String> {
         .map(str::to_string)
         .collect()
 }
-
 fn script_source(harness_source: &str, script_args: Option<&serde_json::Value>) -> String {
     let normalized = normalize_workflow_export(harness_source);
     let v3_primitives = V3_PRIMITIVES_JS;
@@ -196,7 +199,6 @@ __archonRun()
 "#
     )
 }
-
 fn result_view_json(result: &WorkflowV2Result) -> archon_workflow::WorkflowResult<String> {
     let mut view = match &result.data {
         serde_json::Value::Object(object) => object.clone(),
@@ -215,7 +217,6 @@ fn result_view_json(result: &WorkflowV2Result) -> archon_workflow::WorkflowResul
     view.insert("result".to_string(), serde_json::to_value(result)?);
     serde_json::to_string(&serde_json::Value::Object(view)).map_err(Into::into)
 }
-
 fn completion_evidence_from_result(
     result: &WorkflowV2Result,
 ) -> Vec<WorkflowV2TaskCompletionEvidence> {
@@ -244,7 +245,6 @@ fn completion_evidence_from_result(
     }
     evidence
 }
-
 fn reusable_record_has_required_completion_evidence(record: &WorkflowV2CallRecord) -> bool {
     !completion_evidence_call_id(&record.call.id) || !record.completion_evidence.is_empty()
 }

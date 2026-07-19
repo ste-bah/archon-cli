@@ -341,6 +341,8 @@ include!("workflow_live_v3_orchestrated.rs");
 
 include!("workflow_live_v3_author.rs");
 
+include!("workflow_live_v3_author_checks.rs");
+
 include!("workflow_live_v2_lifecycle_waves.rs");
 
 include!("workflow_live_v2_lifecycle_impl.rs");

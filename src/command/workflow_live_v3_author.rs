@@ -79,16 +79,70 @@ Rules the script must follow:
     notes: '<short honest summary>'
   } accounting for EVERY task id exactly once across accepted+blocked; adversarial_findings and uncovered_requirements MUST come from the two mandatory agents, never invented or omitted."#;
 
-const V3_AUTHOR_TASK: &str = r#"Author a complete workflow.js orchestration script for the provided decomposed task universe, following the dialect reference exactly. The script must cover EVERY task in the universe: implement, verify, and honestly account for each one. The input includes governed learning context from previous runs — apply its lessons: avoid the recorded failure classes, keep whatever prevented false completions, and steer agents away from repair patterns that previously churned. Reply with a JSON object whose data.workflow_js field contains ONLY the complete script text (no fences, no commentary)."#;
+const V3_AUTHOR_TASK_TEMPLATE: &str = r#"Author the complete workflow.js orchestration script for this decomposed task set. INVESTIGATE BEFORE WRITING — you have READ tools (Read, Grep, Glob); you have NO shell and must NOT run commands or create/modify ANY files. Your ONLY deliverable is the result envelope.
 
-/// Bootstrap script (legacy dialect): one journaled reduce call authors the
-/// workflow source and returns it through the script result channel.
+Required investigation (do it; cite the files you actually read in evidence):
+1. READ the source requirements document(s) under the source roots below, and EVERY task file listed.
+2. Inspect the repository tree with Glob/Read (key directories, the files each task declares); distrust any existing status/acceptance documents — verify against the live tree.
+3. For each task, extract its EXACT declared target files, dependencies, acceptance criteria, and artifact contracts — honor them verbatim, never invent paths. Use canonical task ids verbatim in taskIds.
+4. Decide sequential vs parallel FROM THE TASK DATA: tasks editing shared files or linked by dependencies run sequentially; only genuinely independent tasks may batch.
+
+Then write the script per the dialect reference and SELF-CHECK before returning:
+- every canonical task id appears in EXACTLY ONE write agent() call's taskIds with that task's declared target files (never one umbrella call claiming many tasks);
+- a task that is already implemented still gets its write agent — instruct that agent to return the typed no-op (status noop, idempotent_noop true, task_coverage evidence) when it verifies nothing needs changing; NEVER make cosmetic edits just to show work;
+- every write call has focused test commands; the two mandated reviews are present, exactly labeled, after all work;
+- meta.phases matches the phase() calls; the accounting return covers every task id exactly once;
+- the script text must not contain confirmation questions or the phrases "restored context"/"previous session summary".
+
+Reply with the standard JSON result envelope; put ONLY the complete script text in data.workflow_js (no fences) — workflow_js must sit INSIDE data. Include evidence entries naming the files you read.
+
+Repository root: {repo_root}
+Source requirement roots: {source_roots}
+Task files (read every one; the fingerprint changes when the file changes):
+{task_paths}
+
+{retry_feedback}
+Governed learning context from previous runs (apply its lessons):
+{learning_context}
+
+DIALECT REFERENCE:
+{reference}"#;
+
+/// Single-pass placeholder substitution: each `{name}` is looked up once —
+/// substituted content is never re-scanned, so run-derived text (learning
+/// context, retry errors) cannot inject other placeholders.
+fn compose_author_brief(values: &[(&str, &str)]) -> String {
+    let mut out = String::with_capacity(V3_AUTHOR_TASK_TEMPLATE.len());
+    let mut rest = V3_AUTHOR_TASK_TEMPLATE;
+    while let Some(start) = rest.find('{') {
+        let Some(len) = rest[start..].find('}') else {
+            break;
+        };
+        let name = &rest[start + 1..start + len];
+        if let Some((_, value)) = values.iter().find(|(key, _)| *key == name) {
+            out.push_str(&rest[..start]);
+            out.push_str(value);
+            rest = &rest[start + len + 1..];
+        } else {
+            out.push_str(&rest[..start + 1]);
+            rest = &rest[start + 1..];
+        }
+    }
+    out.push_str(rest);
+    debug_assert!(
+        !["{repo_root}", "{source_roots}", "{task_paths}", "{retry_feedback}", "{learning_context}", "{reference}"]
+            .iter()
+            .any(|token| out.contains(token)),
+        "author brief has unsubstituted placeholders"
+    );
+    out
+}
+
 const V3_AUTHOR_BOOTSTRAP: &str = r#"
 async function workflow(w) {
-  const authored = await w.reduce(
+  const authored = await w.agent(
     "author-workflow-script",
-    [args.task_universe, args.primitive_reference, args.retry_feedback || null, args.learning_context || null],
-    { tier: "reducer", task: args.author_task }
+    { tier: "planner", task: args.author_task }
   );
   const source =
     (authored && typeof authored.workflow_js === "string" && authored.workflow_js) ||
@@ -104,51 +158,14 @@ async function workflow(w) {
 "#;
 
 impl WorkflowV2ScriptRunner {
-    /// v3 entry: author workflow.js if absent (journaled, cache-keyed on the
-    /// universe), persist it, then execute it. Re-runs with an unchanged
+    /// v3 entry: author workflow.js if absent (journaled, cache-keyed on the composed brief
+    /// (task paths + per-file content fingerprints + lessons)), persist it, then execute it. Re-runs with an unchanged
     /// authored script replay unchanged call prefixes from the store.
     pub(super) async fn run_authored_script_lifecycle(
         self,
         authored_path: std::path::PathBuf,
         governed_learning_context: serde_json::Value,
     ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
-        let authored_source = if authored_path.exists() {
-            let source = std::fs::read_to_string(&authored_path).map_err(|err| WorkflowError::Io {
-                path: authored_path.clone(),
-                source: err,
-            })?;
-            let source = validate_authored_workflow_source(&source)?;
-            // Pre-flight: the persisted script must still plan real work.
-            if let Err(reason) = validate_authored_plan(&source).await {
-                return Err(WorkflowError::SpecInvalid(format!(
-                    "persisted authored-workflow.js failed its dry-run pre-flight ({reason}); delete {} to re-author",
-                    authored_path.display()
-                )));
-            }
-            source
-        } else {
-            // Author, pre-flight in a dry run, and re-author ONCE with the
-            // specific pre-flight error — an authored script that would do no
-            // real work must never reach live execution (V3-D1/V3-D2 class).
-            let mut source = self
-                .author_workflow_source(None, &governed_learning_context)
-                .await?;
-            if let Err(reason) = validate_authored_plan(&source).await {
-                source = self
-                    .author_workflow_source(Some(&reason), &governed_learning_context)
-                    .await?;
-                if let Err(reason) = validate_authored_plan(&source).await {
-                    return Err(WorkflowError::SpecInvalid(format!(
-                        "authored workflow failed its dry-run pre-flight twice; last error: {reason}"
-                    )));
-                }
-            }
-            std::fs::write(&authored_path, &source).map_err(|err| WorkflowError::Io {
-                path: authored_path.clone(),
-                source: err,
-            })?;
-            source
-        };
         let expected_task_ids = self
             .task_universe
             .as_ref()
@@ -160,6 +177,56 @@ impl WorkflowV2ScriptRunner {
                     .collect::<std::collections::BTreeSet<_>>()
             })
             .unwrap_or_default();
+        let authored_source = if authored_path.exists() {
+            let source = std::fs::read_to_string(&authored_path).map_err(|err| WorkflowError::Io {
+                path: authored_path.clone(),
+                source: err,
+            })?;
+            let source = validate_authored_workflow_source(&source)?;
+            // Pre-flight: the persisted script must still plan real work.
+            if let Err(reason) = validate_authored_plan(&source, &expected_task_ids).await {
+                return Err(WorkflowError::SpecInvalid(format!(
+                    "persisted authored-workflow.js failed its dry-run pre-flight ({reason}); delete {} to re-author",
+                    authored_path.display()
+                )));
+            }
+            source
+        } else {
+            // Author, pre-flight in a dry run, and re-author ONCE with the
+            // specific pre-flight error — an authored script that would do no
+            // real work must never reach live execution (V3-D1/V3-D2 class).
+            // ONE bounded retry covers BOTH failure kinds: a rejected plan
+            // AND an unusable authoring envelope (e.g. workflow_js outside
+            // data) — each retry names the specific defect.
+            let first = match self.author_workflow_source(None, &governed_learning_context).await {
+                Ok(source) => match validate_authored_plan(&source, &expected_task_ids).await {
+                    Ok(()) => Ok(source),
+                    Err(reason) => Err(reason),
+                },
+                Err(err) => Err(format!(
+                    "the authoring envelope was unusable ({err}); the complete script text must be the data.workflow_js field of the standard result envelope"
+                )),
+            };
+            let source = match first {
+                Ok(source) => source,
+                Err(reason) => {
+                    let source = self
+                        .author_workflow_source(Some(&reason), &governed_learning_context)
+                        .await?;
+                    if let Err(reason) = validate_authored_plan(&source, &expected_task_ids).await {
+                        return Err(WorkflowError::SpecInvalid(format!(
+                            "authored workflow failed its dry-run pre-flight twice; last error: {reason}"
+                        )));
+                    }
+                    source
+                }
+            };
+            std::fs::write(&authored_path, &source).map_err(|err| WorkflowError::Io {
+                path: authored_path.clone(),
+                source: err,
+            })?;
+            source
+        };
         let summary = self.run(&authored_source).await?;
         validate_mandatory_review_calls(&summary.calls).map_err(|reason| {
             WorkflowError::SpecInvalid(format!(
@@ -177,15 +244,53 @@ impl WorkflowV2ScriptRunner {
         governed_learning_context: &serde_json::Value,
     ) -> archon_workflow::WorkflowResult<String> {
         let mut bootstrap = self.clone();
-        bootstrap.script_args = Some(serde_json::json!({
-            "task_universe": self.task_universe,
-            "primitive_reference": V3_PRIMITIVE_REFERENCE,
-            "author_task": V3_AUTHOR_TASK,
-            "learning_context": governed_learning_context,
-            "retry_feedback": retry_feedback.map(|reason| format!(
-                "Your previous script was REJECTED before execution: {reason}. Fix EVERY defect listed and return the corrected complete script."
-            )),
-        }));
+        // Authoring must never adopt a cached record from a prior session:
+        // frontier reuse ignores the input hash, which would replay a stale
+        // script for BOTH bounded attempts (retry feedback unseen).
+        bootstrap.adopt_accepted_cache = false;
+        let (task_paths, source_roots) = self
+            .task_universe
+            .as_ref()
+            .map(|universe| {
+                let paths = universe
+                    .tasks
+                    .iter()
+                    .map(|task| {
+                        let fingerprint = std::fs::read(&task.source_path)
+                            .map(|bytes| {
+                                use sha2::{Digest, Sha256};
+                                hex::encode(&Sha256::digest(&bytes)[..8])
+                            })
+                            .unwrap_or_else(|_| "unreadable".to_string());
+                        format!(
+                            "- {}: {} (fingerprint {fingerprint})",
+                            task.canonical_task_id, task.source_path
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                (paths, universe.source_roots.join(", "))
+            })
+            .unwrap_or_default();
+        let author_task = compose_author_brief(&[
+            (
+                "repo_root",
+                self.runtime.target_repository_root.as_deref().unwrap_or("<none>"),
+            ),
+            ("source_roots", &source_roots),
+            ("task_paths", &task_paths),
+            (
+                "retry_feedback",
+                &retry_feedback
+                    .map(|reason| format!(
+                        "YOUR PREVIOUS ATTEMPT WAS REJECTED: {reason}. Fix EVERY defect listed.\n"
+                    ))
+                    .unwrap_or_default(),
+            ),
+            ("learning_context", &governed_learning_context.to_string()),
+            ("reference", V3_PRIMITIVE_REFERENCE),
+        ]);
+        bootstrap.script_args = Some(serde_json::json!({ "author_task": author_task }));
         let summary = bootstrap.run(V3_AUTHOR_BOOTSTRAP).await?;
         let raw = summary.script_result.ok_or_else(|| {
             WorkflowError::SpecInvalid(
@@ -207,153 +312,6 @@ impl WorkflowV2ScriptRunner {
             })?;
         validate_authored_workflow_source(source)
     }
-}
-
-/// Dry-run pre-flight: execute the authored script against the recording stub
-/// host and require it to PLAN real work. A script that would spawn zero
-/// agents must never reach live execution.
-async fn validate_authored_plan(source: &str) -> Result<(), String> {
-    let planned = dry_run_workflow_plan(source, None)
-        .await
-        .map_err(|err| format!("dry run failed: {err}"))?;
-    let work_calls = planned
-        .iter()
-        .filter(|call| {
-            matches!(
-                call.method,
-                WorkflowV2HostMethod::Agent
-                    | WorkflowV2HostMethod::Implementation
-                    | WorkflowV2HostMethod::Fanout
-                    | WorkflowV2HostMethod::Parallel
-            )
-        })
-        .count();
-    if work_calls == 0 {
-        return Err(format!(
-            "the script plans ZERO agent calls across {} host call(s) — every implement/verify body must actually invoke agent() and be awaited",
-            planned.len()
-        ));
-    }
-    validate_mandatory_review_calls(&planned)?;
-    Ok(())
-}
-
-/// Single source of truth for the mandated post-work reviews. The reference
-/// text, the validator, the accounting fields, and the tests all derive from
-/// these constants — a drift-guard unit test pins the reference against them.
-pub(super) const MANDATED_REVIEWS: [(&str, &str, bool); 2] = [
-    ("adversarial-review", "adversarial review", true),
-    ("coverage-audit", "source-coverage audit", false),
-];
-pub(super) const MANDATED_RESULT_FIELDS: [&str; 2] =
-    ["adversarial_findings", "uncovered_requirements"];
-const CRITIC_TIER: &str = "critic";
-
-pub(super) fn mandate_call_hint(label: &str, requires_critic: bool) -> String {
-    if requires_critic {
-        format!("await agent(..., {{ label: '{label}', tier: '{CRITIC_TIER}' }})")
-    } else {
-        format!("await agent(..., {{ label: '{label}' }})")
-    }
-}
-
-/// The prelude mints agent ids as `<label>-<ordinal>`; a mandate matches only
-/// that exact shape (or the bare label), never labels that merely extend it.
-fn call_id_matches_label(id: &str, label: &str) -> bool {
-    if id == label {
-        return true;
-    }
-    id.strip_prefix(label)
-        .and_then(|rest| rest.strip_prefix('-'))
-        .is_some_and(|ordinal| !ordinal.is_empty() && ordinal.bytes().all(|b| b.is_ascii_digit()))
-}
-
-fn is_mandated_review_call(call: &WorkflowV2HostCall) -> bool {
-    call.method == WorkflowV2HostMethod::Agent
-        && MANDATED_REVIEWS
-            .iter()
-            .any(|(label, _, _)| call_id_matches_label(&call.id, label))
-}
-
-fn is_task_work_call(call: &WorkflowV2HostCall) -> bool {
-    !is_mandated_review_call(call)
-        && matches!(
-            call.method,
-            WorkflowV2HostMethod::Agent
-                | WorkflowV2HostMethod::Fanout
-                | WorkflowV2HostMethod::Implementation
-                | WorkflowV2HostMethod::Parallel
-        )
-}
-
-/// Enforce the mandated reviews on the EXECUTED/PLANNED call sequence:
-/// present, as separate top-level read-only agent() calls, with the critic
-/// tier where required, positioned AFTER all task work. Reports EVERY defect
-/// in one error and names the ACTUAL cause for near-misses.
-fn validate_mandatory_review_calls(planned: &[WorkflowV2HostCall]) -> Result<(), String> {
-    let last_work = planned.iter().rposition(is_task_work_call);
-    let mut defects: Vec<String> = Vec::new();
-    for (label, purpose, requires_critic) in MANDATED_REVIEWS {
-        let hint = mandate_call_hint(label, requires_critic);
-        let matched = planned.iter().enumerate().find(|(_, call)| {
-            call.method == WorkflowV2HostMethod::Agent && call_id_matches_label(&call.id, label)
-        });
-        let Some((index, call)) = matched else {
-            // Near-miss diagnosis: the label exists but under the wrong call
-            // kind (agents() batch → Parallel, write:true → Fanout), or only
-            // as an extended label — name the real defect, not "omitted".
-            if let Some(wrong_kind) = planned.iter().find(|call| {
-                call.method != WorkflowV2HostMethod::Agent
-                    && call_id_matches_label(&call.id, label)
-            }) {
-                defects.push(format!(
-                    "the {purpose} labeled `{label}` ran as w.{} — the mandated reviews must be SEPARATE top-level read-only agent() calls, never inside agents() batches and never with write:true; use: {hint}",
-                    wrong_kind.method.as_str()
-                ));
-            } else if let Some(extended) = planned.iter().find(|call| {
-                call.method == WorkflowV2HostMethod::Agent
-                    && call.id.starts_with(label)
-                    && !call_id_matches_label(&call.id, label)
-            }) {
-                defects.push(format!(
-                    "no {purpose} agent with the exact label `{label}` (found `{}` — extended labels do not count); use: {hint}",
-                    extended.id
-                ));
-            } else {
-                defects.push(format!(
-                    "the mandatory {purpose} agent with exact label `{label}` is missing; add: {hint}"
-                ));
-            }
-            continue;
-        };
-        if requires_critic
-            && !call
-                .options
-                .role
-                .as_deref()
-                .is_some_and(|role| role.eq_ignore_ascii_case(CRITIC_TIER))
-        {
-            defects.push(format!(
-                "the {purpose} agent `{}` must use tier '{CRITIC_TIER}' so it routes to the dedicated adversarial reviewer; use: {hint}",
-                call.id
-            ));
-        }
-        if let Some(last_work) = last_work
-            && index < last_work
-        {
-            defects.push(format!(
-                "the {purpose} agent `{}` runs BEFORE task work finishes — both mandated reviews must come after ALL agent, implementation, fanout, and parallel calls",
-                call.id
-            ));
-        }
-    }
-    if defects.is_empty() {
-        return Ok(());
-    }
-    Err(format!(
-        "mandated-review defects (fix EVERY one): {}",
-        defects.join("; AND ")
-    ))
 }
 
 fn validate_authored_workflow_source(source: &str) -> archon_workflow::WorkflowResult<String> {

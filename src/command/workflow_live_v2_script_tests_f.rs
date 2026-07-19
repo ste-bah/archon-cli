@@ -103,3 +103,51 @@ async function workflow(w) {
             .expect_err("globs must be rejected");
         assert!(error.to_string().contains("glob"), "{error}");
     }
+
+    #[tokio::test]
+    async fn preflight_names_tasks_missing_from_write_coverage() {
+        let expected: std::collections::BTreeSet<String> =
+            ["TASK-EX-001".to_string(), "TASK-EX-002".to_string()]
+                .into_iter()
+                .collect();
+        // Write coverage for 001 only; 002 must be named as missing.
+        let script = r#"
+async function workflow(w) {
+  await w.fanout("write-1", [{ item_id: "i1", canonical_task_ids: ["TASK-EX-001"], target_files: ["src/lib.rs"], task: "x" }], { write: "worktree", task: "x" });
+  await w.agent("adversarial-review-1", { tier: "critic", task: "falsify" });
+  await w.agent("coverage-audit-2", { task: "audit" });
+  return {};
+}
+"#;
+        let error = validate_authored_plan(script, &expected)
+            .await
+            .expect_err("missing write coverage must fail");
+        assert!(error.contains("TASK-EX-002"), "{error}");
+        assert!(!error.contains("NO write coverage") || !error.split("NO write coverage").nth(1).unwrap_or("").contains("TASK-EX-001"), "{error}");
+
+        let umbrella = r#"
+async function workflow(w) {
+  await w.fanout("write-1", [{ item_id: "i1", canonical_task_ids: ["TASK-EX-001", "TASK-EX-002"], target_files: ["src/lib.rs"], task: "x" }], { write: "worktree", task: "x" });
+  await w.agent("adversarial-review-1", { tier: "critic", task: "falsify" });
+  await w.agent("coverage-audit-2", { task: "audit" });
+  return {};
+}
+"#;
+        let error = validate_authored_plan(umbrella, &expected)
+            .await
+            .expect_err("small universes must reject umbrella task claims");
+        assert!(error.contains("umbrella id-stuffing"), "{error}");
+
+        let complete = r#"
+async function workflow(w) {
+  await w.fanout("write-1", [{ item_id: "i1", canonical_task_ids: ["TASK-EX-001"], target_files: ["src/lib.rs"], task: "x" }], { write: "worktree", task: "x" });
+  await w.fanout("write-2", [{ item_id: "i2", canonical_task_ids: ["TASK-EX-002"], target_files: ["src/main.rs"], task: "y" }], { write: "worktree", task: "y" });
+  await w.agent("adversarial-review-1", { tier: "critic", task: "falsify" });
+  await w.agent("coverage-audit-2", { task: "audit" });
+  return {};
+}
+"#;
+        validate_authored_plan(complete, &expected)
+            .await
+            .expect("full write coverage passes");
+    }
