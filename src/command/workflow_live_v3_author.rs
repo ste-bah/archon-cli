@@ -15,8 +15,9 @@ Shape — top-level script, exactly like this (no wrapper function):
   const first = await agent('...prompt...', { label: 'first-step' })
   log('first step done')
 
-  phase('Second Phase')
-  const second = await agent(`...uses ${first.summary} verbatim...`, { label: 'second-step' })
+  phase('Task Work')
+  const impl = await agent(`Implement TASK-X-001 per <task file path>. Repository root: <repo root>. Re-inspect the current state FIRST — if the work is genuinely already done, return the typed no-op. Prove your change with tests you run yourself.`, { label: 'implement-task-x-001', write: true, taskIds: ['TASK-X-001'], targetFiles: ['src/module.ext'] })
+  const check = await agent(`You did NOT implement TASK-X-001 — be suspicious of its self-report. Re-read <task file path>, inspect the actual code, and run whatever tests YOU judge prove or disprove the acceptance criteria.`, { label: 'verify-task-x-001', verify: true, taskIds: ['TASK-X-001'] })
 
   phase('Review')
   const adversarial = await agent('Try to FALSIFY every accepted claim above using the actual files and tests: ...', { label: 'adversarial-review', tier: 'critic' })
@@ -41,7 +42,14 @@ Primitives:
     write: true,                          // spawn a WRITE agent in a sealed worktree through the write gauntlet
     taskIds: ['<canonical task id>'],     // required when write:true
     targetFiles: ['path/one.ext'],        // LITERAL repo-relative file paths ONLY (never descriptions); the write agent owns exactly these
-    focusedTests: ['exact test command'], // write:true — commands proving the change; must match >0 tests
+    verify: true,                         // REQUIRED on per-task verifiers: routes the agent through the host
+                                          // verification machinery WITH command execution. Without it (or a
+                                          // non-empty focusedTests) the agent has NO shell and any test runs
+                                          // it claims are downgraded to inspection — hollow verification.
+    focusedTests: ['test command'],       // OPTIONAL — only commands you VERIFIED exist (a wrong package or
+                                          // module name fails the run); omit to let the agent choose its own.
+                                          // If given, must match >0 tests. On a read-only agent a non-empty
+                                          // list routes through the verification machinery like verify:true.
     artifacts: ['relative/artifact.path'],// artifacts the work must produce
     tier: 'coder' | 'reducer' | 'analysis' | 'critic'   // 'critic' routes to the dedicated adversarial reviewer
   }
@@ -64,16 +72,18 @@ Primitives:
 
 Rules the script must follow:
 - AWAIT EVERY agent(), agents(), pipeline(), and phase-with-body call. Never fire-and-forget real work: a workflow that returns while work is pending FAILS the run with a dropped-call error. (Bare phase()/log() markers are the only calls that need no await.)
-- SEQUENTIAL vs PARALLEL: tasks connected by dependency_ids or touching the same files run SEQUENTIALLY (await one before starting the next). INDEPENDENT tasks may run concurrently — prefer `await agents([...])` (one host call, host-managed safe parallelism); `await Promise.all([...agent()...])` is acceptable for independent READ-ONLY work only. Never parallelize write work outside agents(). EXCEPTION: the two mandated reviews below must be SEPARATE top-level `await agent(...)` calls — never inside agents() batches, never write:true, never conditional — placed AFTER all task work.
-- Work tasks in dependency order (each task in the universe lists dependency_ids).
-- For each task: implement with a write agent, then verify with a read-only agent whose prompt names EXACT, module-qualified test commands; a test filter matching zero tests is never evidence.
-- Read every returned envelope. If status is not accepted/noop, the envelope carries the verbatim gate error: retry with SPECIFIC corrected instructions (exact command, exact path), at most 3 retries per task, then record the task as blocked with the evidence.
+- SEQUENTIAL by default, in dependency order. Only genuinely independent tasks (no shared files, no dependency link) may run concurrently via `await agents([...])`; parallel writes outside agents() are forbidden.
+- PER TASK, TWO STAGES, GOAL-ORIENTED PROMPTS — agents are capable sessions with their own tools; give them goals and context, never command scripts to obey:
+  1. IMPLEMENT (write agent): give it the task file PATH, the repository root, and the goal; for artifact work tell it to use `project_artifact_root` from its OWN stage input (the host stamps it there — never guess or invent an artifact path yourself). Tell it to READ the task file and RE-INSPECT the current repo/artifact state FIRST — if the work is genuinely already done it returns the typed no-op (status noop, idempotent_noop true, task_coverage evidence) instead of redoing or cosmetically editing anything; the workflow must be safe to re-run. It decides how to implement and how to prove it, runs its own tests, and fixes its own command mistakes inside its session.
+  2. VERIFY (fresh read-only agent with `verify: true` so it can execute commands): frame it adversarially — "you did NOT do this work; be suspicious of its self-report. Re-read the task file yourself, inspect the actual code and artifacts, and run whatever tests YOU judge prove or disprove the acceptance criteria." It chooses its own commands; if a command errors it corrects itself and re-runs within its session. Artifact checks use ABSOLUTE paths under the project artifact root — a DIFFERENT directory from the repository, stamped as `project_artifact_root` in the agent's own stage input.
+- Read every returned envelope. On failure it carries the verbatim gate error: give the retry agent that error plus the original goal (never more constraints), at most 3 retries per task, then record the task honestly as blocked with the evidence.
 - Never edit an existing artifact instance to satisfy a check; produce new artifacts through the real pipeline.
-- An honest block naming a real gap is success; fabricated acceptance is failure.
+- An honest block naming a real gap is success; fabricated acceptance is failure. The runtime gates independently validate patches, no-op proofs, and test evidence — do not try to outsmart them; they are on your side.
 - Deterministic code only (no Math.random, no Date.now); pass any needed timestamps via prompts.
 - MANDATORY after all task work, before returning:
   1. An ADVERSARIAL REVIEW agent: `await agent(<claims + evidence>, { label: 'adversarial-review', tier: 'critic' })` — tier 'critic' routes to the dedicated adversarial reviewer (the sherlock agent) when the project defines one. Instruct it to try to FALSIFY every accepted task's claims — probe actual files, inspect the verifiers' executed focused-check outputs, hunt for hollow artifacts, untested paths, and claims that outrun evidence. It is read-only and must not claim to execute commands. Its findings go into the return value verbatim.
   2. A SOURCE-COVERAGE AUDIT agent (read-only, label 'coverage-audit'): give it the source requirements document path and the full task list and instruct it to name every normative requirement that NO task in the universe covers. Report gaps honestly; do NOT implement work outside the given tasks.
+  Both are SEPARATE unconditional top-level `await agent(...)` calls — never inside agents() batches, never write:true, never wrapped in if/try on earlier results.
 - Return {
     accepted: [...taskIds],
     blocked: [{ taskId, reason }],
@@ -93,7 +103,8 @@ Required investigation (do it; cite the files you actually read in evidence):
 Then write the script per the dialect reference and SELF-CHECK before returning:
 - every canonical task id appears in EXACTLY ONE write agent() call's taskIds with that task's declared target files (never one umbrella call claiming many tasks);
 - a task that is already implemented still gets its write agent — instruct that agent to return the typed no-op (status noop, idempotent_noop true, task_coverage evidence) when it verifies nothing needs changing; NEVER make cosmetic edits just to show work;
-- every write call has focused test commands; the two mandated reviews are present, exactly labeled, after all work;
+- write agents are told to prove their change by running tests IN-SESSION; only add focusedTests commands you verified against the repo (a wrong package or module name fails the gauntlet — when unsure, omit them);
+- the two mandated reviews are present, exactly labeled, after all work;
 - meta.phases matches the phase() calls; the accounting return covers every task id exactly once;
 - the script text must not contain confirmation questions or the phrases "restored context"/"previous session summary".
 
