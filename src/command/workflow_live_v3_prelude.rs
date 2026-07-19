@@ -65,6 +65,26 @@ function __archonPrimitives(w) {
         task: prompt,
       });
     }
+    // Per-task verifiers (verify:true or focusedTests) run through the
+    // HOST's verification-wave machinery: the wave id prefix grants command
+    // execution and attaches every focused-verification guard (zero-test
+    // demotion, outcome normalization, host-anchored evidence). The
+    // adversarial reviewer stays a plain read-only agent by design.
+    if (opts.verify === true || (Array.isArray(opts.focusedTests) && opts.focusedTests.length > 0)) {
+      const item = {
+        item_id: `${id}-check`,
+        canonical_task_ids: opts.taskIds || [],
+        task: prompt,
+        instructions: prompt,
+        focused_verification: opts.focusedTests || [],
+        artifact_requirements: opts.artifacts || [],
+      };
+      return await w.parallel(`verification-wave-${id}`, [item], {
+        tier: opts.tier || "coder",
+        itemKind: "focused_verification",
+        task: prompt,
+      });
+    }
     return await w.agent(id, {
       tier: opts.tier || "coder",
       task: prompt,

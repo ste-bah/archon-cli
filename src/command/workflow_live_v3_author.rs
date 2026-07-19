@@ -45,7 +45,10 @@ Primitives:
     artifacts: ['relative/artifact.path'],// artifacts the work must produce
     tier: 'coder' | 'reducer' | 'analysis' | 'critic'   // 'critic' routes to the dedicated adversarial reviewer
   }
-  Without write:true the agent is read-only (verification, judgment, exploration).
+  Without write:true the agent is read-only (verification, judgment, exploration). Per-task verification
+  agents MUST set `verify: true` (or focusedTests): they then run through the host verification machinery
+  and can EXECUTE their test commands, with zero-match protection attached. The adversarial reviewer is
+  read-only by design — give it the verifier outputs and file paths; it falsifies by inspection.
   AGENT SELECTION IS AUTOMATIC: the host picks the best registry agent from the stage type, tier, and prompt
   content (e.g. systems-language implementation routes to the systems-coder specialist; tier 'critic' routes to
   the adversarial reviewer). Describe the WORK precisely; do not invent agent names. To pin a specific registry
@@ -69,7 +72,7 @@ Rules the script must follow:
 - An honest block naming a real gap is success; fabricated acceptance is failure.
 - Deterministic code only (no Math.random, no Date.now); pass any needed timestamps via prompts.
 - MANDATORY after all task work, before returning:
-  1. An ADVERSARIAL REVIEW agent: `await agent(<claims + evidence>, { label: 'adversarial-review', tier: 'critic' })` — tier 'critic' routes to the dedicated adversarial reviewer (the sherlock agent) when the project defines one. Instruct it to try to FALSIFY every accepted task's claims — probe actual files, run focused checks, hunt for hollow artifacts, untested paths, and claims that outrun evidence. Its findings go into the return value verbatim.
+  1. An ADVERSARIAL REVIEW agent: `await agent(<claims + evidence>, { label: 'adversarial-review', tier: 'critic' })` — tier 'critic' routes to the dedicated adversarial reviewer (the sherlock agent) when the project defines one. Instruct it to try to FALSIFY every accepted task's claims — probe actual files, inspect the verifiers' executed focused-check outputs, hunt for hollow artifacts, untested paths, and claims that outrun evidence. It is read-only and must not claim to execute commands. Its findings go into the return value verbatim.
   2. A SOURCE-COVERAGE AUDIT agent (read-only, label 'coverage-audit'): give it the source requirements document path and the full task list and instruct it to name every normative requirement that NO task in the universe covers. Report gaps honestly; do NOT implement work outside the given tasks.
 - Return {
     accepted: [...taskIds],

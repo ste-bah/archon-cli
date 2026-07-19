@@ -151,3 +151,38 @@ async function workflow(w) {
             .await
             .expect("full write coverage passes");
     }
+
+    #[tokio::test]
+    async fn verify_class_agents_route_through_the_verification_wave_machinery() {
+        // verify:true / focusedTests reroute to a verification-wave-prefixed
+        // parallel call — the HOST prefix that grants command execution and
+        // attaches the focused-verification guards. Plain readers and the
+        // critic-tier adversarial review stay plain agent calls (no shell).
+        let script = r#"
+export const meta = { name: 'verify-route-demo', phases: [{ title: 'One' }] }
+const plain = agent('Read something.', { label: 'plain-reader' })
+const verifier = agent('Run the tests.', { label: 'task-verifier', verify: true, taskIds: ['TASK-EX-001'], focusedTests: ['cargo test exact_name'] })
+const critic = agent('Falsify claims by inspection.', { label: 'adversarial-review', tier: 'critic' })
+await Promise.all([plain, verifier, critic])
+return { accepted: [], blocked: [], adversarial_findings: [], uncovered_requirements: [], notes: 'n' }
+"#;
+        let (calls, _) = dry_run_workflow_plan_details(script, None)
+            .await
+            .expect("plan");
+        let verifier_call = calls
+            .iter()
+            .find(|call| call.id.starts_with("verification-wave-task-verifier"))
+            .expect("verifier must become a verification-wave call");
+        assert_eq!(verifier_call.method, WorkflowV2HostMethod::Parallel);
+        let critic_call = calls
+            .iter()
+            .find(|call| call.id.starts_with("adversarial-review"))
+            .expect("critic call");
+        assert_eq!(critic_call.method, WorkflowV2HostMethod::Agent);
+        assert!(critic_call.options.item_kind.is_none());
+        let plain_call = calls
+            .iter()
+            .find(|call| call.id.starts_with("plain-reader"))
+            .expect("plain call");
+        assert_eq!(plain_call.method, WorkflowV2HostMethod::Agent);
+    }

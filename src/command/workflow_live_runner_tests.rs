@@ -1,7 +1,9 @@
 use archon_workflow::{ProviderTier, StageKind, StageRunRequest};
 use serde_json::json;
 
-use super::workflow_live_runner::{activity_detail, allowed_tools, write_coordination_enabled};
+use super::workflow_live_runner::{
+    activity_detail, allowed_tools, command_execution_stage, write_coordination_enabled,
+};
 
 fn request(input: serde_json::Value) -> StageRunRequest {
     request_with_task(input, "Implement")
@@ -84,6 +86,33 @@ fn generated_v2_read_only_verification_branch_stays_read_only() {
     assert!(!tools.contains(&"Bash".to_string()));
     assert!(!tools.contains(&"Write".to_string()));
     assert!(activity_detail(&req, "stage running").contains("tool_mode=read_only"));
+}
+
+#[test]
+fn generated_v2_verification_wave_gets_command_execution() {
+    let req = StageRunRequest {
+        run_id: "wf-test".into(),
+        stage_id: "verification-wave-task-verifier-2".into(),
+        stage_kind: StageKind::Agent,
+        agent: Some("coder".into()),
+        task: "Run the declared focused verification commands.".into(),
+        attempt: 1,
+        provider_tier: ProviderTier::Coder,
+        depends_on: Vec::new(),
+        input: json!({
+            "target_repository_root": "/tmp/project",
+            "v2_call": {
+                "id": "verification-wave-task-verifier-2",
+                "method": "parallel",
+                "role": "coder",
+                "write_mode": null,
+                "target_files": []
+            }
+        }),
+    };
+
+    assert!(command_execution_stage(&req));
+    assert!(allowed_tools(&req).contains(&"Bash".to_string()));
 }
 
 fn mcp_project() -> tempfile::TempDir {
