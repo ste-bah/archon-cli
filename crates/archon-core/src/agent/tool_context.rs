@@ -30,6 +30,11 @@ impl Agent {
             // both dispatch sites.
             sandbox: self.config.sandbox.clone(),
             activity_sink: self.provider_model_activity_sink(active_model),
+            tool_run_parent_action_id: self.guardrail_action_id.clone(),
+            tool_run_tool_use_id: None,
+            tool_run_attempt: 0,
+            tool_run_admission: self.tool_run_admission_callback.clone(),
+            tool_run_outcome: self.tool_run_outcome_callback.clone(),
         }
     }
 }

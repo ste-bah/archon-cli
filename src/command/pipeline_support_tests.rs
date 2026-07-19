@@ -41,6 +41,24 @@ async fn workflow_cli_subagent_executor_is_installed_with_configured_cap() {
     assert_eq!(executor.max_concurrency(), Some(3));
 }
 
+#[test]
+fn workflow_cli_tool_context_installs_tool_run_callbacks_and_parent_identity() {
+    let config = ArchonConfig::default();
+    let mut context = ToolContext {
+        session_id: "workflow-cli-test".into(),
+        ..ToolContext::default()
+    };
+
+    crate::command::world_model::configure_tool_run_context(&config, &mut context);
+
+    assert_eq!(
+        context.tool_run_parent_action_id.as_deref(),
+        Some("workflow-cli-test")
+    );
+    assert!(context.tool_run_admission.is_some());
+    assert!(context.tool_run_outcome.is_some());
+}
+
 struct FakeProvider;
 
 #[async_trait::async_trait]

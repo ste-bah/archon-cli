@@ -48,6 +48,7 @@ pub mod subagent;
 pub mod subagent_executor;
 pub mod tasks;
 pub mod team;
+pub(crate) mod tool_run_admission;
 pub mod update;
 
 /// Re-export from archon-tools so downstream crates can use `archon_core::task_manager`.

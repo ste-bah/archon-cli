@@ -160,10 +160,11 @@ async fn execute_prepared_tools(
         .iter()
         .map(|p| {
             let name = p.name.clone();
+            let tool_use_id = p.id.clone();
             let input = p.input.clone();
             let parse_error = p.parse_error.clone();
             let registry = Arc::clone(&registry);
-            let mut ctx = runner.tool_context.clone();
+            let mut ctx = runner.tool_context.with_tool_run_attempt(tool_use_id, 0);
             ctx.cancel_parent = Some(round_cancel.child_token());
             async move {
                 if let Some(err) = parse_error {

@@ -26,6 +26,60 @@ mod tests {
     include!("03_action_classification_tests.rs");
 
     #[test]
+    fn critical_guarded_tool_run_blocks_before_execution() {
+        let policy = WorldGuardrailPolicyConfig::default();
+        let action = WorldGuardedAction::new(
+            "s1",
+            WorldAdvisorSurface::ToolRun,
+            GuardedActionKind::ShellCommand,
+            "run dangerous tool",
+            "run dangerous tool",
+        );
+        let context = WorldGuardrailPredictionContext::from_scores(
+            RuntimeTaskClass::ExternalSideEffect,
+            WorldGuardrailMode::Guarded,
+            GuardrailRiskScores {
+                predicted_failure: Some(1.0),
+                ..GuardrailRiskScores::default()
+            },
+            &policy,
+        );
+
+        let decision = decide_guardrail(&action, None, context, &policy);
+
+        assert_eq!(decision.risk_tier, WorldRiskTier::Critical);
+        assert!(!decision.allowed_to_continue);
+        assert!(
+            decision
+                .reason_codes
+                .contains(&GuardrailReasonCode::ToolRunBlocked)
+        );
+    }
+
+    #[test]
+    fn advisory_critical_tool_run_remains_non_blocking() {
+        let policy = WorldGuardrailPolicyConfig::default();
+        let action = WorldGuardedAction::new(
+            "s1",
+            WorldAdvisorSurface::ToolRun,
+            GuardedActionKind::ShellCommand,
+            "run dangerous tool",
+            "run dangerous tool",
+        );
+        let context = WorldGuardrailPredictionContext::from_scores(
+            RuntimeTaskClass::ExternalSideEffect,
+            WorldGuardrailMode::Advisory,
+            GuardrailRiskScores {
+                predicted_failure: Some(1.0),
+                ..GuardrailRiskScores::default()
+            },
+            &policy,
+        );
+
+        assert!(decide_guardrail(&action, None, context, &policy).allowed_to_continue);
+    }
+
+    #[test]
     fn guarded_high_risk_coding_requires_verification() {
         let policy = WorldGuardrailPolicyConfig::default();
         let action = WorldGuardedAction::new(

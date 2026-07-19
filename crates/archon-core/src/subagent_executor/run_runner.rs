@@ -154,6 +154,11 @@ impl AgentSubagentExecutor {
             cancel_parent: Some(tool_cancel),
             sandbox: parent_ctx.sandbox.clone(),
             activity_sink: parent_ctx.activity_sink.clone(),
+            tool_run_parent_action_id: parent_ctx.tool_run_parent_action_id.clone(),
+            tool_run_tool_use_id: None,
+            tool_run_attempt: 0,
+            tool_run_admission: parent_ctx.tool_run_admission.clone(),
+            tool_run_outcome: parent_ctx.tool_run_outcome.clone(),
         }
     }
 

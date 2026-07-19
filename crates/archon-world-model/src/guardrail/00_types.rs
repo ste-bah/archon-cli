@@ -135,6 +135,7 @@ pub enum GuardrailReasonCode {
     ManualApprovalRequired,
     AdvisorUnavailable,
     GuardrailOverheadExceeded,
+    ToolRunBlocked,
     LowRiskAllowed,
 }
 

@@ -2,6 +2,7 @@
 
 include!("guard/00_runtime.rs");
 include!("guard/00_active_runtime.rs");
+include!("guard/00_tool_run.rs");
 include!("guard/00_completion.rs");
 include!("guard/01_pipeline.rs");
 include!("guard/02_classify_status.rs");

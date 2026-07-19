@@ -182,6 +182,7 @@ pub(super) async fn build(
     let llm_adapter = super::pipeline_adapter::build_subagent_pipeline_client(
         Arc::clone(&provider),
         &agent_config,
+        config,
         &working_dir,
         session_id,
     );
@@ -211,6 +212,13 @@ pub(super) async fn build(
             )
         },
     ));
+    let tool_run_admission_config = config.clone();
+    agent.set_tool_run_callbacks(
+        Arc::new(move |request| {
+            crate::command::world_model::admit_tool_run_attempt(&tool_run_admission_config, request)
+        }),
+        Arc::new(crate::command::world_model::record_tool_run_attempt_outcome),
+    );
     let finalization_session_id = session_id.to_string();
     agent.set_turn_finalization_callback(Arc::new(move |action_id, _output| {
         crate::command::world_model::turn_finalization_verdict_for_action(

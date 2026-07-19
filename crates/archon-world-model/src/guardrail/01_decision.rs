@@ -334,7 +334,13 @@ pub fn decide_guardrail(
         push_reason_codes(&mut reason_codes, &context, policy);
     }
 
-    if required_actions.is_empty() {
+    let blocked_tool_run = action.surface == WorldAdvisorSurface::ToolRun
+        && context.risk_tier == WorldRiskTier::Critical
+        && context.guardrail_mode.can_block();
+    if blocked_tool_run {
+        reason_codes.push(GuardrailReasonCode::ToolRunBlocked);
+    }
+    if required_actions.is_empty() && !blocked_tool_run {
         reason_codes.push(GuardrailReasonCode::LowRiskAllowed);
     }
 
@@ -349,7 +355,7 @@ pub fn decide_guardrail(
         mode: context.guardrail_mode,
         risk_tier: context.risk_tier,
         required_actions,
-        allowed_to_continue: true,
+        allowed_to_continue: !blocked_tool_run,
         allowed_to_finalize,
         reason_codes,
         prediction_context: Some(context),

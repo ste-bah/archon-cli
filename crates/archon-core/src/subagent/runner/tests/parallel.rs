@@ -8,6 +8,35 @@ struct SleeperTool {
     delay_ms: u64,
 }
 
+struct RiskySubagentTool {
+    executions: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl Tool for RiskySubagentTool {
+    fn name(&self) -> &str {
+        "RiskySubagent"
+    }
+
+    fn description(&self) -> &str {
+        "subagent admission test"
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object"})
+    }
+
+    async fn execute(&self, _input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
+        self.executions
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        ToolResult::success("executed")
+    }
+
+    fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
+        PermissionLevel::Risky
+    }
+}
+
 #[async_trait::async_trait]
 impl Tool for SleeperTool {
     fn name(&self) -> &str {
@@ -139,6 +168,71 @@ async fn parallel_tool_dispatch_concurrent_and_order_preserved() {
         elapsed.as_millis() < 900,
         "{}ms — expected <900ms for 3×400ms concurrent (serial would be ~900ms)",
         elapsed.as_millis()
+    );
+}
+
+#[tokio::test]
+async fn subagent_tool_round_admits_provider_tool_use_id_before_execution() {
+    let provider = Arc::new(MockProvider::new(vec![
+        tool_use_response("provider-tool-use-1", "RiskySubagent", "{}"),
+        text_response("done"),
+    ]));
+    let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut registry = ToolRegistry::new();
+    registry.register(Box::new(RiskySubagentTool {
+        executions: Arc::clone(&executions),
+    }));
+    let registry = Arc::new(registry);
+    let admissions = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let admissions_for_callback = Arc::clone(&admissions);
+    let outcomes = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let outcomes_for_callback = Arc::clone(&outcomes);
+    let runner = SubagentRunner::new(
+        provider,
+        "test".into(),
+        registry.tool_definitions(),
+        registry,
+        ToolContext {
+            session_id: "subagent-session".into(),
+            tool_run_parent_action_id: Some("parent-1".into()),
+            tool_run_admission: Some(Arc::new(move |request| {
+                admissions_for_callback
+                    .lock()
+                    .unwrap()
+                    .push((request.tool_use_id, request.attempt));
+                archon_tools::tool::ToolRunAdmission::Allowed
+            })),
+            tool_run_outcome: Some(Arc::new(move |outcome| {
+                outcomes_for_callback
+                    .lock()
+                    .unwrap()
+                    .push((outcome.tool_use_id, outcome.attempt));
+            })),
+            ..ToolContext::default()
+        },
+        "mock".into(),
+        5,
+        60,
+        Arc::new(AgentConfig::default()),
+        Arc::new(IdentityProvider::new(
+            IdentityMode::Clean,
+            "test".into(),
+            String::new(),
+            String::new(),
+        )),
+    );
+
+    let result = runner.run("run risky tool").await.unwrap();
+
+    assert_eq!(result, "done");
+    assert_eq!(executions.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(
+        *admissions.lock().unwrap(),
+        vec![("provider-tool-use-1".into(), 0)]
+    );
+    assert_eq!(
+        *outcomes.lock().unwrap(),
+        vec![("provider-tool-use-1".into(), 0)]
     );
 }
 

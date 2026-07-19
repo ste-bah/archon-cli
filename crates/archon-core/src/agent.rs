@@ -20,7 +20,9 @@ use archon_permissions::auto::AutoModeEvaluator;
 use archon_permissions::is_default_safe_tool;
 use archon_session::checkpoint::CheckpointStore;
 use archon_session::plan::PlanStore;
-use archon_tools::tool::{AgentMode, ToolContext, ToolResult};
+use archon_tools::tool::{
+    AgentMode, ToolContext, ToolResult, ToolRunAdmissionCallback, ToolRunOutcomeCallback,
+};
 use tokio::sync::Mutex;
 
 use crate::ChannelMetricSink;
@@ -35,7 +37,7 @@ mod cognitive_gate;
 mod cognitive_gate_tests;
 mod compaction;
 mod compaction_serde;
-mod events;
+pub(crate) mod events;
 mod lifecycle;
 mod memory_integration;
 mod message_delivery;
@@ -54,6 +56,8 @@ mod tool_dispatch;
 pub(crate) mod tool_input_json;
 mod tool_postprocess;
 mod tool_postprocess_steps;
+#[cfg(test)]
+mod tool_postprocess_steps_tests;
 mod tool_preflight;
 mod tool_preflight_gates;
 mod tool_preflight_steps;
@@ -161,6 +165,8 @@ pub struct Agent {
         Option<Arc<dyn Fn(UserCorrectionEventPayload) + Send + Sync>>,
     record_reasoning_turn_callback: Option<Arc<dyn Fn(ReasoningTurnEventPayload) + Send + Sync>>,
     first_tool_action_callback: Option<FirstToolActionCallback>,
+    tool_run_admission_callback: Option<ToolRunAdmissionCallback>,
+    tool_run_outcome_callback: Option<ToolRunOutcomeCallback>,
     turn_finalization_callback: Option<TurnFinalizationCallback>,
     guardrail_action_id: Option<String>,
     turn_requirement_reminder: Option<String>,

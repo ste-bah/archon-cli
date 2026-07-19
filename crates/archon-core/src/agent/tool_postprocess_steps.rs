@@ -186,7 +186,7 @@ impl Agent {
         }
     }
 
-    async fn run_post_tool_hooks(
+    pub(super) async fn run_post_tool_hooks(
         &mut self,
         pre: &PreflightResult,
         result: &mut ToolResult,
@@ -210,7 +210,14 @@ impl Agent {
                     max = max_retries,
                     "PostToolUse hook requested retry, re-executing tool"
                 );
-                *result = pre.tool_arc.execute(pre.input.clone(), ctx).await;
+                let retry_ctx = ctx.with_tool_run_attempt(pre.tool_id.clone(), retry_count);
+                *result = crate::tool_run_admission::execute_tool_attempt(
+                    pre.tool_arc.as_ref(),
+                    pre.input.clone(),
+                    &retry_ctx,
+                    pre.sandbox_prechecked,
+                )
+                .await;
                 continue;
             }
             if post_agg.retry {

@@ -16,6 +16,40 @@ pub enum PermissionLevel {
     Dangerous,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolRunAdmissionRequest {
+    pub session_id: String,
+    pub parent_action_id: String,
+    pub tool_use_id: String,
+    pub attempt: u32,
+    pub tool_name: String,
+    pub input: serde_json::Value,
+    pub permission_level: PermissionLevel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolRunAdmission {
+    Allowed,
+    Blocked { reason: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolRunAttemptOutcome {
+    pub session_id: String,
+    pub parent_action_id: String,
+    pub tool_use_id: String,
+    pub attempt: u32,
+    pub tool_name: String,
+    pub input: serde_json::Value,
+    pub permission_level: PermissionLevel,
+    pub blocked: bool,
+    pub is_error: bool,
+}
+
+pub type ToolRunAdmissionCallback =
+    Arc<dyn Fn(ToolRunAdmissionRequest) -> ToolRunAdmission + Send + Sync>;
+pub type ToolRunOutcomeCallback = Arc<dyn Fn(ToolRunAttemptOutcome) + Send + Sync>;
+
 // ---------------------------------------------------------------------------
 // Agent mode
 // ---------------------------------------------------------------------------
@@ -68,6 +102,25 @@ pub struct ToolContext {
     /// Canonical activity stream for TUI/log/persistence consumers. Tools do
     /// not need to know about rendering; dispatch emits lifecycle events here.
     pub activity_sink: Option<Arc<dyn AgentActivitySink>>,
+    /// Parent guarded action for per-attempt ToolRun admission.
+    pub tool_run_parent_action_id: Option<String>,
+    /// Stable provider tool-use identifier for this invocation.
+    pub tool_run_tool_use_id: Option<String>,
+    /// Zero-based execution attempt; retries increment this value.
+    pub tool_run_attempt: u32,
+    /// Binary-installed policy callback. Safe tools bypass it.
+    pub tool_run_admission: Option<ToolRunAdmissionCallback>,
+    /// Records exactly one terminal outcome for each admitted attempt.
+    pub tool_run_outcome: Option<ToolRunOutcomeCallback>,
+}
+
+impl ToolContext {
+    pub fn with_tool_run_attempt(&self, tool_use_id: impl Into<String>, attempt: u32) -> Self {
+        let mut context = self.clone();
+        context.tool_run_tool_use_id = Some(tool_use_id.into());
+        context.tool_run_attempt = attempt;
+        context
+    }
 }
 
 impl std::fmt::Debug for ToolContext {
@@ -84,6 +137,17 @@ impl std::fmt::Debug for ToolContext {
             .field(
                 "activity_sink",
                 &self.activity_sink.as_ref().map(|_| "<activity_sink>"),
+            )
+            .field("tool_run_parent_action_id", &self.tool_run_parent_action_id)
+            .field("tool_run_tool_use_id", &self.tool_run_tool_use_id)
+            .field("tool_run_attempt", &self.tool_run_attempt)
+            .field(
+                "tool_run_admission",
+                &self.tool_run_admission.as_ref().map(|_| "<callback>"),
+            )
+            .field(
+                "tool_run_outcome",
+                &self.tool_run_outcome.as_ref().map(|_| "<callback>"),
             )
             .finish()
     }

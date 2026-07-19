@@ -59,6 +59,8 @@ impl Agent {
             record_user_correction_event_callback: None,
             record_reasoning_turn_callback: None,
             first_tool_action_callback: None,
+            tool_run_admission_callback: None,
+            tool_run_outcome_callback: None,
             turn_finalization_callback: None,
             guardrail_action_id: None,
             turn_requirement_reminder: None,
@@ -340,6 +342,15 @@ impl Agent {
 
     pub fn set_first_tool_action_callback(&mut self, cb: FirstToolActionCallback) {
         self.first_tool_action_callback = Some(cb);
+    }
+
+    pub fn set_tool_run_callbacks(
+        &mut self,
+        admission: ToolRunAdmissionCallback,
+        outcome: ToolRunOutcomeCallback,
+    ) {
+        self.tool_run_admission_callback = Some(admission);
+        self.tool_run_outcome_callback = Some(outcome);
     }
 
     pub fn set_turn_finalization_callback(&mut self, cb: TurnFinalizationCallback) {
