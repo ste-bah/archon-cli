@@ -6,7 +6,7 @@ pub(super) fn normalize_agent_output(
     request: &WorkflowV2AgentRequest,
     output: &str,
 ) -> serde_json::Result<Value> {
-    let mut value: Value = serde_json::from_str(output)?;
+    let mut value: Value = parse_envelope_document(output)?;
     let Some(object) = value.as_object_mut() else {
         return Ok(value);
     };
@@ -17,6 +17,83 @@ pub(super) fn normalize_agent_output(
     stamp_artifact_ids(object);
     normalize_commands(object);
     Ok(value)
+}
+
+/// Parse the agent reply as one JSON envelope. Providers routinely wrap an
+/// otherwise-valid envelope in markdown fences or prose; when the whole reply
+/// is not bare JSON, accept it only if it contains exactly one complete
+/// top-level JSON object carrying a `status` member. Location only — no
+/// content is invented, ambiguity stays a loud failure, the forbidden-text
+/// guard has already seen the full raw reply, and every schema and validation
+/// gate still runs on whatever parses here.
+fn parse_envelope_document(output: &str) -> serde_json::Result<Value> {
+    let root_error = match serde_json::from_str(output.trim()) {
+        Ok(value) => return Ok(value),
+        Err(error) => error,
+    };
+    // Tolerate EXACTLY ONE complete top-level object wrapped in fences or
+    // prose. Two or more complete objects is an ambiguous reply (echoed
+    // schema example + real envelope, draft + final): never guess which is
+    // the envelope — surface the root error so the repair loop re-asks.
+    let mut found: Option<Value> = None;
+    let mut skip_until = 0;
+    for (index, _) in output.match_indices(['{', '[']) {
+        if index < skip_until {
+            continue;
+        }
+        let mut stream = serde_json::Deserializer::from_str(&output[index..]).into_iter::<Value>();
+        match stream.next() {
+            Some(Ok(value)) => {
+                skip_until = index + stream.byte_offset();
+                // A complete array is another JSON document, not prose. In
+                // particular, never extract a validating envelope nested in
+                // a one-element array and pretend it was top-level.
+                if value.is_array() {
+                    return Err(root_error);
+                }
+                if !value.is_object() {
+                    continue;
+                }
+                if found.is_some() {
+                    return Err(root_error);
+                }
+                found = Some(value);
+            }
+            // An unterminated object is a truncation signature: the reply is
+            // structurally incomplete, and any complete object inside it (an
+            // echoed branch envelope in data.items, a coverage entry) could
+            // impersonate the real reply. Never extract from a truncated
+            // reply. (Prose braces fail with non-EOF errors and fall through.)
+            Some(Err(error)) if error.is_eof() || starts_like_json_container(&output[index..]) => {
+                return Err(root_error);
+            }
+            _ => {}
+        }
+    }
+    // Every envelope declares `status`; a lone complete NESTED object inside
+    // a truncated envelope must not impersonate the reply. Evidence items
+    // lack `status`; task_coverage entries carry `status` AND `task_id` —
+    // and `task_id` is never a top-level envelope key, so its presence marks
+    // a fragment.
+    match found {
+        Some(value) if value.get("status").is_some() && value.get("task_id").is_none() => Ok(value),
+        _ => Err(root_error),
+    }
+}
+
+fn starts_like_json_container(candidate: &str) -> bool {
+    let mut chars = candidate.chars();
+    match chars.next() {
+        // Valid JSON object members begin with a quoted key. If such a
+        // container is malformed later, no complete object inside it may be
+        // promoted to the reply envelope. Natural-language braces such as
+        // "{ curly braces" remain eligible prose.
+        Some('{') => matches!(chars.find(|ch| !ch.is_whitespace()), Some('"' | '}')),
+        // Arrays are never result envelopes. A malformed array can still
+        // contain one complete validating object, so it is always ambiguous.
+        Some('[') => true,
+        _ => false,
+    }
 }
 
 fn normalize_path_records(object: &mut Map<String, Value>, field: &str) {

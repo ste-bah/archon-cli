@@ -177,12 +177,14 @@ impl WorkflowV2AgentAdapter {
         let value = super::agent_output_normalize::normalize_agent_output(request, output)
             .map_err(|err| {
                 WorkflowV2AgentError::MalformedOutput(format!(
-                    "agent output must be one JSON WorkflowV2Result object: {err}"
+                    "agent output must be one JSON WorkflowV2Result object: {err}; output begins: {}",
+                    output_excerpt(output)
                 ))
             })?;
         let mut result: WorkflowV2Result = serde_json::from_value(value).map_err(|err| {
             WorkflowV2AgentError::MalformedOutput(format!(
-                "agent output must be one JSON WorkflowV2Result object: {err}"
+                "agent output must be one JSON WorkflowV2Result object: {err}; output begins: {}",
+                output_excerpt(output)
             ))
         })?;
         self.validate_agent_result(request, &mut result)?;
@@ -407,6 +409,14 @@ fn truncate_chars(value: &str, max_chars: usize) -> String {
     out
 }
 
+/// Bounded single-line head of a raw agent reply, embedded in parse errors so
+/// persisted failure records and retry briefs show WHAT the agent wrote, not
+/// just where serde gave up.
+fn output_excerpt(output: &str) -> String {
+    let collapsed: String = output.split_whitespace().collect::<Vec<_>>().join(" ");
+    truncate_chars(&collapsed, 200)
+}
+
 const READ_ONLY_RULES: &str = concat!(
     "- This is read-only work: do not claim file edits and leave files_changed empty.\n",
     "- For project artifact checks, use project_artifact_paths absolute_path values when present; otherwise resolve .archon/... paths under project_artifact_root, not repository_root."
@@ -441,6 +451,9 @@ const RESULT_SCHEMA: &str = r#"{
   "data": {"items": "optional typed payload for downstream fanout/reduce"}
 }"#;
 
+#[cfg(test)]
+#[path = "agent_adapter_envelope_tests.rs"]
+mod envelope_tests;
 #[cfg(test)]
 #[path = "agent_adapter_project_artifact_completion_tests.rs"]
 mod project_artifact_completion_tests;
