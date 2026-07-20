@@ -1,6 +1,7 @@
 //! Meaning compiler CLI handler.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::Result;
 use cozo::DbInstance;
@@ -11,9 +12,12 @@ fn meaning_db_path() -> PathBuf {
     crate::command::store_paths::evidence_db_path(&["ARCHON_MEANING_DB_PATH", "ARCHON_KB_DB_PATH"])
 }
 
-fn open_db() -> Result<DbInstance> {
-    let db_path = meaning_db_path();
-    let db = crate::command::store_paths::open_sqlite_db(&db_path, "meaning")?;
+fn open_db() -> Result<Arc<DbInstance>> {
+    open_db_at(&meaning_db_path())
+}
+
+fn open_db_at(path: &Path) -> Result<Arc<DbInstance>> {
+    let db = archon_docs::acquire_docs_db(path)?;
     archon_meaning::ensure_schema(&db)?;
     Ok(db)
 }
@@ -105,6 +109,18 @@ fn export(db: &DbInstance, kind: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn meaning_database_reuses_shared_document_handle() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("evidence.db");
+        let shared = archon_docs::acquire_docs_db(&path).unwrap();
+
+        let meaning = open_db_at(&path).unwrap();
+
+        assert!(std::sync::Arc::ptr_eq(&shared, &meaning));
+        archon_meaning::list_samples(&meaning).unwrap();
+    }
 
     #[test]
     fn meaning_db_path_prefers_explicit_override() {

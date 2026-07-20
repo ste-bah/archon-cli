@@ -17,7 +17,7 @@ use tokio::sync::{Mutex, mpsc};
 
 // ---------------------------------------------------------------------------
 // Global trigger sender (bridges TUI key handler → voice_loop without
-// changing run_tui's public signature)
+// changing the public TUI run signature)
 // ---------------------------------------------------------------------------
 
 static VOICE_TRIGGER_TX: OnceLock<mpsc::Sender<VoiceTrigger>> = OnceLock::new();

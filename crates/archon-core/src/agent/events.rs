@@ -20,7 +20,7 @@ impl AgentActivitySink for ProviderModelActivitySink {
     }
 }
 
-pub(super) fn emit_tool_result_activity(
+pub(crate) fn emit_tool_result_activity(
     ctx: &ToolContext,
     tool_name: &str,
     result: &ToolResult,

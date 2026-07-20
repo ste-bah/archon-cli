@@ -258,10 +258,14 @@ fn normalized_lock_path(path: &Path) -> Result<PathBuf> {
 
 /// Return a stable path key for a possibly absent resource.
 ///
-/// The parent is created and canonicalized so relative paths, `.`/`..`, and
+/// Existing resources are canonicalized completely. For absent resources, the
+/// parent is created and canonicalized so relative paths, `.`/`..`, and
 /// symlinked parents resolve to one process-wide resource identity.
 pub fn canonical_resource_path(path: impl AsRef<Path>) -> Result<PathBuf> {
     let path = absolute_normalized_path(path.as_ref())?;
+    if path.exists() {
+        return Ok(path.canonicalize()?);
+    }
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(parent)?;
     let parent = canonicalize_existing_path(parent)?;

@@ -1,7 +1,8 @@
 use anyhow::Result;
 use cozo::DbInstance;
+use std::sync::Arc;
 
-pub(crate) async fn handle_status(db: DbInstance) -> Result<()> {
+pub(crate) async fn handle_status(db: Arc<DbInstance>) -> Result<()> {
     let summary = archon_docs::status::get_status_summary(&db)?;
     println!("Total sources:   {}", summary.total_sources);
     println!("  Discovered:    {}", summary.discovered);

@@ -11,31 +11,50 @@ use super::{HnswManifest, HnswSearchHit};
 pub(super) fn search(
     hnsw_dir: PathBuf,
     manifest: HnswManifest,
-    chunk_ids: HashMap<usize, String>,
+    load_chunk_ids: impl FnOnce() -> Result<HashMap<usize, String>>,
     query: Vec<f32>,
     top_k: usize,
     ef: usize,
 ) -> Result<Vec<HnswSearchHit>> {
     let identity = manifest_identity(&hnsw_dir, &manifest);
-    let mut cache = cache().lock().unwrap_or_else(|error| error.into_inner());
-    if cache
-        .as_ref()
-        .is_none_or(|cache| cache.identity != identity)
-    {
-        *cache = Some(Cache::load(hnsw_dir, manifest, chunk_ids, identity)?);
-    }
-    cache
-        .as_ref()
-        .expect("persisted HNSW cache initialized")
-        .search(query, top_k, ef)
+    let cache = {
+        let mut caches = cache().lock().unwrap_or_else(|error| error.into_inner());
+        if !caches.contains_key(&identity) {
+            let loaded = Cache::load(hnsw_dir, manifest, load_chunk_ids()?)?;
+            caches.insert(identity.clone(), loaded);
+        }
+        caches
+            .get(&identity)
+            .expect("persisted HNSW cache initialized")
+            .clone()
+    };
+    cache.search(query, top_k, ef)
 }
 
+#[cfg(test)]
 pub(super) fn clear() {
-    let cache = {
+    let caches = {
         let mut cache = cache().lock().unwrap_or_else(|error| error.into_inner());
-        cache.take()
+        std::mem::take(&mut *cache)
     };
-    drop(cache);
+    drop(caches);
+}
+
+pub(super) fn clear_dir(hnsw_dir: &std::path::Path) {
+    let prefix = format!("{}:", hnsw_dir.display());
+    let removed = {
+        let mut cache = cache().lock().unwrap_or_else(|error| error.into_inner());
+        let identities: Vec<_> = cache
+            .keys()
+            .filter(|identity| identity.starts_with(&prefix))
+            .cloned()
+            .collect();
+        identities
+            .into_iter()
+            .filter_map(|identity| cache.remove(&identity))
+            .collect::<Vec<_>>()
+    };
+    drop(removed);
 }
 
 #[cfg(test)]
@@ -45,10 +64,10 @@ pub(super) fn load_count() -> usize {
 
 #[cfg(test)]
 pub(super) fn cache_present() -> bool {
-    cache()
+    !cache()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
-        .is_some()
+        .is_empty()
 }
 
 #[cfg(test)]
@@ -56,8 +75,8 @@ pub(super) fn worker_count() -> usize {
     WORKERS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+#[derive(Clone)]
 struct Cache {
-    identity: String,
     requests: Sender<Request>,
 }
 
@@ -73,7 +92,6 @@ impl Cache {
         hnsw_dir: PathBuf,
         manifest: HnswManifest,
         chunk_ids: HashMap<usize, String>,
-        identity: String,
     ) -> Result<Self> {
         let (requests, receiver) = mpsc::channel();
         let (ready, ready_receiver) = mpsc::sync_channel(1);
@@ -84,7 +102,7 @@ impl Cache {
         ready_receiver
             .recv()
             .context("wait for persisted HNSW cache worker")??;
-        Ok(Self { identity, requests })
+        Ok(Self { requests })
     }
 
     fn search(&self, query: Vec<f32>, top_k: usize, ef: usize) -> Result<Vec<HnswSearchHit>> {
@@ -193,9 +211,9 @@ fn manifest_identity(hnsw_dir: &std::path::Path, manifest: &HnswManifest) -> Str
     )
 }
 
-fn cache() -> &'static Mutex<Option<Cache>> {
-    static CACHE: OnceLock<Mutex<Option<Cache>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(None))
+fn cache() -> &'static Mutex<HashMap<String, Cache>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Cache>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 #[cfg(test)]

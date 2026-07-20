@@ -35,7 +35,7 @@ pub(crate) fn store_batch(
             elapsed: batch.started.elapsed(),
         },
     );
-    let vector_store = match DocVectorStore::open_default() {
+    let vector_store = match DocVectorStore::acquire_default() {
         Ok(store) => store,
         Err(error) => {
             tracing::warn!(%error, "RocksDB vector store unavailable; retrying chunks individually");
@@ -229,7 +229,7 @@ fn store_batch_individually(
                 Some(vector_store) => {
                     write_single_chunk(db, vector_store, chunk, &write, &embedding, backend)
                 }
-                None => DocVectorStore::open_default().and_then(|vector_store| {
+                None => DocVectorStore::acquire_default().and_then(|vector_store| {
                     write_single_chunk(db, &vector_store, chunk, &write, &embedding, backend)
                 }),
             }

@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use archon_docs::{answer, retrieval};
 use cozo::DbInstance;
@@ -18,7 +19,7 @@ pub(crate) async fn run_search(args: Vec<String>, ctx: &ToolContext) -> ToolResu
     run_blocking("docs search", move || {
         let cwd = effective_working_dir(working_dir);
         let db_path = docs_db_path(&cwd);
-        let db = match open_docs_db("docs search", &db_path) {
+        let db = match acquire_docs_db("docs search", &db_path) {
             Ok(db) => db,
             Err(error) => return ToolResult::error(error),
         };
@@ -40,7 +41,7 @@ pub(crate) async fn run_list(limit: usize, ctx: &ToolContext) -> ToolResult {
     run_blocking("docs list", move || {
         let cwd = effective_working_dir(working_dir);
         let db_path = docs_db_path(&cwd);
-        let db = match open_docs_db("docs list", &db_path) {
+        let db = match acquire_docs_db("docs list", &db_path) {
             Ok(db) => db,
             Err(error) => return ToolResult::error(error),
         };
@@ -57,7 +58,7 @@ pub(crate) async fn run_get(document_id: String, ctx: &ToolContext) -> ToolResul
     run_blocking("docs get", move || {
         let cwd = effective_working_dir(working_dir);
         let db_path = docs_db_path(&cwd);
-        let db = match open_docs_db("docs get", &db_path) {
+        let db = match acquire_docs_db("docs get", &db_path) {
             Ok(db) => db,
             Err(error) => return ToolResult::error(error),
         };
@@ -79,7 +80,7 @@ pub(crate) async fn run_answer(args: Vec<String>, ctx: &ToolContext) -> ToolResu
     run_blocking("docs answer", move || {
         let cwd = effective_working_dir(working_dir);
         let db_path = docs_db_path(&cwd);
-        let db = match open_docs_db("docs answer", &db_path) {
+        let db = match acquire_docs_db("docs answer", &db_path) {
             Ok(db) => db,
             Err(error) => return ToolResult::error(error),
         };
@@ -138,19 +139,9 @@ fn expect_arg(iter: &mut impl Iterator<Item = String>, expected: &str) -> Result
     }
 }
 
-fn open_docs_db(operation: &str, db_path: &Path) -> Result<DbInstance, String> {
+fn acquire_docs_db(operation: &str, db_path: &Path) -> Result<Arc<DbInstance>, String> {
     docs_db_wait_hook(operation);
-    if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("create docs DB dir {}: {error}", parent.display()))?;
-    }
-    archon_docs::configure_cozo_write_lock_for_db(db_path);
-    let path = db_path.to_string_lossy().to_string();
-    let db = DbInstance::new("sqlite", &path, "")
-        .map_err(|error| format!("open document store at {path}: {error}"))?;
-    archon_docs::schema::ensure_doc_schema(&db)
-        .map_err(|error| format!("ensure document schema: {error}"))?;
-    Ok(db)
+    archon_docs::acquire_docs_db(db_path).map_err(|error| format!("{operation}: {error}"))
 }
 
 async fn run_blocking(

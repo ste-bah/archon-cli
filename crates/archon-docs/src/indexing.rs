@@ -124,13 +124,14 @@ fn index_loaded_chunks_inner(
         );
     }
     if worker_count > 1 {
-        return crate::indexing_parallel::index_loaded_chunks_parallel(
+        let result = crate::indexing_parallel::index_loaded_chunks_parallel(
             db,
             chunks,
             options,
             worker_count,
             progress,
-        );
+        )?;
+        return build_persisted_snapshot(provider.as_ref(), result);
     }
 
     let batch_size = options.batch_size.max(1);
@@ -292,6 +293,21 @@ fn index_loaded_chunks_inner(
             elapsed: started.elapsed(),
         },
     );
+    build_persisted_snapshot(provider.as_ref(), result)
+}
+
+fn build_persisted_snapshot(
+    provider: &dyn crate::embed::LocalEmbeddingProvider,
+    result: IndexResult,
+) -> Result<IndexResult, DocsError> {
+    if result.indexed == 0 {
+        return Ok(result);
+    }
+    crate::vector_store::DocVectorStore::acquire_default()
+        .and_then(|store| store.build_hnsw(provider.backend_name(), provider.dimension(), None))
+        .map_err(|error| DocsError::Retrieval {
+            message: format!("build persisted HNSW snapshot after indexing: {error}"),
+        })?;
     Ok(result)
 }
 
@@ -338,7 +354,7 @@ pub fn index_chunk(db: &DbInstance, chunk: &ChunkArtifact) -> Result<(), DocsErr
             message: "embed_chunks returned empty".into(),
         });
     };
-    let vector_store = match crate::vector_store::DocVectorStore::open_default() {
+    let vector_store = match crate::vector_store::DocVectorStore::acquire_default() {
         Ok(store) => store,
         Err(error) => {
             let _ = store::update_chunk_embedding_status(db, &chunk.chunk_id, "failed");

@@ -1,18 +1,15 @@
 //! TASK-AGS-103: Consumer-side back-pressure for the TUI render loop.
 //!
-//! The agent event channel is unbounded (TASK-AGS-102) so producers can
-//! never block. Back-pressure is enforced at the *consumer* by bounding
-//! the in-TUI buffer and coalescing/dropping Progress events when the
-//! render loop falls behind, while preserving every State event.
+//! The agent event channel is unbounded so producers never block. Back-pressure
+//! is enforced at the consumer by coalescing adjacent assistant text and
+//! shedding only ephemeral progress when the render loop falls behind. Text and
+//! state transitions remain lossless.
 //!
 //! Policy:
-//! - SOFT_CAP = 1_000: once exceeded, begin dropping oldest Progress
-//!   events. State events are always retained.
-//! - HARD_CAP = 10_000: absolute ceiling. Further Progress pushes drop
-//!   the oldest Progress entries to make room. State events still never
-//!   dropped.
-//! - RENDER_EVENT_BUDGET = 10_000: maximum events drained per frame
-//!   tick so a burst cannot starve the UI redraw.
+//! - SOFT_CAP = 1_000: shed oldest ephemeral progress beyond this size.
+//! - HARD_CAP = 10_000: continue shedding ephemeral progress. Lossless text and
+//!   state may temporarily exceed the event-count cap.
+//! - RENDER_EVENT_BUDGET = 10_000: maximum events drained per frame tick.
 
 use std::collections::VecDeque;
 
@@ -20,7 +17,7 @@ use archon_core::agent::AgentEvent;
 
 /// Soft cap — start shedding Progress beyond this size.
 pub const SOFT_CAP: usize = 1_000;
-/// Hard cap — absolute buffer ceiling. Progress dropped first.
+/// Event-count threshold used to shed ephemeral progress first.
 pub const HARD_CAP: usize = 10_000;
 /// Maximum events drained per render tick.
 pub const RENDER_EVENT_BUDGET: usize = 10_000;
@@ -29,14 +26,16 @@ pub const RENDER_EVENT_BUDGET: usize = 10_000;
 pub enum Priority {
     /// High-value state transitions — never dropped.
     State,
-    /// Incremental streaming output — droppable under overflow.
+    /// User-visible assistant output — lossless and coalesced when adjacent.
+    Text,
+    /// Ephemeral incremental state — droppable under overflow.
     Progress,
 }
 
 /// Classify an [`AgentEvent`] by shedding priority.
 pub fn priority(ev: &AgentEvent) -> Priority {
     match ev {
-        AgentEvent::TextDelta(_) | AgentEvent::ThinkingDelta(_) => Priority::Progress,
+        AgentEvent::TextDelta(_) | AgentEvent::ThinkingDelta(_) => Priority::Text,
         AgentEvent::UserPromptReady
         | AgentEvent::ApiCallStarted { .. }
         | AgentEvent::ContextPressureUpdated { .. }
@@ -82,30 +81,32 @@ impl EventCoalescer {
         self.buffer.is_empty()
     }
 
-    /// Push an event, shedding oldest Progress if the hard cap is exceeded.
+    /// Push an event, coalescing adjacent content and shedding only ephemeral Progress.
     pub fn push(&mut self, event: AgentEvent) {
-        self.buffer.push_back(event);
+        match event {
+            AgentEvent::TextDelta(text) => {
+                if let Some(AgentEvent::TextDelta(previous)) = self.buffer.back_mut() {
+                    previous.push_str(&text);
+                } else {
+                    self.buffer.push_back(AgentEvent::TextDelta(text));
+                }
+            }
+            AgentEvent::ThinkingDelta(text) => {
+                if let Some(AgentEvent::ThinkingDelta(previous)) = self.buffer.back_mut() {
+                    previous.push_str(&text);
+                } else {
+                    self.buffer.push_back(AgentEvent::ThinkingDelta(text));
+                }
+            }
+            event => self.buffer.push_back(event),
+        }
         while self.buffer.len() > self.hard_cap {
             if !self.drop_oldest_progress() {
-                // Buffer is all State events — cannot shed further.
+                // Buffer is entirely lossless — allow temporary cap overflow.
                 break;
             }
         }
-        // Soft cap: start shedding early once past the soft threshold, but
-        // only if the oldest queued event is a droppable Progress. This
-        // keeps steady-state latency bounded during slow bursts without
-        // touching State events.
-        while self.buffer.len() > self.soft_cap {
-            let front_is_progress = self
-                .buffer
-                .front()
-                .map(|e| priority(e) == Priority::Progress)
-                .unwrap_or(false);
-            if !front_is_progress {
-                break;
-            }
-            self.buffer.pop_front();
-        }
+        while self.buffer.len() > self.soft_cap && self.drop_oldest_progress() {}
     }
 
     pub fn pop(&mut self) -> Option<AgentEvent> {

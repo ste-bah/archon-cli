@@ -79,6 +79,43 @@ impl MemoryGraph {
                 }
             })?;
 
+        self.init_memory_fts()?;
+
+        Ok(())
+    }
+
+    fn init_memory_fts(&self) -> Result<(), MemoryError> {
+        for script in [
+            r#"::fts create memories:content_fts {
+                extractor: content,
+                extract_filter: content != "",
+                tokenizer: NGram(1, 2, false),
+                filters: [Lowercase],
+            }"#,
+            r#"::fts create memories:title_fts {
+                extractor: title,
+                extract_filter: title != "",
+                tokenizer: NGram(1, 2, false),
+                filters: [Lowercase],
+            }"#,
+            r#"::fts create memories:tags_fts {
+                extractor: tags,
+                extract_filter: tags != "[]",
+                tokenizer: NGram(1, 2, false),
+                filters: [Lowercase],
+            }"#,
+        ] {
+            self.db
+                .run_script(script, Default::default(), ScriptMutability::Mutable)
+                .or_else(|e| {
+                    let msg = e.to_string();
+                    if msg.contains("already exists") || msg.contains("conflicts") {
+                        Ok(empty_rows())
+                    } else {
+                        Err(db_err(e))
+                    }
+                })?;
+        }
         Ok(())
     }
 }

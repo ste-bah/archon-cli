@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use archon_docs::vlm::factory::{self as vlm_factory, VlmProviderInitStatus};
@@ -113,13 +114,31 @@ fn video_db_path() -> PathBuf {
     crate::command::store_paths::evidence_db_path(&["ARCHON_VIDEO_DB_PATH"])
 }
 
-fn open_db() -> Result<DbInstance> {
-    let db_path = video_db_path();
-    archon_docs::configure_cozo_write_lock_for_db(&db_path);
-    let db = crate::command::store_paths::open_sqlite_db(&db_path, "video")?;
-    archon_docs::schema::ensure_doc_schema(&db)?;
+fn open_db() -> Result<Arc<DbInstance>> {
+    open_db_at(&video_db_path())
+}
+
+fn open_db_at(path: &Path) -> Result<Arc<DbInstance>> {
+    let db = archon_docs::acquire_docs_db(path)?;
     archon_video::schema::create_video_schema(&db)?;
     Ok(db)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn video_database_reuses_shared_document_handle() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("evidence.db");
+        let shared = archon_docs::acquire_docs_db(&path).unwrap();
+
+        let video = open_db_at(&path).unwrap();
+
+        assert!(std::sync::Arc::ptr_eq(&shared, &video));
+        archon_video::schema::create_video_schema(&video).unwrap();
+    }
 }
 
 fn normalize_kb_id(kb: Option<&str>) -> Option<String> {

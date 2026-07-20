@@ -4,6 +4,8 @@ pub mod models;
 pub mod schema;
 pub mod store;
 
+mod docs_db_cache;
+
 pub mod chunking;
 mod cozo_retry;
 pub mod indexing;
@@ -52,6 +54,12 @@ mod retrieval_semantic;
 #[cfg(test)]
 mod retrieval_tests;
 pub mod vlm;
+
+pub fn acquire_docs_db(
+    path: impl AsRef<std::path::Path>,
+) -> anyhow::Result<std::sync::Arc<cozo::DbInstance>> {
+    docs_db_cache::acquire(path.as_ref())
+}
 
 pub fn configure_cozo_write_lock_for_db(path: impl AsRef<std::path::Path>) {
     cozo_retry::configure_write_lock_for_db(path);

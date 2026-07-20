@@ -7,9 +7,9 @@
 //!
 //! SKIPPED targets (documented per task spec):
 //!   - SessionPicker rendering: no dedicated `render_*` function; the picker
-//!     is drawn inline inside `app::run_tui`. Snapshotting would require
+//!     is drawn inline inside the main TUI renderer. Snapshotting would require
 //!     extracting the draw code, which the task forbids.
-//!   - McpManager rendering: same reason — rendered inline in `app::run_tui`.
+//!   - McpManager rendering: same reason — rendered inline by the main TUI renderer.
 //!   - `chat`, `history`, `agents`, `settings`, `session_browser`,
 //!     `diff_viewer` (overlay), `context_viz`, `model_picker`, `tasks_overlay`,
 //!     `help` modules: do not yet exist in the crate (future Phase 6 work).

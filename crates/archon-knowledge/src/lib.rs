@@ -74,11 +74,15 @@ pub struct KnowledgeStats {
 
 #[derive(Clone)]
 pub struct KnowledgeEngine {
-    db: DbInstance,
+    db: std::sync::Arc<DbInstance>,
 }
 
 impl KnowledgeEngine {
     pub fn new(db: DbInstance) -> Result<Self> {
+        Self::from_shared(std::sync::Arc::new(db))
+    }
+
+    pub fn from_shared(db: std::sync::Arc<DbInstance>) -> Result<Self> {
         schema::ensure_knowledge_schema(&db)?;
         Ok(Self { db })
     }

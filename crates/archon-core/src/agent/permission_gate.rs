@@ -426,15 +426,15 @@ mod tests {
         }];
 
         let allowed = agent.preflight_tools(&pending, AgentMode::Normal).await;
+        assert_eq!(allowed.len(), 1);
+        let ctx = agent.build_tool_context(AgentMode::Normal, "mock").await;
+        let results = agent.dispatch_allowed_tools(&allowed, &ctx).await;
 
-        assert!(allowed.is_empty());
-        let tool_result = &agent.state.messages[0]["content"][0];
-        assert_eq!(tool_result["tool_use_id"], "tool-1");
-        assert_eq!(tool_result["is_error"], true);
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_error);
         assert!(
-            tool_result["content"]
-                .as_str()
-                .unwrap_or_default()
+            results[0]
+                .content
                 .contains("sandbox blocked mutated write path")
         );
     }

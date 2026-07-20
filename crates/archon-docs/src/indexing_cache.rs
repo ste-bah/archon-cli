@@ -16,7 +16,7 @@ pub(crate) fn reuse_cached_embeddings(
     chunks: &[ChunkArtifact],
     provider: &str,
 ) -> Result<CacheReuseResult> {
-    let vector_store = DocVectorStore::open_default()?;
+    let vector_store = DocVectorStore::acquire_default()?;
     reuse_cached_embeddings_with_store(db, &vector_store, chunks, provider)
 }
 

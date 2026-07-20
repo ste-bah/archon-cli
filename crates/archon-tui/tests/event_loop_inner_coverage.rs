@@ -163,11 +163,6 @@ async fn headless_backend_walks_wide_event_surface() {
             cols: 100,
             rows: 30,
         });
-        // TUI-106 no-op arms (run_tui path just drops these) — still needs
-        // to hit the match arms.
-        let _ = event_tx.send(TuiEvent::UserInput("ignored in this loop".into()));
-        let _ = event_tx.send(TuiEvent::SlashCancel);
-        let _ = event_tx.send(TuiEvent::SlashAgent("reviewer".into()));
         // Let the TUI settle, then terminate.
         tokio::time::sleep(Duration::from_millis(500)).await;
         let _ = event_tx.send(TuiEvent::Done);

@@ -227,6 +227,7 @@ fn make_runner(provider: Arc<CapturingMockProvider>, identity: IdentityProvider)
         cancel_parent: None,
         sandbox: None,
         activity_sink: None,
+        ..ToolContext::default()
     };
     SubagentRunner::new(
         provider,

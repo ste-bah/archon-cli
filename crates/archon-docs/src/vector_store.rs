@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -7,6 +7,7 @@ use hnsw_rs::prelude::{AnnT, DistCosine, Hnsw};
 use rust_rocksdb::{DB, Options, WriteBatch};
 use serde::{Deserialize, Serialize};
 
+mod cache;
 mod config;
 mod generation;
 mod hnsw_ids;
@@ -21,11 +22,15 @@ use hnsw_ids::chunk_id_for_hnsw_id;
 #[cfg(test)]
 use hnsw_ids::chunk_ids_by_hnsw_id;
 #[cfg(test)]
-use hnsw_ids::{hit_resolution_probes, reset_hit_resolution_probes};
+use hnsw_ids::{
+    hit_resolution_probes, reset_hit_resolution_probes, reset_reverse_scan_probes,
+    reverse_scan_probes,
+};
 
 const VECTOR_PREFIX: &str = "vec";
 const CACHE_PREFIX: &str = "cache";
 const ID_PREFIX: &str = "id";
+const REVERSE_ID_PREFIX: &str = "rid";
 
 #[cfg(test)]
 fn persisted_hnsw_load_count() -> usize {
@@ -77,6 +82,14 @@ pub struct DocVectorStore {
 }
 
 impl DocVectorStore {
+    pub fn acquire_default() -> Result<std::sync::Arc<Self>> {
+        Self::acquire(default_store_dir())
+    }
+
+    pub fn acquire(path: impl AsRef<Path>) -> Result<std::sync::Arc<Self>> {
+        cache::acquire(path.as_ref())
+    }
+
     pub fn open_default() -> Result<Self> {
         Self::open(default_store_dir())
     }
@@ -109,6 +122,15 @@ impl DocVectorStore {
             .snapshot_fence
             .lock()
             .unwrap_or_else(|error| error.into_inner());
+        for provider in rows.iter().map(|row| row.provider).collect::<HashSet<_>>() {
+            if self
+                .db
+                .get_pinned(reverse_id_marker_key(provider))?
+                .is_none()
+            {
+                self.migrate_reverse_hnsw_ids(provider)?;
+            }
+        }
         let mut batch = WriteBatch::default();
         let mut written_keys = HashSet::new();
         let mut mutated_providers = HashSet::new();
@@ -119,10 +141,13 @@ impl DocVectorStore {
             let bytes = encode_vector(row.embedding);
             let vector_key = vector_key(row.provider, row.chunk_id);
             batch.put(&vector_key, &bytes);
+            let hnsw_id = hnsw_id(row.chunk_id);
+            batch.put(id_key(row.provider, row.chunk_id), hnsw_id.to_be_bytes());
             batch.put(
-                id_key(row.provider, row.chunk_id),
-                hnsw_id(row.chunk_id).to_be_bytes(),
+                reverse_id_key(row.provider, hnsw_id),
+                row.chunk_id.as_bytes(),
             );
+            batch.put(reverse_id_marker_key(row.provider), []);
             if !row.content_hash.is_empty() {
                 batch.put(cache_key(row.provider, row.content_hash), &bytes);
             }
@@ -210,6 +235,8 @@ impl DocVectorStore {
             provider_generation: Some(provider_generation),
         };
         self.write_hnsw_manifest(provider, &manifest)?;
+        persisted_hnsw::clear_dir(&hnsw_dir);
+        self.remove_superseded_hnsw_dumps(provider, &manifest.dump_basename)?;
         Ok(manifest)
     }
 
@@ -229,28 +256,6 @@ impl DocVectorStore {
             manifest.provider
         );
         Ok(Some(manifest))
-    }
-
-    pub(crate) fn chunk_ids_by_hnsw_id(&self, provider: &str) -> Result<HashMap<usize, String>> {
-        let prefix = format!("{ID_PREFIX}/{provider}/");
-        let mut chunk_ids = HashMap::new();
-        for item in self.db.prefix_iterator(prefix.as_bytes()) {
-            let (key, value) = item.context("iterate RocksDB HNSW identifiers")?;
-            if !key.starts_with(prefix.as_bytes()) {
-                break;
-            }
-            let chunk_id = std::str::from_utf8(&key)
-                .ok()
-                .and_then(|key| key.strip_prefix(&prefix))
-                .context("parse RocksDB HNSW identifier key")?;
-            anyhow::ensure!(
-                value.len() == std::mem::size_of::<usize>(),
-                "HNSW identifier has invalid length for {chunk_id}"
-            );
-            let hnsw_id = usize::from_be_bytes(value.as_ref().try_into()?);
-            chunk_ids.entry(hnsw_id).or_insert_with(|| chunk_id.into());
-        }
-        Ok(chunk_ids)
     }
 
     fn iter_records(
@@ -299,6 +304,26 @@ impl DocVectorStore {
 
     fn hnsw_manifest_path(&self, provider: &str) -> PathBuf {
         self.hnsw_dir(provider).join("manifest.json")
+    }
+
+    fn remove_superseded_hnsw_dumps(&self, provider: &str, current_basename: &str) -> Result<()> {
+        let hnsw_dir = self.hnsw_dir(provider);
+        for entry in std::fs::read_dir(&hnsw_dir)
+            .with_context(|| format!("read HNSW dir {}", hnsw_dir.display()))?
+        {
+            let path = entry
+                .with_context(|| format!("read HNSW dir entry {}", hnsw_dir.display()))?
+                .path();
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            let is_dump = name.ends_with(".hnsw.graph") || name.ends_with(".hnsw.data");
+            if is_dump && !name.starts_with(&format!("{current_basename}.")) {
+                std::fs::remove_file(&path)
+                    .with_context(|| format!("remove superseded HNSW dump {}", path.display()))?;
+            }
+        }
+        Ok(())
     }
 
     fn write_hnsw_manifest(&self, provider: &str, manifest: &HnswManifest) -> Result<()> {
@@ -385,6 +410,14 @@ fn cache_key(provider: &str, content_hash: &str) -> Vec<u8> {
 
 fn id_key(provider: &str, chunk_id: &str) -> Vec<u8> {
     key3(ID_PREFIX, provider, chunk_id)
+}
+
+fn reverse_id_key(provider: &str, hnsw_id: usize) -> Vec<u8> {
+    key3(REVERSE_ID_PREFIX, provider, &hnsw_id.to_string())
+}
+
+fn reverse_id_marker_key(provider: &str) -> Vec<u8> {
+    key3(REVERSE_ID_PREFIX, provider, "ready")
 }
 
 fn vector_prefix(provider: Option<&str>) -> String {

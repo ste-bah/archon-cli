@@ -71,7 +71,7 @@ fn rocksdb_hnsw_search(
     query_vec: &[f32],
     top_k: usize,
 ) -> Result<Option<Vec<SearchResult>>, DocsError> {
-    let vector_store = match DocVectorStore::open_default() {
+    let vector_store = match DocVectorStore::acquire_default() {
         Ok(store) => store,
         Err(error) => {
             tracing::warn!(%error, "RocksDB vector store unavailable; trying legacy Cozo HNSW");

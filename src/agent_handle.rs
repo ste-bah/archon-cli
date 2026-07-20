@@ -19,11 +19,9 @@
 //!    `Arc<Mutex<archon_core::agent::Agent>>`. Adapter locks + awaits
 //!    `process_message` inside `run_turn`, maps `AgentLoopError` to anyhow.
 //!
-//! 4. No `run_event_loop` call. Spec mentions it as option; `main.rs` still
-//!    owns slash-command routing, session restore, skill dispatch not in
-//!    `run_event_loop`'s scope. Full integration deferred to
-//!    SPEC-TUI-MODULARIZATION. TUI-107 uses `AgentDispatcher` directly +
-//!    minimal `tokio::select!` conversion (input arm + 16ms tick arm).
+//! 4. Production integration uses `AgentDispatcher` directly. `session_loop`
+//!    owns slash-command routing, session restore, and skill dispatch; the TUI
+//!    render/input loop remains separate.
 //!
 //! 5. `agent_event_tx` scope: exists at 3162, not currently captured into
 //!    input loop closure. Coder plumbs it through (small additive change,

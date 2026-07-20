@@ -1,6 +1,124 @@
 use super::*;
 
 #[test]
+fn cached_stores_reuse_one_handle_for_the_same_canonical_path() {
+    let temp = tempfile::tempdir().unwrap();
+
+    let first = DocVectorStore::acquire(temp.path()).unwrap();
+    let second = DocVectorStore::acquire(&temp.path().join(".")).unwrap();
+
+    assert!(std::sync::Arc::ptr_eq(&first, &second));
+}
+
+#[test]
+fn cached_stores_keep_different_paths_isolated() {
+    let first_temp = tempfile::tempdir().unwrap();
+    let second_temp = tempfile::tempdir().unwrap();
+
+    let first = DocVectorStore::acquire(first_temp.path()).unwrap();
+    let second = DocVectorStore::acquire(second_temp.path()).unwrap();
+
+    assert!(!std::sync::Arc::ptr_eq(&first, &second));
+}
+
+#[cfg(unix)]
+#[test]
+fn cached_stores_resolve_final_directory_symlinks() {
+    let temp = tempfile::tempdir().unwrap();
+    let real = temp.path().join("real-store");
+    let alias = temp.path().join("alias-store");
+    std::fs::create_dir(&real).unwrap();
+    std::os::unix::fs::symlink(&real, &alias).unwrap();
+
+    let first = DocVectorStore::acquire(&real).unwrap();
+    let second = DocVectorStore::acquire(&alias).unwrap();
+
+    assert!(std::sync::Arc::ptr_eq(&first, &second));
+}
+
+#[test]
+fn concurrent_cached_store_acquisition_opens_once() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("concurrent-store");
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let release = std::sync::Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+    let open_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let handles: Vec<_> = (0..8)
+        .map(|_| {
+            let path = path.clone();
+            let entered_tx = entered_tx.clone();
+            let release = std::sync::Arc::clone(&release);
+            let open_count = std::sync::Arc::clone(&open_count);
+            std::thread::spawn(move || {
+                cache::acquire_with(&path, |key| {
+                    open_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    entered_tx.send(()).unwrap();
+                    let (released, changed) = &*release;
+                    let mut released = released.lock().unwrap();
+                    while !*released {
+                        released = changed.wait(released).unwrap();
+                    }
+                    DocVectorStore::open(key).map(std::sync::Arc::new)
+                })
+                .unwrap()
+            })
+        })
+        .collect();
+    entered_rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .unwrap();
+    assert!(
+        entered_rx
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .is_err(),
+        "a second opener entered while the first remained blocked"
+    );
+    let (released, changed) = &*release;
+    *released.lock().unwrap() = true;
+    changed.notify_all();
+    let stores: Vec<_> = handles
+        .into_iter()
+        .map(|handle| handle.join().unwrap())
+        .collect();
+
+    assert_eq!(open_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(
+        stores
+            .iter()
+            .all(|store| std::sync::Arc::ptr_eq(&stores[0], store))
+    );
+}
+
+#[test]
+fn failed_cached_store_open_can_be_retried() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("retry-store");
+    std::fs::write(&path, "not a directory").unwrap();
+
+    assert!(DocVectorStore::acquire(&path).is_err());
+    std::fs::remove_file(&path).unwrap();
+
+    assert!(DocVectorStore::acquire(&path).is_ok());
+}
+
+#[test]
+fn panicking_cached_store_open_can_be_retried() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("panic-store");
+
+    assert!(
+        std::panic::catch_unwind(|| {
+            let _ = cache::acquire_with(&path, |_| -> anyhow::Result<_> {
+                panic!("synthetic store open panic")
+            });
+        })
+        .is_err()
+    );
+
+    assert!(DocVectorStore::acquire(&path).is_ok());
+}
+
+#[test]
 fn count_vectors_does_not_decode_vector_payloads() {
     let temp = tempfile::tempdir().unwrap();
     let store = DocVectorStore::open(temp.path()).unwrap();

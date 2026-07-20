@@ -381,11 +381,11 @@ mod tui_drain_metric_tests {
         reset_all();
         let (tx, mut rx) = crate::event_channel::bounded_tui_event_channel_with_capacity(4);
 
-        tx.send(crate::events::TuiEvent::TextDelta("one".into()))
+        tx.send(crate::events::TuiEvent::GenerationStarted)
             .expect("queue first event");
-        tx.send(crate::events::TuiEvent::TextDelta("two".into()))
+        tx.send(crate::events::TuiEvent::Done)
             .expect("queue second event");
-        tx.send(crate::events::TuiEvent::TextDelta("three".into()))
+        tx.send(crate::events::TuiEvent::Error("three".into()))
             .expect("queue third event");
 
         rx.try_recv().expect("drain first event");

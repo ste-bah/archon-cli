@@ -139,10 +139,6 @@ export type WorkflowControlPreview = { action: string, enabled: boolean, policyR
 
 export type WorkflowRunDetail = { summary: WorkflowRunSummary, bundle: WorkflowBundleView | null, approval: WorkflowApprovalView | null, harness: string | null, compiledSpec: string | null, stages: Array<WorkflowStageView>, agents: Array<WorkflowAgentView>, v2Results: Array<WorkflowV2ResultView>, v2Branches: Array<WorkflowV2BranchView>, artifacts: Array<WorkflowArtifactView>, events: Array<WorkflowEventPreview>, };
 
-export type WorkflowStageView = { id: string, status: string, attempt: number, startedAt: string | null, completedAt: string | null, artifacts: number, error: string | null, };
-
-export type WorkflowArtifactView = { id: string, path: string, producingStage: string, contentHash: string, };
-
 export type WorkflowBundleView = { workflowPath: string, compiledSpecPath: string, workflowHash: string, compiledHash: string, phaseCount: number, maxAgents: number, maxParallelism: number, writeCapableStages: Array<string>, };
 
 export type WorkflowApprovalView = { workflowHash: string, projectRoot: string, workflowName: string, phaseCount: number, maxAgents: number, maxParallelism: number, writeCapableStages: Array<string>, externalRequirements: Array<string>, costWarning: string, rawScriptPath: string, compiledSpecPath: string, decision: string | null, decidedAt: string | null, decidedBy: string | null, };
@@ -153,7 +149,9 @@ export type WorkflowV2ResultView = { callId: string, status: string, summary: st
 
 export type WorkflowV2BranchView = { callId: string, itemId: string, role: string, status: string, summary: string | null, error: string | null, outputPath: string, };
 
-export type WorkflowToolCallPreview = { toolName: string, inputPreview: string | null, outputPreview: string | null, };
+export type WorkflowStageView = { id: string, status: string, attempt: number, startedAt: string | null, completedAt: string | null, artifacts: number, error: string | null, };
+
+export type WorkflowArtifactView = { id: string, path: string, producingStage: string, contentHash: string, };
 
 export type WorkflowControlRequest = { runId: string, action: string, stageId: string | null, itemId: string | null, rationale: string | null, confirmationToken: string | null, };
 

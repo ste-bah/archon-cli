@@ -3,14 +3,14 @@
 //! Translates a resolved [`Action`] (from [`KeyMap::resolve`]) into calls on
 //! [`App`] / [`super::InputHandler`] and returns a [`KeyResult`] describing
 //! any side effect (send input, cancel, quit, etc.) for the event loop to
-//! execute. Overlay-modal keys (session picker, MCP manager, etc.) are NOT
-//! handled here — they stay in `run_tui()` / `event_loop::input`.
+//! execute. Overlay-modal keys (session picker, MCP manager, etc.) remain in
+//! `event_loop::input`, while `session_loop` consumes async send/cancel results.
 
 use crate::app::App;
 use crate::keybindings::{Action, KeyMap};
 use crossterm::event::KeyEvent;
 
-/// Result of handling a key event. The caller (run_tui) handles async I/O.
+/// Result of handling a key event. `session_loop` handles async I/O.
 pub enum KeyResult {
     Nothing,
     Quit,
@@ -20,7 +20,8 @@ pub enum KeyResult {
 }
 
 /// Process a key event through the KeyMap. Non-modal dispatch only.
-/// Overlay-modal keys (session picker, MCP manager, etc.) stay in run_tui().
+/// Overlay-modal keys (session picker, MCP manager, etc.) stay in
+/// `event_loop::input`.
 pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
     let Some(action) = keymap.resolve(key) else {
         return KeyResult::Nothing;

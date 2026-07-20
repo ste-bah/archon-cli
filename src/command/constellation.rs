@@ -1,7 +1,8 @@
 //! Constellation CLI handler.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::Result;
 use cozo::DbInstance;
@@ -16,9 +17,12 @@ fn constellation_db_path() -> PathBuf {
     ])
 }
 
-fn open_db() -> Result<DbInstance> {
-    let db_path = constellation_db_path();
-    let db = crate::command::store_paths::open_sqlite_db(&db_path, "constellation")?;
+fn open_db() -> Result<Arc<DbInstance>> {
+    open_db_at(&constellation_db_path())
+}
+
+fn open_db_at(path: &Path) -> Result<Arc<DbInstance>> {
+    let db = archon_docs::acquire_docs_db(path)?;
     archon_constellation::ensure_schema(&db)?;
     Ok(db)
 }
@@ -213,6 +217,18 @@ mod tests {
         unsafe {
             std::env::remove_var("ARCHON_CONSTELLATION_DB_PATH");
         }
+    }
+
+    #[test]
+    fn constellation_database_reuses_shared_document_handle() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("evidence.db");
+        let shared = archon_docs::acquire_docs_db(&path).unwrap();
+
+        let constellation = open_db_at(&path).unwrap();
+
+        assert!(std::sync::Arc::ptr_eq(&shared, &constellation));
+        archon_constellation::list_centroids(&constellation).unwrap();
     }
 
     #[test]

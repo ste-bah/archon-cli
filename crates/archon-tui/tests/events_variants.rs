@@ -172,21 +172,6 @@ fn resize_variant() {
 }
 
 #[test]
-fn user_input_variant() {
-    let _e = TuiEvent::UserInput("hello world".into());
-}
-
-#[test]
-fn slash_cancel_variant() {
-    let _e = TuiEvent::SlashCancel;
-}
-
-#[test]
-fn slash_agent_variant() {
-    let _e = TuiEvent::SlashAgent("agent-123".into());
-}
-
-#[test]
 fn done_variant() {
     let _e = TuiEvent::Done;
 }

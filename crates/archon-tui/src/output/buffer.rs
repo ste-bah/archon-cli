@@ -206,7 +206,8 @@ impl OutputBuffer {
         self.last_global_scroll_y.set(global_scroll_y);
         self.last_visible_line_start.set(start);
 
-        let (lines, paragraph_scroll_y) = self.visible_lines(start, end, paragraph_scroll_y, width);
+        let (lines, paragraph_scroll_y) =
+            self.visible_lines(start, end, paragraph_scroll_y, width, visible_height);
         RenderedOutputView {
             lines,
             total_wrapped,
@@ -221,6 +222,7 @@ impl OutputBuffer {
         end: usize,
         paragraph_scroll_y: usize,
         width: u16,
+        visible_height: u16,
     ) -> (Vec<Line<'static>>, u16) {
         let mut lines = self
             .render_cache
@@ -228,10 +230,11 @@ impl OutputBuffer {
             .as_ref()
             .map(|cache| cache.lines[start..end].to_vec())
             .unwrap_or_default();
-        if paragraph_scroll_y <= u16::MAX as usize {
+        let max_paragraph_scroll = u16::MAX.saturating_sub(visible_height);
+        if paragraph_scroll_y <= max_paragraph_scroll as usize {
             return (lines, paragraph_scroll_y as u16);
         }
-        let skipped_rows = paragraph_scroll_y - u16::MAX as usize;
+        let skipped_rows = paragraph_scroll_y - max_paragraph_scroll as usize;
         if let Some(first) = lines.first_mut()
             && let Some(cache) = self.render_cache.borrow().as_ref()
             && let (Some(line), Some(text)) =
@@ -240,7 +243,7 @@ impl OutputBuffer {
             let suffix = wrapped_suffix_after_rows(text, width, skipped_rows);
             *first = line_suffix(line, text.len().saturating_sub(suffix.len()));
         }
-        (lines, u16::MAX)
+        (lines, max_paragraph_scroll)
     }
 
     pub fn new_wrapped_rows(&self, total_wrapped: usize, width: u16, theme: &Theme) -> usize {

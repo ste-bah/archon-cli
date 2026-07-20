@@ -4,9 +4,20 @@ use super::*;
 
 fn persisted_hnsw_test_lock() -> MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
+    let lock = LOCK
+        .get_or_init(|| Mutex::new(()))
         .lock()
-        .unwrap_or_else(|error| error.into_inner())
+        .unwrap_or_else(|error| error.into_inner());
+    persisted_hnsw::clear();
+    lock
+}
+
+fn wait_for_worker_count(expected: usize) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    while persisted_hnsw::worker_count() != expected && std::time::Instant::now() < deadline {
+        std::thread::yield_now();
+    }
+    assert_eq!(persisted_hnsw::worker_count(), expected);
 }
 
 fn write_test_vectors(store: &DocVectorStore, provider: &str, rows: &[(&str, &[f32])]) {
@@ -116,6 +127,42 @@ fn old_manifest_without_generation_is_compatible_but_stale() {
 }
 
 #[test]
+fn publishing_new_snapshot_removes_superseded_dump_files() {
+    let _lock = persisted_hnsw_test_lock();
+    let temp = tempfile::tempdir().unwrap();
+    let store = DocVectorStore::open(temp.path()).unwrap();
+    write_test_vectors(&store, "test", &[("chunk-a", &[1.0, 0.0])]);
+    let first = store.build_hnsw("test", 2, None).unwrap();
+    let first_graph = store
+        .hnsw_dir("test")
+        .join(format!("{}.hnsw.graph", first.dump_basename));
+    let first_data = store
+        .hnsw_dir("test")
+        .join(format!("{}.hnsw.data", first.dump_basename));
+    assert!(first_graph.exists());
+    assert!(first_data.exists());
+
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    let second = store.build_hnsw("test", 2, None).unwrap();
+
+    assert_ne!(first.dump_basename, second.dump_basename);
+    assert!(!first_graph.exists());
+    assert!(!first_data.exists());
+    assert!(
+        store
+            .hnsw_dir("test")
+            .join(format!("{}.hnsw.graph", second.dump_basename))
+            .exists()
+    );
+    assert!(
+        store
+            .hnsw_dir("test")
+            .join(format!("{}.hnsw.data", second.dump_basename))
+            .exists()
+    );
+}
+
+#[test]
 fn corrupt_current_dump_returns_error() {
     let _lock = persisted_hnsw_test_lock();
     let temp = tempfile::tempdir().unwrap();
@@ -162,13 +209,142 @@ fn provider_or_dimension_mismatch_uses_in_memory_fallback() {
 }
 
 #[test]
+fn persisted_search_uses_direct_reverse_identifiers() {
+    let _lock = persisted_hnsw_test_lock();
+    persisted_hnsw::clear();
+    let temp = tempfile::tempdir().unwrap();
+    let store = DocVectorStore::open(temp.path()).unwrap();
+    write_test_vectors(&store, "test", &[("chunk-a", &[1.0, 0.0])]);
+    store.build_hnsw("test", 2, None).unwrap();
+
+    let reverse_key = format!("rid/test/{}", hnsw_id("chunk-a"));
+    let persisted_chunk_id = store.db.get(reverse_key.as_bytes()).unwrap();
+    assert_eq!(persisted_chunk_id.as_deref(), Some(b"chunk-a".as_slice()));
+
+    store.db.delete(id_key("test", "chunk-a")).unwrap();
+    let hits = store
+        .search_persisted_first("test", &[1.0, 0.0], 1, 16, None)
+        .unwrap();
+
+    assert_eq!(hits[0].chunk_id, "chunk-a");
+}
+
+#[test]
+fn different_snapshot_identities_remain_cached() {
+    let _lock = persisted_hnsw_test_lock();
+    persisted_hnsw::clear();
+    let temp = tempfile::tempdir().unwrap();
+    let store = DocVectorStore::open(temp.path()).unwrap();
+    write_test_vectors(&store, "first", &[("first-a", &[1.0, 0.0])]);
+    write_test_vectors(&store, "second", &[("second-a", &[0.0, 1.0])]);
+    store.build_hnsw("first", 2, None).unwrap();
+    store.build_hnsw("second", 2, None).unwrap();
+    let loads_before = persisted_hnsw_load_count();
+
+    let first_hits = store
+        .search_persisted_first("first", &[1.0, 0.0], 1, 16, None)
+        .unwrap();
+    let second_hits = store
+        .search_persisted_first("second", &[0.0, 1.0], 1, 16, None)
+        .unwrap();
+    let repeated_first_hits = store
+        .search_persisted_first("first", &[1.0, 0.0], 1, 16, None)
+        .unwrap();
+
+    assert_eq!(first_hits[0].chunk_id, "first-a");
+    assert_eq!(second_hits[0].chunk_id, "second-a");
+    assert_eq!(repeated_first_hits[0].chunk_id, "first-a");
+    assert_eq!(persisted_hnsw_load_count(), loads_before + 2);
+}
+
+#[test]
+fn stale_provider_does_not_evict_other_cached_snapshot() {
+    let _lock = persisted_hnsw_test_lock();
+    persisted_hnsw::clear();
+    let temp = tempfile::tempdir().unwrap();
+    let store = DocVectorStore::open(temp.path()).unwrap();
+    write_test_vectors(&store, "first", &[("first-a", &[1.0, 0.0])]);
+    write_test_vectors(&store, "second", &[("second-a", &[0.0, 1.0])]);
+    store.build_hnsw("first", 2, None).unwrap();
+    store.build_hnsw("second", 2, None).unwrap();
+    store
+        .search_persisted_first("first", &[1.0, 0.0], 1, 16, None)
+        .unwrap();
+    store
+        .search_persisted_first("second", &[0.0, 1.0], 1, 16, None)
+        .unwrap();
+    let loads_after_initial_searches = persisted_hnsw_load_count();
+
+    write_test_vectors(&store, "second", &[("second-b", &[1.0, 0.0])]);
+    store
+        .search_persisted_first("second", &[1.0, 0.0], 1, 16, None)
+        .unwrap();
+    let first_hits = store
+        .search_persisted_first("first", &[1.0, 0.0], 1, 16, None)
+        .unwrap();
+
+    assert_eq!(first_hits[0].chunk_id, "first-a");
+    assert_eq!(persisted_hnsw_load_count(), loads_after_initial_searches);
+}
+
+#[test]
+fn legacy_forward_identifiers_are_migrated_once() {
+    let _lock = persisted_hnsw_test_lock();
+    persisted_hnsw::clear();
+    let temp = tempfile::tempdir().unwrap();
+    let store = DocVectorStore::open(temp.path()).unwrap();
+    write_test_vectors(&store, "test", &[("chunk-a", &[1.0, 0.0])]);
+    store.build_hnsw("test", 2, None).unwrap();
+    let reverse_key = reverse_id_key("test", hnsw_id("chunk-a"));
+    store.db.delete(&reverse_key).unwrap();
+    store.db.delete(reverse_id_marker_key("test")).unwrap();
+
+    let hits = store
+        .search_persisted_first("test", &[1.0, 0.0], 1, 16, None)
+        .unwrap();
+
+    assert_eq!(hits[0].chunk_id, "chunk-a");
+    assert_eq!(
+        store.db.get(reverse_key).unwrap().as_deref(),
+        Some(b"chunk-a".as_slice())
+    );
+}
+
+#[test]
+fn first_post_upgrade_write_migrates_all_legacy_identifiers() {
+    let _lock = persisted_hnsw_test_lock();
+    let temp = tempfile::tempdir().unwrap();
+    let store = DocVectorStore::open(temp.path()).unwrap();
+    write_test_vectors(&store, "test", &[("legacy", &[1.0, 0.0])]);
+    store
+        .db
+        .delete(reverse_id_key("test", hnsw_id("legacy")))
+        .unwrap();
+    store.db.delete(reverse_id_marker_key("test")).unwrap();
+
+    write_test_vectors(&store, "test", &[("current", &[0.0, 1.0])]);
+
+    assert_eq!(
+        store
+            .db
+            .get(reverse_id_key("test", hnsw_id("legacy")))
+            .unwrap()
+            .as_deref(),
+        Some(b"legacy".as_slice())
+    );
+}
+
+#[test]
 fn missing_identifier_for_persisted_hit_returns_error() {
     let _lock = persisted_hnsw_test_lock();
     let temp = tempfile::tempdir().unwrap();
     let store = DocVectorStore::open(temp.path()).unwrap();
     write_test_vectors(&store, "test", &[("chunk-a", &[1.0, 0.0])]);
     store.build_hnsw("test", 2, None).unwrap();
-    store.db.delete(id_key("test", "chunk-a")).unwrap();
+    store
+        .db
+        .delete(reverse_id_key("test", hnsw_id("chunk-a")))
+        .unwrap();
 
     let error = store
         .search_persisted_first("test", &[1.0, 0.0], 1, 16, None)
@@ -252,6 +428,46 @@ fn persisted_snapshot_cache_is_shared_across_search_threads() {
     assert_eq!(first.join().unwrap()[0].chunk_id, "chunk-a");
     assert_eq!(second.join().unwrap()[0].chunk_id, "chunk-a");
     assert_eq!(persisted_hnsw_load_count(), loads_before + 1);
+}
+
+#[test]
+fn repeated_persisted_search_scans_reverse_ids_once() {
+    let _lock = persisted_hnsw_test_lock();
+    let temp = tempfile::tempdir().unwrap();
+    let store = DocVectorStore::open(temp.path()).unwrap();
+    write_test_vectors(&store, "test", &[("chunk-a", &[1.0, 0.0])]);
+    store.build_hnsw("test", 2, None).unwrap();
+    reset_reverse_scan_probes();
+
+    store
+        .search_persisted_first("test", &[1.0, 0.0], 1, 16, None)
+        .unwrap();
+    store
+        .search_persisted_first("test", &[1.0, 0.0], 1, 16, None)
+        .unwrap();
+
+    assert_eq!(reverse_scan_probes(), 1);
+}
+
+#[test]
+fn replacing_snapshot_releases_previous_worker() {
+    let _lock = persisted_hnsw_test_lock();
+    let temp = tempfile::tempdir().unwrap();
+    let store = DocVectorStore::open(temp.path()).unwrap();
+    write_test_vectors(&store, "test", &[("chunk-a", &[1.0, 0.0])]);
+    store.build_hnsw("test", 2, None).unwrap();
+    store
+        .search_persisted_first("test", &[1.0, 0.0], 1, 16, None)
+        .unwrap();
+    assert_eq!(persisted_hnsw::worker_count(), 1);
+
+    store.build_hnsw("test", 2, None).unwrap();
+    wait_for_worker_count(0);
+    store
+        .search_persisted_first("test", &[1.0, 0.0], 1, 16, None)
+        .unwrap();
+
+    assert_eq!(persisted_hnsw::worker_count(), 1);
 }
 
 #[test]

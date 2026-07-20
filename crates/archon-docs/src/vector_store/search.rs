@@ -34,13 +34,13 @@ impl DocVectorStore {
             return persisted_hnsw::search(
                 self.hnsw_dir(provider),
                 manifest.clone(),
-                self.chunk_ids_by_hnsw_id(provider)?,
+                || self.chunk_ids_by_hnsw_id(provider),
                 query.to_vec(),
                 top_k,
                 ef,
             );
         }
-        persisted_hnsw::clear();
+        persisted_hnsw::clear_dir(&self.hnsw_dir(provider));
         self.search_in_memory_locked(provider, query, top_k, ef, limit)
     }
 

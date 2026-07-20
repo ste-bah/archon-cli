@@ -221,15 +221,6 @@ pub(super) async fn handle_tui_event(
         TuiEvent::Resize { cols, rows } => {
             crate::layout::handle_resize(cols, rows);
         }
-        TuiEvent::UserInput(_) => {
-            // TUI-106: handled by run_event_loop; old run_tui path is a no-op.
-        }
-        TuiEvent::SlashCancel => {
-            // TUI-106: handled by run_event_loop; old run_tui path is a no-op.
-        }
-        TuiEvent::SlashAgent(_) => {
-            // TUI-106: handled by run_event_loop; old run_tui path is a no-op.
-        }
         TuiEvent::Done => {
             app.should_quit = true;
         }
@@ -430,5 +421,26 @@ mod tests {
                 .iter()
                 .any(|line| line.contains("[question] Choose a path"))
         );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn resize_and_done_update_canonical_loop_state() {
+        let mut app = App::new();
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+
+        handle_tui_event(
+            &mut app,
+            TuiEvent::Resize {
+                cols: 200,
+                rows: 60,
+            },
+            &tx,
+        )
+        .await;
+        handle_tui_event(&mut app, TuiEvent::Done, &tx).await;
+
+        assert_eq!(crate::layout::last_known_size(), (200, 60));
+        assert!(app.should_quit);
     }
 }

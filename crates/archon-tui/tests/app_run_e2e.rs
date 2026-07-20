@@ -17,14 +17,11 @@
 //! The whole thing is wrapped in a 5-second `tokio::time::timeout` so
 //! a misbehaving event loop never wedges CI.
 //!
-//! ## Why TextDelta instead of UserInput
+//! ## Why TextDelta
 //!
-//! In the legacy `run_tui` path (the one driven by the explicit headless
-//! test seam), `TuiEvent::UserInput` is intentionally a
-//! no-op — TUI-106 routed user input through `run_event_loop` instead.
-//! The TUI's job is to *render* assistant output, not to dispatch the
-//! LLM call. So this test injects the assistant response directly via
-//! `TuiEvent::TextDelta`, mirroring what a real provider would emit.
+//! Prompt dispatch belongs to `session_loop`; the TUI event loop renders
+//! provider output. This test therefore injects the assistant response via
+//! `TuiEvent::TextDelta`, mirroring the production provider-to-TUI path.
 //!
 //! The hardcoded `"mock:hello"` string matches the shape a real
 //! `MockProvider` would emit (`mock:<prompt>`). We don't actually
@@ -60,9 +57,8 @@ fn buffer_to_string(terminal: &Terminal<TestBackend>) -> String {
 async fn app_run_drives_session_end_to_end() {
     // ── Arrange ────────────────────────────────────────────────────
     // Build the channels that AppConfig requires. The TUI consumes
-    // events from event_rx and forwards user input on input_tx.
-    // We don't drive input_tx in this test — the legacy run_tui path
-    // doesn't process UserInput from the channel.
+    // events from event_rx; prompt dispatch is owned by session_loop and is
+    // intentionally outside this render-loop test.
     let (event_tx, event_rx) = archon_tui::event_channel::bounded_tui_event_channel();
     let (input_tx, _input_rx) = mpsc::channel::<String>(16);
 

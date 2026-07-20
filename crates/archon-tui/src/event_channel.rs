@@ -1,10 +1,8 @@
-//! Bounded TUI event channel with priority shedding.
+//! Lossless TUI event channel with content coalescing.
 //!
-//! The TUI render loop must never be fed by an unbounded producer-facing
-//! queue. If rendering stalls on a huge buffer, background producers can keep
-//! sending progress events and inflate RSS without limit. This channel keeps
-//! the synchronous `send()` API needed by slash-command handlers while putting
-//! a hard cap on queued `TuiEvent`s.
+//! Assistant text, thinking, payload-bearing progress, and state transitions
+//! are lossless. Adjacent text and thinking deltas are merged to limit event
+//! count without changing byte order or crossing event boundaries.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -17,21 +15,23 @@ use crate::events::TuiEvent;
 
 pub const TUI_EVENT_CHANNEL_CAPACITY: usize = 1024;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EventPriority {
-    State,
-    Progress,
-}
-
 #[derive(Debug)]
 struct Inner {
     queue: std::sync::Mutex<VecDeque<TuiEvent>>,
     notify: Notify,
     closed: AtomicBool,
     sender_count: AtomicUsize,
-    capacity: usize,
     dropped_progress: AtomicUsize,
+    dropped_content: AtomicUsize,
     dropped_state: AtomicUsize,
+    #[cfg(test)]
+    pause_before_send_lock: AtomicBool,
+    #[cfg(test)]
+    send_reached_lock: AtomicBool,
+    #[cfg(test)]
+    pause_before_recv_wait: AtomicBool,
+    #[cfg(test)]
+    recv_reached_wait: AtomicBool,
 }
 
 /// Producer side of the bounded TUI event channel.
@@ -60,9 +60,9 @@ impl Drop for TuiEventSender {
 impl TuiEventSender {
     /// Synchronously enqueue an event.
     ///
-    /// The queue is hard-bounded. When full, progress events are shed before
-    /// state events. If the queue is entirely state events, the oldest event is
-    /// dropped as a last-resort RSS safety valve.
+    /// Payload-bearing events are lossless and may temporarily exceed the
+    /// event-count target. Adjacent text and thinking deltas are coalesced to
+    /// limit that growth without losing bytes.
     // The failed event is returned to the caller (mpsc convention), so the
     // error size is inherent to the contract.
     #[allow(clippy::result_large_err)]
@@ -71,22 +71,22 @@ impl TuiEventSender {
             return Err(SendError(event));
         }
 
+        #[cfg(test)]
+        {
+            self.inner.send_reached_lock.store(true, Ordering::Release);
+            while self.inner.pause_before_send_lock.load(Ordering::Acquire) {
+                std::thread::yield_now();
+            }
+        }
+
         {
             let mut queue = self.inner.queue.lock().expect("tui event queue lock");
-            if queue.len() >= self.inner.capacity {
-                if priority(&event) == EventPriority::Progress {
-                    self.inner.dropped_progress.fetch_add(1, Ordering::Relaxed);
-                    return Ok(());
-                }
-                if drop_oldest_progress(&mut queue) {
-                    crate::observability::record_tui_event_discarded();
-                    self.inner.dropped_progress.fetch_add(1, Ordering::Relaxed);
-                } else {
-                    queue.pop_front();
-                    crate::observability::record_tui_event_discarded();
-                    self.inner.dropped_state.fetch_add(1, Ordering::Relaxed);
-                }
+            if self.inner.closed.load(Ordering::Acquire) {
+                return Err(SendError(event));
             }
+            let Some(event) = enqueue_or_coalesce_content_delta(&mut queue, event) else {
+                return Ok(());
+            };
             queue.push_back(event);
             crate::observability::record_tui_event_enqueued();
         }
@@ -97,6 +97,10 @@ impl TuiEventSender {
 
     pub fn dropped_progress(&self) -> usize {
         self.inner.dropped_progress.load(Ordering::Relaxed)
+    }
+
+    pub fn dropped_content(&self) -> usize {
+        self.inner.dropped_content.load(Ordering::Relaxed)
     }
 
     pub fn dropped_state(&self) -> usize {
@@ -112,9 +116,9 @@ pub struct TuiEventReceiver {
 
 impl Drop for TuiEventReceiver {
     fn drop(&mut self) {
-        self.inner.closed.store(true, Ordering::Release);
         let dropped = {
             let mut queue = self.inner.queue.lock().expect("tui event queue lock");
+            self.inner.closed.store(true, Ordering::Release);
             let dropped = queue.len();
             queue.clear();
             dropped
@@ -129,13 +133,24 @@ impl Drop for TuiEventReceiver {
 impl TuiEventReceiver {
     pub async fn recv(&mut self) -> Option<TuiEvent> {
         loop {
+            let inner = Arc::clone(&self.inner);
+            let notified = inner.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
             if let Ok(event) = self.try_recv() {
                 return Some(event);
             }
             if self.inner.sender_count.load(Ordering::Acquire) == 0 {
                 return None;
             }
-            self.inner.notify.notified().await;
+            #[cfg(test)]
+            {
+                self.inner.recv_reached_wait.store(true, Ordering::Release);
+                while self.inner.pause_before_recv_wait.load(Ordering::Acquire) {
+                    std::thread::yield_now();
+                }
+            }
+            notified.await;
         }
     }
 
@@ -174,9 +189,17 @@ pub fn bounded_tui_event_channel_with_capacity(
         notify: Notify::new(),
         closed: AtomicBool::new(false),
         sender_count: AtomicUsize::new(1),
-        capacity,
         dropped_progress: AtomicUsize::new(0),
+        dropped_content: AtomicUsize::new(0),
         dropped_state: AtomicUsize::new(0),
+        #[cfg(test)]
+        pause_before_send_lock: AtomicBool::new(false),
+        #[cfg(test)]
+        send_reached_lock: AtomicBool::new(false),
+        #[cfg(test)]
+        pause_before_recv_wait: AtomicBool::new(false),
+        #[cfg(test)]
+        recv_reached_wait: AtomicBool::new(false),
     });
     (
         TuiEventSender {
@@ -186,86 +209,31 @@ pub fn bounded_tui_event_channel_with_capacity(
     )
 }
 
-fn priority(event: &TuiEvent) -> EventPriority {
+fn enqueue_or_coalesce_content_delta(
+    queue: &mut VecDeque<TuiEvent>,
+    event: TuiEvent,
+) -> Option<TuiEvent> {
     match event {
-        TuiEvent::TextDelta(_) | TuiEvent::ThinkingDelta(_) | TuiEvent::VideoIngestProgress(_) => {
-            EventPriority::Progress
+        TuiEvent::TextDelta(text) => {
+            if let Some(TuiEvent::TextDelta(previous)) = queue.back_mut() {
+                previous.push_str(&text);
+                None
+            } else {
+                Some(TuiEvent::TextDelta(text))
+            }
         }
-        _ => EventPriority::State,
-    }
-}
-
-fn drop_oldest_progress(queue: &mut VecDeque<TuiEvent>) -> bool {
-    if let Some(idx) = queue
-        .iter()
-        .position(|event| priority(event) == EventPriority::Progress)
-    {
-        queue.remove(idx);
-        true
-    } else {
-        false
+        TuiEvent::ThinkingDelta(text) => {
+            if let Some(TuiEvent::ThinkingDelta(previous)) = queue.back_mut() {
+                previous.push_str(&text);
+                None
+            } else {
+                Some(TuiEvent::ThinkingDelta(text))
+            }
+        }
+        event => Some(event),
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn bounded_channel_drops_new_progress_when_full() {
-        let (tx, mut rx) = bounded_tui_event_channel_with_capacity(2);
-        tx.send(TuiEvent::TextDelta("a".into())).unwrap();
-        tx.send(TuiEvent::TextDelta("b".into())).unwrap();
-        tx.send(TuiEvent::TextDelta("c".into())).unwrap();
-
-        assert_eq!(tx.dropped_progress(), 1);
-        assert!(matches!(rx.recv().await, Some(TuiEvent::TextDelta(s)) if s == "a"));
-        assert!(matches!(rx.recv().await, Some(TuiEvent::TextDelta(s)) if s == "b"));
-        assert!(rx.try_recv().is_err());
-    }
-
-    #[tokio::test]
-    async fn bounded_channel_preserves_state_by_shedding_progress() {
-        let (tx, mut rx) = bounded_tui_event_channel_with_capacity(2);
-        tx.send(TuiEvent::TextDelta("progress".into())).unwrap();
-        tx.send(TuiEvent::ThinkingDelta("thinking".into())).unwrap();
-        tx.send(TuiEvent::Done).unwrap();
-
-        assert_eq!(tx.dropped_progress(), 1);
-        assert!(matches!(
-            rx.recv().await,
-            Some(TuiEvent::ThinkingDelta(s)) if s == "thinking"
-        ));
-        assert!(matches!(rx.recv().await, Some(TuiEvent::Done)));
-    }
-
-    #[tokio::test]
-    async fn bounded_channel_has_hard_state_cap() {
-        let (tx, mut rx) = bounded_tui_event_channel_with_capacity(1);
-        tx.send(TuiEvent::GenerationStarted).unwrap();
-        tx.send(TuiEvent::Done).unwrap();
-
-        assert_eq!(tx.dropped_state(), 1);
-        assert!(matches!(rx.recv().await, Some(TuiEvent::Done)));
-    }
-
-    #[tokio::test]
-    async fn resize_is_preserved_as_state_event() {
-        let (tx, mut rx) = bounded_tui_event_channel_with_capacity(1);
-        tx.send(TuiEvent::TextDelta("progress".into())).unwrap();
-        tx.send(TuiEvent::Resize {
-            cols: 120,
-            rows: 40,
-        })
-        .unwrap();
-
-        assert_eq!(tx.dropped_progress(), 1);
-        assert!(matches!(
-            rx.recv().await,
-            Some(TuiEvent::Resize {
-                cols: 120,
-                rows: 40
-            })
-        ));
-    }
-}
+#[path = "event_channel_tests.rs"]
+mod tests;

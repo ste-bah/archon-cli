@@ -36,7 +36,6 @@ impl Agent {
         {
             return None;
         }
-        let sandbox_prechecked = self.precheck_sandbox(tool, &input).await?;
         self.snapshot_before_mutation(tool, &input).await;
         let file_path = file_path_for_tool(tool, &input);
         self.fire_before_tool_call_hook(&tool.name, &tool.id, &input)
@@ -48,7 +47,7 @@ impl Agent {
             input,
             tool_arc,
             file_path,
-            sandbox_prechecked,
+            sandbox_prechecked: false,
         })
     }
 

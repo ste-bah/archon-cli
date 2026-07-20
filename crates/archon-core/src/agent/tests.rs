@@ -35,7 +35,7 @@ impl LlmProvider for MockLlmProvider {
     }
 }
 
-fn test_agent() -> Agent {
+pub(super) fn test_agent() -> Agent {
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     Agent::new(
         Arc::new(MockLlmProvider),

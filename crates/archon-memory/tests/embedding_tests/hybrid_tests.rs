@@ -77,6 +77,26 @@ fn hybrid_search_alpha_zero_is_pure_vector() {
 }
 
 #[test]
+fn hybrid_search_propagates_vector_index_failures() {
+    let g = MemoryGraph::in_memory().expect("graph");
+    let dim = 4;
+    vector_search::init_embedding_schema(g.db(), dim).expect("schema");
+    g.db()
+        .run_script(
+            "::index drop memory_embeddings:embedding_idx",
+            Default::default(),
+            cozo::ScriptMutability::Mutable,
+        )
+        .expect("drop vector index");
+
+    let provider = MockProvider::new(dim);
+    let error = hybrid_search::hybrid_search(g.db(), "query", &provider, 0.5, 10)
+        .expect_err("vector index failure must surface");
+
+    assert!(matches!(error, MemoryError::Database(_)));
+}
+
+#[test]
 fn hybrid_search_alpha_one_is_pure_keyword() {
     let g = MemoryGraph::in_memory().expect("graph");
     let dim = 4;

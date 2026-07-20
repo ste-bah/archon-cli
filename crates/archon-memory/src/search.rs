@@ -1,10 +1,102 @@
-use chrono::Utc;
-use cozo::DbInstance;
+use std::collections::{BTreeMap, BTreeSet};
 
-use crate::graph::{raw_to_memory, read_all_memories};
+use chrono::Utc;
+use cozo::{DataValue, DbInstance, ScriptMutability};
+
+use crate::graph::{raw_to_memory, read_all_memories, row_values_to_memory};
 use crate::types::{Memory, MemoryError, SearchFilter};
 
 pub(crate) const FULL_SCAN_WARNING_THRESHOLD: usize = 10_000;
+const KEYWORD_CANDIDATE_MULTIPLIER: usize = 4;
+const MIN_KEYWORD_CANDIDATES: usize = 256;
+const MEMORY_COLUMNS: &str = "id, content, title, memory_type, importance, tags, source_type, project_path, created_at, updated_at, access_count, last_accessed";
+
+pub(crate) struct KeywordCandidates {
+    pub(crate) memories: Vec<Memory>,
+    #[cfg(test)]
+    pub(crate) used_fts: bool,
+}
+
+pub(crate) fn keyword_candidates(
+    db: &DbInstance,
+    query: &str,
+    limit: usize,
+) -> Result<KeywordCandidates, MemoryError> {
+    if query.split_whitespace().next().is_none() || limit == 0 {
+        return Ok(KeywordCandidates {
+            memories: Vec::new(),
+            #[cfg(test)]
+            used_fts: true,
+        });
+    }
+
+    let candidate_limit = limit
+        .saturating_mul(KEYWORD_CANDIDATE_MULTIPLIER)
+        .max(MIN_KEYWORD_CANDIDATES);
+    match fts_keyword_candidates(db, query, candidate_limit) {
+        Ok(memories) => Ok(KeywordCandidates {
+            memories,
+            #[cfg(test)]
+            used_fts: true,
+        }),
+        Err(MemoryError::Database(message)) if fts_index_unavailable(&message) => {
+            let all_rows = read_all_memories(db)?;
+            warn_full_scan("memory.keyword.fallback", all_rows.len(), Some(limit));
+            Ok(KeywordCandidates {
+                memories: all_rows
+                    .into_iter()
+                    .filter_map(|row| raw_to_memory(row).ok())
+                    .collect(),
+                #[cfg(test)]
+                used_fts: false,
+            })
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn fts_keyword_candidates(
+    db: &DbInstance,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<Memory>, MemoryError> {
+    let limit = i64::try_from(limit)
+        .map_err(|_| MemoryError::Database("keyword candidate limit exceeds i64".into()))?;
+    let mut params = BTreeMap::new();
+    params.insert("query".into(), DataValue::from(fts_query(query)));
+    params.insert("limit".into(), DataValue::from(limit));
+
+    let mut memories = Vec::new();
+    let mut seen = BTreeSet::new();
+    for index in ["content_fts", "title_fts", "tags_fts"] {
+        let script = format!(
+            "?[score, {MEMORY_COLUMNS}] := ~memories:{index} {{{MEMORY_COLUMNS} | query: $query, k: $limit, score_kind: 'tf_idf', bind_score: score }} :order -score"
+        );
+        let result = db
+            .run_script(&script, params.clone(), ScriptMutability::Immutable)
+            .map_err(|error| MemoryError::Database(error.to_string()))?;
+        for row in result.rows {
+            if let Some(id) = row.get(1).and_then(DataValue::get_str)
+                && seen.insert(id.to_string())
+            {
+                memories.push(row_values_to_memory(&row[1..])?);
+            }
+        }
+    }
+    Ok(memories)
+}
+
+fn fts_query(query: &str) -> String {
+    query
+        .split_whitespace()
+        .map(|term| format!("{:?}", term))
+        .collect::<Vec<_>>()
+        .join(" OR ")
+}
+
+fn fts_index_unavailable(message: &str) -> bool {
+    message.contains("Index ") && message.contains(" not found on relation ")
+}
 
 pub(crate) fn full_scan_contract(
     surface: &str,
@@ -52,18 +144,12 @@ pub(crate) fn recall(
         return Ok(Vec::new());
     }
 
-    // Fetch all memories and score them in Rust.
-    let all_rows = read_all_memories(db)?;
-    warn_full_scan("memory.recall.keyword", all_rows.len(), Some(limit));
+    let candidates = keyword_candidates(db, query, limit)?;
     let now = Utc::now();
 
     let mut scored: Vec<(f64, Memory)> = Vec::new();
 
-    for raw in all_rows {
-        let mem = match raw_to_memory(raw) {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
+    for mem in candidates.memories {
 
         let content_lower = mem.content.to_lowercase();
         let tags_lower = mem.tags.join(",").to_lowercase();
@@ -191,6 +277,152 @@ mod tests {
     use super::*;
     use crate::graph::MemoryGraph;
     use crate::types::MemoryType;
+
+    #[test]
+    fn keyword_candidates_use_fts_for_content_title_and_tags() {
+        let g = MemoryGraph::in_memory().expect("graph creation failed");
+        let content_id = g
+            .store_memory("indexed-content-marker", "", MemoryType::Fact, 0.5, &[], "m", "")
+            .expect("store failed");
+        let title_id = g
+            .store_memory("body", "indexed-title-marker", MemoryType::Fact, 0.5, &[], "m", "")
+            .expect("store failed");
+        let tag_id = g
+            .store_memory(
+                "body",
+                "",
+                MemoryType::Fact,
+                0.5,
+                &["indexed-tag-marker".to_string()],
+                "m",
+                "",
+            )
+            .expect("store failed");
+
+        for (query, expected_id) in [
+            ("indexed-content-marker", content_id),
+            ("indexed-title-marker", title_id),
+            ("indexed-tag-marker", tag_id),
+        ] {
+            let candidates = keyword_candidates(g.db(), query, 16).expect("FTS query failed");
+            assert!(candidates.used_fts);
+            assert!(candidates.memories.iter().any(|memory| memory.id == expected_id));
+        }
+    }
+
+    #[test]
+    fn keyword_fts_tracks_updates_and_deletes() {
+        let g = MemoryGraph::in_memory().expect("graph creation failed");
+        let id = g
+            .store_memory("before-update-marker", "", MemoryType::Fact, 0.5, &[], "m", "")
+            .expect("store failed");
+
+        g.update_memory(&id, Some("after-update-marker"), None)
+            .expect("update failed");
+        let updated = keyword_candidates(g.db(), "after-update-marker", 16)
+            .expect("updated FTS query failed");
+        assert!(updated.used_fts);
+        assert!(updated.memories.iter().any(|memory| memory.id == id));
+
+        g.delete_memory(&id).expect("delete failed");
+        let deleted = keyword_candidates(g.db(), "after-update-marker", 16)
+            .expect("deleted FTS query failed");
+        assert!(deleted.used_fts);
+        assert!(deleted.memories.iter().all(|memory| memory.id != id));
+    }
+
+    #[test]
+    fn keyword_candidates_fall_back_when_fts_is_unavailable() {
+        let db = DbInstance::new("mem", "", "").expect("db creation failed");
+        db.run_script(
+            ":create memories {
+                id: String => content: String, title: String, memory_type: String,
+                importance: Float, tags: String, source_type: String, project_path: String,
+                created_at: String, updated_at: String, access_count: Int, last_accessed: String
+            }",
+            Default::default(),
+            cozo::ScriptMutability::Mutable,
+        )
+        .expect("relation creation failed");
+        let now = Utc::now().to_rfc3339();
+        let params = std::collections::BTreeMap::from([
+            ("id".to_string(), cozo::DataValue::from("fallback-id")),
+            ("now".to_string(), cozo::DataValue::from(now.as_str())),
+        ]);
+        db.run_script(
+            "?[id, content, title, memory_type, importance, tags, source_type, project_path,
+                created_at, updated_at, access_count, last_accessed] <- [[
+                $id, 'fallback-marker', '', 'fact', 0.5, '[]', 'test', '', $now, '', 0, ''
+            ]] :put memories {id => content, title, memory_type, importance, tags, source_type,
+                project_path, created_at, updated_at, access_count, last_accessed}",
+            params,
+            cozo::ScriptMutability::Mutable,
+        )
+        .expect("memory insert failed");
+
+        let candidates = keyword_candidates(&db, "fallback-marker", 16)
+            .expect("fallback query failed");
+        assert!(!candidates.used_fts);
+        assert_eq!(candidates.memories.len(), 1);
+        assert_eq!(candidates.memories[0].id, "fallback-id");
+    }
+
+    #[test]
+    fn keyword_candidates_match_any_query_term() {
+        let g = MemoryGraph::in_memory().expect("graph creation failed");
+        let rust_id = g
+            .store_memory("rust", "", MemoryType::Fact, 0.5, &[], "m", "")
+            .expect("store failed");
+        let python_id = g
+            .store_memory("python", "", MemoryType::Fact, 0.5, &[], "m", "")
+            .expect("store failed");
+
+        let candidates = keyword_candidates(g.db(), "rust python", 16).expect("FTS query failed");
+        assert!(candidates.memories.iter().any(|memory| memory.id == rust_id));
+        assert!(
+            candidates
+                .memories
+                .iter()
+                .any(|memory| memory.id == python_id)
+        );
+    }
+
+    #[test]
+    fn keyword_candidates_support_single_character_terms() {
+        let g = MemoryGraph::in_memory().expect("graph creation failed");
+        let id = g
+            .store_memory("x", "", MemoryType::Fact, 0.5, &[], "m", "")
+            .expect("store failed");
+
+        let candidates = keyword_candidates(g.db(), "x", 16).expect("FTS query failed");
+        assert!(candidates.memories.iter().any(|memory| memory.id == id));
+    }
+
+    #[test]
+    fn recall_candidate_window_keeps_access_boost_winner() {
+        let g = MemoryGraph::in_memory().expect("graph creation failed");
+        let winner = g
+            .store_memory("needle", "", MemoryType::Fact, 0.5, &[], "m", "")
+            .expect("store failed");
+        for _ in 0..7 {
+            g.get_memory(&winner).expect("access update failed");
+        }
+        for i in 0..8 {
+            g.store_memory(
+                &format!("decoy-{i} {}", "needle ".repeat(32)),
+                "",
+                MemoryType::Fact,
+                0.5,
+                &[],
+                "m",
+                "",
+            )
+            .expect("store failed");
+        }
+
+        let results = g.recall_memories("needle", 1).expect("recall failed");
+        assert_eq!(results[0].id, winner);
+    }
 
     #[test]
     fn recall_ranks_by_keyword_hits() {

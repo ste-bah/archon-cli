@@ -246,9 +246,7 @@ mod tests {
         let (event_tx, mut event_rx) = crate::event_channel::bounded_tui_event_channel();
         let (input_tx, _input_rx) = mpsc::channel(1);
         for index in 0..=MAX_TUI_EVENTS_PER_FRAME {
-            event_tx
-                .send(TuiEvent::TextDelta(index.to_string()))
-                .unwrap();
+            event_tx.send(TuiEvent::Error(index.to_string())).unwrap();
         }
         let initial_event = event_rx.recv().await.unwrap();
         let mut app = App::new();
@@ -272,6 +270,25 @@ mod tests {
             1,
             "terminal selection must regain control without consuming queued TUI work"
         );
+    }
+
+    #[tokio::test]
+    async fn coalesced_text_reaches_app_without_byte_loss() {
+        let (event_tx, mut event_rx) =
+            crate::event_channel::bounded_tui_event_channel_with_capacity(1);
+        let (input_tx, _input_rx) = mpsc::channel(1);
+        for chunk in ["hello ", "世界", "\nfinal"] {
+            event_tx.send(TuiEvent::TextDelta(chunk.into())).unwrap();
+        }
+        event_tx.send(TuiEvent::Done).unwrap();
+        let initial_event = event_rx.recv().await.unwrap();
+        let mut app = App::new();
+
+        let drained = drain_tui_events(&mut app, initial_event, &mut event_rx, &input_tx).await;
+
+        assert_eq!(drained, 2);
+        assert!(app.should_quit);
+        assert_eq!(app.output.all_lines().join("\n"), "hello 世界\nfinal");
     }
 
     #[tokio::test(start_paused = true)]

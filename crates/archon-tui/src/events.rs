@@ -426,9 +426,6 @@ pub enum TuiEvent {
         cols: u16,
         rows: u16,
     },
-    UserInput(String),
-    SlashCancel,
-    SlashAgent(String),
     Done,
     /// Notification overlay with a duration in milliseconds (TUI-330).
     NotificationTimeout(u64),
@@ -473,9 +470,6 @@ impl TuiEvent {
             Self::VoiceText(_) => "VoiceText",
             Self::SetAgentInfo { .. } => "SetAgentInfo",
             Self::Resize { .. } => "Resize",
-            Self::UserInput(_) => "UserInput",
-            Self::SlashCancel => "SlashCancel",
-            Self::SlashAgent(_) => "SlashAgent",
             Self::Done => "Done",
             Self::NotificationTimeout(_) => "NotificationTimeout",
         }

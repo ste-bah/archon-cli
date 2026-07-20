@@ -198,35 +198,6 @@ impl Agent {
         false
     }
 
-    pub(super) async fn precheck_sandbox(
-        &mut self,
-        tool: &PendingToolCall,
-        input: &serde_json::Value,
-    ) -> Option<bool> {
-        match self
-            .config
-            .sandbox
-            .as_ref()
-            .map(|backend| backend.check(&tool.name, input))
-        {
-            Some(Ok(())) => Some(true),
-            Some(Err(reason)) => {
-                let result =
-                    ToolResult::error(format!("Sandbox denied tool '{}': {reason}", tool.name));
-                self.send_event(AgentEvent::ToolCallComplete {
-                    name: tool.name.clone(),
-                    id: tool.id.clone(),
-                    result: result.clone(),
-                    transcript_summary: None,
-                })
-                .await;
-                self.state.add_tool_result(&tool.id, &result.content, true);
-                None
-            }
-            None => Some(false),
-        }
-    }
-
     pub(super) async fn snapshot_before_mutation(
         &self,
         tool: &PendingToolCall,

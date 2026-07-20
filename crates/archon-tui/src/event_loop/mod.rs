@@ -1,73 +1,17 @@
-//! Non-blocking event loop for the TUI (TUI-106).
+//! Live render and terminal-input loop for the TUI.
 //!
-//! `run_event_loop` is the entry point that TASK-TUI-107 will wire into
-//! main.rs. It consumes TuiEvents from a bounded priority-shedding channel, drives
-//! [`AgentDispatcher`] (spawn/cancel/switch/poll), and polls completion
-//! on a 16ms interval so finished turns drain within one frame.
-//!
-//! ## Spec Deviation (inherited from TUI-100)
-//!
-//! Spec references `Arc<dyn Agent>` and `Arc<dyn AgentRouter>`. Neither
-//! trait exists: `archon_core::agent::Agent` is a concrete struct, not
-//! a trait. Resolution carried forward from TUI-100: [`EventLoopConfig`]
-//! takes `Arc<dyn TurnRunner>` (defined in `task_dispatch.rs`) for the
-//! agent-execution seat and `Arc<dyn AgentRouter>` (also in
-//! `task_dispatch.rs`) for the agent-switching seat. The bridge from
-//! the concrete `archon_core` `Agent` to `TurnRunner` happens in
-//! TUI-107's `AgentHandle` adapter, not here.
-//!
-//! ## Spec Deviation (TUI-106-specific)
-//!
-//! Spec references `TuiEvent::UserInput(prompt)`, `TuiEvent::SlashCancel`,
-//! `TuiEvent::SlashAgent(id)` — none of these variants existed in the
-//! `TuiEvent` enum before TUI-106. Resolution: three new variants were
-//! added additively to [`crate::app::TuiEvent`] (no reordering of
-//! existing variants), and corresponding no-op arms were added to the
-//! existing `run_tui` match so its exhaustive pattern still compiles.
-//! `run_tui` is a no-op on these variants because the new
-//! `run_event_loop` is their handler — the old path will be retired by
-//! TUI-107.
-//!
-//! ## Non-blocking contract
-//!
-//! - No branch of `tokio::select!` calls `.await` on anything in
-//!   [`AgentDispatcher`]. `poll_completion` is SYNC by design (see
-//!   TUI-103) and is called directly without wrapping in `async {}`.
-//! - Both select branches use cancel-safe futures only:
-//!   `UnboundedReceiver::recv()` and `tokio::time::Interval::tick()`.
-//! - After every `TuiEvent` is handled, `poll_completion` is called
-//!   immediately so a turn that finished during the event pump does
-//!   NOT wait for the next 16ms tick to drain.
-//!
-//! ## REM-2g: file-split layout
-//!
-//! Relocated from `src/event_loop.rs` → `src/event_loop/` per REM-2g
-//! (docs/rem-2-split-plan.md section 3.3). Public API unchanged:
-//! `EventLoopConfig`, `run_event_loop` stay in `mod.rs`; `lib.rs` keeps
-//! `pub use event_loop::{EventLoopConfig, run_event_loop}`.
-//!
-//! Submodules (private to `event_loop`):
-//! - `tui_events` — `handle_tui_event` (30-arm `TuiEvent` drain match)
-//! - `input` — `handle_key_event` (crossterm keyboard/mouse/resize dispatch)
-//!
-//! `run_inner` now delegates its two per-iteration branches to these
-//! helpers. `mcp_actions_for` / `mcp_action_count` live here so both
-//! the outer loop and `input::handle_key_event` can reference them via
-//! `super::`.
+//! `run_inner` is the production event loop. It receives rendered-state
+//! events through [`tui_events::handle_tui_event`] and terminal input through
+//! [`input::handle_key_event`]. Prompt submission, cancellation, and slash
+//! routing are owned by `src/session_loop`.
 
 use std::io;
-use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::Result;
-use archon_core::agent::TimestampedEvent;
 use crossterm::event::EventStream;
 use ratatui::Terminal;
-use tokio::sync::mpsc::UnboundedSender;
 
-use crate::app::{App, AppConfig, TuiEvent};
-use crate::event_channel::TuiEventReceiver;
-use crate::task_dispatch::{AgentDispatcher, AgentRouter, CancelOutcome, TurnRunner};
+use crate::app::{App, AppConfig};
 
 use driver::{
     IDLE_TICK_CADENCE, LoopEvent, TickScheduler, animation_cadence, drain_tui_events,
@@ -80,104 +24,6 @@ mod input;
 mod mouse;
 pub(crate) mod thinking_archive;
 mod tui_events;
-
-/// Configuration passed to [`run_event_loop`]. Field order and types
-/// are pinned by the TUI-106 spec (with TUI-100 deviation for `runner`).
-pub struct EventLoopConfig {
-    pub tui_event_rx: TuiEventReceiver,
-    pub agent_event_tx: UnboundedSender<TimestampedEvent>,
-    pub runner: Arc<dyn TurnRunner>,
-    pub router: Arc<dyn AgentRouter>,
-}
-
-/// Main TUI event loop: consume `TuiEvent`s, drive [`AgentDispatcher`],
-/// poll completion on a 16ms tick. Returns `Ok(())` when the channel
-/// closes or a [`TuiEvent::Done`] is received.
-// TUI-330: cognitive complexity (36/25). This is the dispatcher-side event
-// loop — a single `select!` over the event channel and a poll interval with
-// a match on TuiEvent variants (UserInput, SlashCancel, SlashAgent, Resize,
-// Done). Splitting arms into helpers would fragment the match that is the
-// architectural focal point of this function and require threading
-// dispatcher / runner / router through every helper. Kept as a single
-// function intentionally.
-//
-// TUI-331: Fix 3 attempted extracting a `handle_tui_event(dispatcher, runner,
-// ev) -> LoopAction` helper; measured complexity dropped only 36 → 32, still
-// over the 25 threshold (the outer `tokio::select!` + `Some/None` match +
-// `poll_completion()` drain account for the residual complexity). Refactor
-// reverted; allow retained. Remove this allow when either:
-//   (a) The outer loop's `tokio::select!` is replaced with a single-source
-//       stream abstraction that folds the poll-interval branch into the
-//       event channel (removing one level of nesting), OR
-//   (b) TUI-107's `AgentHandle` adapter is introduced, at which point the
-//       dispatcher / runner / router become fields on a single actor struct
-//       and the helper extraction in Fix 3 will land <25.
-#[allow(clippy::cognitive_complexity)]
-pub async fn run_event_loop(cfg: EventLoopConfig) -> Result<()> {
-    let EventLoopConfig {
-        mut tui_event_rx,
-        agent_event_tx,
-        runner,
-        router,
-    } = cfg;
-
-    let mut dispatcher = AgentDispatcher::new(router, agent_event_tx);
-    let mut poll_interval = tokio::time::interval(Duration::from_millis(16));
-
-    loop {
-        tokio::select! {
-            maybe_ev = tui_event_rx.recv() => {
-                match maybe_ev {
-                    Some(ev) => {
-                        crate::observability::record_tui_event_drain(ev.variant_name());
-                        match ev {
-                            TuiEvent::UserInput(prompt) => {
-                                let _ = dispatcher.spawn_turn(prompt, runner.clone());
-                            }
-                            TuiEvent::SlashCancel => {
-                                match dispatcher.cancel_current() {
-                                    CancelOutcome::NoInflight => {
-                                        tracing::info!("slash-cancel: no in-flight turn");
-                                    }
-                                    CancelOutcome::Aborted { elapsed_ms } => {
-                                        tracing::info!(elapsed_ms, "slash-cancel: aborted");
-                                    }
-                                }
-                            }
-                            TuiEvent::SlashAgent(id) => {
-                                match dispatcher.switch_agent(&id) {
-                                    Ok(()) => tracing::info!(agent = %id, "slash-agent switched"),
-                                    Err(e) => tracing::warn!(error = %e, agent = %id, "slash-agent failed"),
-                                }
-                            }
-                            TuiEvent::Resize { cols, rows } => {
-                                let _ = crate::layout::handle_resize(cols, rows);
-                            }
-                            TuiEvent::Done => break,
-                            _ => {
-                                // Other TuiEvent variants (agent→TUI output events) are
-                                // consumed by the old run_tui path's render loop, not by
-                                // this dispatcher-side loop. No-op here.
-                            }
-                        }
-                    }
-                    None => {
-                        // Channel closed. Caller dropped the sender.
-                        break;
-                    }
-                }
-                // Drain any newly-completed turn in the same frame —
-                // do NOT wait for the next 16ms tick.
-                let _ = dispatcher.poll_completion();
-            }
-            _ = poll_interval.tick() => {
-                let _ = dispatcher.poll_completion();
-            }
-        }
-    }
-
-    Ok(())
-}
 
 /// Backend-generic event loop body (TUI-310 extraction from `app.rs`).
 ///

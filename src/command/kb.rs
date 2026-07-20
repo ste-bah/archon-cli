@@ -1,6 +1,7 @@
 //! Knowledge intelligence CLI handler.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::Result;
 use cozo::DbInstance;
@@ -12,18 +13,19 @@ fn kb_db_path() -> PathBuf {
     crate::command::store_paths::evidence_db_path(&["ARCHON_KB_DB_PATH"])
 }
 
-fn open_db() -> Result<DbInstance> {
-    let db_path = kb_db_path();
-    archon_docs::configure_cozo_write_lock_for_db(&db_path);
-    let db = crate::command::store_paths::open_sqlite_db(&db_path, "knowledge")?;
-    archon_docs::schema::ensure_doc_schema(&db)?;
+fn open_db() -> Result<Arc<DbInstance>> {
+    open_db_at(&kb_db_path())
+}
+
+fn open_db_at(path: &Path) -> Result<Arc<DbInstance>> {
+    let db = archon_docs::acquire_docs_db(path)?;
     archon_knowledge::schema::ensure_knowledge_schema(&db)?;
     Ok(db)
 }
 
 pub async fn handle_kb_command(action: KbAction) -> Result<()> {
     let db = open_db()?;
-    let engine = archon_knowledge::KnowledgeEngine::new(db.clone())?;
+    let engine = archon_knowledge::KnowledgeEngine::from_shared(Arc::clone(&db))?;
     let policy = load_policy();
 
     match action {
@@ -366,6 +368,18 @@ mod tests {
         archon_docs::schema::ensure_doc_schema(&db).unwrap();
         archon_knowledge::schema::ensure_knowledge_schema(&db).unwrap();
         db
+    }
+
+    #[test]
+    fn kb_database_reuses_shared_document_handle() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("evidence.db");
+        let shared = archon_docs::acquire_docs_db(&path).unwrap();
+
+        let kb = open_db_at(&path).unwrap();
+
+        assert!(std::sync::Arc::ptr_eq(&shared, &kb));
+        archon_knowledge::schema::ensure_knowledge_schema(&kb).unwrap();
     }
 
     #[test]

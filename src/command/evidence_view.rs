@@ -3,6 +3,7 @@
 use anyhow::Result;
 use archon_tui::app::{EvidenceRowPayload, TuiEvent, ViewId};
 use cozo::DbInstance;
+use std::sync::Arc;
 
 use crate::command::registry::{CommandContext, CommandHandler};
 
@@ -192,10 +193,9 @@ fn docs_usage_line(reason: &str) -> String {
     format!("{reason}\n\n{}", docs_usage())
 }
 
-fn open_docs_db() -> Result<DbInstance> {
-    let db = crate::command::store_paths::open_evidence_db("document", &["ARCHON_DOCS_DB_PATH"])?;
-    archon_docs::schema::ensure_doc_schema(&db)?;
-    Ok(db)
+fn open_docs_db() -> Result<Arc<DbInstance>> {
+    let path = crate::command::store_paths::evidence_db_path(&["ARCHON_DOCS_DB_PATH"]);
+    archon_docs::acquire_docs_db(path)
 }
 
 fn open_learning_db() -> Result<DbInstance> {

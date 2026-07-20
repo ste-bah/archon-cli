@@ -2,6 +2,7 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use anyhow::Result;
@@ -356,16 +357,8 @@ fn kb_item(name: &str, scope: &str, path: &Path) -> WebKnowledgeBaseItem {
     }
 }
 
-fn open_docs_db(paths: &WebRuntimePaths) -> Result<DbInstance> {
-    let path = evidence_db_path(paths);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let db = archon_learning::cozo_guard::open_sqlite_guarded(
-        &path.to_string_lossy(),
-        &format!("open web ingest store at {}", path.display()),
-    )?;
-    Ok(db)
+fn open_docs_db(paths: &WebRuntimePaths) -> Result<Arc<DbInstance>> {
+    archon_docs::acquire_docs_db(evidence_db_path(paths))
 }
 
 fn evidence_db_path(paths: &WebRuntimePaths) -> PathBuf {

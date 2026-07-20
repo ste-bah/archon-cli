@@ -346,17 +346,55 @@ fn locked_viewport_stays_fixed_when_new_rows_arrive() {
 }
 
 #[test]
-fn one_logical_line_can_scroll_beyond_u16_wrapped_rows() {
+fn single_logical_line_beyond_u16_rows_renders_distinct_wide_tail() {
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    use ratatui::widgets::{Paragraph, Widget, Wrap};
+
     let theme = crate::theme::intj_theme();
     let mut buf = OutputBuffer::new();
-    buf.append_line(&"x".repeat(70_000));
+    let width = 8;
+    let sentinel = "T界🙂";
+    let prefix = "HEAD-";
+    let padding = "x".repeat(width as usize * 65_536 - prefix.len());
+    buf.append_line(&format!("{prefix}{padding}{sentinel}"));
 
-    let view = buf.rendered_view(&theme, 1, 1);
+    let view = buf.rendered_view(&theme, width, 1);
+    assert!(view.total_wrapped > u16::MAX as usize);
+    assert_eq!(view.global_scroll_y, view.total_wrapped - 1);
+    assert_eq!(view.paragraph_scroll_y, u16::MAX - 1);
 
-    assert_eq!(view.total_wrapped, 70_000);
-    assert_eq!(view.global_scroll_y, 69_999);
-    assert_eq!(view.paragraph_scroll_y, u16::MAX);
-    assert_eq!(view.lines[0].to_string().chars().count(), 65_536);
+    let area = Rect::new(0, 0, width, 1);
+    let mut rendered = Buffer::empty(area);
+    Paragraph::new(view.lines)
+        .wrap(Wrap { trim: false })
+        .scroll((view.paragraph_scroll_y, 0))
+        .render(area, &mut rendered);
+
+    assert_eq!(rendered[(0, 0)].symbol(), "T");
+    assert_eq!(rendered[(1, 0)].symbol(), "界");
+    assert_eq!(rendered[(3, 0)].symbol(), "🙂");
+    assert!(rendered.content().iter().all(|cell| cell.symbol() != "H"));
+}
+
+#[test]
+fn auto_scroll_beyond_u16_rows_renders_distinct_wide_tail() {
+    let theme = crate::theme::intj_theme();
+    let mut buf = OutputBuffer::new();
+    for index in 0..65_536 {
+        buf.append_line(&format!("row-{index}"));
+    }
+    let sentinel = "TAIL-界界";
+    buf.append_line(sentinel);
+
+    let view = buf.rendered_view(&theme, 20, 1);
+
+    assert!(view.total_wrapped > u16::MAX as usize);
+    assert_eq!(view.global_scroll_y, view.total_wrapped - 1);
+    assert_eq!(
+        view.lines.last().map(ToString::to_string).as_deref(),
+        Some(sentinel)
+    );
 }
 
 #[test]

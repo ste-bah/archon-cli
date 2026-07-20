@@ -49,6 +49,41 @@ impl LocalEmbeddingProvider for MockProvider {
     }
 }
 
+struct ParallelMockProvider {
+    dim: usize,
+}
+
+impl LocalEmbeddingProvider for ParallelMockProvider {
+    fn embed_chunks(&self, chunks: &[String]) -> Result<Vec<Vec<f32>>, DocsError> {
+        Ok(chunks
+            .iter()
+            .map(|chunk| {
+                let mut vector = vec![0.0_f32; self.dim];
+                for (index, byte) in chunk.bytes().enumerate() {
+                    vector[index % self.dim] = (byte as f32) / 255.0;
+                }
+                normalise(vector)
+            })
+            .collect())
+    }
+
+    fn embed_query(&self, query: &str) -> Result<Vec<f32>, DocsError> {
+        Ok(self.embed_chunks(&[query.to_string()])?.remove(0))
+    }
+
+    fn dimension(&self) -> usize {
+        self.dim
+    }
+
+    fn backend_name(&self) -> &'static str {
+        "parallel-mock"
+    }
+
+    fn max_embedding_workers(&self) -> usize {
+        2
+    }
+}
+
 struct SynonymProvider;
 
 impl LocalEmbeddingProvider for SynonymProvider {
