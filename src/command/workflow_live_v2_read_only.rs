@@ -9,6 +9,11 @@ async fn run_read_only_v2_fanout(
     run_id: &str,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
     let items = fanout_items_for_call(&execution, v2_store)?;
+    // Read-only branches (verification waves) need the project artifact root
+    // too: without it verifiers fall back to repo-relative paths and cannot
+    // resolve declared artifacts, which the reference tells them to check
+    // absolutely. Write branches already get this stamp.
+    let items = workflow_live_v2_write::stamp_project_artifact_policy(items, v2_store);
     let item_order = branch_item_order(&items);
     let (reused_outcomes, pending_items) =
         split_reusable_branch_outcomes(v2_store, &execution.call.id, items)?;

@@ -50,11 +50,17 @@ pub(super) async fn run_write_capable_v2_fanout(
     store_for_control: &archon_workflow::WorkflowStore,
     run_id: &str,
     workspace_boundary_supported: bool,
+    task_universe: Option<&super::super::workflow_live_task_universe::WorkflowV2TaskUniverse>,
     source_task_graph: Option<&archon_workflow::WorkflowV2SourceTaskGraph>,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
     let branches = fanout_items_for_call(&execution, v2_store)?;
     let mut branches = stamp_project_artifact_policy(branches, v2_store);
     apply_source_graph_targets_to_branches(&mut branches, source_task_graph);
+    // Authoritative tool binding does NOT depend on the source graph: v3
+    // authored write call ids (`implement-task-...`) are not recognized by
+    // dynamic_source_kind, so no graph exists for them and the graph-based
+    // stamp never runs. Stamp straight from the task universe instead.
+    stamp_required_tools_from_universe(&mut branches, task_universe);
     let all_write_items =
         write_items_for_branches(target_repository_root, &execution.call, &branches)?;
     let planner = WorkflowV2WritePlanner::new(
@@ -185,7 +191,7 @@ fn revalidate_reused_artifact_results(
     }
 }
 
-fn stamp_project_artifact_policy(
+pub(super) fn stamp_project_artifact_policy(
     mut branches: Vec<archon_workflow::WorkflowV2FanoutItem>,
     v2_store: &WorkflowV2ResultStore,
 ) -> Vec<archon_workflow::WorkflowV2FanoutItem> {
@@ -207,6 +213,53 @@ fn stamp_project_artifact_policy(
         }
     }
     branches
+}
+
+/// Stamp each branch item's `required_tools` from the AUTHORITATIVE task
+/// universe, matched by the item's canonical task ids. Runs for every write
+/// branch regardless of whether a source graph was built, so tool binding
+/// works for authored (v3) and generated (v2) call ids alike. Agent-authored
+/// tool declarations were already stripped at the shared builder, so this is
+/// the only writer of the field.
+fn stamp_required_tools_from_universe(
+    branches: &mut [archon_workflow::WorkflowV2FanoutItem],
+    task_universe: Option<&super::super::workflow_live_task_universe::WorkflowV2TaskUniverse>,
+) {
+    let Some(universe) = task_universe else {
+        return;
+    };
+    for branch in branches {
+        let Some(item) = branch
+            .input
+            .get_mut("item")
+            .and_then(serde_json::Value::as_object_mut)
+        else {
+            continue;
+        };
+        let claimed: Vec<String> = item
+            .get("canonical_task_ids")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .map(str::to_string)
+            .collect();
+        if claimed.is_empty() {
+            continue;
+        }
+        let mut tools: std::collections::BTreeSet<String> = Default::default();
+        for task in &universe.tasks {
+            if claimed.iter().any(|id| id == &task.canonical_task_id) {
+                tools.extend(task.required_tools.iter().cloned());
+            }
+        }
+        if !tools.is_empty() {
+            item.insert(
+                "required_tools".to_string(),
+                serde_json::json!(tools.into_iter().collect::<Vec<_>>()),
+            );
+        }
+    }
 }
 
 fn apply_source_graph_targets_to_branches(

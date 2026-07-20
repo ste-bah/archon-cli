@@ -104,7 +104,7 @@ fn rust_module_expansion(repository_root: &Path, target: &str) -> Option<TargetF
             ));
         }
     }
-    let dir_scopes = module_dir_scope(repository_root, &module_dir, !expanded.is_empty());
+    let dir_scopes = module_dir_scope(repository_root, &module_dir);
     Some(TargetFileExpansion {
         source: target.to_string(),
         expanded: expanded.into_iter().collect(),
@@ -113,14 +113,12 @@ fn rust_module_expansion(repository_root: &Path, target: &str) -> Option<TargetF
     })
 }
 
-fn module_dir_scope(
-    repository_root: &Path,
-    module_dir: &Path,
-    has_file_children: bool,
-) -> Vec<String> {
-    if !has_file_children {
-        return Vec::new();
-    }
+/// Owning a declared `foo.rs` also owns its module directory `foo/`, even when
+/// that directory has no files yet. Without this a task whose declared target
+/// is already at the file-size cap is deadlocked: it cannot add lines (hygiene
+/// gate) and cannot split the file either (the split destinations would be
+/// undeclared paths). Generic to any Rust target in any PRD.
+fn module_dir_scope(repository_root: &Path, module_dir: &Path) -> Vec<String> {
     repo_relative(repository_root, &repository_root.join(module_dir))
         .into_iter()
         .collect()
