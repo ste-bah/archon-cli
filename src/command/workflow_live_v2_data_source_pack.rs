@@ -1,6 +1,14 @@
 const SOURCE_PACK_TEXT_LIMIT: usize = 700;
 
 pub(super) fn source_pack_value(value: &serde_json::Value) -> serde_json::Value {
+    // Packed reduce source is prior agent output, and allowed_mcp_tools scans
+    // the whole stage input: a tool declaration surviving the pack would bind
+    // MCP tools on the reducer. The unknown-object packer preserves every key,
+    // so strip tool declarations here — the fanout branch builder already does
+    // the same for write/verify items.
+    let mut value = value.clone();
+    super::super::workflow_live_mcp::strip_tool_declarations(&mut value);
+    let value = &value;
     match value {
         serde_json::Value::Array(items) => {
             serde_json::Value::Array(items.iter().map(source_pack_value).collect())
@@ -257,4 +265,26 @@ fn truncate_json_text(value: &serde_json::Value) -> serde_json::Value {
 
 fn json_array_len(value: &serde_json::Value) -> serde_json::Value {
     serde_json::json!(value.as_array().map(Vec::len).unwrap_or(0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packing_strips_tool_declarations_from_reduce_source() {
+        // allowed_mcp_tools scans the whole reduce stage input; packed prior
+        // agent output must not carry a tool declaration (even nested) or the
+        // reducer would bind MCP tools it was never authorised for.
+        let packed = source_pack_value(&serde_json::json!({
+            "status": "accepted",
+            "summary": "prior output",
+            "evidence": { "required_tools": ["pine_compile"] },
+            "notes": [{ "mcp_tools": ["tv_health_check"] }]
+        }));
+        let blob = packed.to_string();
+        assert!(!blob.contains("required_tools"), "{blob}");
+        assert!(!blob.contains("mcp_tools"), "{blob}");
+        assert!(!blob.contains("pine_compile"), "{blob}");
+    }
 }

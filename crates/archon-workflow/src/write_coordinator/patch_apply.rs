@@ -77,7 +77,13 @@ impl std::fmt::Display for ApplyError {
                 write!(f, "patch apply conflict for '{item}': {stderr}")
             }
             Self::StaleBaseline { item, path } => {
-                write!(f, "stale baseline for '{item}' at '{path}'")
+                // Carry the remedy: the patch was computed against a version of
+                // this file that has since changed, so re-applying it would
+                // clobber the newer content. Re-read and regenerate.
+                write!(
+                    f,
+                    "stale baseline for '{item}' at '{path}': this file changed after your patch was computed, so the patch was NOT applied. Re-read '{path}' as it is NOW and regenerate your change against the current contents — do not resubmit the same patch"
+                )
             }
             Self::VerifyFailed { exit, stderr_tail } => {
                 write!(f, "wave verify failed (exit {exit}): {stderr_tail}")
@@ -252,7 +258,9 @@ fn apply_one(
     // VAL-WC-004 stale recheck — only files this item INTENDS to mutate.
     if let Some(path) = stale_target(canonical_root, m, pre_hashes_by_item) {
         updated.status = ManifestStatus::Failed {
-            reason: format!("stale baseline at {path}"),
+            reason: format!(
+                "stale baseline at {path}: the file changed after this patch was computed and was NOT modified; re-read {path} as it is now and regenerate the change against current contents"
+            ),
         };
         rec.items_failed
             .push((m.item_id.clone(), format!("StaleBaseline at {path}")));

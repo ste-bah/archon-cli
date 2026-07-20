@@ -159,10 +159,14 @@ fn demote_zero_test_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
     if test_commands.is_empty() {
         return;
     }
-    let all_zero_matched = test_commands.iter().all(|command| {
+    // ANY zero-match test command demotes, not only "all of them". A single
+    // command carrying several filters can report overall success while named
+    // filters inside it matched nothing — that command proves nothing about
+    // those filters, and treating the batch as passing credits untested work.
+    let any_zero_matched = test_commands.iter().any(|command| {
         archon_workflow::context::output_reports_zero_matched_tests(&command.output_summary)
     });
-    if !all_zero_matched {
+    if !any_zero_matched {
         return;
     }
     result.status = WorkflowV2Status::NeedsReview;
@@ -356,6 +360,32 @@ mod commandless_demotion_tests {
         let mut empty = accepted_outcome(Vec::new());
         normalize_focused_verification_outcome("verification-wave-1-2", &mut empty);
         assert_eq!(empty.status, WorkflowV2Status::NeedsReview);
+    }
+
+    #[test]
+    fn one_zero_match_command_among_passing_ones_still_demotes() {
+        // A verifier can run several test commands, one of which matched zero
+        // tests (e.g. a misnamed filter) while the others passed. ANY zero
+        // match demotes — the batch passing does not excuse the filter that
+        // proved nothing.
+        let mut outcome = accepted_outcome(vec![
+            WorkflowV2CommandRecord {
+                kind: WorkflowV2CommandKind::Test,
+                command: "cargo test real_pass".to_string(),
+                status: WorkflowV2CommandStatus::Succeeded,
+                exit_code: Some(0),
+                output_summary: "test result: ok. 5 passed; 0 failed".to_string(),
+            },
+            WorkflowV2CommandRecord {
+                kind: WorkflowV2CommandKind::Test,
+                command: "cargo test misnamed_filter".to_string(),
+                status: WorkflowV2CommandStatus::Succeeded,
+                exit_code: Some(0),
+                output_summary: "test result: ok. 0 passed; 0 failed; 12 filtered out".to_string(),
+            },
+        ]);
+        normalize_focused_verification_outcome("verification-wave-1-4", &mut outcome);
+        assert_eq!(outcome.status, WorkflowV2Status::NeedsReview);
     }
 
     #[test]

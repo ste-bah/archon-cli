@@ -102,9 +102,9 @@ fn explicit_zero_test_phrase(lower: &str) -> bool {
 }
 
 fn rust_summary_reports_zero_matched(body: &str) -> bool {
-    body.lines()
-        .filter_map(RustTestSummary::parse)
-        .any(|summary| summary.matched_tests() == 0)
+    let summaries: Vec<_> = body.lines().filter_map(RustTestSummary::parse).collect();
+    !summaries.is_empty()
+        && summaries.iter().all(|summary| summary.matched_tests() == 0)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,6 +157,13 @@ mod tests {
     fn all_filtered_rust_test_summary_is_zero_matched() {
         let body = "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1007 filtered out.";
         assert!(reports_zero_test_filter(body, &body.to_ascii_lowercase()));
+    }
+
+    #[test]
+    fn mixed_harness_output_with_real_match_is_not_zero_matched() {
+        let body = "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 42 filtered out.\n\
+                    test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out.";
+        assert!(!reports_zero_test_filter(body, &body.to_ascii_lowercase()));
     }
 
     #[test]

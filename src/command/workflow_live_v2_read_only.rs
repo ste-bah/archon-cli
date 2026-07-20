@@ -31,6 +31,10 @@ async fn run_read_only_v2_fanout(
     let parent_call_id = execution.call.id.clone();
     let branch_parent_call_id = execution.call.id.clone();
     let branch_store = v2_store.clone();
+    // Read-only branches (verification waves) must resolve project artifacts
+    // absolutely: passing the store is what populates request.project_artifacts,
+    // which is the typed field the prompt renders project_artifact_root from.
+    let branch_artifact_store = v2_store.clone();
     let branch_control_store = store_for_control.clone();
     let branch_run_id = run_id.to_string();
     let branch_event_store = store_for_control.clone();
@@ -92,6 +96,7 @@ async fn run_read_only_v2_fanout(
                     let run_id = branch_run_id.clone();
                     let target_repository_root = target_repository_root.clone();
                     let branch_client = client.with_timeout_secs(Some(branch_timeout_secs));
+                    let artifact_store = branch_artifact_store.clone();
                     async move {
                         poll_v2_run_control(&control_store, &run_id, &branch.id)?;
                         emit_v2_branch_event(
@@ -121,7 +126,7 @@ async fn run_read_only_v2_fanout(
                                 &branch_execution,
                                 &adapter,
                                 &branch_client,
-                                None,
+                                Some(&artifact_store),
                             )
                             .await?,
                         };

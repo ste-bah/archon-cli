@@ -98,3 +98,33 @@ fn empty_required_tools_array_does_not_trip_the_guard() {
         )
         .expect("an empty required_tools list is not a tool declaration");
 }
+
+#[test]
+fn prompt_renders_project_artifact_root_from_the_typed_context_not_the_input() {
+    // The verifier prompt reads project_artifact_root from request.project_artifacts
+    // (the TYPED field), never from the input JSON. Stamping a policy blob into
+    // the input does NOT populate it — read-only branches must be given the
+    // store so this field is built. Pinning the actual consumer.
+    let temp = tempfile::tempdir().expect("tempdir");
+    let v2_root = temp.path().join("project/.archon/workflows/wf-x/v2");
+    std::fs::create_dir_all(&v2_root).expect("v2 root");
+
+    let mut request = write_request_with_input(serde_json::json!({
+        "_workflow_project_artifact_policy": { "project_root": "/stamped/in/input/only" }
+    }));
+    // Input-only stamp: prompt must NOT pick it up.
+    assert!(
+        WorkflowV2AgentAdapter::new()
+            .build_prompt(&request)
+            .contains("project_artifact_root: <none>"),
+        "input stamp must not satisfy the prompt"
+    );
+
+    // Typed context populated (what passing the store does): prompt resolves it.
+    request.project_artifacts = crate::project_artifact_context_from_v2_root(&v2_root);
+    let prompt = WorkflowV2AgentAdapter::new().build_prompt(&request);
+    assert!(
+        !prompt.contains("project_artifact_root: <none>"),
+        "typed context must render an absolute root"
+    );
+}

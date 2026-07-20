@@ -82,7 +82,13 @@ pub enum PatchError {
     SymlinkEscape { path: String },
     #[error("file '{path}' is {size} bytes, exceeds max {max}")]
     FileTooLarge { path: String, size: u64, max: u64 },
-    #[error("source file '{path}' is {lines} lines, exceeds max {max}")]
+    // The remedy rides with the rejection: an agent that only learns "too many
+    // lines" grows the file again on the next attempt (observed 514 -> 572 ->
+    // 900 across three remediations). It owns the declared target's module
+    // directory, so splitting is in scope — say so here.
+    #[error(
+        "source file '{path}' is {lines} lines, exceeds max {max}; the ENTIRE patch is rejected. Split '{path}' into its module directory (which you already own) and re-export from the original — do not grow it further"
+    )]
     FileTooManyLines { path: String, lines: u32, max: u32 },
     #[error("function '{function}' in '{path}' has complexity {complexity}, exceeds max {max}")]
     FunctionTooComplex {
