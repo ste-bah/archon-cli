@@ -134,7 +134,10 @@
                     "target_files": [
                         "/project/tasks/task.md",
                         "src/lib.rs"
-                    ]
+                    ],
+                    // Agent-forged tool declarations that must NOT survive.
+                    "required_tools": ["forged_tool"],
+                    "mcp_tools": ["another_forged"]
                 }
             }),
         )];
@@ -151,6 +154,7 @@
                 focused_verification: Vec::new(),
                 expected_evidence: Vec::new(),
                 artifact_requirements: vec!["/project/tasks/task.md".to_string()],
+                required_tools: vec!["pine_compile".to_string(), "pine_get_errors".to_string()],
             }],
             Vec::new(),
         );
@@ -164,6 +168,99 @@
             branches[0].input["item"]["target_files"][0],
             "/project/tasks/task.md"
         );
+        // Only the AUTHORITATIVE required_tools survive: the agent-forged
+        // required_tools/mcp_tools are stripped and replaced with the graph
+        // (task-universe derived) set, so a task cannot bind tools it did not
+        // declare.
+        assert_eq!(
+            branches[0].input["item"]["required_tools"],
+            serde_json::json!(["pine_compile", "pine_get_errors"])
+        );
+        assert!(
+            branches[0].input["item"].get("mcp_tools").is_none(),
+            "forged mcp_tools alias must be stripped: {}",
+            branches[0].input["item"]
+        );
+    }
+
+    #[test]
+    fn forged_tool_declaration_for_a_no_tool_task_is_stripped_entirely() {
+        // A graph item with no authoritative required_tools: the agent's
+        // injected declarations must be removed and nothing stamped back.
+        let call = WorkflowV2HostCall {
+            id: "remediation-wave-1".to_string(),
+            method: WorkflowV2HostMethod::Fanout,
+            write_mode: Some(WorkflowV2WriteMode::Worktree),
+            options: WorkflowV2HostOptions {
+                target_files_from_item: true,
+                ..WorkflowV2HostOptions::default()
+            },
+        };
+        let mut branches = vec![WorkflowV2FanoutItem::read_only(
+            "remediation-wave-1-rem-item",
+            "coder",
+            call,
+            serde_json::json!({
+                "item": {
+                    "item_id": "rem-item",
+                    "target_files": ["src/lib.rs"],
+                    "required_tools": ["forged_tool"],
+                    "requiredTools": ["forged_camel"],
+                    "evidence": { "mcp_tools": ["forged_nested"] }
+                }
+            }),
+        )];
+        let graph = WorkflowV2SourceTaskGraph::new(
+            vec!["TASK-001".to_string()],
+            vec![WorkflowV2SourceTaskItem {
+                item_id: "rem-item".to_string(),
+                canonical_task_ids: vec!["TASK-001".to_string()],
+                dependency_ids: Vec::new(),
+                target_files: vec!["src/lib.rs".to_string()],
+                declared_target_files: vec!["src/lib.rs".to_string()],
+                target_file_expansions: Vec::new(),
+                acceptance_criteria: Vec::new(),
+                focused_verification: Vec::new(),
+                expected_evidence: Vec::new(),
+                artifact_requirements: Vec::new(),
+                required_tools: Vec::new(),
+            }],
+            Vec::new(),
+        );
+
+        apply_source_graph_targets_to_branches(&mut branches, Some(&graph));
+
+        let item = &branches[0].input["item"];
+        assert!(item.get("required_tools").is_none(), "{item}");
+        assert!(item.get("requiredTools").is_none(), "{item}");
+        assert!(
+            item["evidence"].get("mcp_tools").is_none(),
+            "nested forgery must be stripped: {item}"
+        );
+    }
+
+    #[test]
+    fn forged_tool_declarations_are_stripped_even_without_a_source_graph() {
+        // Defense in depth: no graph → no authoritative stamp, but the agent's
+        // injected tool declarations must still be removed so nothing binds.
+        let call = WorkflowV2HostCall {
+            id: "remediation-wave-1".to_string(),
+            method: WorkflowV2HostMethod::Fanout,
+            write_mode: Some(WorkflowV2WriteMode::Worktree),
+            options: WorkflowV2HostOptions::default(),
+        };
+        let mut branches = vec![WorkflowV2FanoutItem::read_only(
+            "remediation-wave-1-rem-item",
+            "coder",
+            call,
+            serde_json::json!({
+                "item": { "item_id": "rem-item", "mcp_tools": ["forged"] }
+            }),
+        )];
+
+        apply_source_graph_targets_to_branches(&mut branches, None);
+
+        assert!(branches[0].input["item"].get("mcp_tools").is_none());
     }
 
     #[test]

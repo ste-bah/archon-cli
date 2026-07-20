@@ -361,6 +361,7 @@ fn repairable_agent_contract_error(error: &WorkflowV2AgentError) -> bool {
         | WorkflowV2AgentError::PlanOnlyImplementation
         | WorkflowV2AgentError::ImplementationAcceptedWithoutChanges
         | WorkflowV2AgentError::ImplementationNoopWithoutTaskCoverage
+        | WorkflowV2AgentError::ImplementationNoopWithDeclaredRequiredTools
         | WorkflowV2AgentError::ImplementationNoopMissingProjectArtifactEvidence
         | WorkflowV2AgentError::ImplementationChangedFilesOutsideOwnership(_) => false,
     }

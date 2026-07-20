@@ -284,6 +284,7 @@ fn save_wave<const D: usize, const C: usize>(
             focused_verification: Vec::new(),
             expected_evidence: Vec::new(),
             artifact_requirements: Vec::new(),
+            required_tools: Vec::new(),
         }],
         completed_ids.into_iter().map(str::to_string).collect(),
     );

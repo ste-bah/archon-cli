@@ -31,6 +31,10 @@ pub enum WorkflowV2AgentError {
     #[error("implementation noop requires typed task_coverage evidence")]
     ImplementationNoopWithoutTaskCoverage,
     #[error(
+        "task declares required_tools; a no-op is not acceptable — exercise the declared tools and return accepted with fresh command/artifact evidence, or block honestly"
+    )]
+    ImplementationNoopWithDeclaredRequiredTools,
+    #[error(
         "implementation noop with declared project artifacts requires existing artifact evidence"
     )]
     ImplementationNoopMissingProjectArtifactEvidence,

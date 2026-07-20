@@ -67,8 +67,9 @@ function __archonPrimitives(w) {
     }
     // Per-task verifiers (verify:true or focusedTests) run through the
     // HOST's verification-wave machinery: the wave id prefix grants command
-    // execution and attaches every focused-verification guard (zero-test
-    // demotion, outcome normalization, host-anchored evidence). The
+    // execution and attaches every focused-verification guard (zero-test and
+    // zero-command demotion, outcome normalization). commands_run is
+    // agent-reported — the demotions are what keep it honest. The
     // adversarial reviewer stays a plain read-only agent by design.
     if (opts.verify === true || (Array.isArray(opts.focusedTests) && opts.focusedTests.length > 0)) {
       const item = {
@@ -79,6 +80,16 @@ function __archonPrimitives(w) {
         focused_verification: opts.focusedTests || [],
         artifact_requirements: opts.artifacts || [],
       };
+      if (item.focused_verification.length === 0) {
+        // Goal-oriented verifier: the agent chooses its own commands
+        // in-session. The prompt rides as verification_requirements (what to
+        // prove); host item normalization copies it into focused_verification
+        // to satisfy the wave metadata contract. Fail-closed backstop: an
+        // accepted outcome recording no successful command execution is
+        // demoted by the host (commands_run is agent-reported, so absence of
+        // execution must never verify anything).
+        item.verification_requirements = [prompt];
+      }
       return await w.parallel(`verification-wave-${id}`, [item], {
         tier: opts.tier || "coder",
         itemKind: "focused_verification",

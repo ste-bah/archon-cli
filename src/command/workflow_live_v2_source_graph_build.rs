@@ -189,6 +189,8 @@ fn source_task_graph_from_items(
     let mut items = Vec::new();
     for (item_id, canonical_task_ids, value) in raw_items {
         let dependency_ids = normalize_dependency_refs(&value, universe, &item_to_tasks);
+        let required_tools =
+            authoritative_required_tools(authoritative_task_universe, &canonical_task_ids);
         let raw_target_files = sorted_unique(non_empty_strings(
             value
                 .get("target_files")
@@ -265,6 +267,11 @@ fn source_task_graph_from_items(
                 values.extend(evidence_target_files);
                 values
             }),
+            // AUTHORITATIVE ONLY: computed above straight from the task
+            // universe for this item's canonical tasks, never from the
+            // (agent-authored) item value — an injected tool declaration must
+            // never bind MCP tools the task does not actually require.
+            required_tools,
         });
     }
     items.sort_by(|left, right| left.item_id.cmp(&right.item_id));
@@ -303,6 +310,23 @@ fn source_graph_target_files(
         Ok(normalized) => (normalized, evidence_targets),
         Err(_) => (source_targets, evidence_targets),
     }
+}
+
+/// required_tools taken solely from the authoritative task universe for the
+/// item's canonical tasks. The item value is never consulted, so an agent
+/// cannot make a no-tool task bind MCP tools by injecting a tool declaration.
+fn authoritative_required_tools(
+    task_universe: &WorkflowV2TaskUniverse,
+    canonical_task_ids: &[String],
+) -> Vec<String> {
+    sorted_unique(
+        task_universe
+            .tasks
+            .iter()
+            .filter(|task| canonical_task_ids.iter().any(|id| id == &task.canonical_task_id))
+            .flat_map(|task| task.required_tools.iter().cloned())
+            .collect(),
+    )
 }
 
 fn is_task_source_target(target: &str, task_universe: &WorkflowV2TaskUniverse) -> bool {

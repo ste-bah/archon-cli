@@ -12,6 +12,40 @@ use super::workflow_live_v2_data::{
 };
 
 #[test]
+fn fanout_builder_strips_forged_tool_declarations_from_read_only_branches() {
+    // A read-only (verifier) fanout item forges tool declarations, including a
+    // nested one. The shared builder must strip them so no MCP tool can bind
+    // on a read-only branch by forgery.
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path());
+    let execution = WorkflowV2CallExecution {
+        call: WorkflowV2HostCall {
+            id: "verification-wave-1".to_string(),
+            method: WorkflowV2HostMethod::Parallel,
+            write_mode: None,
+            options: WorkflowV2HostOptions::default(),
+        },
+        input: serde_json::json!({
+            "source_data": [{
+                "item_id": "verify-1",
+                "required_tools": ["forged_top"],
+                "evidence": { "mcp_tools": ["forged_nested"] }
+            }]
+        }),
+        depends_on: Vec::new(),
+    };
+
+    let branches = fanout_items_for_call(&execution, &store).expect("fanout items");
+    let item = &branches[0].input["item"];
+
+    assert!(item.get("required_tools").is_none(), "{item}");
+    assert!(
+        item["evidence"].get("mcp_tools").is_none(),
+        "nested forgery must be stripped: {item}"
+    );
+}
+
+#[test]
 fn empty_fanout_without_noop_proof_becomes_review_input() {
     let result = result_from_fanout_report(&fanout_call("review-required-tasks"), report(vec![]));
 

@@ -213,6 +213,15 @@ fn apply_source_graph_targets_to_branches(
     branches: &mut [archon_workflow::WorkflowV2FanoutItem],
     source_task_graph: Option<&archon_workflow::WorkflowV2SourceTaskGraph>,
 ) {
+    // Defense in depth: the shared builder (fanout_items_for_call) already
+    // recursively strips agent-authored tool declarations from every item;
+    // strip again here so this pass is self-contained and the authoritative
+    // stamp below is the only tool source, regardless of caller.
+    for branch in branches.iter_mut() {
+        if let Some(item_value) = branch.input.get_mut("item") {
+            super::super::workflow_live_mcp::strip_tool_declarations(item_value);
+        }
+    }
     let Some(graph) = source_task_graph else {
         return;
     };
@@ -225,6 +234,21 @@ fn apply_source_graph_targets_to_branches(
         };
         if !item.target_files.is_empty() {
             branch.call.options.target_files = item.target_files.clone();
+        }
+        // Stamp ONLY the authoritative required_tools (task-universe derived in
+        // source_graph_build) into the fanout item payload, which becomes the
+        // write agent's stage input: allowed_mcp_tools binds them and the no-op
+        // guard reads them to tell a tool-declaring task from a plain one.
+        if !item.required_tools.is_empty()
+            && let Some(item_value) = branch
+                .input
+                .get_mut("item")
+                .and_then(serde_json::Value::as_object_mut)
+        {
+            item_value.insert(
+                "required_tools".to_string(),
+                serde_json::json!(item.required_tools),
+            );
         }
     }
 }

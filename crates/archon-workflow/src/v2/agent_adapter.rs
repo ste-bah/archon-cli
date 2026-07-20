@@ -252,6 +252,13 @@ fn validate_request_specific_result(
         {
             Err(WorkflowV2AgentError::ImplementationAcceptedWithoutChanges)
         }
+        WorkflowV2Status::Noop if request_declares_required_tools(&request.input) => {
+            // A task that declares required tools (e.g. project MCP tools)
+            // cannot be satisfied by inspecting stale artifacts and declaring
+            // a no-op: those tools must actually be exercised this run. Force
+            // fresh work (accepted with real evidence) or an honest block.
+            Err(WorkflowV2AgentError::ImplementationNoopWithDeclaredRequiredTools)
+        }
         WorkflowV2Status::Noop if !has_typed_noop_proof(result) => {
             Err(WorkflowV2AgentError::ImplementationNoopWithoutTaskCoverage)
         }
@@ -337,6 +344,26 @@ fn has_typed_noop_proof(result: &WorkflowV2Result) -> bool {
             .iter()
             .any(|evidence| !evidence.summary.trim().is_empty())
     })
+}
+
+/// True when the stage input carries a non-empty `required_tools` (any casing)
+/// anywhere in its structure. The write branch input embeds the task's
+/// declared required_tools (stamped from the authoritative task universe), so
+/// this recognizes tasks whose completion demands exercising specific tools.
+fn request_declares_required_tools(input: &serde_json::Value) -> bool {
+    match input {
+        serde_json::Value::Object(object) => object.iter().any(|(key, value)| {
+            if matches!(key.as_str(), "required_tools" | "requiredTools") {
+                value
+                    .as_array()
+                    .is_some_and(|tools| tools.iter().any(|tool| tool.is_string()))
+            } else {
+                request_declares_required_tools(value)
+            }
+        }),
+        serde_json::Value::Array(values) => values.iter().any(request_declares_required_tools),
+        _ => false,
+    }
 }
 
 fn reject_forbidden_text(text: &str) -> Result<(), WorkflowV2AgentError> {
@@ -457,6 +484,9 @@ mod envelope_tests;
 #[cfg(test)]
 #[path = "agent_adapter_project_artifact_completion_tests.rs"]
 mod project_artifact_completion_tests;
+#[cfg(test)]
+#[path = "agent_adapter_required_tools_tests.rs"]
+mod required_tools_tests;
 #[cfg(test)]
 #[path = "agent_adapter_tests.rs"]
 mod tests;

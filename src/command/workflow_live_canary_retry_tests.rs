@@ -215,7 +215,16 @@ impl RetryAgentClient {
             "summary": "Retry verification accepted proof artifact.",
             "evidence": [{ "kind": "inspection", "summary": "retry accepted" }],
             "artifacts": [{ "id": "proof", "path": ARTIFACT_REL, "description": "proof" }],
-            "commands_run": [],
+            // The zero-command backstop demotes accepted verifications that
+            // executed nothing; an honest retry verifier runs at least the
+            // artifact check it claims.
+            "commands_run": [{
+                "kind": "inspect",
+                "command": format!("test -s {ARTIFACT_REL}"),
+                "status": "succeeded",
+                "exit_code": 0,
+                "output_summary": "proof artifact present and non-empty"
+            }],
             "files_read": [{ "path": ARTIFACT_REL, "purpose": "proof check" }],
             "files_changed": [],
             "task_coverage": [{

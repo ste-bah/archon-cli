@@ -252,6 +252,11 @@ pub struct WorkflowV2SourceTaskItem {
     pub expected_evidence: Vec<String>,
     #[serde(default)]
     pub artifact_requirements: Vec<String>,
+    /// Tools the task declares it requires (e.g. project MCP tools). Carried
+    /// from the authoritative task universe so the write branch can bind them;
+    /// a task that declares tools must not be satisfied by a bare no-op.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_tools: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

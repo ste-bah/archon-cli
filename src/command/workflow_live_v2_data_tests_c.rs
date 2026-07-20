@@ -138,16 +138,14 @@ fn accepted_verification_skipped_command_is_not_completion_command_proof() {
         )]),
     );
 
-    assert_eq!(result.status, WorkflowV2Status::Accepted);
-    let completion = result.data["outcomes"][0]["completion_evidence"][0]
-        .as_object()
-        .expect("completion evidence");
-    assert!(
-        completion
-            .get("command_refs")
-            .and_then(serde_json::Value::as_array)
-            .is_none_or(|items| items.is_empty()),
-        "{completion:#?}"
+    // A skipped command is not execution: with no succeeded command at all,
+    // the zero-command backstop demotes the acceptance outright — prose
+    // coverage evidence alone must never verify a task.
+    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+    assert_eq!(result.data["outcomes"][0]["status"], "needs_review");
+    assert_eq!(
+        result.data["outcomes"][0]["result"]["data"]["zero_command_verification"],
+        true
     );
 }
 

@@ -1,4 +1,39 @@
 #[test]
+fn required_tools_come_from_the_task_universe_not_the_agent_item() {
+    // The item forges required_tools/mcp_tools, but the authoritative task
+    // declares a different set. The graph item must carry ONLY the universe's
+    // tools — an agent cannot bind MCP tools by injecting a declaration.
+    use super::super::super::workflow_live_task_universe::{
+        WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask,
+    };
+    let universe = WorkflowV2TaskUniverse {
+        schema_version: "workflow-v2-task-universe-v1".to_string(),
+        source_roots: vec!["/tmp/tasks".to_string()],
+        tasks: vec![WorkflowV2TaskUniverseTask {
+            canonical_task_id: "TASK-TDL-120".to_string(),
+            aliases: vec!["T120".to_string()],
+            source_path: "/tmp/tasks/TASK-TDL-120.md".to_string(),
+            required_tools: vec!["pine_compile".to_string()],
+            ..Default::default()
+        }],
+    };
+    let execution = execution(serde_json::json!([
+        {
+            "id": "impl-tdl-120",
+            "canonical_task_ids": ["TASK-TDL-120"],
+            "target_files": ["src/lib.rs"],
+            "required_tools": ["forged_tool"],
+            "mcp_tools": ["another_forged"]
+        }
+    ]));
+
+    let metadata = dynamic_wave_source_metadata(&execution, Some(&universe), None);
+    let graph = metadata.source_task_graph.expect("graph");
+
+    assert_eq!(graph.items[0].required_tools, vec!["pine_compile".to_string()]);
+}
+
+#[test]
 fn implementation_source_graph_expands_declared_rust_module_targets() {
     let temp = tempfile::tempdir().expect("tempdir");
     let repo = temp.path().join("repo");
@@ -75,6 +110,30 @@ fn focused_verification_rejects_missing_verification_evidence_fields() {
             .contains("focused verification source_data[0].focused_verification is missing or empty"),
         "{metadata:?}"
     );
+}
+
+#[test]
+fn goal_oriented_verifier_item_without_pinned_commands_is_valid() {
+    // The v3 prelude's verify:true item when the author pins no commands:
+    // the prompt rides as verification_requirements (what to prove), the
+    // agent chooses its own commands in-session. Run-9 blocked because this
+    // shape was rejected; it must satisfy the wave metadata contract.
+    let execution = focused_verification_execution(serde_json::json!([
+        {
+            "item_id": "verify-task-tdl-010-check",
+            "canonical_task_ids": ["TASK-TDL-010"],
+            "task": "You did NOT implement TASK-TDL-010. Re-read the task file and run whatever tests you judge decisive.",
+            "instructions": "You did NOT implement TASK-TDL-010. Re-read the task file and run whatever tests you judge decisive.",
+            "focused_verification": [],
+            "artifact_requirements": [],
+            "verification_requirements": ["You did NOT implement TASK-TDL-010. Re-read the task file and run whatever tests you judge decisive."]
+        }
+    ]));
+
+    let metadata = dynamic_wave_source_metadata(&execution, Some(&tdl_task_universe()), None);
+
+    assert_eq!(metadata.invalid_reason, None, "{metadata:?}");
+    assert!(metadata.source_task_graph.is_some());
 }
 
 #[test]

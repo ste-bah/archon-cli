@@ -46,7 +46,13 @@ pub(super) fn normalize_focused_verification_outcome(
         // D73 companion: a verification that only ran test commands matching
         // zero tests proved nothing — the same fail-closed rule the write
         // path applies via patch validation.
-        demote_zero_test_acceptance(outcome);
+        demote_commandless_acceptance(outcome);
+        if matches!(
+            outcome.status,
+            WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+        ) {
+            demote_zero_test_acceptance(outcome);
+        }
         return;
     }
     if !should_accept_duplicate_pass {
@@ -94,6 +100,48 @@ pub(super) fn normalize_focused_verification_outcome(
     outcome.status = WorkflowV2Status::Accepted;
     outcome.failure_kind = None;
     outcome.error = None;
+}
+
+/// Demote an accepted/noop focused-verification outcome that recorded NO
+/// successful command execution at all. commands_run is agent-reported, so a
+/// verifier that ran nothing and self-reported acceptance must fail closed —
+/// this is the execution-side backstop for goal-oriented verifiers whose
+/// items pin no commands.
+fn demote_commandless_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
+    let Some(result) = outcome.result.as_mut() else {
+        return;
+    };
+    let ran_any_successful_command = result
+        .commands_run
+        .iter()
+        .any(|command| command.status == archon_workflow::WorkflowV2CommandStatus::Succeeded);
+    if ran_any_successful_command {
+        return;
+    }
+    result.status = WorkflowV2Status::NeedsReview;
+    result.residual_gaps.push(archon_workflow::WorkflowV2ResidualGap {
+        id: "zero_command_verification".to_string(),
+        description:
+            "this focused verification recorded no successful command execution; a run that executed nothing is not verification evidence"
+                .to_string(),
+        severity: Some("review".to_string()),
+    });
+    result.evidence.push(WorkflowV2Evidence::new(
+        WorkflowV2EvidenceKind::Review,
+        "accepted verification demoted: no successful command execution recorded",
+    ));
+    let mut data = result.data.as_object().cloned().unwrap_or_default();
+    data.insert(
+        "zero_command_verification".to_string(),
+        serde_json::json!(true),
+    );
+    data.insert(
+        "verification_failure_class".to_string(),
+        serde_json::json!("retryable_verification_shape_issue"),
+    );
+    result.data = serde_json::Value::Object(data);
+    outcome.status = WorkflowV2Status::NeedsReview;
+    outcome.failure_kind = Some(BranchFailureKind::Semantic);
 }
 
 /// Demote an accepted/noop focused-verification outcome whose only test
@@ -259,5 +307,67 @@ fn collect_json_strings(value: &serde_json::Value, output: &mut Vec<String>) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod commandless_demotion_tests {
+    use super::*;
+    use archon_workflow::{WorkflowV2CommandKind, WorkflowV2CommandRecord};
+
+    fn accepted_outcome(commands: Vec<WorkflowV2CommandRecord>) -> WorkflowV2BranchOutcome {
+        let mut result = WorkflowV2Result::accepted("verifier claims acceptance");
+        result.commands_run = commands;
+        WorkflowV2BranchOutcome {
+            item_id: "verify-check".to_string(),
+            role: "verifier".to_string(),
+            status: WorkflowV2Status::Accepted,
+            result: Some(result),
+            error: None,
+            failure_kind: None,
+            item_input_hash: Some("input".to_string()),
+            completion_evidence: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn accepted_verification_with_no_successful_command_is_demoted() {
+        // commands_run is agent-reported: a verifier that executed nothing
+        // (or only failed commands) must never verify anything.
+        let mut outcome = accepted_outcome(vec![WorkflowV2CommandRecord {
+            kind: WorkflowV2CommandKind::Test,
+            command: "cargo test broken".to_string(),
+            status: WorkflowV2CommandStatus::Failed,
+            exit_code: Some(101),
+            output_summary: "compile error".to_string(),
+        }]);
+        normalize_focused_verification_outcome("verification-wave-1-1", &mut outcome);
+        assert_eq!(outcome.status, WorkflowV2Status::NeedsReview);
+        assert_eq!(outcome.failure_kind, Some(BranchFailureKind::Semantic));
+        let result = outcome.result.expect("result");
+        assert_eq!(result.data["zero_command_verification"], true);
+        assert!(
+            result
+                .residual_gaps
+                .iter()
+                .any(|gap| gap.id == "zero_command_verification")
+        );
+
+        let mut empty = accepted_outcome(Vec::new());
+        normalize_focused_verification_outcome("verification-wave-1-2", &mut empty);
+        assert_eq!(empty.status, WorkflowV2Status::NeedsReview);
+    }
+
+    #[test]
+    fn accepted_verification_with_a_successful_command_is_not_demoted() {
+        let mut outcome = accepted_outcome(vec![WorkflowV2CommandRecord {
+            kind: WorkflowV2CommandKind::Test,
+            command: "cargo test -p archon-trading data_lake --lib".to_string(),
+            status: WorkflowV2CommandStatus::Succeeded,
+            exit_code: Some(0),
+            output_summary: "test result: ok. 16 passed; 0 failed".to_string(),
+        }]);
+        normalize_focused_verification_outcome("verification-wave-1-3", &mut outcome);
+        assert_eq!(outcome.status, WorkflowV2Status::Accepted);
     }
 }

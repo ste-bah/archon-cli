@@ -12,7 +12,14 @@ pub(super) fn fanout_items_for_call(
     Ok(values
         .into_iter()
         .enumerate()
-        .map(|(idx, value)| {
+        .map(|(idx, mut value)| {
+            // Agent-authored items must never declare tools: MCP binding is
+            // authoritative (task-universe derived, stamped later for write
+            // branches). Strip every tool-declaration key at every depth here,
+            // at the single builder both write and read-only branches share,
+            // so a nested forgery cannot reach allowed_mcp_tools or the no-op
+            // guard (both scan the whole input recursively).
+            super::super::workflow_live_mcp::strip_tool_declarations(&mut value);
             let item_id = fanout_item_id(&value, idx);
             let mut branch_call = execution.call.clone();
             branch_call.id = format!("{}-{item_id}", execution.call.id);
