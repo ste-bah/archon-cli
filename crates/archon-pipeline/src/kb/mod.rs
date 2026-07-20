@@ -7,13 +7,16 @@ mod ingest_storage;
 pub mod lint;
 mod provenance_storage;
 pub mod query;
+mod query_search;
 pub mod schema;
 
 pub use schema::{KbEdge, KbEdgeType, KbNode, KbNodeType};
 
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::Result;
+use archon_docs::embed::LocalEmbeddingProvider;
 use serde::{Deserialize, Serialize};
 
 // --- Supporting types ---
@@ -89,14 +92,42 @@ pub struct KbStats {
 pub struct KnowledgeBase {
     db: cozo::DbInstance,
     ingester: ingest::Ingester,
+    embedder: Option<Arc<dyn LocalEmbeddingProvider>>,
 }
 
 impl KnowledgeBase {
     /// Create a new knowledge base, ensuring the schema exists.
     pub fn new(db: cozo::DbInstance) -> Result<Self> {
+        if let Some(embedder) = archon_docs::embed::get_provider() {
+            return Self::from_shared_embedder(db, embedder);
+        }
         schema::ensure_kb_schema(&db)?;
         let ingester = ingest::Ingester::new(db.clone())?;
-        Ok(Self { db, ingester })
+        Ok(Self {
+            db,
+            ingester,
+            embedder: None,
+        })
+    }
+
+    pub fn with_embedder(
+        db: cozo::DbInstance,
+        embedder: Box<dyn LocalEmbeddingProvider>,
+    ) -> Result<Self> {
+        Self::from_shared_embedder(db, Arc::from(embedder))
+    }
+
+    fn from_shared_embedder(
+        db: cozo::DbInstance,
+        embedder: Arc<dyn LocalEmbeddingProvider>,
+    ) -> Result<Self> {
+        schema::ensure_kb_schema(&db)?;
+        let ingester = ingest::Ingester::with_embedder(db.clone(), Arc::clone(&embedder))?;
+        Ok(Self {
+            db,
+            ingester,
+            embedder: Some(embedder),
+        })
     }
 
     /// Ingest content from the given source into the knowledge base.
@@ -129,7 +160,10 @@ impl KnowledgeBase {
     /// Delegates to [`query::QueryEngine`] for search, context gathering,
     /// and synthesis, then converts the result into the public [`QueryResult`].
     pub async fn query(&self, question: &str, opts: &QueryOptions) -> Result<QueryResult> {
-        let engine = query::QueryEngine::new(self.db.clone());
+        let mut engine = query::QueryEngine::new(self.db.clone());
+        if let Some(embedder) = &self.embedder {
+            engine = engine.with_embedder(Arc::clone(embedder));
+        }
         let qa_opts = query::QaQueryOptions {
             top_k: opts.max_results,
             file_answer: false,
@@ -308,6 +342,8 @@ impl KnowledgeBase {
         // 4. Remove the node and its hash mapping in one transaction. The
         // mapping is conditional so deleting a legacy duplicate never removes
         // another node's keyed ownership reservation.
+        let _embedding_guard = schema::lock_embedding_state()?;
+        let has_embedding_storage = schema::kb_embedding_storage_exists(&self.db)?;
         let transaction = self.db.multi_transaction(true);
         let content_hash = transaction
             .run_script(
@@ -319,6 +355,15 @@ impl KnowledgeBase {
             .first()
             .and_then(|row| row[0].get_str())
             .map(str::to_owned);
+        if has_embedding_storage
+            && let Err(error) = transaction.run_script(
+                "?[node_id, embedding] := *kb_embeddings{node_id, embedding}, node_id = $nid\n                 :rm kb_embeddings { node_id => embedding }",
+                params.clone(),
+            )
+        {
+            let _ = transaction.abort();
+            return Err(anyhow::anyhow!("delete node embedding failed: {error}"));
+        }
         if let Err(error) = transaction.run_script(
             "?[node_id, node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at] := \
              *kb_nodes{node_id, node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at}, \

@@ -3,8 +3,10 @@
 //! Implements REQ-KB-003. NFR: search < 500ms, Q&A < 5s.
 
 use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
 
 use anyhow::Result;
+use archon_docs::embed::LocalEmbeddingProvider;
 use cozo::{DataValue, ScriptMutability};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -77,18 +79,10 @@ pub struct QaSource {
 pub trait QaSynthesizer: Send + Sync {
     async fn synthesize(&self, question: &str, context: &str) -> Result<String>;
 }
-/// Deprecated compatibility surface for the former unwired embedding configuration.
-#[deprecated(note = "KB queries use text matching; this configuration has no effect")]
-pub trait QueryEmbedder: Send + Sync {
-    fn embed_query(&self, text: &str) -> Result<Vec<f32>>;
-}
-/// Knowledge base query engine.
-///
-/// Searches KB nodes, gathers graph context, synthesizes answers via an
-/// optional LLM, and optionally files answers back as derived nodes.
 pub struct QueryEngine {
     db: cozo::DbInstance,
     synthesizer: Option<Box<dyn QaSynthesizer>>,
+    embedder: Option<Arc<dyn LocalEmbeddingProvider>>,
 }
 
 impl QueryEngine {
@@ -96,6 +90,7 @@ impl QueryEngine {
         Self {
             db,
             synthesizer: None,
+            embedder: None,
         }
     }
 
@@ -104,9 +99,8 @@ impl QueryEngine {
         self
     }
 
-    #[deprecated(note = "KB queries use text matching; this configuration has no effect")]
-    #[allow(deprecated)]
-    pub fn with_embedder(self, _embedder: Box<dyn QueryEmbedder>) -> Self {
+    pub fn with_embedder(mut self, embedder: Arc<dyn LocalEmbeddingProvider>) -> Self {
+        self.embedder = Some(embedder);
         self
     }
 
@@ -174,7 +168,7 @@ impl QueryEngine {
         })
     }
 
-    /// Search KB nodes using text matching.
+    /// Search KB nodes using text and optional semantic matching.
     /// Answer-type nodes get a 0.9x score penalty (EC-PIPE-018).
     pub fn search_nodes(
         &self,
@@ -182,75 +176,13 @@ impl QueryEngine {
         limit: usize,
         type_filter: Option<&[KbNodeType]>,
     ) -> Result<Vec<ScoredKbNode>> {
-        let mut params = BTreeMap::new();
-        params.insert("q".to_string(), DataValue::from(query_text.to_lowercase()));
-        // Over-fetch so post-filter still has enough results
-        params.insert("lim".to_string(), DataValue::from((limit * 3) as i64));
-
-        let result = self
-            .db
-            .run_script(
-                "?[node_id, node_type, source, domain_tag, title, content, \
-                 content_hash, chunk_index, created_at, updated_at] := \
-                 *kb_nodes{node_id, node_type, source, domain_tag, title, content, \
-                 content_hash, chunk_index, created_at, updated_at}, \
-                 (str_includes(lowercase(title), $q) or \
-                  str_includes(lowercase(content), $q)) \
-                 :limit $lim",
-                params,
-                ScriptMutability::Immutable,
-            )
-            .map_err(|e| anyhow::anyhow!("KB search failed: {}", e))?;
-
-        let mut scored: Vec<ScoredKbNode> = result
-            .rows
-            .iter()
-            .filter_map(|row| {
-                let node = row_to_kb_node(row);
-
-                // Apply type filter if specified
-                if let Some(filter) = type_filter
-                    && !filter.contains(&node.node_type)
-                {
-                    return None;
-                }
-
-                // Calculate relevance score based on title vs content match
-                let query_lower = query_text.to_lowercase();
-                let title_lower = node.title.to_lowercase();
-                let content_lower = node.content.to_lowercase();
-
-                let mut score: f64 = 0.0;
-                if title_lower.contains(&query_lower) {
-                    score += 0.8;
-                }
-                if content_lower.contains(&query_lower) {
-                    score += 0.5;
-                }
-                // Clamp to 0-1
-                score = score.min(1.0);
-
-                // EC-PIPE-018: Answer nodes get 0.9x penalty
-                if node.node_type == KbNodeType::Answer {
-                    score *= 0.9;
-                }
-
-                if score > 0.0 {
-                    Some(ScoredKbNode { node, score })
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        scored.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        scored.truncate(limit);
-
-        Ok(scored)
+        super::query_search::search_nodes(
+            &self.db,
+            self.embedder.as_ref(),
+            query_text,
+            limit,
+            type_filter,
+        )
     }
 
     /// Follow edges to collect related concepts, backlinks, provenance chains.
@@ -450,7 +382,7 @@ impl QueryEngine {
     }
 }
 
-fn row_to_kb_node(row: &[DataValue]) -> KbNode {
+pub(super) fn row_to_kb_node(row: &[DataValue]) -> KbNode {
     KbNode {
         node_id: row[0].get_str().unwrap_or("").to_string(),
         node_type: str_to_node_type(row[1].get_str().unwrap_or("raw")),
@@ -479,6 +411,9 @@ fn str_to_node_type(s: &str) -> KbNodeType {
 #[cfg(test)]
 #[path = "query_provenance_tests.rs"]
 mod query_provenance_tests;
+#[cfg(test)]
+#[path = "query_search_tests.rs"]
+mod query_search_tests;
 #[cfg(test)]
 #[path = "query_tests.rs"]
 mod query_tests;

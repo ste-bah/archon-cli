@@ -4,8 +4,10 @@
 //! batch storage in CozoDB.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::Result;
+use archon_docs::embed::LocalEmbeddingProvider;
 use cozo::DbInstance;
 use sha2::{Digest, Sha256};
 
@@ -19,6 +21,7 @@ use super::{IngestResult, IngestSource};
 /// Document ingester for the knowledge base.
 pub struct Ingester {
     storage: ChunkStorage,
+    embedder: Option<Arc<dyn LocalEmbeddingProvider>>,
 }
 
 impl Ingester {
@@ -28,6 +31,49 @@ impl Ingester {
     pub fn new(db: DbInstance) -> Result<Self> {
         Ok(Self {
             storage: ChunkStorage::new(db),
+            embedder: None,
+        })
+    }
+
+    pub fn with_embedder(
+        db: DbInstance,
+        embedder: Arc<dyn LocalEmbeddingProvider>,
+    ) -> Result<Self> {
+        let _guard = super::schema::lock_embedding_state()?;
+        let existing = read_node_content(&db)?;
+        let content: Vec<_> = existing
+            .iter()
+            .map(|(_, content)| content.clone())
+            .collect();
+        let vectors = embedder.embed_chunks(&content)?;
+        if vectors.len() != existing.len() {
+            anyhow::bail!(
+                "KB embedder returned {} vectors for {} existing nodes",
+                vectors.len(),
+                existing.len()
+            );
+        }
+        let embeddings: Vec<_> = existing
+            .into_iter()
+            .zip(vectors)
+            .map(|((node_id, _), embedding)| (node_id, embedding))
+            .collect();
+        super::schema::ensure_kb_embedding_schema_locked(
+            &db,
+            &embedder.embedding_space_id(),
+            embedder.dimension(),
+            Some(&embeddings),
+        )?;
+        let storage = ChunkStorage::new(db.clone());
+        super::schema::assert_embedding_space(
+            &db,
+            &embedder.embedding_space_id(),
+            embedder.dimension(),
+        )?;
+        backfill_missing_embeddings(&db, embedder.as_ref())?;
+        Ok(Self {
+            storage,
+            embedder: Some(embedder),
         })
     }
 
@@ -140,7 +186,31 @@ impl Ingester {
         source: &str,
         domain_tag: &str,
     ) -> Result<IngestResult> {
-        self.storage.store(chunks, source, domain_tag, sha256_hex)
+        let _guard = self
+            .embedder
+            .as_ref()
+            .map(|_| super::schema::lock_embedding_state())
+            .transpose()?;
+        if let Some(embedder) = &self.embedder {
+            super::schema::assert_embedding_space(
+                self.storage.db(),
+                &embedder.embedding_space_id(),
+                embedder.dimension(),
+            )?;
+        }
+        let content: Vec<_> = chunks.iter().map(|chunk| chunk.content.clone()).collect();
+        let embeddings = self
+            .embedder
+            .as_ref()
+            .map(|embedder| embedder.embed_chunks(&content))
+            .transpose()?;
+        self.storage.store(
+            chunks,
+            embeddings.as_deref(),
+            source,
+            domain_tag,
+            sha256_hex,
+        )
     }
 
     #[doc(hidden)]
@@ -152,6 +222,87 @@ impl Ingester {
     pub fn transaction_count_for_tests(&self) -> usize {
         self.storage.transaction_count_for_tests()
     }
+}
+
+pub(super) fn read_node_content(db: &DbInstance) -> Result<Vec<(String, String)>> {
+    let result = db
+        .run_script(
+            "?[node_id, content] := *kb_nodes{node_id, content}",
+            Default::default(),
+            cozo::ScriptMutability::Immutable,
+        )
+        .map_err(|error| anyhow::anyhow!("read KB nodes for embedding failed: {error}"))?;
+    Ok(result
+        .rows
+        .iter()
+        .map(|row| {
+            (
+                row[0].get_str().unwrap_or_default().to_string(),
+                row[1].get_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect())
+}
+
+pub(super) fn backfill_missing_embeddings(
+    db: &DbInstance,
+    embedder: &dyn LocalEmbeddingProvider,
+) -> Result<()> {
+    let result = db
+        .run_script(
+            "?[node_id, content] := *kb_nodes{node_id, content}, \
+             not *kb_embeddings{node_id}",
+            Default::default(),
+            cozo::ScriptMutability::Immutable,
+        )
+        .map_err(|error| anyhow::anyhow!("read unindexed KB nodes failed: {error}"))?;
+    for batch in result
+        .rows
+        .chunks(super::ingest_storage::KB_INGEST_BATCH_SIZE)
+    {
+        let content: Vec<_> = batch
+            .iter()
+            .map(|row| row[1].get_str().unwrap_or_default().to_string())
+            .collect();
+        let embeddings = embedder.embed_chunks(&content)?;
+        store_backfill_batch(db, batch, &embeddings)?;
+    }
+    Ok(())
+}
+
+fn store_backfill_batch(
+    db: &DbInstance,
+    nodes: &[Vec<cozo::DataValue>],
+    embeddings: &[Vec<f32>],
+) -> Result<()> {
+    use cozo::{DataValue, Vector};
+    use ndarray::Array1;
+    if nodes.len() != embeddings.len() {
+        anyhow::bail!(
+            "KB embedder returned {} vectors for {} existing nodes",
+            embeddings.len(),
+            nodes.len()
+        );
+    }
+    let rows = nodes
+        .iter()
+        .zip(embeddings)
+        .map(|(node, embedding)| {
+            DataValue::List(vec![
+                node[0].clone(),
+                DataValue::Vec(Vector::F32(Array1::from_vec(embedding.clone()))),
+            ])
+        })
+        .collect();
+    let mut params = std::collections::BTreeMap::new();
+    params.insert("rows".to_string(), DataValue::List(rows));
+    db.run_script(
+        "?[node_id, embedding] <- $rows\n         :put kb_embeddings { node_id => embedding }",
+        params,
+        cozo::ScriptMutability::Mutable,
+    )
+    .map_err(|error| anyhow::anyhow!("backfill KB embeddings failed: {error}"))?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

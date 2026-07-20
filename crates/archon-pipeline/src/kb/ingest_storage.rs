@@ -4,7 +4,8 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use anyhow::Result;
-use cozo::{DataValue, DbInstance, MultiTransaction};
+use cozo::{DataValue, DbInstance, MultiTransaction, Vector};
+use ndarray::Array1;
 
 use super::IngestResult;
 use super::schema::KbNodeType;
@@ -20,6 +21,7 @@ struct PendingChunk<'a> {
     chunk: &'a ChunkData,
     content_hash: String,
     chunk_index: usize,
+    embedding: Option<&'a [f32]>,
 }
 
 /// Stores raw chunks and their keyed content hashes in the same transaction.
@@ -38,13 +40,27 @@ impl ChunkStorage {
         }
     }
 
+    pub(super) fn db(&self) -> &DbInstance {
+        &self.db
+    }
+
     pub(super) fn store(
         &self,
         chunks: &[ChunkData],
+        embeddings: Option<&[Vec<f32>]>,
         source: &str,
         domain_tag: &str,
         hash: impl Fn(&str) -> String,
     ) -> Result<IngestResult> {
+        if let Some(embeddings) = embeddings
+            && embeddings.len() != chunks.len()
+        {
+            anyhow::bail!(
+                "KB embedder returned {} vectors for {} chunks",
+                embeddings.len(),
+                chunks.len()
+            );
+        }
         let mut seen_hashes = self.load_existing_hashes()?;
         let mut pending = Vec::new();
 
@@ -55,6 +71,7 @@ impl ChunkStorage {
                     chunk,
                     content_hash,
                     chunk_index,
+                    embedding: embeddings.map(|values| values[chunk_index].as_slice()),
                 });
             }
         }
@@ -157,6 +174,7 @@ impl ChunkStorage {
             anyhow::bail!("injected KB ingest batch failure after hash write");
         }
         self.insert_node_rows(transaction, &rows, source, domain_tag, now)?;
+        self.insert_embedding_rows(transaction, &rows)?;
         Ok(rows.len())
     }
 
@@ -220,6 +238,36 @@ impl ChunkStorage {
                 params,
             )
             .map_err(|error| anyhow::anyhow!("insert KB nodes failed: {error}"))?;
+        Ok(())
+    }
+
+    fn insert_embedding_rows(
+        &self,
+        transaction: &MultiTransaction,
+        rows: &[(String, &PendingChunk<'_>)],
+    ) -> Result<()> {
+        let embedding_rows: Vec<_> = rows
+            .iter()
+            .filter_map(|(node_id, chunk)| {
+                chunk.embedding.map(|embedding| {
+                    DataValue::List(vec![
+                        DataValue::from(node_id.as_str()),
+                        DataValue::Vec(Vector::F32(Array1::from_vec(embedding.to_vec()))),
+                    ])
+                })
+            })
+            .collect();
+        if embedding_rows.is_empty() {
+            return Ok(());
+        }
+        let mut params = BTreeMap::new();
+        params.insert("rows".to_string(), DataValue::List(embedding_rows));
+        transaction
+            .run_script(
+                "?[node_id, embedding] <- $rows\n                 :put kb_embeddings { node_id => embedding }",
+                params,
+            )
+            .map_err(|error| anyhow::anyhow!("insert KB embeddings failed: {error}"))?;
         Ok(())
     }
 

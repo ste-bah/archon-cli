@@ -35,6 +35,12 @@ pub trait LocalEmbeddingProvider: Send + Sync {
     /// Human-readable backend name for status reporting.
     fn backend_name(&self) -> &'static str;
 
+    /// Stable identifier for the vector space produced by this provider.
+    /// Providers with configurable models or endpoints must override this.
+    fn embedding_space_id(&self) -> String {
+        self.backend_name().to_string()
+    }
+
     /// Maximum useful parallel embedding batches for this provider instance.
     ///
     /// Local fastembed is one worker unless explicitly initialised with

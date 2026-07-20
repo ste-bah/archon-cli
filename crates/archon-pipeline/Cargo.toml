@@ -20,6 +20,8 @@ toml.workspace = true
 sha2.workspace = true
 hex.workspace = true
 cozo.workspace = true
+ndarray.workspace = true
+archon-docs = { path = "../archon-docs" }
 archon-memory = { path = "../archon-memory" }
 archon-leann = { path = "../archon-leann" }
 archon-llm = { path = "../archon-llm" }
