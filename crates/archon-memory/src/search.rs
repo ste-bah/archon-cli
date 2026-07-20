@@ -7,8 +7,7 @@ use crate::graph::{raw_to_memory, read_all_memories, row_values_to_memory};
 use crate::types::{Memory, MemoryError, SearchFilter};
 
 pub(crate) const FULL_SCAN_WARNING_THRESHOLD: usize = 10_000;
-const KEYWORD_CANDIDATE_MULTIPLIER: usize = 4;
-const MIN_KEYWORD_CANDIDATES: usize = 256;
+const INITIAL_FTS_LIMIT: i64 = 256;
 const MEMORY_COLUMNS: &str = "id, content, title, memory_type, importance, tags, source_type, project_path, created_at, updated_at, access_count, last_accessed";
 
 pub(crate) struct KeywordCandidates {
@@ -30,10 +29,7 @@ pub(crate) fn keyword_candidates(
         });
     }
 
-    let candidate_limit = limit
-        .saturating_mul(KEYWORD_CANDIDATE_MULTIPLIER)
-        .max(MIN_KEYWORD_CANDIDATES);
-    match fts_keyword_candidates(db, query, candidate_limit) {
+    match fts_keyword_candidates(db, query) {
         Ok(memories) => Ok(KeywordCandidates {
             memories,
             #[cfg(test)]
@@ -55,35 +51,47 @@ pub(crate) fn keyword_candidates(
     }
 }
 
-fn fts_keyword_candidates(
-    db: &DbInstance,
-    query: &str,
-    limit: usize,
-) -> Result<Vec<Memory>, MemoryError> {
-    let limit = i64::try_from(limit)
-        .map_err(|_| MemoryError::Database("keyword candidate limit exceeds i64".into()))?;
-    let mut params = BTreeMap::new();
-    params.insert("query".into(), DataValue::from(fts_query(query)));
-    params.insert("limit".into(), DataValue::from(limit));
-
+fn fts_keyword_candidates(db: &DbInstance, query: &str) -> Result<Vec<Memory>, MemoryError> {
     let mut memories = Vec::new();
     let mut seen = BTreeSet::new();
+
     for index in ["content_fts", "title_fts", "tags_fts"] {
-        let script = format!(
-            "?[score, {MEMORY_COLUMNS}] := ~memories:{index} {{{MEMORY_COLUMNS} | query: $query, k: $limit, score_kind: 'tf_idf', bind_score: score }} :order -score"
-        );
-        let result = db
-            .run_script(&script, params.clone(), ScriptMutability::Immutable)
-            .map_err(|error| MemoryError::Database(error.to_string()))?;
-        for row in result.rows {
-            if let Some(id) = row.get(1).and_then(DataValue::get_str)
-                && seen.insert(id.to_string())
-            {
-                memories.push(row_values_to_memory(&row[1..])?);
+        let mut limit = INITIAL_FTS_LIMIT;
+        loop {
+            let result = fts_candidate_query(db, query, index, limit)?;
+            let exhausted = result.rows.len() < limit as usize;
+            for row in result.rows {
+                if let Some(id) = row.get(1).and_then(DataValue::get_str)
+                    && seen.insert(id.to_string())
+                {
+                    memories.push(row_values_to_memory(&row[1..])?);
+                }
             }
+            if exhausted {
+                break;
+            }
+            limit = limit.checked_mul(2).ok_or_else(|| {
+                MemoryError::Database("keyword candidate limit exceeds i64".into())
+            })?;
         }
     }
     Ok(memories)
+}
+
+fn fts_candidate_query(
+    db: &DbInstance,
+    query: &str,
+    index: &str,
+    limit: i64,
+) -> Result<cozo::NamedRows, MemoryError> {
+    let mut params = BTreeMap::new();
+    params.insert("query".into(), DataValue::from(fts_query(query)));
+    params.insert("limit".into(), DataValue::from(limit));
+    let script = format!(
+        "?[score, {MEMORY_COLUMNS}] := ~memories:{index} {{{MEMORY_COLUMNS} | query: $query, k: $limit, score_kind: 'tf_idf', bind_score: score }} :order -score"
+    );
+    db.run_script(&script, params, ScriptMutability::Immutable)
+        .map_err(|error| MemoryError::Database(error.to_string()))
 }
 
 fn fts_query(query: &str) -> String {
@@ -150,7 +158,6 @@ pub(crate) fn recall(
     let mut scored: Vec<(f64, Memory)> = Vec::new();
 
     for mem in candidates.memories {
-
         let content_lower = mem.content.to_lowercase();
         let tags_lower = mem.tags.join(",").to_lowercase();
         let title_lower = mem.title.to_lowercase();
@@ -196,9 +203,30 @@ pub(crate) fn recall(
     Ok(scored.into_iter().map(|(_, m)| m).collect())
 }
 
+fn structured_search_candidates(
+    db: &DbInstance,
+    filter: &SearchFilter,
+) -> Result<KeywordCandidates, MemoryError> {
+    if let Some(text) = filter.text.as_deref() {
+        return keyword_candidates(db, text, usize::MAX);
+    }
+    if !filter.tags.is_empty() {
+        return keyword_candidates(db, &filter.tags.join(" "), usize::MAX);
+    }
+    let all_rows = read_all_memories(db)?;
+    warn_full_scan("memory.search.filter", all_rows.len(), None);
+    Ok(KeywordCandidates {
+        memories: all_rows
+            .into_iter()
+            .filter_map(|row| raw_to_memory(row).ok())
+            .collect(),
+        #[cfg(test)]
+        used_fts: false,
+    })
+}
+
 /// Structured search with filters (type, tags, text, date range).
 pub(crate) fn search(db: &DbInstance, filter: &SearchFilter) -> Result<Vec<Memory>, MemoryError> {
-    // If no filters are set, return empty (same behavior as original).
     let has_any_filter = filter.memory_type.is_some()
         || filter.text.is_some()
         || !filter.tags.is_empty()
@@ -209,18 +237,10 @@ pub(crate) fn search(db: &DbInstance, filter: &SearchFilter) -> Result<Vec<Memor
         return Ok(Vec::new());
     }
 
-    // Fetch all memories and filter in Rust.
-    let all_rows = read_all_memories(db)?;
-    warn_full_scan("memory.search.filter", all_rows.len(), None);
-
+    let candidates = structured_search_candidates(db, filter)?;
     let mut results: Vec<Memory> = Vec::new();
 
-    for raw in all_rows {
-        let mem = match raw_to_memory(raw) {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-
+    for mem in candidates.memories {
         // Filter by memory_type
         if let Some(mt) = filter.memory_type
             && mem.memory_type != mt
@@ -273,224 +293,5 @@ pub(crate) fn search(db: &DbInstance, filter: &SearchFilter) -> Result<Vec<Memor
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::graph::MemoryGraph;
-    use crate::types::MemoryType;
-
-    #[test]
-    fn keyword_candidates_use_fts_for_content_title_and_tags() {
-        let g = MemoryGraph::in_memory().expect("graph creation failed");
-        let content_id = g
-            .store_memory("indexed-content-marker", "", MemoryType::Fact, 0.5, &[], "m", "")
-            .expect("store failed");
-        let title_id = g
-            .store_memory("body", "indexed-title-marker", MemoryType::Fact, 0.5, &[], "m", "")
-            .expect("store failed");
-        let tag_id = g
-            .store_memory(
-                "body",
-                "",
-                MemoryType::Fact,
-                0.5,
-                &["indexed-tag-marker".to_string()],
-                "m",
-                "",
-            )
-            .expect("store failed");
-
-        for (query, expected_id) in [
-            ("indexed-content-marker", content_id),
-            ("indexed-title-marker", title_id),
-            ("indexed-tag-marker", tag_id),
-        ] {
-            let candidates = keyword_candidates(g.db(), query, 16).expect("FTS query failed");
-            assert!(candidates.used_fts);
-            assert!(candidates.memories.iter().any(|memory| memory.id == expected_id));
-        }
-    }
-
-    #[test]
-    fn keyword_fts_tracks_updates_and_deletes() {
-        let g = MemoryGraph::in_memory().expect("graph creation failed");
-        let id = g
-            .store_memory("before-update-marker", "", MemoryType::Fact, 0.5, &[], "m", "")
-            .expect("store failed");
-
-        g.update_memory(&id, Some("after-update-marker"), None)
-            .expect("update failed");
-        let updated = keyword_candidates(g.db(), "after-update-marker", 16)
-            .expect("updated FTS query failed");
-        assert!(updated.used_fts);
-        assert!(updated.memories.iter().any(|memory| memory.id == id));
-
-        g.delete_memory(&id).expect("delete failed");
-        let deleted = keyword_candidates(g.db(), "after-update-marker", 16)
-            .expect("deleted FTS query failed");
-        assert!(deleted.used_fts);
-        assert!(deleted.memories.iter().all(|memory| memory.id != id));
-    }
-
-    #[test]
-    fn keyword_candidates_fall_back_when_fts_is_unavailable() {
-        let db = DbInstance::new("mem", "", "").expect("db creation failed");
-        db.run_script(
-            ":create memories {
-                id: String => content: String, title: String, memory_type: String,
-                importance: Float, tags: String, source_type: String, project_path: String,
-                created_at: String, updated_at: String, access_count: Int, last_accessed: String
-            }",
-            Default::default(),
-            cozo::ScriptMutability::Mutable,
-        )
-        .expect("relation creation failed");
-        let now = Utc::now().to_rfc3339();
-        let params = std::collections::BTreeMap::from([
-            ("id".to_string(), cozo::DataValue::from("fallback-id")),
-            ("now".to_string(), cozo::DataValue::from(now.as_str())),
-        ]);
-        db.run_script(
-            "?[id, content, title, memory_type, importance, tags, source_type, project_path,
-                created_at, updated_at, access_count, last_accessed] <- [[
-                $id, 'fallback-marker', '', 'fact', 0.5, '[]', 'test', '', $now, '', 0, ''
-            ]] :put memories {id => content, title, memory_type, importance, tags, source_type,
-                project_path, created_at, updated_at, access_count, last_accessed}",
-            params,
-            cozo::ScriptMutability::Mutable,
-        )
-        .expect("memory insert failed");
-
-        let candidates = keyword_candidates(&db, "fallback-marker", 16)
-            .expect("fallback query failed");
-        assert!(!candidates.used_fts);
-        assert_eq!(candidates.memories.len(), 1);
-        assert_eq!(candidates.memories[0].id, "fallback-id");
-    }
-
-    #[test]
-    fn keyword_candidates_match_any_query_term() {
-        let g = MemoryGraph::in_memory().expect("graph creation failed");
-        let rust_id = g
-            .store_memory("rust", "", MemoryType::Fact, 0.5, &[], "m", "")
-            .expect("store failed");
-        let python_id = g
-            .store_memory("python", "", MemoryType::Fact, 0.5, &[], "m", "")
-            .expect("store failed");
-
-        let candidates = keyword_candidates(g.db(), "rust python", 16).expect("FTS query failed");
-        assert!(candidates.memories.iter().any(|memory| memory.id == rust_id));
-        assert!(
-            candidates
-                .memories
-                .iter()
-                .any(|memory| memory.id == python_id)
-        );
-    }
-
-    #[test]
-    fn keyword_candidates_support_single_character_terms() {
-        let g = MemoryGraph::in_memory().expect("graph creation failed");
-        let id = g
-            .store_memory("x", "", MemoryType::Fact, 0.5, &[], "m", "")
-            .expect("store failed");
-
-        let candidates = keyword_candidates(g.db(), "x", 16).expect("FTS query failed");
-        assert!(candidates.memories.iter().any(|memory| memory.id == id));
-    }
-
-    #[test]
-    fn recall_candidate_window_keeps_access_boost_winner() {
-        let g = MemoryGraph::in_memory().expect("graph creation failed");
-        let winner = g
-            .store_memory("needle", "", MemoryType::Fact, 0.5, &[], "m", "")
-            .expect("store failed");
-        for _ in 0..7 {
-            g.get_memory(&winner).expect("access update failed");
-        }
-        for i in 0..8 {
-            g.store_memory(
-                &format!("decoy-{i} {}", "needle ".repeat(32)),
-                "",
-                MemoryType::Fact,
-                0.5,
-                &[],
-                "m",
-                "",
-            )
-            .expect("store failed");
-        }
-
-        let results = g.recall_memories("needle", 1).expect("recall failed");
-        assert_eq!(results[0].id, winner);
-    }
-
-    #[test]
-    fn recall_ranks_by_keyword_hits() {
-        let g = MemoryGraph::in_memory().expect("graph creation failed");
-        // one keyword match
-        g.store_memory("apple pie", "", MemoryType::Fact, 0.5, &[], "m", "")
-            .expect("store failed");
-        // two keyword matches
-        g.store_memory(
-            "apple pie with apple sauce",
-            "",
-            MemoryType::Fact,
-            0.5,
-            &[],
-            "m",
-            "",
-        )
-        .expect("store failed");
-
-        let results = g.recall_memories("apple", 10).expect("recall failed");
-        assert_eq!(results.len(), 2);
-    }
-
-    #[test]
-    fn full_scan_contract_warns_only_past_threshold() {
-        assert!(full_scan_contract("memory.recall.keyword", 10, Some(5)).is_none());
-        let message = full_scan_contract(
-            "memory.recall.keyword",
-            FULL_SCAN_WARNING_THRESHOLD,
-            Some(5),
-        )
-        .expect("threshold row count should warn");
-        assert!(message.contains("full-scan"));
-        assert!(message.contains("at most 5"));
-    }
-
-    #[test]
-    fn recall_respects_limit() {
-        let g = MemoryGraph::in_memory().expect("graph creation failed");
-        for i in 0..20 {
-            g.store_memory(
-                &format!("memory {i} about rust"),
-                "",
-                MemoryType::Fact,
-                0.5,
-                &[],
-                "m",
-                "",
-            )
-            .expect("store failed");
-        }
-        let results = g.recall_memories("rust", 5).expect("recall failed");
-        assert_eq!(results.len(), 5);
-    }
-
-    #[test]
-    fn search_with_date_range() {
-        let g = MemoryGraph::in_memory().expect("graph creation failed");
-        g.store_memory("x", "", MemoryType::Fact, 0.5, &[], "m", "")
-            .expect("store failed");
-
-        let future = Utc::now() + chrono::Duration::days(1);
-        let filter = SearchFilter {
-            date_from: Some(future),
-            ..Default::default()
-        };
-        // Nothing should be in the future.
-        let results = g.search_memories(&filter).expect("search failed");
-        assert!(results.is_empty());
-    }
-}
+#[path = "search_tests.rs"]
+mod tests;
