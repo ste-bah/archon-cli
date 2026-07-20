@@ -121,15 +121,11 @@ fn exact_results(
     if query_terms.is_empty() {
         return Ok(Vec::new());
     }
-    let fts_query = query_terms
-        .iter()
-        .map(|term| &term[..2])
-        .collect::<Vec<_>>()
-        .join(" OR ");
+    let fts_query = query_terms.join(" OR ");
     let candidates = store::search_doc_chunks_fts(
         db,
         &fts_query,
-        store::count_doc_chunks(db)?,
+        exact_candidate_limit(options.top_k)?,
         options.document_filter.as_deref(),
     )?;
     Ok(exact_results_for_chunks(&query_terms, &candidates))
@@ -250,6 +246,12 @@ fn hnsw_results(
             "semantic HNSW search failed: {e}"
         ))),
     }
+}
+
+fn exact_candidate_limit(top_k: usize) -> Result<usize> {
+    top_k.checked_mul(8).ok_or_else(|| {
+        KnowledgeError::InvalidSearchOptions("top_k is too large to expand exact candidates".into())
+    })
 }
 
 fn cozo_limit(value: usize) -> Result<i64> {

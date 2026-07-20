@@ -121,6 +121,30 @@ fn exact_search_preserves_ascii_boundaries_next_to_unicode() {
 }
 
 #[test]
+fn exact_search_ignores_prefix_only_fts_crowding() {
+    let db = db_with_doc_schema();
+    for index in 0..32 {
+        insert_chunk(&db, &format!("decoy-{index}"), "doc-other", "Magma quasar.");
+    }
+    insert_chunk(&db, "wanted", "doc-wanted", "Marketplace quality.");
+    let engine = engine(db);
+
+    let results = engine
+        .search(
+            "marketplace quality",
+            &SearchOptions {
+                mode: SearchMode::Exact,
+                top_k: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].artifact_id, "wanted");
+}
+
+#[test]
 fn exact_search_ranks_all_index_matches_by_term_coverage() {
     let db = db_with_doc_schema();
     for index in 0..4 {
@@ -196,26 +220,6 @@ fn hybrid_search_uses_exact_when_no_embedding_is_available() {
 }
 
 #[test]
-fn semantic_search_without_doc_schema_returns_empty() {
-    let db = DbInstance::new("mem", "", "").unwrap();
-    let engine = engine(db);
-
-    let results = engine
-        .search(
-            "semantic",
-            &SearchOptions {
-                mode: SearchMode::Semantic,
-                top_k: 5,
-                query_embedding: Some(vec![1.0, 0.0]),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-
-    assert!(results.is_empty());
-}
-
-#[test]
 fn hybrid_search_without_doc_schema_returns_empty() {
     let db = DbInstance::new("mem", "", "").unwrap();
     let engine = engine(db);
@@ -225,27 +229,6 @@ fn hybrid_search_without_doc_schema_returns_empty() {
             "semantic",
             &SearchOptions {
                 mode: SearchMode::Hybrid,
-                top_k: 5,
-                query_embedding: Some(vec![1.0, 0.0]),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-
-    assert!(results.is_empty());
-}
-
-#[test]
-fn semantic_search_without_vector_schema_returns_empty() {
-    let db = db_with_doc_schema();
-    insert_chunk(&db, "c1", "doc-1", "A chunk exists without vectors.");
-    let engine = engine(db);
-
-    let results = engine
-        .search(
-            "chunk",
-            &SearchOptions {
-                mode: SearchMode::Semantic,
                 top_k: 5,
                 query_embedding: Some(vec![1.0, 0.0]),
                 ..Default::default()
@@ -275,20 +258,17 @@ fn semantic_search_without_embedding_returns_empty() {
 }
 
 #[test]
-fn semantic_search_rejects_top_k_above_cozo_integer_range() {
+fn exact_search_rejects_candidate_limit_overflow() {
     let db = db_with_doc_schema();
-    archon_docs::schema::ensure_vec_schema(&db, 2).unwrap();
-    insert_chunk(&db, "c1", "doc-1", "Semantic target chunk.");
-    archon_docs::store::insert_chunk_embedding(&db, "c1", &[1.0, 0.0], "test").unwrap();
+    insert_chunk(&db, "c1", "doc-1", "Marketplace quality.");
     let engine = engine(db);
 
     let error = engine
         .search(
-            "semantic target",
+            "marketplace",
             &SearchOptions {
-                mode: SearchMode::Semantic,
+                mode: SearchMode::Exact,
                 top_k: usize::MAX,
-                query_embedding: Some(vec![1.0, 0.0]),
                 ..Default::default()
             },
         )
@@ -296,87 +276,8 @@ fn semantic_search_rejects_top_k_above_cozo_integer_range() {
 
     assert_eq!(
         error.to_string(),
-        "invalid search options: top_k exceeds CozoDB's signed integer range"
+        "invalid search options: top_k is too large to expand exact candidates"
     );
-}
-
-#[test]
-fn semantic_search_finds_vector_indexed_chunk() {
-    let db = db_with_doc_schema();
-    archon_docs::schema::ensure_vec_schema(&db, 2).unwrap();
-    insert_chunk(&db, "c1", "doc-1", "Semantic target chunk.");
-    insert_chunk(&db, "c2", "doc-2", "Different vector chunk.");
-    archon_docs::store::insert_chunk_embedding(&db, "c1", &[1.0, 0.0], "test").unwrap();
-    archon_docs::store::insert_chunk_embedding(&db, "c2", &[0.0, 1.0], "test").unwrap();
-    let engine = engine(db);
-    let results = engine
-        .search(
-            "semantic target",
-            &SearchOptions {
-                mode: SearchMode::Semantic,
-                top_k: 1,
-                query_embedding: Some(vec![1.0, 0.0]),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-    assert_eq!(results[0].artifact_id, "c1");
-    assert!(results[0].semantic_score > 0.9);
-}
-
-#[test]
-fn semantic_search_filter_overfetches_before_post_filtering() {
-    let db = db_with_doc_schema();
-    archon_docs::schema::ensure_vec_schema(&db, 2).unwrap();
-    for index in 0..3 {
-        let chunk_id = format!("excluded-{index}");
-        insert_chunk(&db, &chunk_id, "doc-other", "Closer excluded vector.");
-        archon_docs::store::insert_chunk_embedding(&db, &chunk_id, &[1.0, 0.0], "test").unwrap();
-    }
-    insert_chunk(&db, "wanted", "doc-wanted", "Allowed vector.");
-    archon_docs::store::insert_chunk_embedding(&db, "wanted", &[0.0, 1.0], "test").unwrap();
-    let engine = engine(db);
-
-    let results = engine
-        .search(
-            "vector",
-            &SearchOptions {
-                mode: SearchMode::Semantic,
-                top_k: 1,
-                query_embedding: Some(vec![1.0, 0.0]),
-                document_filter: Some(vec!["doc-wanted".into()]),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].artifact_id, "wanted");
-}
-
-#[test]
-fn semantic_search_respects_document_filter() {
-    let db = db_with_doc_schema();
-    archon_docs::schema::ensure_vec_schema(&db, 2).unwrap();
-    insert_chunk(&db, "c1", "doc-1", "Filtered vector chunk.");
-    insert_chunk(&db, "c2", "doc-2", "Closer global vector chunk.");
-    archon_docs::store::insert_chunk_embedding(&db, "c1", &[0.8, 0.2], "test").unwrap();
-    archon_docs::store::insert_chunk_embedding(&db, "c2", &[1.0, 0.0], "test").unwrap();
-    let engine = engine(db);
-    let results = engine
-        .search(
-            "vector",
-            &SearchOptions {
-                mode: SearchMode::Semantic,
-                top_k: 1,
-                query_embedding: Some(vec![1.0, 0.0]),
-                document_filter: Some(vec!["doc-1".into()]),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].document_id, "doc-1");
 }
 
 #[test]
@@ -426,30 +327,6 @@ fn fts_chunk_candidates_respect_document_filter() {
 
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].chunk_id, "c2");
-}
-
-#[test]
-fn semantic_search_with_empty_document_filter_returns_empty() {
-    let db = db_with_doc_schema();
-    archon_docs::schema::ensure_vec_schema(&db, 2).unwrap();
-    insert_chunk(&db, "c1", "doc-1", "Semantic target chunk.");
-    archon_docs::store::insert_chunk_embedding(&db, "c1", &[1.0, 0.0], "test").unwrap();
-    let engine = engine(db);
-
-    let results = engine
-        .search(
-            "semantic target",
-            &SearchOptions {
-                mode: SearchMode::Semantic,
-                top_k: 1,
-                query_embedding: Some(vec![1.0]),
-                document_filter: Some(Vec::new()),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-
-    assert!(results.is_empty());
 }
 
 #[test]
