@@ -15,9 +15,28 @@ Shape — top-level script, exactly like this (no wrapper function):
   const first = await agent('...prompt...', { label: 'first-step' })
   log('first step done')
 
+  function remediationEvidence(env) {
+    if (!env) return 'no envelope'
+    let outputSummaryBudget = 4000
+    return JSON.stringify(env, (key, value) => {
+      if (key !== 'output_summary' || typeof value !== 'string') return value
+      const kept = value.slice(0, outputSummaryBudget)
+      outputSummaryBudget -= kept.length
+      return kept.length === value.length ? kept : `${kept}\n[output_summary truncated]`
+    })
+  }
+
   phase('Task Work')
-  const impl = await agent(`Implement TASK-X-001 per <task file path>. Repository root: <repo root>. Re-inspect the current state FIRST — if the work is genuinely already done, return the typed no-op. Prove your change with tests you run yourself.`, { label: 'implement-task-x-001', write: true, taskIds: ['TASK-X-001'], targetFiles: ['src/module.ext'] })
-  const check = await agent(`You did NOT implement TASK-X-001 — be suspicious of its self-report. Re-read <task file path>, inspect the actual code, and run whatever tests YOU judge prove or disprove the acceptance criteria.`, { label: 'verify-task-x-001', verify: true, taskIds: ['TASK-X-001'] })
+  // EVERY task follows this implement -> verify -> REMEDIATE shape. A verifier
+  // that demotes the task is not the end: feed its verbatim findings back to a
+  // fresh write agent and re-verify, up to 3 attempts, then record blocked.
+  let impl = await agent(`Implement TASK-X-001 per <task file path>. Repository root: <repo root>. Re-inspect the current state FIRST — if the work is genuinely already done, return the typed no-op. Prove your change with tests you run yourself.`, { label: 'implement-task-x-001', write: true, taskIds: ['TASK-X-001'], targetFiles: ['src/module.ext'] })
+  let check = await agent(`You did NOT implement TASK-X-001 — be suspicious of its self-report. Re-read <task file path>, inspect the actual code, and run whatever tests YOU judge prove or disprove the acceptance criteria.`, { label: 'verify-task-x-001', verify: true, taskIds: ['TASK-X-001'] })
+  for (let attempt = 2; attempt <= 3 && (!isAccepted(impl) || !isAccepted(check)); attempt += 1) {
+    const rejectedAttempt = `Implementation envelope:\n${remediationEvidence(impl)}\nVerifier envelope:\n${remediationEvidence(check)}`
+    impl = await agent(`Remediate TASK-X-001. The previous attempt was REJECTED. Fix exactly what these verbatim implementation and verifier envelopes name; do not re-argue them:\n${rejectedAttempt}\nOriginal goal: implement TASK-X-001 per <task file path>. Repository root: <repo root>. Prove the fix with tests you run yourself.`, { label: `remediate-task-x-001-${attempt}`, write: true, taskIds: ['TASK-X-001'], targetFiles: ['src/module.ext'] })
+    check = await agent(`You did NOT implement TASK-X-001 — be suspicious. The previous attempt was rejected with these verbatim findings:\n${rejectedAttempt}\nRe-read <task file path>, inspect the actual code, and run whatever tests YOU judge prove or disprove the acceptance criteria.`, { label: `verify-task-x-001-${attempt}`, verify: true, taskIds: ['TASK-X-001'] })
+  }
 
   phase('Review')
   const adversarial = await agent('Try to FALSIFY every accepted claim above using the actual files and tests: ...', { label: 'adversarial-review', tier: 'critic' })
@@ -30,8 +49,16 @@ Shape — top-level script, exactly like this (no wrapper function):
     uncovered_requirements: gapsFrom(coverage),
     notes: 'short honest summary',
   }
-  // (acceptedTaskIds/blockedTasks are arrays you build during the run;
-  //  findingsFrom/gapsFrom are your own small helpers reading the envelopes.)
+  // Your own small helpers, defined at the top of the script:
+  //   isAccepted(env) -> env && (env.status === 'accepted' || env.status === 'noop')
+  //   remediationEvidence(env) -> JSON.stringify the complete envelope with every
+  //      finding intact, but share a 4,000-character budget across only its
+  //      commands_run[*].output_summary strings and mark any truncation
+  //   summarize(env)  -> short text used only for final blocked accounting
+  //   findingsFrom/gapsFrom -> read the review envelopes for the return value
+  // acceptedTaskIds/blockedTasks are arrays you build as tasks finish:
+  //   isAccepted(impl) && isAccepted(check) ? acceptedTaskIds.push(id)
+  //                                         : blockedTasks.push({ taskId: id, reason: summarize(check) })
 
 Statements run at the top level: bare phase()/log() (no await needed), `await agent(...)`, and a final top-level `return`.
 
@@ -76,7 +103,8 @@ Rules the script must follow:
 - PER TASK, TWO STAGES, GOAL-ORIENTED PROMPTS — agents are capable sessions with their own tools; give them goals and context, never command scripts to obey:
   1. IMPLEMENT (write agent): give it the task file PATH, the repository root, and the goal; for artifact work tell it to use `project_artifact_root` from its OWN stage input (the host stamps it there — never guess or invent an artifact path yourself). Tell it to READ the task file and RE-INSPECT the current repo/artifact state FIRST — if the work is genuinely already done it returns the typed no-op (status noop, idempotent_noop true, task_coverage evidence) instead of redoing or cosmetically editing anything; the workflow must be safe to re-run. It decides how to implement and how to prove it, runs its own tests, and fixes its own command mistakes inside its session.
   2. VERIFY (fresh read-only agent with `verify: true` so it can execute commands): frame it adversarially — "you did NOT do this work; be suspicious of its self-report. Re-read the task file yourself, inspect the actual code and artifacts, and run whatever tests YOU judge prove or disprove the acceptance criteria." It chooses its own commands; if a command errors it corrects itself and re-runs within its session. Artifact checks use ABSOLUTE paths under the project artifact root — a DIFFERENT directory from the repository, stamped as `project_artifact_root` in the agent's own stage input.
-- Read every returned envelope. On failure it carries the verbatim gate error: give the retry agent that error plus the original goal (never more constraints), at most 3 retries per task, then record the task honestly as blocked with the evidence.
+- REMEDIATION IS MANDATORY, NOT OPTIONAL — this is the difference between a workflow that REPORTS problems and one that FIXES them, which is the entire point. Every task MUST follow implement -> verify -> remediate-and-re-verify, exactly as the example shows. A rejected implement or a verifier that returns anything other than accepted/noop is NOT the end of that task: feed the verifier's VERBATIM findings to a fresh write agent ("fix exactly what they name, do not re-argue them"), then re-verify, up to 3 attempts total. Only after the last attempt still fails do you record the task as blocked with the evidence. A script that runs each task once and records the failure is INCOMPLETE and will be rejected — the tasks must actually be implemented.
+- Retry prompts carry the COMPLETE implementation and verifier envelope structure plus the original goal. Preserve every finding, blocker, status, changed-file claim, and tool-evidence field verbatim. Only commands_run[*].output_summary may be bounded: share a 4,000-character budget across those strings in each envelope and mark truncation explicitly. Never reduce findings to a wrapper summary, add constraints, or argue about whether a finding is fair.
 - Never edit an existing artifact instance to satisfy a check; produce new artifacts through the real pipeline.
 - An honest block naming a real gap is success; fabricated acceptance is failure. The runtime gates independently validate patches, no-op proofs, and test evidence — do not try to outsmart them; they are on your side.
 - Deterministic code only (no Math.random, no Date.now); pass any needed timestamps via prompts.
@@ -101,8 +129,9 @@ Required investigation (do it; cite the files you actually read in evidence):
 4. Decide sequential vs parallel FROM THE TASK DATA: tasks editing shared files or linked by dependencies run sequentially; only genuinely independent tasks may batch.
 
 Then write the script per the dialect reference and SELF-CHECK before returning:
-- every canonical task id appears in EXACTLY ONE write agent() call's taskIds with that task's declared target files (never one umbrella call claiming many tasks);
+- every canonical task id appears in EXACTLY ONE INITIAL write agent() call's taskIds with that task's declared target files (never one umbrella call claiming many tasks); bounded remediation calls repeat only that same task id and target ownership;
 - a task that is already implemented still gets its write agent — instruct that agent to return the typed no-op (status noop, idempotent_noop true, task_coverage evidence) when it verifies nothing needs changing; NEVER make cosmetic edits just to show work;
+- EVERY task has a remediation path: after its verifier, a bounded loop (max 3 attempts) that re-runs a write agent with the verifier's verbatim findings and re-verifies, before recording blocked. A script without remediation does not implement the tasks and is incomplete;
 - write agents are told to prove their change by running tests IN-SESSION; only add focusedTests commands you verified against the repo (a wrong package or module name fails the gauntlet — when unsure, omit them);
 - the two mandated reviews are present, exactly labeled, after all work;
 - meta.phases matches the phase() calls; the accounting return covers every task id exactly once;
