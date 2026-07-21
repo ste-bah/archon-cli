@@ -465,6 +465,33 @@ fn atomic_delta_and_tag_updates_preserve_concurrent_invariants() {
 }
 
 #[test]
+fn atomic_trend_reconciliation_uses_authoritative_score() {
+    let graph = make_graph();
+    let id = graph
+        .store_memory(
+            "rule",
+            "",
+            MemoryType::Rule,
+            50.0,
+            &["existing".into(), "trend:stable".into()],
+            "test",
+            "",
+        )
+        .expect("store rule");
+    graph
+        .apply_importance_delta(&id, -20.0, "fixture:lower-before-reconcile")
+        .expect("lower score");
+
+    let reconciled = graph
+        .reconcile_importance_trend(&id, 40.0)
+        .expect("reconcile trend");
+
+    assert_eq!(reconciled.importance, 30.0);
+    assert!(reconciled.tags.contains(&"existing".to_string()));
+    assert!(reconciled.tags.contains(&"trend:declining".to_string()));
+}
+
+#[test]
 fn atomic_delta_rejects_nan_inf_and_empty_provenance() {
     let graph = make_graph();
     let id = graph

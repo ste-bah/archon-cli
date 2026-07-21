@@ -230,6 +230,15 @@ fn dispatch(graph: &MemoryGraph, method: &str, params: &Value) -> Result<Value, 
             serde_json::to_value(memory).map_err(|error| error.to_string())
         }
 
+        "reconcile_importance_trend" => {
+            let id = str_param(params, "id")?;
+            let previous_importance = f64_param(params, "previous_importance")?;
+            let memory = graph
+                .reconcile_importance_trend(&id, previous_importance)
+                .map_err(|error| error.to_string())?;
+            serde_json::to_value(memory).map_err(|error| error.to_string())
+        }
+
         "has_importance_application" => {
             let memory_id = str_param(params, "memory_id")?;
             let provenance_id = str_param(params, "provenance_id")?;

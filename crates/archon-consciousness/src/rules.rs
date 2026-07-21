@@ -287,6 +287,49 @@ impl<'g> RulesEngine<'g> {
             .collect())
     }
 
+    /// Reconcile persisted trend tags against scores from the previous snapshot
+    /// and return the authoritative score readbacks used for the next snapshot.
+    pub fn reconcile_trends(
+        &self,
+        previous_scores: &[crate::persistence::RuleScoreEntry],
+    ) -> Result<Vec<crate::persistence::RuleScoreEntry>, RulesError> {
+        let current_rules = self.get_rules_sorted()?;
+        current_rules
+            .iter()
+            .map(|rule| {
+                let previous = previous_scores
+                    .iter()
+                    .find(|entry| entry.rule_id == rule.id)
+                    .or_else(|| {
+                        let current_match_count = current_rules
+                            .iter()
+                            .filter(|candidate| candidate.text == rule.text)
+                            .count();
+                        if current_match_count != 1 {
+                            return None;
+                        }
+                        let mut matches = previous_scores
+                            .iter()
+                            .filter(|entry| entry.rule_text == rule.text);
+                        let first = matches.next()?;
+                        matches.next().is_none().then_some(first)
+                    });
+                let reconciled = match previous {
+                    Some(previous) => self
+                        .graph
+                        .reconcile_importance_trend(&rule.id, previous.score)?,
+                    None => self.graph.inspect_memory(&rule.id)?,
+                };
+                let authoritative = memory_to_rule(reconciled)?;
+                Ok(crate::persistence::RuleScoreEntry {
+                    rule_id: authoritative.id,
+                    rule_text: authoritative.text,
+                    score: authoritative.score,
+                })
+            })
+            .collect()
+    }
+
     /// Import rule scores from a previous session.
     ///
     /// For each entry, if a rule with matching text exists, its score is
@@ -317,7 +360,9 @@ impl<'g> RulesEngine<'g> {
                     entry.rule_id, entry.rule_text, entry.score
                 );
                 let delta = entry.score - rule.score;
-                self.apply_score_delta(&rule.id, delta, &provenance_id)?;
+                if delta.abs() > f64::EPSILON {
+                    self.apply_score_delta(&rule.id, delta, &provenance_id)?;
+                }
                 imported += 1;
             }
         }

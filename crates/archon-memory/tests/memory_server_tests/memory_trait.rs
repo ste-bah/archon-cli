@@ -156,6 +156,12 @@ async fn remote_memory_trait() {
     assert_eq!(atomically_updated.importance, 0.85);
     assert_eq!(atomically_updated.tags, vec!["remote", "trend:rising"]);
 
+    let reconciled = mt
+        .reconcile_importance_trend(&id, 0.9)
+        .expect("reconcile remote trend");
+    assert_eq!(reconciled.importance, 0.85);
+    assert_eq!(reconciled.tags, vec!["remote", "trend:declining"]);
+
     let recalled = mt.recall_memories("remote", 10).expect("recall");
     assert!(!recalled.is_empty());
 

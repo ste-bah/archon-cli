@@ -174,6 +174,21 @@ impl MemoryTrait for MemoryClient {
         serde_json::from_value(result).map_err(MemoryError::from)
     }
 
+    fn reconcile_importance_trend(
+        &self,
+        id: &str,
+        previous_importance: f64,
+    ) -> Result<Memory, MemoryError> {
+        let result = block_on_async(self.call(
+            "reconcile_importance_trend",
+            serde_json::json!({
+                "id": id,
+                "previous_importance": previous_importance,
+            }),
+        ))?;
+        serde_json::from_value(result).map_err(MemoryError::from)
+    }
+
     fn has_importance_application(
         &self,
         memory_id: &str,

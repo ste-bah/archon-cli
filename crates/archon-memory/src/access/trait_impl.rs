@@ -104,6 +104,14 @@ impl MemoryTrait for MemoryGraph {
         MemoryGraph::apply_importance_delta(self, id, delta, provenance_id)
     }
 
+    fn reconcile_importance_trend(
+        &self,
+        id: &str,
+        previous_importance: f64,
+    ) -> Result<Memory, MemoryError> {
+        MemoryGraph::reconcile_importance_trend(self, id, previous_importance)
+    }
+
     fn has_importance_application(
         &self,
         memory_id: &str,
@@ -303,6 +311,17 @@ impl MemoryTrait for MemoryAccess {
         match self {
             Self::Direct { graph, .. } => graph.apply_importance_delta(id, delta, provenance_id),
             Self::Remote(client) => client.apply_importance_delta(id, delta, provenance_id),
+        }
+    }
+
+    fn reconcile_importance_trend(
+        &self,
+        id: &str,
+        previous_importance: f64,
+    ) -> Result<Memory, MemoryError> {
+        match self {
+            Self::Direct { graph, .. } => graph.reconcile_importance_trend(id, previous_importance),
+            Self::Remote(client) => client.reconcile_importance_trend(id, previous_importance),
         }
     }
 

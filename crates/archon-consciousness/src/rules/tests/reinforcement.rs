@@ -162,6 +162,115 @@ fn decay_persists_declining_trend_for_reload() {
 }
 
 #[test]
+fn reconcile_snapshot_trends_compares_persisted_scores() {
+    let (graph, _) = make_engine();
+    let engine = RulesEngine::new(&graph);
+    let rising = engine
+        .add_rule("rising", RuleSource::UserDefined)
+        .expect("add rising rule");
+    let stable = engine
+        .add_rule("stable", RuleSource::UserDefined)
+        .expect("add stable rule");
+    let declining = engine
+        .add_rule("declining", RuleSource::UserDefined)
+        .expect("add declining rule");
+    let previous = engine.export_scores().expect("export baseline");
+
+    engine
+        .boost_rule_by(&rising.id, 5.0, "fixture:snapshot-rising")
+        .expect("raise score");
+    engine
+        .apply_score_delta(&declining.id, -5.0, "fixture:snapshot-declining")
+        .expect("lower score");
+
+    engine
+        .reconcile_trends(&previous)
+        .expect("reconcile snapshot trends");
+
+    let rules = engine.get_rules_sorted().expect("reload rules");
+    assert_eq!(
+        rules
+            .iter()
+            .find(|rule| rule.id == rising.id)
+            .unwrap()
+            .trend,
+        Trend::Rising
+    );
+    assert_eq!(
+        rules
+            .iter()
+            .find(|rule| rule.id == stable.id)
+            .unwrap()
+            .trend,
+        Trend::Stable
+    );
+    assert_eq!(
+        rules
+            .iter()
+            .find(|rule| rule.id == declining.id)
+            .unwrap()
+            .trend,
+        Trend::Declining
+    );
+}
+
+#[test]
+fn legacy_text_reconciliation_skips_ambiguous_current_rules() {
+    let (graph, _) = make_engine();
+    let engine = RulesEngine::new(&graph);
+    let first = engine
+        .add_rule("duplicate text", RuleSource::UserDefined)
+        .expect("add first rule");
+    let second = engine
+        .add_rule("duplicate text", RuleSource::SystemDefault)
+        .expect("add second rule");
+    let legacy = [crate::persistence::RuleScoreEntry {
+        rule_id: "missing-legacy-id".to_string(),
+        rule_text: "duplicate text".to_string(),
+        score: 40.0,
+    }];
+
+    engine
+        .reconcile_trends(&legacy)
+        .expect("reconcile legacy scores");
+
+    for id in [first.id, second.id] {
+        let rule = engine
+            .get_rules_sorted()
+            .expect("reload rules")
+            .into_iter()
+            .find(|rule| rule.id == id)
+            .expect("find rule");
+        assert_eq!(rule.trend, Trend::Stable);
+    }
+}
+
+#[test]
+fn zero_delta_import_preserves_reconciled_trend() {
+    let (graph, _) = make_engine();
+    let engine = RulesEngine::new(&graph);
+    let rule = engine
+        .add_rule("preserve trend", RuleSource::UserDefined)
+        .expect("add rule");
+    let previous = engine.export_scores().expect("export baseline");
+    engine
+        .boost_rule_by(&rule.id, 5.0, "fixture:import-rising")
+        .expect("raise score");
+    engine.reconcile_trends(&previous).expect("reconcile trend");
+    let current = engine.export_scores().expect("export current score");
+
+    engine.import_scores(&current).expect("import same score");
+
+    let reloaded = engine
+        .get_rules_sorted()
+        .expect("reload rules")
+        .into_iter()
+        .find(|candidate| candidate.id == rule.id)
+        .expect("find rule");
+    assert_eq!(reloaded.trend, Trend::Rising);
+}
+
+#[test]
 fn format_for_prompt_includes_score_floor_and_excludes_score_below_it() {
     let (graph, _) = make_engine();
     let engine = RulesEngine::new(&graph);

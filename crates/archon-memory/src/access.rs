@@ -100,6 +100,30 @@ pub trait MemoryTrait: Send + Sync {
         provenance_id: &str,
     ) -> Result<Memory, MemoryError>;
 
+    /// Atomically compare the authoritative importance to a prior snapshot,
+    /// replace the trend tag, and return the reconciled row.
+    fn reconcile_importance_trend(
+        &self,
+        id: &str,
+        previous_importance: f64,
+    ) -> Result<Memory, MemoryError> {
+        let memory = self.inspect_memory(id)?;
+        let mut tags: Vec<_> = memory
+            .tags
+            .iter()
+            .filter(|tag| !tag.starts_with("trend:"))
+            .cloned()
+            .collect();
+        let trend = match memory.importance.total_cmp(&previous_importance) {
+            std::cmp::Ordering::Greater => "trend:rising",
+            std::cmp::Ordering::Equal => "trend:stable",
+            std::cmp::Ordering::Less => "trend:declining",
+        };
+        tags.push(trend.to_string());
+        self.update_memory(id, None, Some(&tags))?;
+        self.inspect_memory(id)
+    }
+
     /// Return whether this memory has durably recorded an importance delta
     /// for the given immutable provenance identifier.
     fn has_importance_application(
