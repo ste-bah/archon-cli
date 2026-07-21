@@ -102,18 +102,15 @@ pub(super) async fn resume_generated_v2_workflow(
     let Some(plan) = live_plan_from_generated_bundle(store, &run).await? else {
         return Ok(None);
     };
-    match run.status {
-        RunStatus::Completed => {
-            return Ok(Some(format!(
-                "Workflow {} is already completed; start a new workflow run for new work.\n",
-                run.id
-            )));
-        }
-        // A cancelled run IS resumable: its accepted call results are persisted
-        // in the result-store frontier, so resuming re-runs only the work that
-        // did not complete (Resume resets cancelled stages/items to Pending).
-        // Only a genuinely finished run (Completed, above) refuses resume.
-        _ => {}
+    // A cancelled run IS resumable: its accepted call results are persisted
+    // in the result-store frontier, so resuming re-runs only the work that
+    // did not complete (Resume resets cancelled stages/items to Pending).
+    // Only a genuinely finished run (Completed) refuses resume.
+    if run.status == RunStatus::Completed {
+        return Ok(Some(format!(
+            "Workflow {} is already completed; start a new workflow run for new work.\n",
+            run.id
+        )));
     }
     let run = match gate_live_approval(cwd, store, run, approval_mode, &tui_tx)? {
         LiveApprovalOutcome::Proceed { run, note } => {
@@ -287,8 +284,7 @@ async fn execute_generated_v2_run(
             .as_ref()
             .map(|universe| {
                 super::workflow_live_v2_completion_credit::prepare_resume_credit(
-                    &v2_store,
-                    universe,
+                    &v2_store, universe,
                 )
             })
             .transpose()?

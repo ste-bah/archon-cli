@@ -249,6 +249,29 @@ fn reusable_record_has_required_completion_evidence(record: &WorkflowV2CallRecor
     !completion_evidence_call_id(&record.call.id) || !record.completion_evidence.is_empty()
 }
 
+/// True when every task this record covers is in the restart's completed set
+/// (and it covers at least one). Used to reuse an already-accepted call —
+/// including its verification — on `restart task <id>` without re-checking
+/// scaffold/input hashes, so tasks before the restart point are not
+/// re-validated from the top.
+pub(super) fn record_tasks_all_completed(
+    record: &WorkflowV2CallRecord,
+    completed: &std::collections::BTreeSet<String>,
+) -> bool {
+    if completed.is_empty() {
+        return false;
+    }
+    let mut tasks: std::collections::BTreeSet<&str> =
+        record.completed_ids.iter().map(String::as_str).collect();
+    for evidence in &record.completion_evidence {
+        let task_id = evidence.task_id.trim();
+        if !task_id.is_empty() {
+            tasks.insert(task_id);
+        }
+    }
+    !tasks.is_empty() && tasks.iter().all(|task| completed.contains(*task))
+}
+
 pub(super) fn frontier_resume_record_reusable(
     record: &WorkflowV2CallRecord,
     scaffold_hash: &str,

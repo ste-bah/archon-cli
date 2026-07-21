@@ -22,6 +22,23 @@ impl WorkflowScriptHost {
             source_metadata.source_fingerprint.as_deref(),
         );
         if let Some(record) = self.runner.v2_store.load_call_record(&execution.call.id)? {
+            // Restart/resume from a task: a call whose tasks are ALL already
+            // recorded complete must be reused directly — including its
+            // verification — without re-checking scaffold/input hashes. A
+            // re-authored script or a fresh verifier input would otherwise
+            // fail the hash match and force every prior task to re-validate
+            // from the top, which is exactly what `restart task <id>` must not
+            // do. Only accepted/noop, non-invalidated, still-valid records for
+            // tasks in the completed set qualify.
+            if record_tasks_all_completed(&record, &self.runner.resume_completed_ids)
+                && is_reusable_status(record.status)
+                && record.invalidated_by.is_none()
+                && record.result.validate().is_ok()
+                && reusable_record_has_required_completion_evidence(&record)
+            {
+                self.mark_reused(&record).await?;
+                return result_view_json(&record.result);
+            }
             let source_metadata_reusable = !source_metadata.source_metadata_required
                 || source_metadata.source_fingerprint.is_some();
             let strict_reuse = source_metadata_reusable
