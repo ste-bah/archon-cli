@@ -6,13 +6,11 @@ use serde::{Deserialize, Serialize};
 
 use archon_world_model::embedding::{EmbeddingRequest, WorldEmbeddingAdapter};
 use archon_world_model::guardrail::GuardrailRiskScores;
-use archon_world_model::integration::WorldAdvisorSurface;
 use archon_world_model::jepa::JEPA_MODEL_KIND;
 use archon_world_model::registry::{LATENT_TRANSITION_MODEL_KIND, ModelRegistry};
 use archon_world_model::representation::{
     TraceAction, TraceWindow, TraceWindowBuilder, WorldRepresentationAdapter,
 };
-use archon_world_model::schema::{WorldActionKind, WorldTraceRow, WorldTraceSource};
 use archon_world_model::storage::WorldModelStore;
 
 use super::embedding_runtime::build_embedding_adapter;
@@ -68,57 +66,21 @@ fn default_prediction_model_kind() -> String {
     LATENT_TRANSITION_MODEL_KIND.into()
 }
 
-fn runtime_action_row(
-    surface: WorldAdvisorSurface,
-    session_id: &str,
-    action_ref: &str,
-    action_summary: &str,
-) -> WorldTraceRow {
-    let action_kind = match surface {
-        WorldAdvisorSurface::MemorySurfacing => WorldActionKind::MemorySurface,
-        WorldAdvisorSurface::ToolRun => WorldActionKind::ToolCall,
-        WorldAdvisorSurface::VerificationRun => WorldActionKind::Verification,
-        WorldAdvisorSurface::Pipeline | WorldAdvisorSurface::PipelineStep => {
-            WorldActionKind::PlanUpdate
-        }
-        _ => WorldActionKind::AgentAttempt,
-    };
-    let source = match surface {
-        WorldAdvisorSurface::ProviderRuntime => WorldTraceSource::ProviderRuntime,
-        WorldAdvisorSurface::MemorySurfacing => WorldTraceSource::Memory,
-        WorldAdvisorSurface::AgentEvolution => WorldTraceSource::AgentEvolution,
-        WorldAdvisorSurface::InteractiveSession => WorldTraceSource::Conversation,
-        WorldAdvisorSurface::Pipeline | WorldAdvisorSurface::PipelineStep => {
-            WorldTraceSource::PipelineBundle
-        }
-        _ => WorldTraceSource::ActivityEvent,
-    };
-    let mut action = WorldTraceRow::new(session_id, action_kind)
-        .with_row_id(format!("world-runtime-action-{}", uuid::Uuid::new_v4()));
-    action.source = source;
-    action.redacted_excerpt = Some(format!("operation={action_ref} input={action_summary}"));
-    action
-}
-
 fn prediction_trace(
     root: &Path,
-    surface: WorldAdvisorSurface,
     session_id: &str,
     action_ref: &str,
-    action_summary: &str,
     context_limit: usize,
 ) -> anyhow::Result<PredictionTrace> {
     let store = WorldModelStore::open(root)?;
-    let mut rows = store.load_rows()?;
-    let action_row = match rows.iter().find(|row| row.row_id == action_ref) {
-        Some(row) => row.clone(),
-        None => {
-            let row = runtime_action_row(surface, session_id, action_ref, action_summary);
-            store.persist_rows(&[row.clone()])?;
-            rows.push(row.clone());
-            row
-        }
-    };
+    let rows = store.load_rows()?;
+    let action_row = rows
+        .iter()
+        .find(|row| row.row_id == action_ref)
+        .cloned()
+        .ok_or_else(|| {
+            anyhow::anyhow!("StoredTraceUnavailable: action row not found: {action_ref}")
+        })?;
     if action_row.session_id != session_id {
         anyhow::bail!(
             "stored action row session mismatch: expected {session_id}, got {}",
@@ -160,7 +122,6 @@ pub(super) fn render_active_checkpoint_prediction(
         root,
         stats,
         active_model_id,
-        WorldAdvisorSurface::InteractiveSession,
         session_id,
         action_ref,
         summary,
@@ -235,7 +196,6 @@ pub(super) fn persist_active_checkpoint_prediction(
     root: &Path,
     stats: archon_world_model::ColdStartStats,
     active_model_id: Option<String>,
-    surface: WorldAdvisorSurface,
     session_id: &str,
     action_ref: &str,
     summary: &str,
@@ -249,10 +209,8 @@ pub(super) fn persist_active_checkpoint_prediction(
 
     let trace = prediction_trace(
         root,
-        surface,
         session_id,
         action_ref,
-        summary,
         config.learning.world_model.jepa.context_window_rows,
     )?;
     let inference = predict_with_checkpoint(config, root, &model_id, &trace)?;
@@ -309,7 +267,7 @@ pub(super) fn record_outcome_for_prediction(
     let mut prediction = load_prediction(root, prediction_id)?
         .ok_or_else(|| anyhow::anyhow!("prediction not found: {prediction_id}"))?;
     let actual_next_state = if prediction.model_kind == JEPA_MODEL_KIND {
-        encode_jepa_actual_outcome(config, root, &prediction, actual_summary)?
+        encode_jepa_actual_outcome(config, root, &prediction)?
     } else {
         let adapter = build_embedding_adapter(config)?;
         embed(

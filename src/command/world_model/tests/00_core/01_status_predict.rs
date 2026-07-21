@@ -151,61 +151,35 @@ fn predict_next_uses_active_model_when_ready() {
 }
 
 #[test]
-fn repeated_runtime_action_ref_uses_current_candidate_action() {
+fn predict_next_fails_open_without_recorded_action() {
     let temp = tempfile::tempdir().unwrap();
     seed_training_rows(temp.path());
     let config = test_config();
     let trained = candidate::render_train(&config, temp.path(), true, None).unwrap();
     let candidate_id = candidate_id_from(&trained);
-    let stats = archon_world_model::ColdStartStats {
-        rows: 1_000,
-        sessions: 50,
-        observed_days: 7,
-    };
+    let store = archon_world_model::storage::WorldModelStore::open(temp.path()).unwrap();
+    let rows_before = store.load_rows().unwrap();
 
-    let first = render_predict_next_with_state(
+    let rendered = render_predict_next_with_state(
         &config,
         temp.path(),
-        stats,
-        Some(candidate_id.clone()),
-        "runtime-session",
-        "static-action-ref",
-        "first candidate action",
-    );
-    assert!(first.contains("Inference: active_checkpoint"), "{first}");
-    let second = render_predict_next_with_state(
-        &config,
-        temp.path(),
-        stats,
+        archon_world_model::ColdStartStats {
+            rows: 1_000,
+            sessions: 50,
+            observed_days: 7,
+        },
         Some(candidate_id),
         "runtime-session",
-        "static-action-ref",
-        "second candidate action",
+        "missing-action-ref",
+        "candidate action without runtime trace",
     );
-    let prediction_id = prediction_id_from(&second);
-    let prediction = predict::load_prediction(temp.path(), &prediction_id)
-        .unwrap()
-        .expect("second prediction should be persisted");
 
-    assert_eq!(
-        prediction.action_summary,
-        "operation=static-action-ref input=second candidate action"
+    assert!(
+        rendered.contains("Unavailable: StoredTraceUnavailable"),
+        "{rendered}"
     );
-    let rows = archon_world_model::storage::WorldModelStore::open(temp.path())
-        .unwrap()
-        .load_rows()
-        .unwrap();
-    let runtime_rows = rows
-        .iter()
-        .filter(|row| {
-            row.session_id == "runtime-session"
-                && row.redacted_excerpt.as_deref().is_some_and(|summary| {
-                    summary.starts_with("operation=static-action-ref input=")
-                })
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(runtime_rows.len(), 2);
-    assert_ne!(runtime_rows[0].row_id, runtime_rows[1].row_id);
+    assert!(rendered.contains("Behavior: fail-open"), "{rendered}");
+    assert_eq!(store.load_rows().unwrap(), rows_before);
 }
 
 #[test]

@@ -194,38 +194,7 @@ pub(super) async fn build(
         agent_event_tx,
         agent_registry,
     );
-    let guardrail_config = config.clone();
-    let guardrail_session_id = session_id.to_string();
-    agent.set_first_tool_action_callback(Arc::new(
-        move |action_id, tool_name, tool_use_id, input| {
-            crate::command::world_model::reclassify_active_guardrail_for_session(
-                &guardrail_config,
-                &guardrail_session_id,
-                action_id,
-                tool_name,
-                tool_use_id,
-                input,
-            );
-            crate::command::world_model::turn_requirements_for_action(
-                &guardrail_session_id,
-                action_id,
-            )
-        },
-    ));
-    let tool_run_admission_config = config.clone();
-    agent.set_tool_run_callbacks(
-        Arc::new(move |request| {
-            crate::command::world_model::admit_tool_run_attempt(&tool_run_admission_config, request)
-        }),
-        Arc::new(crate::command::world_model::record_tool_run_attempt_outcome),
-    );
-    let finalization_session_id = session_id.to_string();
-    agent.set_turn_finalization_callback(Arc::new(move |action_id, _output| {
-        crate::command::world_model::turn_finalization_verdict_for_action(
-            &finalization_session_id,
-            action_id,
-        )
-    }));
+    super::world_model_callbacks::install(&mut agent, config, session_id);
     let metrics = Arc::new(archon_tui::observability::ChannelMetrics::default());
     let metrics_sink: Arc<dyn ChannelMetricSink> = metrics.clone();
     agent.set_channel_metrics(metrics_sink);

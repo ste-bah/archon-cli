@@ -1,10 +1,12 @@
 #[test]
-fn predict_next_persists_missing_runtime_action_before_inference() {
+fn predict_next_does_not_persist_missing_runtime_action() {
     let temp = tempfile::tempdir().unwrap();
     seed_training_rows(temp.path());
     let config = test_config();
     let trained = candidate::render_train(&config, temp.path(), true, None).unwrap();
     let candidate_id = candidate_id_from(&trained);
+    let store = archon_world_model::storage::WorldModelStore::open(temp.path()).unwrap();
+    let rows_before = store.load_rows().unwrap();
 
     let rendered = render_predict_next_with_state(
         &config,
@@ -21,37 +23,10 @@ fn predict_next_persists_missing_runtime_action_before_inference() {
     );
 
     assert!(
-        rendered.contains("Inference: active_checkpoint"),
+        rendered.contains("Unavailable: StoredTraceUnavailable"),
         "{rendered}"
     );
-    let rows = archon_world_model::storage::WorldModelStore::open(temp.path())
-        .unwrap()
-        .load_rows()
-        .unwrap();
-    let action = rows
-        .iter()
-        .find(|row| {
-            row.redacted_excerpt.as_deref()
-                == Some(
-                    "operation=runtime-action input=execute the selected agent evolution command",
-                )
-        })
-        .expect("runtime action must be persisted before inference");
-    assert!(action.row_id.starts_with("world-runtime-action-"));
-    assert_ne!(action.row_id, "runtime-action");
-    assert_eq!(action.session_id, "runtime-session");
-    assert_eq!(
-        action.action_kind,
-        archon_world_model::schema::WorldActionKind::AgentAttempt
-    );
-    assert_eq!(
-        action.source,
-        archon_world_model::schema::WorldTraceSource::Conversation
-    );
-    assert_eq!(
-        action.redacted_excerpt.as_deref(),
-        Some("operation=runtime-action input=execute the selected agent evolution command")
-    );
+    assert_eq!(store.load_rows().unwrap(), rows_before);
 }
 
 #[test]
@@ -255,6 +230,60 @@ fn predict_next_uses_active_jepa_metal_model() {
     assert!(rendered.contains("Runtime framework: mlx-rs"));
     assert!(rendered.contains("Runtime native prediction: true"));
     assert!(rendered.contains("Runtime host fallback count: 0"));
+}
+
+#[test]
+fn jepa_outcome_requires_recorded_target_trace() {
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let store = archon_world_model::storage::WorldModelStore::open(temp.path()).unwrap();
+    let mut planned = archon_world_model::WorldTraceRow::new(
+        "outcome-session",
+        archon_world_model::schema::WorldActionKind::PlanUpdate,
+    )
+    .with_row_id("outcome-action");
+    planned.redacted_excerpt = Some("apply the reviewed migration".into());
+    store.persist_rows(&[planned]).unwrap();
+
+    let config = jepa_test_config();
+    let trained = candidate::render_train_jepa(&config, temp.path(), true, None).unwrap();
+    let candidate_id = candidate_id_from(&trained);
+    archon_world_model::registry::ModelRegistry::open(temp.path())
+        .unwrap()
+        .promote_model_kind(&candidate_id, "jepa_transition")
+        .unwrap();
+    let rendered = render_predict_next_with_state(
+        &config,
+        temp.path(),
+        archon_world_model::ColdStartStats {
+            rows: 1_000,
+            sessions: 50,
+            observed_days: 7,
+        },
+        Some(candidate_id),
+        "outcome-session",
+        "outcome-action",
+        "summary echo must not become model input",
+    );
+    let prediction_id = prediction_id_from(&rendered);
+
+    let error = predict::record_outcome_for_prediction(
+        &config,
+        temp.path(),
+        &prediction_id,
+        "migration completed",
+    )
+    .unwrap_err();
+
+    assert!(
+        error.to_string().contains("StoredTraceUnavailable"),
+        "{error}"
+    );
+    let persisted = predict::load_prediction(temp.path(), &prediction_id)
+        .unwrap()
+        .expect("prediction remains persisted");
+    assert!(persisted.actual_next_state.is_none());
+    assert!(persisted.latent_surprise.is_none());
 }
 
 #[test]

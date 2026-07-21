@@ -157,7 +157,6 @@ fn encode_jepa_actual_outcome(
     config: &archon_core::config::ArchonConfig,
     root: &Path,
     prediction: &PersistedPrediction,
-    actual_summary: &str,
 ) -> anyhow::Result<Vec<f32>> {
     let registry = ModelRegistry::open(root)?;
     let candidate = registry
@@ -170,37 +169,27 @@ fn encode_jepa_actual_outcome(
             candidate.model.metadata.latent_dim
         );
     }
-    let (window, _) = synthetic_runtime_window(
-        &prediction.session_id,
-        &format!("{}-actual", prediction.action_ref),
-        actual_summary,
-    )?;
+    let store = WorldModelStore::open(root)?;
+    let rows = store.load_rows()?;
+    let session_rows = rows
+        .iter()
+        .filter(|row| row.session_id == prediction.session_id)
+        .cloned()
+        .collect::<Vec<_>>();
+    let builder = TraceWindowBuilder::new(&session_rows);
+    let window = builder
+        .target_window(&prediction.action_ref, 1, 1)
+        .map_err(|error| anyhow::anyhow!("StoredTraceUnavailable: {error}"))?;
     candidate
         .model
         .encode_target(&window)
         .map_err(|error| anyhow::anyhow!("JepaEncoderFailed: {error}"))
 }
 
-fn synthetic_runtime_window(
-    session_id: &str,
-    action_ref: &str,
-    summary: &str,
-) -> anyhow::Result<(archon_world_model::TraceWindow, TraceAction)> {
-    let mut row =
-        WorldTraceRow::new(session_id, WorldActionKind::AgentAttempt).with_row_id(action_ref);
-    row.redacted_excerpt = Some(summary.to_string());
-    row.created_at = Utc::now();
-    let action = TraceAction::from_row(&row);
-    let builder = TraceWindowBuilder::new(&[row]);
-    let window = builder
-        .context_window(action_ref, 1)
-        .map_err(|error| anyhow::anyhow!("JepaEncoderFailed: {error}"))?;
-    Ok((window, action))
-}
-
 fn unavailable_reason_from_error(error: &anyhow::Error) -> &'static str {
     let message = error.to_string();
     for reason in [
+        "StoredTraceUnavailable",
         "JepaCheckpointMissing",
         "JepaCheckpointInvalid",
         "JepaEncoderFailed",

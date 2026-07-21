@@ -7,6 +7,79 @@ use super::build_agent::build_session_agent;
 use super::{BuiltAgent, agent_ledger, open_governed_learning_db};
 use crate::cli_args::Cli;
 
+trait NonInteractiveGuardTarget {
+    fn activate_guardrail(&mut self, session_id: &str, action_id: &str);
+    fn set_guardrail_action_id(&mut self, action_id: Option<String>);
+    fn set_turn_requirement_reminder(&mut self, reminder: Option<String>);
+}
+
+impl NonInteractiveGuardTarget for archon_core::agent::Agent {
+    fn activate_guardrail(&mut self, session_id: &str, action_id: &str) {
+        crate::command::world_model::activate_guardrail_for_action(session_id, action_id);
+    }
+
+    fn set_guardrail_action_id(&mut self, action_id: Option<String>) {
+        archon_core::agent::Agent::set_guardrail_action_id(self, action_id);
+    }
+
+    fn set_turn_requirement_reminder(&mut self, reminder: Option<String>) {
+        archon_core::agent::Agent::set_turn_requirement_reminder(self, reminder);
+    }
+}
+
+fn apply_non_interactive_guard_scope(
+    target: &mut impl NonInteractiveGuardTarget,
+    session_id: &str,
+    action_id: &str,
+    reminder: Option<String>,
+) {
+    target.activate_guardrail(session_id, action_id);
+    target.set_guardrail_action_id(Some(action_id.to_string()));
+    target.set_turn_requirement_reminder(reminder);
+}
+
+fn clear_non_interactive_guard_scope(target: &mut impl NonInteractiveGuardTarget) {
+    target.set_guardrail_action_id(None);
+    target.set_turn_requirement_reminder(None);
+}
+
+fn begin_non_interactive_guardrail(
+    config: &archon_core::config::ArchonConfig,
+    session_id: &str,
+    content: &str,
+    action_prefix: &str,
+) -> Option<crate::command::world_model::RuntimeGuardrailRecord> {
+    let task_class = archon_world_model::guardrail::classify_task(
+        content,
+        archon_world_model::integration::WorldAdvisorSurface::InteractiveSession,
+    );
+    let surface = match task_class {
+        archon_world_model::RuntimeTaskClass::CodingChange
+        | archon_world_model::RuntimeTaskClass::Debugging
+        | archon_world_model::RuntimeTaskClass::Refactor => {
+            archon_world_model::integration::WorldAdvisorSurface::CodingTask
+        }
+        _ => archon_world_model::integration::WorldAdvisorSurface::InteractiveSession,
+    };
+    crate::command::world_model::begin_guarded_action(
+        config,
+        surface,
+        session_id,
+        &format!("{action_prefix}-{}", uuid::Uuid::new_v4()),
+        content,
+    )
+}
+
+fn apply_guardrail_record(
+    target: &mut impl NonInteractiveGuardTarget,
+    session_id: &str,
+    record: &crate::command::world_model::RuntimeGuardrailRecord,
+) {
+    let action_id = &record.action.action_id;
+    let reminder = crate::command::world_model::turn_requirements_for_action(session_id, action_id);
+    apply_non_interactive_guard_scope(target, session_id, action_id, reminder);
+}
+
 /// Run a print-mode session: set up auth/agent, process one query, return exit code.
 pub(crate) async fn run_print_mode_session(
     config: &archon_core::config::ArchonConfig,
@@ -51,7 +124,17 @@ pub(crate) async fn run_print_mode_session(
         permission_mode,
     );
 
-    run_print_mode(print_config, config, &mut agent, event_rx).await
+    let guardrail =
+        begin_non_interactive_guardrail(config, session_id, &print_config.query, "print-turn");
+    if let Some(record) = &guardrail {
+        apply_guardrail_record(&mut agent, session_id, record);
+    }
+    let exit_code = run_print_mode(print_config, config, &mut agent, event_rx).await;
+    clear_non_interactive_guard_scope(&mut agent);
+    if let Some(record) = &guardrail {
+        crate::command::world_model::record_guardrail_turn_outcome(config, record, exit_code == 0);
+    }
+    exit_code
 }
 
 /// Run a headless-mode session over JSON-lines stdin/stdout.
@@ -122,6 +205,8 @@ pub(crate) async fn run_headless_session(
                     governed_learning_db.as_ref(),
                     &ledger_context,
                     &permission_mode,
+                    config,
+                    session_id,
                 )
                 .await
                 {
@@ -157,10 +242,26 @@ async fn process_headless_message(
     governed_learning_db: Option<&std::sync::Arc<cozo::DbInstance>>,
     ledger_context: &crate::runtime::agent_ledger_events::AgentLedgerContext,
     permission_mode: &std::sync::Arc<tokio::sync::Mutex<String>>,
+    config: &archon_core::config::ArchonConfig,
+    session_id: &str,
 ) -> bool {
     tracing::info!(len = content.len(), "headless: processing UserMessage");
 
-    if let Err(e) = agent.process_message(content).await {
+    let guardrail = begin_non_interactive_guardrail(config, session_id, content, "headless-turn");
+    if let Some(record) = &guardrail {
+        apply_guardrail_record(agent, session_id, record);
+    }
+    let process_result = agent.process_message(content).await;
+    clear_non_interactive_guard_scope(agent);
+    if let Some(record) = &guardrail {
+        crate::command::world_model::record_guardrail_turn_outcome(
+            config,
+            record,
+            process_result.is_ok(),
+        );
+    }
+
+    if let Err(e) = process_result {
         tracing::error!(%e, "headless: agent error");
         crate::runtime::agent_ledger_events::record_agent_runtime_error(
             governed_learning_db,
@@ -229,4 +330,57 @@ async fn write_line(stdout: &mut tokio::io::Stdout, msg: AgentMessage) -> std::i
         .map_err(|e| std::io::Error::other(e.to_string()))?;
     tokio::io::AsyncWriteExt::write_all(stdout, line.as_bytes()).await?;
     tokio::io::AsyncWriteExt::flush(stdout).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Default)]
+    struct RecordingGuardTarget {
+        activated: Option<(String, String)>,
+        action_id: Option<String>,
+        reminder: Option<String>,
+    }
+
+    impl NonInteractiveGuardTarget for RecordingGuardTarget {
+        fn activate_guardrail(&mut self, session_id: &str, action_id: &str) {
+            self.activated = Some((session_id.to_string(), action_id.to_string()));
+        }
+
+        fn set_guardrail_action_id(&mut self, action_id: Option<String>) {
+            self.action_id = action_id;
+        }
+
+        fn set_turn_requirement_reminder(&mut self, reminder: Option<String>) {
+            self.reminder = reminder;
+        }
+    }
+
+    #[test]
+    fn non_interactive_guard_scope_activates_and_assigns_action_identity() {
+        let mut target = RecordingGuardTarget::default();
+
+        apply_non_interactive_guard_scope(
+            &mut target,
+            "print-session",
+            "print-turn-1",
+            Some("run required verification".into()),
+        );
+
+        assert_eq!(
+            target.activated,
+            Some(("print-session".into(), "print-turn-1".into()))
+        );
+        assert_eq!(target.action_id.as_deref(), Some("print-turn-1"));
+        assert_eq!(
+            target.reminder.as_deref(),
+            Some("run required verification")
+        );
+
+        clear_non_interactive_guard_scope(&mut target);
+
+        assert!(target.action_id.is_none());
+        assert!(target.reminder.is_none());
+    }
 }

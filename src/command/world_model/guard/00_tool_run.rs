@@ -19,6 +19,10 @@ pub(crate) fn admit_tool_run_attempt(
     }
 
     let started_at = std::time::Instant::now();
+    if let Err(error) = persist_tool_run_candidate_at_root(&root, &request) {
+        tracing::warn!(%error, "failed to persist ToolRun candidate trace; allowing attempt");
+        return ToolRunAdmission::Allowed;
+    }
     let action_id = tool_run_action_id(&request);
     let summary = tool_run_summary(&request);
     let advisory = super::runtime::record_runtime_advisory(
@@ -124,12 +128,30 @@ fn record_tool_run_attempt_outcome_at_root(root: &Path, attempt: ToolRunAttemptO
         &attempt.tool_use_id,
         attempt.attempt,
     );
-    let decision = archon_world_model::guardrail::load_guardrail_decisions(&root)
-        .unwrap_or_default()
+    let decisions = match archon_world_model::guardrail::load_guardrail_decisions(root) {
+        Ok(decisions) => decisions,
+        Err(error) => {
+            tracing::warn!(%error, %action_id, "failed to load ToolRun admission decision");
+            record_unavailable_tool_run_outcome(
+                root,
+                &attempt,
+                &action_id,
+                "guardrail_decision_unavailable:store_unavailable",
+            );
+            return;
+        }
+    };
+    let decision = decisions
         .into_iter()
         .find(|decision| decision.action_id == action_id);
     let Some(decision) = decision else {
         tracing::warn!(%action_id, "ToolRun outcome has no persisted admission decision");
+        record_unavailable_tool_run_outcome(
+            root,
+            &attempt,
+            &action_id,
+            "guardrail_decision_unavailable:not_found",
+        );
         return;
     };
     let task_class = archon_world_model::classify_tool_action(
@@ -156,15 +178,75 @@ fn record_tool_run_attempt_outcome_at_root(root: &Path, attempt: ToolRunAttemptO
     );
     outcome.outcome_id = format!("world-guard-outcome-{action_id}");
     outcome.idempotency_key = format!("world_guardrail:outcome:{action_id}");
-    outcome
-        .evidence_refs
-        .push(format!("parent_guarded_action:{}", attempt.parent_action_id));
+    outcome.evidence_refs.push(format!(
+        "parent_guarded_action:{}",
+        attempt.parent_action_id
+    ));
     if attempt.blocked {
-        outcome.evidence_refs.push("guardrail:tool_run_blocked".into());
+        outcome
+            .evidence_refs
+            .push("guardrail:tool_run_blocked".into());
     }
-    if let Err(error) = archon_world_model::guardrail::append_guardrail_outcome(&root, &outcome) {
+    if let Ok(config) = archon_core::config::load_config() {
+        super::runtime::record_runtime_guardrail_outcome_for_decision_at_root(
+            &config,
+            root,
+            &decision,
+            &attempt.session_id,
+            &action_id,
+            &format!("{} execution outcome", attempt.tool_name),
+            &mut outcome,
+        );
+    } else if decision.prediction_id.is_some() {
+        outcome
+            .evidence_refs
+            .push("prediction_outcome_unavailable:store_unavailable".into());
+    }
+    if let Err(error) = archon_world_model::guardrail::append_guardrail_outcome(root, &outcome) {
         tracing::warn!(%error, %action_id, "failed to persist ToolRun outcome");
     }
+}
+
+fn record_unavailable_tool_run_outcome(
+    root: &Path,
+    attempt: &ToolRunAttemptOutcome,
+    action_id: &str,
+    evidence_ref: &str,
+) {
+    let mut outcome = unavailable_tool_run_outcome(attempt, action_id);
+    outcome.evidence_refs.push(evidence_ref.into());
+    if let Err(error) = archon_world_model::guardrail::append_guardrail_outcome(root, &outcome) {
+        tracing::warn!(%error, %action_id, "failed to persist unavailable ToolRun outcome");
+    }
+}
+
+fn unavailable_tool_run_outcome(
+    attempt: &ToolRunAttemptOutcome,
+    action_id: &str,
+) -> archon_world_model::WorldGuardrailOutcome {
+    let task_class = archon_world_model::classify_tool_action(
+        &attempt.tool_name,
+        &attempt.input,
+        archon_world_model::integration::WorldAdvisorSurface::ToolRun,
+    );
+    let mut decision = archon_world_model::WorldGuardrailDecision::default();
+    decision.action_id = action_id.to_string();
+    decision.surface = archon_world_model::integration::WorldAdvisorSurface::ToolRun;
+    decision.decision_id.clear();
+    let mut outcome = archon_world_model::WorldGuardrailOutcome::from_decision(
+        &decision,
+        task_class,
+        if attempt.blocked || attempt.is_error {
+            archon_world_model::GuardrailFinalStatus::Failed
+        } else {
+            archon_world_model::GuardrailFinalStatus::CompletedWithCaveat
+        },
+        "ToolRun admission decision unavailable",
+    );
+    outcome.outcome_id = format!("world-guard-outcome-{action_id}");
+    outcome.idempotency_key = format!("world_guardrail:outcome:{action_id}");
+    outcome.decision_id = None;
+    outcome
 }
 
 fn tool_run_action(request: &ToolRunAdmissionRequest) -> archon_world_model::WorldGuardedAction {
@@ -199,6 +281,72 @@ fn tool_run_summary(request: &ToolRunAdmissionRequest) -> String {
     )
 }
 
+fn persist_tool_run_candidate_at_root(
+    root: &Path,
+    request: &ToolRunAdmissionRequest,
+) -> anyhow::Result<()> {
+    let fields = request
+        .input
+        .as_object()
+        .map(|input| {
+            let mut fields = input.keys().map(String::as_str).collect::<Vec<_>>();
+            fields.sort_unstable();
+            fields.join(",")
+        })
+        .unwrap_or_default();
+    let redacted_input = redact_tool_input(&request.input);
+    let mut row = archon_world_model::WorldTraceRow::new(
+        &request.session_id,
+        archon_world_model::schema::WorldActionKind::ToolCall,
+    )
+    .with_row_id(tool_run_action_id(request));
+    row.redacted_excerpt = Some(format!(
+        "tool={} fields={} input={} permission={:?} attempt={}",
+        request.tool_name, fields, redacted_input, request.permission_level, request.attempt
+    ));
+    row.evidence_refs = vec![archon_world_model::schema::EvidenceRef::new(
+        "parent_guarded_action",
+        &request.parent_action_id,
+    )];
+    archon_world_model::storage::WorldModelStore::open(root)?.persist_rows(&[row])?;
+    Ok(())
+}
+
+fn redact_tool_input(input: &serde_json::Value) -> String {
+    fn redact(value: &serde_json::Value, key: Option<&str>) -> serde_json::Value {
+        if key.is_some_and(is_sensitive_tool_input_key) {
+            return serde_json::Value::String("[REDACTED_SECRET]".into());
+        }
+        match value {
+            serde_json::Value::Object(fields) => serde_json::Value::Object(
+                fields
+                    .iter()
+                    .map(|(key, value)| (key.clone(), redact(value, Some(key))))
+                    .collect(),
+            ),
+            serde_json::Value::Array(values) => {
+                serde_json::Value::Array(values.iter().map(|value| redact(value, None)).collect())
+            }
+            _ => value.clone(),
+        }
+    }
+
+    archon_world_model::embedding::redact_embedding_text(
+        &serde_json::to_string(&redact(input, None)).unwrap_or_default(),
+    )
+    .chars()
+    .take(600)
+    .collect()
+}
+
+fn is_sensitive_tool_input_key(key: &str) -> bool {
+    let normalized = key.to_ascii_lowercase().replace(['-', '_'], "");
+    matches!(
+        normalized.as_str(),
+        "apikey" | "token" | "secret" | "authorization" | "bearer" | "password"
+    )
+}
+
 fn tool_run_action_id(request: &ToolRunAdmissionRequest) -> String {
     tool_run_action_id_parts(
         &request.parent_action_id,
@@ -208,9 +356,7 @@ fn tool_run_action_id(request: &ToolRunAdmissionRequest) -> String {
 }
 
 fn tool_run_action_id_parts(parent_action_id: &str, tool_use_id: &str, attempt: u32) -> String {
-    format!(
-        "world-guard-tool-{parent_action_id}-{tool_use_id}-attempt-{attempt}"
-    )
+    format!("world-guard-tool-{parent_action_id}-{tool_use_id}-attempt-{attempt}")
 }
 
 fn tool_run_block_reason(decision: &archon_world_model::WorldGuardrailDecision) -> String {
@@ -296,7 +442,52 @@ mod tool_run_tests {
 
         assert_eq!(tool_run_action_id(&request), tool_run_action_id(&request));
         assert_ne!(tool_run_action_id(&request), tool_run_action_id(&retry));
-        assert!(tool_run_action(&retry).idempotency_key.ends_with("attempt-1"));
+        assert!(
+            tool_run_action(&retry)
+                .idempotency_key
+                .ends_with("attempt-1")
+        );
+    }
+
+    #[test]
+    fn tool_run_candidate_trace_uses_real_action_id_and_redacted_input_shape() {
+        let temp = tempfile::tempdir().unwrap();
+        let request = ToolRunAdmissionRequest {
+            session_id: "session-1".into(),
+            parent_action_id: "parent-1".into(),
+            tool_use_id: "tool-use-1".into(),
+            attempt: 2,
+            tool_name: "Bash".into(),
+            input: serde_json::json!({
+                "command": "curl -H 'Authorization: secret-token'",
+                "api_key": "direct-secret",
+                "nested": {
+                    "token": "nested-secret",
+                    "items": [{"authorization": "array-secret"}]
+                }
+            }),
+            permission_level: archon_tools::tool::PermissionLevel::Dangerous,
+        };
+
+        persist_tool_run_candidate_at_root(temp.path(), &request).unwrap();
+
+        let rows = archon_world_model::storage::WorldModelStore::open(temp.path())
+            .unwrap()
+            .load_rows()
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].row_id, tool_run_action_id(&request));
+        assert_eq!(
+            rows[0].action_kind,
+            archon_world_model::schema::WorldActionKind::ToolCall
+        );
+        let excerpt = rows[0].redacted_excerpt.as_deref().unwrap();
+        assert!(excerpt.contains("tool=Bash"));
+        assert!(excerpt.contains("command"));
+        assert!(!excerpt.contains("secret-token"));
+        assert!(!excerpt.contains("direct-secret"));
+        assert!(!excerpt.contains("nested-secret"));
+        assert!(!excerpt.contains("array-secret"));
     }
 
     #[test]
@@ -337,12 +528,90 @@ mod tool_run_tests {
         let outcomes = archon_world_model::guardrail::load_guardrail_outcomes(temp.path()).unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(outcomes[0].action_id, tool_run_action_id(&request));
+        assert!(
+            outcomes[0]
+                .evidence_refs
+                .contains(&"prediction_outcome_unavailable:store_unavailable".into())
+        );
         assert_eq!(
             outcomes[0].decision_id.as_deref(),
             archon_world_model::guardrail::load_guardrail_decisions(temp.path())
                 .unwrap()
                 .first()
                 .map(|decision| decision.decision_id.as_str())
+        );
+    }
+
+    #[test]
+    fn decision_load_failure_records_correlated_unavailable_outcome() {
+        let temp = tempfile::tempdir().unwrap();
+        let attempt = ToolRunAttemptOutcome {
+            session_id: "session-1".into(),
+            parent_action_id: "parent-1".into(),
+            tool_use_id: "tool-use-1".into(),
+            attempt: 4,
+            tool_name: "Bash".into(),
+            input: serde_json::json!({"command": "true"}),
+            permission_level: archon_tools::tool::PermissionLevel::Dangerous,
+            blocked: false,
+            is_error: false,
+        };
+        let action_id = tool_run_action_id_parts(
+            &attempt.parent_action_id,
+            &attempt.tool_use_id,
+            attempt.attempt,
+        );
+        let ledger_dir = temp.path().join("ledgers");
+        std::fs::create_dir_all(&ledger_dir).unwrap();
+        std::fs::write(
+            ledger_dir.join(archon_world_model::guardrail::REVISIONS_LEDGER),
+            b"not-json\n",
+        )
+        .unwrap();
+
+        record_tool_run_attempt_outcome_at_root(temp.path(), attempt);
+
+        let outcomes = archon_world_model::guardrail::load_guardrail_outcomes(temp.path()).unwrap();
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].action_id, action_id);
+        assert_eq!(outcomes[0].decision_id, None);
+        assert!(
+            outcomes[0]
+                .evidence_refs
+                .contains(&"guardrail_decision_unavailable:store_unavailable".into())
+        );
+    }
+
+    #[test]
+    fn missing_decision_records_correlated_unavailable_outcome() {
+        let temp = tempfile::tempdir().unwrap();
+        let attempt = ToolRunAttemptOutcome {
+            session_id: "session-1".into(),
+            parent_action_id: "parent-1".into(),
+            tool_use_id: "tool-use-1".into(),
+            attempt: 5,
+            tool_name: "Bash".into(),
+            input: serde_json::json!({"command": "true"}),
+            permission_level: archon_tools::tool::PermissionLevel::Dangerous,
+            blocked: false,
+            is_error: false,
+        };
+        let action_id = tool_run_action_id_parts(
+            &attempt.parent_action_id,
+            &attempt.tool_use_id,
+            attempt.attempt,
+        );
+
+        record_tool_run_attempt_outcome_at_root(temp.path(), attempt);
+
+        let outcomes = archon_world_model::guardrail::load_guardrail_outcomes(temp.path()).unwrap();
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].action_id, action_id);
+        assert_eq!(outcomes[0].decision_id, None);
+        assert!(
+            outcomes[0]
+                .evidence_refs
+                .contains(&"guardrail_decision_unavailable:not_found".into())
         );
     }
 
@@ -366,12 +635,7 @@ mod tool_run_tests {
             tool_run_attempt: 0,
             tool_run_admission: Some(Arc::new(move |request| {
                 let advisory = critical_test_advisory(&request);
-                admit_tool_run_at_root(
-                    &admission_config,
-                    &admission_root,
-                    &request,
-                    advisory,
-                )
+                admit_tool_run_at_root(&admission_config, &admission_root, &request, advisory)
             })),
             tool_run_outcome: Some(Arc::new(move |outcome| {
                 record_tool_run_attempt_outcome_at_root(&outcome_root, outcome);
@@ -405,7 +669,10 @@ mod tool_run_tests {
         );
         assert_eq!(outcomes.len(), 1);
         assert_eq!(outcomes[0].action_id, actions[0].action_id);
-        assert_eq!(outcomes[0].decision_id.as_deref(), Some(decisions[0].decision_id.as_str()));
+        assert_eq!(
+            outcomes[0].decision_id.as_deref(),
+            Some(decisions[0].decision_id.as_str())
+        );
     }
 
     #[test]

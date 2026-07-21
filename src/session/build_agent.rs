@@ -170,6 +170,7 @@ pub(super) async fn build_session_agent(
         agent_event_tx,
         agent_registry,
     );
+    super::world_model_callbacks::install(&mut agent, config, session_id);
     let metrics = Arc::new(archon_tui::observability::ChannelMetrics::default());
     let metrics_sink: Arc<dyn ChannelMetricSink> = metrics.clone();
     agent.set_channel_metrics(metrics_sink);
