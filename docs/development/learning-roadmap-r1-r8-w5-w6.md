@@ -32,7 +32,7 @@ Status vocabulary follows `docs/reports/audit/prd-008-audit-validation-appendix.
 
 ## R0 entry gate
 
-No behavior-changing roadmap slice may be promoted until findings 9, 11, 17, and 40–43 have verified closure evidence. Current audit state blocks promotion because finding 9 (memory keyword full scans) remains open. Slice 1 may implement metrics and run the existing heuristic in shadow mode while R0 closes; it may not mutate rules through the new classifier.
+No behavior-changing roadmap slice may be promoted until findings 9, 11, 17, and 40–43 have verified closure evidence. Finding 9 is now closed in physical source: memory keyword retrieval queries the `content_fts`, `title_fts`, and `tags_fts` indexes first, with a full scan retained only as an explicit fallback when those indexes are unavailable. Re-evaluate findings 11, 17, and 40–43 from physical source before promotion; Slice 1 may implement metrics and run the existing heuristic in shadow mode while any remaining R0 item closes, but it may not mutate rules through the new classifier.
 
 Record R0 closure as immutable evidence references to the relevant test runs, runtime source-of-truth inspections, reviews, and commits. Re-evaluate this gate immediately before each slice starts; do not infer closure from this roadmap.
 
