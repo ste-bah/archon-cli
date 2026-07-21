@@ -245,11 +245,8 @@ fn parse_optional_percent(value: f64) -> Option<f64> {
 mod tests {
     use super::*;
 
-    fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-provider-rate-limits-{}.db", uuid::Uuid::new_v4());
-        let db = DbInstance::new("sqlite", &path, "").unwrap();
-        crate::schema::ensure_learning_schema(&db).unwrap();
-        db
+    fn test_db() -> std::sync::Arc<DbInstance> {
+        crate::cozo_guard::test_sqlite_db("test-provider-rate-limits")
     }
 
     #[test]

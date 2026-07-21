@@ -16,8 +16,8 @@
 //! - Panics BEFORE this module's `install` call (config load, agent
 //!   init, resume restoration) are not captured. `TerminalGuard::Drop`
 //!   still restores the terminal via RAII.
-//! - Panics during a CozoDB `run_script` may leave the lock held; the
-//!   hook's `save_snapshot` will fail and fall through silently.
+//! - Panics inside guarded Cozo operations skip snapshot persistence to avoid
+//!   re-entering Cozo while its write coordination is active.
 //! - Stack-overflow panics may not have stack to run the hook at all.
 
 use std::panic::AssertUnwindSafe;
@@ -43,6 +43,10 @@ pub(crate) struct PanicSaveContext {
 /// hit `install` (only `run_interactive_session` does), so the hook
 /// body short-circuits when this is empty.
 pub(crate) static PANIC_CTX: OnceLock<PanicSaveContext> = OnceLock::new();
+
+pub(crate) fn should_capture_panic() -> bool {
+    !archon_cozo::in_guarded_operation()
+}
 
 /// Install the panic hook AND wire the InnerVoice change callback.
 ///
@@ -78,6 +82,11 @@ pub(crate) fn install(
     // Chain to the previous hook so stack traces still print.
     let prev_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        if !should_capture_panic() {
+            prev_hook(info);
+            return;
+        }
+
         // Bypass the hook if the OnceLock is somehow empty (e.g. install
         // raced). This also makes test-binary panics no-op since tests
         // never call `install`.
@@ -121,8 +130,8 @@ pub(crate) fn install(
                 stats,
             };
 
-            // Best-effort save. If the panicking thread held a CozoDB
-            // lock mid-run_script, save will fail; silently fall through.
+            // Best-effort save for panics outside guarded Cozo operations. Guarded
+            // panics bypass this body above to avoid re-entering Cozo.
             let _ = archon_consciousness::persistence::save_snapshot(ctx.memory.as_ref(), &snap);
             let _ = archon_consciousness::persistence::prune_snapshots(
                 ctx.memory.as_ref(),
@@ -141,6 +150,76 @@ pub(crate) fn install(
 mod tests {
     use super::*;
     use archon_memory::MemoryGraph;
+    use std::process::Command;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    const DELEGATION_CHILD_ENV: &str = "ARCHON_PANIC_SAVE_DELEGATION_CHILD";
+
+    #[test]
+    fn guarded_panics_still_reach_the_previous_hook() {
+        if std::env::var_os(DELEGATION_CHILD_ENV).is_some() {
+            let hook_calls = Arc::new(AtomicUsize::new(0));
+            archon_cozo::run_guarded(
+                "install Cozo hook",
+                cozo::ScriptMutability::Immutable,
+                &archon_cozo::CozoGuardConfig::default(),
+                || Ok(()),
+            )
+            .unwrap();
+
+            let cozo_hook = std::panic::take_hook();
+            let hook_calls_for_hook = Arc::clone(&hook_calls);
+            std::panic::set_hook(Box::new(move |info| {
+                hook_calls_for_hook.fetch_add(1, Ordering::SeqCst);
+                cozo_hook(info);
+            }));
+
+            let graph = MemoryGraph::in_memory().expect("graph");
+            let memory: Arc<dyn MemoryTrait> = Arc::new(graph);
+            install(
+                memory,
+                InnerVoice::new(),
+                "panic-delegation-test".into(),
+                0.5,
+                std::time::Instant::now(),
+                1,
+            );
+
+            let result = archon_cozo::run_guarded(
+                "guarded panic",
+                cozo::ScriptMutability::Immutable,
+                &archon_cozo::CozoGuardConfig::default(),
+                || -> anyhow::Result<()> { panic!("guarded panic") },
+            );
+            assert!(result.is_err());
+            assert_eq!(hook_calls.load(Ordering::SeqCst), 1);
+            return;
+        }
+
+        let status = Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("panic_save::tests::guarded_panics_still_reach_the_previous_hook")
+            .arg("--nocapture")
+            .env(DELEGATION_CHILD_ENV, "1")
+            .status()
+            .unwrap();
+        assert!(status.success(), "panic-save delegation child failed");
+    }
+
+    #[test]
+    fn guarded_cozo_operations_disable_personality_capture() {
+        let result = archon_cozo::run_guarded(
+            "panic-save guard test",
+            cozo::ScriptMutability::Immutable,
+            &archon_cozo::CozoGuardConfig::default(),
+            || -> anyhow::Result<()> {
+                assert!(!super::should_capture_panic());
+                Ok(())
+            },
+        );
+        result.unwrap();
+        assert!(super::should_capture_panic());
+    }
 
     #[test]
     fn ctx_holds_install_inputs() {

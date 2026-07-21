@@ -43,19 +43,29 @@ pub(crate) fn acquire_for_dir(working_dir: &Path) -> Result<Arc<DbInstance>> {
 }
 
 pub(crate) fn acquire_for_path(path: &Path) -> Result<Arc<DbInstance>> {
-    acquire_for_path_with(path, open_and_ensure)
+    acquire_for_path_with_arc(path, open_and_ensure)
 }
 
-fn open_and_ensure(path: &Path) -> Result<DbInstance> {
+fn open_and_ensure(path: &Path) -> Result<Arc<DbInstance>> {
     let path_text = path.to_string_lossy();
-    let db = archon_learning::cozo_guard::open_sqlite_guarded(&path_text, "open learning db")?;
-    archon_learning::cozo_guard::ensure_learning_schema_guarded(&db, path)?;
+    let config = archon_cozo::CozoGuardConfig::for_interactive_db_path(path);
+    let db =
+        archon_cozo::open_sqlite_guarded_instance(&path_text, "open learning db", config)?.db_arc();
+    archon_learning::schema::ensure_learning_schema(&db)?;
     Ok(db)
 }
 
+#[cfg(test)]
 pub(crate) fn acquire_for_path_with(
     path: &Path,
-    open: impl Fn(&Path) -> Result<DbInstance> + Send + Sync + 'static,
+    open: impl Fn(&Path) -> Result<Arc<DbInstance>> + Send + Sync + 'static,
+) -> Result<Arc<DbInstance>> {
+    acquire_for_path_with_arc(path, open)
+}
+
+pub(crate) fn acquire_for_path_with_arc(
+    path: &Path,
+    open: impl Fn(&Path) -> Result<Arc<DbInstance>> + Send + Sync + 'static,
 ) -> Result<Arc<DbInstance>> {
     let key = archon_cozo::canonical_resource_path(path)?;
     let cache = store_cache();
@@ -75,7 +85,7 @@ pub(crate) fn acquire_for_path_with(
     }
     drop(cache_guard);
 
-    let opened = catch_unwind(AssertUnwindSafe(|| open(&key).map(Arc::new)));
+    let opened = catch_unwind(AssertUnwindSafe(|| open(&key)));
     let mut cache_guard = lock_recovering_poison(&cache.cache);
     match opened {
         Ok(Ok(db)) => {

@@ -440,7 +440,7 @@ fn open_pipeline_learning_db_at(cwd: &Path, db_path: &Path) -> Option<Arc<cozo::
     crate::command::pipeline_learning_migration::maybe_migrate_legacy_pipeline_learning_with_log(
         cwd, db_path, &db, "pipeline",
     );
-    Some(Arc::new(db))
+    Some(db)
 }
 
 fn build_pipeline_auto_trainer_from_db(

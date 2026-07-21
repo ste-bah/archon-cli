@@ -129,10 +129,12 @@ pub fn insert_memory_promotion_candidate(
         DataValue::from(candidate.created_at.as_str()),
     );
 
-    db.run_script(
+    crate::cozo_guard::run_script_guarded(
+        db,
         memory_promotion_candidate_put_script(),
         params,
         ScriptMutability::Mutable,
+        "insert memory_promotion_candidates failed",
     )
     .map_err(|e| anyhow::anyhow!("insert memory_promotion_candidates failed: {e}"))?;
     Ok(())
@@ -241,14 +243,8 @@ fn clamp_unit(value: f64) -> f64 {
 mod tests {
     use super::*;
 
-    fn test_db() -> DbInstance {
-        let path = format!(
-            "/tmp/test-memory-promotion-candidates-{}.db",
-            uuid::Uuid::new_v4()
-        );
-        let db = DbInstance::new("sqlite", &path, "").unwrap();
-        crate::schema::ensure_learning_schema(&db).unwrap();
-        db
+    fn test_db() -> std::sync::Arc<DbInstance> {
+        crate::cozo_guard::test_sqlite_db("test-memory-promotion-candidates")
     }
 
     #[test]

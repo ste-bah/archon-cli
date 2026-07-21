@@ -226,7 +226,7 @@ fn format_counts(counts: &BTreeMap<String, usize>) -> String {
         .join(", ")
 }
 
-fn open_learning_db() -> Result<DbInstance> {
+fn open_learning_db() -> Result<std::sync::Arc<DbInstance>> {
     let db = crate::command::store_paths::open_learning_db("learning")?;
     archon_learning::schema::ensure_learning_schema(&db)?;
     Ok(db)
@@ -237,11 +237,8 @@ mod tests {
     use super::*;
     use archon_learning::permission_runtime_events::insert_permission_runtime_event;
 
-    fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-permissions-cli-{}.db", uuid::Uuid::new_v4());
-        let db = DbInstance::new("sqlite", &path, "").unwrap();
-        archon_learning::schema::ensure_learning_schema(&db).unwrap();
-        db
+    fn test_db() -> std::sync::Arc<DbInstance> {
+        crate::command::test_support::registered_learning_test_db("test-permissions-cli")
     }
 
     #[test]

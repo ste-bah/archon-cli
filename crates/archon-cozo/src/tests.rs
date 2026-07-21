@@ -19,6 +19,18 @@ fn write_lock_path_is_sibling_sidecar() {
 }
 
 #[test]
+fn deriving_write_lock_path_does_not_create_database_parent() {
+    let temp = tempfile::tempdir().unwrap();
+    let parent = temp.path().join("missing").join("nested");
+    let db_path = parent.join("learning.db");
+
+    let lock_path = write_lock_path_for_db(&db_path);
+
+    assert!(!parent.exists(), "lock-path derivation created directories");
+    assert_eq!(lock_path, parent.join("learning.db.archon-cozo-write.lock"));
+}
+
+#[test]
 fn retryable_errors_include_sqlite_and_file_lock_variants() {
     assert!(is_retryable_cozo_error("database is locked (code 5)"));
     assert!(is_retryable_cozo_error("sqlite_busy"));
@@ -139,6 +151,25 @@ async fn async_guarded_terminal_error_does_not_retry() {
 
     assert!(error.to_string().contains("relation not found"));
     assert_eq!(attempts.get(), 1);
+}
+
+#[test]
+fn stale_guarded_database_registry_entries_are_pruned() {
+    let database = GuardedDbInstance::new(
+        DbInstance::new("mem", "", "").unwrap(),
+        CozoGuardConfig::default(),
+    );
+    let key = Arc::as_ptr(&database.db) as usize;
+    let weak = Arc::downgrade(&database.db);
+    assert!(guarded_config_for(database.db()).is_some());
+
+    drop(database);
+    assert_eq!(weak.strong_count(), 0);
+
+    assert!(guard_registry::registered_database_keys().contains(&key));
+    let replacement = DbInstance::new("mem", "", "").unwrap();
+    assert!(guarded_config_for(&replacement).is_none());
+    assert!(!guard_registry::registered_database_keys().contains(&key));
 }
 
 #[test]

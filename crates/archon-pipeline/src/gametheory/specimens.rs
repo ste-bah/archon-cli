@@ -10,7 +10,7 @@ use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability};
 use serde::{Deserialize, Serialize};
 
-use super::schema::ensure_gametheory_schema;
+use super::schema::{ensure_gametheory_schema, run_script_guarded};
 
 const SPECIMEN_SOURCE_RELATIVE: &str = ".archon/agents/gametheory/game-classifier.md";
 
@@ -105,10 +105,12 @@ fn load_specimens_from_markdown(
 ) -> Result<SpecimenLoadResult> {
     ensure_gametheory_schema(db)?;
     if force {
-        db.run_script(
+        run_script_guarded(
+            db,
             "{::remove gt_specimen_library}",
             Default::default(),
             ScriptMutability::Mutable,
+            "remove old gt_specimen_library",
         )
         .map_err(|e| anyhow::anyhow!("remove old gt_specimen_library failed: {e}"))?;
         ensure_gametheory_schema(db)?;
@@ -241,7 +243,8 @@ fn insert_specimen(db: &DbInstance, record: &SpecimenRecord) -> Result<()> {
     );
     params.insert("notes".into(), DataValue::from(record.notes.as_str()));
 
-    db.run_script(
+    run_script_guarded(
+        db,
         "?[specimen_id, situation_type, cooperation, payoff_sum, symmetry, timing, \
          perfect_info, complete_info, cardinality, strategy_space, horizon, primary_family, notes] \
          <- [[$id, $sit, $coop, $pay, $sym, $timing, $perfect, $complete, $card, $space, \
@@ -251,6 +254,7 @@ fn insert_specimen(db: &DbInstance, record: &SpecimenRecord) -> Result<()> {
          primary_family, notes }",
         params,
         ScriptMutability::Mutable,
+        "insert gt_specimen_library",
     )
     .map_err(|e| anyhow::anyhow!("insert gt_specimen_library failed: {e}"))?;
     Ok(())
@@ -391,9 +395,15 @@ fn find_from_current_dir() -> Result<Option<PathBuf>> {
 mod tests {
     use super::*;
 
-    fn test_db() -> DbInstance {
+    fn test_db() -> std::sync::Arc<DbInstance> {
         let path = format!("/tmp/test-gt-specimens-{}.db", uuid::Uuid::new_v4());
-        DbInstance::new("sqlite", &path, "").unwrap()
+        archon_cozo::open_sqlite_guarded_instance(
+            &path,
+            "open game-theory specimen test db",
+            archon_cozo::CozoGuardConfig::for_db_path(&path),
+        )
+        .unwrap()
+        .db_arc()
     }
 
     fn source_markdown() -> String {

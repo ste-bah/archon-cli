@@ -262,11 +262,8 @@ fn print_shadow_evaluation(evaluation: &AgentShadowEvaluationRecord) {
 mod tests {
     use super::*;
 
-    fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-agent-evolve-shadow-{}.db", uuid::Uuid::new_v4());
-        let db = DbInstance::new("sqlite", &path, "").unwrap();
-        archon_learning::schema::ensure_learning_schema(&db).unwrap();
-        db
+    fn test_db() -> std::sync::Arc<DbInstance> {
+        crate::command::test_support::registered_learning_test_db("test-agent-evolve-shadow")
     }
 
     #[test]

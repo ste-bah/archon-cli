@@ -228,11 +228,14 @@ impl LearningStatusHandler {
             version_after = weight_version_after,
             rolled_back = rolled_back,
         );
-        let _ = db.run_script(
+        archon_cozo::run_bound_script_guarded(
+            db,
             &insert_run,
             Default::default(),
             cozo::ScriptMutability::Mutable,
-        );
+            "record manual GNN training run",
+        )
+        .map_err(|error| anyhow::anyhow!("Failed to record GNN training run: {error:#}"))?;
 
         // Build outcome table
         let verdict = if rolled_back {

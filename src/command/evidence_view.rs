@@ -198,7 +198,7 @@ fn open_docs_db() -> Result<Arc<DbInstance>> {
     archon_docs::acquire_docs_db(path)
 }
 
-fn open_learning_db() -> Result<DbInstance> {
+fn open_learning_db() -> Result<Arc<DbInstance>> {
     let db = crate::command::store_paths::open_learning_db("learning")?;
     archon_learning::schema::ensure_learning_schema(&db)?;
     Ok(db)

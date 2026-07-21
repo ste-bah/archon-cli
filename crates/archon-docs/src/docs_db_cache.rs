@@ -4,26 +4,30 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 use anyhow::{Context, Result};
-use cozo::DbInstance;
+use archon_cozo::GuardedDbInstance;
 
-pub(crate) fn acquire(path: &Path) -> Result<Arc<DbInstance>> {
+pub(crate) fn acquire(path: &Path) -> Result<Arc<GuardedDbInstance>> {
     acquire_with(path, open)
 }
 
-fn open(path: &Path) -> Result<Arc<DbInstance>> {
-    crate::configure_cozo_write_lock_for_db(path);
+fn open(path: &Path) -> Result<Arc<GuardedDbInstance>> {
     let display = path.display();
-    let db = DbInstance::new("sqlite", path, "")
-        .map_err(|error| anyhow::anyhow!("open document store at {display}: {error}"))?;
-    crate::schema::ensure_doc_schema(&db)
+    let config = archon_cozo::CozoGuardConfig::for_db_path(path);
+    let guarded = archon_cozo::open_sqlite_guarded_instance(
+        &path.to_string_lossy(),
+        "open document store",
+        config,
+    )
+    .map_err(|error| anyhow::anyhow!("open document store at {display}: {error}"))?;
+    crate::schema::ensure_doc_schema(&guarded)
         .with_context(|| format!("ensure document schema at {display}"))?;
-    Ok(Arc::new(db))
+    Ok(Arc::new(guarded))
 }
 
 fn acquire_with(
     path: &Path,
-    open: impl FnOnce(&Path) -> Result<Arc<DbInstance>>,
-) -> Result<Arc<DbInstance>> {
+    open: impl FnOnce(&Path) -> Result<Arc<GuardedDbInstance>>,
+) -> Result<Arc<GuardedDbInstance>> {
     let key = archon_cozo::canonical_resource_path(path)?;
     let cache = cache();
     let mut entries = cache
@@ -74,7 +78,7 @@ fn acquire_with(
 
 enum Entry {
     Opening,
-    Ready(Arc<DbInstance>),
+    Ready(Arc<GuardedDbInstance>),
 }
 
 struct StoreCache {
@@ -97,6 +101,29 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn databases_retain_independent_write_lock_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let first_path = temp.path().join("first.db");
+        let second_path = temp.path().join("second.db");
+
+        let first = acquire(&first_path).unwrap();
+        let second = acquire(&second_path).unwrap();
+
+        assert_eq!(
+            first.config().write_lock_path.as_deref(),
+            Some(archon_cozo::write_lock_path_for_db(&first_path).as_path())
+        );
+        assert_eq!(
+            archon_cozo::guarded_config_for(first.db()).and_then(|config| config.write_lock_path),
+            Some(archon_cozo::write_lock_path_for_db(&first_path))
+        );
+        assert_eq!(
+            second.config().write_lock_path.as_deref(),
+            Some(archon_cozo::write_lock_path_for_db(&second_path).as_path())
+        );
+    }
 
     #[test]
     fn same_canonical_path_reuses_one_database() {

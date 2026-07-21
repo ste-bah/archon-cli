@@ -125,10 +125,15 @@ fn unique_temp_root() -> PathBuf {
     std::env::temp_dir().join(format!("archon-web-metrics-{}", uuid::Uuid::new_v4()))
 }
 
-fn open_test_learning_db(path: &Path) -> cozo::DbInstance {
+fn open_test_learning_db(path: &Path) -> archon_cozo::GuardedDbInstance {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).unwrap();
     }
-    let path_str = path.to_string_lossy().to_string();
-    cozo::DbInstance::new("sqlite", &path_str, "").unwrap()
+    let path_str = path.to_string_lossy();
+    archon_cozo::open_sqlite_guarded_instance(
+        &path_str,
+        "open web metrics test db",
+        archon_cozo::CozoGuardConfig::for_db_path(path),
+    )
+    .unwrap()
 }

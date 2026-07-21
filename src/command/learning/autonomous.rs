@@ -20,7 +20,7 @@ fn learning_db_path() -> PathBuf {
     crate::command::store_paths::learning_db_path()
 }
 
-fn open_learning_db(path: &Path) -> Result<DbInstance> {
+fn open_learning_db(path: &Path) -> Result<std::sync::Arc<DbInstance>> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -156,11 +156,8 @@ fn print_summary(summary: &TickSummary) {
 mod tests {
     use super::*;
 
-    fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-learning-tick-{}.db", uuid::Uuid::new_v4());
-        let db = DbInstance::new("sqlite", &path, "").unwrap();
-        archon_learning::schema::ensure_learning_schema(&db).unwrap();
-        db
+    fn test_db() -> std::sync::Arc<DbInstance> {
+        crate::command::test_support::registered_learning_test_db("test-learning-tick")
     }
 
     fn record_correction(db: &DbInstance, id: &str) {

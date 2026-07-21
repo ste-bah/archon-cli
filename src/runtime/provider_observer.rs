@@ -40,10 +40,8 @@ impl ProviderRuntimeEventRecorder {
     }
 
     #[cfg(test)]
-    fn with_db(db: DbInstance) -> Self {
-        Self {
-            db: Some(Arc::new(db)),
-        }
+    fn with_db(db: Arc<DbInstance>) -> Self {
+        Self { db: Some(db) }
     }
 
     fn record(&self, event: ProviderRuntimeEvent) -> Option<String> {

@@ -131,11 +131,13 @@ fn delete_learn_events(db: &DbInstance) -> Result<()> {
         if let Some(event_id) = row.first().and_then(|v| v.get_str()) {
             let mut params = BTreeMap::new();
             params.insert("eid".into(), DataValue::from(event_id));
-            let _ = db.run_script(
+            crate::cozo_guard::run_script_guarded(
+                db,
                 "?[event_id] <- [[$eid]] :rm learn_events { event_id }",
                 params,
                 ScriptMutability::Mutable,
-            );
+                "delete consumed learn_event",
+            )?;
         }
     }
     Ok(())
@@ -237,10 +239,8 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
-    fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-outcome-signal-{}.db", uuid::Uuid::new_v4());
-        let db = DbInstance::new("sqlite", &path, "").unwrap();
-        crate::schema::ensure_learning_schema(&db).unwrap();
+    fn test_db() -> std::sync::Arc<DbInstance> {
+        let db = crate::cozo_guard::test_sqlite_db("test-outcome-signal");
         // Also create the legacy learn_events relation for consume tests.
         create_phase5_learn_events(&db);
         db
@@ -255,6 +255,43 @@ mod tests {
             Default::default(),
             ScriptMutability::Mutable,
         );
+    }
+
+    #[test]
+    fn delete_learn_events_surfaces_guard_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("unregistered.db");
+        let db = DbInstance::new("sqlite", &path, "").unwrap();
+        create_phase5_learn_events(&db);
+        insert_phase5_learn_event(&db, "legacy-delete");
+
+        let error = delete_learn_events(&db).expect_err("guard failure must propagate");
+
+        assert!(error.to_string().contains("no bound Cozo guard config"));
+    }
+
+    fn insert_phase5_learn_event(db: &DbInstance, event_id: &str) {
+        let mut params = BTreeMap::new();
+        params.insert("eid".into(), DataValue::from(event_id));
+        params.insert("wid".into(), DataValue::from("default"));
+        params.insert("et".into(), DataValue::from("FalseCompletionDetected"));
+        params.insert("sid".into(), DataValue::from("incident"));
+        params.insert("oid".into(), DataValue::from(""));
+        params.insert("sig".into(), DataValue::from("{}"));
+        params.insert("cf".into(), DataValue::from(0.8_f64));
+        params.insert("prid".into(), DataValue::from("prov"));
+        params.insert("ca".into(), DataValue::from("2026-05-03T00:00:00Z"));
+        db.run_script(
+            "?[event_id, workspace_id, event_type, source_artifact_id, \
+             outcome_artifact_id, signal, confidence, provenance_record_id, created_at] \
+             <- [[$eid, $wid, $et, $sid, $oid, $sig, $cf, $prid, $ca]] \
+             :put learn_events { event_id => workspace_id, event_type, \
+             source_artifact_id, outcome_artifact_id, signal, confidence, \
+             provenance_record_id, created_at }",
+            params,
+            ScriptMutability::Mutable,
+        )
+        .unwrap();
     }
 
     fn create_false_completion_incidents(db: &DbInstance) {

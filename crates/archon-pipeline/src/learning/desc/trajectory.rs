@@ -56,18 +56,18 @@ impl TrajectoryLinker {
         p2.insert("tid".to_string(), DataValue::from(trajectory_id));
         p2.insert("ts".to_string(), DataValue::from(now as i64));
 
-        store
-            .db
-            .run_script(
-                "?[episode_id, task_type, solution, quality_score, trajectory_id, updated_at] \
-                 <- [[$eid, $tt, $sol, $qs, $tid, $ts]] \
-                 :put desc_episode_metadata { \
-                     episode_id => task_type, solution, quality_score, trajectory_id, updated_at \
-                 }",
-                p2,
-                ScriptMutability::Mutable,
-            )
-            .map_err(|e| anyhow::anyhow!("link_trajectory write failed: {}", e))?;
+        crate::learning::run_script_guarded(
+            &store.db,
+            "?[episode_id, task_type, solution, quality_score, trajectory_id, updated_at] \
+             <- [[$eid, $tt, $sol, $qs, $tid, $ts]] \
+             :put desc_episode_metadata { \
+                 episode_id => task_type, solution, quality_score, trajectory_id, updated_at \
+             }",
+            p2,
+            ScriptMutability::Mutable,
+            "link DESC episode trajectory",
+        )
+        .map_err(|e| anyhow::anyhow!("link_trajectory write failed: {}", e))?;
 
         Ok(())
     }

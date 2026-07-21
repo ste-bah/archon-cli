@@ -319,8 +319,10 @@ mod tests {
     ) -> anyhow::Result<Arc<cozo::DbInstance>> {
         super::learning_store::acquire_for_path_with(path, move |path| {
             opens.fetch_add(1, Ordering::SeqCst);
-            let db = cozo::DbInstance::new("sqlite", path, "")
-                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            let db = archon_learning::cozo_guard::open_sqlite_guarded(
+                path.to_str().unwrap(),
+                "open Codex rate-limit test store",
+            )?;
             ensures.fetch_add(1, Ordering::SeqCst);
             archon_learning::schema::ensure_learning_schema(&db)?;
             Ok(db)

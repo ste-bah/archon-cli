@@ -80,13 +80,7 @@ mod tests {
     use super::*;
 
     fn test_db() -> Arc<DbInstance> {
-        let path = format!(
-            "/tmp/test-provider-incident-ledger-{}.db",
-            uuid::Uuid::new_v4()
-        );
-        let db = DbInstance::new("sqlite", &path, "").unwrap();
-        archon_learning::schema::ensure_learning_schema(&db).unwrap();
-        Arc::new(db)
+        crate::command::test_support::registered_learning_test_db("test-provider-incident-ledger")
     }
 
     #[test]

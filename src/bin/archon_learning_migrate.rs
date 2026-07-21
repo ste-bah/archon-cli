@@ -143,9 +143,13 @@ fn merge_totals(total: &mut Totals, report: &Totals) {
     total.missing_relations += report.missing_relations;
 }
 
-fn open_db(engine: &str, path: &Path) -> Result<DbInstance> {
+fn open_db(engine: &str, path: &Path) -> Result<archon_cozo::GuardedDbInstance> {
     let path_str = path.to_string_lossy().to_string();
-    DbInstance::new(engine, &path_str, "").map_err(|error| anyhow::anyhow!("{error}"))
+    let db = DbInstance::new(engine, &path_str, "").map_err(|error| anyhow::anyhow!("{error}"))?;
+    Ok(archon_cozo::GuardedDbInstance::new(
+        db,
+        archon_cozo::CozoGuardConfig::for_db_path(path),
+    ))
 }
 
 #[derive(Default)]
@@ -253,9 +257,15 @@ fn put_relation_row(db: &DbInstance, spec: &RelationSpec, row: &[DataValue]) -> 
         spec.name,
         spec.keys.join(", ")
     );
-    db.run_script(&script, params, ScriptMutability::Mutable)
-        .map(|_| ())
-        .map_err(|error| anyhow::anyhow!("{error}"))
+    archon_cozo::run_bound_script_guarded(
+        db,
+        &script,
+        params,
+        ScriptMutability::Mutable,
+        "migrate learning relation row",
+    )
+    .map(|_| ())
+    .map_err(|error| anyhow::anyhow!("{error}"))
 }
 
 fn relation_missing(error: &cozo::Error) -> bool {
@@ -266,4 +276,22 @@ fn relation_missing(error: &cozo::Error) -> bool {
 
 fn is_database_locked(error: &anyhow::Error) -> bool {
     error.to_string().contains("database is locked")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn persistent_migration_database_binds_its_guard_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("migration.db");
+
+        let db = open_db("sqlite", &path).unwrap();
+
+        assert_eq!(
+            archon_cozo::guarded_config_for(&db).and_then(|config| config.write_lock_path),
+            Some(archon_cozo::write_lock_path_for_db(&path)),
+        );
+    }
 }

@@ -113,8 +113,14 @@ pub fn insert_sandbox_profile(db: &DbInstance, profile: &SandboxProfileRecord) -
         DataValue::from(profile.updated_at.as_str()),
     );
 
-    db.run_script(profile_put_script(), params, ScriptMutability::Mutable)
-        .map_err(|e| anyhow::anyhow!("insert sandbox_profiles failed: {e}"))?;
+    crate::cozo_guard::run_script_guarded(
+        db,
+        profile_put_script(),
+        params,
+        ScriptMutability::Mutable,
+        "insert sandbox_profiles failed",
+    )
+    .map_err(|e| anyhow::anyhow!("insert sandbox_profiles failed: {e}"))?;
     Ok(())
 }
 
@@ -218,11 +224,8 @@ fn non_empty(value: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-sandbox-profiles-{}.db", uuid::Uuid::new_v4());
-        let db = DbInstance::new("sqlite", &path, "").unwrap();
-        crate::schema::ensure_learning_schema(&db).unwrap();
-        db
+    fn test_db() -> std::sync::Arc<DbInstance> {
+        crate::cozo_guard::test_sqlite_db("test-sandbox-profiles")
     }
 
     #[test]

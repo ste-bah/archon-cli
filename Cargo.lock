@@ -366,6 +366,7 @@ dependencies = [
 name = "archon-cognitive"
 version = "1.3.11"
 dependencies = [
+ "archon-cozo",
  "archon-policy",
  "archon-reasoning-quality",
  "blake3",
@@ -386,6 +387,7 @@ name = "archon-completion"
 version = "1.3.11"
 dependencies = [
  "anyhow",
+ "archon-cozo",
  "archon-learning",
  "archon-provenance",
  "async-trait",
@@ -774,6 +776,7 @@ version = "1.3.11"
 dependencies = [
  "anyhow",
  "archon-core",
+ "archon-cozo",
  "archon-docs",
  "archon-leann",
  "archon-learning",
@@ -875,6 +878,7 @@ dependencies = [
  "anyhow",
  "archon-cognitive",
  "archon-core",
+ "archon-cozo",
  "archon-docs",
  "archon-learning",
  "archon-llm",

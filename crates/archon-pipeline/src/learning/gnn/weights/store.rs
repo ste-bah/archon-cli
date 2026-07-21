@@ -191,7 +191,8 @@ impl WeightStore {
             params.insert("nan".to_string(), cozo::DataValue::from(has_nan));
             params.insert("ts".to_string(), cozo::DataValue::from(now_ms));
 
-            db.run_script(
+            crate::learning::run_script_guarded(
+                db,
                 "?[layer_id, version, in_dim, out_dim, initialization, seed, \
                    weights_blob, bias_blob, norm_l2, has_nan, saved_at_ms] \
                  <- [[$lid, $ver, $in_dim, $out_dim, $init, $seed, \
@@ -202,6 +203,7 @@ impl WeightStore {
                  }",
                 params,
                 cozo::ScriptMutability::Mutable,
+                "save GNN weights",
             )
             .map_err(|e| WeightStoreError::Db(format!("save_all layer {}: {}", layer_id, e)))?;
         }

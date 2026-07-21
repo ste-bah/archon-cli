@@ -11,13 +11,28 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use cozo::{DataValue, DbInstance, NamedRows, ScriptMutability};
 
+const MIGRATION_CONTEXT: &str = "migrate pipeline learning schema";
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
+fn run_guarded(
+    db: &DbInstance,
+    script: &str,
+    params: BTreeMap<String, DataValue>,
+) -> Result<NamedRows> {
+    super::run_script_guarded(
+        db,
+        script,
+        params,
+        ScriptMutability::Mutable,
+        MIGRATION_CONTEXT,
+    )
+}
+
 fn run_mutable(db: &DbInstance, script: &str) -> Result<NamedRows> {
-    db.run_script(script, Default::default(), ScriptMutability::Mutable)
-        .map_err(|e| anyhow::anyhow!("{e}"))
+    run_guarded(db, script, Default::default())
 }
 
 fn run_immutable(db: &DbInstance, script: &str) -> Result<NamedRows> {
@@ -30,8 +45,7 @@ fn run_mutable_params(
     script: &str,
     params: BTreeMap<String, DataValue>,
 ) -> Result<NamedRows> {
-    db.run_script(script, params, ScriptMutability::Mutable)
-        .map_err(|e| anyhow::anyhow!("{e}"))
+    run_guarded(db, script, params)
 }
 
 // ---------------------------------------------------------------------------

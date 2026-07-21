@@ -39,7 +39,10 @@ pub(crate) fn evidence_db_path(overrides: &[&str]) -> PathBuf {
     )
 }
 
-pub(crate) fn open_evidence_db(label: &str, overrides: &[&str]) -> Result<DbInstance> {
+pub(crate) fn open_evidence_db(
+    label: &str,
+    overrides: &[&str],
+) -> Result<std::sync::Arc<DbInstance>> {
     open_sqlite_db(&evidence_db_path(overrides), label)
 }
 
@@ -54,7 +57,7 @@ pub(crate) fn learning_db_path() -> PathBuf {
     learning_db_path_for_dir(&std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
-pub(crate) fn open_learning_db(label: &str) -> Result<DbInstance> {
+pub(crate) fn open_learning_db(label: &str) -> Result<std::sync::Arc<DbInstance>> {
     open_sqlite_db(&learning_db_path(), label)
 }
 
@@ -71,7 +74,7 @@ pub(crate) fn open_session_store(path: &Path) -> Result<archon_session::storage:
         .map_err(|e| anyhow::anyhow!("failed to open session database at {}: {e}", path.display()))
 }
 
-pub(crate) fn open_sqlite_db(path: &Path, label: &str) -> Result<DbInstance> {
+pub(crate) fn open_sqlite_db(path: &Path, label: &str) -> Result<std::sync::Arc<DbInstance>> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -80,4 +83,19 @@ pub(crate) fn open_sqlite_db(path: &Path, label: &str) -> Result<DbInstance> {
         &path_str,
         &format!("open {label} store at {path_str}"),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn sqlite_store_retains_its_write_lock_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("store.db");
+        let database = super::open_sqlite_db(&path, "test").unwrap();
+
+        assert_eq!(
+            archon_cozo::guarded_config_for(&database).and_then(|config| config.write_lock_path),
+            Some(archon_cozo::write_lock_path_for_db(&path)),
+        );
+    }
 }

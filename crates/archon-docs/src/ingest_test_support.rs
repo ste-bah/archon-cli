@@ -3,8 +3,7 @@ use crate::embed::{self, LocalEmbeddingProvider};
 use crate::models::PageOffset;
 
 pub(super) fn test_db() -> DbInstance {
-    let path = format!("/tmp/test-ingest-{}.db", uuid::Uuid::new_v4());
-    let db = DbInstance::new("sqlite", &path, "").unwrap();
+    let db = DbInstance::new("mem", "", Default::default()).unwrap();
     ensure_doc_schema(&db).unwrap();
     db
 }

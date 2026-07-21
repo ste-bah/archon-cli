@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use archon_cozo::GuardedDbInstance;
 use chrono::Utc;
 use cozo::{DataValue, DbInstance, ScriptMutability};
 use uuid::Uuid;
@@ -10,7 +11,7 @@ use crate::schema::ensure_cognitive_schema;
 use crate::types::{CognitiveDecision, CognitiveError, Situation, ToolVerdict};
 
 pub struct PersistentCognitiveStore {
-    db: DbInstance,
+    db: GuardedDbInstance,
     root: PathBuf,
     db_path: PathBuf,
 }

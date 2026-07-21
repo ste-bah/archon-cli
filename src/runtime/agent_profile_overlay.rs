@@ -164,9 +164,8 @@ mod tests {
 
     #[test]
     fn ledger_hydration_updates_runtime_meta_without_files() {
-        let path = format!("/tmp/test-agent-overlay-meta-{}.db", uuid::Uuid::new_v4());
-        let db = DbInstance::new("sqlite", &path, "").unwrap();
-        archon_learning::schema::ensure_learning_schema(&db).unwrap();
+        let db =
+            crate::command::test_support::registered_learning_test_db("test-agent-overlay-meta");
         archon_learning::agent_evolution_ledger::insert_agent_performance_ledger_record(
             &db,
             &archon_learning::agent_evolution_ledger::AgentPerformanceLedgerRecord::new(

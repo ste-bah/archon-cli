@@ -82,7 +82,8 @@ pub fn store_trajectory(db: &DbInstance, trajectory: &Trajectory) -> Result<()> 
         DataValue::from(trajectory.updated_at as i64),
     );
 
-    db.run_script(
+    super::run_script_guarded(
+        db,
         "?[trajectory_id, route, agent_key, session_id, patterns, context, embedding, \
          quality, reward, feedback_score, weights_path, created_at, updated_at] <- \
          [[$trajectory_id, $route, $agent_key, $session_id, $patterns, $context, \
@@ -93,6 +94,7 @@ pub fn store_trajectory(db: &DbInstance, trajectory: &Trajectory) -> Result<()> 
          weights_path, created_at, updated_at }",
         params,
         ScriptMutability::Mutable,
+        "store pipeline learning trajectory",
     )
     .map(|_| ())
     .map_err(|e| anyhow::anyhow!("trajectory_store::store_trajectory: {e}"))

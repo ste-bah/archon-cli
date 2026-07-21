@@ -1,33 +1,26 @@
-use std::cell::Cell;
-use std::collections::{BTreeMap, HashMap};
-use std::fs::OpenOptions;
-use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use cozo::{DataValue, DbInstance, NamedRows, ScriptMutability};
 
+mod guard_registry;
+mod locking;
+mod panic_guard;
+
+use guard_registry::register_guarded_database;
+use locking::{
+    HeldWriteLock, lock_recovering_poison, process_write_lock, write_lock_is_held, write_lock_key,
+};
+use panic_guard::catch_guarded_operation;
+
 const DEFAULT_MAX_ATTEMPTS: usize = 90;
 const INTERACTIVE_MAX_ATTEMPTS: usize = 10;
 const DEFAULT_INITIAL_BACKOFF_MS: u64 = 100;
 const DEFAULT_MAX_BACKOFF_MS: u64 = 2_000;
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-enum WriteLockKey {
-    Fallback,
-    Path(PathBuf),
-}
-
-static COZO_PROCESS_WRITE_LOCKS: OnceLock<Mutex<HashMap<WriteLockKey, Arc<Mutex<()>>>>> =
-    OnceLock::new();
-static COZO_PANIC_HOOK: OnceLock<()> = OnceLock::new();
-
-thread_local! {
-    static IN_GUARDED_COZO_OPERATION: Cell<usize> = const { Cell::new(0) };
-}
 
 #[derive(Clone, Debug)]
 pub struct CozoGuardConfig {
@@ -66,13 +59,77 @@ impl CozoGuardConfig {
     }
 }
 
+#[derive(Clone)]
+pub struct GuardedDbInstance {
+    db: Arc<DbInstance>,
+    config: CozoGuardConfig,
+}
+
+impl GuardedDbInstance {
+    pub fn new(db: DbInstance, config: CozoGuardConfig) -> Self {
+        let db = Arc::new(db);
+        register_guarded_database(&db, &config);
+        Self { db, config }
+    }
+
+    pub fn db(&self) -> &DbInstance {
+        &self.db
+    }
+
+    pub fn db_arc(&self) -> Arc<DbInstance> {
+        Arc::clone(&self.db)
+    }
+
+    pub fn config(&self) -> &CozoGuardConfig {
+        &self.config
+    }
+
+    pub fn run_script_guarded(
+        &self,
+        script: &str,
+        params: BTreeMap<String, DataValue>,
+        mutability: ScriptMutability,
+        context: &str,
+    ) -> Result<NamedRows> {
+        run_script_guarded(&self.db, script, params, mutability, context, &self.config)
+    }
+}
+
+impl std::ops::Deref for GuardedDbInstance {
+    type Target = DbInstance;
+
+    fn deref(&self) -> &Self::Target {
+        &self.db
+    }
+}
+
+pub fn guarded_config_for(db: &DbInstance) -> Option<CozoGuardConfig> {
+    guard_registry::guarded_config_for(db)
+}
+
+pub fn bound_guard_config(db: &DbInstance, context: &str) -> Result<CozoGuardConfig> {
+    guard_registry::bound_guard_config(db, context)
+}
+
+pub fn run_bound_script_guarded(
+    db: &DbInstance,
+    script: &str,
+    params: BTreeMap<String, DataValue>,
+    mutability: ScriptMutability,
+    context: &str,
+) -> Result<NamedRows> {
+    let config = bound_guard_config(db, context)?;
+    run_script_guarded(db, script, params, mutability, context, &config)
+}
+
 pub fn write_lock_path_for_db(path: impl AsRef<Path>) -> PathBuf {
     let path = path.as_ref();
-    let file_name = path
+    let resource = canonical_resource_path(path).unwrap_or_else(|_| path.to_path_buf());
+    let file_name = resource
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("cozo.db");
-    path.with_file_name(format!("{file_name}.archon-cozo-write.lock"))
+    resource.with_file_name(format!("{file_name}.archon-cozo-write.lock"))
 }
 
 pub fn open_sqlite_guarded(
@@ -84,6 +141,15 @@ pub fn open_sqlite_guarded(
         DbInstance::new("sqlite", path, "")
             .map_err(|error| anyhow!("open sqlite-backed Cozo store failed: {error}"))
     })
+}
+
+pub fn open_sqlite_guarded_instance(
+    path: &str,
+    context: &str,
+    config: CozoGuardConfig,
+) -> Result<GuardedDbInstance> {
+    let db = open_sqlite_guarded(path, context, &config)?;
+    Ok(GuardedDbInstance::new(db, config))
 }
 
 pub async fn open_sqlite_guarded_async(
@@ -229,8 +295,13 @@ fn run_guarded_once<T>(
     run: &mut impl FnMut() -> Result<T>,
 ) -> Result<T> {
     if matches!(mutability, ScriptMutability::Mutable) {
-        let process_lock = process_write_lock(config.write_lock_path.as_deref())?;
+        let key = write_lock_key(config.write_lock_path.as_deref())?;
+        if write_lock_is_held(&key) {
+            return catch_guarded_operation(context, run);
+        }
+        let process_lock = process_write_lock(&key);
         let _process_guard = lock_recovering_poison(&process_lock);
+        let _held_lock = HeldWriteLock::enter(key);
         if let Some(path) = &config.write_lock_path {
             return with_write_lock(path, context, || catch_guarded_operation(context, run));
         }
@@ -240,92 +311,8 @@ fn run_guarded_once<T>(
     catch_guarded_operation(context, run)
 }
 
-fn process_write_lock(path: Option<&Path>) -> Result<Arc<Mutex<()>>> {
-    let key = match path {
-        Some(path) => WriteLockKey::Path(normalized_lock_path(path)?),
-        None => WriteLockKey::Fallback,
-    };
-    let locks = COZO_PROCESS_WRITE_LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut locks = lock_recovering_poison(locks);
-    Ok(Arc::clone(
-        locks.entry(key).or_insert_with(|| Arc::new(Mutex::new(()))),
-    ))
-}
-
-fn normalized_lock_path(path: &Path) -> Result<PathBuf> {
-    canonical_resource_path(path)
-}
-
-/// Return a stable path key for a possibly absent resource.
-///
-/// Existing resources are canonicalized completely. For absent resources, the
-/// parent is created and canonicalized so relative paths, `.`/`..`, and
-/// symlinked parents resolve to one process-wide resource identity.
 pub fn canonical_resource_path(path: impl AsRef<Path>) -> Result<PathBuf> {
-    let path = absolute_normalized_path(path.as_ref())?;
-    if path.exists() {
-        return Ok(path.canonicalize()?);
-    }
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    std::fs::create_dir_all(parent)?;
-    let parent = canonicalize_existing_path(parent)?;
-    Ok(parent.join(path.file_name().unwrap_or_default()))
-}
-
-fn absolute_normalized_path(path: &Path) -> Result<PathBuf> {
-    let path = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(path)
-    };
-    Ok(lexically_normalized_path(&path))
-}
-
-fn canonicalize_existing_path(path: &Path) -> Result<PathBuf> {
-    let mut unresolved = Vec::new();
-    let mut existing = path;
-
-    loop {
-        match existing.canonicalize() {
-            Ok(mut normalized) => {
-                for component in unresolved.iter().rev() {
-                    normalized.push(component);
-                }
-                return Ok(normalized);
-            }
-            Err(error) => {
-                let Some(name) = existing.file_name() else {
-                    return Err(error.into());
-                };
-                unresolved.push(name.to_os_string());
-                let Some(parent) = existing.parent() else {
-                    return Err(error.into());
-                };
-                existing = parent;
-            }
-        }
-    }
-}
-
-fn lexically_normalized_path(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            _ => normalized.push(component.as_os_str()),
-        }
-    }
-    normalized
-}
-
-fn lock_recovering_poison<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    match mutex.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    }
+    locking::canonical_resource_path(path)
 }
 
 pub fn with_write_lock<T>(
@@ -333,87 +320,17 @@ pub fn with_write_lock<T>(
     context: &str,
     run: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let file = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .truncate(false)
-        .open(path)
-        .map_err(|error| {
-            anyhow!(
-                "{context}: open Cozo write lock {}: {error}",
-                path.display()
-            )
-        })?;
-    let mut lock = fd_lock::RwLock::new(file);
-    let _guard = lock.try_write().map_err(|error| {
-        anyhow!(
-            "{context}: Cozo write lock unavailable at {}: {error}",
-            path.display()
-        )
-    })?;
-    tracing::trace!(context, lock_path = %path.display(), "acquired Cozo write lock");
-    run()
+    locking::with_write_lock(path, context, run)
 }
 
-fn catch_guarded_operation<T>(context: &str, run: &mut impl FnMut() -> Result<T>) -> Result<T> {
-    install_cozo_panic_hook();
-    let _guard = GuardedCozoOperation::enter();
-    let result = catch_unwind(AssertUnwindSafe(run));
-
-    match result {
-        Ok(result) => result,
-        Err(payload) => Err(anyhow!(
-            "{context}: Cozo operation panicked: {}",
-            panic_payload_message(payload)
-        )),
-    }
-}
-
-fn install_cozo_panic_hook() {
-    COZO_PANIC_HOOK.get_or_init(|| {
-        let delegate = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |panic_info| {
-            let guarded = IN_GUARDED_COZO_OPERATION.with(|depth| depth.get() > 0);
-            if !guarded {
-                delegate(panic_info);
-            }
-        }));
-    });
-}
-
-struct GuardedCozoOperation;
-
-impl GuardedCozoOperation {
-    fn enter() -> Self {
-        IN_GUARDED_COZO_OPERATION.with(|depth| depth.set(depth.get() + 1));
-        Self
-    }
-}
-
-impl Drop for GuardedCozoOperation {
-    fn drop(&mut self) {
-        IN_GUARDED_COZO_OPERATION.with(|depth| depth.set(depth.get().saturating_sub(1)));
-    }
+pub fn in_guarded_operation() -> bool {
+    panic_guard::in_guarded_operation()
 }
 
 fn backoff_duration(config: &CozoGuardConfig, attempt: usize) -> Duration {
     let initial = config.initial_backoff.as_millis() as u64;
     let max = config.max_backoff.as_millis() as u64;
     Duration::from_millis(initial.saturating_mul(attempt as u64 + 1).min(max))
-}
-
-fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
-    if let Some(message) = payload.downcast_ref::<String>() {
-        message.clone()
-    } else if let Some(message) = payload.downcast_ref::<&str>() {
-        (*message).to_owned()
-    } else {
-        "unknown panic payload".to_owned()
-    }
 }
 
 #[cfg(test)]

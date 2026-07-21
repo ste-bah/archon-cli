@@ -209,7 +209,7 @@ fn render_replay_dead_letter(root: &Path, bridge: Option<&str>) -> Result<String
         match entry.bridge.as_str() {
             "learning_event" => crate::runtime::reasoning_quality::bridge_reasoning_events(
                 std::slice::from_ref(&event),
-                learning_db.as_ref(),
+                learning_db.as_deref(),
                 root,
                 None,
                 false,
@@ -316,7 +316,7 @@ fn render_briefing_preview(
         config,
         &policy,
         Some(&reasoning_root),
-        learning_db.as_ref(),
+        learning_db.as_deref(),
         Some(&world_root),
         "preview",
         task,
@@ -384,7 +384,7 @@ fn world_model_root() -> Result<PathBuf> {
         .join("world-model"))
 }
 
-fn open_learning_db() -> Result<cozo::DbInstance> {
+fn open_learning_db() -> Result<std::sync::Arc<cozo::DbInstance>> {
     let db = crate::command::store_paths::open_learning_db("learning")?;
     archon_learning::schema::ensure_learning_schema(&db)?;
     Ok(db)

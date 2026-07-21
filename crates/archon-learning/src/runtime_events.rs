@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::time::Duration;
 
 use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability};
@@ -63,7 +62,7 @@ pub fn insert_provider_runtime_event(
     );
     params.insert("created".into(), DataValue::from(event.created_at.as_str()));
 
-    archon_cozo::run_script_guarded(
+    run_script_guarded(
         db,
         "?[event_id, provider_id, profile_id, model_id, runtime_mode, \
          event_type, severity, reason_code, message, retry_count, \
@@ -78,19 +77,9 @@ pub fn insert_provider_runtime_event(
         params,
         ScriptMutability::Mutable,
         "insert provider_runtime_events failed",
-        &provider_event_insert_config(),
     )?;
 
     Ok(())
-}
-
-fn provider_event_insert_config() -> archon_cozo::CozoGuardConfig {
-    archon_cozo::CozoGuardConfig {
-        max_attempts: 3,
-        initial_backoff: Duration::from_millis(20),
-        max_backoff: Duration::from_millis(80),
-        write_lock_path: None,
-    }
 }
 
 pub fn get_provider_runtime_event(
@@ -217,14 +206,44 @@ fn non_empty(value: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn test_db() -> DbInstance {
-        let path = format!(
-            "/tmp/test-provider-runtime-events-{}.db",
-            uuid::Uuid::new_v4()
-        );
+    fn test_db() -> std::sync::Arc<DbInstance> {
+        crate::cozo_guard::test_sqlite_db("test-provider-runtime-events")
+    }
+
+    #[test]
+    fn provider_runtime_event_insert_rejects_unregistered_persistent_db() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("unregistered-provider-events.db");
         let db = DbInstance::new("sqlite", &path, "").unwrap();
-        crate::schema::ensure_learning_schema(&db).unwrap();
-        db
+        db.run_script(
+            r#":create provider_runtime_events {
+                event_id: String => provider_id: String, profile_id: String,
+                model_id: String, runtime_mode: String, event_type: String,
+                severity: String, reason_code: String, message: String,
+                retry_count: Int, fallback_from: String, fallback_to: String,
+                request_id: String, run_id: String, pipeline_id: String,
+                raw_redacted_json: String, created_at: String
+            }"#,
+            Default::default(),
+            ScriptMutability::Mutable,
+        )
+        .unwrap();
+        let event = ProviderRuntimeEventRecord::new(
+            "provider-event-unregistered",
+            "anthropic",
+            "direct",
+            "request_started",
+            "debug",
+            "2026-05-08T12:00:00Z",
+        );
+
+        let error = insert_provider_runtime_event(&db, &event)
+            .expect_err("unregistered persistent writes must fail loudly");
+
+        assert!(
+            error.to_string().contains("no bound Cozo guard config"),
+            "unexpected error: {error:#}",
+        );
     }
 
     #[test]

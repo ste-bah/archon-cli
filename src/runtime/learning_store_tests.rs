@@ -142,7 +142,7 @@ fn panicking_open_releases_waiters_and_allows_a_retry() -> Result<()> {
     let panic_rx_for_opener = Arc::clone(&panic_rx);
 
     let opener = std::thread::spawn(move || {
-        acquire_for_path_with(&first_path, move |_| -> Result<DbInstance> {
+        acquire_for_path_with(&first_path, move |_| -> Result<Arc<DbInstance>> {
             opening_tx.send(()).expect("announce opening cache entry");
             panic_rx_for_opener
                 .lock()
@@ -269,6 +269,49 @@ fn symlinked_parent_and_real_parent_share_the_cache_entry() -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
+#[test]
+fn pipeline_schema_initialization_uses_registered_final_file_alias_lock() -> Result<()> {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir()?;
+    let path = temp.path().join("learning-state.db");
+    let alias = temp.path().join("learning-state-alias.db");
+    clear_for_tests(&path);
+    let database = acquire_for_path(&path)?;
+    symlink(&path, &alias)?;
+
+    let alias_lock = archon_cozo::write_lock_path_for_db(&alias);
+    let (locked_tx, locked_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let holder = std::thread::spawn(move || {
+        archon_cozo::with_write_lock(&alias_lock, "hold pipeline alias lock", || {
+            locked_tx.send(()).expect("announce held alias lock");
+            release_rx.recv().expect("release held alias lock");
+            Ok(())
+        })
+    });
+    locked_rx.recv_timeout(Duration::from_secs(2))?;
+
+    let (result_tx, result_rx) = mpsc::channel();
+    let writer = std::thread::spawn(move || {
+        result_tx
+            .send(archon_pipeline::learning::schema::initialize_learning_schemas(&database))
+            .expect("report pipeline schema result");
+    });
+
+    assert!(
+        result_rx.recv_timeout(Duration::from_millis(100)).is_err(),
+        "pipeline schema write bypassed registered alias lock",
+    );
+    release_tx.send(())?;
+    holder.join().expect("lock holder thread")?;
+    result_rx.recv_timeout(Duration::from_secs(2))??;
+    writer.join().expect("schema writer thread");
+    clear_for_tests(&path);
+    Ok(())
+}
+
 #[test]
 fn real_store_acquisition_reuses_the_handle_and_exposes_governed_schema() -> Result<()> {
     let temp = tempfile::tempdir()?;
@@ -296,6 +339,10 @@ fn real_store_acquisition_reuses_the_handle_and_exposes_governed_schema() -> Res
     });
 
     assert!(Arc::ptr_eq(&first, &second));
+    assert_eq!(
+        archon_cozo::guarded_config_for(&first).and_then(|config| config.write_lock_path),
+        Some(archon_cozo::write_lock_path_for_db(&path)),
+    );
     assert!(
         relation_exists,
         "provider_runtime_events relation should exist"
@@ -323,7 +370,7 @@ fn counters() -> (Arc<AtomicUsize>, Arc<AtomicUsize>) {
 fn counting_opener(
     open_count: Arc<AtomicUsize>,
     ensure_count: Arc<AtomicUsize>,
-) -> impl Fn(&Path) -> Result<DbInstance> + Send + Sync + 'static {
+) -> impl Fn(&Path) -> Result<Arc<DbInstance>> + Send + Sync + 'static {
     move |path| {
         open_count.fetch_add(1, Ordering::SeqCst);
         let db = open_test_db(path)?;
@@ -333,8 +380,11 @@ fn counting_opener(
     }
 }
 
-fn open_test_db(path: &Path) -> Result<DbInstance> {
-    DbInstance::new("sqlite", path, "").map_err(|error| anyhow!("{error}"))
+fn open_test_db(path: &Path) -> Result<Arc<DbInstance>> {
+    archon_learning::cozo_guard::open_sqlite_guarded(
+        path.to_str().unwrap(),
+        "open runtime learning-store test db",
+    )
 }
 
 fn spawn_overlapping_acquire(

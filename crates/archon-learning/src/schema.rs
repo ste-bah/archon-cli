@@ -433,9 +433,9 @@ fn ensure_sandbox_sessions(db: &DbInstance) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn test_db() -> DbInstance {
+    fn test_db() -> std::sync::Arc<DbInstance> {
         let path = format!("/tmp/test-learning-schema-{}.db", uuid::Uuid::new_v4());
-        DbInstance::new("sqlite", &path, "").unwrap()
+        crate::cozo_guard::open_sqlite_guarded(&path, "open test learning schema").unwrap()
     }
 
     #[test]

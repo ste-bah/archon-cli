@@ -12,11 +12,12 @@ use super::interactive_learning_init::{
 fn open_and_initialize(working_dir: std::path::PathBuf) -> Result<BlockingInitialization> {
     let db_path = crate::command::store_paths::learning_db_path_for_dir(&working_dir);
     let config = archon_cozo::CozoGuardConfig::for_interactive_db_path(&db_path);
-    let db = Arc::new(archon_cozo::open_sqlite_guarded(
+    let db = archon_cozo::open_sqlite_guarded_instance(
         &db_path.to_string_lossy(),
         "test interactive learning db",
-        &config,
-    )?);
+        config,
+    )?
+    .db_arc();
     let schemas = initialize_schemas(&working_dir, db.as_ref());
     Ok(BlockingInitialization { db, schemas })
 }
@@ -66,6 +67,11 @@ async fn interactive_learning_initialization_reuses_runtime_cache_handle() {
     crate::runtime::learning_store::clear_for_tests(&db_path);
     let cached = crate::runtime::learning_store::acquire_for_dir(temp_dir.path())
         .expect("cached learning store");
+    assert_eq!(
+        archon_cozo::guarded_config_for(&cached).map(|config| config.max_attempts),
+        Some(10),
+        "runtime cache must bind the interactive retry policy",
+    );
 
     let databases = initialize(temp_dir.path()).await;
 
@@ -73,6 +79,22 @@ async fn interactive_learning_initialization_reuses_runtime_cache_handle() {
     let governed = databases.governed.expect("governed schema available");
     assert!(Arc::ptr_eq(&cached, &pipeline));
     assert!(Arc::ptr_eq(&cached, &governed));
+    crate::runtime::learning_store::clear_for_tests(&db_path);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn interactive_learning_initialization_binds_guard_config() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let db_path = crate::command::store_paths::learning_db_path_for_dir(temp_dir.path());
+    crate::runtime::learning_store::clear_for_tests(&db_path);
+
+    let databases = initialize(temp_dir.path()).await;
+    let governed = databases.governed.expect("governed schema available");
+
+    assert_eq!(
+        archon_cozo::guarded_config_for(&governed).and_then(|config| config.write_lock_path),
+        Some(archon_cozo::write_lock_path_for_db(&db_path)),
+    );
     crate::runtime::learning_store::clear_for_tests(&db_path);
 }
 
@@ -145,6 +167,63 @@ async fn interactive_learning_partial_schema_failure_retains_the_healthy_role() 
 
     assert!(databases.pipeline.is_none());
     assert!(databases.governed.is_some());
+}
+
+#[test]
+fn interactive_pipeline_schema_initialization_uses_registered_retry_policy() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let db_path = crate::command::store_paths::learning_db_path_for_dir(temp_dir.path());
+    std::fs::create_dir_all(db_path.parent().expect("learning db parent"))
+        .expect("create learning db parent");
+    let lock_path = temp_dir.path().join("registered-policy.lock");
+    let config = archon_cozo::CozoGuardConfig {
+        max_attempts: 1,
+        initial_backoff: Duration::ZERO,
+        max_backoff: Duration::ZERO,
+        write_lock_path: Some(lock_path.clone()),
+    };
+    let db = archon_cozo::open_sqlite_guarded_instance(
+        &db_path.to_string_lossy(),
+        "test registered interactive policy",
+        config,
+    )
+    .expect("open registered learning db")
+    .db_arc();
+    let (locked_tx, locked_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let lock_holder = std::thread::spawn(move || {
+        archon_cozo::with_write_lock(&lock_path, "test policy lock holder", || {
+            locked_tx.send(()).expect("announce held lock");
+            release_rx.recv().expect("release held lock");
+            Ok(())
+        })
+    });
+    locked_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("registered sidecar lock acquired");
+
+    let (result_tx, result_rx) = mpsc::channel();
+    let working_dir = temp_dir.path().to_owned();
+    let initialization = std::thread::spawn(move || {
+        result_tx
+            .send(initialize_schemas(&working_dir, &db))
+            .expect("report schema initialization");
+    });
+
+    let result = result_rx.recv_timeout(Duration::from_millis(250));
+    release_tx.send(()).expect("release lock");
+    lock_holder
+        .join()
+        .expect("lock holder joins")
+        .expect("lock holder succeeds");
+    initialization.join().expect("schema thread joins");
+
+    let schemas =
+        result.expect("registered one-attempt policy must return without default retries");
+    assert!(
+        !schemas.pipeline,
+        "held registered lock must fail pipeline initialization"
+    );
 }
 
 #[test]

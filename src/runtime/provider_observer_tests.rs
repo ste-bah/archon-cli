@@ -68,14 +68,8 @@ impl LlmProvider for CompleteProvider {
     }
 }
 
-fn test_db() -> DbInstance {
-    let path = format!(
-        "/tmp/test-observed-provider-events-{}.db",
-        uuid::Uuid::new_v4()
-    );
-    let db = DbInstance::new("sqlite", &path, "").unwrap();
-    archon_learning::schema::ensure_learning_schema(&db).unwrap();
-    db
+fn test_db() -> Arc<DbInstance> {
+    crate::command::test_support::registered_learning_test_db("test-observed-provider-events")
 }
 
 fn anthropic_provider(identity_mode: IdentityMode) -> Arc<dyn LlmProvider> {

@@ -28,6 +28,7 @@ archon-llm = { path = "../archon-llm" }
 archon-core = { path = "../archon-core" }
 archon-tools = { path = "../archon-tools" }
 archon-learning = { path = "../archon-learning" }
+archon-cozo = { path = "../archon-cozo" }
 archon-meaning = { path = "../archon-meaning" }
 archon-observability = { path = "../archon-observability" }
 cel-interpreter.workspace = true

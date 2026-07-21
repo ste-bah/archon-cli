@@ -440,7 +440,7 @@ fn render_usage_line(reason: &str) -> String {
     format!("{reason}\n\n{}", render_usage())
 }
 
-fn open_db() -> Result<DbInstance> {
+fn open_db() -> Result<std::sync::Arc<DbInstance>> {
     crate::command::store_paths::open_evidence_db("gametheory", &["ARCHON_GAMETHEORY_DB_PATH"])
 }
 
@@ -590,7 +590,7 @@ mod tests {
                 "0.010000",
             );
 
-            let stale_ctx_db = Arc::new(test_db());
+            let stale_ctx_db = test_db();
             let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(stale_ctx_db).build();
             let args = vec!["status".to_string(), "gt-slash".to_string()];
             GameTheorySlashHandler.execute(&mut ctx, &args).unwrap();
@@ -614,7 +614,7 @@ mod tests {
                 .unwrap();
 
             runtime.block_on(async {
-                let stale_ctx_db = Arc::new(test_db());
+                let stale_ctx_db = test_db();
                 let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(stale_ctx_db).build();
                 let classify_args = vec![
                     "classify-only".to_string(),
@@ -672,9 +672,15 @@ mod tests {
         });
     }
 
-    fn test_db() -> DbInstance {
+    fn test_db() -> Arc<DbInstance> {
         let path = format!("/tmp/test-gt-slash-{}.db", uuid::Uuid::new_v4());
-        DbInstance::new("sqlite", &path, "").unwrap()
+        archon_cozo::open_sqlite_guarded_instance(
+            &path,
+            "open game-theory slash test db",
+            archon_cozo::CozoGuardConfig::for_db_path(&path),
+        )
+        .unwrap()
+        .db_arc()
     }
 
     fn seed_gt_run(db: &DbInstance, run_id: &str, situation: &str, status: &str, cost: &str) {

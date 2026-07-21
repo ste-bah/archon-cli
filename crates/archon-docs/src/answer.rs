@@ -259,8 +259,7 @@ mod tests {
     use super::*;
 
     fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-answer-{}.db", uuid::Uuid::new_v4());
-        DbInstance::new("sqlite", &path, "").unwrap()
+        DbInstance::new("mem", "", Default::default()).unwrap()
     }
 
     struct MockProvider {

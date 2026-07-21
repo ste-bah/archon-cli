@@ -284,7 +284,7 @@ fn open_learning_db(cwd: &Path) -> anyhow::Result<Arc<cozo::DbInstance>> {
         "open daemon GNN learning db",
     )?;
     archon_pipeline::learning::schema::initialize_learning_schemas(&db)?;
-    Ok(Arc::new(db))
+    Ok(db)
 }
 
 fn open_memory_graph(config: &ArchonConfig) -> anyhow::Result<archon_memory::MemoryGraph> {

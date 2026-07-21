@@ -18,6 +18,7 @@ archon-cognitive = { path = "../archon-cognitive" }
 archon-docs = { path = "../archon-docs" }
 archon-llm = { path = "../archon-llm" }
 archon-learning = { path = "../archon-learning" }
+archon-cozo = { path = "../archon-cozo" }
 archon-tools = { path = "../archon-tools" }
 archon-workflow = { path = "../archon-workflow" }
 

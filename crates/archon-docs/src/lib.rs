@@ -58,11 +58,7 @@ pub mod vlm;
 pub fn acquire_docs_db(
     path: impl AsRef<std::path::Path>,
 ) -> anyhow::Result<std::sync::Arc<cozo::DbInstance>> {
-    docs_db_cache::acquire(path.as_ref())
-}
-
-pub fn configure_cozo_write_lock_for_db(path: impl AsRef<std::path::Path>) {
-    cozo_retry::configure_write_lock_for_db(path);
+    docs_db_cache::acquire(path.as_ref()).map(|database| database.db_arc())
 }
 
 pub fn run_cozo_script_guarded(

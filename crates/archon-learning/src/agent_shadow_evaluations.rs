@@ -137,10 +137,12 @@ pub fn insert_agent_shadow_evaluation(
         DataValue::from(evaluation.created_at.as_str()),
     );
 
-    db.run_script(
+    crate::cozo_guard::run_script_guarded(
+        db,
         shadow_evaluation_put_script(),
         params,
         ScriptMutability::Mutable,
+        "insert agent_shadow_evaluations failed",
     )
     .map_err(|e| anyhow::anyhow!("insert agent_shadow_evaluations failed: {e}"))?;
     Ok(())
@@ -285,14 +287,8 @@ fn clamp_unit(value: f64) -> f64 {
 mod tests {
     use super::*;
 
-    fn test_db() -> DbInstance {
-        let path = format!(
-            "/tmp/test-agent-shadow-evaluations-{}.db",
-            uuid::Uuid::new_v4()
-        );
-        let db = DbInstance::new("sqlite", &path, "").unwrap();
-        crate::schema::ensure_learning_schema(&db).unwrap();
-        db
+    fn test_db() -> std::sync::Arc<DbInstance> {
+        crate::cozo_guard::test_sqlite_db("test-agent-shadow-evaluations")
     }
 
     #[test]
