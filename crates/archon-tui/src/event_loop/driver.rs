@@ -23,6 +23,7 @@ const MAX_TUI_EVENTS_PER_FRAME: usize = 64;
 pub(super) struct TickScheduler {
     cadence: Duration,
     interval: tokio::time::Interval,
+    prefer_tui: bool,
 }
 
 impl TickScheduler {
@@ -30,6 +31,7 @@ impl TickScheduler {
         Self {
             cadence,
             interval: Self::interval_from_now(cadence),
+            prefer_tui: false,
         }
     }
 
@@ -64,7 +66,7 @@ pub(super) enum LoopEvent {
     Terminal(Event),
     TerminalStreamError(io::Error),
     TerminalStreamClosed,
-    Tui(TuiEvent),
+    Tui(Box<TuiEvent>),
     TuiChannelClosed,
     Tick,
 }
@@ -85,26 +87,50 @@ where
 {
     match terminal_events {
         Some(terminal_events) => {
-            tokio::select! {
-                biased;
-                _ = scheduler.tick() => LoopEvent::Tick,
-                terminal_event = terminal_events.next() => match terminal_event {
-                    Some(Ok(event)) => LoopEvent::Terminal(event),
-                    Some(Err(error)) => LoopEvent::TerminalStreamError(error),
-                    None => LoopEvent::TerminalStreamClosed,
-                },
-                tui_event = event_rx.recv() => match tui_event {
-                    Some(event) => LoopEvent::Tui(event),
-                    None => LoopEvent::TuiChannelClosed,
-                },
+            let event = if scheduler.prefer_tui {
+                tokio::select! {
+                    biased;
+                    _ = scheduler.tick() => LoopEvent::Tick,
+                    tui_event = event_rx.recv() => match tui_event {
+                        Some(event) => LoopEvent::Tui(Box::new(event)),
+                        None => LoopEvent::TuiChannelClosed,
+                    },
+                    terminal_event = terminal_events.next() => match terminal_event {
+                        Some(Ok(event)) => LoopEvent::Terminal(event),
+                        Some(Err(error)) => LoopEvent::TerminalStreamError(error),
+                        None => LoopEvent::TerminalStreamClosed,
+                    },
+                }
+            } else {
+                tokio::select! {
+                    biased;
+                    _ = scheduler.tick() => LoopEvent::Tick,
+                    terminal_event = terminal_events.next() => match terminal_event {
+                        Some(Ok(event)) => LoopEvent::Terminal(event),
+                        Some(Err(error)) => LoopEvent::TerminalStreamError(error),
+                        None => LoopEvent::TerminalStreamClosed,
+                    },
+                    tui_event = event_rx.recv() => match tui_event {
+                        Some(event) => LoopEvent::Tui(Box::new(event)),
+                        None => LoopEvent::TuiChannelClosed,
+                    },
+                }
+            };
+            match event {
+                LoopEvent::Terminal(_)
+                | LoopEvent::TerminalStreamError(_)
+                | LoopEvent::TerminalStreamClosed => scheduler.prefer_tui = true,
+                LoopEvent::Tui(_) | LoopEvent::TuiChannelClosed => scheduler.prefer_tui = false,
+                LoopEvent::Tick => {}
             }
+            event
         }
         None => {
             tokio::select! {
                 biased;
                 _ = scheduler.tick() => LoopEvent::Tick,
                 tui_event = event_rx.recv() => match tui_event {
-                    Some(event) => LoopEvent::Tui(event),
+                    Some(event) => LoopEvent::Tui(Box::new(event)),
                     None => LoopEvent::TuiChannelClosed,
                 },
             }
@@ -157,12 +183,12 @@ mod tests {
         let event =
             next_loop_event(Some(&mut terminal_events), &mut event_rx, &mut scheduler).await;
         assert!(
-            matches!(event, LoopEvent::Tui(TuiEvent::TextDelta(ref text)) if text == "from-agent")
+            matches!(event, LoopEvent::Tui(ref tui_event) if matches!(tui_event.as_ref(), TuiEvent::TextDelta(text) if text == "from-agent"))
         );
 
         let mut app = App::new();
         if let LoopEvent::Tui(event) = event {
-            super::super::tui_events::handle_tui_event(&mut app, event, &input_tx).await;
+            super::super::tui_events::handle_tui_event(&mut app, *event, &input_tx).await;
         }
         assert!(
             app.output
@@ -197,6 +223,30 @@ mod tests {
         }
 
         assert_eq!(input_rx.try_recv().unwrap(), "typed");
+    }
+
+    #[tokio::test]
+    async fn queued_tui_event_gets_bounded_service_under_continuous_terminal_input() {
+        let (event_tx, mut event_rx) = crate::event_channel::bounded_tui_event_channel();
+        let mut terminal_events = stream::repeat_with(|| {
+            Ok(Event::Key(KeyEvent::new(
+                KeyCode::Char('x'),
+                KeyModifiers::NONE,
+            )))
+        });
+        let mut scheduler = TickScheduler::new(Duration::from_secs(60));
+        event_tx
+            .send(TuiEvent::TextDelta("from-agent".into()))
+            .unwrap();
+
+        assert!(matches!(
+            next_loop_event(Some(&mut terminal_events), &mut event_rx, &mut scheduler).await,
+            LoopEvent::Terminal(_)
+        ));
+        assert!(matches!(
+            next_loop_event(Some(&mut terminal_events), &mut event_rx, &mut scheduler).await,
+            LoopEvent::Tui(_)
+        ));
     }
 
     #[tokio::test]

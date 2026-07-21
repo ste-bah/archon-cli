@@ -141,7 +141,7 @@ where
                 terminal_events = None;
             }
             LoopEvent::Tui(tui_event) => {
-                drain_tui_events(&mut app, tui_event, &mut event_rx, &input_tx).await;
+                drain_tui_events(&mut app, *tui_event, &mut event_rx, &input_tx).await;
             }
             LoopEvent::TuiChannelClosed => break,
             LoopEvent::Tick => {
