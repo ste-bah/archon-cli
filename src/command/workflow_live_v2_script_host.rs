@@ -5,6 +5,51 @@ struct WorkflowScriptHost {
 }
 
 impl WorkflowScriptHost {
+    /// Find an accepted stored record to reuse for a call whose task is already
+    /// completed but whose ordinal-suffixed id shifted on re-run. Matches by
+    /// task + kind (verify vs implement/remediate), preferring the latest
+    /// accepted attempt. Only scans when the call actually belongs to a
+    /// completed task, so non-completed calls pay no cost.
+    fn reusable_completed_task_record(
+        &self,
+        execution: &WorkflowV2CallExecution,
+    ) -> archon_workflow::WorkflowResult<Option<WorkflowV2CallRecord>> {
+        let completed = &self.runner.resume_completed_ids;
+        if completed.is_empty() {
+            return Ok(None);
+        }
+        let call_id_lower = execution.call.id.to_ascii_lowercase();
+        let Some(task) = completed
+            .iter()
+            .find(|task| call_id_lower.contains(&task.to_ascii_lowercase()))
+        else {
+            return Ok(None);
+        };
+        let want_verify = call_id_lower.contains("verify");
+        let mut best: Option<WorkflowV2CallRecord> = None;
+        for record in self.runner.v2_store.load_call_records()? {
+            if record.call.id.to_ascii_lowercase().contains("verify") != want_verify {
+                continue;
+            }
+            if !(is_reusable_status(record.status)
+                && record.invalidated_by.is_none()
+                && record.result.validate().is_ok()
+                && reusable_record_has_required_completion_evidence(&record)
+                && record_covers_task(&record, task)
+                && record_tasks_all_completed(&record, completed))
+            {
+                continue;
+            }
+            if best
+                .as_ref()
+                .is_none_or(|current| record.attempt >= current.attempt)
+            {
+                best = Some(record);
+            }
+        }
+        Ok(best)
+    }
+
     async fn execute(
         &self,
         method: String,
@@ -61,6 +106,18 @@ impl WorkflowScriptHost {
                 self.mark_reused(&record).await?;
                 return result_view_json(&record.result);
             }
+        }
+
+        // Ordinal-drift resilience: v3 call ids embed a global ordinal that
+        // shifts across re-runs when reused tasks skip their remediation loops,
+        // so a completed task's call arrives under a NEW id with no record at
+        // `execution.call.id`. When the call belongs to a task already in the
+        // completed set, reuse that task's accepted record of the same kind
+        // (implement vs verify) regardless of the ordinal — this is what makes
+        // `restart`/continue actually skip 010–079 instead of re-validating.
+        if let Some(record) = self.reusable_completed_task_record(&execution)? {
+            self.mark_reused(&record).await?;
+            return result_view_json(&record.result);
         }
 
         poll_v2_run_control(
