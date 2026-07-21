@@ -13,19 +13,47 @@ fn temp_store() -> (PathBuf, SessionStore) {
 }
 
 #[test]
-fn list_sessions_uses_three_queries_for_empty_and_populated_results() {
+fn list_sessions_uses_one_query_for_empty_and_populated_results() {
     let (dir, store) = temp_store();
 
-    store.reset_list_query_count();
+    store.reset_query_count();
     assert!(store.list_sessions(10).expect("list empty").is_empty());
-    assert_eq!(store.list_query_count(), 3);
+    assert_eq!(store.query_count(), 1);
 
     store
         .register_session("listed-session", "/listed", None, "test")
         .expect("register session");
-    store.reset_list_query_count();
-    assert_eq!(store.list_sessions(10).expect("list populated").len(), 1);
-    assert_eq!(store.list_query_count(), 3);
+    store
+        .set_name("listed-session", "Listed")
+        .expect("set session name");
+    store
+        .set_parent("listed-session", "parent-session")
+        .expect("set session parent");
+    store
+        .register_session("empty-metadata-session", "/empty", None, "test")
+        .expect("register empty metadata session");
+    store
+        .set_name("empty-metadata-session", "")
+        .expect("set empty session name");
+    store
+        .set_parent("empty-metadata-session", "")
+        .expect("set empty session parent");
+    store.reset_query_count();
+    let sessions = store.list_sessions(10).expect("list populated");
+    assert_eq!(sessions.len(), 2);
+    let listed = sessions
+        .iter()
+        .find(|session| session.id == "listed-session")
+        .expect("listed session");
+    assert_eq!(listed.name.as_deref(), Some("Listed"));
+    assert_eq!(listed.parent_session_id.as_deref(), Some("parent-session"));
+    let empty = sessions
+        .iter()
+        .find(|session| session.id == "empty-metadata-session")
+        .expect("empty metadata session");
+    assert_eq!(empty.name.as_deref(), Some(""));
+    assert_eq!(empty.parent_session_id.as_deref(), Some(""));
+    assert_eq!(store.query_count(), 1);
 
     fs::remove_dir_all(dir).expect("remove temp directory");
 }

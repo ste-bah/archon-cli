@@ -3,6 +3,42 @@ use std::path::{Path, PathBuf};
 
 use cozo::{DataValue, DbInstance, NamedRows, ScriptMutability};
 
+pub struct SessionDb {
+    inner: DbInstance,
+    #[cfg(test)]
+    query_count: std::sync::atomic::AtomicUsize,
+}
+
+impl SessionDb {
+    fn new(inner: DbInstance) -> Self {
+        Self {
+            inner,
+            #[cfg(test)]
+            query_count: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    pub fn run_script(
+        &self,
+        script: &str,
+        params: BTreeMap<String, DataValue>,
+        mutability: ScriptMutability,
+    ) -> Result<NamedRows, cozo::Error> {
+        #[cfg(test)]
+        self.query_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.run_script(script, params, mutability)
+    }
+}
+
+impl std::ops::Deref for SessionDb {
+    type Target = DbInstance;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
     #[error("session database error: {0}")]
@@ -60,11 +96,9 @@ fn empty_rows() -> NamedRows {
 }
 
 pub struct SessionStore {
-    pub(crate) db: DbInstance,
+    db: SessionDb,
     #[cfg(test)]
     fail_next_replace_after_rows: std::sync::atomic::AtomicBool,
-    #[cfg(test)]
-    list_query_count: std::sync::atomic::AtomicUsize,
 }
 
 impl SessionStore {
@@ -85,11 +119,9 @@ impl SessionStore {
         #[cfg(unix)]
         secure_file_permissions(path)?;
         let store = Self {
-            db,
+            db: SessionDb::new(db),
             #[cfg(test)]
             fail_next_replace_after_rows: std::sync::atomic::AtomicBool::new(false),
-            #[cfg(test)]
-            list_query_count: std::sync::atomic::AtomicUsize::new(0),
         };
         store.init_schema()?;
         Ok(store)
@@ -99,7 +131,7 @@ impl SessionStore {
         Self::open(&default_db_path())
     }
 
-    pub fn db(&self) -> &DbInstance {
+    pub fn db(&self) -> &SessionDb {
         &self.db
     }
 
@@ -145,14 +177,16 @@ impl SessionStore {
     }
 
     #[cfg(test)]
-    pub(crate) fn reset_list_query_count(&self) {
-        self.list_query_count
+    pub(crate) fn reset_query_count(&self) {
+        self.db
+            .query_count
             .store(0, std::sync::atomic::Ordering::SeqCst);
     }
 
     #[cfg(test)]
-    pub(crate) fn list_query_count(&self) -> usize {
-        self.list_query_count
+    pub(crate) fn query_count(&self) -> usize {
+        self.db
+            .query_count
             .load(std::sync::atomic::Ordering::SeqCst)
     }
 }
