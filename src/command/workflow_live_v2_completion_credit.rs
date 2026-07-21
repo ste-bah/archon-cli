@@ -3,8 +3,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use archon_workflow::{
-    WorkflowError, WorkflowV2HostMethod, WorkflowV2Result, WorkflowV2ResultStore, WorkflowV2Status,
-    WorkflowV2TaskCompletionEvidence, WorkflowV2TaskCompletionEvidenceKind,
+    WorkflowError, WorkflowV2CallRecord, WorkflowV2HostMethod, WorkflowV2Result,
+    WorkflowV2ResultStore, WorkflowV2Status, WorkflowV2TaskCompletionEvidence,
+    WorkflowV2TaskCompletionEvidenceKind, WorkflowV2TaskCoverageStatus,
 };
 
 use super::workflow_live_task_universe::WorkflowV2TaskUniverse;
@@ -26,6 +27,7 @@ impl CompletionCredit {
                 continue;
             }
             credit.record_all(&record.completion_evidence);
+            credit.record_v3_implementation(&record);
         }
         for outcome in store.load_branch_outcomes()? {
             credit.record_all(&outcome.completion_evidence);
@@ -44,6 +46,43 @@ impl CompletionCredit {
     fn record_all(&mut self, evidence: &[WorkflowV2TaskCompletionEvidence]) {
         for item in evidence {
             self.record(item);
+        }
+    }
+
+    /// Credit the implementation set from an accepted v3 authored-script
+    /// implement/remediate record's task coverage.
+    ///
+    /// Decomposed `implementation-wave-*` records carry ImplementationCandidate
+    /// completion evidence, but v3 implement/remediate records historically did
+    /// not, so `record_all` alone leaves the implementation set empty for a
+    /// pure-v3 run and `completed_ids()` (which needs implementation ∩
+    /// verification) credits nothing — resume can never skip completed work.
+    /// Deriving credit straight from `task_coverage` (the same authoritative
+    /// signal the evidence emitter reads) fixes that for both records written
+    /// before the emitter learned the v3 prefixes and any future emitter
+    /// regression. The intersection with the verification set is unchanged, so
+    /// no task is credited that was not also verified.
+    fn record_v3_implementation(&mut self, record: &WorkflowV2CallRecord) {
+        if !is_v3_implementation_call(&record.call.id) {
+            return;
+        }
+        if !matches!(
+            record.status,
+            WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+        ) {
+            return;
+        }
+        for coverage in &record.result.task_coverage {
+            if !matches!(
+                coverage.status,
+                WorkflowV2TaskCoverageStatus::Accepted | WorkflowV2TaskCoverageStatus::Noop
+            ) {
+                continue;
+            }
+            let task_id = coverage.task_id.trim();
+            if !task_id.is_empty() {
+                self.implementation.insert(task_id.to_string());
+            }
         }
     }
 
@@ -71,6 +110,14 @@ impl CompletionCredit {
             }
         }
     }
+}
+
+/// True for v3 authored-script implement/remediate call ids. These are the
+/// runtime's own v3 call-id scheme (not PRD-specific); the same prefixes gate
+/// ordinal-drift reuse in the script host.
+fn is_v3_implementation_call(call_id: &str) -> bool {
+    let id = call_id.to_ascii_lowercase();
+    id.starts_with("implement-task-") || id.starts_with("remediate-task-")
 }
 
 pub(super) fn prepare_resume_credit(

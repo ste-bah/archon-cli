@@ -251,6 +251,15 @@ fn task_completion_evidence_kind(call_id: &str) -> Option<WorkflowV2TaskCompleti
     if call_id.starts_with("implementation-wave-")
         || call_id.starts_with("remediation-wave-")
         || call_id.starts_with("review-remediation-wave-")
+        // v3 authored-script implement/remediate calls, symmetric with the
+        // verify calls above (which already match `verification-wave-`). Without
+        // these, an accepted v3 implementation stamps no ImplementationCandidate
+        // evidence, the implementation credit set stays empty for a pure-v3 run,
+        // and `completed = noop ∪ (implementation ∩ verification)` credits no
+        // task — so resume/restart can never skip completed work. The prefixes
+        // are the runtime's own v3 call-id scheme, not PRD-specific.
+        || call_id.starts_with("implement-task-")
+        || call_id.starts_with("remediate-task-")
     {
         return Some(WorkflowV2TaskCompletionEvidenceKind::ImplementationCandidate);
     }
