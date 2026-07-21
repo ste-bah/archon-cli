@@ -318,6 +318,14 @@ async fn execute_generated_v2_run(
     let script_lifecycle = std::env::var("ARCHON_SCRIPT_LIFECYCLE")
         .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
+    if let Some(root) = plan.target_repository_root.as_deref() {
+        let trimmed = root.trim();
+        if !trimmed.is_empty() && !std::path::Path::new(trimmed).join(".git").exists() {
+            return Err(WorkflowError::SpecInvalid(format!(
+                "write repository root '{trimmed}' is not a git repository (no .git); every write branch would fail 'Not a git repository'. Point the repository/write root at the git working tree, not the artifact/--target project"
+            )).into());
+        }
+    }
     let run_result = if plan.task_universe.is_some() && script_lifecycle {
         runner
             .run_authored_script_lifecycle(
