@@ -143,12 +143,12 @@ pub trait MemoryTrait: Send + Sync {
 /// 2. Otherwise, acquire a file lock, open CozoDB, start the TCP server, and
 ///    become the server process.
 ///
-/// # Runtime requirement
+/// # Runtime behavior
 ///
-/// Must be called from within a **multi-threaded** tokio runtime. The
-/// `Remote` variant returned uses [`MemoryClient`], whose [`MemoryTrait`]
-/// methods call [`block_on_async`] internally — this will panic outside a
-/// tokio context.
+/// This async entry point requires a Tokio runtime while opening the memory
+/// service. The synchronous [`MemoryTrait`] methods on a returned `Remote`
+/// variant bridge calls from multi-threaded, current-thread, or no-runtime
+/// contexts.
 pub async fn open_memory(data_dir: &Path) -> Result<MemoryAccess, MemoryError> {
     open_memory_with_db_path(data_dir, &data_dir.join("memory.db")).await
 }
