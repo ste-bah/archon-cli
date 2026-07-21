@@ -183,11 +183,22 @@ fn apply_action(
     match action {
         LifecycleAction::Resume => {
             run.status = RunStatus::Running;
+            // Resume recovers work interrupted by EITHER a pause or a cancel:
+            // reset both back to Pending so it re-runs. Already-accepted calls
+            // are reused from the result-store frontier, so nothing completed
+            // is lost — cancelling a run you intend to continue must not throw
+            // away the persisted accepted work.
             for stage in run.stages.values_mut() {
-                if stage.status == StageStatus::Paused {
+                if matches!(stage.status, StageStatus::Paused | StageStatus::Cancelled) {
                     stage.status = StageStatus::Pending;
                     stage.error = None;
                     stage.completed_at = None;
+                }
+            }
+            for item in run.items.values_mut() {
+                if matches!(item.status, StageStatus::Paused | StageStatus::Cancelled) {
+                    item.status = StageStatus::Pending;
+                    item.error = None;
                 }
             }
             Ok((WorkflowEventKind::Resumed, json!({"action": "resume"})))
@@ -459,4 +470,108 @@ fn emit_lifecycle_event(
     let seq = store.next_event_seq(run_id)?;
     WorkflowEventLog::new(store.clone()).emit(run_id, seq, event.0, event.1)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    use chrono::Utc;
+
+    use super::*;
+    use crate::run::{ItemState, StageStatus};
+    use crate::spec::{ArtifactPolicy, StageKind, StageSpec, WorkflowSpec};
+
+    #[test]
+    fn resume_reopens_cancelled_work_without_rewinding_accepted_work() {
+        let mut run = WorkflowRun::new(test_spec(), PathBuf::from("/tmp/run"));
+        run.status = RunStatus::Cancelled;
+        run.stages.get_mut("accepted").unwrap().status = StageStatus::Accepted;
+        let cancelled_stage = run.stages.get_mut("cancelled").unwrap();
+        cancelled_stage.status = StageStatus::Cancelled;
+        cancelled_stage.error = Some("cancelled".to_string());
+        cancelled_stage.completed_at = Some(Utc::now());
+        run.items.insert(
+            "accepted-item".to_string(),
+            ItemState {
+                id: "accepted-item".to_string(),
+                stage_id: "accepted".to_string(),
+                status: StageStatus::Accepted,
+                artifact: None,
+                error: None,
+            },
+        );
+        run.items.insert(
+            "cancelled-item".to_string(),
+            ItemState {
+                id: "cancelled-item".to_string(),
+                stage_id: "cancelled".to_string(),
+                status: StageStatus::Cancelled,
+                artifact: None,
+                error: Some("cancelled".to_string()),
+            },
+        );
+
+        apply_action(&mut run, LifecycleAction::Resume).unwrap();
+
+        assert_eq!(run.status, RunStatus::Running);
+        assert_eq!(
+            run.stages.get("accepted").unwrap().status,
+            StageStatus::Accepted
+        );
+        let resumed_stage = run.stages.get("cancelled").unwrap();
+        assert_eq!(resumed_stage.status, StageStatus::Pending);
+        assert_eq!(resumed_stage.error, None);
+        assert_eq!(resumed_stage.completed_at, None);
+        assert_eq!(
+            run.items.get("accepted-item").unwrap().status,
+            StageStatus::Accepted
+        );
+        let resumed_item = run.items.get("cancelled-item").unwrap();
+        assert_eq!(resumed_item.status, StageStatus::Pending);
+        assert_eq!(resumed_item.error, None);
+    }
+
+    fn test_spec() -> WorkflowSpec {
+        WorkflowSpec {
+            schema: crate::spec::WORKFLOW_SCHEMA.to_string(),
+            name: "cancelled-resume".to_string(),
+            task: "test cancelled resume".to_string(),
+            target_repository_root: None,
+            max_parallelism: 1,
+            max_agents: 1,
+            provider_tiers: BTreeMap::new(),
+            stages: vec![test_stage("accepted"), test_stage("cancelled")],
+            artifact_policy: ArtifactPolicy::default(),
+            permissions: BTreeMap::new(),
+            quality_gates: BTreeMap::new(),
+            learning_hooks: Vec::new(),
+        }
+    }
+
+    fn test_stage(id: &str) -> StageSpec {
+        StageSpec {
+            id: id.to_string(),
+            kind: StageKind::Agent,
+            task: Some(format!("run {id}")),
+            agent: None,
+            foreach: None,
+            reducer: None,
+            tool: None,
+            condition: None,
+            depends_on: Vec::new(),
+            provider_tier: None,
+            retry: Default::default(),
+            input: serde_json::Value::Null,
+            model: None,
+            provider: None,
+            expected_target_files: Vec::new(),
+            verify_command: None,
+            max_parallelism: None,
+            item_kind: None,
+            filter: None,
+            extra: BTreeMap::new(),
+        }
+    }
 }

@@ -350,10 +350,7 @@ fn terminal_resume_message(run: &WorkflowRun) -> Option<String> {
             "Workflow {} is already completed; start a new workflow run for new work.\n",
             run.id
         )),
-        RunStatus::Cancelled => Some(format!(
-            "Workflow {} is cancelled and cannot be resumed; start a new workflow run.\n",
-            run.id
-        )),
+        RunStatus::Cancelled => None,
         _ => None,
     }
 }

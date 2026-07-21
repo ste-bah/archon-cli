@@ -109,18 +109,16 @@ pub(super) async fn resume_generated_v2_workflow(
                 run.id
             )));
         }
-        RunStatus::Cancelled => {
-            return Ok(Some(format!(
-                "Workflow {} is cancelled and cannot be resumed; start a new workflow run.\n",
-                run.id
-            )));
-        }
+        // A cancelled run IS resumable: its accepted call results are persisted
+        // in the result-store frontier, so resuming re-runs only the work that
+        // did not complete (Resume resets cancelled stages/items to Pending).
+        // Only a genuinely finished run (Completed, above) refuses resume.
         _ => {}
     }
     let run = match gate_live_approval(cwd, store, run, approval_mode, &tui_tx)? {
         LiveApprovalOutcome::Proceed { run, note } => {
             let _ = tui_tx.send(TuiEvent::TextDelta(note.clone()));
-            if matches!(run.status, RunStatus::Paused) {
+            if matches!(run.status, RunStatus::Paused | RunStatus::Cancelled) {
                 LifecycleController::new(store.clone()).apply(&run.id, LifecycleAction::Resume)?
             } else {
                 *run
