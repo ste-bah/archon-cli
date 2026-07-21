@@ -101,6 +101,12 @@ struct GeneratedV2Metadata {
     governed_learning_context: Vec<GeneratedWorkflowLearningContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     generated_config: Option<GeneratedWorkflowConfig>,
+    /// Which lifecycle this run was CREATED with (true = v3 authored script,
+    /// false = decomposed). Persisted so continue/resume runs the SAME engine
+    /// instead of silently switching when the ARCHON_SCRIPT_LIFECYCLE env var
+    /// is absent — a decomposed continue cannot reuse a v3 run's records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    script_lifecycle: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default)]

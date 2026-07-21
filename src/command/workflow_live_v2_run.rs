@@ -229,8 +229,18 @@ fn save_generated_v2_metadata(
             .task_universe
             .as_ref()
             .map(|_| plan.generated_config.clone()),
+        // Record the lifecycle at creation so continue/resume honors it.
+        script_lifecycle: Some(script_lifecycle_from_env()),
     };
     store.write_run_json(run_id, GENERATED_V2_METADATA_PATH, &metadata)
+}
+
+/// The ARCHON_SCRIPT_LIFECYCLE env decision, in one place so creation and the
+/// fallback on continue agree.
+fn script_lifecycle_from_env() -> bool {
+    std::env::var("ARCHON_SCRIPT_LIFECYCLE")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
 }
 
 fn load_generated_v2_metadata(
@@ -309,9 +319,27 @@ async fn execute_generated_v2_run(
     // Decomposed-PRD runs default to the Rust lifecycle. v3 script mode
     // (ARCHON_SCRIPT_LIFECYCLE=1) instead AUTHORS a workflow.js from the
     // task universe and executes it — composition as code, no reducer relay.
-    let script_lifecycle = std::env::var("ARCHON_SCRIPT_LIFECYCLE")
-        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
+    // A CONTINUED run MUST use the lifecycle it was created with (persisted in
+    // metadata): re-reading the env var here silently switches a v3 run to
+    // decomposed when the flag is absent, and the decomposed engine cannot
+    // reuse the v3 run's records — it re-does everything under a different
+    // engine. Persisted choice wins; the env var is only the fallback for a
+    // run that predates this field.
+    let script_lifecycle = load_generated_v2_metadata(store, &run.id)
+        .ok()
+        .flatten()
+        .and_then(|metadata| metadata.script_lifecycle)
+        // Legacy runs created before the persisted field: a v3 run leaves an
+        // authored-workflow.js in its run dir — detect it so those continue as
+        // v3 too, rather than falling back to the env var and switching engine.
+        .or_else(|| {
+            store
+                .run_dir(&run.id)
+                .join("authored-workflow.js")
+                .exists()
+                .then_some(true)
+        })
+        .unwrap_or_else(script_lifecycle_from_env);
     if let Some(root) = plan.target_repository_root.as_deref() {
         let trimmed = root.trim();
         if !trimmed.is_empty() && !std::path::Path::new(trimmed).join(".git").exists() {
