@@ -158,12 +158,11 @@ async fn build_codex_session_provider(
     let (provider, runtime_mode) =
         crate::runtime::codex_provider::build_codex_provider(config, "tui_session").await?;
     let profile_id =
-        crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(provider.name());
-    Ok(observe_llm_provider_with_profile(
-        provider,
-        runtime_mode,
-        profile_id,
-    ))
+        crate::runtime::provider_auth_selection::selected_provider_auth_profile_id_async(
+            provider.name(),
+        )
+        .await;
+    Ok(observe_llm_provider_with_profile(provider, runtime_mode, profile_id).await)
 }
 
 /// Spawn the Prometheus `/metrics` exporter when `--metrics-port PORT` is

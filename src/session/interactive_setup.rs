@@ -110,6 +110,7 @@ pub(super) async fn prepare(
     super::build_agent::register_agent_listing(&mut registry, &agent_registry_tmp);
     let agent_def =
         super::build_agent::resolve_agent_definition(config, resolved_flags, &agent_registry_tmp)
+            .await
             .map_err(|code| anyhow::anyhow!("agent resolution failed with exit code {code}"))?;
     drop(agent_registry_tmp);
 

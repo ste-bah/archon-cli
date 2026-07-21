@@ -48,7 +48,7 @@ pub(crate) fn select_provider_auth_profile_from_db(
     ))
 }
 
-pub(crate) fn selected_provider_auth_profile_id(provider_id: &str) -> Option<String> {
+fn selected_provider_auth_profile_id(provider_id: &str) -> Option<String> {
     let db = match learning_store::acquire_default() {
         Ok(db) => db,
         Err(error) => {
@@ -73,6 +73,35 @@ pub(crate) fn selected_provider_auth_profile_id(provider_id: &str) -> Option<Str
                 operation = "query_auth_profiles",
                 "provider auth profile selection unavailable"
             );
+            None
+        }
+    }
+}
+
+pub(crate) async fn selected_provider_auth_profile_id_async(provider_id: &str) -> Option<String> {
+    selected_provider_auth_profile_id_async_with(provider_id, |provider_id| {
+        selected_provider_auth_profile_id(&provider_id)
+    })
+    .await
+}
+
+async fn selected_provider_auth_profile_id_async_with<Select>(
+    provider_id: &str,
+    select: Select,
+) -> Option<String>
+where
+    Select: FnOnce(String) -> Option<String> + Send + 'static,
+{
+    let provider_id = provider_id.to_string();
+    match archon_tui::observability::spawn_blocking_named(
+        "provider-auth-profile-select",
+        move || select(provider_id),
+    )
+    .await
+    {
+        Ok(profile_id) => profile_id,
+        Err(error) => {
+            tracing::warn!(%error, "provider auth profile selection task failed");
             None
         }
     }
@@ -168,6 +197,43 @@ mod tests {
 
     fn now() -> String {
         "2026-05-08T12:00:00Z".to_string()
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn async_selection_keeps_current_thread_runtime_responsive_while_query_blocks() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let (query_started_tx, query_started_rx) = mpsc::channel();
+        let (release_query_tx, release_query_rx) = mpsc::channel();
+        let (progress_tx, progress_rx) = mpsc::channel();
+        let (result_tx, result_rx) = mpsc::channel();
+
+        let coordinator = std::thread::spawn(move || {
+            query_started_rx
+                .recv_timeout(Duration::from_secs(2))
+                .expect("query boundary entered");
+            let progressed = progress_rx.recv_timeout(Duration::from_millis(250)).is_ok();
+            release_query_tx.send(()).expect("release query boundary");
+            result_tx.send(progressed).expect("report runtime progress");
+        });
+
+        let selection = selected_provider_auth_profile_id_async_with("anthropic", move |_| {
+            query_started_tx.send(()).expect("announce query boundary");
+            release_query_rx.recv().expect("release query boundary");
+            Some("profile-1".to_string())
+        });
+        let progress = async move {
+            progress_tx.send(()).expect("report runtime progress");
+        };
+        let (profile_id, ()) = tokio::join!(selection, progress);
+
+        coordinator.join().expect("coordinator joins");
+        assert!(
+            result_rx.recv().expect("runtime progress result"),
+            "another Tokio task must progress while provider auth selection is blocked"
+        );
+        assert_eq!(profile_id.as_deref(), Some("profile-1"));
     }
 
     #[test]

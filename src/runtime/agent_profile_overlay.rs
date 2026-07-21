@@ -4,7 +4,41 @@ use crate::runtime::learning_store;
 use anyhow::Result;
 use cozo::DbInstance;
 
-pub(crate) fn apply_active_profile_overlay_if_enabled(
+pub(crate) async fn apply_active_profile_overlay_if_enabled_async(
+    config: &archon_core::config::ArchonConfig,
+    agent: &mut archon_core::agents::CustomAgentDefinition,
+) -> Result<Option<archon_core::agents::evolution::AgentProfileOverlayReport>> {
+    if !config
+        .learning
+        .agent_evolution
+        .active_profile_overlay_enabled
+    {
+        return Ok(None);
+    }
+
+    let config = config.clone();
+    let mut resolved_agent = agent.clone();
+    let (resolved_agent, report) = run_profile_overlay_async_with(move || {
+        let report = apply_active_profile_overlay_if_enabled(&config, &mut resolved_agent)?;
+        Ok((resolved_agent, report))
+    })
+    .await?;
+    *agent = resolved_agent;
+    Ok(report)
+}
+
+async fn run_profile_overlay_async_with<T>(
+    apply: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T>
+where
+    T: Send + 'static,
+{
+    archon_tui::observability::spawn_blocking_named("agent-profile-overlay", apply)
+        .await
+        .map_err(|error| anyhow::anyhow!("agent profile overlay task failed: {error}"))?
+}
+
+fn apply_active_profile_overlay_if_enabled(
     config: &archon_core::config::ArchonConfig,
     agent: &mut archon_core::agents::CustomAgentDefinition,
 ) -> Result<Option<archon_core::agents::evolution::AgentProfileOverlayReport>> {
@@ -104,6 +138,43 @@ fn bool_score(value: bool) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn async_profile_overlay_runs_off_runtime_worker() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let (query_started_tx, query_started_rx) = mpsc::channel();
+        let (release_query_tx, release_query_rx) = mpsc::channel();
+        let (progress_tx, progress_rx) = mpsc::channel();
+        let (result_tx, result_rx) = mpsc::channel();
+
+        let coordinator = std::thread::spawn(move || {
+            query_started_rx
+                .recv_timeout(Duration::from_secs(2))
+                .expect("profile query entered");
+            let progressed = progress_rx.recv_timeout(Duration::from_millis(250)).is_ok();
+            release_query_tx.send(()).expect("release profile query");
+            result_tx.send(progressed).expect("report runtime progress");
+        });
+
+        let overlay = run_profile_overlay_async_with(move || {
+            query_started_tx.send(()).expect("announce profile query");
+            release_query_rx.recv().expect("release profile query");
+            Ok(())
+        });
+        let progress = async move {
+            progress_tx.send(()).expect("report runtime progress");
+        };
+        let (result, ()) = tokio::join!(overlay, progress);
+
+        coordinator.join().expect("coordinator joins");
+        result.expect("profile overlay succeeds");
+        assert!(
+            result_rx.recv().expect("runtime progress result"),
+            "another Tokio task must progress while profile overlay blocks"
+        );
+    }
 
     fn agent() -> archon_core::agents::CustomAgentDefinition {
         archon_core::agents::CustomAgentDefinition {

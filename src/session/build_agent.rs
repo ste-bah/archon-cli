@@ -57,7 +57,7 @@ pub(super) async fn build_session_agent(
 
     let agent_registry_early = AgentRegistry::load(&working_dir);
     register_agent_listing(&mut registry, &agent_registry_early);
-    let agent_def = resolve_agent_definition(config, resolved_flags, &agent_registry_early)?;
+    let agent_def = resolve_agent_definition(config, resolved_flags, &agent_registry_early).await?;
 
     let hook_registry_arc = crate::runtime::hooks::load_runtime_hook_registry(&working_dir);
     crate::runtime::hooks::register_agent_session_hooks(
@@ -301,10 +301,12 @@ async fn resolve_session_provider(
                     return Err(archon_core::print_mode::EXIT_ERROR);
                 }
             };
-        let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
-            provider.name(),
-        );
-        observe_llm_provider_with_profile(provider, runtime_mode, profile_id)
+        let profile_id =
+            crate::runtime::provider_auth_selection::selected_provider_auth_profile_id_async(
+                provider.name(),
+            )
+            .await;
+        observe_llm_provider_with_profile(provider, runtime_mode, profile_id).await
     } else {
         let provider = match api_client {
             Some(api_client) => {
@@ -319,14 +321,16 @@ async fn resolve_session_provider(
                     selection
                         .fallback_reason
                         .unwrap_or("provider_construction_fallback"),
-                );
+                )
+                .await;
                 selection.provider
             }
             None => match build_llm_provider_without_anthropic_fallback(&config.llm) {
                 Ok(provider) => provider,
                 Err(error) => {
                     let reason = provider_construction_error_reason(&error);
-                    record_anthropic_fallback_denied(&config.llm.provider, "session_agent", reason);
+                    record_anthropic_fallback_denied(&config.llm.provider, "session_agent", reason)
+                        .await;
                     eprintln!("Provider {} failed: {error}", config.llm.provider);
                     return Err(archon_core::print_mode::EXIT_ERROR);
                 }
@@ -334,13 +338,20 @@ async fn resolve_session_provider(
         };
         let selected_provider = provider.name().to_string();
         let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
-        let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
-            &selected_provider,
-        );
-        observe_llm_provider_with_profile(provider, runtime_mode, profile_id)
+        let profile_id =
+            crate::runtime::provider_auth_selection::selected_provider_auth_profile_id_async(
+                &selected_provider,
+            )
+            .await;
+        observe_llm_provider_with_profile(provider, runtime_mode, profile_id).await
     };
 
     let selected_provider = provider.name().to_string();
+    let selected_profile_id =
+        crate::runtime::provider_auth_selection::selected_provider_auth_profile_id_async(
+            &selected_provider,
+        )
+        .await;
     crate::runtime::hooks::fire_provider_resolve_hook(
         hook_registry,
         working_dir,
@@ -352,10 +363,7 @@ async fn resolve_session_provider(
             requested_provider,
             selected_provider: Some(&selected_provider),
             runtime_mode: Some(runtime_mode_for_provider_name(&selected_provider)),
-            profile_id: crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
-                &selected_provider,
-            )
-            .as_deref(),
+            profile_id: selected_profile_id.as_deref(),
         },
     )
     .await;
@@ -381,7 +389,7 @@ pub(super) fn register_agent_listing(
     )));
 }
 
-pub(super) fn resolve_agent_definition(
+pub(super) async fn resolve_agent_definition(
     config: &archon_core::config::ArchonConfig,
     resolved_flags: &archon_core::cli_flags::ResolvedFlags,
     agent_registry: &AgentRegistry,
@@ -393,10 +401,10 @@ pub(super) fn resolve_agent_definition(
         Some(def) => {
             tracing::info!(agent = agent_name, "resolved custom agent");
             let mut def = def.clone();
-            if let Err(error) =
-                crate::runtime::agent_profile_overlay::apply_active_profile_overlay_if_enabled(
-                    config, &mut def,
-                )
+            if let Err(error) = crate::runtime::agent_profile_overlay::apply_active_profile_overlay_if_enabled_async(
+                config, &mut def,
+            )
+            .await
             {
                 tracing::warn!(agent = agent_name, %error, "agent profile overlay skipped");
             }

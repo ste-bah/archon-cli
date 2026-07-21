@@ -132,9 +132,59 @@ async fn async_guarded_retry_yields_and_succeeds() {
     assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn async_guarded_operation_runs_off_runtime_worker() {
+    use std::sync::mpsc;
+
+    let (write_started_tx, write_started_rx) = mpsc::channel();
+    let (release_write_tx, release_write_rx) = mpsc::channel();
+    let (progress_tx, progress_rx) = mpsc::channel();
+    let (result_tx, result_rx) = mpsc::channel();
+
+    let coordinator = std::thread::spawn(move || {
+        write_started_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("guarded operation entered");
+        let progressed = progress_rx.recv_timeout(Duration::from_millis(250)).is_ok();
+        release_write_tx
+            .send(())
+            .expect("release guarded operation");
+        result_tx.send(progressed).expect("report runtime progress");
+    });
+
+    let config = CozoGuardConfig {
+        max_attempts: 1,
+        initial_backoff: Duration::ZERO,
+        max_backoff: Duration::ZERO,
+        write_lock_path: None,
+    };
+    let guarded = run_guarded_async(
+        "blocking guarded operation",
+        ScriptMutability::Immutable,
+        &config,
+        move || {
+            write_started_tx.send(()).expect("announce operation");
+            release_write_rx.recv().expect("release operation");
+            Ok(())
+        },
+    );
+    let progress = async move {
+        progress_tx.send(()).expect("report runtime progress");
+    };
+    let (result, ()) = tokio::join!(guarded, progress);
+
+    coordinator.join().expect("coordinator joins");
+    result.expect("guarded operation succeeds");
+    assert!(
+        result_rx.recv().expect("runtime progress result"),
+        "another Tokio task must progress while guarded operation blocks"
+    );
+}
+
 #[tokio::test(start_paused = true)]
 async fn async_guarded_terminal_error_does_not_retry() {
-    let attempts = Cell::new(0);
+    let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let attempts_for_run = Arc::clone(&attempts);
     let config = CozoGuardConfig {
         max_attempts: 2,
         initial_backoff: Duration::from_secs(1),
@@ -142,15 +192,20 @@ async fn async_guarded_terminal_error_does_not_retry() {
         write_lock_path: None,
     };
 
-    let error = run_guarded_async("terminal", ScriptMutability::Immutable, &config, || {
-        attempts.set(attempts.get() + 1);
-        Err::<(), _>(anyhow!("relation not found"))
-    })
+    let error = run_guarded_async(
+        "terminal",
+        ScriptMutability::Immutable,
+        &config,
+        move || {
+            attempts_for_run.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err::<(), _>(anyhow!("relation not found"))
+        },
+    )
     .await
     .unwrap_err();
 
     assert!(error.to_string().contains("relation not found"));
-    assert_eq!(attempts.get(), 1);
+    assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 
 #[test]

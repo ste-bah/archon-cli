@@ -87,6 +87,48 @@ fn anthropic_provider(identity_mode: IdentityMode) -> Arc<dyn LlmProvider> {
     Arc::new(AnthropicProvider::new(client))
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn provider_persistence_keeps_current_thread_runtime_responsive_while_write_blocks() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let (write_started_tx, write_started_rx) = mpsc::channel();
+    let (release_write_tx, release_write_rx) = mpsc::channel();
+    let (progress_tx, progress_rx) = mpsc::channel();
+    let (result_tx, result_rx) = mpsc::channel();
+
+    let coordinator = std::thread::spawn(move || {
+        write_started_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("persistence boundary entered");
+        let progressed = progress_rx.recv_timeout(Duration::from_millis(250)).is_ok();
+        release_write_tx
+            .send(())
+            .expect("release persistence boundary");
+        result_tx.send(progressed).expect("report runtime progress");
+    });
+
+    let persistence = run_provider_persistence_async_with("test persistence", move || {
+        write_started_tx
+            .send(())
+            .expect("announce persistence boundary");
+        release_write_rx
+            .recv()
+            .expect("release persistence boundary");
+    });
+    let progress = async move {
+        progress_tx.send(()).expect("report runtime progress");
+    };
+    let (result, ()) = tokio::join!(persistence, progress);
+    assert!(result.is_some(), "persistence task must complete");
+
+    coordinator.join().expect("coordinator joins");
+    assert!(
+        result_rx.recv().expect("runtime progress result"),
+        "another Tokio task must progress while provider persistence is blocked"
+    );
+}
+
 #[tokio::test]
 async fn complete_records_start_and_success_events() {
     let db = test_db();
@@ -95,7 +137,8 @@ async fn complete_records_start_and_success_events() {
         "direct",
         None,
         ProviderRuntimeEventRecorder::with_db(db.clone()),
-    );
+    )
+    .await;
 
     observed
         .complete(LlmRequest {
@@ -126,7 +169,8 @@ async fn failures_emit_request_and_limit_events() {
         "direct",
         None,
         ProviderRuntimeEventRecorder::with_db(db.clone()),
-    );
+    )
+    .await;
 
     let error = observed
         .complete(LlmRequest {
@@ -158,7 +202,8 @@ async fn provider_failures_feed_agent_ledger_when_context_present() {
         "direct",
         None,
         ProviderRuntimeEventRecorder::with_db(db.clone()),
-    );
+    )
+    .await;
 
     let error = observed
         .complete(LlmRequest {
@@ -216,7 +261,8 @@ async fn observed_events_include_profile_id_when_known() {
         "direct",
         Some("anthropic-oauth".into()),
         ProviderRuntimeEventRecorder::with_db(db.clone()),
-    );
+    )
+    .await;
 
     observed
         .complete(LlmRequest {
@@ -235,8 +281,8 @@ async fn observed_events_include_profile_id_when_known() {
     assert_eq!(events[1].profile_id.as_deref(), Some("anthropic-oauth"));
 }
 
-#[test]
-fn anthropic_spoof_identity_event_is_recorded_on_wrap() {
+#[tokio::test]
+async fn anthropic_spoof_identity_event_is_recorded_on_wrap() {
     let db = test_db();
     let _observed = ObservedLlmProvider::new(
         anthropic_provider(IdentityMode::Spoof {
@@ -249,7 +295,8 @@ fn anthropic_spoof_identity_event_is_recorded_on_wrap() {
         "direct",
         Some("anthropic-oauth".into()),
         ProviderRuntimeEventRecorder::with_db(db.clone()),
-    );
+    )
+    .await;
 
     let events =
         archon_learning::runtime_events::list_provider_runtime_events(&db, Some("anthropic"))
@@ -261,15 +308,16 @@ fn anthropic_spoof_identity_event_is_recorded_on_wrap() {
     assert_eq!(events[0].raw_redacted_json["identity_status"], "spoof");
 }
 
-#[test]
-fn anthropic_clean_identity_records_rejected_spoof_event() {
+#[tokio::test]
+async fn anthropic_clean_identity_records_rejected_spoof_event() {
     let db = test_db();
     let _observed = ObservedLlmProvider::new(
         anthropic_provider(IdentityMode::Clean),
         "direct",
         None,
         ProviderRuntimeEventRecorder::with_db(db.clone()),
-    );
+    )
+    .await;
 
     let events =
         archon_learning::runtime_events::list_provider_runtime_events(&db, Some("anthropic"))

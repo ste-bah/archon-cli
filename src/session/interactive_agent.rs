@@ -356,41 +356,52 @@ async fn resolve_provider(
                     selection
                         .fallback_reason
                         .unwrap_or("provider_construction_fallback"),
-                );
+                )
+                .await;
                 let profile_id =
-                    crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+                    crate::runtime::provider_auth_selection::selected_provider_auth_profile_id_async(
                         &selected_provider,
-                    );
+                    )
+                    .await;
                 observe_llm_provider_with_profile(selection.provider, runtime_mode, profile_id)
+                    .await
             }
             None => {
-                let provider = build_llm_provider_without_anthropic_fallback(&config.llm).map_err(
-                    |error| {
+                let provider = match build_llm_provider_without_anthropic_fallback(&config.llm) {
+                    Ok(provider) => provider,
+                    Err(error) => {
                         let reason = provider_construction_error_reason(&error);
                         record_anthropic_fallback_denied(
                             &config.llm.provider,
                             "interactive_session",
                             reason,
-                        );
-                        anyhow::anyhow!("provider {} failed: {error}", config.llm.provider)
-                    },
-                )?;
+                        )
+                        .await;
+                        return Err(anyhow::anyhow!(
+                            "provider {} failed: {error}",
+                            config.llm.provider
+                        ));
+                    }
+                };
                 let selected_provider = provider.name().to_string();
                 let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
                 let profile_id =
-                    crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+                    crate::runtime::provider_auth_selection::selected_provider_auth_profile_id_async(
                         &selected_provider,
-                    );
-                observe_llm_provider_with_profile(provider, runtime_mode, profile_id)
+                    )
+                    .await;
+                observe_llm_provider_with_profile(provider, runtime_mode, profile_id).await
             }
         },
     };
 
     if !provider_was_prebuilt {
         let selected_provider = provider.name().to_string();
-        let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
-            &selected_provider,
-        );
+        let profile_id =
+            crate::runtime::provider_auth_selection::selected_provider_auth_profile_id_async(
+                &selected_provider,
+            )
+            .await;
         crate::runtime::hooks::fire_provider_resolve_hook(
             hook_registry,
             working_dir,

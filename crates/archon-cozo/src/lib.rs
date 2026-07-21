@@ -157,8 +157,9 @@ pub async fn open_sqlite_guarded_async(
     context: &str,
     config: &CozoGuardConfig,
 ) -> Result<DbInstance> {
-    run_guarded_async(context, ScriptMutability::Mutable, config, || {
-        DbInstance::new("sqlite", path, "")
+    let path = path.to_string();
+    run_guarded_async(context, ScriptMutability::Mutable, config, move || {
+        DbInstance::new("sqlite", &path, "")
             .map_err(|error| anyhow!("open sqlite-backed Cozo store failed: {error}"))
     })
     .await
@@ -179,15 +180,16 @@ pub fn run_script_guarded(
 }
 
 pub async fn run_script_guarded_async(
-    db: &DbInstance,
-    script: &str,
+    db: Arc<DbInstance>,
+    script: impl Into<String>,
     params: BTreeMap<String, DataValue>,
     mutability: ScriptMutability,
     context: &str,
     config: &CozoGuardConfig,
 ) -> Result<NamedRows> {
-    run_guarded_async(context, mutability, config, || {
-        db.run_script(script, params.clone(), mutability)
+    let script = script.into();
+    run_guarded_async(context, mutability, config, move || {
+        db.run_script(&script, params.clone(), mutability)
             .map_err(|error| anyhow!("{error}"))
     })
     .await
@@ -220,21 +222,38 @@ pub fn run_guarded<T>(
     unreachable!("a guarded retry loop always returns from an attempt")
 }
 
-pub async fn run_guarded_async<T>(
+pub async fn run_guarded_async<T, Run>(
     context: &str,
     mutability: ScriptMutability,
     config: &CozoGuardConfig,
-    mut run: impl FnMut() -> Result<T>,
-) -> Result<T> {
+    run: Run,
+) -> Result<T>
+where
+    T: Send + 'static,
+    Run: FnMut() -> Result<T> + Send + 'static,
+{
     let attempts = config.max_attempts.max(1);
+    let context = context.to_string();
+    let config = config.clone();
+    let mut run = run;
 
     for attempt in 0..attempts {
-        match run_guarded_once(context, mutability, config, &mut run) {
+        let attempt_context = context.clone();
+        let attempt_config = config.clone();
+        let attempt_result = tokio::task::spawn_blocking(move || {
+            let result = run_guarded_once(&attempt_context, mutability, &attempt_config, &mut run);
+            (run, result)
+        })
+        .await
+        .map_err(|error| anyhow!("{context}: guarded operation task failed: {error}"))?;
+        run = attempt_result.0;
+
+        match attempt_result.1 {
             Ok(value) => return Ok(value),
             Err(error) => {
                 let last_error = format!("{error:#}");
                 if let Some(backoff) =
-                    retry_backoff(context, config, attempt, attempts, &last_error)
+                    retry_backoff(&context, &config, attempt, attempts, &last_error)
                 {
                     tokio::time::sleep(backoff).await;
                     continue;

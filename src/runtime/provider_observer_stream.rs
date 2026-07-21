@@ -39,7 +39,8 @@ pub(super) fn forward_stream(
                         &observed,
                         &request_id,
                         error_type,
-                    );
+                    )
+                    .await;
                 }
                 StreamEvent::MessageStop => {
                     completed = true;
@@ -50,7 +51,8 @@ pub(super) fn forward_stream(
                         profile_id.as_deref(),
                         &observed,
                         &request_id,
-                    );
+                    )
+                    .await;
                 }
                 _ => {}
             }
@@ -66,13 +68,14 @@ pub(super) fn forward_stream(
                 profile_id.as_deref(),
                 &observed,
                 &request_id,
-            );
+            )
+            .await;
         }
     });
     rx
 }
 
-fn record_stream_error(
+async fn record_stream_error(
     recorder: &ProviderRuntimeEventRecorder,
     provider_id: &str,
     runtime_mode: &str,
@@ -95,32 +98,42 @@ fn record_stream_error(
         "request_origin": observed.origin.as_deref(),
         "stream_error_type": error_type,
     }));
-    if let Some(event_id) = recorder.record(event) {
-        crate::runtime::provider_incident_ledger::record_provider_incident(
-            crate::runtime::provider_incident_ledger::ProviderIncidentLedgerInput {
-                db: recorder.db.as_ref(),
-                agent_type: observed.agent_type.as_deref(),
-                agent_version: observed.agent_version.as_deref(),
-                run_id: observed.run_id.as_deref(),
-                model_id: &observed.model,
-                provider_id,
-                provider_event_id: &event_id,
-                reason_code: error_type,
-            },
-        );
-    }
-    crate::runtime::provider_profile_updates::mark_failure_reason(
-        recorder.db.as_ref(),
-        provider_id,
-        runtime_mode,
-        profile_id,
-        Some(&observed.model),
-        Some(request_id),
-        error_type,
-    );
+    let provider_id = provider_id.to_string();
+    let runtime_mode = runtime_mode.to_string();
+    let profile_id = profile_id.map(ToOwned::to_owned);
+    let observed = observed.clone();
+    let request_id = request_id.to_string();
+    let error_type = error_type.to_string();
+    recorder
+        .persist("record provider stream error", move |recorder| {
+            if let Some(event_id) = recorder.record_sync(event) {
+                crate::runtime::provider_incident_ledger::record_provider_incident(
+                    crate::runtime::provider_incident_ledger::ProviderIncidentLedgerInput {
+                        db: recorder.db.as_ref(),
+                        agent_type: observed.agent_type.as_deref(),
+                        agent_version: observed.agent_version.as_deref(),
+                        run_id: observed.run_id.as_deref(),
+                        model_id: &observed.model,
+                        provider_id: &provider_id,
+                        provider_event_id: &event_id,
+                        reason_code: &error_type,
+                    },
+                );
+            }
+            crate::runtime::provider_profile_updates::mark_failure_reason(
+                recorder.db.as_ref(),
+                &provider_id,
+                &runtime_mode,
+                profile_id.as_deref(),
+                Some(&observed.model),
+                Some(&request_id),
+                &error_type,
+            );
+        })
+        .await;
 }
 
-fn record_stream_success(
+async fn record_stream_success(
     recorder: &ProviderRuntimeEventRecorder,
     provider_id: &str,
     runtime_mode: &str,
@@ -128,31 +141,39 @@ fn record_stream_success(
     observed: &ObservedRequest,
     request_id: &str,
 ) {
-    recorder.record(
-        base_event(
-            provider_id,
-            runtime_mode,
-            ProviderRuntimeEventType::RequestSucceeded,
-            ProviderRuntimeSeverity::Info,
-        )
-        .with_request_id(request_id.to_string())
-        .with_model(observed.model.clone())
-        .with_reason("stream_completed")
-        .with_redacted_json(serde_json::json!({
-            "request_origin": observed.origin.as_deref(),
-        })),
-    );
-    crate::runtime::provider_profile_updates::mark_success(
-        recorder.db.as_ref(),
+    let event = base_event(
         provider_id,
         runtime_mode,
-        profile_id,
-        Some(&observed.model),
-        Some(request_id),
-    );
+        ProviderRuntimeEventType::RequestSucceeded,
+        ProviderRuntimeSeverity::Info,
+    )
+    .with_request_id(request_id.to_string())
+    .with_model(observed.model.clone())
+    .with_reason("stream_completed")
+    .with_redacted_json(serde_json::json!({
+        "request_origin": observed.origin.as_deref(),
+    }));
+    let provider_id = provider_id.to_string();
+    let runtime_mode = runtime_mode.to_string();
+    let profile_id = profile_id.map(ToOwned::to_owned);
+    let model = observed.model.clone();
+    let request_id = request_id.to_string();
+    recorder
+        .persist("record provider stream success", move |recorder| {
+            recorder.record_sync(event);
+            crate::runtime::provider_profile_updates::mark_success(
+                recorder.db.as_ref(),
+                &provider_id,
+                &runtime_mode,
+                profile_id.as_deref(),
+                Some(&model),
+                Some(&request_id),
+            );
+        })
+        .await;
 }
 
-fn record_stream_closed_without_stop(
+async fn record_stream_closed_without_stop(
     recorder: &ProviderRuntimeEventRecorder,
     provider_id: &str,
     runtime_mode: &str,
@@ -173,27 +194,39 @@ fn record_stream_closed_without_stop(
     .with_redacted_json(serde_json::json!({
         "request_origin": observed.origin.as_deref(),
     }));
-    if let Some(event_id) = recorder.record(event) {
-        crate::runtime::provider_incident_ledger::record_provider_incident(
-            crate::runtime::provider_incident_ledger::ProviderIncidentLedgerInput {
-                db: recorder.db.as_ref(),
-                agent_type: observed.agent_type.as_deref(),
-                agent_version: observed.agent_version.as_deref(),
-                run_id: observed.run_id.as_deref(),
-                model_id: &observed.model,
-                provider_id,
-                provider_event_id: &event_id,
-                reason_code: "stream_closed_without_message_stop",
+    let provider_id = provider_id.to_string();
+    let runtime_mode = runtime_mode.to_string();
+    let profile_id = profile_id.map(ToOwned::to_owned);
+    let observed = observed.clone();
+    let request_id = request_id.to_string();
+    recorder
+        .persist(
+            "record provider stream closed without stop",
+            move |recorder| {
+                if let Some(event_id) = recorder.record_sync(event) {
+                    crate::runtime::provider_incident_ledger::record_provider_incident(
+                        crate::runtime::provider_incident_ledger::ProviderIncidentLedgerInput {
+                            db: recorder.db.as_ref(),
+                            agent_type: observed.agent_type.as_deref(),
+                            agent_version: observed.agent_version.as_deref(),
+                            run_id: observed.run_id.as_deref(),
+                            model_id: &observed.model,
+                            provider_id: &provider_id,
+                            provider_event_id: &event_id,
+                            reason_code: "stream_closed_without_message_stop",
+                        },
+                    );
+                }
+                crate::runtime::provider_profile_updates::mark_failure_reason(
+                    recorder.db.as_ref(),
+                    &provider_id,
+                    &runtime_mode,
+                    profile_id.as_deref(),
+                    Some(&observed.model),
+                    Some(&request_id),
+                    "stream_closed_without_message_stop",
+                );
             },
-        );
-    }
-    crate::runtime::provider_profile_updates::mark_failure_reason(
-        recorder.db.as_ref(),
-        provider_id,
-        runtime_mode,
-        profile_id,
-        Some(&observed.model),
-        Some(request_id),
-        "stream_closed_without_message_stop",
-    );
+        )
+        .await;
 }

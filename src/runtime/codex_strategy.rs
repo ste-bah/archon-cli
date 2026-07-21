@@ -13,14 +13,14 @@ pub(crate) struct CodexRuntimeDecision {
     pub(crate) app_server_discovered: bool,
 }
 
-pub(crate) fn resolve_codex_runtime_strategy(
+pub(crate) async fn resolve_codex_runtime_strategy(
     config: &CodexProviderConfig,
     surface: &str,
 ) -> Result<CodexRuntimeDecision> {
-    resolve_codex_runtime_strategy_with_events(config, surface, true)
+    resolve_codex_runtime_strategy_with_events(config, surface, true).await
 }
 
-fn resolve_codex_runtime_strategy_with_events(
+async fn resolve_codex_runtime_strategy_with_events(
     config: &CodexProviderConfig,
     surface: &str,
     emit_events: bool,
@@ -30,15 +30,15 @@ fn resolve_codex_runtime_strategy_with_events(
             selected_runtime_mode: "direct",
             app_server_discovered: false,
         }),
-        "auto" => auto_strategy(config, surface, emit_events),
-        "app_server" => app_server_strategy(config, surface, emit_events),
+        "auto" => auto_strategy(config, surface, emit_events).await,
+        "app_server" => app_server_strategy(config, surface, emit_events).await,
         other => Err(anyhow::anyhow!(
             "providers.openai-codex.runtime must be direct, app_server, or auto, got `{other}`"
         )),
     }
 }
 
-fn auto_strategy(
+async fn auto_strategy(
     config: &CodexProviderConfig,
     surface: &str,
     emit_events: bool,
@@ -56,7 +56,8 @@ fn auto_strategy(
             surface,
             discovery_reason(config, "codex_auto_direct_fallback_disabled"),
             emit_events,
-        );
+        )
+        .await;
     }
     if emit_events {
         record_provider_fallback_selected(
@@ -65,7 +66,8 @@ fn auto_strategy(
             "direct",
             discovery.reason_code(),
             strategy_metadata(config, surface, true),
-        );
+        )
+        .await;
     }
     Ok(CodexRuntimeDecision {
         selected_runtime_mode: "direct",
@@ -73,7 +75,7 @@ fn auto_strategy(
     })
 }
 
-fn app_server_strategy(
+async fn app_server_strategy(
     config: &CodexProviderConfig,
     surface: &str,
     emit_events: bool,
@@ -85,7 +87,7 @@ fn app_server_strategy(
             app_server_discovered: true,
         });
     }
-    deny_direct_fallback(config, surface, discovery.reason_code(), emit_events)
+    deny_direct_fallback(config, surface, discovery.reason_code(), emit_events).await
 }
 
 fn discovery_reason(config: &CodexProviderConfig, fallback_reason: &'static str) -> &'static str {
@@ -97,7 +99,7 @@ fn discovery_reason(config: &CodexProviderConfig, fallback_reason: &'static str)
     }
 }
 
-fn deny_direct_fallback(
+async fn deny_direct_fallback(
     config: &CodexProviderConfig,
     surface: &str,
     reason_code: &str,
@@ -110,7 +112,8 @@ fn deny_direct_fallback(
             "direct",
             reason_code,
             strategy_metadata(config, surface, false),
-        );
+        )
+        .await;
     }
     Err(anyhow::anyhow!("{}", strategy_error(surface, reason_code)))
 }
@@ -161,18 +164,20 @@ fn strategy_metadata(
 mod tests {
     use super::*;
 
-    #[test]
-    fn direct_is_the_compatibility_default() {
+    #[tokio::test]
+    async fn direct_is_the_compatibility_default() {
         let config = CodexProviderConfig::default();
 
-        let decision = resolve_codex_runtime_strategy_with_events(&config, "test", false).unwrap();
+        let decision = resolve_codex_runtime_strategy_with_events(&config, "test", false)
+            .await
+            .unwrap();
 
         assert_eq!(decision.selected_runtime_mode, "direct");
         assert!(!decision.app_server_discovered);
     }
 
-    #[test]
-    fn app_server_mode_never_silently_uses_direct() {
+    #[tokio::test]
+    async fn app_server_mode_never_silently_uses_direct() {
         let config = CodexProviderConfig {
             runtime: "app_server".into(),
             direct_fallback: true,
@@ -180,39 +185,46 @@ mod tests {
         };
 
         let error = resolve_codex_runtime_strategy_with_events(&config, "test", false)
+            .await
             .unwrap_err()
             .to_string();
 
         assert!(error.contains("app-server runtime is unavailable"));
     }
 
-    #[test]
-    fn auto_requires_explicit_direct_fallback() {
+    #[tokio::test]
+    async fn auto_requires_explicit_direct_fallback() {
         let config = CodexProviderConfig {
             runtime: "auto".into(),
             direct_fallback: false,
             ..CodexProviderConfig::default()
         };
 
-        assert!(resolve_codex_runtime_strategy_with_events(&config, "test", false).is_err());
+        assert!(
+            resolve_codex_runtime_strategy_with_events(&config, "test", false)
+                .await
+                .is_err()
+        );
     }
 
-    #[test]
-    fn auto_can_select_direct_when_policy_allows_it() {
+    #[tokio::test]
+    async fn auto_can_select_direct_when_policy_allows_it() {
         let config = CodexProviderConfig {
             runtime: "auto".into(),
             direct_fallback: true,
             ..CodexProviderConfig::default()
         };
 
-        let decision = resolve_codex_runtime_strategy_with_events(&config, "test", false).unwrap();
+        let decision = resolve_codex_runtime_strategy_with_events(&config, "test", false)
+            .await
+            .unwrap();
 
         assert_eq!(decision.selected_runtime_mode, "direct");
         assert!(!decision.app_server_discovered);
     }
 
-    #[test]
-    fn auto_selects_app_server_when_configured() {
+    #[tokio::test]
+    async fn auto_selects_app_server_when_configured() {
         let config = CodexProviderConfig {
             runtime: "auto".into(),
             direct_fallback: true,
@@ -220,7 +232,9 @@ mod tests {
             ..CodexProviderConfig::default()
         };
 
-        let decision = resolve_codex_runtime_strategy_with_events(&config, "test", false).unwrap();
+        let decision = resolve_codex_runtime_strategy_with_events(&config, "test", false)
+            .await
+            .unwrap();
         let metadata = strategy_metadata(&config, "test", true);
 
         assert_eq!(decision.selected_runtime_mode, "app_server");
@@ -228,22 +242,24 @@ mod tests {
         assert_eq!(metadata["app_server_discovery"]["status"], "configured");
     }
 
-    #[test]
-    fn app_server_mode_selects_adapter_when_endpoint_configured() {
+    #[tokio::test]
+    async fn app_server_mode_selects_adapter_when_endpoint_configured() {
         let config = CodexProviderConfig {
             runtime: "app_server".into(),
             app_server_url: Some("http://127.0.0.1:11434/codex".into()),
             ..CodexProviderConfig::default()
         };
 
-        let decision = resolve_codex_runtime_strategy_with_events(&config, "test", false).unwrap();
+        let decision = resolve_codex_runtime_strategy_with_events(&config, "test", false)
+            .await
+            .unwrap();
 
         assert_eq!(decision.selected_runtime_mode, "app_server");
         assert!(decision.app_server_discovered);
     }
 
-    #[test]
-    fn app_server_mode_reports_invalid_endpoint_before_adapter_pending() {
+    #[tokio::test]
+    async fn app_server_mode_reports_invalid_endpoint_before_adapter_pending() {
         let config = CodexProviderConfig {
             runtime: "app_server".into(),
             app_server_url: Some("file:///tmp/codex.sock".into()),
@@ -251,14 +267,15 @@ mod tests {
         };
 
         let error = resolve_codex_runtime_strategy_with_events(&config, "test", false)
+            .await
             .unwrap_err()
             .to_string();
 
         assert!(error.contains("endpoint is invalid"));
     }
 
-    #[test]
-    fn app_server_mode_reports_invalid_transport_before_adapter_pending() {
+    #[tokio::test]
+    async fn app_server_mode_reports_invalid_transport_before_adapter_pending() {
         let config = CodexProviderConfig {
             runtime: "app_server".into(),
             app_server_transport: "pipe".into(),
@@ -266,6 +283,7 @@ mod tests {
         };
 
         let error = resolve_codex_runtime_strategy_with_events(&config, "test", false)
+            .await
             .unwrap_err()
             .to_string();
 
