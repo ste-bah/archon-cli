@@ -18,6 +18,11 @@ impl WorkflowScriptHost {
         if completed.is_empty() {
             return Ok(None);
         }
+        // Only v3 implement/verify calls reuse this way, and only against
+        // records of the SAME v3 family — never a stale decomposed record.
+        let Some(want_family) = v3_call_family(&execution.call.id) else {
+            return Ok(None);
+        };
         let call_id_lower = execution.call.id.to_ascii_lowercase();
         let Some(task) = completed
             .iter()
@@ -25,10 +30,9 @@ impl WorkflowScriptHost {
         else {
             return Ok(None);
         };
-        let want_verify = call_id_lower.contains("verify");
         let mut best: Option<WorkflowV2CallRecord> = None;
         for record in self.runner.v2_store.load_call_records()? {
-            if record.call.id.to_ascii_lowercase().contains("verify") != want_verify {
+            if v3_call_family(&record.call.id) != Some(want_family) {
                 continue;
             }
             if !(is_reusable_status(record.status)

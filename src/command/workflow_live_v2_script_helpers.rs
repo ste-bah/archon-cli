@@ -272,6 +272,27 @@ pub(super) fn record_tasks_all_completed(
     !tasks.is_empty() && tasks.iter().all(|task| completed.contains(*task))
 }
 
+/// The v3 authored-script call family a call id belongs to, or None for
+/// anything else (decomposed `implementation-wave-*`/`verification-wave-N`,
+/// reviews, discovery). Reuse across ordinal drift must only match within the
+/// same family so a stale decomposed record can never satisfy a v3 task call.
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub(super) enum V3CallFamily {
+    Implement,
+    Verify,
+}
+
+pub(super) fn v3_call_family(call_id: &str) -> Option<V3CallFamily> {
+    let id = call_id.to_ascii_lowercase();
+    if id.starts_with("implement-task-") || id.starts_with("remediate-task-") {
+        Some(V3CallFamily::Implement)
+    } else if id.starts_with("verification-wave-verify-task-") {
+        Some(V3CallFamily::Verify)
+    } else {
+        None
+    }
+}
+
 /// True when this record's accepted work covers `task`.
 pub(super) fn record_covers_task(record: &WorkflowV2CallRecord, task: &str) -> bool {
     record.completed_ids.iter().any(|id| id == task)
