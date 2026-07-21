@@ -23,24 +23,33 @@ impl WorkflowScriptHost {
         let Some(want_family) = v3_call_family(&execution.call.id) else {
             return Ok(None);
         };
+        // Which completed task does this call belong to? Match by the canonical
+        // task token embedded in the call id.
         let call_id_lower = execution.call.id.to_ascii_lowercase();
-        let Some(task) = completed
+        let Some(task_token) = completed
             .iter()
-            .find(|task| call_id_lower.contains(&task.to_ascii_lowercase()))
+            .map(|task| task.to_ascii_lowercase())
+            .find(|token| call_id_lower.contains(token.as_str()))
         else {
             return Ok(None);
         };
+        // Match candidate records to the same task by CALL ID token, NOT by
+        // completion evidence: implement/remediate records carry no task-id
+        // evidence (only verify records do), so an evidence check would reject
+        // the accepted remediate record that actually satisfies the task. The
+        // task is already confirmed complete (it's in `completed`), the family
+        // is fixed, and the record must be accepted+valid — that is sufficient.
         let mut best: Option<WorkflowV2CallRecord> = None;
         for record in self.runner.v2_store.load_call_records()? {
             if v3_call_family(&record.call.id) != Some(want_family) {
                 continue;
             }
+            if !record.call.id.to_ascii_lowercase().contains(&task_token) {
+                continue;
+            }
             if !(is_reusable_status(record.status)
                 && record.invalidated_by.is_none()
-                && record.result.validate().is_ok()
-                && reusable_record_has_required_completion_evidence(&record)
-                && record_covers_task(&record, task)
-                && record_tasks_all_completed(&record, completed))
+                && record.result.validate().is_ok())
             {
                 continue;
             }

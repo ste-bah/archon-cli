@@ -293,15 +293,6 @@ pub(super) fn v3_call_family(call_id: &str) -> Option<V3CallFamily> {
     }
 }
 
-/// True when this record's accepted work covers `task`.
-pub(super) fn record_covers_task(record: &WorkflowV2CallRecord, task: &str) -> bool {
-    record.completed_ids.iter().any(|id| id == task)
-        || record
-            .completion_evidence
-            .iter()
-            .any(|evidence| evidence.task_id.trim() == task)
-}
-
 pub(super) fn frontier_resume_record_reusable(
     record: &WorkflowV2CallRecord,
     scaffold_hash: &str,
