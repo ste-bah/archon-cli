@@ -260,12 +260,7 @@ fn shell_tokens(command: &str) -> Vec<String> {
             } else {
                 current.push(ch);
             }
-        } else if matches!(ch, '>' | '<' | '&') && quote.is_none() {
-            if !current.is_empty() {
-                tokens.push(current.to_lowercase());
-                current.clear();
-            }
-        } else if ch.is_whitespace() && quote.is_none() {
+        } else if (matches!(ch, '>' | '<' | '&') || ch.is_whitespace()) && quote.is_none() {
             if !current.is_empty() {
                 tokens.push(current.to_lowercase());
                 current.clear();

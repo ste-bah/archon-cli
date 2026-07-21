@@ -80,9 +80,7 @@ fn append_sse_line_bytes(buffer: &mut Vec<u8>, pending_cr: &mut bool, segment: &
     let previous_cr_is_delimiter = *pending_cr && segment.first() == Some(&b'\n');
     let append_previous_cr = *pending_cr && !previous_cr_is_delimiter;
     let defer_current_cr = !terminated && content.last() == Some(&b'\r');
-    if defer_current_cr {
-        content = &content[..content.len() - 1];
-    } else if terminated && content.last() == Some(&b'\r') {
+    if (defer_current_cr || terminated) && content.last() == Some(&b'\r') {
         content = &content[..content.len() - 1];
     }
 
@@ -305,7 +303,7 @@ async fn pump_one_stream_with_state(
             let line_len = buf.len();
 
             match std::str::from_utf8(&buf[..line_len]) {
-                Ok(line) if line.is_empty() => {
+                Ok("") => {
                     if let Some(frame) = current.take_frame() {
                         if let Some(id) = &frame.id {
                             state.last_event_id = Some(id.clone());
