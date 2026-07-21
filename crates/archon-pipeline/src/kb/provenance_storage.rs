@@ -160,8 +160,8 @@ fn record_post_batch_write() {
 fn should_fail_after_batch_write() -> bool {
     #[cfg(test)]
     {
-        return test_state::STATE
-            .with(|state| std::mem::take(&mut state.borrow_mut().fail_after_batch_write));
+        test_state::STATE
+            .with(|state| std::mem::take(&mut state.borrow_mut().fail_after_batch_write))
     }
     #[cfg(not(test))]
     false
