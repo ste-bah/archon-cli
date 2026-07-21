@@ -1,30 +1,52 @@
+use std::sync::Mutex;
+
 use crate::client::MemoryClient;
 use crate::types::{Memory, MemoryError, MemoryType, RelType, SearchFilter, StoreMemoryOutcome};
 
 use super::MemoryTrait;
 
-/// Helper: run an async call on the current tokio runtime from a sync context.
+static CURRENT_THREAD_BRIDGE_LOCK: Mutex<()> = Mutex::new(());
+
+/// Helper: run an async call from a synchronous trait method.
 ///
-/// Uses `block_in_place` + `block_on` so the current thread yields to the
-/// scheduler while blocking.
-///
-/// # Panics
-///
-/// Panics if called outside a **multi-threaded** tokio runtime (i.e. there is
-/// no current `Handle`, or the runtime is single-threaded and
-/// `block_in_place` is unsupported).
-fn block_on_async<F: std::future::Future>(f: F) -> F::Output {
-    tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(f))
+/// Multi-threaded Tokio runtimes can yield the current worker with
+/// `block_in_place`. Callers without a runtime run the future directly on a
+/// local runtime. Current-thread runtime callers use a serialized scoped
+/// thread so Tokio runtimes are not nested and bridge concurrency stays bounded.
+/// The remote server must not depend on the blocked current-thread executor.
+fn block_on_async<F>(future: F) -> F::Output
+where
+    F: std::future::Future + Send,
+    F::Output: Send,
+{
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(|| handle.block_on(future))
+        }
+        Ok(_) => {
+            let _guard = CURRENT_THREAD_BRIDGE_LOCK
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            std::thread::scope(|scope| {
+                scope
+                    .spawn(|| build_bridge_runtime().block_on(future))
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+            })
+        }
+        Err(_) => build_bridge_runtime().block_on(future),
+    }
+}
+
+fn build_bridge_runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build memory client bridge runtime")
 }
 
 /// [`MemoryTrait`] implementation that bridges async [`MemoryClient`] calls
 /// into the synchronous trait interface via [`block_on_async`].
-///
-/// # Runtime requirement
-///
-/// `MemoryClient` requires a **multi-threaded** tokio runtime.  Calling any
-/// [`MemoryTrait`] method on a `MemoryClient` from outside a tokio runtime
-/// (or from a single-threaded runtime) will panic.
 impl MemoryTrait for MemoryClient {
     fn store_memory(
         &self,
@@ -238,5 +260,57 @@ impl MemoryTrait for MemoryClient {
             serde_json::json!({"id": id, "depth": depth}),
         ))?;
         serde_json::from_value(result).map_err(MemoryError::from)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Barrier};
+    use std::time::Duration;
+
+    use super::block_on_async;
+
+    #[test]
+    fn async_bridge_works_without_an_active_runtime() {
+        assert_eq!(block_on_async(async { 41 + 1 }), 42);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn async_bridge_works_inside_current_thread_runtime() {
+        assert_eq!(block_on_async(async { 41 + 1 }), 42);
+    }
+
+    #[test]
+    fn current_thread_bridge_calls_are_serialized() {
+        let start = Arc::new(Barrier::new(3));
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+
+        std::thread::scope(|scope| {
+            for _ in 0..2 {
+                let start = Arc::clone(&start);
+                let active = Arc::clone(&active);
+                let max_active = Arc::clone(&max_active);
+                scope.spawn(move || {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("build test runtime");
+                    runtime.block_on(async {
+                        start.wait();
+                        block_on_async(async {
+                            let now_active = active.fetch_add(1, Ordering::SeqCst) + 1;
+                            max_active.fetch_max(now_active, Ordering::SeqCst);
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                            active.fetch_sub(1, Ordering::SeqCst);
+                        });
+                    });
+                });
+            }
+            start.wait();
+        });
+
+        assert_eq!(max_active.load(Ordering::SeqCst), 1);
     }
 }
