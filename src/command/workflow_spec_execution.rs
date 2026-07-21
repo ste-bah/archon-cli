@@ -39,6 +39,9 @@ fn repair_workflow(store: &WorkflowStore, run_id: &str) -> Result<String> {
 
 fn restart_task_workflow(store: &WorkflowStore, run_id: &str, task_id: &str) -> Result<String> {
     let run = store.load_state(run_id)?;
+    if let Some(output) = restart_generated_v2_task_workflow(store, &run, task_id)? {
+        return Ok(output);
+    }
     let stage_id = stage_id_for_task(&run, task_id)
         .ok_or_else(|| anyhow!("task '{task_id}' did not match any workflow stage in {run_id}"))?;
     let status = lifecycle(

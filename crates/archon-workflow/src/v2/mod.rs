@@ -55,9 +55,10 @@ pub use result::{
     WorkflowV2Result, WorkflowV2Status, WorkflowV2TaskCoverage, WorkflowV2TaskCoverageStatus,
 };
 pub use result_store::{
-    WorkflowV2CallRecord, WorkflowV2Checkpoint, WorkflowV2RejectedOutput, WorkflowV2ResultStore,
-    WorkflowV2SourceTargetExpansion, WorkflowV2SourceTaskGraph, WorkflowV2SourceTaskItem,
-    WorkflowV2TaskCompletionEvidence, WorkflowV2TaskCompletionEvidenceKind,
+    WorkflowV2CallRecord, WorkflowV2Checkpoint, WorkflowV2DeletedBranchOutcome,
+    WorkflowV2RejectedOutput, WorkflowV2ResultStore, WorkflowV2SourceTargetExpansion,
+    WorkflowV2SourceTaskGraph, WorkflowV2SourceTaskItem, WorkflowV2TaskCompletionEvidence,
+    WorkflowV2TaskCompletionEvidenceKind, WorkflowV2TaskInvalidation,
 };
 pub use resume::WorkflowV2ResumeDecision;
 pub use runtime::{WorkflowV2CallExecution, WorkflowV2RunSummary, WorkflowV2Runtime};

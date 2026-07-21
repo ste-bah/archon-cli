@@ -11,7 +11,7 @@ use archon_workflow::{
     CommandAction, HeuristicWorkflowPlanner, LifecycleAction, LifecycleController, RunStatus,
     StageStatus, TemplateRegistry, WorkflowApprovalStore, WorkflowBundle, WorkflowBundleOrigin,
     WorkflowCommand, WorkflowCommandRegistry, WorkflowPlanner, WorkflowRun, WorkflowSpec,
-    WorkflowStore, WorkflowV2CallExecution, WorkflowV2ResultStore,
+    WorkflowStore, WorkflowV2CallExecution, WorkflowV2ResultStore, WorkflowV2TaskInvalidation,
 };
 
 use crate::cli_args::WorkflowAction;

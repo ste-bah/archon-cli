@@ -6,6 +6,21 @@ pub enum WorkflowV2TaskCompletionEvidenceKind {
     VerifiedNoop,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorkflowV2TaskInvalidation {
+    pub requested_task_id: String,
+    pub affected_task_ids: Vec<String>,
+    pub invalidated_call_ids: Vec<String>,
+    pub deleted_branch_outcomes: Vec<WorkflowV2DeletedBranchOutcome>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowV2DeletedBranchOutcome {
+    pub call_id: String,
+    pub item_id: String,
+    pub task_ids: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowV2TaskCompletionEvidence {
     pub task_id: String,

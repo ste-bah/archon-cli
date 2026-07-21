@@ -22,6 +22,9 @@ impl CompletionCredit {
     ) -> archon_workflow::WorkflowResult<Self> {
         let mut credit = Self::default();
         for record in store.load_call_records()? {
+            if record.invalidated_by.is_some() {
+                continue;
+            }
             credit.record_all(&record.completion_evidence);
         }
         for outcome in store.load_branch_outcomes()? {
@@ -138,6 +141,9 @@ fn verified_noop_task_ids(
 ) -> archon_workflow::WorkflowResult<BTreeSet<String>> {
     let mut verified = BTreeSet::new();
     for record in store.load_call_records()? {
+        if record.invalidated_by.is_some() {
+            continue;
+        }
         record_verified_noops(
             &mut verified,
             &record.completion_evidence,
@@ -240,7 +246,10 @@ fn terminal_records(
     let mut records = store
         .load_call_records()?
         .into_iter()
-        .filter(|record| record.call.method == WorkflowV2HostMethod::FinalReport)
+        .filter(|record| {
+            record.call.method == WorkflowV2HostMethod::FinalReport
+                && record.invalidated_by.is_none()
+        })
         .collect::<Vec<_>>();
     records.sort_by(|left, right| left.finished_at.cmp(&right.finished_at));
     Ok(records)

@@ -256,6 +256,79 @@ impl WorkflowV2ResultStore {
         }
         Ok(invalidated.into_iter().collect())
     }
+
+    pub fn invalidate_task_and_dependents(
+        &self,
+        executions: &[super::WorkflowV2CallExecution],
+        requested_task_id: &str,
+        affected_task_ids: &BTreeSet<String>,
+        reason: &str,
+    ) -> WorkflowResult<WorkflowV2TaskInvalidation> {
+        let records = self.load_call_records()?;
+        let seed_call_ids = records
+            .iter()
+            .filter(|record| record_intersects_tasks(record, affected_task_ids))
+            .map(|record| record.call.id.clone())
+            .collect::<BTreeSet<_>>();
+        let mut invalidated = BTreeSet::new();
+        for call_id in &seed_call_ids {
+            if executions.is_empty() {
+                invalidated.insert(call_id.clone());
+            } else {
+                invalidated.extend(downstream_call_ids(executions, call_id));
+            }
+        }
+        for record in &records {
+            if invalidated.contains(&record.call.id) {
+                continue;
+            }
+            if record_intersects_tasks(record, affected_task_ids) {
+                invalidated.insert(record.call.id.clone());
+            }
+        }
+        for id in &invalidated {
+            if let Some(mut record) = self.load_call_record(id)? {
+                record.invalidated_by = Some(reason.to_string());
+                self.save_call_record(&record)?;
+            }
+        }
+        if let Some(mut checkpoint) = self.load_checkpoint()? {
+            checkpoint.remove_completed(&invalidated);
+            self.save_checkpoint(&checkpoint)?;
+        }
+        let mut deleted_branch_outcomes = Vec::new();
+        for outcome in self.load_branch_outcomes()? {
+            let task_ids = branch_outcome_task_ids(&outcome);
+            let affected = task_ids
+                .iter()
+                .any(|task_id| affected_task_ids.contains(task_id));
+            if !affected {
+                continue;
+            }
+            let call_id = outcome
+                .completion_evidence
+                .iter()
+                .find(|evidence| !evidence.call_id.trim().is_empty())
+                .map(|evidence| evidence.call_id.clone())
+                .unwrap_or_default();
+            if call_id.is_empty() {
+                continue;
+            }
+            if self.delete_branch_outcome(&call_id, &outcome.item_id)? {
+                deleted_branch_outcomes.push(WorkflowV2DeletedBranchOutcome {
+                    call_id,
+                    item_id: outcome.item_id,
+                    task_ids: task_ids.into_iter().collect(),
+                });
+            }
+        }
+        Ok(WorkflowV2TaskInvalidation {
+            requested_task_id: requested_task_id.to_string(),
+            affected_task_ids: affected_task_ids.iter().cloned().collect(),
+            invalidated_call_ids: invalidated.into_iter().collect(),
+            deleted_branch_outcomes,
+        })
+    }
 }
 
 fn load_outcomes_from_dir(

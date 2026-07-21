@@ -27,6 +27,93 @@ fn invalidate_generated_v2_call(
     invalidate_generated_v2_call_cache(store, run, call_id, true)
 }
 
+fn restart_generated_v2_task_workflow(
+    store: &WorkflowStore,
+    run: &WorkflowRun,
+    task_id: &str,
+) -> Result<Option<String>> {
+    let _manifest = match WorkflowBundle::verify(store, &run.id) {
+        Ok(manifest)
+            if matches!(
+                manifest.origin,
+                WorkflowBundleOrigin::GeneratedHarness | WorkflowBundleOrigin::SavedCommand
+            ) =>
+        {
+            manifest
+        }
+        _ => return Ok(None),
+    };
+    let Some(task_universe) = generated_v2_task_universe(store, run)? else {
+        return Ok(None);
+    };
+    let canonical_task_id = task_universe.resolve_canonical_task_id(task_id)?;
+    let affected_task_ids = task_universe.downstream_task_closure(&canonical_task_id);
+    let executions = generated_v2_restart_executions(store, run)?;
+    let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
+    let invalidation = v2_store.invalidate_task_and_dependents(
+        &executions,
+        &canonical_task_id,
+        &affected_task_ids,
+        &format!("restart-task:{canonical_task_id}"),
+    )?;
+    reset_generated_v2_task_state(store, &run.id, &invalidation)?;
+    Ok(Some(format_generated_v2_task_restart(
+        &run.id,
+        task_id,
+        &invalidation,
+    )))
+}
+
+fn generated_v2_task_universe(
+    store: &WorkflowStore,
+    run: &WorkflowRun,
+) -> Result<Option<crate::command::workflow_live::workflow_live_task_universe::WorkflowV2TaskUniverse>>
+{
+    let metadata_path = store.run_dir(&run.id).join("v2/generated-metadata.json");
+    if !metadata_path.exists() {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(&metadata_path)?;
+    let metadata: serde_json::Value = serde_json::from_str(&raw)?;
+    metadata
+        .get("task_universe")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|err| anyhow!("invalid persisted generated V2 task universe: {err}"))
+}
+
+fn format_generated_v2_task_restart(
+    run_id: &str,
+    requested_task_id: &str,
+    invalidation: &WorkflowV2TaskInvalidation,
+) -> String {
+    format!(
+        "Workflow generated V2 task restart prepared: task {requested_task_id} resolved to {}.\naffected_tasks: {}\ninvalidated_calls: {}\ndeleted_branch_outcomes: {}\nNext: /workflow continue {run_id}\n",
+        invalidation.requested_task_id,
+        invalidation.affected_task_ids.join(", "),
+        invalidation.invalidated_call_ids.join(", "),
+        invalidation.deleted_branch_outcomes.len(),
+    )
+}
+
+fn reset_generated_v2_task_state(
+    store: &WorkflowStore,
+    run_id: &str,
+    invalidation: &WorkflowV2TaskInvalidation,
+) -> Result<()> {
+    let mut run = store.load_state(run_id)?;
+    for call_id in &invalidation.invalidated_call_ids {
+        if run.stages.contains_key(call_id) {
+            run.stages
+                .insert(call_id.clone(), StageState::pending(call_id.clone()));
+        }
+    }
+    run.status = RunStatus::Running;
+    store.save_state(&run)?;
+    Ok(())
+}
+
 fn invalidate_generated_v2_call_cache(
     store: &WorkflowStore,
     run: &WorkflowRun,

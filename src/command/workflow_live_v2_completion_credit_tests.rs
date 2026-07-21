@@ -27,6 +27,36 @@ fn resume_credit_combines_noop_and_verified_implementation_branches() {
 }
 
 #[test]
+fn resume_credit_ignores_invalidated_call_records() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path());
+    save_invalidated_record(
+        &store,
+        "implementation",
+        implementation_evidence("TASK-TWO"),
+    );
+    save_outcome(&store, "verification", verification_evidence("TASK-TWO"));
+    save_terminal(
+        &store,
+        "invalidated-final",
+        r#"{ "accepted_tasks": ["TASK-TWO"] }"#,
+        "2026-07-12T17:00:04Z",
+    );
+    let mut final_record = store
+        .load_call_record("invalidated-final")
+        .expect("lookup")
+        .expect("final record");
+    final_record.invalidated_by = Some("restart-task:TASK-TWO".to_string());
+    store
+        .save_call_record(&final_record)
+        .expect("invalidate final");
+
+    let completed = prepare_resume_credit(&store, &universe()).expect("resume credit");
+
+    assert!(!completed.contains("TASK-TWO"));
+}
+
+#[test]
 fn resume_credit_excludes_blocked_terminal_claims_and_archives_terminals() {
     let temp = tempfile::tempdir().expect("tempdir");
     let store = WorkflowV2ResultStore::new(temp.path());
@@ -54,6 +84,35 @@ fn resume_credit_excludes_blocked_terminal_claims_and_archives_terminals() {
     );
     let archive = store.root().join("archived-resume-terminals");
     assert_eq!(files_below(&archive), 2);
+}
+
+fn save_invalidated_record(
+    store: &WorkflowV2ResultStore,
+    call_id: &str,
+    evidence: WorkflowV2TaskCompletionEvidence,
+) {
+    let result = WorkflowV2Result {
+        status: evidence.status,
+        data: serde_json::json!({}),
+        ..WorkflowV2Result::default()
+    };
+    let call = WorkflowV2HostCall {
+        id: call_id.to_string(),
+        method: WorkflowV2HostMethod::Agent,
+        write_mode: None,
+        options: WorkflowV2HostOptions::default(),
+    };
+    let mut record = WorkflowV2CallRecord::new(
+        store.run_id(),
+        call,
+        1,
+        "input".to_string(),
+        result,
+        Vec::new(),
+    )
+    .with_completion_evidence(vec![evidence]);
+    record.invalidated_by = Some("restart-task:TASK-TWO".to_string());
+    store.save_call_record(&record).expect("invalidated record");
 }
 
 fn save_outcome(

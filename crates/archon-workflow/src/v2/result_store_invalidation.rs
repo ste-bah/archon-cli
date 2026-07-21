@@ -55,6 +55,25 @@ fn dynamic_wave_invalidated_call_ids(
     invalidated
 }
 
+fn record_intersects_tasks(record: &WorkflowV2CallRecord, task_ids: &BTreeSet<String>) -> bool {
+    record.completed_ids.iter().any(|task_id| task_ids.contains(task_id))
+        || record
+            .completion_evidence
+            .iter()
+            .any(|evidence| task_ids.contains(&evidence.task_id))
+        || source_graph_intersects_tasks(record, task_ids)
+}
+
+fn branch_outcome_task_ids(outcome: &WorkflowV2BranchOutcome) -> BTreeSet<String> {
+    outcome
+        .completion_evidence
+        .iter()
+        .map(|evidence| evidence.task_id.trim())
+        .filter(|task_id| !task_id.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 fn source_graph_intersects_tasks(
     record: &WorkflowV2CallRecord,
     task_ids: &BTreeSet<String>,

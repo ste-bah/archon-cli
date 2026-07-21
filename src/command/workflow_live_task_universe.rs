@@ -6,13 +6,66 @@ use archon_workflow::{WorkflowError, WorkflowResult};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) struct WorkflowV2TaskUniverse {
-    pub(super) schema_version: String,
-    pub(super) source_roots: Vec<String>,
-    pub(super) tasks: Vec<WorkflowV2TaskUniverseTask>,
+pub(crate) struct WorkflowV2TaskUniverse {
+    pub(crate) schema_version: String,
+    pub(crate) source_roots: Vec<String>,
+    pub(crate) tasks: Vec<WorkflowV2TaskUniverseTask>,
 }
 
 impl WorkflowV2TaskUniverse {
+    pub(crate) fn resolve_canonical_task_id(&self, input: &str) -> WorkflowResult<String> {
+        let wanted = normalized_task_alias(input);
+        if wanted.is_empty() {
+            return Err(WorkflowError::SpecInvalid(
+                "restart task id must not be empty".to_string(),
+            ));
+        }
+        let mut matches = Vec::new();
+        for task in &self.tasks {
+            if task
+                .aliases_for_resolution()
+                .into_iter()
+                .any(|alias| normalized_task_alias(&alias) == wanted)
+            {
+                matches.push(task.canonical_task_id.clone());
+            }
+        }
+        matches.sort();
+        matches.dedup();
+        match matches.as_slice() {
+            [task_id] => Ok(task_id.clone()),
+            [] => Err(WorkflowError::SpecInvalid(format!(
+                "task '{input}' did not match any canonical task in the generated task universe"
+            ))),
+            many => Err(WorkflowError::SpecInvalid(format!(
+                "task alias '{input}' is ambiguous across canonical tasks {}; use the full canonical task ID",
+                many.join(", ")
+            ))),
+        }
+    }
+
+    pub(crate) fn downstream_task_closure(&self, canonical_task_id: &str) -> BTreeSet<String> {
+        let mut affected = BTreeSet::from([canonical_task_id.to_string()]);
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for task in &self.tasks {
+                if affected.contains(&task.canonical_task_id) {
+                    continue;
+                }
+                if task
+                    .dependency_ids
+                    .iter()
+                    .any(|dependency| affected.contains(dependency))
+                {
+                    affected.insert(task.canonical_task_id.clone());
+                    changed = true;
+                }
+            }
+        }
+        affected
+    }
+
     #[cfg(test)]
     pub(super) fn canonical_ids(&self) -> Vec<String> {
         self.tasks
@@ -22,9 +75,29 @@ impl WorkflowV2TaskUniverse {
     }
 }
 
+impl WorkflowV2TaskUniverseTask {
+    fn aliases_for_resolution(&self) -> Vec<String> {
+        let mut aliases = vec![self.canonical_task_id.clone()];
+        if let Some(without_prefix) = self.canonical_task_id.strip_prefix("TASK-") {
+            aliases.push(without_prefix.to_string());
+        }
+        aliases.extend(self.aliases.iter().cloned());
+        aliases
+    }
+}
+
+fn normalized_task_alias(value: &str) -> String {
+    value
+        .trim()
+        .to_ascii_uppercase()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect()
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) struct WorkflowV2TaskUniverseTask {
-    pub(super) canonical_task_id: String,
+pub(crate) struct WorkflowV2TaskUniverseTask {
+    pub(crate) canonical_task_id: String,
     #[serde(default)]
     pub(super) aliases: Vec<String>,
     pub(super) source_path: String,

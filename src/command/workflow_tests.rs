@@ -13,7 +13,8 @@ use archon_workflow::{
     WorkflowBundle, WorkflowBundleOrigin, WorkflowRun, WorkflowSpec, WorkflowStore,
     WorkflowV2BranchOutcome, WorkflowV2CallRecord, WorkflowV2Evidence, WorkflowV2EvidenceKind,
     WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2Result,
-    WorkflowV2ResultStore, WorkflowV2Status, WorkflowV2WriteMode,
+    WorkflowV2ResultStore, WorkflowV2SourceTaskGraph, WorkflowV2SourceTaskItem, WorkflowV2Status,
+    WorkflowV2TaskCompletionEvidence, WorkflowV2TaskCompletionEvidenceKind, WorkflowV2WriteMode,
 };
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -219,6 +220,140 @@ export default async function workflow(w) {
             .load_branch_outcome("implementation", "implementation-T002")
             .unwrap()
             .is_none()
+    );
+}
+
+#[test]
+fn restart_task_generated_v2_resolves_alias_without_static_stage() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let mut run = store.create_run(test_spec()).unwrap();
+    run.stages
+        .insert("alpha-write".to_string(), running_stage("alpha-write"));
+    run.stages
+        .insert("beta-check".to_string(), running_stage("beta-check"));
+    run.stages
+        .insert("gamma-write".to_string(), running_stage("gamma-write"));
+    store.save_state(&run).unwrap();
+    WorkflowBundle::create_for_run(
+        &store,
+        &run,
+        "export default async function workflow(w) { await w.agent(\"alpha-write\", { task: \"write\" }); }",
+        WorkflowBundleOrigin::GeneratedHarness,
+    )
+    .unwrap();
+    let manifest_calls = vec![
+        test_v2_call("alpha-write", WorkflowV2HostMethod::Fanout, None),
+        test_v2_call(
+            "beta-check",
+            WorkflowV2HostMethod::Fanout,
+            Some("alpha-write.items"),
+        ),
+        test_v2_call("gamma-write", WorkflowV2HostMethod::Fanout, None),
+    ];
+    std::fs::create_dir_all(store.run_dir(&run.id).join("v2")).unwrap();
+    std::fs::write(
+        store.run_dir(&run.id).join("v2/generated-metadata.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "workflow-generated-v2-metadata-v1",
+            "task_universe": {
+                "schema_version": "workflow-v2-task-universe-v1",
+                "source_roots": ["tasks"],
+                "tasks": [
+                    {
+                        "canonical_task_id": "TASK-ALPHA-010",
+                        "aliases": ["T010"],
+                        "source_path": "tasks/TASK-ALPHA-010.md",
+                        "dependency_ids": []
+                    },
+                    {
+                        "canonical_task_id": "TASK-ALPHA-020",
+                        "aliases": ["T020"],
+                        "source_path": "tasks/TASK-ALPHA-020.md",
+                        "dependency_ids": ["TASK-ALPHA-010"]
+                    },
+                    {
+                        "canonical_task_id": "TASK-ALPHA-030",
+                        "aliases": ["T030"],
+                        "source_path": "tasks/TASK-ALPHA-030.md",
+                        "dependency_ids": []
+                    }
+                ]
+            },
+            "generated_scaffold": {
+                "host_call_manifest": manifest_calls,
+            },
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
+    save_test_task_call_record(
+        &v2_store,
+        &run.id,
+        test_v2_call("alpha-write", WorkflowV2HostMethod::Fanout, None),
+        vec![],
+        &["TASK-ALPHA-010"],
+        &[],
+    );
+    save_test_task_call_record(
+        &v2_store,
+        &run.id,
+        test_v2_call(
+            "beta-check",
+            WorkflowV2HostMethod::Fanout,
+            Some("alpha-write.items"),
+        ),
+        vec!["alpha-write".to_string()],
+        &["TASK-ALPHA-020"],
+        &["TASK-ALPHA-010"],
+    );
+    save_test_task_call_record(
+        &v2_store,
+        &run.id,
+        test_v2_call("gamma-write", WorkflowV2HostMethod::Fanout, None),
+        vec![],
+        &["TASK-ALPHA-030"],
+        &[],
+    );
+    save_test_task_branch(&v2_store, "alpha-write", "alpha-item", "TASK-ALPHA-010");
+    save_test_task_branch(&v2_store, "beta-check", "beta-item", "TASK-ALPHA-020");
+    save_test_task_branch(&v2_store, "gamma-write", "gamma-item", "TASK-ALPHA-030");
+
+    let output = restart_task_workflow(&store, &run.id, "ALPHA-010").unwrap();
+
+    assert!(output.contains("resolved to TASK-ALPHA-010"));
+    assert!(output.contains("TASK-ALPHA-020"));
+    assert!(
+        v2_store
+            .load_branch_outcome("alpha-write", "alpha-item")
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        v2_store
+            .load_branch_outcome("beta-check", "beta-item")
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        v2_store
+            .load_branch_outcome("gamma-write", "gamma-item")
+            .unwrap()
+            .is_some()
+    );
+    let reloaded = store.load_state(&run.id).unwrap();
+    assert_eq!(
+        reloaded.stages.get("alpha-write").unwrap().status,
+        StageStatus::Pending
+    );
+    assert_eq!(
+        reloaded.stages.get("beta-check").unwrap().status,
+        StageStatus::Pending
+    );
+    assert_eq!(
+        reloaded.stages.get("gamma-write").unwrap().status,
+        StageStatus::Running
     );
 }
 
@@ -435,6 +570,36 @@ fn save_test_branch(v2_store: &WorkflowV2ResultStore, call_id: &str, item_id: &s
         .unwrap();
 }
 
+fn save_test_task_branch(
+    v2_store: &WorkflowV2ResultStore,
+    call_id: &str,
+    item_id: &str,
+    task_id: &str,
+) {
+    let evidence = WorkflowV2TaskCompletionEvidence::new(
+        task_id,
+        WorkflowV2TaskCompletionEvidenceKind::ImplementationCandidate,
+        call_id,
+        item_id,
+        WorkflowV2Status::Accepted,
+    );
+    v2_store
+        .save_branch_outcome(
+            call_id,
+            &WorkflowV2BranchOutcome {
+                item_id: item_id.to_string(),
+                role: "coder".to_string(),
+                status: WorkflowV2Status::Accepted,
+                result: Some(WorkflowV2Result::accepted(format!("{task_id} accepted"))),
+                error: None,
+                failure_kind: None,
+                item_input_hash: Some(format!("test-input-hash-{item_id}")),
+                completion_evidence: vec![evidence],
+            },
+        )
+        .unwrap();
+}
+
 fn running_stage(id: &str) -> StageState {
     let mut state = StageState::pending(id);
     state.status = StageStatus::Running;
@@ -482,5 +647,72 @@ fn save_test_call_record(
             result,
             depends_on,
         ))
+        .unwrap();
+}
+
+fn save_test_task_call_record(
+    v2_store: &WorkflowV2ResultStore,
+    run_id: &str,
+    call: WorkflowV2HostCall,
+    depends_on: Vec<String>,
+    canonical_task_ids: &[&str],
+    dependency_ids: &[&str],
+) {
+    let item_id = format!("item-{}", call.id);
+    let graph = WorkflowV2SourceTaskGraph::new(
+        vec![
+            "TASK-ALPHA-010".to_string(),
+            "TASK-ALPHA-020".to_string(),
+            "TASK-ALPHA-030".to_string(),
+        ],
+        vec![WorkflowV2SourceTaskItem {
+            item_id: item_id.clone(),
+            canonical_task_ids: canonical_task_ids
+                .iter()
+                .map(|task_id| (*task_id).to_string())
+                .collect(),
+            dependency_ids: dependency_ids
+                .iter()
+                .map(|task_id| (*task_id).to_string())
+                .collect(),
+            target_files: Vec::new(),
+            declared_target_files: Vec::new(),
+            target_file_expansions: Vec::new(),
+            acceptance_criteria: Vec::new(),
+            focused_verification: Vec::new(),
+            expected_evidence: Vec::new(),
+            artifact_requirements: Vec::new(),
+            required_tools: Vec::new(),
+        }],
+        canonical_task_ids
+            .iter()
+            .map(|task_id| (*task_id).to_string())
+            .collect(),
+    );
+    let evidence = canonical_task_ids
+        .iter()
+        .map(|task_id| {
+            WorkflowV2TaskCompletionEvidence::new(
+                *task_id,
+                WorkflowV2TaskCompletionEvidenceKind::ImplementationCandidate,
+                call.id.clone(),
+                item_id.clone(),
+                WorkflowV2Status::Accepted,
+            )
+        })
+        .collect();
+    v2_store
+        .save_call_record(
+            &WorkflowV2CallRecord::new(
+                run_id,
+                call,
+                1,
+                "test-input-hash".to_string(),
+                WorkflowV2Result::accepted("accepted"),
+                depends_on,
+            )
+            .with_source_metadata(Some("test-source".to_string()), Some(graph))
+            .with_completion_evidence(evidence),
+        )
         .unwrap();
 }

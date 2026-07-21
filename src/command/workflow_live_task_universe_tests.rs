@@ -1,6 +1,63 @@
 use super::*;
 
 #[test]
+fn task_universe_resolves_canonical_and_alias_forms() {
+    let universe = synthetic_universe(&[
+        ("TASK-ALPHA-010", &["T010"], &[]),
+        ("TASK-ALPHA-020", &["T020"], &["TASK-ALPHA-010"]),
+    ]);
+
+    assert_eq!(
+        universe
+            .resolve_canonical_task_id("TASK-ALPHA-010")
+            .unwrap(),
+        "TASK-ALPHA-010"
+    );
+    assert_eq!(
+        universe.resolve_canonical_task_id("ALPHA-010").unwrap(),
+        "TASK-ALPHA-010"
+    );
+    assert_eq!(
+        universe.resolve_canonical_task_id("T010").unwrap(),
+        "TASK-ALPHA-010"
+    );
+}
+
+#[test]
+fn task_universe_rejects_ambiguous_short_aliases() {
+    let universe = synthetic_universe(&[
+        ("TASK-ALPHA-010", &["T010"], &[]),
+        ("TASK-BETA-010", &["T010"], &[]),
+    ]);
+
+    let err = universe
+        .resolve_canonical_task_id("T010")
+        .expect_err("ambiguous short alias must fail");
+
+    assert!(err.to_string().contains("ambiguous"));
+    assert!(err.to_string().contains("TASK-ALPHA-010"));
+    assert!(err.to_string().contains("TASK-BETA-010"));
+}
+
+#[test]
+fn task_universe_computes_downstream_task_closure() {
+    let universe = synthetic_universe(&[
+        ("TASK-ALPHA-010", &["T010"], &[]),
+        ("TASK-ALPHA-020", &["T020"], &["TASK-ALPHA-010"]),
+        ("TASK-ALPHA-030", &["T030"], &["TASK-ALPHA-020"]),
+        ("TASK-ALPHA-040", &["T040"], &[]),
+    ]);
+
+    assert_eq!(
+        universe.downstream_task_closure("TASK-ALPHA-010"),
+        ["TASK-ALPHA-010", "TASK-ALPHA-020", "TASK-ALPHA-030"]
+            .into_iter()
+            .map(str::to_string)
+            .collect()
+    );
+}
+
+#[test]
 fn universe_comes_from_task_files_not_reducer_items() {
     let temp = tempfile::tempdir().expect("tempdir");
     fs::write(
@@ -374,4 +431,28 @@ deliverable_contracts:
     .expect_err("invalid capability contract must fail");
 
     assert!(error.to_string().contains("invalid type"));
+}
+
+fn synthetic_universe(tasks: &[(&str, &[&str], &[&str])]) -> WorkflowV2TaskUniverse {
+    WorkflowV2TaskUniverse {
+        schema_version: "workflow-v2-task-universe-v1".to_string(),
+        source_roots: vec!["tasks".to_string()],
+        tasks: tasks
+            .iter()
+            .map(
+                |(canonical_task_id, aliases, dependency_ids)| WorkflowV2TaskUniverseTask {
+                    canonical_task_id: (*canonical_task_id).to_string(),
+                    aliases: aliases.iter().map(|alias| (*alias).to_string()).collect(),
+                    source_path: format!("tasks/{canonical_task_id}.md"),
+                    dependency_ids: dependency_ids
+                        .iter()
+                        .map(|dependency| (*dependency).to_string())
+                        .collect(),
+                    title: None,
+                    artifact_requirements: Vec::new(),
+                    ..Default::default()
+                },
+            )
+            .collect(),
+    }
 }

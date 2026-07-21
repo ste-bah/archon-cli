@@ -69,7 +69,7 @@ mod workflow_live_semantic_preservation;
 // driver wiring lands incrementally; the action contract compiles and is
 // tested from day one.
 #[path = "workflow_live_task_universe.rs"]
-mod workflow_live_task_universe;
+pub(crate) mod workflow_live_task_universe;
 #[cfg(test)]
 #[path = "workflow_live_test_support.rs"]
 mod workflow_live_test_support;

@@ -1,6 +1,7 @@
 use super::super::{
-    WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2HostMethod, WorkflowV2HostOptions,
-    WorkflowV2SourceTaskGraph, WorkflowV2SourceTaskItem, WorkflowV2WriteMode,
+    WorkflowV2CallExecution, WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2HostMethod,
+    WorkflowV2HostOptions, WorkflowV2SourceTaskGraph, WorkflowV2SourceTaskItem,
+    WorkflowV2TaskCompletionEvidence, WorkflowV2TaskCompletionEvidenceKind, WorkflowV2WriteMode,
 };
 use super::*;
 
@@ -247,6 +248,14 @@ fn dynamic_wave_restart_invalidates_generated_downstream_non_implementation_call
     );
 }
 
+fn execution<const D: usize>(id: &str, depends_on: [&str; D]) -> WorkflowV2CallExecution {
+    WorkflowV2CallExecution {
+        call: call(id),
+        input: serde_json::Value::Null,
+        depends_on: depends_on.into_iter().map(str::to_string).collect(),
+    }
+}
+
 fn implementation_call(id: &str) -> WorkflowV2HostCall {
     WorkflowV2HostCall {
         id: id.to_string(),
@@ -258,6 +267,71 @@ fn implementation_call(id: &str) -> WorkflowV2HostCall {
             ..WorkflowV2HostOptions::default()
         },
     }
+}
+
+fn save_task_record<const T: usize, const D: usize>(
+    store: &WorkflowV2ResultStore,
+    call_id: &str,
+    task_ids: [&str; T],
+    dependency_ids: [&str; D],
+) {
+    let task_ids = task_ids.into_iter().map(str::to_string).collect::<Vec<_>>();
+    let graph = WorkflowV2SourceTaskGraph::new(
+        vec![
+            "TASK-ALPHA-010".to_string(),
+            "TASK-ALPHA-020".to_string(),
+            "TASK-ALPHA-030".to_string(),
+        ],
+        vec![WorkflowV2SourceTaskItem {
+            item_id: format!("item-{call_id}"),
+            canonical_task_ids: task_ids.clone(),
+            dependency_ids: dependency_ids.into_iter().map(str::to_string).collect(),
+            target_files: Vec::new(),
+            declared_target_files: Vec::new(),
+            target_file_expansions: Vec::new(),
+            acceptance_criteria: Vec::new(),
+            focused_verification: Vec::new(),
+            expected_evidence: Vec::new(),
+            artifact_requirements: Vec::new(),
+            required_tools: Vec::new(),
+        }],
+        task_ids,
+    );
+    let record = WorkflowV2CallRecord::new(
+        "wf-test",
+        implementation_call(call_id),
+        1,
+        format!("hash-{call_id}"),
+        WorkflowV2Result::accepted(format!("{call_id} accepted")),
+        Vec::new(),
+    )
+    .with_source_metadata(Some(format!("source-{call_id}")), Some(graph));
+    store.save_call_record(&record).expect("save task record");
+}
+
+fn save_task_outcome(store: &WorkflowV2ResultStore, call_id: &str, item_id: &str, task_id: &str) {
+    let evidence = WorkflowV2TaskCompletionEvidence::new(
+        task_id,
+        WorkflowV2TaskCompletionEvidenceKind::ImplementationCandidate,
+        call_id,
+        item_id,
+        WorkflowV2Status::Accepted,
+    );
+    store
+        .save_branch_outcome(
+            call_id,
+            &WorkflowV2BranchOutcome {
+                item_id: item_id.to_string(),
+                role: "coder".to_string(),
+                status: WorkflowV2Status::Accepted,
+                result: Some(WorkflowV2Result::accepted(format!("{task_id} accepted"))),
+                error: None,
+                failure_kind: None,
+                item_input_hash: Some(format!("hash-{item_id}")),
+                completion_evidence: vec![evidence],
+            },
+        )
+        .expect("save task outcome");
 }
 
 fn save_wave<const D: usize, const C: usize>(
@@ -298,6 +372,88 @@ fn save_wave<const D: usize, const C: usize>(
     )
     .with_source_metadata(Some(format!("source-{call_id}")), Some(graph));
     store.save_call_record(&record).expect("save wave");
+}
+
+#[test]
+fn task_restart_invalidation_uses_canonical_task_graph_and_preserves_unrelated_outcomes() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path());
+    let executions = vec![
+        execution("alpha-write", []),
+        execution("beta-check", ["alpha-write"]),
+        execution("gamma-write", []),
+        execution("terminal-summary", ["beta-check", "gamma-write"]),
+    ];
+    save_task_record(&store, "alpha-write", ["TASK-ALPHA-010"], []);
+    save_task_record(&store, "beta-check", ["TASK-ALPHA-020"], ["TASK-ALPHA-010"]);
+    save_task_record(&store, "gamma-write", ["TASK-ALPHA-030"], []);
+    save_task_record(&store, "terminal-summary", ["TASK-ALPHA-020"], []);
+    save_task_outcome(&store, "alpha-write", "item-alpha", "TASK-ALPHA-010");
+    save_task_outcome(&store, "beta-check", "item-beta", "TASK-ALPHA-020");
+    save_task_outcome(&store, "gamma-write", "item-gamma", "TASK-ALPHA-030");
+    store
+        .save_checkpoint(&WorkflowV2Checkpoint {
+            completed_call_ids: vec![
+                "alpha-write".to_string(),
+                "beta-check".to_string(),
+                "gamma-write".to_string(),
+                "terminal-summary".to_string(),
+            ],
+        })
+        .expect("checkpoint");
+
+    let invalidation = store
+        .invalidate_task_and_dependents(
+            &executions,
+            "TASK-ALPHA-010",
+            &["TASK-ALPHA-010", "TASK-ALPHA-020"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            "restart-task:TASK-ALPHA-010",
+        )
+        .expect("invalidate task");
+
+    assert_eq!(
+        invalidation.invalidated_call_ids,
+        vec![
+            "alpha-write".to_string(),
+            "beta-check".to_string(),
+            "terminal-summary".to_string(),
+        ]
+    );
+    assert_eq!(invalidation.deleted_branch_outcomes.len(), 2);
+    assert!(
+        store
+            .load_branch_outcome("alpha-write", "item-alpha")
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        store
+            .load_branch_outcome("beta-check", "item-beta")
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        store
+            .load_branch_outcome("gamma-write", "item-gamma")
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(
+        store.load_checkpoint().unwrap().unwrap().completed_call_ids,
+        vec!["gamma-write".to_string()]
+    );
+    assert_eq!(
+        store
+            .load_call_record("alpha-write")
+            .unwrap()
+            .unwrap()
+            .invalidated_by
+            .as_deref(),
+        Some("restart-task:TASK-ALPHA-010")
+    );
 }
 
 #[test]
