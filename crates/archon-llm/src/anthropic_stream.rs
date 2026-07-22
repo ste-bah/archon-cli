@@ -22,7 +22,14 @@ where
     E: std::fmt::Display,
 {
     let mut buffer = Vec::new();
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let chunk = tokio::select! {
+            _ = tx.closed() => return,
+            chunk = stream.next() => chunk,
+        };
+        let Some(chunk) = chunk else {
+            break;
+        };
         match chunk {
             Ok(chunk) => buffer.extend_from_slice(chunk.as_ref()),
             Err(error) => {
