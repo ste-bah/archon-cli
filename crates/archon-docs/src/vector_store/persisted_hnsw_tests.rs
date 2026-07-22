@@ -127,6 +127,20 @@ fn old_manifest_without_generation_is_compatible_but_stale() {
 }
 
 #[test]
+fn fixed_second_produces_unique_snapshot_basenames() {
+    let timestamp = chrono::DateTime::parse_from_rfc3339("2026-07-22T19:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+
+    let first = hnsw_dump_basename(timestamp);
+    let second = hnsw_dump_basename(timestamp);
+
+    assert_ne!(first, second);
+    assert!(first.starts_with("doc-text-20260722T190000Z-"));
+    assert!(second.starts_with("doc-text-20260722T190000Z-"));
+}
+
+#[test]
 fn publishing_new_snapshot_removes_superseded_dump_files() {
     let _lock = persisted_hnsw_test_lock();
     let temp = tempfile::tempdir().unwrap();
@@ -142,10 +156,14 @@ fn publishing_new_snapshot_removes_superseded_dump_files() {
     assert!(first_graph.exists());
     assert!(first_data.exists());
 
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    write_test_vectors(&store, "test", &[("chunk-b", &[0.0, 1.0])]);
     let second = store.build_hnsw("test", 2, None).unwrap();
+    let published = store.latest_hnsw_manifest("test").unwrap().unwrap();
 
     assert_ne!(first.dump_basename, second.dump_basename);
+    assert_eq!(published.dump_basename, second.dump_basename);
+    assert_eq!(published.provider_generation, second.provider_generation);
+    assert_eq!(published.vector_count, second.vector_count);
     assert!(!first_graph.exists());
     assert!(!first_data.exists());
     assert!(
@@ -160,6 +178,15 @@ fn publishing_new_snapshot_removes_superseded_dump_files() {
             .join(format!("{}.hnsw.data", second.dump_basename))
             .exists()
     );
+
+    persisted_hnsw::clear();
+    let loads_before = persisted_hnsw_load_count();
+    let hits = store
+        .search_persisted_first("test", &[0.0, 1.0], 1, 16, None)
+        .unwrap();
+
+    assert_eq!(hits[0].chunk_id, "chunk-b");
+    assert_eq!(persisted_hnsw_load_count(), loads_before + 1);
 }
 
 #[test]

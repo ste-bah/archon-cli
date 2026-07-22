@@ -222,7 +222,7 @@ impl DocVectorStore {
         let hnsw_dir = self.hnsw_dir(provider);
         std::fs::create_dir_all(&hnsw_dir)
             .with_context(|| format!("create HNSW dir {}", hnsw_dir.display()))?;
-        let basename = format!("doc-text-{}", chrono::Utc::now().format("%Y%m%dT%H%M%SZ"));
+        let basename = hnsw_dump_basename(chrono::Utc::now());
         let dump_basename = hnsw
             .file_dump(&hnsw_dir, &basename)
             .context("dump Rust HNSW index")?;
@@ -332,6 +332,14 @@ impl DocVectorStore {
         std::fs::write(&path, bytes)
             .with_context(|| format!("write HNSW manifest {}", path.display()))
     }
+}
+
+fn hnsw_dump_basename(timestamp: chrono::DateTime<chrono::Utc>) -> String {
+    format!(
+        "doc-text-{}-{}",
+        timestamp.format("%Y%m%dT%H%M%SZ"),
+        uuid::Uuid::new_v4().simple()
+    )
 }
 
 fn build_hnsw_index(
