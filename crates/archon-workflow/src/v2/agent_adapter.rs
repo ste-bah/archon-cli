@@ -245,6 +245,21 @@ fn validate_request_specific_result(
             WorkflowV2AgentError::ImplementationChangedFilesOutsideOwnership(err.to_string())
         })?;
     validate_write_ownership(request, result)?;
+    // A task that declares required_tools must actually EXERCISE each of them.
+    // The no-op guard below already forbids skipping them via a no-op, but an
+    // accepted result can also silently drop a required tool — running only the
+    // easy ones and asserting the rest "unavailable" in prose — which lets a
+    // task with live tooling (an MCP compile/browser/db call) degrade to a
+    // fail-closed/exploratory outcome with no evidence it ever tried. Require a
+    // recorded invocation of every declared tool (a captured failure counts as a
+    // genuine attempt) before an accepted result is allowed to stand. Reads only
+    // required_tools and commands_run — no tool-, domain-, or PRD-specific
+    // knowledge, so it holds for every task, tool, and workflow engine.
+    if result.status == WorkflowV2Status::Accepted
+        && let Some(tool) = first_unexercised_required_tool(&request.input, result)
+    {
+        return Err(WorkflowV2AgentError::ImplementationAcceptedWithRequiredToolUnexercised(tool));
+    }
     match result.status {
         WorkflowV2Status::Accepted
             if result.files_changed.is_empty()
@@ -364,6 +379,75 @@ fn request_declares_required_tools(input: &serde_json::Value) -> bool {
         serde_json::Value::Array(values) => values.iter().any(request_declares_required_tools),
         _ => false,
     }
+}
+
+/// The first declared required tool that has no matching invocation in this
+/// result's recorded commands, or `None` when every declared tool was exercised
+/// (or none were declared). Matching is by the raw tool name against each
+/// command string, case-insensitively, regardless of command status — a
+/// captured failure is a genuine attempt and satisfies the requirement. Reads
+/// only `required_tools` and `commands_run`, with no knowledge of any specific
+/// tool, domain, or PRD, so the same guard holds for every workflow engine.
+fn first_unexercised_required_tool(
+    input: &serde_json::Value,
+    result: &WorkflowV2Result,
+) -> Option<String> {
+    let mut required: Vec<String> = Vec::new();
+    collect_required_tool_names(input, &mut required);
+    if required.is_empty() {
+        return None;
+    }
+    let commands: Vec<String> = result
+        .commands_run
+        .iter()
+        .map(|command| command.command.to_ascii_lowercase())
+        .collect();
+    required.into_iter().find(|tool| {
+        !commands
+            .iter()
+            .any(|command| command.contains(tool.as_str()))
+    })
+}
+
+/// Collect the raw (lowercased) names of every declared required tool anywhere
+/// in the stage input, stripping any `mcp__server__` qualifier down to the bare
+/// tool name so a command referencing either the qualified or the raw name
+/// matches.
+fn collect_required_tool_names(input: &serde_json::Value, output: &mut Vec<String>) {
+    match input {
+        serde_json::Value::Object(object) => {
+            for (key, value) in object {
+                if matches!(key.as_str(), "required_tools" | "requiredTools") {
+                    if let Some(items) = value.as_array() {
+                        for name in items.iter().filter_map(serde_json::Value::as_str) {
+                            let raw = raw_tool_name(name).to_ascii_lowercase();
+                            if !raw.is_empty() && !output.contains(&raw) {
+                                output.push(raw);
+                            }
+                        }
+                    }
+                } else {
+                    collect_required_tool_names(value, output);
+                }
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                collect_required_tool_names(value, output);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Strip an `mcp__server__` qualifier to the bare tool name; other names are
+/// returned trimmed and unchanged.
+fn raw_tool_name(name: &str) -> &str {
+    name.strip_prefix("mcp__")
+        .and_then(|suffix| suffix.split_once("__"))
+        .map(|(_, raw)| raw)
+        .unwrap_or(name)
+        .trim()
 }
 
 fn reject_forbidden_text(text: &str) -> Result<(), WorkflowV2AgentError> {

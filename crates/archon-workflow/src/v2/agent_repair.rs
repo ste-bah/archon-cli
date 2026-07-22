@@ -35,6 +35,10 @@ pub enum WorkflowV2AgentError {
     )]
     ImplementationNoopWithDeclaredRequiredTools,
     #[error(
+        "task declares required_tools; an accepted result must show an actual invocation of every declared tool (a captured success OR a captured failure counts), but required tool '{0}' was never exercised this run — run it and return its captured result, or block honestly with the captured failure. Do not assert the tool is unavailable without attempting it."
+    )]
+    ImplementationAcceptedWithRequiredToolUnexercised(String),
+    #[error(
         "implementation noop with declared project artifacts requires existing artifact evidence"
     )]
     ImplementationNoopMissingProjectArtifactEvidence,

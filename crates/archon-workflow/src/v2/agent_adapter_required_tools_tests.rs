@@ -99,6 +99,85 @@ fn empty_required_tools_array_does_not_trip_the_guard() {
         .expect("an empty required_tools list is not a tool declaration");
 }
 
+fn accepted_result_json(commands: serde_json::Value) -> String {
+    serde_json::json!({
+        "status": "accepted",
+        "summary": "implemented TASK-TDL-120 pine artifacts",
+        "files_changed": [{ "path": "crates/archon-trading/src/data_lake.rs" }],
+        "commands_run": commands,
+        "task_coverage": [{
+            "task_id": "TASK-TDL-120",
+            "status": "accepted",
+            "summary": "pine artifacts generated and checked",
+            "evidence": [{ "kind": "implementation", "summary": "generated pine v6 artifacts" }]
+        }]
+    })
+    .to_string()
+}
+
+#[test]
+fn accepted_is_rejected_when_a_declared_required_tool_is_never_exercised() {
+    // The agent ran only the offline tools and silently skipped the live-compile
+    // tools the task required, asserting them "unavailable" in prose. That must
+    // not stand — this is exactly the TDL-120 escape hatch.
+    let input = serde_json::json!({
+        "item": {
+            "canonical_task_ids": ["TASK-TDL-120"],
+            "required_tools": ["pine_analyze", "pine_check", "pine_compile", "pine_smart_compile"]
+        }
+    });
+    let commands = serde_json::json!([
+        { "kind": "inspect", "command": "mcp__tradingview__pine_analyze indicator", "status": "succeeded", "output_summary": "0 issues" },
+        { "kind": "inspect", "command": "mcp__tradingview__pine_check strategy", "status": "succeeded", "output_summary": "compiled" }
+    ]);
+    let error = WorkflowV2AgentAdapter::new()
+        .parse_agent_output(
+            &write_request_with_input(input),
+            &accepted_result_json(commands),
+        )
+        .expect_err("accepted must be rejected when a required tool was never invoked");
+    assert!(
+        matches!(
+            &error,
+            WorkflowV2AgentError::ImplementationAcceptedWithRequiredToolUnexercised(tool)
+                if tool == "pine_compile"
+        ),
+        "{error}"
+    );
+}
+
+#[test]
+fn accepted_is_allowed_when_a_required_tool_was_attempted_even_if_it_failed() {
+    // A captured FAILURE of the required tool is a genuine attempt: the honest
+    // block/gap can then cite it. The guard requires an attempt, not a success.
+    let input = serde_json::json!({
+        "item": { "canonical_task_ids": ["TASK-TDL-120"], "required_tools": ["pine_compile"] }
+    });
+    let commands = serde_json::json!([
+        { "kind": "other", "command": "mcp__tradingview__pine_compile on AHDM-v1-indicator.pine", "status": "failed", "output_summary": "CDP chart not reachable" }
+    ]);
+    WorkflowV2AgentAdapter::new()
+        .parse_agent_output(
+            &write_request_with_input(input),
+            &accepted_result_json(commands),
+        )
+        .expect("a captured tool failure is a real attempt and satisfies the required-tools guard");
+}
+
+#[test]
+fn accepted_with_no_required_tools_is_unaffected_by_the_exercise_guard() {
+    let input = serde_json::json!({ "item": { "canonical_task_ids": ["TASK-TDL-001"] } });
+    let commands = serde_json::json!([
+        { "kind": "test", "command": "cargo test -p archon-trading", "status": "succeeded", "output_summary": "ok" }
+    ]);
+    WorkflowV2AgentAdapter::new()
+        .parse_agent_output(
+            &write_request_with_input(input),
+            &accepted_result_json(commands),
+        )
+        .expect("no declared required tools means the exercise guard never trips");
+}
+
 #[test]
 fn prompt_renders_project_artifact_root_from_the_typed_context_not_the_input() {
     // The verifier prompt reads project_artifact_root from request.project_artifacts
