@@ -322,3 +322,61 @@ async function workflow(w) {{
         );
     }
 }
+
+fn failed_record_with_summary(call_id: &str, summary: &str) -> WorkflowV2CallRecord {
+    let mut result = WorkflowV2Result::default();
+    result.status = WorkflowV2Status::Failed;
+    result.summary = summary.to_string();
+    WorkflowV2CallRecord::new(
+        "run",
+        WorkflowV2HostCall {
+            id: call_id.to_string(),
+            method: WorkflowV2HostMethod::Agent,
+            write_mode: None,
+            options: WorkflowV2HostOptions::default(),
+        },
+        1,
+        String::new(),
+        result,
+        Vec::new(),
+    )
+}
+
+#[test]
+fn infra_transport_stage_failure_contributes_blocked_not_failed() {
+    // A mandatory review that fails purely on a transport/compaction
+    // (infrastructure) error must NOT doom an otherwise-complete run to Failed
+    // and discard every honest task outcome. It contributes Blocked instead —
+    // honest and resumable.
+    let record = failed_record_with_summary(
+        "adversarial-review-47",
+        "workflow stage failed: agent transport failed: reactive subagent compaction failed: no safe compaction boundary",
+    );
+    assert_eq!(
+        run_terminal_status_contribution(&record, WorkflowV2Status::Failed),
+        WorkflowV2Status::Blocked,
+    );
+    // A run whose worst genuine outcome is Blocked (some tasks honestly blocked)
+    // stays Blocked when the review infra-fails — not escalated to Failed.
+    assert_eq!(
+        merge_v2_status(
+            WorkflowV2Status::Blocked,
+            run_terminal_status_contribution(&record, WorkflowV2Status::Failed),
+        ),
+        WorkflowV2Status::Blocked,
+    );
+}
+
+#[test]
+fn genuine_stage_failure_still_contributes_failed() {
+    // A real work failure (not infrastructure) is unchanged: it still dooms the
+    // run to Failed. The downgrade is strictly for transport/compaction errors.
+    let record = failed_record_with_summary(
+        "implement-task-tdl-010-3",
+        "verification found the acceptance criteria unmet",
+    );
+    assert_eq!(
+        run_terminal_status_contribution(&record, WorkflowV2Status::Failed),
+        WorkflowV2Status::Failed,
+    );
+}

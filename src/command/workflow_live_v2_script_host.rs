@@ -364,7 +364,8 @@ impl WorkflowScriptHost {
         if record.call.method == WorkflowV2HostMethod::FinalReport {
             acc.status = status;
         } else {
-            acc.status = merge_v2_status(acc.status, status);
+            acc.status =
+                merge_v2_status(acc.status, run_terminal_status_contribution(record, status));
         }
         acc.executed += 1;
         if is_reusable_status(status) {
@@ -383,7 +384,10 @@ impl WorkflowScriptHost {
         if record.call.method == WorkflowV2HostMethod::FinalReport {
             acc.status = record.status;
         } else {
-            acc.status = merge_v2_status(acc.status, record.status);
+            acc.status = merge_v2_status(
+                acc.status,
+                run_terminal_status_contribution(record, record.status),
+            );
         }
         acc.failed_call = Some(record.call.id.clone());
         acc.failed_result_path = Some(result_path);

@@ -357,6 +357,29 @@ fn status_precedence(status: WorkflowV2Status) -> u8 {
     }
 }
 
+/// The severity a non-final stage contributes to the RUN's terminal status.
+///
+/// A stage that failed on a transport/compaction/infrastructure error — not a
+/// genuine work rejection — must not doom an otherwise-complete run to `Failed`
+/// and discard every honest task outcome behind an infra hiccup. Such a stage
+/// contributes `Blocked` instead: honest ("this stage could not complete and is
+/// resumable") and non-fatal, so the run terminates reflecting the real task
+/// tally with the stage flagged, and can be resumed to re-run just that stage.
+/// The stage record itself stays truthful — still `Failed` with the transport
+/// reason. Genuine (non-infrastructure) failures contribute `Failed` unchanged.
+/// General: keys only on the failure text via the shared transport detector, so
+/// it holds for any stage, PRD, tool, or workflow — no special cases.
+fn run_terminal_status_contribution(
+    record: &WorkflowV2CallRecord,
+    status: WorkflowV2Status,
+) -> WorkflowV2Status {
+    if status == WorkflowV2Status::Failed && is_transport_failure_text(&record.result.summary) {
+        WorkflowV2Status::Blocked
+    } else {
+        status
+    }
+}
+
 fn next_action_for_terminal_call(call_id: &str, status: WorkflowV2Status) -> String {
     match status {
         WorkflowV2Status::NeedsReview | WorkflowV2Status::Blocked => format!(
