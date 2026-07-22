@@ -1,19 +1,21 @@
 /// Dry-run pre-flight: execute the authored script against the recording stub
 /// host and require it to PLAN real work — with every universe task claimed
-/// by EXACTLY ONE write call, both mandated reviews present, and no
+/// by EXACTLY ONE write call, mandatory map→reduce reviews present, and no
 /// umbrella id-stuffing. Reports EVERY defect in one aggregated error.
 async fn validate_authored_plan(
     source: &str,
     expected_task_ids: &std::collections::BTreeSet<String>,
 ) -> Result<(), String> {
-    let (planned, write_task_claims) = dry_run_workflow_plan_details(source, None)
+    let details = dry_run_workflow_plan_full_details(source, None)
         .await
         .map_err(|err| format!("dry run failed: {err}"))?;
+    let planned = &details.calls;
+    let write_task_claims = &details.write_task_claims;
     let mut defects: Vec<String> = Vec::new();
 
     let mut claims_by_id: std::collections::BTreeMap<&str, Vec<&str>> = Default::default();
     let mut claims_by_call: std::collections::BTreeMap<&str, usize> = Default::default();
-    for (task_id, call_id) in &write_task_claims {
+    for (task_id, call_id) in write_task_claims {
         claims_by_id.entry(task_id).or_default().push(call_id);
         *claims_by_call.entry(call_id).or_default() += 1;
     }
@@ -66,7 +68,15 @@ async fn validate_authored_plan(
             planned.len()
         ));
     }
-    if let Err(review_defects) = validate_mandatory_review_calls(&planned) {
+    let accepted_for_review = if expected_task_ids.is_empty() {
+        write_task_claims
+            .iter()
+            .map(|(task_id, _)| task_id.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+    } else {
+        expected_task_ids.clone()
+    };
+    if let Err(review_defects) = validate_map_reduce_review_calls(&details, &accepted_for_review) {
         defects.push(review_defects);
     }
     if defects.is_empty() {
@@ -75,42 +85,44 @@ async fn validate_authored_plan(
     Err(defects.join("; AND "))
 }
 
-pub(super) const MANDATED_REVIEWS: [(&str, &str, bool); 2] = [
-    ("adversarial-review", "adversarial review", true),
-    ("coverage-audit", "source-coverage audit", false),
-];
 pub(super) const MANDATED_RESULT_FIELDS: [&str; 2] =
     ["adversarial_findings", "uncovered_requirements"];
 const CRITIC_TIER: &str = "critic";
+const REVIEW_MAP_STAGE: &str = "map";
+const REVIEW_REDUCE_FINAL_STAGE: &str = "reduce_final";
+const REVIEW_REDUCE_CHUNK_STAGE: &str = "reduce_chunk";
+const REVIEW_CONTRACT_MARKER: &str = "reviewContract";
+const REVIEW_BOUNDS_HINT: &str = "maxInputBytes";
+const MANDATED_REVIEW_KINDS: [(&str, &str); 2] = [
+    ("adversarial_findings", "adversarial findings review"),
+    ("uncovered_requirements", "source-coverage audit"),
+];
 
-pub(super) fn mandate_call_hint(label: &str, requires_critic: bool) -> String {
-    if requires_critic {
-        format!("await agent(..., {{ label: '{label}', tier: '{CRITIC_TIER}' }})")
-    } else {
-        format!("await agent(..., {{ label: '{label}' }})")
-    }
+fn review_contract(call: &WorkflowV2HostCall) -> Option<&serde_json::Value> {
+    call.options
+        .extra
+        .get("reviewContract")
+        .or_else(|| call.options.extra.get("review_contract"))
 }
 
-/// The prelude mints agent ids as `<label>-<ordinal>`; a mandate matches only
-/// that exact shape (or the bare label), never labels that merely extend it.
-fn call_id_matches_label(id: &str, label: &str) -> bool {
-    if id == label {
-        return true;
-    }
-    id.strip_prefix(label)
-        .and_then(|rest| rest.strip_prefix('-'))
-        .is_some_and(|ordinal| !ordinal.is_empty() && ordinal.bytes().all(|b| b.is_ascii_digit()))
+fn review_contract_string<'a>(contract: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    contract.get(key).and_then(serde_json::Value::as_str)
 }
 
-fn is_mandated_review_call(call: &WorkflowV2HostCall) -> bool {
-    call.method == WorkflowV2HostMethod::Agent
-        && MANDATED_REVIEWS
-            .iter()
-            .any(|(label, _, _)| call_id_matches_label(&call.id, label))
+fn review_contract_kind(call: &WorkflowV2HostCall) -> Option<&str> {
+    review_contract(call).and_then(|contract| review_contract_string(contract, "kind"))
+}
+
+fn review_contract_stage(call: &WorkflowV2HostCall) -> Option<&str> {
+    review_contract(call).and_then(|contract| review_contract_string(contract, "stage"))
+}
+
+fn is_review_contract_call(call: &WorkflowV2HostCall) -> bool {
+    review_contract(call).is_some()
 }
 
 fn is_task_work_call(call: &WorkflowV2HostCall) -> bool {
-    !is_mandated_review_call(call)
+    !is_review_contract_call(call)
         && matches!(
             call.method,
             WorkflowV2HostMethod::Agent
@@ -120,72 +132,486 @@ fn is_task_work_call(call: &WorkflowV2HostCall) -> bool {
         )
 }
 
-/// Enforce the mandated reviews on the EXECUTED/PLANNED call sequence:
-/// present, as separate top-level read-only agent() calls, with the critic
-/// tier where required, positioned AFTER all task work. Reports EVERY defect
-/// in one error and names the ACTUAL cause for near-misses.
-fn validate_mandatory_review_calls(planned: &[WorkflowV2HostCall]) -> Result<(), String> {
+fn is_critic(call: &WorkflowV2HostCall) -> bool {
+    call.options
+        .role
+        .as_deref()
+        .is_some_and(|role| role.eq_ignore_ascii_case(CRITIC_TIER))
+}
+
+fn call_index(planned: &[WorkflowV2HostCall], call_id: &str) -> Option<usize> {
+    planned.iter().position(|call| call.id == call_id)
+}
+
+/// Enforce the mandatory reviews on the EXECUTED/PLANNED call sequence:
+/// read-only critic map reviewers cover every accepted task exactly once,
+/// then bounded critic reducers preserve map findings into the accounting
+/// fields. Reports EVERY defect in one error and names near-misses.
+fn validate_map_reduce_review_calls(
+    details: &WorkflowDryRunPlanDetails,
+    accepted_task_ids: &std::collections::BTreeSet<String>,
+) -> Result<(), String> {
+    let planned = &details.calls;
+    let first_review = planned.iter().position(is_review_contract_call);
     let last_work = planned.iter().rposition(is_task_work_call);
     let mut defects: Vec<String> = Vec::new();
-    for (label, purpose, requires_critic) in MANDATED_REVIEWS {
-        let hint = mandate_call_hint(label, requires_critic);
-        let matched = planned.iter().enumerate().find(|(_, call)| {
-            call.method == WorkflowV2HostMethod::Agent && call_id_matches_label(&call.id, label)
-        });
-        let Some((index, call)) = matched else {
-            // Near-miss diagnosis: the label exists but under the wrong call
-            // kind (agents() batch → Parallel, write:true → Fanout), or only
-            // as an extended label — name the real defect, not "omitted".
-            if let Some(wrong_kind) = planned.iter().find(|call| {
-                call.method != WorkflowV2HostMethod::Agent
-                    && call_id_matches_label(&call.id, label)
-            }) {
-                defects.push(format!(
-                    "the {purpose} labeled `{label}` ran as w.{} — the mandated reviews must be SEPARATE top-level read-only agent() calls, never inside agents() batches and never with write:true; use: {hint}",
-                    wrong_kind.method.as_str()
-                ));
-            } else if let Some(extended) = planned.iter().find(|call| {
-                call.method == WorkflowV2HostMethod::Agent
-                    && call.id.starts_with(label)
-                    && !call_id_matches_label(&call.id, label)
-            }) {
-                defects.push(format!(
-                    "no {purpose} agent with the exact label `{label}` (found `{}` — extended labels do not count); use: {hint}",
-                    extended.id
-                ));
-            } else {
-                defects.push(format!(
-                    "the mandatory {purpose} agent with exact label `{label}` is missing; add: {hint}"
-                ));
-            }
-            continue;
-        };
-        if requires_critic
-            && !call
-                .options
-                .role
-                .as_deref()
-                .is_some_and(|role| role.eq_ignore_ascii_case(CRITIC_TIER))
-        {
+
+    if let (Some(first_review), Some(last_work)) = (first_review, last_work)
+        && first_review < last_work
+    {
+        defects.push(
+            "mandatory map→reduce reviews start BEFORE task work finishes — all review map/reduce calls must run after implementation, remediation, and verification work"
+                .to_string(),
+        );
+    }
+
+    for call in planned.iter().filter(|call| is_review_contract_call(call)) {
+        let kind = review_contract_kind(call).unwrap_or("<missing-kind>");
+        let stage = review_contract_stage(call).unwrap_or("<missing-stage>");
+        if call.write_mode.is_some() {
             defects.push(format!(
-                "the {purpose} agent `{}` must use tier '{CRITIC_TIER}' so it routes to the dedicated adversarial reviewer; use: {hint}",
+                "review call `{}` ({kind}/{stage}) must be read-only and must not set write mode",
                 call.id
             ));
         }
-        if let Some(last_work) = last_work
-            && index < last_work
-        {
+        if !is_critic(call) {
             defects.push(format!(
-                "the {purpose} agent `{}` runs BEFORE task work finishes — both mandated reviews must come after ALL agent, implementation, fanout, and parallel calls",
+                "review call `{}` ({kind}/{stage}) must use tier '{CRITIC_TIER}'",
                 call.id
             ));
         }
     }
+
+    for call in planned
+        .iter()
+        .filter(|call| matches!(review_contract_stage(call), Some(REVIEW_MAP_STAGE)))
+    {
+        if !matches!(
+            call.method,
+            WorkflowV2HostMethod::Fanout | WorkflowV2HostMethod::Parallel
+        ) {
+            defects.push(format!(
+                "review map `{}` must run as read-only w.parallel or w.fanout, not w.{}",
+                call.id,
+                call.method.as_str()
+            ));
+        }
+    }
+    for call in planned.iter().filter(|call| {
+        matches!(
+            review_contract_stage(call),
+            Some(REVIEW_REDUCE_FINAL_STAGE | REVIEW_REDUCE_CHUNK_STAGE)
+        )
+    }) {
+        if call.method != WorkflowV2HostMethod::Reduce {
+            defects.push(format!(
+                "review reducer `{}` must run as w.reduce, not w.{}",
+                call.id,
+                call.method.as_str()
+            ));
+        }
+    }
+
+    let legacy_labels = ["adversarial-review", "coverage-audit"];
+    for label in legacy_labels {
+        if planned.iter().any(|call| {
+            call.method == WorkflowV2HostMethod::Agent
+                && (call.id == label
+                    || call
+                        .id
+                        .strip_prefix(label)
+                        .and_then(|rest| rest.strip_prefix('-'))
+                        .is_some_and(|ordinal| {
+                            !ordinal.is_empty() && ordinal.bytes().all(|b| b.is_ascii_digit())
+                        }))
+        }) {
+            defects.push(format!(
+                "legacy monolithic review `{label}` no longer satisfies the mandate — use read-only critic {REVIEW_CONTRACT_MARKER} map→reduce calls"
+            ));
+        }
+    }
+
+    let map_call_ids = details
+        .review_map_claims
+        .iter()
+        .map(|claim| claim.call_id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+
+    for (review_kind, purpose) in MANDATED_REVIEW_KINDS {
+        validate_review_kind_shape(
+            details,
+            accepted_task_ids,
+            review_kind,
+            purpose,
+            &map_call_ids,
+            &mut defects,
+        );
+    }
+
     if defects.is_empty() {
         return Ok(());
     }
     Err(format!(
-        "mandated-review defects (fix EVERY one): {}",
+        "mandatory map→reduce review defects (fix EVERY one): {}",
         defects.join("; AND ")
     ))
+}
+
+fn validate_review_kind_shape(
+    details: &WorkflowDryRunPlanDetails,
+    accepted_task_ids: &std::collections::BTreeSet<String>,
+    review_kind: &str,
+    purpose: &str,
+    all_map_call_ids: &std::collections::BTreeSet<String>,
+    defects: &mut Vec<String>,
+) {
+    let map_call_ids_for_kind = details
+        .calls
+        .iter()
+        .filter(|call| {
+            review_contract_kind(call) == Some(review_kind)
+                && review_contract_stage(call) == Some(REVIEW_MAP_STAGE)
+        })
+        .map(|call| call.id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let maps = details
+        .review_map_claims
+        .iter()
+        .filter(|claim| claim.review_kind == review_kind)
+        .collect::<Vec<_>>();
+    if map_call_ids_for_kind.is_empty() {
+        defects.push(format!(
+            "missing {purpose} map review — add read-only critic map calls with {REVIEW_CONTRACT_MARKER}.kind='{review_kind}' and stage='{REVIEW_MAP_STAGE}'"
+        ));
+    }
+
+    let mut by_task: std::collections::BTreeMap<&str, Vec<String>> = Default::default();
+    for claim in &maps {
+        if call_index(&details.calls, &claim.call_id).is_none() {
+            defects.push(format!(
+                "{purpose} map call `{}` was planned but did not execute in the live call sequence",
+                claim.call_id
+            ));
+        }
+        if claim.task_ids.len() != 1 {
+            defects.push(format!(
+                "{purpose} map item in call `{}` item {:?} covers {} task ids ({:?}) — each map item must cover exactly one accepted task",
+                claim.call_id,
+                claim.item_id,
+                claim.task_ids.len(),
+                claim.task_ids
+            ));
+            continue;
+        }
+        let task_id = claim.task_ids[0].as_str();
+        if !accepted_task_ids.contains(task_id) {
+            defects.push(format!(
+                "{purpose} map item in call `{}` covers unknown or non-accepted task `{task_id}`",
+                claim.call_id
+            ));
+        }
+        by_task
+            .entry(task_id)
+            .or_default()
+            .push(format!("{}:{:?}", claim.call_id, claim.item_id));
+    }
+    for missing in accepted_task_ids
+        .iter()
+        .filter(|task_id| !by_task.contains_key(task_id.as_str()))
+    {
+        defects.push(format!(
+            "{purpose} map coverage omitted accepted task `{missing}`"
+        ));
+    }
+    for (task_id, claims) in by_task {
+        if claims.len() > 1 {
+            defects.push(format!(
+                "{purpose} map coverage includes accepted task `{task_id}` more than once ({})",
+                claims.join(", ")
+            ));
+        }
+    }
+
+    let reducers = details
+        .review_reduce_edges
+        .iter()
+        .filter(|edge| edge.review_kind == review_kind)
+        .collect::<Vec<_>>();
+    let finals = reducers
+        .iter()
+        .filter(|edge| edge.stage == REVIEW_REDUCE_FINAL_STAGE)
+        .collect::<Vec<_>>();
+    if finals.len() != 1 {
+        defects.push(format!(
+            "{purpose} must have exactly one final reducer with {REVIEW_CONTRACT_MARKER}.stage='{REVIEW_REDUCE_FINAL_STAGE}' (found {})",
+            finals.len()
+        ));
+    }
+    for edge in &reducers {
+        if !edge.preserve_map_findings {
+            defects.push(format!(
+                "{purpose} reducer `{}` must declare preserveMapFindings: true",
+                edge.call_id
+            ));
+        }
+        if edge.max_input_bytes.is_none() && edge.max_findings_per_reduce.is_none() {
+            defects.push(format!(
+                "{purpose} reducer `{}` must declare a reduce bound such as {REVIEW_BOUNDS_HINT} or maxFindingsPerReduce",
+                edge.call_id
+            ));
+        }
+        if let Some(index) = call_index(&details.calls, &edge.call_id) {
+            for source in edge
+                .source_map_call_ids
+                .iter()
+                .chain(edge.source_reduce_call_ids.iter())
+            {
+                match call_index(&details.calls, source) {
+                    Some(source_index) if source_index > index => {
+                        defects.push(format!(
+                            "{purpose} reducer `{}` references source `{source}` that runs after it",
+                            edge.call_id
+                        ));
+                    }
+                    Some(_) => {}
+                    None => defects.push(format!(
+                        "{purpose} reducer `{}` references source `{source}` that did not execute",
+                        edge.call_id
+                    )),
+                }
+            }
+        }
+    }
+
+    if let Some(final_reduce) = finals.first() {
+        if final_reduce.accounting_field.as_deref() != Some(review_kind) {
+            defects.push(format!(
+                "{purpose} final reducer `{}` must declare accountingField: '{review_kind}'",
+                final_reduce.call_id
+            ));
+        }
+        let direct_maps = final_reduce
+            .source_map_call_ids
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        let chunk_sources = final_reduce
+            .source_reduce_call_ids
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        let expected_maps = map_call_ids_for_kind.clone();
+        if chunk_sources.is_empty() {
+            if direct_maps != expected_maps {
+                defects.push(format!(
+                    "{purpose} final reducer `{}` must reference every {review_kind} map call exactly once: expected={expected_maps:?} actual={direct_maps:?}",
+                    final_reduce.call_id
+                ));
+            }
+        } else {
+            for source in &chunk_sources {
+                if !reducers
+                    .iter()
+                    .any(|edge| edge.stage == REVIEW_REDUCE_CHUNK_STAGE && edge.call_id == *source)
+                {
+                    defects.push(format!(
+                        "{purpose} final reducer `{}` references unknown chunk reducer `{source}`",
+                        final_reduce.call_id
+                    ));
+                }
+            }
+            let chunked_maps = reducers
+                .iter()
+                .filter(|edge| chunk_sources.contains(&edge.call_id))
+                .flat_map(|edge| edge.source_map_call_ids.iter().cloned())
+                .collect::<std::collections::BTreeSet<_>>();
+            if chunked_maps != expected_maps {
+                defects.push(format!(
+                    "{purpose} chunk reducers must cover every {review_kind} map call exactly once before final reduce: expected={expected_maps:?} actual={chunked_maps:?}"
+                ));
+            }
+        }
+        for source in direct_maps.iter().chain(chunk_sources.iter()) {
+            if all_map_call_ids.contains(source) && !expected_maps.contains(source) {
+                defects.push(format!(
+                    "{purpose} final reducer `{}` references map call `{source}` from another review kind",
+                    final_reduce.call_id
+                ));
+            }
+        }
+    }
+}
+
+fn validate_review_accounting_from_reducers(
+    script_result: Option<&str>,
+    details: &WorkflowDryRunPlanDetails,
+    store: &WorkflowV2ResultStore,
+) -> archon_workflow::WorkflowResult<()> {
+    let raw = script_result.ok_or_else(|| {
+        WorkflowError::SpecInvalid("authored workflow returned no task accounting".to_string())
+    })?;
+    let accounting: serde_json::Value = serde_json::from_str(raw).map_err(|err| {
+        WorkflowError::SpecInvalid(format!(
+            "authored workflow task accounting was not JSON: {err}"
+        ))
+    })?;
+    for (review_kind, purpose) in MANDATED_REVIEW_KINDS {
+        let final_reduce = details
+            .review_reduce_edges
+            .iter()
+            .find(|edge| edge.review_kind == review_kind && edge.stage == REVIEW_REDUCE_FINAL_STAGE)
+            .ok_or_else(|| {
+                WorkflowError::SpecInvalid(format!(
+                    "{purpose} accounting has no final reducer to bind `{review_kind}`"
+                ))
+            })?;
+        let map_findings = collect_map_findings(details, store, review_kind)?;
+        let reduce_record = store
+            .load_call_record(&final_reduce.call_id)?
+            .ok_or_else(|| {
+                WorkflowError::SpecInvalid(format!(
+                    "{purpose} final reducer record `{}` is missing",
+                    final_reduce.call_id
+                ))
+            })?;
+        if reduce_record.invalidated_by.is_some() {
+            return Err(WorkflowError::SpecInvalid(format!(
+                "{purpose} final reducer `{}` was invalidated and cannot back accounting",
+                final_reduce.call_id
+            )));
+        }
+        let reduce_findings = extract_review_findings_from_record(&reduce_record)?;
+        assert_multiset_contains(
+            &reduce_findings,
+            &map_findings,
+            &format!(
+                "{purpose} final reducer `{}` dropped map findings",
+                final_reduce.call_id
+            ),
+        )?;
+        let accounting_findings = accounting
+            .get(review_kind)
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| {
+                WorkflowError::SpecInvalid(format!(
+                    "authored workflow accounting omitted `{review_kind}` — it must come from the {purpose} reducer"
+                ))
+            })?
+            .clone();
+        assert_multiset_equal(
+            &accounting_findings,
+            &reduce_findings,
+            &format!(
+                "authored workflow accounting field `{review_kind}` does not match final reducer `{}`",
+                final_reduce.call_id
+            ),
+        )?;
+    }
+    Ok(())
+}
+
+fn collect_map_findings(
+    details: &WorkflowDryRunPlanDetails,
+    store: &WorkflowV2ResultStore,
+    review_kind: &str,
+) -> archon_workflow::WorkflowResult<Vec<serde_json::Value>> {
+    let mut findings = Vec::new();
+    let call_ids = details
+        .review_map_claims
+        .iter()
+        .filter(|claim| claim.review_kind == review_kind)
+        .map(|claim| claim.call_id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    for call_id in call_ids {
+        let record = store.load_call_record(&call_id)?.ok_or_else(|| {
+            WorkflowError::SpecInvalid(format!(
+                "mandatory review map record `{call_id}` is missing"
+            ))
+        })?;
+        if record.invalidated_by.is_some() {
+            return Err(WorkflowError::SpecInvalid(format!(
+                "mandatory review map record `{call_id}` was invalidated"
+            )));
+        }
+        findings.extend(extract_review_findings_from_record(&record)?);
+    }
+    Ok(findings)
+}
+
+fn extract_review_findings_from_record(
+    record: &WorkflowV2CallRecord,
+) -> archon_workflow::WorkflowResult<Vec<serde_json::Value>> {
+    let mut findings = Vec::new();
+    collect_findings_arrays(&record.result.data, &mut findings);
+    if findings.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(findings)
+}
+
+fn collect_findings_arrays(value: &serde_json::Value, findings: &mut Vec<serde_json::Value>) {
+    match value {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_findings_arrays(item, findings);
+            }
+        }
+        serde_json::Value::Object(object) => {
+            for key in ["findings", "adversarial_findings", "uncovered_requirements"] {
+                if let Some(array) = object.get(key).and_then(serde_json::Value::as_array) {
+                    findings.extend(array.iter().cloned());
+                }
+            }
+            for key in ["data", "result", "items", "outcomes"] {
+                if let Some(child) = object.get(key) {
+                    collect_findings_arrays(child, findings);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn assert_multiset_contains(
+    haystack: &[serde_json::Value],
+    needles: &[serde_json::Value],
+    context: &str,
+) -> archon_workflow::WorkflowResult<()> {
+    let haystack = finding_multiset(haystack)?;
+    let needles = finding_multiset(needles)?;
+    for (finding, count) in needles {
+        let have = haystack.get(&finding).copied().unwrap_or(0);
+        if have < count {
+            return Err(WorkflowError::SpecInvalid(format!(
+                "{context}: missing finding {finding} expected {count} found {have}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn assert_multiset_equal(
+    left: &[serde_json::Value],
+    right: &[serde_json::Value],
+    context: &str,
+) -> archon_workflow::WorkflowResult<()> {
+    let left = finding_multiset(left)?;
+    let right = finding_multiset(right)?;
+    if left != right {
+        return Err(WorkflowError::SpecInvalid(format!(
+            "{context}: left={left:?} right={right:?}"
+        )));
+    }
+    Ok(())
+}
+
+fn finding_multiset(
+    values: &[serde_json::Value],
+) -> archon_workflow::WorkflowResult<std::collections::BTreeMap<String, usize>> {
+    let mut out = std::collections::BTreeMap::new();
+    for value in values {
+        let key = serde_json::to_string(value)?;
+        *out.entry(key).or_default() += 1;
+    }
+    Ok(out)
 }

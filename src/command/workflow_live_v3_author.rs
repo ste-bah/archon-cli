@@ -39,14 +39,42 @@ Shape — top-level script, exactly like this (no wrapper function):
   }
 
   phase('Review')
-  const adversarial = await agent('Try to FALSIFY every accepted claim above using the actual files and tests: ...', { label: 'adversarial-review', tier: 'critic' })
-  const coverage = await agent('Compare the source requirements document against the task list; name every requirement no task covers: ...', { label: 'coverage-audit' })
+  const reviewItems = acceptedTaskIds.map((taskId) => ({
+    item_id: `review-${taskId.toLowerCase()}`,
+    canonical_task_ids: [taskId],
+    task: `Read-only critic review for ${taskId}; return data.findings as compact structured findings.`,
+    evidence: boundedEvidenceFor(taskId),
+  }))
+  const adversarialMap = await w.parallel('adversarial-review-map', reviewItems, {
+    tier: 'critic',
+    itemKind: 'review_map',
+    maxParallelism: 4,
+    task: 'For each item, try to FALSIFY that accepted task using its claims and bounded evidence. Return data.findings; max 25 findings per item.',
+    reviewContract: { version: 1, kind: 'adversarial_findings', stage: 'map', findingsPath: 'data.findings', itemTaskIdsPath: 'canonical_task_ids', maxFindingsPerItem: 25 },
+  })
+  const adversarialReduce = await w.reduce('adversarial-review-reduce', { findings: findingsFrom(adversarialMap) }, {
+    tier: 'critic',
+    task: 'Preserve every map finding verbatim, then add any cross-task contradictions. Return data.findings.',
+    reviewContract: { version: 1, kind: 'adversarial_findings', stage: 'reduce_final', sourceMapCallIds: ['adversarial-review-map'], preserveMapFindings: true, findingsPath: 'data.findings', accountingField: 'adversarial_findings', maxInputBytes: 48000 },
+  })
+  const coverageMap = await w.parallel('coverage-audit-map', reviewItems, {
+    tier: 'critic',
+    itemKind: 'review_map',
+    maxParallelism: 4,
+    task: 'For each accepted task, compare its task/source sections against the source requirements and return data.findings for requirements this task appears not to cover.',
+    reviewContract: { version: 1, kind: 'uncovered_requirements', stage: 'map', findingsPath: 'data.findings', itemTaskIdsPath: 'canonical_task_ids', maxFindingsPerItem: 25 },
+  })
+  const coverageReduce = await w.reduce('coverage-audit-reduce', { findings: findingsFrom(coverageMap) }, {
+    tier: 'critic',
+    task: 'Preserve every map coverage finding verbatim, deduplicate only by exact finding identity, and add cross-task uncovered-requirement findings. Return data.findings.',
+    reviewContract: { version: 1, kind: 'uncovered_requirements', stage: 'reduce_final', sourceMapCallIds: ['coverage-audit-map'], preserveMapFindings: true, findingsPath: 'data.findings', accountingField: 'uncovered_requirements', maxInputBytes: 48000 },
+  })
 
   return {
     accepted: acceptedTaskIds,
     blocked: blockedTasks,
-    adversarial_findings: findingsFrom(adversarial),
-    uncovered_requirements: gapsFrom(coverage),
+    adversarial_findings: findingsFrom(adversarialReduce),
+    uncovered_requirements: findingsFrom(coverageReduce),
     notes: 'short honest summary',
   }
   // Your own small helpers, defined at the top of the script:
@@ -108,17 +136,17 @@ Rules the script must follow:
 - Never edit an existing artifact instance to satisfy a check; produce new artifacts through the real pipeline.
 - An honest block naming a real gap is success; fabricated acceptance is failure. The runtime gates independently validate patches, no-op proofs, and test evidence — do not try to outsmart them; they are on your side.
 - Deterministic code only (no Math.random, no Date.now); pass any needed timestamps via prompts.
-- MANDATORY after all task work, before returning:
-  1. An ADVERSARIAL REVIEW agent: `await agent(<claims + evidence>, { label: 'adversarial-review', tier: 'critic' })` — tier 'critic' routes to the dedicated adversarial reviewer (the sherlock agent) when the project defines one. Instruct it to try to FALSIFY every accepted task's claims — probe actual files, inspect the verifiers' executed focused-check outputs, hunt for hollow artifacts, untested paths, and claims that outrun evidence. It is read-only and must not claim to execute commands. Its findings go into the return value verbatim.
-  2. A SOURCE-COVERAGE AUDIT agent (read-only, label 'coverage-audit'): give it the source requirements document path and the full task list and instruct it to name every normative requirement that NO task in the universe covers. Report gaps honestly; do NOT implement work outside the given tasks.
-  Both are SEPARATE unconditional top-level `await agent(...)` calls — never inside agents() batches, never write:true, never wrapped in if/try on earlier results.
+- MANDATORY after all task work, before returning: run BOTH mandatory reviews as read-only critic map→reduce contracts, never as one monolithic agent and never with write mode:
+  1. ADVERSARIAL REVIEW: map over every accepted task exactly once with `w.parallel` or `w.fanout`, `tier: 'critic'`, `itemKind: 'review_map'`, and `reviewContract: { kind: 'adversarial_findings', stage: 'map', ... }`. Each map source item MUST name exactly one accepted canonical task id in `canonical_task_ids`. Then run `w.reduce` with `tier: 'critic'` and `reviewContract: { kind: 'adversarial_findings', stage: 'reduce_final', sourceMapCallIds: [...], preserveMapFindings: true, accountingField: 'adversarial_findings', maxInputBytes: 48000 }`. The reducer sees only compact map findings, preserves every map finding verbatim, and may ADD cross-task contradictions.
+  2. SOURCE-COVERAGE AUDIT: same map→reduce shape using `reviewContract.kind: 'uncovered_requirements'` and final `accountingField: 'uncovered_requirements'`. Map reviewers compare source requirements/task coverage per accepted task; the reducer preserves every map finding and adds cross-task/source gaps.
+  Review map/reduce calls must run AFTER all implementation, remediation, and verification work. Map calls must bound findings (`maxFindingsPerItem`); reducers must declare bounds (`maxInputBytes` or `maxFindingsPerReduce`). If findings are too large, chunk-reduce first, then final reduce. The runtime rejects skipped tasks, duplicate task coverage, write-mode reviews, non-critic reviews, unbounded reducers, and dropped findings.
 - Return {
     accepted: [...taskIds],
     blocked: [{ taskId, reason }],
     adversarial_findings: [ '<finding or empty>' ],
     uncovered_requirements: [ '<requirement no task covers, or empty>' ],
     notes: '<short honest summary>'
-  } accounting for EVERY task id exactly once across accepted+blocked; adversarial_findings and uncovered_requirements MUST come from the two mandatory agents, never invented or omitted."#;
+  } accounting for EVERY task id exactly once across accepted+blocked; adversarial_findings and uncovered_requirements MUST come from their final reducers, never invented or omitted."#;
 
 const V3_AUTHOR_TASK_TEMPLATE: &str = r#"Author the complete workflow.js orchestration script for this decomposed task set. INVESTIGATE BEFORE WRITING — you have READ tools (Read, Grep, Glob); you have NO shell and must NOT run commands or create/modify ANY files. Your ONLY deliverable is the result envelope.
 
@@ -133,7 +161,7 @@ Then write the script per the dialect reference and SELF-CHECK before returning:
 - a task that is already implemented still gets its write agent — instruct that agent to return the typed no-op (status noop, idempotent_noop true, task_coverage evidence) when it verifies nothing needs changing; NEVER make cosmetic edits just to show work;
 - EVERY task has a remediation path: after its verifier, a bounded loop (max 3 attempts) that re-runs a write agent with the verifier's verbatim findings and re-verifies, before recording blocked. A script without remediation does not implement the tasks and is incomplete;
 - write agents are told to prove their change by running tests IN-SESSION; only add focusedTests commands you verified against the repo (a wrong package or module name fails the gauntlet — when unsure, omit them);
-- the two mandated reviews are present, exactly labeled, after all work;
+- the two mandatory map→reduce reviews are present after all work, read-only, critic-tier throughout, cover every accepted task exactly once, preserve map findings into reducers, and return adversarial_findings/uncovered_requirements from those reducers;
 - meta.phases matches the phase() calls; the accounting return covers every task id exactly once;
 - the script text must not contain confirmation questions or the phrases "restored context"/"previous session summary".
 
@@ -173,9 +201,16 @@ fn compose_author_brief(values: &[(&str, &str)]) -> String {
     }
     out.push_str(rest);
     debug_assert!(
-        !["{repo_root}", "{source_roots}", "{task_paths}", "{retry_feedback}", "{learning_context}", "{reference}"]
-            .iter()
-            .any(|token| out.contains(token)),
+        ![
+            "{repo_root}",
+            "{source_roots}",
+            "{task_paths}",
+            "{retry_feedback}",
+            "{learning_context}",
+            "{reference}"
+        ]
+        .iter()
+        .any(|token| out.contains(token)),
         "author brief has unsubstituted placeholders"
     );
     out
@@ -221,10 +256,11 @@ impl WorkflowV2ScriptRunner {
             })
             .unwrap_or_default();
         let authored_source = if authored_path.exists() {
-            let source = std::fs::read_to_string(&authored_path).map_err(|err| WorkflowError::Io {
-                path: authored_path.clone(),
-                source: err,
-            })?;
+            let source =
+                std::fs::read_to_string(&authored_path).map_err(|err| WorkflowError::Io {
+                    path: authored_path.clone(),
+                    source: err,
+                })?;
             let source = validate_authored_workflow_source(&source)?;
             // Pre-flight: the persisted script must still plan real work.
             if let Err(reason) = validate_authored_plan(&source, &expected_task_ids).await {
@@ -241,7 +277,10 @@ impl WorkflowV2ScriptRunner {
             // ONE bounded retry covers BOTH failure kinds: a rejected plan
             // AND an unusable authoring envelope (e.g. workflow_js outside
             // data) — each retry names the specific defect.
-            let first = match self.author_workflow_source(None, &governed_learning_context).await {
+            let first = match self
+                .author_workflow_source(None, &governed_learning_context)
+                .await
+            {
                 Ok(source) => match validate_authored_plan(&source, &expected_task_ids).await {
                     Ok(()) => Ok(source),
                     Err(reason) => Err(reason),
@@ -270,14 +309,21 @@ impl WorkflowV2ScriptRunner {
             })?;
             source
         };
-        let summary = self.run(&authored_source).await?;
-        validate_mandatory_review_calls(&summary.calls).map_err(|reason| {
+        let summary = self.clone().run(&authored_source).await?;
+        let mut review_details = dry_run_workflow_plan_full_details(&authored_source, None).await?;
+        review_details.calls = summary.calls.clone();
+        validate_map_reduce_review_calls(&review_details, &expected_task_ids).map_err(|reason| {
             WorkflowError::SpecInvalid(format!(
-                "the executed run violated the mandated-review contract ({reason}); the live call sequence diverged from the pre-flight plan (likely conditional review calls) — delete {} to re-author with unconditional reviews",
+                "the executed run violated the mandatory map→reduce review contract ({reason}); the live call sequence diverged from the pre-flight plan (likely conditional review calls) — delete {} to re-author with unconditional reviews",
                 authored_path.display()
             ))
         })?;
         validate_authored_task_accounting(summary.script_result.as_deref(), &expected_task_ids)?;
+        validate_review_accounting_from_reducers(
+            summary.script_result.as_deref(),
+            &review_details,
+            &self.v2_store,
+        )?;
         Ok(summary)
     }
 
@@ -384,7 +430,9 @@ fn validate_authored_task_accounting(
         WorkflowError::SpecInvalid("authored workflow returned no task accounting".to_string())
     })?;
     let value: serde_json::Value = serde_json::from_str(raw).map_err(|err| {
-        WorkflowError::SpecInvalid(format!("authored workflow task accounting was not JSON: {err}"))
+        WorkflowError::SpecInvalid(format!(
+            "authored workflow task accounting was not JSON: {err}"
+        ))
     })?;
     let accepted = value
         .get("accepted")
@@ -406,7 +454,11 @@ fn validate_authored_task_accounting(
     // output arrays must be present (possibly empty) — a run that never ran
     // them cannot produce honest completeness claims.
     for field in MANDATED_RESULT_FIELDS {
-        if value.get(field).and_then(serde_json::Value::as_array).is_none() {
+        if value
+            .get(field)
+            .and_then(serde_json::Value::as_array)
+            .is_none()
+        {
             return Err(WorkflowError::SpecInvalid(format!(
                 "authored workflow accounting omitted `{field}` — the adversarial review and source-coverage audit agents are mandatory"
             )));

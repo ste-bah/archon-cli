@@ -10,11 +10,41 @@
 
 const WORKFLOW_DRY_RUN_WATCHDOG: Duration = Duration::from_secs(10);
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct WorkflowDryRunPlanDetails {
+    pub(crate) calls: Vec<WorkflowV2HostCall>,
+    /// (task id, write call id) pairs — coverage AND duplicate detection.
+    pub(crate) write_task_claims: Vec<(String, String)>,
+    /// Review map item claims captured from source items.
+    pub(crate) review_map_claims: Vec<WorkflowReviewMapClaim>,
+    /// Review reduce linkage and bounds captured from reviewContract metadata.
+    pub(crate) review_reduce_edges: Vec<WorkflowReviewReduceEdge>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WorkflowReviewMapClaim {
+    pub(crate) review_kind: String,
+    pub(crate) call_id: String,
+    pub(crate) item_id: Option<String>,
+    pub(crate) task_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WorkflowReviewReduceEdge {
+    pub(crate) review_kind: String,
+    pub(crate) call_id: String,
+    pub(crate) stage: String,
+    pub(crate) accounting_field: Option<String>,
+    pub(crate) source_map_call_ids: Vec<String>,
+    pub(crate) source_reduce_call_ids: Vec<String>,
+    pub(crate) preserve_map_findings: bool,
+    pub(crate) max_input_bytes: Option<usize>,
+    pub(crate) max_findings_per_reduce: Option<usize>,
+}
+
 #[derive(Default)]
 struct WorkflowDryRunRecorder {
-    calls: Vec<WorkflowV2HostCall>,
-    /// (task id, write call id) pairs — coverage AND duplicate detection.
-    write_task_claims: Vec<(String, String)>,
+    details: WorkflowDryRunPlanDetails,
     policy_error: Option<String>,
 }
 
@@ -33,6 +63,14 @@ pub(crate) async fn dry_run_workflow_plan_details(
     harness_source: &str,
     script_args: Option<&serde_json::Value>,
 ) -> archon_workflow::WorkflowResult<(Vec<WorkflowV2HostCall>, Vec<(String, String)>)> {
+    let details = dry_run_workflow_plan_full_details(harness_source, script_args).await?;
+    Ok((details.calls, details.write_task_claims))
+}
+
+pub(crate) async fn dry_run_workflow_plan_full_details(
+    harness_source: &str,
+    script_args: Option<&serde_json::Value>,
+) -> archon_workflow::WorkflowResult<WorkflowDryRunPlanDetails> {
     let source = script_source(harness_source, script_args);
     tokio::task::spawn_blocking(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -51,7 +89,7 @@ pub(crate) async fn dry_run_workflow_plan_details(
 
 async fn dry_run_on_current_thread(
     source: String,
-) -> archon_workflow::WorkflowResult<(Vec<WorkflowV2HostCall>, Vec<(String, String)>)> {
+) -> archon_workflow::WorkflowResult<WorkflowDryRunPlanDetails> {
     let recorder = Arc::new(StdMutex::new(WorkflowDryRunRecorder::default()));
     let runtime = AsyncRuntime::new()
         .map_err(|err| WorkflowError::SpecInvalid(format!("quickjs runtime failed: {err}")))?;
@@ -112,12 +150,12 @@ async fn dry_run_on_current_thread(
             "workflow.js validation failed: {err}"
         )));
     }
-    if recorder.calls.is_empty() {
+    if recorder.details.calls.is_empty() {
         return Err(WorkflowError::SpecInvalid(
             "workflow.js declares no executable host calls".to_string(),
         ));
     }
-    Ok((recorder.calls.clone(), recorder.write_task_claims.clone()))
+    Ok(recorder.details.clone())
 }
 
 fn record_dry_run_call(
@@ -135,7 +173,7 @@ fn record_dry_run_call(
     let mut recorder = recorder
         .lock()
         .map_err(|_| WorkflowError::SpecInvalid("dry-run recorder lock poisoned".to_string()))?;
-    if recorder.calls.iter().any(|seen| seen.id == call.id) {
+    if recorder.details.calls.iter().any(|seen| seen.id == call.id) {
         let error = format!("workflow.js has duplicate host call id `{}`", call.id);
         recorder.policy_error.get_or_insert(error.clone());
         return Err(WorkflowError::SpecInvalid(error));
@@ -168,12 +206,14 @@ fn record_dry_run_call(
                     Some(serde_json::Value::Array(ids)) => {
                         for id in ids.iter().filter_map(serde_json::Value::as_str) {
                             recorder
+                                .details
                                 .write_task_claims
                                 .push((id.to_string(), call.id.clone()));
                         }
                     }
                     Some(serde_json::Value::String(id)) => {
                         recorder
+                            .details
                             .write_task_claims
                             .push((id.clone(), call.id.clone()));
                     }
@@ -182,8 +222,145 @@ fn record_dry_run_call(
             }
         }
     }
-    recorder.calls.push(call);
+    record_review_contract_details(&mut recorder.details, &call, payload);
+    recorder.details.calls.push(call);
     Ok(dry_run_stub_result(method))
+}
+
+fn record_review_contract_details(
+    details: &mut WorkflowDryRunPlanDetails,
+    call: &WorkflowV2HostCall,
+    payload: &str,
+) {
+    let Some(contract) = review_contract_value(call) else {
+        return;
+    };
+    let review_kind = contract
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let stage = contract
+        .get("stage")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    if review_kind.is_empty() || stage.is_empty() {
+        return;
+    }
+    if stage == "map" {
+        let Ok(request) = serde_json::from_str::<ScriptHostRequest>(payload) else {
+            return;
+        };
+        for item in request
+            .source
+            .as_ref()
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            details.review_map_claims.push(WorkflowReviewMapClaim {
+                review_kind: review_kind.clone(),
+                call_id: call.id.clone(),
+                item_id: item
+                    .get("item_id")
+                    .or_else(|| item.get("itemId"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
+                task_ids: task_ids_from_value(item),
+            });
+        }
+    } else if stage == "reduce_final" || stage == "reduce_chunk" {
+        details.review_reduce_edges.push(WorkflowReviewReduceEdge {
+            review_kind,
+            call_id: call.id.clone(),
+            stage,
+            accounting_field: contract
+                .get("accountingField")
+                .or_else(|| contract.get("accounting_field"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            source_map_call_ids: string_vec_contract(
+                contract,
+                &["sourceMapCallIds", "source_map_call_ids"],
+            ),
+            source_reduce_call_ids: string_vec_contract(
+                contract,
+                &["sourceReduceCallIds", "source_reduce_call_ids"],
+            ),
+            preserve_map_findings: contract
+                .get("preserveMapFindings")
+                .or_else(|| contract.get("preserve_map_findings"))
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+            max_input_bytes: usize_contract(contract, &["maxInputBytes", "max_input_bytes"]),
+            max_findings_per_reduce: usize_contract(
+                contract,
+                &["maxFindingsPerReduce", "max_findings_per_reduce"],
+            ),
+        });
+    }
+}
+
+fn review_contract_value(call: &WorkflowV2HostCall) -> Option<&serde_json::Value> {
+    call.options
+        .extra
+        .get("reviewContract")
+        .or_else(|| call.options.extra.get("review_contract"))
+}
+
+fn string_vec_contract(value: &serde_json::Value, keys: &[&str]) -> Vec<String> {
+    keys.iter()
+        .find_map(|key| value.get(*key))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn usize_contract(value: &serde_json::Value, keys: &[&str]) -> Option<usize> {
+    keys.iter()
+        .find_map(|key| value.get(*key))
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+}
+
+fn task_ids_from_value(item: &serde_json::Value) -> Vec<String> {
+    let mut out = Vec::new();
+    for key in [
+        "canonical_task_ids",
+        "canonicalTaskIds",
+        "canonical_task_id",
+        "canonicalTaskId",
+        "task_ids",
+        "taskIds",
+        "task_id",
+        "taskId",
+    ] {
+        match item.get(key) {
+            Some(serde_json::Value::Array(ids)) => {
+                out.extend(
+                    ids.iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_string),
+                );
+            }
+            Some(serde_json::Value::String(id)) => {
+                let id = id.trim();
+                if !id.is_empty() {
+                    out.push(id.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 fn dry_run_call_from_payload(
@@ -192,7 +369,9 @@ fn dry_run_call_from_payload(
 ) -> archon_workflow::WorkflowResult<WorkflowV2HostCall> {
     let request: ScriptHostRequest = serde_json::from_str(payload)?;
     let method = WorkflowV2HostMethod::parse(method).ok_or_else(|| {
-        WorkflowError::SpecInvalid(format!("workflow.js used unsupported host method w.{method}"))
+        WorkflowError::SpecInvalid(format!(
+            "workflow.js used unsupported host method w.{method}"
+        ))
     })?;
     reject_agent_routing_overrides(&request.id, &request.options)?;
     let (options, write_mode) = parse_script_options(&request.options)?;
