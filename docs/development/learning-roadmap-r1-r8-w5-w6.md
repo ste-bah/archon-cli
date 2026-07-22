@@ -10,10 +10,12 @@ All ten items remain roadmap work. Existing components are substantial, but none
 | R2 | Partially confirmed | Corrections select lexically relevant rules and emit learning evidence | Decision/tool causal attribution and structured lesson provenance |
 | R3 | Confirmed | Production correction detection remains phrase heuristics | Confidence-scored classifier, abstention, and labeled evaluation |
 | R4 | Partially confirmed | Memory Garden prunes, decays, deduplicates, and merges | Governed generative consolidation, retirement, and nightly scheduling |
-| R5 | Partially confirmed | Verification outcomes and deterministic label mapping exist | Join verified outcomes to training traces; stop treating unverified completion as success |
-| R6 | Partially confirmed | Latent surprise is computed, persisted, and used by candidate evaluation | Replay prioritization, reflection trigger, and runtime metrics |
+| R5 | Partially confirmed | `SelfModelStore` and persisted reasoning-quality self-trust evidence exist | Verified aggregate updates, bounded drift, and live briefing/action use |
+| R6 | Partially confirmed | Reflection records, writers, and governed proposal plumbing exist | Runtime struggle/surprise triggers, compact private reflection, and measured reuse |
 | R7 | Confirmed | Memory, docs, knowledge, and LEANN expose separate retrieval APIs | One provenance-normalized, score-calibrated retrieval facade |
 | R8 | Partially confirmed | Cognitive inspection exposes counts and recent rows | Per-session intelligence metrics, baselines, trends, and release gates |
+| W5 | Partially confirmed | Verification outcomes and deterministic label mapping exist | Join verified outcomes to training traces; stop treating unverified completion as success |
+| W6 | Partially confirmed | Latent surprise is computed and persisted | Replay prioritization, reflection trigger, and runtime metrics |
 
 Status vocabulary follows `docs/reports/audit/prd-008-audit-validation-appendix.md`.
 
@@ -174,9 +176,9 @@ struct CorrectionClassification {
 ```
 
 3. Keep deterministic explicit corrections as high-confidence rules; use a cheap configured provider for ambiguous language.
-4. Abstain below threshold; abstention must not create or reinforce rules.
+4. Abstain below threshold; abstention must not create a correction, lesson, proposal, or rule mutation.
 5. Create a reviewed evaluation corpus from real correction events with redacted text or stable hashes plus adjudicated labels.
-6. Promotion gate: precision >= 0.95 on rule-mutating corrections; report recall and abstention without hiding them.
+6. Promotion gate: correction-classification precision >= 0.95 for the subset that may proceed to R2 attribution; report recall and abstention without hiding them. Classifier output alone never creates or reinforces rules.
 
 **Primary seams:** `archon-core/src/agent/memory_integration.rs`, `archon-consciousness/src/corrections.rs`, reasoning-quality event bridge, cognitive metric store.
 

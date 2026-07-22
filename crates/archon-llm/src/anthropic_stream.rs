@@ -140,3 +140,72 @@ async fn send_stream_error(
         })
         .await;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    type Chunk = Result<Vec<u8>, &'static str>;
+
+    fn controlled_stream(
+        receiver: tokio::sync::mpsc::Receiver<Chunk>,
+    ) -> impl Stream<Item = Chunk> + Send + Unpin + 'static {
+        futures_util::stream::unfold(receiver, |mut receiver| async move {
+            receiver.recv().await.map(|chunk| (chunk, receiver))
+        })
+        .boxed()
+    }
+
+    fn text_delta(text: &str) -> Chunk {
+        Ok(format!(
+            "event: content_block_delta\ndata: {{\"index\":0,\"delta\":{{\"type\":\"text_delta\",\"text\":\"{text}\"}}}}\n\n"
+        )
+        .into_bytes())
+    }
+
+    #[tokio::test]
+    async fn emits_delta_before_source_stream_completes() {
+        let (source_tx, source_rx) = tokio::sync::mpsc::channel(2);
+        let mut events = spawn_anthropic_stream_reader(controlled_stream(source_rx));
+
+        source_tx.send(text_delta("first")).await.unwrap();
+
+        let event = tokio::time::timeout(std::time::Duration::from_millis(100), events.recv())
+            .await
+            .expect("delta must arrive while source sender is still open")
+            .expect("stream event");
+        assert!(matches!(event, StreamEvent::TextDelta { text, .. } if text == "first"));
+
+        source_tx
+            .send(Ok(br#"event: message_stop
+data: {"type":"message_stop"}
+
+"#
+            .to_vec()))
+            .await
+            .unwrap();
+        assert!(matches!(
+            events.recv().await,
+            Some(StreamEvent::MessageStop)
+        ));
+    }
+
+    #[tokio::test]
+    async fn source_error_after_delta_is_emitted_as_network_error() {
+        let (source_tx, source_rx) = tokio::sync::mpsc::channel(2);
+        let mut events = spawn_anthropic_stream_reader(controlled_stream(source_rx));
+
+        source_tx.send(text_delta("partial")).await.unwrap();
+        assert!(matches!(
+            events.recv().await,
+            Some(StreamEvent::TextDelta { text, .. }) if text == "partial"
+        ));
+
+        source_tx.send(Err("connection reset")).await.unwrap();
+        assert!(matches!(
+            events.recv().await,
+            Some(StreamEvent::Error { error_type, message })
+                if error_type == "network" && message == "connection reset"
+        ));
+    }
+}
