@@ -158,7 +158,34 @@ fn normalize_commands(object: &mut Map<String, Value>) {
         };
         insert_missing(fields, "kind", Value::String("other".to_string()));
         normalize_command_status(fields);
+        synthesize_missing_output_summary(fields);
     }
+}
+
+/// `output_summary` is a required String on the result envelope but is
+/// descriptive metadata only: the command's own `status`/`exit_code` drive
+/// every gate, and the verification pass/fail detector keys on explicit
+/// pass/failure markers. Agents intermittently omit it, which otherwise
+/// hard-rejects an entire substantively-valid result (a real defect observed
+/// on live runs). Synthesize a NEUTRAL placeholder when absent — it carries no
+/// pass or failure marker, so verification stays fail-closed and can never be
+/// tricked into reading a pass; the schema and every safety gate still run on
+/// the real result. Only fills a missing/empty value; never overwrites what the
+/// agent actually reported.
+fn synthesize_missing_output_summary(fields: &mut Map<String, Value>) {
+    if fields.get("output_summary").is_some_and(value_present) {
+        return;
+    }
+    let status = fields
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("reported");
+    fields.insert(
+        "output_summary".to_string(),
+        Value::String(format!(
+            "(no output_summary provided by agent; command status: {status})"
+        )),
+    );
 }
 
 fn normalize_command_status(fields: &mut Map<String, Value>) {
