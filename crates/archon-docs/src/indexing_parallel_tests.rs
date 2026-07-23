@@ -242,6 +242,28 @@ struct CountingProvider {
     started: Arc<(Mutex<usize>, Condvar)>,
 }
 
+struct CountingBatches {
+    next: usize,
+    total: usize,
+    admitted: Arc<AtomicUsize>,
+}
+
+impl Iterator for CountingBatches {
+    type Item = EmbeddingBatch;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next == self.total {
+            return None;
+        }
+        self.next += 1;
+        self.admitted.fetch_add(1, Ordering::SeqCst);
+        Some(EmbeddingBatch {
+            index: self.next,
+            chunks: vec![chunk(&self.next.to_string(), "content")],
+        })
+    }
+}
+
 impl LocalEmbeddingProvider for CountingProvider {
     fn embed_chunks(&self, chunks: &[String]) -> Result<Vec<Vec<f32>>, DocsError> {
         let (started, signal) = &*self.started;
@@ -264,12 +286,41 @@ impl LocalEmbeddingProvider for CountingProvider {
 }
 
 #[test]
+fn source_admission_is_bounded_by_max_in_flight() {
+    let started = Arc::new((Mutex::new(0), Condvar::new()));
+    let admitted = Arc::new(AtomicUsize::new(0));
+    let provider: Arc<dyn LocalEmbeddingProvider> = Arc::new(CountingProvider {
+        started: Arc::clone(&started),
+    });
+    let batches = CountingBatches {
+        next: 0,
+        total: 6,
+        admitted: Arc::clone(&admitted),
+    };
+    let mut first = true;
+
+    consume_embedded_batches(provider, batches, 2, 2, |_, _| {
+        if first {
+            first = false;
+            assert_eq!(
+                admitted.load(Ordering::SeqCst),
+                2,
+                "producer must not materialize batches beyond the residence bound"
+            );
+        }
+    })
+    .expect("embedding pipeline succeeds");
+
+    assert_eq!(admitted.load(Ordering::SeqCst), 6);
+}
+
+#[test]
 fn max_in_flight_includes_batches_waiting_for_writer() {
     let started = Arc::new((Mutex::new(0), Condvar::new()));
     let provider: Arc<dyn LocalEmbeddingProvider> = Arc::new(CountingProvider {
         started: Arc::clone(&started),
     });
-    let batches = (1..=4)
+    let batches: Vec<_> = (1..=4)
         .map(|index| EmbeddingBatch {
             index,
             chunks: vec![chunk(&index.to_string(), "content")],

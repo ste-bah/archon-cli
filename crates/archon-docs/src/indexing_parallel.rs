@@ -1,4 +1,5 @@
-use std::collections::VecDeque;
+use std::cell::RefCell;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Instant;
 
@@ -105,22 +106,35 @@ pub(crate) fn index_loaded_chunks_parallel(
     let mut result = IndexResult::default();
     emit_candidates_loaded(&mut progress, batch_total, chunks.len(), started);
 
-    let batches = build_embedding_batches(
-        db,
-        &chunks,
-        batch_size,
-        batch_total,
-        provider.backend_name(),
-        &mut result,
-        &mut progress,
-        started,
-    );
+    let provider_name = provider.backend_name();
+    let result_state = RefCell::new(&mut result);
+    let progress_state = RefCell::new(&mut progress);
+    let batches = chunks
+        .chunks(batch_size)
+        .enumerate()
+        .filter_map(|(offset, batch)| {
+            let batch_index = offset + 1;
+            let mut result = result_state.borrow_mut();
+            let mut progress = progress_state.borrow_mut();
+            build_embedding_batch(
+                db,
+                batch,
+                batch_index,
+                batch_total,
+                provider_name,
+                &mut result,
+                &mut progress,
+                started,
+            )
+        });
     consume_embedded_batches(
         provider,
         batches,
         worker_count,
         max_in_flight,
         |embedded, provider| {
+            let mut result = result_state.borrow_mut();
+            let mut progress = progress_state.borrow_mut();
             write_embedded_batch(
                 db,
                 embedded,
@@ -139,52 +153,66 @@ pub(crate) fn index_loaded_chunks_parallel(
 
 fn consume_embedded_batches(
     provider: Arc<dyn LocalEmbeddingProvider>,
-    batches: Vec<EmbeddingBatch>,
+    batches: impl IntoIterator<Item = EmbeddingBatch>,
     workers: usize,
     max_in_flight_batches: usize,
     mut consume: impl FnMut(EmbeddedBatch, &dyn LocalEmbeddingProvider),
 ) -> Result<(), DocsError> {
     let worker_count = workers.max(1);
     let max_in_flight = max_in_flight_batches.max(1);
-    let residence_permits = Arc::new(PermitPool::new(max_in_flight));
     let provider: Arc<dyn LocalEmbeddingProvider> = Arc::new(LimitedProvider {
         inner: provider,
         permits: Arc::new(PermitPool::new(worker_count)),
     });
-    let queue = Arc::new(Mutex::new(VecDeque::from(batches)));
-    let (sender, receiver) = std::sync::mpsc::sync_channel(max_in_flight);
+    let (job_sender, job_receiver) = std::sync::mpsc::sync_channel(max_in_flight);
+    let job_receiver = Arc::new(Mutex::new(job_receiver));
+    let (result_sender, result_receiver) = std::sync::mpsc::sync_channel(max_in_flight);
     let worker_result = std::thread::scope(|scope| {
         let mut handles = Vec::with_capacity(worker_count);
         for _ in 0..worker_count {
             let provider = Arc::clone(&provider);
-            let queue = Arc::clone(&queue);
-            let sender = sender.clone();
-            let residence_permits = Arc::clone(&residence_permits);
+            let receiver = Arc::clone(&job_receiver);
+            let sender = result_sender.clone();
             handles.push(scope.spawn(move || {
                 loop {
-                    let permit = residence_permits.acquire();
-                    let batch = queue
-                        .lock()
-                        .expect("embedding batch queue lock")
-                        .pop_front();
-                    let Some(batch) = batch else {
+                    let batch = receiver.lock().expect("embedding job receiver lock").recv();
+                    let Ok(batch) = batch else {
                         break;
                     };
-                    if sender
-                        .send((embed_one(Arc::clone(&provider), batch), permit))
-                        .is_err()
-                    {
+                    let embedded =
+                        catch_unwind(AssertUnwindSafe(|| embed_one(Arc::clone(&provider), batch)));
+                    if sender.send(embedded).is_err() {
                         break;
                     }
                 }
             }));
         }
-        drop(sender);
-        for (embedded, _permit) in receiver {
-            consume(embedded, provider.as_ref());
+        drop(result_sender);
+
+        let mut batches = batches.into_iter();
+        let mut in_flight = 0;
+        for batch in batches.by_ref().take(max_in_flight) {
+            job_sender.send(batch).map_err(|_| ())?;
+            in_flight += 1;
         }
+        let mut worker_panicked = false;
+        while in_flight > 0 {
+            match result_receiver.recv().map_err(|_| ())? {
+                Ok(embedded) => consume(embedded, provider.as_ref()),
+                Err(_) => worker_panicked = true,
+            }
+            in_flight -= 1;
+            if !worker_panicked && let Some(batch) = batches.next() {
+                job_sender.send(batch).map_err(|_| ())?;
+                in_flight += 1;
+            }
+        }
+        drop(job_sender);
         for handle in handles {
             handle.join().map_err(|_| ())?;
+        }
+        if worker_panicked {
+            return Err(());
         }
         Ok(())
     });
@@ -209,20 +237,27 @@ fn embed_one(provider: Arc<dyn LocalEmbeddingProvider>, batch: EmbeddingBatch) -
 }
 
 #[allow(clippy::too_many_arguments)]
-fn build_embedding_batches(
+fn build_embedding_batch(
     db: &DbInstance,
-    chunks: &[ChunkArtifact],
-    batch_size: usize,
+    batch: &[ChunkArtifact],
+    batch_index: usize,
     batch_total: usize,
     provider: &str,
     result: &mut IndexResult,
     progress: &mut Option<&mut dyn FnMut(IndexProgress)>,
     started: Instant,
-) -> Vec<EmbeddingBatch> {
-    let mut batches = Vec::new();
-    for (offset, batch) in chunks.chunks(batch_size).enumerate() {
-        let batch_index = offset + 1;
-        emit_batch_started(
+) -> Option<EmbeddingBatch> {
+    emit_batch_started(
+        progress,
+        batch_index,
+        batch_total,
+        batch.len(),
+        result,
+        started,
+    );
+    let uncached = uncached_batch(db, batch, provider, result);
+    if uncached.is_empty() {
+        emit_batch_finished(
             progress,
             batch_index,
             batch_total,
@@ -230,24 +265,13 @@ fn build_embedding_batches(
             result,
             started,
         );
-        let uncached = uncached_batch(db, batch, provider, result);
-        if uncached.is_empty() {
-            emit_batch_finished(
-                progress,
-                batch_index,
-                batch_total,
-                batch.len(),
-                result,
-                started,
-            );
-        } else {
-            batches.push(EmbeddingBatch {
-                index: batch_index,
-                chunks: uncached,
-            });
-        }
+        None
+    } else {
+        Some(EmbeddingBatch {
+            index: batch_index,
+            chunks: uncached,
+        })
     }
-    batches
 }
 
 #[allow(clippy::too_many_arguments)]
