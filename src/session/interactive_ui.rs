@@ -69,6 +69,7 @@ pub(super) async fn run(
     btw_system_prompt: Vec<serde_json::Value>,
     active_model: String,
     auto_capture: Option<Arc<archon_pipeline::capture::AutoCapture>>,
+    sandbox_audit_drain: crate::runtime::sandbox_audit_writer::SandboxAuditDrain,
 ) -> Result<()> {
     let auth_label = match resolve_auth_with_keys(
         env_vars.anthropic_api_key.as_deref(),
@@ -183,7 +184,9 @@ pub(super) async fn run(
     let mcp_lifecycle_tx = crate::session_loop::spawn_mcp_lifecycle_task(mcp_manager.clone());
     let input_tui_tx = tui_event_tx.clone();
     super::cognitive_daemon_startup::ensure_for_session(config, &working_dir, &tui_event_tx);
-    observability::spawn_named(
+    let sandbox_audit_drain =
+        crate::runtime::sandbox_audit_writer::SandboxAuditDrainHandle::new(sandbox_audit_drain);
+    let session_loop = observability::spawn_named(
         "session-loop",
         crate::session_loop::run_session_loop(
             agent,
@@ -207,6 +210,9 @@ pub(super) async fn run(
             auto_trainer.clone(),
             agent_dispatcher_shared,
             cancel_handle_slot,
+            sandbox_audit_drain.clone(),
+            true,
+            tokio_util::sync::CancellationToken::new(),
         ),
     );
 
@@ -241,9 +247,9 @@ pub(super) async fn run(
         })
         .collect();
 
-    archon_tui::app::run(archon_tui::app::AppConfig {
+    let tui_result = archon_tui::app::run(archon_tui::app::AppConfig {
         event_rx: tui_event_rx,
-        input_tx: user_input_tx,
+        input_tx: user_input_tx.clone(),
         model: active_model.clone(),
         splash: splash_opt,
         btw_tx: Some(btw_tx),
@@ -254,7 +260,17 @@ pub(super) async fn run(
         context_threshold: config.context.compact_threshold,
         command_catalog,
     })
-    .await?;
+    .await;
+
+    drop(user_input_tx);
+    let loop_result = session_loop
+        .await
+        .map_err(|error| anyhow::anyhow!("session loop task failed: {error}"));
+    let fallback_result = sandbox_audit_drain
+        .shutdown(std::time::Duration::from_secs(30))
+        .await;
+    super::finish_loop_and_audit(loop_result, fallback_result)?;
+    tui_result?;
 
     if let Some(at) = auto_trainer.as_ref() {
         at.shutdown();

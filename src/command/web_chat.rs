@@ -60,6 +60,14 @@ impl WebChatBackend for WebChatBridge {
 }
 
 impl WebChatBridge {
+    pub(crate) async fn begin_shutdown(&self) {
+        self.session.begin_shutdown().await;
+    }
+
+    pub(crate) async fn finish_shutdown(&self) -> Result<()> {
+        self.session.finish_shutdown().await
+    }
+
     async fn prompt_with_attachments(
         &self,
         message_id: &str,

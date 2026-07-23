@@ -45,24 +45,93 @@ pub(crate) async fn handle_web_command(
     };
 
     let policy = web_policy_summary();
+    let shutdown_signal = register_web_shutdown_signal()?;
     let paths = WebRuntimePaths::from_overrides(
         config.memory.db_path.as_deref(),
         config.session.db_path.as_deref(),
     );
-    let chat_backend =
-        crate::command::web_chat::WebChatBridge::new(config, cli, env_vars, resolved_flags).await?;
+    let chat_backend = Arc::new(
+        crate::command::web_chat::WebChatBridge::new(config, cli, env_vars, resolved_flags).await?,
+    );
     let mut server = WebServer::with_policy_and_paths(web_cfg, token, policy, paths)
-        .with_chat_backend(Arc::new(chat_backend));
+        .with_chat_backend(chat_backend.clone());
     if allow_unauthenticated_nonlocal_bind {
         server = server.unsafe_allow_unauthenticated_nonlocal_bind_for_cli();
     }
-    if let Err(e) = server.run().await {
-        eprintln!("web server error: {e}");
-        std::process::exit(1);
-    }
-    Ok(())
+    let (shutdown_error_tx, shutdown_error_rx) = tokio::sync::oneshot::channel();
+    let chat_backend_for_shutdown = Arc::clone(&chat_backend);
+    let server_result = server
+        .run_until(async move {
+            let result = shutdown_signal.await;
+            chat_backend_for_shutdown.begin_shutdown().await;
+            let _ = shutdown_error_tx.send(result);
+        })
+        .await;
+    chat_backend.begin_shutdown().await;
+    let audit_result = chat_backend.finish_shutdown().await;
+    let signal_result = shutdown_error_rx
+        .await
+        .map_err(|_| anyhow::anyhow!("web shutdown signal task ended without a result"))
+        .and_then(|result| result);
+
+    finish_web_shutdown(server_result, signal_result, audit_result)
 }
 
+fn finish_web_shutdown(
+    server_result: anyhow::Result<()>,
+    signal_result: anyhow::Result<()>,
+    audit_result: anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let errors: Vec<String> = [
+        server_result
+            .err()
+            .map(|error| format!("web server failed: {error:#}")),
+        signal_result
+            .err()
+            .map(|error| format!("web shutdown signal failed: {error:#}")),
+        audit_result
+            .err()
+            .map(|error| format!("web audit shutdown failed: {error:#}")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(errors.join("; ")))
+    }
+}
+
+fn register_web_shutdown_signal()
+-> anyhow::Result<std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>>> {
+    #[cfg(unix)]
+    {
+        let mut interrupt =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+                .map_err(|error| anyhow::anyhow!("web: SIGINT handler failed: {error}"))?;
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .map_err(|error| anyhow::anyhow!("web: SIGTERM handler failed: {error}"))?;
+        Ok(Box::pin(async move {
+            tokio::select! {
+                _ = interrupt.recv() => {}
+                _ = terminate.recv() => {}
+            }
+            Ok(())
+        }))
+    }
+    #[cfg(not(unix))]
+    {
+        let mut interrupt = tokio::signal::windows::ctrl_c()
+            .map_err(|error| anyhow::anyhow!("web: Ctrl-C handler failed: {error}"))?;
+        Ok(Box::pin(async move {
+            interrupt.recv().await;
+            Ok(())
+        }))
+    }
+}
 fn web_policy_summary() -> EffectivePolicySummary {
     let policy = std::env::current_dir()
         .ok()
@@ -92,5 +161,75 @@ fn web_policy_summary() -> EffectivePolicySummary {
             "corpus filesystem open".to_string(),
             "behaviour proposal approval".to_string(),
         ],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shutdown_signal_is_registered_before_web_session_starts() {
+        let source = include_str!("web.rs");
+        let registration = source
+            .find("let shutdown_signal = register_web_shutdown_signal()")
+            .expect("web shutdown signal registration");
+        let session_start = source
+            .find("WebChatBridge::new")
+            .expect("web session startup");
+
+        assert!(
+            registration < session_start,
+            "web session can consume SIGTERM before server listener is registered"
+        );
+    }
+
+    #[test]
+    fn web_shutdown_succeeds_when_every_stage_succeeds() {
+        finish_web_shutdown(Ok(()), Ok(()), Ok(())).expect("clean web shutdown");
+    }
+
+    #[test]
+    fn web_shutdown_preserves_each_individual_failure() {
+        for (server_result, signal_result, audit_result, expected) in [
+            (
+                Err(anyhow::anyhow!("server failed")),
+                Ok(()),
+                Ok(()),
+                "server failed",
+            ),
+            (
+                Ok(()),
+                Err(anyhow::anyhow!("signal failed")),
+                Ok(()),
+                "signal failed",
+            ),
+            (
+                Ok(()),
+                Ok(()),
+                Err(anyhow::anyhow!("audit failed")),
+                "audit failed",
+            ),
+        ] {
+            let error = finish_web_shutdown(server_result, signal_result, audit_result)
+                .expect_err("web shutdown failure must remain visible");
+
+            assert!(error.to_string().contains(expected), "{error:#}");
+        }
+    }
+
+    #[test]
+    fn web_shutdown_preserves_server_signal_and_audit_failures() {
+        let error = finish_web_shutdown(
+            Err(anyhow::anyhow!("server failed")),
+            Err(anyhow::anyhow!("signal failed")),
+            Err(anyhow::anyhow!("audit failed")),
+        )
+        .expect_err("all web shutdown failures must remain visible");
+        let message = error.to_string();
+
+        assert!(message.contains("server failed"), "{error:#}");
+        assert!(message.contains("signal failed"), "{error:#}");
+        assert!(message.contains("audit failed"), "{error:#}");
     }
 }

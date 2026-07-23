@@ -96,6 +96,7 @@ pub(crate) async fn run_print_mode_session(
         selected_provider,
         selected_model,
         permission_mode,
+        sandbox_audit_drain,
         ..
     } = match build_session_agent(config, session_id, cli, env_vars, resolved_flags, true).await {
         Ok(b) => b,
@@ -110,7 +111,7 @@ pub(crate) async fn run_print_mode_session(
     }
 
     let working_dir = std::env::current_dir().unwrap_or_default();
-    let governed_learning_db = open_governed_learning_db(&working_dir);
+    let governed_learning_db = open_governed_learning_db(&working_dir).await;
     let ledger_context = agent_ledger::context(
         session_id,
         agent_def.as_ref(),
@@ -134,6 +135,10 @@ pub(crate) async fn run_print_mode_session(
     if let Some(record) = &guardrail {
         crate::command::world_model::record_guardrail_turn_outcome(config, record, exit_code == 0);
     }
+    if let Err(error) = drain_sandbox_audit(sandbox_audit_drain).await {
+        tracing::error!(%error, "sandbox audit writer shutdown failed");
+        return 1;
+    }
     exit_code
 }
 
@@ -153,6 +158,7 @@ pub(crate) async fn run_headless_session(
         selected_provider,
         selected_model,
         permission_mode,
+        sandbox_audit_drain,
         ..
     } = match build_session_agent(config, session_id, cli, env_vars, resolved_flags, false).await {
         Ok(b) => b,
@@ -165,7 +171,7 @@ pub(crate) async fn run_headless_session(
     let mut line = String::new();
     let mut event_rx = event_rx;
     let working_dir = std::env::current_dir().unwrap_or_default();
-    let governed_learning_db = open_governed_learning_db(&working_dir);
+    let governed_learning_db = open_governed_learning_db(&working_dir).await;
     let ledger_context = agent_ledger::context(
         session_id,
         agent_def.as_ref(),
@@ -175,17 +181,17 @@ pub(crate) async fn run_headless_session(
 
     tracing::info!(%session_id, "headless: agent loop started");
 
-    loop {
+    let exit_code = 'headless: loop {
         line.clear();
         match tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line).await {
             Ok(0) => {
                 tracing::info!("headless: stdin closed (EOF)");
-                break;
+                break 'headless 0;
             }
             Ok(_) => {}
             Err(e) => {
                 tracing::error!("headless: read error: {e}");
-                return 1;
+                break 'headless 1;
             }
         }
 
@@ -193,7 +199,7 @@ pub(crate) async fn run_headless_session(
             Ok(AgentMessage::Ping) => {
                 if write_line(&mut stdout, AgentMessage::Pong).await.is_err() {
                     tracing::error!("headless: stdout write failed, exiting");
-                    return 1;
+                    break 'headless 1;
                 }
             }
             Ok(AgentMessage::UserMessage { content }) => {
@@ -210,7 +216,7 @@ pub(crate) async fn run_headless_session(
                 )
                 .await
                 {
-                    return 1;
+                    break 'headless 1;
                 }
             }
             Ok(_) => tracing::debug!("headless: ignoring non-UserMessage/non-Ping"),
@@ -225,13 +231,31 @@ pub(crate) async fn run_headless_session(
                 .await
                 .is_err()
                 {
-                    return 1;
+                    break 'headless 1;
                 }
             }
         }
-    }
+    };
 
-    0
+    if let Err(error) = drain_sandbox_audit(sandbox_audit_drain).await {
+        tracing::error!(%error, "sandbox audit writer shutdown failed");
+        return 1;
+    }
+    exit_code
+}
+
+async fn drain_sandbox_audit(
+    drain: crate::runtime::sandbox_audit_writer::SandboxAuditDrain,
+) -> anyhow::Result<()> {
+    let readback = drain.shutdown(std::time::Duration::from_secs(30)).await?;
+    tracing::info!(
+        accepted = readback.accepted,
+        dropped = readback.dropped,
+        persisted = readback.persisted,
+        failed = readback.failed,
+        "sandbox audit writer drained"
+    );
+    Ok(())
 }
 
 async fn process_headless_message(

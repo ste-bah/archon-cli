@@ -157,6 +157,7 @@ pub(super) async fn prepare(
         config.permissions.mode.clone()
     };
     let permission_mode_shared = Arc::new(tokio::sync::Mutex::new(initial_perm_mode));
+    let sandbox_backend = super::native_session_sandbox_backend(config, sandbox_flag).await;
 
     let btw_system_prompt = system_prompt.clone();
     let system_prompt_chars: usize = system_prompt
@@ -195,15 +196,7 @@ pub(super) async fn prepare(
         max_tool_concurrency: config.tools.max_concurrency as usize,
         max_turns: None,
         cancel_token: None,
-        sandbox: Some(super::session_sandbox_backend(
-            config,
-            sandbox_flag,
-            session_id,
-            agent_def
-                .as_ref()
-                .map(|def| def.agent_type.as_str())
-                .unwrap_or("main"),
-        )),
+        sandbox: Some(sandbox_backend),
         activity_sink: super::session_activity_sink(session_id),
         context: config.context.clone(),
         max_subagent_concurrency: config.subagent.max_concurrent,

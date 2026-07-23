@@ -5,7 +5,13 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::runtime::learning_store;
+#[cfg(test)]
+use crate::runtime::sandbox_audit_writer::SandboxAuditReadback;
+use crate::runtime::sandbox_audit_writer::{
+    SandboxAuditDrain, SandboxAuditWrite, SandboxAuditWriter,
+};
 use archon_permissions::sandbox::{SandboxBackend, SandboxCommandRequest, SandboxCommandResult};
+#[cfg(test)]
 use cozo::DbInstance;
 
 pub(crate) struct AuditedSandboxBackend {
@@ -15,7 +21,7 @@ pub(crate) struct AuditedSandboxBackend {
     run_id: String,
     agent_type: String,
     sandbox_session_id: String,
-    db: Option<Arc<DbInstance>>,
+    writer: Option<SandboxAuditWriter>,
 }
 
 impl std::fmt::Debug for AuditedSandboxBackend {
@@ -26,49 +32,68 @@ impl std::fmt::Debug for AuditedSandboxBackend {
             .field("run_id", &self.run_id)
             .field("agent_type", &self.agent_type)
             .field("sandbox_session_id", &self.sandbox_session_id)
-            .field("db", &self.db.as_ref().map(|_| "<cozo>"))
+            .field("writer", &self.writer.as_ref().map(|_| "<sandbox-audit>"))
             .finish()
     }
 }
 
-pub(crate) fn audit_sandbox_backend(
+pub(crate) async fn audit_sandbox_backend(
     inner: Arc<dyn SandboxBackend>,
     config: &archon_core::config::ArchonConfig,
     run_id: impl Into<String>,
     agent_type: impl Into<String>,
-) -> Arc<dyn SandboxBackend> {
+) -> anyhow::Result<(Arc<dyn SandboxBackend>, SandboxAuditDrain)> {
     let run_id = run_id.into();
     let agent_type = agent_type.into();
-    let db = match learning_store::acquire_default() {
-        Ok(db) => Some(db),
-        Err(error) => {
-            tracing::warn!(
-                %error,
-                %run_id,
-                %agent_type,
-                "sandbox audit persistence unavailable"
-            );
-            None
-        }
-    };
-    Arc::new(AuditedSandboxBackend::new(
-        inner,
-        config.sandbox.clone(),
-        config.clone(),
-        run_id,
-        agent_type,
-        db,
+    let db = learning_store::acquire_default_async()
+        .await
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "sandbox audit persistence unavailable for run {run_id} agent {agent_type}: {error}"
+            )
+        })?;
+    let (writer, drain) = SandboxAuditWriter::new(db);
+    Ok((
+        Arc::new(AuditedSandboxBackend::new(
+            inner,
+            config.sandbox.clone(),
+            config.clone(),
+            run_id,
+            agent_type,
+            Some(writer),
+        )),
+        drain,
     ))
 }
 
 impl AuditedSandboxBackend {
+    #[cfg(test)]
+    fn new_with_db(
+        inner: Arc<dyn SandboxBackend>,
+        config: archon_core::sandbox::SandboxConfig,
+        archon_config: archon_core::config::ArchonConfig,
+        run_id: String,
+        agent_type: String,
+        db: Arc<DbInstance>,
+    ) -> Self {
+        let (writer, _drain) = SandboxAuditWriter::new(db);
+        Self::new(
+            inner,
+            config,
+            archon_config,
+            run_id,
+            agent_type,
+            Some(writer),
+        )
+    }
+
     fn new(
         inner: Arc<dyn SandboxBackend>,
         config: archon_core::sandbox::SandboxConfig,
         archon_config: archon_core::config::ArchonConfig,
         run_id: String,
         agent_type: String,
-        db: Option<Arc<DbInstance>>,
+        writer: Option<SandboxAuditWriter>,
     ) -> Self {
         let sandbox_session_id = format!("sandbox-session-{}", uuid::Uuid::new_v4());
         let backend = Self {
@@ -78,14 +103,14 @@ impl AuditedSandboxBackend {
             run_id,
             agent_type,
             sandbox_session_id,
-            db,
+            writer,
         };
         backend.record_session("configured");
         backend
     }
 
     fn record_session(&self, status: &str) {
-        let Some(db) = &self.db else {
+        let Some(writer) = &self.writer else {
             return;
         };
         let backend_kind = self.backend_kind();
@@ -105,14 +130,11 @@ impl AuditedSandboxBackend {
         if backend_kind == "openshell" && self.config.openshell.provider_injection {
             session = session.with_provider_injection_enabled();
         }
-        if let Err(error) = archon_learning::sandbox_sessions::insert_sandbox_session(db, &session)
-        {
-            tracing::warn!(%error, backend = %backend_kind, "sandbox session audit failed");
-        }
+        writer.enqueue(SandboxAuditWrite::Session(Box::new(session)));
     }
 
     fn record_event(&self, tool: &str, decision: &str, reason_code: &str) {
-        let Some(db) = &self.db else {
+        let Some(writer) = &self.writer else {
             return;
         };
         let backend_kind = self.backend_kind();
@@ -134,24 +156,22 @@ impl AuditedSandboxBackend {
             Some(self.config.workspace_access.clone()),
         )
         .with_redacted_context(redacted_context(&self.config, &backend_kind));
-        if let Err(error) =
-            archon_learning::sandbox_runtime_events::insert_sandbox_runtime_event(db, &event)
-        {
-            tracing::warn!(%error, backend = %backend_kind, "sandbox runtime audit failed");
-        }
-        self.record_agent_ledger_signal(db, &event_id, decision, reason_code, &backend_kind);
+        let ledger = self.agent_ledger_signal(&event_id, decision, reason_code, &backend_kind);
+        writer.enqueue(SandboxAuditWrite::RuntimeEvent {
+            event: Box::new(event),
+            ledger: ledger.map(Box::new),
+        });
     }
 
-    fn record_agent_ledger_signal(
+    fn agent_ledger_signal(
         &self,
-        db: &DbInstance,
         sandbox_event_id: &str,
         decision: &str,
         reason_code: &str,
         backend_kind: &str,
-    ) {
+    ) -> Option<archon_learning::agent_evolution_ledger::AgentPerformanceLedgerRecord> {
         if !matches!(decision, "denied" | "failed") {
-            return;
+            return None;
         }
         let mut record =
             archon_learning::agent_evolution_ledger::AgentPerformanceLedgerRecord::new(
@@ -165,17 +185,14 @@ impl AuditedSandboxBackend {
             .add_evidence(format!("sandbox_reason:{reason_code}"));
         record.gate_failed = Some(format!("sandbox:{backend_kind}:{decision}"));
         record.completion_rate = Some(0.0);
-        if let Err(error) =
-            archon_learning::agent_evolution_ledger::insert_agent_performance_ledger_record(
-                db, &record,
-            )
-        {
-            tracing::warn!(
-                %error,
-                backend = %backend_kind,
-                agent = %self.agent_type,
-                "sandbox agent ledger signal failed"
-            );
+        Some(record)
+    }
+
+    #[cfg(test)]
+    async fn flush_audit(&self) -> SandboxAuditReadback {
+        match &self.writer {
+            Some(writer) => writer.flush_for_test().await,
+            None => SandboxAuditReadback::default(),
         }
     }
 
@@ -331,158 +348,5 @@ fn redacted_context(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[derive(Debug)]
-    struct FakeSandboxBackend {
-        bash_result: Option<SandboxCommandResult>,
-    }
-
-    impl SandboxBackend for FakeSandboxBackend {
-        fn check(&self, tool: &str, _input: &serde_json::Value) -> Result<(), String> {
-            if tool == "DenyMe" {
-                Err("blocked".to_string())
-            } else {
-                Ok(())
-            }
-        }
-
-        fn execute_bash<'a>(
-            &'a self,
-            _request: SandboxCommandRequest,
-        ) -> Pin<Box<dyn Future<Output = Option<SandboxCommandResult>> + Send + 'a>> {
-            Box::pin(async move { self.bash_result.clone() })
-        }
-    }
-
-    fn test_db() -> Arc<DbInstance> {
-        crate::command::test_support::registered_learning_test_db("test-sandbox-audit")
-    }
-
-    #[test]
-    fn wrapper_records_configured_session() {
-        let db = test_db();
-        let config = archon_core::sandbox::SandboxConfig {
-            backend: "openshell".to_string(),
-            openshell: archon_core::sandbox::OpenShellConfig {
-                workspace_mode: "mirror".to_string(),
-                gateway: Some("user@gateway.example/private".to_string()),
-                ..archon_core::sandbox::OpenShellConfig::default()
-            },
-            ..archon_core::sandbox::SandboxConfig::default()
-        };
-
-        let wrapper = AuditedSandboxBackend::new(
-            Arc::new(FakeSandboxBackend { bash_result: None }),
-            config,
-            archon_core::config::ArchonConfig::default(),
-            "run-1".to_string(),
-            "reviewer".to_string(),
-            Some(db.clone()),
-        );
-        let sessions =
-            archon_learning::sandbox_sessions::list_sandbox_sessions_by_status(&db, "configured")
-                .unwrap();
-
-        assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].backend_kind, "openshell");
-        assert_eq!(sessions[0].agent_type.as_deref(), Some("reviewer"));
-        assert_eq!(sessions[0].workspace_mode.as_deref(), Some("mirror"));
-        assert_eq!(
-            sessions[0].transport_endpoint_redacted.as_deref(),
-            Some("gateway.example/[redacted]")
-        );
-        assert!(wrapper.sandbox_session_id.starts_with("sandbox-session-"));
-    }
-
-    #[tokio::test]
-    async fn wrapper_records_redacted_check_and_bash_events() {
-        let db = test_db();
-        let config = archon_core::sandbox::SandboxConfig {
-            backend: "docker".to_string(),
-            ..archon_core::sandbox::SandboxConfig::default()
-        };
-        let wrapper = AuditedSandboxBackend::new(
-            Arc::new(FakeSandboxBackend {
-                bash_result: Some(SandboxCommandResult {
-                    content: "ok".to_string(),
-                    is_error: false,
-                }),
-            }),
-            config,
-            archon_core::config::ArchonConfig::default(),
-            "run-1".to_string(),
-            "coder".to_string(),
-            Some(db.clone()),
-        );
-
-        wrapper
-            .check("Read", &serde_json::json!({"path": "/secret"}))
-            .unwrap();
-        wrapper
-            .execute_bash(SandboxCommandRequest {
-                command: "echo secret".to_string(),
-                working_dir: ".".into(),
-                timeout_ms: 1_000,
-                max_output_bytes: 1024,
-                env: vec![("TOKEN".to_string(), "secret".to_string())],
-            })
-            .await;
-        let events =
-            archon_learning::sandbox_runtime_events::list_sandbox_runtime_events_by_backend(
-                &db, "docker",
-            )
-            .unwrap();
-
-        assert_eq!(events.len(), 2);
-        assert!(events.iter().any(|event| event.decision == "allowed"));
-        assert!(events.iter().any(|event| event.decision == "executed"));
-        assert_eq!(events[0].agent_type.as_deref(), Some("coder"));
-        assert!(events[0].redacted_context_json.get("command").is_none());
-        assert!(events[0].redacted_context_json.get("env").is_none());
-    }
-
-    #[test]
-    fn wrapper_feeds_denied_sandbox_events_into_agent_ledger() {
-        let db = test_db();
-        let config = archon_core::sandbox::SandboxConfig {
-            backend: "openshell".to_string(),
-            ..archon_core::sandbox::SandboxConfig::default()
-        };
-        let wrapper = AuditedSandboxBackend::new(
-            Arc::new(FakeSandboxBackend { bash_result: None }),
-            config,
-            archon_core::config::ArchonConfig::default(),
-            "run-2".to_string(),
-            "reviewer".to_string(),
-            Some(db.clone()),
-        );
-
-        let error = wrapper
-            .check("DenyMe", &serde_json::json!({"command": "secret"}))
-            .unwrap_err();
-        let rows = archon_learning::agent_evolution_ledger::list_agent_performance_ledger_by_agent(
-            &db, "reviewer",
-        )
-        .unwrap();
-
-        assert_eq!(error, "blocked");
-        assert_eq!(rows.len(), 1);
-        assert_eq!(
-            rows[0].gate_failed.as_deref(),
-            Some("sandbox:openshell:denied")
-        );
-        assert!(
-            rows[0]
-                .evidence_ids
-                .iter()
-                .any(|evidence| evidence.starts_with("sandbox_event:sandbox-event-"))
-        );
-        assert!(
-            rows[0]
-                .evidence_ids
-                .contains(&"sandbox_reason:sandbox_check_denied".to_string())
-        );
-    }
-}
+#[path = "sandbox_audit_tests.rs"]
+mod tests;

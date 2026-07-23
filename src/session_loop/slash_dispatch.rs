@@ -35,13 +35,18 @@ pub(super) struct SlashDispatchContext<'a> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SlashDispatchResult {
+    Exit,
     Handled,
     Unhandled,
 }
 
 impl SlashDispatchResult {
     pub(super) fn is_handled(self) -> bool {
-        matches!(self, Self::Handled)
+        matches!(self, Self::Handled | Self::Exit)
+    }
+
+    pub(super) fn should_exit(self) -> bool {
+        matches!(self, Self::Exit)
     }
 }
 
@@ -52,7 +57,7 @@ pub(super) async fn dispatch_slash_or_skill(
     let trimmed = input.trim();
     if matches!(trimmed, "/exit" | "/quit" | "/q") {
         handle_exit(&ctx).await;
-        return SlashDispatchResult::Handled;
+        return SlashDispatchResult::Exit;
     }
     if trimmed == "/compact" || trimmed.starts_with("/compact ") {
         handle_compact(trimmed, &ctx).await;
@@ -124,6 +129,18 @@ async fn handle_exit(ctx: &SlashDispatchContext<'_>) {
         .input_tui_tx
         .send(TuiEvent::TextDelta("\nGoodbye.\n".into()));
     let _ = ctx.input_tui_tx.send(TuiEvent::Done);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SlashDispatchResult;
+
+    #[test]
+    fn exit_result_is_handled_and_terminating() {
+        assert!(SlashDispatchResult::Exit.is_handled());
+        assert!(SlashDispatchResult::Exit.should_exit());
+        assert!(!SlashDispatchResult::Handled.should_exit());
+    }
 }
 
 async fn handle_compact(trimmed: &str, ctx: &SlashDispatchContext<'_>) {

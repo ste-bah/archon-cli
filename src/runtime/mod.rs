@@ -30,6 +30,7 @@ pub(crate) mod provider_profile_updates;
 pub(crate) mod reasoning_critic;
 pub(crate) mod reasoning_quality;
 pub(crate) mod sandbox_audit;
+pub(crate) mod sandbox_audit_writer;
 pub(crate) mod sandbox_events;
 pub(crate) mod sandbox_mode;
 

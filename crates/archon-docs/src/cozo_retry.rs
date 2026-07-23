@@ -16,11 +16,11 @@ pub(crate) fn run_script_guarded(
 #[cfg(test)]
 mod tests {
     #[test]
-    fn retryable_errors_include_sqlite_lock_and_poison_messages() {
+    fn retryable_errors_include_sqlite_lock_and_reject_poison_messages() {
         assert!(archon_cozo::is_retryable_cozo_error(
             "database is locked (code 5)"
         ));
-        assert!(archon_cozo::is_retryable_cozo_error(
+        assert!(!archon_cozo::is_retryable_cozo_error(
             "called with PoisonError"
         ));
         assert!(!archon_cozo::is_retryable_cozo_error("relation not found"));

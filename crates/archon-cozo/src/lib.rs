@@ -289,22 +289,35 @@ fn retry_backoff(
 
 pub fn is_retryable_cozo_error(message: &str) -> bool {
     let message = message.to_ascii_lowercase();
+    if explicit_error_codes(&message).any(|code| code != 5) {
+        return false;
+    }
     [
         "database is locked",
         "database table is locked",
         "locked (code 5)",
         "code: some(5)",
         "sqlite_busy",
-        "poisonerror",
-        "poison error",
-        "wouldblock",
-        "would-block",
-        "would block",
         "write-lock unavailable",
         "write lock unavailable",
     ]
     .iter()
     .any(|signal| message.contains(signal))
+}
+
+fn explicit_error_codes(message: &str) -> impl Iterator<Item = u64> + '_ {
+    message.match_indices("code").filter_map(|(index, _)| {
+        let suffix = &message[index + "code".len()..];
+        let suffix = suffix.trim_start_matches(|character: char| {
+            character.is_ascii_whitespace() || matches!(character, ':' | '(')
+        });
+        let suffix = suffix.strip_prefix("some(").unwrap_or(suffix);
+        let digits = suffix
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>();
+        digits.parse().ok()
+    })
 }
 
 fn run_guarded_once<T>(

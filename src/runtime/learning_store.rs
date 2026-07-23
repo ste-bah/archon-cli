@@ -36,10 +36,39 @@ pub(crate) fn acquire_default() -> Result<Arc<DbInstance>> {
     acquire_for_path(&crate::command::store_paths::learning_db_path())
 }
 
+#[cfg(test)]
 pub(crate) fn acquire_for_dir(working_dir: &Path) -> Result<Arc<DbInstance>> {
     acquire_for_path(&crate::command::store_paths::learning_db_path_for_dir(
         working_dir,
     ))
+}
+
+pub(crate) async fn acquire_default_async() -> Result<Arc<DbInstance>> {
+    acquire_for_path_async(crate::command::store_paths::learning_db_path()).await
+}
+
+pub(crate) async fn acquire_for_dir_async(working_dir: &Path) -> Result<Arc<DbInstance>> {
+    acquire_for_path_async(crate::command::store_paths::learning_db_path_for_dir(
+        working_dir,
+    ))
+    .await
+}
+
+async fn acquire_for_path_async(path: std::path::PathBuf) -> Result<Arc<DbInstance>> {
+    tokio::task::spawn_blocking(move || acquire_for_path(&path))
+        .await
+        .map_err(|error| anyhow::anyhow!("learning store acquisition task failed: {error}"))?
+}
+
+#[cfg(test)]
+pub(crate) async fn acquire_for_path_with_async(
+    path: &Path,
+    open: impl Fn(&Path) -> Result<Arc<DbInstance>> + Send + Sync + 'static,
+) -> Result<Arc<DbInstance>> {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || acquire_for_path_with_arc(&path, open))
+        .await
+        .map_err(|error| anyhow::anyhow!("learning store acquisition task failed: {error}"))?
 }
 
 pub(crate) fn acquire_for_path(path: &Path) -> Result<Arc<DbInstance>> {

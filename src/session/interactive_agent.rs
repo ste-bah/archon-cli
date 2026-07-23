@@ -42,6 +42,7 @@ pub(super) struct Runtime {
     pub auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
     pub metrics: Arc<archon_tui::observability::ChannelMetrics>,
     pub agent_event_tx_for_dispatcher: tokio::sync::mpsc::UnboundedSender<TimestampedEvent>,
+    pub sandbox_audit_drain: crate::runtime::sandbox_audit_writer::SandboxAuditDrain,
 }
 
 pub(super) async fn build(
@@ -186,6 +187,31 @@ pub(super) async fn build(
         &working_dir,
         session_id,
     );
+    let native_sandbox = agent_config
+        .sandbox
+        .take()
+        .expect("session sandbox configured");
+    let (sandbox, sandbox_audit_drain) = crate::runtime::sandbox_audit::audit_sandbox_backend(
+        native_sandbox,
+        config,
+        session_id,
+        &agent_config.agent_type,
+    )
+    .await?;
+    agent_config.sandbox = Some(sandbox);
+    let cognitive_store = match super::open_cognitive_store(&working_dir).await {
+        Ok(store) => store,
+        Err(error) => {
+            let audit_result = super::drain_startup_sandbox_audit(sandbox_audit_drain).await;
+            return Err(super::finish_startup_failure(error, audit_result));
+        }
+    };
+    let metrics = Arc::new(archon_tui::observability::ChannelMetrics::default());
+    if let Err(error) = super::spawn_metrics_exporter(cli.metrics_port, Arc::clone(&metrics)) {
+        let audit_result = super::drain_startup_sandbox_audit(sandbox_audit_drain).await;
+        return Err(super::finish_startup_failure(error, audit_result));
+    }
+
     let agent_event_tx_for_dispatcher = agent_event_tx.clone();
     let mut agent = Agent::new(
         Arc::clone(&provider),
@@ -195,14 +221,11 @@ pub(super) async fn build(
         agent_registry,
     );
     super::world_model_callbacks::install(&mut agent, config, session_id);
-    let metrics = Arc::new(archon_tui::observability::ChannelMetrics::default());
     let metrics_sink: Arc<dyn ChannelMetricSink> = metrics.clone();
     agent.set_channel_metrics(metrics_sink);
-    if let Some(store) = super::open_cognitive_store(&working_dir) {
+    if let Some(store) = cognitive_store {
         agent.set_cognitive_store(store);
     }
-
-    super::spawn_metrics_exporter(cli.metrics_port, Arc::clone(&metrics))?;
 
     if let Some(store) = checkpoint_store {
         agent.set_checkpoint_store(store);
@@ -281,6 +304,7 @@ pub(super) async fn build(
         auto_trainer,
         metrics,
         agent_event_tx_for_dispatcher,
+        sandbox_audit_drain,
     })
 }
 

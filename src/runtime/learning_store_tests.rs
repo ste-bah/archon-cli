@@ -7,7 +7,9 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use cozo::{DbInstance, ScriptMutability};
 
-use super::{acquire_for_path, acquire_for_path_with, clear_for_tests};
+use super::{
+    acquire_for_path, acquire_for_path_with, acquire_for_path_with_async, clear_for_tests,
+};
 
 fn assert_send_sync<T: Send + Sync>() {}
 
@@ -308,6 +310,41 @@ fn pipeline_schema_initialization_uses_registered_final_file_alias_lock() -> Res
     holder.join().expect("lock holder thread")?;
     result_rx.recv_timeout(Duration::from_secs(2))??;
     writer.join().expect("schema writer thread");
+    clear_for_tests(&path);
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn async_acquisition_does_not_block_the_runtime_worker() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let path = temp.path().join("learning-state.db");
+    clear_for_tests(&path);
+    let (opening_tx, opening_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let (progress_tx, progress_rx) = mpsc::channel();
+    let (result_tx, result_rx) = mpsc::channel();
+    let release_rx = Arc::new(Mutex::new(release_rx));
+
+    let coordinator = std::thread::spawn(move || {
+        opening_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let progressed = progress_rx.recv_timeout(Duration::from_millis(250)).is_ok();
+        release_tx.send(()).unwrap();
+        result_tx.send(progressed).unwrap();
+    });
+
+    let acquire = acquire_for_path_with_async(&path, move |path| {
+        opening_tx.send(()).unwrap();
+        release_rx.lock().unwrap().recv().unwrap();
+        open_test_db(path)
+    });
+    let progress = async move {
+        progress_tx.send(()).unwrap();
+    };
+    let (database, ()) = tokio::join!(acquire, progress);
+
+    coordinator.join().unwrap();
+    database?;
+    assert!(result_rx.recv().unwrap());
     clear_for_tests(&path);
     Ok(())
 }

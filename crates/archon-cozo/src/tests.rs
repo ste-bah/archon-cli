@@ -46,10 +46,8 @@ fn retryable_errors_match_only_precise_busy_signals() {
         "locked (code 5)",
         "code: Some(5)",
         "SQLITE_BUSY",
-        "would-block",
         "write-lock unavailable",
         "write lock unavailable",
-        "poison error",
     ] {
         assert!(is_retryable_cozo_error(message), "{message}");
     }
@@ -59,6 +57,10 @@ fn retryable_errors_match_only_precise_busy_signals() {
         "code 500",
         "code: Some(50)",
         "code: Some(500)",
+        "database is locked (code 500)",
+        "database table is locked (code 500)",
+        "poison error",
+        "would-block",
         "unrelated code 5 prefix",
     ] {
         assert!(!is_retryable_cozo_error(message), "{message}");
@@ -105,30 +107,35 @@ async fn async_guarded_retry_yields_and_succeeds() {
         yielded_for_task.store(true, std::sync::atomic::Ordering::SeqCst);
     });
 
-    let retry = run_guarded_async(
-        "async retry",
-        ScriptMutability::Immutable,
-        &config,
-        move || {
-            let attempt = attempts_for_run.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            if attempt == 0 {
-                return Err(anyhow!("database is locked"));
-            }
-            Ok("success")
-        },
-    );
-    tokio::pin!(retry);
+    let (attempted_tx, attempted_rx) = tokio::sync::oneshot::channel();
+    let mut attempted_tx = Some(attempted_tx);
+    let retry = tokio::spawn(async move {
+        run_guarded_async(
+            "async retry",
+            ScriptMutability::Immutable,
+            &config,
+            move || {
+                let attempt = attempts_for_run.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if let Some(tx) = attempted_tx.take() {
+                    let _ = tx.send(());
+                }
+                if attempt == 0 {
+                    return Err(anyhow!("database is locked"));
+                }
+                Ok("success")
+            },
+        )
+        .await
+    });
+    attempted_rx.await.unwrap();
 
-    tokio::select! {
-        result = &mut retry => panic!("retry unexpectedly completed: {result:?}"),
-        _ = tokio::task::yield_now() => {}
-    }
+    assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
     task.await.unwrap();
     assert!(yielded.load(std::sync::atomic::Ordering::SeqCst));
-    assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(!retry.is_finished());
 
     tokio::time::advance(Duration::from_secs(1)).await;
-    assert_eq!(retry.await.unwrap(), "success");
+    assert_eq!(retry.await.unwrap().unwrap(), "success");
     assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
 }
 
