@@ -27,15 +27,30 @@ Shape — top-level script, exactly like this (no wrapper function):
   }
 
   phase('Task Work')
-  // EVERY task follows this implement -> verify -> REMEDIATE shape. A verifier
-  // that demotes the task is not the end: feed its verbatim findings back to a
-  // fresh write agent and re-verify, up to 3 attempts, then record blocked.
-  let impl = await agent(`Implement TASK-X-001 per <task file path>. Repository root: <repo root>. Re-inspect the current state FIRST — if the work is genuinely already done, return the typed no-op. Prove your change with tests you run yourself.`, { label: 'implement-task-x-001', write: true, taskIds: ['TASK-X-001'], targetFiles: ['src/module.ext'] })
-  let check = await agent(`You did NOT implement TASK-X-001 — be suspicious of its self-report. Re-read <task file path>, inspect the actual code, and run whatever tests YOU judge prove or disprove the acceptance criteria.`, { label: 'verify-task-x-001', verify: true, taskIds: ['TASK-X-001'] })
-  for (let attempt = 2; attempt <= 3 && (!isAccepted(impl) || !isAccepted(check)); attempt += 1) {
-    const rejectedAttempt = `Implementation envelope:\n${remediationEvidence(impl)}\nVerifier envelope:\n${remediationEvidence(check)}`
-    impl = await agent(`Remediate TASK-X-001. The previous attempt was REJECTED. Fix exactly what these verbatim implementation and verifier envelopes name; do not re-argue them:\n${rejectedAttempt}\nOriginal goal: implement TASK-X-001 per <task file path>. Repository root: <repo root>. Prove the fix with tests you run yourself.`, { label: `remediate-task-x-001-${attempt}`, write: true, taskIds: ['TASK-X-001'], targetFiles: ['src/module.ext'] })
-    check = await agent(`You did NOT implement TASK-X-001 — be suspicious. The previous attempt was rejected with these verbatim findings:\n${rejectedAttempt}\nRe-read <task file path>, inspect the actual code, and run whatever tests YOU judge prove or disprove the acceptance criteria.`, { label: `verify-task-x-001-${attempt}`, verify: true, taskIds: ['TASK-X-001'] })
+  // Author ONE implement -> verify -> REMEDIATE block for EVERY canonical task in
+  // the universe by ITERATING THE FULL TASK LIST. This loop is mandatory: do NOT
+  // implement a single task and stop, and do NOT re-run the same task id — every
+  // task from the first to the last must get its own block with its own labels.
+  // Enumerate the ACTUAL task ids and their real task-file paths / target files
+  // here — one entry per canonical task in the universe, in dependency order.
+  const tasks = [
+    { id: 'TASK-X-001', file: '<task file path for TASK-X-001>', targetFiles: ['src/module.ext'] },
+    { id: 'TASK-X-002', file: '<task file path for TASK-X-002>', targetFiles: ['src/other.ext'] },
+    // ...one entry for EVERY remaining canonical task id in the universe...
+  ]
+  const acceptedTaskIds = []
+  const blockedTasks = []
+  for (const t of tasks) {
+    // A verifier that demotes the task is not the end: feed its verbatim findings
+    // to a fresh write agent and re-verify, up to 3 attempts, then record blocked.
+    let impl = await agent(`Implement ${t.id} per ${t.file}. Repository root: <repo root>. Re-inspect the current state FIRST — if the work is genuinely already done, return the typed no-op. Prove your change with tests you run yourself.`, { label: `implement-${t.id.toLowerCase()}`, write: true, taskIds: [t.id], targetFiles: t.targetFiles })
+    let check = await agent(`You did NOT implement ${t.id} — be suspicious of its self-report. Re-read ${t.file}, inspect the actual code, and run whatever tests YOU judge prove or disprove the acceptance criteria.`, { label: `verify-${t.id.toLowerCase()}`, verify: true, taskIds: [t.id] })
+    for (let attempt = 2; attempt <= 3 && (!isAccepted(impl) || !isAccepted(check)); attempt += 1) {
+      const rejectedAttempt = `Implementation envelope:\n${remediationEvidence(impl)}\nVerifier envelope:\n${remediationEvidence(check)}`
+      impl = await agent(`Remediate ${t.id}. The previous attempt was REJECTED. Fix exactly what these verbatim implementation and verifier envelopes name; do not re-argue them:\n${rejectedAttempt}\nOriginal goal: implement ${t.id} per ${t.file}. Repository root: <repo root>. Prove the fix with tests you run yourself.`, { label: `remediate-${t.id.toLowerCase()}-${attempt}`, write: true, taskIds: [t.id], targetFiles: t.targetFiles })
+      check = await agent(`You did NOT implement ${t.id} — be suspicious. The previous attempt was rejected with these verbatim findings:\n${rejectedAttempt}\nRe-read ${t.file}, inspect the actual code, and run whatever tests YOU judge prove or disprove the acceptance criteria.`, { label: `verify-${t.id.toLowerCase()}-${attempt}`, verify: true, taskIds: [t.id] })
+    }
+    isAccepted(impl) && isAccepted(check) ? acceptedTaskIds.push(t.id) : blockedTasks.push({ taskId: t.id, reason: summarize(check) })
   }
 
   phase('Review')
