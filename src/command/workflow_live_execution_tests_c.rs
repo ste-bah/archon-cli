@@ -12,6 +12,7 @@ async fn generated_live_run_executes_read_only_fanout_in_parallel() {
     let output = run_live_action(
         temp.path(),
         CommandAction::Run {
+            decomposed: false,
             task: "Inspect and fan out over typed items".to_string(),
         },
         client.clone(),
@@ -95,6 +96,7 @@ async fn generated_v2_pause_during_read_only_fanout_stops_pending_branch_launch(
         run_live_action(
             &cwd,
             CommandAction::Run {
+                decomposed: false,
                 task: "Inspect and slow-review typed items with a generated V2 workflow"
                     .to_string(),
             },
@@ -151,6 +153,7 @@ async fn generated_worktree_write_fanout_applies_patch_to_canonical_repo() {
     let output = run_live_action(
         temp.path(),
         CommandAction::Run {
+            decomposed: false,
             task: format!(
                 "Implement one worktree fanout change against the repository {}",
                 repo.display()

@@ -125,6 +125,27 @@ mod workflow_resume_from_parse_tests {
             other => panic!("expected workflow run, got {other:?}"),
         }
     }
+
+    #[test]
+    fn workflow_run_decomposed_parses() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "workflow",
+            "run",
+            "--live",
+            "--yes",
+            "--decomposed",
+            "same task",
+        ])
+        .expect("decomposed must parse");
+
+        match cli.command {
+            Some(Commands::Workflow {
+                action: WorkflowAction::Run { decomposed, .. },
+            }) => assert!(decomposed),
+            other => panic!("expected workflow run, got {other:?}"),
+        }
+    }
 }
 
 #[cfg(test)]

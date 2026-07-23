@@ -228,7 +228,7 @@ async fn run_live_action(
             render_live_plan(&plan)
         }
         CommandAction::PlanSpec { path } => Ok(load_spec_file(cwd, &path)?.to_yaml()?),
-        CommandAction::Run { task } => {
+        CommandAction::Run { task, decomposed } => {
             let plan = capped_live_plan(&task).await?;
             return workflow_live_v2::run_generated_v2_workflow(
                 cwd,
@@ -240,6 +240,11 @@ async fn run_live_action(
                 runner.agent_names.clone(),
                 approval_mode,
                 workspace_boundary_supported,
+                if decomposed {
+                    false
+                } else {
+                    workflow_live_v2::script_lifecycle_from_env()
+                },
             )
             .await;
         }
@@ -420,7 +425,7 @@ fn live_start_message(action: &CommandAction) -> String {
         CommandAction::PlanSpec { path } => {
             format!("Validating dynamic workflow spec: {path}\n")
         }
-        CommandAction::Run { task } => format!("Starting dynamic workflow for task: {task}\n"),
+        CommandAction::Run { task, .. } => format!("Starting dynamic workflow for task: {task}\n"),
         CommandAction::RunSpec { path } => {
             format!("Starting dynamic workflow from spec: {path}\n")
         }

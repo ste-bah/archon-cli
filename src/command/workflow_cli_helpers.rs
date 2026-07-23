@@ -10,6 +10,7 @@ fn run_cli_action(
     spec_file: Option<&PathBuf>,
     from_template: Option<&String>,
     task: &[String],
+    decomposed: bool,
 ) -> Result<CommandAction> {
     let task_counts_as_task = !task.is_empty() && from_template.is_none();
     let selected =
@@ -32,16 +33,18 @@ fn run_cli_action(
     }
     Ok(CommandAction::Run {
         task: task_string(task)?,
+        decomposed,
     })
 }
 
 fn ensure_resume_from_compatible(
     spec_file: &Option<PathBuf>,
     from_template: &Option<String>,
+    decomposed: bool,
 ) -> Result<()> {
-    if spec_file.is_some() || from_template.is_some() {
+    if spec_file.is_some() || from_template.is_some() || decomposed {
         return Err(anyhow!(
-            "--resume-from cannot be combined with --spec-file or --from-template"
+            "--resume-from cannot be combined with --spec-file, --from-template, or --decomposed"
         ));
     }
     Ok(())

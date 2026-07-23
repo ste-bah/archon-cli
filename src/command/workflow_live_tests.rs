@@ -370,7 +370,7 @@ fn generated_run_branch_is_isolated_from_legacy_executor_dispatch() {
     )
     .expect("read workflow_live source");
     let run_branch = source
-        .split("CommandAction::Run { task } => {")
+        .split("CommandAction::Run { task, decomposed } => {")
         .nth(1)
         .and_then(|rest| rest.split("CommandAction::RunSpec").next())
         .expect("generated run branch");

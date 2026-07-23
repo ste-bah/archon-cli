@@ -79,7 +79,7 @@ async fn generated_workflow_ignores_legacy_hash_only_deny_for_new_approval_subje
 
     let output = run_live_action(
         temp.path(),
-        CommandAction::Run { task },
+        CommandAction::Run { task, decomposed: false },
         planner,
         tui_tx,
         None,
@@ -123,6 +123,7 @@ async fn generated_live_run_executes_v2_runtime_and_persists_typed_results() {
     let output = run_live_action(
         temp.path(),
         CommandAction::Run {
+            decomposed: false,
             task: "Inspect this repository with a generated V2 workflow".to_string(),
         },
         client.clone(),

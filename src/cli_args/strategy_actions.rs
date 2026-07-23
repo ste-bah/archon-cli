@@ -327,6 +327,9 @@ pub enum WorkflowAction {
         /// Validate an existing workflow spec file instead of planning from text
         #[arg(long, value_name = "PATH")]
         spec_file: Option<std::path::PathBuf>,
+        /// Use the legacy decomposed lifecycle instead of the default v3 authored-script lifecycle
+        #[arg(long)]
+        decomposed: bool,
         /// Use the configured provider for planning instead of deterministic smoke mode
         #[arg(long)]
         live: bool,
@@ -344,6 +347,9 @@ pub enum WorkflowAction {
         /// Resume a prior generated V2 run and reuse its accepted/noop calls
         #[arg(long = "resume-from", value_name = "RUN_ID")]
         resume_from: Option<String>,
+        /// Use the legacy decomposed lifecycle instead of the default v3 authored-script lifecycle
+        #[arg(long)]
+        decomposed: bool,
         /// Use the configured provider for live stage agents
         #[arg(long)]
         live: bool,

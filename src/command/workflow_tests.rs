@@ -51,6 +51,7 @@ fn run_resume_from_uses_existing_v2_resume_path() {
         spec_file: None,
         from_template: None,
         resume_from: Some("prior-run".to_string()),
+        decomposed: false,
         live: true,
         yes: true,
         task: vec!["same canary task".to_string()],
@@ -62,6 +63,24 @@ fn run_resume_from_uses_existing_v2_resume_path() {
         command,
         CommandAction::Resume { run_id } if run_id == "prior-run"
     ));
+}
+
+
+#[test]
+fn run_resume_from_rejects_decomposed_flag() {
+    let action = WorkflowAction::Run {
+        spec_file: None,
+        from_template: None,
+        resume_from: Some("prior-run".to_string()),
+        decomposed: true,
+        live: true,
+        yes: true,
+        task: vec!["same canary task".to_string()],
+    };
+
+    let err = cli_action(&action).expect_err("decomposed resume-from must fail");
+
+    assert!(err.to_string().contains("--decomposed"));
 }
 
 #[test]

@@ -12,6 +12,8 @@ pub enum CommandAction {
     },
     Run {
         task: String,
+        #[serde(default)]
+        decomposed: bool,
     },
     RunSpec {
         path: String,
@@ -158,6 +160,7 @@ impl WorkflowCommand {
             "list" => CommandAction::List,
             _ => CommandAction::Run {
                 task: args.join(" "),
+                decomposed: false,
             },
         };
         Ok(Self { action })
@@ -178,6 +181,8 @@ fn parse_plan(args: &[String]) -> WorkflowResult<CommandAction> {
 
 fn parse_run(args: &[String]) -> WorkflowResult<CommandAction> {
     let args = without_live_flag(args);
+    let decomposed = args.iter().any(|arg| arg == "--decomposed");
+    let args: Vec<String> = args.into_iter().filter(|arg| arg != "--decomposed").collect();
     if flag(&args, "--spec-file") {
         return Ok(CommandAction::RunSpec {
             path: required(&args, 1, "spec file")?,
@@ -191,6 +196,7 @@ fn parse_run(args: &[String]) -> WorkflowResult<CommandAction> {
     }
     Ok(CommandAction::Run {
         task: join_task(&args)?,
+        decomposed,
     })
 }
 

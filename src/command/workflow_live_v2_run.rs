@@ -8,6 +8,7 @@ pub(super) async fn run_generated_v2_workflow(
     agent_names: Vec<String>,
     approval_mode: LiveApprovalMode,
     workspace_boundary_supported: bool,
+    script_lifecycle: bool,
 ) -> Result<String> {
     run_v2_workflow_with_origin(
         cwd,
@@ -20,6 +21,7 @@ pub(super) async fn run_generated_v2_workflow(
         approval_mode,
         workspace_boundary_supported,
         WorkflowBundleOrigin::GeneratedHarness,
+        script_lifecycle,
     )
     .await
 }
@@ -46,6 +48,7 @@ pub(super) async fn run_saved_v2_workflow(
         approval_mode,
         workspace_boundary_supported,
         WorkflowBundleOrigin::SavedCommand,
+        script_lifecycle_from_env(),
     )
     .await
 }
@@ -61,10 +64,11 @@ async fn run_v2_workflow_with_origin(
     approval_mode: LiveApprovalMode,
     workspace_boundary_supported: bool,
     origin: WorkflowBundleOrigin,
+    script_lifecycle: bool,
 ) -> Result<String> {
     let run = store.create_run(plan.approval_metadata_spec())?;
     WorkflowBundle::create_for_run(store, &run, &plan.harness_source, origin)?;
-    save_generated_v2_metadata(store, &run.id, &plan)?;
+    save_generated_v2_metadata(store, &run.id, &plan, script_lifecycle)?;
     let run = match gate_live_approval(cwd, store, run, approval_mode, &tui_tx)? {
         LiveApprovalOutcome::Proceed { run, note } => {
             let _ = tui_tx.send(TuiEvent::TextDelta(note.clone()));
@@ -215,6 +219,7 @@ fn save_generated_v2_metadata(
     store: &WorkflowStore,
     run_id: &str,
     plan: &WorkflowScriptPlan,
+    script_lifecycle: bool,
 ) -> archon_workflow::WorkflowResult<()> {
     let generated_scaffold = plan.generated_scaffold();
     let metadata = GeneratedV2Metadata {
@@ -230,17 +235,21 @@ fn save_generated_v2_metadata(
             .as_ref()
             .map(|_| plan.generated_config.clone()),
         // Record the lifecycle at creation so continue/resume honors it.
-        script_lifecycle: Some(script_lifecycle_from_env()),
+        script_lifecycle: Some(script_lifecycle),
     };
     store.write_run_json(run_id, GENERATED_V2_METADATA_PATH, &metadata)
 }
 
 /// The ARCHON_SCRIPT_LIFECYCLE env decision, in one place so creation and the
 /// fallback on continue agree.
-fn script_lifecycle_from_env() -> bool {
+pub(super) fn script_lifecycle_from_env() -> bool {
+    // v3 authored-script lifecycle is the DEFAULT. The decomposed (v1) engine is
+    // opt-in only via ARCHON_SCRIPT_LIFECYCLE=0/false — otherwise a run silently
+    // fell back to decomposed (old monolithic review) whenever the flag wasn't
+    // read at creation, which is a footgun. Absent var => v3.
     std::env::var("ARCHON_SCRIPT_LIFECYCLE")
-        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
+        .map(|value| !(value == "0" || value.eq_ignore_ascii_case("false")))
+        .unwrap_or(true)
 }
 
 fn load_generated_v2_metadata(
@@ -357,6 +366,7 @@ async fn execute_generated_v2_run(
             )
             .await
     } else if plan.task_universe.is_some() {
+        // TODO(remove-decomposed): delete the legacy native lifecycle after v3 live proof.
         runner
             .run_decomposed_lifecycle(
                 &plan.harness_source,

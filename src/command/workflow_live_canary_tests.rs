@@ -24,6 +24,7 @@ use std::path::PathBuf;
 use std::process::Command as CanaryGitCommand;
 use std::sync::Arc;
 use std::sync::Mutex as CanaryMutex;
+use std::sync::OnceLock;
 
 use anyhow::Result as CanaryResult;
 use archon_pipeline::runner::{LlmClient, LlmResponse};
@@ -33,6 +34,37 @@ use super::{LiveApprovalMode, run_live_action};
 
 const CANARY_TASK_ID: &str = "TASK-TDL-001";
 const CANARY_ARTIFACT_REL: &str = ".archon/artifacts/TASK-TDL-001/gap-audit.md";
+
+static LIFECYCLE_ENV_LOCK: OnceLock<CanaryMutex<()>> = OnceLock::new();
+
+struct DecomposedLifecycleEnvGuard {
+    previous: Option<String>,
+}
+
+impl DecomposedLifecycleEnvGuard {
+    fn set() -> (std::sync::MutexGuard<'static, ()>, Self) {
+        let guard = LIFECYCLE_ENV_LOCK
+            .get_or_init(|| CanaryMutex::new(()))
+            .lock()
+            .expect("lifecycle env lock");
+        let previous = std::env::var("ARCHON_SCRIPT_LIFECYCLE").ok();
+        unsafe {
+            std::env::set_var("ARCHON_SCRIPT_LIFECYCLE", "0");
+        }
+        (guard, Self { previous })
+    }
+}
+
+impl Drop for DecomposedLifecycleEnvGuard {
+    fn drop(&mut self) {
+        unsafe {
+            match &self.previous {
+                Some(value) => std::env::set_var("ARCHON_SCRIPT_LIFECYCLE", value),
+                None => std::env::remove_var("ARCHON_SCRIPT_LIFECYCLE"),
+            }
+        }
+    }
+}
 
 /// Scripted stand-in for every agent role in the decomposed-PRD scaffold.
 ///
@@ -411,6 +443,7 @@ fn canary_git(repo: &std::path::Path, args: &[&str]) {
 
 #[tokio::test]
 async fn canary_wf_afae6bee_regression() {
+    let (_lifecycle_lock, _lifecycle_env) = DecomposedLifecycleEnvGuard::set();
     let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(64);
     let temp = tempfile::tempdir().expect("tempdir");
     let project_root = temp.path();
@@ -450,7 +483,7 @@ async fn canary_wf_afae6bee_regression() {
 
     let output = run_live_action(
         project_root,
-        CommandAction::Run { task },
+        CommandAction::Run { task, decomposed: false },
         client.clone(),
         tui_tx,
         None,

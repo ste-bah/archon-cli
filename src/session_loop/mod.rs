@@ -383,4 +383,14 @@ mod tests {
             ))
         );
     }
+
+    #[test]
+    fn slash_input_preserves_decomposed_workflow_flag() {
+        assert_eq!(
+            slash_input("./archon workflow run --live --decomposed do work"),
+            Some(std::borrow::Cow::Owned(
+                "/workflow run --live --decomposed do work".to_string()
+            ))
+        );
+    }
 }
