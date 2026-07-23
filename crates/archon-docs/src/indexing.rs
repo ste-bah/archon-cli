@@ -377,6 +377,13 @@ pub fn index_chunk(db: &DbInstance, chunk: &ChunkArtifact) -> Result<(), DocsErr
             message: error.to_string(),
         });
     }
+    build_persisted_snapshot(
+        provider.as_ref(),
+        IndexResult {
+            indexed: 1,
+            ..IndexResult::default()
+        },
+    )?;
     let _ = store::update_chunk_embedding_status(db, &chunk.chunk_id, "indexed");
     let _ = crate::index_queue::mark_chunks_indexed(db, &[chunk]);
     Ok(())

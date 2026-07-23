@@ -95,6 +95,24 @@ fn parallel_indexing_builds_current_persisted_snapshot() {
 
 #[test]
 #[serial_test::serial(docs_global_state)]
+fn index_chunk_builds_current_persisted_snapshot() {
+    let db = test_db();
+    setup_with_provider(&db, 4);
+    let chunk = insert_test_chunk(&db, "chunk-direct-snapshot", "direct snapshot content");
+
+    index_chunk(&db, &chunk).unwrap();
+    let vector_store = crate::vector_store::DocVectorStore::acquire_default().unwrap();
+    let vector_count = vector_store.count_vectors(Some("mock")).unwrap();
+    let manifest = vector_store.latest_hnsw_manifest("mock").unwrap().unwrap();
+
+    assert_eq!(manifest.provider, "mock");
+    assert_eq!(manifest.dimension, 4);
+    assert_eq!(manifest.vector_count, vector_count);
+    assert!(vector_store.has_vector("mock", &chunk.chunk_id).unwrap());
+}
+
+#[test]
+#[serial_test::serial(docs_global_state)]
 fn index_and_search_known_chunk() {
     let db = test_db();
     setup_with_provider(&db, 4);
