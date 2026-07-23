@@ -1,9 +1,7 @@
 use archon_workflow::{ProviderTier, StageKind, StageRunRequest};
 use serde_json::json;
 
-use super::workflow_live_runner::{
-    activity_detail, allowed_tools, command_execution_stage, write_coordination_enabled,
-};
+use super::workflow_live_runner::{activity_detail, allowed_tools, command_execution_stage};
 
 fn request(input: serde_json::Value) -> StageRunRequest {
     request_with_task(input, "Implement")
@@ -24,17 +22,17 @@ fn request_with_task(input: serde_json::Value, task: &str) -> StageRunRequest {
 }
 
 #[test]
-fn write_coordination_object_enables_boundary_mode() {
+fn coordinated_implementation_object_input_gets_bash() {
+    // Every implementation branch now gets Bash so the coder can build/test its
+    // edits, even under write-coordination and without the task naming tests.
     let req = request(json!({"write_coordination": {"enabled": true}}));
-    assert!(write_coordination_enabled(&req));
-    assert!(!allowed_tools(&req).contains(&"Bash".to_string()));
+    assert!(allowed_tools(&req).contains(&"Bash".to_string()));
 }
 
 #[test]
-fn write_coordination_bool_enables_boundary_mode() {
+fn coordinated_implementation_bool_input_gets_bash() {
     let req = request(json!({"write_coordination": true}));
-    assert!(write_coordination_enabled(&req));
-    assert!(!allowed_tools(&req).contains(&"Bash".to_string()));
+    assert!(allowed_tools(&req).contains(&"Bash".to_string()));
 }
 
 #[test]
@@ -43,7 +41,6 @@ fn coordinated_implementation_with_verification_gets_bash() {
         json!({"write_coordination": {"enabled": true}}),
         "Implement missing work and run focused tests.",
     );
-    assert!(write_coordination_enabled(&req));
     assert!(allowed_tools(&req).contains(&"Bash".to_string()));
 }
 

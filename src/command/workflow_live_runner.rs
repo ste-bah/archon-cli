@@ -337,8 +337,17 @@ pub(crate) fn allowed_tools(request: &StageRunRequest) -> Vec<String> {
     tools
 }
 
-fn implementation_tools(request: &StageRunRequest) -> Vec<&'static str> {
-    let mut tools = vec![
+fn implementation_tools(_request: &StageRunRequest) -> Vec<&'static str> {
+    // Every implementation branch gets Bash. Without it a coder can Write/Edit
+    // but cannot run `cargo check`/`cargo test`/`cargo build` to verify its own
+    // edits — so on live runs it hesitated ("performed only safe read-only
+    // inspection; confirm before I make edits") and never implemented. Bash was
+    // previously withheld under write-coordination unless the task text happened
+    // to mention running tests, which silently crippled most coder branches.
+    // Concurrent worktree builds serialize on cargo's own target-dir lock, and
+    // any file changed via Bash without being declared is still caught by
+    // validate_changed_files_for_repository at merge time.
+    vec![
         "Read",
         "Grep",
         "Glob",
@@ -351,22 +360,8 @@ fn implementation_tools(request: &StageRunRequest) -> Vec<&'static str> {
         "LargeEditDeleteSection",
         "LargeEditCommit",
         "LargeEditAbort",
-    ];
-    if !write_coordination_enabled(request) || command_execution_stage(request) {
-        tools.push("Bash");
-    }
-    tools
-}
-
-pub(super) fn write_coordination_enabled(request: &StageRunRequest) -> bool {
-    match request.input.get("write_coordination") {
-        Some(serde_json::Value::Bool(enabled)) => *enabled,
-        Some(value) => value
-            .get("enabled")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false),
-        None => false,
-    }
+        "Bash",
+    ]
 }
 
 pub(crate) fn command_execution_stage(request: &StageRunRequest) -> bool {

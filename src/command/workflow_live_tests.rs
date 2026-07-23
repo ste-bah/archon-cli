@@ -143,7 +143,7 @@ fn focused_test_workflow_stages_can_execute_commands_without_write_tools() {
 }
 
 #[test]
-fn coordinated_implementation_omits_bash_for_workspace_boundary() {
+fn coordinated_implementation_keeps_bash_for_workspace_verification() {
     let req = request(json!({
         "write_coordination": true,
         "target_repository_root": "/tmp/isolated-repo",
@@ -153,7 +153,7 @@ fn coordinated_implementation_omits_bash_for_workspace_boundary() {
     assert!(tools.contains(&"Read".to_string()));
     assert!(tools.contains(&"Write".to_string()));
     assert!(tools.contains(&"ApplyPatch".to_string()));
-    assert!(!tools.contains(&"Bash".to_string()));
+    assert!(tools.contains(&"Bash".to_string()));
 }
 
 #[test]
