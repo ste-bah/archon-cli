@@ -234,8 +234,8 @@ fn save_generated_v2_metadata(
             .task_universe
             .as_ref()
             .map(|_| plan.generated_config.clone()),
-        // Record the lifecycle at creation so continue/resume honors it.
-        script_lifecycle: Some(script_lifecycle),
+        // Only task-universe runs can enter the authored-script lifecycle.
+        script_lifecycle: Some(script_lifecycle && plan.task_universe.is_some()),
     };
     store.write_run_json(run_id, GENERATED_V2_METADATA_PATH, &metadata)
 }
@@ -356,6 +356,13 @@ async fn execute_generated_v2_run(
                 "write repository root '{trimmed}' is not a git repository (no .git); every write branch would fail 'Not a git repository'. Point the repository/write root at the git working tree, not the artifact/--target project"
             )).into());
         }
+    }
+    if script_lifecycle && plan.task_universe.is_none() {
+        return Err(WorkflowError::SpecInvalid(format!(
+            "generated V2 run '{}' was created for the v3 authored-script lifecycle but has no persisted task universe; refusing to execute scaffold workflow.js",
+            run.id
+        ))
+        .into());
     }
     let run_result = if plan.task_universe.is_some() && script_lifecycle {
         runner

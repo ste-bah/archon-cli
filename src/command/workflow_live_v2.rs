@@ -126,6 +126,153 @@ include!("workflow_live_v2_read_only.rs");
 include!("workflow_live_v2_branch_cache.rs");
 
 #[cfg(test)]
+mod generated_resume_tests {
+    use super::*;
+    use archon_pipeline::runner::LlmResponse;
+    use archon_tui::event_channel::bounded_tui_event_channel;
+
+    struct PanicLlm;
+
+    #[async_trait::async_trait]
+    impl LlmClient for PanicLlm {
+        async fn send_message(
+            &self,
+            _messages: Vec<serde_json::Value>,
+            _system: Vec<serde_json::Value>,
+            _tools: Vec<serde_json::Value>,
+            _model: &str,
+        ) -> Result<LlmResponse> {
+            panic!("resume guard must fail before scaffold execution")
+        }
+    }
+
+    #[tokio::test]
+    async fn v3_lifecycle_metadata_without_task_universe_refuses_scaffold_execution() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let store = WorkflowStore::project(temp.path());
+        let spec = archon_workflow::WorkflowSpec {
+            schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
+            name: "inconsistent-v3-generated-run".to_string(),
+            task: "prove inconsistent v3 metadata fails closed".to_string(),
+            target_repository_root: None,
+            max_parallelism: 4,
+            max_agents: 16,
+            provider_tiers: BTreeMap::new(),
+            stages: Vec::new(),
+            artifact_policy: Default::default(),
+            permissions: BTreeMap::new(),
+            quality_gates: BTreeMap::new(),
+            learning_hooks: Vec::new(),
+        };
+        let run = store.create_run(spec).expect("seed run");
+        let scaffold = r#"
+export default async function workflow(w) {
+  await w.checkpoint("should-not-run", { task: "this scaffold must not execute" });
+}
+"#;
+        WorkflowBundle::create_for_run(
+            &store,
+            &run,
+            scaffold,
+            WorkflowBundleOrigin::GeneratedHarness,
+        )
+        .expect("seed generated bundle");
+        store
+            .write_run_json(
+                &run.id,
+                GENERATED_V2_METADATA_PATH,
+                &GeneratedV2Metadata {
+                    schema_version: "workflow-generated-v2-metadata-v1".to_string(),
+                    generated_kind: None,
+                    scaffold_hash: Some(workflow_scaffold_hash(scaffold)),
+                    generated_scaffold: None,
+                    task_universe: None,
+                    script_args: None,
+                    governed_learning_context: Vec::new(),
+                    generated_config: None,
+                    script_lifecycle: Some(true),
+                },
+            )
+            .expect("seed inconsistent metadata");
+        let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+
+        let err = resume_generated_v2_workflow(
+            temp.path(),
+            &store,
+            &run.id,
+            Arc::new(PanicLlm),
+            tui_tx,
+            Vec::new(),
+            LiveApprovalMode::CliYes,
+            true,
+        )
+        .await
+        .expect_err("inconsistent v3 metadata must fail closed");
+        let message = err.to_string();
+
+        assert!(
+            message.contains("created for the v3 authored-script lifecycle"),
+            "{message}"
+        );
+        assert!(message.contains("no persisted task universe"), "{message}");
+        assert!(
+            message.contains("refusing to execute scaffold workflow.js"),
+            "{message}"
+        );
+        let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
+        assert!(
+            v2_store
+                .load_call_record("should-not-run")
+                .expect("call lookup")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn universe_less_plan_is_not_recorded_as_script_lifecycle() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let store = WorkflowStore::project(temp.path());
+        let spec = archon_workflow::WorkflowSpec {
+            schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
+            name: "authored-universe-less-run".to_string(),
+            task: "author a workflow.js without a decomposed task universe".to_string(),
+            target_repository_root: None,
+            max_parallelism: 4,
+            max_agents: 16,
+            provider_tiers: BTreeMap::new(),
+            stages: Vec::new(),
+            artifact_policy: Default::default(),
+            permissions: BTreeMap::new(),
+            quality_gates: BTreeMap::new(),
+            learning_hooks: Vec::new(),
+        };
+        let run = store.create_run(spec).expect("seed run");
+        let plan = WorkflowScriptPlan::generated(
+            "author a workflow.js without a decomposed task universe",
+            "export default async function workflow(w) { await w.checkpoint(\"noop\", {}); }",
+            Vec::new(),
+            None, // no task universe -> provider-authored path
+            GeneratedWorkflowConfig::default(),
+        );
+        // Caller requests v3 (the default); the universe-less plan must still be
+        // recorded as NOT script-lifecycle so the guard does not refuse it.
+        save_generated_v2_metadata(&store, &run.id, &plan, true).expect("save metadata");
+        let metadata = load_generated_v2_metadata(&store, &run.id)
+            .expect("load metadata")
+            .expect("metadata present");
+        assert_eq!(
+            metadata.script_lifecycle,
+            Some(false),
+            "universe-less authored run must not be recorded as v3 script-lifecycle"
+        );
+        assert!(
+            metadata.task_universe.is_none(),
+            "no universe should be persisted for an authored run"
+        );
+    }
+}
+
+#[cfg(test)]
 mod branch_cache_tests {
     use super::*;
     use archon_workflow::{
