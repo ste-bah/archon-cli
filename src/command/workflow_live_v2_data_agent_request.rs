@@ -7,7 +7,15 @@ pub(super) fn v2_agent_request(
         "Return exactly one typed WorkflowV2Result JSON object.".to_string(),
         "Do not return markdown, prose-only summaries, or plan-only implementation text."
             .to_string(),
+        // Branches run in a headless fanout, so agents must not wait for confirmation.
+        "You are a fully autonomous, non-interactive agent. No human will read or reply to your output. Never ask for confirmation or approval, and never wait for or request a \"proceed\", \"go ahead\", or \"do it\" — there is nobody to answer. Complete the assigned work now and report it in the JSON result.".to_string(),
     ];
+    if execution.call.write_mode.is_some() {
+        // Read-only roles have no write_mode and must not be told to edit files.
+        constraints.push(
+            "This is a WRITE-CAPABLE branch: you must make the required file edits yourself, now, in your assigned worktree/repository, before returning. Do not stop at a plan and do not describe edits you have not actually made — an accepted result requires the real changes to exist on disk, confirmed by your own commands.".to_string(),
+        );
+    }
     if call_declares_items_output(&execution.call) {
         constraints.push(
             "This call feeds downstream fanout: put work items in data.items as a flat JSON array of item objects. Do not nest items under dependency_phases, groups, phases, or any other wrapper.".to_string(),
