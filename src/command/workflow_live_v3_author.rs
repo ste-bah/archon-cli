@@ -54,42 +54,20 @@ Shape — top-level script, exactly like this (no wrapper function):
   }
 
   phase('Review')
-  const reviewItems = acceptedTaskIds.map((taskId) => ({
-    item_id: `review-${taskId.toLowerCase()}`,
-    canonical_task_ids: [taskId],
-    task: `Read-only critic review for ${taskId}; return data.findings as compact structured findings.`,
-    evidence: boundedEvidenceFor(taskId),
-  }))
-  const adversarialMap = await w.parallel('adversarial-review-map', reviewItems, {
-    tier: 'critic',
-    itemKind: 'review_map',
-    maxParallelism: 4,
-    task: 'For each item, try to FALSIFY that accepted task using its claims and bounded evidence. Return data.findings; max 25 findings per item.',
-    reviewContract: { version: 1, kind: 'adversarial_findings', stage: 'map', findingsPath: 'data.findings', itemTaskIdsPath: 'canonical_task_ids', maxFindingsPerItem: 25 },
-  })
-  const adversarialReduce = await w.reduce('adversarial-review-reduce', { findings: findingsFrom(adversarialMap) }, {
-    tier: 'critic',
-    task: 'Preserve every map finding verbatim, then add any cross-task contradictions. Return data.findings.',
-    reviewContract: { version: 1, kind: 'adversarial_findings', stage: 'reduce_final', sourceMapCallIds: ['adversarial-review-map'], preserveMapFindings: true, findingsPath: 'data.findings', accountingField: 'adversarial_findings', maxInputBytes: 48000 },
-  })
-  const coverageMap = await w.parallel('coverage-audit-map', reviewItems, {
-    tier: 'critic',
-    itemKind: 'review_map',
-    maxParallelism: 4,
-    task: 'For each accepted task, compare its task/source sections against the source requirements and return data.findings for requirements this task appears not to cover.',
-    reviewContract: { version: 1, kind: 'uncovered_requirements', stage: 'map', findingsPath: 'data.findings', itemTaskIdsPath: 'canonical_task_ids', maxFindingsPerItem: 25 },
-  })
-  const coverageReduce = await w.reduce('coverage-audit-reduce', { findings: findingsFrom(coverageMap) }, {
-    tier: 'critic',
-    task: 'Preserve every map coverage finding verbatim, deduplicate only by exact finding identity, and add cross-task uncovered-requirement findings. Return data.findings.',
-    reviewContract: { version: 1, kind: 'uncovered_requirements', stage: 'reduce_final', sourceMapCallIds: ['coverage-audit-map'], preserveMapFindings: true, findingsPath: 'data.findings', accountingField: 'uncovered_requirements', maxInputBytes: 48000 },
-  })
+  // The runtime PROVIDES the two mandatory reviews as built-in primitives:
+  // adversarialReview and coverageAudit each fan out ONE critic reviewer per
+  // accepted task (bounded, so a large deliverable never overflows one context)
+  // then reduce over the findings. You do NOT author the map/reduce shape — just
+  // pass the accepted task ids and a bounded-evidence function. Each returns the
+  // final findings array for the accounting below.
+  const adversarial_findings = await adversarialReview(acceptedTaskIds, { evidenceFor: boundedEvidenceFor })
+  const uncovered_requirements = await coverageAudit(acceptedTaskIds, { evidenceFor: boundedEvidenceFor })
 
   return {
     accepted: acceptedTaskIds,
     blocked: blockedTasks,
-    adversarial_findings: findingsFrom(adversarialReduce),
-    uncovered_requirements: findingsFrom(coverageReduce),
+    adversarial_findings,
+    uncovered_requirements,
     notes: 'short honest summary',
   }
   // Your own small helpers, defined at the top of the script:
@@ -98,10 +76,8 @@ Shape — top-level script, exactly like this (no wrapper function):
   //      finding intact, but share a 4,000-character budget across only its
   //      commands_run[*].output_summary strings and mark any truncation
   //   summarize(env)  -> short text used only for final blocked accounting
-  //   findingsFrom/gapsFrom -> read the review envelopes for the return value
-  // acceptedTaskIds/blockedTasks are arrays you build as tasks finish:
-  //   isAccepted(impl) && isAccepted(check) ? acceptedTaskIds.push(id)
-  //                                         : blockedTasks.push({ taskId: id, reason: summarize(check) })
+  //   boundedEvidenceFor(taskId) -> a compact, bounded evidence array for a task
+  //      id (its accepted claims/artifacts) — the reviewers falsify against it
 
 Statements run at the top level: bare phase()/log() (no await needed), `await agent(...)`, and a final top-level `return`.
 

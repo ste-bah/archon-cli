@@ -186,7 +186,59 @@ function __archonPrimitives(w) {
     }
     return results;
   };
-  return Object.freeze({ agent, agents, phase, log, pipeline, w });
+  // Mandatory reviews as a RUNTIME primitive: fanout one critic reviewer per
+  // accepted task (the map — bounded, so a large deliverable can never overflow
+  // one context) then a single critic reduce over the map findings (the cross-
+  // task pass). The author calls one line; it never authors the map/reduce shape
+  // itself. Read-only; the reduce feeds the accounting field named by `kind`.
+  const findingsFrom = (env) => {
+    const direct = env && env.data && env.data.findings;
+    if (Array.isArray(direct)) return direct;
+    const nested = env && env.result && env.result.data && env.result.data.findings;
+    return Array.isArray(nested) ? nested : [];
+  };
+  const reviewMapReduce = async (label, kind, mapTask, reduceTask, acceptedTaskIds, evidenceFor) => {
+    const ids = Array.isArray(acceptedTaskIds) ? acceptedTaskIds : [];
+    const map = ids.length > 0
+      ? await w.parallel(`${label}-map`, ids.map((taskId) => ({
+          item_id: `review-${slug(taskId)}`,
+          canonical_task_ids: [taskId],
+          task: mapTask,
+          evidence: (typeof evidenceFor === "function" ? evidenceFor(taskId) : []),
+        })), {
+          tier: "critic",
+          itemKind: "review_map",
+          maxParallelism: 4,
+          task: mapTask,
+          reviewContract: { version: 1, kind, stage: "map", findingsPath: "data.findings", itemTaskIdsPath: "canonical_task_ids", maxFindingsPerItem: 25 },
+        })
+      : { data: { findings: [] } };
+    const reduce = await w.reduce(`${label}-reduce`, { findings: findingsFrom(map) }, {
+      tier: "critic",
+      task: reduceTask,
+      reviewContract: { version: 1, kind, stage: "reduce_final", sourceMapCallIds: [`${label}-map`], preserveMapFindings: true, findingsPath: "data.findings", accountingField: kind, maxInputBytes: 48000 },
+    });
+    return findingsFrom(reduce);
+  };
+  const adversarialReview = async (acceptedTaskIds, opts = {}) =>
+    reviewMapReduce(
+      "adversarial-review",
+      "adversarial_findings",
+      "You did NOT do this work — be suspicious. Try to FALSIFY this accepted task using only its own claims and the bounded evidence supplied. Return data.findings as compact structured findings (max 25).",
+      "Preserve every map finding verbatim, then add any cross-task contradictions you can see across the map findings. Return data.findings.",
+      acceptedTaskIds,
+      opts.evidenceFor,
+    );
+  const coverageAudit = async (acceptedTaskIds, opts = {}) =>
+    reviewMapReduce(
+      "coverage-audit",
+      "uncovered_requirements",
+      "Compare this accepted task against the source requirements it claims to satisfy. Return data.findings for any requirement it appears NOT to cover.",
+      "Preserve every map coverage finding verbatim, deduplicate only by exact finding identity, then add cross-task uncovered-requirement findings. Return data.findings.",
+      acceptedTaskIds,
+      opts.evidenceFor,
+    );
+  return Object.freeze({ agent, agents, phase, log, pipeline, adversarialReview, coverageAudit, w });
 }
 "#;
 
