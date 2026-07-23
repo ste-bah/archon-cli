@@ -13,34 +13,10 @@ use tokio::task::JoinHandle;
 use crate::provider_env::{ProviderEnvPolicy, ProviderEnvResolution, ProviderEnvSource};
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
-const SENSITIVE_PATTERNS: &[&str] = &[
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "_TOKEN",
-    "_SECRET",
-    "_KEY",
-    "_PASSWORD",
-    "_CREDENTIAL",
-];
-
-const PASSTHROUGH_VARS: &[&str] = &[
-    "PATH",
-    "HOME",
-    "USER",
-    "SHELL",
-    "LANG",
-    "LC_ALL",
-    "TERM",
-    "DISPLAY",
-    "XDG_RUNTIME_DIR",
-    "DBUS_SESSION_BUS_ADDRESS",
-    "SSH_AUTH_SOCK",
-    "EDITOR",
-    "VISUAL",
-    "TMPDIR",
-    "TMP",
-    "TEMP",
-];
+#[path = "bash_env.rs"]
+mod bash_env;
+use bash_env::ensure_env_default;
+pub use bash_env::sanitized_env;
 
 const DEFAULT_BASH_TIMEOUT_SECS: u64 = 600;
 const PIPE_READ_CHUNK_BYTES: usize = 8 * 1024;
@@ -483,34 +459,6 @@ fn signal_process_group(pid: u32, signal: libc::c_int) {
 
 fn command_with_compat_prelude(command: &str) -> String {
     format!("{BASH_COMPAT_PRELUDE}\n{SHELL_TIMEOUT_PRELUDE}\n{command}")
-}
-
-pub fn sanitized_env() -> Vec<(String, String)> {
-    let mut env = Vec::new();
-
-    for (key, value) in std::env::vars() {
-        if PASSTHROUGH_VARS.contains(&key.as_str()) {
-            env.push((key, value));
-            continue;
-        }
-
-        let upper = key.to_uppercase();
-        let is_sensitive = SENSITIVE_PATTERNS
-            .iter()
-            .any(|pattern| upper.contains(pattern));
-
-        if !is_sensitive {
-            env.push((key, value));
-        }
-    }
-
-    env
-}
-
-fn ensure_env_default(env: &mut Vec<(String, String)>, key: &str, value: &str) {
-    if !env.iter().any(|(existing, _)| existing == key) {
-        env.push((key.to_string(), value.to_string()));
-    }
 }
 
 #[cfg(test)]

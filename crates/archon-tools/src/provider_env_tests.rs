@@ -180,6 +180,57 @@ async fn profile_timeout_is_resolution_error_not_missing() {
 }
 
 #[test]
+fn profile_shell_prefers_discovered_sh() {
+    let sh = PathBuf::from(r"C:\Program Files\Git\bin\sh.exe");
+    let bash = PathBuf::from(r"C:\Program Files\Git\bin\bash.exe");
+
+    assert_eq!(select_profile_shell(Some(sh.clone()), Some(bash)), sh);
+}
+
+#[test]
+fn profile_shell_uses_discovered_bash_when_sh_is_unavailable() {
+    let bash = PathBuf::from(r"C:\Program Files\Git\bin\bash.exe");
+
+    assert_eq!(select_profile_shell(None, Some(bash.clone())), bash);
+}
+
+#[test]
+fn profile_shell_falls_back_to_path_sh() {
+    assert_eq!(select_profile_shell(None, None), PathBuf::from("sh"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn profile_script_runs_under_posix_sh() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let profile = dir.path().join("profile");
+    let mut file = std::fs::File::create(&profile).expect("profile");
+    writeln!(file, "export ARCHON_TEST_POSIX_KEY=posix-value").unwrap();
+    let keys = vec!["ARCHON_TEST_POSIX_KEY".to_string()];
+    let profiles = vec![profile.display().to_string()];
+
+    let output = tokio::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(profile_script(&keys, &profiles))
+        .output()
+        .await
+        .expect("run POSIX shell");
+
+    assert!(
+        output.status.success(),
+        "profile script must be POSIX-compatible: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        parse_profile_output(&output.stdout, &keys).expect("parse profile output"),
+        BTreeMap::from([(
+            "ARCHON_TEST_POSIX_KEY".to_string(),
+            "posix-value".to_string()
+        )])
+    );
+}
+
+#[test]
 fn resolver_status_defaults_for_legacy_redacted_proofs() {
     let proof: ProviderEnvResolverProof = serde_json::from_value(serde_json::json!({
         "exit_status": 0,

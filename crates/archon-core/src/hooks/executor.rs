@@ -6,9 +6,11 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::sync::Mutex as TokioMutex;
 
-use super::context::HookContext;
-use super::function::FunctionRegistry;
-use super::types::{HookConfig, HookEvent, HookOutcome, HookResult};
+use super::types::{HookConfig, HookOutcome, HookResult};
+
+#[path = "executor_function.rs"]
+mod executor_function;
+use executor_function::execute_function_hook;
 
 // ---------------------------------------------------------------------------
 // Agent hook recursion guard (thread-local) and serialization mutex
@@ -31,10 +33,6 @@ pub fn set_in_hook_agent(value: bool) {
 /// Lazy-initialized Mutex for agent hook serialization (max concurrency: 1).
 static AGENT_HOOK_MUTEX: std::sync::LazyLock<TokioMutex<()>> =
     std::sync::LazyLock::new(|| TokioMutex::new(()));
-
-/// Lazy-initialized FunctionRegistry for function hooks.
-static FUNCTION_REGISTRY: std::sync::LazyLock<FunctionRegistry> =
-    std::sync::LazyLock::new(FunctionRegistry::new);
 
 /// RAII guard that resets IN_HOOK_AGENT to false on drop.
 struct AgentGuard;
@@ -484,41 +482,4 @@ fn spawn_background(
         )
         .await;
     });
-}
-
-// ---------------------------------------------------------------------------
-// Function hook executor — in-process named function dispatch
-// ---------------------------------------------------------------------------
-
-fn execute_function_hook(
-    config: &HookConfig,
-    input: &serde_json::Value,
-    cwd: &Path,
-    session_id: &str,
-    event_name: &str,
-) -> HookResult {
-    // Parse event name back to HookEvent for context building.
-    let hook_event: HookEvent =
-        serde_json::from_value(serde_json::Value::String(event_name.to_string()))
-            .unwrap_or(HookEvent::PreToolUse);
-
-    let tool_name = input
-        .get("tool_name")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-
-    let mut builder = HookContext::builder(hook_event)
-        .session_id(session_id.to_string())
-        .cwd(cwd.to_string_lossy().to_string());
-
-    if let Some(name) = tool_name {
-        builder = builder.tool_name(name);
-    }
-
-    if let Some(tool_input) = input.get("tool_input") {
-        builder = builder.tool_input(tool_input.clone());
-    }
-
-    let ctx = builder.build();
-    FUNCTION_REGISTRY.execute(&config.command, &ctx)
 }

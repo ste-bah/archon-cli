@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::process::Command;
 
+#[path = "provider_env_types_impl.rs"]
+mod types_impl;
+
 const DEFAULT_PROFILE_SOURCE: &str = "~/.profile";
 const PROFILE_TIMEOUT_MS: u64 = 3_000;
 
@@ -111,7 +114,7 @@ pub struct ProviderEnvProof {
 #[derive(Clone, PartialEq, Eq)]
 pub struct ProviderEnvResolution {
     pub proof: ProviderEnvProof,
-    env: Vec<(String, String)>,
+    pub(super) env: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -122,70 +125,6 @@ pub enum ProviderEnvSource {
         policy: ProviderEnvPolicy,
         resolution: ProviderEnvResolution,
     },
-}
-
-impl ProviderEnvSource {
-    pub fn policy(&self) -> Option<&ProviderEnvPolicy> {
-        match self {
-            Self::Policy(policy) | Self::ResolvedPolicy { policy, .. } => Some(policy),
-            Self::Resolution(_) => None,
-        }
-    }
-
-    pub fn resolution(&self) -> Option<&ProviderEnvResolution> {
-        match self {
-            Self::Resolution(resolution) | Self::ResolvedPolicy { resolution, .. } => {
-                Some(resolution)
-            }
-            Self::Policy(_) => None,
-        }
-    }
-}
-
-impl std::fmt::Debug for ProviderEnvResolution {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("ProviderEnvResolution")
-            .field("proof", &self.proof)
-            .field("resolved_key_count", &self.env.len())
-            .finish()
-    }
-}
-
-impl ProviderEnvResolution {
-    pub fn covers(&self, policy: &ProviderEnvPolicy) -> bool {
-        let checked = self
-            .proof
-            .redacted_env_keys_checked
-            .iter()
-            .map(|proof| proof.key.as_str())
-            .collect::<std::collections::BTreeSet<_>>();
-        normalize_keys(policy.required_keys.clone())
-            .iter()
-            .all(|key| checked.contains(key.as_str()))
-    }
-
-    pub fn apply_to_env(&self, env: &mut Vec<(String, String)>) {
-        for (key, value) in &self.env {
-            if let Some(existing) = env.iter_mut().find(|(candidate, _)| candidate == key) {
-                existing.1 = value.clone();
-            } else {
-                env.push((key.clone(), value.clone()));
-            }
-        }
-    }
-
-    pub fn redact_text(&self, text: &str) -> String {
-        self.env
-            .iter()
-            .fold(text.to_string(), |current, (key, value)| {
-                if value.is_empty() {
-                    current
-                } else {
-                    current.replace(value, &format!("<redacted:{key}>"))
-                }
-            })
-    }
 }
 
 pub async fn resolve_provider_env(policy: &ProviderEnvPolicy) -> ProviderEnvResolution {
@@ -398,11 +337,11 @@ async fn profile_values_with_timeout(
 }
 
 fn profile_shell() -> PathBuf {
-    ["/bin/zsh", "/bin/bash", "/bin/sh"]
-        .into_iter()
-        .map(PathBuf::from)
-        .find(|path| path.is_file())
-        .unwrap_or_else(|| PathBuf::from("sh"))
+    select_profile_shell(which::which("sh").ok(), which::which("bash").ok())
+}
+
+fn select_profile_shell(sh: Option<PathBuf>, bash: Option<PathBuf>) -> PathBuf {
+    sh.or(bash).unwrap_or_else(|| PathBuf::from("sh"))
 }
 
 fn profile_script(keys: &[String], profiles: &[String]) -> String {
@@ -411,7 +350,7 @@ fn profile_script(keys: &[String], profiles: &[String]) -> String {
         .filter_map(|profile| shell_path(profile))
         .map(|profile| {
             format!(
-                "if [ -f {profile} ]; then source {profile} >/dev/null 2>&1 || {{ print -u2 'provider profile source failed'; exit 73; }}; fi"
+                "if [ -f {profile} ]; then . {profile} >/dev/null 2>&1 || {{ printf '%s\n' 'provider profile source failed' >&2; exit 73; }}; fi"
             )
         })
         .collect::<Vec<_>>()
