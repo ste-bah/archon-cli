@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 use crate::subagent_executor::{ExecutorError, SubagentOutcome, get_subagent_executor};
@@ -26,7 +27,25 @@ pub async fn run_subagent(
     cancel: CancellationToken,
     ctx: ToolContext,
 ) -> SubagentOutcome {
-    run_subagent_with_auto_background(subagent_id, request, cancel, ctx, true).await
+    run_subagent_with_auto_background(subagent_id, request, cancel, ctx, true, None).await
+}
+
+pub(crate) async fn run_subagent_with_completion(
+    subagent_id: String,
+    request: SubagentRequest,
+    cancel: CancellationToken,
+    ctx: ToolContext,
+    auto_background_completion: oneshot::Sender<SubagentOutcome>,
+) -> SubagentOutcome {
+    run_subagent_with_auto_background(
+        subagent_id,
+        request,
+        cancel,
+        ctx,
+        true,
+        Some(auto_background_completion),
+    )
+    .await
 }
 
 /// Run a subagent as an awaited foreground operation even when the global
@@ -38,7 +57,7 @@ pub async fn run_subagent_foreground(
     cancel: CancellationToken,
     ctx: ToolContext,
 ) -> SubagentOutcome {
-    run_subagent_with_auto_background(subagent_id, request, cancel, ctx, false).await
+    run_subagent_with_auto_background(subagent_id, request, cancel, ctx, false, None).await
 }
 
 async fn run_subagent_with_auto_background(
@@ -47,6 +66,7 @@ async fn run_subagent_with_auto_background(
     cancel: CancellationToken,
     ctx: ToolContext,
     allow_auto_background: bool,
+    auto_background_completion: Option<oneshot::Sender<SubagentOutcome>>,
 ) -> SubagentOutcome {
     let exec = match get_subagent_executor() {
         Some(e) => e,
@@ -67,7 +87,17 @@ async fn run_subagent_with_auto_background(
         let ctx = ctx.clone();
         let req = request.clone();
         let sid = subagent_id.clone();
-        async move { exec.run_to_completion(sid, req, ctx, cancel).await }
+        async move {
+            let result = exec.run_to_completion(sid, req, ctx, cancel).await;
+            if let Some(completion) = auto_background_completion {
+                let outcome = match &result {
+                    Ok(text) => SubagentOutcome::Completed(text.clone()),
+                    Err(error) => SubagentOutcome::Failed(error.to_string()),
+                };
+                let _ = completion.send(outcome);
+            }
+            result
+        }
     });
 
     let outcome = if auto_bg_ms == 0 {
@@ -121,9 +151,7 @@ async fn run_subagent_with_auto_background(
                 .on_visible_complete(subagent_id.clone(), Err(err.clone()), nested)
                 .await;
         }
-        SubagentOutcome::AutoBackgrounded => {
-            // NO on_visible_complete call — see PRESERVE-D5 above.
-        }
+        SubagentOutcome::AutoBackgrounded => {}
         SubagentOutcome::Cancelled => {
             exec.on_inner_complete(subagent_id.clone(), Err("subagent cancelled".to_string()))
                 .await;

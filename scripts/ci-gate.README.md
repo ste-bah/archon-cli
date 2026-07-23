@@ -9,8 +9,10 @@ Reference: **TASK-AGS-007** (phase-0 prereqs) —
 
 ## Why `--test-threads=2`
 
-Every `cargo test` invocation in this repo runs with `--test-threads=2`.
-This is hard-coded in `ci-gate.sh` and is the project-wide safe floor.
+The CI gate's executable workspace test run uses `--test-threads=2`.
+Baseline discovery uses `--list`; baseline regeneration uses one test thread.
+The CI executable-test policy is hard-coded in `ci-gate.sh` and is the
+project-wide safe floor for that gate.
 
 1. **REQ-FOR-D1 / D2 / D3** introduce shared global state — the
    `BACKGROUND_AGENTS` DashMap, the task registry, and tempdir-backed
@@ -75,4 +77,5 @@ messages cite which task owns the missing piece.
 4. Injecting a banned import causes failure at step 2 without reaching
    step 3.
 5. Deleting a test causes step 6 to print `ERROR: tests were removed`.
-6. `scripts/ci-gate.sh` ≤200 lines, POSIX + cargo only.
+6. `scripts/ci-gate.sh` ≤200 lines; baseline discovery requires Bash, Cargo,
+   Python 3, and GNU `timeout`.
