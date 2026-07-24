@@ -459,21 +459,19 @@ pub fn parse_bedrock_event(event: &serde_json::Value) -> Vec<StreamEvent> {
     if let Some(metadata) = event.get("metadata")
         && let Some(usage) = metadata.get("usage")
     {
-        let input_tokens = usage
-            .get("inputTokens")
-            .and_then(|t| t.as_u64())
-            .unwrap_or(0);
-        let output_tokens = usage
-            .get("outputTokens")
-            .and_then(|t| t.as_u64())
-            .unwrap_or(0);
+        let input_tokens = usage.get("inputTokens").and_then(|t| t.as_u64());
+        let output_tokens = usage.get("outputTokens").and_then(|t| t.as_u64());
         events.push(StreamEvent::MessageDelta {
             stop_reason: None,
             usage: Some(Usage {
-                input_tokens,
-                output_tokens,
+                input_tokens: input_tokens.unwrap_or(0),
+                output_tokens: output_tokens.unwrap_or(0),
                 cache_creation_input_tokens: 0,
                 cache_read_input_tokens: 0,
+                input_tokens_available: input_tokens.is_some(),
+                output_tokens_available: output_tokens.is_some(),
+                cache_creation_input_tokens_available: false,
+                cache_read_input_tokens_available: false,
             }),
         });
     }

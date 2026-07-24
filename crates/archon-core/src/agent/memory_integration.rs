@@ -278,6 +278,13 @@ impl Agent {
 
         let session_id = self.config.session_id.clone();
         let turn = self.turn_number as usize;
+        let attribution = self.config.runtime_attribution_extra(
+            "memory_extraction",
+            "memory_extraction",
+            Some(self.turn_number),
+            None,
+            None,
+        );
         let client = Arc::clone(&self.client);
         let model = self.config.model.clone();
         // Reference: auto_trainer_runtime.rs — closure pointing at AutoTrainer.record_memories.
@@ -305,8 +312,8 @@ impl Agent {
                 thinking: None,
                 speed: None,
                 effort: None,
-                extra: serde_json::Value::Null,
-                request_origin: None,
+                extra: attribution,
+                request_origin: Some("memory_extraction".into()),
                 reasoning_encrypted: None,
             };
 

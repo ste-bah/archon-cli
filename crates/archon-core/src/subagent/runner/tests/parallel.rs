@@ -86,6 +86,7 @@ async fn parallel_tool_dispatch_concurrent_and_order_preserved() {
                     output_tokens: 5,
                     cache_creation_input_tokens: 0,
                     cache_read_input_tokens: 0,
+                    ..Usage::default()
                 },
             },
             StreamEvent::ContentBlockStart {

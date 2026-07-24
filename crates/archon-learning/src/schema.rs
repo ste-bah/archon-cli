@@ -20,6 +20,7 @@ pub fn ensure_learning_schema(db: &DbInstance) -> Result<()> {
     ensure_behaviour_policy_decisions(db)?;
     ensure_behaviour_approvals(db)?;
     ensure_provider_runtime_events(db)?;
+    crate::llm_call_usage::ensure_schema(db)?;
     ensure_agent_performance_ledger(db)?;
     ensure_agent_evolution_proposals(db)?;
     ensure_agent_profile_versions(db)?;

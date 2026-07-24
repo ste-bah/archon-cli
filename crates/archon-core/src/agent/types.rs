@@ -194,16 +194,6 @@ impl AgentConfig {
         };
         (self.max_tokens, thinking, speed)
     }
-
-    pub fn runtime_context_extra(&self) -> serde_json::Value {
-        serde_json::json!({
-            "archon_runtime": {
-                "run_id": self.session_id,
-                "agent_type": self.agent_type,
-                "agent_version": self.agent_version,
-            }
-        })
-    }
 }
 
 impl Default for AgentConfig {
@@ -377,11 +367,22 @@ mod tests {
             ..AgentConfig::default()
         };
 
-        let extra = config.runtime_context_extra();
+        let extra = config.runtime_attribution_extra(
+            "assistant",
+            "main_session",
+            Some(2),
+            Some(3),
+            Some(100),
+        );
 
         assert_eq!(extra["archon_runtime"]["run_id"], "session-1");
+        assert_eq!(extra["archon_runtime"]["session_id"], "session-1");
+        assert_eq!(extra["archon_runtime"]["role"], "assistant");
         assert_eq!(extra["archon_runtime"]["agent_type"], "reviewer");
         assert_eq!(extra["archon_runtime"]["agent_version"], "1.0.0");
+        assert_eq!(extra["archon_runtime"]["turn"], 2);
+        assert_eq!(extra["archon_runtime"]["round"], 3);
+        assert_eq!(extra["archon_runtime"]["effective_denominator"], 100);
     }
 
     #[test]

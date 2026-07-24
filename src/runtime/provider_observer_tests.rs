@@ -3,8 +3,7 @@ use archon_llm::anthropic::AnthropicClient;
 use archon_llm::auth::AuthProvider;
 use archon_llm::identity::{IdentityMode, IdentityProvider};
 use archon_llm::providers::AnthropicProvider;
-use archon_llm::types::Secret;
-use archon_llm::types::Usage;
+use archon_llm::types::{Secret, Usage};
 
 struct FailingProvider;
 
@@ -58,6 +57,10 @@ impl LlmProvider for CompleteProvider {
                 output_tokens: 5,
                 cache_creation_input_tokens: 0,
                 cache_read_input_tokens: 0,
+                input_tokens_available: true,
+                output_tokens_available: true,
+                cache_creation_input_tokens_available: true,
+                cache_read_input_tokens_available: true,
             },
             stop_reason: "end_turn".into(),
         })
@@ -159,6 +162,18 @@ async fn complete_records_start_and_success_events() {
     assert_eq!(events[1].event_type, "request_started");
     assert_eq!(events[0].model_id.as_deref(), Some("model-a"));
     assert_eq!(events[0].raw_redacted_json["usage"]["output_count"], 5);
+
+    let rows = archon_learning::llm_call_usage::list_llm_call_usage(
+        &db,
+        &archon_learning::llm_call_usage::LlmCallUsageScope::default(),
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].terminal_status, "succeeded");
+    assert_eq!(
+        rows[0].input_tokens,
+        archon_learning::llm_call_usage::UsageAvailability::Known(3)
+    );
 }
 
 #[tokio::test]
@@ -192,6 +207,13 @@ async fn failures_emit_request_and_limit_events() {
         events[0].message.as_deref(),
         Some("provider reported a usage or quota limit")
     );
+    let rows = archon_learning::llm_call_usage::list_llm_call_usage(
+        &db,
+        &archon_learning::llm_call_usage::LlmCallUsageScope::default(),
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].terminal_status, "failed");
 }
 
 #[tokio::test]

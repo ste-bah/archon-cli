@@ -84,6 +84,7 @@ impl SubagentRunner {
                     &mut last_known_context_tokens,
                     &mut proactive_pressure_attempted,
                     reasoning_encrypted.clone(),
+                    turn,
                 ),
             )
             .await

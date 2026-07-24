@@ -7,6 +7,7 @@ pub mod codex;
 pub mod gcp_auth;
 pub mod local;
 pub mod openai;
+mod openai_protocol;
 pub mod vertex;
 
 // TASK-AGS-700: descriptor-driven Phase 7 scaffolding. Coexists with the

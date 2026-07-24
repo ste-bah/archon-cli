@@ -188,6 +188,7 @@ impl LlmProvider for CapturingMockProvider {
                     output_tokens: 5,
                     cache_creation_input_tokens: 0,
                     cache_read_input_tokens: 0,
+                    ..Usage::default()
                 },
             },
             StreamEvent::ContentBlockStart {
@@ -295,6 +296,10 @@ async fn subagent_system_block_starts_with_billing_header_in_spoof_mode() {
             .is_some_and(|t| t.contains("Test agent body"))
     });
     assert!(body_found, "agent body not found in system blocks");
+    assert_eq!(request.extra["archon_runtime"]["role"], "subagent");
+    assert_eq!(request.extra["archon_runtime"]["origin"], "subagent");
+    assert_eq!(request.extra["archon_runtime"]["turn"], 0);
+    assert_eq!(request.extra["archon_runtime"]["round"], 0);
 }
 
 #[tokio::test]
@@ -335,4 +340,8 @@ async fn subagent_system_block_omits_billing_header_in_clean_mode() {
             .is_some_and(|t| t.contains("Test agent body"))
     });
     assert!(body_found, "agent body not found in system blocks");
+    assert_eq!(request.extra["archon_runtime"]["role"], "subagent");
+    assert_eq!(request.extra["archon_runtime"]["origin"], "subagent");
+    assert_eq!(request.extra["archon_runtime"]["turn"], 0);
+    assert_eq!(request.extra["archon_runtime"]["round"], 0);
 }

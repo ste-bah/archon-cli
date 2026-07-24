@@ -273,10 +273,15 @@ impl LlmProvider for LocalProvider {
                     text_parts.push(text);
                 }
                 StreamEvent::MessageDelta {
-                    stop_reason: Some(sr),
-                    ..
+                    stop_reason: event_stop_reason,
+                    usage: event_usage,
                 } => {
-                    stop_reason = sr;
+                    if let Some(sr) = event_stop_reason {
+                        stop_reason = sr;
+                    }
+                    if let Some(event_usage) = event_usage {
+                        usage.merge(&event_usage);
+                    }
                 }
                 _ => {}
             }

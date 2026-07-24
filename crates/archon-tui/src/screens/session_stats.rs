@@ -126,10 +126,10 @@ pub fn compute_stats(
     let mut recent_tools: Vec<String> = Vec::new();
 
     // Accumulate token usage across all messages
-    let mut total_input_tokens: u64 = 0;
-    let mut total_output_tokens: u64 = 0;
-    let mut total_cache_creation_input_tokens: u64 = 0;
-    let mut total_cache_read_input_tokens: u64 = 0;
+    let mut input_tokens = UsageTotal::default();
+    let mut output_tokens = UsageTotal::default();
+    let mut cache_creation_input_tokens = UsageTotal::default();
+    let mut cache_read_input_tokens = UsageTotal::default();
 
     // Parse messages in reverse (newest-first) to build recent lists
     for content in messages.iter().rev() {
@@ -167,22 +167,10 @@ pub fn compute_stats(
 
             // Extract token usage if present
             if let Some(token_obj) = json.get("token_usage") {
-                total_input_tokens += token_obj
-                    .get("input_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                total_output_tokens += token_obj
-                    .get("output_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                total_cache_creation_input_tokens += token_obj
-                    .get("cache_creation_input_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                total_cache_read_input_tokens += token_obj
-                    .get("cache_read_input_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
+                input_tokens.record(token_obj, "input_tokens");
+                output_tokens.record(token_obj, "output_tokens");
+                cache_creation_input_tokens.record(token_obj, "cache_creation_input_tokens");
+                cache_read_input_tokens.record(token_obj, "cache_read_input_tokens");
             }
         }
     }
@@ -198,16 +186,60 @@ pub fn compute_stats(
         message_count,
         agent_count: agents.len() as u64,
         token_usage: TokenUsage {
-            input_tokens: total_input_tokens,
-            output_tokens: total_output_tokens,
-            cache_creation_input_tokens: total_cache_creation_input_tokens,
-            cache_read_input_tokens: total_cache_read_input_tokens,
+            input_tokens: input_tokens.value,
+            output_tokens: output_tokens.value,
+            cache_creation_input_tokens: cache_creation_input_tokens.value,
+            cache_read_input_tokens: cache_read_input_tokens.value,
+            input_tokens_available: input_tokens.available,
+            output_tokens_available: output_tokens.available,
+            cache_creation_input_tokens_available: cache_creation_input_tokens.available,
+            cache_read_input_tokens_available: cache_read_input_tokens.available,
         },
         elapsed,
         estimated_cost_usd: None, // pricing table is follow-up work
         recent_commands,
         recent_agents,
         recent_tools,
+    }
+}
+
+#[derive(Default)]
+struct UsageTotal {
+    value: u64,
+    available: bool,
+    invalid: bool,
+}
+
+impl UsageTotal {
+    fn record(&mut self, usage: &serde_json::Value, field: &str) {
+        if self.invalid {
+            return;
+        }
+        let available = usage
+            .get(format!("{field}_available"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or_else(|| usage.get(field).is_some());
+        if !available {
+            self.invalid = true;
+            self.available = false;
+            return;
+        }
+        let Some(value) = usage.get(field).and_then(serde_json::Value::as_u64) else {
+            self.invalid = true;
+            self.available = false;
+            return;
+        };
+        match self.value.checked_add(value) {
+            Some(total) => {
+                self.value = total;
+                self.available = true;
+            }
+            None => {
+                self.value = u64::MAX;
+                self.available = false;
+                self.invalid = true;
+            }
+        }
     }
 }
 
@@ -315,6 +347,62 @@ mod tests {
         assert!(stats.recent_agents.len() <= 10);
         assert!(stats.recent_tools.len() <= 10);
 
+        std::fs::remove_file(&db_path).ok();
+    }
+
+    #[test]
+    fn compute_stats_preserves_explicit_unavailable_usage() {
+        use archon_session::storage::SessionStore;
+
+        let db_path = std::env::temp_dir().join("test_compute_stats_unavailable.db");
+        let store = SessionStore::open(&db_path).unwrap();
+        let session = store.create_session("/tmp", None, "test-model").unwrap();
+        store
+            .save_message(
+                &session.id,
+                0,
+                r#"{"token_usage":{"input_tokens":123,"input_tokens_available":false}}"#,
+            )
+            .unwrap();
+        store
+            .save_message(
+                &session.id,
+                1,
+                r#"{"token_usage":{"input_tokens":5,"input_tokens_available":true}}"#,
+            )
+            .unwrap();
+
+        let stats = compute_stats(&store, &session.id, &NullStats);
+
+        assert_eq!(stats.token_usage.input_tokens, 5);
+        assert!(!stats.token_usage.input_tokens_available);
+        std::fs::remove_file(&db_path).ok();
+    }
+
+    #[test]
+    fn compute_stats_marks_overflowed_usage_unavailable() {
+        use archon_session::storage::SessionStore;
+
+        let db_path = std::env::temp_dir().join("test_compute_stats_overflow.db");
+        let store = SessionStore::open(&db_path).unwrap();
+        let session = store.create_session("/tmp", None, "test-model").unwrap();
+        let first = format!(
+            r#"{{"token_usage":{{"input_tokens":{},"input_tokens_available":true}}}}"#,
+            u64::MAX
+        );
+        store.save_message(&session.id, 0, &first).unwrap();
+        store
+            .save_message(
+                &session.id,
+                1,
+                r#"{"token_usage":{"input_tokens":1,"input_tokens_available":true}}"#,
+            )
+            .unwrap();
+
+        let stats = compute_stats(&store, &session.id, &NullStats);
+
+        assert_eq!(stats.token_usage.input_tokens, u64::MAX);
+        assert!(!stats.token_usage.input_tokens_available);
         std::fs::remove_file(&db_path).ok();
     }
 

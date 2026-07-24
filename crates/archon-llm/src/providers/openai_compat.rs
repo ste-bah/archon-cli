@@ -254,6 +254,16 @@ impl OpenAiCompatProvider {
                 output_tokens,
                 cache_creation_input_tokens: 0,
                 cache_read_input_tokens: 0,
+                input_tokens_available: usage_json
+                    .and_then(|u| u.get("prompt_tokens"))
+                    .and_then(|v| v.as_u64())
+                    .is_some(),
+                output_tokens_available: usage_json
+                    .and_then(|u| u.get("completion_tokens"))
+                    .and_then(|v| v.as_u64())
+                    .is_some(),
+                cache_creation_input_tokens_available: false,
+                cache_read_input_tokens_available: false,
             },
             stop_reason,
         })

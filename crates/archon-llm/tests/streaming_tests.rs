@@ -1,5 +1,49 @@
 use archon_llm::streaming::{StreamEvent, parse_sse_event, split_sse_lines};
-use archon_llm::types::ContentBlockType;
+use archon_llm::types::{ContentBlockType, Usage};
+
+#[test]
+fn usage_merge_marks_overflowed_field_unavailable() {
+    let mut total = Usage {
+        input_tokens: u64::MAX,
+        input_tokens_available: true,
+        ..Usage::default()
+    };
+
+    total.merge(&Usage {
+        input_tokens: 1,
+        input_tokens_available: true,
+        ..Usage::default()
+    });
+
+    assert!(!total.input_tokens_available);
+}
+
+#[test]
+fn usage_serde_roundtrip_preserves_unavailable_zero() {
+    let usage = Usage::default();
+
+    let roundtrip: Usage = serde_json::from_value(serde_json::to_value(&usage).unwrap()).unwrap();
+
+    assert_eq!(roundtrip.input_tokens, 0);
+    assert!(!roundtrip.input_tokens_available);
+    assert!(!roundtrip.output_tokens_available);
+    assert!(!roundtrip.cache_creation_input_tokens_available);
+    assert!(!roundtrip.cache_read_input_tokens_available);
+}
+
+#[test]
+fn usage_legacy_json_infers_availability_from_present_numbers() {
+    let usage: Usage = serde_json::from_value(serde_json::json!({
+        "input_tokens": 0,
+        "output_tokens": 3
+    }))
+    .unwrap();
+
+    assert!(usage.input_tokens_available);
+    assert!(usage.output_tokens_available);
+    assert!(!usage.cache_creation_input_tokens_available);
+    assert!(!usage.cache_read_input_tokens_available);
+}
 
 #[test]
 fn parse_message_start() {
@@ -11,11 +55,29 @@ fn parse_message_start() {
             assert_eq!(model, "claude-sonnet-4-6");
             assert_eq!(usage.input_tokens, 100);
             assert_eq!(usage.output_tokens, 0);
+            assert!(usage.input_tokens_available);
+            assert!(usage.output_tokens_available);
+            assert!(!usage.cache_creation_input_tokens_available);
+            assert!(!usage.cache_read_input_tokens_available);
         }
         other => panic!("wrong event: {other:?}"),
     }
 }
 
+#[test]
+fn absent_anthropic_usage_fields_remain_unavailable() {
+    let data = r#"{"type":"message_start","message":{"id":"msg_01abc","model":"claude-sonnet-4-6","usage":{}}}"#;
+
+    match parse_sse_event("message_start", data).expect("parse") {
+        StreamEvent::MessageStart { usage, .. } => {
+            assert!(!usage.input_tokens_available);
+            assert!(!usage.output_tokens_available);
+            assert!(!usage.cache_creation_input_tokens_available);
+            assert!(!usage.cache_read_input_tokens_available);
+        }
+        other => panic!("wrong event: {other:?}"),
+    }
+}
 #[test]
 fn parse_content_block_start_text() {
     let data =
@@ -137,6 +199,16 @@ fn parse_message_delta() {
         StreamEvent::MessageDelta { stop_reason, usage } => {
             assert_eq!(stop_reason.as_deref(), Some("end_turn"));
             assert_eq!(usage.as_ref().map(|u| u.output_tokens), Some(42));
+            assert!(
+                usage
+                    .as_ref()
+                    .is_some_and(|usage| usage.output_tokens_available)
+            );
+            assert!(
+                usage
+                    .as_ref()
+                    .is_some_and(|usage| !usage.input_tokens_available)
+            );
         }
         other => panic!("wrong event: {other:?}"),
     }
@@ -266,6 +338,7 @@ fn usage_merge() {
         output_tokens: 0,
         cache_creation_input_tokens: 50,
         cache_read_input_tokens: 25,
+        ..Default::default()
     };
     total.merge(&start_usage);
 
@@ -275,6 +348,7 @@ fn usage_merge() {
         output_tokens: 200,
         cache_creation_input_tokens: 0,
         cache_read_input_tokens: 0,
+        ..Default::default()
     };
     total.merge(&delta_usage);
 

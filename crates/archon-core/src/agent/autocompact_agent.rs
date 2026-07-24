@@ -88,12 +88,20 @@ impl Agent {
             consecutive_failures = self.state.auto_compact.consecutive_failures,
             "auto-compaction attempt started"
         );
+        let attribution = self.config.runtime_attribution_extra(
+            "compaction",
+            "auto_compaction",
+            None,
+            None,
+            None,
+        );
         let result = compact_json_messages_with_provider(
             self.client.as_ref(),
             &active_model,
             &self.state.messages,
             action,
             force,
+            attribution,
         )
         .await;
         match result {

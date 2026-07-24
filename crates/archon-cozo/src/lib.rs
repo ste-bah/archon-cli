@@ -122,6 +122,16 @@ pub fn run_bound_script_guarded(
     run_script_guarded(db, script, params, mutability, context, &config)
 }
 
+pub fn run_bound_guarded<T>(
+    db: &DbInstance,
+    context: &str,
+    mutability: ScriptMutability,
+    run: impl FnMut() -> Result<T>,
+) -> Result<T> {
+    let config = bound_guard_config(db, context)?;
+    run_guarded(context, mutability, &config, run)
+}
+
 pub fn write_lock_path_for_db(path: impl AsRef<Path>) -> PathBuf {
     let path = path.as_ref();
     let resource = canonical_resource_path(path).unwrap_or_else(|_| path.to_path_buf());

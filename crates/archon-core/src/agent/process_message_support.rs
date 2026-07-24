@@ -17,9 +17,18 @@ impl Agent {
         let turns = self.conversation_text_turns();
         let model = self.config.model.clone();
         let turn = self.turn_number as u32;
+        let attribution = self.config.runtime_attribution_extra(
+            "memory_extraction",
+            "auto_extraction",
+            Some(self.turn_number),
+            None,
+            None,
+        );
         self.prune_finished_auto_extractions();
         let handle = tokio::spawn(async move {
-            let _ = extractor.maybe_extract(&turns, turn, &model).await;
+            let _ = extractor
+                .maybe_extract(&turns, turn, &model, attribution)
+                .await;
         });
         self.auto_extraction_tasks.push(handle);
     }

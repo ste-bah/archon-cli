@@ -84,7 +84,11 @@ impl Agent {
             thinking,
             speed,
             effort,
-            extra: self.config.runtime_context_extra(),
+            extra: self.config.request_runtime_extra(
+                self.turn_number,
+                agentic_iterations,
+                self.context_window_for(&active_model),
+            ),
             request_origin: Some("main_session".into()),
             reasoning_encrypted: None,
         };

@@ -37,6 +37,7 @@ impl AutoExtractor {
         recent_turns: &[String],
         current_turn: u32,
         model: &str,
+        attribution: serde_json::Value,
     ) -> Vec<String> {
         if !self.enabled {
             return vec![];
@@ -49,7 +50,7 @@ impl AutoExtractor {
 
         self.last_run_turn.store(current_turn, Ordering::Relaxed);
 
-        let facts = match self.extract_facts(recent_turns, model).await {
+        let facts = match self.extract_facts(recent_turns, model, attribution).await {
             Ok(f) => f,
             Err(_) => return vec![],
         };
@@ -85,6 +86,7 @@ impl AutoExtractor {
         &self,
         recent_turns: &[String],
         model: &str,
+        attribution: serde_json::Value,
     ) -> Result<Vec<String>, String> {
         let conversation = recent_turns.join("\n\n");
 
@@ -108,7 +110,7 @@ impl AutoExtractor {
             thinking: None,
             speed: None,
             effort: None,
-            extra: serde_json::Value::Null,
+            extra: attribution,
             request_origin: Some("auto_extraction".into()),
             reasoning_encrypted: None,
         };
@@ -308,7 +310,7 @@ mod tests {
         let extractor = AutoExtractor::new(Arc::new(FakeLlm), Arc::new(FakeMemory), 5, false);
         assert!(!extractor.enabled);
         // Throttle check: turn 5 but disabled -> empty result
-        let result = rt.block_on(extractor.maybe_extract(&[], 5, "test"));
+        let result = rt.block_on(extractor.maybe_extract(&[], 5, "test", serde_json::Value::Null));
         assert!(result.is_empty());
     }
 
@@ -343,12 +345,88 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn extraction_request_preserves_runtime_attribution() {
+        let captured = Arc::new(std::sync::Mutex::new(None));
+        let extractor = AutoExtractor::new(
+            Arc::new(CapturingLlm {
+                captured: Arc::clone(&captured),
+            }),
+            Arc::new(FakeMemory),
+            5,
+            true,
+        );
+        let attribution = crate::agent::AgentConfig {
+            session_id: "auto-session-42".into(),
+            ..crate::agent::AgentConfig::default()
+        }
+        .runtime_attribution_extra(
+            "memory_extraction",
+            "auto_extraction",
+            Some(5),
+            None,
+            None,
+        );
+
+        extractor
+            .maybe_extract(&["user: remember this".into()], 5, "test", attribution)
+            .await;
+
+        let request = captured.lock().unwrap().clone().unwrap();
+        assert_eq!(
+            request.extra["archon_runtime"]["session_id"],
+            "auto-session-42"
+        );
+        assert_eq!(request.extra["archon_runtime"]["origin"], "auto_extraction");
+    }
+
+    struct CapturingLlm {
+        captured: Arc<std::sync::Mutex<Option<LlmRequest>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for CapturingLlm {
+        fn name(&self) -> &str {
+            "capturing"
+        }
+
+        fn models(&self) -> Vec<archon_llm::provider::ModelInfo> {
+            vec![]
+        }
+
+        async fn stream(
+            &self,
+            _request: LlmRequest,
+        ) -> Result<
+            tokio::sync::mpsc::Receiver<archon_llm::streaming::StreamEvent>,
+            archon_llm::provider::LlmError,
+        > {
+            unreachable!("auto extraction uses complete")
+        }
+
+        async fn complete(
+            &self,
+            request: LlmRequest,
+        ) -> Result<LlmResponse, archon_llm::provider::LlmError> {
+            *self.captured.lock().unwrap() = Some(request);
+            Ok(LlmResponse {
+                content: vec![],
+                usage: Default::default(),
+                stop_reason: String::new(),
+            })
+        }
+
+        fn supports_feature(&self, _feature: archon_llm::provider::ProviderFeature) -> bool {
+            false
+        }
+    }
+
     #[test]
     fn test_throttled_by_turn_count() {
         let extractor = AutoExtractor::new(Arc::new(FakeLlm), Arc::new(FakeMemory), 5, true);
         let rt = tokio::runtime::Runtime::new().unwrap();
         // Turn 3 < every_n_turns=5: should not trigger extraction.
-        let result = rt.block_on(extractor.maybe_extract(&[], 3, "test"));
+        let result = rt.block_on(extractor.maybe_extract(&[], 3, "test", serde_json::Value::Null));
         assert!(result.is_empty());
     }
 
@@ -357,7 +435,12 @@ mod tests {
         let extractor = AutoExtractor::new(Arc::new(FakeLlm), Arc::new(FakeMemory), 5, true);
         let rt = tokio::runtime::Runtime::new().unwrap();
         // Turn 5 >= 5: will attempt extraction, LLM fails, but turn gets updated.
-        let _ = rt.block_on(extractor.maybe_extract(&["user: hello".into()], 5, "test"));
+        let _ = rt.block_on(extractor.maybe_extract(
+            &["user: hello".into()],
+            5,
+            "test",
+            serde_json::Value::Null,
+        ));
         assert_eq!(extractor.last_run_turn.load(Ordering::Relaxed), 5);
     }
 
@@ -377,8 +460,12 @@ mod tests {
     fn test_llm_error_returns_empty() {
         let extractor = AutoExtractor::new(Arc::new(FakeLlm), Arc::new(FakeMemory), 5, true);
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result =
-            rt.block_on(extractor.maybe_extract(&["user: test message".into()], 5, "test"));
+        let result = rt.block_on(extractor.maybe_extract(
+            &["user: test message".into()],
+            5,
+            "test",
+            serde_json::Value::Null,
+        ));
         assert!(result.is_empty());
     }
 }

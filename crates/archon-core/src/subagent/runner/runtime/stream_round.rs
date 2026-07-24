@@ -388,12 +388,20 @@ async fn compact_messages_for_retry(
     last_known_context_tokens: &mut u64,
     error_context: &str,
 ) -> anyhow::Result<()> {
+    let attribution = runner.agent_config.runtime_attribution_extra(
+        "compaction",
+        "subagent_reactive_compaction",
+        None,
+        None,
+        None,
+    );
     let (outcome, compacted) = crate::agent::autocompact::compact_json_messages_with_provider(
         runner.provider.as_ref(),
         &runner.model,
         messages,
         crate::agent::CompactAction::Full,
         true,
+        attribution,
     )
     .await
     .map_err(|err| anyhow::anyhow!("{error_context}: {err}"))?;

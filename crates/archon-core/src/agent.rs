@@ -39,6 +39,8 @@ mod compaction;
 mod compaction_serde;
 pub(crate) mod events;
 mod lifecycle;
+#[cfg(test)]
+mod memory_attribution_tests;
 mod memory_integration;
 mod message_delivery;
 mod payloads;
@@ -46,6 +48,7 @@ mod permission_gate;
 mod process_message;
 mod process_message_steps;
 mod process_message_support;
+mod runtime_attribution;
 mod runtime_hooks;
 mod summary_text;
 mod support;
@@ -71,6 +74,7 @@ pub use compaction::ManualCompactOutcome;
 pub use payloads::{
     ReasoningEvidenceEventPayload, ReasoningTurnEventPayload, UserCorrectionEventPayload,
 };
+pub use runtime_attribution::RuntimeAttribution;
 pub use support::AgentLoopError;
 use support::{parse_plan_from_text, user_correction_excerpt};
 pub use types::{AgentConfig, AgentEvent, ConversationState, SessionStats, TimestampedEvent};
@@ -225,12 +229,20 @@ impl Agent {
 
         let before = self.state.messages.clone();
         self.state.auto_compact.compact_in_flight = true;
+        let attribution = self.config.runtime_attribution_extra(
+            "compaction",
+            "request_pressure_compaction",
+            None,
+            None,
+            None,
+        );
         let result = autocompact::compact_json_messages_with_provider(
             self.client.as_ref(),
             active_model,
             &self.state.messages,
             CompactAction::Full,
             false,
+            attribution,
         )
         .await;
 

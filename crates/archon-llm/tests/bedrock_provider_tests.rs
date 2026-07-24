@@ -127,6 +127,29 @@ fn bedrock_message_stop_parsed() {
     assert!(has_stop, "expected MessageStop, got: {stream_events:?}");
 }
 
+#[test]
+fn bedrock_missing_usage_fields_remain_unavailable() {
+    let event = serde_json::json!({
+        "metadata": {
+            "usage": {
+                "inputTokens": 0
+            }
+        }
+    });
+
+    let stream_events = archon_llm::providers::bedrock::parse_bedrock_event(&event);
+
+    assert!(matches!(
+        stream_events.as_slice(),
+        [archon_llm::streaming::StreamEvent::MessageDelta {
+            usage: Some(usage),
+            ..
+        }] if usage.input_tokens_available
+            && !usage.output_tokens_available
+            && usage.input_tokens == 0
+    ));
+}
+
 // ---------------------------------------------------------------------------
 // Test 5a: Claude model supports Thinking
 // ---------------------------------------------------------------------------

@@ -264,9 +264,14 @@ async fn generate_compaction_summary_pre_trims_huge_history_bounds_body() {
         })
         .collect();
 
-    let summary = generate_compaction_summary_structured(&provider, "claude-opus-4-7", &messages)
-        .await
-        .expect("summary should succeed");
+    let summary = generate_compaction_summary_structured(
+        &provider,
+        "claude-opus-4-7",
+        &messages,
+        serde_json::Value::Null,
+    )
+    .await
+    .expect("summary should succeed");
 
     assert_eq!(summary, "Synthesised summary.");
     let request = captured
