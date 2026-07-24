@@ -103,6 +103,21 @@ return { accepted: [], blocked: [], adversarial_findings: [], uncovered_requirem
         .expect("mandatory map-reduce reviews satisfy pre-flight");
 }
 
+#[tokio::test]
+async fn authored_plan_accepts_review_prelude_helpers() {
+    let script = r#"export const meta = { name: 'primitive-reviews', phases: [] }
+
+const acceptedTaskIds = []
+const adversarial_findings = await adversarialReview(acceptedTaskIds, { evidenceFor: () => [] })
+const uncovered_requirements = await coverageAudit(acceptedTaskIds, { evidenceFor: () => [] })
+return { accepted: [], blocked: [], adversarial_findings, uncovered_requirements }
+"#;
+
+    validate_authored_plan(script, &Default::default())
+        .await
+        .expect("review prelude helpers should satisfy dry-run pre-flight");
+}
+
 #[test]
 fn top_level_shape_is_not_confused_by_workflow_words_in_metadata() {
     let source = r#"export const meta = {

@@ -199,20 +199,18 @@ function __archonPrimitives(w) {
   };
   const reviewMapReduce = async (label, kind, mapTask, reduceTask, acceptedTaskIds, evidenceFor) => {
     const ids = Array.isArray(acceptedTaskIds) ? acceptedTaskIds : [];
-    const map = ids.length > 0
-      ? await w.parallel(`${label}-map`, ids.map((taskId) => ({
-          item_id: `review-${slug(taskId)}`,
-          canonical_task_ids: [taskId],
-          task: mapTask,
-          evidence: (typeof evidenceFor === "function" ? evidenceFor(taskId) : []),
-        })), {
-          tier: "critic",
-          itemKind: "review_map",
-          maxParallelism: 4,
-          task: mapTask,
-          reviewContract: { version: 1, kind, stage: "map", findingsPath: "data.findings", itemTaskIdsPath: "canonical_task_ids", maxFindingsPerItem: 25 },
-        })
-      : { data: { findings: [] } };
+    const map = await w.parallel(`${label}-map`, ids.map((taskId) => ({
+      item_id: `review-${slug(taskId)}`,
+      canonical_task_ids: [taskId],
+      task: mapTask,
+      evidence: (typeof evidenceFor === "function" ? evidenceFor(taskId) : []),
+    })), {
+      tier: "critic",
+      itemKind: "review_map",
+      maxParallelism: 4,
+      task: mapTask,
+      reviewContract: { version: 1, kind, stage: "map", findingsPath: "data.findings", itemTaskIdsPath: "canonical_task_ids", maxFindingsPerItem: 25 },
+    });
     const reduce = await w.reduce(`${label}-reduce`, { findings: findingsFrom(map) }, {
       tier: "critic",
       task: reduceTask,

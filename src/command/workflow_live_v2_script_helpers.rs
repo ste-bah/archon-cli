@@ -180,6 +180,8 @@ async function __archonRun() {{
     globalThis.phase = api.phase;
     globalThis.log = api.log;
     globalThis.pipeline = api.pipeline;
+    globalThis.adversarialReview = api.adversarialReview;
+    globalThis.coverageAudit = api.coverageAudit;
     globalThis.w = api.w;
   }}
   const result = await workflow(api);
