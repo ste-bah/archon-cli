@@ -44,6 +44,11 @@ impl SubagentExecutor for HangingExecutor {
         self.started.store(true, Ordering::SeqCst);
         cancel.cancelled().await;
         self.observed_cancel.store(true, Ordering::SeqCst);
+        self.on_inner_complete(
+            "cancel-abort".to_string(),
+            Err("cancelled after cleanup".to_string()),
+        )
+        .await;
         Err(ExecutorError::Internal("cancelled after cleanup".into()))
     }
 

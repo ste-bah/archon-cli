@@ -177,7 +177,6 @@ fn trait_is_object_safe_with_five_methods() {
 }
 
 // Test 2: install_subagent_executor + get_subagent_executor round-trip.
-// ---------------------------------------------------------------------------
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial_test::serial]
 async fn install_then_get_round_trips() {

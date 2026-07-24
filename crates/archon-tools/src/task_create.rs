@@ -1,5 +1,4 @@
 use serde_json::json;
-use tokio_util::sync::CancellationToken;
 
 use crate::agent_tool::{SubagentRequest, run_subagent_foreground, run_subagent_with_completion};
 use crate::subagent_executor::{SubagentClassification, SubagentOutcome, get_subagent_executor};
@@ -78,7 +77,8 @@ impl Tool for TaskCreateTool {
         };
 
         let full_desc = format!("{subject}: {description}");
-        let task_id = crate::task_manager::TASK_MANAGER.create_task(&full_desc);
+        let task_id = crate::task_manager::TASK_MANAGER
+            .create_task_with_parent(&full_desc, ctx.cancel_parent.as_ref());
 
         // Manual task (no prompt): return task_id only.
         let Some(prompt) = input
@@ -203,7 +203,9 @@ impl Tool for TaskCreateTool {
                 // Spawn detached. The closure owns task_id so it can update
                 // TASK_MANAGER when run_subagent returns.
                 let sid_spawn = subagent_id.clone();
-                let cancel = CancellationToken::new();
+                let cancel = TASK_MANAGER
+                    .execution_token(&task_id)
+                    .expect("new task has an execution token");
                 let ctx_spawn = nested_ctx.clone();
                 let task_id_spawn = task_id.clone();
                 archon_observability::spawn_named("task-create-subagent-background", async move {
@@ -228,7 +230,9 @@ impl Tool for TaskCreateTool {
                 // any concurrent /tasks query sees Running, not Pending.
                 TASK_MANAGER.set_status(&task_id, TaskStatus::Running);
 
-                let cancel = CancellationToken::new();
+                let cancel = TASK_MANAGER
+                    .execution_token(&task_id)
+                    .expect("new task has an execution token");
                 let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
                 let outcome = run_subagent_with_completion(
                     subagent_id.clone(),
