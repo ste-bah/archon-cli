@@ -101,7 +101,7 @@ impl WorkflowV2ScriptRunner {
                     host.emit_terminal_status(summary.status);
                     return Ok(summary);
                 }
-                let summary = host.mark_script_failure(&error).await;
+                let summary = host.mark_script_failure(&error, true).await;
                 Ok(summary)
             }
         }

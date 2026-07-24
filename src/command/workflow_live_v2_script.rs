@@ -108,6 +108,21 @@ impl WorkflowV2ScriptRunner {
         self,
         harness_source: &str,
     ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
+        self.run_with_terminal_status(harness_source, true).await
+    }
+
+    pub(super) async fn run_without_terminal_status(
+        self,
+        harness_source: &str,
+    ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
+        self.run_with_terminal_status(harness_source, false).await
+    }
+
+    async fn run_with_terminal_status(
+        self,
+        harness_source: &str,
+        emit_terminal_status: bool,
+    ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
         let harness_source = harness_source.to_string();
         tokio::task::spawn_blocking(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
@@ -118,7 +133,7 @@ impl WorkflowV2ScriptRunner {
                         "workflow.js local async runtime failed: {err}"
                     ))
                 })?;
-            runtime.block_on(self.run_on_current_thread(&harness_source))
+            runtime.block_on(self.run_on_current_thread(&harness_source, emit_terminal_status))
         })
         .await
         .map_err(|err| WorkflowError::SpecInvalid(format!("workflow.js task failed: {err}")))?
@@ -127,6 +142,7 @@ impl WorkflowV2ScriptRunner {
     async fn run_on_current_thread(
         self,
         harness_source: &str,
+        emit_terminal_status: bool,
     ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
         let script_args = self.script_args.clone();
         let host = Arc::new(WorkflowScriptHost {
@@ -194,14 +210,18 @@ impl WorkflowV2ScriptRunner {
             Ok(result) => {
                 let mut summary = host.summary().await;
                 summary.script_result = Some(result);
-                host.emit_terminal_status(summary.status);
+                if emit_terminal_status {
+                    host.emit_terminal_status(summary.status);
+                }
                 Ok(summary)
             }
             Err(err) => {
                 let error = err.to_string();
                 if error.contains(TERMINAL_HOST_CALL_MARKER) {
                     let summary = host.summary().await;
-                    host.emit_terminal_status(summary.status);
+                    if emit_terminal_status {
+                        host.emit_terminal_status(summary.status);
+                    }
                     return Ok(summary);
                 }
                 let workflow_error = workflow_js_error(error.clone());
@@ -211,7 +231,7 @@ impl WorkflowV2ScriptRunner {
                 ) {
                     return Err(workflow_error);
                 }
-                let summary = host.mark_script_failure(&error).await;
+                let summary = host.mark_script_failure(&error, emit_terminal_status).await;
                 Ok(summary)
             }
         }

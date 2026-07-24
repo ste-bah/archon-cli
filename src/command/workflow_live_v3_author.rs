@@ -371,7 +371,9 @@ impl WorkflowV2ScriptRunner {
             ("reference", V3_PRIMITIVE_REFERENCE),
         ]);
         bootstrap.script_args = Some(serde_json::json!({ "author_task": author_task }));
-        let summary = bootstrap.run(V3_AUTHOR_BOOTSTRAP).await?;
+        let summary = bootstrap
+            .run_without_terminal_status(V3_AUTHOR_BOOTSTRAP)
+            .await?;
         let raw = summary.script_result.ok_or_else(|| {
             WorkflowError::SpecInvalid(
                 "workflow author bootstrap produced no script result".to_string(),

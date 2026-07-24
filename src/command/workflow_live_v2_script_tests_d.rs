@@ -240,6 +240,26 @@ export default async function workflow({ agent, phase, log, w }) {
     // The execution's own result surfaced through the script channel.
     let result = summary.script_result.expect("script result");
     assert!(result.contains("authored demo complete"));
+
+    let events = std::fs::read_to_string(workflow_store.run_dir(&run.id).join("events.jsonl"))
+        .expect("events");
+    let author_finished = events
+        .find(r#""call_id":"author-workflow-script","#)
+        .expect("author completion event");
+    let authored_phase_started = events
+        .find(r#""call_id":"phase-1-authored-phase","#)
+        .expect("authored phase event");
+    let terminal_status = events
+        .find(r#""event":"terminal_status""#)
+        .expect("terminal status event");
+    assert!(
+        authored_phase_started < terminal_status,
+        "author bootstrap must not emit terminal status before authored execution"
+    );
+    assert!(
+        author_finished < authored_phase_started,
+        "authored execution should start after the author bootstrap call"
+    );
 }
 
 #[test]
