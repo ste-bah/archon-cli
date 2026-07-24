@@ -76,9 +76,38 @@ fn parse_envelope_document(output: &str) -> serde_json::Result<Value> {
     // and `task_id` is never a top-level envelope key, so its presence marks
     // a fragment.
     match found {
-        Some(value) if value.get("status").is_some() && value.get("task_id").is_none() => Ok(value),
+        Some(value) if is_result_envelope(&value) => Ok(value),
         _ => Err(root_error),
     }
+}
+
+/// Distinguish the real result envelope from a nested task_coverage entry when
+/// extracting one object from a prose/fence-wrapped reply. Both carry `status`.
+/// A top-level `task_id` previously marked the object a fragment and rejected the
+/// WHOLE (valid) result — but agents routinely add a top-level `task_id` to the
+/// envelope (observed live: verify branches emitting `{status, task_id, …}` got
+/// binned as "missing field status"). The envelope always carries orchestration
+/// fields a task_coverage entry never has, so key on those: accept when `status`
+/// is present and either there is no `task_id` or at least one envelope-only
+/// field is present. A bare `{task_id, status, summary, evidence}` fragment is
+/// still rejected.
+fn is_result_envelope(value: &Value) -> bool {
+    if value.get("status").is_none() {
+        return false;
+    }
+    if value.get("task_id").is_none() {
+        return true;
+    }
+    const ENVELOPE_ONLY: [&str; 7] = [
+        "commands_run",
+        "files_changed",
+        "files_read",
+        "artifacts",
+        "residual_gaps",
+        "task_coverage",
+        "data",
+    ];
+    ENVELOPE_ONLY.iter().any(|key| value.get(key).is_some())
 }
 
 fn starts_like_json_container(candidate: &str) -> bool {
