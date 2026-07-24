@@ -126,6 +126,8 @@ async fn process_message_fires_runtime_lifecycle_hooks() {
     assert!(seen.contains(&crate::hooks::HookEvent::AfterAgentRun));
 }
 
+include!("tests/tool_result_projection.rs");
+
 struct CountingLlmProvider {
     stream_calls: Arc<AtomicUsize>,
 }

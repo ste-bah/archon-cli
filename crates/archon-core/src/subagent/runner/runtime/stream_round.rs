@@ -30,7 +30,7 @@ pub(super) async fn collect_stream_round(
     let mut reconnected = false;
     let mut rx = loop {
         let attempt_request = LlmRequest {
-            messages: messages.clone(),
+            messages: projected_messages(runner, messages),
             ..request.clone()
         };
         match tokio::time::timeout(
@@ -78,7 +78,7 @@ pub(super) async fn collect_stream_round(
                 reconnected = true;
                 tokio::time::sleep(STREAM_RECONNECT_BACKOFF).await;
                 let retry_request = LlmRequest {
-                    messages: messages.clone(),
+                    messages: projected_messages(runner, messages),
                     ..request.clone()
                 };
                 rx = tokio::time::timeout(
@@ -196,6 +196,16 @@ pub(super) async fn collect_stream_round(
     })
 }
 
+fn projected_messages(
+    runner: &SubagentRunner,
+    messages: &[serde_json::Value],
+) -> Vec<serde_json::Value> {
+    crate::agent::tool_result_context::project_messages_for_request(
+        messages,
+        runner.agent_config.context.preserve_recent_turns,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn open_stream_with_retries(
     runner: &SubagentRunner,
@@ -224,7 +234,7 @@ async fn open_stream_with_retries(
             runner
                 .provider
                 .stream(LlmRequest {
-                    messages: messages.clone(),
+                    messages: projected_messages(runner, messages),
                     ..request
                 })
                 .await
@@ -261,7 +271,7 @@ async fn open_stream_with_retries(
             runner
                 .provider
                 .stream(LlmRequest {
-                    messages: messages.clone(),
+                    messages: projected_messages(runner, messages),
                     ..request
                 })
                 .await

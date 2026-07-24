@@ -216,6 +216,14 @@ impl LlmProvider for CapturingMockProvider {
 }
 
 fn make_runner(provider: Arc<CapturingMockProvider>, identity: IdentityProvider) -> SubagentRunner {
+    make_runner_with_config(provider, identity, AgentConfig::default())
+}
+
+fn make_runner_with_config(
+    provider: Arc<CapturingMockProvider>,
+    identity: IdentityProvider,
+    config: AgentConfig,
+) -> SubagentRunner {
     let tool_registry = ToolRegistry::new();
     let tool_defs = vec![];
     let ctx = ToolContext {
@@ -239,7 +247,7 @@ fn make_runner(provider: Arc<CapturingMockProvider>, identity: IdentityProvider)
         "mock-model".into(),
         1,
         60,
-        Arc::new(AgentConfig::default()),
+        Arc::new(config),
         Arc::new(identity),
     )
 }
@@ -300,6 +308,45 @@ async fn subagent_system_block_starts_with_billing_header_in_spoof_mode() {
     assert_eq!(request.extra["archon_runtime"]["origin"], "subagent");
     assert_eq!(request.extra["archon_runtime"]["turn"], 0);
     assert_eq!(request.extra["archon_runtime"]["round"], 0);
+}
+
+#[tokio::test]
+async fn subagent_request_trims_old_tool_result_without_mutating_resume_history() {
+    let captured = Arc::new(Mutex::new(None));
+    let provider = Arc::new(CapturingMockProvider::new(Arc::clone(&captured)));
+    let identity = IdentityProvider::new(
+        IdentityMode::Clean,
+        "test-session".into(),
+        "test-device".into(),
+        String::new(),
+    );
+    let mut config = AgentConfig::default();
+    config.context.preserve_recent_turns = 1;
+    let mut runner = make_runner_with_config(provider, identity, config);
+    let old_content = "old-result".repeat(20_000);
+    let resume_messages = vec![
+        serde_json::json!({"role":"user","content":"first turn"}),
+        serde_json::json!({"role":"assistant","content":[{
+            "type":"tool_use","id":"tool-1","name":"Bash","input":{}
+        }]}),
+        serde_json::json!({"role":"user","content":[{
+            "type":"tool_result","tool_use_id":"tool-1","content":old_content,"is_error":false
+        }]}),
+        serde_json::json!({"role":"user","content":"second turn"}),
+    ];
+    runner.set_initial_messages(resume_messages.clone());
+
+    runner.run("latest turn").await.expect("subagent response");
+
+    let request = captured.lock().await.take().expect("captured request");
+    let projected = request.messages[2]["content"][0]["content"]
+        .as_str()
+        .expect("projected tool result");
+    assert!(projected.contains("tool output trimmed"));
+    assert_eq!(
+        resume_messages[2]["content"][0]["content"],
+        serde_json::Value::String(old_content)
+    );
 }
 
 #[tokio::test]

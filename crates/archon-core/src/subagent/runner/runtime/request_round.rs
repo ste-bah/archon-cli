@@ -136,7 +136,10 @@ async fn build_llm_request(
         model: runner.model.clone(),
         max_tokens,
         system: build_system_messages(runner, messages),
-        messages: messages.to_vec(),
+        messages: crate::agent::tool_result_context::project_messages_for_request(
+            messages,
+            runner.agent_config.context.preserve_recent_turns,
+        ),
         tools: runner.tool_definitions.clone(),
         thinking,
         speed,
@@ -250,7 +253,10 @@ async fn maybe_compact_for_request_pressure(
         "subagent request-pressure compaction failed; continuing turn",
     )
     .await;
-    request.messages = messages.clone();
+    request.messages = crate::agent::tool_result_context::project_messages_for_request(
+        messages,
+        runner.agent_config.context.preserve_recent_turns,
+    );
     *request_body_bytes = crate::agent::autocompact::request_body_bytes(request);
 }
 

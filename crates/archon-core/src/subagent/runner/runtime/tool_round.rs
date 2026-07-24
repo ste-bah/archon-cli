@@ -186,25 +186,10 @@ fn record_tool_results(
     let mut tool_results: Vec<serde_json::Value> = Vec::with_capacity(prepared.len());
     for (prepared_tool, result) in prepared.iter().zip(exec_results) {
         record_tool_progress(runner, prepared_tool);
-        let context_output = crate::agent::tool_result_context::cap_tool_output_for_context(
-            &prepared_tool.name,
-            &result.content,
-        );
-        if context_output.truncated {
-            tracing::warn!(
-                tool = %prepared_tool.name,
-                tool_use_id = %prepared_tool.id,
-                original_chars = context_output.original_chars,
-                stored_chars = context_output.stored_chars,
-                limit_chars = context_output.limit_chars,
-                scope = "subagent",
-                "subagent tool output trimmed before model replay"
-            );
-        }
         tool_results.push(serde_json::json!({
             "type": "tool_result",
             "tool_use_id": prepared_tool.id,
-            "content": context_output.content,
+            "content": result.content,
             "is_error": result.is_error,
         }));
         runner.emit_activity_stream(

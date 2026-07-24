@@ -281,12 +281,10 @@ impl ConversationState {
     }
 
     pub fn add_tool_result(&mut self, tool_use_id: &str, content: &str, is_error: bool) {
-        let context_output =
-            crate::agent::tool_result_context::cap_tool_output_for_context("", content);
         let result = serde_json::json!({
             "type": "tool_result",
             "tool_use_id": tool_use_id,
-            "content": context_output.content,
+            "content": content,
             "is_error": is_error,
         });
         if let Some(last) = self.messages.last_mut()
@@ -406,7 +404,7 @@ mod tests {
     }
 
     #[test]
-    fn conversation_state_hard_caps_tool_result_text() {
+    fn conversation_state_preserves_full_tool_result_text() {
         let mut state = ConversationState::default();
         let huge = "x".repeat(700_000);
 
@@ -415,7 +413,6 @@ mod tests {
         let content = state.messages[0]["content"][0]["content"]
             .as_str()
             .expect("tool result content");
-        assert!(content.len() < 100_000, "content len was {}", content.len());
-        assert!(content.contains("tool output trimmed"));
+        assert_eq!(content, huge);
     }
 }

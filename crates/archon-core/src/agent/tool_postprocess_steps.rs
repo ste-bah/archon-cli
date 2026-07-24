@@ -426,22 +426,8 @@ impl Agent {
     }
 
     fn add_context_tool_result(&mut self, pre: &PreflightResult, result: &ToolResult) {
-        let context_output = crate::agent::tool_result_context::cap_tool_output_for_context(
-            &pre.tool_name,
-            &result.content,
-        );
-        if context_output.truncated {
-            tracing::warn!(
-                tool = %pre.tool_name,
-                tool_use_id = %pre.tool_id,
-                original_chars = context_output.original_chars,
-                stored_chars = context_output.stored_chars,
-                limit_chars = context_output.limit_chars,
-                "tool output trimmed before model replay"
-            );
-        }
         self.state
-            .add_tool_result(&pre.tool_id, &context_output.content, result.is_error);
+            .add_tool_result(&pre.tool_id, &result.content, result.is_error);
     }
 }
 

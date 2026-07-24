@@ -123,8 +123,7 @@ impl UsageAccumulator {
 
     pub fn cache_tokens(&self) -> u64 {
         self.cache_creation_input_tokens
-            .checked_add(self.cache_read_input_tokens)
-            .unwrap_or(u64::MAX)
+            .saturating_add(self.cache_read_input_tokens)
     }
 }
 
@@ -159,13 +158,17 @@ fn add_context_delta(
     saw_cache_creation: bool,
     saw_cache_read: bool,
 ) {
-    let input = (!saw_input).then_some(usage.input_tokens).unwrap_or(0);
-    let cache_creation = (!saw_cache_creation)
-        .then_some(usage.cache_creation_input_tokens)
-        .unwrap_or(0);
-    let cache_read = (!saw_cache_read)
-        .then_some(usage.cache_read_input_tokens)
-        .unwrap_or(0);
+    let input = if !saw_input { usage.input_tokens } else { 0 };
+    let cache_creation = if !saw_cache_creation {
+        usage.cache_creation_input_tokens
+    } else {
+        0
+    };
+    let cache_read = if !saw_cache_read {
+        usage.cache_read_input_tokens
+    } else {
+        0
+    };
     add_context_parts(total, overflowed, input, cache_creation, cache_read);
 }
 

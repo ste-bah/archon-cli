@@ -53,20 +53,18 @@ pub(super) fn forward_stream(
                     )
                     .await;
                 }
-                StreamEvent::MessageStop => {
-                    if terminal_status.is_none() {
-                        completed = true;
-                        terminal_status = Some("succeeded");
-                        record_stream_success(
-                            &recorder,
-                            &provider_id,
-                            &runtime_mode,
-                            profile_id.as_deref(),
-                            &observed,
-                            &request_id,
-                        )
-                        .await;
-                    }
+                StreamEvent::MessageStop if terminal_status.is_none() => {
+                    completed = true;
+                    terminal_status = Some("succeeded");
+                    record_stream_success(
+                        &recorder,
+                        &provider_id,
+                        &runtime_mode,
+                        profile_id.as_deref(),
+                        &observed,
+                        &request_id,
+                    )
+                    .await;
                 }
                 _ => {}
             }

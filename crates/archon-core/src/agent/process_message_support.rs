@@ -59,7 +59,10 @@ impl Agent {
         retry_label: &str,
     ) -> Result<Receiver<StreamEvent>, AgentLoopError> {
         let retry_request = LlmRequest {
-            messages: self.state.messages.clone(),
+            messages: tool_result_context::project_messages_for_request(
+                &self.state.messages,
+                self.config.context.preserve_recent_turns,
+            ),
             ..prepared.request.clone()
         };
         self.client
