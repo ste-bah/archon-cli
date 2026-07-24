@@ -151,6 +151,8 @@ pub(super) struct WorkflowV2DeliverableContract {
     pub(super) required_nonempty_fields: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) positive_count_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(super) minimum_count_fields: BTreeMap<String, u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) gaps_field: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -165,6 +167,8 @@ pub(super) struct WorkflowV2DeliverableContract {
     pub(super) registry_allowed_statuses: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) registry_count_field: Option<String>,
+    #[serde(default)]
+    pub(super) registry_minimum_count: u64,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(super) registry_identity_fields: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

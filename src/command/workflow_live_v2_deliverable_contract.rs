@@ -298,6 +298,15 @@ for identity, cell in sorted(
                 failures.append(f'{label} positive count field failed: {field}')
         except (TypeError, ValueError):
             failures.append(f'{label} positive count field is not numeric: {field}')
+    for field, minimum in (contract.get('minimum_count_fields') or {}).items():
+        try:
+            actual = int(get_field(cell, field, 0) or 0)
+            if actual < int(minimum):
+                failures.append(
+                    f'{label} count below declared minimum: {field}={actual} < {minimum}'
+                )
+        except (TypeError, ValueError):
+            failures.append(f'{label} minimum count field is not numeric: {field}')
 
     key_values = [get_field(cell, field) for field in contract.get('registry_key_fields', [])]
     key = ':'.join(str(value) for value in key_values)
@@ -320,8 +329,15 @@ for identity, cell in sorted(
     count_field = contract.get('registry_count_field')
     if count_field:
         try:
-            if int(get_field(record, count_field, 0) or 0) <= 0:
+            registry_count = int(get_field(record, count_field, 0) or 0)
+            if registry_count <= 0:
                 failures.append(f'{label} registry count is not positive: {count_field}')
+            registry_minimum = int(contract.get('registry_minimum_count') or 0)
+            if registry_minimum > 0 and registry_count < registry_minimum:
+                failures.append(
+                    f'{label} registry count below declared minimum: '
+                    f'{count_field}={registry_count} < {registry_minimum}'
+                )
         except (TypeError, ValueError):
             failures.append(f'{label} registry count is not numeric: {count_field}')
     for cell_field, registry_field in contract.get('registry_identity_fields', {}).items():
