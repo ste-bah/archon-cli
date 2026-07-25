@@ -1,3 +1,40 @@
+/// Collect `item_id -> (artifact_root, deliverable_contract)` for every fanout
+/// item that declared a contract, so the host can verify the declared deliverable
+/// itself rather than trusting the branch's self-reported verification.
+///
+/// The root is the item's stamped project artifact root (contract paths are
+/// declared relative to it); items lacking either a contract or a root are
+/// skipped — nothing is invented. Domain-agnostic: the contract's own content
+/// decides what gets checked.
+fn declared_contracts_by_item(
+    items: &[archon_workflow::WorkflowV2FanoutItem],
+) -> std::collections::BTreeMap<String, (String, serde_json::Value)> {
+    let mut contracts = std::collections::BTreeMap::new();
+    for item in items {
+        let Some(contract) = item.input.get("deliverable_contract") else {
+            continue;
+        };
+        if !contract.is_object() {
+            continue;
+        }
+        let root = item
+            .input
+            .get("_workflow_project_artifact_policy")
+            .and_then(|policy| policy.get("project_root"))
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| {
+                item.input
+                    .get("project_artifact_root")
+                    .and_then(serde_json::Value::as_str)
+            });
+        let Some(root) = root else {
+            continue;
+        };
+        contracts.insert(item.id.clone(), (root.to_string(), contract.clone()));
+    }
+    contracts
+}
+
 async fn run_read_only_v2_fanout(
     task: &str,
     runtime: &WorkflowV2ScriptRuntime,
@@ -14,6 +51,11 @@ async fn run_read_only_v2_fanout(
     // resolve declared artifacts, which the reference tells them to check
     // absolutely. Write branches already get this stamp.
     let items = workflow_live_v2_write::stamp_project_artifact_policy(items, v2_store);
+    // Capture each item's declared deliverable contract (plus the artifact root
+    // its paths resolve against) BEFORE the items are consumed by scheduling, so
+    // the host can run the contract verifier itself instead of trusting the
+    // branch's self-report. See enforce_declared_contracts.
+    let declared_contracts = declared_contracts_by_item(&items);
     let item_order = branch_item_order(&items);
     let (reused_outcomes, pending_items) =
         split_reusable_branch_outcomes(v2_store, &execution.call.id, items)?;
@@ -140,6 +182,11 @@ async fn run_read_only_v2_fanout(
     let mut outcomes = reused_outcomes;
     outcomes.extend(run_report.outcomes);
     sort_branch_outcomes_by_order(&mut outcomes, &item_order);
+    // Host-executed contract enforcement runs BEFORE aggregation so a demoted
+    // branch also lowers the call's aggregate status; demoting afterwards would
+    // leave an already-computed "accepted" result standing.
+    workflow_live_v2_verification::enforce_declared_contracts(&mut outcomes, &declared_contracts)
+        .await;
     let report = WorkflowV2FanoutReport {
         outcomes,
         max_parallelism: run_report.max_parallelism,

@@ -321,7 +321,7 @@ include!("workflow_live_v3_prelude.rs");
 include!("workflow_live_v2_script_verification.rs");
 
 #[path = "workflow_live_v2_deliverable_contract.rs"]
-mod workflow_live_v2_deliverable_contract;
+pub(super) mod workflow_live_v2_deliverable_contract;
 #[path = "workflow_live_v2_lifecycle_boundary_repair.rs"]
 mod workflow_live_v2_lifecycle_boundary_repair;
 #[path = "workflow_live_v2_lifecycle_noop_routing.rs"]

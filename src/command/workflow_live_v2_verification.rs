@@ -194,6 +194,205 @@ fn demote_zero_test_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
     outcome.failure_kind = Some(BranchFailureKind::Semantic);
 }
 
+/// HOST-EXECUTED deliverable-contract enforcement.
+///
+/// The contract verifier was previously only handed to the agent as the item's
+/// `focused_verification` text and the agent SELF-REPORTED the outcome — so an
+/// agent that skipped it (or ran only a weaker typed command) could report
+/// "verified" over fabricated artifacts, and every declared contract predicate
+/// went unexecuted. A gate the audited party may decline to run is not a gate.
+///
+/// This runs the SAME host-generated verifier ourselves for every accepted
+/// branch whose item declared a contract, and demotes the outcome when it fails.
+/// Fail-closed: a verifier that cannot be executed, times out, or emits
+/// unparseable output demotes too — "we could not check" is never a pass.
+///
+/// Domain-agnostic: the contract declares its own artifact paths and predicates;
+/// this only runs the command and reads the JSON verdicts from its stdout.
+pub(super) async fn enforce_declared_contracts(
+    outcomes: &mut [WorkflowV2BranchOutcome],
+    contracts: &std::collections::BTreeMap<String, (String, serde_json::Value)>,
+) {
+    if contracts.is_empty() {
+        return;
+    }
+    for outcome in outcomes.iter_mut() {
+        if !matches!(
+            outcome.status,
+            WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+        ) {
+            continue;
+        }
+        let Some((root, contract)) = contracts.get(&outcome.item_id) else {
+            continue;
+        };
+        let command =
+            super::workflow_live_v2_script::workflow_live_v2_deliverable_contract::verification_command(root, contract);
+        match run_contract_verifier(&command).await {
+            ContractVerification::Passed => {}
+            ContractVerification::Failed(detail) => {
+                demote_failed_contract(outcome, &detail);
+            }
+        }
+    }
+}
+
+/// Upper bound on a single declared-contract verification. The verifier only
+/// reads JSON/JSONL, so overrunning this means it is wedged rather than slow;
+/// the branch is then demoted as unverified instead of stalling the fanout.
+const CONTRACT_VERIFIER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+enum ContractVerification {
+    Passed,
+    Failed(String),
+}
+
+async fn run_contract_verifier(command: &str) -> ContractVerification {
+    let run = tokio::process::Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .kill_on_drop(true)
+        .output();
+    let output = match tokio::time::timeout(CONTRACT_VERIFIER_TIMEOUT, run).await {
+        Ok(Ok(output)) => output,
+        // Fail closed: an unrunnable verifier is not evidence of success.
+        Ok(Err(error)) => {
+            return ContractVerification::Failed(format!(
+                "host could not execute the declared contract verifier: {error}"
+            ));
+        }
+        Err(_) => {
+            return ContractVerification::Failed(format!(
+                "declared contract verifier did not finish within {}s; treating as unverified",
+                CONTRACT_VERIFIER_TIMEOUT.as_secs()
+            ));
+        }
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let verdicts = verifier_verdicts(&stdout);
+    // Any stage that reported a failure demotes the branch, whichever one it
+    // was. Returning on the FIRST verdict instead would let the typed
+    // pre-check's permissive `{"status":"verified"}` mask the contract
+    // verifier's own failure printed after it.
+    if let Some(detail) = verdicts.iter().find_map(verdict_failure) {
+        return ContractVerification::Failed(detail);
+    }
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return ContractVerification::Failed(format!(
+            "declared contract verifier exited non-zero: {}",
+            stderr.trim().chars().take(300).collect::<String>()
+        ));
+    }
+    // The contract verifier is appended last, so the final status-bearing
+    // object is its verdict. Requiring one keeps silence from counting as a
+    // pass.
+    if verdicts.iter().rev().any(|verdict| {
+        verdict
+            .get("status")
+            .and_then(serde_json::Value::as_str)
+            .is_some()
+    }) {
+        return ContractVerification::Passed;
+    }
+    ContractVerification::Failed(
+        "declared contract verifier produced no parseable status; treating as unverified"
+            .to_string(),
+    )
+}
+
+/// Every JSON object the verification command printed, in emission order.
+///
+/// `verification_command` may chain a typed pre-check ahead of the contract
+/// verifier, so stdout routinely carries more than one verdict and they must
+/// all be considered.
+fn verifier_verdicts(stdout: &str) -> Vec<serde_json::Value> {
+    let mut verdicts = Vec::new();
+    let mut offset = 0usize;
+    while let Some(open) = stdout[offset..].find('{') {
+        let start = offset + open;
+        let mut stream =
+            serde_json::Deserializer::from_str(&stdout[start..]).into_iter::<serde_json::Value>();
+        match stream.next() {
+            Some(Ok(value)) => {
+                // Skip past the object just parsed rather than rescanning the
+                // braces nested inside it.
+                offset = start + stream.byte_offset().max(1);
+                verdicts.push(value);
+            }
+            // Not the start of a well-formed object; try the next brace.
+            _ => offset = start + 1,
+        }
+    }
+    verdicts
+}
+
+/// The failure text a verdict carries, if it reports one.
+///
+/// A verdict fails either by saying `status: failed` or by carrying a non-empty
+/// `failures` array — the verifier's early exits print the latter with no
+/// `status` field at all, and their text is the only account of what broke.
+fn verdict_failure(verdict: &serde_json::Value) -> Option<String> {
+    let failed_status = verdict
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|status| status.eq_ignore_ascii_case("failed"));
+    let failures = verdict
+        .get("failures")
+        .and_then(serde_json::Value::as_array)
+        .filter(|items| !items.is_empty());
+    if !failed_status && failures.is_none() {
+        return None;
+    }
+    let detail = failures
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .take(5)
+                .collect::<Vec<_>>()
+                .join("; ")
+        })
+        .unwrap_or_default();
+    Some(if detail.is_empty() {
+        "declared deliverable contract verification failed".to_string()
+    } else {
+        detail
+    })
+}
+
+fn demote_failed_contract(outcome: &mut WorkflowV2BranchOutcome, detail: &str) {
+    let truncated: String = detail.chars().take(500).collect();
+    if let Some(result) = outcome.result.as_mut() {
+        result.status = WorkflowV2Status::NeedsReview;
+        result
+            .residual_gaps
+            .push(archon_workflow::WorkflowV2ResidualGap {
+                id: "declared_contract_verification_failed".to_string(),
+                description: format!(
+                    "host-executed declared deliverable contract verification failed: {truncated}"
+                ),
+                severity: Some("review".to_string()),
+            });
+        result.evidence.push(WorkflowV2Evidence::new(
+            WorkflowV2EvidenceKind::Blocker,
+            "accepted branch demoted: the host ran the declared deliverable contract verifier and it failed",
+        ));
+        let mut data = result.data.as_object().cloned().unwrap_or_default();
+        data.insert(
+            "declared_contract_verification".to_string(),
+            serde_json::json!("failed"),
+        );
+        data.insert(
+            "verification_failure_class".to_string(),
+            serde_json::json!("declared_contract_violation"),
+        );
+        result.data = serde_json::Value::Object(data);
+    }
+    outcome.status = WorkflowV2Status::NeedsReview;
+    outcome.failure_kind = Some(BranchFailureKind::Semantic);
+}
+
 fn stamp_focused_verification_result(result: &mut WorkflowV2Result) {
     let mut object = result.data.as_object().cloned().unwrap_or_default();
     object.insert(
@@ -311,6 +510,126 @@ fn collect_json_strings(value: &serde_json::Value, output: &mut Vec<String>) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod declared_contract_enforcement_tests {
+    use super::*;
+
+    fn accepted_outcome(item_id: &str) -> WorkflowV2BranchOutcome {
+        WorkflowV2BranchOutcome {
+            item_id: item_id.to_string(),
+            role: "implementer".to_string(),
+            status: WorkflowV2Status::Accepted,
+            result: Some(WorkflowV2Result::accepted("branch claims acceptance")),
+            error: None,
+            failure_kind: None,
+            item_input_hash: Some("input".to_string()),
+            completion_evidence: Vec::new(),
+        }
+    }
+
+    fn failure_detail(verification: ContractVerification) -> String {
+        match verification {
+            ContractVerification::Failed(detail) => detail,
+            ContractVerification::Passed => panic!("expected the verifier to fail closed"),
+        }
+    }
+
+    #[tokio::test]
+    async fn typed_precheck_pass_cannot_mask_a_contract_verifier_failure() {
+        // verification_command chains the typed pre-check AHEAD of the contract
+        // verifier, so a permissive `verified` is printed first. Reading only
+        // the first verdict is what let fabricated artifacts pass as verified.
+        let detail = failure_detail(
+            run_contract_verifier(
+                r#"printf '%s\n' '{"status":"verified","verified_cells":3}' '{"status":"failed","failure_count":1,"failures":["close steps are constant"]}'; exit 1"#,
+            )
+            .await,
+        );
+        assert_eq!(detail, "close steps are constant");
+    }
+
+    #[tokio::test]
+    async fn failures_reported_without_a_status_field_are_still_caught() {
+        // The verifier's early exits print `{"failures": [...]}` with no status
+        // field; that text is the only account of what actually broke.
+        let detail = failure_detail(
+            run_contract_verifier(
+                r#"printf '%s\n' '{"failures":["declared deliverable is missing"]}'; exit 1"#,
+            )
+            .await,
+        );
+        assert_eq!(detail, "declared deliverable is missing");
+    }
+
+    #[tokio::test]
+    async fn a_clean_terminal_verdict_passes() {
+        let verification = run_contract_verifier(
+            r#"printf '%s\n' '{"status":"verified"}' '{"status":"substantive_deliverable_verified","verified_cells":4}'"#,
+        )
+        .await;
+        assert!(matches!(verification, ContractVerification::Passed));
+    }
+
+    #[tokio::test]
+    async fn exit_zero_without_any_verdict_fails_closed() {
+        // "We could not check" is never a pass.
+        let detail = failure_detail(run_contract_verifier("echo 'no json here'").await);
+        assert!(detail.contains("no parseable status"), "{detail}");
+    }
+
+    #[tokio::test]
+    async fn a_nonzero_exit_with_no_verdict_fails_closed() {
+        let detail = failure_detail(run_contract_verifier("echo 'boom' >&2; exit 3").await);
+        assert!(detail.contains("exited non-zero"), "{detail}");
+        assert!(detail.contains("boom"), "{detail}");
+    }
+
+    #[tokio::test]
+    async fn enforcement_is_inert_when_no_item_declared_a_contract() {
+        let mut outcomes = [accepted_outcome("build-thing")];
+        enforce_declared_contracts(&mut outcomes, &std::collections::BTreeMap::new()).await;
+        assert_eq!(outcomes[0].status, WorkflowV2Status::Accepted);
+    }
+
+    #[test]
+    fn every_printed_object_is_collected_in_order() {
+        let verdicts = verifier_verdicts(
+            "noise {\"status\":\"verified\",\"nested\":{\"cells\":2}} tail\n{\"status\":\"failed\"}\n",
+        );
+        assert_eq!(verdicts.len(), 2, "{verdicts:?}");
+        assert_eq!(verdicts[0]["status"], "verified");
+        assert_eq!(verdicts[1]["status"], "failed");
+    }
+
+    #[test]
+    fn an_empty_failures_array_is_not_a_failure() {
+        assert!(verdict_failure(&serde_json::json!({"status": "ok", "failures": []})).is_none());
+        assert!(verdict_failure(&serde_json::json!({"status": "verified"})).is_none());
+    }
+
+    #[test]
+    fn a_failed_contract_demotes_the_branch_with_a_typed_gap() {
+        let mut outcome = accepted_outcome("implement-tdl-080");
+        demote_failed_contract(&mut outcome, "close steps are constant");
+        assert_eq!(outcome.status, WorkflowV2Status::NeedsReview);
+        assert_eq!(outcome.failure_kind, Some(BranchFailureKind::Semantic));
+        let result = outcome.result.expect("result");
+        assert_eq!(
+            result.data["verification_failure_class"],
+            "declared_contract_violation"
+        );
+        assert!(
+            result
+                .residual_gaps
+                .iter()
+                .any(|gap| gap.id == "declared_contract_verification_failed"
+                    && gap.description.contains("close steps are constant")),
+            "{:?}",
+            result.residual_gaps
+        );
     }
 }
 
