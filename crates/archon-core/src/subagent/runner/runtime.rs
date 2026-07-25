@@ -103,35 +103,40 @@ impl SubagentRunner {
                         &self.tool_context.session_id,
                     ),
             );
-            let stream = tokio::time::timeout_at(
-                inference_deadline,
-                collect_stream_round(
-                self,
-                &mut messages,
-                &mut auto_compact,
-                (
-                    &mut reactive_overflow_retried,
-                    &mut reactive_rate_limit_retried,
-                    &mut last_known_context_tokens,
-                ),
-                prepared_request.request,
-                (
-                    prepared_request.request_body_bytes,
-                    prepared_request.large_retry_body_bytes,
-                ),
-                &prepared_request.telemetry,
-                ),
-            )
-            .await
-            .map_err(|_| {
-                let elapsed = started.elapsed().as_secs();
-                anyhow::anyhow!(
-                    "Subagent wall-clock timeout: {elapsed}s elapsed (cap: {}s) during LLM inference at turn {}/{}",
-                    self.timeout_secs,
-                    turn,
-                    self.max_turns,
+            let inference = async {
+                tokio::time::timeout_at(
+                    inference_deadline,
+                    collect_stream_round(
+                        self,
+                        &mut messages,
+                        &mut auto_compact,
+                        (
+                            &mut reactive_overflow_retried,
+                            &mut reactive_rate_limit_retried,
+                            &mut last_known_context_tokens,
+                        ),
+                        prepared_request.request,
+                        (
+                            prepared_request.request_body_bytes,
+                            prepared_request.large_retry_body_bytes,
+                        ),
+                        &prepared_request.telemetry,
+                    ),
                 )
-            })??;
+                .await
+                .map_err(|_| {
+                    let elapsed = started.elapsed().as_secs();
+                    anyhow::anyhow!(
+                        "Subagent wall-clock timeout: {elapsed}s elapsed (cap: {}s) during LLM inference at turn {}/{}",
+                        self.timeout_secs,
+                        turn,
+                        self.max_turns,
+                    )
+                })?
+            };
+            let stream =
+                await_cancellable_inference(inference, self.tool_context.cancel_parent.as_ref())
+                    .await?;
             if stream.retry_after_compact {
                 continue;
             }
@@ -194,6 +199,23 @@ impl SubagentRunner {
             true,
         );
         anyhow::bail!("Subagent reached max turns ({})", self.max_turns)
+    }
+}
+
+async fn await_cancellable_inference<F, T>(
+    inference: F,
+    cancel: Option<&tokio_util::sync::CancellationToken>,
+) -> anyhow::Result<T>
+where
+    F: std::future::Future<Output = anyhow::Result<T>>,
+{
+    let Some(cancel) = cancel else {
+        return inference.await;
+    };
+    tokio::select! {
+        biased;
+        _ = cancel.cancelled() => anyhow::bail!("Subagent cancelled during LLM inference"),
+        result = inference => result,
     }
 }
 
