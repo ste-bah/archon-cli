@@ -483,7 +483,10 @@ async fn canary_wf_afae6bee_regression() {
 
     let output = run_live_action(
         project_root,
-        CommandAction::Run { task, decomposed: false },
+        CommandAction::Run {
+            task,
+            decomposed: false,
+        },
         client.clone(),
         tui_tx,
         None,

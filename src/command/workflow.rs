@@ -123,7 +123,12 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
                     mode(*live),
                 ));
             }
-            let action = run_cli_action(spec_file.as_ref(), from_template.as_ref(), task, *decomposed)?;
+            let action = run_cli_action(
+                spec_file.as_ref(),
+                from_template.as_ref(),
+                task,
+                *decomposed,
+            )?;
             return Ok((action, mode(*live)));
         }
         WorkflowAction::Status { run_id } => CommandAction::Status {

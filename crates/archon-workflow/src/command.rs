@@ -182,7 +182,10 @@ fn parse_plan(args: &[String]) -> WorkflowResult<CommandAction> {
 fn parse_run(args: &[String]) -> WorkflowResult<CommandAction> {
     let args = without_live_flag(args);
     let decomposed = args.iter().any(|arg| arg == "--decomposed");
-    let args: Vec<String> = args.into_iter().filter(|arg| arg != "--decomposed").collect();
+    let args: Vec<String> = args
+        .into_iter()
+        .filter(|arg| arg != "--decomposed")
+        .collect();
     if flag(&args, "--spec-file") {
         return Ok(CommandAction::RunSpec {
             path: required(&args, 1, "spec file")?,

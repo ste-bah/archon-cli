@@ -65,7 +65,6 @@ fn run_resume_from_uses_existing_v2_resume_path() {
     ));
 }
 
-
 #[test]
 fn run_resume_from_rejects_decomposed_flag() {
     let action = WorkflowAction::Run {

@@ -369,7 +369,10 @@ async fn triage_retry_items_launch_retry_verification() {
     let client = Arc::new(RetryAgentClient::new(project_root.to_path_buf()));
     let output = run_live_action(
         project_root,
-        CommandAction::Run { task, decomposed: false },
+        CommandAction::Run {
+            task,
+            decomposed: false,
+        },
         client.clone(),
         tui_tx,
         None,
