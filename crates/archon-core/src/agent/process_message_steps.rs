@@ -75,7 +75,7 @@ impl Agent {
         let (max_tokens, thinking, speed) = self.config.build_base_request_fields(&active_model);
         self.maybe_auto_compact(&active_model).await?;
 
-        let request = LlmRequest {
+        let mut request = LlmRequest {
             model: active_model.clone(),
             max_tokens,
             system,
@@ -95,6 +95,13 @@ impl Agent {
             request_origin: Some("main_session".into()),
             reasoning_encrypted: None,
         };
+        request_cache::apply_conversation_cache(
+            &mut request,
+            self.client.as_ref(),
+            self.config.context.prompt_cache && self.config.context.prompt_cache_conversation,
+            &self.config.context.prompt_cache_mode,
+            &self.config.context.prompt_cache_ttl,
+        );
         self.fire_after_prompt_build_hook(&request, agentic_iterations)
             .await;
 

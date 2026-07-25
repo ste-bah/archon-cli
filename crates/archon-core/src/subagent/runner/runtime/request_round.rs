@@ -132,7 +132,7 @@ async fn build_llm_request(
 ) -> LlmRequest {
     let (max_tokens, thinking, speed) =
         runner.agent_config.build_base_request_fields(&runner.model);
-    LlmRequest {
+    let mut request = LlmRequest {
         model: runner.model.clone(),
         max_tokens,
         system: build_system_messages(runner, messages),
@@ -153,7 +153,16 @@ async fn build_llm_request(
         ),
         request_origin: Some("subagent".into()),
         reasoning_encrypted,
-    }
+    };
+    crate::agent::request_cache::apply_conversation_cache(
+        &mut request,
+        runner.provider.as_ref(),
+        runner.agent_config.context.prompt_cache
+            && runner.agent_config.context.prompt_cache_conversation,
+        &runner.agent_config.context.prompt_cache_mode,
+        &runner.agent_config.context.prompt_cache_ttl,
+    );
+    request
 }
 
 fn build_system_messages(
@@ -164,7 +173,7 @@ fn build_system_messages(
     let first_user_message = messages
         .first()
         .and_then(|message| message.get("content"))
-        .and_then(|content| content.as_str())
+        .and_then(first_text_content)
         .unwrap_or("");
     if let Some(billing) = runner.identity.billing_header(first_user_message) {
         system.push(serde_json::json!({
@@ -184,6 +193,16 @@ fn build_system_messages(
         }));
     }
     system
+}
+
+fn first_text_content(content: &serde_json::Value) -> Option<&str> {
+    content.as_str().or_else(|| {
+        content.as_array()?.iter().find_map(|block| {
+            (block.get("type").and_then(|value| value.as_str()) == Some("text"))
+                .then(|| block.get("text").and_then(|value| value.as_str()))
+                .flatten()
+        })
+    })
 }
 
 async fn resolve_effort(runner: &SubagentRunner) -> Option<String> {
@@ -256,6 +275,14 @@ async fn maybe_compact_for_request_pressure(
     request.messages = crate::agent::tool_result_context::project_messages_for_request(
         messages,
         runner.agent_config.context.preserve_recent_turns,
+    );
+    crate::agent::request_cache::apply_conversation_cache(
+        request,
+        runner.provider.as_ref(),
+        runner.agent_config.context.prompt_cache
+            && runner.agent_config.context.prompt_cache_conversation,
+        &runner.agent_config.context.prompt_cache_mode,
+        &runner.agent_config.context.prompt_cache_ttl,
     );
     *request_body_bytes = crate::agent::autocompact::request_body_bytes(request);
 }

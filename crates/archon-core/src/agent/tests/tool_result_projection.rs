@@ -5,11 +5,15 @@ struct CapturingLlmProvider {
 #[async_trait::async_trait]
 impl LlmProvider for CapturingLlmProvider {
     fn name(&self) -> &str {
-        "capturing"
+        "anthropic"
     }
 
     fn models(&self) -> Vec<ModelInfo> {
         vec![]
+    }
+
+    fn supports_anthropic_message_caching(&self) -> bool {
+        true
     }
 
     fn supports_feature(&self, _: ProviderFeature) -> bool {
@@ -29,6 +33,37 @@ impl LlmProvider for CapturingLlmProvider {
     async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
         unimplemented!()
     }
+}
+
+#[tokio::test]
+async fn main_anthropic_request_marks_latest_conversation_block() {
+    let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut config = AgentConfig::default();
+    config.context.prompt_cache_conversation = true;
+    let mut agent = Agent::new(
+        Arc::new(CapturingLlmProvider {
+            captured: Arc::clone(&captured),
+        }),
+        ToolRegistry::new(),
+        config,
+        tx,
+        Arc::new(std::sync::RwLock::new(AgentRegistry::load(
+            &std::env::temp_dir(),
+        ))),
+    );
+    agent.state.add_user_message("latest turn");
+
+    let prepared = agent
+        .prepare_turn_request("latest turn", 0)
+        .await
+        .expect("prepare request");
+
+    assert_eq!(
+        prepared.request.messages[0]["content"][0]["cache_control"]["type"],
+        "ephemeral"
+    );
+    assert_eq!(agent.state.messages[0]["content"], "latest turn");
 }
 
 #[tokio::test]
@@ -127,10 +162,11 @@ async fn eight_tool_rounds_send_trimmed_history_but_reopen_with_full_results() {
             .expect("old tool result")
             .contains("tool output trimmed"));
     }
-    for round in 6..8 {
+    for (round, full) in full_results.iter().enumerate().take(8).skip(6) {
         assert_eq!(
             request.messages[round * 3 + 2]["content"][0]["content"],
-            full_results[round]
+            *full,
+            "recent round {round} should remain byte-identical",
         );
     }
 

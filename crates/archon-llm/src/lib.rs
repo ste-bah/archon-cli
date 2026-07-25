@@ -35,6 +35,8 @@ pub mod types;
 pub mod usage;
 
 #[cfg(test)]
+mod anthropic_cache_tests;
+#[cfg(test)]
 mod anthropic_oauth_refresh_tests;
 #[cfg(test)]
 mod anthropic_tests;

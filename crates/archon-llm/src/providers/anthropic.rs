@@ -168,15 +168,20 @@ impl LlmProvider for AnthropicProvider {
     }
 
     fn supports_feature(&self, feature: ProviderFeature) -> bool {
-        matches!(
-            feature,
+        match feature {
+            ProviderFeature::PromptCaching => {
+                crate::anthropic_url::is_official_messages_url(self.client.api_url())
+            }
             ProviderFeature::Thinking
-                | ProviderFeature::ToolUse
-                | ProviderFeature::PromptCaching
-                | ProviderFeature::Vision
-                | ProviderFeature::SystemPrompt
-                | ProviderFeature::Streaming
-        )
+            | ProviderFeature::ToolUse
+            | ProviderFeature::Vision
+            | ProviderFeature::SystemPrompt
+            | ProviderFeature::Streaming => true,
+        }
+    }
+
+    fn supports_anthropic_message_caching(&self) -> bool {
+        crate::anthropic_url::is_official_messages_url(self.client.api_url())
     }
 
     fn as_anthropic(&self) -> Option<&AnthropicClient> {

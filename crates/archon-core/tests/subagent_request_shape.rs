@@ -162,11 +162,15 @@ impl CapturingMockProvider {
 #[async_trait::async_trait]
 impl LlmProvider for CapturingMockProvider {
     fn name(&self) -> &str {
-        "capturing-mock"
+        "anthropic"
     }
     fn models(&self) -> Vec<ModelInfo> {
         vec![]
     }
+    fn supports_anthropic_message_caching(&self) -> bool {
+        true
+    }
+
     fn supports_feature(&self, _: ProviderFeature) -> bool {
         false
     }
@@ -308,6 +312,58 @@ async fn subagent_system_block_starts_with_billing_header_in_spoof_mode() {
     assert_eq!(request.extra["archon_runtime"]["origin"], "subagent");
     assert_eq!(request.extra["archon_runtime"]["turn"], 0);
     assert_eq!(request.extra["archon_runtime"]["round"], 0);
+}
+
+#[tokio::test]
+async fn subagent_spoof_billing_fingerprint_uses_array_message_text() {
+    let captured = Arc::new(Mutex::new(None));
+    let provider = Arc::new(CapturingMockProvider::new(Arc::clone(&captured)));
+    let identity = IdentityProvider::new(
+        IdentityMode::Spoof {
+            version: "2.1.89".into(),
+            entrypoint: "cli".into(),
+            betas: vec![],
+            workload: None,
+            anti_distillation: false,
+        },
+        "test-session".into(),
+        "test-device".into(),
+        String::new(),
+    );
+    let expected = identity.billing_header("actual first prompt").unwrap();
+    let mut runner = make_runner(provider, identity);
+    runner.set_initial_messages(vec![serde_json::json!({
+        "role":"user",
+        "content":[{"type":"text","text":"actual first prompt"}]
+    })]);
+
+    runner.run("latest turn").await.expect("subagent response");
+
+    let request = captured.lock().await.take().expect("captured request");
+    assert_eq!(request.system[0]["text"], expected);
+}
+
+#[tokio::test]
+async fn subagent_anthropic_request_marks_latest_conversation_block() {
+    let captured = Arc::new(Mutex::new(None));
+    let provider = Arc::new(CapturingMockProvider::new(Arc::clone(&captured)));
+    let identity = IdentityProvider::new(
+        IdentityMode::Clean,
+        "test-session".into(),
+        "test-device".into(),
+        String::new(),
+    );
+    let mut config = AgentConfig::default();
+    config.context.prompt_cache_conversation = true;
+    let runner = make_runner_with_config(provider, identity, config);
+
+    runner.run("latest turn").await.expect("subagent response");
+
+    let request = captured.lock().await.take().expect("captured request");
+    assert_eq!(
+        request.messages[0]["content"][0]["cache_control"]["type"],
+        "ephemeral"
+    );
 }
 
 #[tokio::test]

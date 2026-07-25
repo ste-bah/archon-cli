@@ -358,7 +358,7 @@ impl Default for ContextConfig {
             prompt_cache: true,
             prompt_cache_mode: "explicit".into(),
             prompt_cache_ttl: "5m".into(),
-            prompt_cache_conversation: false,
+            prompt_cache_conversation: true,
             archonmd_max_tokens: 8192,
         }
     }

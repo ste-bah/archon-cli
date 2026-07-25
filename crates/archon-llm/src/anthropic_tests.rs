@@ -6,11 +6,11 @@ use crate::types::Secret;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-fn make_auth() -> AuthProvider {
+pub(super) fn make_auth() -> AuthProvider {
     AuthProvider::ApiKey(Secret::new("test-key".to_string()))
 }
 
-fn make_identity() -> IdentityProvider {
+pub(super) fn make_identity() -> IdentityProvider {
     IdentityProvider::new(
         IdentityMode::Clean,
         "test-session".to_string(),

@@ -2,7 +2,8 @@ use std::time::Duration;
 
 pub use crate::anthropic_support::{ApiError, MessageRequest};
 use crate::anthropic_support::{
-    cached_tool_blocks, classify_error, effective_effort, effective_speed, extract_unknown_beta,
+    cached_tool_blocks, classify_error, effective_effort, effective_speed,
+    enforce_cache_breakpoint_budget, extract_unknown_beta, remove_cache_directives,
 };
 use crate::auth::{AuthError, AuthProvider, OAuthCredentials};
 use crate::identity::IdentityProvider;
@@ -377,45 +378,71 @@ impl AnthropicClient {
         // the canonical Claude Code identity blocks (billing header + identity
         // prefix) so the request is recognised as Claude Code traffic. Idempotent:
         // skip prepending if the caller already provided the identity prefix.
-        let mut system_blocks: Vec<serde_json::Value> = Vec::new();
+        let mut system_blocks = request.system.clone();
         if matches!(
             self.identity.mode,
             crate::identity::IdentityMode::Spoof { .. }
         ) {
-            let already_has_identity = request.system.iter().any(|b| {
-                b.get("text")
-                    .and_then(|t| t.as_str())
-                    .map(|s| s.starts_with("You are Claude Code,"))
-                    .unwrap_or(false)
+            let has_billing = system_blocks.iter().any(|block| {
+                block
+                    .get("text")
+                    .and_then(|text| text.as_str())
+                    .is_some_and(|text| text.starts_with("x-anthropic-billing-header:"))
             });
-            if !already_has_identity {
+            let has_identity = system_blocks.iter().any(|block| {
+                block
+                    .get("text")
+                    .and_then(|text| text.as_str())
+                    .is_some_and(|text| text.starts_with("You are Claude Code,"))
+            });
+            if !has_billing {
                 let first_user_msg = request
                     .messages
                     .first()
-                    .and_then(|m| m.get("content"))
-                    .and_then(|c| c.as_str())
+                    .and_then(|message| message.get("content"))
+                    .and_then(first_text_content)
                     .unwrap_or("");
                 if let Some(billing) = self.identity.billing_header(first_user_msg) {
-                    system_blocks.push(serde_json::json!({
-                        "type": "text",
-                        "text": billing,
-                        "cache_control": { "type": "ephemeral" }
-                    }));
+                    system_blocks.insert(
+                        0,
+                        serde_json::json!({
+                            "type": "text",
+                            "text": billing,
+                            "cache_control": { "type": "ephemeral" }
+                        }),
+                    );
                 }
-                system_blocks.push(serde_json::json!({
-                    "type": "text",
-                    "text": "You are Claude Code, Anthropic's official CLI for Claude.",
-                    "cache_control": { "type": "ephemeral", "scope": "org" }
-                }));
+            }
+            if !has_identity {
+                let identity_index = system_blocks
+                    .iter()
+                    .position(|block| {
+                        block
+                            .get("text")
+                            .and_then(|text| text.as_str())
+                            .is_some_and(|text| text.starts_with("x-anthropic-billing-header:"))
+                    })
+                    .map_or(0, |index| index + 1);
+                system_blocks.insert(
+                    identity_index,
+                    serde_json::json!({
+                        "type": "text",
+                        "text": "You are Claude Code, Anthropic's official CLI for Claude.",
+                        "cache_control": { "type": "ephemeral", "scope": "org" }
+                    }),
+                );
             }
         }
-        system_blocks.extend(request.system.iter().cloned());
         if !system_blocks.is_empty() {
             body["system"] = serde_json::json!(system_blocks);
         }
 
         if !request.tools.is_empty() {
-            body["tools"] = serde_json::json!(cached_tool_blocks(&request.tools));
+            body["tools"] = if crate::anthropic_url::is_official_messages_url(&self.api_url) {
+                serde_json::json!(cached_tool_blocks(&request.tools))
+            } else {
+                serde_json::json!(&request.tools)
+            };
         }
 
         if let Some(ref thinking) = request.thinking {
@@ -439,8 +466,23 @@ impl AnthropicClient {
             body["anti_distillation"] = anti_dist;
         }
 
+        if crate::anthropic_url::is_official_messages_url(&self.api_url) {
+            enforce_cache_breakpoint_budget(&mut body);
+        } else {
+            remove_cache_directives(&mut body);
+        }
         serde_json::to_string(&body).map_err(|e| ApiError::SerializeError(format!("{e}")))
     }
+}
+
+fn first_text_content(content: &serde_json::Value) -> Option<&str> {
+    content.as_str().or_else(|| {
+        content.as_array()?.iter().find_map(|block| {
+            (block.get("type").and_then(|value| value.as_str()) == Some("text"))
+                .then(|| block.get("text").and_then(|value| value.as_str()))
+                .flatten()
+        })
+    })
 }
 
 fn oauth_header(creds: &OAuthCredentials) -> (String, String) {

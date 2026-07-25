@@ -48,6 +48,7 @@ mod permission_gate;
 mod process_message;
 mod process_message_steps;
 mod process_message_support;
+pub(crate) mod request_cache;
 mod runtime_attribution;
 mod runtime_hooks;
 mod summary_text;

@@ -1418,6 +1418,7 @@ archon-cli-workspace::bin::archon::runtime::provider_incident_ledger::tests::pro
 archon-cli-workspace::bin::archon::runtime::provider_limit_windows::tests::quota_error_persists_hash_not_raw_message
 archon-cli-workspace::bin::archon::runtime::provider_limit_windows::tests::rate_limited_error_persists_exhausted_window
 archon-cli-workspace::bin::archon::runtime::provider_limit_windows::tests::reset_hint_parses_rfc3339_and_relative_units
+archon-cli-workspace::bin::archon::runtime::provider_observer::persistence_tests::anthropic_compatible_proxy_sse_strips_cache_marker_and_persists_usage
 archon-cli-workspace::bin::archon::runtime::provider_observer::tests::anthropic_clean_identity_records_rejected_spoof_event
 archon-cli-workspace::bin::archon::runtime::provider_observer::tests::anthropic_spoof_identity_event_is_recorded_on_wrap
 archon-cli-workspace::bin::archon::runtime::provider_observer::tests::complete_records_start_and_success_events
@@ -2058,6 +2059,15 @@ archon-core::lib::archon_core::agent::tests::correction_matching_prefers_specifi
 archon-core::lib::archon_core::agent::tests::eight_tool_rounds_send_trimmed_history_but_reopen_with_full_results
 archon-core::lib::archon_core::agent::tests::greeting_turn_short_circuits_before_provider_or_tools
 archon-core::lib::archon_core::agent::tests::guarded_exit_plan_persists_draft_after_allowed_finalization
+archon-core::lib::archon_core::agent::request_cache::tests::anthropic_compatible_proxy_does_not_receive_conversation_marker
+archon-core::lib::archon_core::agent::request_cache::tests::anthropic_marks_latest_conversation_block_without_mutating_source
+archon-core::lib::archon_core::agent::request_cache::tests::conversation_marker_is_added_before_anthropic_wire_budgeting
+archon-core::lib::archon_core::agent::request_cache::tests::marks_latest_tool_result_block_for_incremental_tool_round_caching
+archon-core::lib::archon_core::agent::request_cache::tests::native_prompt_caching_provider_does_not_receive_anthropic_marker
+archon-core::lib::archon_core::agent::request_cache::tests::one_hour_ttl_is_applied_to_conversation_marker
+archon-core::lib::archon_core::agent::request_cache::tests::skips_contentless_messages_when_finding_latest_cacheable_block
+archon-core::lib::archon_core::agent::request_cache::tests::unsupported_or_disabled_modes_do_not_mark_conversation
+archon-core::lib::archon_core::agent::tests::main_anthropic_request_marks_latest_conversation_block
 archon-core::lib::archon_core::agent::tests::main_request_trims_old_tool_result_without_mutating_canonical_history
 archon-core::lib::archon_core::agent::tests::permission_mode_normal_allows_all_tools
 archon-core::lib::archon_core::agent::tests::permission_mode_plan_blocks_mutating_tools
@@ -3277,6 +3287,8 @@ archon-core::test::skills_tests::register_and_get
 archon-core::test::skills_tests::resolve_alias
 archon-core::test::skills_tests::unknown_command_returns_none
 archon-core::test::skills_tests::user_skill_executes_as_prompt_with_args
+archon-core::lib::archon_core::subagent::runner::runtime::stream_round::tests::rebuilt_request_marks_latest_text_without_mutating_history
+archon-core::lib::archon_core::subagent::runner::runtime::stream_round::tests::rebuilt_request_marks_latest_tool_result_without_mutating_history
 archon-core::test::subagent_request_shape::alignment_regression_all_models
 archon-core::test::subagent_request_shape::comprehensive_structural_alignment
 archon-core::test::subagent_request_shape::haiku_gets_budgeted_thinking
@@ -3285,7 +3297,9 @@ archon-core::test::subagent_request_shape::opus_gets_adaptive_thinking
 archon-core::test::subagent_request_shape::sonnet_gets_adaptive_thinking
 archon-core::test::subagent_request_shape::speed_defaults_to_none
 archon-core::test::subagent_request_shape::speed_is_fast_when_fast_mode_enabled
+archon-core::test::subagent_request_shape::subagent_anthropic_request_marks_latest_conversation_block
 archon-core::test::subagent_request_shape::subagent_request_trims_old_tool_result_without_mutating_resume_history
+archon-core::test::subagent_request_shape::subagent_spoof_billing_fingerprint_uses_array_message_text
 archon-core::test::subagent_request_shape::subagent_system_block_omits_billing_header_in_clean_mode
 archon-core::test::subagent_request_shape::subagent_system_block_starts_with_billing_header_in_spoof_mode
 archon-core::test::subagent_request_shape::thinking_disabled_for_zero_budget_non_adaptive_model
@@ -3885,7 +3899,12 @@ archon-llm::lib::archon_llm::anthropic_oauth_refresh_tests::repeated_oauth_401_r
 archon-llm::lib::archon_llm::anthropic_oauth_refresh_tests::valid_oauth_uses_fast_path_without_refresh_network_call
 archon-llm::lib::archon_llm::anthropic_stream::tests::emits_delta_before_source_stream_completes
 archon-llm::lib::archon_llm::anthropic_stream::tests::source_error_after_delta_is_emitted_as_network_error
+archon-llm::lib::archon_llm::anthropic_cache_tests::cache_budget_preserves_tool_schema_property_named_cache_control
 archon-llm::lib::archon_llm::anthropic_tests::cache_control_blocks_stay_within_anthropic_budget
+archon-llm::lib::archon_llm::anthropic_cache_tests::spoof_wire_billing_fingerprint_uses_array_message_text
+archon-llm::lib::archon_llm::anthropic_cache_tests::spoof_wire_does_not_duplicate_existing_billing_cache_marker
+archon-llm::lib::archon_llm::anthropic_cache_tests::spoof_wire_prioritizes_conversation_marker_over_tool_marker
+archon-llm::lib::archon_llm::anthropic_cache_tests::spoof_wire_keeps_conversation_cache_marker_when_budget_allows
 archon-llm::lib::archon_llm::anthropic_tests::custom_api_url_stored
 archon-llm::lib::archon_llm::anthropic_tests::custom_api_url_used_not_constant
 archon-llm::lib::archon_llm::anthropic_tests::default_api_url_when_none
@@ -3896,6 +3915,9 @@ archon-llm::lib::archon_llm::anthropic_tests::extract_unknown_beta_returns_none_
 archon-llm::lib::archon_llm::anthropic_tests::large_rate_limited_body_returns_for_caller_compaction
 archon-llm::lib::archon_llm::anthropic_tests::long_retry_after_returns_without_sleeping
 archon-llm::lib::archon_llm::anthropic_tests::probe_body_structure
+archon-llm::lib::archon_llm::anthropic_cache_tests::prompt_caching_capability_requires_official_anthropic_endpoint
+archon-llm::lib::archon_llm::anthropic_cache_tests::proxy_wire_does_not_add_anthropic_tool_cache_marker
+archon-llm::lib::archon_llm::anthropic_cache_tests::spoof_proxy_wire_strips_anthropic_directives_but_preserves_schema_property
 archon-llm::lib::archon_llm::anthropic_tests::tool_definitions_get_anthropic_cache_control
 archon-llm::lib::archon_llm::anthropic_tests::unsupported_speed_and_effort_are_dropped_from_wire_body
 archon-llm::lib::archon_llm::anthropic_tests::validate_betas_with_empty_candidates_returns_empty
@@ -4035,6 +4057,7 @@ archon-llm::lib::archon_llm::providers::stream_decode::tests::decode_sse_skips_c
 archon-llm::lib::archon_llm::providers::stream_decode::tests::decode_sse_tolerates_unknown_fields
 archon-llm::lib::archon_llm::providers::vertex::tests::vertex_token_overflow_maps_to_context_window
 archon-llm::lib::archon_llm::retry::tests::long_rate_limit_is_fail_fast
+archon-llm::lib::archon_llm::retry::tests::retry_provider_preserves_anthropic_message_cache_capability
 archon-llm::lib::archon_llm::retry::tests::short_rate_limit_is_retryable
 archon-llm::lib::archon_llm::runtime::events::tests::event_metadata_redacts_sensitive_values
 archon-llm::lib::archon_llm::runtime::events::tests::fallback_event_records_source_and_target
@@ -4083,6 +4106,7 @@ archon-llm::lib::archon_llm::thinking::tests::param_disabled_none
 archon-llm::lib::archon_llm::usage::tests::delta_input_is_fallback_when_start_missing
 archon-llm::lib::archon_llm::usage::tests::start_usage_counts_cache_once
 archon-llm::test::active_concurrent::test_concurrent_swap_and_request
+archon-llm::test::active_provider::active_provider_preserves_current_anthropic_message_cache_capability
 archon-llm::test::active_provider::test_active_provider_impls_llm_provider
 archon-llm::test::active_provider::test_current_returns_cloned_arc
 archon-llm::test::active_provider::test_swap_changes_descriptor

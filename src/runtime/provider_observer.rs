@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use anyhow::Result;
 use archon_llm::provider::{
     LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature,
@@ -11,6 +9,7 @@ use archon_llm::streaming::StreamEvent;
 use archon_llm::types::Usage;
 use async_trait::async_trait;
 use cozo::DbInstance;
+use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 
 use super::learning_store;
@@ -27,7 +26,6 @@ mod observer_runtime;
 mod stream;
 #[path = "provider_observer_usage.rs"]
 mod usage;
-
 use errors::{error_kind, error_message, error_metadata, error_severity, limit_event_type};
 use observer_runtime::record_agent_provider_incident_sync;
 pub(crate) use observer_runtime::{record_provider_fallback, runtime_mode_for_provider_name};
@@ -471,6 +469,9 @@ impl LlmProvider for ObservedLlmProvider {
 
     fn supports_feature(&self, feature: ProviderFeature) -> bool {
         self.inner.supports_feature(feature)
+    }
+    fn supports_anthropic_message_caching(&self) -> bool {
+        self.inner.supports_anthropic_message_caching()
     }
 
     fn as_anthropic(&self) -> Option<&archon_llm::anthropic::AnthropicClient> {

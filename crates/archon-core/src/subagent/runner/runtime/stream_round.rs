@@ -29,10 +29,7 @@ pub(super) async fn collect_stream_round(
 ) -> anyhow::Result<StreamRoundResult> {
     let mut reconnected = false;
     let mut rx = loop {
-        let attempt_request = LlmRequest {
-            messages: projected_messages(runner, messages),
-            ..request.clone()
-        };
+        let attempt_request = projected_request(runner, messages, &request);
         match tokio::time::timeout(
             STREAM_IDLE_TIMEOUT,
             open_stream_with_retries(
@@ -77,10 +74,7 @@ pub(super) async fn collect_stream_round(
                 drop(rx);
                 reconnected = true;
                 tokio::time::sleep(STREAM_RECONNECT_BACKOFF).await;
-                let retry_request = LlmRequest {
-                    messages: projected_messages(runner, messages),
-                    ..request.clone()
-                };
+                let retry_request = projected_request(runner, messages, &request);
                 rx = tokio::time::timeout(
                     STREAM_IDLE_TIMEOUT,
                     runner.provider.stream(retry_request),
@@ -196,6 +190,26 @@ pub(super) async fn collect_stream_round(
     })
 }
 
+fn projected_request(
+    runner: &SubagentRunner,
+    messages: &[serde_json::Value],
+    request: &LlmRequest,
+) -> LlmRequest {
+    let mut request = LlmRequest {
+        messages: projected_messages(runner, messages),
+        ..request.clone()
+    };
+    crate::agent::request_cache::apply_conversation_cache(
+        &mut request,
+        runner.provider.as_ref(),
+        runner.agent_config.context.prompt_cache
+            && runner.agent_config.context.prompt_cache_conversation,
+        &runner.agent_config.context.prompt_cache_mode,
+        &runner.agent_config.context.prompt_cache_ttl,
+    );
+    request
+}
+
 fn projected_messages(
     runner: &SubagentRunner,
     messages: &[serde_json::Value],
@@ -233,10 +247,7 @@ async fn open_stream_with_retries(
             .await?;
             runner
                 .provider
-                .stream(LlmRequest {
-                    messages: projected_messages(runner, messages),
-                    ..request
-                })
+                .stream(projected_request(runner, messages, &request))
                 .await
                 .map_err(anyhow::Error::new)
         }
@@ -270,10 +281,7 @@ async fn open_stream_with_retries(
             .await?;
             runner
                 .provider
-                .stream(LlmRequest {
-                    messages: projected_messages(runner, messages),
-                    ..request
-                })
+                .stream(projected_request(runner, messages, &request))
                 .await
                 .map_err(anyhow::Error::new)
         }
@@ -449,4 +457,9 @@ fn record_message_delta_usage(runner: &SubagentRunner, usage: &archon_llm::types
         guard.cumulative_output_tokens += usage.output_tokens;
         guard.last_update = chrono::Utc::now();
     }
+}
+
+#[cfg(test)]
+mod tests {
+    include!("stream_round_tests.rs");
 }

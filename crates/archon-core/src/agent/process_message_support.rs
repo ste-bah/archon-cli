@@ -58,13 +58,20 @@ impl Agent {
         prepared: &PreparedTurnRequest,
         retry_label: &str,
     ) -> Result<Receiver<StreamEvent>, AgentLoopError> {
-        let retry_request = LlmRequest {
+        let mut retry_request = LlmRequest {
             messages: tool_result_context::project_messages_for_request(
                 &self.state.messages,
                 self.config.context.preserve_recent_turns,
             ),
             ..prepared.request.clone()
         };
+        request_cache::apply_conversation_cache(
+            &mut retry_request,
+            self.client.as_ref(),
+            self.config.context.prompt_cache && self.config.context.prompt_cache_conversation,
+            &self.config.context.prompt_cache_mode,
+            &self.config.context.prompt_cache_ttl,
+        );
         self.client
             .stream(retry_request)
             .await

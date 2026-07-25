@@ -1,5 +1,9 @@
 const DEFAULT_MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
 
+pub(crate) fn is_official_messages_url(url: &str) -> bool {
+    url == DEFAULT_MESSAGES_URL
+}
+
 pub(crate) fn messages_url(configured: Option<String>) -> String {
     let Some(raw) = configured else {
         return DEFAULT_MESSAGES_URL.to_string();

@@ -98,6 +98,81 @@ fn warn_dropped_knob(model: &str, field: &str, value: &str) {
     }
 }
 
+const MAX_ANTHROPIC_CACHE_BREAKPOINTS: usize = 4;
+
+pub(crate) fn remove_cache_directives(body: &mut serde_json::Value) {
+    for path in cache_directive_paths(body) {
+        remove_cache_directive(body, path);
+    }
+}
+
+pub(crate) fn enforce_cache_breakpoint_budget(body: &mut serde_json::Value) {
+    let mut directive_paths = cache_directive_paths(body);
+    if directive_paths.len() <= MAX_ANTHROPIC_CACHE_BREAKPOINTS {
+        return;
+    }
+
+    let excess = directive_paths.len() - MAX_ANTHROPIC_CACHE_BREAKPOINTS;
+    for path in directive_paths.drain(..excess) {
+        remove_cache_directive(body, path);
+    }
+}
+
+#[derive(Clone, Copy)]
+enum CacheDirectivePath {
+    Tool(usize),
+    System(usize),
+    MessageBlock(usize, usize),
+}
+
+fn cache_directive_paths(body: &serde_json::Value) -> Vec<CacheDirectivePath> {
+    let mut paths = Vec::new();
+    collect_array_directives(body.get("tools"), CacheDirectivePath::Tool, &mut paths);
+    collect_array_directives(body.get("system"), CacheDirectivePath::System, &mut paths);
+    if let Some(messages) = body.get("messages").and_then(serde_json::Value::as_array) {
+        for (message_index, message) in messages.iter().enumerate() {
+            let Some(blocks) = message.get("content").and_then(serde_json::Value::as_array) else {
+                continue;
+            };
+            for (block_index, block) in blocks.iter().enumerate() {
+                if block.get("cache_control").is_some() {
+                    paths.push(CacheDirectivePath::MessageBlock(message_index, block_index));
+                }
+            }
+        }
+    }
+    paths
+}
+
+fn collect_array_directives(
+    value: Option<&serde_json::Value>,
+    path: impl Fn(usize) -> CacheDirectivePath,
+    paths: &mut Vec<CacheDirectivePath>,
+) {
+    let Some(values) = value.and_then(serde_json::Value::as_array) else {
+        return;
+    };
+    for (index, value) in values.iter().enumerate() {
+        if value.get("cache_control").is_some() {
+            paths.push(path(index));
+        }
+    }
+}
+
+fn remove_cache_directive(body: &mut serde_json::Value, path: CacheDirectivePath) {
+    let target = match path {
+        CacheDirectivePath::Tool(index) => body["tools"].get_mut(index),
+        CacheDirectivePath::System(index) => body["system"].get_mut(index),
+        CacheDirectivePath::MessageBlock(message, block) => body["messages"]
+            .get_mut(message)
+            .and_then(|value| value.get_mut("content"))
+            .and_then(|value| value.get_mut(block)),
+    };
+    if let Some(object) = target.and_then(serde_json::Value::as_object_mut) {
+        object.remove("cache_control");
+    }
+}
+
 pub(crate) fn cached_tool_blocks(tools: &[serde_json::Value]) -> Vec<serde_json::Value> {
     let mut tools: Vec<serde_json::Value> = tools.to_vec();
     if let Some(last) = tools.last_mut()

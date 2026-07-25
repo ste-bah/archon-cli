@@ -216,6 +216,10 @@ impl LlmProvider for ActiveProvider {
         self.current().compaction_provider_family()
     }
 
+    fn supports_anthropic_message_caching(&self) -> bool {
+        self.current().supports_anthropic_message_caching()
+    }
+
     fn as_anthropic(&self) -> Option<&AnthropicClient> {
         // `as_anthropic` hands back a borrowed reference tied to
         // `&self`. We cannot safely do that through an ArcSwap load
