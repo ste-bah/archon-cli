@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-pub(super) fn verification_command(root: &str, contract: &Value) -> String {
+pub(crate) fn verification_command(root: &str, contract: &Value) -> String {
     let root_literal = serde_json::to_string(root).expect("project root JSON");
     let contract_json = serde_json::to_string(contract).expect("deliverable contract JSON");
     let contract_literal =
@@ -43,11 +43,36 @@ fn shell_quote(value: &str) -> String {
 }
 
 const VERIFIER: &str = r#"python3 - <<'PY'
+import datetime
 import hashlib
 import itertools
 import json
 import pathlib
 import sys
+
+def parse_timestamp(value):
+    # Accept the common serialized instant shapes without adding a dependency:
+    # RFC3339/ISO-8601 (with 'Z' or offset), plain date, and epoch seconds/millis.
+    # Returns an aware UTC datetime, or None when unparseable.
+    if isinstance(value, (int, float)):
+        seconds = float(value)
+        if seconds > 1e11:  # milliseconds
+            seconds /= 1000.0
+        try:
+            return datetime.datetime.fromtimestamp(seconds, datetime.timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    text = str(value).strip()
+    if not text:
+        return None
+    normalized_text = text[:-1] + '+00:00' if text.endswith('Z') else text
+    try:
+        parsed = datetime.datetime.fromisoformat(normalized_text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return parsed.astimezone(datetime.timezone.utc)
 
 root = pathlib.Path(__PROJECT_ROOT__)
 contract = json.loads(__CONTRACT_JSON__)
@@ -387,6 +412,32 @@ for identity, cell in sorted(
         }
         if len(values) <= 1:
             failures.append(f'{label} payload field is constant or absent: {field}')
+    # Temporal impossibility: an observed series cannot contain records dated in
+    # the future. Fabricated payloads are commonly produced by incrementing a
+    # timestamp N times from a start date, which overshoots now. Contract-driven
+    # and domain-neutral: only runs when the contract names an observation-time
+    # field, and only rejects timestamps strictly after the verification instant.
+    observed_time_field = contract.get('observed_time_field')
+    if observed_time_field and rows:
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        for row_index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                continue
+            raw_value = get_field(row, observed_time_field)
+            if raw_value in (None, ''):
+                continue
+            parsed = parse_timestamp(raw_value)
+            if parsed is None:
+                failures.append(
+                    f'{label} payload row {row_index} {observed_time_field} is not a parseable timestamp: {raw_value}'
+                )
+                continue
+            if parsed > now_utc:
+                failures.append(
+                    f'{label} payload row {row_index} {observed_time_field} is in the future '
+                    f'({raw_value}); an observed series cannot contain future records'
+                )
+                break
 
     request_path_field = contract.get('request_path_field')
     requested_count_field = contract.get('requested_count_field')

@@ -179,6 +179,14 @@ pub(super) struct WorkflowV2DeliverableContract {
     pub(super) required_fields: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) non_constant_fields: Vec<String>,
+    /// Name of the payload field holding each record's observation instant. When
+    /// declared, the verifier rejects any record dated after the verification
+    /// time: an observed series cannot contain future records, and fabricated
+    /// payloads built by incrementing a timestamp N times routinely overshoot
+    /// now. Domain-neutral — the contract names the field, the engine only
+    /// compares instants.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) observed_time_field: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) series_value_fields: Vec<String>,
     #[serde(default)]
