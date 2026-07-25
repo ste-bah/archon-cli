@@ -85,7 +85,14 @@ async fn generated_v2_request_keeps_stable_prompt_in_system_context() {
     );
     let mut request = request(WorkflowV2HostMethod::Agent, None);
     request.input = serde_json::json!({
-        "task_universe":[{"id":"TASK-1","description":"stable universe"}],
+        "task_universe":{
+            "schema_version":"workflow-v2-task-universe-v1",
+            "source_roots":["project-tasks"],
+            "tasks":[{
+                "canonical_task_id":"TASK-1",
+                "description":"stable universe"
+            }]
+        },
         "wave":1
     });
     let prompt = archon_workflow::WorkflowV2AgentAdapter::new().build_prompt_parts(&request);

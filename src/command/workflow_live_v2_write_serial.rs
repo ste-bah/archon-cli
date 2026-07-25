@@ -46,6 +46,7 @@ async fn run_serial_v2_write_fanout(
             &adapter,
             client,
             Some(v2_store),
+            None,
         )
         .await
         {

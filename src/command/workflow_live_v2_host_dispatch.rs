@@ -71,6 +71,7 @@ async fn execute_v2_live_call(
                 &adapter,
                 client,
                 Some(v2_store),
+                task_universe,
             )
             .await
         }
@@ -155,6 +156,7 @@ async fn run_single_v2_agent_call(
     adapter: &WorkflowV2AgentAdapter,
     client: &LiveV2AgentClient,
     v2_store: Option<&WorkflowV2ResultStore>,
+    task_universe: Option<&WorkflowV2TaskUniverse>,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
     run_single_v2_agent_call_in_repository(
         task,
@@ -163,6 +165,7 @@ async fn run_single_v2_agent_call(
         adapter,
         client,
         v2_store,
+        task_universe,
         None,
     )
     .await
@@ -175,6 +178,7 @@ async fn run_single_v2_agent_call_in_repository(
     adapter: &WorkflowV2AgentAdapter,
     client: &LiveV2AgentClient,
     v2_store: Option<&WorkflowV2ResultStore>,
+    task_universe: Option<&WorkflowV2TaskUniverse>,
     repository_root_override: Option<String>,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
     let execution = match v2_store {
@@ -182,7 +186,7 @@ async fn run_single_v2_agent_call_in_repository(
         None => execution.clone(),
     };
     let repository_root = repository_root_override.or(target_repository_root);
-    let mut request = v2_agent_request(task, repository_root, &execution);
+    let mut request = v2_agent_request(task, repository_root, &execution, task_universe);
     if let Some(store) = v2_store {
         let mut context = archon_workflow::project_artifact_context_from_v2_root(store.root());
         context.add_artifact_requirements(&request.input);

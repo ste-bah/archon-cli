@@ -24,7 +24,11 @@ fn request() -> WorkflowV2AgentRequest {
 fn workflow_prompt_splits_stable_prefix_from_volatile_call_data() {
     let mut first = request();
     first.input = serde_json::json!({
-        "task_universe": [{"id":"TASK-1","description":"stable"}],
+        "task_universe": {
+            "schema_version":"workflow-v2-task-universe-v1",
+            "source_roots":["project-tasks"],
+            "tasks":[{"canonical_task_id":"TASK-1","description":"stable"}]
+        },
         "wave": 1
     });
     let mut second = first.clone();
@@ -45,9 +49,9 @@ fn workflow_prompt_splits_stable_prefix_from_volatile_call_data() {
 #[test]
 fn workflow_prompt_extracts_nested_task_universe_aliases_without_duplication() {
     let universe = serde_json::json!({
-        "schema_version":"1",
+        "schema_version":"workflow-v2-task-universe-v1",
         "source_roots":["project-tasks"],
-        "tasks":[{"id":"TASK-1","description":"universe-only-detail"}]
+        "tasks":[{"canonical_task_id":"TASK-1","description":"universe-only-detail"}]
     });
     let mut request = request();
     request.input = serde_json::json!([

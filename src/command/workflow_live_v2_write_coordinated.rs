@@ -63,6 +63,7 @@ async fn run_coordinated_v2_write_fanout(
                     &adapter,
                     client,
                     Some(v2_store),
+                    None,
                 )
                 .await;
                 active.fetch_sub(1, Ordering::SeqCst);

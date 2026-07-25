@@ -117,6 +117,7 @@ async fn run_read_only_v2_fanout(
                                 &adapter,
                                 &branch_client,
                                 None,
+                                None,
                             )
                             .await?,
                         };

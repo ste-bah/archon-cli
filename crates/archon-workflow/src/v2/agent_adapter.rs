@@ -373,5 +373,14 @@ pub(super) const RESULT_SCHEMA: &str = r#"{
 #[path = "agent_adapter_project_artifact_completion_tests.rs"]
 mod project_artifact_completion_tests;
 #[cfg(test)]
+#[path = "agent_prompt_digest_tests.rs"]
+mod prompt_digest_tests;
+#[cfg(test)]
+#[path = "agent_prompt_growth_tests.rs"]
+mod prompt_growth_tests;
+#[cfg(test)]
+#[path = "agent_prompt_tests.rs"]
+mod prompt_tests;
+#[cfg(test)]
 #[path = "agent_adapter_tests.rs"]
 mod tests;
