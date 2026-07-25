@@ -187,6 +187,25 @@ pub(super) struct WorkflowV2DeliverableContract {
     /// compares instants.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) observed_time_field: Option<String>,
+    /// Weekday indices (Mon=0 … Sun=6) on which the observed venue does not
+    /// trade, and specific non-trading dates. When either is declared the
+    /// verifier rejects records dated to a closed session. This is external
+    /// truth rather than a threshold: an evenly spaced generated series lands on
+    /// closed days by construction, and there is no number to fabricate toward.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) closed_weekdays: Option<Vec<u8>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) closed_dates: Vec<String>,
+    /// Overrides for the synthetic-series step-variety check, the minimum
+    /// percentage of first differences that must be distinct. Left unset in task
+    /// specs by design — a declared numeric threshold is a target to fabricate
+    /// against, so the defaults live in the engine where the agent cannot read
+    /// them. Integer percent rather than a float ratio because this struct
+    /// derives Ord and f64 does not implement it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) step_variety_min_rows: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) step_variety_min_percent: Option<u32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) series_value_fields: Vec<String>,
     #[serde(default)]

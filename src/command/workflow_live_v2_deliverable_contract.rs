@@ -78,6 +78,14 @@ root = pathlib.Path(__PROJECT_ROOT__)
 contract = json.loads(__CONTRACT_JSON__)
 failures = []
 
+# Step-variety bounds for the synthetic-series check. These live in the ENGINE,
+# not in task specs, on purpose: every numeric threshold written into a spec
+# becomes the number an agent fabricates to (a `row_count: 200` minimum produced
+# a payload with exactly 200 forged rows). An agent reading its task cannot see
+# these, and satisfying them requires genuinely varied data rather than padding.
+step_variety_min_rows = int(contract.get('step_variety_min_rows') or 20)
+step_variety_min_ratio = int(contract.get('step_variety_min_percent') or 20) / 100.0
+
 def resolve(value):
     path = pathlib.Path(value)
     return path if path.is_absolute() else root / path
@@ -439,6 +447,33 @@ for identity, cell in sorted(
                 )
                 break
 
+    # Venue-calendar validity. A series observed from a venue that does not
+    # trade continuously cannot carry records on days the venue was shut. This
+    # is external truth rather than a threshold -- there is no number to tune
+    # against, and a generator that emits an evenly spaced series produces
+    # closed-day records automatically. Opt-in and domain-neutral: the contract
+    # declares which weekdays the venue is closed and any specific closed dates.
+    closed_weekdays = contract.get('closed_weekdays')
+    closed_dates = {str(value).strip()[:10] for value in contract.get('closed_dates', [])}
+    if observed_time_field and rows and (closed_weekdays is not None or closed_dates):
+        closed_weekday_set = {int(day) for day in (closed_weekdays or [])}
+        closed_hits = []
+        for row_index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                continue
+            parsed = parse_timestamp(get_field(row, observed_time_field))
+            if parsed is None:
+                continue
+            if parsed.weekday() in closed_weekday_set:
+                closed_hits.append(f'row {row_index} falls on weekday {parsed.weekday()}')
+            elif parsed.date().isoformat() in closed_dates:
+                closed_hits.append(f'row {row_index} falls on closed date {parsed.date().isoformat()}')
+        if closed_hits:
+            failures.append(
+                f'{label} payload has {len(closed_hits)} record(s) dated when the venue was closed '
+                f'({"; ".join(closed_hits[:3])}); an observed series cannot contain them'
+            )
+
     request_path_field = contract.get('request_path_field')
     requested_count_field = contract.get('requested_count_field')
     if request_path_field and requested_count_field:
@@ -493,8 +528,25 @@ for identity, cell in sorted(
             if len(values) < 3:
                 continue
             steps = tuple(round(values[index] - values[index - 1], 12) for index in range(1, len(values)))
-            if steps and len(set(steps)) == 1:
-                failures.append(f'{label} payload field has a constant first difference: {field}')
+            # Requiring EVERY step to be identical was trivially evaded: a
+            # generated series using two alternating increments has 2 distinct
+            # steps and walked straight through. Judge the VARIETY of the step
+            # distribution instead. An observed series prices independently each
+            # period, so its first differences are near-all distinct; a series
+            # whose hundreds of steps take only a handful of values was authored,
+            # not observed. Ratio-based, so it does not depend on series length.
+            if steps:
+                distinct = len(set(steps))
+                if distinct == 1:
+                    failures.append(f'{label} payload field has a constant first difference: {field}')
+                elif len(steps) >= step_variety_min_rows:
+                    ratio = distinct / len(steps)
+                    if ratio < step_variety_min_ratio:
+                        failures.append(
+                            f'{label} payload field has only {distinct} distinct first differences '
+                            f'across {len(steps)} steps (ratio {ratio:.3f} < {step_variety_min_ratio}): '
+                            f'{field} is synthetic, not observed'
+                        )
             field_steps.append((field, steps))
         if field_steps:
             step_series.append((identity, tuple(field_steps)))

@@ -681,3 +681,141 @@ fn cargo_write_waves_serialize_before_agent_launch() {
 
     assert_eq!(write_wave_parallelism(&items), 1);
 }
+
+/// Build a project whose payload rows are supplied by the caller, so a test can
+/// choose exactly what the "observed" series looks like.
+fn series_project(rows: Vec<serde_json::Value>) -> (tempfile::TempDir, serde_json::Value) {
+    let project = tempfile::tempdir().expect("project");
+    let count = rows.len();
+    write_json(
+        &project.path().join(".archon/demo/coverage.json"),
+        &serde_json::json!({
+            "instruments": ["ALPHA"],
+            "timeframes": ["1D"],
+            "cells": [{"canonical_instrument": "ALPHA", "timeframe": "1D",
+                       "provider_symbol": "EXCHANGE:ALPHA", "available": true,
+                       "production_eligible": true, "row_count": count,
+                       "dataset_id": "alpha", "version": "v1"}],
+            "gaps": []
+        }),
+    );
+    write_jsonl(
+        &project.path().join(".archon/demo/alpha/payload.jsonl"),
+        &rows,
+    );
+    write_json(
+        &project.path().join(".archon/demo/alpha/request.json"),
+        &serde_json::json!({"count": count}),
+    );
+    write_json(
+        &project.path().join(".archon/demo/alpha/response.json"),
+        &serde_json::json!({"symbol": "EXCHANGE:ALPHA", "timeframe": "1D"}),
+    );
+    write_json(
+        &project.path().join(".archon/demo/alpha/validation.json"),
+        &serde_json::json!({"status": "passed", "checks": [{"status": "passed"}]}),
+    );
+    write_json(
+        &project.path().join(".archon/demo/registry.json"),
+        &serde_json::json!({"datasets": {"alpha:v1": {
+            "production_eligible": true, "status": "Healthy", "rows": count,
+            "symbol": "ALPHA", "timeframe": "1D",
+            "payload_path": ".archon/demo/alpha/payload.jsonl",
+            "request_path": ".archon/demo/alpha/request.json",
+            "response_path": ".archon/demo/alpha/response.json",
+            "validation_path": ".archon/demo/alpha/validation.json"}}}),
+    );
+    (project, record_series_contract())
+}
+
+fn verifier_stdout(project: &tempfile::TempDir, contract: &serde_json::Value) -> String {
+    let command = super::workflow_live_v2_deliverable_contract::verification_command(
+        project.path().to_str().expect("project path"),
+        contract,
+    );
+    String::from_utf8_lossy(&run_verifier(&command).stdout).into_owned()
+}
+
+/// Two alternating increments across 200 rows: the shape that was actually
+/// fabricated. The old rule fired only when EVERY first difference matched, so
+/// distinct == 2 walked straight through it.
+#[test]
+fn a_series_with_only_two_distinct_step_values_is_rejected_as_synthetic() {
+    let rows: Vec<_> = (0..200)
+        .map(|index| {
+            let value = 100.0 + (index / 2) as f64 * 1.2 + (index % 2) as f64 * 0.5;
+            serde_json::json!({"timestamp": 1_700_000_000i64 + index * 86_400,
+                               "value": value, "measure": value * 2.0})
+        })
+        .collect();
+    let (project, contract) = series_project(rows);
+    let stdout = verifier_stdout(&project, &contract);
+    assert!(stdout.contains("distinct first differences"), "{stdout}");
+    assert!(stdout.contains("synthetic, not observed"), "{stdout}");
+}
+
+/// The counterpart guard: a check that misfires on genuine data would be worse
+/// than no check, because everyone learns to ignore it. Real SPY closes score
+/// ~0.88 on this ratio.
+#[test]
+fn an_irregular_series_of_the_same_length_is_accepted() {
+    // A linear ramp plus a *linear* jitter is still synthetic -- its first
+    // differences take two values, and an earlier draft of this fixture was
+    // correctly rejected by the check. Real closes move independently each
+    // session, so drive the walk with an LCG.
+    let mut state: u64 = 12_345;
+    let rows: Vec<_> = (0..200)
+        .map(|index| {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            let step = ((state >> 33) % 10_000) as f64 / 1_000.0 - 5.0;
+            let value = 500.0 + index as f64 * 0.1 + step;
+            serde_json::json!({"timestamp": 1_700_000_000i64 + index * 86_400,
+                               "value": value, "measure": value * 1.5 + step})
+        })
+        .collect();
+    let (project, contract) = series_project(rows);
+    let stdout = verifier_stdout(&project, &contract);
+    assert!(!stdout.contains("distinct first differences"), "{stdout}");
+    assert!(!stdout.contains("synthetic, not observed"), "{stdout}");
+}
+
+/// A venue that closes at weekends cannot have produced weekend records. The
+/// forged set carried 48 of them.
+#[test]
+fn records_dated_to_a_closed_session_are_rejected() {
+    // 1704067200 = 2024-01-01T00:00:00Z (Monday); +5d and +6d land on the weekend.
+    let rows: Vec<_> = (0..40)
+        .map(|index| {
+            let jitter = ((index * 7919) % 977) as f64 / 100.0;
+            serde_json::json!({"timestamp": 1_704_067_200i64 + index * 86_400,
+                               "value": 100.0 + index as f64 * 0.4 + jitter,
+                               "measure": 50.0 + index as f64 * 0.9 + jitter})
+        })
+        .collect();
+    let (project, mut contract) = series_project(rows);
+    contract["observed_time_field"] = serde_json::json!("timestamp");
+    contract["closed_weekdays"] = serde_json::json!([5, 6]);
+    contract["closed_dates"] = serde_json::json!(["2024-01-01"]);
+    let stdout = verifier_stdout(&project, &contract);
+    assert!(stdout.contains("when the venue was closed"), "{stdout}");
+}
+
+/// Without a declared calendar the check must stay silent -- it is opt-in, and
+/// a 24/7 venue trades every day.
+#[test]
+fn a_venue_with_no_declared_calendar_keeps_every_session() {
+    let rows: Vec<_> = (0..40)
+        .map(|index| {
+            let jitter = ((index * 7919) % 977) as f64 / 100.0;
+            serde_json::json!({"timestamp": 1_704_067_200i64 + index * 86_400,
+                               "value": 100.0 + index as f64 * 0.4 + jitter,
+                               "measure": 50.0 + index as f64 * 0.9 + jitter})
+        })
+        .collect();
+    let (project, mut contract) = series_project(rows);
+    contract["observed_time_field"] = serde_json::json!("timestamp");
+    let stdout = verifier_stdout(&project, &contract);
+    assert!(!stdout.contains("when the venue was closed"), "{stdout}");
+}
