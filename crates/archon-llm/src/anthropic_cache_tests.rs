@@ -244,6 +244,33 @@ fn spoof_wire_prioritizes_conversation_marker_over_tool_marker() {
 }
 
 #[test]
+fn official_anthropic_tool_section_bytes_are_stable() {
+    let client = AnthropicClient::new(make_auth(), spoof_identity(), None);
+    let request = MessageRequest {
+        messages: vec![serde_json::json!({"role":"user","content":"hello"})],
+        tools: vec![serde_json::json!({
+            "name":"Read",
+            "description":"read",
+            "input_schema":{
+                "type":"object",
+                "properties":{"file_path":{"type":"string"}}
+            }
+        })],
+        ..MessageRequest::default()
+    };
+
+    let first: serde_json::Value =
+        serde_json::from_str(&client.build_request_body(&request).unwrap()).unwrap();
+    let second: serde_json::Value =
+        serde_json::from_str(&client.build_request_body(&request).unwrap()).unwrap();
+
+    assert_eq!(
+        serde_json::to_vec(&first["tools"]).unwrap(),
+        serde_json::to_vec(&second["tools"]).unwrap()
+    );
+}
+
+#[test]
 fn cache_budget_preserves_tool_schema_property_named_cache_control() {
     let client = AnthropicClient::new(make_auth(), spoof_identity(), None);
     let request = MessageRequest {

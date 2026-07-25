@@ -90,6 +90,26 @@ fn bedrock_request_maps_tools() {
     assert!(spec["inputSchema"]["json"].is_object());
 }
 
+#[test]
+fn bedrock_tool_section_bytes_are_stable() {
+    let tools = vec![serde_json::json!({
+        "name":"Bash",
+        "description":"run",
+        "input_schema":{
+            "type":"object",
+            "properties":{"command":{"type":"string"}}
+        }
+    })];
+
+    let first = BedrockProvider::build_converse_body(&[], &[], &tools, 8192);
+    let second = BedrockProvider::build_converse_body(&[], &[], &tools, 8192);
+
+    assert_eq!(
+        serde_json::to_vec(&first["toolConfig"]["tools"]).unwrap(),
+        serde_json::to_vec(&second["toolConfig"]["tools"]).unwrap()
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Test 4a: Bedrock response event — content_block_delta parsed
 // ---------------------------------------------------------------------------

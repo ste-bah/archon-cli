@@ -36,6 +36,53 @@ impl LlmProvider for CapturingLlmProvider {
 }
 
 #[tokio::test]
+async fn main_request_tool_definitions_are_byte_stable_across_turns() {
+    let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let config = AgentConfig {
+        tools: vec![serde_json::json!({
+            "name":"Read",
+            "description":"read",
+            "input_schema":{"type":"object"}
+        })],
+        ..AgentConfig::default()
+    };
+    let mut agent = Agent::new(
+        Arc::new(CapturingLlmProvider {
+            captured: Arc::clone(&captured),
+        }),
+        ToolRegistry::new(),
+        config,
+        tx,
+        Arc::new(std::sync::RwLock::new(AgentRegistry::load(
+            &std::env::temp_dir(),
+        ))),
+    );
+
+    agent.state.add_user_message("first turn");
+    let first = agent
+        .prepare_turn_request("first turn", 0)
+        .await
+        .expect("first request");
+    agent.state.add_user_message("second turn");
+    let second = agent
+        .prepare_turn_request("second turn", 0)
+        .await
+        .expect("second request");
+
+    let first_tools = archon_llm::providers::OpenAiProvider::map_tools_to_openai(
+        &first.request.tools,
+    );
+    let second_tools = archon_llm::providers::OpenAiProvider::map_tools_to_openai(
+        &second.request.tools,
+    );
+    assert_eq!(
+        serde_json::to_vec(&first_tools).unwrap(),
+        serde_json::to_vec(&second_tools).unwrap()
+    );
+}
+
+#[tokio::test]
 async fn main_anthropic_request_marks_latest_conversation_block() {
     let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();

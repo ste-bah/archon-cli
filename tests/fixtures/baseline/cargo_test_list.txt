@@ -2068,6 +2068,7 @@ archon-core::lib::archon_core::agent::request_cache::tests::one_hour_ttl_is_appl
 archon-core::lib::archon_core::agent::request_cache::tests::skips_contentless_messages_when_finding_latest_cacheable_block
 archon-core::lib::archon_core::agent::request_cache::tests::unsupported_or_disabled_modes_do_not_mark_conversation
 archon-core::lib::archon_core::agent::tests::main_anthropic_request_marks_latest_conversation_block
+archon-core::lib::archon_core::agent::tests::main_request_tool_definitions_are_byte_stable_across_turns
 archon-core::lib::archon_core::agent::tests::main_request_trims_old_tool_result_without_mutating_canonical_history
 archon-core::lib::archon_core::agent::tests::permission_mode_normal_allows_all_tools
 archon-core::lib::archon_core::agent::tests::permission_mode_plan_blocks_mutating_tools
@@ -2120,7 +2121,8 @@ archon-core::lib::archon_core::agents::built_in::tests::fork_guard_detects_marke
 archon-core::lib::archon_core::agents::built_in::tests::fork_guard_detects_marker_in_content_string
 archon-core::lib::archon_core::agents::built_in::tests::fork_guard_false_for_empty_messages
 archon-core::lib::archon_core::agents::built_in::tests::fork_guard_false_when_no_marker
-archon-core::lib::archon_core::agents::built_in::tests::general_purpose_allows_all_tools
+archon-core::lib::archon_core::agents::built_in::tests::general_purpose_has_explicit_curated_tool_set
+archon-core::lib::archon_core::agents::built_in::tests::general_purpose_prompt_matches_curated_tool_set
 archon-core::lib::archon_core::agents::built_in::tests::is_fork_enabled_defaults_to_false
 archon-core::lib::archon_core::agents::built_in::tests::is_fork_enabled_false_for_zero
 archon-core::lib::archon_core::agents::built_in::tests::is_fork_enabled_true_when_set
@@ -2652,6 +2654,7 @@ archon-core::lib::archon_core::subagent::runner::tests::basic::proactive_compact
 archon-core::lib::archon_core::subagent::runner::tests::basic::signed_thinking_is_replayed_for_anthropic_shape_after_tool_use
 archon-core::lib::archon_core::subagent::runner::tests::basic::text_only_returns_immediately
 archon-core::lib::archon_core::subagent::runner::tests::basic::tier_alias_is_resolved_before_subagent_request
+archon-core::lib::archon_core::subagent::runner::tests::basic::tool_definitions_are_byte_stable_across_rounds
 archon-core::lib::archon_core::subagent::runner::tests::basic::tool_dispatch_error_continues
 archon-core::lib::archon_core::subagent::runner::tests::basic::tool_use_then_text_returns_after_two_turns
 archon-core::lib::archon_core::subagent::runner::tests::parallel::parallel_tool_dispatch_concurrent_and_order_preserved
@@ -3900,6 +3903,7 @@ archon-llm::lib::archon_llm::anthropic_oauth_refresh_tests::valid_oauth_uses_fas
 archon-llm::lib::archon_llm::anthropic_stream::tests::emits_delta_before_source_stream_completes
 archon-llm::lib::archon_llm::anthropic_stream::tests::source_error_after_delta_is_emitted_as_network_error
 archon-llm::lib::archon_llm::anthropic_cache_tests::cache_budget_preserves_tool_schema_property_named_cache_control
+archon-llm::lib::archon_llm::anthropic_cache_tests::official_anthropic_tool_section_bytes_are_stable
 archon-llm::lib::archon_llm::anthropic_tests::cache_control_blocks_stay_within_anthropic_budget
 archon-llm::lib::archon_llm::anthropic_cache_tests::spoof_wire_billing_fingerprint_uses_array_message_text
 archon-llm::lib::archon_llm::anthropic_cache_tests::spoof_wire_does_not_duplicate_existing_billing_cache_marker
@@ -4153,6 +4157,7 @@ archon-llm::test::bedrock_provider_tests::bedrock_provider_is_object_safe
 archon-llm::test::bedrock_provider_tests::bedrock_request_maps_system_prompt
 archon-llm::test::bedrock_provider_tests::bedrock_request_maps_tools
 archon-llm::test::bedrock_provider_tests::bedrock_sigv4_header_format_valid
+archon-llm::test::bedrock_provider_tests::bedrock_tool_section_bytes_are_stable
 archon-llm::test::builder_tests::build_llm_provider_auth_flavor_none_requires_no_env_var
 archon-llm::test::builder_tests::build_llm_provider_with_groq_api_key_returns_compat_provider
 archon-llm::test::builder_tests::build_llm_provider_without_groq_api_key_errors_with_var_name
@@ -4168,6 +4173,7 @@ archon-llm::test::codex_capture_replay_oauth_token::synthetic_jwt_decodes_to_tes
 archon-llm::test::codex_capture_replay_request_shape::captured_header_shape_matches_archon_headers
 archon-llm::test::codex_capture_replay_request_shape::captured_request_shape_matches_openclaw_fixture
 archon-llm::test::codex_capture_replay_request_shape::captured_tool_and_reasoning_fixtures_match_translator_shape
+archon-llm::test::codex_capture_replay_request_shape::consecutive_captured_tool_sections_are_byte_stable
 archon-llm::test::codex_capture_replay_sse::captured_sse_fixture_parses_and_translates
 archon-llm::test::codex_capture_secret_leak::codex_capture_fixtures_do_not_contain_live_secret_patterns
 archon-llm::test::codex_client_basic_stream::provider_complete_preserves_tool_use_blocks
@@ -4206,6 +4212,7 @@ archon-llm::test::codex_translator_system_prompt::ignores_openai_role_content_sy
 archon-llm::test::codex_translator_system_prompt::joins_canonical_system_text_blocks
 archon-llm::test::codex_translator_tool_call_roundtrip::errored_tool_result_gets_error_prefix
 archon-llm::test::codex_translator_tool_call_roundtrip::tool_use_maps_to_function_call
+archon-llm::test::codex_translator_tools::codex_tool_section_bytes_are_stable
 archon-llm::test::codex_translator_tools::maps_anthropic_tool_schema_to_response_tool
 archon-llm::test::codex_translator_tools::missing_name_is_error
 archon-llm::test::codex_translator_unknown_block::unknown_content_block_is_skipped
@@ -4343,6 +4350,7 @@ archon-llm::test::openai_provider_tests::openai_sse_text_delta_parsed
 archon-llm::test::openai_provider_tests::openai_sse_tool_call_parsed
 archon-llm::test::openai_provider_tests::openai_system_prompt_becomes_first_message
 archon-llm::test::openai_provider_tests::openai_tool_mapping_correct
+archon-llm::test::openai_provider_tests::openai_tool_section_bytes_are_stable
 archon-llm::test::openai_provider_tests::openai_uses_env_api_key
 archon-llm::test::provider_trait_tests::anthropic_supports_thinking_and_tool_use
 archon-llm::test::provider_trait_tests::llm_request_from_message_request_round_trip
@@ -4516,6 +4524,11 @@ archon-mcp::lib::archon_mcp::tool_bridge::tests::flatten_content_mixed
 archon-mcp::lib::archon_mcp::tool_bridge::tests::flatten_content_resource_no_text
 archon-mcp::lib::archon_mcp::tool_bridge::tests::flatten_content_text_only
 archon-mcp::lib::archon_mcp::tool_bridge::tests::flatten_error_result
+archon-mcp::lib::archon_mcp::tool_bridge::tests::model_description_cap_preserves_utf8
+archon-mcp::lib::archon_mcp::tool_bridge::tests::model_description_caps_long_ascii_text
+archon-mcp::lib::archon_mcp::tool_bridge::tests::model_description_keeps_exact_cap
+archon-mcp::lib::archon_mcp::tool_bridge::tests::model_description_keeps_short_text_and_default
+archon-mcp::lib::archon_mcp::tool_bridge::tests::permission_classification_uses_full_description_beyond_model_cap
 archon-mcp::lib::archon_mcp::tool_bridge::tests::qualified_name_construction
 archon-mcp::lib::archon_mcp::tool_bridge::tests::qualified_name_with_special_chars
 archon-mcp::lib::archon_mcp::tool_bridge::tests::trusted_meta_permission_hint_is_honored

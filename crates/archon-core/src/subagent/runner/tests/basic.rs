@@ -313,6 +313,27 @@ async fn tool_dispatch_error_continues() {
 }
 
 #[tokio::test]
+async fn tool_definitions_are_byte_stable_across_rounds() {
+    let provider = Arc::new(MockProvider::new(vec![
+        tool_use_response("t1", "NonexistentTool", r#"{}"#),
+        text_response("done"),
+    ]));
+    let runner = make_runner(provider.clone(), 5);
+
+    assert_eq!(runner.run("use a tool").await.unwrap(), "done");
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 2);
+    let first_tools =
+        archon_llm::providers::OpenAiProvider::map_tools_to_openai(&requests[0].tools);
+    let second_tools =
+        archon_llm::providers::OpenAiProvider::map_tools_to_openai(&requests[1].tools);
+    assert_eq!(
+        serde_json::to_vec(&first_tools).unwrap(),
+        serde_json::to_vec(&second_tools).unwrap()
+    );
+}
+
+#[tokio::test]
 async fn empty_tool_definitions_still_works() {
     let provider = Arc::new(MockProvider::new(vec![text_response("No tools needed")]));
     let registry = Arc::new(crate::dispatch::create_default_registry(

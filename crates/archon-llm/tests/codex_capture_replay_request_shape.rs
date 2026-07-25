@@ -48,6 +48,25 @@ fn request() -> LlmRequest {
     }
 }
 
+fn request_with_tool(content: &str) -> LlmRequest {
+    LlmRequest {
+        messages: vec![serde_json::json!({
+            "role": "user",
+            "content": [{"type": "text", "text": content}]
+        })],
+        tools: vec![serde_json::json!({
+            "name": "lookup",
+            "description": "Lookup a value",
+            "input_schema": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"]
+            }
+        })],
+        ..request()
+    }
+}
+
 #[tokio::test]
 async fn captured_request_shape_matches_openclaw_fixture() {
     let server = MockServer::start().await;
@@ -90,6 +109,57 @@ async fn captured_request_shape_matches_openclaw_fixture() {
     let actual_body: serde_json::Value =
         serde_json::from_slice(&actual.body).unwrap_or_else(|_| serde_json::json!({}));
     assert_json_matches(&actual_body, &captured["body"], "$");
+}
+
+#[tokio::test]
+async fn consecutive_captured_tool_sections_are_byte_stable() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/codex/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            fixture_text("responses_sse_simple.txt"),
+            "text/event-stream",
+        ))
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap_or_else(|_| std::process::exit(1));
+    let cred_path = dir.path().join(".credentials.json");
+    write_creds(&cred_path);
+    let provider = CodexProvider::new_with_base_url(
+        cred_path,
+        SpoofConfig::default(),
+        reqwest::Client::new(),
+        server.uri(),
+    )
+    .unwrap_or_else(|_| std::process::exit(1));
+
+    for content in ["first turn", "second turn"] {
+        let mut stream = provider
+            .stream(request_with_tool(content))
+            .await
+            .unwrap_or_else(|_| std::process::exit(1));
+        while stream.recv().await.is_some() {}
+    }
+
+    let requests = server.received_requests().await.unwrap_or_default();
+    let codex_posts: Vec<_> = requests
+        .iter()
+        .filter(|request| {
+            request.method.as_str() == "POST" && request.url.path() == "/codex/responses"
+        })
+        .collect();
+    assert_eq!(codex_posts.len(), 2);
+    let first: serde_json::Value = serde_json::from_slice(&codex_posts[0].body).unwrap();
+    let second: serde_json::Value = serde_json::from_slice(&codex_posts[1].body).unwrap();
+    assert_ne!(first["input"], second["input"]);
+    assert_eq!(first["instructions"], second["instructions"]);
+    assert_ne!(first["prompt_cache_key"], second["prompt_cache_key"]);
+    assert_eq!(
+        serde_json::to_vec(&first["tools"]).unwrap(),
+        serde_json::to_vec(&second["tools"]).unwrap()
+    );
 }
 
 #[test]
