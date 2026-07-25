@@ -24,6 +24,7 @@ const ACTIVITY_STREAM_PREFIX: &str = "archon_activity_stream:";
 pub struct SubagentRunner {
     provider: Arc<dyn LlmProvider>,
     system_prompt: String,
+    request_system: Vec<serde_json::Value>,
     tool_definitions: Vec<serde_json::Value>,
     registry: Arc<ToolRegistry>,
     tool_context: ToolContext,
@@ -90,6 +91,7 @@ impl SubagentRunner {
         Self {
             provider,
             system_prompt,
+            request_system: Vec::new(),
             tool_definitions,
             registry,
             tool_context,
@@ -114,6 +116,10 @@ impl SubagentRunner {
 
     pub fn model(&self) -> &str {
         &self.model
+    }
+
+    pub fn set_request_system(&mut self, system: Vec<serde_json::Value>) {
+        self.request_system = system;
     }
 
     /// TASK-T3 (G4): wire a shared ProgressTracker so the runner can

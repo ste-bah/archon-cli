@@ -47,7 +47,18 @@ pub async fn run_subagent(
     cancel: CancellationToken,
     ctx: ToolContext,
 ) -> SubagentOutcome {
-    run_subagent_with_auto_background(subagent_id, request, cancel, ctx, true, None).await
+    run_subagent_with_auto_background(subagent_id, request, Vec::new(), cancel, ctx, true, None)
+        .await
+}
+
+pub async fn run_subagent_with_system(
+    subagent_id: String,
+    request: SubagentRequest,
+    system: Vec<serde_json::Value>,
+    cancel: CancellationToken,
+    ctx: ToolContext,
+) -> SubagentOutcome {
+    run_subagent_with_auto_background(subagent_id, request, system, cancel, ctx, true, None).await
 }
 
 pub(crate) async fn run_subagent_with_completion(
@@ -60,6 +71,7 @@ pub(crate) async fn run_subagent_with_completion(
     run_subagent_with_auto_background(
         subagent_id,
         request,
+        Vec::new(),
         cancel,
         ctx,
         true,
@@ -77,12 +89,24 @@ pub async fn run_subagent_foreground(
     cancel: CancellationToken,
     ctx: ToolContext,
 ) -> SubagentOutcome {
-    run_subagent_with_auto_background(subagent_id, request, cancel, ctx, false, None).await
+    run_subagent_with_auto_background(subagent_id, request, Vec::new(), cancel, ctx, false, None)
+        .await
+}
+
+pub async fn run_subagent_foreground_with_system(
+    subagent_id: String,
+    request: SubagentRequest,
+    system: Vec<serde_json::Value>,
+    cancel: CancellationToken,
+    ctx: ToolContext,
+) -> SubagentOutcome {
+    run_subagent_with_auto_background(subagent_id, request, system, cancel, ctx, false, None).await
 }
 
 async fn run_subagent_with_auto_background(
     subagent_id: String,
     request: SubagentRequest,
+    system: Vec<serde_json::Value>,
     cancel: CancellationToken,
     ctx: ToolContext,
     allow_auto_background: bool,
@@ -106,9 +130,12 @@ async fn run_subagent_with_auto_background(
         let cancel = cancel.clone();
         let ctx = ctx.clone();
         let req = request.clone();
+        let system = system.clone();
         let sid = subagent_id.clone();
         async move {
-            let result = exec.run_to_completion(sid, req, ctx, cancel.clone()).await;
+            let result = exec
+                .run_to_completion_with_system(sid, req, system, ctx, cancel.clone())
+                .await;
             let cancelled = result.is_err() && cancel.is_cancelled();
             let execution = ExecutionResult { result, cancelled };
             if let Some(completion) = auto_background_completion {

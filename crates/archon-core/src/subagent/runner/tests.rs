@@ -48,6 +48,10 @@ impl LlmProvider for MockProvider {
         false
     }
 
+    fn supports_anthropic_message_caching(&self) -> bool {
+        self.provider_family == ProviderFamily::AnthropicApi
+    }
+
     fn compaction_provider_family(&self) -> ProviderFamily {
         self.provider_family
     }
@@ -435,3 +439,4 @@ async fn subagent_mid_stream_rate_limit_compacts_own_history_before_one_retry() 
 mod basic;
 mod parallel;
 mod progress;
+mod workflow_system;

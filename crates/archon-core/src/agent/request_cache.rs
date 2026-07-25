@@ -1,5 +1,37 @@
 use archon_llm::provider::{LlmProvider, LlmRequest};
 
+pub(crate) fn apply_system_cache(
+    request: &mut LlmRequest,
+    provider: &dyn LlmProvider,
+    enabled: bool,
+    mode: &str,
+    ttl: &str,
+) {
+    if !provider.supports_anthropic_message_caching()
+        || !enabled
+        || !matches!(mode, "explicit" | "hybrid")
+    {
+        for block in &mut request.system {
+            if let Some(object) = block.as_object_mut() {
+                object.remove("cache_control");
+            }
+        }
+        return;
+    }
+    let Some(block) = request
+        .system
+        .last_mut()
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    let mut marker = serde_json::json!({"type": "ephemeral"});
+    if ttl == "1h" {
+        marker["ttl"] = serde_json::json!("1h");
+    }
+    block.insert("cache_control".into(), marker);
+}
+
 pub(crate) fn apply_conversation_cache(
     request: &mut LlmRequest,
     provider: &dyn LlmProvider,
@@ -95,7 +127,7 @@ mod tests {
     use archon_llm::streaming::StreamEvent;
     use archon_llm::types::Secret;
 
-    use super::apply_conversation_cache;
+    use super::{apply_conversation_cache, apply_system_cache};
 
     fn provider(api_url: Option<&str>) -> AnthropicProvider {
         let identity = IdentityProvider::new(
@@ -149,6 +181,38 @@ mod tests {
             ],
             tools: vec![serde_json::json!({"name":"Read","cache_control":{"type":"ephemeral"}})],
             ..LlmRequest::default()
+        }
+    }
+
+    #[test]
+    fn official_anthropic_marks_stable_system_boundary_when_enabled() {
+        let direct = provider(None);
+        let mut request = request();
+        request
+            .system
+            .push(serde_json::json!({"type":"text","text":"stable workflow universe"}));
+
+        apply_system_cache(&mut request, &direct, true, "explicit", "5m");
+
+        assert_eq!(request.system[1]["cache_control"]["type"], "ephemeral");
+        assert_eq!(request.system[0].get("cache_control"), None);
+    }
+
+    #[test]
+    fn disabled_or_unsupported_system_cache_removes_markers() {
+        let direct = provider(None);
+        let proxy = provider(Some("http://localhost:11434/v1/messages"));
+        for (provider, enabled, mode) in [
+            (&direct as &dyn LlmProvider, false, "explicit"),
+            (&direct as &dyn LlmProvider, true, "automatic"),
+            (&proxy as &dyn LlmProvider, true, "explicit"),
+        ] {
+            let mut request = request();
+            request.system[0]["cache_control"] = serde_json::json!({"type":"ephemeral"});
+
+            apply_system_cache(&mut request, provider, enabled, mode, "5m");
+
+            assert_eq!(request.system[0].get("cache_control"), None);
         }
     }
 

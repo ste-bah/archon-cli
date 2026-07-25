@@ -71,6 +71,45 @@ fn request(
     }
 }
 
+#[tokio::test]
+async fn generated_v2_request_keeps_stable_prompt_in_system_context() {
+    let recorder = Arc::new(RecordingClient::default());
+    let (tui_tx, _tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    let client = LiveV2AgentClient::new(
+        recorder.clone(),
+        tui_tx,
+        Vec::new(),
+        "wf-test".to_string(),
+        Some("/repo".to_string()),
+        Some(17),
+    );
+    let mut request = request(WorkflowV2HostMethod::Agent, None);
+    request.input = serde_json::json!({
+        "task_universe":[{"id":"TASK-1","description":"stable universe"}],
+        "wave":1
+    });
+    let prompt = archon_workflow::WorkflowV2AgentAdapter::new().build_prompt_parts(&request);
+
+    client
+        .run_agent_request(&request, prompt.invocation.clone())
+        .await
+        .expect("recorded request");
+
+    let recorded = recorder
+        .last_request
+        .lock()
+        .expect("recording lock")
+        .clone()
+        .expect("recorded request");
+    let system = recorded.system[0]["text"].as_str().expect("system text");
+    let message = recorded.messages[0]["content"]
+        .as_str()
+        .expect("message text");
+    assert!(system.contains(&prompt.stable_prefix));
+    assert!(!message.contains("stable universe"));
+    assert!(message.contains("call_id: discover"));
+}
+
 #[test]
 fn read_only_v2_agent_gets_repository_cwd_and_read_tools() {
     let stage = stage_request_for_v2_agent(

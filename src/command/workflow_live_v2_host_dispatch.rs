@@ -218,7 +218,7 @@ async fn run_v2_agent_call_with_rejected_output_log(
     v2_store: Option<&WorkflowV2ResultStore>,
 ) -> Result<WorkflowV2Result, WorkflowV2AgentError> {
     let first = client
-        .run_agent_request(request, adapter.build_prompt(request))
+        .run_agent_request(request, adapter.build_prompt_parts(request).invocation)
         .await?;
     match adapter.parse_agent_output(request, &first) {
         Ok(result) => {

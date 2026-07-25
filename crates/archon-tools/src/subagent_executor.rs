@@ -147,6 +147,23 @@ pub trait SubagentExecutor: Send + Sync {
         cancel: CancellationToken,
     ) -> Result<String, ExecutorError>;
 
+    async fn run_to_completion_with_system(
+        &self,
+        subagent_id: String,
+        request: SubagentRequest,
+        system: Vec<serde_json::Value>,
+        ctx: ToolContext,
+        cancel: CancellationToken,
+    ) -> Result<String, ExecutorError> {
+        if !system.is_empty() {
+            return Err(ExecutorError::Internal(
+                "subagent executor does not support per-request system context".to_string(),
+            ));
+        }
+        self.run_to_completion(subagent_id, request, ctx, cancel)
+            .await
+    }
+
     /// Inner terminal side effects: `SubagentManager` update +
     /// `save_agent_memory`.
     ///

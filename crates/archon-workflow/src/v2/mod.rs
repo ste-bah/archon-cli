@@ -6,6 +6,7 @@
 
 pub mod agent_adapter;
 mod agent_output_normalize;
+mod agent_prompt;
 mod agent_repair;
 mod branch_evidence;
 pub mod host_api;

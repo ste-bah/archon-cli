@@ -154,6 +154,13 @@ async fn build_llm_request(
         request_origin: Some("subagent".into()),
         reasoning_encrypted,
     };
+    crate::agent::request_cache::apply_system_cache(
+        &mut request,
+        runner.provider.as_ref(),
+        runner.agent_config.context.prompt_cache,
+        &runner.agent_config.context.prompt_cache_mode,
+        &runner.agent_config.context.prompt_cache_ttl,
+    );
     crate::agent::request_cache::apply_conversation_cache(
         &mut request,
         runner.provider.as_ref(),
@@ -186,6 +193,7 @@ fn build_system_messages(
         "type": "text",
         "text": &runner.system_prompt,
     }));
+    system.extend(runner.request_system.clone());
     if let Some(ref reminder) = runner.critical_system_reminder {
         system.push(serde_json::json!({
             "type": "text",

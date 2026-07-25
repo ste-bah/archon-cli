@@ -16,7 +16,6 @@ use super::super::workflow_live_retry;
 use super::super::workflow_live_runner::{
     activity_detail, allowed_tools, request_target_repository_root, tier_model_alias,
     workflow_agent, workflow_agent_ordinal, workflow_agent_session_id,
-    workflow_stage_system_context,
 };
 
 #[derive(Clone)]
@@ -170,6 +169,8 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
             AgentActivityStatus::Running,
             "v2 call running",
         );
+        let prompt_parts =
+            archon_workflow::WorkflowV2AgentAdapter::new().build_prompt_parts(request);
         let agent_request = AgentExecutionRequest {
             session_id: workflow_agent_session_id(&stage_request),
             pipeline_type: PipelineType::Workflow,
@@ -184,7 +185,11 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
             })],
             system: vec![serde_json::json!({
                 "type": "text",
-                "text": v2_system_context(&stage_request),
+                "text": format!(
+                    "{}\n\n{}",
+                    v2_system_context(),
+                    prompt_parts.stable_prefix
+                ),
             })],
             tools: super::workflow_live_provider_env::provider_env_tool_markers(request),
             allowed_tools: allowed_tools(&stage_request),
@@ -402,11 +407,8 @@ fn stage_kind_for_v2_agent(request: &WorkflowV2AgentRequest) -> StageKind {
     }
 }
 
-fn v2_system_context(request: &StageRunRequest) -> String {
-    format!(
-        "{} Return exactly one JSON object matching the Workflow V2 result envelope from the user message.",
-        workflow_stage_system_context(request)
-    )
+fn v2_system_context() -> &'static str {
+    "You are an Archon dynamic workflow stage agent. Return exactly one JSON object matching the Workflow V2 result envelope from the user message."
 }
 
 #[cfg(test)]
