@@ -414,3 +414,7 @@ fn v2_system_context() -> &'static str {
 #[cfg(test)]
 #[path = "workflow_live_v2_client_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "workflow_live_v2_wire_tests.rs"]
+mod wire_tests;

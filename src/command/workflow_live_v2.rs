@@ -113,6 +113,10 @@ include!("workflow_live_v2_run.rs");
 
 include!("workflow_live_v2_learning.rs");
 
+#[cfg(test)]
+#[path = "workflow_live_v2_learning_tests.rs"]
+mod learning_fidelity_tests;
+
 include!("workflow_live_v2_host_dispatch.rs");
 
 include!("workflow_live_v2_read_only.rs");
