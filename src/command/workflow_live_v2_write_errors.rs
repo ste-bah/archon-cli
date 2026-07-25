@@ -25,6 +25,32 @@ fn write_branch_validation_error_result(
         description: truncate_for_result(error, 500),
         severity: Some(severity.to_string()),
     });
+    // A branch that needed a file outside its declared write scope is a SCOPE
+    // problem, not defective work: the agent may have produced the correct fix
+    // and had it discarded. Emit a separate typed gap naming the wanted path(s)
+    // so the next remediation (or the authored script) can declare that scope
+    // instead of re-deriving the diagnosis from scratch and failing identically.
+    // Generic: paths are extracted from the runtime's own error text.
+    let wanted_paths = undeclared_write_paths(error);
+    if !wanted_paths.is_empty() {
+        result.residual_gaps.push(WorkflowV2ResidualGap {
+            id: format!(
+                "scope_expansion_needed_{}",
+                sanitize_v2_path_segment(item_id)
+            ),
+            description: truncate_for_result(
+                &format!(
+                    "write branch '{item_id}' required write access to path(s) outside its declared target_files: {}. \
+                     The change was rejected and discarded, so this task cannot be completed until the declared write \
+                     scope includes those path(s) (or the work is redirected to an in-scope file). Re-run this task with \
+                     the path(s) declared in target_files.",
+                    wanted_paths.join(", ")
+                ),
+                500,
+            ),
+            severity: Some(severity.to_string()),
+        });
+    }
     result.data = serde_json::json!({
         "branch_id": item_id,
         "item_id": item_id,
@@ -34,6 +60,51 @@ fn write_branch_validation_error_result(
         "error": truncate_for_result(error, 2_000),
     });
     result
+}
+
+/// Extract the repository path(s) a rejected write wanted, from the runtime's own
+/// ownership/scope error text. Domain-neutral: matches the quoted path the write
+/// guards report, plus the unquoted `target_files: <paths>` tail form. Returns an
+/// empty vec for any error that is not a scope rejection.
+fn undeclared_write_paths(error: &str) -> Vec<String> {
+    let lower = error.to_ascii_lowercase();
+    let is_scope_error = lower.contains("undeclared path")
+        || lower.contains("outside declared target_files")
+        || lower.contains("outside declared ownership");
+    if !is_scope_error {
+        return Vec::new();
+    }
+    let mut paths = Vec::new();
+    // Quoted form: ...changed undeclared path 'src/foo.rs'
+    let mut rest = error;
+    while let Some(start) = rest.find('\'') {
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('\'') else { break };
+        let candidate = after[..end].trim();
+        if candidate.contains('/') || candidate.contains(".rs") {
+            let candidate = candidate.to_string();
+            if !paths.contains(&candidate) {
+                paths.push(candidate);
+            }
+        }
+        rest = &after[end + 1..];
+    }
+    // Unquoted tail form: ...outside declared target_files: src/a.rs, src/b.rs
+    if paths.is_empty()
+        && let Some(index) = lower.find("target_files:")
+    {
+        for candidate in error[index + "target_files:".len()..].split(',') {
+            let candidate = candidate.trim().trim_end_matches(['.', ';']).trim();
+            if candidate.contains('/') && !candidate.contains(' ') {
+                let candidate = candidate.to_string();
+                if !paths.contains(&candidate) {
+                    paths.push(candidate);
+                }
+            }
+        }
+    }
+    paths.truncate(8);
+    paths
 }
 
 fn canonical_task_ids_from_write_error_input(input: Option<&serde_json::Value>) -> Vec<String> {
