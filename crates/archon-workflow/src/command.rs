@@ -342,7 +342,8 @@ mod tests {
         assert_eq!(
             parse(&["run", "--live", "Implement", "PRD-009"]),
             CommandAction::Run {
-                task: "Implement PRD-009".into()
+                task: "Implement PRD-009".into(),
+                decomposed: false
             }
         );
         assert_eq!(
@@ -354,7 +355,8 @@ mod tests {
         assert_eq!(
             parse(&["--live", "run", "Implement", "PRD-009"]),
             CommandAction::Run {
-                task: "Implement PRD-009".into()
+                task: "Implement PRD-009".into(),
+                decomposed: false
             }
         );
     }
