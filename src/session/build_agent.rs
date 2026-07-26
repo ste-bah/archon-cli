@@ -122,8 +122,9 @@ pub(super) async fn build_session_agent(
     };
     apply_agent_execution_overrides(&mut agent_config, agent_def.as_ref(), cli).await;
 
-    let (agent_event_tx, agent_event_rx) =
-        tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
+    let (agent_event_tx, agent_event_rx) = tokio::sync::mpsc::channel::<TimestampedEvent>(
+        archon_core::agent::AGENT_EVENT_CHANNEL_CAPACITY,
+    );
     let selected_model = agent_config.model.clone();
     let permission_mode_for_built = Arc::clone(&agent_config.permission_mode);
 

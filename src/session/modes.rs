@@ -258,9 +258,71 @@ async fn drain_sandbox_audit(
     Ok(())
 }
 
+async fn record_headless_event(
+    timestamped: archon_core::agent::TimestampedEvent,
+    response_text: &mut String,
+    governed_learning_db: Option<&std::sync::Arc<cozo::DbInstance>>,
+    ledger_context: &crate::runtime::agent_ledger_events::AgentLedgerContext,
+    permission_mode: &std::sync::Arc<tokio::sync::Mutex<String>>,
+) {
+    agent_ledger::record_event(
+        governed_learning_db,
+        ledger_context,
+        permission_mode,
+        &timestamped.inner,
+    )
+    .await;
+    if let AgentEvent::TextDelta(text) = timestamped.inner {
+        response_text.push_str(&text);
+    }
+}
+
+async fn drain_headless_events_while<F, T>(
+    future: F,
+    event_rx: &mut tokio::sync::mpsc::Receiver<archon_core::agent::TimestampedEvent>,
+    response_text: &mut String,
+    governed_learning_db: Option<&std::sync::Arc<cozo::DbInstance>>,
+    ledger_context: &crate::runtime::agent_ledger_events::AgentLedgerContext,
+    permission_mode: &std::sync::Arc<tokio::sync::Mutex<String>>,
+) -> T
+where
+    F: std::future::Future<Output = T>,
+{
+    tokio::pin!(future);
+    let output = loop {
+        tokio::select! {
+            output = &mut future => break output,
+            event = event_rx.recv() => {
+                let Some(event) = event else {
+                    break (&mut future).await;
+                };
+                record_headless_event(
+                    event,
+                    response_text,
+                    governed_learning_db,
+                    ledger_context,
+                    permission_mode,
+                )
+                .await;
+            }
+        }
+    };
+    while let Ok(event) = event_rx.try_recv() {
+        record_headless_event(
+            event,
+            response_text,
+            governed_learning_db,
+            ledger_context,
+            permission_mode,
+        )
+        .await;
+    }
+    output
+}
+
 async fn process_headless_message(
     agent: &mut archon_core::agent::Agent,
-    event_rx: &mut tokio::sync::mpsc::UnboundedReceiver<archon_core::agent::TimestampedEvent>,
+    event_rx: &mut tokio::sync::mpsc::Receiver<archon_core::agent::TimestampedEvent>,
     stdout: &mut tokio::io::Stdout,
     content: &str,
     governed_learning_db: Option<&std::sync::Arc<cozo::DbInstance>>,
@@ -275,7 +337,16 @@ async fn process_headless_message(
     if let Some(record) = &guardrail {
         apply_guardrail_record(agent, session_id, record);
     }
-    let process_result = agent.process_message(content).await;
+    let mut response_text = String::new();
+    let process_result = drain_headless_events_while(
+        agent.process_message(content),
+        event_rx,
+        &mut response_text,
+        governed_learning_db,
+        ledger_context,
+        permission_mode,
+    )
+    .await;
     clear_non_interactive_guard_scope(agent);
     if let Some(record) = &guardrail {
         crate::command::world_model::record_guardrail_turn_outcome(
@@ -292,7 +363,6 @@ async fn process_headless_message(
             ledger_context,
             &permission_mode.lock().await.clone(),
         );
-        drain_stale_events(event_rx);
         return write_line(
             stdout,
             AgentMessage::Error {
@@ -303,29 +373,6 @@ async fn process_headless_message(
         .is_ok();
     }
 
-    let mut response_text = String::new();
-    loop {
-        match event_rx.try_recv() {
-            Ok(ts) => {
-                agent_ledger::record_event(
-                    governed_learning_db,
-                    ledger_context,
-                    permission_mode,
-                    &ts.inner,
-                )
-                .await;
-                if let AgentEvent::TextDelta(text) = ts.inner {
-                    response_text.push_str(&text);
-                }
-            }
-            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
-            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                tracing::warn!("headless: event channel disconnected");
-                break;
-            }
-        }
-    }
-
     write_line(
         stdout,
         AgentMessage::AssistantMessage {
@@ -334,18 +381,6 @@ async fn process_headless_message(
     )
     .await
     .is_ok()
-}
-
-fn drain_stale_events(
-    event_rx: &mut tokio::sync::mpsc::UnboundedReceiver<archon_core::agent::TimestampedEvent>,
-) {
-    loop {
-        match event_rx.try_recv() {
-            Ok(_) => {}
-            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
-            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break,
-        }
-    }
 }
 
 async fn write_line(stdout: &mut tokio::io::Stdout, msg: AgentMessage) -> std::io::Result<()> {
@@ -359,6 +394,47 @@ async fn write_line(stdout: &mut tokio::io::Stdout, msg: AgentMessage) -> std::i
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn bounded_headless_source_is_drained_while_agent_future_runs() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        let producer = async move {
+            for text in ["one", "two", "three"] {
+                tx.send(archon_core::agent::TimestampedEvent {
+                    sent_at: std::time::Instant::now(),
+                    inner: AgentEvent::TextDelta(text.into()),
+                })
+                .await
+                .expect("bounded event send");
+            }
+            Ok::<_, anyhow::Error>(())
+        };
+
+        let ledger_context = crate::runtime::agent_ledger_events::AgentLedgerContext::new(
+            "main",
+            "headless-test",
+            "test-model",
+            "test-provider",
+        );
+        let permission_mode = std::sync::Arc::new(tokio::sync::Mutex::new("auto".into()));
+        let mut response_text = String::new();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            drain_headless_events_while(
+                producer,
+                &mut rx,
+                &mut response_text,
+                None,
+                &ledger_context,
+                &permission_mode,
+            ),
+        )
+        .await
+        .expect("bounded source must not deadlock");
+
+        result.expect("producer result");
+        assert_eq!(response_text, "onetwothree");
+    }
 
     #[derive(Default)]
     struct RecordingGuardTarget {

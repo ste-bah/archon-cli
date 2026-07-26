@@ -46,6 +46,7 @@ pub(crate) fn build_command_context<'a>(
     Box::pin(async move {
         let mut ctx = CommandContext {
             tui_tx,
+            pending_tui_events: std::sync::Mutex::new(Vec::new()),
             status_snapshot: None,
             model_snapshot: None,
             cost_snapshot: None,

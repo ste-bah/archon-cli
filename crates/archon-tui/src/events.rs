@@ -338,6 +338,10 @@ pub enum TuiEvent {
         name: String,
         id: String,
     },
+    ToolOutputChunk {
+        id: String,
+        chunk: String,
+    },
     ToolComplete {
         name: String,
         id: String,
@@ -437,6 +441,7 @@ impl TuiEvent {
             Self::TextDelta(_) => "TextDelta",
             Self::ThinkingDelta(_) => "ThinkingDelta",
             Self::ToolStart { .. } => "ToolStart",
+            Self::ToolOutputChunk { .. } => "ToolOutputChunk",
             Self::ToolComplete { .. } => "ToolComplete",
             Self::TurnComplete { .. } => "TurnComplete",
             Self::Error(_) => "Error",

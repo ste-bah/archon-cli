@@ -1,5 +1,21 @@
 use std::path::PathBuf;
 
+use archon_pipeline::runner::PipelineType;
+
+#[derive(Debug, Clone)]
+pub(crate) enum PipelineWork {
+    Watch {
+        cwd: PathBuf,
+        session_id: String,
+    },
+    Resume {
+        cwd: PathBuf,
+        pipeline_type: PipelineType,
+        session_id: String,
+        force_quality_gate: bool,
+    },
+}
+
 /// Side-effect descriptors produced synchronously by
 /// [`CommandHandler::execute`] and applied asynchronously after
 /// dispatch returns.
@@ -92,4 +108,7 @@ pub(crate) enum CommandEffect {
     /// `AddExtraDir`, and B11 `SetEffortLevelShared` effect-slot
     /// precedent.
     SetPermissionMode(String),
+    /// Start pipeline watcher/resume work only after synchronous handler events
+    /// have drained through the bounded TUI channel.
+    StartPipelineWork(PipelineWork),
 }

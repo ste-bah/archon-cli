@@ -13,16 +13,18 @@ use archon_tui::app::TuiEvent;
 use archon_tui::event_channel::TuiEventSender;
 use archon_tui::events::{AgentActivityRole, AgentActivityStatus, AgentActivityUpdate};
 
-pub(super) fn emit_attached_state(tui_tx: &TuiEventSender, cwd: &Path, state: &BundleState) {
+use crate::command::registry::CommandContext;
+
+pub(super) fn emit_attached_state(ctx: &CommandContext, cwd: &Path, state: &BundleState) {
     let current = state.current_agent_key.as_deref().unwrap_or("<waiting>");
-    let _ = tui_tx.send(TuiEvent::TextDelta(format!(
+    ctx.emit(TuiEvent::TextDelta(format!(
         "Attached to running {:?} pipeline {}\n\
          Progress: {} completed\n\
          Current agent: {}\n",
         state.pipeline_type, state.session_id, state.completed_agent_count, current
     )));
     if let Some(agent_key) = state.current_agent_key.as_deref() {
-        let _ = tui_tx.send(TuiEvent::AgentActivity(pipeline_activity_update(
+        ctx.emit(TuiEvent::AgentActivity(pipeline_activity_update(
             &state.session_id,
             state.completed_agent_count,
             agent_key,
@@ -33,9 +35,9 @@ pub(super) fn emit_attached_state(tui_tx: &TuiEventSender, cwd: &Path, state: &B
     }
 }
 
-pub(super) fn emit_completed_state(tui_tx: &TuiEventSender, cwd: &Path, state: &BundleState) {
+pub(super) fn emit_completed_state(ctx: &CommandContext, cwd: &Path, state: &BundleState) {
     let artifact_text = final_artifacts_for_state(cwd, state).unwrap_or_default();
-    let _ = tui_tx.send(TuiEvent::TextDelta(format!(
+    ctx.emit(TuiEvent::TextDelta(format!(
         "Pipeline {} is already complete.\n\
          Agents run: {}\n\
          Total cost: ${:.4}\n{}",
@@ -52,29 +54,39 @@ pub(super) fn spawn_audit_watcher(cwd: PathBuf, session_id: String, tui_tx: TuiE
             .unwrap_or(0);
 
         loop {
-            match read_new_audit_events(&audit_path, &mut offset) {
-                Ok(events) => {
-                    for event in events {
-                        emit_audit_event(&tui_tx, &session_id, event);
-                    }
-                }
+            match emit_new_audit_events(&tui_tx, &session_id, &audit_path, &mut offset).await {
+                Ok(()) => {}
                 Err(error) => {
-                    let _ = tui_tx.send(TuiEvent::TextDelta(format!(
-                        "Pipeline audit watcher paused: {error}\n"
-                    )));
+                    if tui_tx
+                        .send_async(TuiEvent::TextDelta(format!(
+                            "Pipeline audit watcher paused: {error}\n"
+                        )))
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
                 }
             }
 
             match store.load_state(&session_id) {
                 Ok(state) if state.status == BundleStatus::Running => {}
                 Ok(state) => {
-                    emit_terminal_state(&tui_tx, &cwd, &state);
+                    if emit_new_audit_events(&tui_tx, &session_id, &audit_path, &mut offset)
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                    let _ = emit_terminal_state(&tui_tx, &cwd, &state).await;
                     break;
                 }
                 Err(error) => {
-                    let _ = tui_tx.send(TuiEvent::Error(format!(
-                        "Pipeline audit watcher failed: {error}"
-                    )));
+                    let _ = tui_tx
+                        .send_async(TuiEvent::Error(format!(
+                            "Pipeline audit watcher failed: {error}"
+                        )))
+                        .await;
                     break;
                 }
             }
@@ -83,67 +95,83 @@ pub(super) fn spawn_audit_watcher(cwd: PathBuf, session_id: String, tui_tx: TuiE
     });
 }
 
-fn read_new_audit_events(path: &Path, offset: &mut u64) -> Result<Vec<PipelineEventLine>> {
-    let mut file = OpenOptions::new().read(true).open(path)?;
-    file.seek(SeekFrom::Start(*offset))?;
-    let mut raw = String::new();
-    file.read_to_string(&mut raw)?;
-    *offset = file.stream_position()?;
-    Ok(raw
-        .lines()
-        .filter_map(|line| serde_json::from_str::<PipelineEventLine>(line).ok())
-        .collect())
+async fn emit_new_audit_events(
+    tui_tx: &TuiEventSender,
+    session_id: &str,
+    path: &Path,
+    offset: &mut u64,
+) -> Result<()> {
+    for event in read_new_audit_events(path, offset)? {
+        emit_audit_event(tui_tx, session_id, event).await?;
+    }
+    Ok(())
 }
 
-fn emit_audit_event(tui_tx: &TuiEventSender, session_id: &str, event: PipelineEventLine) {
-    match event.event {
+fn read_new_audit_events(path: &Path, offset: &mut u64) -> Result<Vec<PipelineEventLine>> {
+    let start = *offset;
+    let mut file = OpenOptions::new().read(true).open(path)?;
+    file.seek(SeekFrom::Start(start))?;
+    let mut raw = String::new();
+    file.read_to_string(&mut raw)?;
+    let Some(last_newline) = raw.rfind('\n') else {
+        return Ok(Vec::new());
+    };
+    let complete = &raw[..=last_newline];
+    let events = complete
+        .lines()
+        .map(serde_json::from_str::<PipelineEventLine>)
+        .collect::<Result<Vec<_>, _>>()?;
+    *offset = start + complete.len() as u64;
+    Ok(events)
+}
+
+async fn emit_audit_event(
+    tui_tx: &TuiEventSender,
+    session_id: &str,
+    event: PipelineEventLine,
+) -> Result<()> {
+    let events = match event.event {
         PipelineEvent::AgentPlanned {
             ordinal,
             agent_key,
             phase,
-        } => {
-            let _ = tui_tx.send(TuiEvent::AgentActivity(pipeline_activity_update(
+        } => vec![
+            TuiEvent::AgentActivity(pipeline_activity_update(
                 session_id,
                 ordinal,
                 &agent_key,
                 AgentActivityStatus::Running,
                 Some(format!("phase {phase} planned")),
                 None,
-            )));
-            let _ = tui_tx.send(TuiEvent::TextDelta(format!(
-                "[pipeline phase {phase}] {agent_key} started\n"
-            )));
-        }
+            )),
+            TuiEvent::TextDelta(format!("[pipeline phase {phase}] {agent_key} started\n")),
+        ],
         PipelineEvent::LlmAttemptStarted {
             ordinal,
             agent_key,
             attempt,
             model,
-        } => {
-            let _ = tui_tx.send(TuiEvent::AgentActivity(pipeline_activity_update(
-                session_id,
-                ordinal,
-                &agent_key,
-                AgentActivityStatus::Running,
-                Some(format!("LLM attempt {attempt} running")),
-                Some(model),
-            )));
-        }
+        } => vec![TuiEvent::AgentActivity(pipeline_activity_update(
+            session_id,
+            ordinal,
+            &agent_key,
+            AgentActivityStatus::Running,
+            Some(format!("LLM attempt {attempt} running")),
+            Some(model),
+        ))],
         PipelineEvent::AgentRetried {
             ordinal,
             agent_key,
             attempt,
             reason,
-        } => {
-            let _ = tui_tx.send(TuiEvent::AgentActivity(pipeline_activity_update(
-                session_id,
-                ordinal,
-                &agent_key,
-                AgentActivityStatus::Running,
-                Some(format!("retry {attempt}: {reason}")),
-                None,
-            )));
-        }
+        } => vec![TuiEvent::AgentActivity(pipeline_activity_update(
+            session_id,
+            ordinal,
+            &agent_key,
+            AgentActivityStatus::Running,
+            Some(format!("retry {attempt}: {reason}")),
+            None,
+        ))],
         PipelineEvent::QualityGateForceAccepted {
             ordinal,
             agent_key,
@@ -151,96 +179,108 @@ fn emit_audit_event(tui_tx: &TuiEventSender, session_id: &str, event: PipelineEv
             overall,
             threshold,
             reason,
-        } => {
-            let detail =
-                format!("force accepted attempt {attempt}: score {overall:.2}/{threshold:.2}");
-            let _ = tui_tx.send(TuiEvent::AgentActivity(pipeline_activity_update(
+        } => vec![
+            TuiEvent::AgentActivity(pipeline_activity_update(
                 session_id,
                 ordinal,
                 &agent_key,
                 AgentActivityStatus::Running,
-                Some(detail),
+                Some(format!(
+                    "force accepted attempt {attempt}: score {overall:.2}/{threshold:.2}"
+                )),
                 None,
-            )));
-            let _ = tui_tx.send(TuiEvent::TextDelta(format!(
+            )),
+            TuiEvent::TextDelta(format!(
                 "[pipeline] {agent_key} quality gate force-accepted: {reason}\n"
-            )));
-        }
+            )),
+        ],
         PipelineEvent::LlmAttemptFailed {
             ordinal,
             agent_key,
             attempt,
             error,
-        } => {
-            let _ = tui_tx.send(TuiEvent::AgentActivity(pipeline_activity_update(
+        } => vec![
+            TuiEvent::AgentActivity(pipeline_activity_update(
                 session_id,
                 ordinal,
                 &agent_key,
                 AgentActivityStatus::Failed,
                 Some(format!("attempt {attempt} failed: {error}")),
                 None,
-            )));
-            let _ = tui_tx.send(TuiEvent::TextDelta(format!(
+            )),
+            TuiEvent::TextDelta(format!(
                 "[pipeline] {agent_key} attempt {attempt} failed: {error}\n"
-            )));
-        }
+            )),
+        ],
         PipelineEvent::AgentCompleted {
             ordinal, agent_key, ..
-        } => {
-            let _ = tui_tx.send(TuiEvent::AgentActivity(pipeline_activity_update(
+        } => vec![
+            TuiEvent::AgentActivity(pipeline_activity_update(
                 session_id,
                 ordinal,
                 &agent_key,
                 AgentActivityStatus::Complete,
                 Some("complete".to_string()),
                 None,
-            )));
-            let _ = tui_tx.send(TuiEvent::TextDelta(format!(
-                "[pipeline] {agent_key} complete\n"
-            )));
-        }
+            )),
+            TuiEvent::TextDelta(format!("[pipeline] {agent_key} complete\n")),
+        ],
         PipelineEvent::ArtifactWritten {
             artifact_type,
             path,
             ..
-        } if artifact_type.contains("research-paper") => {
-            let _ = tui_tx.send(TuiEvent::TextDelta(format!(
-                "[pipeline artifact] {artifact_type}: {path}\n"
-            )));
-        }
+        } if artifact_type.contains("research-paper") => vec![TuiEvent::TextDelta(format!(
+            "[pipeline artifact] {artifact_type}: {path}\n"
+        ))],
         PipelineEvent::RunFailed { error } => {
-            let _ = tui_tx.send(TuiEvent::Error(format!("Pipeline failed: {error}")));
+            vec![TuiEvent::Error(format!("Pipeline failed: {error}"))]
         }
         PipelineEvent::RunCompleted {
             completed_agent_count,
             ..
-        } => {
-            let _ = tui_tx.send(TuiEvent::TextDelta(format!(
-                "Pipeline complete: {completed_agent_count} agents completed.\n"
-            )));
-        }
-        _ => {}
+        } => vec![TuiEvent::TextDelta(format!(
+            "Pipeline complete: {completed_agent_count} agents completed.\n"
+        ))],
+        _ => Vec::new(),
+    };
+    for event in events {
+        tui_tx.send_async(event).await?;
     }
+    Ok(())
 }
 
-fn emit_terminal_state(tui_tx: &TuiEventSender, cwd: &Path, state: &BundleState) {
-    match state.status {
-        BundleStatus::Completed => emit_completed_state(tui_tx, cwd, state),
+async fn emit_terminal_state(
+    tui_tx: &TuiEventSender,
+    cwd: &Path,
+    state: &BundleState,
+) -> Result<()> {
+    let event = match state.status {
+        BundleStatus::Completed => {
+            let artifact_text = final_artifacts_for_state(cwd, state).unwrap_or_default();
+            Some(TuiEvent::TextDelta(format!(
+                "Pipeline {} is already complete.\n\
+                 Agents run: {}\n\
+                 Total cost: ${:.4}\n{}",
+                state.session_id, state.completed_agent_count, state.total_cost_usd, artifact_text
+            )))
+        }
         BundleStatus::Failed => {
             let detail = state.last_error.as_deref().unwrap_or("unknown error");
-            let _ = tui_tx.send(TuiEvent::Error(format!(
+            Some(TuiEvent::Error(format!(
                 "Pipeline {} failed: {detail}",
                 state.session_id
-            )));
+            )))
         }
-        BundleStatus::Aborted => {
-            let _ = tui_tx.send(TuiEvent::TextDelta(format!(
-                "Pipeline {} was aborted.\n",
-                state.session_id
-            )));
-        }
-        BundleStatus::Running => {}
+        BundleStatus::Aborted => Some(TuiEvent::TextDelta(format!(
+            "Pipeline {} was aborted.\n",
+            state.session_id
+        ))),
+        BundleStatus::Running => None,
+    };
+    if let Some(event) = event {
+        tui_tx.send_async(event).await?;
     }
+    Ok(())
 }
 
 fn final_artifacts_for_state(cwd: &Path, state: &BundleState) -> Option<String> {
@@ -287,6 +327,110 @@ fn pipeline_activity_update(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn partial_audit_line_is_retried_after_append_completes_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let audit_path = temp.path().join("audit.log");
+        let line = serde_json::to_string(&PipelineEventLine {
+            ts: chrono::Utc::now(),
+            event: PipelineEvent::RunCompleted {
+                final_output_hash: "hash".into(),
+                completed_agent_count: 3,
+            },
+        })
+        .unwrap();
+        let split = line.len() / 2;
+        std::fs::write(&audit_path, &line[..split]).unwrap();
+        let mut offset = 0;
+
+        assert!(
+            read_new_audit_events(&audit_path, &mut offset)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(offset, 0, "partial trailing line must remain unread");
+
+        use std::io::Write;
+        let mut file = OpenOptions::new().append(true).open(&audit_path).unwrap();
+        writeln!(file, "{}", &line[split..]).unwrap();
+
+        let events = read_new_audit_events(&audit_path, &mut offset).unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            events[0].event,
+            PipelineEvent::RunCompleted {
+                completed_agent_count: 3,
+                ..
+            }
+        ));
+        assert_eq!(offset, std::fs::metadata(audit_path).unwrap().len());
+    }
+
+    #[tokio::test]
+    async fn final_drain_emits_terminal_audit_event() {
+        let temp = tempfile::tempdir().unwrap();
+        let audit_path = temp.path().join("audit.log");
+        let line = PipelineEventLine {
+            ts: chrono::Utc::now(),
+            event: PipelineEvent::RunCompleted {
+                final_output_hash: "hash".into(),
+                completed_agent_count: 3,
+            },
+        };
+        std::fs::write(
+            &audit_path,
+            format!("{}\n", serde_json::to_string(&line).unwrap()),
+        )
+        .unwrap();
+        let (tx, mut rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(1);
+        let mut offset = 0;
+
+        emit_new_audit_events(&tx, "session-1", &audit_path, &mut offset)
+            .await
+            .expect("final drain");
+
+        assert!(matches!(
+            rx.recv().await,
+            Some(TuiEvent::TextDelta(text))
+                if text == "Pipeline complete: 3 agents completed.\n"
+        ));
+        assert_eq!(offset, std::fs::metadata(audit_path).unwrap().len());
+    }
+
+    #[tokio::test]
+    async fn audit_event_waits_for_capacity_and_preserves_order() {
+        let (tx, mut rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(1);
+        tx.send(TuiEvent::GenerationStarted).expect("fill queue");
+        let emitter = tokio::spawn(async move {
+            emit_audit_event(
+                &tx,
+                "session-1",
+                PipelineEventLine {
+                    ts: chrono::Utc::now(),
+                    event: PipelineEvent::AgentPlanned {
+                        ordinal: 1,
+                        agent_key: "contract-agent".into(),
+                        phase: 1,
+                    },
+                },
+            )
+            .await
+        });
+        tokio::task::yield_now().await;
+        assert!(!emitter.is_finished());
+
+        assert!(matches!(rx.recv().await, Some(TuiEvent::GenerationStarted)));
+        assert!(matches!(
+            rx.recv().await,
+            Some(TuiEvent::AgentActivity(update)) if update.name == "contract-agent"
+        ));
+        emitter.await.expect("emitter task").expect("emit event");
+        assert!(matches!(
+            rx.recv().await,
+            Some(TuiEvent::TextDelta(text)) if text == "[pipeline phase 1] contract-agent started\n"
+        ));
+    }
 
     #[test]
     fn activity_update_is_stable_per_pipeline_agent() {

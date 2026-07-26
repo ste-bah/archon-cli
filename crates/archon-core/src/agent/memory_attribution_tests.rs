@@ -46,7 +46,7 @@ async fn memory_extraction_request_carries_session_attribution() {
         captured: Arc::clone(&captured),
         captured_notify: Arc::clone(&captured_notify),
     });
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     let mut agent = Agent::new(
         provider,
         ToolRegistry::new(),

@@ -120,14 +120,12 @@ impl Agent {
     }
 
     pub(super) async fn send_event(&self, event: AgentEvent) {
-        // TASK-AGS-102: unbounded send — synchronous, fails only if rx dropped.
-        // TASK-AGS-108 ERR-ARCH-02: WARN on closed channel, continue execution.
         let event_name = event.event_name();
         let timestamped = TimestampedEvent {
             sent_at: std::time::Instant::now(),
             inner: event,
         };
-        if self.event_tx.send(timestamped).is_err() {
+        if self.event_tx.send(timestamped).await.is_err() {
             tracing::warn!(
                 event_id = event_name,
                 "Agent event channel closed: dropping event"

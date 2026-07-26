@@ -80,6 +80,8 @@ pub use support::AgentLoopError;
 use support::{parse_plan_from_text, user_correction_excerpt};
 pub use types::{AgentConfig, AgentEvent, ConversationState, SessionStats, TimestampedEvent};
 
+pub const AGENT_EVENT_CHANNEL_CAPACITY: usize = 1024;
+
 /// Single source of truth gate: does the agent loop auto-allow this tool in
 /// default mode? Must always agree with `archon_permissions::DEFAULT_SAFE_TOOLS`.
 /// Called by the lockstep regression test.
@@ -110,7 +112,7 @@ pub struct Agent {
     registry: ToolRegistry,
     config: AgentConfig,
     state: ConversationState,
-    event_tx: tokio::sync::mpsc::UnboundedSender<TimestampedEvent>,
+    event_tx: tokio::sync::mpsc::Sender<TimestampedEvent>,
     checkpoint_store: Option<Arc<Mutex<CheckpointStore>>>,
     plan_store: Option<PlanStore>,
     turn_number: u64,

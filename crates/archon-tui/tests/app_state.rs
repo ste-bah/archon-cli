@@ -15,7 +15,7 @@ impl AgentRouter for MockRouter {
 #[test]
 fn app_state_new_compiles() {
     let router = Arc::new(MockRouter);
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, _rx) = tokio::sync::mpsc::channel(archon_core::agent::AGENT_EVENT_CHANNEL_CAPACITY);
     let theme = intj_theme();
     let _state = AppState::new(router, tx, theme);
 }

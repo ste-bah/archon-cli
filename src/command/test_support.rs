@@ -411,6 +411,7 @@ impl CtxBuilder {
         (
             CommandContext {
                 tui_tx: self.tui_tx,
+                pending_tui_events: std::sync::Mutex::new(Vec::new()),
                 status_snapshot: self.status_snapshot,
                 model_snapshot: self.model_snapshot,
                 cost_snapshot: self.cost_snapshot,

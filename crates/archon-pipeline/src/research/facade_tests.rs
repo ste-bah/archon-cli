@@ -254,6 +254,70 @@ async fn process_completion_stores_memory() {
     assert_eq!(stored, "step-back analysis output");
 }
 
+#[tokio::test]
+async fn process_completion_waits_for_progress_capacity() {
+    let facade: Arc<dyn PipelineFacade> = Arc::new(make_facade());
+    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel(1);
+    progress_tx.send("occupied".to_string()).await.unwrap();
+    let progress_facade =
+        crate::runner::PipelineProgressFacade::new(Arc::clone(&facade), progress_tx);
+    let mut session = facade.init_session("test").await.unwrap();
+    let agent = ResearchFacade::to_agent_info(
+        &RESEARCH_AGENTS[0],
+        &archon_core::config::AnthropicModelsConfig::default(),
+    );
+    let result = make_agent_result("step-back analysis output");
+    let quality = QualityScore {
+        overall: 0.75,
+        dimensions: HashMap::new(),
+    };
+
+    let completion = tokio::spawn(async move {
+        progress_facade
+            .process_completion(&mut session, &agent, &result, &quality)
+            .await
+    });
+    tokio::task::yield_now().await;
+    assert!(
+        !completion.is_finished(),
+        "full progress channel did not apply backpressure"
+    );
+
+    assert_eq!(progress_rx.recv().await.as_deref(), Some("occupied"));
+    completion
+        .await
+        .expect("completion task")
+        .expect("process completion");
+    assert_eq!(
+        progress_rx.recv().await.as_deref(),
+        Some("[pipeline phase 1] Step-Back Analyzer complete (quality: 0.75)\n")
+    );
+}
+
+#[tokio::test]
+async fn closed_progress_receiver_does_not_fail_completion() {
+    let facade: Arc<dyn PipelineFacade> = Arc::new(make_facade());
+    let (progress_tx, progress_rx) = tokio::sync::mpsc::channel(1);
+    drop(progress_rx);
+    let progress_facade =
+        crate::runner::PipelineProgressFacade::new(Arc::clone(&facade), progress_tx);
+    let mut session = facade.init_session("test").await.unwrap();
+    let agent = ResearchFacade::to_agent_info(
+        &RESEARCH_AGENTS[0],
+        &archon_core::config::AnthropicModelsConfig::default(),
+    );
+    let result = make_agent_result("step-back analysis output");
+    let quality = QualityScore {
+        overall: 0.75,
+        dimensions: HashMap::new(),
+    };
+
+    progress_facade
+        .process_completion(&mut session, &agent, &result, &quality)
+        .await
+        .expect("detached TUI must not fail pipeline completion");
+}
+
 // 6. Memory flows between agents (store via MemoryTrait, recall in B)
 #[tokio::test]
 async fn memory_flows_between_agents() {

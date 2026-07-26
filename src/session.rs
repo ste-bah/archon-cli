@@ -49,7 +49,7 @@ pub(crate) use web_runtime::{WebSessionHandle, spawn_web_session};
 #[allow(dead_code)]
 struct BuiltAgent {
     agent: Agent,
-    event_rx: tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent>,
+    event_rx: tokio::sync::mpsc::Receiver<TimestampedEvent>,
     agent_def: Option<archon_core::agents::definition::CustomAgentDefinition>,
     metrics: std::sync::Arc<archon_tui::observability::ChannelMetrics>,
     selected_provider: String,
@@ -249,7 +249,7 @@ pub(crate) async fn run_interactive_session(
     env_vars: &ArchonEnvVars,
     resume_messages: Option<Vec<serde_json::Value>>,
     resolved_flags: &archon_core::cli_flags::ResolvedFlags,
-    voice_event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<archon_tui::app::TuiEvent>>,
+    voice_event_rx: Option<tokio::sync::mpsc::Receiver<archon_tui::app::TuiEvent>>,
 ) -> Result<()> {
     let interactive_bootstrap::Bootstrap {
         config_path,

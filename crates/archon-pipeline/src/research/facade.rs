@@ -13,7 +13,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use tokio::sync::mpsc::UnboundedSender;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -62,10 +61,6 @@ pub struct ResearchFacade {
     learning: Option<Mutex<PhDLearningIntegration>>,
     /// Run-level memory for god-research style rolling context.
     rlm_store: Mutex<ResearchRlm>,
-    /// Optional sender for per-agent progress events (TUI streaming).
-    /// Uses internal mutability so the sender can be attached after
-    /// construction (it's not known at bootstrap time).
-    tui_sender: Mutex<Option<UnboundedSender<String>>>,
     /// Anthropic model alias map. Defaults to compile-time defaults; callers
     /// that have an active `ArchonConfig` should pass `config.models.anthropic`
     /// via `with_models(..)` so operator overrides apply.
@@ -90,7 +85,6 @@ impl ResearchFacade {
             style_prompt,
             learning: None,
             rlm_store: Mutex::new(ResearchRlm::new()),
-            tui_sender: Mutex::new(None),
             models: archon_core::config::AnthropicModelsConfig::default(),
             context: archon_core::config::ContextConfig::default(),
         }
@@ -113,16 +107,9 @@ impl ResearchFacade {
             style_prompt,
             learning: Some(Mutex::new(learning)),
             rlm_store: Mutex::new(ResearchRlm::new()),
-            tui_sender: Mutex::new(None),
             models: archon_core::config::AnthropicModelsConfig::default(),
             context: archon_core::config::ContextConfig::default(),
         }
-    }
-
-    /// Attach a TUI sender at construction time (builder pattern).
-    pub fn with_tui_sender(mut self, tx: UnboundedSender<String>) -> Self {
-        self.tui_sender = Mutex::new(Some(tx));
-        self
     }
 
     /// Attach an operator-configured Anthropic model alias map (builder pattern).
@@ -134,11 +121,6 @@ impl ResearchFacade {
     pub fn with_context(mut self, context: archon_core::config::ContextConfig) -> Self {
         self.context = context;
         self
-    }
-
-    /// Set the TUI sender after construction (called from dispatch handler).
-    pub fn set_tui_sender(&self, tx: UnboundedSender<String>) {
-        *self.tui_sender.lock().expect("tui_sender lock") = Some(tx);
     }
 
     /// Extract the top-level namespace from a memory key for tagging.
@@ -442,14 +424,6 @@ impl PipelineFacade for ResearchFacade {
             && let Ok(mut learning) = learning_mutex.lock()
         {
             learning.record_citation_quality(&agent.key, quality.overall);
-        }
-
-        // Emit per-agent progress to TUI if sender is attached.
-        if let Some(ref tx) = *self.tui_sender.lock().expect("tui_sender lock") {
-            let _ = tx.send(format!(
-                "[pipeline phase {}] {} complete (quality: {:.2})\n",
-                agent.phase, agent.display_name, quality.overall,
-            ));
         }
 
         Ok(())

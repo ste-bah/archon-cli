@@ -294,9 +294,11 @@ async fn agent_process_message_carries_real_subagent_text_across_seam() {
     };
     *config.permission_mode.lock().await = "yolo".to_string();
 
-    // 4. Build the Agent. Event channel is unbounded; drain it in a
-    //    background task so send_event never fails.
-    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
+    // 4. Build the Agent. Drain its bounded event channel in a background task
+    //    so backpressure cannot stall this seam-focused test.
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<TimestampedEvent>(
+        archon_core::agent::AGENT_EVENT_CHANNEL_CAPACITY,
+    );
     tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
 
     let agent_registry = Arc::new(std::sync::RwLock::new(AgentRegistry::load(

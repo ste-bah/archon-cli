@@ -7,7 +7,7 @@
 #
 # Rules:
 #   1 (D1, TC-ARCH-02): no .process_message().await at handler scope in INPUT_HANDLER region
-#   2 (D3, TC-ARCH-05): no .send().await on agent event channel (must be unbounded)
+#   2 (D3, TC-ARCH-05): Agent event send must await bounded channel capacity
 #   3 (D1 broad):       no .await in functions named handle_*_input / on_key / process_key
 #
 # Run locally:  bash scripts/lint/arch-lint.sh
@@ -60,16 +60,13 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Rule 2 (TC-ARCH-05, D3): no .send().await on agent event channel
+# Rule 2 (TC-ARCH-05, D3): Agent event send awaits bounded capacity
 #
-# The agent event channel MUST be unbounded (non-async send). Any
-# `event_tx.send(...).await` in agent.rs or main.rs is a violation.
+# Lossless bounded transport requires the Agent producer to await capacity.
 # ---------------------------------------------------------------------------
-RULE2_PATTERN='event_tx\.send\([^)]*\)\.await'
-RULE2_PATHS=(crates/archon-core/src/agent.rs src/main.rs)
-
-if match=$(grep -nE "${RULE2_PATTERN}" "${RULE2_PATHS[@]}" 2>/dev/null); then
-    fail "producer channels must be unbounded — no .send().await on event_tx (D3)" "${match}"
+AGENT_EVENTS_SOURCE="crates/archon-core/src/agent/events.rs"
+if ! grep -q 'self\.event_tx\.send(timestamped)\.await' "${AGENT_EVENTS_SOURCE}" 2>/dev/null; then
+    fail "Agent event transport must await bounded capacity (D3)" "${AGENT_EVENTS_SOURCE}: missing awaited TimestampedEvent send"
 fi
 
 # ---------------------------------------------------------------------------

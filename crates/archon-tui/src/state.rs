@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use archon_core::agent::TimestampedEvent;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::Sender;
 
 use crate::layout::ReflowOutcome;
 use crate::observability::ChannelMetrics;
@@ -119,7 +119,7 @@ impl AppState {
     /// * `theme` — initial color theme
     pub fn new(
         router: Arc<dyn AgentRouter>,
-        agent_event_tx: UnboundedSender<TimestampedEvent>,
+        agent_event_tx: Sender<TimestampedEvent>,
         theme: Theme,
     ) -> Self {
         Self {

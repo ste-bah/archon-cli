@@ -35,11 +35,10 @@ pub struct CommandContext {
     pub(crate) leann: Option<Arc<archon_pipeline::runner::LeannIntegration>>,
     /// TUI event sink for text deltas, errors, and state change
     /// notifications.
-    ///
-    /// Bounded sender with a synchronous `send(event)` API. This keeps sync
-    /// slash handlers simple while preventing unbounded queue growth when the
-    /// render loop falls behind.
     pub(crate) tui_tx: archon_tui::event_channel::TuiEventSender,
+    /// Events emitted by the synchronous handler, flushed with async
+    /// backpressure immediately after dispatch returns.
+    pub(crate) pending_tui_events: std::sync::Mutex<Vec<TuiEvent>>,
     /// TASK-AGS-807 snapshot-pattern field.
     ///
     /// Populated by `build_command_context` for `/status` (and its
@@ -453,26 +452,4 @@ pub struct CommandContext {
     /// in std::sync::Mutex because cancel_current() takes &mut self and
     /// CommandHandler::execute is sync.
     pub(crate) agent_dispatcher: Option<Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>>,
-}
-
-// Wraps `tui_tx.send` at handler call sites so the copy-paste
-// `let _ = ctx.tui_tx.send(...)` pattern collapses to `ctx.emit(...)`.
-// Saturation is handled inside the bounded sender by progress-event shedding;
-// the only error surfaced here is receiver shutdown.
-impl CommandContext {
-    /// Deliver a [`TuiEvent`] to the TUI channel. Logs on failure;
-    /// never panics.
-    ///
-    /// `TuiEventSender::send` is synchronous (no `.await`), so the method body
-    /// is safe to call from sync `CommandHandler::execute`. Saturation is
-    /// handled inside the bounded channel; a closed channel still emits the
-    /// operator-visible error trace.
-    pub(crate) fn emit(&self, event: TuiEvent) {
-        if self.tui_tx.send(event).is_err() {
-            tracing::error!(
-                target: "archon_cli::command::tui",
-                "tui_tx closed — TUI receiver task is dead"
-            );
-        }
-    }
 }

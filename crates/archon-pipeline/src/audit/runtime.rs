@@ -346,14 +346,38 @@ impl PipelineAuditRun {
         self.state.completed_at = Some(Utc::now());
         self.state.final_output_hash = Some(final_output_hash.clone());
         self.state.updated_at = Utc::now();
-        self.store.save_state(&self.state)?;
         self.store.append_event(
             &self.state.session_id,
             PipelineEvent::RunCompleted {
                 final_output_hash,
                 completed_agent_count: self.state.completed_agent_count,
             },
-        )
+        )?;
+        self.store.save_state(&self.state)
+    }
+
+    pub fn abort_existing(
+        worktree: impl AsRef<Path>,
+        session_id: &str,
+        reason: &str,
+    ) -> Result<()> {
+        let store = PipelineBundleStore::new(worktree);
+        let state = store.load_state(session_id)?;
+        Self { store, state }.abort(reason)
+    }
+
+    pub fn abort(&mut self, reason: &str) -> Result<()> {
+        self.state.status = BundleStatus::Aborted;
+        self.state.completed_at = Some(Utc::now());
+        self.state.last_error = Some(reason.to_string());
+        self.state.updated_at = Utc::now();
+        self.store.append_event(
+            &self.state.session_id,
+            PipelineEvent::RunAborted {
+                reason: reason.to_string(),
+            },
+        )?;
+        self.store.save_state(&self.state)
     }
 
     pub fn fail(&mut self, error: &str) -> Result<()> {
@@ -361,13 +385,13 @@ impl PipelineAuditRun {
         self.state.completed_at = Some(Utc::now());
         self.state.last_error = Some(error.to_string());
         self.state.updated_at = Utc::now();
-        self.store.save_state(&self.state)?;
         self.store.append_event(
             &self.state.session_id,
             PipelineEvent::RunFailed {
                 error: error.to_string(),
             },
-        )
+        )?;
+        self.store.save_state(&self.state)
     }
 }
 

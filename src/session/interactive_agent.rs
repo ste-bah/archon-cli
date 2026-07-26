@@ -25,7 +25,7 @@ use crate::runtime::provider_observer::{
 pub(super) struct Runtime {
     pub agent: Agent,
     pub provider: Arc<dyn archon_llm::provider::LlmProvider>,
-    pub agent_event_rx: tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent>,
+    pub agent_event_rx: tokio::sync::mpsc::Receiver<TimestampedEvent>,
     pub tui_event_tx: TuiEventSender,
     pub tui_event_rx: TuiEventReceiver,
     pub user_input_tx: tokio::sync::mpsc::Sender<String>,
@@ -41,7 +41,7 @@ pub(super) struct Runtime {
     pub governed_learning_db: Option<Arc<cozo::DbInstance>>,
     pub auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
     pub metrics: Arc<archon_tui::observability::ChannelMetrics>,
-    pub agent_event_tx_for_dispatcher: tokio::sync::mpsc::UnboundedSender<TimestampedEvent>,
+    pub agent_event_tx_for_dispatcher: tokio::sync::mpsc::Sender<TimestampedEvent>,
     pub sandbox_audit_drain: crate::runtime::sandbox_audit_writer::SandboxAuditDrain,
 }
 
@@ -58,10 +58,11 @@ pub(super) async fn build(
     checkpoint_store: Option<archon_session::checkpoint::CheckpointStore>,
     mut agent_config: AgentConfig,
     registry: archon_core::dispatch::ToolRegistry,
-    voice_event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<archon_tui::app::TuiEvent>>,
+    voice_event_rx: Option<tokio::sync::mpsc::Receiver<archon_tui::app::TuiEvent>>,
 ) -> Result<Runtime> {
-    let (agent_event_tx, agent_event_rx) =
-        tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
+    let (agent_event_tx, agent_event_rx) = tokio::sync::mpsc::channel::<TimestampedEvent>(
+        archon_core::agent::AGENT_EVENT_CHANNEL_CAPACITY,
+    );
     let (tui_event_tx, tui_event_rx) = archon_tui::event_channel::bounded_tui_event_channel();
     agent_config.activity_sink =
         super::session_activity_sink_with_tui(session_id, tui_event_tx.clone());
@@ -79,7 +80,7 @@ pub(super) async fn build(
         let voice_fwd_tx = tui_event_tx.clone();
         observability::spawn_named("voice-event-forwarder", async move {
             while let Some(evt) = voice_rx.recv().await {
-                if voice_fwd_tx.send(evt).is_err() {
+                if voice_fwd_tx.send_async(evt).await.is_err() {
                     break;
                 }
             }

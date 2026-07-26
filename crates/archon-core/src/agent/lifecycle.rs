@@ -5,7 +5,7 @@ impl Agent {
         client: Arc<dyn LlmProvider>,
         registry: ToolRegistry,
         config: AgentConfig,
-        event_tx: tokio::sync::mpsc::UnboundedSender<TimestampedEvent>,
+        event_tx: tokio::sync::mpsc::Sender<TimestampedEvent>,
         agent_registry: Arc<std::sync::RwLock<AgentRegistry>>,
     ) -> Self {
         let permission_store: Arc<dyn crate::hooks::PermissionStore> =
@@ -161,8 +161,7 @@ impl Agent {
     /// Used by print mode to unblock the event consumer task.
     pub fn close_event_channel(&mut self) {
         // Replace the sender with a closed one by dropping it.
-        // TASK-AGS-102: unbounded variant — same drop-to-close semantics.
-        let (tx, _) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, _) = tokio::sync::mpsc::channel(super::AGENT_EVENT_CHANNEL_CAPACITY);
         self.event_tx = tx;
         // The old sender is dropped, closing the channel
     }

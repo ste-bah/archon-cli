@@ -28,7 +28,9 @@ impl TurnRunner for FinalizationBlockedRunner {
 
 #[tokio::test]
 async fn dispatcher_preserves_finalization_blocked_outcome() {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
+    let (tx, _rx) = tokio::sync::mpsc::channel::<TimestampedEvent>(
+        archon_core::agent::AGENT_EVENT_CHANNEL_CAPACITY,
+    );
     let mut dispatcher = AgentDispatcher::new(Arc::new(NoopRouter), tx);
     dispatcher.spawn_turn("prompt".into(), Arc::new(FinalizationBlockedRunner));
 

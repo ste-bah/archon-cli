@@ -36,7 +36,7 @@ impl LlmProvider for MockLlmProvider {
 }
 
 pub(super) fn test_agent() -> Agent {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     Agent::new(
         Arc::new(MockLlmProvider),
         ToolRegistry::new(),
@@ -163,7 +163,7 @@ impl LlmProvider for CountingLlmProvider {
 #[tokio::test]
 async fn greeting_turn_short_circuits_before_provider_or_tools() {
     let calls = Arc::new(AtomicUsize::new(0));
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, mut rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     let mut agent = Agent::new(
         Arc::new(CountingLlmProvider {
             stream_calls: Arc::clone(&calls),

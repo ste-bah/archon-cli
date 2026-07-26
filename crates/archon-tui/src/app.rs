@@ -266,10 +266,11 @@ impl App {
             self.active_tool = None;
         }
         let tool_index = self.tool_outputs.iter().position(|tool| tool.tool_id == id);
+        let mut completed_output = output.to_string();
         if let Some(index) = tool_index {
             let (duration_ms, summary) = {
                 let tool_state = &mut self.tool_outputs[index];
-                tool_state.complete(output, !success);
+                completed_output = tool_state.complete(output, !success).to_string();
                 (tool_state.duration_ms(), tool_state.summary.clone())
             };
             if success {
@@ -280,15 +281,15 @@ impl App {
                 self.output.append_line(&format!(
                     "● {name}{summary} ✓ {} ({} lines)",
                     format_duration(duration_ms),
-                    output.lines().count()
+                    completed_output.lines().count()
                 ));
                 self.tool_outputs[index].marker_line = Some(marker_line);
             }
         }
-        self.push_parent_activity_tool_result(name, output, !success);
+        self.push_parent_activity_tool_result(name, &completed_output, !success);
         crate::agent_activity::tool_completed(&mut self.agent_activity, name, id, success);
         if !success {
-            let output = output.trim_end();
+            let output = completed_output.trim_end();
             if output.is_empty() {
                 self.output.append_line(&format!("[tool] {name} failed"));
             } else {

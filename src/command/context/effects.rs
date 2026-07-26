@@ -107,12 +107,14 @@ pub(crate) fn apply_effect<'a>(
                     "mode_changed",
                     "slash_permissions",
                 );
-                let _ = tui_tx.send(TuiEvent::PermissionModeChanged(resolved.clone()));
+                let _ = tui_tx
+                    .send_async(TuiEvent::PermissionModeChanged(resolved.clone()))
+                    .await;
                 tracing::info!(mode = %resolved, "set permission mode via /permissions");
-            } // Future variants (AGS-819 /theme, etc.): add a match arm here
-              // with the appropriate awaited mutex write. No fallback arm —
-              // enum exhaustiveness forces new tickets to wire their effects
-              // through this single point of truth.
+            }
+            CommandEffect::StartPipelineWork(work) => {
+                crate::command::pipeline_slash::start_pipeline_work(slash_ctx, tui_tx, work).await;
+            }
         }
     })
 }

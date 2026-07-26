@@ -174,11 +174,8 @@ mod tests {
     fn agent_with_rules_and_events(
         mode: &str,
         rules: RuleSet,
-    ) -> (
-        Agent,
-        tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent>,
-    ) {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    ) -> (Agent, tokio::sync::mpsc::Receiver<TimestampedEvent>) {
+        let (tx, rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
         let config = AgentConfig {
             permission_mode: Arc::new(Mutex::new(mode.to_string())),
             permission_rules: rules,
@@ -200,7 +197,7 @@ mod tests {
         registry: ToolRegistry,
         sandbox: Arc<dyn archon_permissions::SandboxBackend>,
     ) -> Agent {
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
         let config = AgentConfig {
             permission_mode: Arc::new(Mutex::new("bypassPermissions".to_string())),
             sandbox: Some(sandbox),
@@ -331,7 +328,7 @@ mod tests {
     async fn preflight_rejects_hook_mutated_input_that_violates_tool_schema() {
         let mut tools = ToolRegistry::new();
         tools.register(Box::new(archon_tools::bash::BashTool::default()));
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
         let config = AgentConfig {
             permission_mode: Arc::new(Mutex::new("bypassPermissions".to_string())),
             ..AgentConfig::default()

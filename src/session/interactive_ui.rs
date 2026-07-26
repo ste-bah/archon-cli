@@ -57,9 +57,7 @@ pub(super) async fn run(
     governed_learning_db: Option<Arc<cozo::DbInstance>>,
     auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
     leann_init_cancel: Arc<AtomicBool>,
-    agent_event_tx_for_dispatcher: tokio::sync::mpsc::UnboundedSender<
-        archon_core::agent::TimestampedEvent,
-    >,
+    agent_event_tx_for_dispatcher: tokio::sync::mpsc::Sender<archon_core::agent::TimestampedEvent>,
     tui_event_tx: TuiEventSender,
     tui_event_rx: TuiEventReceiver,
     user_input_tx: tokio::sync::mpsc::Sender<String>,

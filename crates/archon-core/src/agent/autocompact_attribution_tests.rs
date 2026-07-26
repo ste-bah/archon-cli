@@ -72,7 +72,7 @@ async fn auto_compaction_summary_preserves_session_scope_without_denominator() {
     let provider = Arc::new(CapturingSummaryProvider {
         captured: Arc::clone(&captured),
     });
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     let mut agent = Agent::new(
         provider,
         ToolRegistry::new(),

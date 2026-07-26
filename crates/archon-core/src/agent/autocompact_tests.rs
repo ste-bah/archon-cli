@@ -235,7 +235,7 @@ fn serialized_request_len(request: &LlmRequest) -> usize {
 }
 
 fn test_agent_with_provider(provider: Arc<dyn LlmProvider>) -> Agent {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     Agent::new(
         provider,
         ToolRegistry::new(),

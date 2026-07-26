@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use archon_pipeline::audit::types::BundleStatus;
+use archon_pipeline::audit::{PipelineAuditRun, PipelineEvent, PipelineEventLine};
 use archon_pipeline::audit::{PipelineBundleStore, rewind_bundle, verify_bundle};
 use archon_pipeline::runner::{AgentInfo, AgentResult, PipelineType, ToolAccessLevel};
 
@@ -90,6 +91,74 @@ fn rewind_quarantines_stale_agents_and_keeps_bundle_verifiable() {
 
     let verification = verify_bundle(&store, "session-1", false).unwrap();
     assert!(verification.valid, "{:?}", verification.findings);
+}
+
+#[test]
+fn audit_append_syncs_data_before_returning() {
+    let source = include_str!("../src/audit/store.rs");
+    let append_event = source
+        .split("pub fn append_event")
+        .nth(1)
+        .and_then(|body| body.split("pub fn write_prompt").next())
+        .expect("append_event source");
+    let write = append_event.find("file.write_all").expect("audit write");
+    let sync = append_event.find("file.sync_data").expect("audit sync");
+    let returned = append_event.rfind("Ok(())").expect("append return");
+    assert!(write < sync && sync < returned);
+}
+
+#[test]
+fn terminal_audit_event_is_visible_before_terminal_state() {
+    for outcome in ["completed", "failed", "aborted"] {
+        let temp = tempfile::tempdir().unwrap();
+        let session_id = outcome;
+        let mut audit = PipelineAuditRun::start(
+            temp.path(),
+            session_id,
+            PipelineType::Coding,
+            "terminal ordering",
+        )
+        .unwrap();
+
+        match outcome {
+            "failed" => audit.fail("boom").unwrap(),
+            "completed" => audit.complete("done").unwrap(),
+            "aborted" => audit.abort("user aborted run").unwrap(),
+            _ => unreachable!(),
+        }
+
+        let store = PipelineBundleStore::new(temp.path());
+        let state_modified = std::fs::metadata(store.bundle_dir(session_id).join("state.json"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        let audit_modified = std::fs::metadata(store.bundle_dir(session_id).join("audit.log"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        assert!(
+            audit_modified <= state_modified,
+            "terminal audit event must be durable before terminal state"
+        );
+
+        let events = std::fs::read_to_string(store.bundle_dir(session_id).join("audit.log"))
+            .unwrap()
+            .lines()
+            .map(|line| {
+                serde_json::from_str::<PipelineEventLine>(line)
+                    .unwrap()
+                    .event
+            })
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            events.last(),
+            Some(
+                PipelineEvent::RunFailed { .. }
+                    | PipelineEvent::RunCompleted { .. }
+                    | PipelineEvent::RunAborted { .. }
+            )
+        ));
+    }
 }
 
 #[test]

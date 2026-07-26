@@ -147,7 +147,7 @@ mod tests {
     fn dispatcher() -> Arc<std::sync::Mutex<archon_tui::AgentDispatcher>> {
         Arc::new(std::sync::Mutex::new(archon_tui::AgentDispatcher::new(
             Arc::new(crate::agent_handle::NoopAgentRouter),
-            tokio::sync::mpsc::unbounded_channel().0,
+            tokio::sync::mpsc::channel(1).0,
         )))
     }
 

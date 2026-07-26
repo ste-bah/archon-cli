@@ -26,6 +26,11 @@ pub(super) async fn handle_tui_event(
         TuiEvent::TextDelta(text) => app.on_text_delta(&text),
         TuiEvent::ThinkingDelta(text) => app.on_thinking_delta(&text),
         TuiEvent::ToolStart { name, id } => app.on_tool_start(&name, &id),
+        TuiEvent::ToolOutputChunk { id, chunk } => {
+            if let Some(tool) = app.tool_outputs.iter_mut().find(|tool| tool.tool_id == id) {
+                tool.append_output(&chunk);
+            }
+        }
         TuiEvent::ToolComplete {
             name,
             id,

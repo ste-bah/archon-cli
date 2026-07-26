@@ -158,6 +158,9 @@ mod tests {
             CommandEffect::SetPermissionMode(_) => {
                 unreachable!("narrow apply_effect harness only exercises SetModelOverride")
             }
+            CommandEffect::StartPipelineWork(_) => {
+                unreachable!("narrow apply_effect harness only exercises SetModelOverride")
+            }
         }
 
         let got = model_override_shared.lock().await.clone();

@@ -11,7 +11,6 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use tokio::sync::mpsc::UnboundedSender;
 
 use archon_core::config::{AnthropicModelsConfig, ContextConfig};
 
@@ -28,11 +27,11 @@ use crate::runner::{
 mod helpers;
 mod layers;
 
+#[cfg(test)]
+use helpers::display_name_from_key;
 use helpers::{
     CODING_PARALLEL_WAVE_LIMIT, agent_to_info, dependencies_satisfied, find_coding_agent,
 };
-#[cfg(test)]
-use helpers::display_name_from_key;
 
 /// Facade implementing the coding pipeline's 50-agent sequence with 11-layer
 /// prompt augmentation.
@@ -40,10 +39,6 @@ pub struct CodingFacade {
     quality_calculator: CodingQualityCalculator,
     rlm_store: Mutex<RlmStore>,
     learning: Option<Mutex<LearningIntegration>>,
-    /// Optional sender for per-agent progress events (TUI streaming).
-    /// Uses internal mutability so the sender can be attached after
-    /// construction (it's not known at bootstrap time).
-    tui_sender: Mutex<Option<UnboundedSender<String>>>,
     /// Anthropic model alias map. Defaults to compile-time defaults; callers
     /// that have an active `ArchonConfig` should pass `config.models.anthropic`
     /// via `with_models(..)` so operator overrides apply.
@@ -58,7 +53,6 @@ impl CodingFacade {
             quality_calculator: CodingQualityCalculator::new(),
             rlm_store: Mutex::new(RlmStore::new()),
             learning: None,
-            tui_sender: Mutex::new(None),
             models: AnthropicModelsConfig::default(),
             context: ContextConfig::default(),
         }
@@ -73,16 +67,9 @@ impl CodingFacade {
             quality_calculator: CodingQualityCalculator::new(),
             rlm_store: Mutex::new(RlmStore::new()),
             learning: Some(Mutex::new(learning)),
-            tui_sender: Mutex::new(None),
             models: AnthropicModelsConfig::default(),
             context: ContextConfig::default(),
         }
-    }
-
-    /// Attach a TUI sender at construction time (builder pattern).
-    pub fn with_tui_sender(mut self, tx: UnboundedSender<String>) -> Self {
-        self.tui_sender = Mutex::new(Some(tx));
-        self
     }
 
     /// Attach an operator-configured Anthropic model alias map (builder pattern).
@@ -98,11 +85,6 @@ impl CodingFacade {
     pub fn with_context(mut self, context: ContextConfig) -> Self {
         self.context = context;
         self
-    }
-
-    /// Set the TUI sender after construction (called from dispatch handler).
-    pub fn set_tui_sender(&self, tx: UnboundedSender<String>) {
-        *self.tui_sender.lock().expect("tui_sender lock") = Some(tx);
     }
 }
 
@@ -276,13 +258,6 @@ impl PipelineFacade for CodingFacade {
             && let Ok(mut learning) = learning_mutex.lock()
         {
             learning.on_agent_complete(&agent.key, quality.overall, &result.output);
-        }
-
-        if let Some(ref tx) = *self.tui_sender.lock().expect("tui_sender lock") {
-            let _ = tx.send(format!(
-                "[pipeline phase {}] {} complete (quality: {:.2})\n",
-                agent.phase, agent.display_name, quality.overall,
-            ));
         }
 
         Ok(())

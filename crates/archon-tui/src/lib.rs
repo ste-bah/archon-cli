@@ -66,6 +66,9 @@ pub mod cancel;
 pub use cancel::YieldGate;
 
 pub mod event_channel;
+mod event_framing;
+mod event_payload_size;
+mod event_queue_metrics;
 pub mod events;
 pub mod evidence_view_state;
 pub use events::TuiEvent;

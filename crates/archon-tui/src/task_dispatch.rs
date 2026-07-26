@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use archon_core::agent::TimestampedEvent;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::Sender;
 
 /// Abstraction over "something that can run a single agent turn". Defined
 /// locally (see module-level spec deviation note) so the dispatcher is
@@ -99,17 +99,13 @@ pub struct AgentDispatcher {
     pub pending_queue: std::collections::VecDeque<QueuedPrompt>,
     /// Router handle used for agent switching (TASK-TUI-104).
     pub router: std::sync::Arc<dyn AgentRouter>,
-    /// Unbounded producer side of the agent event channel
-    /// (see TECH-TUI-EVENTCHANNEL).
-    pub agent_event_tx: tokio::sync::mpsc::UnboundedSender<TimestampedEvent>,
+    /// Bounded producer side of the agent event channel.
+    pub agent_event_tx: tokio::sync::mpsc::Sender<TimestampedEvent>,
 }
 
 impl AgentDispatcher {
     /// Construct a new dispatcher with no in-flight turn and an empty queue.
-    pub fn new(
-        router: Arc<dyn AgentRouter>,
-        agent_event_tx: UnboundedSender<TimestampedEvent>,
-    ) -> Self {
+    pub fn new(router: Arc<dyn AgentRouter>, agent_event_tx: Sender<TimestampedEvent>) -> Self {
         Self {
             current_query: None,
             pending_queue: VecDeque::new(),

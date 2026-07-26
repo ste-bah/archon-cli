@@ -325,16 +325,22 @@ mod tests {
     #[tokio::test]
     async fn coalesced_text_reaches_app_without_byte_loss() {
         let (event_tx, mut event_rx) =
-            crate::event_channel::bounded_tui_event_channel_with_capacity(1);
+            crate::event_channel::bounded_tui_event_channel_with_capacity(2);
         let (input_tx, _input_rx) = mpsc::channel(1);
-        for chunk in ["hello ", "世界", "\nfinal"] {
-            event_tx.send(TuiEvent::TextDelta(chunk.into())).unwrap();
-        }
-        event_tx.send(TuiEvent::Done).unwrap();
+        let producer = tokio::spawn(async move {
+            for chunk in ["hello ", "世界", "\nfinal"] {
+                event_tx
+                    .send_async(TuiEvent::TextDelta(chunk.into()))
+                    .await
+                    .unwrap();
+            }
+            event_tx.send_async(TuiEvent::Done).await.unwrap();
+        });
         let initial_event = event_rx.recv().await.unwrap();
         let mut app = App::new();
 
         let drained = drain_tui_events(&mut app, initial_event, &mut event_rx, &input_tx).await;
+        producer.await.expect("producer task");
 
         assert_eq!(drained, 2);
         assert!(app.should_quit);

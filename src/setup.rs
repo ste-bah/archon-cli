@@ -121,7 +121,7 @@ pub fn resolve_cli_flags(
 /// Returns the voice event receiver if voice is enabled.
 pub fn setup_voice_pipeline(
     config: &archon_core::config::ArchonConfig,
-) -> Option<tokio::sync::mpsc::UnboundedReceiver<archon_tui::app::TuiEvent>> {
+) -> Option<tokio::sync::mpsc::Receiver<archon_tui::app::TuiEvent>> {
     if !config.voice.enabled {
         tracing::info!("voice: disabled (config.voice.enabled=false)");
         return None;
@@ -143,11 +143,7 @@ pub fn setup_voice_pipeline(
         config.voice.toggle_mode,
         hotkey_action_for_mode(config.voice.toggle_mode)
     );
-    // TASK-SESSION-LOOP-EXTRACT (A-2): flipped from bounded
-    // `mpsc::channel::<VTuiEvent>(16)` to `unbounded_channel`. Matches
-    // the session-wide `TuiEvent` channel flip at session.rs:1414 and
-    // the signature change on `voice_loop(..)`.
-    let (voice_evt_tx, voice_evt_rx_inner) = tokio::sync::mpsc::unbounded_channel::<VTuiEvent>();
+    let (voice_evt_tx, voice_evt_rx_inner) = tokio::sync::mpsc::channel::<VTuiEvent>(16);
     let voice_event_rx = Some(voice_evt_rx_inner);
     let audio_capture = archon_tui::voice::capture::AudioCapture::new();
     let audio: StdArc<dyn AudioSource> = if audio_capture.is_supported() {

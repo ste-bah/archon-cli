@@ -23,7 +23,7 @@ async fn shutdown_releases_submission_blocked_on_full_input_queue() {
             crate::runtime::sandbox_audit_writer::SandboxAuditDrainHandle::empty_for_test(),
         dispatcher: Arc::new(std::sync::Mutex::new(AgentDispatcher::new(
             Arc::new(crate::agent_handle::NoopAgentRouter),
-            tokio::sync::mpsc::unbounded_channel().0,
+            tokio::sync::mpsc::channel(1).0,
         ))),
         shutdown: tokio_util::sync::CancellationToken::new(),
     };
@@ -65,7 +65,7 @@ async fn active_submit_exits_when_shutdown_closes_event_channel() {
             crate::runtime::sandbox_audit_writer::SandboxAuditDrainHandle::empty_for_test(),
         dispatcher: Arc::new(std::sync::Mutex::new(AgentDispatcher::new(
             Arc::new(crate::agent_handle::NoopAgentRouter),
-            tokio::sync::mpsc::unbounded_channel().0,
+            tokio::sync::mpsc::channel(1).0,
         ))),
         shutdown: tokio_util::sync::CancellationToken::new(),
     };
@@ -112,7 +112,7 @@ async fn finish_shutdown_times_out_and_aborts_stalled_session_loop() {
             crate::runtime::sandbox_audit_writer::SandboxAuditDrainHandle::empty_for_test(),
         dispatcher: Arc::new(std::sync::Mutex::new(AgentDispatcher::new(
             Arc::new(crate::agent_handle::NoopAgentRouter),
-            tokio::sync::mpsc::unbounded_channel().0,
+            tokio::sync::mpsc::channel(1).0,
         ))),
         shutdown: tokio_util::sync::CancellationToken::new(),
     };
@@ -150,7 +150,7 @@ async fn finish_shutdown_bounds_abort_resistant_session_loop() {
             crate::runtime::sandbox_audit_writer::SandboxAuditDrainHandle::empty_for_test(),
         dispatcher: Arc::new(std::sync::Mutex::new(AgentDispatcher::new(
             Arc::new(crate::agent_handle::NoopAgentRouter),
-            tokio::sync::mpsc::unbounded_channel().0,
+            tokio::sync::mpsc::channel(1).0,
         ))),
         shutdown: tokio_util::sync::CancellationToken::new(),
     };
@@ -183,7 +183,7 @@ async fn begin_shutdown_closes_web_session_input() {
             crate::runtime::sandbox_audit_writer::SandboxAuditDrainHandle::empty_for_test(),
         dispatcher: Arc::new(std::sync::Mutex::new(AgentDispatcher::new(
             Arc::new(crate::agent_handle::NoopAgentRouter),
-            tokio::sync::mpsc::unbounded_channel().0,
+            tokio::sync::mpsc::channel(1).0,
         ))),
         shutdown: tokio_util::sync::CancellationToken::new(),
     };

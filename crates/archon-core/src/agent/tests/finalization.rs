@@ -43,7 +43,7 @@ impl LlmProvider for GuardrailCompletionProvider {
 async fn blocked_finalization_retries_once_without_turn_complete() {
     let calls = Arc::new(AtomicUsize::new(0));
     let captured_system = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, mut rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     let mut agent = Agent::new(
         Arc::new(GuardrailCompletionProvider {
             calls: Arc::clone(&calls),
@@ -105,7 +105,7 @@ async fn blocked_finalization_retries_once_without_turn_complete() {
 async fn blocked_trivial_finalization_enters_bounded_repair_loop() {
     let calls = Arc::new(AtomicUsize::new(0));
     let captured_system = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, mut rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     let mut agent = Agent::new(
         Arc::new(GuardrailCompletionProvider {
             calls: Arc::clone(&calls),
@@ -203,7 +203,7 @@ async fn guarded_exit_plan_persists_draft_after_allowed_finalization() {
     let plan_store = archon_session::plan::PlanStore::new(session_store.db()).unwrap();
     let mut registry = ToolRegistry::new();
     registry.register(Box::new(archon_tools::plan_mode::ExitPlanModeTool));
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     let mut config = AgentConfig::default();
     config.session_id = "guarded-plan-session".into();
     config.max_turns = Some(1);
@@ -301,7 +301,7 @@ impl LlmProvider for ToolBreakCompletionProvider {
 
 #[tokio::test]
 async fn blocked_tool_loop_break_withholds_draft_text_and_reasoning() {
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, mut rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     let mut config = AgentConfig::default();
     config.max_turns = Some(1);
     let mut agent = Agent::new(
@@ -346,7 +346,7 @@ async fn blocked_tool_loop_break_withholds_draft_text_and_reasoning() {
 async fn scoped_tool_loop_break_requires_finalization_verdict() {
     let calls = Arc::new(AtomicUsize::new(0));
     let captured_system = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     let mut agent = Agent::new(
         Arc::new(GuardrailCompletionProvider {
             calls,
@@ -376,7 +376,7 @@ async fn scoped_tool_loop_break_requires_finalization_verdict() {
 async fn unscoped_turn_keeps_streaming_text_with_callback_installed() {
     let calls = Arc::new(AtomicUsize::new(0));
     let captured_system = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, mut rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     let mut agent = Agent::new(
         Arc::new(GuardrailCompletionProvider {
             calls,
@@ -407,7 +407,7 @@ async fn unscoped_turn_keeps_streaming_text_with_callback_installed() {
 async fn allowed_finalization_emits_turn_complete_once() {
     let calls = Arc::new(AtomicUsize::new(0));
     let captured_system = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, mut rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     let mut agent = Agent::new(
         Arc::new(GuardrailCompletionProvider {
             calls: Arc::clone(&calls),

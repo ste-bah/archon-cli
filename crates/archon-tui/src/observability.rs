@@ -58,16 +58,7 @@ use std::sync::{Mutex, OnceLock};
 /// Read via Prometheus `/metrics` endpoint or directly for tests.
 pub static TUI_EVENT_DRAINED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
-/// Approximate count of `TuiEvent`s queued in the render-loop input channel.
-///
-/// Maintained manually because the stall watchdog runs outside the receiver
-/// owner. Senders increment only after an event is actually queued; the
-/// receiver decrements when an event leaves the queue.
-pub static TUI_EVENT_PENDING: AtomicUsize = AtomicUsize::new(0);
-
-/// Unix milliseconds of the last `record_tui_event_drain()` call.
-/// `0` means never drained. Used by `warn_if_drain_stalled` to detect
-/// a stuck render loop (no events processed for >threshold_ms).
+/// Unix milliseconds of the last successful TUI event drain.
 pub static TUI_EVENT_LAST_DRAIN_UNIX_MS: AtomicU64 = AtomicU64::new(0);
 
 static TUI_EVENT_LAST_DRAIN_VARIANT: OnceLock<Mutex<&'static str>> = OnceLock::new();
@@ -80,21 +71,16 @@ pub const DEFAULT_DRAIN_STALL_THRESHOLD_MS: u64 = 10_000;
 pub const LONG_RUNNING_DRAIN_STALL_THRESHOLD_MS: u64 = 90_000;
 const DRAIN_STALL_WARN_REFRESH_MS: u64 = 60_000;
 
-pub fn record_tui_event_enqueued() {
-    TUI_EVENT_PENDING.fetch_add(1, Ordering::Relaxed);
-}
-
-pub fn record_tui_event_dequeued() {
-    decrement_tui_event_pending();
-}
-
-pub fn record_tui_event_discarded() {
-    decrement_tui_event_pending();
-}
-
-pub fn tui_event_pending_count() -> usize {
-    TUI_EVENT_PENDING.load(Ordering::Relaxed)
-}
+pub use crate::event_queue_metrics::{
+    TUI_EVENT_PENDING, record_tui_event_blocked_send, record_tui_event_closed_send_failure,
+    record_tui_event_coalesced_bytes, record_tui_event_dequeued, record_tui_event_discarded,
+    record_tui_event_enqueued, record_tui_event_full_send_failure,
+    record_tui_event_oversized_metadata_rejected, record_tui_event_oversized_rejected,
+    tui_event_blocked_send_duration_ns, tui_event_closed_send_failure_count,
+    tui_event_full_send_failure_count, tui_event_oversized_metadata_rejected_count,
+    tui_event_oversized_rejected_count, tui_event_pending_byte_high_water, tui_event_pending_bytes,
+    tui_event_pending_count,
+};
 
 pub fn mark_long_running_workload(reason: &str) {
     LONG_RUNNING_WORKLOAD_COUNT.fetch_add(1, Ordering::Relaxed);
@@ -230,29 +216,11 @@ pub fn warn_if_drain_stalled(threshold_ms: u64) -> bool {
 
 #[doc(hidden)]
 pub fn reset_tui_drain_stall_state_for_tests() {
-    TUI_EVENT_PENDING.store(0, Ordering::Relaxed);
+    crate::event_queue_metrics::reset_for_tests();
     TUI_EVENT_LAST_DRAIN_UNIX_MS.store(0, Ordering::Relaxed);
     TUI_EVENT_LAST_STALL_WARN_UNIX_MS.store(0, Ordering::Relaxed);
     TUI_EVENT_LAST_STALL_WARN_PENDING.store(0, Ordering::Relaxed);
     LONG_RUNNING_WORKLOAD_COUNT.store(0, Ordering::Relaxed);
-}
-
-fn decrement_tui_event_pending() {
-    let mut current = TUI_EVENT_PENDING.load(Ordering::Relaxed);
-    loop {
-        if current == 0 {
-            return;
-        }
-        match TUI_EVENT_PENDING.compare_exchange_weak(
-            current,
-            current - 1,
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        ) {
-            Ok(_) => return,
-            Err(actual) => current = actual,
-        }
-    }
 }
 
 fn reset_drain_stall_hysteresis() {
@@ -360,7 +328,7 @@ mod tui_drain_metric_tests {
     #[serial(tui_drain_metrics)]
     fn warn_if_drain_stalled_returns_true_when_pending_and_overdue() {
         reset_all();
-        record_tui_event_enqueued();
+        record_tui_event_enqueued(0);
         set_last_drain_overdue(DEFAULT_DRAIN_STALL_THRESHOLD_MS);
 
         assert!(warn_if_drain_stalled(DEFAULT_DRAIN_STALL_THRESHOLD_MS));
@@ -370,7 +338,7 @@ mod tui_drain_metric_tests {
     #[serial(tui_drain_metrics)]
     fn warn_if_drain_stalled_does_not_fire_for_pre_startup() {
         reset_all();
-        record_tui_event_enqueued();
+        record_tui_event_enqueued(0);
 
         assert!(!warn_if_drain_stalled(DEFAULT_DRAIN_STALL_THRESHOLD_MS));
     }
@@ -399,7 +367,7 @@ mod tui_drain_metric_tests {
     fn pending_count_saturates_at_zero() {
         reset_all();
 
-        record_tui_event_discarded();
+        record_tui_event_discarded(0);
 
         assert_eq!(tui_event_pending_count(), 0);
     }
@@ -422,7 +390,7 @@ mod tui_drain_metric_tests {
     #[serial(tui_drain_metrics)]
     fn warn_hysteresis_suppresses_duplicate_warnings_within_60s() {
         reset_all();
-        record_tui_event_enqueued();
+        record_tui_event_enqueued(0);
         set_last_drain_overdue(DEFAULT_DRAIN_STALL_THRESHOLD_MS);
 
         assert!(warn_if_drain_stalled(DEFAULT_DRAIN_STALL_THRESHOLD_MS));
@@ -433,11 +401,11 @@ mod tui_drain_metric_tests {
     #[serial(tui_drain_metrics)]
     fn warn_hysteresis_clears_after_pending_count_grows() {
         reset_all();
-        record_tui_event_enqueued();
+        record_tui_event_enqueued(0);
         set_last_drain_overdue(DEFAULT_DRAIN_STALL_THRESHOLD_MS);
 
         assert!(warn_if_drain_stalled(DEFAULT_DRAIN_STALL_THRESHOLD_MS));
-        record_tui_event_enqueued();
+        record_tui_event_enqueued(0);
         assert!(warn_if_drain_stalled(DEFAULT_DRAIN_STALL_THRESHOLD_MS));
     }
 
@@ -445,7 +413,7 @@ mod tui_drain_metric_tests {
     #[serial(tui_drain_metrics)]
     fn warn_hysteresis_refreshes_after_60_seconds() {
         reset_all();
-        record_tui_event_enqueued();
+        record_tui_event_enqueued(0);
         set_last_drain_overdue(DEFAULT_DRAIN_STALL_THRESHOLD_MS);
 
         assert!(warn_if_drain_stalled(DEFAULT_DRAIN_STALL_THRESHOLD_MS));

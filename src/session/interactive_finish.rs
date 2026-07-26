@@ -29,7 +29,7 @@ pub(super) async fn finish(
     governed_learning_db: Option<Arc<cozo::DbInstance>>,
     session_store: Arc<archon_session::storage::SessionStore>,
     tui_event_tx: TuiEventSender,
-    agent_event_rx: tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent>,
+    agent_event_rx: tokio::sync::mpsc::Receiver<TimestampedEvent>,
     metrics: Arc<archon_tui::observability::ChannelMetrics>,
     cost_alert_state: archon_core::cost_alerts::CostAlertState,
     permission_mode_shared: Arc<tokio::sync::Mutex<String>>,

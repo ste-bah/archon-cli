@@ -2,7 +2,7 @@
 async fn preflight_observer_receives_first_allowed_tool_with_final_input() {
     let mut registry = ToolRegistry::new();
     registry.register(Box::new(archon_tools::file_write::WriteTool));
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     let config = AgentConfig {
         permission_mode: Arc::new(Mutex::new("bypassPermissions".to_string())),
         ..AgentConfig::default()

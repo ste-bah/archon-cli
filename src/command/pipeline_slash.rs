@@ -11,8 +11,8 @@ use anyhow::Result;
 use archon_pipeline::audit::store::PipelineBundleStore;
 use archon_pipeline::audit::types::BundleStatus;
 use archon_pipeline::runner::{
-    LlmClient, PipelineResult, PipelineRunOptions, PipelineType,
-    resume_pipeline_audited_with_options,
+    LlmClient, PipelineFacade, PipelineProgressFacade, PipelineResult, PipelineRunOptions,
+    PipelineType, resume_pipeline_audited_with_options,
 };
 use archon_tui::app::TuiEvent;
 use archon_tui::event_channel::TuiEventSender;
@@ -23,7 +23,7 @@ use crate::command::pipeline_slash_progress::{
 use crate::command::pipeline_support::{
     build_interactive_learning_stack, build_reflexion_injector, final_research_artifact_paths,
 };
-use crate::command::registry::{CommandContext, CommandHandler};
+use crate::command::registry::{CommandContext, CommandHandler, PipelineWork};
 
 /// TUI-aware `/pipeline` umbrella.
 pub(crate) struct PipelineSlashHandler;
@@ -88,69 +88,94 @@ fn handle_tui_resume(
 
     match state.status {
         BundleStatus::Running => {
-            emit_attached_state(&ctx.tui_tx, &cwd, &state);
-            spawn_audit_watcher(cwd, session_id.to_string(), ctx.tui_tx.clone());
+            emit_attached_state(ctx, &cwd, &state);
+            ctx.pending_effect = Some(crate::command::registry::CommandEffect::StartPipelineWork(
+                PipelineWork::Watch {
+                    cwd,
+                    session_id: session_id.to_string(),
+                },
+            ));
             Ok(())
         }
         BundleStatus::Completed => {
-            emit_completed_state(&ctx.tui_tx, &cwd, &state);
+            emit_completed_state(ctx, &cwd, &state);
             Ok(())
         }
-        BundleStatus::Failed | BundleStatus::Aborted => resume_in_process(
-            ctx,
-            cwd,
-            state.pipeline_type,
-            session_id.to_string(),
-            force_quality_gate,
-        ),
+        BundleStatus::Failed | BundleStatus::Aborted => {
+            ctx.pending_effect = Some(crate::command::registry::CommandEffect::StartPipelineWork(
+                PipelineWork::Resume {
+                    cwd,
+                    pipeline_type: state.pipeline_type,
+                    session_id: session_id.to_string(),
+                    force_quality_gate,
+                },
+            ));
+            Ok(())
+        }
     }
 }
 
-fn resume_in_process(
-    ctx: &mut CommandContext,
+pub(crate) async fn start_pipeline_work(
+    ctx: &crate::slash_context::SlashCommandContext,
+    tui_tx: &TuiEventSender,
+    work: PipelineWork,
+) {
+    match work {
+        PipelineWork::Watch { cwd, session_id } => {
+            spawn_audit_watcher(cwd, session_id, tui_tx.clone());
+        }
+        PipelineWork::Resume {
+            cwd,
+            pipeline_type,
+            session_id,
+            force_quality_gate,
+        } => {
+            let _ = resume_in_process(
+                ctx,
+                tui_tx,
+                cwd,
+                pipeline_type,
+                session_id,
+                force_quality_gate,
+            )
+            .await;
+        }
+    }
+}
+
+async fn resume_in_process(
+    ctx: &crate::slash_context::SlashCommandContext,
+    tui_tx: &TuiEventSender,
     cwd: PathBuf,
     pipeline_type: PipelineType,
     session_id: String,
     force_quality_gate: bool,
 ) -> Result<()> {
-    let llm: Arc<dyn LlmClient> = match ctx.llm_adapter.clone() {
-        Some(llm) => llm,
-        None => {
-            ctx.emit(TuiEvent::Error(
-                "LLM adapter not available; cannot resume pipeline in the TUI.".into(),
-            ));
-            return Ok(());
-        }
-    };
+    let llm: Arc<dyn LlmClient> = Arc::clone(&ctx.llm_adapter);
     let loaded_config = archon_core::config::load_config().ok();
     let mut learning = loaded_config.as_ref().and_then(|config| {
         build_interactive_learning_stack(config, ctx.cozo_db.clone(), ctx.auto_trainer.clone())
     });
     let mut reflexion = loaded_config.as_ref().and_then(build_reflexion_injector);
-    let tui_tx = ctx.tui_tx.clone();
+    let tui_tx = tui_tx.clone();
     let options = PipelineRunOptions { force_quality_gate };
 
     match pipeline_type {
         PipelineType::Coding => {
-            let coding = match ctx.coding_pipeline.clone() {
-                Some(coding) => coding,
-                None => {
-                    ctx.emit(TuiEvent::Error(
-                        "Coding pipeline facade not available.".into(),
-                    ));
-                    return Ok(());
-                }
-            };
-            attach_progress_forwarder("pipeline-resume-code-progress", &coding, tui_tx.clone());
+            let coding: Arc<dyn PipelineFacade> = Arc::clone(&ctx.coding_pipeline) as _;
+            let (progress_facade, progress_forwarder) =
+                attach_progress_forwarder("pipeline-resume-code-progress", coding, tui_tx.clone());
             let leann = ctx.leann.clone();
             let session = session_id.clone();
-            let _ = tui_tx.send(TuiEvent::TextDelta(format!(
-                "{}\n",
-                resume_status_line("coding", &session, force_quality_gate)
-            )));
+            tui_tx
+                .send_async(TuiEvent::TextDelta(format!(
+                    "{}\n",
+                    resume_status_line("coding", &session, force_quality_gate)
+                )))
+                .await?;
             archon_observability::spawn_named("pipeline-resume-code", async move {
                 let result = resume_pipeline_audited_with_options(
-                    coding.as_ref(),
+                    &progress_facade,
                     llm.as_ref(),
                     &session,
                     &cwd,
@@ -159,32 +184,30 @@ fn resume_in_process(
                     options,
                 )
                 .await;
-                emit_resume_result(&tui_tx, &cwd, result);
+                drop(progress_facade);
+                if let Err(error) = progress_forwarder.await {
+                    tracing::error!(%error, "coding resume progress forwarder failed");
+                }
+                emit_resume_result(&tui_tx, &cwd, result).await;
             });
         }
         PipelineType::Research => {
-            let research = match ctx.research_pipeline.clone() {
-                Some(research) => research,
-                None => {
-                    ctx.emit(TuiEvent::Error(
-                        "Research pipeline facade not available.".into(),
-                    ));
-                    return Ok(());
-                }
-            };
-            attach_progress_forwarder(
+            let research: Arc<dyn PipelineFacade> = Arc::clone(&ctx.research_pipeline) as _;
+            let (progress_facade, progress_forwarder) = attach_progress_forwarder(
                 "pipeline-resume-research-progress",
-                &research,
+                research,
                 tui_tx.clone(),
             );
             let session = session_id.clone();
-            let _ = tui_tx.send(TuiEvent::TextDelta(format!(
-                "{}\n",
-                resume_status_line("research", &session, force_quality_gate)
-            )));
+            tui_tx
+                .send_async(TuiEvent::TextDelta(format!(
+                    "{}\n",
+                    resume_status_line("research", &session, force_quality_gate)
+                )))
+                .await?;
             archon_observability::spawn_named("pipeline-resume-research", async move {
                 let result = resume_pipeline_audited_with_options(
-                    research.as_ref(),
+                    &progress_facade,
                     llm.as_ref(),
                     &session,
                     &cwd,
@@ -193,13 +216,19 @@ fn resume_in_process(
                     options,
                 )
                 .await;
-                emit_resume_result(&tui_tx, &cwd, result);
+                drop(progress_facade);
+                if let Err(error) = progress_forwarder.await {
+                    tracing::error!(%error, "research resume progress forwarder failed");
+                }
+                emit_resume_result(&tui_tx, &cwd, result).await;
             });
         }
         other => {
-            ctx.emit(TuiEvent::Error(format!(
-                "Unsupported audited pipeline type for TUI resume: {other:?}"
-            )));
+            tui_tx
+                .send_async(TuiEvent::Error(format!(
+                    "Unsupported audited pipeline type for TUI resume: {other:?}"
+                )))
+                .await?;
         }
     }
     Ok(())
@@ -215,36 +244,24 @@ fn resume_status_line(kind: &str, session_id: &str, force_quality_gate: bool) ->
     }
 }
 
-trait TuiProgressFacade {
-    fn set_progress_sender(&self, tx: tokio::sync::mpsc::UnboundedSender<String>);
-}
-
-impl TuiProgressFacade for archon_pipeline::coding::facade::CodingFacade {
-    fn set_progress_sender(&self, tx: tokio::sync::mpsc::UnboundedSender<String>) {
-        self.set_tui_sender(tx);
-    }
-}
-
-impl TuiProgressFacade for archon_pipeline::research::facade::ResearchFacade {
-    fn set_progress_sender(&self, tx: tokio::sync::mpsc::UnboundedSender<String>) {
-        self.set_tui_sender(tx);
-    }
-}
-
-fn attach_progress_forwarder<F>(name: &'static str, facade: &Arc<F>, tui_tx: TuiEventSender)
-where
-    F: TuiProgressFacade + ?Sized + Send + Sync + 'static,
-{
-    let (string_tx, mut string_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    facade.set_progress_sender(string_tx);
-    archon_observability::spawn_named(name, async move {
+fn attach_progress_forwarder(
+    name: &'static str,
+    facade: Arc<dyn PipelineFacade>,
+    tui_tx: TuiEventSender,
+) -> (PipelineProgressFacade, tokio::task::JoinHandle<()>) {
+    let (string_tx, mut string_rx) = tokio::sync::mpsc::channel::<String>(1);
+    let progress_facade = PipelineProgressFacade::new(facade, string_tx);
+    let forwarder = archon_observability::spawn_named(name, async move {
         while let Some(msg) = string_rx.recv().await {
-            let _ = tui_tx.send(TuiEvent::TextDelta(msg));
+            if tui_tx.send_async(TuiEvent::TextDelta(msg)).await.is_err() {
+                return;
+            }
         }
     });
+    (progress_facade, forwarder)
 }
 
-fn emit_resume_result(tui_tx: &TuiEventSender, cwd: &Path, result: Result<PipelineResult>) {
+async fn emit_resume_result(tui_tx: &TuiEventSender, cwd: &Path, result: Result<PipelineResult>) {
     match result {
         Ok(result) => {
             let artifacts = final_research_artifact_paths(&result, cwd)
@@ -256,21 +273,25 @@ fn emit_resume_result(tui_tx: &TuiEventSender, cwd: &Path, result: Result<Pipeli
                     )
                 })
                 .unwrap_or_default();
-            let _ = tui_tx.send(TuiEvent::TextDelta(format!(
-                "\n=== Pipeline Complete ===\n\
+            let _ = tui_tx
+                .send_async(TuiEvent::TextDelta(format!(
+                    "\n=== Pipeline Complete ===\n\
                  Session: {}\n\
                  Agents run: {}\n\
                  Total cost: ${:.4}\n\
                  Duration: {:.1}s\n{}",
-                result.session_id,
-                result.agent_results.len(),
-                result.total_cost_usd,
-                result.duration.as_secs_f64(),
-                artifacts,
-            )));
+                    result.session_id,
+                    result.agent_results.len(),
+                    result.total_cost_usd,
+                    result.duration.as_secs_f64(),
+                    artifacts,
+                )))
+                .await;
         }
         Err(error) => {
-            let _ = tui_tx.send(TuiEvent::Error(format!("Pipeline resume failed: {error}")));
+            let _ = tui_tx
+                .send_async(TuiEvent::Error(format!("Pipeline resume failed: {error}")))
+                .await;
         }
     }
 }
@@ -280,6 +301,19 @@ mod tests {
     use super::*;
     use crate::command::registry::CommandHandler;
     use crate::command::test_support::{CtxBuilder, drain_tui_events};
+
+    #[test]
+    fn slash_dispatch_starts_pipeline_work_only_after_successful_flush() {
+        let source = include_str!("slash.rs");
+        let flush = source.find("flush_events().await").expect("flush call");
+        let gate = source
+            .find("events_flushed\n                || !matches!")
+            .expect("successful flush gate");
+        let apply = source
+            .find("apply_effect(effect, ctx, tui_tx).await")
+            .expect("effect application");
+        assert!(flush < gate && gate < apply);
+    }
 
     #[tokio::test]
     async fn running_resume_attaches_without_appending_run_resumed() {
@@ -304,6 +338,12 @@ mod tests {
         PipelineSlashHandler
             .execute(&mut ctx, &["resume".to_string(), "session-1".to_string()])
             .unwrap();
+        assert!(matches!(
+            ctx.pending_effect,
+            Some(crate::command::registry::CommandEffect::StartPipelineWork(
+                _
+            ))
+        ));
 
         let events = drain_tui_events(&mut rx);
         assert!(

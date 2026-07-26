@@ -62,15 +62,22 @@ impl ToolOutputState {
         }
     }
 
+    pub fn append_output(&mut self, chunk: &str) {
+        self.output.push_str(chunk);
+    }
+
     /// Mark the tool as complete and set output.
-    pub fn complete(&mut self, output: &str, is_error: bool) {
+    pub fn complete(&mut self, output: &str, is_error: bool) -> &str {
         self.status = if is_error {
             ToolDisplayStatus::Error
         } else {
             ToolDisplayStatus::Success
         };
-        self.output = output.to_string();
-        self.truncated_preview = Self::compute_preview(output);
+        if !output.is_empty() {
+            self.output = output.to_string();
+        }
+        self.truncated_preview = Self::compute_preview(&self.output);
+        &self.output
     }
 
     fn compute_preview(output: &str) -> String {
@@ -137,6 +144,17 @@ impl ToolOutputState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chunked_tool_output_reconstructs_before_completion() {
+        let mut state = ToolOutputState::new("Bash", "tool-chunked");
+        state.append_output("hello ");
+        state.append_output("世界");
+        state.complete("", false);
+
+        assert_eq!(state.output, "hello 世界");
+        assert_eq!(state.status, ToolDisplayStatus::Success);
+    }
 
     #[test]
     fn tool_output_new_starts_running_collapsed() {

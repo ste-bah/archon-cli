@@ -76,7 +76,8 @@ fn dispatch_variant(r: &DispatchResult) -> &'static str {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_input_dispatch_latency_during_running_turn_under_100ms() {
-    let (agent_event_tx, _agent_event_rx) = mpsc::unbounded_channel::<TimestampedEvent>();
+    let (agent_event_tx, _agent_event_rx) =
+        mpsc::channel::<TimestampedEvent>(archon_core::agent::AGENT_EVENT_CHANNEL_CAPACITY);
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
     let runner: Arc<dyn TurnRunner> = Arc::new(SlowRunner);
     let mut dispatcher = AgentDispatcher::new(router, agent_event_tx);

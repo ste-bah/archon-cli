@@ -1,6 +1,7 @@
 use super::*;
 use crate::coding::agents::Phase;
 use crate::runner::AgentResult;
+use std::sync::Arc;
 use std::time::Duration;
 
 fn make_facade() -> CodingFacade {
@@ -256,6 +257,64 @@ async fn process_completion_writes_to_rlm() {
         store.read("coding/understanding/parsed-intent"),
         Some("analysis output".to_string()),
     );
+}
+
+#[tokio::test]
+async fn process_completion_waits_for_progress_capacity() {
+    let facade: Arc<dyn PipelineFacade> = Arc::new(make_facade());
+    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel(1);
+    progress_tx.send("occupied".to_string()).await.unwrap();
+    let progress_facade =
+        crate::runner::PipelineProgressFacade::new(Arc::clone(&facade), progress_tx);
+    let mut session = facade.init_session("task").await.unwrap();
+    let info = agent_to_info(&AGENTS[0], &AnthropicModelsConfig::default());
+    let result = make_result("analysis output");
+    let quality = QualityScore {
+        overall: 0.9,
+        dimensions: HashMap::new(),
+    };
+
+    let completion = tokio::spawn(async move {
+        progress_facade
+            .process_completion(&mut session, &info, &result, &quality)
+            .await
+    });
+    tokio::task::yield_now().await;
+    assert!(
+        !completion.is_finished(),
+        "full progress channel did not apply backpressure"
+    );
+
+    assert_eq!(progress_rx.recv().await.as_deref(), Some("occupied"));
+    completion
+        .await
+        .expect("completion task")
+        .expect("process completion");
+    assert_eq!(
+        progress_rx.recv().await.as_deref(),
+        Some("[pipeline phase 1] Contract Agent complete (quality: 0.90)\n")
+    );
+}
+
+#[tokio::test]
+async fn closed_progress_receiver_does_not_fail_completion() {
+    let facade: Arc<dyn PipelineFacade> = Arc::new(make_facade());
+    let (progress_tx, progress_rx) = tokio::sync::mpsc::channel(1);
+    drop(progress_rx);
+    let progress_facade =
+        crate::runner::PipelineProgressFacade::new(Arc::clone(&facade), progress_tx);
+    let mut session = facade.init_session("task").await.unwrap();
+    let info = agent_to_info(&AGENTS[0], &AnthropicModelsConfig::default());
+    let result = make_result("analysis output");
+    let quality = QualityScore {
+        overall: 0.9,
+        dimensions: HashMap::new(),
+    };
+
+    progress_facade
+        .process_completion(&mut session, &info, &result, &quality)
+        .await
+        .expect("detached TUI must not fail pipeline completion");
 }
 
 #[tokio::test]

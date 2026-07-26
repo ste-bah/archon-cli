@@ -38,7 +38,7 @@ impl LlmProvider for CapturingLlmProvider {
 #[tokio::test]
 async fn main_request_tool_definitions_are_byte_stable_across_turns() {
     let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     let config = AgentConfig {
         tools: vec![serde_json::json!({
             "name":"Read",
@@ -85,7 +85,7 @@ async fn main_request_tool_definitions_are_byte_stable_across_turns() {
 #[tokio::test]
 async fn main_anthropic_request_marks_latest_conversation_block() {
     let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     let mut config = AgentConfig::default();
     config.context.prompt_cache_conversation = true;
     let mut agent = Agent::new(
@@ -116,7 +116,7 @@ async fn main_anthropic_request_marks_latest_conversation_block() {
 #[tokio::test]
 async fn main_request_trims_old_tool_result_without_mutating_canonical_history() {
     let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     let mut config = AgentConfig::default();
     config.context.preserve_recent_turns = 1;
     let mut agent = Agent::new(
@@ -160,7 +160,7 @@ async fn main_request_trims_old_tool_result_without_mutating_canonical_history()
 #[tokio::test]
 async fn eight_tool_rounds_send_trimmed_history_but_reopen_with_full_results() {
     let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     let mut config = AgentConfig::default();
     config.context.preserve_recent_turns = 3;
     let mut agent = Agent::new(
@@ -250,7 +250,7 @@ async fn eight_tool_rounds_send_trimmed_history_but_reopen_with_full_results() {
 
 #[tokio::test]
 async fn canonical_tool_result_survives_session_store_reopen_after_request_projection() {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     let mut config = AgentConfig::default();
     config.context.preserve_recent_turns = 1;
     let mut agent = Agent::new(

@@ -84,6 +84,17 @@ pub(crate) fn handle_slash_command<'a>(
         let mut __cmd_ctx =
             crate::command::context::build_command_context(input, tui_tx.clone(), ctx).await;
         let dispatch_result = ctx.dispatcher.dispatch(&mut __cmd_ctx, input);
+        let events_flushed = match __cmd_ctx.flush_events().await {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::error!(
+                    target: "archon_cli::command::tui",
+                    %error,
+                    "failed to flush command TUI events"
+                );
+                false
+            }
+        };
         if dispatch_result.is_err() {
             return dispatcher_recognizes;
         }
@@ -93,7 +104,13 @@ pub(crate) fn handle_slash_command<'a>(
         // `pending_effect` synchronously; we consume it with `.take()`
         // here — where `.await` is legal — and apply the mutation via
         // `command::context::apply_effect`. Single-shot by construction.
-        if let Some(effect) = __cmd_ctx.pending_effect.take() {
+        if let Some(effect) = __cmd_ctx.pending_effect.take()
+            && (events_flushed
+                || !matches!(
+                    effect,
+                    crate::command::registry::CommandEffect::StartPipelineWork(_)
+                ))
+        {
             // TASK-AGS-POST-6-BODIES-B04-DIFF: `tui_tx` threaded into
             // `apply_effect` so the RunGitDiffStat variant can call the
             // existing LIVE `handle_diff_command(tui_tx, &path)` helper
@@ -155,21 +172,30 @@ pub(crate) fn handle_diff_command<'a>(
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 if !output.status.success() {
                     if stderr.contains("not a git repository") {
-                        let _ =
-                            tui_tx.send(TuiEvent::TextDelta("\nNot in a git repository.\n".into()));
+                        let _ = tui_tx
+                            .send_async(TuiEvent::TextDelta("\nNot in a git repository.\n".into()))
+                            .await;
                     } else {
-                        let _ = tui_tx.send(TuiEvent::Error(format!("git diff failed: {stderr}")));
+                        let _ = tui_tx
+                            .send_async(TuiEvent::Error(format!("git diff failed: {stderr}")))
+                            .await;
                     }
                     return;
                 }
                 if stdout.is_empty() {
-                    let _ = tui_tx.send(TuiEvent::TextDelta("\nNo uncommitted changes.\n".into()));
+                    let _ = tui_tx
+                        .send_async(TuiEvent::TextDelta("\nNo uncommitted changes.\n".into()))
+                        .await;
                 } else {
-                    let _ = tui_tx.send(TuiEvent::TextDelta(format!("\n{stdout}")));
+                    let _ = tui_tx
+                        .send_async(TuiEvent::TextDelta(format!("\n{stdout}")))
+                        .await;
                 }
             }
             Err(e) => {
-                let _ = tui_tx.send(TuiEvent::Error(format!("Failed to run git: {e}")));
+                let _ = tui_tx
+                    .send_async(TuiEvent::Error(format!("Failed to run git: {e}")))
+                    .await;
             }
         }
     })
