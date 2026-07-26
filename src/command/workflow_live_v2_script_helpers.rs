@@ -182,6 +182,7 @@ async function __archonRun() {{
     globalThis.pipeline = api.pipeline;
     globalThis.adversarialReview = api.adversarialReview;
     globalThis.coverageAudit = api.coverageAudit;
+    globalThis.remediateFindings = api.remediateFindings;
     globalThis.w = api.w;
   }}
   const result = await workflow(api);

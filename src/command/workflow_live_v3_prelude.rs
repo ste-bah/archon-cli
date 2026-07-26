@@ -456,3 +456,59 @@ fn workflow_meta_marker_offset(source: &str) -> Option<usize> {
     }
     None
 }
+
+#[cfg(test)]
+mod primitive_binding_tests {
+    /// Every primitive the prelude exports must also be bound as a global.
+    ///
+    /// Authored (v3) scripts call these bare — `remediateFindings(...)`, not
+    /// `api.remediateFindings(...)` — so a primitive that is exported from
+    /// `__archonPrimitives` but missing from the globals block does not exist as
+    /// far as the script is concerned. That shipped once: the findings-loop
+    /// primitive was written, wired into the author reference, and passed every
+    /// unit test, then killed a live run at dry-run pre-flight with
+    /// `remediateFindings is not defined`.
+    ///
+    /// It is the same failure as a verifier that is never invoked and a
+    /// primitive the validator forbids: the code is correct and unreachable.
+    /// Comparing the two lists is cheap; discovering it live is not.
+    #[test]
+    fn every_exported_primitive_is_bound_as_a_global() {
+        let prelude = super::V3_PRIMITIVES_JS;
+        let frozen = prelude
+            .rsplit_once("Object.freeze({")
+            .and_then(|(_, tail)| tail.split_once("})"))
+            .map(|(inner, _)| inner)
+            .expect("prelude must end by freezing its primitive object");
+        let exported: std::collections::BTreeSet<&str> = frozen
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .collect();
+
+        let helpers = include_str!("workflow_live_v2_script_helpers.rs");
+        let bound: std::collections::BTreeSet<&str> = helpers
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("globalThis."))
+            .filter_map(|rest| rest.split_once(" = api."))
+            .map(|(name, _)| name)
+            .collect();
+
+        // Guard the guard: if either parse silently yielded nothing, the
+        // difference below would be empty and this test would pass vacuously.
+        assert!(
+            exported.contains("remediateFindings") && exported.contains("agent"),
+            "failed to parse the prelude's exported primitives: {exported:?}"
+        );
+        assert!(
+            bound.contains("agent") && bound.contains("coverageAudit"),
+            "failed to parse the globals block: {bound:?}"
+        );
+
+        let missing: Vec<&str> = exported.difference(&bound).copied().collect();
+        assert!(
+            missing.is_empty(),
+            "prelude exports {missing:?} but the globals block never binds them — an authored script calling these gets 'not defined' at dry-run pre-flight. Add `globalThis.<name> = api.<name>;` in workflow_live_v2_script_helpers.rs"
+        );
+    }
+}
