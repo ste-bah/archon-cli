@@ -56,14 +56,22 @@ function __archonPrimitives(w) {
         artifact_requirements: opts.artifacts || [],
         work_type: "implementation",
       };
-      return await w.fanout(id, [item], {
+      const writeOptions = {
         write: "worktree",
         itemKind: "implementation",
         tier: opts.tier || "coder",
         targetFilesFromItem: true,
         maxParallelism: 1,
         task: prompt,
-      });
+      };
+      // Only remediateFindings sets this. It marks work that a mandatory review
+      // ASKED for, which the ordering rule must not confuse with work smuggled
+      // in after the reviewers looked. The validator checks the contract's
+      // claims against the actual plan, so declaring one buys nothing unless
+      // the reduce calls it names really precede it and a verifier really
+      // follows it.
+      if (opts.remediationContract) writeOptions.remediationContract = opts.remediationContract;
+      return await w.fanout(id, [item], writeOptions);
     }
     // Per-task verifiers (verify:true or focusedTests) run through the
     // HOST's verification-wave machinery: the wave id prefix grants command
@@ -90,11 +98,13 @@ function __archonPrimitives(w) {
         // execution must never verify anything).
         item.verification_requirements = [prompt];
       }
-      return await w.parallel(`verification-wave-${id}`, [item], {
+      const verifyOptions = {
         tier: opts.tier || "coder",
         itemKind: "focused_verification",
         task: prompt,
-      });
+      };
+      if (opts.remediationContract) verifyOptions.remediationContract = opts.remediationContract;
+      return await w.parallel(`verification-wave-${id}`, [item], verifyOptions);
     }
     return await w.agent(id, {
       tier: opts.tier || "coder",
@@ -236,7 +246,102 @@ function __archonPrimitives(w) {
       acceptedTaskIds,
       opts.evidenceFor,
     );
-  return Object.freeze({ agent, agents, phase, log, pipeline, adversarialReview, coverageAudit, w });
+  // Group review findings by the canonical task id(s) they name. Reviewers emit
+  // ids under the review contract's itemTaskIdsPath; accept the common aliases
+  // so a reducer that renames the field does not silently drop the finding.
+  const findingsByTask = (findings) => {
+    const grouped = {};
+    const unassigned = [];
+    const list = Array.isArray(findings) ? findings : [];
+    for (const finding of list) {
+      const raw = finding && (finding.canonical_task_ids || finding.task_ids || finding.taskIds
+        || (finding.task_id ? [finding.task_id] : []) || []);
+      const ids = (Array.isArray(raw) ? raw : [raw]).filter(Boolean);
+      if (ids.length === 0) { unassigned.push(finding); continue; }
+      for (const id of ids) {
+        if (!grouped[id]) grouped[id] = [];
+        grouped[id].push(finding);
+      }
+    }
+    return { grouped, unassigned };
+  };
+  // Act on review findings instead of only reporting them.
+  //
+  // The mandatory reviews are the last stages before final accounting — they can
+  // only judge work once every task is done — so historically their findings were
+  // terminal output and nothing consumed them: a run could surface ~96 verified
+  // findings and exit having fixed none. This runs a BOUNDED fix+re-verify pass
+  // over the findings that name a task, and returns what is still outstanding so
+  // the caller records it honestly. It never forces acceptance: an unresolved
+  // finding stays unresolved, and findings naming no task are returned untouched
+  // rather than quietly dropped.
+  const remediateFindings = async (findings, opts = {}) => {
+    // Local envelope helpers: the author's own isAccepted/summarize live in the
+    // authored script, not here, so the prelude must not depend on them.
+    const acceptedEnvelope = (env) => {
+      const status = String((env && (env.status || (env.result && env.result.status))) || "").toLowerCase();
+      return ["accepted", "passed", "ok", "succeeded", "success", "complete", "completed", "verified_noop", "noop"].indexOf(status) >= 0;
+    };
+    const summarizeEnvelope = (env) =>
+      String((env && (env.summary || (env.result && env.result.summary))) || "no summary").slice(0, 300);
+    const { grouped, unassigned } = findingsByTask(findings);
+    const taskIds = Object.keys(grouped);
+    const maxRounds = Math.max(1, Number(opts.maxRounds) || 2);
+    // The reduces whose findings this pass acts on. Naming them is what lets the
+    // validator tell review-ordered remediation apart from work hidden from the
+    // reviewers: it confirms these calls really are final reduces and really do
+    // precede every remediation call below.
+    const sourceReduceCallIds = Array.isArray(opts.sourceReduceCallIds) && opts.sourceReduceCallIds.length > 0
+      ? opts.sourceReduceCallIds
+      : ["adversarial-review-reduce", "coverage-audit-reduce"];
+    const contractFor = (stage, taskId, round) => ({
+      version: 1,
+      stage,
+      taskId,
+      round,
+      maxRounds,
+      sourceReduceCallIds,
+    });
+    const resolved = [];
+    const unresolved = [];
+    for (const taskId of taskIds) {
+      const own = grouped[taskId];
+      const verbatim = JSON.stringify(own).slice(0, 6000);
+      const context = typeof opts.taskFileFor === "function" ? opts.taskFileFor(taskId) : "";
+      const targetFiles = typeof opts.targetFilesFor === "function" ? opts.targetFilesFor(taskId) : undefined;
+      let fix = null;
+      let check = null;
+      for (let round = 1; round <= maxRounds; round += 1) {
+        fix = await agent(
+          `Post-review remediation for ${taskId}${context ? ` per ${context}` : ""}. A read-only review of ALREADY-ACCEPTED work raised the findings below. Fix exactly what they name; do not re-argue them. If a finding is factually wrong, say so with the evidence that disproves it rather than editing around it. Findings (verbatim):\n${verbatim}\nProve every fix with tests you run yourself.`,
+          {
+            label: `review-remediate-${slug(taskId)}-${round}`,
+            write: true,
+            taskIds: [taskId],
+            targetFiles,
+            remediationContract: contractFor("remediate", taskId, round),
+          },
+        );
+        check = await agent(
+          `You did NOT do this remediation — be suspicious of its self-report. These review findings were raised against ${taskId}:\n${verbatim}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid).`,
+          {
+            label: `review-verify-${slug(taskId)}-${round}`,
+            verify: true,
+            taskIds: [taskId],
+            remediationContract: contractFor("verify", taskId, round),
+          },
+        );
+        if (acceptedEnvelope(fix) && acceptedEnvelope(check)) break;
+      }
+      if (acceptedEnvelope(fix) && acceptedEnvelope(check)) {
+        resolved.push({ taskId, findingCount: own.length });
+      } else {
+        unresolved.push({ taskId, findingCount: own.length, reason: summarizeEnvelope(check) });
+      }
+    }
+    return { resolved, unresolved, unassigned };
+  };
+  return Object.freeze({ agent, agents, phase, log, pipeline, adversarialReview, coverageAudit, remediateFindings, w });
 }
 "#;
 
@@ -267,10 +372,7 @@ fn normalize_workflow_export(source: &str) -> String {
             "async function workflow",
         ),
         ("export default function workflow", "function workflow"),
-        (
-            "export default async function(",
-            "async function workflow(",
-        ),
+        ("export default async function(", "async function workflow("),
         ("export default function(", "function workflow("),
     ] {
         if normalized.contains(from) {

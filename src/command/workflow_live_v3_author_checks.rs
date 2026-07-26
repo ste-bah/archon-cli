@@ -92,6 +92,12 @@ const REVIEW_MAP_STAGE: &str = "map";
 const REVIEW_REDUCE_FINAL_STAGE: &str = "reduce_final";
 const REVIEW_REDUCE_CHUNK_STAGE: &str = "reduce_chunk";
 const REVIEW_CONTRACT_MARKER: &str = "reviewContract";
+const REMEDIATION_CONTRACT_MARKER: &str = "remediationContract";
+const REMEDIATION_STAGE_FIX: &str = "remediate";
+const REMEDIATION_STAGE_VERIFY: &str = "verify";
+/// Hard ceiling on post-review remediation rounds per task. The pass exists to
+/// close findings, not to grind a task until something reports green.
+const REMEDIATION_MAX_ROUNDS: u64 = 3;
 const REVIEW_BOUNDS_HINT: &str = "maxInputBytes";
 const MANDATED_REVIEW_KINDS: [(&str, &str); 2] = [
     ("adversarial_findings", "adversarial findings review"),
@@ -121,8 +127,32 @@ fn is_review_contract_call(call: &WorkflowV2HostCall) -> bool {
     review_contract(call).is_some()
 }
 
+fn remediation_contract(call: &WorkflowV2HostCall) -> Option<&serde_json::Value> {
+    call.options
+        .extra
+        .get(REMEDIATION_CONTRACT_MARKER)
+        .or_else(|| call.options.extra.get("remediation_contract"))
+}
+
+fn remediation_contract_string<'a>(call: &'a WorkflowV2HostCall, key: &str) -> Option<&'a str> {
+    remediation_contract(call).and_then(|contract| contract.get(key).and_then(|v| v.as_str()))
+}
+
+fn is_review_remediation_call(call: &WorkflowV2HostCall) -> bool {
+    remediation_contract(call).is_some()
+}
+
+/// Task work for the review-ordering rule.
+///
+/// Review-remediation calls are excluded: work a mandatory review ASKED for,
+/// and which is re-verified afterwards, is categorically different from work
+/// smuggled in after the reviewers looked. The exclusion is not a free pass —
+/// `validate_review_remediation_calls` checks every claim such a call makes
+/// against the actual plan, so declaring a contract without the real structure
+/// behind it fails louder than omitting one.
 fn is_task_work_call(call: &WorkflowV2HostCall) -> bool {
     !is_review_contract_call(call)
+        && !is_review_remediation_call(call)
         && matches!(
             call.method,
             WorkflowV2HostMethod::Agent
@@ -141,6 +171,108 @@ fn is_critic(call: &WorkflowV2HostCall) -> bool {
 
 fn call_index(planned: &[WorkflowV2HostCall], call_id: &str) -> Option<usize> {
     planned.iter().position(|call| call.id == call_id)
+}
+
+/// Validate every call that claims to be review-driven remediation.
+///
+/// Such calls are exempt from the review-ordering rule, so the exemption has to
+/// cost more than it grants. Each one must name final reduce calls that really
+/// exist and really precede it, stay inside a bounded round count, and — for a
+/// write — be followed by a verifier for the same task. An author who forges a
+/// contract to slip work past the reviewers has to build a genuine, bounded,
+/// re-verified remediation loop to do it, which is the thing we wanted anyway.
+fn review_remediation_defects(planned: &[WorkflowV2HostCall]) -> Vec<String> {
+    let mut defects = Vec::new();
+    let reduce_final_indices: std::collections::BTreeMap<&str, usize> = planned
+        .iter()
+        .enumerate()
+        .filter(|(_, call)| matches!(review_contract_stage(call), Some(REVIEW_REDUCE_FINAL_STAGE)))
+        .map(|(index, call)| (call.id.as_str(), index))
+        .collect();
+
+    for (index, call) in planned.iter().enumerate() {
+        let Some(contract) = remediation_contract(call) else {
+            continue;
+        };
+        let stage = remediation_contract_string(call, "stage").unwrap_or("<missing-stage>");
+        if !matches!(stage, REMEDIATION_STAGE_FIX | REMEDIATION_STAGE_VERIFY) {
+            defects.push(format!(
+                "review remediation `{}` declares unknown stage `{stage}` (expected `{REMEDIATION_STAGE_FIX}` or `{REMEDIATION_STAGE_VERIFY}`)",
+                call.id
+            ));
+        }
+        let Some(task_id) = remediation_contract_string(call, "taskId") else {
+            defects.push(format!(
+                "review remediation `{}` must name the canonical task it remediates via `taskId`",
+                call.id
+            ));
+            continue;
+        };
+
+        let sources: Vec<&str> = contract
+            .get("sourceReduceCallIds")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .collect();
+        if sources.is_empty() {
+            defects.push(format!(
+                "review remediation `{}` must name the final reduce call(s) whose findings it acts on via `sourceReduceCallIds`",
+                call.id
+            ));
+        }
+        for source in &sources {
+            match reduce_final_indices.get(source) {
+                None => defects.push(format!(
+                    "review remediation `{}` names `{source}` as a source, but no final review reduce with that id is planned",
+                    call.id
+                )),
+                Some(&reduce_index) if reduce_index > index => defects.push(format!(
+                    "review remediation `{}` runs BEFORE its source reduce `{source}` — remediation may only act on findings that already exist",
+                    call.id
+                )),
+                Some(_) => {}
+            }
+        }
+
+        let max_rounds = contract
+            .get("maxRounds")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        if max_rounds == 0 || max_rounds > REMEDIATION_MAX_ROUNDS {
+            defects.push(format!(
+                "review remediation `{}` must declare `maxRounds` between 1 and {REMEDIATION_MAX_ROUNDS} (found {max_rounds})",
+                call.id
+            ));
+        }
+        let round = contract
+            .get("round")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        if round == 0 || (max_rounds > 0 && round > max_rounds) {
+            defects.push(format!(
+                "review remediation `{}` declares round {round}, outside its own bound of {max_rounds}",
+                call.id
+            ));
+        }
+
+        // A fix that nothing re-checks is exactly the unreviewed work the
+        // ordering rule exists to prevent.
+        if stage == REMEDIATION_STAGE_FIX {
+            let verified_later = planned.iter().skip(index + 1).any(|later| {
+                remediation_contract_string(later, "stage") == Some(REMEDIATION_STAGE_VERIFY)
+                    && remediation_contract_string(later, "taskId") == Some(task_id)
+            });
+            if !verified_later {
+                defects.push(format!(
+                    "review remediation `{}` changes {task_id} after review but no later remediation verifier re-checks that task",
+                    call.id
+                ));
+            }
+        }
+    }
+    defects
 }
 
 /// Enforce the mandatory reviews on the EXECUTED/PLANNED call sequence:
@@ -164,6 +296,8 @@ fn validate_map_reduce_review_calls(
                 .to_string(),
         );
     }
+
+    defects.extend(review_remediation_defects(planned));
 
     for call in planned.iter().filter(|call| is_review_contract_call(call)) {
         let kind = review_contract_kind(call).unwrap_or("<missing-kind>");

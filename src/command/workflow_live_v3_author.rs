@@ -62,12 +62,19 @@ Shape — top-level script, exactly like this (no wrapper function):
   // final findings array for the accounting below.
   const adversarial_findings = await adversarialReview(acceptedTaskIds, { evidenceFor: boundedEvidenceFor })
   const uncovered_requirements = await coverageAudit(acceptedTaskIds, { evidenceFor: boundedEvidenceFor })
+  // Reviews find problems AFTER every task is accepted, so nothing downstream
+  // would ever act on them. remediateFindings runs one bounded fix+re-verify
+  // pass over the findings that name a task and returns what is still open —
+  // report review_remediation in the accounting so unresolved findings and
+  // findings naming no task stay visible instead of being quietly dropped.
+  const review_remediation = await remediateFindings([...adversarial_findings, ...uncovered_requirements], { taskFileFor: (id) => (tasks.find((t) => t.id === id) || {}).file, targetFilesFor: (id) => (tasks.find((t) => t.id === id) || {}).targetFiles })
 
   return {
     accepted: acceptedTaskIds,
     blocked: blockedTasks,
     adversarial_findings,
     uncovered_requirements,
+    review_remediation,
     notes: 'short honest summary',
   }
   // Your own small helpers, defined at the top of the script:
