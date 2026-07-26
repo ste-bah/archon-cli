@@ -386,16 +386,34 @@ async fn execute_generated_v2_run(
     };
     let summary = match run_result {
         Ok(summary) => summary,
+        // Every early return below must reconcile state.json first: these paths
+        // skip sync_v2_summary_to_run, so without this the run's final status
+        // exists only in events.jsonl while state.json still says Running.
         Err(WorkflowError::ControlPaused(message)) => {
+            persist_terminal_run_status(store, &run.id, RunStatus::Paused)?;
             return Ok(format!(
                 "Workflow paused: {}\n{}\nResume with: /workflow resume --live {}\n",
                 run.id, message, run.id
             ));
         }
         Err(WorkflowError::ControlCancelled(message)) => {
+            persist_terminal_run_status(store, &run.id, RunStatus::Cancelled)?;
             return Ok(format!("Workflow cancelled: {}\n{}\n", run.id, message));
         }
-        Err(err) => return Err(err.into()),
+        Err(err) => {
+            // Best-effort: the original error is what the caller must see, so a
+            // failure to persist here is logged rather than masking it.
+            if let Err(state_err) =
+                persist_terminal_run_status(store, &run.id, RunStatus::Failed)
+            {
+                tracing::warn!(
+                    run_id = %run.id,
+                    error = %state_err,
+                    "failed to persist terminal run status after run error"
+                );
+            }
+            return Err(err.into());
+        }
     };
 
     sync_v2_summary_to_run(store, &run.id, &summary.calls, &v2_store, summary.status)?;

@@ -52,6 +52,31 @@ pub(super) fn mark_v2_call_running(
     store.save_state_preserving_control(&run)
 }
 
+/// Persist a terminal run status to state.json on the paths that never reach
+/// `sync_v2_summary_to_run`.
+///
+/// A paused, cancelled or errored run returns early from the generated-run
+/// executor, so its final status was only ever written to events.jsonl while
+/// state.json kept its last value — `Running`. Observed live: a run whose event
+/// log recorded `terminal_status: failed` still reported `status: running` with
+/// 78 stages "running" hours after the process died. Everything that reads run
+/// status is then wrong: resume logic, status queries, the resumable guard, and
+/// any monitoring. Stages are left untouched (there is no summary on these
+/// paths); only the run-level status is reconciled.
+pub(super) fn persist_terminal_run_status(
+    store: &WorkflowStore,
+    run_id: &str,
+    status: RunStatus,
+) -> archon_workflow::WorkflowResult<()> {
+    let mut run = store.load_state(run_id)?;
+    if run.status == status {
+        return Ok(());
+    }
+    run.status = status;
+    run.mark_updated();
+    store.save_state_preserving_control(&run)
+}
+
 pub(super) fn sync_v2_summary_to_run(
     store: &WorkflowStore,
     run_id: &str,

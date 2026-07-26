@@ -69,7 +69,9 @@ use workflow_live_v2_write::run_write_capable_v2_fanout;
 #[path = "workflow_live_v2_state.rs"]
 mod workflow_live_v2_state;
 
-use workflow_live_v2_state::{poll_v2_run_control, sync_v2_summary_to_run};
+use workflow_live_v2_state::{
+    persist_terminal_run_status, poll_v2_run_control, sync_v2_summary_to_run,
+};
 #[path = "workflow_live_v2_script.rs"]
 mod workflow_live_v2_script;
 
