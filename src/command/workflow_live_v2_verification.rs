@@ -211,7 +211,7 @@ fn demote_zero_test_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
 /// this only runs the command and reads the JSON verdicts from its stdout.
 pub(super) async fn enforce_declared_contracts(
     outcomes: &mut [WorkflowV2BranchOutcome],
-    contracts: &std::collections::BTreeMap<String, (String, serde_json::Value)>,
+    contracts: &std::collections::BTreeMap<String, (String, Vec<serde_json::Value>)>,
 ) {
     if contracts.is_empty() {
         return;
@@ -223,15 +223,21 @@ pub(super) async fn enforce_declared_contracts(
         ) {
             continue;
         }
-        let Some((root, contract)) = contracts.get(&outcome.item_id) else {
+        let Some((root, declared)) = contracts.get(&outcome.item_id) else {
             continue;
         };
-        let command =
-            super::workflow_live_v2_script::workflow_live_v2_deliverable_contract::verification_command(root, contract);
-        match run_contract_verifier(&command).await {
-            ContractVerification::Passed => {}
-            ContractVerification::Failed(detail) => {
-                demote_failed_contract(outcome, &detail);
+        // A task may declare several contracts and a v3 verification item
+        // covers the whole task, so every one has to hold: stop at the first
+        // failure, since one violated contract already sinks the branch.
+        for contract in declared {
+            let command =
+                super::workflow_live_v2_script::workflow_live_v2_deliverable_contract::verification_command(root, contract);
+            match run_contract_verifier(&command).await {
+                ContractVerification::Passed => {}
+                ContractVerification::Failed(detail) => {
+                    demote_failed_contract(outcome, &detail);
+                    break;
+                }
             }
         }
     }

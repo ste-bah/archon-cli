@@ -45,6 +45,7 @@ async fn execute_v2_live_call(
                 v2_store,
                 store_for_control,
                 run_id,
+                task_universe,
             )
             .await
         }
