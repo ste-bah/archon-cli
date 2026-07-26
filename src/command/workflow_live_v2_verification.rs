@@ -229,18 +229,48 @@ pub(super) async fn enforce_declared_contracts(
         // A task may declare several contracts and a v3 verification item
         // covers the whole task, so every one has to hold: stop at the first
         // failure, since one violated contract already sinks the branch.
+        let mut passed = 0usize;
+        let mut failed = false;
         for contract in declared {
             let command =
                 super::workflow_live_v2_script::workflow_live_v2_deliverable_contract::verification_command(root, contract);
             match run_contract_verifier(&command).await {
-                ContractVerification::Passed => {}
+                ContractVerification::Passed => passed += 1,
                 ContractVerification::Failed(detail) => {
                     demote_failed_contract(outcome, &detail);
+                    failed = true;
                     break;
                 }
             }
         }
+        if !failed {
+            stamp_passed_contracts(outcome, passed);
+        }
     }
+}
+
+/// Record that the host ran this branch's contracts and they held.
+///
+/// Recording only failures makes the gate unobservable when it works: "no
+/// mentions of declared_contract_verification" reads identically whether every
+/// contract passed or the verifier never ran at all. That ambiguity is exactly
+/// how this enforcement sat dead through several runs while looking fine — so
+/// a pass leaves a trace too, and absence of the field now means the host did
+/// not check.
+fn stamp_passed_contracts(outcome: &mut WorkflowV2BranchOutcome, passed: usize) {
+    let Some(result) = outcome.result.as_mut() else {
+        return;
+    };
+    let mut data = result.data.as_object().cloned().unwrap_or_default();
+    data.insert(
+        "declared_contract_verification".to_string(),
+        serde_json::json!("passed"),
+    );
+    data.insert(
+        "declared_contracts_verified".to_string(),
+        serde_json::json!(passed),
+    );
+    result.data = serde_json::Value::Object(data);
 }
 
 /// Upper bound on a single declared-contract verification. The verifier only
@@ -591,6 +621,30 @@ mod declared_contract_enforcement_tests {
         let detail = failure_detail(run_contract_verifier("echo 'boom' >&2; exit 3").await);
         assert!(detail.contains("exited non-zero"), "{detail}");
         assert!(detail.contains("boom"), "{detail}");
+    }
+
+    /// A gate you cannot observe succeeding is indistinguishable from one that
+    /// never ran — the ambiguity that hid this enforcement being dead.
+    #[tokio::test]
+    async fn a_passing_contract_leaves_a_positive_trace() {
+        let mut outcomes = [accepted_outcome("verify-task-ex-001")];
+        let contracts = std::collections::BTreeMap::from([(
+            "verify-task-ex-001".to_string(),
+            (
+                "/proj".to_string(),
+                vec![serde_json::json!({"artifact_path": ".archon/none.json"})],
+            ),
+        )]);
+        // Stub the verifier's verdict shape rather than the contract itself:
+        // what matters is that a clean pass is recorded, not silently dropped.
+        let verification = run_contract_verifier(r#"printf '%s\n' '{"status":"verified"}'"#).await;
+        assert!(matches!(verification, ContractVerification::Passed));
+        stamp_passed_contracts(&mut outcomes[0], 1);
+        let data = &outcomes[0].result.as_ref().expect("result").data;
+        assert_eq!(data["declared_contract_verification"], "passed");
+        assert_eq!(data["declared_contracts_verified"], 1);
+        assert_eq!(outcomes[0].status, WorkflowV2Status::Accepted);
+        let _ = contracts;
     }
 
     #[tokio::test]
