@@ -623,6 +623,47 @@ mod declared_contract_enforcement_tests {
         assert!(detail.contains("boom"), "{detail}");
     }
 
+    /// END-TO-END, both directions. The helper test below proves the stamp
+    /// writes; this proves ENFORCEMENT actually calls it, which is the seam
+    /// that was silently missing. A trace that has only ever been seen green
+    /// is not evidence — so the same contract shape is driven to a pass and to
+    /// a failure, and the two must be distinguishable.
+    #[tokio::test]
+    async fn enforcement_records_a_pass_and_a_failure_differently() {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path().to_str().expect("root").to_string();
+        let present = project.path().join(".archon/demo/present.json");
+        std::fs::create_dir_all(present.parent().expect("parent")).expect("dir");
+        std::fs::write(&present, r#"{"ok":true}"#).expect("artifact");
+
+        // Same contract shape; only the declared artifact differs.
+        let passing = serde_json::json!({"artifact_path": ".archon/demo/present.json"});
+        let failing = serde_json::json!({"artifact_path": ".archon/demo/absent.json"});
+
+        let mut outcomes = [
+            accepted_outcome("verify-passes"),
+            accepted_outcome("verify-fails"),
+        ];
+        let contracts = std::collections::BTreeMap::from([
+            ("verify-passes".to_string(), (root.clone(), vec![passing])),
+            ("verify-fails".to_string(), (root, vec![failing])),
+        ]);
+        enforce_declared_contracts(&mut outcomes, &contracts).await;
+
+        let passed = outcomes[0].result.as_ref().expect("result");
+        assert_eq!(outcomes[0].status, WorkflowV2Status::Accepted);
+        assert_eq!(passed.data["declared_contract_verification"], "passed");
+        assert_eq!(passed.data["declared_contracts_verified"], 1);
+
+        let failed = outcomes[1].result.as_ref().expect("result");
+        assert_eq!(outcomes[1].status, WorkflowV2Status::NeedsReview);
+        assert_eq!(failed.data["declared_contract_verification"], "failed");
+        assert_eq!(
+            failed.data["verification_failure_class"],
+            "declared_contract_violation"
+        );
+    }
+
     /// A gate you cannot observe succeeding is indistinguishable from one that
     /// never ran — the ambiguity that hid this enforcement being dead.
     #[tokio::test]
