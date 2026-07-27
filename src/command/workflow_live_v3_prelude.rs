@@ -201,11 +201,30 @@ function __archonPrimitives(w) {
   // one context) then a single critic reduce over the map findings (the cross-
   // task pass). The author calls one line; it never authors the map/reduce shape
   // itself. Read-only; the reduce feeds the accounting field named by `kind`.
+  // Findings out of an envelope, whichever shape it has.
+  //
+  // A reduce returns ONE envelope carrying data.findings. A map is a fanout:
+  // its envelope has no data.findings at all — every reviewer's findings sit in
+  // its own branch outcome. Reading only the top level therefore silently
+  // returned [] for every map, so the reduce was handed nothing and truthfully
+  // reported "no map findings were present" while 29 real findings sat in the
+  // branches. The mandatory review then read as clean, preserveMapFindings was
+  // vacuously satisfied at 0 of 0, and the remediation loop had nothing to act
+  // on — a false all-clear that looks exactly like a good run.
   const findingsFrom = (env) => {
     const direct = env && env.data && env.data.findings;
     if (Array.isArray(direct)) return direct;
     const nested = env && env.result && env.result.data && env.result.data.findings;
-    return Array.isArray(nested) ? nested : [];
+    if (Array.isArray(nested)) return nested;
+    const outcomes = (env && env.data && env.data.outcomes)
+      || (env && env.result && env.result.data && env.result.data.outcomes);
+    if (!Array.isArray(outcomes)) return [];
+    const collected = [];
+    for (const outcome of outcomes) {
+      const branch = outcome && outcome.result && outcome.result.data && outcome.result.data.findings;
+      if (Array.isArray(branch)) collected.push(...branch);
+    }
+    return collected;
   };
   const reviewMapReduce = async (label, kind, mapTask, reduceTask, acceptedTaskIds, evidenceFor) => {
     const ids = Array.isArray(acceptedTaskIds) ? acceptedTaskIds : [];
@@ -509,6 +528,35 @@ mod primitive_binding_tests {
         assert!(
             missing.is_empty(),
             "prelude exports {missing:?} but the globals block never binds them — an authored script calling these gets 'not defined' at dry-run pre-flight. Add `globalThis.<name> = api.<name>;` in workflow_live_v2_script_helpers.rs"
+        );
+    }
+}
+
+#[cfg(test)]
+mod findings_extraction_tests {
+    /// The prelude's findingsFrom must read a FANOUT envelope, not just a
+    /// single-agent one. A map is a fanout: its envelope carries no
+    /// data.findings, only per-branch outcomes. Reading the top level alone
+    /// returned [] for every map, so reduces received nothing and the mandatory
+    /// review reported clean while real findings sat unread in the branches.
+    ///
+    /// Asserted against the JS source because the helper is prelude text, not
+    /// Rust: the shape it must traverse is `data.outcomes[i].result.data.findings`.
+    #[test]
+    fn findings_extraction_traverses_fanout_branch_outcomes() {
+        let prelude = super::V3_PRIMITIVES_JS;
+        let start = prelude
+            .find("const findingsFrom =")
+            .expect("findingsFrom must exist");
+        let body = &prelude[start..start + 900.min(prelude.len() - start)];
+        assert!(
+            body.contains("outcomes"),
+            "findingsFrom must consider fanout branch outcomes: {body}"
+        );
+        assert!(
+            body.contains("outcome.result.data.findings")
+                || body.contains("outcome && outcome.result"),
+            "findingsFrom must read each branch outcome's own findings: {body}"
         );
     }
 }
