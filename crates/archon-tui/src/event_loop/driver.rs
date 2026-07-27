@@ -90,7 +90,6 @@ where
             let event = if scheduler.prefer_tui {
                 tokio::select! {
                     biased;
-                    _ = scheduler.tick() => LoopEvent::Tick,
                     tui_event = event_rx.recv() => match tui_event {
                         Some(event) => LoopEvent::Tui(Box::new(event)),
                         None => LoopEvent::TuiChannelClosed,
@@ -100,16 +99,17 @@ where
                         Some(Err(error)) => LoopEvent::TerminalStreamError(error),
                         None => LoopEvent::TerminalStreamClosed,
                     },
+                    _ = scheduler.tick() => LoopEvent::Tick,
                 }
             } else {
                 tokio::select! {
                     biased;
-                    _ = scheduler.tick() => LoopEvent::Tick,
                     terminal_event = terminal_events.next() => match terminal_event {
                         Some(Ok(event)) => LoopEvent::Terminal(event),
                         Some(Err(error)) => LoopEvent::TerminalStreamError(error),
                         None => LoopEvent::TerminalStreamClosed,
                     },
+                    _ = scheduler.tick() => LoopEvent::Tick,
                     tui_event = event_rx.recv() => match tui_event {
                         Some(event) => LoopEvent::Tui(Box::new(event)),
                         None => LoopEvent::TuiChannelClosed,
@@ -169,6 +169,22 @@ mod tests {
     use tokio::sync::mpsc;
 
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn overdue_tick_does_not_starve_terminal_input() {
+        let (_event_tx, mut event_rx) = crate::event_channel::bounded_tui_event_channel();
+        let mut terminal_events = stream::iter([Ok(Event::Key(KeyEvent::new(
+            KeyCode::PageUp,
+            KeyModifiers::NONE,
+        )))]);
+        let mut scheduler = TickScheduler::new(Duration::from_millis(250));
+        tokio::time::advance(Duration::from_millis(250)).await;
+
+        let event =
+            next_loop_event(Some(&mut terminal_events), &mut event_rx, &mut scheduler).await;
+
+        assert!(matches!(event, LoopEvent::Terminal(Event::Key(_))));
+    }
 
     #[tokio::test]
     async fn queued_tui_event_wins_while_terminal_stream_is_pending() {

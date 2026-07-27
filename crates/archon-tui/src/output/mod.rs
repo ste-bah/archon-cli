@@ -11,6 +11,8 @@
 
 mod buffer;
 #[cfg(test)]
+mod buffer_large_transcript_tests;
+#[cfg(test)]
 mod buffer_tests;
 mod render_cache;
 mod sanitize;

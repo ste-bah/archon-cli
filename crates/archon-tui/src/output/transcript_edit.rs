@@ -28,6 +28,10 @@ impl OutputBuffer {
                 );
             if before_viewport {
                 self.anchor_inserted_lines.extend(lines.iter().cloned());
+                if let Some(mut anchor) = self.viewport_anchor.get() {
+                    anchor.line_index = anchor.line_index.saturating_add(lines.len());
+                    self.viewport_anchor.set(Some(anchor));
+                }
             }
         }
         self.mark_dirty();
@@ -68,6 +72,10 @@ impl OutputBuffer {
                 if inserted.current_index >= end {
                     inserted.current_index = inserted.current_index.saturating_sub(end - start);
                 }
+            }
+            if before_viewport && let Some(mut anchor) = self.viewport_anchor.get() {
+                anchor.line_index = anchor.line_index.saturating_sub(end - start);
+                self.viewport_anchor.set(Some(anchor));
             }
         }
         self.mark_dirty();

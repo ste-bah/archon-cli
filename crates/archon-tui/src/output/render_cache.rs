@@ -240,6 +240,37 @@ fn is_wrap_whitespace(grapheme: &str) -> bool {
     grapheme == "\u{200b}" || (grapheme != "\u{00a0}" && grapheme.chars().all(char::is_whitespace))
 }
 
+pub(super) fn visible_line_range(
+    wrap: &WrapCache,
+    scroll_y: usize,
+    visible_height: u16,
+) -> (usize, usize, usize) {
+    if wrap.offsets.is_empty() {
+        return (0, 0, 0);
+    }
+
+    let viewport_end = scroll_y
+        .saturating_add(visible_height as usize)
+        .saturating_add(1);
+    let start = wrap
+        .offsets
+        .partition_point(|offset| *offset <= scroll_y)
+        .saturating_sub(1);
+
+    let end = wrap
+        .offsets
+        .partition_point(|offset| *offset < viewport_end)
+        .saturating_add(1)
+        .min(wrap.offsets.len());
+
+    let paragraph_scroll_y = scroll_y.saturating_sub(wrap.offsets[start]);
+    (
+        start,
+        end.max(start + 1).min(wrap.offsets.len()),
+        paragraph_scroll_y,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{count_wrapped_rows, wrapped_suffix_after_rows};
@@ -274,48 +305,4 @@ mod tests {
         assert_eq!(wrapped_suffix_after_rows("界界界", 2, 2), "界");
         assert_eq!(count_wrapped_rows(&["界界"], 2), 2);
     }
-}
-
-pub(super) fn visible_line_range(
-    wrap: &WrapCache,
-    scroll_y: usize,
-    visible_height: u16,
-) -> (usize, usize, usize) {
-    if wrap.offsets.is_empty() {
-        return (0, 0, 0);
-    }
-
-    let viewport_end = scroll_y
-        .saturating_add(visible_height as usize)
-        .saturating_add(1);
-    let start = wrap
-        .offsets
-        .iter()
-        .enumerate()
-        .find(|(idx, offset)| {
-            let next = wrap
-                .offsets
-                .get(idx + 1)
-                .copied()
-                .unwrap_or(wrap.total_wrapped);
-            **offset > scroll_y || next > scroll_y
-        })
-        .map(|(idx, _)| idx)
-        .unwrap_or_else(|| wrap.offsets.len().saturating_sub(1));
-
-    let end = wrap
-        .offsets
-        .iter()
-        .enumerate()
-        .skip(start)
-        .find(|(_, offset)| **offset >= viewport_end)
-        .map(|(idx, _)| idx + 1)
-        .unwrap_or(wrap.offsets.len());
-
-    let paragraph_scroll_y = scroll_y.saturating_sub(wrap.offsets[start]);
-    (
-        start,
-        end.max(start + 1).min(wrap.offsets.len()),
-        paragraph_scroll_y,
-    )
 }

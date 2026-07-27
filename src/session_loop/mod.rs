@@ -37,7 +37,7 @@ mod personality_save;
 mod post_turn;
 mod prompt_turn;
 mod session_export;
-mod session_history;
+pub(crate) mod session_history;
 mod session_shutdown;
 mod slash_dispatch;
 mod slash_handlers;
