@@ -140,8 +140,7 @@ pub(super) fn sync_validation_record(
     record: &StoredDatasetRecord,
     report: &ValidationReport,
 ) -> Result<(), DataStoreError> {
-    let metadata_path = root.join(&record.metadata_path);
-    let metadata: DatasetMetadata = read_json(&metadata_path)?;
+    let metadata = read_dataset_metadata(root, record)?;
     let mut registry = read_json::<PersistentDatasetRegistry>(
         &root.join(".archon/trading-lab/data/registry.json"),
     )?;
@@ -198,7 +197,7 @@ fn update_metadata_from_validation(
     report: &ValidationReport,
 ) -> Result<(), DataStoreError> {
     let metadata_path = root.join(&record.metadata_path);
-    let mut metadata: DatasetMetadata = read_json(&metadata_path)?;
+    let mut metadata = read_dataset_metadata(root, record)?;
     metadata.production_eligible = validation_is_production_eligible(report, &metadata);
     if !metadata.production_eligible && !metadata_is_yfinance_degraded_fallback(&metadata) {
         metadata.quality_status = "degraded".into();

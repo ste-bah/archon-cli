@@ -446,6 +446,23 @@ mod world_guard_parse_tests {
     }
 }
 
+#[cfg(test)]
+mod trading_data_tui_slash_routing_tests {
+    use super::{Cli, Commands, TradingCliAction, TradingCliDataAction};
+    use clap::Parser;
+
+    #[test]
+    #[rustfmt::skip]
+    fn slash_trading_data_aliases_route_to_cli_parser() {
+        let list = Cli::try_parse_from(["archon", "trading", "data", "list", "--json"])
+            .expect("/trading data list --json mirror must parse");
+        assert!(matches!(list.command, Some(Commands::Trading { action: TradingCliAction::Data { action: TradingCliDataAction::List { json: true, .. } } })));
+        let export = Cli::try_parse_from(["archon", "trading", "data", "export", "--dataset-id", "btc-1d", "--version", "v1", "--out", "bars.json"])
+            .expect("/trading data export mirror must parse");
+        assert!(matches!(export.command, Some(Commands::Trading { action: TradingCliAction::Data { action: TradingCliDataAction::Export { .. } } })));
+    }
+}
+
 #[path = "provider_parse_tests.rs"]
 mod provider_parse_tests;
 #[cfg(test)]

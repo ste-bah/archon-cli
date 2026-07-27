@@ -36,7 +36,7 @@ impl VerifiedArtifacts {
     fn read(root: &Path, record: &StoredDatasetRecord) -> Result<Self, DataStoreError> {
         let metadata_read = read_dataset_metadata_with_quarantine(root, record)?;
         let validation = read_json(&root.join(&record.validation_path))?;
-        let manifest = read_json(&root.join(&record.manifest_path))?;
+        let manifest = read_stored_dataset_record(&root.join(&record.manifest_path))?;
         let normalized = std::fs::read(root.join(&record.normalized_path)).map_err(io_error)?;
         let raw = std::fs::read(root.join(&record.raw_response_path)).map_err(io_error)?;
         Ok(Self {
@@ -96,6 +96,31 @@ pub(super) fn read_dataset_metadata(
     read_dataset_metadata_with_quarantine(root, record).map(|metadata| metadata.metadata)
 }
 
+fn read_stored_dataset_record(path: &Path) -> Result<StoredDatasetRecord, DataStoreError> {
+    match read_json(path) {
+        Ok(record) => Ok(record),
+        Err(error) if json_unknown_field(&error, "remediation_note") => {
+            read_record_without_workflow_note_fields(path)
+        }
+        Err(error) if json_unknown_field(&error, "quality_status") => {
+            read_record_without_workflow_note_fields(path)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn read_record_without_workflow_note_fields(
+    path: &Path,
+) -> Result<StoredDatasetRecord, DataStoreError> {
+    let mut value = read_json::<serde_json::Value>(path)?;
+    let Some(object) = value.as_object_mut() else {
+        return Err(DataStoreError::Json("record must be a JSON object".into()));
+    };
+    object.remove("quality_status");
+    object.remove("remediation_note");
+    serde_json::from_value(value).map_err(|err| DataStoreError::Json(err.to_string()))
+}
+
 fn read_dataset_metadata_with_quarantine(
     root: &Path,
     record: &StoredDatasetRecord,
@@ -107,7 +132,13 @@ fn read_dataset_metadata_with_quarantine(
             quarantined: false,
         }),
         Err(error) if json_unknown_field(&error, "quarantined_at") => {
-            read_metadata_without_quarantine_fields(&path)
+            read_metadata_without_workflow_note_fields(&path, true)
+        }
+        Err(error) if json_unknown_field(&error, "quarantine_reason") => {
+            read_metadata_without_workflow_note_fields(&path, true)
+        }
+        Err(error) if json_unknown_field(&error, "remediation_note") => {
+            read_metadata_without_workflow_note_fields(&path, false)
         }
         Err(error) => Err(error),
     }
@@ -118,8 +149,9 @@ struct DatasetMetadataRead {
     quarantined: bool,
 }
 
-fn read_metadata_without_quarantine_fields(
+fn read_metadata_without_workflow_note_fields(
     path: &Path,
+    quarantined: bool,
 ) -> Result<DatasetMetadataRead, DataStoreError> {
     let mut value = read_json::<serde_json::Value>(path)?;
     let Some(object) = value.as_object_mut() else {
@@ -129,10 +161,11 @@ fn read_metadata_without_quarantine_fields(
     };
     object.remove("quarantined_at");
     object.remove("quarantine_reason");
+    object.remove("remediation_note");
     Ok(DatasetMetadataRead {
         metadata: serde_json::from_value(value)
             .map_err(|err| DataStoreError::Json(err.to_string()))?,
-        quarantined: true,
+        quarantined,
     })
 }
 

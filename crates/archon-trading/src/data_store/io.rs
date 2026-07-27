@@ -62,7 +62,34 @@ pub(super) fn normalized_bars_checksum(bars: &[OhlcvBar]) -> Result<String, Data
 
 pub(super) fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, DataStoreError> {
     let text = std::fs::read_to_string(path).map_err(io_error)?;
-    serde_json::from_str(&text).map_err(|err| DataStoreError::Json(err.to_string()))
+    let normalized = strip_legacy_duplicate_schema_version(&text)?;
+    serde_json::from_str(&normalized).map_err(|err| DataStoreError::Json(err.to_string()))
+}
+
+fn strip_legacy_duplicate_schema_version(text: &str) -> Result<String, DataStoreError> {
+    let mut value: serde_json::Value =
+        serde_json::from_str(text).map_err(|err| DataStoreError::Json(err.to_string()))?;
+    if let Some(object) = value.as_object_mut() {
+        if object.contains_key("schema") && object.contains_key("schema_version") {
+            object.remove("schema_version");
+        }
+    }
+    if let Some(datasets) = value
+        .get_mut("datasets")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for record in datasets.values_mut() {
+            if let Some(object) = record.as_object_mut() {
+                if object.contains_key("schema") && object.contains_key("schema_version") {
+                    object.remove("schema_version");
+                }
+                if object.get("status").and_then(serde_json::Value::as_str) == Some("Available") {
+                    object.insert("status".into(), serde_json::Value::String("Healthy".into()));
+                }
+            }
+        }
+    }
+    serde_json::to_string(&value).map_err(|err| DataStoreError::Json(err.to_string()))
 }
 
 pub(super) fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), DataStoreError> {

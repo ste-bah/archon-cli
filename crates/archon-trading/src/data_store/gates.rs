@@ -16,6 +16,22 @@ pub(super) fn append_missing_artifact_issues(
     }
 }
 
+pub(super) fn missing_dataset_backtest_gate_report(
+    dataset_id: &str,
+    version: &str,
+    key: String,
+) -> BacktestDataGateReport {
+    let issues = vec![format!("missing dataset registry entry: {key}")];
+    BacktestDataGateReport {
+        dataset_id: dataset_id.into(),
+        version: version.into(),
+        diagnostic: true,
+        promotion_eligible: false,
+        overridden_issues: issues.clone(),
+        issues,
+    }
+}
+
 pub(super) fn append_dataset_gate_issues(
     root: &Path,
     record: &StoredDatasetRecord,

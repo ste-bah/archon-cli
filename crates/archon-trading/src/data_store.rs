@@ -227,7 +227,7 @@ impl TradingDataLake {
             .cloned()
             .ok_or_else(|| DataStoreError::MissingDataset(registry_key(dataset_id, version)))?;
         verify_artifacts(&self.root, &record)?;
-        let metadata: DatasetMetadata = read_json(&self.root.join(&record.metadata_path))?;
+        let metadata = read_dataset_metadata(&self.root, &record)?;
         let bars = read_jsonl_bars(&self.root.join(&record.normalized_path))?;
         let dataset = StoredOhlcvDataset {
             record,
@@ -252,11 +252,14 @@ impl TradingDataLake {
     ) -> Result<BacktestDataGateReport, DataStoreError> {
         let registry = self.load_registry_migration(false)?.registry;
         let key = registry_key(dataset_id, version);
-        let record = registry
-            .datasets
-            .get(&key)
-            .cloned()
-            .ok_or_else(|| DataStoreError::MissingDataset(key.clone()))?;
+        let Some(record) = registry.datasets.get(&key).cloned() else {
+            if !diagnostic_allow_degraded_data {
+                return Err(DataStoreError::MissingDataset(key));
+            }
+            return Ok(missing_dataset_backtest_gate_report(
+                dataset_id, version, key,
+            ));
+        };
         let mut issues = Vec::new();
         append_missing_artifact_issues(&self.root, &record, &mut issues);
         if !issues
@@ -304,7 +307,7 @@ impl TradingDataLake {
             .cloned()
             .ok_or_else(|| DataStoreError::MissingDataset(registry_key(dataset_id, version)))?;
         verify_artifacts(&self.root, &record)?;
-        let metadata: DatasetMetadata = read_json(&self.root.join(&record.metadata_path))?;
+        let metadata = read_dataset_metadata(&self.root, &record)?;
         validate_metadata(&metadata)
             .map_err(|err| DataStoreError::InvalidMetadata(format!("{err:?}")))?;
         let bars = read_jsonl_bars(&self.root.join(&record.normalized_path))?;
@@ -459,7 +462,7 @@ fn load_gate_dataset(
     root: &Path,
     record: &StoredDatasetRecord,
 ) -> Result<StoredOhlcvDataset, DataStoreError> {
-    let metadata: DatasetMetadata = read_json(&root.join(&record.metadata_path))?;
+    let metadata = read_dataset_metadata(root, record)?;
     let bars = read_jsonl_bars(&root.join(&record.normalized_path))?;
     Ok(StoredOhlcvDataset {
         record: record.clone(),

@@ -353,6 +353,33 @@ fn diagnostic_backtest_gate_reports_overridden_dataset_issues() {
 }
 
 #[test]
+fn diagnostic_backtest_gate_reports_missing_dataset_as_overridden_issue() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+
+    let result = lake.backtest_data_gate("polygon-BTCUSD-1D-raw", "missing-version", false);
+    assert!(
+        matches!(result, Err(DataStoreError::MissingDataset(key)) if key == "polygon-BTCUSD-1D-raw:missing-version")
+    );
+
+    let report = lake
+        .backtest_data_gate("polygon-BTCUSD-1D-raw", "missing-version", true)
+        .unwrap();
+
+    assert!(report.diagnostic);
+    assert!(!report.promotion_eligible);
+    assert_eq!(report.dataset_id, "polygon-BTCUSD-1D-raw");
+    assert_eq!(report.version, "missing-version");
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| issue.contains("missing dataset registry entry"))
+    );
+    assert_eq!(report.overridden_issues, report.issues);
+}
+
+#[test]
 fn backtest_gate_refuses_checksum_mismatch() {
     let temp = tempfile::tempdir().unwrap();
     let lake = TradingDataLake::new(temp.path());
