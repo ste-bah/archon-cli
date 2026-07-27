@@ -528,9 +528,23 @@ fn output_excerpt(output: &str) -> String {
     truncate_chars(&collapsed, 200)
 }
 
+/// Shared by read-only and implementation work: both run filtered test commands
+/// as evidence, and a filter that matched nothing is not evidence. A macro
+/// rather than a const because `concat!` accepts only literals.
+macro_rules! test_filter_rule {
+    () => {
+        "- TEST COMMANDS: pass ONE filter per invocation. Most runners (cargo included) reject or silently ignore multiple positional filters, so a combined command can exit 0 while the filters you named matched nothing — that is not evidence and the host demotes it. Run each filter as its own command and check each reported a non-zero match count.\n"
+    };
+}
+
 const READ_ONLY_RULES: &str = concat!(
     "- This is read-only work: do not claim file edits and leave files_changed empty.\n",
-    "- For project artifact checks, use project_artifact_paths absolute_path values when present; otherwise resolve .archon/... paths under project_artifact_root, not repository_root."
+    "- For project artifact checks, use project_artifact_paths absolute_path values when present; otherwise resolve .archon/... paths under project_artifact_root, not repository_root.\n",
+    // Verification branches are read-only and are the ones running filtered test
+    // commands to prove a task, so this rule matters more here than on the write
+    // side where it originally lived alone.
+    test_filter_rule!(),
+    "- Run test and build commands from the repository root you were given; a runner invoked from the project artifact root will not find the source workspace."
 );
 
 const IMPLEMENTATION_RULES: &str = concat!(
@@ -538,7 +552,7 @@ const IMPLEMENTATION_RULES: &str = concat!(
     "- If edits are required and made, status must be accepted and files_changed must list each changed path.\n",
     "- The top-level status is your branch verdict; nested artifact/evidence content may describe fail-closed examples such as validation reports with status=failed.\n",
     "- commands_run.kind must be one of inspect, test, build, format, review, or other; use other for implementation notes.\n",
-    "- TEST COMMANDS: pass ONE filter per invocation. Most runners (cargo included) reject or silently ignore multiple positional filters, so a combined command can exit 0 while the filters you named matched nothing — that is not evidence and the host demotes it. Run each filter as its own command and check each reported a non-zero match count.\n",
+    test_filter_rule!(),
     "- Accepted/noop results must include concrete evidence: files/artifacts, commands_run, task_coverage, and residual_gaps when relevant.\n",
     "- Repository source edits must stay under repository_root and declared target_files; workflow/project artifacts must be written under project_artifact_root when provided and listed in artifacts.\n",
     "- FILE SIZE: a source file that would exceed the repository's per-file line cap is REJECTED and none of your patch is credited. Do not grow a file past the cap. You also own the module directory of each declared target (declaring `a/b.rs` owns `a/b/`), so when a target is at or near the cap, SPLIT it: move cohesive sections into new files under that module directory and re-export them from the original. Splitting is expected and in scope — silently growing the file until the gate rejects the whole patch is not.\n",
@@ -576,3 +590,29 @@ mod required_tools_tests;
 #[cfg(test)]
 #[path = "agent_adapter_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod shared_rule_tests {
+    /// The one-filter rule lived only in IMPLEMENTATION_RULES, but VERIFICATION
+    /// branches are read-only and are precisely the ones running filtered test
+    /// commands as proof. In one observed run agents issued 63 invalid
+    /// multi-filter cargo commands and self-corrected, burning cycles against
+    /// guidance they were never shown.
+    ///
+    /// Worse than the wasted cycles: a runner that silently ignores extra
+    /// filters exits 0 having matched nothing, which is the zero-match evidence
+    /// the host already demotes. Both paths must carry the rule.
+    #[test]
+    fn both_rule_sets_carry_the_test_filter_rule() {
+        assert!(
+            super::READ_ONLY_RULES.contains("ONE filter per invocation"),
+            "read-only work runs filtered test commands too: {}",
+            super::READ_ONLY_RULES
+        );
+        assert!(
+            super::IMPLEMENTATION_RULES.contains("ONE filter per invocation"),
+            "{}",
+            super::IMPLEMENTATION_RULES
+        );
+    }
+}
