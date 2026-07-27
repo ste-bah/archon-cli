@@ -104,6 +104,59 @@ fn stamp_declared_contracts_from_universe(
     items
 }
 
+/// Stamp each read-only branch with the tools its task declared it needs,
+/// looked up in the AUTHORITATIVE task universe by canonical task id.
+///
+/// Write branches have always got this (`stamp_required_tools_from_universe`),
+/// and the decomposed path stamps it onto its verification items too — but the
+/// v3 authored path builds its own verification items and never did. A task
+/// whose acceptance requires live tool invocations then had a verifier that
+/// could not invoke them: observed live as "this stage only had
+/// Read/Grep/Glob/Bash and could not call the required tools", against a task
+/// whose acceptance criteria demand exactly those calls. Unverifiable by
+/// construction, three attempts each, no action any agent could take.
+///
+/// Universe-sourced so an authored script cannot grant itself tools; this only
+/// mirrors what the task file already declares. Read-only refers to REPO
+/// writes — it does not mean a verifier must be blind to the systems the task
+/// is about.
+fn stamp_required_tools_from_universe(
+    mut items: Vec<archon_workflow::WorkflowV2FanoutItem>,
+    task_universe: Option<
+        &crate::command::workflow_live::workflow_live_task_universe::WorkflowV2TaskUniverse,
+    >,
+) -> Vec<archon_workflow::WorkflowV2FanoutItem> {
+    let Some(universe) = task_universe else {
+        return items;
+    };
+    for item in &mut items {
+        let claimed = branch_canonical_task_ids(&item.input);
+        if claimed.is_empty() {
+            continue;
+        }
+        let tools: std::collections::BTreeSet<String> = universe
+            .tasks
+            .iter()
+            .filter(|task| claimed.iter().any(|id| id == &task.canonical_task_id))
+            .flat_map(|task| task.required_tools.iter().cloned())
+            .collect();
+        if tools.is_empty() {
+            continue;
+        }
+        if let Some(object) = item
+            .input
+            .get_mut("item")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            object.insert(
+                "required_tools".to_string(),
+                serde_json::json!(tools.into_iter().collect::<Vec<_>>()),
+            );
+        }
+    }
+    items
+}
+
 /// Canonical task ids claimed by a branch, from either nesting the item
 /// builders produce.
 fn branch_canonical_task_ids(input: &serde_json::Value) -> Vec<String> {
@@ -142,6 +195,10 @@ async fn run_read_only_v2_fanout(
     // prelude builds its own verification items and never attaches one, so
     // without this the host verifier below has nothing to enforce.
     let items = stamp_declared_contracts_from_universe(items, task_universe);
+    // Same asymmetry as contracts: write branches and the decomposed path bind
+    // declared tools, the v3 authored path did not — so a verifier could be
+    // asked to prove live tool invocations it had no way to make.
+    let items = stamp_required_tools_from_universe(items, task_universe);
     // Capture each item's declared deliverable contracts (plus the artifact root
     // its paths resolve against) BEFORE the items are consumed by scheduling, so
     // the host can run the contract verifier itself instead of trusting the
@@ -356,10 +413,14 @@ mod declared_contract_stamping_tests {
             "tasks": [{
                 "canonical_task_id": "TASK-EX-001",
                 "source_path": "tasks/TASK-EX-001.md",
+                "required_tools": ["read_tool", "probe_tool"],
                 "deliverable_contracts": [{
                     "kind": "record_series",
                     "artifact_path": ".archon/demo/coverage.json"
                 }]
+            }, {
+                "canonical_task_id": "TASK-EX-002",
+                "source_path": "tasks/TASK-EX-002.md"
             }]
         }))
         .expect("task universe")
@@ -401,6 +462,40 @@ mod declared_contract_stamping_tests {
         assert_eq!(root, "/proj");
         assert_eq!(contracts.len(), 1);
         assert_eq!(contracts[0]["artifact_path"], ".archon/demo/coverage.json");
+    }
+
+    /// A verifier asked to prove live tool invocations must be able to make
+    /// them. Write branches and the decomposed path bound declared tools; the
+    /// v3 authored path did not, so tasks whose acceptance requires tool calls
+    /// were unverifiable by construction.
+    #[test]
+    fn a_v3_verification_item_is_granted_its_tasks_declared_tools() {
+        let items = super::stamp_required_tools_from_universe(
+            vec![item(
+                "verify-task-ex-001",
+                serde_json::json!(["TASK-EX-001"]),
+            )],
+            Some(&universe()),
+        );
+        let tools = items[0].input["item"]["required_tools"]
+            .as_array()
+            .expect("tools must be stamped");
+        let names: Vec<&str> = tools.iter().filter_map(|t| t.as_str()).collect();
+        assert_eq!(names, vec!["probe_tool", "read_tool"]);
+    }
+
+    /// Universe-sourced: a branch claiming a task that declares no tools gets
+    /// none, so this cannot become a backdoor grant.
+    #[test]
+    fn a_task_declaring_no_tools_grants_none() {
+        let items = super::stamp_required_tools_from_universe(
+            vec![item(
+                "verify-task-ex-002",
+                serde_json::json!(["TASK-EX-002"]),
+            )],
+            Some(&universe()),
+        );
+        assert!(items[0].input["item"].get("required_tools").is_none());
     }
 
     #[test]
