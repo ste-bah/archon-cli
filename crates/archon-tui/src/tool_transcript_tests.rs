@@ -1,6 +1,7 @@
 use crate::app::App;
 use crate::input::{KeyResult, handle_key};
 use crate::keybindings::KeyMap;
+use crate::output::ToolDisplayStatus;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 fn complete_success(app: &mut App, name: &str, id: &str, output: &str) {
@@ -70,10 +71,52 @@ fn overlapping_same_name_completions_match_by_tool_id() {
     app.on_tool_start("Bash", "bash-2");
     app.on_tool_complete("Bash", "bash-1", true, "first");
 
+    assert_eq!(app.active_tool.as_deref(), Some("Bash"));
     assert_eq!(app.tool_outputs[0].output, "first");
     assert!(app.tool_outputs[1].output.is_empty());
     app.on_tool_complete("Bash", "bash-2", true, "second");
     assert_eq!(app.tool_outputs[1].output, "second");
+}
+
+#[test]
+fn overlapping_tools_complete_out_of_order_without_losing_invocation_state() {
+    let mut app = App::new();
+    app.on_tool_start("Read", "read-1");
+    app.on_tool_start("Bash", "bash-1");
+    app.on_tool_start("Read", "read-2");
+
+    app.on_tool_complete("Bash", "bash-1", false, "failed second");
+    assert_eq!(app.active_tool.as_deref(), Some("Read"));
+    app.on_tool_complete("Read", "read-1", true, "finished first");
+    assert_eq!(app.active_tool.as_deref(), Some("Read"));
+    app.on_tool_complete("Read", "read-2", true, "finished third");
+
+    assert!(app.active_tool.is_none());
+    assert_eq!(app.tool_outputs[0].tool_id, "read-1");
+    assert_eq!(app.tool_outputs[0].status, ToolDisplayStatus::Success);
+    assert_eq!(app.tool_outputs[1].tool_id, "bash-1");
+    assert_eq!(app.tool_outputs[1].status, ToolDisplayStatus::Error);
+    assert_eq!(app.tool_outputs[2].tool_id, "read-2");
+    assert_eq!(app.tool_outputs[2].status, ToolDisplayStatus::Success);
+}
+
+#[test]
+fn ctrl_e_expands_latest_success_when_newer_tool_failed_inline() {
+    let mut app = App::new();
+    complete_success(&mut app, "Read", "read-ok", "successful output");
+    app.on_tool_start("Read", "read-fail");
+    app.on_tool_complete("Read", "read-fail", false, "failure detail");
+    let keymap = KeyMap::default();
+
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL),
+        &keymap,
+    );
+
+    assert!(app.tool_outputs[0].expanded);
+    assert!(!app.tool_outputs[1].expanded);
+    assert!(app.output.all_lines().contains(&"successful output"));
 }
 
 #[test]

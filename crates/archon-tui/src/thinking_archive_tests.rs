@@ -5,6 +5,37 @@ use super::app::App;
 use super::output::ThinkingState;
 
 #[test]
+fn discarded_thinking_preview_is_not_archived() {
+    let mut app = App::new();
+    app.on_transient_thinking_delta("unapproved preview");
+
+    app.discard_thinking_preview();
+    app.on_turn_complete();
+
+    assert!(!app.thinking.active);
+    assert!(app.thinking.accumulated.is_empty());
+    assert!(app.thinking_blocks.is_empty());
+    assert!(
+        app.output
+            .all_lines()
+            .iter()
+            .all(|line| !line.contains("Thought for") && !line.contains("unapproved preview"))
+    );
+}
+
+#[test]
+fn committed_thinking_preview_archives_once_on_completion() {
+    let mut app = App::new();
+    app.on_transient_thinking_delta("approved preview");
+
+    app.commit_thinking_preview();
+    app.on_turn_complete();
+
+    assert_eq!(app.thinking_blocks.len(), 1);
+    assert_eq!(app.thinking_blocks[0].text, "approved preview");
+}
+
+#[test]
 fn completed_empty_thinking_is_still_archived() {
     let mut app = App::new();
 
@@ -224,12 +255,7 @@ fn thinking_archive_keys_navigate_expand_and_close() {
 
     super::event_loop::thinking_archive::handle_key(&mut app, KeyCode::Enter);
     assert!(app.thinking_archive_selection().is_none());
-    assert!(
-        app.output
-            .all_lines()
-            .iter()
-            .any(|line| *line == "  first thought")
-    );
+    assert!(app.output.all_lines().contains(&"  first thought"));
 }
 
 #[test]

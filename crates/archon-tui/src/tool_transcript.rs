@@ -1,6 +1,17 @@
 use crate::app::App;
 
 impl App {
+    pub(crate) fn latest_running_tool_except(&self, excluded: usize) -> Option<String> {
+        self.tool_outputs
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(index, tool)| {
+                *index != excluded && tool.status == crate::output::ToolDisplayStatus::Running
+            })
+            .map(|(_, tool)| tool.tool_name.clone())
+    }
+
     /// Store a safe, preflight-validated summary for a matching tool call.
     pub fn set_tool_summary(&mut self, id: &str, summary: Option<String>) {
         if let Some(tool) = self.tool_outputs.iter_mut().find(|tool| tool.tool_id == id) {
@@ -24,7 +35,11 @@ impl App {
     }
 
     pub fn toggle_tool_output(&mut self, index: Option<usize>) {
-        let index = index.or_else(|| self.tool_outputs.len().checked_sub(1));
+        let index = index.or_else(|| {
+            self.tool_outputs
+                .iter()
+                .rposition(|tool| tool.marker_line.is_some())
+        });
         let Some(index) = index else {
             return;
         };

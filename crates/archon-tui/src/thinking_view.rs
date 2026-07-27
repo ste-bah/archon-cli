@@ -104,11 +104,18 @@ fn display_width_tail(text: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::display_width_tail;
+    use super::{display_width_tail, wrap_display_rows};
 
     #[test]
     fn tail_keeps_combining_marks_with_their_base_grapheme() {
         assert_eq!(display_width_tail("界界e\u{301}XYZ", 6), "界e\u{301}XYZ");
+    }
+
+    #[test]
+    fn expanded_rows_wrap_cjk_combining_and_zwj_graphemes_intact() {
+        let rows = wrap_display_rows("界e\u{301}👩‍💻界", 4);
+
+        assert_eq!(rows, ["界e\u{301}", "👩‍💻界"]);
     }
 
     #[test]

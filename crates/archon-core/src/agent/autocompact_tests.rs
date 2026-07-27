@@ -397,6 +397,10 @@ impl LlmProvider for RateLimitThenSuccessProvider {
                 retry_after_secs: 30,
             }),
             (RateLimitFailureMode::MidStream, 0) => Ok(stream_from_events(vec![
+                StreamEvent::ThinkingDelta {
+                    index: 0,
+                    thinking: "rejected preview".into(),
+                },
                 StreamEvent::Error {
                     error_type: "rate_limited".into(),
                     message: "rate limit exceeded; retry after 30s".into(),
@@ -405,6 +409,10 @@ impl LlmProvider for RateLimitThenSuccessProvider {
             ])
             .await),
             _ => Ok(stream_from_events(vec![
+                StreamEvent::ThinkingDelta {
+                    index: 0,
+                    thinking: "accepted preview".into(),
+                },
                 StreamEvent::TextDelta {
                     index: 0,
                     text: "done".into(),
@@ -446,7 +454,18 @@ fn compaction_ready_messages(prefix: &str) -> Vec<serde_json::Value> {
 
 async fn assert_main_rate_limit_compacts_before_one_retry(mode: RateLimitFailureMode) {
     let provider = Arc::new(RateLimitThenSuccessProvider::new(mode));
-    let mut agent = test_agent_with_provider(provider.clone());
+    let (tx, mut rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
+    let mut agent = Agent::new(
+        provider.clone(),
+        ToolRegistry::new(),
+        AgentConfig::default(),
+        tx,
+        Arc::new(std::sync::RwLock::new(AgentRegistry::load(
+            &std::env::temp_dir(),
+        ))),
+    );
+    agent.set_guardrail_action_id(Some("rate-limit-retry".into()));
+    agent.set_turn_finalization_callback(Arc::new(|_, _| TurnFinalizationVerdict::Allowed));
     agent.config.context.large_request_retry_body_bytes = Some(1);
     agent.config.context.context_window_override = Some(1_000_000);
     agent.state.messages = compaction_ready_messages("main");
@@ -474,14 +493,7 @@ async fn assert_main_rate_limit_compacts_before_one_retry(mode: RateLimitFailure
     assert_eq!(agent.state.auto_compact.consecutive_failures, 0);
     assert!(!agent.state.auto_compact.disabled);
     assert!(!agent.state.auto_compact.compact_in_flight);
+    assert_retry_preview_lifecycle(&mut rx, mode);
 }
 
-#[tokio::test]
-async fn main_pre_stream_rate_limit_compacts_before_one_retry() {
-    assert_main_rate_limit_compacts_before_one_retry(RateLimitFailureMode::PreStream).await;
-}
-
-#[tokio::test]
-async fn main_mid_stream_rate_limit_compacts_before_one_retry() {
-    assert_main_rate_limit_compacts_before_one_retry(RateLimitFailureMode::MidStream).await;
-}
+include!("autocompact_retry_preview_tests.rs");

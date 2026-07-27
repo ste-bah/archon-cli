@@ -45,6 +45,12 @@ pub enum AgentEvent {
     },
     TextDelta(String),
     ThinkingDelta(String),
+    /// Unapproved reasoning preview for interactive display only.
+    TransientThinkingDelta(String),
+    /// Approve the active transient preview for normal completion/history.
+    CommitThinkingPreview,
+    /// Remove the active transient preview without retaining history.
+    DiscardThinkingPreview,
     ToolCallStarted {
         name: String,
         id: String,
@@ -96,6 +102,9 @@ impl AgentEvent {
             AgentEvent::ContextPressureUpdated { .. } => "ContextPressureUpdated",
             AgentEvent::TextDelta(_) => "TextDelta",
             AgentEvent::ThinkingDelta(_) => "ThinkingDelta",
+            AgentEvent::TransientThinkingDelta(_) => "TransientThinkingDelta",
+            AgentEvent::CommitThinkingPreview => "CommitThinkingPreview",
+            AgentEvent::DiscardThinkingPreview => "DiscardThinkingPreview",
             AgentEvent::ToolCallStarted { .. } => "ToolCallStarted",
             AgentEvent::ToolCallComplete { .. } => "ToolCallComplete",
             AgentEvent::PermissionRequired { .. } => "PermissionRequired",

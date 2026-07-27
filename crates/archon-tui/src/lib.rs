@@ -17,6 +17,7 @@ pub mod input;
 pub mod markdown;
 pub mod output;
 pub mod permissions;
+mod thinking_archive;
 #[cfg(test)]
 mod thinking_archive_tests;
 mod thinking_view;

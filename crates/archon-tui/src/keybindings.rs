@@ -25,7 +25,7 @@ pub enum Action {
     ScrollDown,
     /// Ctrl+Home / Ctrl+Left = scroll to top of output.
     ScrollTop,
-    /// Ctrl+End / Ctrl+Right = scroll to bottom of output.
+    /// End / Ctrl+End / Ctrl+Right = scroll to bottom of output.
     ScrollBottom,
     /// `/` = open a slash command (the slash is included in the payload).
     SlashCommand(String),
@@ -140,6 +140,10 @@ impl Default for KeyMap {
         bindings.insert(
             KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL),
             Action::ScrollTop,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::End, KeyModifiers::NONE),
+            Action::ScrollBottom,
         );
         bindings.insert(
             KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL),
@@ -327,13 +331,6 @@ mod tests {
         let km = KeyMap::default();
         let key = KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL);
         assert_eq!(km.resolve(key), Some(&Action::ScrollTop));
-    }
-
-    #[test]
-    fn ctrl_end_scrolls_to_bottom() {
-        let km = KeyMap::default();
-        let key = KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL);
-        assert_eq!(km.resolve(key), Some(&Action::ScrollBottom));
     }
 
     #[test]

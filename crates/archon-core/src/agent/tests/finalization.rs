@@ -23,7 +23,13 @@ impl LlmProvider for GuardrailCompletionProvider {
     ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
         self.captured_system.lock().unwrap().push(request.system);
         self.calls.fetch_add(1, Ordering::SeqCst);
-        let (tx, rx) = tokio::sync::mpsc::channel(2);
+        let (tx, rx) = tokio::sync::mpsc::channel(3);
+        tx.send(StreamEvent::ThinkingDelta {
+            index: 0,
+            thinking: "draft thinking".into(),
+        })
+        .await
+        .unwrap();
         tx.send(StreamEvent::TextDelta {
             index: 0,
             text: "final answer".into(),
@@ -93,12 +99,47 @@ async fn blocked_finalization_retries_once_without_turn_complete() {
             .iter()
             .any(|event| matches!(event.inner, AgentEvent::TextDelta(_)))
     );
-    assert!(reasoning_outputs.lock().unwrap().is_empty());
-    assert!(agent
-        .conversation_state()
-        .messages
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event.inner, AgentEvent::TransientThinkingDelta(ref thinking) if thinking == "draft thinking"))
+            .count(),
+        2
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event.inner, AgentEvent::DiscardThinkingPreview))
+            .count(),
+        2
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event.inner, AgentEvent::CommitThinkingPreview))
+    );
+    let lifecycle = events
         .iter()
-        .all(|message| message["role"] != "assistant"));
+        .filter_map(|event| match event.inner {
+            AgentEvent::TransientThinkingDelta(_) => Some("preview"),
+            AgentEvent::DiscardThinkingPreview => Some("discard"),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(lifecycle, ["preview", "discard", "preview", "discard"]);
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event.inner, AgentEvent::ThinkingDelta(_)))
+    );
+    assert!(reasoning_outputs.lock().unwrap().is_empty());
+    assert!(
+        agent
+            .conversation_state()
+            .messages
+            .iter()
+            .all(|message| message["role"] != "assistant")
+    );
 }
 
 #[tokio::test]
@@ -138,11 +179,13 @@ async fn blocked_trivial_finalization_enters_bounded_repair_loop() {
             .iter()
             .any(|event| matches!(event.inner, AgentEvent::TextDelta(_)))
     );
-    assert!(agent
-        .conversation_state()
-        .messages
-        .iter()
-        .all(|message| message["role"] != "assistant"));
+    assert!(
+        agent
+            .conversation_state()
+            .messages
+            .iter()
+            .all(|message| message["role"] != "assistant")
+    );
 }
 
 struct ExitPlanCompletionProvider;
@@ -198,19 +241,24 @@ impl LlmProvider for ExitPlanCompletionProvider {
 #[tokio::test]
 async fn guarded_exit_plan_persists_draft_after_allowed_finalization() {
     let temp = tempfile::tempdir().unwrap();
-    let session_store = archon_session::storage::SessionStore::open(&temp.path().join("session.db"))
-        .unwrap();
+    let session_store =
+        archon_session::storage::SessionStore::open(&temp.path().join("session.db")).unwrap();
     let plan_store = archon_session::plan::PlanStore::new(session_store.db()).unwrap();
     let mut registry = ToolRegistry::new();
     registry.register(Box::new(archon_tools::plan_mode::ExitPlanModeTool));
     let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
-    let mut config = AgentConfig::default();
-    config.session_id = "guarded-plan-session".into();
-    config.max_turns = Some(1);
-    config.permission_rules.always_allow.push(archon_permissions::rules::ToolRule {
-        tool: "ExitPlanMode".into(),
-        pattern: "*".into(),
-    });
+    let mut config = AgentConfig {
+        session_id: "guarded-plan-session".into(),
+        max_turns: Some(1),
+        ..AgentConfig::default()
+    };
+    config
+        .permission_rules
+        .always_allow
+        .push(archon_permissions::rules::ToolRule {
+            tool: "ExitPlanMode".into(),
+            pattern: "*".into(),
+        });
     *config.permission_mode.lock().await = "plan".into();
     let mut agent = Agent::new(
         Arc::new(ExitPlanCompletionProvider),
@@ -300,10 +348,12 @@ impl LlmProvider for ToolBreakCompletionProvider {
 }
 
 #[tokio::test]
-async fn blocked_tool_loop_break_withholds_draft_text_and_reasoning() {
+async fn blocked_tool_loop_break_streams_thinking_but_withholds_draft_text_and_reasoning() {
     let (tx, mut rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
-    let mut config = AgentConfig::default();
-    config.max_turns = Some(1);
+    let config = AgentConfig {
+        max_turns: Some(1),
+        ..AgentConfig::default()
+    };
     let mut agent = Agent::new(
         Arc::new(ToolBreakCompletionProvider),
         ToolRegistry::new(),
@@ -333,6 +383,19 @@ async fn blocked_tool_loop_break_withholds_draft_text_and_reasoning() {
     assert!(!events.iter().any(
         |event| matches!(event.inner, AgentEvent::TextDelta(ref text) if text == "draft before tool")
     ));
+    assert!(events.iter().any(|event| {
+        matches!(event.inner, AgentEvent::TransientThinkingDelta(ref thinking) if thinking == "draft thinking")
+    }));
+    assert!(
+        events
+            .iter()
+            .any(|event| { matches!(event.inner, AgentEvent::DiscardThinkingPreview) })
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| { matches!(event.inner, AgentEvent::CommitThinkingPreview) })
+    );
     assert!(!events.iter().any(|event| {
         matches!(event.inner, AgentEvent::ThinkingDelta(ref thinking) if thinking == "draft thinking")
     }));
@@ -372,85 +435,4 @@ async fn scoped_tool_loop_break_requires_finalization_verdict() {
     assert!(matches!(error, AgentLoopError::FinalizationBlocked(_)));
 }
 
-#[tokio::test]
-async fn unscoped_turn_keeps_streaming_text_with_callback_installed() {
-    let calls = Arc::new(AtomicUsize::new(0));
-    let captured_system = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (tx, mut rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
-    let mut agent = Agent::new(
-        Arc::new(GuardrailCompletionProvider {
-            calls,
-            captured_system,
-        }),
-        ToolRegistry::new(),
-        AgentConfig::default(),
-        tx,
-        Arc::new(std::sync::RwLock::new(AgentRegistry::load(
-            &std::env::temp_dir(),
-        ))),
-    );
-    agent.set_turn_finalization_callback(Arc::new(|_, _| TurnFinalizationVerdict::Allowed));
-
-    agent.process_message("implement feature").await.unwrap();
-
-    let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
-    assert_eq!(
-        events
-            .iter()
-            .filter(|event| matches!(event.inner, AgentEvent::TextDelta(ref text) if text == "final answer"))
-            .count(),
-        1
-    );
-}
-
-#[tokio::test]
-async fn allowed_finalization_emits_turn_complete_once() {
-    let calls = Arc::new(AtomicUsize::new(0));
-    let captured_system = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (tx, mut rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
-    let mut agent = Agent::new(
-        Arc::new(GuardrailCompletionProvider {
-            calls: Arc::clone(&calls),
-            captured_system,
-        }),
-        ToolRegistry::new(),
-        AgentConfig::default(),
-        tx,
-        Arc::new(std::sync::RwLock::new(AgentRegistry::load(
-            &std::env::temp_dir(),
-        ))),
-    );
-    agent.set_guardrail_action_id(Some("allowed-action".into()));
-    agent.set_turn_finalization_callback(Arc::new(|_, _| TurnFinalizationVerdict::Allowed));
-
-    agent.process_message("implement feature").await.unwrap();
-
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
-    let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
-    assert_eq!(
-        events
-            .iter()
-            .filter(|event| matches!(event.inner, AgentEvent::TurnComplete { .. }))
-            .count(),
-        1
-    );
-    assert_eq!(
-        events
-            .iter()
-            .filter(|event| matches!(event.inner, AgentEvent::TextDelta(ref text) if text == "final answer"))
-            .count(),
-        1
-    );
-    assert_eq!(
-        agent
-            .conversation_state()
-            .messages
-            .iter()
-            .filter(|message| {
-                message["role"] == "assistant"
-                    && message["content"].to_string().contains("final answer")
-            })
-            .count(),
-        1
-    );
-}
+include!("finalization_preview.rs");

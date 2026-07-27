@@ -172,24 +172,6 @@ fn thinking_height_cap(visible_height: u16) -> u16 {
         .min(visible_height.saturating_sub(1))
 }
 
-#[cfg(test)]
-mod tests {
-    use ratatui::text::Line;
-
-    use super::{reserved_thinking_height, thinking_height_cap};
-
-    #[test]
-    fn expanded_thinking_is_capped_at_about_one_third_of_viewport() {
-        let lines = (0..40)
-            .map(|index| Line::from(format!("thought {index}")))
-            .collect::<Vec<_>>();
-
-        assert_eq!(thinking_height_cap(30), 10);
-        assert_eq!(reserved_thinking_height(&lines, 30, true), 10);
-        assert_eq!(thinking_height_cap(31), 11);
-    }
-}
-
 pub(crate) fn input_prefix(app: &App) -> String {
     if app.is_generating {
         match &app.active_tool {
@@ -378,4 +360,22 @@ pub fn draw_suggestions_popup(frame: &mut Frame, app: &App, input_area: Rect) {
             .style(Style::default().fg(t.fg)),
     );
     frame.render_widget(popup, popup_area);
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::text::Line;
+
+    use super::{reserved_thinking_height, thinking_height_cap};
+
+    #[test]
+    fn expanded_thinking_is_capped_at_about_one_third_of_viewport() {
+        let lines = (0..40)
+            .map(|index| Line::from(format!("thought {index}")))
+            .collect::<Vec<_>>();
+
+        assert_eq!(thinking_height_cap(30), 10);
+        assert_eq!(reserved_thinking_height(&lines, 30, true), 10);
+        assert_eq!(thinking_height_cap(31), 11);
+    }
 }

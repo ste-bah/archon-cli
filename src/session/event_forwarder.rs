@@ -55,6 +55,9 @@ pub(super) fn spawn_agent_event_forwarder(
                     TuiEvent::TextDelta(text)
                 }
                 AgentEvent::ThinkingDelta(text) => TuiEvent::ThinkingDelta(text),
+                AgentEvent::TransientThinkingDelta(text) => TuiEvent::TransientThinkingDelta(text),
+                AgentEvent::CommitThinkingPreview => TuiEvent::CommitThinkingPreview,
+                AgentEvent::DiscardThinkingPreview => TuiEvent::DiscardThinkingPreview,
                 AgentEvent::ToolCallStarted { name, id } => TuiEvent::ToolStart { name, id },
                 AgentEvent::ToolCallComplete {
                     name,

@@ -289,3 +289,15 @@ pub fn event_to_notification(session_id: &str, event: &AgentEvent) -> Option<JRp
         params,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transient_thinking_has_no_ide_notification() {
+        let event = AgentEvent::TransientThinkingDelta("unapproved".into());
+
+        assert!(event_to_notification("session", &event).is_none());
+    }
+}

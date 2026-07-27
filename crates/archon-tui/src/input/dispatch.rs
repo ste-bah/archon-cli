@@ -200,6 +200,9 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
             if let Some(q) = text.strip_prefix("/btw ").filter(|q| !q.trim().is_empty()) {
                 return KeyResult::SendBtw(q.trim().to_string());
             }
+            if text == "/thinking" || text.starts_with("/thinking ") {
+                return KeyResult::SendInput(text);
+            }
             if app.is_generating {
                 app.pending_input.push(text);
                 app.output
@@ -235,6 +238,72 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use super::*;
+
+    #[test]
+    fn thinking_command_bypasses_generation_queue() {
+        let mut app = App::new();
+        app.is_generating = true;
+        app.input.inject_text("/thinking on");
+        let keymap = KeyMap::default();
+
+        let result = handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            &keymap,
+        );
+
+        assert!(matches!(result, KeyResult::SendInput(ref text) if text == "/thinking on"));
+        assert!(app.pending_input.is_empty());
+        assert!(app.is_generating);
+        assert!(
+            !app.output
+                .all_lines()
+                .contains(&"[queued — will send after current turn]")
+        );
+    }
+
+    #[test]
+    fn other_slash_commands_remain_queued_during_generation() {
+        let mut app = App::new();
+        app.is_generating = true;
+        app.input.inject_text("/help");
+        let keymap = KeyMap::default();
+
+        let result = handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            &keymap,
+        );
+
+        assert!(matches!(result, KeyResult::Nothing));
+        assert_eq!(app.pending_input, ["/help"]);
+    }
+
+    #[test]
+    fn end_restores_transcript_follow_after_streamed_arrivals() {
+        let mut app = App::new();
+        for index in 0..30 {
+            app.output.append_line(&format!("existing-{index}"));
+        }
+        let theme = crate::theme::intj_theme();
+        app.output.rendered_view(&theme, 20, 10);
+        app.output.scroll_up(10);
+        app.output.append_line("streamed-arrival");
+        assert!(app.output.scroll_locked);
+
+        let keymap = KeyMap::default();
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::End, KeyModifiers::NONE),
+            &keymap,
+        );
+        assert!(!app.output.scroll_locked);
+        assert_eq!(app.output.scroll_offset, 0);
+
+        app.output.append_line("later-arrival");
+        let view = app.output.rendered_view(&theme, 20, 10);
+        assert_eq!(view.global_scroll_y, view.total_wrapped.saturating_sub(10));
+    }
 
     #[test]
     fn expanded_active_thinking_scrolls_without_moving_transcript() {

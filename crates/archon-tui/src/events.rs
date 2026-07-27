@@ -334,6 +334,9 @@ pub struct McpServerEntry {
 pub enum TuiEvent {
     TextDelta(String),
     ThinkingDelta(String),
+    TransientThinkingDelta(String),
+    CommitThinkingPreview,
+    DiscardThinkingPreview,
     ToolStart {
         name: String,
         id: String,
@@ -440,6 +443,9 @@ impl TuiEvent {
         match self {
             Self::TextDelta(_) => "TextDelta",
             Self::ThinkingDelta(_) => "ThinkingDelta",
+            Self::TransientThinkingDelta(_) => "TransientThinkingDelta",
+            Self::CommitThinkingPreview => "CommitThinkingPreview",
+            Self::DiscardThinkingPreview => "DiscardThinkingPreview",
             Self::ToolStart { .. } => "ToolStart",
             Self::ToolOutputChunk { .. } => "ToolOutputChunk",
             Self::ToolComplete { .. } => "ToolComplete",

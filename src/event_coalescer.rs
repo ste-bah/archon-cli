@@ -35,8 +35,12 @@ pub enum Priority {
 /// Classify an [`AgentEvent`] by shedding priority.
 pub fn priority(ev: &AgentEvent) -> Priority {
     match ev {
-        AgentEvent::TextDelta(_) | AgentEvent::ThinkingDelta(_) => Priority::Text,
+        AgentEvent::TextDelta(_)
+        | AgentEvent::ThinkingDelta(_)
+        | AgentEvent::TransientThinkingDelta(_) => Priority::Text,
         AgentEvent::UserPromptReady
+        | AgentEvent::CommitThinkingPreview
+        | AgentEvent::DiscardThinkingPreview
         | AgentEvent::ApiCallStarted { .. }
         | AgentEvent::ContextPressureUpdated { .. }
         | AgentEvent::ToolCallStarted { .. }
@@ -96,6 +100,14 @@ impl EventCoalescer {
                     previous.push_str(&text);
                 } else {
                     self.buffer.push_back(AgentEvent::ThinkingDelta(text));
+                }
+            }
+            AgentEvent::TransientThinkingDelta(text) => {
+                if let Some(AgentEvent::TransientThinkingDelta(previous)) = self.buffer.back_mut() {
+                    previous.push_str(&text);
+                } else {
+                    self.buffer
+                        .push_back(AgentEvent::TransientThinkingDelta(text));
                 }
             }
             event => self.buffer.push_back(event),

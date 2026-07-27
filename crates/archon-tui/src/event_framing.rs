@@ -10,6 +10,7 @@ pub(super) enum ContentFrames {
         next_offset: usize,
         emitted_empty: bool,
         thinking: bool,
+        transient: bool,
     },
     ToolOutput {
         id: String,
@@ -28,12 +29,21 @@ impl ContentFrames {
                 next_offset: 0,
                 emitted_empty: false,
                 thinking: false,
+                transient: false,
             },
             TuiEvent::ThinkingDelta(text) => Self::Text {
                 text: compact_string(text),
                 next_offset: 0,
                 emitted_empty: false,
                 thinking: true,
+                transient: false,
+            },
+            TuiEvent::TransientThinkingDelta(text) => Self::Text {
+                text: compact_string(text),
+                next_offset: 0,
+                emitted_empty: false,
+                thinking: true,
+                transient: true,
             },
             TuiEvent::ToolOutputChunk { id, chunk } => {
                 Self::tool_output(compact_string(id), compact_string(chunk), None)
@@ -152,6 +162,7 @@ impl Iterator for ContentFrames {
                 next_offset,
                 emitted_empty,
                 thinking,
+                transient,
             } => next_utf8_chunk(
                 text,
                 next_offset,
@@ -159,7 +170,9 @@ impl Iterator for ContentFrames {
                 MAX_COALESCED_CONTENT_BYTES,
             )
             .map(|chunk| {
-                if *thinking {
+                if *transient {
+                    TuiEvent::TransientThinkingDelta(chunk)
+                } else if *thinking {
                     TuiEvent::ThinkingDelta(chunk)
                 } else {
                     TuiEvent::TextDelta(chunk)

@@ -275,6 +275,35 @@ async fn text_burst_reconstructs_exact_utf8_bytes() {
 
 #[tokio::test]
 #[serial(tui_drain_metrics)]
+async fn transient_thinking_is_framed_coalesced_and_bounded() {
+    let oversized = format!("{}界", "x".repeat(MAX_COALESCED_CONTENT_BYTES));
+    let frames = bounded_content_events(TuiEvent::TransientThinkingDelta(oversized.clone()));
+    assert_eq!(frames.len(), 2);
+    assert!(frames.iter().all(|event| {
+        matches!(event, TuiEvent::TransientThinkingDelta(text) if text.len() <= MAX_COALESCED_CONTENT_BYTES)
+    }));
+    let reconstructed = frames
+        .iter()
+        .map(|event| match event {
+            TuiEvent::TransientThinkingDelta(text) => text.as_str(),
+            _ => unreachable!("transient frame type"),
+        })
+        .collect::<String>();
+    assert_eq!(reconstructed, oversized);
+
+    let (tx, mut rx) = bounded_tui_event_channel_with_capacity(1);
+    tx.send(TuiEvent::TransientThinkingDelta("draft ".into()))
+        .unwrap();
+    tx.send(TuiEvent::TransientThinkingDelta("preview".into()))
+        .unwrap();
+    assert!(matches!(
+        rx.recv().await,
+        Some(TuiEvent::TransientThinkingDelta(text)) if text == "draft preview"
+    ));
+}
+
+#[tokio::test]
+#[serial(tui_drain_metrics)]
 async fn adjacent_thinking_deltas_coalesce_without_losing_bytes() {
     let (tx, mut rx) = bounded_tui_event_channel_with_capacity(1);
     let chunks = ["reason ", "世界", "\n", "final"];

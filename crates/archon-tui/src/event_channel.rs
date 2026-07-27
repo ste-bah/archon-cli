@@ -298,8 +298,13 @@ pub fn bounded_content_events(event: TuiEvent) -> Vec<TuiEvent> {
     ContentFrames::new(event).collect()
 }
 
+/// Retained heap bytes owned by one event payload.
+pub fn retained_event_bytes(event: &TuiEvent) -> usize {
+    crate::event_payload_size::heap_bytes(event)
+}
+
 fn frame_is_oversized(event: &TuiEvent) -> bool {
-    crate::event_payload_size::heap_bytes(event) > MAX_COALESCED_CONTENT_BYTES
+    retained_event_bytes(event) > MAX_COALESCED_CONTENT_BYTES
 }
 
 fn coalesce_with_metrics(queue: &mut VecDeque<TuiEvent>, event: TuiEvent) -> Option<TuiEvent> {
@@ -348,6 +353,18 @@ fn enqueue_or_coalesce_content_delta(
                 return None;
             }
             Some(TuiEvent::ThinkingDelta(text))
+        }
+        TuiEvent::TransientThinkingDelta(text) => {
+            if let Some(TuiEvent::TransientThinkingDelta(previous)) = queue.back_mut()
+                && previous.len().saturating_add(text.len()) <= MAX_COALESCED_CONTENT_BYTES
+            {
+                let mut combined = String::with_capacity(previous.len() + text.len());
+                combined.push_str(previous);
+                combined.push_str(&text);
+                *previous = combined;
+                return None;
+            }
+            Some(TuiEvent::TransientThinkingDelta(text))
         }
         event => Some(event),
     }

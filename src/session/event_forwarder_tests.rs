@@ -124,22 +124,25 @@ async fn full_tui_queue_backpressures_agent_source_without_reordering() {
     while tui_rx.is_empty() {
         tokio::task::yield_now().await;
     }
-    agent_tx
-        .send(timestamped(AgentEvent::ThinkingDelta("two".into())))
-        .await
-        .unwrap();
-    agent_tx
-        .send(timestamped(AgentEvent::TextDelta("three".into())))
-        .await
-        .unwrap();
-    let fourth = tokio::spawn(async move {
+    let remaining = tokio::spawn(async move {
+        agent_tx
+            .send(timestamped(AgentEvent::TransientThinkingDelta(
+                "preview".into(),
+            )))
+            .await?;
+        agent_tx
+            .send(timestamped(AgentEvent::ThinkingDelta("two".into())))
+            .await?;
+        agent_tx
+            .send(timestamped(AgentEvent::TextDelta("three".into())))
+            .await?;
         agent_tx
             .send(timestamped(AgentEvent::SessionComplete))
             .await
     });
     assert!(
         tokio::time::timeout(Duration::from_millis(20), async {
-            while !fourth.is_finished() {
+            while !remaining.is_finished() {
                 tokio::task::yield_now().await;
             }
         })
@@ -149,11 +152,14 @@ async fn full_tui_queue_backpressures_agent_source_without_reordering() {
     );
 
     assert!(matches!(tui_rx.recv().await, Some(TuiEvent::TextDelta(text)) if text == "one"));
+    assert!(
+        matches!(tui_rx.recv().await, Some(TuiEvent::TransientThinkingDelta(text)) if text == "preview")
+    );
     assert!(matches!(tui_rx.recv().await, Some(TuiEvent::ThinkingDelta(text)) if text == "two"));
-    fourth
+    remaining
         .await
-        .expect("fourth sender task")
-        .expect("fourth event should resume after drain");
+        .expect("remaining sender task")
+        .expect("remaining events should resume after drain");
     assert!(matches!(tui_rx.recv().await, Some(TuiEvent::TextDelta(text)) if text == "three"));
     assert!(matches!(tui_rx.recv().await, Some(TuiEvent::Done)));
 }

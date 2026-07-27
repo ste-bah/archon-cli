@@ -35,11 +35,23 @@ fn priority_classifies_deltas_by_loss_policy() {
         priority(&AgentEvent::ThinkingDelta("y".into())),
         Priority::Text
     );
+    assert_eq!(
+        priority(&AgentEvent::TransientThinkingDelta("preview".into())),
+        Priority::Text
+    );
 }
 
 #[test]
 fn priority_classifies_state_transitions_as_state() {
     assert_eq!(priority(&AgentEvent::UserPromptReady), Priority::State);
+    assert_eq!(
+        priority(&AgentEvent::CommitThinkingPreview),
+        Priority::State
+    );
+    assert_eq!(
+        priority(&AgentEvent::DiscardThinkingPreview),
+        Priority::State
+    );
     assert_eq!(
         priority(&AgentEvent::ApiCallStarted { model: "m".into() }),
         Priority::State
@@ -202,6 +214,21 @@ fn coalescer_coalesces_adjacent_thinking_without_losing_bytes() {
 
     assert_eq!(c.len(), 1);
     assert!(matches!(c.pop(), Some(AgentEvent::ThinkingDelta(text)) if text == chunks.concat()));
+}
+
+#[test]
+fn coalescer_preserves_transient_preview_lifecycle_boundaries() {
+    let mut c = EventCoalescer::new(1, 1);
+    c.push(AgentEvent::TransientThinkingDelta("draft ".into()));
+    c.push(AgentEvent::TransientThinkingDelta("thinking".into()));
+    c.push(AgentEvent::CommitThinkingPreview);
+    c.push(text_delta("answer"));
+
+    assert!(
+        matches!(c.pop(), Some(AgentEvent::TransientThinkingDelta(text)) if text == "draft thinking")
+    );
+    assert!(matches!(c.pop(), Some(AgentEvent::CommitThinkingPreview)));
+    assert!(matches!(c.pop(), Some(AgentEvent::TextDelta(text)) if text == "answer"));
 }
 
 #[test]

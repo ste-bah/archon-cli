@@ -140,6 +140,7 @@ impl Agent {
         let classified =
             autocompact::classify_stream_error(self.client.name(), &error_type, &message);
         if classified.is_context_window_exceeded() && !*reactive_overflow_retried {
+            self.discard_thinking_preview().await;
             *reactive_overflow_retried = true;
             self.force_reactive_compact().await?;
             return Ok(StreamRoundOutcome::RetryAgentLoop);
@@ -148,6 +149,7 @@ impl Agent {
             && !*reactive_rate_limit_retried
             && prepared.request_body_bytes >= prepared.large_retry_body_bytes
         {
+            self.discard_thinking_preview().await;
             *reactive_rate_limit_retried = true;
             self.warn_large_rate_limit(prepared, "rate_limit_large_request_stream");
             self.force_reactive_compact().await?;
@@ -162,6 +164,7 @@ impl Agent {
             }),
         )
         .await;
+        self.send_event(AgentEvent::DiscardThinkingPreview).await;
         self.send_event(AgentEvent::Error(format!("{error_type}: {message}")))
             .await;
         self.fail_parent_turn(format!("{error_type}: {message}"))

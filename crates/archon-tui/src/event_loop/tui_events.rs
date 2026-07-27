@@ -25,6 +25,9 @@ pub(super) async fn handle_tui_event(
     match event {
         TuiEvent::TextDelta(text) => app.on_text_delta(&text),
         TuiEvent::ThinkingDelta(text) => app.on_thinking_delta(&text),
+        TuiEvent::TransientThinkingDelta(text) => app.on_transient_thinking_delta(&text),
+        TuiEvent::CommitThinkingPreview => app.commit_thinking_preview(),
+        TuiEvent::DiscardThinkingPreview => app.discard_thinking_preview(),
         TuiEvent::ToolStart { name, id } => app.on_tool_start(&name, &id),
         TuiEvent::ToolOutputChunk { id, chunk } => {
             if let Some(tool) = app.tool_outputs.iter_mut().find(|tool| tool.tool_id == id) {
@@ -82,6 +85,12 @@ pub(super) async fn handle_tui_event(
         TuiEvent::SlashCommandComplete => app.on_slash_command_complete(),
         TuiEvent::ThinkingToggle(enabled) => {
             app.show_thinking = enabled;
+            let message = if enabled {
+                "\nThinking display enabled.\n"
+            } else {
+                "\nThinking display disabled.\n"
+            };
+            app.output.append(message);
         }
         TuiEvent::OpenThinkingArchive => app.open_thinking_archive(),
         TuiEvent::ModelChanged(model) => {
@@ -387,6 +396,34 @@ mod tests {
 
         assert_eq!(app.status.context_tokens_used, 121_000);
         assert_eq!(app.status.context_name.as_deref(), Some("main"));
+    }
+
+    #[tokio::test]
+    async fn thinking_toggle_message_does_not_finish_active_thinking() {
+        let mut app = App::new();
+        app.on_thinking_delta("retained before toggle");
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+
+        handle_tui_event(&mut app, TuiEvent::ThinkingToggle(true), &tx).await;
+
+        assert!(app.show_thinking);
+        assert!(app.thinking.active);
+        assert_eq!(app.thinking.accumulated, "retained before toggle");
+        assert!(app.thinking_blocks.is_empty());
+        assert!(
+            app.output
+                .all_lines()
+                .iter()
+                .any(|line| line.contains("Thinking display enabled."))
+        );
+
+        app.on_thinking_delta(" and after toggle");
+        app.on_turn_complete();
+        assert_eq!(app.thinking_blocks.len(), 1);
+        assert_eq!(
+            app.thinking_blocks[0].text,
+            "retained before toggle and after toggle"
+        );
     }
 
     #[tokio::test]

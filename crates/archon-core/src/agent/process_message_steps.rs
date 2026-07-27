@@ -170,6 +170,7 @@ impl Agent {
                     .map(StreamOpenOutcome::Stream)
             }
             Err(e) => {
+                self.discard_thinking_preview().await;
                 self.fail_parent_turn(format!("{e}")).await;
                 Err(AgentLoopError::ApiError(format!("{e}")))
             }
@@ -218,9 +219,12 @@ impl Agent {
                 }
                 StreamEvent::ThinkingDelta { thinking, .. } => {
                     round.thinking_content.push_str(&thinking);
-                    if !self.buffers_finalization_text() {
-                        self.send_event(AgentEvent::ThinkingDelta(thinking)).await;
-                    }
+                    let event = if self.buffers_finalization_text() {
+                        AgentEvent::TransientThinkingDelta(thinking)
+                    } else {
+                        AgentEvent::ThinkingDelta(thinking)
+                    };
+                    self.send_event(event).await;
                 }
                 StreamEvent::InputJsonDelta {
                     index,

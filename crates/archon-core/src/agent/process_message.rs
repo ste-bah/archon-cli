@@ -8,13 +8,21 @@ impl Agent {
         self.turn_finalization_callback.is_some() && self.guardrail_action_id.is_some()
     }
 
-    async fn emit_buffered_round_output(&self, thinking: &str, text: &str) {
+    pub(super) async fn commit_thinking_preview(&self) {
+        if self.buffers_finalization_text() {
+            self.send_event(AgentEvent::CommitThinkingPreview).await;
+        }
+    }
+
+    pub(super) async fn discard_thinking_preview(&self) {
+        if self.buffers_finalization_text() {
+            self.send_event(AgentEvent::DiscardThinkingPreview).await;
+        }
+    }
+
+    async fn emit_buffered_round_output(&self, text: &str) {
         if !self.buffers_finalization_text() {
             return;
-        }
-        if !thinking.is_empty() {
-            self.send_event(AgentEvent::ThinkingDelta(thinking.to_owned()))
-                .await;
         }
         if !text.is_empty() {
             self.send_event(AgentEvent::TextDelta(text.to_owned()))
@@ -26,8 +34,8 @@ impl Agent {
         self.prepend_stream_round_drafts(message_index, round);
         self.persist_guarded_plan_after_draft_admission(round);
         self.emit_reasoning_turn(&round.text_content);
-        self.emit_buffered_round_output(&round.thinking_content, &round.text_content)
-            .await;
+        self.commit_thinking_preview().await;
+        self.emit_buffered_round_output(&round.text_content).await;
     }
 
     fn finalization_verdict(&self, output: &str) -> TurnFinalizationVerdict {
@@ -50,6 +58,7 @@ impl Agent {
         match self.finalization_verdict(output) {
             TurnFinalizationVerdict::Allowed => Ok(()),
             TurnFinalizationVerdict::Blocked { repair_prompt } => {
+                self.discard_thinking_preview().await;
                 self.fail_parent_turn(repair_prompt.clone()).await;
                 Err(AgentLoopError::FinalizationBlocked(repair_prompt))
             }
@@ -73,7 +82,7 @@ impl Agent {
                         "type": "text",
                         "text": response,
                     })]);
-                    self.emit_buffered_round_output("", &response).await;
+                    self.emit_buffered_round_output(&response).await;
                     let active_model = self.active_model().await;
                     self.complete_turn_without_tools(user_input, 0, 0, 0, 0, &active_model)
                         .await;
@@ -165,17 +174,19 @@ impl Agent {
                 TurnFinalizationVerdict::Allowed => {
                     self.add_assistant_stream_round(&round);
                     self.emit_reasoning_turn(&round.text_content);
-                    self.emit_buffered_round_output(&round.thinking_content, &round.text_content)
-                        .await;
+                    self.commit_thinking_preview().await;
+                    self.emit_buffered_round_output(&round.text_content).await;
                 }
                 TurnFinalizationVerdict::Blocked { repair_prompt }
                     if !finalization_repair_attempted =>
                 {
+                    self.discard_thinking_preview().await;
                     finalization_repair_attempted = true;
                     self.state.add_user_message(&repair_prompt);
                     continue 'agent_loop;
                 }
                 TurnFinalizationVerdict::Blocked { repair_prompt } => {
+                    self.discard_thinking_preview().await;
                     self.fail_parent_turn(repair_prompt.clone()).await;
                     return Err(AgentLoopError::FinalizationBlocked(repair_prompt));
                 }

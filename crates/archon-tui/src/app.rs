@@ -234,7 +234,11 @@ impl App {
     pub fn on_text_delta(&mut self, text: &str) {
         // A non-thinking event while thinking is active means thinking ended.
         if self.thinking.active {
-            self.finish_thinking();
+            if self.thinking.transient {
+                self.discard_thinking_preview();
+            } else {
+                self.finish_thinking();
+            }
         }
         self.push_parent_activity_text(text);
         self.output.append(text);
@@ -248,12 +252,29 @@ impl App {
         self.push_parent_activity_thinking(text);
     }
 
+    pub fn on_transient_thinking_delta(&mut self, text: &str) {
+        if !self.thinking.active {
+            self.collapse_all_thinking_blocks();
+        }
+        self.thinking.on_transient_thinking_delta(text);
+    }
+
+    pub fn commit_thinking_preview(&mut self) {
+        if self.thinking.active && self.thinking.transient {
+            self.thinking.commit_preview();
+            self.finish_thinking();
+        }
+    }
+
+    pub fn discard_thinking_preview(&mut self) {
+        self.thinking.discard_preview();
+    }
+
     pub fn on_tool_start(&mut self, name: &str, id: &str) {
-        if self.thinking.active {
+        if self.thinking.active && !self.thinking.transient {
             self.finish_thinking();
         }
         // Track active tool for status bar, but don't clutter the output.
-        // is_generating is already set by GenerationStarted — not set here.
         self.active_tool = Some(name.to_string());
         self.tool_outputs.push(ToolOutputState::new(name, id));
         self.push_parent_activity_tool_call(name);
@@ -261,11 +282,14 @@ impl App {
     }
 
     pub fn on_tool_complete(&mut self, name: &str, id: &str, success: bool, output: &str) {
-        // Only clear active_tool if it matches the completing tool (guards against overlapping calls)
-        if self.active_tool.as_deref() == Some(name) {
-            self.active_tool = None;
-        }
         let tool_index = self.tool_outputs.iter().position(|tool| tool.tool_id == id);
+        if let Some(index) = tool_index {
+            let completing_was_running =
+                self.tool_outputs[index].status == crate::output::ToolDisplayStatus::Running;
+            if completing_was_running {
+                self.active_tool = self.latest_running_tool_except(index);
+            }
+        }
         let mut completed_output = output.to_string();
         if let Some(index) = tool_index {
             let (duration_ms, summary) = {
@@ -301,7 +325,11 @@ impl App {
 
     pub fn on_turn_complete(&mut self) {
         if self.thinking.active {
-            self.finish_thinking();
+            if self.thinking.transient {
+                self.discard_thinking_preview();
+            } else {
+                self.finish_thinking();
+            }
         }
         self.is_generating = false;
         self.output.append_line("");
@@ -311,7 +339,11 @@ impl App {
 
     pub fn on_error(&mut self, message: &str) {
         if self.thinking.active {
-            self.finish_thinking();
+            if self.thinking.transient {
+                self.discard_thinking_preview();
+            } else {
+                self.finish_thinking();
+            }
         }
         self.output.append_line(&format!("[error] {message}"));
         self.is_generating = false;
@@ -373,98 +405,6 @@ impl App {
         } else {
             self.toggle_latest_thinking_block();
         }
-    }
-
-    pub fn open_thinking_archive(&mut self) {
-        self.thinking_archive = self.thinking_blocks.len().checked_sub(1);
-    }
-
-    pub fn close_thinking_archive(&mut self) {
-        self.thinking_archive = None;
-    }
-
-    pub fn select_previous_thinking_block(&mut self) {
-        if let Some(selected) = self.thinking_archive.as_mut() {
-            *selected = selected.saturating_sub(1);
-        }
-    }
-
-    pub fn select_next_thinking_block(&mut self) {
-        if let Some(selected) = self.thinking_archive.as_mut() {
-            *selected = (*selected + 1).min(self.thinking_blocks.len().saturating_sub(1));
-        }
-    }
-
-    pub fn thinking_archive_selection(&self) -> Option<usize> {
-        self.thinking_archive
-    }
-
-    pub fn thinking_archive_block(&self) -> Option<&ThinkingBlock> {
-        self.thinking_archive
-            .and_then(|selected| self.thinking_blocks.get(selected))
-    }
-
-    pub fn expand_selected_thinking_block(&mut self) {
-        let Some(selected) = self.thinking_archive.take() else {
-            return;
-        };
-        self.expand_thinking_block(selected);
-    }
-
-    fn toggle_latest_thinking_block(&mut self) {
-        let Some(index) = self.thinking_blocks.len().checked_sub(1) else {
-            return;
-        };
-        if self.thinking_blocks[index].expanded {
-            self.collapse_thinking_block(index);
-        } else {
-            self.expand_thinking_block(index);
-        }
-    }
-
-    fn expand_thinking_block(&mut self, index: usize) {
-        if self
-            .thinking_blocks
-            .get(index)
-            .is_none_or(|block| block.expanded)
-        {
-            return;
-        }
-        self.collapse_all_thinking_blocks();
-        let (marker_line, lines) = {
-            let block = &self.thinking_blocks[index];
-            (
-                block.marker_line,
-                block
-                    .text
-                    .lines()
-                    .map(|line| format!("  {line}"))
-                    .collect::<Vec<_>>(),
-            )
-        };
-        self.output.insert_lines_after(marker_line, &lines);
-        self.thinking_blocks[index].expanded = true;
-        self.shift_markers_after(marker_line, lines.len() as isize);
-    }
-
-    fn collapse_all_thinking_blocks(&mut self) {
-        if let Some(index) = self.thinking_blocks.iter().position(|block| block.expanded) {
-            self.collapse_thinking_block(index);
-        }
-    }
-
-    fn collapse_thinking_block(&mut self, index: usize) {
-        let Some(block) = self.thinking_blocks.get(index) else {
-            return;
-        };
-        if !block.expanded {
-            return;
-        }
-        let marker_line = block.marker_line;
-        let line_count = block.text.lines().count();
-        self.output.remove_lines_after(marker_line, line_count);
-        self.thinking_blocks[index].expanded = false;
-        self.shift_markers_after(marker_line, -(line_count as isize));
     }
 
     // -- rendering helpers --------------------------------------------------

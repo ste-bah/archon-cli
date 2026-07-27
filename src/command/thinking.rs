@@ -1,42 +1,17 @@
 //! TASK-AGS-POST-6-BODIES-B02-THINKING: /thinking slash-command handler
 //! (Option C, DIRECT pattern body-migrate).
 //!
-//! Real `CommandHandler` impl moved here from the `declare_handler!`
-//! stub at `src/command/registry.rs:587` and the legacy match arms at
-//! `src/command/slash.rs:75-90` (two arms — `"/thinking on" |
-//! "/thinking"` and `"/thinking off"`). The shipped body wrote to
-//! `SlashCommandContext::show_thinking` (an `Arc<AtomicBool>`) and then
-//! awaited two `tui_tx.send(..).await` emissions per arm. The migrated
-//! body performs the same atomic store and the same two TuiEvent
-//! emissions — only the emission primitive changes (`send().await` ->
-//! `try_send(..)`, B01-FAST precedent).
+//! Real `CommandHandler` implementation moved here from the legacy slash
+//! dispatcher. The handler stores the display preference and emits one
+//! semantic `ThinkingToggle` event; the TUI event handler owns the matching
+//! informational transcript text so UI messaging cannot terminate an active
+//! model-thinking block.
 //!
 //! # Why DIRECT (no snapshot, no effect slot)?
 //!
-//! The shipped `/thinking` body performed:
-//!   1. `ctx.show_thinking.store(bool, Ordering::Relaxed)` — sync
-//!      atomic write.
-//!   2. `tui_tx.send(TuiEvent::ThinkingToggle(bool)).await` — emission
-//!      only.
-//!   3. `tui_tx.send(TuiEvent::TextDelta(format!("\n…\n"))).await` —
-//!      emission only.
-//!
-//! Step (1) is a sync atomic store on a shared `Arc<AtomicBool>`; no
-//! `tokio::sync::Mutex` guard is involved. Steps (2) and (3) are output
-//! channel sends, not state mutations. Consequently:
-//!
-//! - NO `ThinkingSnapshot` type (nothing to pre-compute inside an async
-//!   guard — there is no read-side guard at all).
-//! - NO `CommandEffect` variant (the mutation is a sync atomic store,
-//!   not a write-back through `tokio::sync::Mutex`).
-//! - A new `CommandContext::show_thinking: Option<Arc<AtomicBool>>`
-//!   field populated UNCONDITIONALLY by `build_command_context`,
-//!   mirroring the AGS-815 `session_id`, AGS-817 `memory`, and
-//!   B01-FAST `fast_mode_shared` cross-cutting precedent.
-//!
-//! Matches B01-FAST architecture exactly — the only structural
-//! difference is the subcommand parse step (B02 reads `args.first()`,
-//! B01 ignores `_args`).
+//! The shared preference is an `Arc<AtomicBool>`, so the handler needs no
+//! asynchronous state guard or deferred write-back effect. This matches the
+//! existing DIRECT command-handler pattern.
 //!
 //! # Subcommand parse
 //!
@@ -44,41 +19,18 @@
 //!
 //! | match                    | action                  |
 //! |--------------------------|-------------------------|
-//! | `Some("on")` or `None`   | enable (set true)       |
-//! | `Some("off")`            | disable (set false)     |
-//! | `Some(_)` (anything else)| **silent no-op**        |
+//! | `Some("on")` or `None`   | enable                  |
+//! | `Some("off")`            | disable                 |
+//! | `Some("archive")`        | open thinking archive   |
+//! | `Some(_)`                | silent no-op            |
 //!
-//! `None` defaults to enable so that `/thinking` (alone, no args) keeps
-//! the legacy `"/thinking on" | "/thinking"` arm semantics from
-//! shipped slash.rs:75. The unknown-arg silent-noop preserves legacy
-//! fall-through: in the shipped flow, `/thinking foo` matched neither
-//! arm and fell through to the default slash handler (which returned
-//! `false` -> "unknown command"); in the migrated flow ALL `/thinking*`
-//! inputs route to ThinkingHandler, so the silent return below is what
-//! preserves the observable "no state change, no output" behavior. No
-//! error message, usage hint, or any output is emitted — the legacy
-//! body has none and B02 must not introduce any.
+//! Bare `/thinking` retains the legacy enable behavior. Unknown arguments
+//! leave state unchanged and emit no events.
 //!
-//! # Byte-for-byte output preservation
-//!
-//! Every emitted string is faithful to the deleted slash.rs:75-90 body:
-//!
-//! - ENABLE  -> `"\nThinking display enabled.\n"` (slash.rs:79 literal,
-//!              including the leading and trailing `\n` wrap)
-//! - DISABLE -> `"\nThinking display disabled.\n"` (slash.rs:87 literal,
-//!              same `\n` wrap)
-//!
-//! The `\n` wrap is preserved exactly — Sherlock Gate 3 will MD5 the
-//! enabled/disabled strings against the shipped slash.rs literals to
-//! prove byte equivalence.
-//!
-//! # Event order (CRITICAL)
-//!
-//! Event emission order mirrors the legacy flow at slash.rs:77-80 and
-//! :85-88: `TuiEvent::ThinkingToggle(bool)` is emitted FIRST, then
-//! `TuiEvent::TextDelta(msg)`. The TUI consumes ThinkingToggle to
-//! flip a renderer flag before TextDelta lands — reordering would
-//! visually surface as a one-frame stale render.
+//! Informational text is rendered by the TUI's `ThinkingToggle` handler,
+//! preserving the existing enabled/disabled messages without sending them as
+//! model `TextDelta` data. This distinction keeps an in-flight thinking block
+//! active when the display preference changes.
 //!
 //! # try_send vs send().await
 //!
@@ -135,7 +87,7 @@ impl CommandHandler for ThinkingHandler {
             // at slash.rs:83.
             Some("off") => false,
             Some("archive") => {
-                let _ = ctx.tui_tx.send(TuiEvent::OpenThinkingArchive);
+                ctx.emit(TuiEvent::OpenThinkingArchive);
                 return Ok(());
             }
             // Unknown arg: silent return. NO state change, NO events,
@@ -151,22 +103,10 @@ impl CommandHandler for ThinkingHandler {
         //    Ordering::Relaxed)`).
         shared.store(enable, Ordering::Relaxed);
 
-        // 4. Event emission. Order MATTERS: ThinkingToggle FIRST, then
-        //    TextDelta. Mirrors legacy slash.rs:77-80 and :85-88
-        //    sequence byte-for-byte. The TUI consumes ThinkingToggle
-        //    to flip a renderer flag before the TextDelta lands.
-        let _ = ctx.tui_tx.send(TuiEvent::ThinkingToggle(enable));
-
-        // 5. Byte-for-byte preserved format strings from slash.rs:79
-        //    and slash.rs:87. The leading and trailing `\n` wrap is
-        //    PRESERVED — Sherlock Gate 3 will MD5 these literals
-        //    against the shipped strings to prove byte equivalence.
-        let msg = if enable {
-            "\nThinking display enabled.\n"
-        } else {
-            "\nThinking display disabled.\n"
-        };
-        let _ = ctx.tui_tx.send(TuiEvent::TextDelta(msg.to_string()));
+        // 4. Emit one semantic event. The TUI event handler updates the
+        //    renderer flag and appends informational transcript text without
+        //    routing that UI message through model TextDelta semantics.
+        ctx.emit(TuiEvent::ThinkingToggle(enable));
 
         Ok(())
     }
@@ -184,9 +124,9 @@ mod tests {
     // `make_thinking_ctx` helper added to `test_support.rs` in this
     // gate.
     //
-    // Event-order invariant: every test that asserts emissions checks
-    // ThinkingToggle FIRST, then TextDelta. Reordering would be a
-    // legacy-divergence regression — Gate 3 sherlock will verify.
+    // Emission invariant: enable/disable each produce exactly one semantic
+    // ThinkingToggle event. Informational transcript text belongs to the TUI
+    // event handler, not this command handler.
 
     use super::*;
     use crate::command::registry::CommandHandler;
@@ -208,20 +148,9 @@ mod tests {
         );
 
         let events = drain_tui_events(&mut rx);
-        // Event order invariant: ThinkingToggle FIRST, then TextDelta.
         assert!(
-            matches!(events.first(), Some(TuiEvent::ThinkingToggle(true))),
-            "first event must be ThinkingToggle(true) (legacy \
-             slash.rs:77 emits ThinkingToggle BEFORE TextDelta); got: {:?}",
-            events
-        );
-        let matched = events
-            .iter()
-            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s.contains("Thinking display enabled")));
-        assert!(
-            matched,
-            "expected TuiEvent::TextDelta containing 'Thinking display enabled.', \
-             got: {:?}",
+            matches!(events.as_slice(), [TuiEvent::ThinkingToggle(true)]),
+            "thinking enable must emit one semantic toggle event; got: {:?}",
             events
         );
     }
@@ -240,20 +169,9 @@ mod tests {
         );
 
         let events = drain_tui_events(&mut rx);
-        // Event order invariant: ThinkingToggle FIRST, then TextDelta.
         assert!(
-            matches!(events.first(), Some(TuiEvent::ThinkingToggle(false))),
-            "first event must be ThinkingToggle(false) (legacy \
-             slash.rs:85 emits ThinkingToggle BEFORE TextDelta); got: {:?}",
-            events
-        );
-        let matched = events.iter().any(
-            |e| matches!(e, TuiEvent::TextDelta(s) if s.contains("Thinking display disabled")),
-        );
-        assert!(
-            matched,
-            "expected TuiEvent::TextDelta containing 'Thinking display disabled.', \
-             got: {:?}",
+            matches!(events.as_slice(), [TuiEvent::ThinkingToggle(false)]),
+            "thinking disable must emit one semantic toggle event; got: {:?}",
             events
         );
     }
@@ -271,19 +189,9 @@ mod tests {
         );
 
         let events = drain_tui_events(&mut rx);
-        // Event order invariant: ThinkingToggle FIRST, then TextDelta.
         assert!(
-            matches!(events.first(), Some(TuiEvent::ThinkingToggle(true))),
-            "empty args must emit ThinkingToggle(true) FIRST; got: {:?}",
-            events
-        );
-        let matched = events
-            .iter()
-            .any(|e| matches!(e, TuiEvent::TextDelta(s) if s.contains("Thinking display enabled")));
-        assert!(
-            matched,
-            "empty args must emit TextDelta containing 'Thinking display enabled.', \
-             got: {:?}",
+            matches!(events.as_slice(), [TuiEvent::ThinkingToggle(true)]),
+            "bare thinking command must emit one semantic enable event; got: {:?}",
             events
         );
     }

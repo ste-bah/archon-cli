@@ -3,6 +3,7 @@
 //! Relocated from `src/output.rs` (ThinkingState section, L7-L97 + tests
 //! L499-L569) per REM-2h.
 
+use std::cell::Cell;
 use std::time::Instant;
 
 /// A completed, bounded thinking block retained for the current session.
@@ -21,6 +22,8 @@ pub struct ThinkingState {
     pub accumulated: String,
     /// Currently receiving thinking deltas.
     pub active: bool,
+    /// Active content is an unapproved interactive preview.
+    pub transient: bool,
     /// User toggled to see the full text.
     pub expanded: bool,
     /// Animation frame for the dot shimmer (Knight Rider style).
@@ -33,6 +36,8 @@ pub struct ThinkingState {
     pub scroll_offset: usize,
     /// Absolute wrapped-row position used after jumping to the top.
     scroll_from_top: Option<usize>,
+    /// Last rendered maximum scroll, used to restore follow mode from top-origin navigation.
+    last_max_scroll: Cell<usize>,
     /// Whether expanded thinking is detached from auto-follow.
     pub scroll_locked: bool,
 }
@@ -51,12 +56,14 @@ impl ThinkingState {
         Self {
             accumulated: String::new(),
             active: false,
+            transient: false,
             expanded: false,
             dot_offset: 0,
             start: None,
             last_duration_ms: 0,
             scroll_offset: 0,
             scroll_from_top: None,
+            last_max_scroll: Cell::new(0),
             scroll_locked: false,
         }
     }
@@ -71,6 +78,26 @@ impl ThinkingState {
         }
         self.accumulated.push_str(text);
         self.retain_bounded_tail();
+    }
+
+    /// Append an unapproved thinking preview for interactive display.
+    pub fn on_transient_thinking_delta(&mut self, text: &str) {
+        if !self.active {
+            self.transient = true;
+        }
+        self.on_thinking_delta(text);
+    }
+
+    /// Mark the active preview as approved for normal completion/archive.
+    pub fn commit_preview(&mut self) {
+        self.transient = false;
+    }
+
+    /// Clear an unapproved preview without creating history.
+    pub fn discard_preview(&mut self) {
+        if self.transient {
+            self.reset();
+        }
     }
 
     /// Mark the thinking phase as complete.
@@ -110,8 +137,13 @@ impl ThinkingState {
     }
 
     pub fn scroll_down(&mut self, amount: u16) {
-        if let Some(position) = self.scroll_from_top.as_mut() {
-            *position = position.saturating_add(amount as usize);
+        if let Some(position) = self.scroll_from_top {
+            let next = position.saturating_add(amount as usize);
+            if next >= self.last_max_scroll.get() {
+                self.reset_scroll();
+            } else {
+                self.scroll_from_top = Some(next);
+            }
             return;
         }
         self.scroll_offset = self.scroll_offset.saturating_sub(amount as usize);
@@ -132,6 +164,7 @@ impl ThinkingState {
 
     pub fn effective_scroll(&self, total_rows: usize, visible_height: u16) -> usize {
         let max_scroll = total_rows.saturating_sub(visible_height as usize);
+        self.last_max_scroll.set(max_scroll);
         if let Some(position) = self.scroll_from_top {
             return position.min(max_scroll);
         }
@@ -152,6 +185,7 @@ impl ThinkingState {
     pub fn reset(&mut self) {
         self.accumulated.clear();
         self.active = false;
+        self.transient = false;
         self.expanded = false;
         self.dot_offset = 0;
         self.start = None;
@@ -213,6 +247,20 @@ mod tests {
         assert!(ts.expanded);
         ts.toggle_expand();
         assert!(!ts.expanded);
+    }
+
+    #[test]
+    fn page_down_to_tail_restores_follow_for_later_thinking() {
+        let mut ts = ThinkingState::new();
+        ts.on_thinking_delta("initial");
+        ts.scroll_to_top();
+        assert_eq!(ts.effective_scroll(20, 5), 0);
+
+        ts.scroll_down(100);
+        assert_eq!(ts.effective_scroll(20, 5), 15);
+        assert!(!ts.scroll_locked);
+
+        assert_eq!(ts.effective_scroll(30, 5), 25);
     }
 
     #[test]
