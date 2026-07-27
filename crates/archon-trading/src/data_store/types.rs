@@ -1,6 +1,7 @@
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StoredDatasetRecord {
     pub dataset_id: String,
     pub version: String,
@@ -49,6 +50,7 @@ pub struct StoredDatasetRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StoredOhlcvDataset {
     pub record: StoredDatasetRecord,
     pub metadata: DatasetMetadata,
@@ -56,6 +58,7 @@ pub struct StoredOhlcvDataset {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PersistentDatasetRegistry {
     #[serde(rename = "schema", alias = "schema_version")]
     pub schema_version: String,
@@ -90,6 +93,7 @@ pub enum DataStoreError {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RegistryMigrationReport {
     #[serde(rename = "schema", alias = "schema_version")]
     pub schema_version: String,

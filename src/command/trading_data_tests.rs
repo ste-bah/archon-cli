@@ -237,6 +237,80 @@ fn fetch_native_reports_yfinance_degraded_fallback() {
     assert!(!TradingDataLake::new(temp.path()).registry_path().exists());
 }
 
+#[test]
+fn tradingview_capability_reports_can_fetch() {
+    let temp = tempfile::tempdir().unwrap();
+    let output = render_data(&TradingCliDataAction::Capability {
+        target: Some(temp.path().to_path_buf()),
+        provider: "tradingview".into(),
+        symbol: "CME_MINI:ES1!".into(),
+        timeframe: "1D".into(),
+        json: true,
+    })
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+    assert_eq!(report["provider"], "tradingview");
+    assert_eq!(report["can_fetch"], true);
+    assert!(report["unavailable_reason"].is_null());
+}
+
+#[test]
+fn tradingview_snapshot_persists_provider_snapshot() {
+    let temp = tempfile::tempdir().unwrap();
+    let fixture_path = temp.path().join("snapshot-fixture.json");
+    std::fs::write(
+        &fixture_path,
+        r#"{"mcp_tool_results":{"tv_health_check":{"connected":true},"chart_get_state":{"symbol":"CME_MINI:ES1!"},"data_get_ohlcv":{"count":1}}}"#,
+    )
+    .unwrap();
+    unsafe { std::env::set_var("ARCHON_TRADINGVIEW_SNAPSHOT_FIXTURE", &fixture_path) };
+    let output = render_data(&TradingCliDataAction::Snapshot {
+        target: Some(temp.path().to_path_buf()),
+        provider: "tradingview".into(),
+        symbol: "CME_MINI:ES1!".into(),
+    })
+    .unwrap();
+    unsafe { std::env::remove_var("ARCHON_TRADINGVIEW_SNAPSHOT_FIXTURE") };
+    let report: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+    assert_eq!(report["can_fetch"], true);
+    let snapshot_path = temp.path().join(report["snapshot_path"].as_str().unwrap());
+    let snapshot: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(snapshot_path).unwrap()).unwrap();
+    assert_eq!(snapshot["snapshot"]["payload"]["provider"], "tradingview");
+    assert_eq!(
+        snapshot["snapshot"]["payload"]["mcp_state"],
+        "provider_state_fetched"
+    );
+    assert!(snapshot["snapshot"]["payload"]["mcp_tool_results"].is_object());
+    assert_eq!(snapshot["snapshot"]["payload"]["stale_after_seconds"], 300);
+    assert_eq!(snapshot["snapshot"]["payload"]["stale_after_5_min"], false);
+}
+
+#[test]
+fn tradingview_snapshot_fails_closed_without_provider_state() {
+    let temp = tempfile::tempdir().unwrap();
+    let missing_fixture = temp.path().join("missing-snapshot.json");
+    unsafe { std::env::set_var("ARCHON_TRADINGVIEW_SNAPSHOT_FIXTURE", &missing_fixture) };
+    let output = render_data(&TradingCliDataAction::Snapshot {
+        target: Some(temp.path().to_path_buf()),
+        provider: "tradingview".into(),
+        symbol: "CME_MINI:ES1!".into(),
+    })
+    .unwrap();
+    unsafe { std::env::remove_var("ARCHON_TRADINGVIEW_SNAPSHOT_FIXTURE") };
+    let report: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+    assert_eq!(report["can_fetch"], false);
+    assert!(
+        report["unavailable_reason"]
+            .as_str()
+            .unwrap()
+            .contains("No such file")
+    );
+}
+
 fn test_store_request() -> StoreOhlcvRequest {
     StoreOhlcvRequest {
         metadata: DatasetMetadata {

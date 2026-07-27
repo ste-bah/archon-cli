@@ -1,9 +1,6 @@
 use super::*;
 
-#[cfg(not(test))]
-const SERIES_OVERLAP_MIN_ROWS: usize = 5;
-#[cfg(test)]
-const SERIES_OVERLAP_MIN_ROWS: usize = 2;
+pub(super) const COVERAGE_MINIMUM_ROWS: usize = 200;
 pub(super) fn trading_core_instruments() -> Vec<String> {
     ["ES", "NQ", "SPY", "QQQ", "BTCUSDT", "ETHUSDT"]
         .into_iter()
@@ -41,11 +38,6 @@ pub(super) fn coverage_cell(
                 &mut rejected_reasons,
             );
             rejected_reasons.push(provider_unavailable_reason(&capability));
-            continue;
-        }
-        let freshness = snapshot_freshness_for(registry, provider, instrument, checked_at);
-        if freshness != SnapshotFreshness::Fresh {
-            rejected_reasons.push(snapshot_gap_reason(provider, instrument, freshness));
             continue;
         }
         for record in records {
@@ -165,6 +157,7 @@ pub(super) fn validate_coverage_matrix_complete(
                 || cell.dataset_id.is_none()
                 || cell.dataset_checksum.as_deref().is_none_or(str::is_empty)
                 || !cell.production_eligible
+                || cell.row_count < COVERAGE_MINIMUM_ROWS as u64
                 || cell.provider_symbol.trim().is_empty()
                 || cell.timeframe.trim().is_empty()
         })
@@ -175,7 +168,7 @@ pub(super) fn validate_coverage_matrix_complete(
                 cell.timeframe,
                 cell.fallback_reason
                     .as_deref()
-                    .unwrap_or("no provider-native validated registry dataset")
+                    .unwrap_or("no provider-native validated registry dataset meeting 200-row live-fetch coverage minimum")
             )
         })
         .collect::<Vec<_>>();
@@ -238,7 +231,7 @@ fn record_matches_coverage_cell(
         && record.status == DatasetStatus::Healthy
 }
 
-fn coverage_record_issues(
+pub(super) fn coverage_record_issues(
     lake: &TradingDataLake,
     record: &StoredDatasetRecord,
     instrument: &str,
@@ -252,11 +245,12 @@ fn coverage_record_issues(
     {
         return Err(issues);
     }
-    match lake.load_ohlcv(&record.dataset_id, &record.version) {
+    match load_coverage_record_dataset(&lake.root, record) {
         Ok(dataset) => {
             append_dataset_gate_issues(&lake.root, record, &dataset, &mut issues);
             append_coverage_identity_issues(&dataset.metadata, instrument, timeframe, &mut issues);
-            append_series_overlap_issues(record, &dataset, &mut issues);
+            append_coverage_volume_issues(record, &dataset, &mut issues);
+            append_live_fetch_provenance_issues(&lake.root, record, &mut issues);
         }
         Err(error) => issues.push(format!("dataset unreadable: {error:?}")),
     }
@@ -267,24 +261,71 @@ fn coverage_record_issues(
     }
 }
 
-fn append_series_overlap_issues(
+fn load_coverage_record_dataset(
+    root: &Path,
+    record: &StoredDatasetRecord,
+) -> Result<StoredOhlcvDataset, DataStoreError> {
+    verify_artifacts(root, record)?;
+    let metadata = read_dataset_metadata(root, record)?;
+    validate_metadata(&metadata)
+        .map_err(|err| DataStoreError::InvalidMetadata(format!("{err:?}")))?;
+    let bars = read_jsonl_bars(&root.join(&record.normalized_path))?;
+    Ok(StoredOhlcvDataset {
+        record: record.clone(),
+        metadata,
+        bars,
+    })
+}
+
+fn append_coverage_volume_issues(
     record: &StoredDatasetRecord,
     dataset: &StoredOhlcvDataset,
     issues: &mut Vec<String>,
 ) {
-    if record.bars < SERIES_OVERLAP_MIN_ROWS {
+    if record.bars < COVERAGE_MINIMUM_ROWS {
         issues.push(format!(
-            "registry bars {} below required series overlap minimum {}",
-            record.bars, SERIES_OVERLAP_MIN_ROWS
+            "registry bars {} below required coverage minimum {}",
+            record.bars, COVERAGE_MINIMUM_ROWS
         ));
     }
-    if dataset.bars.len() < SERIES_OVERLAP_MIN_ROWS {
+    if dataset.bars.len() < COVERAGE_MINIMUM_ROWS {
         issues.push(format!(
-            "normalized payload rows {} below required series overlap minimum {}",
+            "normalized payload rows {} below required coverage minimum {}",
             dataset.bars.len(),
-            SERIES_OVERLAP_MIN_ROWS
+            COVERAGE_MINIMUM_ROWS
         ));
     }
+}
+
+fn append_live_fetch_provenance_issues(
+    root: &Path,
+    record: &StoredDatasetRecord,
+    issues: &mut Vec<String>,
+) {
+    append_provenance_text_issues(root, &record.raw_request_path, "raw request", issues);
+    append_provenance_text_issues(root, &record.raw_response_path, "raw response", issues);
+}
+
+fn append_provenance_text_issues(root: &Path, path: &str, label: &str, issues: &mut Vec<String>) {
+    let text = match std::fs::read_to_string(root.join(path)) {
+        Ok(text) => text,
+        Err(_) => {
+            issues.push(format!("{label} provenance unreadable: {path}"));
+            return;
+        }
+    };
+    if contains_non_live_provenance_marker(&text) {
+        issues.push(format!(
+            "{label} provenance indicates fixture/mock/synthetic/placeholder source: {path}"
+        ));
+    }
+}
+
+fn contains_non_live_provenance_marker(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    ["fixture", "mock", "synthetic", "placeholder"]
+        .iter()
+        .any(|marker| lower.contains(marker))
 }
 
 fn append_coverage_identity_issues(
@@ -305,57 +346,6 @@ fn append_coverage_identity_issues(
             metadata.timeframe
         ));
     }
-}
-
-fn snapshot_freshness_for(
-    registry: &PersistentDatasetRegistry,
-    provider: &str,
-    instrument: &str,
-    generated_at: &str,
-) -> SnapshotFreshness {
-    let generated_at = unix_seconds(generated_at).unwrap_or(i64::MAX);
-    snapshot_freshness(
-        snapshot_captured_at(registry, provider, instrument),
-        generated_at,
-    )
-}
-
-fn snapshot_captured_at(
-    registry: &PersistentDatasetRegistry,
-    provider: &str,
-    instrument: &str,
-) -> Option<i64> {
-    registry
-        .snapshots
-        .values()
-        .filter_map(|artifact| matching_snapshot_captured_at(artifact, provider, instrument))
-        .max()
-}
-
-fn matching_snapshot_captured_at(
-    artifact: &serde_json::Value,
-    provider: &str,
-    instrument: &str,
-) -> Option<i64> {
-    let snapshot = artifact.get("snapshot").unwrap_or(artifact);
-    let artifact_provider = snapshot.get("provider")?.as_str()?;
-    let artifact_instrument = snapshot.get("canonical_instrument")?.as_str()?;
-    if !artifact_provider.eq_ignore_ascii_case(provider) || artifact_instrument != instrument {
-        return None;
-    }
-    snapshot.get("captured_at_unix_seconds")?.as_i64()
-}
-
-fn unix_seconds(value: &str) -> Option<i64> {
-    chrono::DateTime::parse_from_rfc3339(value)
-        .map(|timestamp| timestamp.timestamp())
-        .ok()
-}
-
-fn snapshot_gap_reason(provider: &str, instrument: &str, freshness: SnapshotFreshness) -> String {
-    format!(
-        "{provider}:{instrument} current snapshot freshness is {freshness:?}; snapshots older than 5 minutes are stale"
-    )
 }
 
 fn provider_unavailable_reason(capability: &ProviderCapabilityResult) -> String {
@@ -411,7 +401,7 @@ mod tests {
             native_interval: true,
             production_eligible: true,
             quality_status: "passed".into(),
-            row_count: 100,
+            row_count: COVERAGE_MINIMUM_ROWS as u64,
             coverage_start: "2026-01-01T00:00:00Z".into(),
             coverage_end: "2026-04-10T00:00:00Z".into(),
             fallback_reason: None,
@@ -430,9 +420,25 @@ mod tests {
     }
 
     #[test]
-    fn d47_production_eligible_coverage_requires_symbol_and_interval() {
+    fn d47_production_eligible_coverage_requires_symbol_interval_and_volume() {
         assert!(validate_coverage_matrix_complete(&matrix(eligible_cell("", "1D"))).is_err());
         assert!(validate_coverage_matrix_complete(&matrix(eligible_cell("ES1!", ""))).is_err());
+        let mut short = eligible_cell("ES1!", "1D");
+        short.row_count = COVERAGE_MINIMUM_ROWS as u64 - 1;
+        assert!(validate_coverage_matrix_complete(&matrix(short)).is_err());
         assert!(validate_coverage_matrix_complete(&matrix(eligible_cell("ES1!", "1D"))).is_ok());
+    }
+
+    #[test]
+    fn tdl080_non_live_provenance_markers_are_rejected() {
+        assert!(contains_non_live_provenance_marker(
+            "TASK-TDL-080 fixture remediation"
+        ));
+        assert!(contains_non_live_provenance_marker(
+            "synthetic placeholder payload"
+        ));
+        assert!(!contains_non_live_provenance_marker(
+            "captured live provider response"
+        ));
     }
 }

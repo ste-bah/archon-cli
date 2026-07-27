@@ -29,10 +29,12 @@ pub enum DataType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DatasetStatus {
     Healthy,
+    #[serde(alias = "Quarantined")]
     Degraded,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CoverageWindow {
     pub start: String,
     pub end: String,
@@ -41,6 +43,7 @@ pub struct CoverageWindow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GapSummary {
     pub missing_bars: u64,
     pub expected_bars: u64,
@@ -57,6 +60,7 @@ impl GapSummary {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DatasetChecksums {
     #[serde(default)]
     pub raw_sha256: String,
@@ -67,6 +71,7 @@ pub struct DatasetChecksums {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DatasetArtifactPaths {
     #[serde(default)]
     pub raw: String,
@@ -99,6 +104,7 @@ pub struct DatasetSourceMetadata {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DatasetMetadata {
     #[serde(default = "dataset_schema")]
     #[serde(rename = "schema", alias = "schema_version")]
@@ -144,6 +150,7 @@ pub struct DatasetMetadata {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct VersionedDataset {
     pub metadata: DatasetMetadata,
     pub content_hash: String,
@@ -164,6 +171,7 @@ pub enum DataLakeError {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DatasetRegistry {
     datasets: BTreeMap<String, VersionedDataset>,
 }

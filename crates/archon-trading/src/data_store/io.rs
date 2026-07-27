@@ -62,7 +62,6 @@ pub(super) fn normalized_bars_checksum(bars: &[OhlcvBar]) -> Result<String, Data
 
 pub(super) fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, DataStoreError> {
     let text = std::fs::read_to_string(path).map_err(io_error)?;
-    let text = text.replace("\n  \"schema_version\":", "\n  \"_schema_version\":");
     serde_json::from_str(&text).map_err(|err| DataStoreError::Json(err.to_string()))
 }
 

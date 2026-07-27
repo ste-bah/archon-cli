@@ -19,8 +19,8 @@ mod request;
 
 use http::fetch_openbb_response;
 use metadata::{
-    apply_unavailable_capability_reason, native_metadata_from_bars, native_quality_status,
-    probed_history_horizon, provider_notes, unavailable_report,
+    apply_unavailable_capability_reason, native_metadata_from_bars, native_production_eligible,
+    native_quality_status, probed_history_horizon, provider_notes, unavailable_report,
 };
 use parse::bars_from_openbb_response;
 use request::{openbb_native_request, select_fetch_window};
@@ -79,6 +79,7 @@ pub(crate) fn fetch_native_with_base_url(
         }
     };
     let fetched_at = chrono::Utc::now().to_rfc3339();
+    let production_eligible = native_production_eligible(provider, timeframe, &request, bars.len());
     let record = TradingDataLake::new(root)
         .store_ohlcv(StoreOhlcvRequest {
             metadata: native_metadata_from_bars(
@@ -87,12 +88,7 @@ pub(crate) fn fetch_native_with_base_url(
             bars,
             raw_body: response.body,
             raw_format: OhlcvFormat::Json,
-            raw_request: json!({
-                "provider": provider.trim().to_ascii_lowercase(),
-                "openbb_provider": request.openbb_provider,
-                "endpoint": request.endpoint,
-                "params": request.params,
-            }),
+            raw_request: raw_request_json(provider, &request),
             redacted_headers: response.redacted_headers,
             provider_notes: provider_notes(&request),
             created_at: fetched_at,
@@ -121,7 +117,7 @@ pub(crate) fn fetch_native_with_base_url(
         "provider_symbol": request.provider_symbol,
         "credential_state": request.credential_state,
         "quality_status": native_quality_status(provider),
-        "production_eligible": !provider.trim().eq_ignore_ascii_case("yfinance"),
+        "production_eligible": production_eligible,
         "stored_ohlcv": record,
         "diagnostic_only": provider.trim().eq_ignore_ascii_case("yfinance"),
         "fail_closed_behavior": "dataset was registered only after provider response parsed, validated, and artifact writes completed"
@@ -214,5 +210,32 @@ fn load_history_horizon(
             .then(|| record.get("history_horizon").cloned())
             .flatten()
             .and_then(|value| serde_json::from_value(value).ok())
+    })
+}
+
+fn raw_request_json(provider: &str, request: &request::OpenBbNativeRequest) -> serde_json::Value {
+    if request.openbb_provider.eq_ignore_ascii_case("yfinance") {
+        return json!({
+            "provider": provider.trim().to_ascii_lowercase(),
+            "provider_symbol": request.provider_symbol,
+            "source": "Yahoo Finance chart endpoint",
+            "url": format!("https://query1.finance.yahoo.com/v8/finance/chart/{}", request.provider_symbol),
+            "params": {
+                "start_date": request.params.get("start_date"),
+                "end_date": request.params.get("end_date"),
+                "interval": request.native_interval,
+                "events": "history",
+                "includeAdjustedClose": "true"
+            },
+            "quality_status": "degraded_fallback",
+            "production_eligible": false,
+            "promotion_eligible": false
+        });
+    }
+    json!({
+        "provider": provider.trim().to_ascii_lowercase(),
+        "openbb_provider": request.openbb_provider,
+        "endpoint": request.endpoint,
+        "params": request.params,
     })
 }

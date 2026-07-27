@@ -3,10 +3,10 @@ use crate::candle_backtest::{OhlcvBacktestReport, run_ohlcv_backtest};
 use crate::data_lake::{
     BacktestDataGateReport, CoverageCell, CoverageGap, CoverageMatrix, DatasetArtifactPaths,
     DatasetChecksums, DatasetMetadata, DatasetSourceMetadata, DatasetStatus,
-    ProviderCapabilityResult, SnapshotFreshness, ValidationCheck, ValidationReport,
-    ValidationSeverity, ValidationStatus, ValidationSummary, VersionedDataset,
-    can_fetch_symbol_timeframe, normalize_timeframe, provider_supports_native_timeframe,
-    snapshot_freshness, status_from_metadata, validate_metadata,
+    ProviderCapabilityResult, ValidationCheck, ValidationReport, ValidationSeverity,
+    ValidationStatus, ValidationSummary, VersionedDataset, can_fetch_symbol_timeframe,
+    normalize_timeframe, provider_supports_native_timeframe, status_from_metadata,
+    validate_metadata,
 };
 use crate::ohlcv::{
     OhlcvBacktestRequest, OhlcvBacktestRule, OhlcvBar, OhlcvDatasetRef, OhlcvFormat,
@@ -20,7 +20,9 @@ const REGISTRY_SCHEMA_V1: &str = "archon-trading-data-registry-v1";
 const REGISTRY_SCHEMA_V2: &str = "archon-trading-data-registry-v2";
 
 mod ahdm;
+mod ahdm_evidence;
 mod ahdm_methods;
+mod ahdm_readiness;
 #[cfg(test)]
 mod ahdm_test_support;
 mod artifact_schema;
@@ -31,16 +33,20 @@ mod io;
 mod migration;
 mod provider_methods;
 mod records;
+mod stooq;
 mod util;
 mod validation;
 
 use ahdm::*;
+use ahdm_evidence::*;
+use ahdm_readiness::*;
 use artifact_schema::*;
 use coverage::*;
 use gates::*;
 use io::*;
 use migration::*;
 use records::*;
+use stooq::*;
 pub use types::*;
 use util::*;
 use validation::*;
@@ -89,7 +95,14 @@ impl TradingDataLake {
                     "coverage checksum link {dataset_id}:{version}"
                 )));
             }
-            verify_artifacts(&root, record)?;
+            let lake = Self::new(root.clone());
+            coverage_record_issues(&lake, record, &cell.canonical_instrument, &cell.timeframe)
+                .map_err(|issues| {
+                    DataStoreError::IncompleteArtifactContract(format!(
+                        "coverage dataset {dataset_id}:{version} rejected: {}",
+                        issues.join("; ")
+                    ))
+                })?;
         }
         Ok(matrix)
     }
@@ -124,11 +137,13 @@ impl TradingDataLake {
         self.root.join(".archon/trading-lab/strategies/AHDM-v1")
     }
 
-    pub fn snapshot_dir(&self, provider: &str, symbol: &str) -> PathBuf {
-        self.data_root()
-            .join("snapshots")
-            .join(safe_path(provider))
-            .join(safe_path(symbol))
+    pub fn snapshot_dir(&self, provider: &str) -> PathBuf {
+        self.data_root().join("snapshots").join(safe_path(provider))
+    }
+
+    pub fn snapshot_path(&self, provider: &str, symbol: &str) -> PathBuf {
+        self.snapshot_dir(provider)
+            .join(format!("{}.json", safe_path(symbol)))
     }
 
     pub fn status(&self) -> Result<PersistentDatasetRegistry, DataStoreError> {
@@ -170,6 +185,7 @@ impl TradingDataLake {
         fail_closed_non_native_production_metadata(&mut metadata);
         fail_closed_derived_or_resampled_metadata(&mut metadata);
         fail_closed_yfinance_fallback_metadata(&mut metadata);
+        fail_closed_stooq_short_span_metadata(&mut metadata, &request.raw_request);
         let versioned = VersionedDataset {
             content_hash: metadata.checksum.clone(),
             status: status_from_metadata(&metadata),
@@ -247,8 +263,12 @@ impl TradingDataLake {
             .iter()
             .any(|issue| issue.contains("missing artifact"))
         {
-            let dataset = self.load_ohlcv(dataset_id, version)?;
-            append_dataset_gate_issues(&self.root, &record, &dataset, &mut issues);
+            match load_gate_dataset(&self.root, &record) {
+                Ok(dataset) => {
+                    append_dataset_gate_issues(&self.root, &record, &dataset, &mut issues)
+                }
+                Err(err) => issues.push(format!("artifact unreadable: {err:?}")),
+            }
         }
         let report = BacktestDataGateReport {
             dataset_id: dataset_id.into(),
@@ -435,8 +455,23 @@ fn registry_record_allows_production(
         && validation.is_ok_and(ValidationReport::allows_production)
 }
 
+fn load_gate_dataset(
+    root: &Path,
+    record: &StoredDatasetRecord,
+) -> Result<StoredOhlcvDataset, DataStoreError> {
+    let metadata: DatasetMetadata = read_json(&root.join(&record.metadata_path))?;
+    let bars = read_jsonl_bars(&root.join(&record.normalized_path))?;
+    Ok(StoredOhlcvDataset {
+        record: record.clone(),
+        metadata,
+        bars,
+    })
+}
+
 #[cfg(test)]
 mod artifact_contract_tests;
+#[cfg(test)]
+mod data_store_ahdm_helpers_tests;
 #[cfg(test)]
 mod data_store_ahdm_tests;
 #[cfg(test)]

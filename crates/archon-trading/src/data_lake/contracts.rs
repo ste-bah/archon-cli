@@ -37,7 +37,6 @@ pub struct ValidationSummary {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ValidationReport {
-    #[serde(rename = "schema", alias = "schema_version")]
     pub schema_version: String,
     pub dataset_id: String,
     pub version: String,
@@ -97,7 +96,7 @@ impl<'de> Deserialize<'de> for ValidationReport {
     {
         #[derive(Deserialize)]
         struct Wire {
-            #[serde(rename = "schema", alias = "schema_version")]
+            #[serde(alias = "schema")]
             schema_version: String,
             dataset_id: String,
             version: String,
@@ -294,21 +293,25 @@ pub fn can_fetch_symbol_timeframe(
         && !missing_input
         && !missing_credentials
         && !provider_blocked
-        && normalized_provider != "yfinance";
-    let can_fetch = false;
+        && matches!(
+            normalized_provider.as_str(),
+            "tradingview" | "openbb" | "polygon"
+        );
+    let can_fetch = production_eligible;
     let capability_native_interval = exact_native_interval
         && supported_provider
         && !missing_input
         && normalized_provider != "yfinance";
-    let unavailable_reason = Some(capability_unavailable_reason(
-        provider,
-        trimmed_symbol,
-        &normalized_timeframe,
-        (supported_provider, exact_native_interval),
-        (missing_credentials, provider_blocked),
-        &normalized_provider,
-        production_eligible,
-    ));
+    let unavailable_reason = (!can_fetch).then(|| {
+        capability_unavailable_reason(
+            provider,
+            trimmed_symbol,
+            &normalized_timeframe,
+            (supported_provider, exact_native_interval),
+            (missing_credentials, provider_blocked),
+            &normalized_provider,
+        )
+    });
     ProviderCapabilityResult {
         provider: normalized_provider,
         symbol: trimmed_symbol.to_string(),
@@ -338,7 +341,6 @@ fn capability_unavailable_reason(
     (supported_provider, native_interval): (bool, bool),
     (missing_credentials, provider_blocked): (bool, bool),
     normalized_provider: &str,
-    provider_implemented: bool,
 ) -> String {
     if let Some(reason) = http_status_unavailable_reason(symbol) {
         reason.into()
@@ -348,9 +350,6 @@ fn capability_unavailable_reason(
         "missing provider credentials".into()
     } else if normalized_provider == "yfinance" && native_interval {
         "yfinance fallback is degraded and ineligible for promotion".into()
-    } else if provider_implemented {
-        "capability record only; downstream provider fetch implementation proof is required before can_fetch=true"
-            .into()
     } else {
         unavailable_reason(
             provider,

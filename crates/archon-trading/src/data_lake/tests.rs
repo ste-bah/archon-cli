@@ -205,10 +205,11 @@ fn dataset_id_and_version_reject_spaces() {
 
 #[test]
 fn capability_results_fail_closed_without_full_fetch() {
-    let result = can_fetch_symbol_timeframe("tradingview", "ES", "240", "2026-06-10T00:00:00Z");
+    let result = can_fetch_symbol_timeframe("stooq", "ES", "240", "2026-06-10T00:00:00Z");
     assert!(!result.can_fetch);
-    assert!(result.native_interval);
+    assert!(!result.native_interval);
     assert!(result.unavailable_reason.is_some());
+    assert!(!result.production_eligible);
 }
 
 #[test]
@@ -315,6 +316,14 @@ fn dataset_id_must_encode_provider_instrument_timeframe_and_price_basis() {
     metadata.timeframe = "240".into();
     let err = validate_metadata(&metadata);
     assert!(err.is_ok(), "unexpected validation error: {err:?}");
+
+    metadata.dataset_id = "approvedprovider-SPY-240-tdl080-live200".into();
+    metadata.price_basis = "raw".into();
+    let err = validate_metadata(&metadata);
+    assert!(
+        err.is_ok(),
+        "expected captured live200 dataset id suffix to preserve provider identity: {err:?}"
+    );
 }
 
 #[test]
@@ -364,6 +373,43 @@ impl NativeOhlcvProvider for UnavailableProvider {
             reason: "snapshot unavailable".into(),
         })
     }
+}
+
+#[test]
+fn parses_stooq_csv_fixture_as_daily_native_bars() {
+    let csv = b"Date,Open,High,Low,Close,Volume\n2026-01-02,470,472,469,471,1000\n";
+    let normalized = String::from_utf8_lossy(csv)
+        .replace("Date,", "timestamp,")
+        .replace("Open,High,Low,Close,Volume", "open,high,low,close,volume")
+        .replace("2026-01-02,", "2026-01-02T00:00:00Z,");
+    let bars =
+        crate::ohlcv::parse_ohlcv(normalized.as_bytes(), crate::ohlcv::OhlcvFormat::Csv).unwrap();
+    assert_eq!(bars.len(), 1);
+    assert_eq!(bars[0].timestamp, "2026-01-02T00:00:00Z");
+    assert_eq!(bars[0].close, 471.0);
+}
+
+#[test]
+fn stooq_html_block_fixture_fails_closed_without_bars() {
+    let html = b"<!doctype html><html><body>verification required</body></html>";
+    let result = crate::ohlcv::parse_ohlcv(html, crate::ohlcv::OhlcvFormat::Csv);
+    assert!(result.is_err());
+}
+
+#[test]
+fn stooq_non_daily_interval_refuses_resampling() {
+    let result = can_fetch_symbol_timeframe("stooq", "SPY", "4H", "2026-06-10T00:00:00Z");
+    assert_eq!(result.timeframe, "240");
+    assert!(!result.native_interval);
+    assert!(!result.can_fetch);
+    assert!(!result.production_eligible);
+    assert!(
+        result
+            .unavailable_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("resampling")
+    );
 }
 
 #[test]

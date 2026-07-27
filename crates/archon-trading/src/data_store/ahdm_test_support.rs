@@ -439,6 +439,20 @@ fn core_coverage_request(instrument: &str, timeframe: &str) -> StoreOhlcvRequest
         instrument.into(),
         provider_symbol(instrument, "tradingview"),
     )]);
+    request.metadata.coverage.expected_bars = COVERAGE_MINIMUM_ROWS as u64;
+    request.metadata.gaps.expected_bars = COVERAGE_MINIMUM_ROWS as u64;
+    request.bars = (0..COVERAGE_MINIMUM_ROWS)
+        .map(|index| {
+            let month = (index / 28) + 1;
+            let day = (index % 28) + 1;
+            bar(
+                &format!("2026-{month:02}-{day:02}T00:00:00Z"),
+                100.0 + index as f64,
+            )
+        })
+        .collect();
+    request.raw_request = serde_json::json!({"source":"live provider fetch test capture"});
+    request.provider_notes = "captured live provider response".into();
     request
 }
 

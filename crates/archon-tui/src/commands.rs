@@ -132,6 +132,14 @@ mod tests {
                 description: "Trading data fetch native Polygon/OpenBB path".into(),
             },
             CommandInfo {
+                name: "/trading data fetch-native --provider yfinance".into(),
+                description: "Trading data fetch native yfinance degraded fallback path".into(),
+            },
+            CommandInfo {
+                name: "/trading data fetch-native --provider stooq".into(),
+                description: "Trading data fetch native Stooq exact-native or fail-closed path".into(),
+            },
+            CommandInfo {
                 name: "/cost".into(),
                 description: "Show cost".into(),
             },
@@ -219,8 +227,14 @@ mod tests {
                 .iter()
                 .any(|name| name.contains("data export --target") && name.contains("--out"))
         );
-        assert!(names.contains(&"/trading data fetch-native --provider polygon"));
         assert!(names.contains(&"/trading data providers --json"));
+        assert!(names.contains(
+            &"/trading data capability --provider openbb --symbol SPY --timeframe 1D --json"
+        ));
+        assert!(names.contains(&"/trading data snapshot --provider tradingview --symbol ES"));
+        assert!(names.contains(&"/trading data fetch-native --provider polygon"));
+        assert!(names.contains(&"/trading data fetch-native --provider yfinance"));
+        assert!(names.contains(&"/trading data fetch-native --provider stooq"));
         assert!(
             names
                 .iter()

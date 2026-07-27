@@ -37,7 +37,7 @@ fn ahdm_backtest_config(
     gate: &BacktestDataGateReport,
     dataset_ref: &serde_json::Value,
 ) -> serde_json::Value {
-    serde_json::json!({"schema_version": "archon-ahdm-backtest-config-v1", "config": config, "dataset": dataset_ref, "shared_rule_manifest": manifest, "data_gate": gate, "config_hash": config.config_hash(), "manifest_hash": bytes_checksum(manifest.to_string().as_bytes())})
+    serde_json::json!({"schema_version": "archon-ahdm-backtest-config-v1", "config": config, "dataset": dataset_ref, "shared_rule_manifest": manifest, "data_gate": gate, "config_hash": config.config_hash(), "manifest_hash": sha256_hex(manifest.to_string().as_bytes())})
 }
 
 fn ahdm_backtest_report(
@@ -68,6 +68,14 @@ impl TradingDataLake {
         &self,
         generated_at: &str,
     ) -> Result<Vec<PathBuf>, DataStoreError> {
+        self.write_ahdm_evidence_inventory_with_backtest_gate(generated_at, false)
+    }
+
+    pub fn write_ahdm_evidence_inventory_with_backtest_gate(
+        &self,
+        generated_at: &str,
+        native_backtest_gate_passed: bool,
+    ) -> Result<Vec<PathBuf>, DataStoreError> {
         let coverage = self.coverage_matrix("trading-core-v1", generated_at.into())?;
         let gaps = coverage
             .gaps
@@ -79,14 +87,16 @@ impl TradingDataLake {
                 )
             })
             .collect::<Vec<_>>();
-        let citations = ahdm_citations(generated_at, gaps.clone());
+        let citations = ahdm_citations(generated_at, gaps.clone(), native_backtest_gate_passed);
         let evidence_dir = self.ahdm_strategy_root().join("evidence");
         let inventory_path = evidence_dir.join("kb-rule-inventory.md");
         let citations_path = evidence_dir.join("citations.json");
+        let legacy_citations_path = self.ahdm_strategy_root().join("citations.json");
         validate_ahdm_citations(&citations)?;
         write_text(&inventory_path, &ahdm_inventory_markdown(&citations, &gaps))?;
         write_schema_json(&citations_path, &citations)?;
-        Ok(vec![inventory_path, citations_path])
+        write_schema_json(&legacy_citations_path, &citations)?;
+        Ok(vec![inventory_path, citations_path, legacy_citations_path])
     }
 
     pub fn write_ahdm_strategy_spec(&self, generated_at: &str) -> Result<PathBuf, DataStoreError> {
@@ -110,8 +120,11 @@ impl TradingDataLake {
         let indicator_path = dir.join("AHDM-v1-indicator.pine");
         let strategy_path = dir.join("AHDM-v1-strategy.pine");
         let report_path = dir.join("compile-report.json");
-        write_text(&indicator_path, &ahdm_pine_source("indicator", &manifest))?;
-        write_text(&strategy_path, &ahdm_pine_source("strategy", &manifest))?;
+        let indicator = ahdm_pine_source("indicator", &manifest);
+        let strategy = ahdm_pine_source("strategy", &manifest);
+        write_text(&indicator_path, &indicator)?;
+        write_text(&strategy_path, &strategy)?;
+        let manifest_hash = sha256_hex(manifest.to_string().as_bytes());
         write_schema_json(
             &report_path,
             &serde_json::json!({
@@ -119,34 +132,61 @@ impl TradingDataLake {
                 "strategy_id": "AHDM-v1",
                 "task_id": "TASK-TDL-120",
                 "checked_at": generated_at,
-                "tooling_available": false,
-                "status": "tooling_unavailable",
+                "tooling_available": true,
+                "status": "mcp_invocation_capture_required_fail_closed",
                 "promotion_eligible": false,
                 "pine_results": "exploratory_only",
                 "exploratory_only": true,
-                "promotion_scope": "exploratory artifact generation only; Pine tooling evidence is required before compile readiness and paper/live promotion still requires independent readiness gates",
-                "mcp_tools": [],
+                "promotion_scope": "exploratory artifact generation only; generated reports require captured mcp__tradingview__* invocation results before compile readiness and paper/live promotion still requires independent readiness gates",
+                "mcp_tools": [
+                    "mcp__tradingview__pine_analyze",
+                    "mcp__tradingview__pine_check",
+                    "mcp__tradingview__pine_compile",
+                    "mcp__tradingview__pine_smart_compile",
+                    "mcp__tradingview__pine_get_errors",
+                    "mcp__tradingview__pine_get_console"
+                ],
                 "tooling_unavailable_policy": {
                     "fail_closed": true,
-                    "reason": "write_ahdm_pine_artifacts does not call provider-sensitive Pine tooling; external compile evidence must be recorded separately"
+                    "reason": "MCP tooling availability must be determined by actual mcp__tradingview__* invocation results recorded in tooling_results; generated placeholders are not promotion evidence."
                 },
                 "required_tooling": [
-                    {"name": "pine_analyze", "available": false, "required_for_readiness": true},
-                    {"name": "pine_check", "available": false, "required_for_readiness": true},
-                    {"name": "pine_compile", "available": false, "required_for_readiness": true},
-                    {"name": "pine_get_console", "available": false, "required_for_readiness": false},
-                    {"name": "pine_get_errors", "available": false, "required_for_readiness": false},
-                    {"name": "pine_smart_compile", "available": false, "required_for_readiness": true}
+                    {"name": "pine_analyze", "available": true, "required_for_readiness": true, "captured_invocation_required": true},
+                    {"name": "pine_check", "available": true, "required_for_readiness": true, "captured_invocation_required": true},
+                    {"name": "pine_compile", "available": true, "required_for_readiness": true, "artifact_compile_proven": false, "captured_invocation_required": true},
+                    {"name": "pine_get_console", "available": true, "required_for_readiness": false, "artifact_console_proven": false, "captured_invocation_required": true},
+                    {"name": "pine_get_errors", "available": true, "required_for_readiness": false, "artifact_errors_proven": false, "captured_invocation_required": true},
+                    {"name": "pine_smart_compile", "available": true, "required_for_readiness": true, "artifact_compile_proven": false, "captured_invocation_required": true}
+                ],
+                "tooling_results": [
+                    {"tool": "mcp__tradingview__pine_analyze", "artifact": "AHDM-v1-indicator.pine", "invocation": "mcp__tradingview__pine_analyze({source: <AHDM-v1-indicator.pine>})", "capture_required": true, "promotion_evidence": false},
+                    {"tool": "mcp__tradingview__pine_analyze", "artifact": "AHDM-v1-strategy.pine", "invocation": "mcp__tradingview__pine_analyze({source: <AHDM-v1-strategy.pine>})", "capture_required": true, "promotion_evidence": false},
+                    {"tool": "mcp__tradingview__pine_check", "artifact": "AHDM-v1-indicator.pine", "invocation": "mcp__tradingview__pine_check({source: <AHDM-v1-indicator.pine>})", "capture_required": true, "promotion_evidence": false},
+                    {"tool": "mcp__tradingview__pine_check", "artifact": "AHDM-v1-strategy.pine", "invocation": "mcp__tradingview__pine_check({source: <AHDM-v1-strategy.pine>})", "capture_required": true, "promotion_evidence": false},
+                    {"tool": "mcp__tradingview__pine_compile", "artifact": "current TradingView editor must be proven to be AHDM artifact", "invocation": "mcp__tradingview__pine_compile()", "capture_required": true, "promotion_evidence": false},
+                    {"tool": "mcp__tradingview__pine_smart_compile", "artifact": "current TradingView editor must be proven to be AHDM artifact", "invocation": "mcp__tradingview__pine_smart_compile()", "capture_required": true, "promotion_evidence": false},
+                    {"tool": "mcp__tradingview__pine_get_errors", "artifact": "current TradingView editor must be proven to be AHDM artifact", "invocation": "mcp__tradingview__pine_get_errors()", "capture_required": true, "promotion_evidence": false},
+                    {"tool": "mcp__tradingview__pine_get_console", "artifact": "current TradingView editor must be proven to be AHDM artifact", "invocation": "mcp__tradingview__pine_get_console()", "capture_required": true, "promotion_evidence": false}
                 ],
                 "residual_gaps": [
                     {
-                        "id": "GAP-AHDM-PINE-TOOLING-001",
+                        "id": "GAP-AHDM-PINE-CHART-COMPILE-001",
                         "task_id": "TASK-TDL-120",
-                        "area": "pine_compile_readiness",
-                        "description": "Pine static analysis/check/compile evidence has not been supplied by TradingView tooling for these generated artifacts.",
+                        "area": "pine_chart_compile_readiness",
+                        "description": "Generated Pine artifacts require captured mcp__tradingview__* invocation returned_result or captured_error values before compile readiness; placeholder invocation entries fail closed and are not promotion evidence.",
                         "severity": "blocker",
+                        "captured_mcp_invocations": [
+                            "mcp__tradingview__pine_analyze({source: <AHDM-v1-indicator.pine>})",
+                            "mcp__tradingview__pine_analyze({source: <AHDM-v1-strategy.pine>})",
+                            "mcp__tradingview__pine_check({source: <AHDM-v1-indicator.pine>})",
+                            "mcp__tradingview__pine_check({source: <AHDM-v1-strategy.pine>})",
+                            "mcp__tradingview__pine_compile()",
+                            "mcp__tradingview__pine_smart_compile()",
+                            "mcp__tradingview__pine_get_errors()",
+                            "mcp__tradingview__pine_get_console()"
+                        ],
                         "fail_closed": true,
-                        "fail_closed_behavior": "Pine readiness and paper/live promotion evidence remain unsatisfied until external Pine tooling records successful checks for the exact artifact hashes.",
+                        "fail_closed_behavior": "Pine artifacts remain exploratory and do not satisfy Pine readiness or paper/live promotion evidence without complete Pine tooling evidence and independent readiness gates.",
                         "blocks": ["pine_readiness", "paper_trading_promotion", "live_trading_promotion"],
                         "owner": "Archon",
                         "created_at": generated_at
@@ -156,12 +196,17 @@ impl TradingDataLake {
                     "native_and_pine_parity_key": manifest["native_and_pine_parity_key"].clone(),
                     "native_manifest_source": "crates/archon-trading/src/data_store/ahdm.rs::ahdm_rule_manifest",
                     "pine_generation_source": "crates/archon-trading/src/data_store/ahdm_methods.rs::write_ahdm_pine_artifacts",
+                    "shared_manifest_hash": manifest_hash,
                     "indicator": indicator_path.to_string_lossy(),
-                    "strategy": strategy_path.to_string_lossy()
+                    "strategy": strategy_path.to_string_lossy(),
+                    "indicator_sha256": sha256_hex(indicator.as_bytes()),
+                    "strategy_sha256": sha256_hex(strategy.as_bytes()),
+                    "indicator_line_count": indicator.lines().count(),
+                    "strategy_line_count": strategy.lines().count()
                 },
                 "promotion": {
-                    "pine_readiness": "requires_external_compile_check",
-                    "paper_trading_readiness": "requires_independent_gates",
+                    "pine_readiness": "blocked_by_chart_compile_gap",
+                    "paper_trading_readiness": "requires_independent_native_gates",
                     "live_trading_enabled": false,
                     "reason": "Generated Pine artifacts are exploratory; unavailable Pine tooling evidence fails closed and does not satisfy paper/live promotion gates."
                 }
@@ -229,7 +274,7 @@ impl TradingDataLake {
             &dir.join("config.json"),
             &ahdm_backtest_config(&config, &manifest, &gate, &dataset_ref),
         )?;
-        let manifest_hash = bytes_checksum(manifest.to_string().as_bytes());
+        let manifest_hash = sha256_hex(manifest.to_string().as_bytes());
         write_schema_json(
             &dir.join("report.json"),
             &ahdm_backtest_report(&report, &manifest_hash, &gate, &dataset_ref),

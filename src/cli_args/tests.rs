@@ -1,7 +1,7 @@
 use super::{
     AgentAction, AgentEvolveAction, Cli, CognitiveAction, CognitiveDaemonAction, Commands,
-    GametheoryAction, ProvidersAction, TradingCliAction, TradingCliCommand, TradingCliPersona,
-    TradingCliVerb, WorldAction, WorldGuardAction, WorldGuardPolicyAction,
+    GametheoryAction, ProvidersAction, TradingCliAction, TradingCliCommand, TradingCliDataAction,
+    TradingCliPersona, TradingCliVerb, WorldAction, WorldGuardAction, WorldGuardPolicyAction,
 };
 
 #[cfg(test)]
@@ -144,6 +144,112 @@ mod workflow_resume_from_parse_tests {
                 action: WorkflowAction::Run { decomposed, .. },
             }) => assert!(decomposed),
             other => panic!("expected workflow run, got {other:?}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod trading_fetch_native_parse_tests {
+    use super::{Cli, Commands, TradingCliAction, TradingCliDataAction};
+    use clap::Parser;
+
+    #[test]
+    fn trading_data_fetch_native_yfinance_parse_contract_in_tests_rs() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "trading",
+            "data",
+            "fetch-native",
+            "--provider",
+            "yfinance",
+            "--symbol",
+            "DIA",
+            "--timeframe",
+            "1D",
+            "--start",
+            "2024-01-02",
+            "--end",
+            "2024-01-10",
+            "--dataset-id",
+            "yfinance-DIA-1D-raw",
+        ])
+        .expect("yfinance fetch-native mandatory flags must parse without --target");
+
+        match cli.command {
+            Some(Commands::Trading {
+                action:
+                    TradingCliAction::Data {
+                        action:
+                            TradingCliDataAction::FetchNative {
+                                provider,
+                                symbol,
+                                timeframe,
+                                start,
+                                end,
+                                dataset_id,
+                                target,
+                            },
+                    },
+            }) => {
+                assert_eq!(provider, "yfinance");
+                assert_eq!(symbol, "DIA");
+                assert_eq!(timeframe, "1D");
+                assert_eq!(start, "2024-01-02");
+                assert_eq!(end, "2024-01-10");
+                assert_eq!(dataset_id, "yfinance-DIA-1D-raw");
+                assert!(target.is_none());
+            }
+            other => panic!("expected trading data fetch-native, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trading_data_fetch_native_stooq_parse_contract_in_tests_rs() {
+        let cli = Cli::try_parse_from([
+            "archon",
+            "trading",
+            "data",
+            "fetch-native",
+            "--provider",
+            "stooq",
+            "--symbol",
+            "SPY",
+            "--timeframe",
+            "1D",
+            "--start",
+            "2020-01-01",
+            "--end",
+            "2024-12-31",
+            "--dataset-id",
+            "stooq-SPY-1D-live-tdl060",
+        ])
+        .expect("stooq fetch-native mandatory flags must parse without --target");
+
+        match cli.command {
+            Some(Commands::Trading {
+                action:
+                    TradingCliAction::Data {
+                        action:
+                            TradingCliDataAction::FetchNative {
+                                provider,
+                                symbol,
+                                timeframe,
+                                start,
+                                end,
+                                dataset_id,
+                                target,
+                            },
+                    },
+            }) => {
+                assert_eq!(provider, "stooq");
+                assert_eq!(symbol, "SPY");
+                assert_eq!(timeframe, "1D");
+                assert_eq!(start, "2020-01-01");
+                assert_eq!(end, "2024-12-31");
+                assert_eq!(dataset_id, "stooq-SPY-1D-live-tdl060");
+                assert!(target.is_none());
+            }
+            other => panic!("expected trading data fetch-native, got {other:?}"),
         }
     }
 }

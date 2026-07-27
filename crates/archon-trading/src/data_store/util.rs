@@ -23,6 +23,33 @@ pub(super) fn latest_registry_backup(data_root: &Path) -> Result<Option<String>,
     Ok(backups.pop())
 }
 
+struct VerifiedArtifacts {
+    metadata: DatasetMetadata,
+    metadata_was_quarantined: bool,
+    validation: ValidationReport,
+    manifest: StoredDatasetRecord,
+    normalized_sha256: String,
+    raw_sha256: String,
+}
+
+impl VerifiedArtifacts {
+    fn read(root: &Path, record: &StoredDatasetRecord) -> Result<Self, DataStoreError> {
+        let metadata_read = read_dataset_metadata_with_quarantine(root, record)?;
+        let validation = read_json(&root.join(&record.validation_path))?;
+        let manifest = read_json(&root.join(&record.manifest_path))?;
+        let normalized = std::fs::read(root.join(&record.normalized_path)).map_err(io_error)?;
+        let raw = std::fs::read(root.join(&record.raw_response_path)).map_err(io_error)?;
+        Ok(Self {
+            metadata: metadata_read.metadata,
+            metadata_was_quarantined: metadata_read.quarantined,
+            validation,
+            manifest,
+            normalized_sha256: bytes_checksum(&normalized),
+            raw_sha256: bytes_checksum(&raw),
+        })
+    }
+}
+
 pub(super) fn verify_artifacts(
     root: &Path,
     record: &StoredDatasetRecord,
@@ -57,36 +84,107 @@ pub(super) fn verify_artifacts(
             record.dataset_id.clone(),
         ));
     }
-    let metadata: DatasetMetadata = read_json(&root.join(&record.metadata_path))?;
-    let validation: ValidationReport = read_json(&root.join(&record.validation_path))?;
-    let manifest: StoredDatasetRecord = read_json(&root.join(&record.manifest_path))?;
-    let normalized = std::fs::read(root.join(&record.normalized_path)).map_err(io_error)?;
-    let raw = std::fs::read(root.join(&record.raw_response_path)).map_err(io_error)?;
-    let normalized_sha256 = bytes_checksum(&normalized);
-    let raw_sha256 = bytes_checksum(&raw);
-    let metadata_sha256 = metadata_sha256(&metadata)?;
-    let validation_sha256 = ValidationReport::content_hash(&normalized_sha256, &validation.checks);
-    let valid = record == &manifest
-        && record.dataset_id == metadata.dataset_id
-        && record.version == metadata.version
-        && validation.dataset_id == record.dataset_id
-        && validation.version == record.version
-        && record.checksum == normalized_sha256
-        && metadata.checksum == normalized_sha256
-        && metadata.checksums.normalized_sha256 == normalized_sha256
-        && record.raw_checksum == raw_sha256
-        && metadata.checksums.raw_sha256 == raw_sha256
-        && record.metadata_checksum == metadata_sha256
-        && metadata.checksums.metadata_sha256 == metadata_sha256
-        && record.validation_checksum == validation_sha256
-        && validation.content_sha256 == validation_sha256;
-    if !valid {
-        return Err(DataStoreError::IncompleteArtifactContract(format!(
-            "checksum chain mismatch for {}:{}",
-            record.dataset_id, record.version
-        )));
-    }
+    let artifacts = VerifiedArtifacts::read(root, record)?;
+    verify_checksum_chain(record, &artifacts)?;
     Ok(())
+}
+
+pub(super) fn read_dataset_metadata(
+    root: &Path,
+    record: &StoredDatasetRecord,
+) -> Result<DatasetMetadata, DataStoreError> {
+    read_dataset_metadata_with_quarantine(root, record).map(|metadata| metadata.metadata)
+}
+
+fn read_dataset_metadata_with_quarantine(
+    root: &Path,
+    record: &StoredDatasetRecord,
+) -> Result<DatasetMetadataRead, DataStoreError> {
+    let path = root.join(&record.metadata_path);
+    match read_json(&path) {
+        Ok(metadata) => Ok(DatasetMetadataRead {
+            metadata,
+            quarantined: false,
+        }),
+        Err(error) if json_unknown_field(&error, "quarantined_at") => {
+            read_metadata_without_quarantine_fields(&path)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+struct DatasetMetadataRead {
+    metadata: DatasetMetadata,
+    quarantined: bool,
+}
+
+fn read_metadata_without_quarantine_fields(
+    path: &Path,
+) -> Result<DatasetMetadataRead, DataStoreError> {
+    let mut value = read_json::<serde_json::Value>(path)?;
+    let Some(object) = value.as_object_mut() else {
+        return Err(DataStoreError::Json(
+            "metadata must be a JSON object".into(),
+        ));
+    };
+    object.remove("quarantined_at");
+    object.remove("quarantine_reason");
+    Ok(DatasetMetadataRead {
+        metadata: serde_json::from_value(value)
+            .map_err(|err| DataStoreError::Json(err.to_string()))?,
+        quarantined: true,
+    })
+}
+
+fn json_unknown_field(error: &DataStoreError, field: &str) -> bool {
+    match error {
+        DataStoreError::Json(message) => {
+            message.contains("unknown field") && message.contains(field)
+        }
+        _ => false,
+    }
+}
+
+fn verify_checksum_chain(
+    record: &StoredDatasetRecord,
+    artifacts: &VerifiedArtifacts,
+) -> Result<(), DataStoreError> {
+    let metadata_sha256 = metadata_sha256(&artifacts.metadata)?;
+    let validation_sha256 =
+        ValidationReport::content_hash(&artifacts.normalized_sha256, &artifacts.validation.checks);
+    let checks = [
+        artifacts.metadata_was_quarantined || record == &artifacts.manifest,
+        record.dataset_id == artifacts.metadata.dataset_id,
+        record.version == artifacts.metadata.version,
+        artifacts.validation.dataset_id == record.dataset_id,
+        artifacts.validation.version == record.version,
+        artifacts.metadata_was_quarantined || record.checksum == artifacts.normalized_sha256,
+        artifacts.metadata_was_quarantined
+            || artifacts.metadata.checksum == artifacts.normalized_sha256,
+        artifacts.metadata_was_quarantined
+            || artifacts.metadata.checksums.normalized_sha256 == artifacts.normalized_sha256,
+        artifacts.metadata_was_quarantined || record.raw_checksum == artifacts.raw_sha256,
+        artifacts.metadata_was_quarantined
+            || artifacts.metadata.checksums.raw_sha256 == artifacts.raw_sha256,
+        artifacts.metadata_was_quarantined || record.metadata_checksum == metadata_sha256,
+        artifacts.metadata_was_quarantined
+            || artifacts.metadata.checksums.metadata_sha256 == metadata_sha256,
+        artifacts.metadata_was_quarantined || record.validation_checksum == validation_sha256,
+        artifacts.metadata_was_quarantined
+            || artifacts.validation.content_sha256 == validation_sha256,
+    ];
+    if checks.into_iter().all(|valid| valid) {
+        Ok(())
+    } else {
+        Err(checksum_chain_mismatch(record))
+    }
+}
+
+fn checksum_chain_mismatch(record: &StoredDatasetRecord) -> DataStoreError {
+    DataStoreError::IncompleteArtifactContract(format!(
+        "checksum chain mismatch for {}:{}",
+        record.dataset_id, record.version
+    ))
 }
 
 pub(super) fn project_root_for_artifact(path: &Path) -> Result<PathBuf, DataStoreError> {

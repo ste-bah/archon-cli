@@ -86,9 +86,7 @@ impl TradingDataLake {
             Some(snapshot.captured_at_unix_seconds),
             now_unix_seconds,
         );
-        let path = self
-            .snapshot_dir(&snapshot.provider, &snapshot.canonical_instrument)
-            .join(format!("{}.json", snapshot.captured_at_unix_seconds));
+        let path = self.snapshot_path(&snapshot.provider, &snapshot.canonical_instrument);
         let artifact = serde_json::json!({
             "schema_version": "archon-trading-snapshot-v1",
             "snapshot": snapshot,
@@ -251,10 +249,16 @@ fn enriched_capability_record(result: &ProviderCapabilityResult) -> serde_json::
     object.insert("registry_backed".into(), serde_json::Value::Bool(false));
     object.insert(
         "registry_status".into(),
-        serde_json::Value::String("Unavailable".into()),
+        serde_json::Value::String(registry_status(result).into()),
     );
-    object.insert("registry_dataset_id".into(), serde_json::Value::Null);
-    object.insert("registry_version".into(), serde_json::Value::Null);
+    object.insert(
+        "registry_dataset_id".into(),
+        registry_dataset_id(result).map_or(serde_json::Value::Null, serde_json::Value::String),
+    );
+    object.insert(
+        "registry_version".into(),
+        registry_version(result).map_or(serde_json::Value::Null, serde_json::Value::String),
+    );
     object.insert("registry_key".into(), serde_json::Value::Null);
     object.insert(
         "fail_closed_behavior".into(),
@@ -290,6 +294,27 @@ fn capability_state(result: &ProviderCapabilityResult) -> &'static str {
     } else {
         "unavailable"
     }
+}
+
+fn registry_status(result: &ProviderCapabilityResult) -> &'static str {
+    if result.can_fetch {
+        "Available"
+    } else {
+        "Unavailable"
+    }
+}
+
+fn registry_dataset_id(result: &ProviderCapabilityResult) -> Option<String> {
+    result.can_fetch.then(|| {
+        format!(
+            "{}:{}:{}",
+            result.provider, result.canonical_instrument, result.timeframe
+        )
+    })
+}
+
+fn registry_version(result: &ProviderCapabilityResult) -> Option<String> {
+    result.can_fetch.then(|| result.checked_at.clone())
 }
 
 fn snapshot_freshness_label(result: &ProviderCapabilityResult) -> &'static str {

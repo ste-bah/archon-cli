@@ -42,9 +42,7 @@ pub(super) fn append_dataset_gate_issues(
     {
         issues.push("manual datasets cannot satisfy provider-native production gates".into());
     }
-    if dataset.bars.len() < 2 {
-        issues.push("dataset has insufficient bar substance for a production backtest".into());
-    }
+    append_backtest_history_issues(record, dataset, issues);
     if !dataset.metadata.production_eligible {
         issues.push("dataset is not production eligible".into());
     }
@@ -78,6 +76,32 @@ pub(super) fn append_dataset_gate_issues(
         || dataset.metadata.paths.manifest.is_empty()
     {
         issues.push("metadata paths object is incomplete".into());
+    }
+}
+
+fn append_backtest_history_issues(
+    record: &StoredDatasetRecord,
+    dataset: &StoredOhlcvDataset,
+    issues: &mut Vec<String>,
+) {
+    if record.bars < COVERAGE_MINIMUM_ROWS {
+        issues.push(format!(
+            "registry bars {} below required production backtest minimum {}",
+            record.bars, COVERAGE_MINIMUM_ROWS
+        ));
+    }
+    if dataset.bars.len() < COVERAGE_MINIMUM_ROWS {
+        issues.push(format!(
+            "normalized payload rows {} below required production backtest minimum {}",
+            dataset.bars.len(),
+            COVERAGE_MINIMUM_ROWS
+        ));
+    }
+    if dataset.metadata.coverage.observed_bars < COVERAGE_MINIMUM_ROWS as u64 {
+        issues.push(format!(
+            "metadata observed bars {} below required production backtest minimum {}",
+            dataset.metadata.coverage.observed_bars, COVERAGE_MINIMUM_ROWS
+        ));
     }
 }
 

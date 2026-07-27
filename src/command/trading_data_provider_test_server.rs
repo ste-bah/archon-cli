@@ -30,16 +30,31 @@ pub(super) fn openbb_server(
     body: serde_json::Value,
     expected_parts: &[&'static str],
 ) -> MockOpenBbServer {
+    http_server(body.to_string(), "application/json", expected_parts)
+}
+
+pub(super) fn raw_http_server(
+    body: &'static str,
+    content_type: &'static str,
+    expected_parts: &[&'static str],
+) -> MockOpenBbServer {
+    http_server(body.to_string(), content_type, expected_parts)
+}
+
+fn http_server(
+    body: String,
+    content_type: &'static str,
+    expected_parts: &[&'static str],
+) -> MockOpenBbServer {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let base_url = format!("http://{}", listener.local_addr().unwrap());
     let stop = Arc::new(AtomicBool::new(false));
     let worker_stop = Arc::clone(&stop);
-    let body = body.to_string();
     let expected_parts = expected_parts.to_vec();
     listener.set_nonblocking(true).unwrap();
     let handle = thread::spawn(move || {
         let stream = accept_before_deadline(&listener, &worker_stop)?;
-        serve_response(stream, &body, &expected_parts)
+        serve_response(stream, &body, content_type, &expected_parts)
     });
     MockOpenBbServer {
         base_url,
@@ -70,6 +85,7 @@ fn accept_before_deadline(listener: &TcpListener, stop: &AtomicBool) -> Result<T
 fn serve_response(
     mut stream: TcpStream,
     body: &str,
+    content_type: &str,
     expected_parts: &[&str],
 ) -> Result<(), String> {
     let mut buffer = [0_u8; 4096];
@@ -84,7 +100,7 @@ fn serve_response(
         return Err(format!("request omitted {expected}: {request}"));
     }
     let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nX-Api-Key: hidden\r\nContent-Length: {}\r\n\r\n{}",
+        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nX-Api-Key: hidden\r\nContent-Length: {}\r\n\r\n{}",
         body.len(),
         body
     );

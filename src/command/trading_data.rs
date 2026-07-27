@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use archon_trading::data_lake::{
-    CoverageWindow, CurrentSnapshot, DataType, DatasetArtifactPaths, DatasetChecksums,
-    DatasetMetadata, DatasetSourceMetadata, GapSummary,
+    CoverageWindow, DataType, DatasetArtifactPaths, DatasetChecksums, DatasetMetadata,
+    DatasetSourceMetadata, GapSummary,
 };
 use archon_trading::data_store::{StoreOhlcvRequest, TradingDataLake};
 use archon_trading::ohlcv::{OhlcvFormat, parse_ohlcv};
@@ -13,6 +13,8 @@ use crate::cli_args::{TradingCliDataAction, TradingCliOhlcvFormat};
 use crate::command::trading_io::write_or_render;
 use crate::command::trading_tools::project_root;
 
+mod provider;
+mod snapshot;
 #[path = "trading_data_env.rs"]
 mod trading_data_env;
 
@@ -87,14 +89,14 @@ pub(crate) fn render_data(action: &TradingCliDataAction) -> Result<String> {
             version,
             out,
         } => validate(target.as_ref(), dataset_id, version, out.as_deref()),
-        TradingCliDataAction::Providers { target, json: _ } => providers(target.as_ref()),
+        TradingCliDataAction::Providers { target, json: _ } => provider::providers(target.as_ref()),
         TradingCliDataAction::Capability {
             target,
             provider,
             symbol,
             timeframe,
             json: _,
-        } => capability(target.as_ref(), provider, symbol, timeframe),
+        } => provider::capability(target.as_ref(), provider, symbol, timeframe),
         TradingCliDataAction::FetchNative {
             target,
             provider,
@@ -116,7 +118,7 @@ pub(crate) fn render_data(action: &TradingCliDataAction) -> Result<String> {
             target,
             provider,
             symbol,
-        } => snapshot(target.as_ref(), provider, symbol),
+        } => snapshot::snapshot(target.as_ref(), provider, symbol),
         TradingCliDataAction::Coverage {
             target,
             universe,
@@ -295,114 +297,6 @@ fn validate(
     write_or_render(&report, out)
 }
 
-fn providers(target: Option<&PathBuf>) -> Result<String> {
-    let root = project_root(target)?;
-    let lake = TradingDataLake::new(root);
-    let report = json!({
-        "providers": ["tradingview", "openbb", "polygon", "stooq", "yfinance"],
-        "capabilities_path": lake.provider_capabilities_path(),
-        "fetch_contract": "provider-neutral; provider-specific fetches fail closed until implemented"
-    });
-    write_or_render(&report, None)
-}
-
-fn capability(
-    target: Option<&PathBuf>,
-    provider: &str,
-    symbol: &str,
-    timeframe: &str,
-) -> Result<String> {
-    let root = project_root(target)?;
-    let provider_key = provider.trim().to_ascii_lowercase();
-    let lake = TradingDataLake::new(root);
-    let result = if matches!(provider_key.as_str(), "openbb" | "polygon" | "yfinance") {
-        let base_url =
-            std::env::var("OPENBB_API_URL").unwrap_or_else(|_| "http://127.0.0.1:6900".into());
-        super::trading_data_provider_openbb::probe_capability_with_base_url(
-            lake.project_root(),
-            &base_url,
-            provider,
-            symbol,
-            timeframe,
-        )?
-    } else {
-        lake.persist_capability(
-            provider,
-            symbol,
-            timeframe,
-            &chrono::Utc::now().to_rfc3339(),
-        )
-        .map_err(data_error)?
-    };
-    let exact_native_support = result.native_interval && result.historical_supported;
-    let capability_state = if result.can_fetch {
-        "can_fetch"
-    } else if result.provider_blocked {
-        "provider_blocked"
-    } else if result.native_interval && !result.production_eligible {
-        "degraded"
-    } else {
-        "unavailable"
-    };
-    let mut capability_states = vec![capability_state];
-    if exact_native_support {
-        capability_states.push("exact_native_support");
-    }
-    let report = json!({
-        "provider": result.provider,
-        "symbol": result.symbol,
-        "canonical_instrument": result.canonical_instrument,
-        "provider_symbol": result.provider_symbol,
-        "timeframe": result.timeframe,
-        "native_interval": result.native_interval,
-        "production_eligible": result.production_eligible,
-        "can_fetch": result.can_fetch,
-        "capability_state": capability_state,
-        "capability_states": capability_states,
-        "exact_native_support": exact_native_support,
-        "current_snapshot_supported": result.current_snapshot_supported,
-        "historical_supported": result.historical_supported,
-        "history_horizon": result.history_horizon,
-        "requires_credentials": result.requires_credentials,
-        "missing_credentials": result.missing_credentials,
-        "provider_blocked": result.provider_blocked,
-        "unsupported": result.unsupported,
-        "credential_state": result.credential_state,
-        "unavailable_reason": result.unavailable_reason,
-        "checked_at": result.checked_at,
-        "provider_environment": trading_data_env::provider_environment_status(provider),
-        "capability_artifact": lake.provider_capability_latest_path(),
-        "fail_closed_behavior": "unavailable capability probes persist proof only and do not write production dataset registry entries"
-    });
-    write_or_render(&report, None)
-}
-
-fn snapshot(target: Option<&PathBuf>, provider: &str, symbol: &str) -> Result<String> {
-    let root = project_root(target)?;
-    let now = chrono::Utc::now().timestamp();
-    let snapshot = CurrentSnapshot {
-        provider: provider.trim().to_ascii_lowercase(),
-        canonical_instrument: symbol.trim().into(),
-        provider_symbol: symbol.trim().into(),
-        captured_at_unix_seconds: now,
-        payload: json!({
-            "unavailable_reason": "provider-specific snapshot fetch support is not implemented",
-            "fail_closed_behavior": "snapshot artifact is diagnostic and cannot satisfy production or promotion gates"
-        }),
-    };
-    let path = TradingDataLake::new(root)
-        .persist_snapshot(snapshot, now)
-        .map_err(data_error)?;
-    let report = json!({
-        "provider": provider,
-        "symbol": symbol,
-        "snapshot_path": path,
-        "can_fetch": false,
-        "unavailable_reason": "provider-specific snapshot fetch support is not implemented"
-    });
-    write_or_render(&report, None)
-}
-
 fn validate_dataset_contract(input: &IngestInput<'_>) -> Result<()> {
     let provider = input.provider.trim().to_ascii_lowercase();
     let timeframe = normalize_timeframe(input.timeframe);
@@ -491,7 +385,12 @@ fn metadata(input: &IngestInput<'_>, observed: u64) -> DatasetMetadata {
 }
 
 pub(super) fn data_error(error: archon_trading::data_store::DataStoreError) -> anyhow::Error {
-    anyhow!("Trading data lake error: {error:?}")
+    match error {
+        archon_trading::data_store::DataStoreError::InvalidOhlcv(message) => {
+            anyhow!("Trading data lake validation failed: {message}")
+        }
+        other => anyhow!("Trading data lake error: {other:?}"),
+    }
 }
 
 fn valid_version(value: &str) -> bool {

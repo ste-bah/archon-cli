@@ -18,9 +18,11 @@ pub(super) fn schema_artifact_value<T: Serialize>(
         .filter(|schema| !schema.trim().is_empty())
         .ok_or_else(|| DataStoreError::InvalidMetadata("artifact schema is required".into()))?;
     canonicalize_dataset_status_casing(&schema, &mut object);
-    object.insert("schema".into(), serde_json::Value::String(schema));
     if is_validation_report(&object) {
+        object.insert("schema_version".into(), serde_json::Value::String(schema));
         add_validation_report_fields(&mut object);
+    } else {
+        object.insert("schema".into(), serde_json::Value::String(schema));
     }
     Ok(serde_json::Value::Object(object))
 }

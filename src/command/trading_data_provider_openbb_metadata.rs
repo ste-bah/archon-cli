@@ -4,6 +4,7 @@ use archon_trading::data_lake::{
     ProviderHistoryHorizon,
 };
 use archon_trading::ohlcv::OhlcvBar;
+use chrono::NaiveDate;
 use serde_json::json;
 use std::collections::BTreeMap;
 
@@ -20,6 +21,11 @@ pub(super) fn native_metadata_from_bars(
     bars: &[OhlcvBar],
 ) -> DatasetMetadata {
     let provider_key = provider.trim().to_ascii_lowercase();
+    let observed_bars = bars.len() as u64;
+    let expected_bars = requested_span_expected_bars(timeframe, request);
+    let missing_bars = expected_bars.saturating_sub(observed_bars);
+    let production_eligible =
+        provider_key != "yfinance" && expected_bars > 0 && observed_bars == expected_bars;
     DatasetMetadata {
         schema_version: "archon-trading-dataset-v1".into(),
         dataset_id: dataset_id.into(),
@@ -31,7 +37,7 @@ pub(super) fn native_metadata_from_bars(
         provider_symbol: request.provider_symbol.clone(),
         timeframe: timeframe.trim().into(),
         native_interval: true,
-        production_eligible: provider_key != "yfinance",
+        production_eligible,
         price_basis: dataset_price_basis(dataset_id).unwrap_or_else(|| "raw".into()),
         session: session_for(symbol).into(),
         data_type: DataType::Ohlcv,
@@ -54,12 +60,12 @@ pub(super) fn native_metadata_from_bars(
                 .last()
                 .map(|bar| bar.timestamp.clone())
                 .unwrap_or_else(|| request.params.get("end_date").cloned().unwrap_or_default()),
-            expected_bars: bars.len() as u64,
-            observed_bars: bars.len() as u64,
+            expected_bars,
+            observed_bars,
         },
         gaps: GapSummary {
-            missing_bars: 0,
-            expected_bars: bars.len() as u64,
+            missing_bars,
+            expected_bars,
         },
         checksum: String::new(),
         checksums: Default::default(),
@@ -68,6 +74,63 @@ pub(super) fn native_metadata_from_bars(
         quality_status: native_quality_status(&provider_key).into(),
         created_at: String::new(),
         optional: false,
+    }
+}
+
+pub(super) fn native_production_eligible(
+    provider: &str,
+    timeframe: &str,
+    request: &OpenBbNativeRequest,
+    observed_bars: usize,
+) -> bool {
+    if provider.trim().eq_ignore_ascii_case("yfinance") || observed_bars == 0 {
+        return false;
+    }
+    let expected_bars = requested_span_expected_bars(timeframe, request);
+    expected_bars > 0 && observed_bars as u64 == expected_bars
+}
+
+fn requested_span_expected_bars(timeframe: &str, request: &OpenBbNativeRequest) -> u64 {
+    let start = request
+        .params
+        .get("start_date")
+        .map(String::as_str)
+        .unwrap_or_default();
+    let end = request
+        .params
+        .get("end_date")
+        .map(String::as_str)
+        .unwrap_or_default();
+    expected_bars_for_span(start, end, timeframe, &request.native_interval).unwrap_or(0)
+}
+
+fn expected_bars_for_span(
+    start: &str,
+    end: &str,
+    timeframe: &str,
+    native_interval: &str,
+) -> Option<u64> {
+    let start = NaiveDate::parse_from_str(start, "%Y-%m-%d").ok()?;
+    let end = NaiveDate::parse_from_str(end, "%Y-%m-%d").ok()?;
+    if end < start {
+        return Some(0);
+    }
+    let inclusive_days = (end - start).num_days() as u64 + 1;
+    let key = timeframe.trim().to_ascii_lowercase();
+    match key.as_str() {
+        "1d" => Some(inclusive_days),
+        "1w" => Some(inclusive_days.div_ceil(7)),
+        "240" | "4h" => Some(inclusive_days * 6),
+        "60" | "1h" => Some(inclusive_days * 24),
+        "15" | "15m" => Some(inclusive_days * 96),
+        _ => match native_interval.trim().to_ascii_lowercase().as_str() {
+            "1d" => Some(inclusive_days),
+            "1w" => Some(inclusive_days.div_ceil(7)),
+            "4h" => Some(inclusive_days * 6),
+            "1h" => Some(inclusive_days * 24),
+            "15m" => Some(inclusive_days * 96),
+            _ => None,
+        },
     }
 }
 
@@ -289,6 +352,12 @@ fn license_for(provider: &str, openbb_provider: &str) -> String {
 }
 
 pub(super) fn provider_notes(request: &OpenBbNativeRequest) -> String {
+    if request.openbb_provider.eq_ignore_ascii_case("yfinance") {
+        return format!(
+            "Live Yahoo Finance chart API fetch used as yfinance degraded fallback. No credentials were required or stored. This dataset is diagnostic-only, production_eligible=false, promotion_eligible=false, and must not be promoted. Requested data was captured from the provider raw response; interval used: {}.",
+            request.native_interval
+        );
+    }
     format!(
         "OpenBB native OHLCV via {} at {}. native_interval={}; adjustment={}; session={}; credential_state={:?}; no values stored.",
         request.openbb_provider,
