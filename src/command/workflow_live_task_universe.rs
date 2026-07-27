@@ -185,6 +185,16 @@ pub(super) struct WorkflowV2DeliverableContract {
     /// payloads built by incrementing a timestamp N times routinely overshoot
     /// now. Domain-neutral — the contract names the field, the engine only
     /// compares instants.
+    /// Format of the declared deliverable: `json` (default) or `text`.
+    ///
+    /// A contract may legitimately declare a prose or tabular artifact — an
+    /// inventory, a written report. Parsing one as JSON fails on line 1 however
+    /// good the work is, and a fail-closed gate then demotes it permanently
+    /// because no remediation can make markdown parse. A textual deliverable is
+    /// checked for existence and non-emptiness, which is all a contract can
+    /// honestly assert about unstructured content.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) artifact_format: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) observed_time_field: Option<String>,
     /// Weekday indices (Mon=0 … Sun=6) on which the observed venue does not

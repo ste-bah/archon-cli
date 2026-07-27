@@ -213,7 +213,19 @@ if has_placeholder(raw_artifact_path) and not contract.get('required_universe'):
             f'declared deliverable requires >= {min_instances} instance(s), '
             f'found {len(instance_paths)} for {raw_artifact_path}'
         )
+    # Parameterized deliverables carry the same format rule as single ones: an
+    # explicit declaration wins, else infer from the extension. Without this a
+    # declared `<run-id>/report.md` instance was parsed as JSON and could never
+    # pass — the same unsatisfiable failure as the single-artifact path below.
+    declared_format = str(contract.get('artifact_format') or '').strip().lower()
     for instance in instance_paths:
+        instance_format = declared_format or (
+            'json' if instance.suffix.lower() in ('.json', '.jsonl') else 'text'
+        )
+        if instance_format != 'json':
+            if not instance.is_file() or instance.stat().st_size == 0:
+                failures.append(f'declared deliverable instance missing or empty: {instance}')
+            continue
         instance_artifact = load_json(instance, f'declared deliverable instance {instance}')
         if instance_artifact is not None:
             internal_consistency(instance_artifact, f'declared deliverable instance {instance}')
@@ -228,6 +240,43 @@ if has_placeholder(raw_artifact_path) and not contract.get('required_universe'):
     raise SystemExit(0)
 
 artifact_path = resolve(contract['artifact_path'])
+# Not every deliverable is JSON. A contract may declare a prose or tabular
+# artifact (an inventory, a report), and parsing one as JSON fails on line 1
+# no matter how good the work is -- a fail-closed gate then demotes correct
+# Format of the declared deliverable. An explicit contract declaration always
+# wins; otherwise INFER it from the artifact's own extension.
+#
+# Not every deliverable is JSON — a contract may legitimately declare prose,
+# a report, or source text. Parsing one as JSON fails on line 1 however good
+# the work is, and a fail-closed gate then demotes it permanently because no
+# remediation can make unstructured text parse: every attempt burns with no
+# action any agent could take. Defaulting to json had exactly that effect on
+# every non-JSON deliverable.
+#
+# Inference rather than a declared default, because a format nobody remembers
+# to declare is a format nobody declares. Structured artifacts keep the full
+# predicate suite; textual ones are checked for existence and non-emptiness,
+# which is all a contract can honestly assert about unstructured content.
+# Domain-neutral: extension only, no knowledge of what the file contains.
+artifact_format = str(contract.get('artifact_format') or '').strip().lower()
+if not artifact_format:
+    artifact_format = 'json' if artifact_path.suffix.lower() in ('.json', '.jsonl') else 'text'
+if artifact_format not in ('json', 'text'):
+    failures.append(f'unsupported declared artifact_format: {artifact_format}')
+    print(json.dumps({'failures': failures}, indent=2))
+    raise SystemExit(1)
+if artifact_format == 'text':
+    if not artifact_path.is_file() or artifact_path.stat().st_size == 0:
+        failures.append(f'declared deliverable missing or empty: {artifact_path}')
+    if failures:
+        print(json.dumps({'failures': failures}, indent=2))
+        raise SystemExit(1)
+    print(json.dumps({
+        'status': 'declared_text_deliverable_present',
+        'artifact': str(artifact_path),
+        'bytes': artifact_path.stat().st_size,
+    }))
+    raise SystemExit(0)
 artifact = load_json(artifact_path, 'declared deliverable')
 if artifact is None:
     print(json.dumps({'failures': failures}, indent=2))
