@@ -267,4 +267,3 @@ fn failed_final_report_terminal_marker_routes_to_host_fallback() {
     )));
     assert!(!terminal_marker_requires_report_fallback(None));
 }
-
