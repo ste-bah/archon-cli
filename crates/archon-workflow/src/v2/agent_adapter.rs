@@ -513,8 +513,6 @@ mod envelope_tests;
 #[path = "agent_adapter_project_artifact_completion_tests.rs"]
 mod project_artifact_completion_tests;
 #[cfg(test)]
-#[path = "agent_adapter_required_tools_tests.rs"]
-mod required_tools_tests;
 #[path = "agent_prompt_digest_tests.rs"]
 mod prompt_digest_tests;
 #[cfg(test)]
@@ -523,6 +521,9 @@ mod prompt_growth_tests;
 #[cfg(test)]
 #[path = "agent_prompt_tests.rs"]
 mod prompt_tests;
+#[cfg(test)]
+#[path = "agent_adapter_required_tools_tests.rs"]
+mod required_tools_tests;
 #[cfg(test)]
 #[path = "agent_adapter_tests.rs"]
 mod tests;
@@ -549,6 +550,51 @@ mod shared_rule_tests {
             super::IMPLEMENTATION_RULES.contains("ONE filter per invocation"),
             "{}",
             super::IMPLEMENTATION_RULES
+        );
+    }
+}
+
+#[cfg(test)]
+mod test_module_gating_tests {
+    /// Every `mod *_tests` declaration must carry `#[cfg(test)]`.
+    ///
+    /// A union merge resolution left one of six bare, because the attribute and
+    /// the item it modifies fell on opposite sides of a conflict marker. The
+    /// consequence was test code compiling into the PRODUCTION binary, and
+    /// nothing caught it: cargo check was clean, every test passed, the module
+    /// compiled. The only signal was a dead_code lint on two helpers that have
+    /// no callers outside tests.
+    ///
+    /// Third appearance of this shape in one session — an attribute binding to
+    /// the wrong item, so tests silently stop being tests. Cheap to assert,
+    /// expensive to find.
+    #[test]
+    fn every_test_module_is_gated_behind_cfg_test() {
+        let source = include_str!("agent_adapter.rs");
+        let lines: Vec<&str> = source.lines().collect();
+        let mut bare = Vec::new();
+        for (index, line) in lines.iter().enumerate() {
+            let trimmed = line.trim_start();
+            let is_test_mod = trimmed.starts_with("mod ")
+                && trimmed
+                    .trim_start_matches("mod ")
+                    .split(|c: char| c == ';' || c == '{' || c.is_whitespace())
+                    .next()
+                    .is_some_and(|name| name.contains("test"));
+            if !is_test_mod {
+                continue;
+            }
+            let start = index.saturating_sub(3);
+            if !lines[start..index]
+                .iter()
+                .any(|l| l.contains("#[cfg(test)]"))
+            {
+                bare.push(format!("line {}: {}", index + 1, trimmed));
+            }
+        }
+        assert!(
+            bare.is_empty(),
+            "test modules compiling into the production binary: {bare:#?}"
         );
     }
 }
