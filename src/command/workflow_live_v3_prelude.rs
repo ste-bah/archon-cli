@@ -316,9 +316,20 @@ function __archonPrimitives(w) {
       if (!env) return false;
       let blob = "";
       try { blob = JSON.stringify(env); } catch (_) { return false; }
+      // Cancellation is a deliberate stop, not a provider failure. It shares
+      // the Execution kind, so it must be excluded before the typed check or a
+      // cancelled round would be refunded.
+      if (blob.indexOf("cancelled") >= 0) return false;
+      // Typed signal: BranchFailureKind::Execution is the host's own
+      // classification for transport, timeout and rate-limit failures, and it
+      // is a persisted enum rather than prose.
+      if (blob.indexOf('"failure_kind":"execution"') >= 0) return true;
+      // A call that fails WHOLESALE produces no branch outcomes and therefore
+      // no failure_kind at all — observed on a 520, where the only evidence is
+      // the summary text. Fall back to the exact markers the host itself
+      // excludes from write-branch validation errors.
       return blob.indexOf("agent transport failed") >= 0
-        || blob.indexOf("timed out after") >= 0
-        || blob.indexOf("subagent failed") >= 0;
+        || blob.indexOf("timed out after") >= 0;
     };
     // Tasks that exhausted their own remediation budget are ALSO unfinished work.
     // The reviews only inspect ACCEPTED tasks — they hunt false acceptance — so a
@@ -609,16 +620,29 @@ mod transport_retry_tests {
         let start = prelude
             .find("const transportFailure =")
             .expect("transportFailure must exist");
-        let body = &prelude[start..start + 400.min(prelude.len() - start)];
+        // Slice to the function's actual end, not a fixed window. A magic
+        // width made this test report failure on correct code twice: the
+        // instrument could not reach what it was asked to check.
+        let body = &prelude[start..start + prelude[start..].find("\n    };").expect("fn end")];
+        // Typed enum first, prose only where the enum cannot exist.
+        assert!(
+            body.contains(r#""failure_kind":"execution""#),
+            "must prefer the host's typed failure kind: {body}"
+        );
+        assert!(
+            body.contains("cancelled"),
+            "a deliberate stop must not be refunded as a provider failure: {body}"
+        );
+        // A wholesale call failure has no branch outcomes and so no
+        // failure_kind; the 520 that cost a round was exactly that shape.
         assert!(body.contains("agent transport failed"), "{body}");
         assert!(body.contains("timed out after"), "{body}");
 
         let loop_start = prelude
             .find("for (let round = 1; round <= maxRounds;")
             .expect("remediation loop must exist");
-        // Wide enough to reach past both agent prompts to the round counter;
-        // a short window made this test fail on correct code.
-        let loop_body = &prelude[loop_start..loop_start + 4000.min(prelude.len() - loop_start)];
+        let loop_body = &prelude
+            [loop_start..loop_start + prelude[loop_start..].find("\n      }").expect("loop end")];
         // The round counter must advance in the BODY, not the for-header, or a
         // transport `continue` would still spend the round.
         assert!(
