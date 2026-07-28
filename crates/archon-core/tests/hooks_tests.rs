@@ -736,7 +736,12 @@ async fn exit_2_returns_blocked_with_stderr() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn exit_1_non_blocking_failure_returns_not_blocked() {
-    let registry = make_registry_with_command(HookEvent::PreToolUse, "exit 1", None, None);
+    let command = if cfg!(windows) && which::which("sh").is_err() && which::which("bash").is_err() {
+        "more >NUL & exit /B 1"
+    } else {
+        "cat >/dev/null; exit 1"
+    };
+    let registry = make_registry_with_command(HookEvent::PreToolUse, command, None, None);
     let input = pre_tool_input("Bash", "echo hello");
     let result = fire_pre_tool_use(&registry, input).await;
     assert!(
