@@ -178,6 +178,7 @@ fn vertex_claude_supports_thinking() {
     );
     assert!(provider.supports_feature(ProviderFeature::Thinking));
     assert!(provider.supports_feature(ProviderFeature::PromptCaching));
+    assert!(provider.supports_feature(ProviderFeature::ToolUse));
     assert!(provider.supports_feature(ProviderFeature::Vision));
 }
 
@@ -196,7 +197,8 @@ fn vertex_gemini_no_thinking() {
     );
     assert!(!provider.supports_feature(ProviderFeature::Thinking));
     assert!(!provider.supports_feature(ProviderFeature::PromptCaching));
-    // Gemini still supports Vision and ToolUse
+    // Gemini supports Vision, but does not advertise ToolUse until its wire
+    // request and response translation is implemented.
     assert!(provider.supports_feature(ProviderFeature::Vision));
-    assert!(provider.supports_feature(ProviderFeature::ToolUse));
+    assert!(!provider.supports_feature(ProviderFeature::ToolUse));
 }
