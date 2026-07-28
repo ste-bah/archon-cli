@@ -151,8 +151,25 @@ fn normalize_worktree_agent_result(
 /// **Marking only.** The budget decision lives in the prelude's
 /// `remediationBudget`, bounded to once per task. That bound is the safety
 /// argument: schema repair already retries under its own cap, so an unbounded
-/// exemption trades a burned attempt for a hung task — strictly worse. Nothing
-/// here forces green; it only stops discarding work that is already on disk.
+/// exemption trades a burned attempt for a hung task — strictly worse.
+///
+/// # What this does NOT do
+///
+/// It does not preserve the patch. A schema failure classifies as `Contract`,
+/// which yields `NeedsReview`, and `capture_worktree_branch_manifest` captures
+/// only `Accepted`/`Noop` — so the patch is never turned into a manifest and
+/// never reaches the canonical repo. It is stranded in the branch worktree and
+/// discarded with it.
+///
+/// **The refunded attempt therefore starts clean and redoes the work.** Seeing a
+/// task visibly repeat itself on this path is expected, not a bug.
+///
+/// So this buys a retry, not a rescue: it stops a malformed *report* from
+/// spending the task's budget. The spec's "re-verify the existing patch rather
+/// than re-running the round" is not achievable here — there is no surviving
+/// patch to re-verify. Making that true would mean capturing a manifest from a
+/// non-accepted branch, which touches the write coordinator's safety model and
+/// is deliberately out of scope.
 fn mark_schema_failure_with_landed_patch(
     result: &mut WorkflowV2Result,
     prepared: &PreparedWorktreeBranch,
@@ -188,8 +205,10 @@ fn mark_schema_failure_with_landed_patch(
         ),
         description: format!(
             "schema repair failed for branch '{}', but {} changed and {} created file(s) landed \
-             against the declared baseline. The work exists; only the report was malformed. This \
-             attempt is refunded ONCE for this task — a second such failure is charged normally.",
+             against the declared baseline, so the attempt did real work and produced no verdict. \
+             The patch is NOT preserved (a NeedsReview branch is never captured), so the refunded \
+             attempt redoes the work from a clean worktree. Refunded ONCE for this task — a \
+             second such failure is charged normally.",
             prepared.branch.id,
             captured.changed_files.len(),
             captured.created_files.len(),
