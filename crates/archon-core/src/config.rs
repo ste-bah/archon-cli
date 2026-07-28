@@ -692,7 +692,16 @@ impl Default for GeneratedWorkflowConfig {
         Self {
             max_repair_iterations: 3,
             max_investigation_iterations: 3,
-            verification_branch_timeout_secs: 1_200,
+            // 4 hours. The previous 20 minutes starved verifiers relative to the
+            // work they inspect: host calls get 2 hours to BUILD something, while
+            // the branch that has to read the result, cross-check it against
+            // registries and artifacts, and run its own tests had one sixth of
+            // that. Observed live — a verifier timed out at 1200s and VOIDED an
+            // already-accepted remediation, recording correct work as unresolved.
+            // A verifier that cannot finish cannot fail-closed honestly; it just
+            // disappears. Override per project with
+            // workflow.generated.verification_branch_timeout_secs.
+            verification_branch_timeout_secs: 14_400,
             host_call_timeout_secs: 7_200,
         }
     }
