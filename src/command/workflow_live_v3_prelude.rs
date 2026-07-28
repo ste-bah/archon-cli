@@ -265,6 +265,78 @@ function __archonPrimitives(w) {
       acceptedTaskIds,
       opts.evidenceFor,
     );
+  // Attempt budget that follows PROGRESS rather than a flat count.
+  //
+  // A flat cap funds the stuck task exactly as much as the one closing gaps:
+  // observed live, a task reported 5 gaps, closed 1, then reported the same 4
+  // twice more and was cut off with real work outstanding, while another
+  // burned its whole budget rediscovering one mechanical remedy.
+  //
+  // Progress is measured against the FIRST attempt's gap set, not the previous
+  // attempt's. Incidental gaps churn (one run saw test-filter-zero-match become
+  // zero-test-noise between attempts) and a consecutive diff reads that as
+  // movement; anything absent from the baseline can never earn budget, so churn
+  // buys nothing and the engine never has to judge which gaps are substantive —
+  // a judgement it cannot make domain-neutrally.
+  //
+  // Gap ids come from the VERIFIER's envelope. Measured across one run,
+  // verification-sourced ids were 17 clean slugs with none suffixed, while
+  // write-sourced ids were 24 with 17 carrying a branch suffix
+  // (invalid_write_branch_output_<item>) that could never match across
+  // attempts and would read as perpetual churn. Choosing the source removes
+  // the normalisation problem instead of solving it.
+  const remediationBudget = (opts = {}) => {
+    const base = Math.max(1, Number(opts.baseAttempts) || 3);
+    const hardCap = Math.max(base, Number(opts.hardCap) || 6);
+    let baseline = null;
+    const gapIdsOf = (env) => {
+      const out = new Set();
+      const walk = (node) => {
+        if (!node) return;
+        if (Array.isArray(node)) { node.forEach(walk); return; }
+        if (typeof node !== "object") return;
+        if (Array.isArray(node.residual_gaps)) {
+          for (const gap of node.residual_gaps) {
+            const id = gap && gap.id;
+            // A suffixed id embeds a branch or item name and cannot match
+            // across attempts. Excluded rather than normalised: silently
+            // "fixing" it would hide a source that should not be used here.
+            if (typeof id === "string" && id && !/_(?:[a-z0-9]+-){2,}/.test(id)) out.add(id);
+          }
+        }
+        for (const value of Object.values(node)) walk(value);
+      };
+      walk(env);
+      return out;
+    };
+    let lastRemaining = null;
+    return {
+      // Called after each attempt with the VERIFIER envelope. Returns whether
+      // another attempt is warranted.
+      shouldContinue(attempt, checkEnv) {
+        const ids = gapIdsOf(checkEnv);
+        if (baseline === null) {
+          baseline = ids;
+          lastRemaining = ids.size;
+          // A verifier that named nothing gives nothing to measure against;
+          // the flat budget still applies.
+          return attempt < base;
+        }
+        const remaining = [...baseline].filter((id) => ids.has(id)).length;
+        // Recorded on EVERY call, including inside the base window. Updating it
+        // only after the base attempts made a flat set look like progress: the
+        // comparison fell back to the baseline size and read 3 -> 3 as 5 -> 3.
+        const stillClosing = remaining < lastRemaining;
+        lastRemaining = remaining;
+        if (attempt < base) return true;
+        if (attempt >= hardCap) return false;
+        // Extend only while the ORIGINAL diagnosis is still shrinking. A
+        // plateau means attempts have stopped converging, which is when more
+        // of them stop being worth buying.
+        return stillClosing;
+      },
+    };
+  };
   // Group review findings by the canonical task id(s) they name. Reviewers emit
   // ids under the review contract's itemTaskIdsPath; accept the common aliases
   // so a reducer that renames the field does not silently drop the finding.
@@ -429,7 +501,7 @@ function __archonPrimitives(w) {
     }
     return { resolved, unresolved, unassigned };
   };
-  return Object.freeze({ agent, agents, phase, log, pipeline, adversarialReview, coverageAudit, remediateFindings, w });
+  return Object.freeze({ agent, agents, phase, log, pipeline, adversarialReview, coverageAudit, remediateFindings, remediationBudget, w });
 }
 "#;
 
@@ -683,5 +755,112 @@ mod findings_extraction_tests {
                 || body.contains("outcome && outcome.result"),
             "findingsFrom must read each branch outcome's own findings: {body}"
         );
+    }
+}
+
+#[cfg(test)]
+mod remediation_budget_tests {
+    /// Runs the REAL prelude JS, not a Rust reimplementation of it.
+    ///
+    /// Every other prelude guard in this file asserts on source text, which
+    /// catches drift but cannot catch wrong behaviour. The budget is arithmetic
+    /// over gap sets, so it is worth executing: a source assertion would have
+    /// passed on a rule that funded exactly the wrong task.
+    fn run_budget_js(driver: &str) -> String {
+        let prelude = super::V3_PRIMITIVES_JS;
+        let start = prelude
+            .find("  const remediationBudget = (opts = {}) => {")
+            .expect("remediationBudget must exist");
+        let end = start
+            + prelude[start..]
+                .find("\n  };\n")
+                .expect("remediationBudget end")
+            + 5;
+        let script = format!("{}\n{driver}\n", &prelude[start..end]);
+        let dir = tempfile::tempdir().expect("tmp");
+        let path = dir.path().join("budget.mjs");
+        std::fs::write(&path, script).expect("write driver");
+        let out = std::process::Command::new("node")
+            .arg(&path)
+            .output()
+            .expect("node must be available; the tests already shell out to zsh and python3");
+        assert!(
+            out.status.success(),
+            "driver failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    fn envelope(gap_ids: &[&str]) -> String {
+        let gaps = gap_ids
+            .iter()
+            .map(|id| format!(r#"{{"id":"{id}"}}"#))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(r#"{{"result":{{"residual_gaps":[{gaps}]}}}}"#)
+    }
+
+    /// The observed TDL-040 sequence: 5 gaps, one closed, then flat.
+    /// A raw-count rule keeps funding it; this must stop on the plateau.
+    #[test]
+    fn budget_extends_while_the_original_diagnosis_shrinks_and_stops_on_a_plateau() {
+        let a1 = envelope(&[
+            "registry-missing",
+            "paging",
+            "mcp-path",
+            "tui-alias",
+            "filter-mismatch",
+        ]);
+        let a2 = envelope(&["paging", "mcp-path", "tui-alias", "zero-match"]);
+        let a3 = envelope(&["paging", "mcp-path", "tui-alias", "zero-test-noise"]);
+        let driver = format!(
+            r#"const b = remediationBudget();
+console.log([b.shouldContinue(1, {a1}), b.shouldContinue(2, {a2}), b.shouldContinue(3, {a3})].join(","));"#
+        );
+        // 1,2 are inside the base budget; 3 is the plateau and must stop.
+        assert_eq!(run_budget_js(&driver), "true,true,false");
+    }
+
+    /// Churned gaps were never in the baseline, so they cannot buy budget.
+    /// This is what removes the need to classify substantive vs incidental.
+    #[test]
+    fn gaps_absent_from_the_baseline_cannot_earn_budget() {
+        let a1 = envelope(&["real-one"]);
+        let a2 = envelope(&["real-one", "churn-a"]);
+        let a3 = envelope(&["real-one", "churn-b"]);
+        let driver = format!(
+            r#"const b = remediationBudget();
+b.shouldContinue(1, {a1}); b.shouldContinue(2, {a2});
+console.log(b.shouldContinue(3, {a3}));"#
+        );
+        assert_eq!(run_budget_js(&driver), "false");
+    }
+
+    /// Branch-suffixed ids cannot match across attempts and would read as
+    /// perpetual churn, so they are excluded rather than silently normalised.
+    #[test]
+    fn branch_suffixed_gap_ids_are_excluded_from_the_baseline() {
+        let a1 = envelope(&["invalid_write_branch_output_review-remediate-task-tdl-020-2-63-0"]);
+        let driver = format!(
+            r#"const b = remediationBudget();
+b.shouldContinue(1, {a1});
+// Baseline is empty, so nothing can be "still closing": it must not extend
+// past the base budget on the strength of an unmatchable id.
+console.log(b.shouldContinue(3, {a1}));"#
+        );
+        assert_eq!(run_budget_js(&driver), "false");
+    }
+
+    /// A verifier that named nothing gives nothing to measure; fall back to the
+    /// flat budget rather than inventing progress from an empty set.
+    #[test]
+    fn an_empty_first_verdict_falls_back_to_the_flat_budget() {
+        let none = envelope(&[]);
+        let driver = format!(
+            r#"const b = remediationBudget();
+console.log([b.shouldContinue(1, {none}), b.shouldContinue(3, {none})].join(","));"#
+        );
+        assert_eq!(run_budget_js(&driver), "true,false");
     }
 }
