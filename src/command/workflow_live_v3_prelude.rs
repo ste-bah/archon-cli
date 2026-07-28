@@ -288,6 +288,38 @@ function __archonPrimitives(w) {
   const remediationBudget = (opts = {}) => {
     const base = Math.max(1, Number(opts.baseAttempts) || 3);
     const hardCap = Math.max(base, Number(opts.hardCap) || 6);
+    // An attempt whose schema repair failed while its patch nonetheless LANDED
+    // produced real work and no verdict. Charging it to the task discards work
+    // that is already on disk — the third shape of "an attempt burned by
+    // something that says nothing about the work", after the 520 and the
+    // verifier timeout.
+    //
+    // Granted as one EXTRA attempt rather than an un-counted one, because the
+    // loop that owns `attempt` is the GENERATED script's and increments
+    // unconditionally. A refund is only expressible here, as added funding.
+    // For a bounded loop the two are behaviourally identical.
+    //
+    // Bounded to once per task, and the bound IS the safety argument: schema
+    // repair already retries under its own cap, so an unbounded exemption
+    // trades a burned attempt for a hung task — strictly worse. An agent that
+    // emits garbage and lands a patch every single time must still run out.
+    const maxSchemaRefunds = Number.isFinite(Number(opts.maxSchemaRefunds))
+      ? Math.max(0, Number(opts.maxSchemaRefunds))
+      : 1;
+    let schemaRefunds = 0;
+    // Keyed on the host's TYPED marker, never on prose. The host sets it only
+    // where the worktree was compared against the declared baseline; a bare
+    // "files changed" test would count stray tool output as landed work and
+    // refund an attempt that produced none.
+    const schemaRefundable = (...envs) => {
+      for (const env of envs) {
+        if (!env) continue;
+        let blob = "";
+        try { blob = JSON.stringify(env); } catch (_) { continue; }
+        if (blob.indexOf('"schema_repair_patch_landed":true') >= 0) return true;
+      }
+      return false;
+    };
     let baseline = null;
     const gapIdsOf = (env) => {
       const out = new Set();
@@ -313,14 +345,23 @@ function __archonPrimitives(w) {
     return {
       // Called after each attempt with the VERIFIER envelope. Returns whether
       // another attempt is warranted.
-      shouldContinue(attempt, checkEnv) {
+      // `implEnv` is optional: a script generated before this argument existed
+      // still runs, it simply cannot earn the schema refund. Checked on BOTH
+      // envelopes because the observed TDL-020 failure was on the write half,
+      // which never reaches the verifier envelope at all.
+      shouldContinue(attempt, checkEnv, implEnv) {
+        if (schemaRefunds < maxSchemaRefunds && schemaRefundable(implEnv, checkEnv)) {
+          schemaRefunds += 1;
+        }
+        const funded = base + schemaRefunds;
+        const ceiling = hardCap + schemaRefunds;
         const ids = gapIdsOf(checkEnv);
         if (baseline === null) {
           baseline = ids;
           lastRemaining = ids.size;
           // A verifier that named nothing gives nothing to measure against;
           // the flat budget still applies.
-          return attempt < base;
+          return attempt < funded;
         }
         const remaining = [...baseline].filter((id) => ids.has(id)).length;
         // Recorded on EVERY call, including inside the base window. Updating it
@@ -328,8 +369,8 @@ function __archonPrimitives(w) {
         // comparison fell back to the baseline size and read 3 -> 3 as 5 -> 3.
         const stillClosing = remaining < lastRemaining;
         lastRemaining = remaining;
-        if (attempt < base) return true;
-        if (attempt >= hardCap) return false;
+        if (attempt < funded) return true;
+        if (attempt >= ceiling) return false;
         // Extend only while the ORIGINAL diagnosis is still shrinking. A
         // plateau means attempts have stopped converging, which is when more
         // of them stop being worth buying.
@@ -848,6 +889,73 @@ b.shouldContinue(1, {a1});
 // Baseline is empty, so nothing can be "still closing": it must not extend
 // past the base budget on the strength of an unmatchable id.
 console.log(b.shouldContinue(3, {a1}));"#
+        );
+        assert_eq!(run_budget_js(&driver), "false");
+    }
+
+    /// The envelope the host produces when schema repair failed but the patch
+    /// was confirmed landed against the declared baseline.
+    fn schema_landed_envelope() -> String {
+        r#"{"result":{"data":{"schema_repair_patch_landed":true},"residual_gaps":[]}}"#.to_string()
+    }
+
+    /// An attempt that died to schema repair WITH a landed patch produced work
+    /// and no verdict, so it must not be charged to the task. Attempt 3 is
+    /// refused on the flat budget; with the refund it is funded.
+    #[test]
+    fn a_schema_failure_with_a_landed_patch_buys_one_extra_attempt() {
+        let none = envelope(&[]);
+        let landed = schema_landed_envelope();
+        let driver = format!(
+            r#"const plain = remediationBudget();
+const refunded = remediationBudget();
+// Same call on both, except the refunded one also saw a landed-patch impl.
+console.log([
+  plain.shouldContinue(1, {none}),
+  plain.shouldContinue(3, {none}),
+  refunded.shouldContinue(1, {none}, {landed}),
+  refunded.shouldContinue(3, {none}),
+].join(","));"#
+        );
+        // plain: funded at 1, refused at 3. refunded: funded at 1 AND at 3.
+        assert_eq!(run_budget_js(&driver), "true,false,true,true");
+    }
+
+    /// The bound is the entire safety argument. Schema repair already retries
+    /// under its own cap, so an unbounded exemption turns a burned attempt into
+    /// a hung task. An agent that lands a patch and emits garbage EVERY time
+    /// must still run out.
+    #[test]
+    fn the_schema_refund_is_bounded_to_once_per_task() {
+        let none = envelope(&[]);
+        let landed = schema_landed_envelope();
+        let driver = format!(
+            r#"const b = remediationBudget();
+// Four consecutive landed-patch schema failures. Only the first may pay out,
+// so funding reaches base+1 = 4 and no further.
+b.shouldContinue(1, {none}, {landed});
+console.log([
+  b.shouldContinue(3, {none}, {landed}),
+  b.shouldContinue(4, {none}, {landed}),
+  b.shouldContinue(5, {none}, {landed}),
+].join(","));"#
+        );
+        // 3 < 4 funded; 4 and 5 are not — the refund did not compound.
+        assert_eq!(run_budget_js(&driver), "true,false,false");
+    }
+
+    /// Without the marker nothing changes. Guards the refund against becoming a
+    /// blanket extra attempt for every task — which would quietly raise the
+    /// budget for the stuck tasks the progress rule exists to cut off.
+    #[test]
+    fn an_envelope_without_the_marker_earns_no_refund() {
+        let none = envelope(&[]);
+        // Shaped like the marker but false, and a look-alike key: neither pays.
+        let decoys = r#"{"result":{"data":{"schema_repair_patch_landed":false,"schema_repair_patch_landed_maybe":true}}}"#;
+        let driver = format!(
+            r#"const b = remediationBudget();
+b.shouldContinue(1, {none}, {decoys});
+console.log(b.shouldContinue(3, {none}, {decoys}));"#
         );
         assert_eq!(run_budget_js(&driver), "false");
     }

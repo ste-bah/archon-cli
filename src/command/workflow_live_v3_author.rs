@@ -49,7 +49,7 @@ Shape — top-level script, exactly like this (no wrapper function):
     // attempts only while the FIRST verifier's gap set is still shrinking, and
     // stops on a plateau. Do not replace this with a fixed bound.
     const budget = remediationBudget()
-    for (let attempt = 2; budget.shouldContinue(attempt - 1, check) && (!isAccepted(impl) || !isAccepted(check)); attempt += 1) {
+    for (let attempt = 2; budget.shouldContinue(attempt - 1, check, impl) && (!isAccepted(impl) || !isAccepted(check)); attempt += 1) {
       const rejectedAttempt = `Implementation envelope:\n${remediationEvidence(impl)}\nVerifier envelope:\n${remediationEvidence(check)}`
       impl = await agent(`Remediate ${t.id}. The previous attempt was REJECTED. Fix exactly what these verbatim implementation and verifier envelopes name; do not re-argue them:\n${rejectedAttempt}\nOriginal goal: implement ${t.id} per ${t.file}. Repository root: <repo root>. Prove the fix with tests you run yourself.`, { label: `remediate-${t.id.toLowerCase()}-${attempt}`, write: true, taskIds: [t.id], targetFiles: t.targetFiles })
       check = await agent(`You did NOT implement ${t.id} — be suspicious. The previous attempt was rejected with these verbatim findings:\n${rejectedAttempt}\nRe-read ${t.file}, inspect the actual code, and run whatever tests YOU judge prove or disprove the acceptance criteria.`, { label: `verify-${t.id.toLowerCase()}-${attempt}`, verify: true, taskIds: [t.id] })

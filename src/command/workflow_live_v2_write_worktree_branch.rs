@@ -24,6 +24,7 @@ async fn run_one_worktree_branch(
     .await
     ?;
     poll_v2_run_control(store_for_control, run_id, &branch.id)?;
+    mark_schema_failure_with_landed_patch(&mut result, &prepared);
     validate_worktree_branch_result(&mut result, &branch, &prepared.assignment, v2_store)?;
     let (manifest, pre_hashes) =
         capture_worktree_branch_manifest(
@@ -132,6 +133,79 @@ fn normalize_worktree_agent_result(
         ),
         Err(err) => Err(err),
     }
+}
+
+/// Record that a schema-repair failure nonetheless left a real patch on disk.
+///
+/// A write branch whose schema repair failed produced NO verdict on the work —
+/// but the work may still have landed. Two of TDL-020's three attempts died
+/// exactly this way, and charging them to the task discarded a patch that
+/// existed. This is the third shape of "an attempt burned by something that
+/// says nothing about the work", after the HTTP 520 and the verifier timeout.
+///
+/// The question is answered against the DECLARED BASELINE, never by asking the
+/// worktree whether any files changed. Stray tool output, a partial write, or a
+/// worktree dirtied by something other than the patch all answer "yes" to the
+/// cheap question, and each would refund an attempt that produced nothing.
+///
+/// **Marking only.** The budget decision lives in the prelude's
+/// `remediationBudget`, bounded to once per task. That bound is the safety
+/// argument: schema repair already retries under its own cap, so an unbounded
+/// exemption trades a burned attempt for a hung task — strictly worse. Nothing
+/// here forces green; it only stops discarding work that is already on disk.
+fn mark_schema_failure_with_landed_patch(
+    result: &mut WorkflowV2Result,
+    prepared: &PreparedWorktreeBranch,
+) {
+    if !is_schema_repair_failure_result(result) {
+        return;
+    }
+    // Fail CLOSED. If the patch cannot be captured we cannot prove work landed,
+    // and an unprovable refund is the failure mode that hangs a task rather
+    // than erroring — so silence here means "charge the attempt", as before.
+    let Ok(captured) = capture_patch(
+        &prepared.workspace,
+        &prepared.coordinator_plan.target_files,
+        &prepared.baseline,
+    ) else {
+        return;
+    };
+    if captured.changed_files.is_empty() && captured.created_files.is_empty() {
+        return;
+    }
+    if let Some(data) = result.data.as_object_mut() {
+        data.insert(
+            "schema_repair_patch_landed".to_string(),
+            serde_json::Value::Bool(true),
+        );
+    }
+    // Typed gap so "was exempted" and "used the exemption" stay separable in the
+    // records rather than having to be inferred from attempt counts later.
+    result.residual_gaps.push(WorkflowV2ResidualGap {
+        id: format!(
+            "schema_repair_exempted_{}",
+            sanitize_v2_path_segment(&prepared.branch.id)
+        ),
+        description: format!(
+            "schema repair failed for branch '{}', but {} changed and {} created file(s) landed \
+             against the declared baseline. The work exists; only the report was malformed. This \
+             attempt is refunded ONCE for this task — a second such failure is charged normally.",
+            prepared.branch.id,
+            captured.changed_files.len(),
+            captured.created_files.len(),
+        ),
+        severity: Some("info".to_string()),
+    });
+}
+
+/// Keyed on the runtime's own error text for the bounded-retry exhaustion, which
+/// is the only place this phrasing is produced (`write_errors.rs:213`).
+fn is_schema_repair_failure_result(result: &WorkflowV2Result) -> bool {
+    result
+        .data
+        .get("error")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|error| error.contains("schema repair failed"))
 }
 
 fn validate_worktree_branch_result(
