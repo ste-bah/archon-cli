@@ -108,13 +108,31 @@ mod tests {
 
     #[test]
     fn active_session_model_preserves_anthropic_default() {
+        let _env_lock = super::super::anthropic_model_env_lock()
+            .lock()
+            .expect("Anthropic model environment lock");
+        let previous = std::env::var_os("ANTHROPIC_MODEL");
+        unsafe {
+            std::env::remove_var("ANTHROPIC_MODEL");
+        }
         let config = ArchonConfig::default();
+        let model = active_session_model(&config);
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var("ANTHROPIC_MODEL", value),
+                None => std::env::remove_var("ANTHROPIC_MODEL"),
+            }
+        }
 
-        assert_eq!(active_session_model(&config), config.api.default_model);
+        assert_eq!(model, config.api.default_model);
     }
 
     #[test]
     fn anthropic_session_honors_anthropic_model_env_override() {
+        let _env_lock = super::super::anthropic_model_env_lock()
+            .lock()
+            .expect("Anthropic model environment lock");
+        let previous = std::env::var_os("ANTHROPIC_MODEL");
         let mut config = ArchonConfig::default();
         config.llm.provider = "anthropic".into();
         unsafe {
@@ -122,7 +140,10 @@ mod tests {
         }
         let model = active_session_model(&config);
         unsafe {
-            std::env::remove_var("ANTHROPIC_MODEL");
+            match previous {
+                Some(value) => std::env::set_var("ANTHROPIC_MODEL", value),
+                None => std::env::remove_var("ANTHROPIC_MODEL"),
+            }
         }
 
         assert_eq!(model, "deepseek-v4-pro[1m]");

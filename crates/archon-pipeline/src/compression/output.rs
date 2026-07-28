@@ -4,7 +4,6 @@ use super::abbreviation::{abbreviate, apply_known_abbrev};
 use super::extraction::Extracted;
 use super::{CompressedMemory, estimate_tokens};
 
-
 pub(super) fn build_compressed(
     raw: &str,
     ex: &Extracted,

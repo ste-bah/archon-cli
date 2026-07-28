@@ -12,9 +12,10 @@ use super::*;
 #[test]
 fn write_lock_path_is_sibling_sidecar() {
     let path = PathBuf::from("/tmp/archon-data.db");
+    let expected_parent = path.parent().unwrap().canonicalize().unwrap();
     assert_eq!(
         write_lock_path_for_db(&path),
-        PathBuf::from("/tmp/archon-data.db.archon-cozo-write.lock")
+        expected_parent.join("archon-data.db.archon-cozo-write.lock")
     );
 }
 

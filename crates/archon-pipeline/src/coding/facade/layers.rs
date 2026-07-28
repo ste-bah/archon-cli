@@ -4,8 +4,8 @@ use crate::coding::algorithm::select_algorithm;
 use crate::prompt_cap::{PromptLayer, TruncationPriority};
 use crate::runner::{AgentInfo, PipelineSession};
 
-use super::helpers::find_coding_agent;
 use super::CodingFacade;
+use super::helpers::find_coding_agent;
 
 impl CodingFacade {
     /// Build the 11-layer prompt for a given agent.

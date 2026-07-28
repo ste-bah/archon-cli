@@ -294,16 +294,16 @@ fn coalescer_reconstructs_exact_text_burst_across_boundaries() {
 // ---------- wiring grep regression ----------
 
 #[test]
-fn event_forwarder_wires_coalescer_into_live_agent_path() {
+fn event_forwarder_wires_bounded_tui_channel_into_live_agent_path() {
     let src = fs::read_to_string(repo_root().join("src/session/event_forwarder.rs"))
         .expect("read event forwarder");
     assert!(
-        src.contains("EventCoalescer::with_defaults()"),
-        "live agent forwarder must instantiate EventCoalescer"
+        src.contains("TuiEventSender"),
+        "live agent forwarder must use the bounded TUI channel sender"
     );
     assert!(
-        src.contains("RENDER_EVENT_BUDGET"),
-        "live agent forwarder must enforce the render drain budget"
+        src.contains("tui_tx.send_async"),
+        "live agent forwarder must await bounded-channel backpressure"
     );
     assert!(
         src.contains("AgentEvent::ThinkingDelta(text) => TuiEvent::ThinkingDelta(text)"),

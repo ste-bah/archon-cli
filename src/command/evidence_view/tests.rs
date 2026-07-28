@@ -122,14 +122,18 @@ fn with_temp_env_db<F>(key: &'static str, f: F)
 where
     F: FnOnce(&Path),
 {
-    let _learning_db_env_guard = if key == "ARCHON_LEARNING_DB_PATH" {
-        Some(
+    let _db_env_guard = match key {
+        "ARCHON_DOCS_DB_PATH" => Some(
+            crate::command::store_paths::DOCS_DB_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()),
+        ),
+        "ARCHON_LEARNING_DB_PATH" => Some(
             crate::command::store_paths::LEARNING_DB_ENV_LOCK
                 .lock()
                 .unwrap_or_else(|e| e.into_inner()),
-        )
-    } else {
-        None
+        ),
+        _ => None,
     };
     let previous = std::env::var_os(key);
     let path = PathBuf::from(format!(

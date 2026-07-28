@@ -187,9 +187,7 @@ impl CommandHandler for ReloadHandler {
             Err(e) => {
                 // R4 Err branch — byte-for-byte preservation of
                 // shipped format string at slash.rs:382.
-                let _ = ctx
-                    .tui_tx
-                    .send(TuiEvent::Error(format!("Config reload failed: {e}")));
+                ctx.emit(TuiEvent::Error(format!("Config reload failed: {e}")));
             }
         }
         Ok(())

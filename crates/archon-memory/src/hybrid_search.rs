@@ -70,10 +70,7 @@ pub fn hybrid_search(
         .into_iter()
         .map(|memory| (memory.id.clone(), memory))
         .collect();
-    Ok(ids
-        .into_iter()
-        .filter_map(|id| by_id.remove(&id))
-        .collect())
+    Ok(ids.into_iter().filter_map(|id| by_id.remove(&id)).collect())
 }
 
 /// Compute normalised keyword relevance scores for all memories.
@@ -94,7 +91,6 @@ fn compute_keyword_scores(
     let mut scores: Vec<(String, f64)> = Vec::new();
 
     for mem in candidates.memories {
-
         let content_lower = mem.content.to_lowercase();
         let tags_lower = mem.tags.join(",").to_lowercase();
         let title_lower = mem.title.to_lowercase();

@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use super::workflow_live_task_universe::WorkflowV2TaskUniverse;
 
+#[path = "workflow_live_generated_contract_universe.rs"]
+mod contract_universe;
+use contract_universe::ContractTaskUniverse;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum GeneratedContractIssueKind {
@@ -52,62 +56,6 @@ pub(super) struct NormalizedGeneratedItem {
 pub(super) struct NormalizedGeneratedInventory {
     pub(super) items: Vec<serde_json::Value>,
     pub(super) issues: Vec<GeneratedContractIssue>,
-}
-
-#[derive(Debug, Clone, Default)]
-struct ContractTaskUniverse {
-    canonical: BTreeSet<String>,
-    aliases: BTreeMap<String, String>,
-    dependencies: BTreeMap<String, Vec<String>>,
-}
-
-impl ContractTaskUniverse {
-    fn from_authoritative(task_universe: Option<&WorkflowV2TaskUniverse>) -> Self {
-        let mut out = Self::default();
-        let Some(task_universe) = task_universe else {
-            return out;
-        };
-        for task in &task_universe.tasks {
-            out.add_canonical(&task.canonical_task_id);
-            for alias in &task.aliases {
-                out.aliases
-                    .insert(alias.trim().to_string(), task.canonical_task_id.clone());
-            }
-            out.dependencies.insert(
-                task.canonical_task_id.clone(),
-                sorted_unique(task.dependency_ids.clone()),
-            );
-        }
-        out
-    }
-
-    fn add_canonical(&mut self, task_id: &str) {
-        let canonical = task_id.trim();
-        if canonical.is_empty() {
-            return;
-        }
-        self.canonical.insert(canonical.to_string());
-        self.aliases
-            .insert(canonical.to_string(), canonical.to_string());
-        if let Some(short) = short_task_alias(canonical) {
-            self.aliases.insert(short, canonical.to_string());
-        }
-    }
-
-    fn resolve(&self, value: &str) -> Option<String> {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            return None;
-        }
-        if self.canonical.is_empty() {
-            return Some(trimmed.to_string());
-        }
-        self.aliases.get(trimmed).cloned()
-    }
-
-    fn dependencies_for(&self, task_id: &str) -> Vec<String> {
-        self.dependencies.get(task_id).cloned().unwrap_or_default()
-    }
 }
 
 #[cfg(test)]

@@ -174,9 +174,7 @@ impl CommandHandler for AddDirHandler {
         if path_arg.is_empty() {
             // Empty-arg branch — byte-for-byte preservation of shipped
             // format string at slash.rs:672-674.
-            let _ = ctx
-                .tui_tx
-                .send(TuiEvent::Error("Usage: /add-dir <path>".into()));
+            ctx.emit(TuiEvent::Error("Usage: /add-dir <path>".into()));
         } else {
             let path = PathBuf::from(path_arg);
             if path.is_dir() {

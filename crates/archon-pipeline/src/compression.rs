@@ -16,16 +16,14 @@
 //! @P1:USvc+AuthMW @P3:PgRepo
 //! ```
 
-
 mod abbreviation;
 mod extraction;
 mod output;
 
-use extraction::extract;
-use output::build_compressed;
 #[cfg(test)]
 use abbreviation::{abbreviate, split_camel_case};
-
+use extraction::extract;
+use output::build_compressed;
 
 /// Compressed memory output.
 #[derive(Debug, Clone)]

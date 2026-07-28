@@ -121,13 +121,7 @@ impl Dispatcher {
                 // fallback, and the defensive 3-suggestion cap. The
                 // dispatcher is only responsible for emission.
                 let msg = errors::format_unknown_command(&parsed.name, &self.registry);
-                // Emit via the TUI event channel. `try_send` so the
-                // dispatcher cannot block on a full channel; dropping a
-                // diagnostic under backpressure is preferable to stalling
-                // the input pipeline. `TuiEvent::Error` is the correct
-                // text-emitting variant for user-visible diagnostics
-                // (see `crates/archon-tui/src/app.rs::TuiEvent`).
-                let _ = ctx.tui_tx.send(archon_tui::app::TuiEvent::Error(msg));
+                ctx.emit(archon_tui::app::TuiEvent::Error(msg));
                 Ok(())
             }
         }

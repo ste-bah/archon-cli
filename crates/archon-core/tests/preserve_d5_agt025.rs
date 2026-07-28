@@ -109,16 +109,16 @@ fn test_env_gate_archon_auto_background_tasks() {
 ///
 /// TASK-AGS-105: the legacy `handle_subagent_result` indirection was removed
 /// from `archon-core/src/agent.rs` and the AGT-025 race structure now lives
-/// in `archon-tools/src/agent_tool.rs::run_subagent`. This guard scans the
+/// in `archon-tools/src/agent_tool/run.rs::run_subagent`. This guard scans the
 /// new location so the invariant continues to fire if anyone drifts it.
 #[test]
 fn test_timeout_branch_does_not_reawait_join_handle() {
-    let source = include_str!("../../archon-tools/src/agent_tool.rs");
+    let source = include_str!("../../archon-tools/src/agent_tool/run.rs");
 
     // Must contain the select! construct.
     assert!(
         source.contains("tokio::select!"),
-        "tokio::select! missing from agent_tool.rs — AGT-025 race structure removed"
+        "tokio::select! missing from agent_tool/run.rs — AGT-025 race structure removed"
     );
 
     // Must contain the timer-sleep setup. TASK-AGS-105 moved the race into
@@ -127,7 +127,7 @@ fn test_timeout_branch_does_not_reawait_join_handle() {
     // auto_background_ms()), not a `timeout_duration` field.
     assert!(
         source.contains("tokio::time::sleep(Duration::from_millis(auto_bg_ms))"),
-        "auto-background sleep timer missing from agent_tool.rs — AGT-025 race structure removed"
+        "auto-background sleep timer missing from agent_tool/run.rs — AGT-025 race structure removed"
     );
 
     // The timer arm must produce AutoBackgrounded without awaiting anything.

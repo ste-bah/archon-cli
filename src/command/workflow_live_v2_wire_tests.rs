@@ -4,6 +4,7 @@ use archon_core::agents::AgentRegistry;
 use archon_core::dispatch::create_default_registry;
 use archon_core::subagent::SubagentManager;
 use archon_core::subagent_executor::AgentSubagentExecutor;
+use archon_learning::llm_call_usage::{LlmCallUsageScope, UsageAvailability, list_llm_call_usage};
 use archon_llm::anthropic::AnthropicClient;
 use archon_llm::auth::AuthProvider;
 use archon_llm::identity::{IdentityMode, IdentityProvider};
@@ -23,6 +24,7 @@ const CHILD_ENV: &str = "ARCHON_WORKFLOW_WIRE_TEST_CHILD";
 
 struct WireHarness {
     _project: tempfile::TempDir,
+    learning_db_path: std::path::PathBuf,
     client: LiveV2AgentClient,
     captured: tokio::sync::oneshot::Receiver<Vec<Vec<u8>>>,
 }
@@ -83,20 +85,36 @@ async fn serve_two_anthropic_requests(
 }
 
 async fn write_anthropic_response(socket: &mut tokio::net::TcpStream, index: usize) {
+    let (input_tokens, cache_creation_tokens, cache_read_tokens, output_tokens) = match index {
+        0 => (11, 3, 0, 7),
+        1 => (13, 0, 11, 9),
+        _ => unreachable!("wire fixture serves exactly two requests"),
+    };
+    let message_start = serde_json::json!({
+        "type": "message_start",
+        "message": {
+            "id": format!("msg-{index}"),
+            "model": "claude-sonnet-4-6",
+            "usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": 0,
+                "cache_creation_input_tokens": cache_creation_tokens,
+                "cache_read_input_tokens": cache_read_tokens,
+            }
+        }
+    });
+    let message_delta = serde_json::json!({
+        "type": "message_delta",
+        "delta": {"stop_reason": "end_turn"},
+        "usage": {"output_tokens": output_tokens},
+    });
     let response = format!(
-        concat!(
-            "event: message_start\n",
-            "data: {{\"type\":\"message_start\",\"message\":{{\"id\":\"msg-{}\",\"model\":\"claude-sonnet-4-6\",\"usage\":{{\"input_tokens\":11,\"output_tokens\":0}}}}}}\n\n",
-            "event: content_block_start\n",
-            "data: {{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{{\"type\":\"text\",\"text\":\"\"}}}}\n\n",
-            "event: content_block_delta\n",
-            "data: {{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{{\"type\":\"text_delta\",\"text\":\"recorded\"}}}}\n\n",
-            "event: content_block_stop\n",
-            "data: {{\"type\":\"content_block_stop\",\"index\":0}}\n\n",
-            "event: message_stop\n",
-            "data: {{\"type\":\"message_stop\"}}\n\n"
-        ),
-        index
+        "event: message_start\ndata: {message_start}\n\n\
+         event: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{{\"type\":\"text\",\"text\":\"\"}}}}\n\n\
+         event: content_block_delta\ndata: {{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{{\"type\":\"text_delta\",\"text\":\"recorded\"}}}}\n\n\
+         event: content_block_stop\ndata: {{\"type\":\"content_block_stop\",\"index\":0}}\n\n\
+         event: message_delta\ndata: {message_delta}\n\n\
+         event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
     );
     let headers = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n",
@@ -126,6 +144,11 @@ fn anthropic_provider(url: String) -> Arc<dyn LlmProvider> {
 }
 
 fn install_wire_executor(provider: Arc<dyn LlmProvider>, root: &std::path::Path) {
+    let agent_config = AgentConfig {
+        session_id: "workflow-wire-test".into(),
+        working_dir: root.to_path_buf(),
+        ..AgentConfig::default()
+    };
     let executor = AgentSubagentExecutor::new(
         provider,
         create_default_registry(root.to_path_buf(), None),
@@ -139,7 +162,7 @@ fn install_wire_executor(provider: Arc<dyn LlmProvider>, root: &std::path::Path)
         Vec::new(),
         Arc::new(tokio::sync::Mutex::new("default".to_string())),
         Arc::new(tokio::sync::Mutex::new(None)),
-        Arc::new(AgentConfig::default()),
+        Arc::new(agent_config),
         Arc::new(IdentityProvider::new(
             IdentityMode::Clean,
             "workflow-wire-test".into(),
@@ -153,11 +176,21 @@ fn install_wire_executor(provider: Arc<dyn LlmProvider>, root: &std::path::Path)
 async fn wire_harness() -> WireHarness {
     let project = tempfile::tempdir().expect("project directory");
     let root = project.path().to_path_buf();
+    let learning_db_path = root.join(".archon").join("learning-state.db");
+    // SAFETY: this fixture executes in an isolated child process.
+    unsafe {
+        std::env::set_var("ARCHON_LEARNING_DB_PATH", &learning_db_path);
+    }
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind server");
     let url = format!("http://{}/v1/messages", listener.local_addr().unwrap());
     let (captured_tx, captured) = tokio::sync::oneshot::channel();
     tokio::spawn(serve_two_anthropic_requests(listener, captured_tx));
-    let provider = anthropic_provider(url);
+    let provider = crate::runtime::provider_observer::observe_llm_provider_with_profile(
+        anthropic_provider(url),
+        "workflow-wire-test",
+        None,
+    )
+    .await;
     install_wire_executor(Arc::clone(&provider), &root);
     let raw: Arc<dyn LlmClient> =
         Arc::new(ProviderLlmAdapter::new(Arc::clone(&provider)).with_origin("workflow-wire-test"));
@@ -180,6 +213,7 @@ async fn wire_harness() -> WireHarness {
     );
     WireHarness {
         _project: project,
+        learning_db_path,
         client,
         captured,
     }
@@ -261,6 +295,84 @@ async fn run_wire_child() {
         .expect("capture server timed out")
         .expect("captured bodies");
     assert_wire_bodies(&bodies);
+    let wire_model = bodies
+        .first()
+        .and_then(|body| serde_json::from_slice::<serde_json::Value>(body).ok())
+        .and_then(|body| body["model"].as_str().map(str::to_owned))
+        .expect("wire model");
+    assert_wire_usage(&harness.learning_db_path, &wire_model);
+}
+
+fn assert_wire_usage(path: &std::path::Path, wire_model: &str) {
+    let db = archon_learning::cozo_guard::open_sqlite_guarded(
+        path.to_str().expect("UTF-8 learning path"),
+        "reopen workflow wire learning db",
+    )
+    .expect("learning db");
+    let rows = list_llm_call_usage(
+        &db,
+        &LlmCallUsageScope::new(Some("workflow-wire-test"), Some("workflow-wire-test")),
+    )
+    .expect("list workflow wire usage");
+    assert_eq!(rows.len(), 2);
+    assert!(
+        rows.iter().all(|row| {
+            row.run_id.as_deref() == Some("workflow-wire-test")
+                && row.session_id.as_deref() == Some("workflow-wire-test")
+                && row.provider_id == "anthropic"
+                && row.model_id == wire_model
+                && row.terminal_status == "succeeded"
+        }),
+        "unexpected workflow wire usage rows: {rows:#?}"
+    );
+    let mut usage = rows
+        .iter()
+        .map(|row| {
+            (
+                row.input_tokens.clone(),
+                row.cache_creation_input_tokens.clone(),
+                row.cache_read_input_tokens.clone(),
+                row.output_tokens.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    usage.sort_by_key(|values| match values.0 {
+        UsageAvailability::Known(value) => value,
+        UsageAvailability::Unavailable => u64::MAX,
+    });
+    assert_eq!(
+        usage,
+        vec![
+            (
+                UsageAvailability::Known(11),
+                UsageAvailability::Known(3),
+                UsageAvailability::Known(0),
+                UsageAvailability::Known(7),
+            ),
+            (
+                UsageAvailability::Known(13),
+                UsageAvailability::Known(0),
+                UsageAvailability::Known(11),
+                UsageAvailability::Known(9),
+            ),
+        ]
+    );
+    let totals = rows.iter().fold((0, 0, 0, 0), |totals, row| {
+        (
+            totals.0 + known_usage(&row.input_tokens),
+            totals.1 + known_usage(&row.cache_creation_input_tokens),
+            totals.2 + known_usage(&row.cache_read_input_tokens),
+            totals.3 + known_usage(&row.output_tokens),
+        )
+    });
+    assert_eq!(totals, (24, 3, 11, 16));
+}
+
+fn known_usage(usage: &UsageAvailability) -> u64 {
+    match usage {
+        UsageAvailability::Known(value) => *value,
+        UsageAvailability::Unavailable => panic!("provider usage must remain available"),
+    }
 }
 
 fn assert_wire_bodies(raw: &[Vec<u8>]) {

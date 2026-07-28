@@ -119,7 +119,7 @@ impl CommandHandler for ResumeHandler {
                                 last_active: m.last_active.chars().take(10).collect(),
                             })
                             .collect();
-                        let _ = ctx.tui_tx.send(TuiEvent::ShowSessionPicker(entries));
+                        ctx.emit(TuiEvent::ShowSessionPicker(entries));
                     }
                 }
                 Err(e) => {

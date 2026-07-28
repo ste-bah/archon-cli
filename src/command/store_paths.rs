@@ -16,6 +16,8 @@ pub(crate) const LEARNING_DB_ENV: &str = "ARCHON_LEARNING_DB_PATH";
 pub(crate) const SESSION_DB_ENV: &str = "ARCHON_SESSION_DB_PATH";
 
 #[cfg(test)]
+pub(crate) static DOCS_DB_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+#[cfg(test)]
 pub(crate) static LEARNING_DB_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub(crate) fn project_archon_dir_for(cwd: &Path) -> PathBuf {

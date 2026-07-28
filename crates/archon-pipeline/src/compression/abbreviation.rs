@@ -1,4 +1,3 @@
-
 /// Abbreviate a CamelCase name by taking the first letter of each component,
 /// keeping short words as-is.
 pub(super) fn abbreviate(name: &str) -> String {

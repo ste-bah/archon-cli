@@ -1,11 +1,4 @@
-use std::sync::{Mutex, OnceLock};
-
 use super::*;
-
-fn anthropic_model_env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
 
 #[test]
 fn web_shutdown_preempts_buffered_session_input() {
@@ -131,7 +124,7 @@ fn active_session_model_preserves_explicit_codex_model_override() {
 
 #[test]
 fn active_session_model_preserves_anthropic_default() {
-    let _env_lock = anthropic_model_env_lock()
+    let _env_lock = super::anthropic_model_env_lock()
         .lock()
         .expect("Anthropic model environment lock");
     let previous = std::env::var_os("ANTHROPIC_MODEL");
