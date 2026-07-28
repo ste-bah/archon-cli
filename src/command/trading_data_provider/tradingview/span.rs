@@ -47,7 +47,7 @@ fn parse_boundary(value: &str, start_of_day: bool) -> Result<i64> {
         .map_err(|err| anyhow!("invalid TradingView requested span boundary `{text}`: {err}"))
 }
 
-fn timeframe_seconds(timeframe: &str) -> Result<i64> {
+pub(super) fn timeframe_seconds(timeframe: &str) -> Result<i64> {
     match timeframe.trim() {
         "15" => Ok(15 * 60),
         "60" => Ok(60 * 60),

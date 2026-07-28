@@ -1,3 +1,5 @@
+#[path = "tradingview/paging.rs"]
+mod paging;
 #[path = "tradingview/span.rs"]
 mod span;
 
@@ -47,18 +49,18 @@ pub(super) fn fetch_tradingview_native(
     dataset_id: &str,
 ) -> Result<String> {
     let request_span = span::requested_span(start, end, timeframe)?;
+    // A span wider than one call is assembled from several rather than
+    // refused. The scroll semantics this relies on are not yet verified
+    // against a live chart, so paging::assert_contiguous rejects the join if a
+    // page lands anywhere other than where the previous one ended — a wrong
+    // assumption fails loudly here instead of registering a series with holes.
     if request_span.requested_bars > request_span.per_call_limit {
-        return tradingview_unavailable(
-            symbol,
-            timeframe,
-            start,
-            end,
-            dataset_id,
-            &format!(
-                "TradingView requested span requires {} bars but MCP call cap is {}; paged native fetch is required before production registration",
-                request_span.requested_bars, request_span.per_call_limit
-            ),
-        );
+        return match paged_tradingview_fetch(root, symbol, timeframe, start, end, request_span) {
+            Ok(outcome) => outcome,
+            Err(reason) => {
+                tradingview_unavailable(symbol, timeframe, start, end, dataset_id, &reason)
+            }
+        };
     }
     let response = match tradingview_response(root, symbol, timeframe, request_span) {
         Ok(response) => response,
@@ -137,6 +139,60 @@ pub(super) fn fetch_tradingview_native(
         ),
         None,
     )
+}
+
+/// Assemble a span wider than one provider call.
+///
+/// Returns Ok(Ok(report)) shape via the caller: a short series is NOT an
+/// error. When the provider runs out of history the dataset is still
+/// legitimate, and the residual gap records the span actually served so
+/// production eligibility is decided against that rather than the span
+/// requested.
+fn paged_tradingview_fetch(
+    root: &Path,
+    symbol: &str,
+    timeframe: &str,
+    start: &str,
+    end: &str,
+    request_span: span::TradingViewRequestSpan,
+) -> Result<Result<String>, String> {
+    let max_pages = request_span
+        .requested_bars
+        .div_ceil(request_span.per_call_limit.max(1))
+        + 2;
+    let series = paging::fetch_paged(
+        request_span.requested_bars,
+        request_span.per_call_limit,
+        max_pages,
+        |request| {
+            if let Some(scroll_to) = request.scroll_to.as_deref() {
+                run_tradingview_scroll(root, scroll_to)?;
+            }
+            let body = run_tradingview_cli(root, symbol, timeframe, request_span)?;
+            bars_from_tradingview_response(&body).map_err(|err| err.to_string())
+        },
+    )?;
+    let interval_secs = span::timeframe_seconds(timeframe).map_err(|err| err.to_string())?;
+    paging::assert_contiguous(&series.bars, interval_secs, &[])?;
+    Ok(Ok(format!(
+        "paged TradingView fetch assembled {} bars for {symbol} {timeframe} across {} page(s); boundary={:?}; requested {start}..{end}",
+        series.bars.len(),
+        series.pages_fetched,
+        series.boundary
+    )))
+}
+
+/// Position the chart before a continuation page. Isolated alongside
+/// paging::page_request_for: both change together when the semantics are
+/// verified against a live chart.
+fn run_tradingview_scroll(root: &Path, scroll_to: &str) -> Result<(), String> {
+    let cli = tv_cli(root);
+    let date = scroll_to.split('T').next().unwrap_or(scroll_to).to_string();
+    let args = vec!["scroll".into(), date];
+    let output = run_node_script(root, &cli, &args).map_err(|error| error.to_string())?;
+    checked_text(output, "TradingView MCP scroll")
+        .map(|_| ())
+        .map_err(|err| err.to_string())
 }
 
 fn tradingview_response(
