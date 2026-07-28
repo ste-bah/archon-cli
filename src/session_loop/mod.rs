@@ -37,7 +37,7 @@ mod personality_save;
 mod post_turn;
 mod prompt_turn;
 mod session_export;
-mod session_history;
+pub(crate) mod session_history;
 mod session_shutdown;
 mod slash_dispatch;
 mod slash_handlers;
@@ -86,7 +86,10 @@ pub(crate) fn run_session_loop(
     auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
     agent_dispatcher: Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>,
     cancel_handle_slot: Arc<std::sync::Mutex<Option<Arc<crate::agent_handle::AgentHandle>>>>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+    sandbox_audit_drain: crate::runtime::sandbox_audit_writer::SandboxAuditDrainHandle,
+    handle_process_signals: bool,
+    shutdown: tokio_util::sync::CancellationToken,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>> {
     Box::pin(async move {
         let agent = Arc::new(tokio::sync::Mutex::new(agent));
 
@@ -104,6 +107,7 @@ pub(crate) fn run_session_loop(
 
         let adapter = Arc::new(crate::agent_handle::AgentHandle::new(
             Arc::clone(&agent),
+            session_id_for_input.clone(),
             auto_capture,
             auto_trainer.clone(),
         ));
@@ -122,16 +126,26 @@ pub(crate) fn run_session_loop(
         poll_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         #[cfg(unix)]
-        let mut sigterm_stream =
+        let (mut sigterm_stream, signal_registration_error) = if handle_process_signals {
             match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-                Ok(s) => Some(s),
-                Err(e) => {
-                    tracing::warn!("install SIGTERM handler failed: {e}");
-                    None
-                }
-            };
+                Ok(signal) => (Some(signal), None),
+                Err(error) => (
+                    None,
+                    Some(anyhow::anyhow!("install SIGTERM handler failed: {error}")),
+                ),
+            }
+        } else {
+            (None, None)
+        };
         let shutdown_in_progress = std::sync::atomic::AtomicBool::new(false);
+        #[cfg(unix)]
+        if let Some(error) = signal_registration_error {
+            let shutdown_result =
+                finish_session(&agent_def, &agent, &agent_dispatcher, sandbox_audit_drain).await;
+            return finish_loop_result(shutdown_result, Some(error));
+        }
 
+        let mut loop_error = None;
         loop {
             if last_busy_activity.elapsed() >= Duration::from_secs(30)
                 && dispatcher_has_work(&agent_dispatcher)
@@ -159,12 +173,18 @@ pub(crate) fn run_session_loop(
                 adapter: &adapter,
                 cmd_ctx: &mut cmd_ctx,
                 post_turn_queue: &mut post_turn_queue,
+                handle_process_signals,
+                shutdown: &shutdown,
             })
             .await
             {
                 LoopInput::Input(input) => input,
                 LoopInput::Continue => continue,
                 LoopInput::Stop => break,
+                LoopInput::Error(error) => {
+                    loop_error = Some(error);
+                    break;
+                }
             };
             crate::command::cognitive_daemon::record_archon_activity(
                 &config,
@@ -210,7 +230,7 @@ pub(crate) fn run_session_loop(
                         input_len = slash_input.len(),
                         "slash command dispatch starting"
                     );
-                    if dispatch_slash_or_skill(
+                    let dispatch_result = dispatch_slash_or_skill(
                         slash_input,
                         SlashDispatchContext {
                             agent: &agent,
@@ -230,13 +250,15 @@ pub(crate) fn run_session_loop(
                             post_turn_queue: &mut post_turn_queue,
                         },
                     )
-                    .await
-                    .is_handled()
-                    {
+                    .await;
+                    if dispatch_result.is_handled() {
                         tracing::info!(
                             command = slash_command_name(slash_input),
                             "slash command dispatch handled"
                         );
+                        if dispatch_result.should_exit() {
+                            break;
+                        }
                         continue;
                     }
                     tracing::warn!(
@@ -267,8 +289,24 @@ pub(crate) fn run_session_loop(
             .await;
         }
 
-        finish_session(&agent_def, &agent, &agent_dispatcher).await;
+        let shutdown_result =
+            finish_session(&agent_def, &agent, &agent_dispatcher, sandbox_audit_drain).await;
+        finish_loop_result(shutdown_result, loop_error)
     })
+}
+
+fn finish_loop_result(
+    shutdown_result: anyhow::Result<()>,
+    loop_error: Option<anyhow::Error>,
+) -> anyhow::Result<()> {
+    match (loop_error, shutdown_result) {
+        (None, Ok(())) => Ok(()),
+        (Some(loop_error), Ok(())) => Err(loop_error),
+        (None, Err(shutdown_error)) => Err(shutdown_error),
+        (Some(loop_error), Err(shutdown_error)) => Err(anyhow::anyhow!(
+            "session loop failed: {loop_error:#}; session shutdown failed: {shutdown_error:#}"
+        )),
+    }
 }
 
 fn dispatcher_has_work(dispatcher: &Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>) -> bool {
@@ -336,7 +374,36 @@ fn slash_command_name(input: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use super::{slash_command_name, slash_input};
+    use super::{finish_loop_result, slash_command_name, slash_input};
+
+    #[test]
+    fn signal_registration_and_shutdown_failures_remain_visible() {
+        let result = finish_loop_result(
+            Err(anyhow::anyhow!("audit shutdown failed")),
+            Some(anyhow::anyhow!("SIGTERM registration failed")),
+        )
+        .expect_err("signal and shutdown failures must remain visible");
+        let message = result.to_string();
+
+        assert!(
+            message.contains("SIGTERM registration failed"),
+            "{result:#}"
+        );
+        assert!(message.contains("audit shutdown failed"), "{result:#}");
+    }
+
+    #[test]
+    fn finish_loop_reports_loop_and_shutdown_failures_together() {
+        let result = finish_loop_result(
+            Err(anyhow::anyhow!("audit shutdown failed")),
+            Some(anyhow::anyhow!("loop failed")),
+        )
+        .expect_err("both session-loop failures must remain visible");
+        let message = result.to_string();
+
+        assert!(message.contains("loop failed"), "{result:#}");
+        assert!(message.contains("audit shutdown failed"), "{result:#}");
+    }
 
     #[test]
     fn slash_input_allows_leading_whitespace() {

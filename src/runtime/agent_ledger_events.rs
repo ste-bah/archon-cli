@@ -102,16 +102,13 @@ fn persist(db: Option<&Arc<DbInstance>>, record: AgentPerformanceLedgerRecord) {
 mod tests {
     use super::*;
 
-    fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-runtime-agent-ledger-{}.db", uuid::Uuid::new_v4());
-        let db = DbInstance::new("sqlite", &path, "").unwrap();
-        archon_learning::schema::ensure_learning_schema(&db).unwrap();
-        db
+    fn test_db() -> Arc<DbInstance> {
+        crate::command::test_support::registered_learning_test_db("test-runtime-agent-ledger")
     }
 
     #[test]
     fn turn_completion_persists_successful_ledger_row() {
-        let db = Arc::new(test_db());
+        let db = test_db();
         let context =
             AgentLedgerContext::new("reviewer", "session-1", "claude-sonnet-4-6", "anthropic")
                 .with_version(Some("1.2".into()));
@@ -132,7 +129,7 @@ mod tests {
 
     #[test]
     fn runtime_error_persists_failed_ledger_row() {
-        let db = Arc::new(test_db());
+        let db = test_db();
         let context = AgentLedgerContext::new("main", "session-1", "gpt-5.4", "openai-codex");
 
         record_agent_runtime_error(Some(&db), &context, "auto");

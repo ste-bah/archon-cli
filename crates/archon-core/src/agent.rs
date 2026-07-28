@@ -20,7 +20,9 @@ use archon_permissions::auto::AutoModeEvaluator;
 use archon_permissions::is_default_safe_tool;
 use archon_session::checkpoint::CheckpointStore;
 use archon_session::plan::PlanStore;
-use archon_tools::tool::{AgentMode, ToolContext, ToolResult};
+use archon_tools::tool::{
+    AgentMode, ToolContext, ToolResult, ToolRunAdmissionCallback, ToolRunOutcomeCallback,
+};
 use tokio::sync::Mutex;
 
 use crate::ChannelMetricSink;
@@ -35,8 +37,10 @@ mod cognitive_gate;
 mod cognitive_gate_tests;
 mod compaction;
 mod compaction_serde;
-mod events;
+pub(crate) mod events;
 mod lifecycle;
+#[cfg(test)]
+mod memory_attribution_tests;
 mod memory_integration;
 mod message_delivery;
 mod payloads;
@@ -44,6 +48,8 @@ mod permission_gate;
 mod process_message;
 mod process_message_steps;
 mod process_message_support;
+pub(crate) mod request_cache;
+mod runtime_attribution;
 mod runtime_hooks;
 mod summary_text;
 mod support;
@@ -54,6 +60,8 @@ mod tool_dispatch;
 pub(crate) mod tool_input_json;
 mod tool_postprocess;
 mod tool_postprocess_steps;
+#[cfg(test)]
+mod tool_postprocess_steps_tests;
 mod tool_preflight;
 mod tool_preflight_gates;
 mod tool_preflight_steps;
@@ -67,15 +75,29 @@ pub use compaction::ManualCompactOutcome;
 pub use payloads::{
     ReasoningEvidenceEventPayload, ReasoningTurnEventPayload, UserCorrectionEventPayload,
 };
+pub use runtime_attribution::RuntimeAttribution;
 pub use support::AgentLoopError;
 use support::{parse_plan_from_text, user_correction_excerpt};
 pub use types::{AgentConfig, AgentEvent, ConversationState, SessionStats, TimestampedEvent};
+
+pub const AGENT_EVENT_CHANNEL_CAPACITY: usize = 1024;
 
 /// Single source of truth gate: does the agent loop auto-allow this tool in
 /// default mode? Must always agree with `archon_permissions::DEFAULT_SAFE_TOOLS`.
 /// Called by the lockstep regression test.
 pub fn is_safe_in_default_mode(name: &str) -> bool {
     is_default_safe_tool(name)
+}
+
+pub type FirstToolActionCallback =
+    Arc<dyn Fn(&str, &str, &str, &serde_json::Value) -> Option<String> + Send + Sync>;
+pub type TurnFinalizationCallback =
+    Arc<dyn Fn(&str, &str) -> TurnFinalizationVerdict + Send + Sync>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TurnFinalizationVerdict {
+    Allowed,
+    Blocked { repair_prompt: String },
 }
 
 #[derive(Debug)]
@@ -90,7 +112,7 @@ pub struct Agent {
     registry: ToolRegistry,
     config: AgentConfig,
     state: ConversationState,
-    event_tx: tokio::sync::mpsc::UnboundedSender<TimestampedEvent>,
+    event_tx: tokio::sync::mpsc::Sender<TimestampedEvent>,
     checkpoint_store: Option<Arc<Mutex<CheckpointStore>>>,
     plan_store: Option<PlanStore>,
     turn_number: u64,
@@ -149,6 +171,12 @@ pub struct Agent {
     record_user_correction_event_callback:
         Option<Arc<dyn Fn(UserCorrectionEventPayload) + Send + Sync>>,
     record_reasoning_turn_callback: Option<Arc<dyn Fn(ReasoningTurnEventPayload) + Send + Sync>>,
+    first_tool_action_callback: Option<FirstToolActionCallback>,
+    tool_run_admission_callback: Option<ToolRunAdmissionCallback>,
+    tool_run_outcome_callback: Option<ToolRunOutcomeCallback>,
+    turn_finalization_callback: Option<TurnFinalizationCallback>,
+    guardrail_action_id: Option<String>,
+    turn_requirement_reminder: Option<String>,
     reasoning_evidence_refs: Vec<ReasoningEvidenceEventPayload>,
     current_situation: Option<archon_cognitive::Situation>,
     cognitive_store: Option<Arc<std::sync::Mutex<archon_cognitive::PersistentCognitiveStore>>>,
@@ -204,12 +232,20 @@ impl Agent {
 
         let before = self.state.messages.clone();
         self.state.auto_compact.compact_in_flight = true;
+        let attribution = self.config.runtime_attribution_extra(
+            "compaction",
+            "request_pressure_compaction",
+            None,
+            None,
+            None,
+        );
         let result = autocompact::compact_json_messages_with_provider(
             self.client.as_ref(),
             active_model,
             &self.state.messages,
             CompactAction::Full,
             false,
+            attribution,
         )
         .await;
 

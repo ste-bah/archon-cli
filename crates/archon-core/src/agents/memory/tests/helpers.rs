@@ -1,4 +1,5 @@
 use super::*;
+use archon_memory::StoreMemoryOutcome;
 
 /// Null memory implementation for testing. Returns empty results.
 pub(super) struct NullMemory;
@@ -16,7 +17,37 @@ impl MemoryTrait for NullMemory {
     ) -> Result<String, MemoryError> {
         Ok("null-id".to_string())
     }
+    fn store_memory_with_id_outcome(
+        &self,
+        _id: &str,
+        _content: &str,
+        _title: &str,
+        _memory_type: MemoryType,
+        _importance: f64,
+        _tags: &[String],
+        _source_type: &str,
+        _project_path: &str,
+    ) -> Result<StoreMemoryOutcome, MemoryError> {
+        Err(MemoryError::NotFound("null".into()))
+    }
+
+    fn store_memory_with_id(
+        &self,
+        _id: &str,
+        _content: &str,
+        _title: &str,
+        _memory_type: MemoryType,
+        _importance: f64,
+        _tags: &[String],
+        _source_type: &str,
+        _project_path: &str,
+    ) -> Result<Memory, MemoryError> {
+        Err(MemoryError::NotFound("null".into()))
+    }
     fn get_memory(&self, _id: &str) -> Result<Memory, MemoryError> {
+        Err(MemoryError::NotFound("null".into()))
+    }
+    fn inspect_memory(&self, _id: &str) -> Result<Memory, MemoryError> {
         Err(MemoryError::NotFound("null".into()))
     }
     fn update_memory(
@@ -27,9 +58,22 @@ impl MemoryTrait for NullMemory {
     ) -> Result<(), MemoryError> {
         Ok(())
     }
-    fn update_importance(&self, _id: &str, _importance: f64) -> Result<(), MemoryError> {
-        Ok(())
+    fn apply_importance_delta(
+        &self,
+        _id: &str,
+        _delta: f64,
+        _provenance_id: &str,
+    ) -> Result<Memory, MemoryError> {
+        Err(MemoryError::NotFound("test double".into()))
     }
+    fn has_importance_application(
+        &self,
+        _memory_id: &str,
+        _provenance_id: &str,
+    ) -> Result<bool, MemoryError> {
+        unimplemented!("test double: has_importance_application not used")
+    }
+
     fn delete_memory(&self, _id: &str) -> Result<(), MemoryError> {
         Ok(())
     }
@@ -93,7 +137,37 @@ impl MemoryTrait for MockMemory {
             .push((content.to_string(), tags.to_vec()));
         Ok("mock-id".to_string())
     }
+    fn store_memory_with_id_outcome(
+        &self,
+        _id: &str,
+        _content: &str,
+        _title: &str,
+        _memory_type: MemoryType,
+        _importance: f64,
+        _tags: &[String],
+        _source_type: &str,
+        _project_path: &str,
+    ) -> Result<StoreMemoryOutcome, MemoryError> {
+        Err(MemoryError::NotFound("mock".into()))
+    }
+
+    fn store_memory_with_id(
+        &self,
+        _id: &str,
+        _content: &str,
+        _title: &str,
+        _memory_type: MemoryType,
+        _importance: f64,
+        _tags: &[String],
+        _source_type: &str,
+        _project_path: &str,
+    ) -> Result<Memory, MemoryError> {
+        Err(MemoryError::NotFound("mock".into()))
+    }
     fn get_memory(&self, _id: &str) -> Result<Memory, MemoryError> {
+        Err(MemoryError::NotFound("mock".into()))
+    }
+    fn inspect_memory(&self, _id: &str) -> Result<Memory, MemoryError> {
         Err(MemoryError::NotFound("mock".into()))
     }
     fn update_memory(
@@ -104,9 +178,22 @@ impl MemoryTrait for MockMemory {
     ) -> Result<(), MemoryError> {
         Ok(())
     }
-    fn update_importance(&self, _id: &str, _importance: f64) -> Result<(), MemoryError> {
-        Ok(())
+    fn apply_importance_delta(
+        &self,
+        _id: &str,
+        _delta: f64,
+        _provenance_id: &str,
+    ) -> Result<Memory, MemoryError> {
+        Err(MemoryError::NotFound("test double".into()))
     }
+    fn has_importance_application(
+        &self,
+        _memory_id: &str,
+        _provenance_id: &str,
+    ) -> Result<bool, MemoryError> {
+        unimplemented!("test double: has_importance_application not used")
+    }
+
     fn delete_memory(&self, _id: &str) -> Result<(), MemoryError> {
         Ok(())
     }

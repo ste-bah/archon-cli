@@ -3,15 +3,7 @@ use std::sync::atomic::AtomicBool;
 
 use super::build_prompt::build_system_prompt;
 use crate::cli_args::Cli;
-use crate::command::utils::{apply_tool_filters, fetch_account_uuid};
-use crate::runtime::llm::{
-    build_llm_provider_selection, provider_construction_error_reason,
-    record_anthropic_fallback_denied,
-};
-use crate::runtime::llm_non_anthropic::build_llm_provider_without_anthropic_fallback;
-use crate::runtime::provider_observer::{
-    observe_llm_provider_with_profile, record_provider_fallback, runtime_mode_for_provider_name,
-};
+use crate::command::utils::apply_tool_filters;
 use archon_core::agent::{Agent, AgentConfig, TimestampedEvent};
 use archon_core::agents::AgentRegistry;
 use archon_core::agents::permissions_overlay::{
@@ -19,16 +11,14 @@ use archon_core::agents::permissions_overlay::{
 };
 use archon_core::dispatch::create_default_registry;
 use archon_core::env_vars::ArchonEnvVars;
-use archon_llm::anthropic::AnthropicClient;
-use archon_llm::auth::resolve_auth_with_keys;
 use archon_llm::effort::EffortLevel;
-use archon_llm::identity::{
-    IdentityMode, IdentityProvider, get_or_create_device_id, resolve_identity_mode,
-};
 use archon_observability::ChannelMetricSink;
 
 #[path = "build_agent_catalog.rs"]
 mod agent_catalog;
+#[path = "build_agent_provider.rs"]
+mod provider;
+use provider::{resolve_identity_and_api_client, resolve_session_provider};
 
 pub(super) async fn build_session_agent(
     config: &archon_core::config::ArchonConfig,
@@ -48,13 +38,16 @@ pub(super) async fn build_session_agent(
     registry.replace(Box::new(archon_tools::bash::BashTool {
         timeout_secs: config.tools.bash_timeout,
         max_output_bytes: config.tools.bash_max_output,
+        safe_commands: config.permissions.safe_commands.clone(),
+        risky_commands: config.permissions.risky_commands.clone(),
+        dangerous_commands: config.permissions.dangerous_commands.clone(),
         provider_env: None,
     }));
     apply_tool_filters(&mut registry, resolved_flags);
 
     let agent_registry_early = AgentRegistry::load(&working_dir);
     register_agent_listing(&mut registry, &agent_registry_early);
-    let agent_def = resolve_agent_definition(config, resolved_flags, &agent_registry_early)?;
+    let agent_def = resolve_agent_definition(config, resolved_flags, &agent_registry_early).await?;
 
     let hook_registry_arc = crate::runtime::hooks::load_runtime_hook_registry(&working_dir);
     crate::runtime::hooks::register_agent_session_hooks(
@@ -94,6 +87,7 @@ pub(super) async fn build_session_agent(
         config.permissions.mode.clone()
     };
     let permission_mode_shared = Arc::new(tokio::sync::Mutex::new(initial_perm_mode));
+    let sandbox_backend = super::native_session_sandbox_backend(config, sandbox_flag).await;
 
     let mut agent_config = AgentConfig {
         model: super::active_session_model(config),
@@ -121,23 +115,16 @@ pub(super) async fn build_session_agent(
         max_tool_concurrency: config.tools.max_concurrency as usize,
         max_turns: None,
         cancel_token: None,
-        sandbox: Some(super::session_sandbox_backend(
-            config,
-            sandbox_flag,
-            session_id,
-            agent_def
-                .as_ref()
-                .map(|def| def.agent_type.as_str())
-                .unwrap_or("main"),
-        )),
+        sandbox: Some(sandbox_backend),
         activity_sink: super::session_activity_sink(session_id),
         context: config.context.clone(),
         max_subagent_concurrency: config.subagent.max_concurrent,
     };
     apply_agent_execution_overrides(&mut agent_config, agent_def.as_ref(), cli).await;
 
-    let (agent_event_tx, agent_event_rx) =
-        tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
+    let (agent_event_tx, agent_event_rx) = tokio::sync::mpsc::channel::<TimestampedEvent>(
+        archon_core::agent::AGENT_EVENT_CHANNEL_CAPACITY,
+    );
     let selected_model = agent_config.model.clone();
     let permission_mode_for_built = Arc::clone(&agent_config.permission_mode);
 
@@ -160,6 +147,39 @@ pub(super) async fn build_session_agent(
         }
     }
 
+    let native_sandbox = agent_config
+        .sandbox
+        .take()
+        .expect("session sandbox configured");
+    let (sandbox, sandbox_audit_drain) = crate::runtime::sandbox_audit::audit_sandbox_backend(
+        native_sandbox,
+        config,
+        session_id,
+        &agent_config.agent_type,
+    )
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, "sandbox audit startup failed");
+        archon_core::print_mode::EXIT_ERROR
+    })?;
+    agent_config.sandbox = Some(sandbox);
+    let cognitive_store = match super::open_cognitive_store(&working_dir).await {
+        Ok(store) => store,
+        Err(error) => {
+            let audit_result = super::drain_startup_sandbox_audit(sandbox_audit_drain).await;
+            let error = super::finish_startup_failure(error, audit_result);
+            tracing::error!(%error, "cognitive executive store startup failed");
+            return Err(archon_core::print_mode::EXIT_ERROR);
+        }
+    };
+    let metrics = Arc::new(archon_tui::observability::ChannelMetrics::default());
+    if let Err(e) = super::spawn_metrics_exporter(cli.metrics_port, Arc::clone(&metrics)) {
+        let audit_result = super::drain_startup_sandbox_audit(sandbox_audit_drain).await;
+        let error = super::finish_startup_failure(e.into(), audit_result);
+        eprintln!("Metrics exporter failed: {error}");
+        return Err(archon_core::print_mode::EXIT_ERROR);
+    }
+
     let mut agent = Agent::new(
         provider,
         registry,
@@ -167,23 +187,22 @@ pub(super) async fn build_session_agent(
         agent_event_tx,
         agent_registry,
     );
-    let metrics = Arc::new(archon_tui::observability::ChannelMetrics::default());
+    super::world_model_callbacks::install(&mut agent, config, session_id);
     let metrics_sink: Arc<dyn ChannelMetricSink> = metrics.clone();
     agent.set_channel_metrics(metrics_sink);
-    if let Some(store) = super::open_cognitive_store(&working_dir) {
+    if let Some(store) = cognitive_store {
         agent.set_cognitive_store(store);
-    }
-
-    if let Err(e) = super::spawn_metrics_exporter(cli.metrics_port, Arc::clone(&metrics)) {
-        eprintln!("Metrics exporter failed: {e}");
-        return Err(archon_core::print_mode::EXIT_ERROR);
     }
 
     agent.set_hook_registry(Arc::clone(&hook_registry_arc));
     agent.set_auto_evaluator(archon_permissions::auto::AutoModeEvaluator::new(
         archon_permissions::auto::AutoModeConfig {
+            safe_commands: config.permissions.safe_commands.clone(),
+            risky_commands: config.permissions.risky_commands.clone(),
+            dangerous_commands: config.permissions.dangerous_commands.clone(),
+            allow_paths: config.permissions.allow_paths.clone(),
+            deny_paths: config.permissions.deny_paths.clone(),
             project_dir: Some(working_dir),
-            ..Default::default()
         },
     ));
     agent.install_subagent_executor();
@@ -202,158 +221,8 @@ pub(super) async fn build_session_agent(
         selected_provider,
         selected_model,
         permission_mode: permission_mode_for_built,
+        sandbox_audit_drain,
     })
-}
-
-async fn resolve_identity_and_api_client(
-    config: &archon_core::config::ArchonConfig,
-    session_id: &str,
-    cli: &Cli,
-    env_vars: &ArchonEnvVars,
-) -> Result<(IdentityProvider, Option<AnthropicClient>), i32> {
-    let device_id = get_or_create_device_id();
-    if super::is_codex_session(config) || config.llm.provider != "anthropic" {
-        return Ok((
-            IdentityProvider::new(
-                IdentityMode::Clean,
-                session_id.to_string(),
-                device_id,
-                String::new(),
-            ),
-            None,
-        ));
-    }
-
-    let auth = match resolve_auth_with_keys(
-        env_vars.anthropic_api_key.as_deref(),
-        env_vars.archon_api_key.as_deref(),
-        env_vars.archon_oauth_token.as_deref(),
-        std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
-    ) {
-        Ok(a) => a,
-        Err(e) => {
-            eprintln!("Authentication failed: {e}");
-            eprintln!("Run `archon login` or set ANTHROPIC_API_KEY.");
-            return Err(archon_core::print_mode::EXIT_ERROR);
-        }
-    };
-    let identity_mode =
-        resolve_identity_mode(&auth, cli.identity_spoof, &config.identity.as_view());
-    let account_uuid = fetch_account_uuid(&auth).await;
-    let identity = IdentityProvider::new(
-        identity_mode,
-        session_id.to_string(),
-        device_id,
-        account_uuid,
-    );
-    let api_url = std::env::var("ANTHROPIC_BASE_URL")
-        .ok()
-        .or_else(|| config.api.base_url.clone());
-    Ok((
-        identity.clone(),
-        Some(AnthropicClient::new(auth, identity, api_url)),
-    ))
-}
-
-async fn resolve_session_provider(
-    config: &archon_core::config::ArchonConfig,
-    session_id: &str,
-    working_dir: &std::path::Path,
-    hook_registry: &Arc<archon_core::hooks::HookRegistry>,
-    api_client: Option<AnthropicClient>,
-) -> Result<Arc<dyn archon_llm::provider::LlmProvider>, i32> {
-    let requested_provider = if super::is_codex_session(config) {
-        "openai-codex"
-    } else {
-        config.llm.provider.as_str()
-    };
-    crate::runtime::hooks::fire_provider_resolve_hook(
-        hook_registry,
-        working_dir,
-        session_id,
-        crate::runtime::hooks::ProviderResolveHookPayload {
-            hook_event: "BeforeProviderResolve",
-            stage: "before_provider_resolve",
-            surface: "session_agent",
-            requested_provider,
-            selected_provider: None,
-            runtime_mode: None,
-            profile_id: None,
-        },
-    )
-    .await;
-
-    let provider = if super::is_codex_session(config) {
-        let (provider, runtime_mode) =
-            match crate::runtime::codex_provider::build_codex_provider(config, "session_agent")
-                .await
-            {
-                Ok(provider) => provider,
-                Err(error) => {
-                    eprintln!("Codex provider failed: {error}");
-                    return Err(archon_core::print_mode::EXIT_ERROR);
-                }
-            };
-        let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
-            provider.name(),
-        );
-        observe_llm_provider_with_profile(provider, runtime_mode, profile_id)
-    } else {
-        let provider = match api_client {
-            Some(api_client) => {
-                let selection =
-                    build_llm_provider_selection(&config.llm, &config.models, api_client);
-                let selected_provider = selection.provider.name().to_string();
-                let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
-                record_provider_fallback(
-                    &config.llm.provider,
-                    &selected_provider,
-                    runtime_mode,
-                    selection
-                        .fallback_reason
-                        .unwrap_or("provider_construction_fallback"),
-                );
-                selection.provider
-            }
-            None => match build_llm_provider_without_anthropic_fallback(&config.llm) {
-                Ok(provider) => provider,
-                Err(error) => {
-                    let reason = provider_construction_error_reason(&error);
-                    record_anthropic_fallback_denied(&config.llm.provider, "session_agent", reason);
-                    eprintln!("Provider {} failed: {error}", config.llm.provider);
-                    return Err(archon_core::print_mode::EXIT_ERROR);
-                }
-            },
-        };
-        let selected_provider = provider.name().to_string();
-        let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
-        let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
-            &selected_provider,
-        );
-        observe_llm_provider_with_profile(provider, runtime_mode, profile_id)
-    };
-
-    let selected_provider = provider.name().to_string();
-    crate::runtime::hooks::fire_provider_resolve_hook(
-        hook_registry,
-        working_dir,
-        session_id,
-        crate::runtime::hooks::ProviderResolveHookPayload {
-            hook_event: "AfterProviderResolve",
-            stage: "after_provider_resolve",
-            surface: "session_agent",
-            requested_provider,
-            selected_provider: Some(&selected_provider),
-            runtime_mode: Some(runtime_mode_for_provider_name(&selected_provider)),
-            profile_id: crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
-                &selected_provider,
-            )
-            .as_deref(),
-        },
-    )
-    .await;
-    tracing::info!("LLM provider: {}", provider.name());
-    Ok(provider)
 }
 
 pub(super) fn register_agent_listing(
@@ -374,7 +243,7 @@ pub(super) fn register_agent_listing(
     )));
 }
 
-pub(super) fn resolve_agent_definition(
+pub(super) async fn resolve_agent_definition(
     config: &archon_core::config::ArchonConfig,
     resolved_flags: &archon_core::cli_flags::ResolvedFlags,
     agent_registry: &AgentRegistry,
@@ -386,10 +255,10 @@ pub(super) fn resolve_agent_definition(
         Some(def) => {
             tracing::info!(agent = agent_name, "resolved custom agent");
             let mut def = def.clone();
-            if let Err(error) =
-                crate::runtime::agent_profile_overlay::apply_active_profile_overlay_if_enabled(
-                    config, &mut def,
-                )
+            if let Err(error) = crate::runtime::agent_profile_overlay::apply_active_profile_overlay_if_enabled_async(
+                config, &mut def,
+            )
+            .await
             {
                 tracing::warn!(agent = agent_name, %error, "agent profile overlay skipped");
             }

@@ -37,12 +37,8 @@ fn learning_db_path() -> Result<std::path::PathBuf> {
     Ok(crate::command::store_paths::learning_db_path())
 }
 
-fn open_learning_db(path: &std::path::Path) -> Result<DbInstance> {
-    let path_str = path.to_string_lossy().to_string();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    DbInstance::new("sqlite", &path_str, "").map_err(|e| anyhow::anyhow!("open learning db: {e}"))
+fn open_learning_db(path: &std::path::Path) -> Result<std::sync::Arc<DbInstance>> {
+    crate::command::store_paths::open_sqlite_db(path, "learning")
 }
 
 // ── Subcommand handlers ──────────────────────────────────────────────────────
@@ -429,11 +425,8 @@ mod tests {
         ProposalStatus, RiskLevel,
     };
 
-    fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-behaviour-policy-{}.db", uuid::Uuid::new_v4());
-        let db = DbInstance::new("sqlite", &path, "").unwrap();
-        archon_learning::schema::ensure_learning_schema(&db).unwrap();
-        db
+    fn test_db() -> std::sync::Arc<DbInstance> {
+        crate::command::test_support::registered_learning_test_db("test-behaviour-policy")
     }
 
     fn seed_low_risk_proposal(db: &DbInstance) {

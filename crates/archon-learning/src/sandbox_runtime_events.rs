@@ -91,6 +91,56 @@ pub fn insert_sandbox_runtime_event(
     db: &DbInstance,
     event: &SandboxRuntimeEventRecord,
 ) -> Result<()> {
+    run_script_guarded(
+        db,
+        event_put_script(),
+        event_put_params(event),
+        ScriptMutability::Mutable,
+        "insert sandbox_runtime_events failed",
+    )?;
+    Ok(())
+}
+
+pub fn insert_sandbox_runtime_event_with_ledger(
+    db: &DbInstance,
+    event: &SandboxRuntimeEventRecord,
+    ledger: Option<&crate::agent_evolution_ledger::AgentPerformanceLedgerRecord>,
+) -> Result<()> {
+    let config = archon_cozo::bound_guard_config(db, "persist sandbox audit event")?;
+    archon_cozo::run_guarded(
+        "persist sandbox audit event",
+        ScriptMutability::Mutable,
+        &config,
+        || {
+            let transaction = db.multi_transaction(true);
+            let result = (|| {
+                transaction
+                    .run_script(event_put_script(), event_put_params(event))
+                    .map_err(|error| anyhow::anyhow!("insert sandbox runtime event: {error}"))?;
+                if let Some(ledger) = ledger {
+                    transaction
+                        .run_script(
+                            crate::agent_evolution_ledger::ledger_put_script(),
+                            crate::agent_evolution_ledger::ledger_put_params(ledger)?,
+                        )
+                        .map_err(|error| anyhow::anyhow!("insert sandbox audit ledger: {error}"))?;
+                }
+                Ok(())
+            })();
+            match result {
+                Ok(()) => transaction
+                    .commit()
+                    .map_err(|error| anyhow::anyhow!("commit sandbox audit event: {error}")),
+                Err(error) => {
+                    let _ = transaction.abort();
+                    Err(error)
+                }
+            }
+        },
+    )
+}
+
+fn event_put_params(event: &SandboxRuntimeEventRecord) -> BTreeMap<String, DataValue> {
     let mut params = BTreeMap::new();
     params.insert("eid".into(), DataValue::from(event.event_id.as_str()));
     params.insert(
@@ -139,15 +189,7 @@ pub fn insert_sandbox_runtime_event(
         DataValue::from(event.redacted_context_json.to_string().as_str()),
     );
     params.insert("created".into(), DataValue::from(event.created_at.as_str()));
-
-    run_script_guarded(
-        db,
-        event_put_script(),
-        params,
-        ScriptMutability::Mutable,
-        "insert sandbox_runtime_events failed",
-    )?;
-    Ok(())
+    params
 }
 
 pub fn get_sandbox_runtime_event(
@@ -257,11 +299,42 @@ fn non_empty(value: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-sandbox-events-{}.db", uuid::Uuid::new_v4());
-        let db = DbInstance::new("sqlite", &path, "").unwrap();
-        crate::schema::ensure_learning_schema(&db).unwrap();
-        db
+    fn test_db() -> std::sync::Arc<DbInstance> {
+        crate::cozo_guard::test_sqlite_db("test-sandbox-events")
+    }
+
+    #[test]
+    fn linked_ledger_failure_rolls_back_runtime_event() {
+        let db = test_db();
+        db.run_script(
+            "{::remove agent_performance_ledger}",
+            Default::default(),
+            ScriptMutability::Mutable,
+        )
+        .unwrap();
+        let event = SandboxRuntimeEventRecord::new(
+            "sandbox-event-rollback",
+            "openshell",
+            "denied",
+            "2026-05-08T12:00:00Z",
+        );
+        let ledger = crate::agent_evolution_ledger::AgentPerformanceLedgerRecord::new(
+            "ledger-rollback",
+            "reviewer",
+            "failed",
+            "2026-05-08T12:00:00Z",
+        );
+
+        let error = insert_sandbox_runtime_event_with_ledger(&db, &event, Some(&ledger))
+            .expect_err("missing ledger relation must fail the linked write");
+
+        assert!(error.to_string().contains("agent_performance_ledger"));
+        assert!(
+            get_sandbox_runtime_event(&db, &event.event_id)
+                .unwrap()
+                .is_none(),
+            "runtime event survived a failed linked-ledger transaction"
+        );
     }
 
     #[test]

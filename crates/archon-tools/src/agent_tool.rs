@@ -12,7 +12,11 @@ pub use catalog::AgentCatalogTool;
 pub use core::AgentTool;
 pub use failure::classify_failure_prefix;
 pub use request::AgentToolError;
-pub use run::{run_subagent, run_subagent_foreground};
+pub(crate) use run::run_subagent_with_completion;
+pub use run::{
+    run_subagent, run_subagent_foreground, run_subagent_foreground_with_system,
+    run_subagent_with_system,
+};
 
 #[cfg(test)]
 pub(crate) use core::AGENT_DESCRIPTION_LIMIT_BYTES;

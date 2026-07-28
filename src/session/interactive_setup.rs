@@ -41,6 +41,9 @@ pub(super) async fn prepare(
     registry.replace(Box::new(archon_tools::bash::BashTool {
         timeout_secs: config.tools.bash_timeout,
         max_output_bytes: config.tools.bash_max_output,
+        safe_commands: config.permissions.safe_commands.clone(),
+        risky_commands: config.permissions.risky_commands.clone(),
+        dangerous_commands: config.permissions.dangerous_commands.clone(),
         provider_env: None,
     }));
     apply_tool_filters(&mut registry, resolved_flags);
@@ -107,6 +110,7 @@ pub(super) async fn prepare(
     super::build_agent::register_agent_listing(&mut registry, &agent_registry_tmp);
     let agent_def =
         super::build_agent::resolve_agent_definition(config, resolved_flags, &agent_registry_tmp)
+            .await
             .map_err(|code| anyhow::anyhow!("agent resolution failed with exit code {code}"))?;
     drop(agent_registry_tmp);
 
@@ -153,6 +157,7 @@ pub(super) async fn prepare(
         config.permissions.mode.clone()
     };
     let permission_mode_shared = Arc::new(tokio::sync::Mutex::new(initial_perm_mode));
+    let sandbox_backend = super::native_session_sandbox_backend(config, sandbox_flag).await;
 
     let btw_system_prompt = system_prompt.clone();
     let system_prompt_chars: usize = system_prompt
@@ -191,15 +196,7 @@ pub(super) async fn prepare(
         max_tool_concurrency: config.tools.max_concurrency as usize,
         max_turns: None,
         cancel_token: None,
-        sandbox: Some(super::session_sandbox_backend(
-            config,
-            sandbox_flag,
-            session_id,
-            agent_def
-                .as_ref()
-                .map(|def| def.agent_type.as_str())
-                .unwrap_or("main"),
-        )),
+        sandbox: Some(sandbox_backend),
         activity_sink: super::session_activity_sink(session_id),
         context: config.context.clone(),
         max_subagent_concurrency: config.subagent.max_concurrent,

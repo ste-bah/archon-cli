@@ -84,6 +84,43 @@ fn train_writes_candidate_manifest_from_stored_rows() {
 }
 
 #[test]
+fn train_uses_serving_representation_and_context_window() {
+    use archon_world_model::representation::GenericEmbeddingRepresentationAdapter;
+
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let mut config = test_config();
+    config.learning.world_model.jepa.context_window_rows = 2;
+
+    let rendered = candidate::render_train(&config, temp.path(), true, Some(1_000)).unwrap();
+    let candidate_id = candidate_id_from(&rendered);
+    let candidate = archon_world_model::registry::ModelRegistry::open(temp.path())
+        .unwrap()
+        .load_cpu_candidate(&candidate_id)
+        .unwrap();
+    let rows = archon_world_model::storage::WorldModelStore::open(temp.path())
+        .unwrap()
+        .load_rows()
+        .unwrap();
+    let representation = GenericEmbeddingRepresentationAdapter::new(
+        super::embedding_runtime::build_embedding_adapter(&config).unwrap(),
+    );
+    let expected =
+        archon_world_model::train::examples_from_rows_with_representation_adapter_and_context(
+            &rows,
+            &representation,
+            config.learning.world_model.jepa.context_window_rows,
+        )
+        .unwrap();
+
+    assert_eq!(candidate.model.metadata.row_count, expected.len() as u64);
+    assert_eq!(
+        candidate.outcome.training_mean_cosine_error,
+        candidate.model.mean_cosine_error(&expected).unwrap()
+    );
+}
+
+#[test]
 fn train_jepa_writes_candidate_manifest_from_stored_rows() {
     let temp = tempfile::tempdir().unwrap();
     seed_training_rows(temp.path());

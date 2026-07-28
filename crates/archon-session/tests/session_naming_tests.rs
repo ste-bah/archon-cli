@@ -219,6 +219,41 @@ fn test_most_recent_in_directory() {
 }
 
 #[test]
+fn format_listing_truncates_multibyte_fields_on_character_boundaries() {
+    let working_directory: String = (0..30)
+        .map(|offset| char::from_u32(0x4e00 + offset).unwrap())
+        .collect();
+    let session = archon_session::storage::SessionMetadata {
+        id: "甲乙丙丁戊己庚辛壬".into(),
+        created_at: "2026-07-16T00:00:00Z".into(),
+        last_active: "一二三四五六七八九十百".into(),
+        working_directory: working_directory.clone(),
+        git_branch: Some("main".into()),
+        model: "opus".into(),
+        message_count: 0,
+        total_tokens: 0,
+        total_cost: 0.0,
+        schema_version: 1,
+        name: Some("甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉".into()),
+        parent_session_id: None,
+    };
+
+    let output = format_session_list(&[session]);
+    let fields: Vec<&str> = output.lines().nth(1).unwrap().split_whitespace().collect();
+
+    assert_eq!(fields[0], "甲乙丙丁戊己庚辛");
+    assert_eq!(fields[1], "甲乙丙丁戊己庚辛壬癸子丑寅卯辰...");
+    assert_eq!(fields[2], "一二三四五六七八九十");
+    assert_eq!(
+        fields[3],
+        format!(
+            "...{}",
+            working_directory.chars().skip(5).collect::<String>()
+        )
+    );
+}
+
+#[test]
 fn format_listing_includes_name() {
     let (dir, store) = temp_db();
     let meta = store

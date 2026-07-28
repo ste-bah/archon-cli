@@ -20,12 +20,15 @@ toml.workspace = true
 sha2.workspace = true
 hex.workspace = true
 cozo.workspace = true
+ndarray.workspace = true
+archon-docs = { path = "../archon-docs" }
 archon-memory = { path = "../archon-memory" }
 archon-leann = { path = "../archon-leann" }
 archon-llm = { path = "../archon-llm" }
 archon-core = { path = "../archon-core" }
 archon-tools = { path = "../archon-tools" }
 archon-learning = { path = "../archon-learning" }
+archon-cozo = { path = "../archon-cozo" }
 archon-meaning = { path = "../archon-meaning" }
 archon-observability = { path = "../archon-observability" }
 cel-interpreter.workspace = true

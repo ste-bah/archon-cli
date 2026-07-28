@@ -1,18 +1,16 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::Result;
 use archon_docs::models::SourceDocument;
-use archon_docs::schema::ensure_doc_schema;
 use archon_docs::vlm::factory::{
     self as vlm_factory, VlmProviderInitReport, VlmProviderInitStatus,
 };
 use cozo::DbInstance;
 
-pub(crate) fn open_docs_db() -> Result<DbInstance> {
+pub(crate) fn open_docs_db() -> Result<Arc<DbInstance>> {
     let db_path = crate::command::store_paths::evidence_db_path(&["ARCHON_DOCS_DB_PATH"]);
-    let db = crate::command::store_paths::open_sqlite_db(&db_path, "document")?;
-    ensure_doc_schema(&db)?;
-    Ok(db)
+    archon_docs::acquire_docs_db(db_path)
 }
 
 pub(crate) fn load_policy() -> archon_policy::EffectivePolicy {

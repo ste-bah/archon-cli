@@ -253,9 +253,10 @@ pub(super) async fn prepare(
             let codex_provider = super::build_codex_session_provider(config).await?;
             let selected_provider = codex_provider.name().to_string();
             let profile_id =
-                crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+                crate::runtime::provider_auth_selection::selected_provider_auth_profile_id_async(
                     &selected_provider,
-                );
+                )
+                .await;
             crate::runtime::hooks::fire_provider_resolve_hook(
                 &hook_registry,
                 &working_dir,

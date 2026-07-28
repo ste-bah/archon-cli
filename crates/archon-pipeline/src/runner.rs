@@ -28,6 +28,7 @@ pub use quality_gate::PipelineRunOptions;
 #[cfg(test)]
 use quality_gate::attempt_accepted;
 use single_agent::run_single_agent;
+pub use support::PipelineProgressFacade;
 use wave::run_parallel_wave;
 
 const PIPELINE_MAX_ATTEMPTS: usize = 3;

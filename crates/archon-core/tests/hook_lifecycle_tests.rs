@@ -30,6 +30,7 @@ fn make_test_registry(event: HookEvent) -> HookRegistry {
                 status_message: None,
                 headers: HashMap::new(),
                 allowed_env_vars: Vec::new(),
+                on_failure: None,
                 enabled: true,
             }],
         }],

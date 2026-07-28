@@ -13,6 +13,14 @@ impl Agent {
                 allowed.push(preflight);
             }
         }
+        if let (Some(callback), Some(action_id), Some(first)) = (
+            &self.first_tool_action_callback,
+            self.guardrail_action_id.as_deref(),
+            allowed.first(),
+        ) {
+            self.turn_requirement_reminder =
+                callback(action_id, &first.tool_name, &first.tool_id, &first.input);
+        }
         allowed
     }
 }

@@ -7,9 +7,13 @@ pub(super) fn render_train(
     let backend = selected_training_backend(config);
     let rows = WorldModelStore::open(root)?.load_rows()?;
     let state_dim = config.learning.world_model.state_dim;
-    let adapter = build_embedding_adapter(config)?;
+    let adapter = GenericEmbeddingRepresentationAdapter::new(build_embedding_adapter(config)?);
     let examples =
-        archon_world_model::train::examples_from_rows_with_adapter(&rows, adapter.as_ref())?;
+        archon_world_model::train::examples_from_rows_with_representation_adapter_and_context(
+            &rows,
+            &adapter,
+            config.learning.world_model.jepa.context_window_rows,
+        )?;
     if examples.is_empty() {
         bail!("not enough rows to train: need at least two rows in the same session");
     }
@@ -190,9 +194,13 @@ pub(super) fn render_eval(
     let registry = ModelRegistry::open(root)?;
     let candidate = registry.load_cpu_candidate(candidate_id)?;
     let rows = WorldModelStore::open(root)?.load_rows()?;
-    let adapter = build_embedding_adapter(config)?;
+    let adapter = GenericEmbeddingRepresentationAdapter::new(build_embedding_adapter(config)?);
     let examples =
-        archon_world_model::train::examples_from_rows_with_adapter(&rows, adapter.as_ref())?;
+        archon_world_model::train::examples_from_rows_with_representation_adapter_and_context(
+            &rows,
+            &adapter,
+            config.learning.world_model.jepa.context_window_rows,
+        )?;
     let (baseline, heldout) = split_for_eval(&examples)?;
     let eval = &config.learning.world_model.eval;
 

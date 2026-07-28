@@ -1,7 +1,9 @@
 /// Tests for Local/Ollama provider adapter (TASK-CLI-405).
 /// Written BEFORE implementation (Gate 01).
-use archon_llm::provider::LlmProvider;
+use archon_llm::provider::{LlmProvider, LlmRequest};
 use archon_llm::providers::LocalProvider;
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 // ---------------------------------------------------------------------------
 // Test 1: LocalProvider implements LlmProvider (object-safe)
@@ -106,6 +108,57 @@ fn local_timeout_configurable() {
 // ---------------------------------------------------------------------------
 // Test 7: SSE parsing reuses OpenAI format
 // ---------------------------------------------------------------------------
+
+#[test]
+fn local_usage_only_chunk_preserves_explicit_zero_usage() {
+    let chunk =
+        r#"{"id":"chatcmpl-local","choices":[],"usage":{"prompt_tokens":0,"completion_tokens":0}}"#;
+
+    let events = LocalProvider::parse_sse_chunk(chunk);
+
+    assert!(matches!(
+        events.as_slice(),
+        [archon_llm::streaming::StreamEvent::MessageDelta {
+            usage: Some(usage),
+            ..
+        }] if usage.input_tokens_available
+            && usage.output_tokens_available
+            && usage.input_tokens == 0
+            && usage.output_tokens == 0
+    ));
+}
+
+#[tokio::test]
+async fn local_complete_returns_usage_from_final_stream_chunk() {
+    let server = MockServer::start().await;
+    let body = concat!(
+        "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":4}}\n\n",
+        "data: [DONE]\n\n"
+    );
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(body),
+        )
+        .mount(&server)
+        .await;
+    let provider = LocalProvider::new(server.uri(), "local-model".into(), 30, false);
+
+    let response = provider
+        .complete(LlmRequest {
+            model: "local-model".into(),
+            ..LlmRequest::default()
+        })
+        .await
+        .expect("mock completion");
+
+    assert_eq!(response.usage.input_tokens, 9);
+    assert_eq!(response.usage.output_tokens, 4);
+    assert!(response.usage.input_tokens_available);
+    assert!(response.usage.output_tokens_available);
+}
 
 #[test]
 fn local_uses_openai_sse_format() {

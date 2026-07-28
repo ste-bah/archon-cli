@@ -250,6 +250,8 @@ fn classify_tool_command(
 }
 
 pub(crate) fn forced_repair_prompt(record: &RuntimeGuardrailRecord) -> Option<String> {
+    let current_record = current_record_for_completion(record);
+    let record = &current_record;
     if record.decision.allowed_to_finalize || !record.decision.mode.can_block() {
         return None;
     }
@@ -346,4 +348,3 @@ pub(crate) fn render_guard_status(
         missing_requirements = summary.missing_requirements,
     )
 }
-

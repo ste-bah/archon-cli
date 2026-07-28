@@ -34,8 +34,15 @@ pub struct ToolOutputState {
     pub output: String,
     /// Whether the user has expanded this tool block.
     pub expanded: bool,
-    /// First 3 lines of output, precomputed for collapsed view.
+    /// First 3 lines of output, precomputed for non-transcript views.
     pub truncated_preview: String,
+    /// Safe summary of validated tool input, if the tool permits it.
+    pub summary: Option<String>,
+    /// Transcript line containing the collapsed success marker.
+    pub marker_line: Option<usize>,
+    /// Number of inline excerpt lines currently inserted after the marker.
+    pub expanded_line_count: usize,
+    started_at: std::time::Instant,
 }
 
 impl ToolOutputState {
@@ -48,26 +55,31 @@ impl ToolOutputState {
             output: String::new(),
             expanded: false,
             truncated_preview: String::new(),
+            summary: None,
+            marker_line: None,
+            expanded_line_count: 0,
+            started_at: std::time::Instant::now(),
         }
     }
 
+    pub fn append_output(&mut self, chunk: &str) {
+        self.output.push_str(chunk);
+    }
+
     /// Mark the tool as complete and set output.
-    pub fn complete(&mut self, output: &str, is_error: bool) {
+    pub fn complete(&mut self, output: &str, is_error: bool) -> &str {
         self.status = if is_error {
             ToolDisplayStatus::Error
         } else {
             ToolDisplayStatus::Success
         };
-        self.output = output.to_string();
-        self.truncated_preview = Self::compute_preview(output);
+        if !output.is_empty() {
+            self.output = output.to_string();
+        }
+        self.truncated_preview = Self::compute_preview(&self.output);
+        &self.output
     }
 
-    /// Toggle between expanded and collapsed views.
-    pub fn toggle_expand(&mut self) {
-        self.expanded = !self.expanded;
-    }
-
-    /// Compute a preview from the first 3 lines of output.
     fn compute_preview(output: &str) -> String {
         let lines: Vec<&str> = output.lines().take(3).collect();
         let preview = lines.join("\n");
@@ -76,6 +88,29 @@ impl ToolOutputState {
         } else {
             preview
         }
+    }
+
+    /// Elapsed lifecycle duration in milliseconds.
+    pub fn duration_ms(&self) -> u64 {
+        self.started_at.elapsed().as_millis() as u64
+    }
+
+    /// Inline transcript excerpt: the first three lines, capped safely at 600 characters.
+    pub fn excerpt_lines(&self) -> Vec<String> {
+        let mut excerpt = self.output.lines().take(3).collect::<Vec<_>>().join("\n");
+        let has_more = self.output.lines().count() > 3 || excerpt.chars().count() > 600;
+        if excerpt.chars().count() > 600 {
+            let end = excerpt
+                .char_indices()
+                .nth(599)
+                .map(|(index, _)| index)
+                .unwrap_or(excerpt.len());
+            excerpt.truncate(end);
+        }
+        if has_more {
+            excerpt.push('…');
+        }
+        excerpt.lines().map(ToString::to_string).collect()
     }
 
     /// Format for collapsed display: "arrow Tool: name -- status (preview)"
@@ -111,6 +146,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn chunked_tool_output_reconstructs_before_completion() {
+        let mut state = ToolOutputState::new("Bash", "tool-chunked");
+        state.append_output("hello ");
+        state.append_output("世界");
+        state.complete("", false);
+
+        assert_eq!(state.output, "hello 世界");
+        assert_eq!(state.status, ToolDisplayStatus::Success);
+    }
+
+    #[test]
     fn tool_output_new_starts_running_collapsed() {
         let state = ToolOutputState::new("Read", "tool_123");
         assert_eq!(state.tool_name, "Read");
@@ -140,16 +186,6 @@ mod tests {
         assert!(state.truncated_preview.contains("line3"));
         assert!(state.truncated_preview.contains("..."));
         assert!(!state.truncated_preview.contains("line4"));
-    }
-
-    #[test]
-    fn tool_output_toggle_expand() {
-        let mut state = ToolOutputState::new("Read", "tool_def");
-        assert!(!state.expanded);
-        state.toggle_expand();
-        assert!(state.expanded);
-        state.toggle_expand();
-        assert!(!state.expanded);
     }
 
     #[test]

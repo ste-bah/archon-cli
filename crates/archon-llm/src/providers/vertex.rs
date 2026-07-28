@@ -424,18 +424,26 @@ fn parse_gemini_vertex_event(val: &serde_json::Value) -> Vec<StreamEvent> {
 /// Parse a usage object from a Vertex AI response into a `Usage` struct.
 fn parse_usage(usage_val: Option<&serde_json::Value>) -> Usage {
     match usage_val {
-        Some(u) => Usage {
-            input_tokens: u.get("input_tokens").and_then(|t| t.as_u64()).unwrap_or(0),
-            output_tokens: u.get("output_tokens").and_then(|t| t.as_u64()).unwrap_or(0),
-            cache_creation_input_tokens: u
+        Some(u) => {
+            let input = u.get("input_tokens").and_then(|tokens| tokens.as_u64());
+            let output = u.get("output_tokens").and_then(|tokens| tokens.as_u64());
+            let cache_creation = u
                 .get("cache_creation_input_tokens")
-                .and_then(|t| t.as_u64())
-                .unwrap_or(0),
-            cache_read_input_tokens: u
+                .and_then(|tokens| tokens.as_u64());
+            let cache_read = u
                 .get("cache_read_input_tokens")
-                .and_then(|t| t.as_u64())
-                .unwrap_or(0),
-        },
+                .and_then(|tokens| tokens.as_u64());
+            Usage {
+                input_tokens: input.unwrap_or(0),
+                output_tokens: output.unwrap_or(0),
+                cache_creation_input_tokens: cache_creation.unwrap_or(0),
+                cache_read_input_tokens: cache_read.unwrap_or(0),
+                input_tokens_available: input.is_some(),
+                output_tokens_available: output.is_some(),
+                cache_creation_input_tokens_available: cache_creation.is_some(),
+                cache_read_input_tokens_available: cache_read.is_some(),
+            }
+        }
         None => Usage::default(),
     }
 }

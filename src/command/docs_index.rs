@@ -1,6 +1,7 @@
 use anyhow::Result;
 use cozo::DbInstance;
 use std::io::{self, Write};
+use std::sync::Arc;
 use std::time::Duration;
 
 use archon_docs::indexing::{self, IndexOptions, IndexProgress, IndexProgressPhase, IndexResult};
@@ -14,7 +15,7 @@ pub(crate) async fn handle_index(
     document: Option<String>,
     batch_size: usize,
     limit: Option<usize>,
-    db: DbInstance,
+    db: Arc<DbInstance>,
 ) -> Result<()> {
     println!("Counting index candidates...");
     flush_stdout();
@@ -79,7 +80,7 @@ pub(crate) async fn handle_index(
     Ok(())
 }
 
-pub(crate) fn handle_index_status(db: DbInstance) -> Result<()> {
+pub(crate) fn handle_index_status(db: Arc<DbInstance>) -> Result<()> {
     let stats = index_queue::stats(&db)?;
     let jobs = index_jobs::summary(&db)?;
     println!("Index queue:");
@@ -122,26 +123,26 @@ pub(crate) fn handle_index_status(db: DbInstance) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn handle_index_retry_failed(db: DbInstance, limit: Option<usize>) -> Result<()> {
+pub(crate) fn handle_index_retry_failed(db: Arc<DbInstance>, limit: Option<usize>) -> Result<()> {
     let retried = index_queue::retry_failed(&db, limit)?;
     println!("Requeued {retried} failed chunk(s) for indexing.");
     Ok(())
 }
 
-pub(crate) fn handle_index_pause(db: DbInstance, job_id: &str) -> Result<()> {
+pub(crate) fn handle_index_pause(db: Arc<DbInstance>, job_id: &str) -> Result<()> {
     index_jobs::pause_job(&db, job_id)?;
     let released = index_queue::release_leases_for_owner(&db, job_id)?;
     println!("Paused index job {job_id}. Released {released} leased chunk(s) back to pending.");
     Ok(())
 }
 
-pub(crate) fn handle_index_resume(db: DbInstance, job_id: &str) -> Result<()> {
+pub(crate) fn handle_index_resume(db: Arc<DbInstance>, job_id: &str) -> Result<()> {
     index_jobs::resume_job(&db, job_id)?;
     println!("Marked index job {job_id} resumable. Run 'archon docs index' to drain queued work.");
     Ok(())
 }
 
-pub(crate) fn handle_index_cancel(db: DbInstance, job_id: &str) -> Result<()> {
+pub(crate) fn handle_index_cancel(db: Arc<DbInstance>, job_id: &str) -> Result<()> {
     index_jobs::cancel_job(&db, job_id)?;
     let released = index_queue::release_leases_for_owner(&db, job_id)?;
     println!("Cancelled index job {job_id}. Released {released} leased chunk(s) back to pending.");

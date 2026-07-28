@@ -3,14 +3,15 @@
 //! Implements REQ-KB-001. Heading-aware chunking, SHA-256 deduplication,
 //! batch storage in CozoDB.
 
-use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::Result;
-use cozo::{DataValue, DbInstance, ScriptMutability};
+use archon_docs::embed::LocalEmbeddingProvider;
+use cozo::DbInstance;
 use sha2::{Digest, Sha256};
 
-use super::schema::KbNodeType;
+use super::ingest_storage::{ChunkData, ChunkStorage};
 use super::{IngestResult, IngestSource};
 
 // ---------------------------------------------------------------------------
@@ -19,7 +20,8 @@ use super::{IngestResult, IngestSource};
 
 /// Document ingester for the knowledge base.
 pub struct Ingester {
-    db: DbInstance,
+    storage: ChunkStorage,
+    embedder: Option<Arc<dyn LocalEmbeddingProvider>>,
 }
 
 impl Ingester {
@@ -27,7 +29,52 @@ impl Ingester {
     ///
     /// Assumes `ensure_kb_schema()` has already been called.
     pub fn new(db: DbInstance) -> Result<Self> {
-        Ok(Self { db })
+        Ok(Self {
+            storage: ChunkStorage::new(db),
+            embedder: None,
+        })
+    }
+
+    pub fn with_embedder(
+        db: DbInstance,
+        embedder: Arc<dyn LocalEmbeddingProvider>,
+    ) -> Result<Self> {
+        let _guard = super::schema::lock_embedding_state()?;
+        let existing = read_node_content(&db)?;
+        let content: Vec<_> = existing
+            .iter()
+            .map(|(_, content)| content.clone())
+            .collect();
+        let vectors = embedder.embed_chunks(&content)?;
+        if vectors.len() != existing.len() {
+            anyhow::bail!(
+                "KB embedder returned {} vectors for {} existing nodes",
+                vectors.len(),
+                existing.len()
+            );
+        }
+        let embeddings: Vec<_> = existing
+            .into_iter()
+            .zip(vectors)
+            .map(|((node_id, _), embedding)| (node_id, embedding))
+            .collect();
+        super::schema::ensure_kb_embedding_schema_locked(
+            &db,
+            &embedder.embedding_space_id(),
+            embedder.dimension(),
+            Some(&embeddings),
+        )?;
+        let storage = ChunkStorage::new(db.clone());
+        super::schema::assert_embedding_space(
+            &db,
+            &embedder.embedding_space_id(),
+            embedder.dimension(),
+        )?;
+        backfill_missing_embeddings(&db, embedder.as_ref())?;
+        Ok(Self {
+            storage,
+            embedder: Some(embedder),
+        })
     }
 
     /// Dispatch to source-specific handler.
@@ -68,12 +115,11 @@ impl Ingester {
         self.store_chunks(&chunks, &source, domain_tag).await
     }
 
-    /// Ingest a PDF file. Splits at page boundaries.
+    /// Ingest a `.pdf` path only when its contents are valid UTF-8 text.
+    /// Binary PDF extraction is not implemented and returns a read error.
     pub async fn ingest_pdf(&self, path: &Path, domain_tag: &str) -> Result<IngestResult> {
-        // PDF reading requires external tooling; for now extract as text if possible.
-        // Falls back to treating the file as text (will produce garbled output for
-        // binary PDFs, but won't crash).
-        let content = std::fs::read_to_string(path).unwrap_or_default();
+        let content = std::fs::read_to_string(path)
+            .map_err(|error| anyhow::anyhow!("PDF text ingestion failed: {error}"))?;
         if content.is_empty() {
             return Ok(IngestResult::default());
         }
@@ -84,12 +130,10 @@ impl Ingester {
         self.store_chunks(&chunks, &source, domain_tag).await
     }
 
-    /// Ingest from a URL: fetch HTML, convert to markdown, then process.
+    /// Return an explicit error because URL ingestion is not implemented.
     pub async fn ingest_url(&self, url: &str, domain_tag: &str) -> Result<IngestResult> {
-        // URL fetching is deferred to integration with archon-cli's WebFetch.
-        // For now, return empty result without error.
         let _ = (url, domain_tag);
-        Ok(IngestResult::default())
+        anyhow::bail!("URL ingestion is not supported")
     }
 
     /// Ingest a plain text file. Splits at blank-line paragraphs.
@@ -142,85 +186,128 @@ impl Ingester {
         source: &str,
         domain_tag: &str,
     ) -> Result<IngestResult> {
-        let mut result = IngestResult {
-            chunks_processed: chunks.len(),
-            ..Default::default()
-        };
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs_f64();
-
-        for (idx, chunk) in chunks.iter().enumerate() {
-            let content_hash = sha256_hex(&chunk.content);
-
-            // Check for duplicate by content_hash
-            if self.hash_exists(&content_hash)? {
-                continue; // skip exact duplicate
-            }
-
-            let node_id = uuid::Uuid::new_v4().to_string();
-            let node_type = node_type_str(&KbNodeType::Raw);
-
-            let mut params = BTreeMap::new();
-            params.insert("nid".to_string(), DataValue::from(node_id.as_str()));
-            params.insert("ntype".to_string(), DataValue::from(node_type));
-            params.insert("source".to_string(), DataValue::from(source));
-            params.insert("dtag".to_string(), DataValue::from(domain_tag));
-            params.insert("title".to_string(), DataValue::from(chunk.title.as_str()));
-            params.insert(
-                "content".to_string(),
-                DataValue::from(chunk.content.as_str()),
-            );
-            params.insert("chash".to_string(), DataValue::from(content_hash.as_str()));
-            params.insert("cidx".to_string(), DataValue::from(idx as i64));
-            params.insert("cat".to_string(), DataValue::from(now));
-            params.insert("uat".to_string(), DataValue::from(now));
-
-            self.db
-                .run_script(
-                    "?[node_id, node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at] \
-                     <- [[$nid, $ntype, $source, $dtag, $title, $content, $chash, $cidx, $cat, $uat]]
-                     :put kb_nodes { node_id => node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at }",
-                    params,
-                    ScriptMutability::Mutable,
-                )
-                .map_err(|e| anyhow::anyhow!("insert kb_node failed: {}", e))?;
-
-            result.nodes_created += 1;
+        let _guard = self
+            .embedder
+            .as_ref()
+            .map(|_| super::schema::lock_embedding_state())
+            .transpose()?;
+        if let Some(embedder) = &self.embedder {
+            super::schema::assert_embedding_space(
+                self.storage.db(),
+                &embedder.embedding_space_id(),
+                embedder.dimension(),
+            )?;
         }
-
-        Ok(result)
+        let content: Vec<_> = chunks.iter().map(|chunk| chunk.content.clone()).collect();
+        let embeddings = self
+            .embedder
+            .as_ref()
+            .map(|embedder| embedder.embed_chunks(&content))
+            .transpose()?;
+        self.storage.store(
+            chunks,
+            embeddings.as_deref(),
+            source,
+            domain_tag,
+            sha256_hex,
+        )
     }
 
-    /// Check if a content hash already exists in kb_nodes.
-    fn hash_exists(&self, content_hash: &str) -> Result<bool> {
-        let mut params = BTreeMap::new();
-        params.insert("ch".to_string(), DataValue::from(content_hash));
+    #[doc(hidden)]
+    pub fn fail_next_batch_after_hash_write_for_tests(&self) {
+        self.storage.fail_next_batch_after_hash_write_for_tests();
+    }
 
-        let result = self
-            .db
-            .run_script(
-                "?[node_id] := *kb_nodes{node_id, content_hash}, content_hash = $ch",
-                params,
-                ScriptMutability::Immutable,
+    #[doc(hidden)]
+    pub fn transaction_count_for_tests(&self) -> usize {
+        self.storage.transaction_count_for_tests()
+    }
+}
+
+pub(super) fn read_node_content(db: &DbInstance) -> Result<Vec<(String, String)>> {
+    let result = db
+        .run_script(
+            "?[node_id, content] := *kb_nodes{node_id, content}",
+            Default::default(),
+            cozo::ScriptMutability::Immutable,
+        )
+        .map_err(|error| anyhow::anyhow!("read KB nodes for embedding failed: {error}"))?;
+    Ok(result
+        .rows
+        .iter()
+        .map(|row| {
+            (
+                row[0].get_str().unwrap_or_default().to_string(),
+                row[1].get_str().unwrap_or_default().to_string(),
             )
-            .map_err(|e| anyhow::anyhow!("hash check failed: {}", e))?;
+        })
+        .collect())
+}
 
-        Ok(!result.rows.is_empty())
+pub(super) fn backfill_missing_embeddings(
+    db: &DbInstance,
+    embedder: &dyn LocalEmbeddingProvider,
+) -> Result<()> {
+    let result = db
+        .run_script(
+            "?[node_id, content] := *kb_nodes{node_id, content}, \
+             not *kb_embeddings{node_id}",
+            Default::default(),
+            cozo::ScriptMutability::Immutable,
+        )
+        .map_err(|error| anyhow::anyhow!("read unindexed KB nodes failed: {error}"))?;
+    for batch in result
+        .rows
+        .chunks(super::ingest_storage::KB_INGEST_BATCH_SIZE)
+    {
+        let content: Vec<_> = batch
+            .iter()
+            .map(|row| row[1].get_str().unwrap_or_default().to_string())
+            .collect();
+        let embeddings = embedder.embed_chunks(&content)?;
+        store_backfill_batch(db, batch, &embeddings)?;
     }
+    Ok(())
+}
+
+fn store_backfill_batch(
+    db: &DbInstance,
+    nodes: &[Vec<cozo::DataValue>],
+    embeddings: &[Vec<f32>],
+) -> Result<()> {
+    use cozo::{DataValue, Vector};
+    use ndarray::Array1;
+    if nodes.len() != embeddings.len() {
+        anyhow::bail!(
+            "KB embedder returned {} vectors for {} existing nodes",
+            embeddings.len(),
+            nodes.len()
+        );
+    }
+    let rows = nodes
+        .iter()
+        .zip(embeddings)
+        .map(|(node, embedding)| {
+            DataValue::List(vec![
+                node[0].clone(),
+                DataValue::Vec(Vector::F32(Array1::from_vec(embedding.clone()))),
+            ])
+        })
+        .collect();
+    let mut params = std::collections::BTreeMap::new();
+    params.insert("rows".to_string(), DataValue::List(rows));
+    db.run_script(
+        "?[node_id, embedding] <- $rows\n         :put kb_embeddings { node_id => embedding }",
+        params,
+        cozo::ScriptMutability::Mutable,
+    )
+    .map_err(|error| anyhow::anyhow!("backfill KB embeddings failed: {error}"))?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
 // Chunking functions
 // ---------------------------------------------------------------------------
-
-/// A chunk of document content ready for storage.
-struct ChunkData {
-    title: String,
-    content: String,
-}
 
 /// Split markdown content at `#` headings.
 ///
@@ -356,15 +443,4 @@ fn sha256_hex(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     hex::encode(hasher.finalize())
-}
-
-/// Convert KbNodeType to string for CozoDB storage.
-fn node_type_str(t: &KbNodeType) -> &'static str {
-    match t {
-        KbNodeType::Raw => "raw",
-        KbNodeType::Compiled => "compiled",
-        KbNodeType::Concept => "concept",
-        KbNodeType::Answer => "answer",
-        KbNodeType::Index => "index",
-    }
 }

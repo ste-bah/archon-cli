@@ -48,6 +48,62 @@ async fn d41_total_wall_clock_times_out_silent_llm_stream() {
 }
 
 #[tokio::test]
+async fn request_system_blocks_reach_final_llm_request_unchanged() {
+    let provider = Arc::new(MockProvider::new_with_family(
+        vec![text_response("done")],
+        ProviderFamily::AnthropicApi,
+    ));
+    let mut runner = make_runner(provider.clone(), 10);
+    let stable = serde_json::json!({
+        "type":"text",
+        "text":"stable workflow universe",
+        "cache_control":{"type":"ephemeral"}
+    });
+    runner.set_request_system(vec![stable.clone()]);
+
+    runner.run("volatile call").await.unwrap();
+
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].system.contains(&stable));
+}
+
+#[tokio::test]
+async fn request_system_prefix_stays_stable_for_openai_projection() {
+    let provider = Arc::new(MockProvider::new(vec![
+        text_response("first"),
+        text_response("second"),
+    ]));
+    let mut runner = make_runner(provider.clone(), 1);
+    runner.set_request_system(vec![serde_json::json!({
+        "type":"text",
+        "text":"stable workflow universe",
+        "cache_control":{"type":"ephemeral"}
+    })]);
+
+    runner.run("call_id: first").await.unwrap();
+    runner.run("call_id: second").await.unwrap();
+
+    let requests = provider.requests();
+    let first = archon_llm::providers::OpenAiProvider::build_openai_messages(
+        &requests[0].system,
+        &requests[0].messages,
+    );
+    let second = archon_llm::providers::OpenAiProvider::build_openai_messages(
+        &requests[1].system,
+        &requests[1].messages,
+    );
+    assert_eq!(first[0], second[0]);
+    assert!(
+        first[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("stable workflow universe")
+    );
+    assert_ne!(first[1], second[1]);
+}
+
+#[tokio::test]
 async fn text_only_returns_immediately() {
     let provider = Arc::new(MockProvider::new(vec![text_response(
         "Hello from subagent",
@@ -310,6 +366,27 @@ async fn tool_dispatch_error_continues() {
     let runner = make_runner(provider.clone(), 10);
     let result = runner.run("use bad tool").await.unwrap();
     assert_eq!(result, "Recovered after tool error");
+}
+
+#[tokio::test]
+async fn tool_definitions_are_byte_stable_across_rounds() {
+    let provider = Arc::new(MockProvider::new(vec![
+        tool_use_response("t1", "NonexistentTool", r#"{}"#),
+        text_response("done"),
+    ]));
+    let runner = make_runner(provider.clone(), 5);
+
+    assert_eq!(runner.run("use a tool").await.unwrap(), "done");
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 2);
+    let first_tools =
+        archon_llm::providers::OpenAiProvider::map_tools_to_openai(&requests[0].tools);
+    let second_tools =
+        archon_llm::providers::OpenAiProvider::map_tools_to_openai(&requests[1].tools);
+    assert_eq!(
+        serde_json::to_vec(&first_tools).unwrap(),
+        serde_json::to_vec(&second_tools).unwrap()
+    );
 }
 
 #[tokio::test]

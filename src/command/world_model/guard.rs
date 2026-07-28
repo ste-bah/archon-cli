@@ -1,6 +1,9 @@
 //! `archon world guard` command rendering and policy helpers.
 
 include!("guard/00_runtime.rs");
+include!("guard/00_active_runtime.rs");
+include!("guard/00_tool_run.rs");
+include!("guard/00_completion.rs");
 include!("guard/01_pipeline.rs");
 include!("guard/02_classify_status.rs");
 include!("guard/03_commands.rs");
@@ -11,4 +14,5 @@ mod tests {
     include!("guard/05_tests_pipeline.rs");
     include!("guard/06_tests_status.rs");
     include!("guard/07_tests_manual_events.rs");
+    include!("guard/08_tests_completion.rs");
 }

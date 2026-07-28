@@ -2,6 +2,7 @@
 pub mod active;
 pub mod agentic;
 pub mod anthropic;
+pub(crate) mod anthropic_stream;
 pub(crate) mod anthropic_support;
 pub(crate) mod anthropic_url;
 pub mod auth;
@@ -33,6 +34,8 @@ pub mod tokens_codex;
 pub mod types;
 pub mod usage;
 
+#[cfg(test)]
+mod anthropic_cache_tests;
 #[cfg(test)]
 mod anthropic_oauth_refresh_tests;
 #[cfg(test)]

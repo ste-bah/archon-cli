@@ -210,12 +210,9 @@ mod tests {
 
     #[test]
     fn permission_mode_event_is_session_scoped_and_redacted() {
-        let path = format!(
-            "/tmp/test-runtime-permission-mode-{}.db",
-            uuid::Uuid::new_v4()
+        let db = crate::command::test_support::registered_learning_test_db(
+            "test-runtime-permission-mode",
         );
-        let db = Arc::new(DbInstance::new("sqlite", &path, "").unwrap());
-        archon_learning::schema::ensure_learning_schema(&db).unwrap();
 
         record_permission_mode_event(
             Some(&db),
@@ -244,12 +241,9 @@ mod tests {
 
     #[test]
     fn denied_permission_event_feeds_agent_ledger_without_granting_tool() {
-        let path = format!(
-            "/tmp/test-runtime-permission-ledger-{}.db",
-            uuid::Uuid::new_v4()
+        let db = crate::command::test_support::registered_learning_test_db(
+            "test-runtime-permission-ledger",
         );
-        let db = Arc::new(DbInstance::new("sqlite", &path, "").unwrap());
-        archon_learning::schema::ensure_learning_schema(&db).unwrap();
 
         record_permission_event(
             Some(&db),

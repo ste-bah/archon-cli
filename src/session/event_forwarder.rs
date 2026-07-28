@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use archon_cli_workspace::event_coalescer::{EventCoalescer, RENDER_EVENT_BUDGET};
 use archon_core::agent::{AgentEvent, SessionStats, TimestampedEvent};
 use archon_core::cost_alerts::{CostAlertAction, CostAlertState};
 use archon_tui::app::TuiEvent;
@@ -8,7 +7,7 @@ use archon_tui::event_channel::TuiEventSender;
 use archon_tui::observability;
 
 pub(super) struct AgentEventForwarderConfig {
-    pub event_rx: tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent>,
+    pub event_rx: tokio::sync::mpsc::Receiver<TimestampedEvent>,
     pub metrics: Arc<archon_tui::observability::ChannelMetrics>,
     pub tui_tx: TuiEventSender,
     pub session_stats: Arc<tokio::sync::Mutex<SessionStats>>,
@@ -44,139 +43,132 @@ pub(super) fn spawn_agent_event_forwarder(
         selected_model,
     } = config;
     observability::spawn_named("agent-event-forwarder", async move {
-        let mut coalescer = EventCoalescer::with_defaults();
-        loop {
-            let timestamped = match event_rx.recv().await {
-                Some(ts) => ts,
-                None => break,
-            };
+        while let Some(timestamped) = event_rx.recv().await {
             let elapsed_ms = (timestamped.sent_at.elapsed().as_millis() as u64).max(1);
             metrics.record_latency_ms(elapsed_ms);
-            coalescer.push(timestamped.inner);
-
-            let mut drained = 1usize;
-            while drained < RENDER_EVENT_BUDGET {
-                match event_rx.try_recv() {
-                    Ok(ts) => {
-                        let elapsed = (ts.sent_at.elapsed().as_millis() as u64).max(1);
-                        metrics.record_latency_ms(elapsed);
-                        coalescer.push(ts.inner);
-                        drained += 1;
-                    }
-                    Err(_) => break,
-                }
-            }
-            metrics.record_drained(drained as u64);
+            metrics.record_drained(1);
             let _ = metrics.warn_if_backlog_over(10_000);
 
-            while let Some(event) = coalescer.pop() {
-                let tui_event = match event {
-                    AgentEvent::TextDelta(text) => {
-                        last_response_for_fwd.lock().await.push_str(&text);
-                        TuiEvent::TextDelta(text)
-                    }
-                    AgentEvent::ThinkingDelta(text) => TuiEvent::ThinkingDelta(text),
-                    AgentEvent::ToolCallStarted { name, id } => TuiEvent::ToolStart { name, id },
-                    AgentEvent::ToolCallComplete { name, id, result } => TuiEvent::ToolComplete {
-                        name,
-                        id,
-                        success: !result.is_error,
-                        output: result.content,
-                    },
-                    AgentEvent::ContextPressureUpdated {
-                        tokens_used,
-                        context_window,
-                        cache_creation_tokens,
-                        cache_read_tokens,
-                        context_name,
-                        resolution_source,
-                    } => TuiEvent::ContextPressureUpdated {
-                        tokens_used,
-                        context_window,
-                        cache_creation_tokens,
-                        cache_read_tokens,
-                        context_name,
-                        resolution_source,
-                    },
-                    AgentEvent::TurnComplete {
+            let tui_event = match timestamped.inner {
+                AgentEvent::TextDelta(text) => {
+                    last_response_for_fwd.lock().await.push_str(&text);
+                    TuiEvent::TextDelta(text)
+                }
+                AgentEvent::ThinkingDelta(text) => TuiEvent::ThinkingDelta(text),
+                AgentEvent::TransientThinkingDelta(text) => TuiEvent::TransientThinkingDelta(text),
+                AgentEvent::CommitThinkingPreview => TuiEvent::CommitThinkingPreview,
+                AgentEvent::DiscardThinkingPreview => TuiEvent::DiscardThinkingPreview,
+                AgentEvent::ToolCallStarted { name, id } => TuiEvent::ToolStart { name, id },
+                AgentEvent::ToolCallComplete {
+                    name,
+                    id,
+                    result,
+                    transcript_summary,
+                } => TuiEvent::ToolComplete {
+                    name,
+                    id,
+                    success: !result.is_error,
+                    output: result.content,
+                    transcript_summary,
+                },
+                AgentEvent::ContextPressureUpdated {
+                    tokens_used,
+                    context_window,
+                    cache_creation_tokens,
+                    cache_read_tokens,
+                    context_name,
+                    resolution_source,
+                } => TuiEvent::ContextPressureUpdated {
+                    tokens_used,
+                    context_window,
+                    cache_creation_tokens,
+                    cache_read_tokens,
+                    context_name,
+                    resolution_source,
+                },
+                AgentEvent::TurnComplete {
+                    input_tokens,
+                    output_tokens,
+                    cache_creation_tokens,
+                    cache_read_tokens,
+                } => {
+                    let events = handle_turn_complete(
                         input_tokens,
                         output_tokens,
                         cache_creation_tokens,
                         cache_read_tokens,
-                    } => {
-                        handle_turn_complete(
-                            input_tokens,
-                            output_tokens,
-                            cache_creation_tokens,
-                            cache_read_tokens,
-                            &session_stats,
-                            &cost_config,
-                            &mut cost_alert_state,
-                            &tui_tx,
-                            &session_store,
-                            &session_id,
-                            &permission_mode,
-                            &agent_ledger_db,
-                            &ledger_context,
-                            &selected_model,
-                        )
-                        .await
+                        &session_stats,
+                        &cost_config,
+                        &mut cost_alert_state,
+                        &session_store,
+                        &session_id,
+                        &permission_mode,
+                        &agent_ledger_db,
+                        &ledger_context,
+                        &selected_model,
+                    )
+                    .await;
+                    for event in events {
+                        if tui_tx.send_async(event).await.is_err() {
+                            return;
+                        }
                     }
-                    AgentEvent::Error(msg) => {
-                        let mode = permission_mode.lock().await.clone();
-                        crate::runtime::agent_ledger_events::record_agent_runtime_error(
-                            agent_ledger_db.as_ref(),
-                            &ledger_context,
-                            &mode,
-                        );
-                        TuiEvent::Error(msg)
-                    }
-                    AgentEvent::SessionComplete => TuiEvent::Done,
-                    AgentEvent::PermissionRequired { tool, description } => {
-                        record_permission(
-                            permission_events_db.as_ref(),
-                            &session_id,
-                            &ledger_context,
-                            &permission_mode,
-                            &tool,
-                            "requested",
-                            None,
-                        )
-                        .await;
-                        TuiEvent::PermissionPrompt { tool, description }
-                    }
-                    AgentEvent::AskUser { question } => TuiEvent::AskUserPrompt { question },
-                    AgentEvent::PermissionGranted { tool } => {
-                        record_permission(
-                            permission_events_db.as_ref(),
-                            &session_id,
-                            &ledger_context,
-                            &permission_mode,
-                            &tool,
-                            "granted",
-                            None,
-                        )
-                        .await;
-                        continue;
-                    }
-                    AgentEvent::PermissionDenied { tool, reason } => {
-                        record_permission(
-                            permission_events_db.as_ref(),
-                            &session_id,
-                            &ledger_context,
-                            &permission_mode,
-                            &tool,
-                            "denied",
-                            reason.as_deref(),
-                        )
-                        .await;
-                        continue;
-                    }
-                    _ => continue,
-                };
-                if tui_tx.send(tui_event).is_err() {
-                    return;
+                    continue;
                 }
+                AgentEvent::Error(msg) => {
+                    let mode = permission_mode.lock().await.clone();
+                    crate::runtime::agent_ledger_events::record_agent_runtime_error(
+                        agent_ledger_db.as_ref(),
+                        &ledger_context,
+                        &mode,
+                    );
+                    TuiEvent::Error(msg)
+                }
+                AgentEvent::SessionComplete => TuiEvent::Done,
+                AgentEvent::PermissionRequired { tool, description } => {
+                    record_permission(
+                        permission_events_db.as_ref(),
+                        &session_id,
+                        &ledger_context,
+                        &permission_mode,
+                        &tool,
+                        "requested",
+                        None,
+                    )
+                    .await;
+                    TuiEvent::PermissionPrompt { tool, description }
+                }
+                AgentEvent::AskUser { question } => TuiEvent::AskUserPrompt { question },
+                AgentEvent::PermissionGranted { tool } => {
+                    record_permission(
+                        permission_events_db.as_ref(),
+                        &session_id,
+                        &ledger_context,
+                        &permission_mode,
+                        &tool,
+                        "granted",
+                        None,
+                    )
+                    .await;
+                    continue;
+                }
+                AgentEvent::PermissionDenied { tool, reason } => {
+                    record_permission(
+                        permission_events_db.as_ref(),
+                        &session_id,
+                        &ledger_context,
+                        &permission_mode,
+                        &tool,
+                        "denied",
+                        reason.as_deref(),
+                    )
+                    .await;
+                    continue;
+                }
+                _ => continue,
+            };
+            if tui_tx.send_async(tui_event).await.is_err() {
+                return;
             }
         }
     });
@@ -192,14 +184,13 @@ async fn handle_turn_complete(
     session_stats: &Arc<tokio::sync::Mutex<SessionStats>>,
     cost_config: &archon_core::config::CostConfig,
     cost_alert_state: &mut CostAlertState,
-    tui_tx: &TuiEventSender,
     session_store: &archon_session::storage::SessionStore,
     session_id: &str,
     permission_mode: &Arc<tokio::sync::Mutex<String>>,
     agent_ledger_db: &Option<Arc<cozo::DbInstance>>,
     ledger_context: &crate::runtime::agent_ledger_events::AgentLedgerContext,
     selected_model: &str,
-) -> TuiEvent {
+) -> Vec<TuiEvent> {
     let estimated_cost = {
         let stats = session_stats.lock().await;
         archon_core::cost::estimate_session_cost_usd(
@@ -211,12 +202,11 @@ async fn handle_turn_complete(
         )
     };
 
+    let mut events = Vec::with_capacity(2);
     match cost_alert_state.check_cost(estimated_cost, cost_config) {
-        CostAlertAction::Warn(msg) => {
-            let _ = tui_tx.send(TuiEvent::Error(format!("COST WARNING: {msg}")));
-        }
+        CostAlertAction::Warn(msg) => events.push(TuiEvent::Error(format!("COST WARNING: {msg}"))),
         CostAlertAction::HardLimitPause(msg) => {
-            let _ = tui_tx.send(TuiEvent::Error(format!("COST LIMIT: {msg}")));
+            events.push(TuiEvent::Error(format!("COST LIMIT: {msg}")))
         }
         CostAlertAction::None => {}
     }
@@ -239,12 +229,13 @@ async fn handle_turn_complete(
         output_tokens,
     );
 
-    TuiEvent::TurnComplete {
+    events.push(TuiEvent::TurnComplete {
         input_tokens,
         output_tokens,
         cache_creation_tokens,
         cache_read_tokens,
-    }
+    });
+    events
 }
 
 async fn record_permission(
@@ -267,3 +258,7 @@ async fn record_permission(
         reason,
     );
 }
+
+#[cfg(test)]
+#[path = "event_forwarder_tests.rs"]
+mod tests;

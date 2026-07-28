@@ -72,6 +72,13 @@ impl Default for WorldGuardrailDecision {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorldGuardrailRevision {
+    pub action: WorldGuardedAction,
+    pub decision: WorldGuardrailDecision,
+    pub idempotency_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VerificationOutcome {
     pub schema_version: u32,
@@ -256,41 +263,6 @@ pub fn risk_tier(score: f32, policy: &WorldGuardrailPolicyConfig) -> WorldRiskTi
     }
 }
 
-pub fn classify_task(summary: &str, surface: WorldAdvisorSurface) -> RuntimeTaskClass {
-    if matches!(surface, WorldAdvisorSurface::VerificationRun) {
-        return RuntimeTaskClass::VerificationOnly;
-    }
-    let lower = summary.to_ascii_lowercase();
-    let has_any = |terms: &[&str]| terms.iter().any(|term| lower.contains(term));
-    if has_any(&["refactor", "rename module", "clean up"]) {
-        RuntimeTaskClass::Refactor
-    } else if has_any(&["debug", "bug", "fix", "failing", "failed test"]) {
-        RuntimeTaskClass::Debugging
-    } else if has_any(&[
-        "code",
-        "implement",
-        "build",
-        "python",
-        "rust",
-        "typescript",
-        "app",
-        "coding",
-    ]) {
-        RuntimeTaskClass::CodingChange
-    } else if has_any(&["research", "source", "citation", "verify claim", "look up"]) {
-        RuntimeTaskClass::ResearchAnswer
-    } else if matches!(
-        surface,
-        WorldAdvisorSurface::Pipeline | WorldAdvisorSurface::PipelineStep
-    ) {
-        RuntimeTaskClass::PipelineExecution
-    } else if has_any(&["delete", "deploy", "publish", "send", "external"]) {
-        RuntimeTaskClass::ExternalSideEffect
-    } else {
-        RuntimeTaskClass::GeneralAnswer
-    }
-}
-
 pub fn default_scores_for_task(task_class: RuntimeTaskClass) -> GuardrailRiskScores {
     match task_class {
         RuntimeTaskClass::CodingChange
@@ -362,7 +334,13 @@ pub fn decide_guardrail(
         push_reason_codes(&mut reason_codes, &context, policy);
     }
 
-    if required_actions.is_empty() {
+    let blocked_tool_run = action.surface == WorldAdvisorSurface::ToolRun
+        && context.risk_tier == WorldRiskTier::Critical
+        && context.guardrail_mode.can_block();
+    if blocked_tool_run {
+        reason_codes.push(GuardrailReasonCode::ToolRunBlocked);
+    }
+    if required_actions.is_empty() && !blocked_tool_run {
         reason_codes.push(GuardrailReasonCode::LowRiskAllowed);
     }
 
@@ -377,7 +355,7 @@ pub fn decide_guardrail(
         mode: context.guardrail_mode,
         risk_tier: context.risk_tier,
         required_actions,
-        allowed_to_continue: true,
+        allowed_to_continue: !blocked_tool_run,
         allowed_to_finalize,
         reason_codes,
         prediction_context: Some(context),
@@ -399,9 +377,10 @@ pub fn finalization_allowed(
     let mut latest_by_kind = BTreeMap::<String, &VerificationOutcome>::new();
     for outcome in verification_outcomes {
         let key = verification_kind_key(&outcome.kind);
-        let replace = latest_by_kind
-            .get(&key)
-            .is_none_or(|existing| existing.created_at <= outcome.created_at);
+        let replace = latest_by_kind.get(&key).is_none_or(|existing| {
+            (existing.created_at, existing.idempotency_key.as_str())
+                <= (outcome.created_at, outcome.idempotency_key.as_str())
+        });
         if replace {
             latest_by_kind.insert(key, outcome);
         }
@@ -473,4 +452,3 @@ fn verification_kind_key(kind: &VerificationKind) -> String {
         VerificationKind::Custom(value) => format!("custom:{value}"),
     }
 }
-

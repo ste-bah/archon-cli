@@ -194,8 +194,10 @@ pub async fn compact_json_messages_with_provider(
     messages: &[serde_json::Value],
     action: CompactAction,
     force: bool,
+    attribution: serde_json::Value,
 ) -> Result<(CompactionOutcome, Vec<serde_json::Value>), CompactionError> {
-    let summary = generate_compaction_summary_structured(provider, model, messages).await?;
+    let summary =
+        generate_compaction_summary_structured(provider, model, messages, attribution).await?;
     let compacted = compact_json_messages_apply_with_summary(messages, action, &summary)?;
     let before = estimate_messages_tokens(messages);
     let after = estimate_messages_tokens(&compacted);
@@ -222,6 +224,7 @@ pub async fn generate_compaction_summary_structured(
     provider: &dyn archon_llm::provider::LlmProvider,
     model: &str,
     messages: &[serde_json::Value],
+    attribution: serde_json::Value,
 ) -> Result<String, CompactionError> {
     use crate::commands::build_compact_summary_request;
 
@@ -258,7 +261,7 @@ pub async fn generate_compaction_summary_structured(
             thinking: None,
             speed: None,
             effort: None,
-            extra: serde_json::Value::Null,
+            extra: compaction_attempt_attribution(&attribution, attempt as u64),
             request_origin: Some("compaction_summary".into()),
             reasoning_encrypted: None,
         };
@@ -313,6 +316,12 @@ pub async fn generate_compaction_summary_structured(
     Err(CompactionError::InvalidSummary(
         "provider returned empty summary".into(),
     ))
+}
+
+fn compaction_attempt_attribution(base: &serde_json::Value, round: u64) -> serde_json::Value {
+    let mut attribution = base.clone();
+    attribution["archon_runtime"]["round"] = serde_json::json!(round);
+    attribution
 }
 
 fn is_cancelled_stream_error(error_type: &str, message: &str) -> bool {
@@ -404,6 +413,9 @@ fn from_context_messages(
         .collect()
 }
 
+#[cfg(test)]
+#[path = "autocompact_attribution_tests.rs"]
+mod attribution_tests;
 #[cfg(test)]
 #[path = "autocompact_tests.rs"]
 mod tests;

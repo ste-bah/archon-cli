@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use archon_core::agent::{AgentEvent, TimestampedEvent};
 use archon_tui::{AgentDispatcher, AgentRouter, TurnRunner};
-use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::mpsc::channel;
 
 /// Number of events each fake turn emits.
 const EVENTS_PER_TURN: usize = 10;
@@ -56,7 +56,7 @@ impl Lcg {
 struct FakeTurnRunner {
     id: usize,
     delay_ms: u64,
-    event_tx: tokio::sync::mpsc::UnboundedSender<TimestampedEvent>,
+    event_tx: tokio::sync::mpsc::Sender<TimestampedEvent>,
 }
 
 impl TurnRunner for FakeTurnRunner {
@@ -78,7 +78,7 @@ impl TurnRunner for FakeTurnRunner {
                     sent_at: Instant::now(),
                     inner: event,
                 };
-                let _ = tx.send(timestamped);
+                let _ = tx.send(timestamped).await;
                 counter += 1;
             }
 
@@ -142,7 +142,8 @@ async fn run_concurrent_test(n: usize, wall_budget_ms: u64, p99_budget_ms: u64) 
     let t0 = Instant::now();
 
     // Shared event channel
-    let (event_tx, _event_rx) = unbounded_channel::<TimestampedEvent>();
+    let (event_tx, mut event_rx) = channel::<TimestampedEvent>(n * EVENTS_PER_TURN);
+    let event_drain = tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
 
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
 
@@ -210,6 +211,8 @@ async fn run_concurrent_test(n: usize, wall_budget_ms: u64, p99_budget_ms: u64) 
         0,
         "pending queue not empty after drain"
     );
+    drop(dispatcher);
+    event_drain.await.expect("event drain task");
 
     println!("[TASK-TUI-111] PASS  n={n}  wall={wall_ms}ms  p99={p99}ms");
 }

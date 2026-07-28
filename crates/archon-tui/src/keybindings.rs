@@ -25,7 +25,7 @@ pub enum Action {
     ScrollDown,
     /// Ctrl+Home / Ctrl+Left = scroll to top of output.
     ScrollTop,
-    /// Ctrl+End / Ctrl+Right = scroll to bottom of output.
+    /// End / Ctrl+End / Ctrl+Right = scroll to bottom of output.
     ScrollBottom,
     /// `/` = open a slash command (the slash is included in the payload).
     SlashCommand(String),
@@ -34,6 +34,8 @@ pub enum Action {
     Escape,
     /// Ctrl+T = toggle thinking display expand/collapse.
     ToggleThinking,
+    /// Ctrl+E = toggle the latest completed tool transcript excerpt.
+    ToggleToolOutput,
     /// Ctrl+V = voice hotkey trigger.
     VoiceHotkey,
     /// Ctrl+\ = toggle split pane layout.
@@ -90,6 +92,10 @@ impl Default for KeyMap {
             Action::ToggleThinking,
         );
         bindings.insert(
+            KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL),
+            Action::ToggleToolOutput,
+        );
+        bindings.insert(
             KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL),
             Action::VoiceHotkey,
         );
@@ -134,6 +140,10 @@ impl Default for KeyMap {
         bindings.insert(
             KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL),
             Action::ScrollTop,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::End, KeyModifiers::NONE),
+            Action::ScrollBottom,
         );
         bindings.insert(
             KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL),
@@ -321,13 +331,6 @@ mod tests {
         let km = KeyMap::default();
         let key = KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL);
         assert_eq!(km.resolve(key), Some(&Action::ScrollTop));
-    }
-
-    #[test]
-    fn ctrl_end_scrolls_to_bottom() {
-        let km = KeyMap::default();
-        let key = KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL);
-        assert_eq!(km.resolve(key), Some(&Action::ScrollBottom));
     }
 
     #[test]

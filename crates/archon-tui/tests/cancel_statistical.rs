@@ -90,7 +90,9 @@ impl Lcg {
 }
 
 fn make_dispatcher() -> archon_tui::AgentDispatcher {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<archon_core::agent::TimestampedEvent>();
+    let (tx, _rx) = tokio::sync::mpsc::channel::<archon_core::agent::TimestampedEvent>(
+        archon_core::agent::AGENT_EVENT_CHANNEL_CAPACITY,
+    );
     let router: std::sync::Arc<dyn archon_tui::AgentRouter> = std::sync::Arc::new(NoopRouter);
     archon_tui::AgentDispatcher::new(router, tx)
 }

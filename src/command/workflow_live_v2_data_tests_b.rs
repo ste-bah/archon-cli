@@ -1,4 +1,118 @@
 #[test]
+fn completion_claim_request_gets_authoritative_universe_without_mutating_execution() {
+    let execution = WorkflowV2CallExecution {
+        call: WorkflowV2HostCall {
+            id: "completion-claim-repair-2".to_string(),
+            method: WorkflowV2HostMethod::Reduce,
+            write_mode: None,
+            options: WorkflowV2HostOptions::default(),
+        },
+        input: serde_json::json!([{"item_id":"claim-1"}]),
+        depends_on: Vec::new(),
+    };
+    let original = execution.input.clone();
+    let original_hash = serde_json::to_string(&execution.input).unwrap();
+    let universe = WorkflowV2TaskUniverse {
+        schema_version: "workflow-v2-task-universe-v1".to_string(),
+        source_roots: vec!["project-tasks".to_string()],
+        tasks: vec![WorkflowV2TaskUniverseTask {
+            canonical_task_id: "TASK-1".to_string(),
+            acceptance_criteria: vec!["completion acceptance detail".to_string()],
+            deliverable_contracts: vec![WorkflowV2DeliverableContract {
+                kind: "json".to_string(),
+                artifact_path: "claim.json".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+    };
+
+    let request = v2_agent_request(
+        "objective",
+        Some("/repo".to_string()),
+        &execution,
+        Some(&universe),
+    );
+
+    assert_eq!(execution.input, original);
+    assert_eq!(serde_json::to_string(&execution.input).unwrap(), original_hash);
+    assert!(
+        request.input.to_string().contains("completion acceptance detail")
+    );
+    assert!(request.input.to_string().contains("deliverable_contracts"));
+    let prompt = WorkflowV2AgentAdapter::new().build_prompt_parts(&request);
+    assert!(
+        prompt
+            .invocation
+            .contains("completion acceptance detail")
+    );
+    assert!(prompt.invocation.contains("deliverable_contracts"));
+}
+
+#[test]
+fn completion_claim_transport_retry_gets_authoritative_universe_once() {
+    let execution = WorkflowV2CallExecution {
+        call: WorkflowV2HostCall {
+            id: "completion-claim-repair-2-transport-retry-3".to_string(),
+            method: WorkflowV2HostMethod::Reduce,
+            write_mode: None,
+            options: WorkflowV2HostOptions::default(),
+        },
+        input: serde_json::json!([{"item_id":"claim-1"}]),
+        depends_on: Vec::new(),
+    };
+    let universe = WorkflowV2TaskUniverse {
+        schema_version: "workflow-v2-task-universe-v1".to_string(),
+        source_roots: vec!["project-tasks".to_string()],
+        tasks: vec![WorkflowV2TaskUniverseTask {
+            canonical_task_id: "TASK-1".to_string(),
+            acceptance_criteria: vec!["retry acceptance detail".to_string()],
+            ..Default::default()
+        }],
+    };
+
+    let request = v2_agent_request("objective", None, &execution, Some(&universe));
+    let serialized = request.input.to_string();
+
+    assert_eq!(serialized.matches("workflow-v2-task-universe-v1").count(), 1);
+    assert!(serialized.contains("retry acceptance detail"));
+}
+
+#[test]
+fn completion_claim_decoy_universe_does_not_suppress_authoritative_universe() {
+    let execution = WorkflowV2CallExecution {
+        call: WorkflowV2HostCall {
+            id: "completion-claim-repair-3".to_string(),
+            method: WorkflowV2HostMethod::Reduce,
+            write_mode: None,
+            options: WorkflowV2HostOptions::default(),
+        },
+        input: serde_json::json!([{"taskUniverse":{
+            "schema_version":"decoy",
+            "source_roots":[],
+            "tasks":[],
+            "label":"decoy metadata"
+        }}]),
+        depends_on: Vec::new(),
+    };
+    let universe = WorkflowV2TaskUniverse {
+        schema_version: "workflow-v2-task-universe-v1".to_string(),
+        source_roots: vec!["project-tasks".to_string()],
+        tasks: vec![WorkflowV2TaskUniverseTask {
+            canonical_task_id: "TASK-1".to_string(),
+            acceptance_criteria: vec!["authoritative acceptance".to_string()],
+            ..Default::default()
+        }],
+    };
+
+    let request = v2_agent_request("objective", None, &execution, Some(&universe));
+    let prompt = WorkflowV2AgentAdapter::new().build_prompt_parts(&request);
+
+    assert!(prompt.invocation.contains("decoy metadata"));
+    assert!(prompt.invocation.contains("authoritative acceptance"));
+}
+
+#[test]
 fn item_producer_request_demands_flat_items_array() {
     let mut extra = BTreeMap::new();
     extra.insert("outputs".to_string(), serde_json::json!(["items"]));
@@ -16,7 +130,12 @@ fn item_producer_request_demands_flat_items_array() {
         depends_on: Vec::new(),
     };
 
-    let request = v2_agent_request("objective", Some("/repo".to_string()), &execution);
+    let request = v2_agent_request(
+        "objective",
+        Some("/repo".to_string()),
+        &execution,
+        None,
+    );
 
     assert!(
         request
@@ -187,6 +306,7 @@ fn fanout_branch_inherits_target_files_from_inventory_item() {
         "objective",
         spec.target_repository_root.clone(),
         &branch_execution,
+        None,
     );
 
     assert_eq!(request.target_files, vec!["src/lib.rs", "tests/lib.rs"]);
@@ -265,6 +385,7 @@ fn fanout_branch_item_targets_override_static_fallback_targets() {
         "objective",
         spec.target_repository_root.clone(),
         &branch_execution,
+        None,
     );
 
     assert_eq!(

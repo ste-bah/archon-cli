@@ -34,9 +34,14 @@ fn test_event_db() -> Arc<DbInstance> {
         "/tmp/test-user-correction-event-{}.db",
         uuid::Uuid::new_v4()
     );
-    let db = DbInstance::new("sqlite", &path, "").unwrap();
+    let db = archon_cozo::open_sqlite_guarded_instance(
+        &path,
+        "open pipeline integration test event store",
+        archon_cozo::CozoGuardConfig::for_db_path(&path),
+    )
+    .unwrap();
     archon_learning::schema::ensure_learning_schema(&db).unwrap();
-    Arc::new(db)
+    db.db_arc()
 }
 
 #[test]

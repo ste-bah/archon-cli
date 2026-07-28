@@ -1,4 +1,4 @@
-use super::tool_types::PreflightResult;
+use super::tool_types::{PreflightResult, tool_transcript_summary};
 use super::*;
 
 #[derive(Default)]
@@ -55,7 +55,9 @@ impl Agent {
             }
             "ExitPlanMode" => {
                 self.restore_mode_after_plan().await;
-                self.persist_latest_plan_from_assistant();
+                if !self.buffers_finalization_text() {
+                    self.persist_latest_plan_from_assistant();
+                }
                 result
             }
             _ => result,
@@ -71,7 +73,7 @@ impl Agent {
         self.state.mode = AgentMode::Normal;
     }
 
-    fn persist_latest_plan_from_assistant(&self) {
+    pub(super) fn persist_latest_plan_from_assistant(&self) {
         let Some(ref plan_store) = self.plan_store else {
             return;
         };
@@ -184,7 +186,7 @@ impl Agent {
         }
     }
 
-    async fn run_post_tool_hooks(
+    pub(super) async fn run_post_tool_hooks(
         &mut self,
         pre: &PreflightResult,
         result: &mut ToolResult,
@@ -208,7 +210,14 @@ impl Agent {
                     max = max_retries,
                     "PostToolUse hook requested retry, re-executing tool"
                 );
-                *result = pre.tool_arc.execute(pre.input.clone(), ctx).await;
+                let retry_ctx = ctx.with_tool_run_attempt(pre.tool_id.clone(), retry_count);
+                *result = crate::tool_run_admission::execute_tool_attempt(
+                    pre.tool_arc.as_ref(),
+                    pre.input.clone(),
+                    &retry_ctx,
+                    pre.sandbox_prechecked,
+                )
+                .await;
                 continue;
             }
             if post_agg.retry {
@@ -366,6 +375,7 @@ impl Agent {
             name: pre.tool_name.clone(),
             id: pre.tool_id.clone(),
             result: result.clone(),
+            transcript_summary: tool_transcript_summary(&pre.tool_name, &pre.input),
         })
         .await;
         self.update_inner_voice_for_tool(&pre.tool_name, result)
@@ -416,22 +426,8 @@ impl Agent {
     }
 
     fn add_context_tool_result(&mut self, pre: &PreflightResult, result: &ToolResult) {
-        let context_output = crate::agent::tool_result_context::cap_tool_output_for_context(
-            &pre.tool_name,
-            &result.content,
-        );
-        if context_output.truncated {
-            tracing::warn!(
-                tool = %pre.tool_name,
-                tool_use_id = %pre.tool_id,
-                original_chars = context_output.original_chars,
-                stored_chars = context_output.stored_chars,
-                limit_chars = context_output.limit_chars,
-                "tool output trimmed before model replay"
-            );
-        }
         self.state
-            .add_tool_result(&pre.tool_id, &context_output.content, result.is_error);
+            .add_tool_result(&pre.tool_id, &result.content, result.is_error);
     }
 }
 

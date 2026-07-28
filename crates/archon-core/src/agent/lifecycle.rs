@@ -5,7 +5,7 @@ impl Agent {
         client: Arc<dyn LlmProvider>,
         registry: ToolRegistry,
         config: AgentConfig,
-        event_tx: tokio::sync::mpsc::UnboundedSender<TimestampedEvent>,
+        event_tx: tokio::sync::mpsc::Sender<TimestampedEvent>,
         agent_registry: Arc<std::sync::RwLock<AgentRegistry>>,
     ) -> Self {
         let permission_store: Arc<dyn crate::hooks::PermissionStore> =
@@ -58,6 +58,12 @@ impl Agent {
             record_correction_callback: None,
             record_user_correction_event_callback: None,
             record_reasoning_turn_callback: None,
+            first_tool_action_callback: None,
+            tool_run_admission_callback: None,
+            tool_run_outcome_callback: None,
+            turn_finalization_callback: None,
+            guardrail_action_id: None,
+            turn_requirement_reminder: None,
             reasoning_evidence_refs: Vec::new(),
             current_situation: None,
             cognitive_store: None,
@@ -155,8 +161,7 @@ impl Agent {
     /// Used by print mode to unblock the event consumer task.
     pub fn close_event_channel(&mut self) {
         // Replace the sender with a closed one by dropping it.
-        // TASK-AGS-102: unbounded variant — same drop-to-close semantics.
-        let (tx, _) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, _) = tokio::sync::mpsc::channel(super::AGENT_EVENT_CHANNEL_CAPACITY);
         self.event_tx = tx;
         // The old sender is dropped, closing the channel
     }
@@ -332,6 +337,31 @@ impl Agent {
         cb: Arc<dyn Fn(ReasoningTurnEventPayload) + Send + Sync>,
     ) {
         self.record_reasoning_turn_callback = Some(cb);
+    }
+
+    pub fn set_first_tool_action_callback(&mut self, cb: FirstToolActionCallback) {
+        self.first_tool_action_callback = Some(cb);
+    }
+
+    pub fn set_tool_run_callbacks(
+        &mut self,
+        admission: ToolRunAdmissionCallback,
+        outcome: ToolRunOutcomeCallback,
+    ) {
+        self.tool_run_admission_callback = Some(admission);
+        self.tool_run_outcome_callback = Some(outcome);
+    }
+
+    pub fn set_turn_finalization_callback(&mut self, cb: TurnFinalizationCallback) {
+        self.turn_finalization_callback = Some(cb);
+    }
+
+    pub fn set_turn_requirement_reminder(&mut self, reminder: Option<String>) {
+        self.turn_requirement_reminder = reminder.filter(|value| !value.trim().is_empty());
+    }
+
+    pub fn set_guardrail_action_id(&mut self, action_id: Option<String>) {
+        self.guardrail_action_id = action_id;
     }
 
     /// Wire the personality-mirror update hook (TASK #245).

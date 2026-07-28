@@ -30,7 +30,12 @@ impl Agent {
         if !self.run_pre_tool_hooks(tool, &perm_mode, &mut input).await {
             return None;
         }
-        let sandbox_prechecked = self.precheck_sandbox(tool, &input).await?;
+        if !self
+            .validate_hook_updated_input(tool, tool_arc.input_schema(), &input)
+            .await
+        {
+            return None;
+        }
         self.snapshot_before_mutation(tool, &input).await;
         let file_path = file_path_for_tool(tool, &input);
         self.fire_before_tool_call_hook(&tool.name, &tool.id, &input)
@@ -42,7 +47,7 @@ impl Agent {
             input,
             tool_arc,
             file_path,
-            sandbox_prechecked,
+            sandbox_prechecked: false,
         })
     }
 
@@ -65,6 +70,7 @@ impl Agent {
             name: tool.name.clone(),
             id: tool.id.clone(),
             result: denied_result.clone(),
+            transcript_summary: None,
         })
         .await;
         self.state
@@ -103,6 +109,7 @@ impl Agent {
                 name: tool.name.clone(),
                 id: tool.id.clone(),
                 result: result.clone(),
+                transcript_summary: None,
             })
             .await;
             self.state

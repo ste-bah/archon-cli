@@ -45,6 +45,12 @@ pub enum AgentEvent {
     },
     TextDelta(String),
     ThinkingDelta(String),
+    /// Unapproved reasoning preview for interactive display only.
+    TransientThinkingDelta(String),
+    /// Approve the active transient preview for normal completion/history.
+    CommitThinkingPreview,
+    /// Remove the active transient preview without retaining history.
+    DiscardThinkingPreview,
     ToolCallStarted {
         name: String,
         id: String,
@@ -53,6 +59,7 @@ pub enum AgentEvent {
         name: String,
         id: String,
         result: ToolResult,
+        transcript_summary: Option<String>,
     },
     PermissionRequired {
         tool: String,
@@ -95,6 +102,9 @@ impl AgentEvent {
             AgentEvent::ContextPressureUpdated { .. } => "ContextPressureUpdated",
             AgentEvent::TextDelta(_) => "TextDelta",
             AgentEvent::ThinkingDelta(_) => "ThinkingDelta",
+            AgentEvent::TransientThinkingDelta(_) => "TransientThinkingDelta",
+            AgentEvent::CommitThinkingPreview => "CommitThinkingPreview",
+            AgentEvent::DiscardThinkingPreview => "DiscardThinkingPreview",
             AgentEvent::ToolCallStarted { .. } => "ToolCallStarted",
             AgentEvent::ToolCallComplete { .. } => "ToolCallComplete",
             AgentEvent::PermissionRequired { .. } => "PermissionRequired",
@@ -193,16 +203,6 @@ impl AgentConfig {
         };
         (self.max_tokens, thinking, speed)
     }
-
-    pub fn runtime_context_extra(&self) -> serde_json::Value {
-        serde_json::json!({
-            "archon_runtime": {
-                "run_id": self.session_id,
-                "agent_type": self.agent_type,
-                "agent_version": self.agent_version,
-            }
-        })
-    }
 }
 
 impl Default for AgentConfig {
@@ -290,12 +290,10 @@ impl ConversationState {
     }
 
     pub fn add_tool_result(&mut self, tool_use_id: &str, content: &str, is_error: bool) {
-        let context_output =
-            crate::agent::tool_result_context::cap_tool_output_for_context("", content);
         let result = serde_json::json!({
             "type": "tool_result",
             "tool_use_id": tool_use_id,
-            "content": context_output.content,
+            "content": content,
             "is_error": is_error,
         });
         if let Some(last) = self.messages.last_mut()
@@ -376,11 +374,22 @@ mod tests {
             ..AgentConfig::default()
         };
 
-        let extra = config.runtime_context_extra();
+        let extra = config.runtime_attribution_extra(
+            "assistant",
+            "main_session",
+            Some(2),
+            Some(3),
+            Some(100),
+        );
 
         assert_eq!(extra["archon_runtime"]["run_id"], "session-1");
+        assert_eq!(extra["archon_runtime"]["session_id"], "session-1");
+        assert_eq!(extra["archon_runtime"]["role"], "assistant");
         assert_eq!(extra["archon_runtime"]["agent_type"], "reviewer");
         assert_eq!(extra["archon_runtime"]["agent_version"], "1.0.0");
+        assert_eq!(extra["archon_runtime"]["turn"], 2);
+        assert_eq!(extra["archon_runtime"]["round"], 3);
+        assert_eq!(extra["archon_runtime"]["effective_denominator"], 100);
     }
 
     #[test]
@@ -404,7 +413,7 @@ mod tests {
     }
 
     #[test]
-    fn conversation_state_hard_caps_tool_result_text() {
+    fn conversation_state_preserves_full_tool_result_text() {
         let mut state = ConversationState::default();
         let huge = "x".repeat(700_000);
 
@@ -413,7 +422,6 @@ mod tests {
         let content = state.messages[0]["content"][0]["content"]
             .as_str()
             .expect("tool result content");
-        assert!(content.len() < 100_000, "content len was {}", content.len());
-        assert!(content.contains("tool output trimmed"));
+        assert_eq!(content, huge);
     }
 }

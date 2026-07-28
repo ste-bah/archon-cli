@@ -85,44 +85,43 @@ pub(crate) async fn build_configured_llm_provider(
     if config.llm.provider == "openai-codex" {
         let (provider, runtime_mode) =
             crate::runtime::codex_provider::build_codex_provider(config, origin).await?;
-        let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
-            provider.name(),
-        );
-        return Ok(observe_llm_provider_with_profile(
-            provider,
-            runtime_mode,
-            profile_id,
-        ));
+        let profile_id =
+            crate::runtime::provider_auth_selection::selected_provider_auth_profile_id_async(
+                provider.name(),
+            )
+            .await;
+        return Ok(observe_llm_provider_with_profile(provider, runtime_mode, profile_id).await);
     }
 
     if config.llm.provider != "anthropic" {
-        let fallback_denial_reason =
-            match build_llm_provider_without_anthropic_fallback(&config.llm) {
-                Ok(provider) => {
-                    let selected_provider = provider.name().to_string();
-                    let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
-                    let profile_id =
-                        crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
-                            &selected_provider,
-                        );
-                    return Ok(observe_llm_provider_with_profile(
-                        provider,
-                        runtime_mode,
-                        profile_id,
-                    ));
-                }
-                Err(provider_error) => {
-                    tracing::warn!(
-                        provider = %config.llm.provider,
-                        error = %provider_error,
-                        "provider construction failed before Anthropic fallback"
-                    );
-                    provider_construction_error_reason(&provider_error)
-                }
-            };
+        let fallback_denial_reason = match build_llm_provider_without_anthropic_fallback(
+            &config.llm,
+        ) {
+            Ok(provider) => {
+                let selected_provider = provider.name().to_string();
+                let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
+                let profile_id =
+                    crate::runtime::provider_auth_selection::selected_provider_auth_profile_id_async(
+                        &selected_provider,
+                    )
+                    .await;
+                return Ok(
+                    observe_llm_provider_with_profile(provider, runtime_mode, profile_id).await,
+                );
+            }
+            Err(provider_error) => {
+                tracing::warn!(
+                    provider = %config.llm.provider,
+                    error = %provider_error,
+                    "provider construction failed before Anthropic fallback"
+                );
+                provider_construction_error_reason(&provider_error)
+            }
+        };
 
         if !anthropic_fallback_auth_available(env_vars) {
-            record_anthropic_fallback_denied(&config.llm.provider, origin, fallback_denial_reason);
+            record_anthropic_fallback_denied(&config.llm.provider, origin, fallback_denial_reason)
+                .await;
         }
     }
 
@@ -162,18 +161,17 @@ pub(crate) async fn build_configured_llm_provider(
         selection
             .fallback_reason
             .unwrap_or("provider_construction_fallback"),
-    );
-    let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
-        &selected_provider,
-    );
-    Ok(observe_llm_provider_with_profile(
-        selection.provider,
-        runtime_mode,
-        profile_id,
-    ))
+    )
+    .await;
+    let profile_id =
+        crate::runtime::provider_auth_selection::selected_provider_auth_profile_id_async(
+            &selected_provider,
+        )
+        .await;
+    Ok(observe_llm_provider_with_profile(selection.provider, runtime_mode, profile_id).await)
 }
 
-pub(crate) fn record_anthropic_fallback_denied(
+pub(crate) async fn record_anthropic_fallback_denied(
     requested_provider: &str,
     surface: &str,
     provider_error_reason: &'static str,
@@ -192,7 +190,8 @@ pub(crate) fn record_anthropic_fallback_denied(
             "surface": surface,
             "provider_error_reason": provider_error_reason,
         }),
-    );
+    )
+    .await;
 }
 
 pub(crate) fn provider_construction_error_reason(error: &anyhow::Error) -> &'static str {

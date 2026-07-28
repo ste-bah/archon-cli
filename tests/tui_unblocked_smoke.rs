@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 use archon_core::agent::TimestampedEvent;
 use archon_tui::{AgentDispatcher, AgentRouter, DispatchResult, TurnOutcome, TurnRunner};
 use tokio::sync::Mutex;
-use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::mpsc::channel;
 
 /// Fake TurnRunner that sleeps for `delay`, then appends the prompt to a
 /// shared log. Used to simulate a long-running agent turn without pulling
@@ -65,8 +65,8 @@ const NON_BLOCKING_TOLERANCE: Duration = Duration::from_millis(50);
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_dispatcher_does_not_block_on_inflight_turn() {
     // Agent event channel — unused in this test, but AgentDispatcher::new
-    // requires a live UnboundedSender<AgentEvent>.
-    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<TimestampedEvent>();
+    // requires a live bounded Sender<AgentEvent>.
+    let (agent_event_tx, _agent_event_rx) = channel::<TimestampedEvent>(1);
 
     // Fake runner with a 500ms per-turn delay. If the dispatcher
     // serialized, spawning the second turn would wait at least 500ms for
@@ -124,6 +124,9 @@ async fn test_dispatcher_does_not_block_on_inflight_turn() {
             match outcome {
                 TurnOutcome::Completed => outcomes.push("completed".to_string()),
                 TurnOutcome::Cancelled => outcomes.push("cancelled".to_string()),
+                TurnOutcome::FinalizationBlocked(message) => {
+                    panic!("unexpected finalization block: {message}")
+                }
                 TurnOutcome::Failed(err) => panic!("unexpected turn failure: {err}"),
             }
         }

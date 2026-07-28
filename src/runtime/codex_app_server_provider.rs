@@ -252,7 +252,8 @@ impl AppServerStreamProjector {
             super::codex_app_server_limits::record_rate_limits(
                 &notification.params,
                 Some(&self.model_id),
-            );
+            )
+            .await;
             return;
         }
         if !self.is_current_turn(&notification.params) {

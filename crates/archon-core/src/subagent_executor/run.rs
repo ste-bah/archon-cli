@@ -8,10 +8,22 @@ impl AgentSubagentExecutor {
         ctx: ToolContext,
         cancel: CancellationToken,
     ) -> Result<String, ExecutorError> {
+        self.run_subagent_to_completion_with_system(subagent_id, request, Vec::new(), ctx, cancel)
+            .await
+    }
+
+    pub(super) async fn run_subagent_to_completion_with_system(
+        &self,
+        subagent_id: String,
+        request: SubagentRequest,
+        system: Vec<serde_json::Value>,
+        ctx: ToolContext,
+        cancel: CancellationToken,
+    ) -> Result<String, ExecutorError> {
         let _capacity_permit = self.acquire_subagent_capacity(&cancel).await?;
         let ids = self.register_subagent_run(&subagent_id, &request).await?;
         let result = self
-            .run_registered_subagent_to_completion(&ids, request, ctx, cancel)
+            .run_registered_subagent_to_completion(&ids, request, system, ctx, cancel)
             .await;
         self.on_inner_complete(ids.cache_id, result.clone().map_err(|err| err.to_string()))
             .await;
@@ -38,6 +50,7 @@ impl AgentSubagentExecutor {
         &self,
         ids: &super::run_prepare::RunIdentity,
         request: SubagentRequest,
+        system: Vec<serde_json::Value>,
         ctx: ToolContext,
         cancel: CancellationToken,
     ) -> Result<String, ExecutorError> {
@@ -46,9 +59,10 @@ impl AgentSubagentExecutor {
         let prepared = self
             .prepare_subagent_run(&ids.manager_id, &request, &ctx)
             .await?;
-        let runner = self
+        let mut runner = self
             .build_subagent_runner(ids, &request, &ctx, &prepared, &cancel)
             .await?;
+        runner.set_request_system(system);
         let activity_model = runner.model().to_string();
 
         self.emit_subagent_started(

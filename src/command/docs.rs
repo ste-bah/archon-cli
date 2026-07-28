@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Result;
 use cozo::DbInstance;
@@ -7,7 +8,6 @@ use archon_docs::answer;
 use archon_docs::ingest;
 use archon_docs::inspect;
 use archon_docs::retrieval;
-use archon_docs::schema::ensure_doc_schema;
 use archon_docs::store;
 use archon_docs::vlm::factory::{self as vlm_factory, VlmProviderInitStatus};
 
@@ -17,12 +17,8 @@ fn docs_db_path() -> PathBuf {
     crate::command::store_paths::evidence_db_path(&["ARCHON_DOCS_DB_PATH"])
 }
 
-pub(crate) fn open_db() -> Result<DbInstance> {
-    let db_path = docs_db_path();
-    archon_docs::configure_cozo_write_lock_for_db(&db_path);
-    let db = crate::command::store_paths::open_sqlite_db(&db_path, "document")?;
-    ensure_doc_schema(&db)?;
-    Ok(db)
+pub(crate) fn open_db() -> Result<Arc<DbInstance>> {
+    archon_docs::acquire_docs_db(docs_db_path())
 }
 
 pub async fn handle_docs_command(action: DocsAction) -> Result<()> {

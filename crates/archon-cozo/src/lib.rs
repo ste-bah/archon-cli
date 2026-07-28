@@ -1,20 +1,26 @@
 use std::collections::BTreeMap;
-use std::fs::OpenOptions;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use cozo::{DataValue, DbInstance, NamedRows, ScriptMutability};
 
+mod guard_registry;
+mod locking;
+mod panic_guard;
+
+use guard_registry::register_guarded_database;
+use locking::{
+    HeldWriteLock, lock_recovering_poison, process_write_lock, write_lock_is_held, write_lock_key,
+};
+use panic_guard::catch_guarded_operation;
+
 const DEFAULT_MAX_ATTEMPTS: usize = 90;
+const INTERACTIVE_MAX_ATTEMPTS: usize = 10;
 const DEFAULT_INITIAL_BACKOFF_MS: u64 = 100;
 const DEFAULT_MAX_BACKOFF_MS: u64 = 2_000;
-
-static COZO_PROCESS_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-static COZO_PANIC_HOOK_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Clone, Debug)]
 pub struct CozoGuardConfig {
@@ -40,19 +46,100 @@ impl CozoGuardConfig {
         Self::default().with_write_lock_path(write_lock_path_for_db(path))
     }
 
+    pub fn for_interactive_db_path(path: impl AsRef<Path>) -> Self {
+        Self {
+            max_attempts: INTERACTIVE_MAX_ATTEMPTS,
+            ..Self::for_db_path(path)
+        }
+    }
+
     pub fn with_write_lock_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.write_lock_path = Some(path.into());
         self
     }
 }
 
+#[derive(Clone)]
+pub struct GuardedDbInstance {
+    db: Arc<DbInstance>,
+    config: CozoGuardConfig,
+}
+
+impl GuardedDbInstance {
+    pub fn new(db: DbInstance, config: CozoGuardConfig) -> Self {
+        let db = Arc::new(db);
+        register_guarded_database(&db, &config);
+        Self { db, config }
+    }
+
+    pub fn db(&self) -> &DbInstance {
+        &self.db
+    }
+
+    pub fn db_arc(&self) -> Arc<DbInstance> {
+        Arc::clone(&self.db)
+    }
+
+    pub fn config(&self) -> &CozoGuardConfig {
+        &self.config
+    }
+
+    pub fn run_script_guarded(
+        &self,
+        script: &str,
+        params: BTreeMap<String, DataValue>,
+        mutability: ScriptMutability,
+        context: &str,
+    ) -> Result<NamedRows> {
+        run_script_guarded(&self.db, script, params, mutability, context, &self.config)
+    }
+}
+
+impl std::ops::Deref for GuardedDbInstance {
+    type Target = DbInstance;
+
+    fn deref(&self) -> &Self::Target {
+        &self.db
+    }
+}
+
+pub fn guarded_config_for(db: &DbInstance) -> Option<CozoGuardConfig> {
+    guard_registry::guarded_config_for(db)
+}
+
+pub fn bound_guard_config(db: &DbInstance, context: &str) -> Result<CozoGuardConfig> {
+    guard_registry::bound_guard_config(db, context)
+}
+
+pub fn run_bound_script_guarded(
+    db: &DbInstance,
+    script: &str,
+    params: BTreeMap<String, DataValue>,
+    mutability: ScriptMutability,
+    context: &str,
+) -> Result<NamedRows> {
+    let config = bound_guard_config(db, context)?;
+    run_script_guarded(db, script, params, mutability, context, &config)
+}
+
+pub fn run_bound_guarded<T>(
+    db: &DbInstance,
+    context: &str,
+    mutability: ScriptMutability,
+    run: impl FnMut() -> Result<T>,
+) -> Result<T> {
+    let config = bound_guard_config(db, context)?;
+    run_guarded(context, mutability, &config, run)
+}
+
 pub fn write_lock_path_for_db(path: impl AsRef<Path>) -> PathBuf {
     let path = path.as_ref();
-    let file_name = path
+    let resource = canonical_resource_path(path).unwrap_or_else(|_| path.to_path_buf());
+    let file_name = resource
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("cozo.db");
-    path.with_file_name(format!("{file_name}.archon-cozo-write.lock"))
+    resource.with_file_name(format!("{file_name}.archon-cozo-write.lock"))
 }
 
 pub fn open_sqlite_guarded(
@@ -64,6 +151,28 @@ pub fn open_sqlite_guarded(
         DbInstance::new("sqlite", path, "")
             .map_err(|error| anyhow!("open sqlite-backed Cozo store failed: {error}"))
     })
+}
+
+pub fn open_sqlite_guarded_instance(
+    path: &str,
+    context: &str,
+    config: CozoGuardConfig,
+) -> Result<GuardedDbInstance> {
+    let db = open_sqlite_guarded(path, context, &config)?;
+    Ok(GuardedDbInstance::new(db, config))
+}
+
+pub async fn open_sqlite_guarded_async(
+    path: &str,
+    context: &str,
+    config: &CozoGuardConfig,
+) -> Result<DbInstance> {
+    let path = path.to_string();
+    run_guarded_async(context, ScriptMutability::Mutable, config, move || {
+        DbInstance::new("sqlite", &path, "")
+            .map_err(|error| anyhow!("open sqlite-backed Cozo store failed: {error}"))
+    })
+    .await
 }
 
 pub fn run_script_guarded(
@@ -80,6 +189,22 @@ pub fn run_script_guarded(
     })
 }
 
+pub async fn run_script_guarded_async(
+    db: Arc<DbInstance>,
+    script: impl Into<String>,
+    params: BTreeMap<String, DataValue>,
+    mutability: ScriptMutability,
+    context: &str,
+    config: &CozoGuardConfig,
+) -> Result<NamedRows> {
+    let script = script.into();
+    run_guarded_async(context, mutability, config, move || {
+        db.run_script(&script, params.clone(), mutability)
+            .map_err(|error| anyhow!("{error}"))
+    })
+    .await
+}
+
 pub fn run_guarded<T>(
     context: &str,
     mutability: ScriptMutability,
@@ -87,23 +212,16 @@ pub fn run_guarded<T>(
     mut run: impl FnMut() -> Result<T>,
 ) -> Result<T> {
     let attempts = config.max_attempts.max(1);
-    let mut last_error = String::new();
 
     for attempt in 0..attempts {
-        let result = run_guarded_once(context, mutability, config, &mut run);
-        match result {
+        match run_guarded_once(context, mutability, config, &mut run) {
             Ok(value) => return Ok(value),
             Err(error) => {
-                last_error = format!("{error:#}");
-                if is_retryable_cozo_error(&last_error) && attempt + 1 < attempts {
-                    tracing::warn!(
-                        context,
-                        attempt = attempt + 1,
-                        max_attempts = attempts,
-                        error = %last_error,
-                        "Cozo store busy; retrying guarded operation"
-                    );
-                    thread::sleep(backoff_duration(config, attempt));
+                let last_error = format!("{error:#}");
+                if let Some(backoff) =
+                    retry_backoff(context, config, attempt, attempts, &last_error)
+                {
+                    thread::sleep(backoff);
                     continue;
                 }
                 return Err(anyhow!("{context}: {last_error}"));
@@ -111,23 +229,105 @@ pub fn run_guarded<T>(
         }
     }
 
-    Err(anyhow!(
-        "{context}: Cozo store stayed busy after {attempts} attempts: {last_error}"
-    ))
+    unreachable!("a guarded retry loop always returns from an attempt")
+}
+
+pub async fn run_guarded_async<T, Run>(
+    context: &str,
+    mutability: ScriptMutability,
+    config: &CozoGuardConfig,
+    run: Run,
+) -> Result<T>
+where
+    T: Send + 'static,
+    Run: FnMut() -> Result<T> + Send + 'static,
+{
+    let attempts = config.max_attempts.max(1);
+    let context = context.to_string();
+    let config = config.clone();
+    let mut run = run;
+
+    for attempt in 0..attempts {
+        let attempt_context = context.clone();
+        let attempt_config = config.clone();
+        let attempt_result = tokio::task::spawn_blocking(move || {
+            let result = run_guarded_once(&attempt_context, mutability, &attempt_config, &mut run);
+            (run, result)
+        })
+        .await
+        .map_err(|error| anyhow!("{context}: guarded operation task failed: {error}"))?;
+        run = attempt_result.0;
+
+        match attempt_result.1 {
+            Ok(value) => return Ok(value),
+            Err(error) => {
+                let last_error = format!("{error:#}");
+                if let Some(backoff) =
+                    retry_backoff(&context, &config, attempt, attempts, &last_error)
+                {
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                }
+                return Err(anyhow!("{context}: {last_error}"));
+            }
+        }
+    }
+
+    unreachable!("a guarded retry loop always returns from an attempt")
+}
+
+fn retry_backoff(
+    context: &str,
+    config: &CozoGuardConfig,
+    attempt: usize,
+    attempts: usize,
+    error: &str,
+) -> Option<Duration> {
+    if !is_retryable_cozo_error(error) || attempt + 1 >= attempts {
+        return None;
+    }
+
+    tracing::warn!(
+        context,
+        attempt = attempt + 1,
+        max_attempts = attempts,
+        error,
+        "Cozo store busy; retrying guarded operation"
+    );
+    Some(backoff_duration(config, attempt))
 }
 
 pub fn is_retryable_cozo_error(message: &str) -> bool {
     let message = message.to_ascii_lowercase();
-    message.contains("database is locked")
-        || message.contains("database table is locked")
-        || message.contains("locked (code 5)")
-        || message.contains("code 5")
-        || message.contains("code: some(5)")
-        || message.contains("sqlite_busy")
-        || message.contains("poisonerror")
-        || message.contains("wouldblock")
-        || message.contains("would block")
-        || message.contains("write lock unavailable")
+    if explicit_error_codes(&message).any(|code| code != 5) {
+        return false;
+    }
+    [
+        "database is locked",
+        "database table is locked",
+        "locked (code 5)",
+        "code: some(5)",
+        "sqlite_busy",
+        "write-lock unavailable",
+        "write lock unavailable",
+    ]
+    .iter()
+    .any(|signal| message.contains(signal))
+}
+
+fn explicit_error_codes(message: &str) -> impl Iterator<Item = u64> + '_ {
+    message.match_indices("code").filter_map(|(index, _)| {
+        let suffix = &message[index + "code".len()..];
+        let suffix = suffix.trim_start_matches(|character: char| {
+            character.is_ascii_whitespace() || matches!(character, ':' | '(')
+        });
+        let suffix = suffix.strip_prefix("some(").unwrap_or(suffix);
+        let digits = suffix
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>();
+        digits.parse().ok()
+    })
 }
 
 fn run_guarded_once<T>(
@@ -137,17 +337,24 @@ fn run_guarded_once<T>(
     run: &mut impl FnMut() -> Result<T>,
 ) -> Result<T> {
     if matches!(mutability, ScriptMutability::Mutable) {
-        let process_lock = COZO_PROCESS_WRITE_LOCK.get_or_init(|| Mutex::new(()));
-        let _process_guard = match process_lock.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        let key = write_lock_key(config.write_lock_path.as_deref())?;
+        if write_lock_is_held(&key) {
+            return catch_guarded_operation(context, run);
+        }
+        let process_lock = process_write_lock(&key);
+        let _process_guard = lock_recovering_poison(&process_lock);
+        let _held_lock = HeldWriteLock::enter(key);
         if let Some(path) = &config.write_lock_path {
             return with_write_lock(path, context, || catch_guarded_operation(context, run));
         }
+        return catch_guarded_operation(context, run);
     }
 
     catch_guarded_operation(context, run)
+}
+
+pub fn canonical_resource_path(path: impl AsRef<Path>) -> Result<PathBuf> {
+    locking::canonical_resource_path(path)
 }
 
 pub fn with_write_lock<T>(
@@ -155,50 +362,11 @@ pub fn with_write_lock<T>(
     context: &str,
     run: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let file = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .truncate(false)
-        .open(path)
-        .map_err(|error| {
-            anyhow!(
-                "{context}: open Cozo write lock {}: {error}",
-                path.display()
-            )
-        })?;
-    let mut lock = fd_lock::RwLock::new(file);
-    let _guard = lock.try_write().map_err(|error| {
-        anyhow!(
-            "{context}: Cozo write lock unavailable at {}: {error}",
-            path.display()
-        )
-    })?;
-    tracing::trace!(context, lock_path = %path.display(), "acquired Cozo write lock");
-    run()
+    locking::with_write_lock(path, context, run)
 }
 
-fn catch_guarded_operation<T>(context: &str, run: &mut impl FnMut() -> Result<T>) -> Result<T> {
-    let hook_lock = COZO_PANIC_HOOK_LOCK.get_or_init(|| Mutex::new(()));
-    let _guard = match hook_lock.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    let hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
-    let result = catch_unwind(AssertUnwindSafe(run));
-    std::panic::set_hook(hook);
-
-    match result {
-        Ok(result) => result,
-        Err(payload) => Err(anyhow!(
-            "{context}: Cozo operation panicked: {}",
-            panic_payload_message(payload)
-        )),
-    }
+pub fn in_guarded_operation() -> bool {
+    panic_guard::in_guarded_operation()
 }
 
 fn backoff_duration(config: &CozoGuardConfig, attempt: usize) -> Duration {
@@ -207,53 +375,5 @@ fn backoff_duration(config: &CozoGuardConfig, attempt: usize) -> Duration {
     Duration::from_millis(initial.saturating_mul(attempt as u64 + 1).min(max))
 }
 
-fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
-    if let Some(message) = payload.downcast_ref::<String>() {
-        message.clone()
-    } else if let Some(message) = payload.downcast_ref::<&str>() {
-        (*message).to_owned()
-    } else {
-        "unknown panic payload".to_owned()
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn write_lock_path_is_sibling_sidecar() {
-        let path = PathBuf::from("/tmp/archon-data.db");
-        assert_eq!(
-            write_lock_path_for_db(&path),
-            PathBuf::from("/tmp/archon-data.db.archon-cozo-write.lock")
-        );
-    }
-
-    #[test]
-    fn retryable_errors_include_sqlite_and_file_lock_variants() {
-        assert!(is_retryable_cozo_error("database is locked (code 5)"));
-        assert!(is_retryable_cozo_error("sqlite_busy"));
-        assert!(is_retryable_cozo_error("Cozo write lock unavailable"));
-        assert!(!is_retryable_cozo_error("relation not found"));
-    }
-
-    #[test]
-    fn write_lock_rejects_second_writer() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("test.lock");
-        let file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .open(&path)
-            .unwrap();
-        let mut lock = fd_lock::RwLock::new(file);
-        let _guard = lock.try_write().unwrap();
-
-        let error = with_write_lock(&path, "test lock", || Ok(())).unwrap_err();
-
-        assert!(is_retryable_cozo_error(&format!("{error:#}")));
-    }
-}
+mod tests;

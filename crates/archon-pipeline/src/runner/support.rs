@@ -5,6 +5,88 @@ use crate::learning::integration::LearningContext;
 use crate::learning::reflexion::{FailedTrajectory, ReflexionInjector};
 use crate::research::artifacts::write_research_agent_artifacts;
 
+pub struct PipelineProgressFacade {
+    inner: Arc<dyn PipelineFacade>,
+    sender: tokio::sync::mpsc::Sender<String>,
+}
+
+impl PipelineProgressFacade {
+    pub fn new(inner: Arc<dyn PipelineFacade>, sender: tokio::sync::mpsc::Sender<String>) -> Self {
+        Self { inner, sender }
+    }
+}
+
+#[async_trait]
+impl PipelineFacade for PipelineProgressFacade {
+    async fn init_session(&self, task: &str) -> Result<PipelineSession> {
+        self.inner.init_session(task).await
+    }
+
+    async fn next_agent(&self, session: &PipelineSession) -> Result<NextAgent> {
+        self.inner.next_agent(session).await
+    }
+
+    async fn build_prompt(
+        &self,
+        session: &PipelineSession,
+        agent: &AgentInfo,
+    ) -> Result<(
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+    )> {
+        self.inner.build_prompt(session, agent).await
+    }
+
+    async fn build_prompt_for_attempt(
+        &self,
+        session: &PipelineSession,
+        agent: &AgentInfo,
+        attempt: u8,
+    ) -> Result<(
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+        Vec<serde_json::Value>,
+    )> {
+        self.inner
+            .build_prompt_for_attempt(session, agent, attempt)
+            .await
+    }
+
+    async fn score_quality(
+        &self,
+        session: &PipelineSession,
+        agent: &AgentInfo,
+        result: &AgentResult,
+    ) -> Result<QualityScore> {
+        self.inner.score_quality(session, agent, result).await
+    }
+
+    async fn process_completion(
+        &self,
+        session: &mut PipelineSession,
+        agent: &AgentInfo,
+        result: &AgentResult,
+        quality: &QualityScore,
+    ) -> Result<()> {
+        self.inner
+            .process_completion(session, agent, result, quality)
+            .await?;
+        let _ = self
+            .sender
+            .send(format!(
+                "[pipeline phase {}] {} complete (quality: {:.2})\n",
+                agent.phase, agent.display_name, quality.overall,
+            ))
+            .await;
+        Ok(())
+    }
+
+    async fn finalize(&self, session: PipelineSession) -> Result<PipelineResult> {
+        self.inner.finalize(session).await
+    }
+}
+
 pub(super) fn append_learning_context(
     system: &mut Vec<serde_json::Value>,
     learning_ctx: &LearningContext,

@@ -4,6 +4,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -78,6 +79,7 @@ pub struct TaskInfo {
 pub struct TaskManager {
     tasks: Mutex<HashMap<String, TaskInfo>>,
     cancellation_tokens: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    execution_tokens: Mutex<HashMap<String, CancellationToken>>,
 }
 
 impl TaskManager {
@@ -85,13 +87,26 @@ impl TaskManager {
         Self {
             tasks: Mutex::new(HashMap::new()),
             cancellation_tokens: Mutex::new(HashMap::new()),
+            execution_tokens: Mutex::new(HashMap::new()),
         }
     }
 
     /// Create a new task and return its 8-character ID.
     pub fn create_task(&self, description: &str) -> String {
+        self.create_task_with_parent(description, None)
+    }
+
+    /// Create a task whose async work is cancelled with its optional parent.
+    pub fn create_task_with_parent(
+        &self,
+        description: &str,
+        parent: Option<&CancellationToken>,
+    ) -> String {
         let full_uuid = Uuid::new_v4().to_string().replace('-', "");
         let id = full_uuid[..8].to_string();
+        let execution_token = parent
+            .map(CancellationToken::child_token)
+            .unwrap_or_default();
 
         let info = TaskInfo {
             id: id.clone(),
@@ -108,6 +123,9 @@ impl TaskManager {
         }
         if let Ok(mut tokens) = self.cancellation_tokens.lock() {
             tokens.insert(id.clone(), Arc::new(AtomicBool::new(false)));
+        }
+        if let Ok(mut tokens) = self.execution_tokens.lock() {
+            tokens.insert(id.clone(), execution_token);
         }
 
         id
@@ -158,6 +176,17 @@ impl TaskManager {
                 .ok_or_else(|| format!("task not found: {id}"))?;
 
             token.store(true, Ordering::SeqCst);
+        }
+
+        {
+            let tokens = self
+                .execution_tokens
+                .lock()
+                .map_err(|e| format!("lock poisoned: {e}"))?;
+            let token = tokens
+                .get(id)
+                .ok_or_else(|| format!("task not found: {id}"))?;
+            token.cancel();
         }
 
         // Update status
@@ -238,9 +267,14 @@ impl TaskManager {
         }
     }
 
-    /// Get the cancellation token for a task (for passing to async workers).
+    /// Get the cancellation token for a task (for passing to polling workers).
     pub fn cancellation_token(&self, id: &str) -> Option<Arc<AtomicBool>> {
         self.cancellation_tokens.lock().ok()?.get(id).cloned()
+    }
+
+    /// Get the task-owned token used to cancel async execution.
+    pub fn execution_token(&self, id: &str) -> Option<CancellationToken> {
+        self.execution_tokens.lock().ok()?.get(id).cloned()
     }
 }
 

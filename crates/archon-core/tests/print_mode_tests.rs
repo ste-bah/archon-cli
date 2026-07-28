@@ -69,8 +69,7 @@ fn format_json_result_valid_json() {
     let usage = archon_llm::types::Usage {
         input_tokens: 100,
         output_tokens: 200,
-        cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 0,
+        ..Default::default()
     };
     let result = format_json_result("Hello, world!", &usage, 0.05);
     let parsed: serde_json::Value = serde_json::from_str(&result).expect("valid JSON");
@@ -233,6 +232,7 @@ fn format_agent_event_tool_call_complete_stream_json() {
         name: "Bash".into(),
         id: "tool_1".into(),
         result: ToolResult::success("output here"),
+        transcript_summary: None,
     };
     let result = format_agent_event(&event, &OutputFormat::StreamJson);
     assert!(result.is_some());

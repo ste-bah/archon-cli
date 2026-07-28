@@ -1,13 +1,34 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
-use crate::subagent_executor::{ExecutorError, SubagentOutcome, get_subagent_executor};
+use crate::subagent_executor::{
+    ExecutorError, SubagentExecutor, SubagentOutcome, get_subagent_executor,
+};
 use crate::subagent_request::SubagentRequest;
 use crate::tool::ToolContext;
 
 const FOREGROUND_CANCEL_CLEANUP_SECS: u64 = 30;
+
+struct ExecutionResult {
+    result: Result<String, ExecutorError>,
+    cancelled: bool,
+}
+
+impl ExecutionResult {
+    fn outcome(&self) -> SubagentOutcome {
+        if self.cancelled {
+            SubagentOutcome::Cancelled
+        } else {
+            match &self.result {
+                Ok(text) => SubagentOutcome::Completed(text.clone()),
+                Err(error) => SubagentOutcome::Failed(error.to_string()),
+            }
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // run_subagent — the AGT-025 `tokio::select!` race, relocated from
@@ -26,7 +47,37 @@ pub async fn run_subagent(
     cancel: CancellationToken,
     ctx: ToolContext,
 ) -> SubagentOutcome {
-    run_subagent_with_auto_background(subagent_id, request, cancel, ctx, true).await
+    run_subagent_with_auto_background(subagent_id, request, Vec::new(), cancel, ctx, true, None)
+        .await
+}
+
+pub async fn run_subagent_with_system(
+    subagent_id: String,
+    request: SubagentRequest,
+    system: Vec<serde_json::Value>,
+    cancel: CancellationToken,
+    ctx: ToolContext,
+) -> SubagentOutcome {
+    run_subagent_with_auto_background(subagent_id, request, system, cancel, ctx, true, None).await
+}
+
+pub(crate) async fn run_subagent_with_completion(
+    subagent_id: String,
+    request: SubagentRequest,
+    cancel: CancellationToken,
+    ctx: ToolContext,
+    auto_background_completion: oneshot::Sender<SubagentOutcome>,
+) -> SubagentOutcome {
+    run_subagent_with_auto_background(
+        subagent_id,
+        request,
+        Vec::new(),
+        cancel,
+        ctx,
+        true,
+        Some(auto_background_completion),
+    )
+    .await
 }
 
 /// Run a subagent as an awaited foreground operation even when the global
@@ -38,15 +89,28 @@ pub async fn run_subagent_foreground(
     cancel: CancellationToken,
     ctx: ToolContext,
 ) -> SubagentOutcome {
-    run_subagent_with_auto_background(subagent_id, request, cancel, ctx, false).await
+    run_subagent_with_auto_background(subagent_id, request, Vec::new(), cancel, ctx, false, None)
+        .await
+}
+
+pub async fn run_subagent_foreground_with_system(
+    subagent_id: String,
+    request: SubagentRequest,
+    system: Vec<serde_json::Value>,
+    cancel: CancellationToken,
+    ctx: ToolContext,
+) -> SubagentOutcome {
+    run_subagent_with_auto_background(subagent_id, request, system, cancel, ctx, false, None).await
 }
 
 async fn run_subagent_with_auto_background(
     subagent_id: String,
     request: SubagentRequest,
+    system: Vec<serde_json::Value>,
     cancel: CancellationToken,
     ctx: ToolContext,
     allow_auto_background: bool,
+    auto_background_completion: Option<oneshot::Sender<SubagentOutcome>>,
 ) -> SubagentOutcome {
     let exec = match get_subagent_executor() {
         Some(e) => e,
@@ -66,31 +130,42 @@ async fn run_subagent_with_auto_background(
         let cancel = cancel.clone();
         let ctx = ctx.clone();
         let req = request.clone();
+        let system = system.clone();
         let sid = subagent_id.clone();
-        async move { exec.run_to_completion(sid, req, ctx, cancel).await }
+        async move {
+            let result = exec
+                .run_to_completion_with_system(sid, req, system, ctx, cancel.clone())
+                .await;
+            let cancelled = result.is_err() && cancel.is_cancelled();
+            let execution = ExecutionResult { result, cancelled };
+            if let Some(completion) = auto_background_completion {
+                let _ = completion.send(execution.outcome());
+            }
+            execution
+        }
     });
 
     let outcome = if auto_bg_ms == 0 {
         tokio::select! {
-            _ = cancel.cancelled() => {
-                await_cancelled_foreground(&mut join).await
-            },
+            biased;
             r = &mut join => match r {
-                Ok(Ok(text))  => SubagentOutcome::Completed(text),
-                Ok(Err(e))    => SubagentOutcome::Failed(format!("{e}")),
-                Err(e)        => SubagentOutcome::Failed(format!("join panic: {e}")),
+                Ok(execution) => execution.outcome(),
+                Err(e) => SubagentOutcome::Failed(format!("join panic: {e}")),
+            },
+            _ = cancel.cancelled() => {
+                await_cancelled_foreground(&mut join, exec.as_ref(), &subagent_id).await
             },
         }
     } else {
         let timer = tokio::time::sleep(Duration::from_millis(auto_bg_ms));
         tokio::select! {
-            _ = cancel.cancelled() => {
-                await_cancelled_foreground(&mut join).await
-            },
+            biased;
             r = &mut join => match r {
-                Ok(Ok(text))  => SubagentOutcome::Completed(text),
-                Ok(Err(e))    => SubagentOutcome::Failed(format!("{e}")),
-                Err(e)        => SubagentOutcome::Failed(format!("join panic: {e}")),
+                Ok(execution) => execution.outcome(),
+                Err(e) => SubagentOutcome::Failed(format!("join panic: {e}")),
+            },
+            _ = cancel.cancelled() => {
+                await_cancelled_foreground(&mut join, exec.as_ref(), &subagent_id).await
             },
             _ = timer => SubagentOutcome::AutoBackgrounded,
         }
@@ -121,12 +196,8 @@ async fn run_subagent_with_auto_background(
                 .on_visible_complete(subagent_id.clone(), Err(err.clone()), nested)
                 .await;
         }
-        SubagentOutcome::AutoBackgrounded => {
-            // NO on_visible_complete call — see PRESERVE-D5 above.
-        }
+        SubagentOutcome::AutoBackgrounded => {}
         SubagentOutcome::Cancelled => {
-            exec.on_inner_complete(subagent_id.clone(), Err("subagent cancelled".to_string()))
-                .await;
             let _ = exec
                 .on_visible_complete(
                     subagent_id.clone(),
@@ -141,7 +212,9 @@ async fn run_subagent_with_auto_background(
 }
 
 async fn await_cancelled_foreground(
-    join: &mut tokio::task::JoinHandle<Result<String, ExecutorError>>,
+    join: &mut tokio::task::JoinHandle<ExecutionResult>,
+    exec: &dyn SubagentExecutor,
+    subagent_id: &str,
 ) -> SubagentOutcome {
     match tokio::time::timeout(
         Duration::from_secs(FOREGROUND_CANCEL_CLEANUP_SECS),
@@ -154,6 +227,11 @@ async fn await_cancelled_foreground(
         Err(_) => {
             join.abort();
             let _ = join.await;
+            exec.on_inner_complete(
+                subagent_id.to_string(),
+                Err("subagent cancelled".to_string()),
+            )
+            .await;
             SubagentOutcome::Cancelled
         }
     }

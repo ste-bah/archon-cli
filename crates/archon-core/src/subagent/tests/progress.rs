@@ -44,18 +44,21 @@ fn progress_tracker_accumulates_usage_from_message_start() {
             output_tokens: 5,
             cache_creation_input_tokens: 10,
             cache_read_input_tokens: 20,
+            ..Default::default()
         },
         archon_llm::types::Usage {
             input_tokens: 50,
             output_tokens: 25,
             cache_creation_input_tokens: 0,
             cache_read_input_tokens: 5,
+            ..Default::default()
         },
         archon_llm::types::Usage {
             input_tokens: 0,
             output_tokens: 12,
             cache_creation_input_tokens: 2,
             cache_read_input_tokens: 0,
+            ..Default::default()
         },
     ];
 

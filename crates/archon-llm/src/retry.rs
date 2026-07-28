@@ -248,6 +248,10 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
         self.inner.compaction_provider_family()
     }
 
+    fn supports_anthropic_message_caching(&self) -> bool {
+        self.inner.supports_anthropic_message_caching()
+    }
+
     fn as_anthropic(&self) -> Option<&AnthropicClient> {
         self.inner.as_anthropic()
     }
@@ -360,6 +364,42 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct AnthropicCacheProvider;
+
+    #[async_trait]
+    impl LlmProvider for AnthropicCacheProvider {
+        fn name(&self) -> &str {
+            "anthropic"
+        }
+
+        fn models(&self) -> Vec<ModelInfo> {
+            Vec::new()
+        }
+
+        fn supports_feature(&self, _: ProviderFeature) -> bool {
+            false
+        }
+
+        fn supports_anthropic_message_caching(&self) -> bool {
+            true
+        }
+
+        async fn complete(&self, _: LlmRequest) -> Result<LlmResponse, LlmError> {
+            unreachable!()
+        }
+
+        async fn stream(&self, _: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn retry_provider_preserves_anthropic_message_cache_capability() {
+        let provider = RetryProvider::new(Arc::new(AnthropicCacheProvider), RetryPolicy::default());
+
+        assert!(provider.supports_anthropic_message_caching());
+    }
 
     #[test]
     fn short_rate_limit_is_retryable() {

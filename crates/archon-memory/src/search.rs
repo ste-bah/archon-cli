@@ -1,10 +1,110 @@
-use chrono::Utc;
-use cozo::DbInstance;
+use std::collections::{BTreeMap, BTreeSet};
 
-use crate::graph::{raw_to_memory, read_all_memories};
+use chrono::Utc;
+use cozo::{DataValue, DbInstance, ScriptMutability};
+
+use crate::graph::{raw_to_memory, read_all_memories, row_values_to_memory};
 use crate::types::{Memory, MemoryError, SearchFilter};
 
 pub(crate) const FULL_SCAN_WARNING_THRESHOLD: usize = 10_000;
+const INITIAL_FTS_LIMIT: i64 = 256;
+const MEMORY_COLUMNS: &str = "id, content, title, memory_type, importance, tags, source_type, project_path, created_at, updated_at, access_count, last_accessed";
+
+pub(crate) struct KeywordCandidates {
+    pub(crate) memories: Vec<Memory>,
+    #[cfg(test)]
+    pub(crate) used_fts: bool,
+}
+
+pub(crate) fn keyword_candidates(
+    db: &DbInstance,
+    query: &str,
+    limit: usize,
+) -> Result<KeywordCandidates, MemoryError> {
+    if query.split_whitespace().next().is_none() || limit == 0 {
+        return Ok(KeywordCandidates {
+            memories: Vec::new(),
+            #[cfg(test)]
+            used_fts: true,
+        });
+    }
+
+    match fts_keyword_candidates(db, query) {
+        Ok(memories) => Ok(KeywordCandidates {
+            memories,
+            #[cfg(test)]
+            used_fts: true,
+        }),
+        Err(MemoryError::Database(message)) if fts_index_unavailable(&message) => {
+            let all_rows = read_all_memories(db)?;
+            warn_full_scan("memory.keyword.fallback", all_rows.len(), Some(limit));
+            Ok(KeywordCandidates {
+                memories: all_rows
+                    .into_iter()
+                    .filter_map(|row| raw_to_memory(row).ok())
+                    .collect(),
+                #[cfg(test)]
+                used_fts: false,
+            })
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn fts_keyword_candidates(db: &DbInstance, query: &str) -> Result<Vec<Memory>, MemoryError> {
+    let mut memories = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    for index in ["content_fts", "title_fts", "tags_fts"] {
+        let mut limit = INITIAL_FTS_LIMIT;
+        loop {
+            let result = fts_candidate_query(db, query, index, limit)?;
+            let exhausted = result.rows.len() < limit as usize;
+            for row in result.rows {
+                if let Some(id) = row.get(1).and_then(DataValue::get_str)
+                    && seen.insert(id.to_string())
+                {
+                    memories.push(row_values_to_memory(&row[1..])?);
+                }
+            }
+            if exhausted {
+                break;
+            }
+            limit = limit.checked_mul(2).ok_or_else(|| {
+                MemoryError::Database("keyword candidate limit exceeds i64".into())
+            })?;
+        }
+    }
+    Ok(memories)
+}
+
+fn fts_candidate_query(
+    db: &DbInstance,
+    query: &str,
+    index: &str,
+    limit: i64,
+) -> Result<cozo::NamedRows, MemoryError> {
+    let mut params = BTreeMap::new();
+    params.insert("query".into(), DataValue::from(fts_query(query)));
+    params.insert("limit".into(), DataValue::from(limit));
+    let script = format!(
+        "?[score, {MEMORY_COLUMNS}] := ~memories:{index} {{{MEMORY_COLUMNS} | query: $query, k: $limit, score_kind: 'tf_idf', bind_score: score }} :order -score"
+    );
+    db.run_script(&script, params, ScriptMutability::Immutable)
+        .map_err(|error| MemoryError::Database(error.to_string()))
+}
+
+fn fts_query(query: &str) -> String {
+    query
+        .split_whitespace()
+        .map(|term| format!("{:?}", term))
+        .collect::<Vec<_>>()
+        .join(" OR ")
+}
+
+fn fts_index_unavailable(message: &str) -> bool {
+    message.contains("Index ") && message.contains(" not found on relation ")
+}
 
 pub(crate) fn full_scan_contract(
     surface: &str,
@@ -52,19 +152,12 @@ pub(crate) fn recall(
         return Ok(Vec::new());
     }
 
-    // Fetch all memories and score them in Rust.
-    let all_rows = read_all_memories(db)?;
-    warn_full_scan("memory.recall.keyword", all_rows.len(), Some(limit));
+    let candidates = keyword_candidates(db, query, limit)?;
     let now = Utc::now();
 
     let mut scored: Vec<(f64, Memory)> = Vec::new();
 
-    for raw in all_rows {
-        let mem = match raw_to_memory(raw) {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-
+    for mem in candidates.memories {
         let content_lower = mem.content.to_lowercase();
         let tags_lower = mem.tags.join(",").to_lowercase();
         let title_lower = mem.title.to_lowercase();
@@ -110,9 +203,30 @@ pub(crate) fn recall(
     Ok(scored.into_iter().map(|(_, m)| m).collect())
 }
 
+fn structured_search_candidates(
+    db: &DbInstance,
+    filter: &SearchFilter,
+) -> Result<KeywordCandidates, MemoryError> {
+    if let Some(text) = filter.text.as_deref() {
+        return keyword_candidates(db, text, usize::MAX);
+    }
+    if !filter.tags.is_empty() {
+        return keyword_candidates(db, &filter.tags.join(" "), usize::MAX);
+    }
+    let all_rows = read_all_memories(db)?;
+    warn_full_scan("memory.search.filter", all_rows.len(), None);
+    Ok(KeywordCandidates {
+        memories: all_rows
+            .into_iter()
+            .filter_map(|row| raw_to_memory(row).ok())
+            .collect(),
+        #[cfg(test)]
+        used_fts: false,
+    })
+}
+
 /// Structured search with filters (type, tags, text, date range).
 pub(crate) fn search(db: &DbInstance, filter: &SearchFilter) -> Result<Vec<Memory>, MemoryError> {
-    // If no filters are set, return empty (same behavior as original).
     let has_any_filter = filter.memory_type.is_some()
         || filter.text.is_some()
         || !filter.tags.is_empty()
@@ -123,18 +237,10 @@ pub(crate) fn search(db: &DbInstance, filter: &SearchFilter) -> Result<Vec<Memor
         return Ok(Vec::new());
     }
 
-    // Fetch all memories and filter in Rust.
-    let all_rows = read_all_memories(db)?;
-    warn_full_scan("memory.search.filter", all_rows.len(), None);
-
+    let candidates = structured_search_candidates(db, filter)?;
     let mut results: Vec<Memory> = Vec::new();
 
-    for raw in all_rows {
-        let mem = match raw_to_memory(raw) {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-
+    for mem in candidates.memories {
         // Filter by memory_type
         if let Some(mt) = filter.memory_type
             && mem.memory_type != mt
@@ -187,78 +293,5 @@ pub(crate) fn search(db: &DbInstance, filter: &SearchFilter) -> Result<Vec<Memor
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::graph::MemoryGraph;
-    use crate::types::MemoryType;
-
-    #[test]
-    fn recall_ranks_by_keyword_hits() {
-        let g = MemoryGraph::in_memory().expect("graph creation failed");
-        // one keyword match
-        g.store_memory("apple pie", "", MemoryType::Fact, 0.5, &[], "m", "")
-            .expect("store failed");
-        // two keyword matches
-        g.store_memory(
-            "apple pie with apple sauce",
-            "",
-            MemoryType::Fact,
-            0.5,
-            &[],
-            "m",
-            "",
-        )
-        .expect("store failed");
-
-        let results = g.recall_memories("apple", 10).expect("recall failed");
-        assert_eq!(results.len(), 2);
-    }
-
-    #[test]
-    fn full_scan_contract_warns_only_past_threshold() {
-        assert!(full_scan_contract("memory.recall.keyword", 10, Some(5)).is_none());
-        let message = full_scan_contract(
-            "memory.recall.keyword",
-            FULL_SCAN_WARNING_THRESHOLD,
-            Some(5),
-        )
-        .expect("threshold row count should warn");
-        assert!(message.contains("full-scan"));
-        assert!(message.contains("at most 5"));
-    }
-
-    #[test]
-    fn recall_respects_limit() {
-        let g = MemoryGraph::in_memory().expect("graph creation failed");
-        for i in 0..20 {
-            g.store_memory(
-                &format!("memory {i} about rust"),
-                "",
-                MemoryType::Fact,
-                0.5,
-                &[],
-                "m",
-                "",
-            )
-            .expect("store failed");
-        }
-        let results = g.recall_memories("rust", 5).expect("recall failed");
-        assert_eq!(results.len(), 5);
-    }
-
-    #[test]
-    fn search_with_date_range() {
-        let g = MemoryGraph::in_memory().expect("graph creation failed");
-        g.store_memory("x", "", MemoryType::Fact, 0.5, &[], "m", "")
-            .expect("store failed");
-
-        let future = Utc::now() + chrono::Duration::days(1);
-        let filter = SearchFilter {
-            date_from: Some(future),
-            ..Default::default()
-        };
-        // Nothing should be in the future.
-        let results = g.search_memories(&filter).expect("search failed");
-        assert!(results.is_empty());
-    }
-}
+#[path = "search_tests.rs"]
+mod tests;

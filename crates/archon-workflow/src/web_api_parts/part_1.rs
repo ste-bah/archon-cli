@@ -387,4 +387,3 @@ fn agent_views(store: &WorkflowStore, run_id: &str) -> WorkflowResult<Vec<Workfl
     });
     Ok(out)
 }
-

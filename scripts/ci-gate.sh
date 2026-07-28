@@ -10,8 +10,9 @@
 #
 # CARGO TEST THREAD POLICY
 # ------------------------
-# Every `cargo test` invocation across the workspace runs with
-# `--test-threads=2`. This is enforced here because:
+# The CI gate's executable workspace test run uses `--test-threads=2`.
+# Baseline discovery uses `--list`; regeneration has its own stricter policy.
+# This is enforced here because:
 #
 #   1. REQ-FOR-D1/D2/D3 introduce shared global state (BACKGROUND_AGENTS
 #      DashMap, task registry, tempdir-based .archon/) that deadlocks
@@ -146,12 +147,20 @@ if should_run "baseline-diff"; then
     fi
     TMPLIST="$(mktemp)"
     trap 'rm -f "$TMPLIST"' EXIT
-    cargo test --workspace --jobs 1 --no-fail-fast -- --list --format=terse \
-        2>/dev/null | sort -u > "$TMPLIST" || true
-    # A test may only be ADDED, never silently removed. `comm -23` gives
-    # lines in baseline that are NOT in the current list — those are the
-    # removals we must fail on.
-    REMOVED="$(comm -23 <(sort -u "$BASELINE") <(sort -u "$TMPLIST") || true)"
+
+    if bash scripts/list-cargo-tests.sh "$TMPLIST"; then
+        :
+    else
+        discovery_rc=$?
+        printf "${C_FAIL}ERROR: cargo test discovery failed${C_OFF}\n" >&2
+        exit "$discovery_rc"
+    fi
+    # Compare full normalized identities. Approved moves and renames are
+    # reviewed into the baseline explicitly so an unrelated same-named test
+    # cannot mask deletion of the protected test.
+    REMOVED="$(comm -23 \
+        <(LC_ALL=C sort -u "$BASELINE") \
+        <(LC_ALL=C sort -u "$TMPLIST"))"
     if [[ -n "$REMOVED" ]]; then
         printf "${C_FAIL}ERROR: tests were removed from the baseline:${C_OFF}\n%s\n" "$REMOVED"
         exit 1

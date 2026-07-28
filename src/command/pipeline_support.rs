@@ -20,7 +20,7 @@ use archon_pipeline::learning::patterns::PatternStore;
 use archon_pipeline::learning::reasoning::{ReasoningBank, ReasoningBankConfig, ReasoningBankDeps};
 use archon_pipeline::learning::reflexion::ReflexionInjector;
 use archon_pipeline::runner::{LlmClient, PipelineType};
-use archon_tools::tool::{AgentMode, ToolContext};
+use archon_tools::tool::ToolContext;
 use chrono::Utc;
 
 use crate::runtime::llm::build_configured_llm_provider;
@@ -55,17 +55,15 @@ pub(crate) async fn build_subagent_pipeline_adapter(
         agent_config.clone(),
     )
     .await;
-    let tool_context = ToolContext {
+    let mut tool_context = ToolContext {
         working_dir: cwd.to_path_buf(),
         session_id: session_id.to_string(),
-        mode: AgentMode::Normal,
-        extra_dirs: Vec::new(),
-        in_fork: false,
-        nested: false,
         cancel_parent: agent_config.cancel_token.clone(),
         sandbox: agent_config.sandbox.clone(),
         activity_sink: agent_config.activity_sink.clone(),
+        ..ToolContext::default()
     };
+    crate::command::world_model::configure_tool_run_context(config, &mut tool_context);
     Ok(Arc::new(
         archon_pipeline::subagent_adapter::SubagentPipelineClient::with_provider(
             raw,
@@ -97,6 +95,9 @@ async fn install_workflow_cli_subagent_executor(
     registry.replace(Box::new(archon_tools::bash::BashTool {
         timeout_secs: config.tools.bash_timeout,
         max_output_bytes: config.tools.bash_max_output,
+        safe_commands: config.permissions.safe_commands.clone(),
+        risky_commands: config.permissions.risky_commands.clone(),
+        dangerous_commands: config.permissions.dangerous_commands.clone(),
         provider_env: None,
     }));
     crate::command::workflow_mcp::install_project_tools(
@@ -439,7 +440,7 @@ fn open_pipeline_learning_db_at(cwd: &Path, db_path: &Path) -> Option<Arc<cozo::
     crate::command::pipeline_learning_migration::maybe_migrate_legacy_pipeline_learning_with_log(
         cwd, db_path, &db, "pipeline",
     );
-    Some(Arc::new(db))
+    Some(db)
 }
 
 fn build_pipeline_auto_trainer_from_db(

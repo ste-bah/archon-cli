@@ -2,9 +2,7 @@ fn predict_with_checkpoint(
     config: &archon_core::config::ArchonConfig,
     root: &Path,
     model_id: &str,
-    session_id: &str,
-    action_ref: &str,
-    summary: &str,
+    trace: &PredictionTrace,
 ) -> anyhow::Result<PredictionInference> {
     let registry = ModelRegistry::open(root)?;
     let active_kind = registry
@@ -14,28 +12,22 @@ fn predict_with_checkpoint(
         if active_kind != JEPA_MODEL_KIND {
             anyhow::bail!("JepaCheckpointMissing: active model is not a JEPA checkpoint");
         }
-        return predict_with_jepa_checkpoint(
-            config, &registry, model_id, session_id, action_ref, summary,
-        );
+        return predict_with_jepa_checkpoint(config, &registry, model_id, trace);
     }
 
     let candidate = registry.load_cpu_candidate(model_id)?;
-    let adapter = build_embedding_adapter(config)?;
-    let state = embed(adapter.as_ref(), model_id, summary)?;
-    let action = embed(adapter.as_ref(), model_id, &format!("action={summary}"))?;
+    let representation = archon_world_model::GenericEmbeddingRepresentationAdapter::new(
+        build_embedding_adapter(config)?,
+    );
+    let state = representation.encode_state(&trace.context)?;
+    let action = representation.encode_action(&trace.action)?;
     let next = archon_world_model::backend::predict_next_with_backend(
         &candidate.model,
         &state,
         &action,
         candidate.model.metadata.backend,
     )?;
-    let guardrail_scores = Some(guardrail_scores_from_auxiliary(
-        candidate
-            .model
-            .predict_auxiliary(&state, &action)?
-            .iter()
-            .map(|prediction| (prediction.label.as_str(), prediction.probability)),
-    ));
+    let guardrail_scores = auxiliary_guardrail_scores(&candidate.model, &state, &action)?;
     Ok(PredictionInference {
         summary: format!(
             "next-state dim={} norm={:.4}",
@@ -44,42 +36,44 @@ fn predict_with_checkpoint(
         ),
         vector: next,
         model_kind: LATENT_TRANSITION_MODEL_KIND.into(),
-        representation_source: format!("{}:{}", adapter.provider_name(), adapter.model_name()),
+        representation_source: format!(
+            "{}:{}",
+            representation.provider_name(),
+            representation.model_name()
+        ),
         guardrail_scores,
         jepa_runtime_backend_report: None,
     })
+}
+
+fn auxiliary_guardrail_scores(
+    model: &archon_world_model::model::CpuLatentTransitionModel,
+    state: &[f32],
+    action: &[f32],
+) -> anyhow::Result<Option<GuardrailRiskScores>> {
+    Ok(Some(guardrail_scores_from_auxiliary(
+        model
+            .predict_auxiliary(state, action)?
+            .iter()
+            .map(|prediction| (prediction.label.as_str(), prediction.probability)),
+    )))
 }
 
 fn predict_with_jepa_checkpoint(
     config: &archon_core::config::ArchonConfig,
     registry: &ModelRegistry,
     model_id: &str,
-    session_id: &str,
-    action_ref: &str,
-    summary: &str,
+    trace: &PredictionTrace,
 ) -> anyhow::Result<PredictionInference> {
     let started = Instant::now();
     let candidate = registry
         .load_jepa_candidate(model_id)
         .map_err(|error| anyhow::anyhow!("JepaCheckpointMissing: {error}"))?;
-    candidate
-        .model
-        .validate_finite()
-        .map_err(|error| anyhow::anyhow!("JepaCheckpointInvalid: {error}"))?;
-    archon_world_model::jepa::validate_jepa_backend_execution(&candidate.model.metadata)
-        .map_err(|error| anyhow::anyhow!("JepaBackendUnavailable: {error}"))?;
-    if candidate.model.metadata.latent_dim != config.learning.world_model.state_dim {
-        anyhow::bail!(
-            "JepaDimensionMismatch: expected {}, got {}",
-            config.learning.world_model.state_dim,
-            candidate.model.metadata.latent_dim
-        );
-    }
-    let (window, action) = synthetic_runtime_window(session_id, action_ref, summary)?;
+    validate_jepa_candidate(config, &candidate)?;
     let runtime = archon_world_model::jepa::predict_jepa_with_backend(
         &candidate.model,
-        &window,
-        &action,
+        &trace.context,
+        &trace.action,
         candidate.model.metadata.backend,
     )?;
     let guardrail_scores = Some(runtime.guardrail_scores);
@@ -113,6 +107,26 @@ fn predict_with_jepa_checkpoint(
     })
 }
 
+fn validate_jepa_candidate(
+    config: &archon_core::config::ArchonConfig,
+    candidate: &archon_world_model::registry::JepaCandidateRecord,
+) -> anyhow::Result<()> {
+    candidate
+        .model
+        .validate_finite()
+        .map_err(|error| anyhow::anyhow!("JepaCheckpointInvalid: {error}"))?;
+    archon_world_model::jepa::validate_jepa_backend_execution(&candidate.model.metadata)
+        .map_err(|error| anyhow::anyhow!("JepaBackendUnavailable: {error}"))?;
+    if candidate.model.metadata.latent_dim != config.learning.world_model.state_dim {
+        anyhow::bail!(
+            "JepaDimensionMismatch: expected {}, got {}",
+            config.learning.world_model.state_dim,
+            candidate.model.metadata.latent_dim
+        );
+    }
+    Ok(())
+}
+
 pub(crate) fn jepa_prediction_latency_budget(
     config: &archon_core::config::ArchonConfig,
     backend: archon_world_model::BackendKind,
@@ -143,7 +157,6 @@ fn encode_jepa_actual_outcome(
     config: &archon_core::config::ArchonConfig,
     root: &Path,
     prediction: &PersistedPrediction,
-    actual_summary: &str,
 ) -> anyhow::Result<Vec<f32>> {
     let registry = ModelRegistry::open(root)?;
     let candidate = registry
@@ -156,37 +169,27 @@ fn encode_jepa_actual_outcome(
             candidate.model.metadata.latent_dim
         );
     }
-    let (window, _) = synthetic_runtime_window(
-        &prediction.session_id,
-        &format!("{}-actual", prediction.action_ref),
-        actual_summary,
-    )?;
+    let store = WorldModelStore::open(root)?;
+    let rows = store.load_rows()?;
+    let session_rows = rows
+        .iter()
+        .filter(|row| row.session_id == prediction.session_id)
+        .cloned()
+        .collect::<Vec<_>>();
+    let builder = TraceWindowBuilder::new(&session_rows);
+    let window = builder
+        .target_window(&prediction.action_ref, 1, 1)
+        .map_err(|error| anyhow::anyhow!("StoredTraceUnavailable: {error}"))?;
     candidate
         .model
         .encode_target(&window)
         .map_err(|error| anyhow::anyhow!("JepaEncoderFailed: {error}"))
 }
 
-fn synthetic_runtime_window(
-    session_id: &str,
-    action_ref: &str,
-    summary: &str,
-) -> anyhow::Result<(archon_world_model::TraceWindow, TraceAction)> {
-    let mut row =
-        WorldTraceRow::new(session_id, WorldActionKind::AgentAttempt).with_row_id(action_ref);
-    row.redacted_excerpt = Some(summary.to_string());
-    row.created_at = Utc::now();
-    let action = TraceAction::from_row(&row);
-    let builder = TraceWindowBuilder::new(&[row]);
-    let window = builder
-        .context_window(action_ref, 1)
-        .map_err(|error| anyhow::anyhow!("JepaEncoderFailed: {error}"))?;
-    Ok((window, action))
-}
-
 fn unavailable_reason_from_error(error: &anyhow::Error) -> &'static str {
     let message = error.to_string();
     for reason in [
+        "StoredTraceUnavailable",
         "JepaCheckpointMissing",
         "JepaCheckpointInvalid",
         "JepaEncoderFailed",

@@ -101,7 +101,9 @@ fn format_agent_event_stream_json(event: &AgentEvent) -> Option<String> {
             &serde_json::json!({"name": name, "id": id}),
         )),
 
-        AgentEvent::ToolCallComplete { name, id, result } => Some(format_stream_event(
+        AgentEvent::ToolCallComplete {
+            name, id, result, ..
+        } => Some(format_stream_event(
             "tool_result",
             &serde_json::json!({
                 "name": name,
@@ -155,10 +157,27 @@ fn format_agent_event_stream_json(event: &AgentEvent) -> Option<String> {
 
         // Events that don't produce stream output
         AgentEvent::UserPromptReady
+        | AgentEvent::TransientThinkingDelta(_)
+        | AgentEvent::CommitThinkingPreview
+        | AgentEvent::DiscardThinkingPreview
         | AgentEvent::ContextPressureUpdated { .. }
         | AgentEvent::PermissionRequired { .. }
         | AgentEvent::PermissionGranted { .. }
         | AgentEvent::PermissionDenied { .. }
         | AgentEvent::SessionComplete => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transient_thinking_is_not_serialized() {
+        let event = AgentEvent::TransientThinkingDelta("unapproved".into());
+
+        assert_eq!(format_agent_event(&event, &OutputFormat::Text), None);
+        assert_eq!(format_agent_event(&event, &OutputFormat::Json), None);
+        assert_eq!(format_agent_event(&event, &OutputFormat::StreamJson), None);
     }
 }

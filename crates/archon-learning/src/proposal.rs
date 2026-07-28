@@ -294,11 +294,8 @@ mod tests {
         }
     }
 
-    fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-proposal-{}.db", uuid::Uuid::new_v4());
-        let db = DbInstance::new("sqlite", &path, "").unwrap();
-        crate::schema::ensure_learning_schema(&db).unwrap();
-        db
+    fn test_db() -> std::sync::Arc<DbInstance> {
+        crate::cozo_guard::test_sqlite_db("test-proposal")
     }
 
     fn seed_manifest_version(db: &DbInstance, version_id: &str, kind: BehaviourManifestKind) {

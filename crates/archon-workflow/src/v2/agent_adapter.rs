@@ -42,6 +42,12 @@ impl WorkflowV2AgentRequest {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowV2PromptParts {
+    pub stable_prefix: String,
+    pub invocation: String,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct WorkflowV2AgentAdapter;
 
@@ -50,90 +56,12 @@ impl WorkflowV2AgentAdapter {
         Self
     }
     pub fn build_prompt(&self, request: &WorkflowV2AgentRequest) -> String {
-        let input = serde_json::to_string_pretty(&request.input)
-            .unwrap_or_else(|_| request.input.to_string());
-        let target_files = if request.target_files.is_empty() {
-            "[]".to_string()
-        } else {
-            serde_json::to_string(&request.target_files).unwrap_or_else(|_| "[]".to_string())
-        };
-        let target_ownership_scopes = if request.target_ownership_scopes.is_empty() {
-            "[]".to_string()
-        } else {
-            serde_json::to_string(&request.target_ownership_scopes)
-                .unwrap_or_else(|_| "[]".to_string())
-        };
-        let artifact_roots = serde_json::to_string(&request.project_artifacts.artifact_roots)
-            .unwrap_or_else(|_| "[]".to_string());
-        let constraints = if request.constraints.is_empty() {
-            "[]".to_string()
-        } else {
-            serde_json::to_string_pretty(&request.constraints).unwrap_or_else(|_| "[]".to_string())
-        };
-        let write_rules = if request.is_write_capable() {
-            IMPLEMENTATION_RULES
-        } else {
-            READ_ONLY_RULES
-        };
-        let final_output_rule = if request.is_write_capable() {
-            FINAL_OUTPUT_RULE
-        } else {
-            ""
-        };
-        let project_artifact_paths =
-            super::project_artifact_prompt::project_artifact_prompt_section(
-                &request.input,
-                &request.call.options.required_artifacts,
-                request.is_write_capable(),
-                &request.project_artifacts,
-            );
+        let parts = self.build_prompt_parts(request);
+        format!("{}\n\n{}", parts.invocation, parts.stable_prefix)
+    }
 
-        format!(
-            "## Archon Workflow V2 Agent Call\n\
-             call_id: {call_id}\n\
-             role: {role}\n\
-             write_mode: {write_mode}\n\
-             repository_root: {repository_root}\n\
-             project_artifact_root: {project_artifact_root}\n\
-             project_artifact_roots: {artifact_roots}\n\
-             workflow_branch_evidence_root: {branch_evidence_root}\n\
-             target_files: {target_files}\n\
-             target_ownership_scopes: {target_ownership_scopes}\n\n\
-             {project_artifact_paths}\
-             ## Task\n{task}\n\n\
-             ## Constraints\n```json\n{constraints}\n```\n\n\
-             ## Input\n```json\n{input}\n```\n\n\
-             ## Execution Rules\n\
-             - Execute the requested work now; do not ask a confirmation question.\n\
-             - Return exactly one JSON object and no markdown fence, prose prefix, or prose suffix.\n\
-             - Do not return restored-context summaries or previous-session summaries.\n\
-             - Do not stop at a plan or proposed next steps for executable work.\n\
-             {write_rules}\n\n\
-             ## Required JSON Result Envelope\n\
-             {RESULT_SCHEMA}\n\n\
-             {final_output_rule}\n",
-            call_id = request.call.id,
-            role = request.role,
-            write_mode = write_mode_label(request.call.write_mode),
-            repository_root = request.repository_root.as_deref().unwrap_or("<none>"),
-            project_artifact_root = request
-                .project_artifacts
-                .project_root
-                .as_deref()
-                .unwrap_or("<none>"),
-            artifact_roots = artifact_roots,
-            branch_evidence_root = request
-                .project_artifacts
-                .branch_evidence_root
-                .as_deref()
-                .unwrap_or("<none>"),
-            target_files = target_files,
-            target_ownership_scopes = target_ownership_scopes,
-            project_artifact_paths = project_artifact_paths,
-            task = request.task,
-            constraints = constraints,
-            input = input,
-        )
+    pub fn build_prompt_parts(&self, request: &WorkflowV2AgentRequest) -> WorkflowV2PromptParts {
+        super::agent_prompt::build_prompt_parts(request)
     }
     pub fn build_repair_prompt(
         &self,
@@ -503,7 +431,7 @@ fn plan_only_text(result: &WorkflowV2Result) -> bool {
     })
 }
 
-fn write_mode_label(write_mode: Option<WorkflowV2WriteMode>) -> &'static str {
+pub(super) fn write_mode_label(write_mode: Option<WorkflowV2WriteMode>) -> &'static str {
     match write_mode {
         Some(WorkflowV2WriteMode::Serial) => "serial",
         Some(WorkflowV2WriteMode::Coordinated) => "coordinated",
@@ -537,7 +465,7 @@ macro_rules! test_filter_rule {
     };
 }
 
-const READ_ONLY_RULES: &str = concat!(
+pub(super) const READ_ONLY_RULES: &str = concat!(
     "- This is read-only work: do not claim file edits and leave files_changed empty.\n",
     "- For project artifact checks, use project_artifact_paths absolute_path values when present; otherwise resolve .archon/... paths under project_artifact_root, not repository_root.\n",
     // Verification branches are read-only and are the ones running filtered test
@@ -547,7 +475,7 @@ const READ_ONLY_RULES: &str = concat!(
     "- Run test and build commands from the repository root you were given; a runner invoked from the project artifact root will not find the source workspace."
 );
 
-const IMPLEMENTATION_RULES: &str = concat!(
+pub(super) const IMPLEMENTATION_RULES: &str = concat!(
     "- This is implementation-capable work.\n",
     "- If edits are required and made, status must be accepted and files_changed must list each changed path.\n",
     "- The top-level status is your branch verdict; nested artifact/evidence content may describe fail-closed examples such as validation reports with status=failed.\n",
@@ -561,10 +489,10 @@ const IMPLEMENTATION_RULES: &str = concat!(
     "- Status accepted with no files_changed is invalid unless concrete project artifact evidence was written under project_artifact_root."
 );
 
-const FINAL_OUTPUT_RULE: &str = r#"## Final Output Rule
+pub(super) const FINAL_OUTPUT_RULE: &str = r#"## Final Output Rule
 Your final message must be exactly one JSON WorkflowV2Result object, even for a no-op. Example: {"status":"noop","idempotent_noop":true,"summary":"already satisfied","evidence":[{"kind":"inspection","summary":"verified existing implementation"}],"commands_run":[{"kind":"inspect","command":"exact check","status":"succeeded","exit_code":0,"output_summary":"passed"}],"files_changed":[],"task_coverage":[{"task_id":"canonical task id","status":"noop","summary":"already satisfied","evidence":[{"kind":"implementation","summary":"concrete proof"}]}],"residual_gaps":[]}. Never return prose such as Status: noop."#;
 
-const RESULT_SCHEMA: &str = r#"{
+pub(super) const RESULT_SCHEMA: &str = r#"{
   "status": "accepted | noop | failed | blocked | needs_review | cancelled",
   "idempotent_noop": "optional boolean; true only for a top-level noop with concrete evidence and no patch",
   "summary": "concise factual summary",
@@ -587,6 +515,14 @@ mod project_artifact_completion_tests;
 #[cfg(test)]
 #[path = "agent_adapter_required_tools_tests.rs"]
 mod required_tools_tests;
+#[path = "agent_prompt_digest_tests.rs"]
+mod prompt_digest_tests;
+#[cfg(test)]
+#[path = "agent_prompt_growth_tests.rs"]
+mod prompt_growth_tests;
+#[cfg(test)]
+#[path = "agent_prompt_tests.rs"]
+mod prompt_tests;
 #[cfg(test)]
 #[path = "agent_adapter_tests.rs"]
 mod tests;

@@ -234,8 +234,11 @@ pub(crate) fn maybe_migrate_legacy_pipeline_learning(
     }
 
     let source_path_str = source_path.to_string_lossy().to_string();
-    let source = DbInstance::new("newrocksdb", &source_path_str, "")
-        .map_err(|error| anyhow::anyhow!("open legacy pipeline learning DB: {error}"))?;
+    let source = archon_cozo::GuardedDbInstance::new(
+        DbInstance::new("newrocksdb", &source_path_str, "")
+            .map_err(|error| anyhow::anyhow!("open legacy pipeline learning DB: {error}"))?,
+        archon_cozo::CozoGuardConfig::for_db_path(&source_path),
+    );
     archon_pipeline::learning::schema::initialize_learning_schemas(&source)
         .context("initialise legacy pipeline learning schema")?;
 
@@ -384,9 +387,15 @@ fn put_relation_row(db: &DbInstance, spec: &RelationSpec, row: &[DataValue]) -> 
         spec.name,
         spec.keys.join(", ")
     );
-    db.run_script(&script, params, ScriptMutability::Mutable)
-        .map(|_| ())
-        .map_err(|error| anyhow::anyhow!("{error}"))
+    archon_cozo::run_bound_script_guarded(
+        db,
+        &script,
+        params,
+        ScriptMutability::Mutable,
+        "migrate legacy pipeline learning row",
+    )
+    .map(|_| ())
+    .map_err(|error| anyhow::anyhow!("{error}"))
 }
 
 #[cfg(test)]
@@ -395,20 +404,30 @@ mod tests {
 
     #[test]
     fn migrates_legacy_rocksdb_rows_into_sqlite_learning_store_once() {
+        let _env_lock = crate::command::store_paths::LEARNING_DB_ENV_LOCK
+            .lock()
+            .expect("learning DB environment lock");
         let temp = tempfile::tempdir().expect("tempdir");
         let cwd = temp.path();
         let source_path = legacy_pipeline_learning_path(cwd);
         let target_path = cwd.join(".archon").join("archon-data.db");
 
         {
-            let source =
-                DbInstance::new("newrocksdb", source_path.to_str().unwrap(), "").expect("source");
+            let source = archon_cozo::GuardedDbInstance::new(
+                DbInstance::new("newrocksdb", source_path.to_str().unwrap(), "").expect("source"),
+                archon_cozo::CozoGuardConfig::for_db_path(&source_path),
+            );
             archon_pipeline::learning::schema::initialize_learning_schemas(&source)
                 .expect("source schema");
             insert_trajectory(&source, "traj-legacy", 0.75);
         }
 
-        let target = DbInstance::new("sqlite", target_path.to_str().unwrap(), "").expect("target");
+        let target = archon_cozo::open_sqlite_guarded_instance(
+            target_path.to_str().unwrap(),
+            "open migration test target",
+            archon_cozo::CozoGuardConfig::for_db_path(&target_path),
+        )
+        .expect("target");
         archon_pipeline::learning::schema::initialize_learning_schemas(&target)
             .expect("target schema");
 

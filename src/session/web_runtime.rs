@@ -10,15 +10,26 @@ use archon_tui::{AgentDispatcher, app::TuiEvent};
 use crate::cli_args::Cli;
 
 const WEB_TURN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(86400);
+#[cfg(not(test))]
+const WEB_SESSION_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+#[cfg(test)]
+const WEB_SESSION_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(10);
+#[cfg(not(test))]
+const WEB_SESSION_ABORT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+#[cfg(test)]
+const WEB_SESSION_ABORT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(10);
 
 pub(crate) struct WebSessionHandle {
-    input_tx: tokio::sync::mpsc::Sender<String>,
+    input_tx: tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<String>>>,
     permission_tx: tokio::sync::mpsc::Sender<bool>,
     ask_user_tx: tokio::sync::mpsc::Sender<String>,
     event_rx: tokio::sync::Mutex<TuiEventReceiver>,
     last_assistant_response: Arc<tokio::sync::Mutex<String>>,
     cancel_handle: Arc<std::sync::Mutex<Option<Arc<crate::agent_handle::AgentHandle>>>>,
+    loop_task: tokio::sync::Mutex<Option<tokio::task::JoinHandle<anyhow::Result<()>>>>,
+    sandbox_audit_drain: crate::runtime::sandbox_audit_writer::SandboxAuditDrainHandle,
     dispatcher: Arc<std::sync::Mutex<AgentDispatcher>>,
+    shutdown: tokio_util::sync::CancellationToken,
 }
 
 impl WebSessionHandle {
@@ -26,10 +37,18 @@ impl WebSessionHandle {
         let mut event_rx = self.event_rx.lock().await;
         while event_rx.try_recv().is_ok() {}
 
-        self.input_tx
-            .send(input)
+        let input_tx = self
+            .input_tx
+            .lock()
             .await
-            .map_err(|_| anyhow::anyhow!("web session input channel closed"))?;
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("web session shut down"))?;
+        tokio::select! {
+            result = input_tx.send(input) => result
+                .map_err(|_| anyhow::anyhow!("web session input channel closed"))?,
+            _ = self.shutdown.cancelled() => anyhow::bail!("web session shut down"),
+        }
 
         let mut reply = String::new();
         let mut timeout = Box::pin(tokio::time::sleep(WEB_TURN_TIMEOUT));
@@ -55,12 +74,59 @@ impl WebSessionHandle {
         }
     }
 
-    fn cancel_inflight_turn(&self) {
+    pub(crate) async fn begin_shutdown(&self) {
+        self.shutdown.cancel();
+        self.signal_inflight_turn();
+        self.input_tx.lock().await.take();
+    }
+
+    pub(crate) async fn finish_shutdown(&self) -> Result<()> {
+        let loop_result = match self.loop_task.lock().await.take() {
+            Some(mut task) => {
+                match tokio::time::timeout(WEB_SESSION_SHUTDOWN_TIMEOUT, &mut task).await {
+                    Ok(result) => result
+                        .map_err(|error| anyhow::anyhow!("web session loop task failed: {error}")),
+                    Err(_) => {
+                        task.abort();
+                        let abort_result =
+                            tokio::time::timeout(WEB_SESSION_ABORT_TIMEOUT, &mut task)
+                                .await
+                                .map_err(|_| {
+                                    anyhow::anyhow!(
+                                        "web session loop remained active {:?} after abort",
+                                        WEB_SESSION_ABORT_TIMEOUT
+                                    )
+                                });
+                        let suffix = abort_result
+                            .err()
+                            .map(|error| format!("; {error:#}"))
+                            .unwrap_or_default();
+                        Err(anyhow::anyhow!(
+                            "web session loop shutdown timed out after {:?}{suffix}",
+                            WEB_SESSION_SHUTDOWN_TIMEOUT
+                        ))
+                    }
+                }
+            }
+            None => Ok(Ok(())),
+        };
+        let fallback_result = self
+            .sandbox_audit_drain
+            .shutdown(std::time::Duration::from_secs(30))
+            .await;
+        super::finish_loop_and_audit(loop_result, fallback_result)
+    }
+
+    fn signal_inflight_turn(&self) {
         if let Ok(guard) = self.cancel_handle.lock()
             && let Some(ref handle) = *guard
         {
             handle.fire_cancel();
         }
+    }
+
+    fn cancel_inflight_turn(&self) {
+        self.signal_inflight_turn();
         if let Ok(mut dispatcher) = self.dispatcher.lock() {
             let _ = dispatcher.cancel_current();
         }
@@ -181,6 +247,7 @@ pub(crate) async fn spawn_web_session(
         auto_trainer,
         metrics,
         agent_event_tx_for_dispatcher,
+        sandbox_audit_drain,
     } = super::interactive_agent::build(
         config,
         session_id,
@@ -330,7 +397,10 @@ pub(crate) async fn spawn_web_session(
         agent.set_inner_voice_change_callback(cb);
     }
 
-    observability::spawn_named(
+    let sandbox_audit_drain =
+        crate::runtime::sandbox_audit_writer::SandboxAuditDrainHandle::new(sandbox_audit_drain);
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let loop_task = observability::spawn_named(
         "web-session-loop",
         crate::session_loop::run_session_loop(
             agent,
@@ -354,17 +424,23 @@ pub(crate) async fn spawn_web_session(
             auto_trainer,
             Arc::clone(&dispatcher),
             Arc::clone(&cancel_handle),
+            sandbox_audit_drain.clone(),
+            false,
+            shutdown.clone(),
         ),
     );
 
     Ok(Arc::new(WebSessionHandle {
-        input_tx: user_input_tx,
+        input_tx: tokio::sync::Mutex::new(Some(user_input_tx)),
         permission_tx: perm_prompt_tx,
         ask_user_tx,
         event_rx: tokio::sync::Mutex::new(tui_event_rx),
         last_assistant_response: last_assistant_response_shared,
         cancel_handle,
+        loop_task: tokio::sync::Mutex::new(Some(loop_task)),
+        sandbox_audit_drain,
         dispatcher,
+        shutdown,
     }))
 }
 
@@ -413,29 +489,5 @@ fn auth_label(env_vars: &ArchonEnvVars) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{finish_reply, sanitize_web_reply};
-
-    #[test]
-    fn finish_reply_prefers_streamed_text() {
-        assert_eq!(finish_reply(" live reply ", "stale"), "live reply");
-    }
-
-    #[test]
-    fn finish_reply_uses_last_assistant_response_when_stream_empty() {
-        assert_eq!(finish_reply("   ", " buffered reply "), "buffered reply");
-    }
-
-    #[test]
-    fn finish_reply_removes_legacy_tool_transcript_noise() {
-        let reply = sanitize_web_reply(
-            "\n[tool] DocSearch started\n\
-             [tool] memory_recall done: 10 memories found\n\
-             noisy memory row\n\
-             \n\
-             [tool] DocSearch failed: Error: database is locked\n\
-             The document store is locked right now.\n",
-        );
-        assert_eq!(reply, "The document store is locked right now.");
-    }
-}
+#[path = "web_runtime_tests.rs"]
+mod tests;

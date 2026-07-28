@@ -9,9 +9,9 @@ use archon_world_model::guardrail::GuardrailRiskScores;
 use archon_world_model::jepa::JEPA_MODEL_KIND;
 use archon_world_model::registry::{LATENT_TRANSITION_MODEL_KIND, ModelRegistry};
 use archon_world_model::representation::{
-    TraceAction, TraceWindowBuilder, WorldRepresentationAdapter,
+    TraceAction, TraceWindow, TraceWindowBuilder, WorldRepresentationAdapter,
 };
-use archon_world_model::schema::{WorldActionKind, WorldTraceRow};
+use archon_world_model::storage::WorldModelStore;
 
 use super::embedding_runtime::build_embedding_adapter;
 
@@ -55,8 +55,57 @@ struct PredictionInference {
     jepa_runtime_backend_report: Option<archon_world_model::JepaRuntimeBackendReport>,
 }
 
+struct PredictionTrace {
+    context: TraceWindow,
+    action: TraceAction,
+    action_summary: String,
+    evidence_refs: Vec<String>,
+}
+
 fn default_prediction_model_kind() -> String {
     LATENT_TRANSITION_MODEL_KIND.into()
+}
+
+fn prediction_trace(
+    root: &Path,
+    session_id: &str,
+    action_ref: &str,
+    context_limit: usize,
+) -> anyhow::Result<PredictionTrace> {
+    let store = WorldModelStore::open(root)?;
+    let rows = store.load_rows()?;
+    let action_row = rows
+        .iter()
+        .find(|row| row.row_id == action_ref)
+        .cloned()
+        .ok_or_else(|| {
+            anyhow::anyhow!("StoredTraceUnavailable: action row not found: {action_ref}")
+        })?;
+    if action_row.session_id != session_id {
+        anyhow::bail!(
+            "stored action row session mismatch: expected {session_id}, got {}",
+            action_row.session_id
+        );
+    }
+    let context_rows = rows
+        .iter()
+        .filter(|row| row.session_id == session_id)
+        .cloned()
+        .collect::<Vec<_>>();
+    let builder = TraceWindowBuilder::new(&context_rows);
+    let context = builder
+        .prior_context_window(&action_row.row_id, context_limit)
+        .map_err(|error| anyhow::anyhow!("stored trace context unavailable: {error}"))?;
+    Ok(PredictionTrace {
+        action: TraceAction::from_row(&action_row),
+        action_summary: action_row.redacted_excerpt.clone().unwrap_or_default(),
+        evidence_refs: context
+            .rows
+            .iter()
+            .map(|row| format!("world_row:{}", row.row_id))
+            .collect(),
+        context,
+    })
 }
 
 pub(super) fn render_active_checkpoint_prediction(
@@ -77,30 +126,9 @@ pub(super) fn render_active_checkpoint_prediction(
         action_ref,
         summary,
     ) {
-        Ok(Some((prediction, prediction_path))) => Some(format!(
-            "World Model Prediction\n\
-             ======================\n\
-             Prediction id: {}\n\
-             Session: {session_id}\n\
-             Action ref: {action_ref}\n\
-             Model: {}\n\
-             Model kind: {}\n\
-             Representation: {}\n\
-             Inference: active_checkpoint\n\
-             Prediction: {}\n\
-             {}\
-             Prediction record: {}",
-            prediction.prediction_id,
-            prediction.model_id,
-            prediction.model_kind,
-            prediction
-                .representation_source
-                .as_deref()
-                .unwrap_or("generic_embedding"),
-            prediction.predicted_next_state_summary,
-            jepa_runtime_backend_report_lines(&prediction),
-            prediction_path.display()
-        )),
+        Ok(Some((prediction, prediction_path))) => {
+            Some(render_prediction(&prediction, &prediction_path))
+        }
         Ok(None) => None,
         Err(error) => Some(super::render_unavailable_prediction(
             session_id,
@@ -108,6 +136,59 @@ pub(super) fn render_active_checkpoint_prediction(
             unavailable_reason_from_error(&error),
         )),
     }
+}
+
+fn render_prediction(prediction: &PersistedPrediction, path: &Path) -> String {
+    format!(
+        "World Model Prediction\n\
+         ======================\n\
+         Prediction id: {}\n\
+         Session: {}\n\
+         Action ref: {}\n\
+         Model: {}\n\
+         Model kind: {}\n\
+         Representation: {}\n\
+         Inference: active_checkpoint\n\
+         Prediction: {}\n\
+         {}\
+         Prediction record: {}",
+        prediction.prediction_id,
+        prediction.session_id,
+        prediction.action_ref,
+        prediction.model_id,
+        prediction.model_kind,
+        prediction
+            .representation_source
+            .as_deref()
+            .unwrap_or("generic_embedding"),
+        prediction.predicted_next_state_summary,
+        jepa_runtime_backend_report_lines(prediction),
+        path.display()
+    )
+}
+
+fn prediction_is_ready(
+    config: &archon_core::config::ArchonConfig,
+    stats: archon_world_model::ColdStartStats,
+    model_id: &str,
+    session_id: &str,
+    action_ref: &str,
+    summary: &str,
+) -> bool {
+    let advisor = archon_world_model::WorldAdvisor::new(
+        archon_world_model::WorldAdvisorConfig {
+            thresholds: super::cold_start_thresholds(config),
+            active_model_id: Some(model_id.to_string()),
+            training_in_progress: false,
+        },
+        stats,
+    );
+    let context = archon_world_model::WorldAdvisorContext {
+        session_id: session_id.to_string(),
+        action_ref: action_ref.to_string(),
+        action_summary: summary.to_string(),
+    };
+    advisor.evaluate(&context).prediction.is_some()
 }
 
 pub(super) fn persist_active_checkpoint_prediction(
@@ -122,25 +203,17 @@ pub(super) fn persist_active_checkpoint_prediction(
     let Some(model_id) = active_model_id else {
         return Ok(None);
     };
-    let advisor = archon_world_model::WorldAdvisor::new(
-        archon_world_model::WorldAdvisorConfig {
-            thresholds: super::cold_start_thresholds(config),
-            active_model_id: Some(model_id.clone()),
-            training_in_progress: false,
-        },
-        stats,
-    );
-    let context = archon_world_model::WorldAdvisorContext {
-        session_id: session_id.to_string(),
-        action_ref: action_ref.to_string(),
-        action_summary: summary.to_string(),
-    };
-    if advisor.evaluate(&context).prediction.is_none() {
+    if !prediction_is_ready(config, stats, &model_id, session_id, action_ref, summary) {
         return Ok(None);
     }
 
-    let inference =
-        predict_with_checkpoint(config, root, &model_id, session_id, action_ref, summary)?;
+    let trace = prediction_trace(
+        root,
+        session_id,
+        action_ref,
+        config.learning.world_model.jepa.context_window_rows,
+    )?;
+    let inference = predict_with_checkpoint(config, root, &model_id, &trace)?;
     let prediction = PersistedPrediction {
         prediction_id: format!("world-prediction-{}", uuid::Uuid::new_v4()),
         model_id,
@@ -148,13 +221,13 @@ pub(super) fn persist_active_checkpoint_prediction(
         representation_source: Some(inference.representation_source),
         session_id: session_id.to_string(),
         action_ref: action_ref.to_string(),
-        action_summary: summary.to_string(),
+        action_summary: trace.action_summary,
         predicted_next_state_summary: inference.summary,
         predicted_next_state: inference.vector,
         actual_next_state_summary: None,
         actual_next_state: None,
         latent_surprise: None,
-        evidence_refs: vec![format!("runtime_action:{action_ref}")],
+        evidence_refs: trace.evidence_refs,
         guardrail_scores: inference.guardrail_scores,
         jepa_runtime_backend_report: inference.jepa_runtime_backend_report,
         created_at: Utc::now(),
@@ -194,7 +267,7 @@ pub(super) fn record_outcome_for_prediction(
     let mut prediction = load_prediction(root, prediction_id)?
         .ok_or_else(|| anyhow::anyhow!("prediction not found: {prediction_id}"))?;
     let actual_next_state = if prediction.model_kind == JEPA_MODEL_KIND {
-        encode_jepa_actual_outcome(config, root, &prediction, actual_summary)?
+        encode_jepa_actual_outcome(config, root, &prediction)?
     } else {
         let adapter = build_embedding_adapter(config)?;
         embed(
@@ -246,4 +319,3 @@ fn prediction_path(root: &Path, prediction_id: &str) -> std::path::PathBuf {
     root.join("predictions")
         .join(format!("{prediction_id}.json"))
 }
-

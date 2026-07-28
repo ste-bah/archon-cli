@@ -7,16 +7,23 @@ test inventory or the pass/fail/ignored tallies must be explained.
 
 ## Files
 
-- `cargo_test_list.txt` — sorted, unique test names across all 14 workspace
-  crates. One name per line, ANSI/timings/abs-paths stripped.
+- `cargo_test_list.txt` — sorted, unique `package::kind::target::test` identities
+  across every workspace libtest-bearing Cargo target. Rustdoc source descriptors
+  are intentionally excluded because they are not libtest test identities.
 - `cargo_test_summary.txt` — exactly one line of the form
-  `passed=N failed=M ignored=K` (plus ` timeout=T` if any crate timed out).
+  `passed=N failed=M ignored=K`.
+- `cargo_test_adjudication.tsv` — reviewed disposition of all 322 historical
+  name-only identities examined during normalization. It records 279 unique
+  same-leaf module moves, 2 module-prefix resolutions, 13 exact replacements,
+  16 semantic replacements, 9 intentional deletions, and 3 tests restored after
+  the original audit. Each row carries a current physical identity or immutable
+  commit/path evidence plus rationale. `cargo_test_adjudication_notes.txt` gives
+  the grouped audit overview. These are evidence, not allowlists consumed by the gate.
 
 ## What "baseline" means
 
-The baseline records **reality, not aspiration**. Failing tests are NOT fixed
-before capture — they are recorded as failing. A later task fixing the failure
-is the moment to regenerate this baseline.
+The baseline records a reviewed, passing test inventory. Regeneration aborts on any
+failed or timed-out package so a partial or failing run cannot become the reference.
 
 ## When to regenerate
 
@@ -58,9 +65,12 @@ regen script therefore:
 
 - Uses `--jobs 1` (one rustc at a time)
 - Uses `-- --test-threads=1` (one test runner at a time)
-- Iterates crates sequentially with `-p <crate>` — never `--workspace`
-- Wraps each crate in a 600s `timeout`; crates that exceed it are counted
-  as `timeout=T` and skipped, not retried
+- Iterates workspace packages sequentially with `-p <crate>` — never `--workspace`
+- Wraps executable package test runs in a 600s `timeout` and the one sequential
+  workspace discovery build in a 1800s `timeout`; any timeout or test failure
+  aborts regeneration without accepting a partial baseline
+- Lists each Cargo test target separately, preserving package, target kind, and
+  target name identity
 
 Do not "optimize" these constraints away.
 

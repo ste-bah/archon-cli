@@ -189,11 +189,25 @@ pub(crate) async fn summary_handler(State(state): State<AppState>, headers: Head
         return resp;
     }
     let jobs = state.ingest_jobs.lock().await.clone();
-    (
-        StatusCode::OK,
-        Json(summary(&state.paths, &state.api.policy(), jobs)),
-    )
-        .into_response()
+    let paths = state.paths.clone();
+    let policy = state.api.policy();
+    match run_summary_blocking(move || summary(&paths, &policy, jobs)).await {
+        Ok(summary) => (StatusCode::OK, Json(summary)).into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("ingest summary blocking task failed: {error}"),
+        )
+            .into_response(),
+    }
+}
+
+async fn run_summary_blocking<T>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, tokio::task::JoinError>
+where
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(work).await
 }
 
 pub(crate) async fn run_handler(
@@ -323,4 +337,23 @@ pub fn generated_typescript() -> String {
 
 fn exported(decl: String) -> String {
     format!("export {decl}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn summary_blocking_work_yields_to_the_async_runtime() {
+        let (release, blocked) = std::sync::mpsc::channel();
+        let work = tokio::spawn(run_summary_blocking(move || {
+            blocked.recv().unwrap();
+            1
+        }));
+
+        tokio::task::yield_now().await;
+        assert_eq!(tokio::spawn(async { 2 }).await.unwrap(), 2);
+        release.send(()).unwrap();
+        assert_eq!(work.await.unwrap().unwrap(), 1);
+    }
 }

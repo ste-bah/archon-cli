@@ -13,6 +13,7 @@ use crate::schema::WorldLabelSet;
 
 pub const ACTIONS_LEDGER: &str = "world-guardrail-actions.jsonl";
 pub const DECISIONS_LEDGER: &str = "world-guardrail-decisions.jsonl";
+pub const REVISIONS_LEDGER: &str = "world-guardrail-revisions.jsonl";
 pub const VERIFICATIONS_LEDGER: &str = "world-guardrail-verifications.jsonl";
 pub const OUTCOMES_LEDGER: &str = "world-guardrail-outcomes.jsonl";
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
@@ -134,6 +135,7 @@ pub enum GuardrailReasonCode {
     ManualApprovalRequired,
     AdvisorUnavailable,
     GuardrailOverheadExceeded,
+    ToolRunBlocked,
     LowRiskAllowed,
 }
 
@@ -383,4 +385,3 @@ impl Default for WorldGuardrailPredictionContext {
         }
     }
 }
-

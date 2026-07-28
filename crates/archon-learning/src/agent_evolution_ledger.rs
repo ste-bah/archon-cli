@@ -127,6 +127,19 @@ pub fn insert_agent_performance_ledger_record(
     db: &DbInstance,
     record: &AgentPerformanceLedgerRecord,
 ) -> Result<()> {
+    run_script_guarded(
+        db,
+        ledger_put_script(),
+        ledger_put_params(record)?,
+        ScriptMutability::Mutable,
+        "insert agent_performance_ledger failed",
+    )?;
+    Ok(())
+}
+
+pub(crate) fn ledger_put_params(
+    record: &AgentPerformanceLedgerRecord,
+) -> Result<BTreeMap<String, DataValue>> {
     let mut params = BTreeMap::new();
     params.insert("eid".into(), DataValue::from(record.event_id.as_str()));
     params.insert("agent".into(), DataValue::from(record.agent_type.as_str()));
@@ -208,15 +221,7 @@ pub fn insert_agent_performance_ledger_record(
         "created".into(),
         DataValue::from(record.created_at.as_str()),
     );
-
-    run_script_guarded(
-        db,
-        ledger_put_script(),
-        params,
-        ScriptMutability::Mutable,
-        "insert agent_performance_ledger failed",
-    )?;
-    Ok(())
+    Ok(params)
 }
 
 pub fn get_agent_performance_ledger_record(
@@ -253,7 +258,7 @@ pub fn list_agent_performance_ledger_by_agent(
     Ok(records)
 }
 
-fn ledger_put_script() -> &'static str {
+pub(crate) fn ledger_put_script() -> &'static str {
     "?[event_id, agent_type, agent_version, run_id, pipeline_id, phase, \
      task_hash, model_id, provider_id, profile_id, permission_mode, \
      completion_status, applied_rate, completion_rate, quality_score, \
@@ -368,14 +373,8 @@ fn clamp_unit(value: f64) -> f64 {
 mod tests {
     use super::*;
 
-    fn test_db() -> DbInstance {
-        let path = format!(
-            "/tmp/test-agent-performance-ledger-{}.db",
-            uuid::Uuid::new_v4()
-        );
-        let db = DbInstance::new("sqlite", &path, "").unwrap();
-        crate::schema::ensure_learning_schema(&db).unwrap();
-        db
+    fn test_db() -> std::sync::Arc<DbInstance> {
+        crate::cozo_guard::test_sqlite_db("test-agent-performance-ledger")
     }
 
     #[test]

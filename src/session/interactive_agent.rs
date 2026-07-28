@@ -25,7 +25,7 @@ use crate::runtime::provider_observer::{
 pub(super) struct Runtime {
     pub agent: Agent,
     pub provider: Arc<dyn archon_llm::provider::LlmProvider>,
-    pub agent_event_rx: tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent>,
+    pub agent_event_rx: tokio::sync::mpsc::Receiver<TimestampedEvent>,
     pub tui_event_tx: TuiEventSender,
     pub tui_event_rx: TuiEventReceiver,
     pub user_input_tx: tokio::sync::mpsc::Sender<String>,
@@ -41,7 +41,8 @@ pub(super) struct Runtime {
     pub governed_learning_db: Option<Arc<cozo::DbInstance>>,
     pub auto_trainer: Option<Arc<archon_pipeline::learning::gnn::auto_trainer::AutoTrainer>>,
     pub metrics: Arc<archon_tui::observability::ChannelMetrics>,
-    pub agent_event_tx_for_dispatcher: tokio::sync::mpsc::UnboundedSender<TimestampedEvent>,
+    pub agent_event_tx_for_dispatcher: tokio::sync::mpsc::Sender<TimestampedEvent>,
+    pub sandbox_audit_drain: crate::runtime::sandbox_audit_writer::SandboxAuditDrain,
 }
 
 pub(super) async fn build(
@@ -57,10 +58,11 @@ pub(super) async fn build(
     checkpoint_store: Option<archon_session::checkpoint::CheckpointStore>,
     mut agent_config: AgentConfig,
     registry: archon_core::dispatch::ToolRegistry,
-    voice_event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<archon_tui::app::TuiEvent>>,
+    voice_event_rx: Option<tokio::sync::mpsc::Receiver<archon_tui::app::TuiEvent>>,
 ) -> Result<Runtime> {
-    let (agent_event_tx, agent_event_rx) =
-        tokio::sync::mpsc::unbounded_channel::<TimestampedEvent>();
+    let (agent_event_tx, agent_event_rx) = tokio::sync::mpsc::channel::<TimestampedEvent>(
+        archon_core::agent::AGENT_EVENT_CHANNEL_CAPACITY,
+    );
     let (tui_event_tx, tui_event_rx) = archon_tui::event_channel::bounded_tui_event_channel();
     agent_config.activity_sink =
         super::session_activity_sink_with_tui(session_id, tui_event_tx.clone());
@@ -78,7 +80,7 @@ pub(super) async fn build(
         let voice_fwd_tx = tui_event_tx.clone();
         observability::spawn_named("voice-event-forwarder", async move {
             while let Some(evt) = voice_rx.recv().await {
-                if voice_fwd_tx.send(evt).is_err() {
+                if voice_fwd_tx.send_async(evt).await.is_err() {
                     break;
                 }
             }
@@ -157,36 +159,9 @@ pub(super) async fn build(
         }
     };
 
-    let learning_cozo_db = {
-        let db_path = crate::command::store_paths::learning_db_path_for_dir(&working_dir);
-        if let Some(parent) = db_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        match archon_learning::cozo_guard::open_sqlite_guarded(
-            db_path.to_str().unwrap_or(""),
-            "open interactive learning db",
-        ) {
-            Ok(db) => {
-                if let Err(e) = archon_pipeline::learning::schema::initialize_learning_schemas(&db)
-                {
-                    tracing::warn!(error = %e, "Learning schema init failed; retrain may not work");
-                } else {
-                    crate::command::pipeline_learning_migration::maybe_migrate_legacy_pipeline_learning_with_log(
-                        &working_dir,
-                        &db_path,
-                        &db,
-                        "interactive",
-                    );
-                }
-                Some(Arc::new(db))
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "CozoDB learning store unavailable; retrain disabled");
-                None
-            }
-        }
-    };
-    let governed_learning_db = super::open_governed_learning_db(&working_dir);
+    let initialized_learning = super::interactive_learning_init::initialize(&working_dir).await;
+    let learning_cozo_db = initialized_learning.pipeline;
+    let governed_learning_db = initialized_learning.governed;
 
     let auto_trainer = build_auto_trainer(config, &learning_cozo_db, memory.as_ref());
 
@@ -209,9 +184,35 @@ pub(super) async fn build(
     let llm_adapter = super::pipeline_adapter::build_subagent_pipeline_client(
         Arc::clone(&provider),
         &agent_config,
+        config,
         &working_dir,
         session_id,
     );
+    let native_sandbox = agent_config
+        .sandbox
+        .take()
+        .expect("session sandbox configured");
+    let (sandbox, sandbox_audit_drain) = crate::runtime::sandbox_audit::audit_sandbox_backend(
+        native_sandbox,
+        config,
+        session_id,
+        &agent_config.agent_type,
+    )
+    .await?;
+    agent_config.sandbox = Some(sandbox);
+    let cognitive_store = match super::open_cognitive_store(&working_dir).await {
+        Ok(store) => store,
+        Err(error) => {
+            let audit_result = super::drain_startup_sandbox_audit(sandbox_audit_drain).await;
+            return Err(super::finish_startup_failure(error, audit_result));
+        }
+    };
+    let metrics = Arc::new(archon_tui::observability::ChannelMetrics::default());
+    if let Err(error) = super::spawn_metrics_exporter(cli.metrics_port, Arc::clone(&metrics)) {
+        let audit_result = super::drain_startup_sandbox_audit(sandbox_audit_drain).await;
+        return Err(super::finish_startup_failure(error, audit_result));
+    }
+
     let agent_event_tx_for_dispatcher = agent_event_tx.clone();
     let mut agent = Agent::new(
         Arc::clone(&provider),
@@ -220,14 +221,12 @@ pub(super) async fn build(
         agent_event_tx,
         agent_registry,
     );
-    let metrics = Arc::new(archon_tui::observability::ChannelMetrics::default());
+    super::world_model_callbacks::install(&mut agent, config, session_id);
     let metrics_sink: Arc<dyn ChannelMetricSink> = metrics.clone();
     agent.set_channel_metrics(metrics_sink);
-    if let Some(store) = super::open_cognitive_store(&working_dir) {
+    if let Some(store) = cognitive_store {
         agent.set_cognitive_store(store);
     }
-
-    super::spawn_metrics_exporter(cli.metrics_port, Arc::clone(&metrics))?;
 
     if let Some(store) = checkpoint_store {
         agent.set_checkpoint_store(store);
@@ -306,6 +305,7 @@ pub(super) async fn build(
         auto_trainer,
         metrics,
         agent_event_tx_for_dispatcher,
+        sandbox_audit_drain,
     })
 }
 
@@ -350,41 +350,52 @@ async fn resolve_provider(
                     selection
                         .fallback_reason
                         .unwrap_or("provider_construction_fallback"),
-                );
+                )
+                .await;
                 let profile_id =
-                    crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+                    crate::runtime::provider_auth_selection::selected_provider_auth_profile_id_async(
                         &selected_provider,
-                    );
+                    )
+                    .await;
                 observe_llm_provider_with_profile(selection.provider, runtime_mode, profile_id)
+                    .await
             }
             None => {
-                let provider = build_llm_provider_without_anthropic_fallback(&config.llm).map_err(
-                    |error| {
+                let provider = match build_llm_provider_without_anthropic_fallback(&config.llm) {
+                    Ok(provider) => provider,
+                    Err(error) => {
                         let reason = provider_construction_error_reason(&error);
                         record_anthropic_fallback_denied(
                             &config.llm.provider,
                             "interactive_session",
                             reason,
-                        );
-                        anyhow::anyhow!("provider {} failed: {error}", config.llm.provider)
-                    },
-                )?;
+                        )
+                        .await;
+                        return Err(anyhow::anyhow!(
+                            "provider {} failed: {error}",
+                            config.llm.provider
+                        ));
+                    }
+                };
                 let selected_provider = provider.name().to_string();
                 let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
                 let profile_id =
-                    crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+                    crate::runtime::provider_auth_selection::selected_provider_auth_profile_id_async(
                         &selected_provider,
-                    );
-                observe_llm_provider_with_profile(provider, runtime_mode, profile_id)
+                    )
+                    .await;
+                observe_llm_provider_with_profile(provider, runtime_mode, profile_id).await
             }
         },
     };
 
     if !provider_was_prebuilt {
         let selected_provider = provider.name().to_string();
-        let profile_id = crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
-            &selected_provider,
-        );
+        let profile_id =
+            crate::runtime::provider_auth_selection::selected_provider_auth_profile_id_async(
+                &selected_provider,
+            )
+            .await;
         crate::runtime::hooks::fire_provider_resolve_hook(
             hook_registry,
             working_dir,

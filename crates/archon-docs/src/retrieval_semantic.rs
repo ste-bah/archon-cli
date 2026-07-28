@@ -71,7 +71,7 @@ fn rocksdb_hnsw_search(
     query_vec: &[f32],
     top_k: usize,
 ) -> Result<Option<Vec<SearchResult>>, DocsError> {
-    let vector_store = match DocVectorStore::open_default() {
+    let vector_store = match DocVectorStore::acquire_default() {
         Ok(store) => store,
         Err(error) => {
             tracing::warn!(%error, "RocksDB vector store unavailable; trying legacy Cozo HNSW");
@@ -87,7 +87,7 @@ fn rocksdb_hnsw_search(
         return Ok(None);
     }
     let hits = vector_store
-        .search_in_memory(provider_name, query_vec, top_k, 50, None)
+        .search_persisted_first(provider_name, query_vec, top_k, 50, None)
         .map_err(|e| DocsError::Retrieval {
             message: format!("Rust-HNSW search failed: {e}"),
         })?;

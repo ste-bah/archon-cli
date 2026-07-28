@@ -25,6 +25,7 @@ fn tool_complete_variant() {
         id: "tool-1".into(),
         success: true,
         output: "file contents".into(),
+        transcript_summary: None,
     };
 }
 
@@ -168,21 +169,6 @@ fn set_agent_info_variant() {
 #[test]
 fn resize_variant() {
     let _e = TuiEvent::Resize { cols: 80, rows: 24 };
-}
-
-#[test]
-fn user_input_variant() {
-    let _e = TuiEvent::UserInput("hello world".into());
-}
-
-#[test]
-fn slash_cancel_variant() {
-    let _e = TuiEvent::SlashCancel;
-}
-
-#[test]
-fn slash_agent_variant() {
-    let _e = TuiEvent::SlashAgent("agent-123".into());
 }
 
 #[test]

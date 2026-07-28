@@ -124,6 +124,27 @@ fn non_reloadable_changes_filtered() {
 // ---------------------------------------------------------------------------
 
 #[test]
+fn watcher_ignores_file_access() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let config_path = dir.path().join("config.toml");
+    fs::write(
+        &config_path,
+        "[api]\ndefault_model = \"claude-sonnet-4-6\"\n",
+    )
+    .expect("write initial config");
+    let watcher = ConfigWatcher::start(std::slice::from_ref(&config_path)).expect("start watcher");
+    thread::sleep(Duration::from_millis(200));
+
+    fs::read_to_string(&config_path).expect("read watched config");
+    thread::sleep(Duration::from_millis(200));
+
+    assert!(
+        watcher.poll_changes().is_empty(),
+        "reading config must not trigger hot reload"
+    );
+}
+
+#[test]
 fn watcher_detects_file_change() {
     let dir = tempfile::tempdir().expect("create temp dir");
     let config_path = dir.path().join("config.toml");

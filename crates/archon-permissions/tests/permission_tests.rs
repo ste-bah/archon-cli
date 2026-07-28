@@ -113,6 +113,15 @@ fn unknown_command_is_risky() {
 // -----------------------------------------------------------------------
 
 #[test]
+fn unrelated_delete_text_remains_safe() {
+    let (s, r, d) = no_overrides();
+    assert_eq!(
+        classify_command("echo -delete", &s, &r, &d),
+        CommandClass::Safe
+    );
+}
+
+#[test]
 fn rm_rf_is_dangerous() {
     let (s, r, d) = no_overrides();
     assert_eq!(

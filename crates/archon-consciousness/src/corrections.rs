@@ -12,6 +12,27 @@ use thiserror::Error;
 
 use crate::rules::{RuleSource, RulesEngine};
 
+const FACTUAL_RULE: (&str, &str) = (
+    "rule:correction:factual-error:v2",
+    "Verify factual claims against available evidence before presenting them.",
+);
+const APPROACH_RULE: (&str, &str) = (
+    "rule:correction:approach-correction:v2",
+    "Review the chosen approach against the user's goal before continuing.",
+);
+const REPEATED_INSTRUCTION_RULE: (&str, &str) = (
+    "rule:correction:repeated-instruction:v2",
+    "Re-read and follow relevant user instructions before acting.",
+);
+const FORBIDDEN_ACTION_RULE: (&str, &str) = (
+    "rule:correction:did-forbidden-action:v2",
+    "Check constraints and permissions before performing a potentially forbidden action.",
+);
+const PERMISSION_RULE: (&str, &str) = (
+    "rule:correction:acted-without-permission:v2",
+    "Obtain explicit user approval before actions that require confirmation.",
+);
+
 // ── public types ─────────────────────────────────────────────
 
 /// Classification of a correction with an associated severity multiplier.
@@ -61,6 +82,16 @@ impl CorrectionType {
             _ => None,
         }
     }
+
+    fn derived_rule(self) -> (&'static str, &'static str) {
+        match self {
+            Self::FactualError => FACTUAL_RULE,
+            Self::ApproachCorrection => APPROACH_RULE,
+            Self::RepeatedInstruction => REPEATED_INSTRUCTION_RULE,
+            Self::DidForbiddenAction => FORBIDDEN_ACTION_RULE,
+            Self::ActedWithoutPermission => PERMISSION_RULE,
+        }
+    }
 }
 
 /// A recorded correction event.
@@ -85,6 +116,12 @@ pub struct Correction {
 pub enum CorrectionError {
     #[error("correction not found: {0}")]
     NotFound(String),
+
+    #[error("correction boost outcome is uncertain after retry errors: {0}")]
+    BoostOutcomeUnknown(String),
+
+    #[error("correction operation failed: {cause}; cleanup failed: {cleanup}")]
+    Cleanup { cause: String, cleanup: String },
 
     #[error("memory graph error: {0}")]
     Memory(#[from] archon_memory::MemoryError),
@@ -117,8 +154,8 @@ impl<'g> CorrectionTracker<'g> {
     /// * If `rule_id` is `Some`, creates a `CausedBy` edge from the
     ///   correction to the rule and increments the rule's score by
     ///   `severity_multiplier * 5.0` (clamped to 100).
-    /// * If `rule_id` is `None`, a new `CorrectionDerived` rule is
-    ///   auto-created from the correction content and linked.
+    /// * If `rule_id` is `None`, a deterministic `CorrectionDerived` rule is
+    ///   created or reused without copying correction text into the rule body.
     pub fn record_correction(
         &self,
         correction_type: CorrectionType,
@@ -126,12 +163,36 @@ impl<'g> CorrectionTracker<'g> {
         context: &str,
         rule_id: Option<&str>,
     ) -> Result<Correction, CorrectionError> {
+        self.record_correction_with_id(
+            &uuid::Uuid::new_v4().to_string(),
+            correction_type,
+            content,
+            context,
+            rule_id,
+        )
+    }
+
+    /// Record a correction using a caller-stable ID so a lost response can be
+    /// retried without applying the rule boost twice.
+    pub fn record_correction_with_id(
+        &self,
+        correction_id: &str,
+        correction_type: CorrectionType,
+        content: &str,
+        context: &str,
+        rule_id: Option<&str>,
+    ) -> Result<Correction, CorrectionError> {
         let severity = correction_type.severity_multiplier();
-
-        let tags = vec![correction_type.as_tag(), format!("severity:{severity}")];
-
+        let derived_rule = correction_type.derived_rule();
+        let effective_rule_id = rule_id.map_or_else(|| derived_rule.0.to_string(), str::to_string);
+        let tags = vec![
+            correction_type.as_tag(),
+            format!("severity:{severity}"),
+            target_rule_tag(&effective_rule_id),
+        ];
         let importance = severity * 10.0; // 15..50 range
-        let mem_id = self.graph.store_memory(
+        let outcome = self.graph.store_memory_with_id_outcome(
+            correction_id,
             content,
             "correction",
             MemoryType::Correction,
@@ -140,48 +201,73 @@ impl<'g> CorrectionTracker<'g> {
             "correction_tracker",
             context,
         )?;
+        let correction = outcome.memory;
+        validate_correction_identity(
+            &correction,
+            correction_type,
+            content,
+            context,
+            &effective_rule_id,
+        )?;
 
-        let effective_rule_id = match rule_id {
-            Some(rid) => {
-                // Link correction -> rule via CausedBy
-                self.graph.create_relationship(
-                    &mem_id,
-                    rid,
-                    RelType::CausedBy,
-                    Some(context),
-                    severity,
-                )?;
-                self.boost_rule(rid, severity)?;
-                Some(rid.to_string())
-            }
-            None => {
-                // Auto-create a rule from the correction.
-                let rule_text = format!("Avoid: {content}");
-                let rule = self
-                    .rules
-                    .add_rule(&rule_text, RuleSource::CorrectionDerived)?;
-                self.graph.create_relationship(
-                    &mem_id,
-                    &rule.id,
-                    RelType::CausedBy,
-                    Some(context),
-                    severity,
-                )?;
-                self.boost_rule(&rule.id, severity)?;
-                Some(rule.id)
-            }
+        let target_resolution = match rule_id {
+            Some(id) => self.validate_explicit_rule(id),
+            None => self
+                .resolve_derived_rule(derived_rule.0, derived_rule.1)
+                .map(|_| ()),
         };
+        if let Err(cause) = target_resolution {
+            return Err(self.compensate_new_claim_failure(cause, &correction.id, outcome.created));
+        }
 
-        let mem = self.graph.get_memory(&mem_id)?;
+        if let Err(cause) = self.graph.create_relationship(
+            &correction.id,
+            &effective_rule_id,
+            RelType::CausedBy,
+            Some(context),
+            severity,
+        ) {
+            return Err(self.compensate_new_claim_failure(
+                cause.into(),
+                &correction.id,
+                outcome.created,
+            ));
+        }
+
+        if let Err(first_error) = self.boost_rule(&effective_rule_id, severity, &correction.id)
+            && let Err(retry_error) = self.boost_rule(&effective_rule_id, severity, &correction.id)
+        {
+            match self
+                .graph
+                .has_importance_application(&effective_rule_id, &correction.id)
+            {
+                Ok(true) => {}
+                Ok(false) => {
+                    return Err(self.compensate_new_claim_failure(
+                        CorrectionError::Memory(archon_memory::MemoryError::Database(format!(
+                            "initial boost failed: {first_error}; retry failed: {retry_error}"
+                        ))),
+                        &correction.id,
+                        outcome.created,
+                    ));
+                }
+                Err(status_error) => {
+                    return Err(CorrectionError::BoostOutcomeUnknown(format!(
+                        "initial boost failed: {first_error}; retry failed: {retry_error}; \
+                         provenance status read failed: {status_error}"
+                    )));
+                }
+            }
+        }
 
         Ok(Correction {
-            id: mem_id,
+            id: correction.id,
             correction_type,
             content: content.to_string(),
             context: context.to_string(),
             severity,
-            rule_id: effective_rule_id,
-            timestamp: mem.created_at,
+            rule_id: Some(effective_rule_id),
+            timestamp: correction.created_at,
         })
     }
 
@@ -203,21 +289,128 @@ impl<'g> CorrectionTracker<'g> {
             .filter_map(|m| memory_to_correction(m).ok())
             .collect();
 
+        sort_corrections(&mut corrections);
         corrections.truncate(limit);
         Ok(corrections)
     }
 
-    /// Boost a rule's score by `multiplier * 5.0`, clamped to 100.
-    fn boost_rule(&self, rule_id: &str, multiplier: f64) -> Result<(), CorrectionError> {
-        let mem = self.graph.get_memory(rule_id)?;
-        let increment = multiplier * 5.0;
-        let new_score = (mem.importance + increment).min(100.0);
-        self.graph.update_importance(rule_id, new_score)?;
+    fn validate_explicit_rule(&self, id: &str) -> Result<(), CorrectionError> {
+        let memory = match self.graph.inspect_memory(id) {
+            Ok(memory) => memory,
+            Err(archon_memory::MemoryError::NotFound(_)) => {
+                return Err(CorrectionError::Rules(crate::rules::RulesError::NotFound(
+                    id.to_string(),
+                )));
+            }
+            Err(error) => return Err(CorrectionError::Memory(error)),
+        };
+        if memory.memory_type != MemoryType::Rule {
+            return Err(CorrectionError::Rules(crate::rules::RulesError::NotFound(
+                id.to_string(),
+            )));
+        }
+        Ok(())
+    }
+
+    fn resolve_derived_rule(
+        &self,
+        id: &str,
+        text: &str,
+    ) -> Result<crate::rules::BehavioralRule, CorrectionError> {
+        self.rules
+            .add_rule_with_id(id, text, RuleSource::CorrectionDerived)
+            .map_err(CorrectionError::from)
+    }
+
+    fn compensate_new_claim_failure(
+        &self,
+        cause: CorrectionError,
+        correction_id: &str,
+        newly_claimed: bool,
+    ) -> CorrectionError {
+        if !newly_claimed {
+            return cause;
+        }
+        match self.graph.delete_memory(correction_id) {
+            Ok(()) => cause,
+            Err(error) => CorrectionError::Cleanup {
+                cause: cause.to_string(),
+                cleanup: format!("delete correction {correction_id}: {error}"),
+            },
+        }
+    }
+
+    /// Boost a rule's score by `multiplier * 5.0` for one correction.
+    fn boost_rule(
+        &self,
+        rule_id: &str,
+        multiplier: f64,
+        correction_id: &str,
+    ) -> Result<(), CorrectionError> {
+        self.rules
+            .boost_rule_by(rule_id, multiplier * 5.0, correction_id)?;
         Ok(())
     }
 }
 
 // ── helpers ──────────────────────────────────────────────────
+
+fn target_rule_tag(rule_id: &str) -> String {
+    format!("target-rule:{rule_id}")
+}
+
+fn validate_correction_identity(
+    correction: &archon_memory::Memory,
+    correction_type: CorrectionType,
+    content: &str,
+    context: &str,
+    target_rule_id: &str,
+) -> Result<(), CorrectionError> {
+    let expected_severity = correction_type.severity_multiplier();
+    let expected_tags = vec![
+        correction_type.as_tag(),
+        format!("severity:{expected_severity}"),
+        target_rule_tag(target_rule_id),
+    ];
+    if correction.memory_type != MemoryType::Correction
+        || correction.content != content
+        || correction.title != "correction"
+        || correction.source_type != "correction_tracker"
+        || correction.project_path != context
+        || correction.importance != (expected_severity * 10.0).min(100.0)
+        || correction.tags != expected_tags
+    {
+        return Err(CorrectionError::Memory(
+            archon_memory::MemoryError::Database(format!(
+                "correction ID collision for {}: existing correction semantics differ",
+                correction.id
+            )),
+        ));
+    }
+    Ok(())
+}
+
+fn is_known_severity(severity: f64) -> bool {
+    [
+        CorrectionType::FactualError,
+        CorrectionType::ApproachCorrection,
+        CorrectionType::RepeatedInstruction,
+        CorrectionType::DidForbiddenAction,
+        CorrectionType::ActedWithoutPermission,
+    ]
+    .into_iter()
+    .any(|correction_type| severity == correction_type.severity_multiplier())
+}
+
+fn sort_corrections(corrections: &mut [Correction]) {
+    corrections.sort_by(|left, right| {
+        right
+            .severity
+            .total_cmp(&left.severity)
+            .then_with(|| right.timestamp.cmp(&left.timestamp))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+}
 
 /// Convert a [`Memory`] into a [`Correction`].
 fn memory_to_correction(m: archon_memory::Memory) -> Result<Correction, CorrectionError> {
@@ -230,11 +423,12 @@ fn memory_to_correction(m: archon_memory::Memory) -> Result<Correction, Correcti
     let severity = m
         .tags
         .iter()
-        .find_map(|t| {
-            t.strip_prefix("severity:")
-                .and_then(|v| v.parse::<f64>().ok())
+        .find_map(|tag| {
+            tag.strip_prefix("severity:")
+                .and_then(|value| value.parse::<f64>().ok())
+                .filter(|severity| is_known_severity(*severity))
         })
-        .unwrap_or(1.0);
+        .unwrap_or_else(|| correction_type.severity_multiplier());
 
     // Try to find a linked rule via relationships (best-effort).
     // We don't have relationship data on the Memory struct, so we
@@ -250,222 +444,8 @@ fn memory_to_correction(m: archon_memory::Memory) -> Result<Correction, Correcti
     })
 }
 
-// ── tests ────────────────────────────────────────────────────
+// ── tests ────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use archon_memory::MemoryGraph;
-
-    fn make_tracker() -> (MemoryGraph, ()) {
-        let graph = MemoryGraph::in_memory().expect("in-memory graph should succeed");
-        (graph, ())
-    }
-
-    #[test]
-    fn severity_multipliers_are_ordered() {
-        assert!(
-            CorrectionType::FactualError.severity_multiplier()
-                < CorrectionType::ApproachCorrection.severity_multiplier()
-        );
-        assert!(
-            CorrectionType::ApproachCorrection.severity_multiplier()
-                < CorrectionType::RepeatedInstruction.severity_multiplier()
-        );
-        assert!(
-            CorrectionType::RepeatedInstruction.severity_multiplier()
-                < CorrectionType::DidForbiddenAction.severity_multiplier()
-        );
-        assert!(
-            CorrectionType::DidForbiddenAction.severity_multiplier()
-                < CorrectionType::ActedWithoutPermission.severity_multiplier()
-        );
-    }
-
-    #[test]
-    fn record_correction_with_existing_rule() {
-        let (graph, _) = make_tracker();
-        let tracker = CorrectionTracker::new(&graph);
-
-        // Create a rule first.
-        let rules = RulesEngine::new(&graph);
-        let rule = rules
-            .add_rule("Always ask before modifying files", RuleSource::UserDefined)
-            .expect("add_rule");
-        let original_score = rule.score; // 50.0
-
-        let correction = tracker
-            .record_correction(
-                CorrectionType::ActedWithoutPermission,
-                "Modified config.toml without asking",
-                "editing session",
-                Some(&rule.id),
-            )
-            .expect("record_correction");
-
-        assert_eq!(
-            correction.correction_type,
-            CorrectionType::ActedWithoutPermission
-        );
-        assert!((correction.severity - 5.0).abs() < f64::EPSILON);
-        assert_eq!(correction.rule_id.as_deref(), Some(rule.id.as_str()));
-
-        // Rule score should have been boosted by 5.0 * 5.0 = 25.0
-        let updated = graph.get_memory(&rule.id).expect("get rule");
-        let expected = original_score + 25.0;
-        assert!(
-            (updated.importance - expected).abs() < f64::EPSILON,
-            "expected {expected}, got {}",
-            updated.importance,
-        );
-    }
-
-    #[test]
-    fn record_correction_auto_creates_rule() {
-        let (graph, _) = make_tracker();
-        let tracker = CorrectionTracker::new(&graph);
-
-        let correction = tracker
-            .record_correction(
-                CorrectionType::FactualError,
-                "Stated Rust 2024 edition does not exist",
-                "research session",
-                None,
-            )
-            .expect("record_correction");
-
-        // A rule should have been auto-created.
-        assert!(correction.rule_id.is_some());
-
-        let rule_id = correction.rule_id.as_ref().expect("rule_id");
-        let rule_mem = graph.get_memory(rule_id).expect("get auto-rule");
-        assert!(rule_mem.content.starts_with("Avoid:"));
-
-        // Rule score should be boosted from 50.0 by 1.5 * 5.0 = 7.5
-        let expected = 50.0 + 7.5;
-        assert!(
-            (rule_mem.importance - expected).abs() < f64::EPSILON,
-            "expected {expected}, got {}",
-            rule_mem.importance,
-        );
-    }
-
-    #[test]
-    fn recall_corrections_finds_stored() {
-        let (graph, _) = make_tracker();
-        let tracker = CorrectionTracker::new(&graph);
-
-        tracker
-            .record_correction(
-                CorrectionType::RepeatedInstruction,
-                "User already said not to create README files",
-                "doc session",
-                None,
-            )
-            .expect("record");
-
-        tracker
-            .record_correction(
-                CorrectionType::ApproachCorrection,
-                "Should have used edit instead of write",
-                "coding session",
-                None,
-            )
-            .expect("record");
-
-        let results = tracker.recall_corrections("README", 10).expect("recall");
-
-        assert!(
-            !results.is_empty(),
-            "should find at least one correction matching 'README'",
-        );
-        assert!(results[0].content.contains("README"));
-    }
-
-    #[test]
-    fn recall_with_limit_truncates() {
-        let (graph, _) = make_tracker();
-        let tracker = CorrectionTracker::new(&graph);
-
-        for i in 0..5 {
-            tracker
-                .record_correction(
-                    CorrectionType::FactualError,
-                    &format!("error number {i}"),
-                    "bulk",
-                    None,
-                )
-                .expect("record");
-        }
-
-        let results = tracker.recall_corrections("error", 2).expect("recall");
-        assert!(results.len() <= 2);
-    }
-
-    #[test]
-    fn correction_type_tag_roundtrip() {
-        let types = [
-            CorrectionType::FactualError,
-            CorrectionType::ApproachCorrection,
-            CorrectionType::RepeatedInstruction,
-            CorrectionType::DidForbiddenAction,
-            CorrectionType::ActedWithoutPermission,
-        ];
-        for ct in &types {
-            let tag = ct.as_tag();
-            let parsed = CorrectionType::from_tag(&tag);
-            assert_eq!(parsed, Some(*ct), "roundtrip failed for {tag}");
-        }
-    }
-
-    #[test]
-    fn boost_clamps_at_100() {
-        let (graph, _) = make_tracker();
-        let tracker = CorrectionTracker::new(&graph);
-
-        let rules = RulesEngine::new(&graph);
-        let rule = rules
-            .add_rule("fragile rule", RuleSource::SystemDefault)
-            .expect("add");
-
-        // Set score close to max.
-        graph.update_importance(&rule.id, 98.0).expect("set score");
-
-        // DidForbiddenAction => 4.0 * 5.0 = 20.0 boost, should clamp.
-        tracker
-            .record_correction(
-                CorrectionType::DidForbiddenAction,
-                "created a file without permission",
-                "test",
-                Some(&rule.id),
-            )
-            .expect("record");
-
-        let updated = graph.get_memory(&rule.id).expect("get");
-        assert!(
-            (updated.importance - 100.0).abs() < f64::EPSILON,
-            "should clamp to 100.0, got {}",
-            updated.importance,
-        );
-    }
-
-    #[test]
-    fn correction_persists_in_graph() {
-        let (graph, _) = make_tracker();
-        let tracker = CorrectionTracker::new(&graph);
-
-        let correction = tracker
-            .record_correction(
-                CorrectionType::ApproachCorrection,
-                "Used unwrap in library code",
-                "code review",
-                None,
-            )
-            .expect("record");
-
-        // Verify the memory is retrievable directly.
-        let mem = graph.get_memory(&correction.id).expect("get");
-        assert_eq!(mem.memory_type, MemoryType::Correction);
-        assert!(mem.content.contains("unwrap"));
-    }
-}
+#[path = "corrections/tests.rs"]
+mod tests;

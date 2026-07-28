@@ -44,6 +44,20 @@ fn ctrl_arrows_scroll_output_for_wsl_terminals() {
 }
 
 #[test]
+fn end_scrolls_to_bottom_and_restores_follow_mode() {
+    let km = KeyMap::default();
+    let end = KeyEvent::new(KeyCode::End, KeyModifiers::NONE);
+    assert_eq!(km.resolve(end), Some(&Action::ScrollBottom));
+}
+
+#[test]
+fn ctrl_end_scrolls_to_bottom() {
+    let km = KeyMap::default();
+    let end = KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL);
+    assert_eq!(km.resolve(end), Some(&Action::ScrollBottom));
+}
+
+#[test]
 fn slash_opens_command() {
     let km = KeyMap::default();
     let slash = KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE);

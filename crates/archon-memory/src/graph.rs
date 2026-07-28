@@ -16,7 +16,9 @@ mod schema;
 mod tests;
 mod traversal;
 
-pub(crate) use rows::{raw_to_memory, read_all_memories, row_to_memory};
+pub(crate) use rows::{
+    raw_to_memory, read_all_memories, row_to_memory, row_values_to_memory, rows_to_memories,
+};
 
 /// Minimum content length required to generate an embedding.
 pub(super) const MIN_EMBED_CHARS: usize = 10;

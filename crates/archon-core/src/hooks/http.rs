@@ -1,3 +1,4 @@
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use reqwest::Client;
@@ -7,13 +8,36 @@ use serde_json::Value;
 use super::types::{HookConfig, HookResult};
 
 const MAX_RESPONSE_BYTES: usize = 64 * 1024; // 64KB
+static HTTP_HOOK_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
+
+pub(crate) fn shared_client() -> &'static Client {
+    &HTTP_HOOK_CLIENT
+}
+
+fn event_name_from_context(context: &Value) -> &str {
+    context
+        .get("hook_event")
+        .or_else(|| context.get("event"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+}
 
 /// Execute an HTTP hook by POSTing context JSON to the URL in config.command.
-/// Fail-open on all errors (timeout, network, parse). TLS required for non-localhost.
+/// Failure handling follows the hook's configured or event-default policy.
 pub async fn execute_http_hook(
     config: &HookConfig,
     context: &Value,
     client: &Client,
+) -> HookResult {
+    let event_name = event_name_from_context(context);
+    execute_http_hook_for_event(config, context, client, event_name).await
+}
+
+pub(crate) async fn execute_http_hook_for_event(
+    config: &HookConfig,
+    context: &Value,
+    client: &Client,
+    event_name: &str,
 ) -> HookResult {
     let url = &config.command;
     let timeout_secs = config.timeout.unwrap_or(60);
@@ -22,7 +46,7 @@ pub async fn execute_http_hook(
     // TLS check: reject non-localhost plain HTTP
     if !is_localhost(url) && !url.starts_with("https://") {
         tracing::warn!(url = %url, "HTTP hook rejected: TLS required for non-localhost URLs");
-        return HookResult::default(); // fail-open
+        return config.failure_result(event_name, "TLS is required for non-localhost URLs");
     }
 
     // Build headers with env var interpolation
@@ -52,11 +76,11 @@ pub async fn execute_http_hook(
         Ok(resp) => resp,
         Err(e) => {
             if e.is_timeout() {
-                tracing::warn!(url = %url, timeout_secs, "HTTP hook timed out (fail-open)");
+                tracing::warn!(url = %url, timeout_secs, "HTTP hook timed out; applying failure policy");
             } else {
-                tracing::warn!(url = %url, error = %e, "HTTP hook network error (fail-open)");
+                tracing::warn!(url = %url, error = %e, "HTTP hook network error; applying failure policy");
             }
-            return HookResult::default();
+            return config.failure_result(event_name, &e.to_string());
         }
     };
 
@@ -67,9 +91,9 @@ pub async fn execute_http_hook(
             tracing::warn!(
                 url = %url,
                 error = %e,
-                "HTTP hook: failed to read response body (fail-open)"
+                "HTTP hook: failed to read response body; applying failure policy"
             );
-            return HookResult::default();
+            return config.failure_result(event_name, &e.to_string());
         }
     };
 
@@ -91,10 +115,20 @@ pub async fn execute_http_hook(
             tracing::warn!(
                 url = %url,
                 error = %e,
-                "HTTP hook response is not valid HookResult JSON (fail-open)"
+                "HTTP hook response is not valid HookResult JSON; applying failure policy"
             );
-            HookResult::default()
+            config.failure_result(event_name, &e.to_string())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shared_client;
+
+    #[test]
+    fn shared_http_client_reuses_one_instance() {
+        assert!(std::ptr::eq(shared_client(), shared_client()));
     }
 }
 

@@ -160,10 +160,11 @@ async fn execute_prepared_tools(
         .iter()
         .map(|p| {
             let name = p.name.clone();
+            let tool_use_id = p.id.clone();
             let input = p.input.clone();
             let parse_error = p.parse_error.clone();
             let registry = Arc::clone(&registry);
-            let mut ctx = runner.tool_context.clone();
+            let mut ctx = runner.tool_context.with_tool_run_attempt(tool_use_id, 0);
             ctx.cancel_parent = Some(round_cancel.child_token());
             async move {
                 if let Some(err) = parse_error {
@@ -185,25 +186,10 @@ fn record_tool_results(
     let mut tool_results: Vec<serde_json::Value> = Vec::with_capacity(prepared.len());
     for (prepared_tool, result) in prepared.iter().zip(exec_results) {
         record_tool_progress(runner, prepared_tool);
-        let context_output = crate::agent::tool_result_context::cap_tool_output_for_context(
-            &prepared_tool.name,
-            &result.content,
-        );
-        if context_output.truncated {
-            tracing::warn!(
-                tool = %prepared_tool.name,
-                tool_use_id = %prepared_tool.id,
-                original_chars = context_output.original_chars,
-                stored_chars = context_output.stored_chars,
-                limit_chars = context_output.limit_chars,
-                scope = "subagent",
-                "subagent tool output trimmed before model replay"
-            );
-        }
         tool_results.push(serde_json::json!({
             "type": "tool_result",
             "tool_use_id": prepared_tool.id,
-            "content": context_output.content,
+            "content": result.content,
             "is_error": result.is_error,
         }));
         runner.emit_activity_stream(

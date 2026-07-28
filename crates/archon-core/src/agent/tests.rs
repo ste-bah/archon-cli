@@ -35,8 +35,8 @@ impl LlmProvider for MockLlmProvider {
     }
 }
 
-fn test_agent() -> Agent {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+pub(super) fn test_agent() -> Agent {
+    let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     Agent::new(
         Arc::new(MockLlmProvider),
         ToolRegistry::new(),
@@ -85,56 +85,7 @@ async fn auto_extraction_prune_keeps_only_unfinished_tasks() {
         .await;
 }
 
-#[tokio::test]
-async fn correction_detection_fires_event_callback_with_top_rule_id() {
-    let mut agent = test_agent();
-    let graph = MemoryGraph::in_memory().expect("in-memory graph");
-    let seeded_rule_id = {
-        let engine = RulesEngine::new(&graph);
-        let rule = engine
-            .add_rule("prefer concise corrections", RuleSource::UserDefined)
-            .expect("seed rule");
-        for _ in 0..10 {
-            let _ = engine.reinforce_rule(&rule.id);
-        }
-        rule.id
-    };
-    let graph: Arc<dyn MemoryTrait> = Arc::new(graph);
-
-    let correction_count = Arc::new(AtomicUsize::new(0));
-    let correction_count_cb = Arc::clone(&correction_count);
-    agent.set_record_correction_callback(Arc::new(move || {
-        correction_count_cb.fetch_add(1, Ordering::SeqCst);
-    }));
-
-    let iv = Arc::new(Mutex::new(InnerVoice::new()));
-    agent.set_inner_voice(Arc::clone(&iv));
-
-    let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let captured_cb = Arc::clone(&captured);
-    agent.set_record_user_correction_event_callback(Arc::new(move |payload| {
-        captured_cb.lock().unwrap().push(payload);
-    }));
-
-    agent
-        .detect_and_record_correction(&format!("use this instead {}", "x".repeat(220)), &graph)
-        .await;
-
-    assert_eq!(correction_count.load(Ordering::SeqCst), 1);
-    let iv = iv.try_lock().expect("inner voice lock");
-    assert_eq!(iv.corrections_received, 1);
-    assert!((iv.confidence - 0.6).abs() < f32::EPSILON);
-
-    let captured = captured.lock().unwrap();
-    assert_eq!(captured.len(), 1);
-    assert_eq!(captured[0].correction_type, "ApproachCorrection");
-    assert_eq!(
-        captured[0].top_rule_id.as_deref(),
-        Some(seeded_rule_id.as_str())
-    );
-    assert!(!captured[0].user_input_excerpt.is_empty());
-    assert!(captured[0].user_input_excerpt.chars().count() <= 200);
-}
+include!("tests/correction_matching.rs");
 
 #[tokio::test]
 async fn process_message_fires_runtime_lifecycle_hooks() {
@@ -175,6 +126,8 @@ async fn process_message_fires_runtime_lifecycle_hooks() {
     assert!(seen.contains(&crate::hooks::HookEvent::AfterAgentRun));
 }
 
+include!("tests/tool_result_projection.rs");
+
 struct CountingLlmProvider {
     stream_calls: Arc<AtomicUsize>,
 }
@@ -210,7 +163,7 @@ impl LlmProvider for CountingLlmProvider {
 #[tokio::test]
 async fn greeting_turn_short_circuits_before_provider_or_tools() {
     let calls = Arc::new(AtomicUsize::new(0));
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, mut rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     let mut agent = Agent::new(
         Arc::new(CountingLlmProvider {
             stream_calls: Arc::clone(&calls),
@@ -238,6 +191,8 @@ async fn greeting_turn_short_circuits_before_provider_or_tools() {
     assert!(saw_text);
     assert!(!saw_tool);
 }
+
+include!("tests/finalization.rs");
 
 /// Verify that thinking blocks include the `signature` field when built
 /// as assistant message content. This is required by the Anthropic API

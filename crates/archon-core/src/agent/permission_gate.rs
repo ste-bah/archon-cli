@@ -174,11 +174,8 @@ mod tests {
     fn agent_with_rules_and_events(
         mode: &str,
         rules: RuleSet,
-    ) -> (
-        Agent,
-        tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent>,
-    ) {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    ) -> (Agent, tokio::sync::mpsc::Receiver<TimestampedEvent>) {
+        let (tx, rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
         let config = AgentConfig {
             permission_mode: Arc::new(Mutex::new(mode.to_string())),
             permission_rules: rules,
@@ -200,7 +197,7 @@ mod tests {
         registry: ToolRegistry,
         sandbox: Arc<dyn archon_permissions::SandboxBackend>,
     ) -> Agent {
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
         let config = AgentConfig {
             permission_mode: Arc::new(Mutex::new("bypassPermissions".to_string())),
             sandbox: Some(sandbox),
@@ -328,6 +325,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn preflight_rejects_hook_mutated_input_that_violates_tool_schema() {
+        let mut tools = ToolRegistry::new();
+        tools.register(Box::new(archon_tools::bash::BashTool::default()));
+        let (tx, mut rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
+        let config = AgentConfig {
+            permission_mode: Arc::new(Mutex::new("bypassPermissions".to_string())),
+            ..AgentConfig::default()
+        };
+        let mut agent = Agent::new(
+            Arc::new(MockLlmProvider),
+            tools,
+            config,
+            tx,
+            Arc::new(std::sync::RwLock::new(AgentRegistry::load(
+                &std::env::temp_dir(),
+            ))),
+        );
+        let hooks = Arc::new(crate::hooks::HookRegistry::new());
+        hooks.register_callback(
+            crate::hooks::HookEvent::PreToolUse,
+            crate::hooks::HookCallbackEntry {
+                name: "remove-required-command".to_string(),
+                callback: Arc::new(|_| crate::hooks::HookResult {
+                    updated_input: Some(serde_json::json!({ "timeout": 1 })),
+                    ..Default::default()
+                }),
+                authority: crate::hooks::SourceAuthority::Policy,
+                timeout_secs: 1,
+            },
+        );
+        agent.set_hook_registry(hooks);
+        let pending = [PendingToolCall {
+            id: "tool-invalid-hook-input".to_string(),
+            name: "Bash".to_string(),
+            input_json: r#"{"command":"cargo test"}"#.to_string(),
+        }];
+
+        let allowed = agent.preflight_tools(&pending, AgentMode::Normal).await;
+
+        assert!(allowed.is_empty());
+        let tool_result = &agent.state.messages[0]["content"][0];
+        assert_eq!(tool_result["tool_use_id"], "tool-invalid-hook-input");
+        assert_eq!(tool_result["is_error"], true);
+        assert!(
+            tool_result["content"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("effective input failed schema validation")
+        );
+        let mut saw_error_without_summary = false;
+        while let Ok(event) = rx.try_recv() {
+            if matches!(
+                event.inner,
+                AgentEvent::ToolCallComplete {
+                    result,
+                    transcript_summary: None,
+                    ..
+                } if result.is_error
+            ) {
+                saw_error_without_summary = true;
+            }
+        }
+        assert!(saw_error_without_summary);
+    }
+
+    include!("permission_gate_observer_test.rs");
+
+    #[tokio::test]
     async fn preflight_sandbox_check_uses_hook_mutated_input() {
         let mut registry = ToolRegistry::new();
         registry.register(Box::new(archon_tools::file_write::WriteTool));
@@ -358,15 +423,15 @@ mod tests {
         }];
 
         let allowed = agent.preflight_tools(&pending, AgentMode::Normal).await;
+        assert_eq!(allowed.len(), 1);
+        let ctx = agent.build_tool_context(AgentMode::Normal, "mock").await;
+        let results = agent.dispatch_allowed_tools(&allowed, &ctx).await;
 
-        assert!(allowed.is_empty());
-        let tool_result = &agent.state.messages[0]["content"][0];
-        assert_eq!(tool_result["tool_use_id"], "tool-1");
-        assert_eq!(tool_result["is_error"], true);
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_error);
         assert!(
-            tool_result["content"]
-                .as_str()
-                .unwrap_or_default()
+            results[0]
+                .content
                 .contains("sandbox blocked mutated write path")
         );
     }

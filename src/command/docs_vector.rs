@@ -1,10 +1,11 @@
 use anyhow::Result;
 use cozo::DbInstance;
+use std::sync::Arc;
 
 use archon_docs::vector_store::DocVectorStore;
 
-pub(crate) fn handle_vector_status(db: DbInstance) -> Result<()> {
-    let store = DocVectorStore::open_default()?;
+pub(crate) fn handle_vector_status(db: Arc<DbInstance>) -> Result<()> {
+    let store = DocVectorStore::acquire_default()?;
     let legacy = archon_docs::vector_migration::legacy_vector_count(&db)?;
     let stats = store.stats(None)?;
     println!("Legacy Cozo vectors: {}", legacy);
@@ -30,12 +31,12 @@ pub(crate) fn handle_vector_status(db: DbInstance) -> Result<()> {
 }
 
 pub(crate) fn handle_vector_migrate(
-    db: DbInstance,
+    db: Arc<DbInstance>,
     limit: Option<usize>,
     batch_size: usize,
     after: Option<String>,
 ) -> Result<()> {
-    let store = DocVectorStore::open_default()?;
+    let store = DocVectorStore::acquire_default()?;
     let report = archon_docs::vector_migration::migrate_legacy_vectors(
         &db,
         &store,
@@ -54,7 +55,7 @@ pub(crate) fn handle_vector_migrate(
 }
 
 pub(crate) fn handle_vector_compact(
-    db: DbInstance,
+    db: Arc<DbInstance>,
     provider: Option<String>,
     dimension: Option<usize>,
     limit: Option<usize>,
@@ -66,7 +67,7 @@ pub(crate) fn handle_vector_compact(
     let dimension = dimension
         .or_else(current_provider_dimension)
         .ok_or_else(|| anyhow::anyhow!("no embedding dimension available for vector compaction"))?;
-    let store = DocVectorStore::open_default()?;
+    let store = DocVectorStore::acquire_default()?;
     let manifest = store.build_hnsw(&provider_name, dimension, limit)?;
     println!("Rust HNSW snapshot built.");
     println!("Provider:   {}", manifest.provider);

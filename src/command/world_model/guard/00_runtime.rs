@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::str::FromStr;
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
@@ -11,6 +11,7 @@ pub(crate) struct RuntimeGuardrailRecord {
     pub advisory: archon_world_model::integration::WorldAdvisorSurfaceRecord,
     pub decision: archon_world_model::WorldGuardrailDecision,
     pub task_class: archon_world_model::RuntimeTaskClass,
+    pub classified_from_tool: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -18,75 +19,6 @@ pub(crate) struct PipelineStepGuardrailReport {
     pub steps_recorded: usize,
     pub parent_verifications_recorded: usize,
     pub failed_step_verifications: usize,
-}
-
-static ACTIVE_GUARDRAILS: OnceLock<Mutex<HashMap<String, RuntimeGuardrailRecord>>> =
-    OnceLock::new();
-static ACTIVE_OBSERVATIONS: OnceLock<Mutex<HashMap<String, GuardrailRuntimeObservations>>> =
-    OnceLock::new();
-const HIGH_SURPRISE_STATUS_THRESHOLD: f32 = 0.30;
-
-#[derive(Debug, Clone, Default)]
-struct GuardrailRuntimeObservations {
-    provider_incident_observed: bool,
-    user_correction_observed: bool,
-    plan_drift_observed: bool,
-    reasoning_failure_observed: bool,
-    retry_count: u32,
-    evidence_refs: Vec<String>,
-}
-
-fn active_guardrails() -> &'static Mutex<HashMap<String, RuntimeGuardrailRecord>> {
-    ACTIVE_GUARDRAILS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn active_observations() -> &'static Mutex<HashMap<String, GuardrailRuntimeObservations>> {
-    ACTIVE_OBSERVATIONS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-pub(crate) fn active_guardrail_for_session(session_id: &str) -> Option<RuntimeGuardrailRecord> {
-    active_guardrails()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .get(session_id)
-        .cloned()
-}
-
-fn remember_active_guardrail(record: &RuntimeGuardrailRecord) {
-    active_guardrails()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .insert(record.action.session_id.clone(), record.clone());
-    active_observations()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .entry(record.action.action_id.clone())
-        .or_default();
-}
-
-fn clear_active_guardrail(session_id: &str, action_id: &str) {
-    let mut guard = active_guardrails()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if guard
-        .get(session_id)
-        .is_some_and(|record| record.action.action_id == action_id)
-    {
-        guard.remove(session_id);
-        active_observations()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(action_id);
-    }
-}
-
-fn observations_for(action_id: &str) -> GuardrailRuntimeObservations {
-    active_observations()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .get(action_id)
-        .cloned()
-        .unwrap_or_default()
 }
 
 pub(crate) fn policy_from_config(
@@ -179,16 +111,39 @@ pub(crate) fn begin_guarded_action(
         policy.max_guardrail_overhead_ms,
     );
     action.verification_plan = verification_plan_for_decision(&action.action_id, &decision);
-    let _ = archon_world_model::guardrail::append_guarded_action(&root, &action);
-    let _ = archon_world_model::guardrail::append_guardrail_decision(&root, &decision);
     let record = RuntimeGuardrailRecord {
         action,
         advisory,
         decision,
         task_class,
+        classified_from_tool: false,
     };
-    remember_active_guardrail(&record);
+    if let Err(error) = persist_and_remember_guardrail(&root, &record) {
+        tracing::warn!(
+            %error,
+            action_id = %record.action.action_id,
+            "failed to persist initial guardrail state"
+        );
+        return None;
+    }
     Some(record)
+}
+
+fn persist_and_remember_guardrail(
+    root: &std::path::Path,
+    record: &RuntimeGuardrailRecord,
+) -> Result<()> {
+    archon_world_model::guardrail::append_guardrail_revision(
+        root,
+        record.action.clone(),
+        record.decision.clone(),
+        format!(
+            "world_guardrail:revision:{}:initial",
+            record.action.action_id
+        ),
+    )?;
+    remember_active_guardrail(record);
+    Ok(())
 }
 
 fn elapsed_ms_u64(started_at: Instant) -> u64 {
@@ -291,6 +246,8 @@ pub(crate) fn record_guardrail_completion_outcome(
     actual_summary: &str,
     bundle_id: Option<&str>,
 ) -> Option<archon_world_model::WorldGuardrailOutcome> {
+    let current_record = current_record_for_completion(record);
+    let record = &current_record;
     let root = super::world_model_root().ok()?;
     let verification_outcomes = archon_world_model::guardrail::load_verification_outcomes(&root)
         .unwrap_or_default()
@@ -467,4 +424,3 @@ pub(crate) fn record_guardrail_pipeline_steps(
 
     report
 }
-

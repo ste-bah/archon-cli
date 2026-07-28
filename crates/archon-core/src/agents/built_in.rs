@@ -8,7 +8,12 @@ pub fn get_built_in_agents() -> Vec<CustomAgentDefinition> {
             agent_type: "general-purpose".into(),
             description: "General-purpose agent for research, code search, and multi-step tasks.".into(),
             system_prompt: include_str!("prompts/general_purpose.md").into(),
-            allowed_tools: None, // all tools
+            allowed_tools: Some(
+                vec!["Read", "Grep", "Glob", "Bash", "Write", "Edit"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+            ),
             source: AgentSource::BuiltIn,
             ..Default::default()
         },
@@ -123,16 +128,37 @@ mod tests {
     }
 
     #[test]
-    fn general_purpose_allows_all_tools() {
+    fn general_purpose_has_explicit_curated_tool_set() {
         let agents = get_built_in_agents();
         let gp = agents
             .iter()
             .find(|a| a.agent_type == "general-purpose")
             .unwrap();
-        assert!(
-            gp.allowed_tools.is_none(),
-            "general-purpose should allow all tools (None)"
-        );
+        let expected: Vec<String> = ["Read", "Grep", "Glob", "Bash", "Write", "Edit"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert_eq!(gp.allowed_tools.as_ref(), Some(&expected));
+    }
+
+    #[test]
+    fn general_purpose_prompt_matches_curated_tool_set() {
+        let agents = get_built_in_agents();
+        let gp = agents
+            .iter()
+            .find(|a| a.agent_type == "general-purpose")
+            .unwrap();
+
+        assert!(!gp.system_prompt.contains("all available tools"));
+        assert!(!gp.system_prompt.contains("web searches"));
+        for capability in [
+            "read files",
+            "search codebases",
+            "run commands",
+            "edit files",
+        ] {
+            assert!(gp.system_prompt.contains(capability));
+        }
     }
 
     #[test]

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use cozo::DbInstance;
+use std::sync::Arc;
 
 use archon_docs::embed::{
     self, EmbeddingProviderConfig, EmbeddingProviderSelection, LocalEmbeddingProvider,
@@ -17,7 +18,7 @@ pub(crate) fn init_embedding(_db: &DbInstance) -> Result<()> {
     Ok(())
 }
 
-pub(crate) async fn handle_model_status(db: DbInstance) -> Result<()> {
+pub(crate) async fn handle_model_status(db: Arc<DbInstance>) -> Result<()> {
     let init_start = std::time::Instant::now();
     if embed::get_provider().is_none() {
         let _ = embed::init_provider(resolved_provider_config());
@@ -121,7 +122,7 @@ fn print_configured_status(
 }
 
 fn print_vector_store_status(provider: &dyn LocalEmbeddingProvider) {
-    match archon_docs::vector_store::DocVectorStore::open_default() {
+    match archon_docs::vector_store::DocVectorStore::acquire_default() {
         Ok(store) => {
             match store.stats(Some(provider.backend_name())) {
                 Ok(stats) => println!(

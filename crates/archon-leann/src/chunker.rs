@@ -31,6 +31,7 @@ pub enum Language {
 // ---------------------------------------------------------------------------
 
 /// Symbol-aware code chunker backed by tree-sitter grammars.
+#[derive(Clone)]
 pub struct Chunker {
     languages: HashMap<Language, tree_sitter::Language>,
 }

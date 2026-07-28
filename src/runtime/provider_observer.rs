@@ -1,7 +1,3 @@
-//! Observe real LLM provider traffic and persist redacted runtime events.
-
-use std::sync::Arc;
-
 use anyhow::Result;
 use archon_llm::provider::{
     LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature,
@@ -10,17 +6,33 @@ use archon_llm::runtime::{
     ProviderRuntimeEvent, ProviderRuntimeEventType, ProviderRuntimeSeverity,
 };
 use archon_llm::streaming::StreamEvent;
+use archon_llm::types::Usage;
 use async_trait::async_trait;
 use cozo::DbInstance;
+use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 
+use super::learning_store;
 use super::provider_event_record::provider_event_record;
 use super::provider_limit_windows;
 
+#[path = "provider_observer_errors.rs"]
+mod errors;
 #[path = "provider_identity_events.rs"]
 mod identity_events;
+#[path = "provider_observer_runtime.rs"]
+mod observer_runtime;
 #[path = "provider_observer_stream.rs"]
 mod stream;
+#[path = "provider_observer_usage.rs"]
+mod usage;
+use errors::{error_kind, error_message, error_metadata, error_severity, limit_event_type};
+use observer_runtime::record_agent_provider_incident_sync;
+pub(crate) use observer_runtime::{record_provider_fallback, runtime_mode_for_provider_name};
+
+#[cfg(test)]
+use usage::context_input_tokens;
+use usage::{ObservedRequest, logical_call_usage};
 
 #[derive(Clone)]
 pub(crate) struct ProviderRuntimeEventRecorder {
@@ -28,26 +40,28 @@ pub(crate) struct ProviderRuntimeEventRecorder {
 }
 
 impl ProviderRuntimeEventRecorder {
-    pub(crate) fn default_learning_store() -> Self {
-        match open_learning_db() {
-            Ok(db) => Self {
-                db: Some(Arc::new(db)),
-            },
-            Err(error) => {
+    pub(crate) async fn default_learning_store() -> Self {
+        let acquired = run_provider_persistence_async_with(
+            "acquire provider runtime event store",
+            learning_store::acquire_default,
+        )
+        .await;
+        match acquired {
+            Some(Ok(db)) => Self { db: Some(db) },
+            Some(Err(error)) => {
                 tracing::warn!(%error, "provider runtime event store unavailable");
                 Self { db: None }
             }
+            None => Self { db: None },
         }
     }
 
     #[cfg(test)]
-    fn with_db(db: DbInstance) -> Self {
-        Self {
-            db: Some(Arc::new(db)),
-        }
+    fn with_db(db: Arc<DbInstance>) -> Self {
+        Self { db: Some(db) }
     }
 
-    fn record(&self, event: ProviderRuntimeEvent) -> Option<String> {
+    fn record_sync(&self, event: ProviderRuntimeEvent) -> Option<String> {
         let event_id = event.event_id.clone();
         let Some(db) = &self.db else {
             return None;
@@ -67,55 +81,83 @@ impl ProviderRuntimeEventRecorder {
         Some(event_id)
     }
 
-    fn record_limit_window(&self, provider_id: &str, model_id: Option<&str>, error: &LlmError) {
+    async fn persist<T>(
+        &self,
+        context: &'static str,
+        persist: impl FnOnce(Self) -> T + Send + 'static,
+    ) -> Option<T>
+    where
+        T: Send + 'static,
+    {
+        let recorder = self.clone();
+        run_provider_persistence_async_with(context, move || persist(recorder)).await
+    }
+
+    pub(super) fn record_call_usage_sync(
+        &self,
+        request_id: &str,
+        request: &ObservedRequest,
+        usage: Option<&Usage>,
+        status: &str,
+    ) {
+        let Some(db) = &self.db else {
+            return;
+        };
+        let record = logical_call_usage(request_id, request, usage, status);
+        if let Err(error) = archon_learning::llm_call_usage::insert_llm_call_usage(db, &record) {
+            tracing::warn!(%error, request_id, "logical call usage persistence failed");
+        }
+    }
+    async fn record(&self, event: ProviderRuntimeEvent) -> Option<String> {
+        self.persist("record provider runtime event", move |recorder| {
+            recorder.record_sync(event)
+        })
+        .await
+        .flatten()
+    }
+
+    fn record_limit_window_sync(
+        &self,
+        provider_id: &str,
+        model_id: Option<&str>,
+        error: &LlmError,
+    ) {
         provider_limit_windows::record_limit_window(self.db.as_ref(), provider_id, model_id, error);
     }
 }
 
-pub(crate) fn observe_llm_provider_with_profile(
+async fn run_provider_persistence_async_with<T>(
+    context: &'static str,
+    persist: impl FnOnce() -> T + Send + 'static,
+) -> Option<T>
+where
+    T: Send + 'static,
+{
+    match archon_tui::observability::spawn_blocking_named("provider-runtime-persistence", persist)
+        .await
+    {
+        Ok(value) => Some(value),
+        Err(error) => {
+            tracing::warn!(%error, %context, "provider runtime persistence task failed");
+            None
+        }
+    }
+}
+
+pub(crate) async fn observe_llm_provider_with_profile(
     provider: Arc<dyn LlmProvider>,
     runtime_mode: impl Into<String>,
     profile_id: Option<String>,
 ) -> Arc<dyn LlmProvider> {
-    Arc::new(ObservedLlmProvider::new(
-        provider,
-        runtime_mode,
-        profile_id,
-        ProviderRuntimeEventRecorder::default_learning_store(),
-    ))
-}
-
-pub(crate) fn runtime_mode_for_provider_name(provider_name: &str) -> &'static str {
-    match provider_name {
-        "openai-codex" => "auto",
-        "local" => "local",
-        _ => "direct",
-    }
-}
-
-pub(crate) fn record_provider_fallback(
-    requested_provider: &str,
-    selected_provider: &str,
-    runtime_mode: &str,
-    reason_code: &str,
-) {
-    if requested_provider == selected_provider {
-        return;
-    }
-    let event = base_event(
-        selected_provider,
-        runtime_mode,
-        ProviderRuntimeEventType::FallbackSelected,
-        ProviderRuntimeSeverity::Warn,
+    Arc::new(
+        ObservedLlmProvider::new(
+            provider,
+            runtime_mode,
+            profile_id,
+            ProviderRuntimeEventRecorder::default_learning_store().await,
+        )
+        .await,
     )
-    .with_reason(reason_code)
-    .with_fallback(requested_provider, selected_provider)
-    .with_redacted_json(serde_json::json!({
-        "requested_provider": requested_provider,
-        "selected_provider": selected_provider,
-        "source": "provider_construction"
-    }));
-    ProviderRuntimeEventRecorder::default_learning_store().record(event);
 }
 
 pub(crate) struct ObservedLlmProvider {
@@ -126,7 +168,7 @@ pub(crate) struct ObservedLlmProvider {
 }
 
 impl ObservedLlmProvider {
-    fn new(
+    async fn new(
         inner: Arc<dyn LlmProvider>,
         runtime_mode: impl Into<String>,
         profile_id: Option<String>,
@@ -138,12 +180,14 @@ impl ObservedLlmProvider {
             profile_id,
             recorder,
         };
-        identity_events::record_provider_identity_decision(
-            &observed.recorder,
+        let event = identity_events::provider_identity_decision_event(
             observed.inner.as_ref(),
             &observed.runtime_mode,
             observed.profile_id.as_deref(),
         );
+        if let Some(event) = event {
+            observed.recorder.record(event).await;
+        }
         observed
     }
 
@@ -170,131 +214,182 @@ impl ObservedLlmProvider {
         }
     }
 
-    fn record_start(&self, request_id: &str, request: &ObservedRequest, operation: &str) {
-        self.recorder.record(
-            self.event(
+    async fn record_start(&self, request_id: &str, request: &ObservedRequest, operation: &str) {
+        let event = self
+            .event(
                 request_id,
                 request,
                 ProviderRuntimeEventType::RequestStarted,
                 ProviderRuntimeSeverity::Debug,
             )
-            .with_reason(operation),
-        );
-        crate::command::world_model::record_provider_runtime_advisory(
-            request.run_id.as_deref().unwrap_or(self.inner.name()),
-            request_id,
-            &format!(
-                "{} provider={} model={} origin={}",
-                operation,
-                self.inner.name(),
-                request.model,
-                request.origin.as_deref().unwrap_or("unknown")
-            ),
-        );
+            .with_reason(operation);
+        let provider_id = self.inner.name().to_string();
+        let model = request.model.clone();
+        let origin = request.origin.clone();
+        let run_id = request.run_id.clone();
+        let request_id = request_id.to_string();
+        let operation = operation.to_string();
+        self.recorder
+            .persist("record provider request start", move |recorder| {
+                recorder.record_sync(event);
+                crate::command::world_model::record_provider_runtime_advisory(
+                    run_id.as_deref().unwrap_or(&provider_id),
+                    &request_id,
+                    &format!(
+                        "{} provider={} model={} origin={}",
+                        operation,
+                        provider_id,
+                        model,
+                        origin.as_deref().unwrap_or("unknown")
+                    ),
+                );
+            })
+            .await;
     }
 
-    fn record_success(
+    async fn record_call_usage(
+        &self,
+        request_id: &str,
+        request: &ObservedRequest,
+        usage: Option<Usage>,
+        status: &str,
+    ) {
+        let request_id = request_id.to_owned();
+        let request = request.clone();
+        let status = status.to_owned();
+        self.recorder
+            .persist("record logical call usage", move |recorder| {
+                recorder.record_call_usage_sync(&request_id, &request, usage.as_ref(), &status);
+            })
+            .await;
+    }
+
+    async fn record_success(
         &self,
         request_id: &str,
         request: &ObservedRequest,
         metadata: serde_json::Value,
     ) {
-        self.recorder.record(
-            self.event(
+        let event = self
+            .event(
                 request_id,
                 request,
                 ProviderRuntimeEventType::RequestSucceeded,
                 ProviderRuntimeSeverity::Info,
             )
             .with_reason("ok")
-            .with_redacted_json(metadata),
-        );
-        super::provider_profile_updates::mark_success(
-            self.recorder.db.as_ref(),
-            self.inner.name(),
-            &self.runtime_mode,
-            self.profile_id.as_deref(),
-            Some(&request.model),
-            Some(request_id),
-        );
+            .with_redacted_json(metadata);
+        let provider_id = self.inner.name().to_string();
+        let runtime_mode = self.runtime_mode.clone();
+        let profile_id = self.profile_id.clone();
+        let model = request.model.clone();
+        let request_id = request_id.to_string();
+        self.recorder
+            .persist("record provider request success", move |recorder| {
+                recorder.record_sync(event);
+                super::provider_profile_updates::mark_success(
+                    recorder.db.as_ref(),
+                    &provider_id,
+                    &runtime_mode,
+                    profile_id.as_deref(),
+                    Some(&model),
+                    Some(&request_id),
+                );
+            })
+            .await;
     }
 
-    fn record_failure(&self, request_id: &str, request: &ObservedRequest, error: &LlmError) {
-        let error_kind = error_kind(error);
+    async fn record_failure(
+        &self,
+        request_id: &str,
+        request: &ObservedRequest,
+        error: LlmError,
+    ) -> LlmError {
+        let error_kind = error_kind(&error);
         let event = self
             .event(
                 request_id,
                 request,
                 ProviderRuntimeEventType::RequestFailed,
-                error_severity(error),
+                error_severity(&error),
             )
             .with_reason(error_kind)
-            .with_message(error_message(error))
-            .with_redacted_json(error_metadata(error));
-        if let Some(event_id) = self.recorder.record(event) {
-            self.record_agent_provider_incident(&event_id, request, error_kind);
-            if let Some(run_id) = request.run_id.as_deref()
-                && let Ok(config) = archon_core::config::load_config()
-            {
-                let attached =
-                    crate::command::world_model::record_guardrail_provider_incident_for_session(
-                        &config, run_id, &event_id, error_kind,
+            .with_message(error_message(&error))
+            .with_redacted_json(error_metadata(&error));
+        let limit_event = limit_event_type(&error).map(|event_type| {
+            self.event(
+                request_id,
+                request,
+                event_type,
+                ProviderRuntimeSeverity::Warn,
+            )
+            .with_reason(error_kind)
+            .with_message(error_message(&error))
+            .with_redacted_json(error_metadata(&error))
+        });
+        let provider_id = self.inner.name().to_string();
+        let runtime_mode = self.runtime_mode.clone();
+        let profile_id = self.profile_id.clone();
+        let observed = request.clone();
+        let request_id = request_id.to_string();
+        let shared_error = Arc::new(std::sync::Mutex::new(Some(error)));
+        let persistence_error = Arc::clone(&shared_error);
+        self.recorder
+            .persist("record provider request failure", move |recorder| {
+                let guard = persistence_error
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let error = guard
+                    .as_ref()
+                    .expect("provider error remains available during persistence");
+                if let Some(event_id) = recorder.record_sync(event) {
+                    record_agent_provider_incident_sync(
+                        recorder.db.as_ref(),
+                        &provider_id,
+                        &event_id,
+                        &observed,
+                        error_kind,
                     );
-                if attached {
-                    tracing::debug!(
-                        run_id,
-                        provider_event_id = %event_id,
-                        reason_code = error_kind,
-                        "world_model.guardrail_provider_incident"
-                    );
+                    if let Some(run_id) = observed.run_id.as_deref()
+                        && let Ok(config) = archon_core::config::load_config()
+                    {
+                        let attached = crate::command::world_model::record_guardrail_provider_incident_for_session(
+                            &config,
+                            run_id,
+                            &event_id,
+                            error_kind,
+                        );
+                        if attached {
+                            tracing::debug!(
+                                run_id,
+                                provider_event_id = %event_id,
+                                reason_code = error_kind,
+                                "world_model.guardrail_provider_incident"
+                            );
+                        }
+                    }
                 }
-            }
-        }
 
-        if let Some(event_type) = limit_event_type(error) {
-            self.recorder.record(
-                self.event(
-                    request_id,
-                    request,
-                    event_type,
-                    ProviderRuntimeSeverity::Warn,
-                )
-                .with_reason(error_kind)
-                .with_message(error_message(error))
-                .with_redacted_json(error_metadata(error)),
-            );
-            self.recorder
-                .record_limit_window(self.inner.name(), Some(&request.model), error);
-        }
-        super::provider_profile_updates::mark_failure(
-            self.recorder.db.as_ref(),
-            self.inner.name(),
-            &self.runtime_mode,
-            self.profile_id.as_deref(),
-            Some(&request.model),
-            Some(request_id),
-            error,
-        );
-    }
-
-    fn record_agent_provider_incident(
-        &self,
-        provider_event_id: &str,
-        request: &ObservedRequest,
-        reason_code: &str,
-    ) {
-        super::provider_incident_ledger::record_provider_incident(
-            super::provider_incident_ledger::ProviderIncidentLedgerInput {
-                db: self.recorder.db.as_ref(),
-                agent_type: request.agent_type.as_deref(),
-                agent_version: request.agent_version.as_deref(),
-                run_id: request.run_id.as_deref(),
-                model_id: &request.model,
-                provider_id: self.inner.name(),
-                provider_event_id,
-                reason_code,
-            },
-        );
+                if let Some(limit_event) = limit_event {
+                    recorder.record_sync(limit_event);
+                    recorder.record_limit_window_sync(&provider_id, Some(&observed.model), error);
+                }
+                super::provider_profile_updates::mark_failure(
+                    recorder.db.as_ref(),
+                    &provider_id,
+                    &runtime_mode,
+                    profile_id.as_deref(),
+                    Some(&observed.model),
+                    Some(&request_id),
+                    error,
+                );
+            })
+            .await;
+        shared_error
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+            .expect("provider error remains available after persistence")
     }
 }
 
@@ -309,9 +404,9 @@ impl LlmProvider for ObservedLlmProvider {
     }
 
     async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
-        let observed = ObservedRequest::from_request(&request);
+        let observed = ObservedRequest::from_request(self.inner.name(), &request);
         let request_id = uuid::Uuid::new_v4().to_string();
-        self.record_start(&request_id, &observed, "stream");
+        self.record_start(&request_id, &observed, "stream").await;
 
         match self.inner.stream(request).await {
             Ok(inner_rx) => Ok(stream::forward_stream(
@@ -324,19 +419,28 @@ impl LlmProvider for ObservedLlmProvider {
                 request_id,
             )),
             Err(error) => {
-                self.record_failure(&request_id, &observed, &error);
+                self.record_call_usage(&request_id, &observed, None, "failed")
+                    .await;
+                let error = self.record_failure(&request_id, &observed, error).await;
                 Err(error)
             }
         }
     }
 
     async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
-        let observed = ObservedRequest::from_request(&request);
+        let observed = ObservedRequest::from_request(self.inner.name(), &request);
         let request_id = uuid::Uuid::new_v4().to_string();
-        self.record_start(&request_id, &observed, "complete");
+        self.record_start(&request_id, &observed, "complete").await;
 
         match self.inner.complete(request).await {
             Ok(response) => {
+                self.record_call_usage(
+                    &request_id,
+                    &observed,
+                    Some(response.usage.clone()),
+                    "succeeded",
+                )
+                .await;
                 self.record_success(
                     &request_id,
                     &observed,
@@ -350,11 +454,14 @@ impl LlmProvider for ObservedLlmProvider {
                             "cache_read_input_count": response.usage.cache_read_input_tokens,
                         }
                     }),
-                );
+                )
+                .await;
                 Ok(response)
             }
             Err(error) => {
-                self.record_failure(&request_id, &observed, &error);
+                self.record_call_usage(&request_id, &observed, None, "failed")
+                    .await;
+                let error = self.record_failure(&request_id, &observed, error).await;
                 Err(error)
             }
         }
@@ -363,52 +470,13 @@ impl LlmProvider for ObservedLlmProvider {
     fn supports_feature(&self, feature: ProviderFeature) -> bool {
         self.inner.supports_feature(feature)
     }
+    fn supports_anthropic_message_caching(&self) -> bool {
+        self.inner.supports_anthropic_message_caching()
+    }
 
     fn as_anthropic(&self) -> Option<&archon_llm::anthropic::AnthropicClient> {
         self.inner.as_anthropic()
     }
-}
-
-#[derive(Clone)]
-pub(super) struct ObservedRequest {
-    model: String,
-    origin: Option<String>,
-    run_id: Option<String>,
-    agent_type: Option<String>,
-    agent_version: Option<String>,
-}
-
-impl ObservedRequest {
-    fn from_request(request: &LlmRequest) -> Self {
-        let runtime = request.extra.get("archon_runtime");
-        Self {
-            model: request.model.clone(),
-            origin: request.request_origin.clone(),
-            run_id: runtime_field(runtime, "run_id"),
-            agent_type: runtime_field(runtime, "agent_type"),
-            agent_version: runtime_field(runtime, "agent_version"),
-        }
-    }
-}
-
-fn runtime_field(runtime: Option<&serde_json::Value>, field: &str) -> Option<String> {
-    runtime?
-        .get(field)?
-        .as_str()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
-}
-
-fn open_learning_db() -> Result<DbInstance> {
-    let path = crate::command::store_paths::learning_db_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let path_str = path.to_string_lossy().to_string();
-    let db = archon_learning::cozo_guard::open_sqlite_guarded(&path_str, "open learning db")?;
-    archon_learning::schema::ensure_learning_schema(&db)?;
-    Ok(db)
 }
 
 fn base_event(
@@ -420,73 +488,12 @@ fn base_event(
     ProviderRuntimeEvent::new(provider_id, runtime_mode, event_type, severity)
 }
 
-fn error_kind(error: &LlmError) -> &'static str {
-    match error {
-        LlmError::Http(_) => "http_error",
-        LlmError::Auth(_) => "auth_error",
-        LlmError::RateLimited { .. } => "rate_limited",
-        LlmError::Overloaded => "overloaded",
-        LlmError::Server { .. } => "server_error",
-        LlmError::Serialize(_) => "serialization_error",
-        LlmError::Unsupported(_) => "unsupported_feature",
-        LlmError::ProviderNotFound { .. } => "provider_not_found",
-        LlmError::QuotaExceeded(_) => "quota_exceeded",
-        LlmError::Aborted => "aborted",
-        LlmError::ContextWindowExceeded { .. } => "context_window_exceeded",
-        _ => "unknown_error",
-    }
-}
-
-fn error_message(error: &LlmError) -> &'static str {
-    match error {
-        LlmError::RateLimited { .. } => "provider reported a rate limit",
-        LlmError::QuotaExceeded(_) => "provider reported a usage or quota limit",
-        LlmError::Auth(_) => "provider authentication failed",
-        LlmError::Server { .. } => "provider returned a server error",
-        LlmError::ProviderNotFound { .. } => "provider was not found",
-        LlmError::Unsupported(_) => "provider does not support the requested feature",
-        LlmError::Aborted => "provider request was aborted",
-        LlmError::Http(_) => "provider HTTP request failed",
-        LlmError::Overloaded => "provider reported overload",
-        LlmError::Serialize(_) => "provider request or response serialization failed",
-        LlmError::ContextWindowExceeded { .. } => "provider context window was exceeded",
-        _ => "provider request failed",
-    }
-}
-
-fn error_severity(error: &LlmError) -> ProviderRuntimeSeverity {
-    match error {
-        LlmError::RateLimited { .. } | LlmError::QuotaExceeded(_) | LlmError::Overloaded => {
-            ProviderRuntimeSeverity::Warn
-        }
-        _ => ProviderRuntimeSeverity::Error,
-    }
-}
-
-fn limit_event_type(error: &LlmError) -> Option<ProviderRuntimeEventType> {
-    match error {
-        LlmError::RateLimited { .. } => Some(ProviderRuntimeEventType::RateLimitObserved),
-        LlmError::QuotaExceeded(_) => Some(ProviderRuntimeEventType::UsageLimitObserved),
-        _ => None,
-    }
-}
-
-fn error_metadata(error: &LlmError) -> serde_json::Value {
-    match error {
-        LlmError::RateLimited { retry_after_secs } => serde_json::json!({
-            "error_kind": error_kind(error),
-            "retry_after_secs": retry_after_secs,
-        }),
-        LlmError::Server { status, .. } => serde_json::json!({
-            "error_kind": error_kind(error),
-            "status": status,
-        }),
-        _ => serde_json::json!({
-            "error_kind": error_kind(error),
-        }),
-    }
-}
-
+#[cfg(test)]
+#[path = "provider_observer_persistence_tests.rs"]
+mod persistence_tests;
 #[cfg(test)]
 #[path = "provider_observer_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "provider_observer_usage_tests.rs"]
+mod usage_tests;

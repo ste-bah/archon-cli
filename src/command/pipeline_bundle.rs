@@ -6,9 +6,7 @@ use archon_core::config::ArchonConfig;
 use archon_core::env_vars::ArchonEnvVars;
 use archon_memory::{MemoryTrait, graph::MemoryGraph};
 use archon_pipeline::audit::store::PipelineBundleStore;
-use archon_pipeline::audit::types::{BundleStatus, PipelineEvent};
 use archon_pipeline::runner::PipelineRunOptions;
-use chrono::Utc;
 
 use crate::command::pipeline_support::{
     build_pipeline_adapter, build_pipeline_learning_stack, build_reflexion_injector, init_leann,
@@ -166,17 +164,11 @@ pub(crate) async fn handle_list(cwd: &Path) -> Result<()> {
 
 pub(crate) async fn handle_abort(cwd: &Path, session_id: &str) -> Result<()> {
     let bundle = PipelineBundleStore::new(cwd);
-    if let Ok(mut state) = bundle.load_state(session_id) {
-        state.status = BundleStatus::Aborted;
-        state.completed_at = Some(Utc::now());
-        state.updated_at = Utc::now();
-        state.last_error = Some("user aborted run".into());
-        bundle.save_state(&state)?;
-        bundle.append_event(
+    if bundle.load_state(session_id).is_ok() {
+        archon_pipeline::audit::PipelineAuditRun::abort_existing(
+            cwd,
             session_id,
-            PipelineEvent::RunAborted {
-                reason: "user aborted run".into(),
-            },
+            "user aborted run",
         )?;
         println!("Session {session_id} aborted.");
         return Ok(());

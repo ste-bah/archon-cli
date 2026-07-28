@@ -26,8 +26,14 @@ pub mod claim_extractor;
 pub mod evidence_resolver;
 pub mod incident_recorder;
 pub mod report_assembler;
+pub mod required_evidence;
 pub mod trust;
 pub mod verification_gates;
+
+pub use models::{
+    RequiredEvidence, RequiredEvidenceCheck, RequiredEvidenceKind, RequiredEvidenceStatus,
+};
+pub use required_evidence::check_required_evidence;
 
 use anyhow::Result;
 use cozo::DbInstance;

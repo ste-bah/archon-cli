@@ -42,11 +42,16 @@
         };
         let examples = build_jepa_training_examples(&rows(), &config).unwrap();
 
-        let (masked, report) = mask_jepa_training_examples(&examples, config.mask_ratio);
+        let example = examples
+            .iter()
+            .find(|example| !example.context.rows.is_empty())
+            .expect("fixture should include an action with prior context");
+        let (masked, report) =
+            mask_jepa_training_examples(std::slice::from_ref(example), config.mask_ratio);
 
         assert!(report.masked_context_fields > 0);
         assert!(report.masked_action_fields > 0);
-        assert_eq!(masked[0].context.session_id, examples[0].context.session_id);
+        assert_eq!(masked[0].context.session_id, example.context.session_id);
         assert_eq!(
             masked[0].context.rows[0].redacted_excerpt.as_deref(),
             Some("[MASKED_EXCERPT]")
@@ -54,7 +59,7 @@
         assert_eq!(masked[0].action.summary, "[MASKED_EXCERPT]");
         assert_eq!(
             masked[0].target.rows[0].redacted_excerpt,
-            examples[0].target.rows[0].redacted_excerpt
+            example.target.rows[0].redacted_excerpt
         );
         assert!(!report.reconstructs_raw_text);
     }

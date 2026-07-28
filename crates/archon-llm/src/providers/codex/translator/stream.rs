@@ -192,13 +192,17 @@ pub fn process_responses_stream(
 }
 
 fn usage_into_archon(usage: ResponseUsage) -> Usage {
+    let cache_read_input_tokens = usage
+        .input_tokens_details
+        .and_then(|details| details.cached_tokens);
     Usage {
         input_tokens: usage.input_tokens as u64,
         output_tokens: usage.output_tokens as u64,
         cache_creation_input_tokens: 0,
-        cache_read_input_tokens: usage
-            .input_tokens_details
-            .and_then(|d| d.cached_tokens)
-            .unwrap_or(0) as u64,
+        cache_read_input_tokens: cache_read_input_tokens.unwrap_or(0) as u64,
+        input_tokens_available: true,
+        output_tokens_available: true,
+        cache_creation_input_tokens_available: false,
+        cache_read_input_tokens_available: cache_read_input_tokens.is_some(),
     }
 }

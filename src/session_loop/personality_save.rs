@@ -50,7 +50,20 @@ pub(crate) async fn save_personality_snapshot_if_enabled(
     drop(iv);
 
     let engine = archon_consciousness::rules::RulesEngine::new(memory);
-    let rule_scores = engine.export_scores().unwrap_or_default();
+    let rule_scores = match archon_consciousness::persistence::load_latest_snapshot(memory) {
+        Ok(Some(previous)) => match engine.reconcile_trends(&previous.rule_scores) {
+            Ok(rule_scores) => rule_scores,
+            Err(e) => {
+                tracing::warn!("personality: failed to reconcile rule trends: {e}");
+                engine.export_scores().unwrap_or_default()
+            }
+        },
+        Ok(None) => engine.export_scores().unwrap_or_default(),
+        Err(e) => {
+            tracing::warn!("personality: failed to load previous snapshot: {e}");
+            engine.export_scores().unwrap_or_default()
+        }
+    };
 
     let snap = archon_consciousness::persistence::PersonalitySnapshot {
         session_id: session_id.to_string(),
@@ -140,6 +153,50 @@ mod tests {
             .expect("load")
             .expect("snapshot present after save");
         assert_eq!(result.session_id, "sess-saved");
+    }
+
+    #[tokio::test]
+    async fn save_reconciles_rule_trend_against_previous_snapshot() {
+        let graph = MemoryGraph::in_memory().expect("graph");
+        let engine = archon_consciousness::rules::RulesEngine::new(&graph);
+        let rule = engine
+            .add_rule(
+                "compare session scores",
+                archon_consciousness::rules::RuleSource::UserDefined,
+            )
+            .expect("add rule");
+
+        save_personality_snapshot_if_enabled(
+            Some(Arc::new(tokio::sync::Mutex::new(InnerVoice::new()))),
+            &graph,
+            "sess-baseline",
+            true,
+            10,
+            0.5,
+            std::time::Instant::now(),
+        )
+        .await;
+        engine
+            .boost_rule_by(&rule.id, 10.0, "fixture:session-rise")
+            .expect("raise score");
+        engine
+            .apply_score_delta(&rule.id, -5.0, "fixture:last-mutation-decline")
+            .expect("lower score");
+
+        save_personality_snapshot_if_enabled(
+            Some(Arc::new(tokio::sync::Mutex::new(InnerVoice::new()))),
+            &graph,
+            "sess-current",
+            true,
+            10,
+            0.5,
+            std::time::Instant::now(),
+        )
+        .await;
+
+        let stored = graph.get_memory(&rule.id).expect("reload rule");
+        assert!(stored.tags.iter().any(|tag| tag == "trend:rising"));
+        assert!(!stored.tags.iter().any(|tag| tag == "trend:declining"));
     }
 
     #[tokio::test]

@@ -45,6 +45,74 @@ fn search_surfaces_failed_indexing() {
 
 #[test]
 #[serial_test::serial(docs_global_state)]
+fn index_pending_builds_current_persisted_snapshot() {
+    let db = test_db();
+    setup_with_provider(&db, 4);
+    let chunk = insert_test_chunk(&db, "chunk-auto-snapshot", "automatic snapshot content");
+
+    let result = index_pending_chunks(&db).unwrap();
+    let vector_store = crate::vector_store::DocVectorStore::acquire_default().unwrap();
+    let manifest = vector_store.latest_hnsw_manifest("mock").unwrap().unwrap();
+
+    assert_eq!(result.indexed, 1);
+    assert_eq!(
+        manifest.vector_count,
+        vector_store.count_vectors(Some("mock")).unwrap()
+    );
+    assert_eq!(manifest.dimension, 4);
+    assert_eq!(manifest.provider, "mock");
+    assert!(vector_store.has_vector("mock", &chunk.chunk_id).unwrap());
+}
+
+#[test]
+#[serial_test::serial(docs_global_state)]
+fn parallel_indexing_builds_current_persisted_snapshot() {
+    let db = test_db();
+    crate::schema::ensure_doc_schema(&db).unwrap();
+    crate::schema::ensure_vec_schema(&db, 4).unwrap();
+    crate::embed::set_provider(Box::new(ParallelMockProvider { dim: 4 }));
+    insert_test_chunk(&db, "chunk-parallel-a", "parallel snapshot a");
+    insert_test_chunk(&db, "chunk-parallel-b", "parallel snapshot b");
+    let options = crate::indexing::IndexOptions {
+        embedding_workers: Some(2),
+        batch_size: 1,
+        ..Default::default()
+    };
+
+    let result = crate::indexing::index_chunks(&db, &options).unwrap();
+    let vector_store = crate::vector_store::DocVectorStore::acquire_default().unwrap();
+    let manifest = vector_store
+        .latest_hnsw_manifest("parallel-mock")
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(result.indexed, 2);
+    assert_eq!(
+        manifest.vector_count,
+        vector_store.count_vectors(Some("parallel-mock")).unwrap()
+    );
+}
+
+#[test]
+#[serial_test::serial(docs_global_state)]
+fn index_chunk_builds_current_persisted_snapshot() {
+    let db = test_db();
+    setup_with_provider(&db, 4);
+    let chunk = insert_test_chunk(&db, "chunk-direct-snapshot", "direct snapshot content");
+
+    index_chunk(&db, &chunk).unwrap();
+    let vector_store = crate::vector_store::DocVectorStore::acquire_default().unwrap();
+    let vector_count = vector_store.count_vectors(Some("mock")).unwrap();
+    let manifest = vector_store.latest_hnsw_manifest("mock").unwrap().unwrap();
+
+    assert_eq!(manifest.provider, "mock");
+    assert_eq!(manifest.dimension, 4);
+    assert_eq!(manifest.vector_count, vector_count);
+    assert!(vector_store.has_vector("mock", &chunk.chunk_id).unwrap());
+}
+
+#[test]
+#[serial_test::serial(docs_global_state)]
 fn index_and_search_known_chunk() {
     let db = test_db();
     setup_with_provider(&db, 4);
@@ -142,7 +210,7 @@ fn index_pending_command_indexes_pending_only() {
     let done_after = store::get_chunk_by_id(&db, "chunk-done").unwrap().unwrap();
     assert_eq!(done_after.embedding_status, "indexed");
 
-    let vector_store = crate::vector_store::DocVectorStore::open_default().unwrap();
+    let vector_store = crate::vector_store::DocVectorStore::acquire_default().unwrap();
     assert!(vector_store.has_vector("mock", "chunk-pending").unwrap());
     assert!(!vector_store.has_vector("mock", "chunk-done").unwrap());
 }

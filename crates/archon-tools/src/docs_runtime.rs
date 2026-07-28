@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use archon_docs::{answer, retrieval};
 use cozo::DbInstance;
@@ -14,42 +15,60 @@ pub(crate) async fn run_search(args: Vec<String>, ctx: &ToolContext) -> ToolResu
         Ok(args) => args,
         Err(error) => return ToolResult::error(error),
     };
-    let db = match open_docs_db(ctx) {
-        Ok(db) => db,
-        Err(error) => return ToolResult::error(error),
-    };
-    let mode = match retrieval::SearchMode::parse(&parsed.mode) {
-        Ok(mode) => mode,
-        Err(error) => return ToolResult::error(error.to_string()),
-    };
-    let policy = load_policy(ctx);
-    match retrieval::search_with_policy(&db, &parsed.query, 10, mode, &policy) {
-        Ok(results) => ToolResult::success(format_search_results(&db, &results, parsed.debug)),
-        Err(error) => ToolResult::error(format_search_error(error)),
-    }
+    let working_dir = ctx.working_dir.clone();
+    run_blocking("docs search", move || {
+        let cwd = effective_working_dir(working_dir);
+        let db_path = docs_db_path(&cwd);
+        let db = match acquire_docs_db("docs search", &db_path) {
+            Ok(db) => db,
+            Err(error) => return ToolResult::error(error),
+        };
+        let mode = match retrieval::SearchMode::parse(&parsed.mode) {
+            Ok(mode) => mode,
+            Err(error) => return ToolResult::error(error.to_string()),
+        };
+        let policy = load_policy(&cwd);
+        match retrieval::search_with_policy(&db, &parsed.query, 10, mode, &policy) {
+            Ok(results) => ToolResult::success(format_search_results(&db, &results, parsed.debug)),
+            Err(error) => ToolResult::error(format_search_error(error)),
+        }
+    })
+    .await
 }
 
 pub(crate) async fn run_list(limit: usize, ctx: &ToolContext) -> ToolResult {
-    let db = match open_docs_db(ctx) {
-        Ok(db) => db,
-        Err(error) => return ToolResult::error(error),
-    };
-    match archon_docs::store::list_doc_sources(&db) {
-        Ok(docs) => ToolResult::success(format_doc_list(&docs, limit)),
-        Err(error) => ToolResult::error(format!("list documents failed: {error}")),
-    }
+    let working_dir = ctx.working_dir.clone();
+    run_blocking("docs list", move || {
+        let cwd = effective_working_dir(working_dir);
+        let db_path = docs_db_path(&cwd);
+        let db = match acquire_docs_db("docs list", &db_path) {
+            Ok(db) => db,
+            Err(error) => return ToolResult::error(error),
+        };
+        match archon_docs::store::list_doc_sources(&db) {
+            Ok(docs) => ToolResult::success(format_doc_list(&docs, limit)),
+            Err(error) => ToolResult::error(format!("list documents failed: {error}")),
+        }
+    })
+    .await
 }
 
 pub(crate) async fn run_get(document_id: String, ctx: &ToolContext) -> ToolResult {
-    let db = match open_docs_db(ctx) {
-        Ok(db) => db,
-        Err(error) => return ToolResult::error(error),
-    };
-    match archon_docs::store::get_doc_source(&db, &document_id) {
-        Ok(Some(doc)) => ToolResult::success(format_doc_get(&db, &doc)),
-        Ok(None) => ToolResult::error(format!("document not found: {document_id}")),
-        Err(error) => ToolResult::error(format!("get document failed: {error}")),
-    }
+    let working_dir = ctx.working_dir.clone();
+    run_blocking("docs get", move || {
+        let cwd = effective_working_dir(working_dir);
+        let db_path = docs_db_path(&cwd);
+        let db = match acquire_docs_db("docs get", &db_path) {
+            Ok(db) => db,
+            Err(error) => return ToolResult::error(error),
+        };
+        match archon_docs::store::get_doc_source(&db, &document_id) {
+            Ok(Some(doc)) => ToolResult::success(format_doc_get(&db, &doc)),
+            Ok(None) => ToolResult::error(format!("document not found: {document_id}")),
+            Err(error) => ToolResult::error(format!("get document failed: {error}")),
+        }
+    })
+    .await
 }
 
 pub(crate) async fn run_answer(args: Vec<String>, ctx: &ToolContext) -> ToolResult {
@@ -57,14 +76,20 @@ pub(crate) async fn run_answer(args: Vec<String>, ctx: &ToolContext) -> ToolResu
         Ok(query) => query,
         Err(error) => return ToolResult::error(error),
     };
-    let db = match open_docs_db(ctx) {
-        Ok(db) => db,
-        Err(error) => return ToolResult::error(error),
-    };
-    match answer::answer(&db, &query, 5) {
-        Ok(ans) => ToolResult::success(format_answer(&db, ans)),
-        Err(error) => ToolResult::error(format_search_error(error)),
-    }
+    let working_dir = ctx.working_dir.clone();
+    run_blocking("docs answer", move || {
+        let cwd = effective_working_dir(working_dir);
+        let db_path = docs_db_path(&cwd);
+        let db = match acquire_docs_db("docs answer", &db_path) {
+            Ok(db) => db,
+            Err(error) => return ToolResult::error(error),
+        };
+        match answer::answer(&db, &query, 5) {
+            Ok(ans) => ToolResult::success(format_answer(&db, ans)),
+            Err(error) => ToolResult::error(format_search_error(error)),
+        }
+    })
+    .await
 }
 
 struct SearchArgs {
@@ -114,27 +139,31 @@ fn expect_arg(iter: &mut impl Iterator<Item = String>, expected: &str) -> Result
     }
 }
 
-fn open_docs_db(ctx: &ToolContext) -> Result<DbInstance, String> {
-    let cwd = working_dir(ctx);
-    let db_path = docs_db_path(&cwd);
-    if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("create docs DB dir {}: {error}", parent.display()))?;
-    }
-    archon_docs::configure_cozo_write_lock_for_db(&db_path);
-    let path = db_path.to_string_lossy().to_string();
-    let db = DbInstance::new("sqlite", &path, "")
-        .map_err(|error| format!("open document store at {path}: {error}"))?;
-    archon_docs::schema::ensure_doc_schema(&db)
-        .map_err(|error| format!("ensure document schema: {error}"))?;
-    Ok(db)
+fn acquire_docs_db(operation: &str, db_path: &Path) -> Result<Arc<DbInstance>, String> {
+    docs_db_wait_hook(operation);
+    archon_docs::acquire_docs_db(db_path).map_err(|error| format!("{operation}: {error}"))
 }
 
-fn working_dir(ctx: &ToolContext) -> PathBuf {
-    if ctx.working_dir.as_os_str().is_empty() {
+async fn run_blocking(
+    operation: &'static str,
+    operation_fn: impl FnOnce() -> ToolResult + Send + 'static,
+) -> ToolResult {
+    match tokio::task::spawn_blocking(move || {
+        run_blocking_panic_hook(operation);
+        operation_fn()
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(error) => ToolResult::error(format!("{operation} blocking task failed: {error}")),
+    }
+}
+
+fn effective_working_dir(working_dir: PathBuf) -> PathBuf {
+    if working_dir.as_os_str().is_empty() {
         return std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     }
-    ctx.working_dir.clone()
+    working_dir
 }
 
 fn docs_db_path(cwd: &Path) -> PathBuf {
@@ -145,8 +174,8 @@ fn docs_db_path(cwd: &Path) -> PathBuf {
         .unwrap_or_else(|| cwd.join(".archon").join("archon-data.db"))
 }
 
-fn load_policy(ctx: &ToolContext) -> archon_policy::EffectivePolicy {
-    archon_policy::load_effective_policy(&working_dir(ctx)).unwrap_or_default()
+fn load_policy(cwd: &Path) -> archon_policy::EffectivePolicy {
+    archon_policy::load_effective_policy(cwd).unwrap_or_default()
 }
 
 fn format_doc_list(docs: &[archon_docs::models::SourceDocument], limit: usize) -> String {
@@ -325,3 +354,24 @@ fn format_search_error(error: archon_docs::errors::DocsError) -> String {
         other => other.to_string(),
     }
 }
+
+#[cfg(test)]
+fn docs_db_wait_hook(operation: &str) {
+    blocking_test_seam::run_wait_hook(operation);
+}
+
+#[cfg(not(test))]
+fn docs_db_wait_hook(_operation: &str) {}
+
+#[cfg(test)]
+fn run_blocking_panic_hook(operation: &str) {
+    blocking_test_seam::run_panic_hook(operation);
+}
+
+#[cfg(not(test))]
+fn run_blocking_panic_hook(_operation: &str) {}
+
+#[cfg(test)]
+mod blocking_test_seam;
+#[cfg(test)]
+mod docs_runtime_tests;

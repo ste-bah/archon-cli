@@ -1,0 +1,29 @@
+Issue #72 historical absence adjudication
+
+Physical source: tests/fixtures/baseline/cargo_test_list.txt
+Historical source: git show HEAD:tests/fixtures/baseline/cargo_test_list.txt
+
+Classification:
+- 279 old identities map to exactly one current physical identity with the same test leaf; module extraction added intermediate modules.
+- 2 old identities have duplicate leaves but map unambiguously by preserved module prefix:
+  - research::facade::tests::facade_with_learning_implements_trait -> archon-pipeline::lib::archon_pipeline::research::facade::tests::extended_tests::facade_with_learning_implements_trait
+  - send_message::tests::permission_level_is_risky -> archon-tools::lib::archon_tools::send_message::tests::cases_a::permission_level_is_risky
+- 13 historical identities have exact replacement tests with immutable commit/path evidence.
+- 16 identities have semantic replacement tests with immutable commit/path evidence.
+- 9 identities were intentionally deleted with their obsolete implementation; each row records the deletion commit and path.
+- 3 llm_adapter tests were absent during the original audit but are now restored
+  under their current physical package/target identity.
+  - 9 Anthropic tests moved to anthropic_tests and dropped redundant test_ prefixes.
+  - async_hook_returns_allow_immediately -> archon-core::test::hooks_tests::async_hook_with_allow_policy_returns_immediately.
+  - hook_timeout_returns_not_blocked -> archon-core::test::hooks_tests::explicit_allow_policy_keeps_pre_tool_timeout_non_blocking.
+  - 3 HeadlessRuntime constructor tests deleted with obsolete HeadlessRuntime architecture; current --headless enters real session loop.
+  - 6 GNN tests moved/renamed to optimizer, backprop, weights, and integration suites.
+  - output::tests::tool_output_toggle_expand replaced by expanded_tool_output_is_bounded_utf8_safe_and_collapses_cleanly.
+  - rules::tests::trend_calculation deleted with score-band trend model; current persisted-delta model has reinforcement tests.
+  - 3 duplicate RunAgentSkill tests deleted with duplicate synchronous skill architecture; current command handler tests cover usage/no-task/dispatch.
+  - snip_context_preserves_recent_turns deleted because client-side snipping broke tool-use/result continuity.
+  - 4 TaskCreate serialized-request/default tests: propagation and response contracts replaced by direct foreground/background executor tests; missing prompted-default coverage restored as task_create_prompt_defaults_request_fields.
+  - budget-exhausted fail-open test replaced by default-policy plus explicit-allow tests.
+  - 6 reasoning/pipeline config, mode, agent-write, prompt-budget, and scanner tests renamed/replaced after intentional contract changes.
+
+Independent source/history audits found no remaining unadjudicated test loss after restoring task_create_prompt_defaults_request_fields.

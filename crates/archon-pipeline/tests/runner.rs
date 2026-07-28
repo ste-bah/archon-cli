@@ -24,8 +24,8 @@ use archon_pipeline::learning::{
 };
 use archon_pipeline::runner::{
     AgentExecutionRequest, AgentInfo, AgentResult, LlmClient, LlmResponse, NextAgent,
-    PipelineFacade, PipelineResult, PipelineSession, PipelineType, QualityScore, ToolAccessLevel,
-    run_pipeline,
+    PipelineFacade, PipelineProgressFacade, PipelineResult, PipelineSession, PipelineType,
+    QualityScore, ToolAccessLevel, run_pipeline,
 };
 
 // ---------------------------------------------------------------------------
@@ -315,6 +315,52 @@ impl LlmClient for MockLlmClient {
 // ---------------------------------------------------------------------------
 // Stub Facade — standard 3-agent pipeline
 // ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn progress_facades_keep_concurrent_run_channels_isolated() {
+    let facade: Arc<dyn PipelineFacade> = Arc::new(StubFacade::new());
+    let (first_tx, mut first_rx) = tokio::sync::mpsc::channel(1);
+    let (second_tx, mut second_rx) = tokio::sync::mpsc::channel(1);
+    let first = PipelineProgressFacade::new(Arc::clone(&facade), first_tx);
+    let second = PipelineProgressFacade::new(Arc::clone(&facade), second_tx);
+    let mut first_session = facade.init_session("first").await.unwrap();
+    let mut second_session = facade.init_session("second").await.unwrap();
+    let agent = StubFacade::make_agent(0);
+    let result = AgentResult {
+        output: "done".into(),
+        tool_use_log: Vec::new(),
+        tokens_in: 0,
+        tokens_out: 0,
+        cost_usd: 0.0,
+        duration: Duration::ZERO,
+        quality: None,
+    };
+    let quality = QualityScore {
+        overall: 0.85,
+        dimensions: HashMap::new(),
+    };
+
+    first
+        .process_completion(&mut first_session, &agent, &result, &quality)
+        .await
+        .unwrap();
+    second
+        .process_completion(&mut second_session, &agent, &result, &quality)
+        .await
+        .unwrap();
+    drop(first);
+
+    assert_eq!(
+        first_rx.recv().await.as_deref(),
+        Some("[pipeline phase 1] Agent 1 complete (quality: 0.85)\n")
+    );
+    assert_eq!(first_rx.recv().await, None);
+    assert_eq!(
+        second_rx.recv().await.as_deref(),
+        Some("[pipeline phase 1] Agent 1 complete (quality: 0.85)\n")
+    );
+    assert!(!second_rx.is_closed());
+}
 
 /// A minimal PipelineFacade implementation that cycles through 3 agents.
 struct StubFacade {

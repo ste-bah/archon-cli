@@ -48,6 +48,10 @@ impl LlmProvider for MockProvider {
         false
     }
 
+    fn supports_anthropic_message_caching(&self) -> bool {
+        self.provider_family == ProviderFamily::AnthropicApi
+    }
+
     fn compaction_provider_family(&self) -> ProviderFamily {
         self.provider_family
     }
@@ -72,6 +76,7 @@ impl LlmProvider for MockProvider {
                             output_tokens: 0,
                             cache_creation_input_tokens: 0,
                             cache_read_input_tokens: 0,
+                            ..Usage::default()
                         },
                     },
                     StreamEvent::ContentBlockStart {
@@ -115,6 +120,7 @@ fn text_response(text: &str) -> Vec<StreamEvent> {
                 output_tokens: 5,
                 cache_creation_input_tokens: 0,
                 cache_read_input_tokens: 0,
+                ..Usage::default()
             },
         },
         StreamEvent::ContentBlockStart {
@@ -142,6 +148,7 @@ fn tool_use_response(tool_id: &str, tool_name: &str, input_json: &str) -> Vec<St
                 output_tokens: 20,
                 cache_creation_input_tokens: 0,
                 cache_read_input_tokens: 0,
+                ..Usage::default()
             },
         },
         StreamEvent::ContentBlockStart {
@@ -173,6 +180,7 @@ fn thinking_tool_use_response(
                 output_tokens: 20,
                 cache_creation_input_tokens: 0,
                 cache_read_input_tokens: 0,
+                ..Usage::default()
             },
         },
         StreamEvent::ContentBlockStart {
@@ -431,3 +439,4 @@ async fn subagent_mid_stream_rate_limit_compacts_own_history_before_one_retry() 
 mod basic;
 mod parallel;
 mod progress;
+mod workflow_system;

@@ -5,6 +5,7 @@ use crate::provider::{
     DataFlowClassification, LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo,
     ProviderFeature, classify_data_flow_endpoint,
 };
+use crate::providers::openai_protocol::{map_http_error, usage_event, usage_from_openai_chunk};
 use crate::streaming::StreamEvent;
 use crate::types::{ContentBlockType, Usage};
 
@@ -153,13 +154,12 @@ impl OpenAiProvider {
 
     /// Build and send the streaming request, return the mpsc receiver.
     async fn do_stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
-        let body = build_openai_request_body(
+        let body = build_openai_stream_request_body(
             &request.model,
             request.max_tokens,
             &request.system,
             &request.messages,
             &request.tools,
-            true,
         );
 
         let url = format!("{}/chat/completions", self.base_url);
@@ -265,6 +265,18 @@ pub fn build_openai_request_body(
     body
 }
 
+pub fn build_openai_stream_request_body(
+    model: &str,
+    max_tokens: u32,
+    system: &[serde_json::Value],
+    messages: &[serde_json::Value],
+    tools: &[serde_json::Value],
+) -> serde_json::Value {
+    let mut body = build_openai_request_body(model, max_tokens, system, messages, tools, true);
+    body["stream_options"] = serde_json::json!({"include_usage": true});
+    body
+}
+
 // ---------------------------------------------------------------------------
 // SSE parsing (shared with LocalProvider)
 // ---------------------------------------------------------------------------
@@ -278,15 +290,16 @@ pub(crate) fn parse_openai_sse_chunk(chunk: &str) -> Vec<StreamEvent> {
         Err(_) => return vec![],
     };
 
+    let usage = usage_from_openai_chunk(&value);
     let choices = match value.get("choices").and_then(|c| c.as_array()) {
         Some(arr) if !arr.is_empty() => arr,
-        _ => return vec![],
+        _ => return usage.map_or_else(Vec::new, usage_event),
     };
 
     let choice = &choices[0];
     let delta = match choice.get("delta") {
         Some(d) => d,
-        None => return vec![],
+        None => return usage.map_or_else(Vec::new, usage_event),
     };
 
     let finish_reason = choice
@@ -368,30 +381,13 @@ pub(crate) fn parse_openai_sse_chunk(chunk: &str) -> Vec<StreamEvent> {
         _ => {}
     }
 
+    if let Some(usage) = usage {
+        events.push(StreamEvent::MessageDelta {
+            stop_reason: None,
+            usage: Some(usage),
+        });
+    }
     events
-}
-
-// ---------------------------------------------------------------------------
-// HTTP error mapping
-// ---------------------------------------------------------------------------
-
-fn map_http_error(status: u16, body: String) -> LlmError {
-    if let Some(err) =
-        crate::context_window::classify_context_window_body(status, &body, Some("openai"), None)
-    {
-        return err;
-    }
-    match status {
-        401 => LlmError::Auth(body),
-        429 => LlmError::RateLimited {
-            retry_after_secs: 60,
-        },
-        500 | 503 => LlmError::Overloaded,
-        _ => LlmError::Server {
-            status,
-            message: body,
-        },
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -459,10 +455,15 @@ impl LlmProvider for OpenAiProvider {
                     text_parts.push(text);
                 }
                 StreamEvent::MessageDelta {
-                    stop_reason: Some(sr),
-                    ..
+                    stop_reason: event_stop_reason,
+                    usage: event_usage,
                 } => {
-                    stop_reason = sr;
+                    if let Some(sr) = event_stop_reason {
+                        stop_reason = sr;
+                    }
+                    if let Some(event_usage) = event_usage {
+                        usage.merge(&event_usage);
+                    }
                 }
                 _ => {}
             }

@@ -17,6 +17,13 @@ pub mod input;
 pub mod markdown;
 pub mod output;
 pub mod permissions;
+mod thinking_archive;
+#[cfg(test)]
+mod thinking_archive_tests;
+mod thinking_view;
+mod tool_transcript;
+#[cfg(test)]
+mod tool_transcript_tests;
 // TASK-TUI-628: sandbox module — logical Bubble-mode permission check.
 pub mod sandbox;
 pub mod splash;
@@ -55,12 +62,14 @@ pub mod layout;
 pub use layout::{ReflowOutcome, handle_resize, last_known_size};
 
 pub mod event_loop;
-pub use event_loop::{EventLoopConfig, run_event_loop};
 
 pub mod cancel;
 pub use cancel::YieldGate;
 
 pub mod event_channel;
+mod event_framing;
+mod event_payload_size;
+mod event_queue_metrics;
 pub mod events;
 pub mod evidence_view_state;
 pub use events::TuiEvent;

@@ -162,11 +162,15 @@ impl CapturingMockProvider {
 #[async_trait::async_trait]
 impl LlmProvider for CapturingMockProvider {
     fn name(&self) -> &str {
-        "capturing-mock"
+        "anthropic"
     }
     fn models(&self) -> Vec<ModelInfo> {
         vec![]
     }
+    fn supports_anthropic_message_caching(&self) -> bool {
+        true
+    }
+
     fn supports_feature(&self, _: ProviderFeature) -> bool {
         false
     }
@@ -188,6 +192,7 @@ impl LlmProvider for CapturingMockProvider {
                     output_tokens: 5,
                     cache_creation_input_tokens: 0,
                     cache_read_input_tokens: 0,
+                    ..Usage::default()
                 },
             },
             StreamEvent::ContentBlockStart {
@@ -215,6 +220,14 @@ impl LlmProvider for CapturingMockProvider {
 }
 
 fn make_runner(provider: Arc<CapturingMockProvider>, identity: IdentityProvider) -> SubagentRunner {
+    make_runner_with_config(provider, identity, AgentConfig::default())
+}
+
+fn make_runner_with_config(
+    provider: Arc<CapturingMockProvider>,
+    identity: IdentityProvider,
+    config: AgentConfig,
+) -> SubagentRunner {
     let tool_registry = ToolRegistry::new();
     let tool_defs = vec![];
     let ctx = ToolContext {
@@ -227,6 +240,7 @@ fn make_runner(provider: Arc<CapturingMockProvider>, identity: IdentityProvider)
         cancel_parent: None,
         sandbox: None,
         activity_sink: None,
+        ..ToolContext::default()
     };
     SubagentRunner::new(
         provider,
@@ -237,7 +251,7 @@ fn make_runner(provider: Arc<CapturingMockProvider>, identity: IdentityProvider)
         "mock-model".into(),
         1,
         60,
-        Arc::new(AgentConfig::default()),
+        Arc::new(config),
         Arc::new(identity),
     )
 }
@@ -294,6 +308,101 @@ async fn subagent_system_block_starts_with_billing_header_in_spoof_mode() {
             .is_some_and(|t| t.contains("Test agent body"))
     });
     assert!(body_found, "agent body not found in system blocks");
+    assert_eq!(request.extra["archon_runtime"]["role"], "subagent");
+    assert_eq!(request.extra["archon_runtime"]["origin"], "subagent");
+    assert_eq!(request.extra["archon_runtime"]["turn"], 0);
+    assert_eq!(request.extra["archon_runtime"]["round"], 0);
+}
+
+#[tokio::test]
+async fn subagent_spoof_billing_fingerprint_uses_array_message_text() {
+    let captured = Arc::new(Mutex::new(None));
+    let provider = Arc::new(CapturingMockProvider::new(Arc::clone(&captured)));
+    let identity = IdentityProvider::new(
+        IdentityMode::Spoof {
+            version: "2.1.89".into(),
+            entrypoint: "cli".into(),
+            betas: vec![],
+            workload: None,
+            anti_distillation: false,
+        },
+        "test-session".into(),
+        "test-device".into(),
+        String::new(),
+    );
+    let expected = identity.billing_header("actual first prompt").unwrap();
+    let mut runner = make_runner(provider, identity);
+    runner.set_initial_messages(vec![serde_json::json!({
+        "role":"user",
+        "content":[{"type":"text","text":"actual first prompt"}]
+    })]);
+
+    runner.run("latest turn").await.expect("subagent response");
+
+    let request = captured.lock().await.take().expect("captured request");
+    assert_eq!(request.system[0]["text"], expected);
+}
+
+#[tokio::test]
+async fn subagent_anthropic_request_marks_latest_conversation_block() {
+    let captured = Arc::new(Mutex::new(None));
+    let provider = Arc::new(CapturingMockProvider::new(Arc::clone(&captured)));
+    let identity = IdentityProvider::new(
+        IdentityMode::Clean,
+        "test-session".into(),
+        "test-device".into(),
+        String::new(),
+    );
+    let mut config = AgentConfig::default();
+    config.context.prompt_cache_conversation = true;
+    let runner = make_runner_with_config(provider, identity, config);
+
+    runner.run("latest turn").await.expect("subagent response");
+
+    let request = captured.lock().await.take().expect("captured request");
+    assert_eq!(
+        request.messages[0]["content"][0]["cache_control"]["type"],
+        "ephemeral"
+    );
+}
+
+#[tokio::test]
+async fn subagent_request_trims_old_tool_result_without_mutating_resume_history() {
+    let captured = Arc::new(Mutex::new(None));
+    let provider = Arc::new(CapturingMockProvider::new(Arc::clone(&captured)));
+    let identity = IdentityProvider::new(
+        IdentityMode::Clean,
+        "test-session".into(),
+        "test-device".into(),
+        String::new(),
+    );
+    let mut config = AgentConfig::default();
+    config.context.preserve_recent_turns = 1;
+    let mut runner = make_runner_with_config(provider, identity, config);
+    let old_content = "old-result".repeat(20_000);
+    let resume_messages = vec![
+        serde_json::json!({"role":"user","content":"first turn"}),
+        serde_json::json!({"role":"assistant","content":[{
+            "type":"tool_use","id":"tool-1","name":"Bash","input":{}
+        }]}),
+        serde_json::json!({"role":"user","content":[{
+            "type":"tool_result","tool_use_id":"tool-1","content":old_content,"is_error":false
+        }]}),
+        serde_json::json!({"role":"user","content":"second turn"}),
+    ];
+    runner.set_initial_messages(resume_messages.clone());
+
+    runner.run("latest turn").await.expect("subagent response");
+
+    let request = captured.lock().await.take().expect("captured request");
+    let projected = request.messages[2]["content"][0]["content"]
+        .as_str()
+        .expect("projected tool result");
+    assert!(projected.contains("tool output trimmed"));
+    assert_eq!(
+        resume_messages[2]["content"][0]["content"],
+        serde_json::Value::String(old_content)
+    );
 }
 
 #[tokio::test]
@@ -334,4 +443,8 @@ async fn subagent_system_block_omits_billing_header_in_clean_mode() {
             .is_some_and(|t| t.contains("Test agent body"))
     });
     assert!(body_found, "agent body not found in system blocks");
+    assert_eq!(request.extra["archon_runtime"]["role"], "subagent");
+    assert_eq!(request.extra["archon_runtime"]["origin"], "subagent");
+    assert_eq!(request.extra["archon_runtime"]["turn"], 0);
+    assert_eq!(request.extra["archon_runtime"]["round"], 0);
 }

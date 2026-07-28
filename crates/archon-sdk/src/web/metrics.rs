@@ -234,8 +234,12 @@ fn provider_runtime_records(
         if !path.exists() {
             continue;
         }
-        let path_str = path.to_string_lossy().to_string();
-        let Ok(db) = cozo::DbInstance::new("sqlite", &path_str, "") else {
+        let path_str = path.to_string_lossy();
+        let Ok(db) = archon_cozo::open_sqlite_guarded_instance(
+            &path_str,
+            "open provider metrics learning db",
+            archon_cozo::CozoGuardConfig::for_db_path(&path),
+        ) else {
             continue;
         };
         let Ok(events) = archon_learning::runtime_events::list_provider_runtime_events(&db, None)

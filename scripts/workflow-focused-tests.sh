@@ -83,11 +83,14 @@ run_step() {
 run_step "coordinated implementation fanout" \
   cargo test -p archon-workflow --test coordinated_implementation_fanout -- --nocapture
 
-run_step "write coordinator config" \
-  cargo test -p archon-workflow --test write_coordinator_config -- --nocapture
+run_step "workflow v2 write modes" \
+  cargo test -p archon-workflow --test v2_write_modes -- --nocapture
 
-run_step "coordinated fanout integration" \
-  cargo test -p archon-workflow --test coordinated_fanout -- --nocapture
+run_step "workflow v2 parallel fanout" \
+  cargo test -p archon-workflow --test v2_parallel_fanout -- --nocapture
+
+run_step "write coordination events" \
+  cargo test -p archon-workflow --test write_coordination_events -- --nocapture
 
 run_step "patch apply unit tests" \
   cargo test -p archon-workflow --lib write_coordinator::patch_apply -- --nocapture

@@ -42,16 +42,19 @@ pub(crate) fn record_runtime_outcome(
     let mut evidence_refs = bundle_id
         .map(|id| vec![format!("bundle:{id}")])
         .unwrap_or_default();
-    if let Some(prediction) = &record.prediction
-        && let Ok((updated, _)) = super::predict::record_outcome_for_prediction(
+    if let Some(prediction) = &record.prediction {
+        match super::predict::record_outcome_for_prediction(
             config,
             &root,
             &prediction.prediction_id,
             actual_summary,
-        )
-    {
-        latent_surprise = updated.latent_surprise;
-        evidence_refs.extend(updated.evidence_refs);
+        ) {
+            Ok((updated, _)) => {
+                latent_surprise = updated.latent_surprise;
+                evidence_refs.extend(updated.evidence_refs);
+            }
+            Err(error) => record_prediction_outcome_failure(&error, &mut evidence_refs),
+        }
     }
     let outcome_id = format!(
         "{}:{}",
@@ -106,21 +109,34 @@ pub(crate) fn record_runtime_guardrail_outcome(
     let Ok(root) = super::world_model_root() else {
         return;
     };
+    record_runtime_guardrail_outcome_at_root(config, &root, record, outcome, bundle_id);
+}
+
+pub(super) fn record_runtime_guardrail_outcome_at_root(
+    config: &archon_core::config::ArchonConfig,
+    root: &std::path::Path,
+    record: &archon_world_model::integration::WorldAdvisorSurfaceRecord,
+    outcome: &mut archon_world_model::WorldGuardrailOutcome,
+    bundle_id: Option<&str>,
+) {
     let mut latent_surprise = None;
     let mut evidence_refs = outcome.evidence_refs.clone();
     if let Some(bundle_id) = bundle_id {
         evidence_refs.push(format!("bundle:{bundle_id}"));
     }
-    if let Some(prediction) = &record.prediction
-        && let Ok((updated, _)) = super::predict::record_outcome_for_prediction(
+    if let Some(prediction) = &record.prediction {
+        match super::predict::record_outcome_for_prediction(
             config,
             &root,
             &prediction.prediction_id,
             &outcome.actual_summary,
-        )
-    {
-        latent_surprise = updated.latent_surprise;
-        evidence_refs.extend(updated.evidence_refs);
+        ) {
+            Ok((updated, _)) => {
+                latent_surprise = updated.latent_surprise;
+                evidence_refs.extend(updated.evidence_refs);
+            }
+            Err(error) => record_prediction_outcome_failure(&error, &mut evidence_refs),
+        }
     }
     evidence_refs.sort();
     evidence_refs.dedup();
@@ -175,6 +191,91 @@ pub(crate) fn record_runtime_counterfactual_advice(
     runtime_counterfactual_advice(config, surface, task, choices).ok()
 }
 
+pub(super) fn record_runtime_guardrail_outcome_for_decision_at_root(
+    config: &archon_core::config::ArchonConfig,
+    root: &std::path::Path,
+    decision: &archon_world_model::WorldGuardrailDecision,
+    session_id: &str,
+    action_ref: &str,
+    action_summary: &str,
+    outcome: &mut archon_world_model::WorldGuardrailOutcome,
+) {
+    let Some(prediction_id) = decision.prediction_id.as_deref() else {
+        return;
+    };
+    match super::predict::load_prediction(root, prediction_id) {
+        Ok(Some(prediction)) => {
+            let record = surface_record_for_prediction(
+                decision.surface,
+                session_id,
+                action_ref,
+                action_summary,
+                prediction,
+            );
+            record_runtime_guardrail_outcome_at_root(config, root, &record, outcome, None);
+        }
+        Ok(None) => record_prediction_outcome_failure(
+            &anyhow::anyhow!("prediction not found: {prediction_id}"),
+            &mut outcome.evidence_refs,
+        ),
+        Err(error) => record_prediction_outcome_failure(&error, &mut outcome.evidence_refs),
+    }
+    outcome.evidence_refs.sort();
+    outcome.evidence_refs.dedup();
+}
+
+fn surface_record_for_prediction(
+    surface: archon_world_model::integration::WorldAdvisorSurface,
+    session_id: &str,
+    action_ref: &str,
+    summary: &str,
+    prediction: super::predict::PersistedPrediction,
+) -> archon_world_model::integration::WorldAdvisorSurfaceRecord {
+    archon_world_model::integration::WorldAdvisorSurfaceRecord {
+        surface,
+        prediction: Some(archon_world_model::WorldPrediction {
+            prediction_id: prediction.prediction_id,
+            model_id: prediction.model_id,
+            predicted_next_state_summary: prediction.predicted_next_state_summary,
+            guardrail_scores: prediction.guardrail_scores,
+            evidence_refs: prediction.evidence_refs,
+            created_at: prediction.created_at,
+        }),
+        unavailable: None,
+        session_id: Some(session_id.to_string()),
+        action_ref: Some(action_ref.to_string()),
+        action_summary: Some(summary.to_string()),
+        continue_foreground_flow: true,
+        created_at: chrono::Utc::now(),
+    }
+}
+
+fn fallback_advisory_record(
+    config: &archon_core::config::ArchonConfig,
+    surface: archon_world_model::integration::WorldAdvisorSurface,
+    stats: archon_world_model::ColdStartStats,
+    active_model_id: Option<String>,
+    session_id: &str,
+    action_ref: &str,
+    summary: &str,
+) -> archon_world_model::integration::WorldAdvisorSurfaceRecord {
+    let advisor = archon_world_model::WorldAdvisor::new(
+        archon_world_model::WorldAdvisorConfig {
+            thresholds: super::cold_start_thresholds(config),
+            active_model_id,
+            training_in_progress: false,
+        },
+        stats,
+    );
+    let decision = advisor.evaluate(&archon_world_model::WorldAdvisorContext {
+        session_id: session_id.to_string(),
+        action_ref: action_ref.to_string(),
+        action_summary: summary.to_string(),
+    });
+    archon_world_model::integration::WorldAdvisorSurfaceRecord::from_decision(surface, decision)
+        .with_context(session_id, action_ref, summary)
+}
+
 fn runtime_advisory_record(
     config: &archon_core::config::ArchonConfig,
     surface: archon_world_model::integration::WorldAdvisorSurface,
@@ -203,23 +304,9 @@ fn runtime_advisory_record(
         summary,
     ) {
         Ok(Some((prediction, _))) => {
-            return Ok(archon_world_model::integration::WorldAdvisorSurfaceRecord {
-                surface,
-                prediction: Some(archon_world_model::WorldPrediction {
-                    prediction_id: prediction.prediction_id,
-                    model_id: prediction.model_id,
-                    predicted_next_state_summary: prediction.predicted_next_state_summary,
-                    guardrail_scores: prediction.guardrail_scores,
-                    evidence_refs: prediction.evidence_refs,
-                    created_at: prediction.created_at,
-                }),
-                unavailable: None,
-                session_id: Some(session_id.to_string()),
-                action_ref: Some(action_ref.to_string()),
-                action_summary: Some(summary.to_string()),
-                continue_foreground_flow: true,
-                created_at: chrono::Utc::now(),
-            });
+            return Ok(surface_record_for_prediction(
+                surface, session_id, action_ref, summary, prediction,
+            ));
         }
         Ok(None) => {}
         Err(error) => {
@@ -232,32 +319,37 @@ fn runtime_advisory_record(
             );
         }
     }
-    let advisor = archon_world_model::WorldAdvisor::new(
-        archon_world_model::WorldAdvisorConfig {
-            thresholds: super::cold_start_thresholds(config),
-            active_model_id,
-            training_in_progress: false,
-        },
+    Ok(fallback_advisory_record(
+        config,
+        surface,
         stats,
-    );
-    let decision = advisor.evaluate(&archon_world_model::WorldAdvisorContext {
-        session_id: session_id.to_string(),
-        action_ref: action_ref.to_string(),
-        action_summary: summary.to_string(),
-    });
-    Ok(
-        archon_world_model::integration::WorldAdvisorSurfaceRecord::from_decision(
-            surface, decision,
-        )
-        .with_context(session_id, action_ref, summary),
-    )
+        active_model_id,
+        session_id,
+        action_ref,
+        summary,
+    ))
+}
+
+fn record_prediction_outcome_failure(error: &anyhow::Error, evidence_refs: &mut Vec<String>) {
+    let reason = unavailable_reason_code(runtime_unavailable_reason_from_error(error));
+    evidence_refs.push(format!("prediction_outcome_unavailable:{reason}"));
+    tracing::warn!(%error, %reason, "world-model prediction outcome unavailable");
+}
+
+fn unavailable_reason_code(reason: archon_world_model::WorldAdvisorUnavailableReason) -> String {
+    serde_json::to_value(reason)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| "store_unavailable".into())
 }
 
 fn runtime_unavailable_reason_from_error(
     error: &anyhow::Error,
 ) -> archon_world_model::WorldAdvisorUnavailableReason {
     let message = error.to_string();
-    if message.contains("JepaCheckpointMissing") {
+    if message.contains("StoredTraceUnavailable") {
+        archon_world_model::WorldAdvisorUnavailableReason::StoredTraceUnavailable
+    } else if message.contains("JepaCheckpointMissing") {
         archon_world_model::WorldAdvisorUnavailableReason::JepaCheckpointMissing
     } else if message.contains("JepaCheckpointInvalid") {
         archon_world_model::WorldAdvisorUnavailableReason::JepaCheckpointInvalid
@@ -419,4 +511,36 @@ fn row_risk(row: &WorldTraceRow) -> f32 {
         risk += 0.15;
     }
     risk.min(1.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_stored_trace_has_typed_runtime_unavailable_reason() {
+        let reason = runtime_unavailable_reason_from_error(&anyhow::anyhow!(
+            "StoredTraceUnavailable: action row not found: missing-action"
+        ));
+
+        assert_eq!(
+            reason,
+            archon_world_model::WorldAdvisorUnavailableReason::StoredTraceUnavailable
+        );
+    }
+
+    #[test]
+    fn prediction_outcome_failure_adds_typed_unavailable_evidence() {
+        let mut evidence_refs = Vec::new();
+
+        record_prediction_outcome_failure(
+            &anyhow::anyhow!("StoredTraceUnavailable: target window crosses session boundary"),
+            &mut evidence_refs,
+        );
+
+        assert_eq!(
+            evidence_refs,
+            vec!["prediction_outcome_unavailable:stored_trace_unavailable"]
+        );
+    }
 }

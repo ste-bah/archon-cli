@@ -1,8 +1,8 @@
+use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
+use std::sync::Arc;
+use std::sync::LazyLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use serde_json::json;
@@ -13,36 +13,21 @@ use tokio::task::JoinHandle;
 use crate::provider_env::{ProviderEnvPolicy, ProviderEnvResolution, ProviderEnvSource};
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
-const SENSITIVE_PATTERNS: &[&str] = &[
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "_TOKEN",
-    "_SECRET",
-    "_KEY",
-    "_PASSWORD",
-    "_CREDENTIAL",
-];
+#[path = "bash_env.rs"]
+mod bash_env;
+use bash_env::ensure_env_default;
+pub use bash_env::sanitized_env;
 
-const PASSTHROUGH_VARS: &[&str] = &[
-    "PATH",
-    "HOME",
-    "USER",
-    "SHELL",
-    "LANG",
-    "LC_ALL",
-    "TERM",
-    "DISPLAY",
-    "XDG_RUNTIME_DIR",
-    "DBUS_SESSION_BUS_ADDRESS",
-    "SSH_AUTH_SOCK",
-    "EDITOR",
-    "VISUAL",
-    "TMPDIR",
-    "TMP",
-    "TEMP",
-];
+const DEFAULT_BASH_TIMEOUT_SECS: u64 = 600;
+const PIPE_READ_CHUNK_BYTES: usize = 8 * 1024;
 
-const DEFAULT_BASH_TIMEOUT_SECS: u64 = 86_400;
+static BASH_PROGRAM: LazyLock<PathBuf> =
+    LazyLock::new(|| select_bash_program(which::which("bash").ok(), which::which("bash.exe").ok()));
+
+fn select_bash_program(bash: Option<PathBuf>, bash_exe: Option<PathBuf>) -> PathBuf {
+    bash.or(bash_exe).unwrap_or_else(|| PathBuf::from("bash"))
+}
+
 const BASH_COMPAT_PRELUDE: &str = r#"
 printf() {
     if [ "${1-}" = "-v" ]; then
@@ -93,9 +78,13 @@ gtimeout() {
 }
 "#;
 
+#[derive(Clone)]
 pub struct BashTool {
     pub timeout_secs: u64,
     pub max_output_bytes: usize,
+    pub safe_commands: Vec<String>,
+    pub risky_commands: Vec<String>,
+    pub dangerous_commands: Vec<String>,
     pub provider_env: Option<ProviderEnvSource>,
 }
 
@@ -104,6 +93,9 @@ impl Default for BashTool {
         Self {
             timeout_secs: DEFAULT_BASH_TIMEOUT_SECS,
             max_output_bytes: 102400,
+            safe_commands: Vec::new(),
+            risky_commands: Vec::new(),
+            dangerous_commands: Vec::new(),
             provider_env: None,
         }
     }
@@ -146,7 +138,7 @@ impl Tool for BashTool {
                 },
                 "timeout": {
                     "type": "integer",
-                    "description": "Optional timeout in milliseconds. Leave unset unless the user or task explicitly requests a longer per-command timeout; shorter values do not undercut the configured tools.bash_timeout."
+                    "description": "Optional timeout in milliseconds. Values below the configured tools.bash_timeout shorten this command; larger values are clamped to that configured maximum."
                 }
             },
             "required": ["command"]
@@ -212,7 +204,7 @@ impl Tool for BashTool {
             };
         }
 
-        let mut cmd = Command::new("/bin/bash");
+        let mut cmd = Command::new(BASH_PROGRAM.as_path());
         cmd.arg("-c")
             .arg(&command)
             .current_dir(&ctx.working_dir)
@@ -240,6 +232,7 @@ impl Tool for BashTool {
         // chain, so the `select!` arm shape stays uniform.
         let cancel_token = ctx.cancel_parent.clone().unwrap_or_default();
 
+        let remaining_output = Arc::new(AtomicUsize::new(self.max_output_bytes));
         let stdout_bytes = Arc::new(AtomicUsize::new(0));
         let stderr_bytes = Arc::new(AtomicUsize::new(0));
         let heartbeat = crate::bash_observability::start_bash_heartbeat(
@@ -247,11 +240,15 @@ impl Tool for BashTool {
             child.id(),
             timeout_ms,
             raw_command,
-            stdout_bytes.clone(),
-            stderr_bytes.clone(),
+            Arc::clone(&stdout_bytes),
+            Arc::clone(&stderr_bytes),
         );
-        let stdout_task = spawn_pipe_reader(child.stdout.take(), stdout_bytes);
-        let stderr_task = spawn_pipe_reader(child.stderr.take(), stderr_bytes);
+        let stdout_task = spawn_pipe_reader(
+            child.stdout.take(),
+            Arc::clone(&remaining_output),
+            stdout_bytes,
+        );
+        let stderr_task = spawn_pipe_reader(child.stderr.take(), remaining_output, stderr_bytes);
 
         enum BashOutcome {
             Done(std::io::Result<std::process::ExitStatus>),
@@ -273,21 +270,12 @@ impl Tool for BashTool {
 
         match outcome {
             BashOutcome::Done(status) => {
-                let (stdout_buf, stderr_buf) = join_output(stdout_task, stderr_task).await;
+                let (stdout_capture, stderr_capture) = join_output(stdout_task, stderr_task).await;
                 let exit_code = status.as_ref().ok().and_then(|s| s.code()).unwrap_or(-1);
 
-                let mut output = String::new();
-
-                // Combine stdout and stderr
-                let combined = [stdout_buf, stderr_buf].concat();
-                let truncated = combined.len() > self.max_output_bytes;
-                let bytes = if truncated {
-                    &combined[..self.max_output_bytes]
-                } else {
-                    &combined
-                };
-
-                output.push_str(&String::from_utf8_lossy(bytes));
+                let combined = [stdout_capture.bytes, stderr_capture.bytes].concat();
+                let truncated = stdout_capture.truncated || stderr_capture.truncated;
+                let mut output = String::from_utf8_lossy(&combined).into_owned();
 
                 if truncated {
                     output.push_str(&format!(
@@ -325,11 +313,22 @@ impl Tool for BashTool {
     fn permission_level(&self, input: &serde_json::Value) -> PermissionLevel {
         let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
 
-        match archon_permissions::classifier::classify_command(command, &[], &[], &[]) {
+        match archon_permissions::classifier::classify_command(
+            command,
+            &self.safe_commands,
+            &self.risky_commands,
+            &self.dangerous_commands,
+        ) {
             archon_permissions::classifier::CommandClass::Safe => PermissionLevel::Safe,
             archon_permissions::classifier::CommandClass::Risky => PermissionLevel::Risky,
             archon_permissions::classifier::CommandClass::Dangerous => PermissionLevel::Dangerous,
         }
+    }
+
+    fn with_provider_env_source(&self, provider_env: ProviderEnvSource) -> Option<Box<dyn Tool>> {
+        Some(Box::new(
+            self.clone().with_provider_env_source(provider_env),
+        ))
     }
 }
 
@@ -352,41 +351,71 @@ fn redact_provider_env_output(
 }
 
 fn effective_timeout_ms(requested_ms: Option<u64>, configured_ms: u64) -> u64 {
-    let Some(requested_ms) = requested_ms else {
-        return configured_ms;
-    };
-    requested_ms.max(configured_ms)
+    requested_ms.unwrap_or(configured_ms).min(configured_ms)
 }
 
-fn spawn_pipe_reader<T>(pipe: Option<T>, byte_count: Arc<AtomicUsize>) -> JoinHandle<Vec<u8>>
+struct CapturedPipe {
+    bytes: Vec<u8>,
+    truncated: bool,
+}
+
+fn spawn_pipe_reader<T>(
+    pipe: Option<T>,
+    remaining: Arc<AtomicUsize>,
+    byte_count: Arc<AtomicUsize>,
+) -> JoinHandle<CapturedPipe>
 where
     T: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
     tokio::spawn(async move {
-        let mut buffer = Vec::new();
+        let mut bytes = Vec::new();
+        let mut truncated = false;
         if let Some(mut pipe) = pipe {
-            let mut chunk = [0_u8; 8192];
+            let mut chunk = [0_u8; PIPE_READ_CHUNK_BYTES];
             loop {
-                match pipe.read(&mut chunk).await {
-                    Ok(0) => break,
-                    Ok(read) => {
-                        byte_count.fetch_add(read, Ordering::Relaxed);
-                        buffer.extend_from_slice(&chunk[..read]);
-                    }
-                    Err(_) => break,
-                }
+                let read = match pipe.read(&mut chunk).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => read,
+                };
+                byte_count.fetch_add(read, Ordering::Relaxed);
+                let retained = reserve_output_bytes(&remaining, read);
+                bytes.extend_from_slice(&chunk[..retained]);
+                truncated |= retained < read;
             }
         }
-        buffer
+        CapturedPipe { bytes, truncated }
     })
 }
 
+fn reserve_output_bytes(remaining: &AtomicUsize, requested: usize) -> usize {
+    let mut available = remaining.load(Ordering::Relaxed);
+    loop {
+        let retained = available.min(requested);
+        match remaining.compare_exchange_weak(
+            available,
+            available - retained,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return retained,
+            Err(current) => available = current,
+        }
+    }
+}
+
+fn empty_capture() -> CapturedPipe {
+    CapturedPipe {
+        bytes: Vec::new(),
+        truncated: false,
+    }
+}
+
 async fn join_output(
-    stdout_task: JoinHandle<Vec<u8>>,
-    stderr_task: JoinHandle<Vec<u8>>,
-) -> (Vec<u8>, Vec<u8>) {
-    let stdout = stdout_task.await.unwrap_or_default();
-    let stderr = stderr_task.await.unwrap_or_default();
+    stdout_task: JoinHandle<CapturedPipe>,
+    stderr_task: JoinHandle<CapturedPipe>,
+) -> (CapturedPipe, CapturedPipe) {
+    let stdout = stdout_task.await.unwrap_or_else(|_| empty_capture());
+    let stderr = stderr_task.await.unwrap_or_else(|_| empty_capture());
     (stdout, stderr)
 }
 
@@ -430,34 +459,6 @@ fn signal_process_group(pid: u32, signal: libc::c_int) {
 
 fn command_with_compat_prelude(command: &str) -> String {
     format!("{BASH_COMPAT_PRELUDE}\n{SHELL_TIMEOUT_PRELUDE}\n{command}")
-}
-
-pub fn sanitized_env() -> Vec<(String, String)> {
-    let mut env = Vec::new();
-
-    for (key, value) in std::env::vars() {
-        if PASSTHROUGH_VARS.contains(&key.as_str()) {
-            env.push((key, value));
-            continue;
-        }
-
-        let upper = key.to_uppercase();
-        let is_sensitive = SENSITIVE_PATTERNS
-            .iter()
-            .any(|pattern| upper.contains(pattern));
-
-        if !is_sensitive {
-            env.push((key, value));
-        }
-    }
-
-    env
-}
-
-fn ensure_env_default(env: &mut Vec<(String, String)>, key: &str, value: &str) {
-    if !env.iter().any(|(existing, _)| existing == key) {
-        env.push((key.to_string(), value.to_string()));
-    }
 }
 
 #[cfg(test)]

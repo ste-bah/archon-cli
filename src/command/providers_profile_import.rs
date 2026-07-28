@@ -234,7 +234,7 @@ fn profile_status(profile: &ProviderAuthProfileRecord) -> &'static str {
     }
 }
 
-fn open_learning_db() -> Result<DbInstance> {
+fn open_learning_db() -> Result<std::sync::Arc<DbInstance>> {
     crate::command::store_paths::open_learning_db("learning")
 }
 
@@ -251,14 +251,8 @@ mod tests {
     use super::*;
     use archon_llm::types::Secret;
 
-    fn test_db() -> DbInstance {
-        let path = format!(
-            "/tmp/test-provider-profile-import-{}.db",
-            uuid::Uuid::new_v4()
-        );
-        let db = DbInstance::new("sqlite", &path, "").unwrap();
-        archon_learning::schema::ensure_learning_schema(&db).unwrap();
-        db
+    fn test_db() -> std::sync::Arc<DbInstance> {
+        crate::command::test_support::registered_learning_test_db("test-provider-profile-import")
     }
 
     #[test]

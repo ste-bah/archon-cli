@@ -71,6 +71,35 @@ const BACKOFF_CAP_MS: u64 = 60_000;
 /// Maximum shift used in exponential backoff (`1 << SHIFT_CAP` = 64x base).
 const SHIFT_CAP: u32 = 6;
 
+/// Maximum bytes retained while waiting for an SSE line terminator.
+const MAX_SSE_LINE_BUFFER_BYTES: usize = 1_024 * 1_024;
+
+fn append_sse_line_bytes(buffer: &mut Vec<u8>, pending_cr: &mut bool, segment: &[u8]) -> bool {
+    let terminated = segment.last() == Some(&b'\n');
+    let mut content = segment.strip_suffix(b"\n").unwrap_or(segment);
+    let previous_cr_is_delimiter = *pending_cr && segment.first() == Some(&b'\n');
+    let append_previous_cr = *pending_cr && !previous_cr_is_delimiter;
+    let defer_current_cr = !terminated && content.last() == Some(&b'\r');
+    if (defer_current_cr || terminated) && content.last() == Some(&b'\r') {
+        content = &content[..content.len() - 1];
+    }
+
+    let additional = content.len() + usize::from(append_previous_cr);
+    let Some(next_len) = buffer.len().checked_add(additional) else {
+        return false;
+    };
+    if next_len > MAX_SSE_LINE_BUFFER_BYTES {
+        return false;
+    }
+
+    if append_previous_cr {
+        buffer.push(b'\r');
+    }
+    buffer.extend_from_slice(content);
+    *pending_cr = defer_current_cr;
+    true
+}
+
 /// Compute the next reconnect delay from the current `retry_ms` base,
 /// the consecutive-failure `attempt` count, and a jitter ratio.
 ///
@@ -248,6 +277,7 @@ async fn pump_one_stream_with_state(
 ) -> PumpOutcome {
     let mut stream = resp.bytes_stream();
     let mut buf: Vec<u8> = Vec::with_capacity(1024);
+    let mut pending_cr = false;
     let mut current = SseFrameBuilder::default();
 
     while let Some(chunk_result) = stream.next().await {
@@ -258,40 +288,39 @@ async fn pump_one_stream_with_state(
                 return PumpOutcome::StreamEnded;
             }
         };
-        buf.extend_from_slice(&chunk);
-
-        while let Some(nl) = buf.iter().position(|&b| b == b'\n') {
-            let mut line_bytes = buf.drain(..=nl).collect::<Vec<u8>>();
-            line_bytes.pop();
-            if line_bytes.last() == Some(&b'\r') {
-                line_bytes.pop();
+        for segment in chunk.split_inclusive(|byte| *byte == b'\n') {
+            if !append_sse_line_bytes(&mut buf, &mut pending_cr, segment) {
+                tracing::warn!(
+                    limit_bytes = MAX_SSE_LINE_BUFFER_BYTES,
+                    "SSE line buffer exceeded limit; will reconnect"
+                );
+                return PumpOutcome::StreamEnded;
             }
-            let line = match std::str::from_utf8(&line_bytes) {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::warn!(error = %e, "non-UTF8 SSE line; skipping");
-                    continue;
-                }
-            };
-
-            if line.is_empty() {
-                if let Some(frame) = current.take_frame() {
-                    if let Some(id) = &frame.id {
-                        state.last_event_id = Some(id.clone());
-                    }
-                    if let Some(r) = frame.retry {
-                        state.retry_ms = r;
-                    }
-                    if tx.send(frame).await.is_err() {
-                        return PumpOutcome::ReceiverDropped;
-                    }
-                }
+            if segment.last() != Some(&b'\n') {
                 continue;
             }
-            if line.starts_with(':') {
-                continue;
+
+            let line_len = buf.len();
+
+            match std::str::from_utf8(&buf[..line_len]) {
+                Ok("") => {
+                    if let Some(frame) = current.take_frame() {
+                        if let Some(id) = &frame.id {
+                            state.last_event_id = Some(id.clone());
+                        }
+                        if let Some(r) = frame.retry {
+                            state.retry_ms = r;
+                        }
+                        if tx.send(frame).await.is_err() {
+                            return PumpOutcome::ReceiverDropped;
+                        }
+                    }
+                }
+                Ok(line) if line.starts_with(':') => {}
+                Ok(line) => current.ingest_line(line),
+                Err(e) => tracing::warn!(error = %e, "non-UTF8 SSE line; skipping"),
             }
-            current.ingest_line(line);
+            buf.clear();
         }
     }
 
@@ -313,94 +342,5 @@ async fn pump_one_stream_with_state(
 pub use crate::sse_shutdown::{SseGuardedStream, SseShutdown, spawn_sse_pump};
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn compute_backoff_zero_attempt_uses_retry_ms() {
-        let d = compute_backoff(3_000, 0, 0.0);
-        assert_eq!(d, Duration::from_millis(3_000));
-    }
-
-    #[test]
-    fn compute_backoff_grows_exponentially() {
-        let d1 = compute_backoff(1_000, 1, 0.0);
-        let d2 = compute_backoff(1_000, 2, 0.0);
-        let d3 = compute_backoff(1_000, 3, 0.0);
-        let d4 = compute_backoff(1_000, 4, 0.0);
-        assert_eq!(d1, Duration::from_millis(1_000));
-        assert_eq!(d2, Duration::from_millis(2_000));
-        assert_eq!(d3, Duration::from_millis(4_000));
-        assert_eq!(d4, Duration::from_millis(8_000));
-    }
-
-    #[test]
-    fn compute_backoff_caps_at_60s() {
-        let d = compute_backoff(1_000_000, 2, 0.0);
-        assert_eq!(d, Duration::from_millis(BACKOFF_CAP_MS));
-    }
-
-    #[test]
-    fn compute_backoff_jitter_within_bounds() {
-        // base = 2_000 ms, jitter = 25% -> band [1750, 2250].
-        for _ in 0..64 {
-            let d = compute_backoff(1_000, 2, 0.25);
-            let ms = d.as_millis() as u64;
-            assert!(
-                (1_750..=2_250).contains(&ms),
-                "backoff {ms}ms out of jitter band [1750, 2250]"
-            );
-        }
-    }
-
-    #[test]
-    fn compute_backoff_shift_cap_prevents_overflow() {
-        // attempt=100 should NOT overflow; uses SHIFT_CAP to bound.
-        let d = compute_backoff(1_000, 100, 0.0);
-        assert_eq!(d, Duration::from_millis(BACKOFF_CAP_MS));
-    }
-
-    #[tokio::test]
-    async fn pump_one_stream_updates_last_event_id_and_retry() {
-        // Build a fake response from bytes using reqwest's test helper
-        // isn't trivial, so exercise the state-update logic via a direct
-        // unit test of the inner frame-dispatch loop.
-        //
-        // Simulate: ingest 2 frames, verify state updates.
-        let mut state = ReconnectState::default();
-        let mut b = SseFrameBuilder::default();
-        b.ingest_line("id: 42");
-        b.ingest_line("retry: 7500");
-        b.ingest_line("data: hi");
-        let frame = b.take_frame().unwrap();
-        if let Some(id) = &frame.id {
-            state.last_event_id = Some(id.clone());
-        }
-        if let Some(r) = frame.retry {
-            state.retry_ms = r;
-        }
-        assert_eq!(state.last_event_id.as_deref(), Some("42"));
-        assert_eq!(state.retry_ms, 7_500);
-
-        // Second frame without id keeps the old id.
-        let mut b2 = SseFrameBuilder::default();
-        b2.ingest_line("data: next");
-        let frame2 = b2.take_frame().unwrap();
-        if let Some(id) = &frame2.id {
-            state.last_event_id = Some(id.clone());
-        }
-        if let Some(r) = frame2.retry {
-            state.retry_ms = r;
-        }
-        assert_eq!(state.last_event_id.as_deref(), Some("42"));
-        assert_eq!(state.retry_ms, 7_500);
-    }
-
-    #[test]
-    fn reconnect_config_default_is_sane() {
-        let c = ReconnectConfig::default();
-        assert_eq!(c.default_retry_ms, 3_000);
-        assert_eq!(c.max_retries, 10);
-        assert!(c.jitter_ratio > 0.0 && c.jitter_ratio < 1.0);
-    }
-}
+#[path = "sse_reconnect_tests.rs"]
+mod tests;

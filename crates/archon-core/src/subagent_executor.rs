@@ -291,6 +291,18 @@ impl SubagentExecutor for AgentSubagentExecutor {
             .await
     }
 
+    async fn run_to_completion_with_system(
+        &self,
+        subagent_id: String,
+        request: SubagentRequest,
+        system: Vec<serde_json::Value>,
+        ctx: ToolContext,
+        cancel: CancellationToken,
+    ) -> Result<String, ExecutorError> {
+        self.run_subagent_to_completion_with_system(subagent_id, request, system, ctx, cancel)
+            .await
+    }
+
     async fn on_inner_complete(&self, subagent_id: String, result: Result<String, String>) {
         self.handle_inner_complete(subagent_id, result).await;
     }

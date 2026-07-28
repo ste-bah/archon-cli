@@ -335,7 +335,7 @@ async fn handle_verify(
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-fn open_db() -> Result<DbInstance> {
+fn open_db() -> Result<std::sync::Arc<DbInstance>> {
     crate::command::store_paths::open_evidence_db("completion", &["ARCHON_COMPLETION_DB_PATH"])
 }
 

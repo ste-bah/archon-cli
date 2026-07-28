@@ -14,8 +14,43 @@ mod tests {
         let transitions = builder.adjacent_transitions(2, 1, 1).unwrap();
 
         assert_eq!(transitions.len(), 1);
-        assert_eq!(transitions[0].context.rows.len(), 1);
+        assert!(transitions[0].context.rows.is_empty());
         assert_eq!(transitions[0].target.rows[0].row_id, "b");
+    }
+
+    #[test]
+    fn adjacent_transition_context_ends_before_action() {
+        let mut first =
+            WorldTraceRow::new("s1", WorldActionKind::ToolCall).with_row_id("first-action");
+        first.redacted_excerpt = Some("first candidate".into());
+        let mut second =
+            WorldTraceRow::new("s1", WorldActionKind::Retry).with_row_id("second-action");
+        second.redacted_excerpt = Some("second candidate".into());
+        let third =
+            WorldTraceRow::new("s1", WorldActionKind::Verification).with_row_id("outcome");
+        let builder = TraceWindowBuilder::new(&[first, second, third]);
+
+        let transitions = builder.adjacent_transitions(2, 1, 1).unwrap();
+
+        assert!(transitions[0].context.rows.is_empty());
+        assert_eq!(transitions[0].action.action_ref, "first-action");
+        assert_eq!(
+            transitions[1]
+                .context
+                .rows
+                .iter()
+                .map(|row| row.row_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["first-action"]
+        );
+        assert_eq!(transitions[1].action.action_ref, "second-action");
+        assert!(
+            transitions[1]
+                .context
+                .rows
+                .iter()
+                .all(|row| row.row_id != transitions[1].action.action_ref)
+        );
     }
 
     #[test]

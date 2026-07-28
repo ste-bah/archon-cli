@@ -5,7 +5,7 @@ edition.workspace = true
 
 [dependencies]
 ratatui.workspace = true
-crossterm.workspace = true
+crossterm = { workspace = true, features = ["event-stream"] }
 serde.workspace = true
 tokio.workspace = true
 tracing.workspace = true
@@ -36,6 +36,8 @@ futures-util = { workspace = true }
 # archon-observability (new owning crate for ChannelMetrics) and archon-tui
 # stay version-aligned. Pins unchanged — parking_lot = 0.12, hdrhistogram = 7.5.
 parking_lot = { workspace = true }
+unicode-segmentation.workspace = true
+unicode-width.workspace = true
 hdrhistogram = { workspace = true }
 tempfile = "3.12"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
@@ -60,6 +62,7 @@ qrcode = { version = "0.14.1", default-features = false }
 jemalloc-ctl = "0.5"
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 insta = { workspace = true }
 criterion.workspace = true
 futures = "0.3"

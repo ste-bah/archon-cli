@@ -15,8 +15,8 @@ fn test_ctx() -> ToolContext {
 }
 
 #[test]
-fn bash_default_timeout_matches_config_default() {
-    assert_eq!(BashTool::default().timeout_secs, 86_400);
+fn bash_default_timeout_is_ten_minutes() {
+    assert_eq!(BashTool::default().timeout_secs, 600);
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -81,7 +81,7 @@ async fn bash_timeout() {
     let tool = BashTool {
         timeout_secs: 1,
         max_output_bytes: 102400,
-        provider_env: None,
+        ..Default::default()
     };
     let result = tool
         .execute(
@@ -99,28 +99,41 @@ async fn bash_timeout() {
 
 #[cfg(not(target_os = "windows"))]
 #[tokio::test]
-async fn workflow_bash_does_not_shorten_configured_timeout() {
+async fn bash_clamps_longer_requested_timeout_to_configured_maximum() {
     let tool = BashTool {
         timeout_secs: 1,
         max_output_bytes: 102400,
-        provider_env: None,
+        ..Default::default()
     };
-    let ctx = ToolContext {
-        session_id: "wf-test-run".into(),
-        ..test_ctx()
-    };
+    let start = std::time::Instant::now();
     let result = tool
         .execute(
-            json!({ "command": "sleep 0.05; echo workflow-timeout-ok", "timeout": 1 }),
-            &ctx,
+            json!({ "command": "sleep 2", "timeout": 5_000 }),
+            &test_ctx(),
         )
         .await;
-    assert!(
-        !result.is_error,
-        "workflow Bash should use configured timeout when model supplies a shorter timeout: {}",
-        result.content
-    );
-    assert!(result.content.contains("workflow-timeout-ok"));
+
+    assert!(result.is_error);
+    assert!(result.content.contains("timed out"));
+    assert!(start.elapsed() < std::time::Duration::from_millis(1_500));
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tokio::test]
+async fn bash_honors_shorter_requested_timeout() {
+    let tool = BashTool {
+        timeout_secs: 2,
+        max_output_bytes: 102400,
+        ..Default::default()
+    };
+    let start = std::time::Instant::now();
+    let result = tool
+        .execute(json!({ "command": "sleep 1", "timeout": 50 }), &test_ctx())
+        .await;
+
+    assert!(result.is_error);
+    assert!(result.content.contains("timed out"));
+    assert!(start.elapsed() < std::time::Duration::from_millis(500));
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -129,7 +142,7 @@ async fn workflow_bash_ignores_shell_timeout_wrapper() {
     let tool = BashTool {
         timeout_secs: 1,
         max_output_bytes: 102400,
-        provider_env: None,
+        ..Default::default()
     };
     let ctx = ToolContext {
         session_id: "wf-test-run".into(),
@@ -155,7 +168,7 @@ async fn bash_output_truncation() {
     let tool = BashTool {
         timeout_secs: 10,
         max_output_bytes: 100,
-        provider_env: None,
+        ..Default::default()
     };
     let result = tool
         .execute(
@@ -228,6 +241,29 @@ fn bash_permission_classification() {
     );
     assert_eq!(
         tool.permission_level(&json!({ "command": "rm -rf /" })),
+        PermissionLevel::Dangerous
+    );
+}
+
+#[test]
+fn bash_permission_classification_uses_configured_lists() {
+    let tool = BashTool {
+        safe_commands: vec!["cargo build".to_string()],
+        risky_commands: vec!["ls".to_string()],
+        dangerous_commands: vec!["echo deploy".to_string()],
+        ..Default::default()
+    };
+
+    assert_eq!(
+        tool.permission_level(&json!({ "command": "cargo build --release" })),
+        PermissionLevel::Safe
+    );
+    assert_eq!(
+        tool.permission_level(&json!({ "command": "ls -la" })),
+        PermissionLevel::Risky
+    );
+    assert_eq!(
+        tool.permission_level(&json!({ "command": "echo deploy production" })),
         PermissionLevel::Dangerous
     );
 }

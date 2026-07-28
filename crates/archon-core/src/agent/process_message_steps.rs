@@ -18,7 +18,7 @@ pub(super) struct PreparedTurnRequest {
 #[derive(Default)]
 pub(super) struct StreamRound {
     pub(super) text_content: String,
-    thinking_content: String,
+    pub(super) thinking_content: String,
     thinking_signature: String,
     pub(super) pending_tools: Vec<PendingToolCall>,
     pub(super) usage_acc: UsageAccumulator,
@@ -68,25 +68,40 @@ impl Agent {
         let mut system = self.inject_memories();
         self.inject_inner_voice(&mut system).await;
         self.inject_critical_reminder(&mut system);
+        self.inject_turn_requirements(&mut system);
 
         let active_model = self.active_model().await;
         let effort = self.turn_effort(user_input).await;
         let (max_tokens, thinking, speed) = self.config.build_base_request_fields(&active_model);
         self.maybe_auto_compact(&active_model).await?;
 
-        let request = LlmRequest {
+        let mut request = LlmRequest {
             model: active_model.clone(),
             max_tokens,
             system,
-            messages: self.state.messages.clone(),
+            messages: tool_result_context::project_messages_for_request(
+                &self.state.messages,
+                self.config.context.preserve_recent_turns,
+            ),
             tools: self.config.tools.clone(),
             thinking,
             speed,
             effort,
-            extra: self.config.runtime_context_extra(),
+            extra: self.config.request_runtime_extra(
+                self.turn_number,
+                agentic_iterations,
+                self.context_window_for(&active_model),
+            ),
             request_origin: Some("main_session".into()),
             reasoning_encrypted: None,
         };
+        request_cache::apply_conversation_cache(
+            &mut request,
+            self.client.as_ref(),
+            self.config.context.prompt_cache && self.config.context.prompt_cache_conversation,
+            &self.config.context.prompt_cache_mode,
+            &self.config.context.prompt_cache_ttl,
+        );
         self.fire_after_prompt_build_hook(&request, agentic_iterations)
             .await;
 
@@ -155,6 +170,7 @@ impl Agent {
                     .map(StreamOpenOutcome::Stream)
             }
             Err(e) => {
+                self.discard_thinking_preview().await;
                 self.fail_parent_turn(format!("{e}")).await;
                 Err(AgentLoopError::ApiError(format!("{e}")))
             }
@@ -197,11 +213,18 @@ impl Agent {
                 }
                 StreamEvent::TextDelta { text, .. } => {
                     round.text_content.push_str(&text);
-                    self.send_event(AgentEvent::TextDelta(text)).await;
+                    if !self.buffers_finalization_text() {
+                        self.send_event(AgentEvent::TextDelta(text)).await;
+                    }
                 }
                 StreamEvent::ThinkingDelta { thinking, .. } => {
                     round.thinking_content.push_str(&thinking);
-                    self.send_event(AgentEvent::ThinkingDelta(thinking)).await;
+                    let event = if self.buffers_finalization_text() {
+                        AgentEvent::TransientThinkingDelta(thinking)
+                    } else {
+                        AgentEvent::ThinkingDelta(thinking)
+                    };
+                    self.send_event(event).await;
                 }
                 StreamEvent::InputJsonDelta {
                     index,
@@ -248,23 +271,80 @@ impl Agent {
     }
 
     pub(super) fn add_assistant_stream_round(&mut self, round: &StreamRound) {
-        let mut assistant_content = Vec::new();
+        self.insert_assistant_stream_round(self.state.messages.len(), round, true);
+    }
+
+    pub(super) fn insert_assistant_stream_round(
+        &mut self,
+        index: usize,
+        round: &StreamRound,
+        include_drafts: bool,
+    ) {
+        let mut assistant_content = self.stream_round_drafts(round, include_drafts);
+        for tool in &round.pending_tools {
+            assistant_content.push(self.assistant_tool_use_block(tool));
+        }
+        self.state.messages.insert(
+            index,
+            serde_json::json!({
+                "role": "assistant",
+                "content": assistant_content,
+            }),
+        );
+    }
+
+    pub(super) fn prepend_stream_round_drafts(&mut self, index: usize, round: &StreamRound) {
+        let drafts = self.stream_round_drafts(round, true);
+        let Some(content) = self.state.messages[index]["content"].as_array_mut() else {
+            return;
+        };
+        content.splice(0..0, drafts);
+    }
+
+    pub(super) fn persist_guarded_plan_after_draft_admission(&self, round: &StreamRound) {
+        let exited_plan = round
+            .pending_tools
+            .iter()
+            .any(|tool| tool.name == "ExitPlanMode" && self.tool_result_passed(&tool.id));
+        if exited_plan {
+            self.persist_latest_plan_from_assistant();
+        }
+    }
+
+    fn tool_result_passed(&self, tool_id: &str) -> bool {
+        self.state.messages.iter().rev().any(|message| {
+            message["content"].as_array().is_some_and(|blocks| {
+                blocks.iter().any(|block| {
+                    block["type"] == "tool_result"
+                        && block["tool_use_id"] == tool_id
+                        && block["is_error"] == false
+                })
+            })
+        })
+    }
+
+    fn stream_round_drafts(
+        &self,
+        round: &StreamRound,
+        include_drafts: bool,
+    ) -> Vec<serde_json::Value> {
+        if !include_drafts {
+            return Vec::new();
+        }
+        let mut drafts = Vec::new();
         if !round.thinking_content.is_empty() {
-            assistant_content.push(serde_json::json!({
+            drafts.push(serde_json::json!({
                 "type": "thinking",
                 "thinking": round.thinking_content,
                 "signature": round.thinking_signature,
             }));
         }
         if !round.text_content.is_empty() {
-            assistant_content.push(serde_json::json!({
+            drafts.push(serde_json::json!({
                 "type": "text",
                 "text": round.text_content,
             }));
         }
-        for tool in &round.pending_tools {
-            assistant_content.push(self.assistant_tool_use_block(tool));
-        }
-        self.state.add_assistant_message(assistant_content);
+        drafts
     }
 }

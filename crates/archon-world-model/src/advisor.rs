@@ -34,6 +34,7 @@ pub enum WorldAdvisorUnavailableReason {
     ColdStart,
     Timeout,
     StoreUnavailable,
+    StoredTraceUnavailable,
     CandidateOnly,
     TrainingInProgress,
     MissingEmbedding,

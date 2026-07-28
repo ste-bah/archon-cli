@@ -233,6 +233,13 @@ impl Agent {
                         self.client.as_ref(),
                         &active_model,
                         &self.state.messages,
+                        self.config.runtime_attribution_extra(
+                            "compaction",
+                            "manual_compaction",
+                            None,
+                            None,
+                            None,
+                        ),
                     )
                     .await
                     {

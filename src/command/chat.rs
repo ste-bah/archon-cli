@@ -55,25 +55,21 @@ async fn build_provider(
                     .with_alias_map(config.models.anthropic.to_alias_map()),
             );
             let profile_id =
-                crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+                crate::runtime::provider_auth_selection::selected_provider_auth_profile_id_async(
                     provider.name(),
-                );
-            Ok(observe_llm_provider_with_profile(
-                provider, "direct", profile_id,
-            ))
+                )
+                .await;
+            Ok(observe_llm_provider_with_profile(provider, "direct", profile_id).await)
         }
         "openai-codex" => {
             let (provider, runtime_mode) =
                 crate::runtime::codex_provider::build_codex_provider(config, "cli_chat").await?;
             let profile_id =
-                crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+                crate::runtime::provider_auth_selection::selected_provider_auth_profile_id_async(
                     provider.name(),
-                );
-            Ok(observe_llm_provider_with_profile(
-                provider,
-                runtime_mode,
-                profile_id,
-            ))
+                )
+                .await;
+            Ok(observe_llm_provider_with_profile(provider, runtime_mode, profile_id).await)
         }
         other => {
             let flat = archon_llm::LlmConfig {
@@ -87,14 +83,11 @@ async fn build_provider(
                 .map_err(|e| anyhow::anyhow!("unknown or unavailable provider `{other}`: {e}"))?;
             let runtime_mode = runtime_mode_for_provider_name(provider.name());
             let profile_id =
-                crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(
+                crate::runtime::provider_auth_selection::selected_provider_auth_profile_id_async(
                     provider.name(),
-                );
-            Ok(observe_llm_provider_with_profile(
-                provider,
-                runtime_mode,
-                profile_id,
-            ))
+                )
+                .await;
+            Ok(observe_llm_provider_with_profile(provider, runtime_mode, profile_id).await)
         }
     }
 }

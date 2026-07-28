@@ -126,6 +126,7 @@ impl PipelineBundleStore {
             .append(true)
             .open(self.bundle_dir(session_id).join("audit.log"))?;
         file.write_all(json.as_bytes())?;
+        file.sync_data()?;
         Ok(())
     }
 

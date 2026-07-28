@@ -14,6 +14,9 @@ use archon_tools::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 use crate::client::McpClient;
 use crate::types::{McpToolBridgePolicy, McpToolDef, McpToolRisk, ToolContent};
 
+const MCP_MODEL_DESCRIPTION_MAX_BYTES: usize = 1_024;
+const MCP_DESCRIPTION_TRUNCATION_MARKER: &str = "... [truncated]";
+
 /// Build the fully qualified tool name for an MCP tool.
 pub fn qualified_tool_name(server_name: &str, tool_name: &str) -> String {
     format!("mcp__{server_name}__{tool_name}")
@@ -27,6 +30,8 @@ pub struct McpTool {
     tool_def: McpToolDef,
     /// Shared client used for RPC calls.
     client: Arc<McpClient>,
+    /// Description exposed to the model-facing tool schema.
+    model_description: String,
     /// Permission level computed from config and trusted metadata.
     permission_level: PermissionLevel,
 }
@@ -53,10 +58,12 @@ impl McpTool {
     ) -> Self {
         let qualified_name = qualified_tool_name(server_name, &tool_def.name);
         let permission_level = classify_mcp_tool_permission(server_name, &tool_def, &policy);
+        let model_description = bounded_model_description(tool_def.description.as_deref());
         Self {
             qualified_name,
             tool_def,
             client,
+            model_description,
             permission_level,
         }
     }
@@ -154,6 +161,24 @@ fn classify_trusted_name_hint(name: &str, description: Option<&str>) -> Option<P
     None
 }
 
+fn bounded_model_description(description: Option<&str>) -> String {
+    let description = description.unwrap_or("MCP tool (no description)");
+    if description.len() <= MCP_MODEL_DESCRIPTION_MAX_BYTES {
+        return description.to_string();
+    }
+
+    let content_budget = MCP_MODEL_DESCRIPTION_MAX_BYTES - MCP_DESCRIPTION_TRUNCATION_MARKER.len();
+    let mut end = content_budget;
+    while !description.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!(
+        "{}{}",
+        &description[..end],
+        MCP_DESCRIPTION_TRUNCATION_MARKER
+    )
+}
+
 /// Flatten MCP tool content into a single text string.
 fn flatten_content(content: &[ToolContent]) -> String {
     content
@@ -174,10 +199,7 @@ impl Tool for McpTool {
     }
 
     fn description(&self) -> &str {
-        self.tool_def
-            .description
-            .as_deref()
-            .unwrap_or("MCP tool (no description)")
+        &self.model_description
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -313,6 +335,57 @@ mod tests {
         let text = flatten_content(&result.content);
         assert_eq!(text, "something broke");
         assert!(result.is_error);
+    }
+
+    #[test]
+    fn model_description_caps_long_ascii_text() {
+        let description = "x".repeat(MCP_MODEL_DESCRIPTION_MAX_BYTES + 1);
+        let bounded = bounded_model_description(Some(&description));
+
+        assert!(bounded.len() <= MCP_MODEL_DESCRIPTION_MAX_BYTES);
+        assert!(bounded.ends_with(MCP_DESCRIPTION_TRUNCATION_MARKER));
+    }
+
+    #[test]
+    fn model_description_keeps_exact_cap() {
+        let description = "x".repeat(MCP_MODEL_DESCRIPTION_MAX_BYTES);
+        assert_eq!(bounded_model_description(Some(&description)), description);
+    }
+
+    #[test]
+    fn model_description_cap_preserves_utf8() {
+        for scalar in ['é', '界', '🦀'] {
+            let description = scalar.to_string().repeat(MCP_MODEL_DESCRIPTION_MAX_BYTES);
+            let bounded = bounded_model_description(Some(&description));
+
+            assert!(bounded.len() <= MCP_MODEL_DESCRIPTION_MAX_BYTES);
+            assert!(bounded.is_char_boundary(bounded.len()));
+            assert!(bounded.ends_with(MCP_DESCRIPTION_TRUNCATION_MARKER));
+        }
+    }
+
+    #[test]
+    fn model_description_keeps_short_text_and_default() {
+        assert_eq!(bounded_model_description(Some("read data")), "read data");
+        assert_eq!(bounded_model_description(None), "MCP tool (no description)");
+    }
+
+    #[test]
+    fn permission_classification_uses_full_description_beyond_model_cap() {
+        let mut tool = tool_def("opaque");
+        tool.description = Some(format!(
+            "{} delete records",
+            "x".repeat(MCP_MODEL_DESCRIPTION_MAX_BYTES)
+        ));
+        let policy = McpToolBridgePolicy {
+            trust_server_hints: true,
+            tool_permissions: Default::default(),
+        };
+
+        assert_eq!(
+            classify_mcp_tool_permission("server", &tool, &policy),
+            PermissionLevel::Dangerous
+        );
     }
 
     #[test]

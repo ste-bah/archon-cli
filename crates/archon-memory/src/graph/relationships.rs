@@ -35,10 +35,20 @@ impl MemoryGraph {
 
         self.db
             .run_script(
-                "?[from_id, to_id, rel_type, context, strength, created_at] <- [[
-                    $from_id, $to_id, $rel_type, $context, $strength, $created_at
-                ]]
-                :put relationships {from_id, to_id, rel_type => context, strength, created_at}",
+                "{
+                    ?[from_id, to_id, rel_type] :=
+                        *relationships{from_id, to_id, rel_type},
+                        from_id = $from_id, to_id = $to_id, rel_type = $rel_type
+                } as _existing
+                %if_not _existing
+                %then
+                    {
+                        ?[from_id, to_id, rel_type, context, strength, created_at] <- [[
+                            $from_id, $to_id, $rel_type, $context, $strength, $created_at
+                        ]]
+                        :put relationships {from_id, to_id, rel_type => context, strength, created_at}
+                    }
+                %end",
                 params,
                 ScriptMutability::Mutable,
             )

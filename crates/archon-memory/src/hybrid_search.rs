@@ -10,7 +10,8 @@ use std::collections::HashMap;
 use cozo::DbInstance;
 
 use crate::embedding::EmbeddingProvider;
-use crate::graph::{raw_to_memory, read_all_memories, row_to_memory};
+use crate::graph::rows_to_memories;
+use crate::search::keyword_candidates;
 use crate::types::{Memory, MemoryError};
 use crate::vector_search;
 
@@ -29,7 +30,7 @@ pub fn hybrid_search(
 
     // Phase 1: keyword scores (always compute for the merge, unless alpha=0)
     let keyword_scores: HashMap<String, f64> = if alpha > 0.0 {
-        compute_keyword_scores(db, query)?
+        compute_keyword_scores(db, query, top_k)?
     } else {
         HashMap::new()
     };
@@ -63,14 +64,16 @@ pub fn hybrid_search(
     ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     ranked.truncate(top_k);
 
-    let mut results = Vec::with_capacity(ranked.len());
-    for (id, _score) in ranked {
-        if let Ok(mem) = row_to_memory(db, &id) {
-            results.push(mem);
-        }
-    }
-
-    Ok(results)
+    let ids: Vec<String> = ranked.into_iter().map(|(id, _score)| id).collect();
+    let memories = rows_to_memories(db, &ids)?;
+    let mut by_id: HashMap<String, Memory> = memories
+        .into_iter()
+        .map(|memory| (memory.id.clone(), memory))
+        .collect();
+    Ok(ids
+        .into_iter()
+        .filter_map(|id| by_id.remove(&id))
+        .collect())
 }
 
 /// Compute normalised keyword relevance scores for all memories.
@@ -80,21 +83,17 @@ pub fn hybrid_search(
 fn compute_keyword_scores(
     db: &DbInstance,
     query: &str,
+    top_k: usize,
 ) -> Result<HashMap<String, f64>, MemoryError> {
     let keywords: Vec<&str> = query.split_whitespace().collect();
     if keywords.is_empty() {
         return Ok(HashMap::new());
     }
 
-    let all_rows = read_all_memories(db)?;
-    crate::search::warn_full_scan("memory.recall.hybrid_keyword", all_rows.len(), None);
+    let candidates = keyword_candidates(db, query, top_k)?;
     let mut scores: Vec<(String, f64)> = Vec::new();
 
-    for raw in all_rows {
-        let mem = match raw_to_memory(raw) {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
+    for mem in candidates.memories {
 
         let content_lower = mem.content.to_lowercase();
         let tags_lower = mem.tags.join(",").to_lowercase();
@@ -143,7 +142,7 @@ fn compute_keyword_scores(
 
 /// Compute vector similarity scores for the top candidates.
 ///
-/// Returns `(memory_id, similarity)` where similarity = `1.0 - cosine_distance`.
+/// Returns `(memory_id, similarity)` where similarity = `1.0 - cosine_distance / 2.0`.
 fn compute_vector_scores(
     db: &DbInstance,
     query: &str,
@@ -155,18 +154,29 @@ fn compute_vector_scores(
         return Ok(HashMap::new());
     }
 
-    // Search may fail if the HNSW index doesn't exist yet (no embeddings stored)
-    let results = match vector_search::search_similar(db, &query_embedding[0], top_k) {
-        Ok(r) => r,
-        Err(_) => return Ok(HashMap::new()),
-    };
+    let results = vector_search::search_similar(db, &query_embedding[0], top_k)?;
 
     let mut map = HashMap::with_capacity(results.len());
     for (id, distance) in results {
-        // Convert cosine distance to similarity: sim = 1.0 - distance
-        let similarity = (1.0 - distance).max(0.0);
+        let similarity = cosine_distance_to_similarity(distance);
         map.insert(id, similarity);
     }
 
     Ok(map)
+}
+
+fn cosine_distance_to_similarity(distance: f64) -> f64 {
+    (1.0 - distance / 2.0).clamp(0.0, 1.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cosine_distance_to_similarity;
+
+    #[test]
+    fn cosine_distance_conversion_maps_full_cozo_range() {
+        assert_eq!(cosine_distance_to_similarity(0.0), 1.0);
+        assert_eq!(cosine_distance_to_similarity(1.0), 0.5);
+        assert_eq!(cosine_distance_to_similarity(2.0), 0.0);
+    }
 }

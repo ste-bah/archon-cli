@@ -680,7 +680,7 @@ fn print_fingerprint(fp: &gametheory::GameTheoryFingerprint) {
     println!();
 }
 
-pub(crate) fn open_db() -> Result<DbInstance> {
+pub(crate) fn open_db() -> Result<Arc<DbInstance>> {
     crate::command::store_paths::open_evidence_db("gametheory", &["ARCHON_GAMETHEORY_DB_PATH"])
 }
 

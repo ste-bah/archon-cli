@@ -85,6 +85,23 @@ pub fn append_guardrail_decision(
     append_jsonl_idempotent(root, DECISIONS_LEDGER, record)
 }
 
+pub fn append_guardrail_revision(
+    root: &Path,
+    action: WorldGuardedAction,
+    decision: WorldGuardrailDecision,
+    idempotency_key: String,
+) -> anyhow::Result<PathBuf> {
+    append_jsonl_idempotent(
+        root,
+        REVISIONS_LEDGER,
+        &WorldGuardrailRevision {
+            action,
+            decision,
+            idempotency_key,
+        },
+    )
+}
+
 pub fn append_verification_outcome(
     root: &Path,
     record: &VerificationOutcome,
@@ -100,11 +117,38 @@ pub fn append_guardrail_outcome(
 }
 
 pub fn load_guarded_actions(root: &Path) -> anyhow::Result<Vec<WorldGuardedAction>> {
-    load_jsonl(root, ACTIONS_LEDGER)
+    let mut actions = load_jsonl::<WorldGuardedAction>(root, ACTIONS_LEDGER)?;
+    actions.extend(
+        load_jsonl::<WorldGuardrailRevision>(root, REVISIONS_LEDGER)?
+            .into_iter()
+            .map(|revision| revision.action),
+    );
+    let mut latest_by_action = BTreeMap::new();
+    for (index, action) in actions.into_iter().enumerate() {
+        latest_by_action.insert(action.action_id.clone(), (index, action));
+    }
+    let mut latest = latest_by_action.into_values().collect::<Vec<_>>();
+    latest.sort_by_key(|(index, _)| *index);
+    Ok(latest.into_iter().map(|(_, action)| action).collect())
 }
 
 pub fn load_guardrail_decisions(root: &Path) -> anyhow::Result<Vec<WorldGuardrailDecision>> {
-    load_jsonl(root, DECISIONS_LEDGER)
+    let mut decisions = load_jsonl(root, DECISIONS_LEDGER)?;
+    decisions.extend(
+        load_jsonl::<WorldGuardrailRevision>(root, REVISIONS_LEDGER)?
+            .into_iter()
+            .map(|revision| revision.decision),
+    );
+    let mut latest_by_action = BTreeMap::new();
+    for (index, decision) in decisions.into_iter().enumerate() {
+        latest_by_action.insert(decision.action_id.clone(), (index, decision));
+    }
+    let mut latest = latest_by_action.into_values().collect::<Vec<_>>();
+    latest.sort_by_key(|(index, _)| *index);
+    Ok(latest
+        .into_iter()
+        .map(|(_, decision)| decision)
+        .collect())
 }
 
 pub fn load_verification_outcomes(root: &Path) -> anyhow::Result<Vec<VerificationOutcome>> {
@@ -321,4 +365,3 @@ fn push_reason_codes(
         reason_codes.push(GuardrailReasonCode::PredictedVerificationNeededHigh);
     }
 }
-

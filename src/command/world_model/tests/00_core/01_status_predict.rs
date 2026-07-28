@@ -77,8 +77,8 @@ fn predict_next_fails_open_when_cold() {
         temp.path(),
         archon_world_model::ColdStartStats::default(),
         None,
-        "s1",
-        "a1",
+        "session-1",
+        "r1",
         "run tests",
     );
 
@@ -98,8 +98,8 @@ fn predict_next_fails_open_without_active_model() {
             observed_days: 7,
         },
         None,
-        "s1",
-        "a1",
+        "session-1",
+        "r1",
         "run tests",
     );
 
@@ -123,8 +123,8 @@ fn predict_next_uses_active_model_when_ready() {
             observed_days: 7,
         },
         Some(candidate_id.clone()),
-        "s1",
-        "a1",
+        "session-1",
+        "r1",
         "run tests",
     );
 
@@ -137,10 +137,10 @@ fn predict_next_uses_active_model_when_ready() {
     assert!(explained.contains(&format!("Prediction: {prediction_id}")));
     assert!(explained.contains("Predicted next state:"));
     assert!(explained.contains("Outcome: pending"));
-    assert!(explained.contains("Evidence refs: runtime_action:a1"));
     let persisted = predict::load_prediction(temp.path(), &prediction_id)
         .unwrap()
         .expect("prediction should be persisted");
+    assert!(persisted.evidence_refs.is_empty());
     assert!(
         persisted
             .guardrail_scores
@@ -148,6 +148,38 @@ fn predict_next_uses_active_model_when_ready() {
             .predicted_verification_needed
             .is_some()
     );
+}
+
+#[test]
+fn predict_next_fails_open_without_recorded_action() {
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let config = test_config();
+    let trained = candidate::render_train(&config, temp.path(), true, None).unwrap();
+    let candidate_id = candidate_id_from(&trained);
+    let store = archon_world_model::storage::WorldModelStore::open(temp.path()).unwrap();
+    let rows_before = store.load_rows().unwrap();
+
+    let rendered = render_predict_next_with_state(
+        &config,
+        temp.path(),
+        archon_world_model::ColdStartStats {
+            rows: 1_000,
+            sessions: 50,
+            observed_days: 7,
+        },
+        Some(candidate_id),
+        "runtime-session",
+        "missing-action-ref",
+        "candidate action without runtime trace",
+    );
+
+    assert!(
+        rendered.contains("Unavailable: StoredTraceUnavailable"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("Behavior: fail-open"), "{rendered}");
+    assert_eq!(store.load_rows().unwrap(), rows_before);
 }
 
 #[test]
@@ -165,8 +197,8 @@ fn record_outcome_links_actual_result_to_prediction() {
             observed_days: 7,
         },
         Some(candidate_id),
-        "s1",
-        "a1",
+        "session-1",
+        "r1",
         "run tests",
     );
     let prediction_id = prediction_id_from(&rendered);

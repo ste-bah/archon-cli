@@ -1,32 +1,20 @@
-//! Repository indexer — walk, chunk, embed, store in CozoDB HNSW.
-//!
-//! Implements REQ-LEANN-003, REQ-LEANN-004.
-//! NFR-PIPE-007: 500 files indexed within 60 seconds on local fastembed.
+//! Repository indexer — walk, chunk, embed, and atomically store code files.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result};
-use cozo::{DataValue, DbInstance, ScriptMutability, Vector};
+use cozo::DbInstance;
 use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
 use archon_memory::embedding::{self, EmbeddingProvider};
 
 use crate::chunker::{Chunker, Language};
+use crate::index_storage::{FileStore, PreparedChunk, ReplaceFileOutcome};
 use crate::language;
 use crate::metadata::{CodeChunk, IndexConfig, IndexStats};
-
-/// Convert a CozoDB error to anyhow.
-fn cozo_err(ctx: &str) -> impl FnOnce(cozo::Error) -> anyhow::Error + '_ {
-    move |e| anyhow::anyhow!("{}: {}", ctx, e)
-}
-
-// ---------------------------------------------------------------------------
-// Configuration types
-// ---------------------------------------------------------------------------
 
 /// Which embedding backend to use for indexing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,10 +44,6 @@ impl Default for EmbeddingConfig {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Mock embedding provider (for tests)
-// ---------------------------------------------------------------------------
-
 /// A deterministic embedding provider that returns zero vectors.
 struct MockEmbeddingProvider {
     dim: usize,
@@ -70,7 +54,7 @@ impl EmbeddingProvider for MockEmbeddingProvider {
         &self,
         texts: &[String],
     ) -> std::result::Result<Vec<Vec<f32>>, archon_memory::types::MemoryError> {
-        Ok(texts.iter().map(|_| vec![0.0f32; self.dim]).collect())
+        Ok(texts.iter().map(|_| vec![0.0; self.dim]).collect())
     }
 
     fn dimensions(&self) -> usize {
@@ -78,14 +62,18 @@ impl EmbeddingProvider for MockEmbeddingProvider {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Indexer
-// ---------------------------------------------------------------------------
-
 /// Maximum chunks per embedding batch.
 const EMBED_BATCH_SIZE: usize = 64;
 
+struct PendingFile {
+    language_name: String,
+    file_path: String,
+    file_hash: String,
+    chunks: Vec<CodeChunk>,
+}
+
 /// Repository and single-file indexing: walk, chunk, embed, store in CozoDB HNSW.
+#[derive(Clone)]
 pub struct Indexer {
     db: DbInstance,
     embedder: Arc<dyn EmbeddingProvider>,
@@ -105,106 +93,45 @@ impl Indexer {
     }
 
     /// Create a new indexer.
-    ///
-    /// `grammar_dir` is passed through to the tree-sitter `Chunker`.
     pub fn new(
         db: DbInstance,
         config: EmbeddingConfig,
         grammar_dir: Option<PathBuf>,
     ) -> Result<Self> {
-        let embedder: Arc<dyn EmbeddingProvider> = match config.provider {
-            EmbeddingProviderKind::Mock => Arc::new(MockEmbeddingProvider {
-                dim: config.dimension,
-            }),
-            EmbeddingProviderKind::Local => {
-                let emb_config = embedding::EmbeddingConfig {
-                    provider: embedding::EmbeddingProviderKind::Local,
-                    ..Default::default()
-                };
-                embedding::create_provider(&emb_config)
-                    .context("failed to create local embedding provider")?
-            }
-            EmbeddingProviderKind::OpenAI => {
-                let emb_config = embedding::EmbeddingConfig {
-                    provider: embedding::EmbeddingProviderKind::OpenAI,
-                    ..Default::default()
-                };
-                embedding::create_provider(&emb_config)
-                    .context("failed to create OpenAI embedding provider")?
-            }
-        };
-
-        let chunker = Chunker::new(grammar_dir)?;
-
+        let embedder = create_embedder(&config)?;
         Ok(Self {
             db,
             embedder,
-            chunker,
+            chunker: Chunker::new(grammar_dir)?,
             dimension: config.dimension,
         })
     }
 
     /// Create CozoDB relations and HNSW index if not present. Idempotent.
     pub fn ensure_schema(&self) -> Result<()> {
-        let dim = self.dimension;
-
-        // Create stored relation with vector column
-        let create_rel = format!(
-            ":create code_chunks {{
-                chunk_id: String
-                =>
-                file_path: String,
-                language: String,
-                line_start: Int,
-                line_end: Int,
-                chunk_content: String,
-                file_hash: String,
-                indexed_at: Float,
-                embedding: <F32; {dim}>
-            }}"
-        );
-        self.run_idempotent(&create_rel)?;
-
-        // Create HNSW index
-        let create_idx = format!(
-            "::hnsw create code_chunks:chunk_embedding_idx {{
-                dim: {dim},
-                m: 50,
-                dtype: F32,
-                fields: [embedding],
-                distance: Cosine,
-                ef_construction: 200
-            }}"
-        );
-        self.run_idempotent(&create_idx)?;
-
-        Ok(())
+        self.file_store().ensure_schema()
     }
 
-    /// Index an entire repository directory tree.
-    ///
-    /// Respects include/exclude patterns. Skips unchanged files (file hash match).
-    /// Returns aggregate statistics.
+    /// Index an entire repository directory tree without blocking the async executor.
     pub async fn index_repository(&self, root: &Path, config: &IndexConfig) -> Result<IndexStats> {
-        self.index_repository_blocking(root, config)
+        let indexer = self.clone();
+        let root = root.to_path_buf();
+        let config = config.clone();
+        tokio::task::spawn_blocking(move || indexer.index_repository_blocking(&root, &config))
+            .await
+            .map_err(|error| anyhow::anyhow!("repository indexing task failed: {error}"))?
     }
 
-    /// Synchronous repository indexing for callers that explicitly offload
-    /// LEANN work to a blocking thread.
+    /// Synchronous repository indexing for callers that explicitly offload LEANN work.
     pub fn index_repository_blocking(
         &self,
         root: &Path,
         config: &IndexConfig,
     ) -> Result<IndexStats> {
-        let cancel = AtomicBool::new(false);
-        self.index_repository_blocking_with_cancel(root, config, &cancel)
+        self.index_repository_blocking_with_cancel(root, config, &AtomicBool::new(false))
     }
 
-    /// Synchronous repository indexing with cooperative cancellation checks.
-    ///
-    /// Cancellation is checked between filesystem entries, files, chunking,
-    /// embedding batches, and Cozo writes so shutdown can stop a large startup
-    /// index without waiting for the whole workspace to finish.
+    /// Synchronously index a repository with cooperative cancellation checks.
     pub fn index_repository_blocking_with_cancel(
         &self,
         root: &Path,
@@ -212,115 +139,75 @@ impl Indexer {
         cancel: &AtomicBool,
     ) -> Result<IndexStats> {
         let mut stats = IndexStats::default();
-
-        let exclude = if config.exclude_patterns.is_empty() {
-            language::default_exclude_patterns()
-        } else {
-            config.exclude_patterns.clone()
-        };
-
-        // Collect all candidate files
-        let mut files_to_index: Vec<(PathBuf, String)> = Vec::new(); // (path, language_str)
+        let mut pending = Vec::new();
+        let exclude = configured_excludes(config);
 
         for entry in WalkDir::new(root)
             .follow_links(false)
             .into_iter()
-            .filter_entry(|e| !language::is_excluded(e.path(), &exclude))
+            .filter_entry(|entry| !language::is_excluded(entry.path(), &exclude))
         {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-
             if is_cancelled(cancel) {
-                tracing::info!(
-                    files = stats.total_files,
-                    chunks = stats.total_chunks,
-                    "LEANN repository indexing cancelled during walk"
-                );
                 return Ok(stats);
             }
-
+            let Ok(entry) = entry else { continue };
             if !entry.file_type().is_file() {
                 continue;
             }
-
             let path = entry.path();
-
-            // Detect language — skip unrecognized files
-            let lang_str = match language::detect_language(path) {
-                Some(l) => l,
-                None => continue,
+            let Some(language_name) = language::detect_language(path) else {
+                continue;
             };
-
-            // Skip non-code files (markdown, json, yaml, toml, etc.)
-            if !is_code_language(&lang_str) {
+            if !is_code_language(&language_name) {
                 continue;
             }
-
-            files_to_index.push((path.to_path_buf(), lang_str));
-        }
-
-        // Process files in batches for embedding efficiency
-        let mut all_chunks: Vec<(CodeChunk, String)> = Vec::new(); // (chunk, file_path_str)
-
-        for (path, lang_str) in &files_to_index {
-            if is_cancelled(cancel) {
-                tracing::info!(
-                    files = stats.total_files,
-                    chunks = stats.total_chunks,
-                    "LEANN repository indexing cancelled before file processing"
-                );
-                return Ok(stats);
-            }
-
-            let content = match std::fs::read_to_string(path) {
-                Ok(c) => c,
-                Err(_) => continue, // skip unreadable files
-            };
-
-            if content.is_empty() {
+            let Ok(content) = std::fs::read_to_string(path) else {
                 continue;
-            }
-
+            };
+            let file_path = path.to_string_lossy().into_owned();
             let file_hash = sha256_hex(&content);
-            let file_path_str = path.to_string_lossy().to_string();
-
-            // Check if file is unchanged
-            if self.file_hash_matches(&file_path_str, &file_hash)? {
-                continue; // skip unchanged file
-            }
-
-            // Remove old chunks for this file
-            self.remove_file_chunks(&file_path_str)?;
-
-            let language = str_to_chunker_language(lang_str);
-            let chunks = self.chunker.chunk_file(path, &content, language);
-
-            if is_cancelled(cancel) {
-                tracing::info!(
-                    files = stats.total_files,
-                    chunks = stats.total_chunks,
-                    "LEANN repository indexing cancelled after chunking"
-                );
-                return Ok(stats);
-            }
-
-            if chunks.is_empty() {
+            if self
+                .file_store()
+                .file_hash_matches(&file_path, &file_hash)?
+            {
                 continue;
             }
-
-            stats.total_files += 1;
-            *stats.languages.entry(lang_str.clone()).or_insert(0) += 1;
-
-            for chunk in chunks {
-                all_chunks.push((chunk, file_path_str.clone()));
-            }
+            let chunks =
+                self.chunker
+                    .chunk_file(path, &content, str_to_chunker_language(&language_name));
+            pending.push(PendingFile {
+                language_name,
+                file_path,
+                file_hash,
+                chunks,
+            });
         }
 
-        // Batch embed and store
-        stats.total_chunks = self.embed_and_store_chunks_with_cancel(&all_chunks, Some(cancel))?;
-
+        let Some(prepared) = self.prepare_repository_files(&pending, cancel)? else {
+            return Ok(stats);
+        };
+        for (file, chunks) in pending.iter().zip(prepared) {
+            if is_cancelled(cancel) {
+                return Ok(stats);
+            }
+            let outcome = self.file_store().replace_file_with_cancel(
+                &file.file_path,
+                &file.file_hash,
+                &chunks,
+                || is_cancelled(cancel),
+            )?;
+            if matches!(outcome, ReplaceFileOutcome::Cancelled) {
+                return Ok(stats);
+            }
+            if !chunks.is_empty() {
+                stats.total_files += 1;
+                stats.total_chunks += chunks.len();
+                *stats
+                    .languages
+                    .entry(file.language_name.clone())
+                    .or_insert(0) += 1;
+            }
+        }
         Ok(stats)
     }
 
@@ -329,226 +216,212 @@ impl Indexer {
     pub async fn index_file(&self, path: &Path) -> Result<()> {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-
-        if content.is_empty() {
-            return Ok(());
-        }
-
-        let lang_str = match language::detect_language(path) {
-            Some(l) if is_code_language(&l) => l,
-            Some(l) => l, // recognized but non-code: still index for single-file requests
-            None => "unknown".to_string(),
-        };
-
-        let file_hash = sha256_hex(&content);
-        let file_path_str = path.to_string_lossy().to_string();
-
-        // Check if unchanged
-        if self.file_hash_matches(&file_path_str, &file_hash)? {
-            return Ok(());
-        }
-
-        // Remove old chunks
-        self.remove_file_chunks(&file_path_str)?;
-
-        let language = str_to_chunker_language(&lang_str);
-        let chunks = self.chunker.chunk_file(path, &content, language);
-
-        if chunks.is_empty() {
-            return Ok(());
-        }
-
-        let paired: Vec<(CodeChunk, String)> = chunks
-            .into_iter()
-            .map(|c| (c, file_path_str.clone()))
-            .collect();
-
-        self.embed_and_store_chunks(&paired)?;
+        let language_name =
+            language::detect_language(path).unwrap_or_else(|| "unknown".to_string());
+        self.index_changed_file(path, &content, &language_name, None)?;
         Ok(())
     }
 
-    /// Remove all chunks for a file from the index.
+    /// Remove all chunks and cached file state for a file from the index.
     pub async fn remove_file(&self, path: &Path) -> Result<()> {
-        let file_path_str = path.to_string_lossy().to_string();
-        self.remove_file_chunks(&file_path_str)?;
-        Ok(())
+        self.file_store()
+            .remove_file(path.to_string_lossy().as_ref())
     }
 
-    // -----------------------------------------------------------------------
-    // Internal helpers
-    // -----------------------------------------------------------------------
-
-    /// Run a CozoScript, ignoring "already exists" / "conflicts" errors.
-    fn run_idempotent(&self, script: &str) -> Result<()> {
-        match self
-            .db
-            .run_script(script, Default::default(), ScriptMutability::Mutable)
+    fn index_changed_file(
+        &self,
+        path: &Path,
+        content: &str,
+        language_name: &str,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<Option<usize>> {
+        let file_path = path.to_string_lossy();
+        let file_hash = sha256_hex(content);
+        if self
+            .file_store()
+            .file_hash_matches(&file_path, &file_hash)?
         {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                let msg = e.to_string();
-                if msg.contains("already exists")
-                    || msg.contains("conflicts")
-                    || msg.contains("index with the same name")
+            return Ok(Some(0));
+        }
+        self.prepare_and_commit(path, content, language_name, &file_path, &file_hash, cancel)
+    }
+
+    fn prepare_and_commit(
+        &self,
+        path: &Path,
+        content: &str,
+        language_name: &str,
+        file_path: &str,
+        file_hash: &str,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<Option<usize>> {
+        if cancelled(cancel) {
+            return Ok(None);
+        }
+        let chunks = self
+            .chunker
+            .chunk_file(path, content, str_to_chunker_language(language_name));
+        let Some(prepared) = self.prepare_chunks(chunks, cancel)? else {
+            return Ok(None);
+        };
+        if cancelled(cancel) {
+            return Ok(None);
+        }
+        let outcome =
+            self.file_store()
+                .replace_file_with_cancel(file_path, file_hash, &prepared, || cancelled(cancel))?;
+        match outcome {
+            ReplaceFileOutcome::Committed => Ok(Some(prepared.len())),
+            ReplaceFileOutcome::Cancelled => Ok(None),
+        }
+    }
+
+    fn prepare_repository_files(
+        &self,
+        files: &[PendingFile],
+        cancel: &AtomicBool,
+    ) -> Result<Option<Vec<Vec<PreparedChunk>>>> {
+        let mut prepared = files
+            .iter()
+            .map(|file| Vec::with_capacity(file.chunks.len()))
+            .collect::<Vec<_>>();
+        let mut batch = Vec::with_capacity(EMBED_BATCH_SIZE);
+
+        for (file_index, file) in files.iter().enumerate() {
+            for chunk in &file.chunks {
+                if is_cancelled(cancel) {
+                    return Ok(None);
+                }
+                batch.push((file_index, chunk));
+                if batch.len() == EMBED_BATCH_SIZE
+                    && self
+                        .embed_repository_batch(&mut prepared, &mut batch, cancel)?
+                        .is_none()
                 {
-                    Ok(())
-                } else {
-                    Err(anyhow::anyhow!("CozoDB script failed: {}", msg))
+                    return Ok(None);
                 }
             }
         }
-    }
-
-    /// Check if the stored file hash matches the given hash.
-    fn file_hash_matches(&self, file_path: &str, file_hash: &str) -> Result<bool> {
-        let mut params = BTreeMap::new();
-        params.insert("fp".to_string(), DataValue::from(file_path));
-        params.insert("fh".to_string(), DataValue::from(file_hash));
-
-        let result = self
-            .db
-            .run_script(
-                "?[chunk_id] := *code_chunks{chunk_id, file_path, file_hash}, \
-             file_path = $fp, file_hash = $fh",
-                params,
-                ScriptMutability::Immutable,
-            )
-            .map_err(cozo_err("hash check query"))?;
-
-        Ok(!result.rows.is_empty())
-    }
-
-    /// Delete all chunks for a given file path.
-    fn remove_file_chunks(&self, file_path: &str) -> Result<()> {
-        let mut params = BTreeMap::new();
-        params.insert("fp".to_string(), DataValue::from(file_path));
-
-        // Single query: select matching rows and remove them.
-        // :rm on an empty result set is a no-op, so no existence check needed.
-        self.db.run_script(
-            "?[chunk_id, file_path, language, line_start, line_end, chunk_content, file_hash, indexed_at, embedding] := \
-             *code_chunks{chunk_id, file_path, language, line_start, line_end, chunk_content, file_hash, indexed_at, embedding}, \
-             file_path = $fp
-             :rm code_chunks { chunk_id => file_path, language, line_start, line_end, chunk_content, file_hash, indexed_at, embedding }",
-            params,
-            ScriptMutability::Mutable,
-        ).map_err(cozo_err("remove file chunks"))?;
-
-        Ok(())
-    }
-
-    /// Embed chunks in batches and store them in CozoDB.
-    fn embed_and_store_chunks(&self, chunks: &[(CodeChunk, String)]) -> Result<()> {
-        self.embed_and_store_chunks_with_cancel(chunks, None)
-            .map(|_| ())
-    }
-
-    fn embed_and_store_chunks_with_cancel(
-        &self,
-        chunks: &[(CodeChunk, String)],
-        cancel: Option<&AtomicBool>,
-    ) -> Result<usize> {
-        if chunks.is_empty() {
-            return Ok(0);
+        if !batch.is_empty()
+            && self
+                .embed_repository_batch(&mut prepared, &mut batch, cancel)?
+                .is_none()
+        {
+            return Ok(None);
         }
+        Ok(Some(prepared))
+    }
 
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs_f64();
+    fn embed_repository_batch(
+        &self,
+        prepared: &mut [Vec<PreparedChunk>],
+        batch: &mut Vec<(usize, &CodeChunk)>,
+        cancel: &AtomicBool,
+    ) -> Result<Option<()>> {
+        if is_cancelled(cancel) {
+            return Ok(None);
+        }
+        let texts = batch
+            .iter()
+            .map(|(_, chunk)| chunk.metadata.chunk_content.clone())
+            .collect::<Vec<_>>();
+        let embeddings = self
+            .embedder
+            .embed(&texts)
+            .map_err(|error| anyhow::anyhow!("embedding failed: {error}"))?;
+        if embeddings.len() != batch.len() {
+            anyhow::bail!(
+                "embedding count mismatch: got {} for {} chunks",
+                embeddings.len(),
+                batch.len()
+            );
+        }
+        if is_cancelled(cancel) {
+            return Ok(None);
+        }
+        for ((file_index, chunk), embedding) in batch.drain(..).zip(embeddings) {
+            prepared[file_index].push(PreparedChunk {
+                chunk: chunk.clone(),
+                embedding,
+            });
+        }
+        Ok(Some(()))
+    }
 
-        // Process in batches
-        let mut stored = 0usize;
+    fn prepare_chunks(
+        &self,
+        chunks: Vec<CodeChunk>,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<Option<Vec<PreparedChunk>>> {
+        let mut prepared = Vec::with_capacity(chunks.len());
         for batch in chunks.chunks(EMBED_BATCH_SIZE) {
-            if cancel.map(is_cancelled).unwrap_or(false) {
-                tracing::info!(
-                    stored,
-                    remaining = chunks.len().saturating_sub(stored),
-                    "LEANN repository indexing cancelled before embedding batch"
-                );
-                return Ok(stored);
+            if cancelled(cancel) {
+                return Ok(None);
             }
-
-            let texts: Vec<String> = batch
+            let texts = batch
                 .iter()
-                .map(|(chunk, _)| chunk.metadata.chunk_content.clone())
-                .collect();
-
+                .map(|chunk| chunk.metadata.chunk_content.clone())
+                .collect::<Vec<_>>();
             let embeddings = self
                 .embedder
                 .embed(&texts)
-                .map_err(|e| anyhow::anyhow!("embedding failed: {}", e))?;
-
+                .map_err(|error| anyhow::anyhow!("embedding failed: {error}"))?;
             if embeddings.len() != batch.len() {
-                return Err(anyhow::anyhow!(
+                anyhow::bail!(
                     "embedding count mismatch: got {} for {} chunks",
                     embeddings.len(),
                     batch.len()
-                ));
+                );
             }
-
-            // Bulk insert this batch
-            for (i, (chunk, _file_path_str)) in batch.iter().enumerate() {
-                if cancel.map(is_cancelled).unwrap_or(false) {
-                    tracing::info!(
-                        stored,
-                        remaining = chunks.len().saturating_sub(stored),
-                        "LEANN repository indexing cancelled before Cozo insert"
-                    );
-                    return Ok(stored);
-                }
-
-                let chunk_id = uuid::Uuid::new_v4().to_string();
-                let emb = &embeddings[i];
-                let arr = ndarray::Array1::from_vec(emb.clone());
-
-                let mut params = BTreeMap::new();
-                params.insert("id".to_string(), DataValue::from(chunk_id.as_str()));
-                params.insert(
-                    "fp".to_string(),
-                    DataValue::from(chunk.metadata.file_path.to_string_lossy().as_ref()),
-                );
-                params.insert(
-                    "lang".to_string(),
-                    DataValue::from(chunk.metadata.language.as_str()),
-                );
-                params.insert(
-                    "ls".to_string(),
-                    DataValue::from(chunk.metadata.line_start as i64),
-                );
-                params.insert(
-                    "le".to_string(),
-                    DataValue::from(chunk.metadata.line_end as i64),
-                );
-                params.insert(
-                    "cc".to_string(),
-                    DataValue::from(chunk.metadata.chunk_content.as_str()),
-                );
-                params.insert(
-                    "fh".to_string(),
-                    DataValue::from(chunk.metadata.file_hash.as_str()),
-                );
-                params.insert("ts".to_string(), DataValue::from(now));
-                params.insert("emb".to_string(), DataValue::Vec(Vector::F32(arr)));
-
-                self.db.run_script(
-                    "?[chunk_id, file_path, language, line_start, line_end, chunk_content, file_hash, indexed_at, embedding] \
-                     <- [[$id, $fp, $lang, $ls, $le, $cc, $fh, $ts, $emb]]
-                     :put code_chunks { chunk_id => file_path, language, line_start, line_end, chunk_content, file_hash, indexed_at, embedding }",
-                    params,
-                    ScriptMutability::Mutable,
-                ).map_err(cozo_err("insert chunk"))?;
-                stored += 1;
+            if cancelled(cancel) {
+                return Ok(None);
             }
+            prepared.extend(
+                batch
+                    .iter()
+                    .cloned()
+                    .zip(embeddings)
+                    .map(|(chunk, embedding)| PreparedChunk { chunk, embedding }),
+            );
         }
+        Ok(Some(prepared))
+    }
 
-        Ok(stored)
+    fn file_store(&self) -> FileStore<'_> {
+        FileStore::new(&self.db, self.dimension)
+    }
+
+    #[cfg(test)]
+    fn remove_file_chunks(&self, file_path: &str) -> Result<()> {
+        self.file_store().remove_file_chunks(file_path)
     }
 }
 
-// ---------------------------------------------------------------------------
-// Free functions
-// ---------------------------------------------------------------------------
+fn create_embedder(config: &EmbeddingConfig) -> Result<Arc<dyn EmbeddingProvider>> {
+    match config.provider {
+        EmbeddingProviderKind::Mock => Ok(Arc::new(MockEmbeddingProvider {
+            dim: config.dimension,
+        })),
+        EmbeddingProviderKind::Local => embedding::create_provider(&embedding::EmbeddingConfig {
+            provider: embedding::EmbeddingProviderKind::Local,
+            ..Default::default()
+        })
+        .context("failed to create local embedding provider"),
+        EmbeddingProviderKind::OpenAI => embedding::create_provider(&embedding::EmbeddingConfig {
+            provider: embedding::EmbeddingProviderKind::OpenAI,
+            ..Default::default()
+        })
+        .context("failed to create OpenAI embedding provider"),
+    }
+}
+
+fn configured_excludes(config: &IndexConfig) -> Vec<String> {
+    if config.exclude_patterns.is_empty() {
+        language::default_exclude_patterns()
+    } else {
+        config.exclude_patterns.clone()
+    }
+}
 
 /// Compute SHA-256 hash of content as hex string.
 fn sha256_hex(content: &str) -> String {
@@ -558,8 +431,8 @@ fn sha256_hex(content: &str) -> String {
 }
 
 /// Map a language string to the chunker's Language enum.
-fn str_to_chunker_language(lang: &str) -> Language {
-    match lang {
+fn str_to_chunker_language(language: &str) -> Language {
+    match language {
         "rust" => Language::Rust,
         "python" => Language::Python,
         "typescript" | "typescriptreact" => Language::TypeScript,
@@ -568,11 +441,9 @@ fn str_to_chunker_language(lang: &str) -> Language {
     }
 }
 
-/// Returns true if the language string represents a programming language
-/// (as opposed to config/data formats like json, yaml, toml, markdown).
-fn is_code_language(lang: &str) -> bool {
+fn is_code_language(language: &str) -> bool {
     matches!(
-        lang,
+        language,
         "rust"
             | "python"
             | "typescript"
@@ -604,6 +475,14 @@ fn is_code_language(lang: &str) -> bool {
     )
 }
 
+fn cancelled(cancel: Option<&AtomicBool>) -> bool {
+    cancel.is_some_and(is_cancelled)
+}
+
 fn is_cancelled(cancel: &AtomicBool) -> bool {
     cancel.load(Ordering::Relaxed)
 }
+
+#[cfg(test)]
+#[path = "indexer_atomicity_tests.rs"]
+mod indexer_atomicity_tests;

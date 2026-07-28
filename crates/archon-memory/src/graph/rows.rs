@@ -107,6 +107,55 @@ pub(crate) fn raw_to_memory(raw: RawRow) -> Result<Memory, MemoryError> {
     })
 }
 
+pub(crate) fn row_values_to_memory(row: &[DataValue]) -> Result<Memory, MemoryError> {
+    raw_to_memory(RawRow {
+        id: extract_str(&row[0]),
+        content: extract_str(&row[1]),
+        title: extract_str(&row[2]),
+        memory_type: extract_str(&row[3]),
+        importance: extract_f64(&row[4]),
+        tags: extract_str(&row[5]),
+        source_type: extract_str(&row[6]),
+        project_path: extract_str(&row[7]),
+        created_at: extract_str(&row[8]),
+        updated_at: extract_str(&row[9]),
+        access_count: extract_i64(&row[10]),
+        last_accessed: extract_str(&row[11]),
+    })
+}
+
+pub(crate) fn rows_to_memories(
+    db: &DbInstance,
+    ids: &[String],
+) -> Result<Vec<Memory>, MemoryError> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut params = BTreeMap::new();
+    params.insert(
+        "ids".into(),
+        DataValue::List(ids.iter().map(|id| DataValue::from(id.as_str())).collect()),
+    );
+    let result = db
+        .run_script(
+            "?[id, content, title, memory_type, importance, tags,
+              source_type, project_path, created_at, updated_at,
+              access_count, last_accessed] :=
+                *memories{id, content, title, memory_type, importance, tags,
+                          source_type, project_path, created_at, updated_at,
+                          access_count, last_accessed},
+                is_in(id, $ids)",
+            params,
+            ScriptMutability::Immutable,
+        )
+        .map_err(db_err)?;
+    result
+        .rows
+        .iter()
+        .map(|row| row_values_to_memory(row))
+        .collect()
+}
+
 /// Read all memory rows from the database.
 pub(crate) fn read_all_memories(db: &DbInstance) -> Result<Vec<RawRow>, MemoryError> {
     let result = db
@@ -140,4 +189,36 @@ pub(crate) fn read_all_memories(db: &DbInstance) -> Result<Vec<RawRow>, MemoryEr
         });
     }
     Ok(rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::MemoryGraph;
+    use crate::types::MemoryType;
+
+    #[test]
+    fn rows_to_memories_loads_requested_ids_in_one_query() {
+        let graph = MemoryGraph::in_memory().expect("graph creation failed");
+        let first = graph
+            .store_memory("first", "", MemoryType::Fact, 0.5, &[], "test", "")
+            .expect("store failed");
+        let second = graph
+            .store_memory("second", "", MemoryType::Fact, 0.5, &[], "test", "")
+            .expect("store failed");
+
+        let memories = rows_to_memories(graph.db(), &[first.clone(), second.clone()])
+            .expect("bulk load failed");
+        let ids: std::collections::BTreeSet<_> =
+            memories.into_iter().map(|memory| memory.id).collect();
+        assert_eq!(ids, [first, second].into_iter().collect());
+    }
+
+    #[test]
+    fn rows_to_memories_propagates_database_failures() {
+        let db = DbInstance::new("mem", "", "").expect("database creation failed");
+        let error = rows_to_memories(&db, &["missing".to_string()])
+            .expect_err("missing relation must fail loud");
+        assert!(matches!(error, MemoryError::Database(_)));
+    }
 }

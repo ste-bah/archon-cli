@@ -42,6 +42,7 @@ impl Agent {
                     name: tool.name.clone(),
                     id: tool.id.clone(),
                     result: result.clone(),
+                    transcript_summary: None,
                 })
                 .await;
                 self.state.add_tool_result(&tool.id, &result.content, true);
@@ -69,6 +70,7 @@ impl Agent {
                     name: tool.name.clone(),
                     id: tool.id.clone(),
                     result: result.clone(),
+                    transcript_summary: None,
                 })
                 .await;
                 self.state
@@ -130,6 +132,7 @@ impl Agent {
             name: tool.name.clone(),
             id: tool.id.clone(),
             result: result.clone(),
+            transcript_summary: None,
         })
         .await;
         self.state.add_tool_result(&tool.id, &result.content, true);
@@ -170,32 +173,29 @@ impl Agent {
         true
     }
 
-    pub(super) async fn precheck_sandbox(
+    pub(super) async fn validate_hook_updated_input(
         &mut self,
         tool: &PendingToolCall,
+        schema: serde_json::Value,
         input: &serde_json::Value,
-    ) -> Option<bool> {
-        match self
-            .config
-            .sandbox
-            .as_ref()
-            .map(|backend| backend.check(&tool.name, input))
-        {
-            Some(Ok(())) => Some(true),
-            Some(Err(reason)) => {
-                let result =
-                    ToolResult::error(format!("Sandbox denied tool '{}': {reason}", tool.name));
-                self.send_event(AgentEvent::ToolCallComplete {
-                    name: tool.name.clone(),
-                    id: tool.id.clone(),
-                    result: result.clone(),
-                })
-                .await;
-                self.state.add_tool_result(&tool.id, &result.content, true);
-                None
-            }
-            None => Some(false),
-        }
+    ) -> bool {
+        let Err(errors) = tool_input_json::validate_tool_input(&schema, input) else {
+            return true;
+        };
+        let result = ToolResult::error(format!(
+            "Tool '{}' effective input failed schema validation: {}",
+            tool.name,
+            errors.join("; ")
+        ));
+        self.send_event(AgentEvent::ToolCallComplete {
+            name: tool.name.clone(),
+            id: tool.id.clone(),
+            result: result.clone(),
+            transcript_summary: None,
+        })
+        .await;
+        self.state.add_tool_result(&tool.id, &result.content, true);
+        false
     }
 
     pub(super) async fn snapshot_before_mutation(
@@ -237,6 +237,7 @@ impl Agent {
             name: tool.name.clone(),
             id: tool.id.clone(),
             result: denied_result.clone(),
+            transcript_summary: None,
         })
         .await;
         self.state
@@ -259,6 +260,7 @@ impl Agent {
             name: tool.name.clone(),
             id: tool.id.clone(),
             result: result.clone(),
+            transcript_summary: None,
         })
         .await;
         self.state
@@ -308,6 +310,7 @@ impl Agent {
             name: tool.name.clone(),
             id: tool.id.clone(),
             result: result.clone(),
+            transcript_summary: None,
         })
         .await;
         self.state

@@ -6,7 +6,62 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem},
 };
 
-use crate::app::{App, McpManagerView};
+use crate::app::{App, McpManagerView, format_duration};
+
+pub fn draw_thinking_archive(frame: &mut Frame, app: &App) {
+    let Some(selected) = app.thinking_archive_selection() else {
+        return;
+    };
+
+    let area = frame.area();
+    let width = area.width.saturating_sub(2).min(72);
+    let height = (app.thinking_blocks.len() as u16 + 2)
+        .max(5)
+        .min(area.height.saturating_sub(2));
+    let overlay = Rect::new(
+        area.x + area.width.saturating_sub(width) / 2,
+        area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    );
+    frame.render_widget(ratatui::widgets::Clear, overlay);
+
+    let items = app
+        .thinking_blocks
+        .iter()
+        .enumerate()
+        .map(|(index, block)| {
+            let preview = block
+                .text
+                .lines()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or("(empty)");
+            let style = if index == selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(app.theme.fg)
+            };
+            ListItem::new(format!(
+                " {}  {}  {}",
+                index + 1,
+                format_duration(block.duration_ms),
+                preview
+            ))
+            .style(style)
+        })
+        .collect::<Vec<_>>();
+
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Thinking archive (Up/Down, Enter expand, Esc close) ")
+            .border_style(Style::default().fg(app.theme.accent)),
+    );
+    frame.render_widget(list, overlay);
+}
 
 /// Render the session picker overlay.
 pub fn draw_session_picker(frame: &mut Frame, app: &App) {

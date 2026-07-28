@@ -3,14 +3,14 @@
 //! Translates a resolved [`Action`] (from [`KeyMap::resolve`]) into calls on
 //! [`App`] / [`super::InputHandler`] and returns a [`KeyResult`] describing
 //! any side effect (send input, cancel, quit, etc.) for the event loop to
-//! execute. Overlay-modal keys (session picker, MCP manager, etc.) are NOT
-//! handled here — they stay in `run_tui()` / `event_loop::input`.
+//! execute. Overlay-modal keys (session picker, MCP manager, etc.) remain in
+//! `event_loop::input`, while `session_loop` consumes async send/cancel results.
 
 use crate::app::App;
 use crate::keybindings::{Action, KeyMap};
 use crossterm::event::KeyEvent;
 
-/// Result of handling a key event. The caller (run_tui) handles async I/O.
+/// Result of handling a key event. `session_loop` handles async I/O.
 pub enum KeyResult {
     Nothing,
     Quit,
@@ -20,7 +20,8 @@ pub enum KeyResult {
 }
 
 /// Process a key event through the KeyMap. Non-modal dispatch only.
-/// Overlay-modal keys (session picker, MCP manager, etc.) stay in run_tui().
+/// Overlay-modal keys (session picker, MCP manager, etc.) stay in
+/// `event_loop::input`.
 pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
     let Some(action) = keymap.resolve(key) else {
         return KeyResult::Nothing;
@@ -43,7 +44,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
         }
         // Grouped single-mutation actions — each calls a no-arg method and returns Nothing
         Action::ToggleThinking => {
-            app.thinking.toggle_expand();
+            app.toggle_thinking();
+            KeyResult::Nothing
+        }
+        Action::ToggleToolOutput => {
+            app.toggle_tool_output(None);
             KeyResult::Nothing
         }
         Action::VoiceHotkey => {
@@ -82,6 +87,22 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
             app.input.move_right();
             KeyResult::Nothing
         }
+        Action::ScrollUp if app.thinking.active && app.thinking.expanded => {
+            app.thinking.scroll_up(10);
+            KeyResult::Nothing
+        }
+        Action::ScrollDown if app.thinking.active && app.thinking.expanded => {
+            app.thinking.scroll_down(10);
+            KeyResult::Nothing
+        }
+        Action::ScrollTop if app.thinking.active && app.thinking.expanded => {
+            app.thinking.scroll_to_top();
+            KeyResult::Nothing
+        }
+        Action::ScrollBottom if app.thinking.active && app.thinking.expanded => {
+            app.thinking.scroll_to_bottom();
+            KeyResult::Nothing
+        }
         Action::ScrollUp => {
             app.output.scroll_up(10);
             KeyResult::Nothing
@@ -91,8 +112,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
             KeyResult::Nothing
         }
         Action::ScrollTop => {
-            app.output.scroll_offset = u16::MAX;
-            app.output.scroll_locked = true;
+            app.output.scroll_to_top();
             KeyResult::Nothing
         }
         Action::ScrollBottom => {
@@ -180,6 +200,9 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
             if let Some(q) = text.strip_prefix("/btw ").filter(|q| !q.trim().is_empty()) {
                 return KeyResult::SendBtw(q.trim().to_string());
             }
+            if text == "/thinking" || text.starts_with("/thinking ") {
+                return KeyResult::SendInput(text);
+            }
             if app.is_generating {
                 app.pending_input.push(text);
                 app.output
@@ -208,4 +231,95 @@ fn handle_activity_key(app: &mut App, action: &Action) -> KeyResult {
         _ => {}
     }
     KeyResult::Nothing
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    use super::*;
+
+    #[test]
+    fn thinking_command_bypasses_generation_queue() {
+        let mut app = App::new();
+        app.is_generating = true;
+        app.input.inject_text("/thinking on");
+        let keymap = KeyMap::default();
+
+        let result = handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            &keymap,
+        );
+
+        assert!(matches!(result, KeyResult::SendInput(ref text) if text == "/thinking on"));
+        assert!(app.pending_input.is_empty());
+        assert!(app.is_generating);
+        assert!(
+            !app.output
+                .all_lines()
+                .contains(&"[queued — will send after current turn]")
+        );
+    }
+
+    #[test]
+    fn other_slash_commands_remain_queued_during_generation() {
+        let mut app = App::new();
+        app.is_generating = true;
+        app.input.inject_text("/help");
+        let keymap = KeyMap::default();
+
+        let result = handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            &keymap,
+        );
+
+        assert!(matches!(result, KeyResult::Nothing));
+        assert_eq!(app.pending_input, ["/help"]);
+    }
+
+    #[test]
+    fn end_restores_transcript_follow_after_streamed_arrivals() {
+        let mut app = App::new();
+        for index in 0..30 {
+            app.output.append_line(&format!("existing-{index}"));
+        }
+        let theme = crate::theme::intj_theme();
+        app.output.rendered_view(&theme, 20, 10);
+        app.output.scroll_up(10);
+        app.output.append_line("streamed-arrival");
+        assert!(app.output.scroll_locked);
+
+        let keymap = KeyMap::default();
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::End, KeyModifiers::NONE),
+            &keymap,
+        );
+        assert!(!app.output.scroll_locked);
+        assert_eq!(app.output.scroll_offset, 0);
+
+        app.output.append_line("later-arrival");
+        let view = app.output.rendered_view(&theme, 20, 10);
+        assert_eq!(view.global_scroll_y, view.total_wrapped.saturating_sub(10));
+    }
+
+    #[test]
+    fn expanded_active_thinking_scrolls_without_moving_transcript() {
+        let mut app = App::new();
+        app.thinking.active = true;
+        app.thinking.expanded = true;
+        let keymap = KeyMap::default();
+
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
+            &keymap,
+        );
+
+        assert_eq!(app.thinking.scroll_offset, 10);
+        assert_eq!(app.output.scroll_offset, 0);
+        assert!(!app.output.scroll_locked);
+    }
 }

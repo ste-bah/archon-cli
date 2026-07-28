@@ -19,12 +19,16 @@ mod btw;
 mod build_agent;
 mod build_prompt;
 mod cognitive_daemon_startup;
+mod cognitive_store;
 mod config_watcher;
 mod event_forwarder;
 mod gnn_auto_trainer_seed;
 mod interactive_agent;
 mod interactive_bootstrap;
 mod interactive_finish;
+mod interactive_learning_init;
+#[cfg(test)]
+mod interactive_learning_init_tests;
 mod interactive_setup;
 mod interactive_ui;
 mod model_selection;
@@ -34,6 +38,7 @@ mod reasoning_quality;
 mod slash_context_builder;
 mod splash;
 mod web_runtime;
+mod world_model_callbacks;
 use activity::{session_activity_sink, session_activity_sink_with_tui};
 pub(super) use model_selection::active_session_model;
 pub(crate) use modes::{run_headless_session, run_print_mode_session};
@@ -44,23 +49,22 @@ pub(crate) use web_runtime::{WebSessionHandle, spawn_web_session};
 #[allow(dead_code)]
 struct BuiltAgent {
     agent: Agent,
-    event_rx: tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent>,
+    event_rx: tokio::sync::mpsc::Receiver<TimestampedEvent>,
     agent_def: Option<archon_core::agents::definition::CustomAgentDefinition>,
     metrics: std::sync::Arc<archon_tui::observability::ChannelMetrics>,
     selected_provider: String,
     selected_model: String,
     permission_mode: Arc<tokio::sync::Mutex<String>>,
+    sandbox_audit_drain: crate::runtime::sandbox_audit_writer::SandboxAuditDrain,
 }
 
 pub(super) fn is_codex_session(config: &archon_core::config::ArchonConfig) -> bool {
     config.llm.provider == "openai-codex"
 }
 
-fn session_sandbox_backend(
+async fn native_session_sandbox_backend(
     config: &archon_core::config::ArchonConfig,
     sandbox_flag: Arc<AtomicBool>,
-    session_id: &str,
-    agent_type: &str,
 ) -> Arc<dyn archon_permissions::SandboxBackend> {
     let backend: Arc<dyn archon_permissions::SandboxBackend> = match config.sandbox.backend.as_str()
     {
@@ -78,34 +82,49 @@ fn session_sandbox_backend(
             sandbox_flag,
         )),
     };
-    let backend =
-        crate::runtime::sandbox_mode::apply_configured_sandbox_mode(backend, &config.sandbox);
-    crate::runtime::sandbox_audit::audit_sandbox_backend(backend, config, session_id, agent_type)
+    crate::runtime::sandbox_mode::apply_configured_sandbox_mode(backend, &config.sandbox)
 }
 
-fn open_governed_learning_db(working_dir: &std::path::Path) -> Option<Arc<cozo::DbInstance>> {
-    let db_path = crate::command::store_paths::learning_db_path_for_dir(working_dir);
-    if let Some(parent) = db_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+fn finish_loop_and_audit(
+    loop_result: anyhow::Result<anyhow::Result<()>>,
+    audit_result: anyhow::Result<
+        Option<crate::runtime::sandbox_audit_writer::SandboxAuditReadback>,
+    >,
+) -> anyhow::Result<()> {
+    match (loop_result.and_then(|result| result), audit_result) {
+        (Ok(()), Ok(_)) => Ok(()),
+        (Err(loop_error), Ok(_)) => Err(loop_error),
+        (Ok(()), Err(audit_error)) => Err(audit_error),
+        (Err(loop_error), Err(audit_error)) => Err(anyhow::anyhow!(
+            "session loop failed: {loop_error:#}; sandbox audit drain failed: {audit_error:#}"
+        )),
     }
-    match archon_learning::cozo_guard::open_sqlite_guarded(
-        db_path.to_string_lossy().as_ref(),
-        "open governed learning db",
-    ) {
-        Ok(db) => {
-            if let Err(e) = archon_learning::schema::ensure_learning_schema(&db) {
-                tracing::warn!(
-                    error = %e,
-                    "governed learning schema init failed; runtime evidence disabled"
-                );
-                None
-            } else {
-                Some(Arc::new(db))
-            }
-        }
-        Err(e) => {
+}
+
+async fn drain_startup_sandbox_audit(
+    drain: crate::runtime::sandbox_audit_writer::SandboxAuditDrain,
+) -> anyhow::Result<crate::runtime::sandbox_audit_writer::SandboxAuditReadback> {
+    drain.shutdown(std::time::Duration::from_secs(30)).await
+}
+
+fn finish_startup_failure(
+    startup_error: anyhow::Error,
+    audit_result: anyhow::Result<crate::runtime::sandbox_audit_writer::SandboxAuditReadback>,
+) -> anyhow::Error {
+    match audit_result {
+        Ok(_) => startup_error,
+        Err(audit_error) => anyhow::anyhow!(
+            "startup failed: {startup_error:#}; sandbox audit drain failed: {audit_error:#}"
+        ),
+    }
+}
+
+async fn open_governed_learning_db(working_dir: &std::path::Path) -> Option<Arc<cozo::DbInstance>> {
+    match crate::runtime::learning_store::acquire_for_dir_async(working_dir).await {
+        Ok(db) => Some(db),
+        Err(error) => {
             tracing::warn!(
-                error = %e,
+                %error,
                 "governed learning store unavailable; runtime evidence disabled"
             );
             None
@@ -113,27 +132,10 @@ fn open_governed_learning_db(working_dir: &std::path::Path) -> Option<Arc<cozo::
     }
 }
 
-fn open_cognitive_store(
+async fn open_cognitive_store(
     working_dir: &std::path::Path,
-) -> Option<archon_cognitive::PersistentCognitiveStore> {
-    let root = working_dir.join(".archon").join("cognitive");
-    match archon_cognitive::PersistentCognitiveStore::open(&root) {
-        Ok(store) => {
-            tracing::info!(
-                path = %store.db_path().display(),
-                "cognitive executive store wired"
-            );
-            Some(store)
-        }
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                path = %root.display(),
-                "cognitive executive store unavailable; continuing without persistence"
-            );
-            None
-        }
-    }
+) -> anyhow::Result<Option<archon_cognitive::PersistentCognitiveStore>> {
+    cognitive_store::open(working_dir).await
 }
 
 fn configure_session_vlm_provider(working_dir: &std::path::Path) {
@@ -172,12 +174,11 @@ async fn build_codex_session_provider(
     let (provider, runtime_mode) =
         crate::runtime::codex_provider::build_codex_provider(config, "tui_session").await?;
     let profile_id =
-        crate::runtime::provider_auth_selection::selected_provider_auth_profile_id(provider.name());
-    Ok(observe_llm_provider_with_profile(
-        provider,
-        runtime_mode,
-        profile_id,
-    ))
+        crate::runtime::provider_auth_selection::selected_provider_auth_profile_id_async(
+            provider.name(),
+        )
+        .await;
+    Ok(observe_llm_provider_with_profile(provider, runtime_mode, profile_id).await)
 }
 
 /// Spawn the Prometheus `/metrics` exporter when `--metrics-port PORT` is
@@ -248,7 +249,7 @@ pub(crate) async fn run_interactive_session(
     env_vars: &ArchonEnvVars,
     resume_messages: Option<Vec<serde_json::Value>>,
     resolved_flags: &archon_core::cli_flags::ResolvedFlags,
-    voice_event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<archon_tui::app::TuiEvent>>,
+    voice_event_rx: Option<tokio::sync::mpsc::Receiver<archon_tui::app::TuiEvent>>,
 ) -> Result<()> {
     let interactive_bootstrap::Bootstrap {
         config_path,
@@ -323,6 +324,7 @@ pub(crate) async fn run_interactive_session(
         auto_trainer,
         metrics,
         agent_event_tx_for_dispatcher,
+        sandbox_audit_drain,
     } = interactive_agent::build(
         config,
         session_id,
@@ -426,47 +428,11 @@ pub(crate) async fn run_interactive_session(
         btw_system_prompt,
         active_model,
         auto_capture,
+        sandbox_audit_drain,
     )
     .await
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn active_session_model_uses_configured_codex_default_when_claude_default_would_leak() {
-        let mut config = archon_core::config::ArchonConfig::default();
-        config.llm.provider = "openai-codex".into();
-        config.api.default_model = "claude-sonnet-4-6".into();
-        config.models.openai_codex.default = "gpt-codex-default".into();
-
-        assert_eq!(active_session_model(&config), "gpt-codex-default");
-    }
-
-    #[test]
-    fn active_session_model_uses_configured_codex_mini_for_haiku_default() {
-        let mut config = archon_core::config::ArchonConfig::default();
-        config.llm.provider = "openai-codex".into();
-        config.api.default_model = "claude-haiku-4-5-20251001".into();
-        config.models.openai_codex.mini = "gpt-codex-mini".into();
-
-        assert_eq!(active_session_model(&config), "gpt-codex-mini");
-    }
-
-    #[test]
-    fn active_session_model_preserves_explicit_codex_model_override() {
-        let mut config = archon_core::config::ArchonConfig::default();
-        config.llm.provider = "openai-codex".into();
-        config.api.default_model = "gpt-5.4-codex-test".into();
-
-        assert_eq!(active_session_model(&config), "gpt-5.4-codex-test");
-    }
-
-    #[test]
-    fn active_session_model_preserves_anthropic_default() {
-        let config = archon_core::config::ArchonConfig::default();
-
-        assert_eq!(active_session_model(&config), config.api.default_model);
-    }
-}
+#[path = "session_tests.rs"]
+mod tests;

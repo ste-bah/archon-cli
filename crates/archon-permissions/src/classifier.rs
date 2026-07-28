@@ -171,6 +171,10 @@ fn classify_single_command(
         }
     }
 
+    if has_dangerous_find_predicate(command) {
+        return CommandClass::Dangerous;
+    }
+
     // Check defaults
     for cmd in DEFAULT_DANGEROUS {
         if lower.starts_with(&cmd.to_lowercase()) {
@@ -190,6 +194,86 @@ fn classify_single_command(
 
     // Unknown commands default to risky
     CommandClass::Risky
+}
+
+fn has_dangerous_find_predicate(command: &str) -> bool {
+    let tokens = shell_tokens(command);
+    if !is_find_executable(command, tokens.first().map(String::as_str)) {
+        return false;
+    }
+
+    let mut index = 1;
+    while index < tokens.len() {
+        let token = tokens[index].as_str();
+        if matches!(token, "-delete" | "-exec" | "-execdir") {
+            return true;
+        }
+        index += 1 + find_predicate_argument_count(token);
+    }
+
+    false
+}
+
+fn is_find_executable(command: &str, parsed_executable: Option<&str>) -> bool {
+    parsed_executable
+        .and_then(|token| token.rsplit('/').next())
+        .is_some_and(|basename| basename == "find")
+        || command
+            .split_whitespace()
+            .next()
+            .map(|token| token.trim_matches(['\'', '"']).to_ascii_lowercase())
+            .and_then(|token| token.rsplit('\\').next().map(str::to_string))
+            .is_some_and(|basename| basename == "find")
+}
+
+fn find_predicate_argument_count(predicate: &str) -> usize {
+    match predicate {
+        "-fprintf" => 2,
+        "-amin" | "-anewer" | "-atime" | "-cmin" | "-cnewer" | "-ctime" | "-fls" | "-fprint"
+        | "-fprint0" | "-fstype" | "-gid" | "-group" | "-ilname" | "-iname" | "-inum"
+        | "-ipath" | "-iregex" | "-iwholename" | "-links" | "-lname" | "-maxdepth"
+        | "-mindepth" | "-mmin" | "-mtime" | "-name" | "-newer" | "-path" | "-perm" | "-printf"
+        | "-regex" | "-samefile" | "-size" | "-type" | "-uid" | "-used" | "-user"
+        | "-wholename" | "-xtype" | "-files0-from" => 1,
+        value if value.starts_with("-newer") => 1,
+        _ => 0,
+    }
+}
+
+fn shell_tokens(command: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+
+    for ch in command.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+        } else if ch == '\\' && quote != Some('\'') {
+            escaped = true;
+        } else if matches!(ch, '\'' | '"') {
+            if quote == Some(ch) {
+                quote = None;
+            } else if quote.is_none() {
+                quote = Some(ch);
+            } else {
+                current.push(ch);
+            }
+        } else if (matches!(ch, '>' | '<' | '&') || ch.is_whitespace()) && quote.is_none() {
+            if !current.is_empty() {
+                tokens.push(current.to_lowercase());
+                current.clear();
+            }
+        } else {
+            current.push(ch);
+        }
+    }
+
+    if !current.is_empty() {
+        tokens.push(current.to_lowercase());
+    }
+    tokens
 }
 
 /// Return the more dangerous of two classifications.

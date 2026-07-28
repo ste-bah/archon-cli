@@ -1,7 +1,10 @@
 /// Tests for OpenAI provider adapter (TASK-CLI-402).
 /// Written BEFORE implementation (Gate 01).
-use archon_llm::provider::{LlmProvider, ProviderFeature};
+use archon_llm::provider::{LlmProvider, LlmRequest, ProviderFeature};
 use archon_llm::providers::OpenAiProvider;
+use archon_llm::providers::openai::build_openai_stream_request_body;
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 // ---------------------------------------------------------------------------
 // Test 1: OpenAiProvider is object-safe (can be boxed as dyn LlmProvider)
@@ -85,6 +88,97 @@ fn openai_uses_env_api_key() {
     assert!(!resolved.is_empty());
 }
 
+#[tokio::test]
+async fn openai_tool_section_bytes_are_stable() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string("data: [DONE]\n\n"),
+        )
+        .expect(2)
+        .mount(&server)
+        .await;
+    let provider = OpenAiProvider::new("test-key".into(), Some(server.uri()), "gpt-4o".into());
+    let tools = vec![serde_json::json!({
+        "name":"Read",
+        "description":"read",
+        "input_schema":{
+            "type":"object",
+            "properties":{"file_path":{"type":"string"}}
+        }
+    })];
+
+    for content in ["first turn", "second turn"] {
+        let mut stream = provider
+            .stream(LlmRequest {
+                model: "gpt-4o".into(),
+                system: vec![serde_json::json!({
+                    "type":"text",
+                    "text":"stable system"
+                })],
+                messages: vec![serde_json::json!({"role":"user","content":content})],
+                tools: tools.clone(),
+                ..LlmRequest::default()
+            })
+            .await
+            .expect("captured stream");
+        while stream.recv().await.is_some() {}
+    }
+
+    let requests = server.received_requests().await.expect("captured requests");
+    assert_eq!(requests.len(), 2);
+    let first: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let second: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
+    assert_ne!(first["messages"], second["messages"]);
+    assert_eq!(first["messages"][0], second["messages"][0]);
+    assert_eq!(
+        serde_json::to_vec(&first["tools"]).unwrap(),
+        serde_json::to_vec(&second["tools"]).unwrap()
+    );
+}
+
+#[test]
+fn openai_streaming_request_asks_for_usage_chunk() {
+    let body = build_openai_stream_request_body("gpt-4o", 1024, &[], &[], &[]);
+
+    assert_eq!(body["stream_options"]["include_usage"], true);
+}
+
+#[tokio::test]
+async fn openai_complete_returns_usage_from_final_stream_chunk() {
+    let server = MockServer::start().await;
+    let body = concat!(
+        "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3}}\n\n",
+        "data: [DONE]\n\n"
+    );
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(body),
+        )
+        .mount(&server)
+        .await;
+    let provider = OpenAiProvider::new("test-key".into(), Some(server.uri()), "gpt-4o".into());
+
+    let response = provider
+        .complete(LlmRequest {
+            model: "gpt-4o".into(),
+            ..LlmRequest::default()
+        })
+        .await
+        .expect("mock completion");
+
+    assert_eq!(response.usage.input_tokens, 7);
+    assert_eq!(response.usage.output_tokens, 3);
+    assert!(response.usage.input_tokens_available);
+    assert!(response.usage.output_tokens_available);
+}
+
 // ---------------------------------------------------------------------------
 // Test 6: SSE parsing — text chunk produces TextDelta
 // ---------------------------------------------------------------------------
@@ -122,6 +216,55 @@ fn openai_sse_tool_call_parsed() {
         has_start,
         "expected ContentBlockStart for tool call, got: {events:?}"
     );
+}
+
+#[test]
+fn openai_terminal_choice_without_delta_preserves_usage() {
+    let chunk = r#"{"id":"chatcmpl-usage","choices":[{"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":6,"completion_tokens":2}}"#;
+
+    let events = OpenAiProvider::parse_sse_chunk(chunk);
+
+    assert!(matches!(
+        events.as_slice(),
+        [archon_llm::streaming::StreamEvent::MessageDelta {
+            usage: Some(usage),
+            ..
+        }] if usage.input_tokens == 6 && usage.output_tokens == 2
+    ));
+}
+
+#[test]
+fn openai_sse_usage_only_chunk_preserves_explicit_zero_usage() {
+    let chunk =
+        r#"{"id":"chatcmpl-usage","choices":[],"usage":{"prompt_tokens":0,"completion_tokens":0}}"#;
+
+    let events = OpenAiProvider::parse_sse_chunk(chunk);
+
+    assert!(matches!(
+        events.as_slice(),
+        [archon_llm::streaming::StreamEvent::MessageDelta {
+            usage: Some(usage),
+            ..
+        }] if usage.input_tokens == 0
+            && usage.output_tokens == 0
+            && usage.input_tokens_available
+            && usage.output_tokens_available
+    ));
+}
+
+#[test]
+fn openai_sse_usage_only_chunk_preserves_absent_usage_as_unavailable() {
+    let chunk = r#"{"id":"chatcmpl-usage","choices":[],"usage":{}}"#;
+
+    let events = OpenAiProvider::parse_sse_chunk(chunk);
+
+    assert!(matches!(
+        events.as_slice(),
+        [archon_llm::streaming::StreamEvent::MessageDelta {
+            usage: Some(usage),
+            ..
+        }] if !usage.input_tokens_available && !usage.output_tokens_available
+    ));
 }
 
 // ---------------------------------------------------------------------------

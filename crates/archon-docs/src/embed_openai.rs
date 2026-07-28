@@ -124,6 +124,10 @@ impl LocalEmbeddingProvider for OpenAiCompatEmbeddingProvider {
         "openai-compatible"
     }
 
+    fn embedding_space_id(&self) -> String {
+        format!("{}:{}:{}", self.backend_name(), self.endpoint, self.model)
+    }
+
     fn max_embedding_workers(&self) -> usize {
         32
     }
@@ -202,4 +206,29 @@ fn parse_embeddings(value: &Value, expected_count: usize) -> Result<Vec<Vec<f32>
 fn backoff(attempt: u32) {
     let ms = (100u64 << attempt).min(3200);
     std::thread::sleep(Duration::from_millis(ms));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedding_space_identity_includes_endpoint_and_model() {
+        let first = OpenAiCompatEmbeddingProvider::new(
+            "test-key".into(),
+            Some("https://first.example/v1".into()),
+            Some("model-a".into()),
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        let second = OpenAiCompatEmbeddingProvider::new(
+            "test-key".into(),
+            Some("https://second.example/v1".into()),
+            Some("model-b".into()),
+            Duration::from_secs(1),
+        )
+        .unwrap();
+
+        assert_ne!(first.embedding_space_id(), second.embedding_space_id());
+    }
 }

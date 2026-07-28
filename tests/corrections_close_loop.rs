@@ -3,18 +3,27 @@ use std::sync::Arc;
 use archon_core::agent::UserCorrectionEventPayload;
 use archon_learning::models::{BehaviourManifestKind, LearningEventType};
 use archon_pipeline::learning::integration::{LearningIntegration, LearningIntegrationConfig};
-use cozo::DbInstance;
 
-fn test_db() -> Arc<DbInstance> {
-    let path = format!("/tmp/corrections-close-loop-{}.db", uuid::Uuid::new_v4());
-    let db = DbInstance::new("sqlite", &path, "").expect("open test db");
+fn test_db() -> archon_cozo::GuardedDbInstance {
+    let path = std::env::temp_dir().join(format!(
+        "corrections-close-loop-{}.db",
+        uuid::Uuid::new_v4()
+    ));
+    let path_text = path.to_string_lossy();
+    let db = archon_cozo::open_sqlite_guarded_instance(
+        &path_text,
+        "open correction loop test db",
+        archon_cozo::CozoGuardConfig::for_db_path(&path),
+    )
+    .expect("open test db");
     archon_learning::schema::ensure_learning_schema(&db).expect("ensure schema");
-    Arc::new(db)
+    db
 }
 
 #[test]
 fn corrections_close_loop_e2e() {
-    let db = test_db();
+    let guarded_db = test_db();
+    let db = guarded_db.db_arc();
     let integration =
         LearningIntegration::new(None, None, LearningIntegrationConfig::default(), None)
             .with_event_store(Arc::clone(&db));

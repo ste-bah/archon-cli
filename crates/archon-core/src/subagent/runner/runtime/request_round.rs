@@ -14,6 +14,7 @@ pub(super) async fn prepare_request_round(
     last_known_context_tokens: &mut u64,
     proactive_pressure_attempted: &mut bool,
     reasoning_encrypted: Option<String>,
+    turn: u32,
 ) -> PreparedRequest {
     let telemetry = build_compaction_telemetry(runner);
     maybe_compact_for_context_window(
@@ -25,7 +26,7 @@ pub(super) async fn prepare_request_round(
     )
     .await;
 
-    let mut request = build_llm_request(runner, messages, reasoning_encrypted).await;
+    let mut request = build_llm_request(runner, messages, reasoning_encrypted, turn).await;
     let mut request_body_bytes = crate::agent::autocompact::request_body_bytes(&request);
     let large_retry_body_bytes =
         crate::agent::autocompact::large_request_retry_body_bytes(&runner.agent_config.context);
@@ -127,22 +128,48 @@ async fn build_llm_request(
     runner: &SubagentRunner,
     messages: &[serde_json::Value],
     reasoning_encrypted: Option<String>,
+    turn: u32,
 ) -> LlmRequest {
     let (max_tokens, thinking, speed) =
         runner.agent_config.build_base_request_fields(&runner.model);
-    LlmRequest {
+    let mut request = LlmRequest {
         model: runner.model.clone(),
         max_tokens,
         system: build_system_messages(runner, messages),
-        messages: messages.to_vec(),
+        messages: crate::agent::tool_result_context::project_messages_for_request(
+            messages,
+            runner.agent_config.context.preserve_recent_turns,
+        ),
         tools: runner.tool_definitions.clone(),
         thinking,
         speed,
         effort: resolve_effort(runner).await,
-        extra: serde_json::Value::Null,
+        extra: runner.agent_config.auxiliary_runtime_extra(
+            "subagent",
+            "subagent",
+            turn as u64,
+            Some(turn),
+            None,
+        ),
         request_origin: Some("subagent".into()),
         reasoning_encrypted,
-    }
+    };
+    crate::agent::request_cache::apply_system_cache(
+        &mut request,
+        runner.provider.as_ref(),
+        runner.agent_config.context.prompt_cache,
+        &runner.agent_config.context.prompt_cache_mode,
+        &runner.agent_config.context.prompt_cache_ttl,
+    );
+    crate::agent::request_cache::apply_conversation_cache(
+        &mut request,
+        runner.provider.as_ref(),
+        runner.agent_config.context.prompt_cache
+            && runner.agent_config.context.prompt_cache_conversation,
+        &runner.agent_config.context.prompt_cache_mode,
+        &runner.agent_config.context.prompt_cache_ttl,
+    );
+    request
 }
 
 fn build_system_messages(
@@ -153,7 +180,7 @@ fn build_system_messages(
     let first_user_message = messages
         .first()
         .and_then(|message| message.get("content"))
-        .and_then(|content| content.as_str())
+        .and_then(first_text_content)
         .unwrap_or("");
     if let Some(billing) = runner.identity.billing_header(first_user_message) {
         system.push(serde_json::json!({
@@ -166,6 +193,7 @@ fn build_system_messages(
         "type": "text",
         "text": &runner.system_prompt,
     }));
+    system.extend(runner.request_system.clone());
     if let Some(ref reminder) = runner.critical_system_reminder {
         system.push(serde_json::json!({
             "type": "text",
@@ -173,6 +201,16 @@ fn build_system_messages(
         }));
     }
     system
+}
+
+fn first_text_content(content: &serde_json::Value) -> Option<&str> {
+    content.as_str().or_else(|| {
+        content.as_array()?.iter().find_map(|block| {
+            (block.get("type").and_then(|value| value.as_str()) == Some("text"))
+                .then(|| block.get("text").and_then(|value| value.as_str()))
+                .flatten()
+        })
+    })
 }
 
 async fn resolve_effort(runner: &SubagentRunner) -> Option<String> {
@@ -242,7 +280,18 @@ async fn maybe_compact_for_request_pressure(
         "subagent request-pressure compaction failed; continuing turn",
     )
     .await;
-    request.messages = messages.clone();
+    request.messages = crate::agent::tool_result_context::project_messages_for_request(
+        messages,
+        runner.agent_config.context.preserve_recent_turns,
+    );
+    crate::agent::request_cache::apply_conversation_cache(
+        request,
+        runner.provider.as_ref(),
+        runner.agent_config.context.prompt_cache
+            && runner.agent_config.context.prompt_cache_conversation,
+        &runner.agent_config.context.prompt_cache_mode,
+        &runner.agent_config.context.prompt_cache_ttl,
+    );
     *request_body_bytes = crate::agent::autocompact::request_body_bytes(request);
 }
 
@@ -279,6 +328,13 @@ async fn compact_proactively(
         messages,
         action,
         false,
+        runner.agent_config.runtime_attribution_extra(
+            "compaction",
+            "subagent_auto_compaction",
+            None,
+            None,
+            None,
+        ),
     )
     .await
     {

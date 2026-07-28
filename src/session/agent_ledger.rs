@@ -46,16 +46,16 @@ pub(super) async fn record_event(
 }
 
 pub(super) fn spawn_print_forwarder(
-    mut event_rx: tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent>,
+    mut event_rx: tokio::sync::mpsc::Receiver<TimestampedEvent>,
     db: Option<Arc<cozo::DbInstance>>,
     context: crate::runtime::agent_ledger_events::AgentLedgerContext,
     permission_mode: Arc<tokio::sync::Mutex<String>>,
-) -> tokio::sync::mpsc::UnboundedReceiver<TimestampedEvent> {
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+) -> tokio::sync::mpsc::Receiver<TimestampedEvent> {
+    let (tx, rx) = tokio::sync::mpsc::channel(archon_core::agent::AGENT_EVENT_CHANNEL_CAPACITY);
     archon_tui::observability::spawn_named("print-agent-ledger-forwarder", async move {
         while let Some(timestamped) = event_rx.recv().await {
             record_event(db.as_ref(), &context, &permission_mode, &timestamped.inner).await;
-            if tx.send(timestamped).is_err() {
+            if tx.send(timestamped).await.is_err() {
                 break;
             }
         }

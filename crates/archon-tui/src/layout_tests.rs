@@ -22,14 +22,12 @@
 //! between a test's own write and its `last_known_size()` read.
 //!
 //! The fix is `#[serial]` (serial_test crate, default key). The same
-//! `LAST_KNOWN_SIZE` global is also written/read by integration tests
-//! that drive `run_event_loop` with `TuiEvent::Resize` — specifically
-//! `tests/event_loop_coverage.rs::test_tc_06_sigwinch_reflow_no_frame_drop`
-//! (writer + reader) and `tests/event_loop_inner_coverage.rs::
-//! run_with_backend_walks_wide_event_surface` (writer). Those tests
-//! are ALSO `#[serial]`-annotated in their own binaries. Cross-binary
-//! safety under plain `cargo test` relies on the default one-binary-
-//! at-a-time harness behavior; within each binary the `#[serial]`
+//! `LAST_KNOWN_SIZE` global is also touched by the canonical
+//! `event_loop::tui_events` Resize/Done regression and by
+//! `tests/event_loop_inner_coverage.rs::headless_backend_walks_wide_event_surface`.
+//! Those tests are also `#[serial]`-annotated in their own binaries.
+//! Cross-binary safety under plain `cargo test` relies on the default
+//! one-binary-at-a-time harness behavior; within each binary the `#[serial]`
 //! default-key group serializes every resize-touching test.
 //!
 //! `thread_local` was considered and rejected: production code shares

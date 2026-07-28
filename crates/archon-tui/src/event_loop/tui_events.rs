@@ -25,13 +25,23 @@ pub(super) async fn handle_tui_event(
     match event {
         TuiEvent::TextDelta(text) => app.on_text_delta(&text),
         TuiEvent::ThinkingDelta(text) => app.on_thinking_delta(&text),
+        TuiEvent::TransientThinkingDelta(text) => app.on_transient_thinking_delta(&text),
+        TuiEvent::CommitThinkingPreview => app.commit_thinking_preview(),
+        TuiEvent::DiscardThinkingPreview => app.discard_thinking_preview(),
         TuiEvent::ToolStart { name, id } => app.on_tool_start(&name, &id),
+        TuiEvent::ToolOutputChunk { id, chunk } => {
+            if let Some(tool) = app.tool_outputs.iter_mut().find(|tool| tool.tool_id == id) {
+                tool.append_output(&chunk);
+            }
+        }
         TuiEvent::ToolComplete {
             name,
             id,
             success,
             output,
+            transcript_summary,
         } => {
+            app.set_tool_summary(&id, transcript_summary);
             app.on_tool_complete(&name, &id, success, &output);
         }
         TuiEvent::TurnComplete {
@@ -75,7 +85,14 @@ pub(super) async fn handle_tui_event(
         TuiEvent::SlashCommandComplete => app.on_slash_command_complete(),
         TuiEvent::ThinkingToggle(enabled) => {
             app.show_thinking = enabled;
+            let message = if enabled {
+                "\nThinking display enabled.\n"
+            } else {
+                "\nThinking display disabled.\n"
+            };
+            app.output.append(message);
         }
+        TuiEvent::OpenThinkingArchive => app.open_thinking_archive(),
         TuiEvent::ModelChanged(model) => {
             app.status.model = model;
         }
@@ -217,15 +234,6 @@ pub(super) async fn handle_tui_event(
         }
         TuiEvent::Resize { cols, rows } => {
             crate::layout::handle_resize(cols, rows);
-        }
-        TuiEvent::UserInput(_) => {
-            // TUI-106: handled by run_event_loop; old run_tui path is a no-op.
-        }
-        TuiEvent::SlashCancel => {
-            // TUI-106: handled by run_event_loop; old run_tui path is a no-op.
-        }
-        TuiEvent::SlashAgent(_) => {
-            // TUI-106: handled by run_event_loop; old run_tui path is a no-op.
         }
         TuiEvent::Done => {
             app.should_quit = true;
@@ -391,6 +399,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn thinking_toggle_message_does_not_finish_active_thinking() {
+        let mut app = App::new();
+        app.on_thinking_delta("retained before toggle");
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+
+        handle_tui_event(&mut app, TuiEvent::ThinkingToggle(true), &tx).await;
+
+        assert!(app.show_thinking);
+        assert!(app.thinking.active);
+        assert_eq!(app.thinking.accumulated, "retained before toggle");
+        assert!(app.thinking_blocks.is_empty());
+        assert!(
+            app.output
+                .all_lines()
+                .iter()
+                .any(|line| line.contains("Thinking display enabled."))
+        );
+
+        app.on_thinking_delta(" and after toggle");
+        app.on_turn_complete();
+        assert_eq!(app.thinking_blocks.len(), 1);
+        assert_eq!(
+            app.thinking_blocks[0].text,
+            "retained before toggle and after toggle"
+        );
+    }
+
+    #[tokio::test]
+    async fn open_thinking_archive_event_selects_the_latest_block() {
+        let mut app = App::new();
+        app.on_thinking_delta("first thought");
+        app.on_turn_complete();
+        app.on_thinking_delta("second thought");
+        app.on_turn_complete();
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+
+        handle_tui_event(&mut app, TuiEvent::OpenThinkingArchive, &tx).await;
+
+        assert_eq!(app.thinking_archive_selection(), Some(1));
+    }
+
+    #[tokio::test]
     async fn ask_user_prompt_sets_modal_state_and_logs_question() {
         let mut app = App::new();
         app.ask_user_draft = "stale answer".into();
@@ -413,5 +463,26 @@ mod tests {
                 .iter()
                 .any(|line| line.contains("[question] Choose a path"))
         );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn resize_and_done_update_canonical_loop_state() {
+        let mut app = App::new();
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+
+        handle_tui_event(
+            &mut app,
+            TuiEvent::Resize {
+                cols: 200,
+                rows: 60,
+            },
+            &tx,
+        )
+        .await;
+        handle_tui_event(&mut app, TuiEvent::Done, &tx).await;
+
+        assert_eq!(crate::layout::last_known_size(), (200, 60));
+        assert!(app.should_quit);
     }
 }

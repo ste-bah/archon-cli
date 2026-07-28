@@ -11,7 +11,9 @@ use crate::command::pipeline_support::{
 };
 use crate::command::registry::{CommandContext, CommandHandler};
 use archon_pipeline::coding::facade::CodingFacade;
-use archon_pipeline::runner::{LlmClient, run_pipeline_audited};
+use archon_pipeline::runner::{
+    LlmClient, PipelineFacade, PipelineProgressFacade, run_pipeline_audited,
+};
 use archon_tui::app::TuiEvent;
 
 /// Handler for `/archon-code <task description>`.
@@ -60,16 +62,20 @@ impl CommandHandler for ArchonCodeHandler {
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
         // Facade emits per-agent progress as Strings; forward to TUI as TextDelta.
-        let (string_tx, mut string_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-        coding.set_tui_sender(string_tx);
+        let (string_tx, mut string_rx) = tokio::sync::mpsc::channel::<String>(1);
+        let coding: Arc<dyn PipelineFacade> = coding;
+        let progress_facade = PipelineProgressFacade::new(coding, string_tx);
         let fwd_tx = tui_tx.clone();
-        archon_observability::spawn_named("archon-code-progress-forwarder", async move {
-            while let Some(msg) = string_rx.recv().await {
-                let _ = fwd_tx.send(TuiEvent::TextDelta(msg));
-            }
-        });
+        let progress_forwarder =
+            archon_observability::spawn_named("archon-code-progress-forwarder", async move {
+                while let Some(msg) = string_rx.recv().await {
+                    if fwd_tx.send_async(TuiEvent::TextDelta(msg)).await.is_err() {
+                        return;
+                    }
+                }
+            });
 
-        let _ = tui_tx.send(TuiEvent::TextDelta(format!(
+        ctx.emit(TuiEvent::TextDelta(format!(
             "Starting coding pipeline for task: {task}\n",
         )));
         let world_context = loaded_config.map(|config| {
@@ -103,7 +109,7 @@ impl CommandHandler for ArchonCodeHandler {
                 && !record.decision.allowed_to_finalize
                 && !record.decision.required_actions.is_empty()
             {
-                let _ = tui_tx.send(TuiEvent::TextDelta(format!(
+                ctx.emit(TuiEvent::TextDelta(format!(
                     "World model guardrail: {:?} risk; pipeline completion requires {:?}.\n",
                     record.decision.risk_tier, record.decision.required_actions
                 )));
@@ -126,8 +132,8 @@ impl CommandHandler for ArchonCodeHandler {
         }
 
         archon_observability::spawn_named("archon-code-pipeline", async move {
-            match run_pipeline_audited(
-                coding.as_ref(),
+            let result = run_pipeline_audited(
+                &progress_facade,
                 llm.as_ref(),
                 &task,
                 &cwd,
@@ -135,20 +141,26 @@ impl CommandHandler for ArchonCodeHandler {
                 reflexion.as_mut(),
                 learning.as_mut(),
             )
-            .await
-            {
+            .await;
+            drop(progress_facade);
+            if let Err(error) = progress_forwarder.await {
+                tracing::error!(%error, "coding progress forwarder failed");
+            }
+            match result {
                 Ok(result) => {
-                    let _ = tui_tx.send(TuiEvent::TextDelta(format!(
-                        "\n=== Pipeline Complete ===\n\
+                    let _ = tui_tx
+                        .send_async(TuiEvent::TextDelta(format!(
+                            "\n=== Pipeline Complete ===\n\
                          Session: {}\n\
                          Agents run: {}\n\
                          Total cost: ${:.4}\n\
                          Duration: {:.1}s\n",
-                        result.session_id,
-                        result.agent_results.len(),
-                        result.total_cost_usd,
-                        result.duration.as_secs_f64(),
-                    )));
+                            result.session_id,
+                            result.agent_results.len(),
+                            result.total_cost_usd,
+                            result.duration.as_secs_f64(),
+                        )))
+                        .await;
                     if let Some((config, guardrail, advisory)) = world_context.as_ref() {
                         if let Some(record) = guardrail {
                             let step_report =
@@ -156,11 +168,13 @@ impl CommandHandler for ArchonCodeHandler {
                                     config, record, &result,
                                 );
                             if step_report.steps_recorded > 0 {
-                                let _ = tui_tx.send(TuiEvent::TextDelta(format!(
-                                    "World model guardrail: recorded {} pipeline steps and {} verification signals.\n",
-                                    step_report.steps_recorded,
-                                    step_report.parent_verifications_recorded
-                                )));
+                                let _ = tui_tx
+                                    .send_async(TuiEvent::TextDelta(format!(
+                                        "World model guardrail: recorded {} pipeline steps and {} verification signals.\n",
+                                        step_report.steps_recorded,
+                                        step_report.parent_verifications_recorded
+                                    )))
+                                    .await;
                             }
                             if let Some(outcome) =
                                 crate::command::world_model::record_guardrail_completion_outcome(
@@ -176,10 +190,12 @@ impl CommandHandler for ArchonCodeHandler {
                                         | archon_world_model::GuardrailFinalStatus::BlockedFailedVerification
                                 )
                             {
-                                let _ = tui_tx.send(TuiEvent::TextDelta(format!(
-                                    "World model guardrail: pipeline output is not marked verified yet; required actions: {:?}\n",
-                                    record.decision.required_actions
-                                )));
+                                let _ = tui_tx
+                                    .send_async(TuiEvent::TextDelta(format!(
+                                        "World model guardrail: pipeline output is not marked verified yet; required actions: {:?}\n",
+                                        record.decision.required_actions
+                                    )))
+                                    .await;
                             }
                         } else {
                             crate::command::world_model::record_runtime_outcome(
@@ -193,7 +209,9 @@ impl CommandHandler for ArchonCodeHandler {
                     }
                 }
                 Err(e) => {
-                    let _ = tui_tx.send(TuiEvent::Error(format!("Coding pipeline failed: {e}")));
+                    let _ = tui_tx
+                        .send_async(TuiEvent::Error(format!("Coding pipeline failed: {e}")))
+                        .await;
                 }
             }
         });

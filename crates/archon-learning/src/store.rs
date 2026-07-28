@@ -37,7 +37,8 @@ pub fn insert_learning_event(db: &DbInstance, event: &LearningEvent) -> Result<(
     );
     params.insert("ca".into(), DataValue::from(event.created_at.as_str()));
 
-    db.run_script(
+    crate::cozo_guard::run_script_guarded(
+        db,
         "?[event_id, workspace_id, event_type, source_artifact_id, \
          outcome_artifact_id, signal, confidence, provenance_record_id, created_at] \
          <- [[$eid, $wid, $et, $sid, $oid, $sig, $cf, $prid, $ca]] \
@@ -46,6 +47,7 @@ pub fn insert_learning_event(db: &DbInstance, event: &LearningEvent) -> Result<(
          provenance_record_id, created_at }",
         params,
         ScriptMutability::Mutable,
+        "insert learning_events failed",
     )
     .map_err(|e| anyhow::anyhow!("insert learning_events failed: {e}"))?;
     Ok(())
@@ -91,10 +93,11 @@ pub fn list_learning_events_since(
         db.run_script(
             "?[event_id, workspace_id, event_type, source_artifact_id, \
              outcome_artifact_id, signal, confidence, provenance_record_id, created_at] \
-             := *learning_events{event_id, workspace_id, event_type, \
+             := *learning_events:by_type_created_at{event_type, created_at, event_id}, \
+             event_type = $et, created_at >= $since, \
+             *learning_events{event_id, workspace_id, event_type, \
              source_artifact_id, outcome_artifact_id, signal, confidence, \
-             provenance_record_id, created_at}, \
-             created_at >= $since, event_type = $et",
+             provenance_record_id, created_at}",
             params,
             ScriptMutability::Immutable,
         )
@@ -104,10 +107,11 @@ pub fn list_learning_events_since(
         db.run_script(
             "?[event_id, workspace_id, event_type, source_artifact_id, \
              outcome_artifact_id, signal, confidence, provenance_record_id, created_at] \
-             := *learning_events{event_id, workspace_id, event_type, \
+             := *learning_events:by_created_at{created_at, event_id}, \
+             created_at >= $since, \
+             *learning_events{event_id, workspace_id, event_type, \
              source_artifact_id, outcome_artifact_id, signal, confidence, \
-             provenance_record_id, created_at}, \
-             created_at >= $since",
+             provenance_record_id, created_at}",
             params,
             ScriptMutability::Immutable,
         )
@@ -151,9 +155,11 @@ pub fn list_learning_events_by_type(
         .run_script(
             "?[event_id, workspace_id, event_type, source_artifact_id, \
              outcome_artifact_id, signal, confidence, provenance_record_id, created_at] \
-             := *learning_events{event_id, workspace_id, event_type, \
+             := *learning_events:by_type_created_at{event_type, event_id}, \
+             event_type = $et, \
+             *learning_events{event_id, workspace_id, event_type, \
              source_artifact_id, outcome_artifact_id, signal, confidence, \
-             provenance_record_id, created_at}, event_type = $et",
+             provenance_record_id, created_at}",
             params,
             ScriptMutability::Immutable,
         )
@@ -244,7 +250,8 @@ pub fn insert_behaviour_proposal(db: &DbInstance, proposal: &BehaviourProposal) 
     params.insert("status".into(), DataValue::from(proposal.status.as_str()));
     params.insert("ca".into(), DataValue::from(proposal.created_at.as_str()));
 
-    db.run_script(
+    crate::cozo_guard::run_script_guarded(
+        db,
         "?[proposal_id, workspace_id, manifest_kind, current_version, \
          proposed_version, diff, evidence_ids_json, risk_level, \
          policy_decision, status, created_at] \
@@ -254,6 +261,7 @@ pub fn insert_behaviour_proposal(db: &DbInstance, proposal: &BehaviourProposal) 
          policy_decision, status, created_at }",
         params,
         ScriptMutability::Mutable,
+        "insert behaviour_proposals failed",
     )
     .map_err(|e| anyhow::anyhow!("insert behaviour_proposals failed: {e}"))?;
     Ok(())
@@ -375,7 +383,8 @@ pub fn insert_manifest_version(db: &DbInstance, version: &BehaviourManifestVersi
     params.insert("rt".into(), DataValue::from(version.is_rollback_target));
     params.insert("ca".into(), DataValue::from(version.created_at.as_str()));
 
-    db.run_script(
+    crate::cozo_guard::run_script_guarded(
+        db,
         "?[version_id, manifest_kind, version_number, content_json, diff, \
          parent_version_id, created_by_proposal_id, is_rollback_target, created_at] \
          <- [[$vid, $mk, $vn, $content, $diff, $pvid, $cbid, $rt, $ca]] \
@@ -384,6 +393,7 @@ pub fn insert_manifest_version(db: &DbInstance, version: &BehaviourManifestVersi
          created_by_proposal_id, is_rollback_target, created_at }",
         params,
         ScriptMutability::Mutable,
+        "insert behaviour_manifest_versions failed",
     )
     .map_err(|e| anyhow::anyhow!("insert behaviour_manifest_versions failed: {e}"))?;
     Ok(())
@@ -533,7 +543,8 @@ pub fn insert_policy_decision(
     );
     params.insert("ca".into(), DataValue::from(created_at));
 
-    db.run_script(
+    crate::cozo_guard::run_script_guarded(
+        db,
         "?[decision_id, proposal_id, rule_name, outcome, reason, \
          evaluated_inputs_json, created_at] \
          <- [[$did, $pid, $rn, $outcome, $reason, $ei, $ca]] \
@@ -541,6 +552,7 @@ pub fn insert_policy_decision(
          rule_name, outcome, reason, evaluated_inputs_json, created_at }",
         params,
         ScriptMutability::Mutable,
+        "insert policy_decision failed",
     )
     .map_err(|e| anyhow::anyhow!("insert policy_decision failed: {e}"))?;
     Ok(())
@@ -593,13 +605,15 @@ pub fn insert_approval(db: &DbInstance, approval: &BehaviourApproval) -> Result<
     params.insert("comment".into(), DataValue::from(approval.comment.as_str()));
     params.insert("ca".into(), DataValue::from(approval.created_at.as_str()));
 
-    db.run_script(
+    crate::cozo_guard::run_script_guarded(
+        db,
         "?[approval_id, proposal_id, approver, approved, comment, created_at] \
          <- [[$aid, $pid, $approver, $approved, $comment, $ca]] \
          :put behaviour_approvals { approval_id => proposal_id, approver, \
          approved, comment, created_at }",
         params,
         ScriptMutability::Mutable,
+        "insert approval failed",
     )
     .map_err(|e| anyhow::anyhow!("insert approval failed: {e}"))?;
     Ok(())
@@ -611,11 +625,113 @@ pub fn insert_approval(db: &DbInstance, approval: &BehaviourApproval) -> Result<
 mod tests {
     use super::*;
 
-    fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-store-{}.db", uuid::Uuid::new_v4());
-        let db = DbInstance::new("sqlite", &path, "").unwrap();
-        crate::schema::ensure_learning_schema(&db).unwrap();
-        db
+    fn test_db() -> std::sync::Arc<DbInstance> {
+        crate::cozo_guard::test_sqlite_db("test-store")
+    }
+
+    #[test]
+    fn learning_event_list_queries_preserve_filter_results() {
+        let db = test_db();
+        for (event_id, event_type, created_at) in [
+            (
+                "lev-old-gate",
+                LearningEventType::GatePassed,
+                "2026-01-01T00:00:00Z",
+            ),
+            (
+                "lev-new-gate",
+                LearningEventType::GatePassed,
+                "2026-06-01T00:00:00Z",
+            ),
+            (
+                "lev-new-failure",
+                LearningEventType::GateFailed,
+                "2026-07-01T00:00:00Z",
+            ),
+        ] {
+            insert_learning_event(
+                &db,
+                &LearningEvent {
+                    event_id: event_id.into(),
+                    workspace_id: "ws-index-results".into(),
+                    event_type,
+                    source_artifact_id: "source".into(),
+                    outcome_artifact_id: None,
+                    signal: serde_json::json!({}),
+                    confidence: 1.0,
+                    provenance_record_id: "provenance".into(),
+                    created_at: created_at.into(),
+                },
+            )
+            .expect("insert event");
+        }
+
+        let since = list_learning_events_since(&db, "2026-05-01T00:00:00Z", None)
+            .expect("list events by time");
+        assert_eq!(
+            event_ids(since),
+            std::collections::BTreeSet::from([
+                "lev-new-failure".to_string(),
+                "lev-new-gate".to_string(),
+            ])
+        );
+
+        let gate_since =
+            list_learning_events_since(&db, "2026-05-01T00:00:00Z", Some("GatePassed"))
+                .expect("list gate events by time");
+        assert_eq!(
+            event_ids(gate_since),
+            std::collections::BTreeSet::from(["lev-new-gate".to_string()])
+        );
+
+        let gates = list_learning_events_by_type(&db, "GatePassed").expect("list events by type");
+        assert_eq!(
+            event_ids(gates),
+            std::collections::BTreeSet::from([
+                "lev-new-gate".to_string(),
+                "lev-old-gate".to_string(),
+            ])
+        );
+    }
+
+    fn event_ids(events: Vec<LearningEvent>) -> std::collections::BTreeSet<String> {
+        events.into_iter().map(|event| event.event_id).collect()
+    }
+
+    #[test]
+    fn learning_event_list_queries_require_secondary_indices() {
+        let db = test_db();
+        let event = LearningEvent {
+            event_id: "lev-index-contract".into(),
+            workspace_id: "ws-index-contract".into(),
+            event_type: LearningEventType::GatePassed,
+            source_artifact_id: "gate-sherlock".into(),
+            outcome_artifact_id: None,
+            signal: serde_json::json!({}),
+            confidence: 1.0,
+            provenance_record_id: "prov-index-contract".into(),
+            created_at: "2026-05-03T00:00:00Z".into(),
+        };
+        insert_learning_event(&db, &event).expect("insert event");
+
+        db.run_script(
+            "::index drop learning_events:by_created_at",
+            Default::default(),
+            ScriptMutability::Mutable,
+        )
+        .expect("drop time index");
+        assert!(list_learning_events_since(&db, "2026-01-01T00:00:00Z", None).is_err());
+
+        db.run_script(
+            "::index drop learning_events:by_type_created_at",
+            Default::default(),
+            ScriptMutability::Mutable,
+        )
+        .expect("drop type index");
+        assert!(
+            list_learning_events_since(&db, "2026-01-01T00:00:00Z", Some("GatePassed"),).is_err()
+        );
+        assert!(list_learning_events_by_type(&db, "GatePassed").is_err());
     }
 
     #[test]

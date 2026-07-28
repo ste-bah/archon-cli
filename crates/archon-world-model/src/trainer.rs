@@ -6,8 +6,8 @@ use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::BackendKind;
-use crate::embedding::WorldEmbeddingAdapter;
 use crate::registry::ModelRegistry;
+use crate::representation::WorldRepresentationAdapter;
 use crate::storage::WorldModelStore;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,7 +21,7 @@ pub struct DynamicTrainerPolicy {
 impl Default for DynamicTrainerPolicy {
     fn default() -> Self {
         Self {
-            min_throttle_ms: 86_400_000,
+            min_throttle_ms: 3_600_000,
             idle_required_ms: 300_000,
             battery_suspend_below_percent: 30,
             max_runtime_ms: 300_000,
@@ -70,7 +70,7 @@ impl Default for DynamicTrainerTriggerPolicy {
             trigger_new_rows: 100,
             trigger_surprises: 5,
             trigger_corrections: 3,
-            trigger_elapsed_ms: 86_400_000,
+            trigger_elapsed_ms: 21_600_000,
             first_run_threshold: 300,
         }
     }
@@ -161,18 +161,26 @@ pub fn evaluate_trainer_trigger(
 pub fn run_dynamic_training_once(
     root: &Path,
     state_dim: usize,
-    (backend, allow_cpu_fallback): (BackendKind, bool),
-    adapter: &dyn WorldEmbeddingAdapter,
-    (policy, trigger_policy): (DynamicTrainerPolicy, DynamicTrainerTriggerPolicy),
-    (runtime, triggers): (TrainerRuntimeSnapshot, DynamicTrainerTriggerSnapshot),
+    backend: BackendKind,
+    allow_cpu_fallback: bool,
+    adapter: &dyn WorldRepresentationAdapter,
+    context_rows: usize,
+    policy: DynamicTrainerPolicy,
+    trigger_policy: DynamicTrainerTriggerPolicy,
+    runtime: TrainerRuntimeSnapshot,
+    triggers: DynamicTrainerTriggerSnapshot,
 ) -> Result<DynamicTrainerRunReport> {
     run_dynamic_training_once_controlled(
         root,
         state_dim,
-        (backend, allow_cpu_fallback),
+        backend,
+        allow_cpu_fallback,
         adapter,
-        (policy, trigger_policy),
-        (runtime, triggers),
+        context_rows,
+        policy,
+        trigger_policy,
+        runtime,
+        triggers,
         None,
     )
 }
@@ -180,10 +188,14 @@ pub fn run_dynamic_training_once(
 pub fn run_dynamic_training_once_controlled(
     root: &Path,
     state_dim: usize,
-    (backend, allow_cpu_fallback): (BackendKind, bool),
-    adapter: &dyn WorldEmbeddingAdapter,
-    (policy, trigger_policy): (DynamicTrainerPolicy, DynamicTrainerTriggerPolicy),
-    (runtime, triggers): (TrainerRuntimeSnapshot, DynamicTrainerTriggerSnapshot),
+    backend: BackendKind,
+    allow_cpu_fallback: bool,
+    adapter: &dyn WorldRepresentationAdapter,
+    context_rows: usize,
+    policy: DynamicTrainerPolicy,
+    trigger_policy: DynamicTrainerTriggerPolicy,
+    runtime: TrainerRuntimeSnapshot,
+    triggers: DynamicTrainerTriggerSnapshot,
     should_stop: Option<&dyn Fn() -> bool>,
 ) -> Result<DynamicTrainerRunReport> {
     let mut decision = evaluate_dynamic_trainer(policy, runtime);
@@ -199,8 +211,12 @@ pub fn run_dynamic_training_once_controlled(
     check_training_stop(should_stop, "world-model row load")?;
     let rows = WorldModelStore::open(root)?.load_rows()?;
     check_training_stop(should_stop, "world-model example build")?;
-    let examples =
-        crate::train::examples_from_rows_with_adapter_controlled(&rows, adapter, should_stop)?;
+    let examples = crate::train::examples_from_rows_with_representation_adapter_controlled(
+        &rows,
+        adapter,
+        context_rows,
+        should_stop,
+    )?;
     if examples.is_empty() {
         decision = decision_with_reason(policy, TrainerDecisionReason::NotEnoughRows);
         return Ok(report(decision, trigger, rows.len(), 0, None, None, None));
@@ -356,6 +372,7 @@ mod tests {
     #[test]
     fn dynamic_training_tick_writes_candidate_when_triggered() {
         use crate::embedding::DeterministicHashEmbeddingAdapter;
+        use crate::representation::GenericEmbeddingRepresentationAdapter;
         use crate::schema::{WorldActionKind, WorldTraceRow};
 
         let temp = tempfile::tempdir().unwrap();
@@ -365,28 +382,28 @@ mod tests {
         let mut second = WorldTraceRow::new("s1", WorldActionKind::Verification).with_row_id("r2");
         second.redacted_excerpt = Some("tests passed".into());
         store.persist_rows(&[first, second]).unwrap();
-        let adapter = DeterministicHashEmbeddingAdapter::new(4).unwrap();
+        let adapter = GenericEmbeddingRepresentationAdapter::new(Box::new(
+            DeterministicHashEmbeddingAdapter::new(4).unwrap(),
+        ));
 
         let run = run_dynamic_training_once(
             temp.path(),
             4,
-            (BackendKind::Cpu, true),
+            BackendKind::Cpu,
+            true,
             &adapter,
-            (
-                DynamicTrainerPolicy::default(),
-                DynamicTrainerTriggerPolicy::default(),
-            ),
-            (
-                idle_snapshot(),
-                DynamicTrainerTriggerSnapshot {
-                    total_rows: 300,
-                    candidate_count: 0,
-                    new_rows_since_training: 0,
-                    surprises_since_training: 0,
-                    corrections_since_training: 0,
-                    elapsed_since_training_ms: None,
-                },
-            ),
+            1,
+            DynamicTrainerPolicy::default(),
+            DynamicTrainerTriggerPolicy::default(),
+            idle_snapshot(),
+            DynamicTrainerTriggerSnapshot {
+                total_rows: 300,
+                candidate_count: 0,
+                new_rows_since_training: 0,
+                surprises_since_training: 0,
+                corrections_since_training: 0,
+                elapsed_since_training_ms: None,
+            },
         )
         .unwrap();
 

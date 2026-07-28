@@ -26,6 +26,15 @@ impl Agent {
         }
     }
 
+    pub(super) fn inject_turn_requirements(&self, system: &mut Vec<serde_json::Value>) {
+        if let Some(ref reminder) = self.turn_requirement_reminder {
+            system.push(serde_json::json!({
+                "type": "text",
+                "text": format!("<guardrail-requirements>{reminder}</guardrail-requirements>"),
+            }));
+        }
+    }
+
     /// GAP 7: Inject recalled memories into the system prompt for this turn.
     pub(super) fn inject_memories(&mut self) -> Vec<serde_json::Value> {
         let mut system = self.config.system_prompt.clone();
@@ -183,16 +192,34 @@ impl Agent {
 
         let tracker = CorrectionTracker::new(graph.as_ref());
         let context = format!("turn:{}", self.turn_number);
-        match tracker.record_correction(correction_type, user_input, &context, None) {
-            Ok(_) => {
+        let engine = RulesEngine::new(graph.as_ref());
+        let rules = match engine.get_rules_sorted() {
+            Ok(rules) => rules,
+            Err(error) => {
+                tracing::warn!("rule lookup failed during correction handling: {error}");
+                return;
+            }
+        };
+        let linked_rule_id = select_relevant_rule(user_input, &rules).map(|rule| rule.id.clone());
+        let correction = match tracker.record_correction(
+            correction_type,
+            user_input,
+            &context,
+            linked_rule_id.as_deref(),
+        ) {
+            Ok(correction) => {
                 // Reference: archon-pipeline/src/learning/gnn/auto_trainer.rs::record_correction.
                 // Closure-injection avoids cycle (archon-core cannot import archon-pipeline).
                 if let Some(ref cb) = self.record_correction_callback {
                     cb();
                 }
+                Some(correction)
             }
-            Err(e) => tracing::warn!("failed to record correction: {e}"),
-        }
+            Err(e) => {
+                tracing::warn!("failed to record correction: {e}");
+                None
+            }
+        };
 
         // CRIT-15 (ITEM 5): Notify inner voice of user correction.
         if let Some(ref iv) = self.inner_voice
@@ -206,27 +233,10 @@ impl Agent {
             }
         }
 
-        // CRIT-14 (ITEM 4): Reinforce rules related to the correction.
-        // When the user corrects us, reinforce the top matching rule so it
-        // gains more prominence in future prompts.
-        let engine = RulesEngine::new(graph.as_ref());
-        let mut top_rule_id = None;
-        match engine.get_rules_sorted() {
-            Ok(rules) => {
-                if let Some(top) = rules.first() {
-                    top_rule_id = Some(top.id.clone());
-                    if let Err(e) = engine.reinforce_rule(&top.id) {
-                        tracing::debug!("reinforce_rule failed: {e}");
-                    }
-                }
-            }
-            Err(e) => tracing::debug!("get_rules_sorted failed during correction handling: {e}"),
-        }
-
         if let Some(ref cb) = self.record_user_correction_event_callback {
             let payload = UserCorrectionEventPayload {
                 correction_type: format!("{correction_type:?}"),
-                top_rule_id,
+                top_rule_id: correction.and_then(|record| record.rule_id),
                 user_input_excerpt: user_correction_excerpt(user_input),
                 session_context: context,
             };
@@ -268,6 +278,13 @@ impl Agent {
 
         let session_id = self.config.session_id.clone();
         let turn = self.turn_number as usize;
+        let attribution = self.config.runtime_attribution_extra(
+            "memory_extraction",
+            "memory_extraction",
+            Some(self.turn_number),
+            None,
+            None,
+        );
         let client = Arc::clone(&self.client);
         let model = self.config.model.clone();
         // Reference: auto_trainer_runtime.rs — closure pointing at AutoTrainer.record_memories.
@@ -295,8 +312,8 @@ impl Agent {
                 thinking: None,
                 speed: None,
                 effort: None,
-                extra: serde_json::Value::Null,
-                request_origin: None,
+                extra: attribution,
+                request_origin: Some("memory_extraction".into()),
                 reasoning_encrypted: None,
             };
 
@@ -333,4 +350,49 @@ impl Agent {
             }
         });
     }
+}
+
+const MATCH_THRESHOLD: f64 = 0.25;
+const MIN_MEANINGFUL_OVERLAP: usize = 2;
+const COMMON_CORRECTION_TOKENS: &[&str] = &[
+    "a", "an", "and", "before", "do", "for", "i", "instead", "is", "it", "no", "not", "of", "or",
+    "should", "that", "the", "this", "to", "use", "was", "with", "you",
+];
+
+fn select_relevant_rule<'a>(
+    correction: &str,
+    rules: &'a [archon_consciousness::rules::BehavioralRule],
+) -> Option<&'a archon_consciousness::rules::BehavioralRule> {
+    let correction_token_set = correction_tokens(correction);
+    rules
+        .iter()
+        .filter_map(|rule| {
+            let rule_tokens = correction_tokens(&rule.text);
+            let overlap = correction_token_set.intersection(&rule_tokens).count();
+            let union = correction_token_set.union(&rule_tokens).count();
+            let jaccard = overlap as f64 / union.max(1) as f64;
+            let dice = (2 * overlap) as f64
+                / (correction_token_set.len() + rule_tokens.len()).max(1) as f64;
+            let relevance = (jaccard + dice) / 2.0;
+            (overlap >= MIN_MEANINGFUL_OVERLAP
+                && jaccard >= MATCH_THRESHOLD
+                && dice >= MATCH_THRESHOLD)
+                .then_some((rule, relevance))
+        })
+        .max_by(
+            |(left_rule, left_similarity), (right_rule, right_similarity)| {
+                left_similarity
+                    .total_cmp(right_similarity)
+                    .then_with(|| left_rule.score.total_cmp(&right_rule.score))
+                    .then_with(|| right_rule.id.cmp(&left_rule.id))
+            },
+        )
+        .map(|(rule, _)| rule)
+}
+
+fn correction_tokens(text: &str) -> std::collections::BTreeSet<String> {
+    text.split(|character: char| !character.is_alphanumeric())
+        .map(str::to_lowercase)
+        .filter(|token| token.len() > 1 && !COMMON_CORRECTION_TOKENS.contains(&token.as_str()))
+        .collect()
 }

@@ -1,5 +1,3 @@
-type TrainerProgress<'a> = Option<&'a dyn Fn(&str, &str)>;
-
 pub(super) fn render_trainer_tick(
     config: &archon_core::config::ArchonConfig,
     root: &Path,
@@ -48,7 +46,7 @@ pub(super) fn render_trainer_tick_observed(
     battery_percent: Option<u8>,
     unplugged: bool,
     should_stop: Option<&dyn Fn() -> bool>,
-    progress: TrainerProgress,
+    progress: Option<&dyn Fn(&str, &str)>,
 ) -> Result<String> {
     if config.learning.world_model.jepa.enabled
         || config.learning.world_model.model_kind == JEPA_MODEL_KIND
@@ -84,7 +82,7 @@ fn render_latent_trainer_tick(
     battery_percent: Option<u8>,
     unplugged: bool,
     should_stop: Option<&dyn Fn() -> bool>,
-    progress: TrainerProgress,
+    progress: Option<&dyn Fn(&str, &str)>,
 ) -> Result<String> {
     let backend = selected_training_backend(config);
     let auto = &config.learning.world_model.auto_trainer;
@@ -106,18 +104,20 @@ fn render_latent_trainer_tick(
     let registry = ModelRegistry::open(root)?;
     let schedule =
         latent_training_schedule(root, stats.rows, registry.candidate_count()? as u64, last_training_age_ms)?;
-    let adapter = build_embedding_adapter(config)?;
+    let adapter = archon_world_model::GenericEmbeddingRepresentationAdapter::new(
+        build_embedding_adapter(config)?,
+    );
     emit_trainer_progress(progress, "latent_train_start", "running latent trainer tick");
     let run = archon_world_model::trainer::run_dynamic_training_once_controlled(
         root,
         config.learning.world_model.state_dim,
-        (
-            backend.selected,
-            config.learning.world_model.training.allow_cpu_fallback,
-        ),
-        adapter.as_ref(),
-        (policy, trigger_policy),
-        (archon_world_model::trainer::TrainerRuntimeSnapshot {
+        backend.selected,
+        config.learning.world_model.training.allow_cpu_fallback,
+        &adapter,
+        config.learning.world_model.jepa.context_window_rows,
+        policy,
+        trigger_policy,
+        archon_world_model::trainer::TrainerRuntimeSnapshot {
             last_activity_age_ms: last_activity_age_ms.unwrap_or(auto.idle_required_ms),
             last_training_age_ms: schedule.last_training_age_ms,
             battery_percent,
@@ -130,7 +130,7 @@ fn render_latent_trainer_tick(
             surprises_since_training: 0,
             corrections_since_training: 0,
             elapsed_since_training_ms: schedule.last_training_age_ms,
-        }),
+        },
         should_stop,
     )?;
     emit_trainer_progress(progress, "latent_train_complete", "latent trainer tick finished");
@@ -184,7 +184,7 @@ fn render_jepa_trainer_tick_observed(
     battery_percent: Option<u8>,
     unplugged: bool,
     should_stop: Option<&dyn Fn() -> bool>,
-    progress: TrainerProgress,
+    progress: Option<&dyn Fn(&str, &str)>,
 ) -> Result<String> {
     let auto = &config.learning.world_model.auto_trainer;
     let policy = archon_world_model::trainer::DynamicTrainerPolicy {
@@ -312,7 +312,7 @@ fn render_jepa_trainer_tick_observed(
     ))
 }
 
-fn emit_trainer_progress(progress: TrainerProgress, stage: &str, summary: &str) {
+fn emit_trainer_progress(progress: Option<&dyn Fn(&str, &str)>, stage: &str, summary: &str) {
     if let Some(progress) = progress {
         progress(stage, summary);
     }

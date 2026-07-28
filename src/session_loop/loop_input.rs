@@ -11,6 +11,7 @@ pub(super) enum LoopInput {
     Input(String),
     Continue,
     Stop,
+    Error(anyhow::Error),
 }
 
 pub(super) struct LoopInputContext<'a> {
@@ -28,6 +29,8 @@ pub(super) struct LoopInputContext<'a> {
     pub(super) adapter: &'a Arc<crate::agent_handle::AgentHandle>,
     pub(super) cmd_ctx: &'a mut SlashCommandContext,
     pub(super) post_turn_queue: &'a mut VecDeque<PostTurnAction>,
+    pub(super) handle_process_signals: bool,
+    pub(super) shutdown: &'a tokio_util::sync::CancellationToken,
 }
 
 pub(super) async fn next_loop_input(ctx: LoopInputContext<'_>) -> LoopInput {
@@ -37,14 +40,26 @@ pub(super) async fn next_loop_input(ctx: LoopInputContext<'_>) -> LoopInput {
             poll_completed_turn(ctx).await;
             LoopInput::Continue
         }
+        _ = ctx.shutdown.cancelled() => LoopInput::Stop,
         maybe_input = ctx.user_input_rx.recv() => {
             match maybe_input {
                 Some(input) => LoopInput::Input(input),
                 None => LoopInput::Stop,
             }
         }
-        _ = tokio::signal::ctrl_c() => {
-            shutdown_input(ctx.shutdown_in_progress, "SIGINT")
+        result = async {
+            if ctx.handle_process_signals {
+                tokio::signal::ctrl_c().await
+            } else {
+                std::future::pending().await
+            }
+        } => {
+            match result {
+                Ok(()) => shutdown_input(ctx.shutdown_in_progress, "SIGINT"),
+                Err(error) => LoopInput::Error(anyhow::anyhow!(
+                    "install Ctrl-C handler failed: {error}"
+                )),
+            }
         }
         _ = async {
             #[cfg(unix)]
@@ -75,6 +90,7 @@ async fn poll_completed_turn(ctx: LoopInputContext<'_>) {
         match &outcome {
             archon_tui::TurnOutcome::Completed => "completed",
             archon_tui::TurnOutcome::Cancelled => "cancelled",
+            archon_tui::TurnOutcome::FinalizationBlocked(_) => "finalization_blocked",
             archon_tui::TurnOutcome::Failed(_) => "failed",
         }
     );
@@ -99,4 +115,23 @@ fn shutdown_input(shutdown_in_progress: &AtomicBool, signal_name: &str) -> LoopI
     }
     tracing::info!("{signal_name} received; routing through /exit");
     LoopInput::Input("/exit".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeated_shutdown_signal_admits_single_exit() {
+        let shutdown_in_progress = AtomicBool::new(false);
+
+        assert!(matches!(
+            shutdown_input(&shutdown_in_progress, "SIGINT"),
+            LoopInput::Input(input) if input == "/exit"
+        ));
+        assert!(matches!(
+            shutdown_input(&shutdown_in_progress, "SIGTERM"),
+            LoopInput::Continue
+        ));
+    }
 }

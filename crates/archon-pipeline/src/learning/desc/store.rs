@@ -67,17 +67,18 @@ impl DescEpisodeStore {
         p.insert("tags".to_string(), DataValue::List(tags));
         p.insert("ts".to_string(), DataValue::from(now as i64));
 
-        self.db
-            .run_script(
-                "?[episode_id, session_id, description, outcome, reward, tags, created_at] \
-                 <- [[$eid, $sid, $desc, $outcome, $reward, $tags, $ts]] \
-                 :put desc_episodes { \
-                     episode_id => session_id, description, outcome, reward, tags, created_at \
-                 }",
-                p,
-                ScriptMutability::Mutable,
-            )
-            .map_err(|e| anyhow::anyhow!("store desc_episodes failed: {}", e))?;
+        crate::learning::run_script_guarded(
+            &self.db,
+            "?[episode_id, session_id, description, outcome, reward, tags, created_at] \
+             <- [[$eid, $sid, $desc, $outcome, $reward, $tags, $ts]] \
+             :put desc_episodes { \
+                 episode_id => session_id, description, outcome, reward, tags, created_at \
+             }",
+            p,
+            ScriptMutability::Mutable,
+            "store DESC episode",
+        )
+        .map_err(|e| anyhow::anyhow!("store desc_episodes failed: {}", e))?;
 
         // --- desc_episode_metadata ---
         let traj = episode.trajectory_id.as_deref().unwrap_or("");
@@ -99,17 +100,18 @@ impl DescEpisodeStore {
         m.insert("tid".to_string(), DataValue::from(traj));
         m.insert("ts".to_string(), DataValue::from(now as i64));
 
-        self.db
-            .run_script(
-                "?[episode_id, task_type, solution, quality_score, trajectory_id, updated_at] \
-                 <- [[$eid, $tt, $sol, $qs, $tid, $ts]] \
-                 :put desc_episode_metadata { \
-                     episode_id => task_type, solution, quality_score, trajectory_id, updated_at \
-                 }",
-                m,
-                ScriptMutability::Mutable,
-            )
-            .map_err(|e| anyhow::anyhow!("store desc_episode_metadata failed: {}", e))?;
+        crate::learning::run_script_guarded(
+            &self.db,
+            "?[episode_id, task_type, solution, quality_score, trajectory_id, updated_at] \
+             <- [[$eid, $tt, $sol, $qs, $tid, $ts]] \
+             :put desc_episode_metadata { \
+                 episode_id => task_type, solution, quality_score, trajectory_id, updated_at \
+             }",
+            m,
+            ScriptMutability::Mutable,
+            "store DESC episode metadata",
+        )
+        .map_err(|e| anyhow::anyhow!("store desc_episode_metadata failed: {}", e))?;
 
         Ok(episode.episode_id.clone())
     }
@@ -227,17 +229,18 @@ impl DescEpisodeStore {
         p2.insert("tid".to_string(), DataValue::from(trajectory_id.as_str()));
         p2.insert("ts".to_string(), DataValue::from(now as i64));
 
-        self.db
-            .run_script(
-                "?[episode_id, task_type, solution, quality_score, trajectory_id, updated_at] \
-                 <- [[$eid, $tt, $sol, $qs, $tid, $ts]] \
-                 :put desc_episode_metadata { \
-                     episode_id => task_type, solution, quality_score, trajectory_id, updated_at \
-                 }",
-                p2,
-                ScriptMutability::Mutable,
-            )
-            .map_err(|e| anyhow::anyhow!("update_quality write failed: {}", e))?;
+        crate::learning::run_script_guarded(
+            &self.db,
+            "?[episode_id, task_type, solution, quality_score, trajectory_id, updated_at] \
+             <- [[$eid, $tt, $sol, $qs, $tid, $ts]] \
+             :put desc_episode_metadata { \
+                 episode_id => task_type, solution, quality_score, trajectory_id, updated_at \
+             }",
+            p2,
+            ScriptMutability::Mutable,
+            "update DESC episode quality",
+        )
+        .map_err(|e| anyhow::anyhow!("update_quality write failed: {}", e))?;
 
         Ok(())
     }

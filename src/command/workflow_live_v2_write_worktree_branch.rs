@@ -111,6 +111,7 @@ async fn run_worktree_branch_agent(
         &adapter,
         client,
         Some(v2_store),
+        None,
         Some(branch.workspace_root.display().to_string()),
     )
     .await;

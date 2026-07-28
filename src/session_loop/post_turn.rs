@@ -88,10 +88,10 @@ fn maybe_spawn_guardrail_repair(
     queue: &mut VecDeque<PostTurnAction>,
     guardrail: crate::command::world_model::RuntimeGuardrailRecord,
 ) {
-    let completed = matches!(outcome, archon_tui::TurnOutcome::Completed);
+    let (completed, spawn_repair) = turn_completion_state(&outcome);
     let guardrail_outcome =
         crate::command::world_model::record_guardrail_turn_outcome(config, &guardrail, completed);
-    if completed
+    if spawn_repair
         && guardrail_outcome.as_ref().is_some_and(|outcome| {
             matches!(
                 outcome.final_status,
@@ -106,7 +106,7 @@ fn maybe_spawn_guardrail_repair(
         ));
         match dispatcher.lock().unwrap().spawn_turn(
             repair_prompt,
-            adapter.clone() as Arc<dyn archon_tui::TurnRunner>,
+            adapter.scoped_turn_runner(guardrail.action.action_id.clone()),
         ) {
             archon_tui::DispatchResult::Running { .. } => {
                 tracing::debug!("spawned guardrail repair turn");
@@ -121,5 +121,28 @@ fn maybe_spawn_guardrail_repair(
         queue.push_back(PostTurnAction::PersistSession {
             guardrail: Some(Box::new(guardrail)),
         });
+    }
+}
+
+fn turn_completion_state(outcome: &archon_tui::TurnOutcome) -> (bool, bool) {
+    match outcome {
+        archon_tui::TurnOutcome::Completed => (true, true),
+        archon_tui::TurnOutcome::FinalizationBlocked(_) => (true, false),
+        archon_tui::TurnOutcome::Cancelled | archon_tui::TurnOutcome::Failed(_) => (false, false),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::turn_completion_state;
+
+    #[test]
+    fn finalization_blocked_is_recorded_as_blocked_without_spawning_another_repair() {
+        assert_eq!(
+            turn_completion_state(&archon_tui::TurnOutcome::FinalizationBlocked(
+                "run tests".into(),
+            )),
+            (true, false)
+        );
     }
 }

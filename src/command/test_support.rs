@@ -32,6 +32,14 @@ pub fn mock_tui_channel() -> (
     archon_tui::event_channel::bounded_tui_event_channel()
 }
 
+pub fn registered_learning_test_db(prefix: &str) -> Arc<cozo::DbInstance> {
+    let path = format!("/tmp/{prefix}-{}.db", uuid::Uuid::new_v4());
+    let db = archon_learning::cozo_guard::open_sqlite_guarded(&path, "open test learning store")
+        .unwrap();
+    archon_learning::schema::ensure_learning_schema(&db).unwrap();
+    db
+}
+
 // ===========================================================================
 // CtxBuilder — composable CommandContext fixture
 // ===========================================================================
@@ -403,6 +411,7 @@ impl CtxBuilder {
         (
             CommandContext {
                 tui_tx: self.tui_tx,
+                pending_tui_events: std::sync::Mutex::new(Vec::new()),
                 status_snapshot: self.status_snapshot,
                 model_snapshot: self.model_snapshot,
                 cost_snapshot: self.cost_snapshot,

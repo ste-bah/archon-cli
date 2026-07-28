@@ -60,6 +60,14 @@ impl WebChatBackend for WebChatBridge {
 }
 
 impl WebChatBridge {
+    pub(crate) async fn begin_shutdown(&self) {
+        self.session.begin_shutdown().await;
+    }
+
+    pub(crate) async fn finish_shutdown(&self) -> Result<()> {
+        self.session.finish_shutdown().await
+    }
+
     async fn prompt_with_attachments(
         &self,
         message_id: &str,
@@ -300,10 +308,9 @@ fn upload_root() -> Result<PathBuf> {
         .join("uploads"))
 }
 
-fn open_docs_db() -> Result<DbInstance> {
-    let db = crate::command::store_paths::open_evidence_db("document", &["ARCHON_DOCS_DB_PATH"])?;
-    archon_docs::schema::ensure_doc_schema(&db)?;
-    Ok(db)
+fn open_docs_db() -> Result<Arc<DbInstance>> {
+    let path = crate::command::store_paths::evidence_db_path(&["ARCHON_DOCS_DB_PATH"]);
+    archon_docs::acquire_docs_db(path)
 }
 
 #[cfg(test)]

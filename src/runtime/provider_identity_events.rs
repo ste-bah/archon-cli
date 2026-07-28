@@ -6,17 +6,14 @@ use archon_llm::runtime::{
     ProviderIdentityStatus, ProviderRuntimeEventType, ProviderRuntimeSeverity,
 };
 
-use super::{ProviderRuntimeEventRecorder, base_event};
+use super::base_event;
 
-pub(super) fn record_provider_identity_decision(
-    recorder: &ProviderRuntimeEventRecorder,
+pub(super) fn provider_identity_decision_event(
     provider: &dyn LlmProvider,
     runtime_mode: &str,
     profile_id: Option<&str>,
-) {
-    let Some(client) = provider.as_anthropic() else {
-        return;
-    };
+) -> Option<archon_llm::runtime::ProviderRuntimeEvent> {
+    let client = provider.as_anthropic()?;
 
     let (event_type, severity, reason, message) = match &client.identity().mode {
         IdentityMode::Spoof { .. } => (
@@ -49,7 +46,7 @@ pub(super) fn record_provider_identity_decision(
     if let Some(profile_id) = profile_id {
         event = event.with_profile(profile_id.to_string());
     }
-    recorder.record(event);
+    Some(event)
 }
 
 pub(super) fn identity_status_for_provider(provider: &dyn LlmProvider) -> ProviderIdentityStatus {

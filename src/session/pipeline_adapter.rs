@@ -7,10 +7,11 @@ use archon_llm::provider::LlmProvider;
 pub(super) fn build_subagent_pipeline_client(
     provider: Arc<dyn LlmProvider>,
     agent_config: &AgentConfig,
+    config: &archon_core::config::ArchonConfig,
     working_dir: &Path,
     session_id: &str,
 ) -> Arc<dyn archon_pipeline::runner::LlmClient> {
-    let tool_context = archon_tools::tool::ToolContext {
+    let mut tool_context = archon_tools::tool::ToolContext {
         working_dir: working_dir.to_path_buf(),
         session_id: session_id.to_string(),
         mode: archon_tools::tool::AgentMode::Normal,
@@ -20,7 +21,9 @@ pub(super) fn build_subagent_pipeline_client(
         cancel_parent: agent_config.cancel_token.clone(),
         sandbox: agent_config.sandbox.clone(),
         activity_sink: agent_config.activity_sink.clone(),
+        ..archon_tools::tool::ToolContext::default()
     };
+    crate::command::world_model::configure_tool_run_context(config, &mut tool_context);
     let raw: Arc<dyn archon_pipeline::runner::LlmClient> = Arc::new(
         archon_pipeline::llm_adapter::ProviderLlmAdapter::new(Arc::clone(&provider))
             .with_origin("tui_pipeline"),

@@ -1,15 +1,14 @@
 use serde_json::json;
-use tokio_util::sync::CancellationToken;
 
-use crate::agent_tool::{SubagentRequest, run_subagent};
+use crate::agent_tool::{SubagentRequest, run_subagent_foreground, run_subagent_with_completion};
 use crate::subagent_executor::{SubagentClassification, SubagentOutcome, get_subagent_executor};
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
 /// Tool that creates a new tracked task in the global TaskManager.
 ///
-/// When a `prompt` field is provided, the response includes a `subagent_request`
-/// that the agent loop should use to spawn a background agent for the task.
-/// Without `prompt`, the task is created for manual tracking only.
+/// When a `prompt` field is provided, the installed subagent executor runs or
+/// spawns the request directly. Without `prompt`, the task is created for manual
+/// tracking only.
 pub struct TaskCreateTool;
 
 #[async_trait::async_trait]
@@ -19,9 +18,9 @@ impl Tool for TaskCreateTool {
     }
 
     fn description(&self) -> &str {
-        "Create a new task to track work. Optionally spawns a background agent \
-         by providing a prompt. Returns the task ID and, if applicable, a \
-         subagent_request for the agent loop to execute."
+        "Create a new task to track work. Optionally runs or spawns a subagent \
+         by providing a prompt. Returns the task ID and execution result or \
+         spawn status when applicable."
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -78,7 +77,8 @@ impl Tool for TaskCreateTool {
         };
 
         let full_desc = format!("{subject}: {description}");
-        let task_id = crate::task_manager::TASK_MANAGER.create_task(&full_desc);
+        let task_id = crate::task_manager::TASK_MANAGER
+            .create_task_with_parent(&full_desc, ctx.cancel_parent.as_ref());
 
         // Manual task (no prompt): return task_id only.
         let Some(prompt) = input
@@ -179,8 +179,8 @@ impl Tool for TaskCreateTool {
         // the task as Pending and the spawn paths below never called
         // set_status. Tasks remained Pending forever. We now transition
         // Pending → Running on dispatch, and Running → Completed/Failed/
-        // Stopped on outcome. AutoBackgrounded leaves the task Running
-        // because the inner runner continues in its own task.
+        // Stopped on terminal outcome. Auto-backgrounded foreground runs keep
+        // a TaskCreate-owned completion receiver that applies terminal status.
         use crate::task_manager::{TASK_MANAGER, TaskStatus};
 
         fn map_outcome_to_status(outcome: &SubagentOutcome) -> Option<TaskStatus> {
@@ -188,9 +188,8 @@ impl Tool for TaskCreateTool {
                 SubagentOutcome::Completed(_) => Some(TaskStatus::Completed),
                 SubagentOutcome::Failed(_) => Some(TaskStatus::Failed),
                 SubagentOutcome::Cancelled => Some(TaskStatus::Stopped),
-                // Inner runner keeps executing in a detached task — final
-                // status will be set when on_inner_complete fires (not from
-                // this call site). Leave as Running.
+                // Inner runner keeps executing in a detached task. The
+                // TaskCreate-owned completion receiver applies final status.
                 SubagentOutcome::AutoBackgrounded => None,
             }
         }
@@ -204,11 +203,14 @@ impl Tool for TaskCreateTool {
                 // Spawn detached. The closure owns task_id so it can update
                 // TASK_MANAGER when run_subagent returns.
                 let sid_spawn = subagent_id.clone();
-                let cancel = CancellationToken::new();
+                let cancel = TASK_MANAGER
+                    .execution_token(&task_id)
+                    .expect("new task has an execution token");
                 let ctx_spawn = nested_ctx.clone();
                 let task_id_spawn = task_id.clone();
                 archon_observability::spawn_named("task-create-subagent-background", async move {
-                    let outcome = run_subagent(sid_spawn, request, cancel, ctx_spawn).await;
+                    let outcome =
+                        run_subagent_foreground(sid_spawn, request, cancel, ctx_spawn).await;
                     if let Some(final_status) = map_outcome_to_status(&outcome) {
                         TASK_MANAGER.set_status(&task_id_spawn, final_status);
                     }
@@ -228,10 +230,33 @@ impl Tool for TaskCreateTool {
                 // any concurrent /tasks query sees Running, not Pending.
                 TASK_MANAGER.set_status(&task_id, TaskStatus::Running);
 
-                let cancel = CancellationToken::new();
-                let outcome = run_subagent(subagent_id.clone(), request, cancel, nested_ctx).await;
+                let cancel = TASK_MANAGER
+                    .execution_token(&task_id)
+                    .expect("new task has an execution token");
+                let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
+                let outcome = run_subagent_with_completion(
+                    subagent_id.clone(),
+                    request,
+                    cancel,
+                    nested_ctx,
+                    completion_tx,
+                )
+                .await;
                 if let Some(final_status) = map_outcome_to_status(&outcome) {
                     TASK_MANAGER.set_status(&task_id, final_status);
+                } else {
+                    let task_id_completion = task_id.clone();
+                    archon_observability::spawn_named(
+                        "task-create-auto-background-completion",
+                        async move {
+                            let final_status = completion_rx
+                                .await
+                                .ok()
+                                .and_then(|outcome| map_outcome_to_status(&outcome))
+                                .unwrap_or(TaskStatus::Failed);
+                            TASK_MANAGER.set_status(&task_id_completion, final_status);
+                        },
+                    );
                 }
                 match outcome {
                     SubagentOutcome::Completed(text) => {
@@ -313,18 +338,8 @@ mod tests {
         );
     }
 
-    // TASK-AGS-105 Section 8 test rewrite: the old tests asserted
-    // `response["subagent_request"]` shape, which was a serialized
-    // SubagentRequest passed back through the dispatch loop for re-entry
-    // into handle_subagent_result. That indirection is deleted. TaskCreate
-    // now routes directly through the SubagentExecutor and returns either
-    // a spawn marker (background) or the final result (foreground).
-    //
-    // Because TaskCreate now needs an executor installed to run the
-    // prompt path, the prompted tests require either an installed
-    // executor (not portable) or the manual-task early return path.
-    // The manual-task path (no prompt) still exercises task creation +
-    // serialization and does not touch the executor seam.
+    // Prompt-path routing is covered in tests/task_ags_105.rs with an installed
+    // recording executor. This module keeps manual-task and schema contracts.
 
     #[tokio::test]
     async fn execute_manual_task_returns_task_id_only() {

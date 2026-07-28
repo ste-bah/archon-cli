@@ -21,6 +21,7 @@ thiserror.workspace = true
 glob.workspace = true
 regex.workspace = true
 reqwest.workspace = true
+futures-util.workspace = true
 chrono.workspace = true
 rand.workspace = true
 cron.workspace = true

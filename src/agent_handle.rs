@@ -19,11 +19,9 @@
 //!    `Arc<Mutex<archon_core::agent::Agent>>`. Adapter locks + awaits
 //!    `process_message` inside `run_turn`, maps `AgentLoopError` to anyhow.
 //!
-//! 4. No `run_event_loop` call. Spec mentions it as option; `main.rs` still
-//!    owns slash-command routing, session restore, skill dispatch not in
-//!    `run_event_loop`'s scope. Full integration deferred to
-//!    SPEC-TUI-MODULARIZATION. TUI-107 uses `AgentDispatcher` directly +
-//!    minimal `tokio::select!` conversion (input arm + 16ms tick arm).
+//! 4. Production integration uses `AgentDispatcher` directly. `session_loop`
+//!    owns slash-command routing, session restore, and skill dispatch; the TUI
+//!    render/input loop remains separate.
 //!
 //! 5. `agent_event_tx` scope: exists at 3162, not currently captured into
 //!    input loop closure. Coder plumbs it through (small additive change,
@@ -48,6 +46,7 @@ use tokio_util::sync::CancellationToken;
 /// `TurnRunner` trait.
 pub struct AgentHandle {
     agent: Arc<Mutex<Agent>>,
+    session_id: String,
     /// Bug-fix 2026-05-12: switched from `tokio::sync::Mutex` to
     /// `std::sync::Mutex` so `fire_cancel` can lock synchronously without
     /// the previous `try_lock` silent-no-op on contention. Both critical
@@ -65,15 +64,98 @@ pub struct AgentHandle {
 impl AgentHandle {
     pub fn new(
         agent: Arc<Mutex<Agent>>,
+        session_id: String,
         auto_capture: Option<Arc<AutoCapture>>,
         auto_trainer: Option<Arc<AutoTrainer>>,
     ) -> Self {
         Self {
             agent,
+            session_id,
             cancel_slot: Arc::new(std::sync::Mutex::new(None)),
             auto_capture,
             auto_trainer,
         }
+    }
+
+    pub fn scoped_turn_runner(
+        self: &Arc<Self>,
+        guardrail_action_id: String,
+    ) -> Arc<dyn TurnRunner> {
+        Arc::new(GuardrailTurnRunner {
+            inner: Arc::clone(self),
+            guardrail_action_id,
+        })
+    }
+
+    fn run_turn_scoped<'a>(
+        &'a self,
+        prompt: String,
+        guardrail_action_id: Option<String>,
+    ) -> Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + 'a>> {
+        let agent = self.agent.clone();
+        let session_id = self.session_id.clone();
+        let cancel_slot = self.cancel_slot.clone();
+        Box::pin(async move {
+            if let Some(action_id) = guardrail_action_id.as_deref() {
+                crate::command::world_model::activate_guardrail_for_action(&session_id, action_id);
+            }
+            let cancel = CancellationToken::new();
+            {
+                let mut slot = cancel_slot.lock().unwrap_or_else(|p| p.into_inner());
+                *slot = Some(cancel.clone());
+            }
+            if let Some(ref capture) = self.auto_capture {
+                let guard = agent.lock().await;
+                let turn_num = guard.turn_number() as usize;
+                let captured = capture.detect(&prompt, turn_num);
+                if !captured.is_empty() {
+                    let mut recent: Vec<archon_pipeline::capture::CapturedMemory> = Vec::new();
+                    for mem in captured {
+                        if !AutoCapture::is_duplicate(&mem, &recent) {
+                            if let Some(memory) = guard.memory_handle() {
+                                let stored = memory.store_memory(
+                                    &mem.content,
+                                    &mem.content.chars().take(80).collect::<String>(),
+                                    archon_memory::types::MemoryType::Fact,
+                                    mem.confidence as f64,
+                                    &["auto-captured".to_string()],
+                                    "auto_capture",
+                                    "",
+                                );
+                                if stored.is_ok()
+                                    && let Some(ref at) = self.auto_trainer
+                                {
+                                    at.record_memory();
+                                }
+                            }
+                            recent.push(mem);
+                        }
+                    }
+                }
+                drop(guard);
+            }
+
+            let mut guard = agent.lock().await;
+            let turn_requirement_reminder = guardrail_action_id.as_deref().and_then(|action_id| {
+                crate::command::world_model::turn_requirements_for_action(&session_id, action_id)
+            });
+            guard.set_guardrail_action_id(guardrail_action_id);
+            guard.set_turn_requirement_reminder(turn_requirement_reminder);
+            guard.set_cancel_token(Some(cancel));
+            let result = guard
+                .process_message(&prompt)
+                .await
+                .map_err(anyhow::Error::from);
+            guard.set_cancel_token(None);
+            guard.set_guardrail_action_id(None);
+            guard.set_turn_requirement_reminder(None);
+            drop(guard);
+            {
+                let mut slot = cancel_slot.lock().unwrap_or_else(|p| p.into_inner());
+                *slot = None;
+            }
+            result
+        })
     }
 
     /// Fire the CancellationToken associated with the in-flight turn, if
@@ -104,66 +186,22 @@ impl TurnRunner for AgentHandle {
         &'a self,
         prompt: String,
     ) -> Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + 'a>> {
-        let agent = self.agent.clone();
-        let cancel_slot = self.cancel_slot.clone();
-        Box::pin(async move {
-            // TASK-AGS-107: set a fresh CancellationToken so
-            // ToolContext.cancel_parent propagates into subagent
-            // child_token() chains for the duration of this turn.
-            let cancel = CancellationToken::new();
-            {
-                let mut slot = cancel_slot.lock().unwrap_or_else(|p| p.into_inner());
-                *slot = Some(cancel.clone());
-            }
-            // v0.1.23: AutoCapture — regex-based memory detection at turn boundary.
-            if let Some(ref capture) = self.auto_capture {
-                let guard = agent.lock().await;
-                let turn_num = guard.turn_number() as usize;
-                let captured = capture.detect(&prompt, turn_num);
-                if !captured.is_empty() {
-                    let mut recent: Vec<archon_pipeline::capture::CapturedMemory> = Vec::new();
-                    for mem in captured {
-                        if !AutoCapture::is_duplicate(&mem, &recent) {
-                            if let Some(memory) = guard.memory_handle() {
-                                let stored = memory.store_memory(
-                                    &mem.content,
-                                    &mem.content.chars().take(80).collect::<String>(),
-                                    archon_memory::types::MemoryType::Fact,
-                                    mem.confidence as f64,
-                                    &["auto-captured".to_string()],
-                                    "auto_capture",
-                                    "",
-                                );
-                                // Reference: auto_trainer.rs::record_memory.
-                                // Only count successful stores so triggers reflect
-                                // real memory accumulation.
-                                if stored.is_ok()
-                                    && let Some(ref at) = self.auto_trainer
-                                {
-                                    at.record_memory();
-                                }
-                            }
-                            recent.push(mem);
-                        }
-                    }
-                }
-                drop(guard);
-            }
+        self.run_turn_scoped(prompt, None)
+    }
+}
 
-            let mut guard = agent.lock().await;
-            guard.set_cancel_token(Some(cancel));
-            let result = guard
-                .process_message(&prompt)
-                .await
-                .map_err(anyhow::Error::from);
-            guard.set_cancel_token(None);
-            drop(guard);
-            {
-                let mut slot = cancel_slot.lock().unwrap_or_else(|p| p.into_inner());
-                *slot = None;
-            }
-            result
-        })
+struct GuardrailTurnRunner {
+    inner: Arc<AgentHandle>,
+    guardrail_action_id: String,
+}
+
+impl TurnRunner for GuardrailTurnRunner {
+    fn run_turn<'a>(
+        &'a self,
+        prompt: String,
+    ) -> Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + 'a>> {
+        self.inner
+            .run_turn_scoped(prompt, Some(self.guardrail_action_id.clone()))
     }
 }
 

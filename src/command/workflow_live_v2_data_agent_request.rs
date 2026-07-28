@@ -2,6 +2,7 @@ pub(super) fn v2_agent_request(
     task: &str,
     target_repository_root: Option<String>,
     execution: &WorkflowV2CallExecution,
+    task_universe: Option<&super::super::workflow_live_task_universe::WorkflowV2TaskUniverse>,
 ) -> WorkflowV2AgentRequest {
     let mut constraints = vec![
         "Return exactly one typed WorkflowV2Result JSON object.".to_string(),
@@ -21,6 +22,22 @@ pub(super) fn v2_agent_request(
             "This call feeds downstream fanout: put work items in data.items as a flat JSON array of item objects. Do not nest items under dependency_phases, groups, phases, or any other wrapper.".to_string(),
         );
     }
+    let mut input = execution.input.clone();
+    if needs_request_task_universe(&execution.call.id)
+        && let Some(universe) = task_universe
+    {
+        let universe = serde_json::to_value(universe)
+            .expect("WorkflowV2TaskUniverse must serialize to JSON");
+        if !contains_task_universe(&input, &universe) {
+            match &mut input {
+                serde_json::Value::Object(object) => {
+                    object.insert("task_universe".to_string(), universe);
+                }
+                serde_json::Value::Array(values) => values.push(universe),
+                _ => input = serde_json::json!([input, universe]),
+            }
+        }
+    }
     WorkflowV2AgentRequest {
         call: execution.call.clone(),
         role: execution
@@ -36,11 +53,33 @@ pub(super) fn v2_agent_request(
             )
         }),
         constraints,
-        input: execution.input.clone(),
+        input,
         repository_root: target_repository_root,
         project_artifacts: Default::default(),
         target_files: execution.call.options.target_files.clone(),
         target_ownership_scopes: target_ownership_scopes(&execution.call.options.extra),
+    }
+}
+
+fn needs_request_task_universe(call_id: &str) -> bool {
+    call_id
+        .rsplit_once("-transport-retry-")
+        .map_or(call_id, |(base, _)| base)
+        .starts_with("completion-claim-repair-")
+}
+
+fn contains_task_universe(value: &serde_json::Value, authoritative: &serde_json::Value) -> bool {
+    if value == authoritative {
+        return true;
+    }
+    match value {
+        serde_json::Value::Object(object) => object
+            .values()
+            .any(|value| contains_task_universe(value, authoritative)),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .any(|value| contains_task_universe(value, authoritative)),
+        _ => false,
     }
 }
 

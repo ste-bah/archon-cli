@@ -1,4 +1,4 @@
-//! Integration tests for TC-TUI-EVENTLOOP-01, 02, 04, 05, 06.
+//! Integration tests for TC-TUI-EVENTLOOP-01, 02, 04, and 05.
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use archon_core::agent::TimestampedEvent;
-use archon_tui::{AgentDispatcher, AgentRouter, EventLoopConfig, TurnOutcome, TurnRunner};
-use tokio::sync::mpsc::unbounded_channel;
+use archon_tui::{AgentDispatcher, AgentRouter, TurnOutcome, TurnRunner};
+use tokio::sync::mpsc::channel;
 use tokio::time::sleep;
 
 // --- Test helpers ---
@@ -116,7 +116,8 @@ async fn drain_until_idle(d: &mut AgentDispatcher) -> Vec<TurnOutcome> {
 /// future. Uses a SlowRunner (5 s) and measures wall time inside spawn_turn.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_tc_01_input_handler_spawns_without_await() {
-    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<TimestampedEvent>();
+    let (agent_event_tx, _agent_event_rx) =
+        channel::<TimestampedEvent>(archon_core::agent::AGENT_EVENT_CHANNEL_CAPACITY);
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
     let mut dispatcher = AgentDispatcher::new(router, agent_event_tx);
 
@@ -154,7 +155,8 @@ async fn test_tc_01_input_handler_spawns_without_await() {
 /// turn, returns false after natural completion, and false after cancel.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_tc_02_current_query_tracking() {
-    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<TimestampedEvent>();
+    let (agent_event_tx, _agent_event_rx) =
+        channel::<TimestampedEvent>(archon_core::agent::AGENT_EVENT_CHANNEL_CAPACITY);
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
     let mut dispatcher = AgentDispatcher::new(router, agent_event_tx);
 
@@ -265,7 +267,8 @@ impl TurnRunner for BurstRunner {
 /// Verifies 10 prompts queued during an in-flight turn drain FIFO with zero loss.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_tc_04_burst_10_messages_fifo_no_loss() {
-    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<TimestampedEvent>();
+    let (agent_event_tx, _agent_event_rx) =
+        channel::<TimestampedEvent>(archon_core::agent::AGENT_EVENT_CHANNEL_CAPACITY);
     let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
     let mut dispatcher = AgentDispatcher::new(router, agent_event_tx);
 
@@ -311,7 +314,8 @@ async fn test_tc_04_burst_10_messages_fifo_no_loss() {
 /// touch the in-flight handle — which remains in-flight after switch.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_tc_05_agent_switch_mid_flight() {
-    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<TimestampedEvent>();
+    let (agent_event_tx, _agent_event_rx) =
+        channel::<TimestampedEvent>(archon_core::agent::AGENT_EVENT_CHANNEL_CAPACITY);
     let (router_fake, calls) = RecordingRouter::new();
     let router: Arc<dyn AgentRouter> = Arc::new(router_fake);
     let mut dispatcher = AgentDispatcher::new(router, agent_event_tx);
@@ -351,106 +355,4 @@ async fn test_tc_05_agent_switch_mid_flight() {
     );
 
     let _ = dispatcher.cancel_current(); // cleanup
-}
-
-// --- TC-06: SIGWINCH reflow no frame drop (REQ-TUI-LOOP-006 / EC-TUI-005) ---
-
-struct StreamRunner {
-    frames: Arc<Mutex<Vec<usize>>>,
-    frame_count: usize,
-    interval_ms: u64,
-}
-
-impl StreamRunner {
-    fn new(frames: Arc<Mutex<Vec<usize>>>, frame_count: usize, interval_ms: u64) -> Self {
-        Self {
-            frames,
-            frame_count,
-            interval_ms,
-        }
-    }
-}
-
-impl TurnRunner for StreamRunner {
-    fn run_turn<'a>(
-        &'a self,
-        _prompt: String,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
-        let frames = Arc::clone(&self.frames);
-        let count = self.frame_count;
-        let interval = self.interval_ms;
-        Box::pin(async move {
-            sleep(Duration::from_millis(50)).await;
-            for i in 0..count {
-                frames.lock().unwrap().push(i + 1);
-                sleep(Duration::from_millis(interval)).await;
-            }
-            Ok(())
-        })
-    }
-}
-
-/// Verifies Resize updates last_known_size and 20 stream frames are recorded.
-///
-/// TASK-200: `#[serial]` because this test both WRITES to the process-
-/// global `LAST_KNOWN_SIZE` (via TuiEvent::Resize → run_event_loop →
-/// handle_resize) and READS it back. Races against any other resize-
-/// dispatching test under --test-threads=2. Coordinated with the
-/// default-key `#[serial]` tests in src/layout_tests.rs and
-/// event_loop_inner_coverage.rs within their respective binaries.
-#[serial_test::serial]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_tc_06_sigwinch_reflow_no_frame_drop() {
-    let frames: Arc<Mutex<Vec<usize>>> = Arc::new(Mutex::new(Vec::new()));
-    let frames_clone = Arc::clone(&frames);
-
-    let (tui_event_tx, tui_event_rx) = archon_tui::event_channel::bounded_tui_event_channel();
-    let (agent_event_tx, _agent_event_rx) = unbounded_channel::<TimestampedEvent>();
-    let runner: Arc<dyn TurnRunner> = Arc::new(StreamRunner::new(frames_clone, 20, 10));
-    let router: Arc<dyn AgentRouter> = Arc::new(NoopRouter);
-
-    let cfg = EventLoopConfig {
-        tui_event_rx,
-        agent_event_tx,
-        runner,
-        router,
-    };
-    let handle = tokio::spawn(async move { archon_tui::run_event_loop(cfg).await });
-
-    tui_event_tx
-        .send(archon_tui::events::TuiEvent::UserInput("stream".into()))
-        .expect("send UserInput(stream)");
-    tui_event_tx
-        .send(archon_tui::events::TuiEvent::Resize {
-            cols: 200,
-            rows: 60,
-        })
-        .expect("send first Resize");
-    tui_event_tx
-        .send(archon_tui::events::TuiEvent::Resize {
-            cols: 200,
-            rows: 60,
-        })
-        .expect("send second Resize");
-
-    sleep(Duration::from_millis(500)).await;
-    tui_event_tx
-        .send(archon_tui::events::TuiEvent::Done)
-        .expect("send Done");
-    handle
-        .await
-        .expect("join run_event_loop")
-        .expect("run_event_loop Ok");
-
-    let (cols, rows) = archon_tui::last_known_size();
-    assert_eq!(
-        (cols, rows),
-        (200, 60),
-        "last_known_size() should be (200, 60)"
-    );
-
-    let recorded = frames.lock().unwrap().clone();
-    assert_eq!(recorded.len(), 20, "expected exactly 20 frames recorded");
-    let expected: Vec<usize> = (1..=20).collect();
-    assert_eq!(recorded, expected, "frames should be 1..=20 in order");
 }

@@ -37,7 +37,7 @@ impl<T> std::fmt::Display for Secret<T> {
 // API types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct Usage {
     #[serde(default)]
     pub input_tokens: u64,
@@ -47,14 +47,97 @@ pub struct Usage {
     pub cache_creation_input_tokens: u64,
     #[serde(default)]
     pub cache_read_input_tokens: u64,
+    #[serde(default)]
+    pub input_tokens_available: bool,
+    #[serde(default)]
+    pub output_tokens_available: bool,
+    #[serde(default)]
+    pub cache_creation_input_tokens_available: bool,
+    #[serde(default)]
+    pub cache_read_input_tokens_available: bool,
+}
+
+impl<'de> Deserialize<'de> for Usage {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct WireUsage {
+            input_tokens: Option<u64>,
+            output_tokens: Option<u64>,
+            cache_creation_input_tokens: Option<u64>,
+            cache_read_input_tokens: Option<u64>,
+            input_tokens_available: Option<bool>,
+            output_tokens_available: Option<bool>,
+            cache_creation_input_tokens_available: Option<bool>,
+            cache_read_input_tokens_available: Option<bool>,
+        }
+
+        let wire = WireUsage::deserialize(deserializer)?;
+        Ok(Self {
+            input_tokens: wire.input_tokens.unwrap_or(0),
+            output_tokens: wire.output_tokens.unwrap_or(0),
+            cache_creation_input_tokens: wire.cache_creation_input_tokens.unwrap_or(0),
+            cache_read_input_tokens: wire.cache_read_input_tokens.unwrap_or(0),
+            input_tokens_available: wire
+                .input_tokens_available
+                .unwrap_or(wire.input_tokens.is_some()),
+            output_tokens_available: wire
+                .output_tokens_available
+                .unwrap_or(wire.output_tokens.is_some()),
+            cache_creation_input_tokens_available: wire
+                .cache_creation_input_tokens_available
+                .unwrap_or(wire.cache_creation_input_tokens.is_some()),
+            cache_read_input_tokens_available: wire
+                .cache_read_input_tokens_available
+                .unwrap_or(wire.cache_read_input_tokens.is_some()),
+        })
+    }
 }
 
 impl Usage {
     pub fn merge(&mut self, other: &Usage) {
-        self.input_tokens += other.input_tokens;
-        self.output_tokens += other.output_tokens;
-        self.cache_creation_input_tokens += other.cache_creation_input_tokens;
-        self.cache_read_input_tokens += other.cache_read_input_tokens;
+        merge_usage_field(
+            &mut self.input_tokens,
+            &mut self.input_tokens_available,
+            other.input_tokens,
+            other.input_tokens_available,
+        );
+        merge_usage_field(
+            &mut self.output_tokens,
+            &mut self.output_tokens_available,
+            other.output_tokens,
+            other.output_tokens_available,
+        );
+        merge_usage_field(
+            &mut self.cache_creation_input_tokens,
+            &mut self.cache_creation_input_tokens_available,
+            other.cache_creation_input_tokens,
+            other.cache_creation_input_tokens_available,
+        );
+        merge_usage_field(
+            &mut self.cache_read_input_tokens,
+            &mut self.cache_read_input_tokens_available,
+            other.cache_read_input_tokens,
+            other.cache_read_input_tokens_available,
+        );
+    }
+}
+
+fn merge_usage_field(total: &mut u64, available: &mut bool, value: u64, value_available: bool) {
+    if !*available && *total == u64::MAX {
+        return;
+    }
+    match total.checked_add(value) {
+        Some(sum) => {
+            *total = sum;
+            *available |= value_available;
+        }
+        None => {
+            *total = u64::MAX;
+            *available = false;
+        }
     }
 }
 

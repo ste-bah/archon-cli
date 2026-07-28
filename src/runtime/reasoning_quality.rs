@@ -392,7 +392,11 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let world = tempfile::tempdir().unwrap();
         let learning_path = temp.path().join("learning.db");
-        let learning_db = cozo::DbInstance::new("sqlite", &learning_path, "").unwrap();
+        let learning_db = archon_learning::cozo_guard::open_sqlite_guarded(
+            learning_path.to_str().unwrap(),
+            "open reasoning-quality test store",
+        )
+        .unwrap();
         archon_learning::schema::ensure_learning_schema(&learning_db).unwrap();
         let event = archon_reasoning_quality::ReasoningQualityEvent {
             event_id: "rqevt-e2e".into(),

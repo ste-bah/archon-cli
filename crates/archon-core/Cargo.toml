@@ -58,6 +58,7 @@ jsonschema.workspace = true
 sqlite.workspace = true
 crc32fast.workspace = true
 sysinfo.workspace = true
+which.workspace = true
 
 # Phase 3: Agent discovery system (TASK-AGS-300..307)
 arc-swap.workspace = true

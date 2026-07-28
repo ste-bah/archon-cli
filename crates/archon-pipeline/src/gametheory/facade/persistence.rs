@@ -7,7 +7,7 @@ use cozo::DbInstance;
 use super::super::final_stage;
 use super::super::quality;
 use super::super::routing::RoutingDecision;
-use super::super::schema::ensure_gametheory_schema;
+use super::super::schema::{ensure_gametheory_schema, run_script_guarded};
 use super::costs::agent_tier;
 
 pub(super) fn persist_routing_decision(db: &DbInstance, rd: &RoutingDecision) -> Result<()> {
@@ -31,7 +31,8 @@ pub(super) fn persist_routing_decision(db: &DbInstance, rd: &RoutingDecision) ->
     params.insert("ec".into(), cozo::DataValue::from(conditions_json.as_str()));
     params.insert("ca".into(), cozo::DataValue::from(rd.created_at.as_str()));
 
-    db.run_script(
+    run_script_guarded(
+        db,
         "?[run_id, fingerprint_id, enabled_specialists_json, skipped_specialists_json, \
          evaluated_conditions_json, created_at] \
          <- [[$rid, $fid, $en, $sk, $ec, $ca]] \
@@ -39,8 +40,8 @@ pub(super) fn persist_routing_decision(db: &DbInstance, rd: &RoutingDecision) ->
          skipped_specialists_json, evaluated_conditions_json, created_at }",
         params,
         cozo::ScriptMutability::Mutable,
-    )
-    .map_err(|e| anyhow::anyhow!("persist gt_routing_decisions failed: {e}"))?;
+        "persist gt_routing_decisions",
+    )?;
     Ok(())
 }
 
@@ -65,7 +66,8 @@ pub(super) fn persist_specialist_outputs(
         let cost = format!("{:.6}", costs_usd.get(agent_key).copied().unwrap_or(0.0));
         params.insert("cost".into(), cozo::DataValue::from(cost.as_str()));
 
-        db.run_script(
+        run_script_guarded(
+            db,
             "?[run_id, agent_key, output_json, status, started_at, completed_at, \
              duration_ms, cost_usd] <- [[$rid, $ak, $out, $status, $started, \
              $completed, $duration, $cost]] \
@@ -73,8 +75,8 @@ pub(super) fn persist_specialist_outputs(
              started_at, completed_at, duration_ms, cost_usd }",
             params,
             cozo::ScriptMutability::Mutable,
-        )
-        .map_err(|e| anyhow::anyhow!("persist gt_specialist_outputs failed: {e}"))?;
+            "persist gt_specialist_outputs",
+        )?;
         persist_run_checkpoint(
             db,
             run_id,
@@ -106,15 +108,16 @@ pub(super) fn persist_specialist_failure(
     params.insert("status".into(), cozo::DataValue::from("failed"));
     params.insert("now".into(), cozo::DataValue::from(now.as_str()));
 
-    db.run_script(
+    run_script_guarded(
+        db,
         "?[run_id, agent_key, output_json, status, started_at, completed_at, duration_ms, cost_usd] \
          <- [[$rid, $ak, $out, $status, $now, $now, '0', '0.000000']] \
          :put gt_specialist_outputs { run_id, agent_key => output_json, status, \
          started_at, completed_at, duration_ms, cost_usd }",
         params,
         cozo::ScriptMutability::Mutable,
-    )
-    .map_err(|e| anyhow::anyhow!("persist failed gt_specialist_outputs failed: {e}"))?;
+        "persist failed gt_specialist_outputs",
+    )?;
     persist_run_checkpoint(
         db,
         run_id,
@@ -159,7 +162,8 @@ pub(super) fn persist_sections(
         );
         params.insert("ca".into(), cozo::DataValue::from(now.as_str()));
 
-        db.run_script(
+        run_script_guarded(
+            db,
             "?[run_id, section_id, section_type, title, content_md, \
              source_specialists_json, created_at] \
              <- [[$rid, $sid, $sty, $stt, $smd, $ssj, $ca]] \
@@ -167,8 +171,8 @@ pub(super) fn persist_sections(
              content_md, source_specialists_json, created_at }",
             params,
             cozo::ScriptMutability::Mutable,
-        )
-        .map_err(|e| anyhow::anyhow!("persist gt_sections failed: {e}"))?;
+            "persist gt_sections",
+        )?;
     }
     Ok(())
 }
@@ -195,14 +199,15 @@ pub(super) fn persist_quality_checks(
             );
             params.insert("created".into(), cozo::DataValue::from(created_at.as_str()));
 
-            db.run_script(
+            run_script_guarded(
+                db,
                 "?[run_id, agent_key, gate_name, passed, detail, created_at] \
                  <- [[$rid, $agent, $gate, $passed, $detail, $created]] \
                  :put gt_quality_checks { run_id, agent_key, gate_name => passed, detail, created_at }",
                 params,
                 cozo::ScriptMutability::Mutable,
-            )
-            .map_err(|e| anyhow::anyhow!("persist gt_quality_checks failed: {e}"))?;
+                "persist gt_quality_checks",
+            )?;
         }
     }
     Ok(())
@@ -225,15 +230,16 @@ pub(super) fn persist_final_report(
     let cost = format!("{total_cost_usd:.6}");
     params.insert("cost".into(), cozo::DataValue::from(cost.as_str()));
 
-    db.run_script(
+    run_script_guarded(
+        db,
         "?[run_id, report_md, created_at, total_cost_usd, total_duration_ms] \
          <- [[$rid, $rep, $ca, $cost, '0']] \
          :put gt_final_reports { run_id => report_md, created_at, \
          total_cost_usd, total_duration_ms }",
         params,
         cozo::ScriptMutability::Mutable,
-    )
-    .map_err(|e| anyhow::anyhow!("persist gt_final_reports failed: {e}"))?;
+        "persist gt_final_reports",
+    )?;
     Ok(())
 }
 
@@ -301,14 +307,15 @@ fn persist_provenance_edge(
     params.insert("typ".into(), cozo::DataValue::from(edge_type));
     params.insert("ca".into(), cozo::DataValue::from(now.as_str()));
 
-    db.run_script(
+    run_script_guarded(
+        db,
         "?[edge_id, from_artifact_id, to_artifact_id, edge_type, created_at] \
          <- [[$eid, $from, $to, $typ, $ca]] \
          :put gt_provenance_edges { edge_id => from_artifact_id, to_artifact_id, edge_type, created_at }",
         params,
         cozo::ScriptMutability::Mutable,
-    )
-    .map_err(|e| anyhow::anyhow!("persist gt_provenance_edges failed: {e}"))?;
+        "persist gt_provenance_edges",
+    )?;
     Ok(())
 }
 
@@ -333,14 +340,15 @@ pub(super) fn persist_run_checkpoint(
     params.insert("dj".into(), cozo::DataValue::from(detail_json.as_str()));
     params.insert("ca".into(), cozo::DataValue::from(created_at.as_str()));
 
-    db.run_script(
+    run_script_guarded(
+        db,
         "?[run_id, checkpoint_key, checkpoint_type, status, detail_json, created_at] \
          <- [[$rid, $ck, $ct, $st, $dj, $ca]] \
          :put gt_run_checkpoints { run_id, checkpoint_key => checkpoint_type, status, detail_json, created_at }",
         params,
         cozo::ScriptMutability::Mutable,
-    )
-    .map_err(|e| anyhow::anyhow!("persist gt_run_checkpoints failed: {e}"))?;
+        "persist gt_run_checkpoints",
+    )?;
     Ok(())
 }
 
@@ -382,14 +390,15 @@ pub(super) fn insert_gt_run(
     params.insert("sa".into(), cozo::DataValue::from(started_at));
     params.insert("st".into(), cozo::DataValue::from(status));
 
-    db.run_script(
+    run_script_guarded(
+        db,
         "?[run_id, situation, started_at, completed_at, status, cost_usd] \
          <- [[$rid, $sit, $sa, \"\", $st, \"0.000000\"]] \
          :put gt_runs { run_id => situation, started_at, completed_at, status, cost_usd }",
         params,
         cozo::ScriptMutability::Mutable,
-    )
-    .map_err(|e| anyhow::anyhow!("insert gt_runs failed: {e}"))?;
+        "insert gt_runs",
+    )?;
     Ok(())
 }
 
@@ -411,14 +420,15 @@ pub(super) fn update_gt_run_status(
     let cost = format!("{cost_usd:.6}");
     params.insert("cost".into(), cozo::DataValue::from(cost.as_str()));
 
-    db.run_script(
+    run_script_guarded(
+        db,
         "?[run_id, situation, started_at, completed_at, status, cost_usd] \
          <- [[$rid, $sit, $sa, $ca, $st, $cost]] \
          :put gt_runs { run_id => situation, started_at, completed_at, status, cost_usd }",
         params,
         cozo::ScriptMutability::Mutable,
-    )
-    .map_err(|e| anyhow::anyhow!("update gt_runs failed: {e}"))?;
+        "update gt_runs",
+    )?;
     Ok(())
 }
 
@@ -435,13 +445,14 @@ pub(super) fn insert_gt_fingerprint(
     params.insert("pf".into(), cozo::DataValue::from(primary_family));
     params.insert("ca".into(), cozo::DataValue::from(created_at));
 
-    db.run_script(
+    run_script_guarded(
+        db,
         "?[run_id, fingerprint_json, primary_family, created_at] \
          <- [[$rid, $fp, $pf, $ca]] \
          :put gt_fingerprints { run_id => fingerprint_json, primary_family, created_at }",
         params,
         cozo::ScriptMutability::Mutable,
-    )
-    .map_err(|e| anyhow::anyhow!("insert gt_fingerprints failed: {e}"))?;
+        "insert gt_fingerprints",
+    )?;
     Ok(())
 }

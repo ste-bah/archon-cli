@@ -18,6 +18,7 @@ async fn runner_accumulates_tokens_from_mock_stream() {
                 output_tokens: 5,
                 cache_creation_input_tokens: 10,
                 cache_read_input_tokens: 20,
+                ..Usage::default()
             },
         },
         StreamEvent::ContentBlockStart {
@@ -38,6 +39,7 @@ async fn runner_accumulates_tokens_from_mock_stream() {
                 output_tokens: 25,
                 cache_creation_input_tokens: 0,
                 cache_read_input_tokens: 0,
+                ..Usage::default()
             }),
         },
         StreamEvent::MessageStop,

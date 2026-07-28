@@ -15,12 +15,8 @@ impl AgentSubagentExecutor {
         let (tool_defs, mut tool_reg) = self
             .build_subagent_tools(request, prepared.resolved_def.as_ref())
             .await;
-        if let Some(provider_env) = request.provider_env.clone()
-            && tool_reg.get("Bash").is_some()
-        {
-            tool_reg.replace(Box::new(
-                archon_tools::bash::BashTool::default().with_provider_env_source(provider_env),
-            ));
+        if let Some(provider_env) = request.provider_env.clone() {
+            tool_reg.attach_provider_env_to_bash(provider_env);
         }
         let requested_cwd = super::paths::resolve_cwd(&self.working_dir, request.cwd.as_deref());
         let worktree_info = self
@@ -158,6 +154,11 @@ impl AgentSubagentExecutor {
             cancel_parent: Some(tool_cancel),
             sandbox: parent_ctx.sandbox.clone(),
             activity_sink: parent_ctx.activity_sink.clone(),
+            tool_run_parent_action_id: parent_ctx.tool_run_parent_action_id.clone(),
+            tool_run_tool_use_id: None,
+            tool_run_attempt: 0,
+            tool_run_admission: parent_ctx.tool_run_admission.clone(),
+            tool_run_outcome: parent_ctx.tool_run_outcome.clone(),
         }
     }
 

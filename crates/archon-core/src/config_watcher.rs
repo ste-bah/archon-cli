@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use notify::event::EventKind;
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 
 use crate::config::{ArchonConfig, ConfigError};
@@ -68,6 +69,9 @@ impl ConfigWatcher {
     pub fn poll_changes(&self) -> Vec<PathBuf> {
         let mut changed = Vec::new();
         while let Ok(Ok(event)) = self.rx.try_recv() {
+            if matches!(event.kind, EventKind::Access(_)) {
+                continue;
+            }
             for path in event.paths {
                 if !changed.contains(&path) {
                     changed.push(path);

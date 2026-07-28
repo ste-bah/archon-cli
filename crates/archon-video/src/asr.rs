@@ -5,9 +5,9 @@ use archon_policy::VideoPolicy;
 use async_trait::async_trait;
 use serde_json::Value;
 use tempfile::{Builder, NamedTempFile};
-use tokio::process::Command;
 
 use crate::errors::VideoError;
+use crate::subprocess::{run_ffmpeg_audio_extraction, run_whisper_cpp};
 use crate::transcript::TranscriptSegment;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,18 +54,7 @@ pub async fn extract_audio_track(
         .map_err(|e| VideoError::AcquisitionFailed {
             message: format!("create temp wav: {e}"),
         })?;
-    let output = Command::new(&bin)
-        .args(["-hide_banner", "-nostdin", "-y"])
-        .arg("-i")
-        .arg(video_path)
-        .args(["-vn", "-ar", "16000", "-ac", "1", "-f", "wav"])
-        .arg(tmp.path())
-        .output()
-        .await
-        .map_err(|_| VideoError::BinaryNotFound {
-            name: "ffmpeg".into(),
-            path: bin.clone(),
-        })?;
+    let output = run_ffmpeg_audio_extraction(&bin, video_path, tmp.path()).await?;
     if !output.status.success() {
         return Err(VideoError::MetadataFailed {
             message: format!(
@@ -153,17 +142,7 @@ impl AsrProvider for WhisperCppAdapter {
             message: format!("create whisper-cpp output directory: {e}"),
         })?;
         let output_prefix = out_dir.path().join("transcript");
-        let output = Command::new(&self.bin)
-            .args(["--model", &opts.model, "--output-json", "--output-file"])
-            .arg(&output_prefix)
-            .arg("--file")
-            .arg(tmp.path())
-            .output()
-            .await
-            .map_err(|_| VideoError::BinaryNotFound {
-                name: "whisper-cli".into(),
-                path: self.bin.clone(),
-            })?;
+        let output = run_whisper_cpp(&self.bin, &opts.model, &output_prefix, tmp.path()).await?;
         if !output.status.success() {
             return Err(VideoError::AsrProviderUnavailable {
                 message: String::from_utf8_lossy(&output.stderr).to_string(),

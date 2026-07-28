@@ -1,20 +1,17 @@
-//! KB Q&A query engine — embed, search, gather context, synthesize, file answers.
+//! KB Q&A query engine — text search, gather context, synthesize, file answers.
 //!
 //! Implements REQ-KB-003. NFR: search < 500ms, Q&A < 5s.
 
 use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
 
 use anyhow::Result;
+use archon_docs::embed::LocalEmbeddingProvider;
 use cozo::{DataValue, ScriptMutability};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use super::schema::{KbNode, KbNodeType};
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 /// Options for a Q&A query.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct QaQueryOptions {
@@ -34,14 +31,12 @@ impl Default for QaQueryOptions {
         }
     }
 }
-
 /// A scored KB node from search.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ScoredKbNode {
     pub node: KbNode,
     pub score: f64,
 }
-
 /// Graph context gathered by following edges.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct GraphContext {
@@ -50,14 +45,12 @@ pub struct GraphContext {
     pub backlinks: Vec<KbNode>,
     pub provenance_chains: Vec<Vec<String>>,
 }
-
 /// A synthesized answer with source citations.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SynthesizedAnswer {
     pub answer_text: String,
     pub source_citations: Vec<SourceCitation>,
 }
-
 /// Citation referencing a KB node.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SourceCitation {
@@ -65,7 +58,6 @@ pub struct SourceCitation {
     pub quote: String,
     pub relevance: f64,
 }
-
 /// Full result of a Q&A query.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct QaQueryResult {
@@ -75,7 +67,6 @@ pub struct QaQueryResult {
     pub search_duration_ms: u64,
     pub synthesis_duration_ms: u64,
 }
-
 /// Source info in query result.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct QaSource {
@@ -83,38 +74,15 @@ pub struct QaSource {
     pub title: String,
     pub relevance_score: f64,
 }
-
-// ---------------------------------------------------------------------------
-// LLM trait for synthesis
-// ---------------------------------------------------------------------------
-
 /// Trait for LLM-based answer synthesis.
 #[async_trait::async_trait]
 pub trait QaSynthesizer: Send + Sync {
     async fn synthesize(&self, question: &str, context: &str) -> Result<String>;
 }
-
-// ---------------------------------------------------------------------------
-// Embedding trait
-// ---------------------------------------------------------------------------
-
-/// Trait for computing query embeddings.
-pub trait QueryEmbedder: Send + Sync {
-    fn embed_query(&self, text: &str) -> Result<Vec<f32>>;
-}
-
-// ---------------------------------------------------------------------------
-// QueryEngine
-// ---------------------------------------------------------------------------
-
-/// Knowledge base query engine.
-///
-/// Searches KB nodes, gathers graph context, synthesizes answers via an
-/// optional LLM, and optionally files answers back as derived nodes.
 pub struct QueryEngine {
     db: cozo::DbInstance,
     synthesizer: Option<Box<dyn QaSynthesizer>>,
-    embedder: Option<Box<dyn QueryEmbedder>>,
+    embedder: Option<Arc<dyn LocalEmbeddingProvider>>,
 }
 
 impl QueryEngine {
@@ -131,7 +99,7 @@ impl QueryEngine {
         self
     }
 
-    pub fn with_embedder(mut self, embedder: Box<dyn QueryEmbedder>) -> Self {
+    pub fn with_embedder(mut self, embedder: Arc<dyn LocalEmbeddingProvider>) -> Self {
         self.embedder = Some(embedder);
         self
     }
@@ -200,8 +168,7 @@ impl QueryEngine {
         })
     }
 
-    /// Search KB nodes using text matching (fallback when no embedder).
-    /// When embedder is available, uses HNSW vector search.
+    /// Search KB nodes using text and optional semantic matching.
     /// Answer-type nodes get a 0.9x score penalty (EC-PIPE-018).
     pub fn search_nodes(
         &self,
@@ -209,74 +176,13 @@ impl QueryEngine {
         limit: usize,
         type_filter: Option<&[KbNodeType]>,
     ) -> Result<Vec<ScoredKbNode>> {
-        let mut params = BTreeMap::new();
-        params.insert("q".to_string(), DataValue::from(query_text));
-        // Over-fetch so post-filter still has enough results
-        params.insert("lim".to_string(), DataValue::from((limit * 3) as i64));
-
-        let result = self
-            .db
-            .run_script(
-                "?[node_id, node_type, source, domain_tag, title, content, \
-                 content_hash, chunk_index, created_at, updated_at] := \
-                 *kb_nodes{node_id, node_type, source, domain_tag, title, content, \
-                 content_hash, chunk_index, created_at, updated_at}, \
-                 (str_includes(title, $q) or str_includes(content, $q)) \
-                 :limit $lim",
-                params,
-                ScriptMutability::Immutable,
-            )
-            .map_err(|e| anyhow::anyhow!("KB search failed: {}", e))?;
-
-        let mut scored: Vec<ScoredKbNode> = result
-            .rows
-            .iter()
-            .filter_map(|row| {
-                let node = row_to_kb_node(row);
-
-                // Apply type filter if specified
-                if let Some(filter) = type_filter
-                    && !filter.contains(&node.node_type)
-                {
-                    return None;
-                }
-
-                // Calculate relevance score based on title vs content match
-                let query_lower = query_text.to_lowercase();
-                let title_lower = node.title.to_lowercase();
-                let content_lower = node.content.to_lowercase();
-
-                let mut score: f64 = 0.0;
-                if title_lower.contains(&query_lower) {
-                    score += 0.8;
-                }
-                if content_lower.contains(&query_lower) {
-                    score += 0.5;
-                }
-                // Clamp to 0-1
-                score = score.min(1.0);
-
-                // EC-PIPE-018: Answer nodes get 0.9x penalty
-                if node.node_type == KbNodeType::Answer {
-                    score *= 0.9;
-                }
-
-                if score > 0.0 {
-                    Some(ScoredKbNode { node, score })
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        scored.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        scored.truncate(limit);
-
-        Ok(scored)
+        super::query_search::search_nodes(
+            &self.db,
+            self.embedder.as_ref(),
+            query_text,
+            limit,
+            type_filter,
+        )
     }
 
     /// Follow edges to collect related concepts, backlinks, provenance chains.
@@ -403,8 +309,8 @@ impl QueryEngine {
         source_node_ids: &[String],
     ) -> Result<String> {
         let node_id = format!("answer-{}", uuid::Uuid::new_v4());
-        let title = if question.len() > 100 {
-            format!("{}...", &question[..97])
+        let title = if question.chars().count() > 100 {
+            format!("{}...", question.chars().take(97).collect::<String>())
         } else {
             question.to_string()
         };
@@ -416,70 +322,32 @@ impl QueryEngine {
         };
         let now = chrono::Utc::now().timestamp() as f64;
 
-        // Insert answer node
-        let mut params = BTreeMap::new();
-        params.insert("node_id".into(), DataValue::from(node_id.as_str()));
-        params.insert("node_type".into(), DataValue::from("answer"));
-        params.insert("source".into(), DataValue::from("qa-engine"));
-        params.insert("domain_tag".into(), DataValue::from(""));
-        params.insert("title".into(), DataValue::from(title.as_str()));
-        params.insert(
-            "content".into(),
-            DataValue::from(answer.answer_text.as_str()),
-        );
-        params.insert(
-            "content_hash".into(),
-            DataValue::from(content_hash.as_str()),
-        );
-        params.insert("chunk_index".into(), DataValue::from(0i64));
-        params.insert("created_at".into(), DataValue::from(now));
-        params.insert("updated_at".into(), DataValue::from(now));
+        let filed_node_id = super::answer_storage::reserve_answer_node(
+            &self.db,
+            &node_id,
+            &title,
+            &answer.answer_text,
+            &content_hash,
+            now,
+        )?;
 
-        self.db
-            .run_script(
-                "?[node_id, node_type, source, domain_tag, title, content, \
-                 content_hash, chunk_index, created_at, updated_at] <- \
-                 [[$node_id, $node_type, $source, $domain_tag, $title, $content, \
-                 $content_hash, $chunk_index, $created_at, $updated_at]] \
-                 :put kb_nodes { node_id => node_type, source, domain_tag, title, \
-                 content, content_hash, chunk_index, created_at, updated_at }",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(|e| anyhow::anyhow!("Failed to file answer node: {}", e))?;
-
-        // Create DerivedFrom edges to source nodes
-        for source_id in source_node_ids {
-            let edge_id = format!("edge-{}", uuid::Uuid::new_v4());
-            let mut edge_params = BTreeMap::new();
-            edge_params.insert("edge_id".into(), DataValue::from(edge_id.as_str()));
-            edge_params.insert("source_node_id".into(), DataValue::from(node_id.as_str()));
-            edge_params.insert("target_node_id".into(), DataValue::from(source_id.as_str()));
-            edge_params.insert("edge_type".into(), DataValue::from("DerivedFrom"));
-            edge_params.insert("created_at".into(), DataValue::from(now));
-
-            if let Err(e) = self.db.run_script(
-                "?[edge_id, source_node_id, target_node_id, edge_type, created_at] <- \
-                 [[$edge_id, $source_node_id, $target_node_id, $edge_type, $created_at]] \
-                 :put kb_edges { edge_id => source_node_id, target_node_id, edge_type, \
-                 created_at }",
-                edge_params,
-                ScriptMutability::Mutable,
-            ) {
-                warn!(
-                    source_id = %source_id,
-                    error = %e,
-                    "Failed to create DerivedFrom edge"
-                );
-            }
+        // Attach provenance to the canonical answer owner. Failure is best effort:
+        // answer filing is already committed and must remain visible.
+        if let Err(error) = super::provenance_storage::persist_derived_from_edges(
+            &self.db,
+            &filed_node_id,
+            source_node_ids,
+            now,
+        ) {
+            warn!(
+                owner_id = %filed_node_id,
+                error = %error,
+                "Failed to batch DerivedFrom provenance edges"
+            );
         }
 
-        Ok(node_id)
+        Ok(filed_node_id)
     }
-
-    // -----------------------------------------------------------------------
-    // Helpers
-    // -----------------------------------------------------------------------
 
     fn format_context(&self, context: &GraphContext) -> String {
         let mut parts = Vec::new();
@@ -514,11 +382,7 @@ impl QueryEngine {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Row conversion helper
-// ---------------------------------------------------------------------------
-
-fn row_to_kb_node(row: &[DataValue]) -> KbNode {
+pub(super) fn row_to_kb_node(row: &[DataValue]) -> KbNode {
     KbNode {
         node_id: row[0].get_str().unwrap_or("").to_string(),
         node_type: str_to_node_type(row[1].get_str().unwrap_or("raw")),
@@ -544,331 +408,12 @@ fn str_to_node_type(s: &str) -> KbNodeType {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::kb::schema::ensure_kb_schema;
-
-    fn test_db() -> cozo::DbInstance {
-        let db = cozo::DbInstance::new("mem", "", Default::default()).unwrap();
-        ensure_kb_schema(&db).unwrap();
-        db
-    }
-
-    fn insert_test_node(db: &cozo::DbInstance, id: &str, ntype: &str, title: &str, content: &str) {
-        let mut params = BTreeMap::new();
-        params.insert("nid".into(), DataValue::from(id));
-        params.insert("ntype".into(), DataValue::from(ntype));
-        params.insert("title".into(), DataValue::from(title));
-        params.insert("content".into(), DataValue::from(content));
-        params.insert("ts".into(), DataValue::from(1000.0));
-        db.run_script(
-            "?[node_id, node_type, source, domain_tag, title, content, \
-             content_hash, chunk_index, created_at, updated_at] <- \
-             [[$nid, $ntype, 'test', '', $title, $content, '', 0, $ts, $ts]] \
-             :put kb_nodes { node_id => node_type, source, domain_tag, title, \
-             content, content_hash, chunk_index, created_at, updated_at }",
-            params,
-            ScriptMutability::Mutable,
-        )
-        .unwrap();
-    }
-
-    fn insert_test_edge(db: &cozo::DbInstance, src: &str, tgt: &str, etype: &str) {
-        let edge_id = format!("edge-{}", uuid::Uuid::new_v4());
-        let mut params = BTreeMap::new();
-        params.insert("eid".into(), DataValue::from(edge_id.as_str()));
-        params.insert("src".into(), DataValue::from(src));
-        params.insert("tgt".into(), DataValue::from(tgt));
-        params.insert("etype".into(), DataValue::from(etype));
-        params.insert("ts".into(), DataValue::from(1000.0));
-        db.run_script(
-            "?[edge_id, source_node_id, target_node_id, edge_type, created_at] <- \
-             [[$eid, $src, $tgt, $etype, $ts]] \
-             :put kb_edges { edge_id => source_node_id, target_node_id, edge_type, \
-             created_at }",
-            params,
-            ScriptMutability::Mutable,
-        )
-        .unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_query_engine_empty_db() {
-        let db = test_db();
-        let engine = QueryEngine::new(db);
-        let opts = QaQueryOptions::default();
-        let result = engine.query("what is Rust?", &opts).await.unwrap();
-        assert!(result.answer.contains("Insufficient context"));
-        assert!(result.sources.is_empty());
-        assert!(result.filed_node_id.is_none());
-    }
-
-    #[tokio::test]
-    async fn test_search_nodes_finds_matching() {
-        let db = test_db();
-        insert_test_node(
-            &db,
-            "n1",
-            "raw",
-            "Rust Programming",
-            "Rust is a systems language.",
-        );
-        insert_test_node(&db, "n2", "raw", "Python Basics", "Python is interpreted.");
-
-        let engine = QueryEngine::new(db);
-        let results = engine.search_nodes("Rust", 10, None).unwrap();
-
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].node.node_id, "n1");
-        assert!(results[0].score > 0.0);
-    }
-
-    #[tokio::test]
-    async fn test_search_nodes_answer_penalty() {
-        let db = test_db();
-        // Same content, different types
-        insert_test_node(
-            &db,
-            "raw1",
-            "raw",
-            "Rust guide",
-            "Learn Rust programming today.",
-        );
-        insert_test_node(
-            &db,
-            "ans1",
-            "answer",
-            "Rust guide",
-            "Learn Rust programming today.",
-        );
-
-        let engine = QueryEngine::new(db);
-        let results = engine.search_nodes("Rust", 10, None).unwrap();
-
-        assert_eq!(results.len(), 2);
-        // Both have "Rust" in title and content -> base score 1.0 (clamped)
-        // Raw node: 1.0, Answer node: 0.9
-        let raw_result = results
-            .iter()
-            .find(|r| r.node.node_type == KbNodeType::Raw)
-            .unwrap();
-        let ans_result = results
-            .iter()
-            .find(|r| r.node.node_type == KbNodeType::Answer)
-            .unwrap();
-
-        assert!(
-            raw_result.score > ans_result.score,
-            "Raw ({}) should score higher than Answer ({})",
-            raw_result.score,
-            ans_result.score
-        );
-        // Verify the 0.9x factor
-        let expected_ans_score = raw_result.score * 0.9;
-        assert!(
-            (ans_result.score - expected_ans_score).abs() < 0.01,
-            "Answer score {} should be ~0.9x of raw score {}",
-            ans_result.score,
-            raw_result.score
-        );
-    }
-
-    #[tokio::test]
-    async fn test_file_answer_creates_node() {
-        let db = test_db();
-        insert_test_node(&db, "src1", "raw", "Source Doc", "Some source content.");
-        insert_test_node(&db, "src2", "raw", "Another Doc", "More source content.");
-
-        let engine = QueryEngine::new(db.clone());
-        let synth_answer = SynthesizedAnswer {
-            answer_text: "This is the synthesized answer.".to_string(),
-            source_citations: vec![],
-        };
-
-        let filed_id = engine
-            .file_answer(
-                "What is the topic?",
-                &synth_answer,
-                &["src1".into(), "src2".into()],
-            )
-            .unwrap();
-
-        assert!(filed_id.starts_with("answer-"));
-
-        // Verify the node was created
-        let mut params = BTreeMap::new();
-        params.insert("nid".into(), DataValue::from(filed_id.as_str()));
-        let result = db
-            .run_script(
-                "?[node_type, content] := *kb_nodes{node_id, node_type, content}, node_id = $nid",
-                params,
-                ScriptMutability::Immutable,
-            )
-            .unwrap();
-        assert_eq!(result.rows.len(), 1);
-        assert_eq!(result.rows[0][0].get_str().unwrap(), "answer");
-        assert!(
-            result.rows[0][1]
-                .get_str()
-                .unwrap()
-                .contains("synthesized answer")
-        );
-
-        // Verify DerivedFrom edges exist
-        let mut edge_params = BTreeMap::new();
-        edge_params.insert("nid".into(), DataValue::from(filed_id.as_str()));
-        let edges = db
-            .run_script(
-                "?[target_node_id, edge_type] := *kb_edges{source_node_id, target_node_id, edge_type}, \
-                 source_node_id = $nid",
-                edge_params,
-                ScriptMutability::Immutable,
-            )
-            .unwrap();
-        assert_eq!(edges.rows.len(), 2);
-    }
-
-    #[tokio::test]
-    async fn test_gather_graph_context_follows_edges() {
-        let db = test_db();
-        insert_test_node(&db, "n1", "raw", "Main Doc", "Main content about Rust.");
-        insert_test_node(&db, "c1", "concept", "Ownership", "Rust ownership model.");
-        insert_test_node(&db, "b1", "raw", "Backlink Source", "References main doc.");
-
-        // n1 -> c1 (outgoing to concept)
-        insert_test_edge(&db, "n1", "c1", "ConceptOf");
-        // b1 -> n1 (incoming backlink)
-        insert_test_edge(&db, "b1", "n1", "Backlink");
-
-        let engine = QueryEngine::new(db);
-        let scored = vec![ScoredKbNode {
-            node: KbNode {
-                node_id: "n1".into(),
-                node_type: KbNodeType::Raw,
-                source: "test".into(),
-                domain_tag: String::new(),
-                title: "Main Doc".into(),
-                content: "Main content about Rust.".into(),
-                content_hash: String::new(),
-                chunk_index: 0,
-                created_at: 1000.0,
-                updated_at: 1000.0,
-            },
-            score: 0.8,
-        }];
-
-        let ctx = engine.gather_graph_context(&scored).unwrap();
-        assert_eq!(ctx.primary_nodes.len(), 1);
-        assert_eq!(ctx.related_concepts.len(), 1);
-        assert_eq!(ctx.related_concepts[0].node_id, "c1");
-        assert_eq!(ctx.backlinks.len(), 1);
-        assert_eq!(ctx.backlinks[0].node_id, "b1");
-    }
-
-    #[tokio::test]
-    async fn test_synthesize_answer_without_llm() {
-        let db = test_db();
-        let engine = QueryEngine::new(db);
-
-        let context = GraphContext {
-            primary_nodes: vec![ScoredKbNode {
-                node: KbNode {
-                    node_id: "n1".into(),
-                    node_type: KbNodeType::Raw,
-                    source: "test".into(),
-                    domain_tag: String::new(),
-                    title: "Test Doc".into(),
-                    content: "Test content here.".into(),
-                    content_hash: String::new(),
-                    chunk_index: 0,
-                    created_at: 1000.0,
-                    updated_at: 1000.0,
-                },
-                score: 0.9,
-            }],
-            ..Default::default()
-        };
-
-        let result = engine
-            .synthesize_answer("What is this?", &context)
-            .await
-            .unwrap();
-        assert!(result.answer_text.contains("1 knowledge base sources"));
-        assert!(result.answer_text.contains("Test Doc"));
-        assert_eq!(result.source_citations.len(), 1);
-        assert_eq!(result.source_citations[0].node_id, "n1");
-    }
-
-    #[tokio::test]
-    async fn test_query_full_flow() {
-        let db = test_db();
-        insert_test_node(
-            &db,
-            "doc1",
-            "raw",
-            "Ownership in Rust",
-            "Rust uses ownership to manage memory safely without garbage collection.",
-        );
-        insert_test_node(
-            &db,
-            "doc2",
-            "raw",
-            "Rust Borrowing",
-            "Borrowing in Rust allows references without taking ownership.",
-        );
-
-        let engine = QueryEngine::new(db);
-        let opts = QaQueryOptions {
-            top_k: 5,
-            file_answer: false,
-            include_graph_context: true,
-            node_type_filter: None,
-        };
-
-        let result = engine.query("Rust", &opts).await.unwrap();
-        assert!(!result.answer.is_empty());
-        assert!(!result.answer.contains("Insufficient context"));
-        assert!(!result.sources.is_empty());
-        // Both docs mention "Rust"
-        assert_eq!(result.sources.len(), 2);
-        assert!(result.search_duration_ms < 500); // NFR: search < 500ms
-    }
-
-    #[tokio::test]
-    async fn test_filed_answer_ranked_below_original() {
-        let db = test_db();
-        // Insert a raw doc and a previously-filed answer with same content
-        insert_test_node(
-            &db,
-            "original",
-            "raw",
-            "Rust Safety",
-            "Rust ensures memory safety through its type system.",
-        );
-        insert_test_node(
-            &db,
-            "filed-ans",
-            "answer",
-            "Rust Safety",
-            "Rust ensures memory safety through its type system.",
-        );
-
-        let engine = QueryEngine::new(db);
-        let results = engine.search_nodes("Rust", 10, None).unwrap();
-
-        assert_eq!(results.len(), 2);
-        // The raw node should be ranked first (higher score)
-        assert_eq!(
-            results[0].node.node_type,
-            KbNodeType::Raw,
-            "Raw node should rank above answer node"
-        );
-        assert_eq!(results[1].node.node_type, KbNodeType::Answer);
-        assert!(results[0].score > results[1].score);
-    }
-}
+#[path = "query_provenance_tests.rs"]
+mod query_provenance_tests;
+#[cfg(test)]
+#[path = "query_search_tests.rs"]
+mod query_search_tests;
+#[cfg(test)]
+#[path = "query_tests.rs"]
+mod query_tests;

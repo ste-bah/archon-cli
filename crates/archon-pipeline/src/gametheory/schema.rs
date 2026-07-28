@@ -3,7 +3,8 @@
 //! Uses the same idempotent `:create` pattern as `archon-docs::schema`.
 
 use anyhow::Result;
-use cozo::{DbInstance, ScriptMutability};
+use cozo::{DataValue, DbInstance, NamedRows, ScriptMutability};
+use std::collections::BTreeMap;
 
 /// Cozo "relation already exists" substrings (same source as archon-docs).
 const COZO_RELATION_ALREADY_EXISTS: &[&str] = &["conflicts with an existing", "already exists"];
@@ -39,9 +40,26 @@ fn ensure_gt_run_checkpoints(db: &DbInstance) -> Result<()> {
     )
 }
 
+/// Run a game-theory Cozo script through its database-bound guard.
+pub(super) fn run_script_guarded(
+    db: &DbInstance,
+    script: &str,
+    params: BTreeMap<String, DataValue>,
+    mutability: ScriptMutability,
+    context: &str,
+) -> Result<NamedRows> {
+    archon_cozo::run_bound_script_guarded(db, script, params, mutability, context)
+}
+
 /// Run a `:create` script, ignoring "already exists" errors only.
 fn run_create(db: &DbInstance, script: &str) -> Result<()> {
-    match db.run_script(script, Default::default(), ScriptMutability::Mutable) {
+    match run_script_guarded(
+        db,
+        script,
+        Default::default(),
+        ScriptMutability::Mutable,
+        "create gametheory relation",
+    ) {
         Ok(_) => Ok(()),
         Err(e) => {
             let msg = e.to_string();
@@ -85,10 +103,12 @@ fn migrate_gt_runs_cost_usd(db: &DbInstance) -> Result<()> {
         )
         .map_err(|e| anyhow::anyhow!("snapshot gt_runs before migration failed: {e}"))?;
 
-    db.run_script(
+    run_script_guarded(
+        db,
         "{::remove gt_runs}",
         Default::default(),
         ScriptMutability::Mutable,
+        "remove old gt_runs relation",
     )
     .map_err(|e| anyhow::anyhow!("remove old gt_runs relation failed: {e}"))?;
     ensure_gt_runs(db)?;
@@ -102,12 +122,14 @@ fn migrate_gt_runs_cost_usd(db: &DbInstance) -> Result<()> {
         params.insert("st".into(), row[4].clone());
         params.insert("cost".into(), cozo::DataValue::from("0.000000"));
 
-        db.run_script(
+        run_script_guarded(
+            db,
             "?[run_id, situation, started_at, completed_at, status, cost_usd] \
              <- [[$rid, $sit, $sa, $ca, $st, $cost]] \
              :put gt_runs { run_id => situation, started_at, completed_at, status, cost_usd }",
             params,
             ScriptMutability::Mutable,
+            "reinsert migrated gt_runs row",
         )
         .map_err(|e| anyhow::anyhow!("reinsert migrated gt_runs row failed: {e}"))?;
     }

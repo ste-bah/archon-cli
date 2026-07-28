@@ -319,6 +319,12 @@ pub trait LlmProvider: Send + Sync {
         }
     }
 
+    /// Whether this provider sends requests directly to Anthropic's official
+    /// Messages endpoint and preserves Anthropic message `cache_control` blocks.
+    fn supports_anthropic_message_caching(&self) -> bool {
+        false
+    }
+
     /// Downcast to the underlying `AnthropicClient` if this provider wraps one.
     ///
     /// Returns `None` for all non-Anthropic providers. Used by code paths that

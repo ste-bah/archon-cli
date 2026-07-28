@@ -21,8 +21,8 @@
 /// - Permission escalation enforcement (REQ-HOOK-004a)
 /// - No short-circuit: all hooks run, results accumulated
 use archon_core::hooks::{
-    AggregatedHookResult, HookCommandType, HookConfig, HookEvent, HookMatcher, HookOutcome,
-    HookRegistry, HookResult, HookType, PermissionBehavior, SourceAuthority,
+    AggregatedHookResult, HookCommandType, HookConfig, HookEvent, HookFailurePolicy, HookMatcher,
+    HookOutcome, HookRegistry, HookResult, HookType, PermissionBehavior, SourceAuthority,
 };
 
 // ---------------------------------------------------------------------------
@@ -150,6 +150,7 @@ fn hook_config_all_optional_fields() {
         status_message: Some("Checking...".into()),
         headers: Default::default(),
         allowed_env_vars: Default::default(),
+        on_failure: None,
         enabled: true,
     };
     assert_eq!(cfg.command, "echo hello");
@@ -170,6 +171,7 @@ fn hook_config_minimal() {
         status_message: None,
         headers: Default::default(),
         allowed_env_vars: Default::default(),
+        on_failure: None,
         enabled: true,
     };
     assert!(cfg.if_condition.is_none());
@@ -193,6 +195,7 @@ fn hook_config_no_blocking_field() {
         status_message: None,
         headers: Default::default(),
         allowed_env_vars: Default::default(),
+        on_failure: None,
         enabled: true,
     })
     .unwrap();
@@ -215,6 +218,7 @@ fn hook_config_no_priority_field() {
         status_message: None,
         headers: Default::default(),
         allowed_env_vars: Default::default(),
+        on_failure: None,
         enabled: true,
     })
     .unwrap();
@@ -222,6 +226,46 @@ fn hook_config_no_priority_field() {
         !json.contains("\"priority\""),
         "priority field must not exist in HookConfig"
     );
+}
+
+#[test]
+fn hook_failure_policy_serializes_lowercase_and_round_trips() {
+    for (policy, expected) in [
+        (HookFailurePolicy::Allow, "\"allow\""),
+        (HookFailurePolicy::Block, "\"block\""),
+    ] {
+        let json = serde_json::to_string(&policy).expect("serialize policy");
+        assert_eq!(json, expected);
+        let decoded: HookFailurePolicy = serde_json::from_str(&json).expect("deserialize policy");
+        assert_eq!(decoded, policy);
+    }
+}
+
+#[test]
+fn hook_config_on_failure_round_trips_and_omits_none() {
+    let mut cfg = HookConfig {
+        hook_type: HookCommandType::Command,
+        command: "true".into(),
+        if_condition: None,
+        timeout: None,
+        once: None,
+        r#async: None,
+        async_rewake: None,
+        status_message: None,
+        headers: Default::default(),
+        allowed_env_vars: Default::default(),
+        on_failure: Some(HookFailurePolicy::Block),
+        enabled: true,
+    };
+
+    let json = serde_json::to_string(&cfg).expect("serialize config");
+    assert!(json.contains("\"on_failure\":\"block\""));
+    let decoded: HookConfig = serde_json::from_str(&json).expect("deserialize config");
+    assert_eq!(decoded.on_failure, Some(HookFailurePolicy::Block));
+
+    cfg.on_failure = None;
+    let json = serde_json::to_string(&cfg).expect("serialize config without policy");
+    assert!(!json.contains("on_failure"));
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +287,7 @@ fn hook_matcher_with_matcher_string() {
             status_message: None,
             headers: Default::default(),
             allowed_env_vars: Default::default(),
+            on_failure: None,
             enabled: true,
         }],
     };
@@ -701,6 +746,28 @@ async fn exit_1_non_blocking_failure_returns_not_blocked() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn unsuccessful_hook_cannot_hide_stdin_broken_pipe() {
+    let registry = make_registry_with_command(HookEvent::PreToolUse, "exit 1", None, None);
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let result = registry
+        .execute_hooks(
+            HookEvent::PreToolUse,
+            serde_json::json!({
+                "tool_name": "Bash",
+                "tool_input": {"payload": "x".repeat(2 * 1024 * 1024)}
+            }),
+            &cwd,
+            "test-session",
+        )
+        .await;
+
+    assert!(
+        result.is_blocked(),
+        "BrokenPipe is ignorable only when the short-lived hook succeeds"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn post_tool_use_hook_fires_after_execution() {
     let tmp = tempfile::NamedTempFile::new().expect("temp file");
     // Normalize backslashes so `sh -c` on Windows doesn't eat them.
@@ -730,16 +797,42 @@ async fn post_tool_use_hook_fires_after_execution() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn hook_timeout_returns_not_blocked() {
+async fn pre_tool_timeout_blocks_by_default() {
+    let registry =
+        make_registry_with_command_and_timeout(HookEvent::PreToolUse, "sleep 60", 1, None);
+    let result = fire_pre_tool_use(&registry, pre_tool_input("Bash", "echo hello")).await;
+
+    assert!(result.is_blocked(), "gating hook timeout must fail closed");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn explicit_allow_policy_keeps_pre_tool_timeout_non_blocking() {
     let registry = make_registry_with_command_and_timeout(
         HookEvent::PreToolUse,
         "sleep 60",
-        1, // 1 second timeout
+        1,
+        Some(HookFailurePolicy::Allow),
     );
-    let input = pre_tool_input("Bash", "echo hello");
-    let result = fire_pre_tool_use(&registry, input).await;
-    // Timeout → non-blocking failure → not blocked
-    assert!(!result.is_blocked(), "timed-out hook must not block");
+    let result = fire_pre_tool_use(&registry, pre_tool_input("Bash", "echo hello")).await;
+
+    assert!(!result.is_blocked());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn post_tool_timeout_remains_non_blocking_by_default() {
+    let registry =
+        make_registry_with_command_and_timeout(HookEvent::PostToolUse, "sleep 60", 1, None);
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let result = registry
+        .execute_hooks(
+            HookEvent::PostToolUse,
+            serde_json::json!({"tool_name": "Bash", "result": "done"}),
+            &cwd,
+            "test-session",
+        )
+        .await;
+
+    assert!(!result.is_blocked());
 }
 
 // ---------------------------------------------------------------------------
@@ -830,17 +923,30 @@ async fn once_hook_removed_after_first_execution() {
 }
 
 // ---------------------------------------------------------------------------
-// async: true returns Allow immediately
+// async: true remains fire-and-forget only for fail-open hooks
 // ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
-async fn async_hook_returns_allow_immediately() {
-    // A slow command that would timeout if blocking, but async: true means it fires and forgets
+async fn async_pre_tool_hook_cannot_bypass_default_blocking_policy() {
+    let registry =
+        make_registry_with_async_command(HookEvent::PreToolUse, "exit 2", true, false, None);
+    let result = fire_pre_tool_use(&registry, pre_tool_input("Bash", "echo hello")).await;
+
+    assert!(
+        result.is_blocked(),
+        "async PreToolUse hook must execute synchronously when failures block"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn async_hook_with_allow_policy_returns_immediately() {
+    // Explicit fail-open policy preserves fire-and-forget behavior.
     let registry = make_registry_with_async_command(
         HookEvent::PreToolUse,
-        "sleep 10; exit 2", // Would block if run synchronously
-        true,               // async: true
-        false,              // async_rewake: false
+        "sleep 10; exit 2",
+        true,
+        false,
+        Some(HookFailurePolicy::Allow),
     );
     let cwd = std::env::current_dir().unwrap_or_default();
     let input = pre_tool_input("Bash", "echo hello");
@@ -851,10 +957,10 @@ async fn async_hook_returns_allow_immediately() {
         .await;
     let elapsed = start.elapsed();
 
-    assert!(!result.is_blocked(), "async hook must not block");
+    assert!(!result.is_blocked(), "fail-open async hook must not block");
     assert!(
         elapsed.as_secs() < 2,
-        "async hook must not block (took {}ms)",
+        "fail-open async hook must return immediately (took {}ms)",
         elapsed.as_millis()
     );
 }
@@ -886,6 +992,7 @@ async fn hooks_execute_in_config_order() {
                     status_message: None,
                     headers: Default::default(),
                     allowed_env_vars: Default::default(),
+                    on_failure: None,
                     enabled: true,
                 }],
             },
@@ -902,6 +1009,7 @@ async fn hooks_execute_in_config_order() {
                     status_message: None,
                     headers: Default::default(),
                     allowed_env_vars: Default::default(),
+                    on_failure: None,
                     enabled: true,
                 }],
             },
@@ -963,6 +1071,7 @@ fn make_registry_with_command(
                 status_message: None,
                 headers: Default::default(),
                 allowed_env_vars: Default::default(),
+                on_failure: None,
                 enabled: true,
             }],
         }],
@@ -975,6 +1084,7 @@ fn make_registry_with_command_and_timeout(
     event: HookEvent,
     cmd: &str,
     timeout_secs: u32,
+    on_failure: Option<HookFailurePolicy>,
 ) -> HookRegistry {
     let registry = HookRegistry::new();
     registry.register_matchers(
@@ -992,6 +1102,7 @@ fn make_registry_with_command_and_timeout(
                 status_message: None,
                 headers: Default::default(),
                 allowed_env_vars: Default::default(),
+                on_failure,
                 enabled: true,
             }],
         }],
@@ -1005,6 +1116,7 @@ fn make_registry_with_async_command(
     cmd: &str,
     is_async: bool,
     is_rewake: bool,
+    on_failure: Option<HookFailurePolicy>,
 ) -> HookRegistry {
     let registry = HookRegistry::new();
     registry.register_matchers(
@@ -1022,6 +1134,7 @@ fn make_registry_with_async_command(
                 status_message: None,
                 headers: Default::default(),
                 allowed_env_vars: Default::default(),
+                on_failure,
                 enabled: true,
             }],
         }],
@@ -1142,6 +1255,7 @@ async fn multiple_hooks_all_run_no_short_circuit() {
                     status_message: None,
                     headers: Default::default(),
                     allowed_env_vars: Default::default(),
+                    on_failure: None,
                     enabled: true,
                 }],
             },
@@ -1158,6 +1272,7 @@ async fn multiple_hooks_all_run_no_short_circuit() {
                     status_message: None,
                     headers: Default::default(),
                     allowed_env_vars: Default::default(),
+                    on_failure: None,
                     enabled: true,
                 }],
             },

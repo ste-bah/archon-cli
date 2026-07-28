@@ -78,7 +78,19 @@ impl EmbeddingProvider for LocalEmbedding {
     }
 }
 
-// Safety: fastembed::TextEmbedding is Send but not Sync by default.
-// We guard it behind a Mutex, making the outer struct safe for Sync.
-// The Mutex ensures only one thread accesses the model at a time.
-unsafe impl Sync for LocalEmbedding {}
+#[cfg(test)]
+mod tests {
+    use super::LocalEmbedding;
+
+    fn assert_send_sync<T: Send + Sync>() {}
+
+    #[test]
+    fn local_embedding_uses_native_send_sync_bounds() {
+        assert_send_sync::<fastembed::TextEmbedding>();
+        assert_send_sync::<LocalEmbedding>();
+
+        let source = include_str!("local.rs");
+        let forbidden_keyword = ["un", "safe"].concat();
+        assert!(!source.contains(&forbidden_keyword));
+    }
+}

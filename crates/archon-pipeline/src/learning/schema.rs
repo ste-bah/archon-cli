@@ -259,7 +259,13 @@ pub fn initialize_learning_schemas(db: &cozo::DbInstance) -> Result<()> {
     ];
 
     for script in schemas {
-        match db.run_script(script, Default::default(), ScriptMutability::Mutable) {
+        match super::run_script_guarded(
+            db,
+            script,
+            Default::default(),
+            ScriptMutability::Mutable,
+            "initialize pipeline learning schema",
+        ) {
             Ok(_) => {}
             Err(e) => {
                 let msg = e.to_string();

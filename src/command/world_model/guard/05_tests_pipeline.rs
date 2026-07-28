@@ -160,6 +160,7 @@
             ),
             decision,
             task_class: archon_world_model::RuntimeTaskClass::PipelineExecution,
+            classified_from_tool: false,
         }
     }
 

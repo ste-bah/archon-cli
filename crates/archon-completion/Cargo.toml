@@ -17,6 +17,7 @@ cozo.workspace = true
 regex.workspace = true
 archon-provenance = { path = "../archon-provenance" }
 archon-learning = { path = "../archon-learning" }
+archon-cozo = { path = "../archon-cozo" }
 
 [dev-dependencies]
 tokio.workspace = true

@@ -1,11 +1,8 @@
-//! TASK-TUI-100: Scaffold for `AgentDispatcher` and associated data models.
+//! Non-blocking `AgentDispatcher` lifecycle and routing contracts.
 //!
-//! This module owns the lifecycle of an in-flight agent turn so the input
-//! handler never blocks. It is **scaffold-only** in TASK-TUI-100: every
-//! method body is `todo!()` except trivial accessors (`queue_len`, `is_busy`).
-//! Behaviour lands in TASK-TUI-101 (`spawn_turn`), TASK-TUI-102
-//! (`cancel_current`), TASK-TUI-103 (`poll_completion`), and TASK-TUI-104
-//! (`switch_agent`).
+//! `session_loop` owns prompt, cancellation, and slash-command routing. This
+//! module tracks the in-flight turn, queues prompts FIFO, polls completion, and
+//! delegates agent switches without blocking input handling.
 //!
 //! Spec: `project-tasks/archon-fixes/tui_fixes/02-technical-spec.md` lines
 //! 65-97 (data_models) and 101-127 (api_contracts). Line budget: <300.
@@ -26,7 +23,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use archon_core::agent::TimestampedEvent;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::Sender;
 
 /// Abstraction over "something that can run a single agent turn". Defined
 /// locally (see module-level spec deviation note) so the dispatcher is
@@ -87,11 +84,12 @@ pub enum DispatchResult {
 pub enum TurnOutcome {
     Completed,
     Cancelled,
+    FinalizationBlocked(String),
     Failed(String),
 }
 
-/// Owns the lifecycle of an in-flight agent turn. The TUI event loop drives
-/// this dispatcher so the input handler never blocks on `process_message`.
+/// Owns the lifecycle of an in-flight agent turn. `session_loop` drives this
+/// dispatcher so prompt handling never blocks on `process_message`.
 ///
 /// Spec: 02-technical-spec.md:69-78.
 pub struct AgentDispatcher {
@@ -101,17 +99,13 @@ pub struct AgentDispatcher {
     pub pending_queue: std::collections::VecDeque<QueuedPrompt>,
     /// Router handle used for agent switching (TASK-TUI-104).
     pub router: std::sync::Arc<dyn AgentRouter>,
-    /// Unbounded producer side of the agent event channel
-    /// (see TECH-TUI-EVENTCHANNEL).
-    pub agent_event_tx: tokio::sync::mpsc::UnboundedSender<TimestampedEvent>,
+    /// Bounded producer side of the agent event channel.
+    pub agent_event_tx: tokio::sync::mpsc::Sender<TimestampedEvent>,
 }
 
 impl AgentDispatcher {
     /// Construct a new dispatcher with no in-flight turn and an empty queue.
-    pub fn new(
-        router: Arc<dyn AgentRouter>,
-        agent_event_tx: UnboundedSender<TimestampedEvent>,
-    ) -> Self {
+    pub fn new(router: Arc<dyn AgentRouter>, agent_event_tx: Sender<TimestampedEvent>) -> Self {
         Self {
             current_query: None,
             pending_queue: VecDeque::new(),
@@ -207,9 +201,8 @@ impl AgentDispatcher {
     /// the Context was never consumed and the in-scope text of TASK-TUI-103
     /// line 39 declares `poll_completion(&mut self) -> Option<TurnOutcome>`
     /// — a sync, non-blocking wrapper driven by
-    /// [`tokio::task::JoinHandle::is_finished`]. We drop the `_cx` argument
-    /// here. Nothing calls this yet (TASK-TUI-106 wires the event loop), so
-    /// the surface change is free.
+    /// [`tokio::task::JoinHandle::is_finished`]. The production `session_loop`
+    /// polls this method between input events.
     ///
     /// ## Ordering guarantee (sherlock-probe #2)
     ///
@@ -226,11 +219,8 @@ impl AgentDispatcher {
     ///
     /// ## Non-blocking contract (sherlock-probe #3)
     ///
-    /// The body contains zero `.await` calls. This MUST remain true — it is
-    /// the entire reason [`poll_completion`] is callable from inside a
-    /// `tokio::select!` arm in the event loop (TASK-TUI-106) without
-    /// starving other branches. If you add `.await`, you have broken the
-    /// subsystem's reason for existing.
+    /// The body contains zero `.await` calls. This MUST remain true so the
+    /// production session loop can poll completion without starving input.
     ///
     /// ## Panic mapping (sherlock-probe #6)
     ///
@@ -261,7 +251,15 @@ impl AgentDispatcher {
         use futures_util::future::FutureExt;
         let outcome = match handle.now_or_never() {
             Some(Ok(Ok(()))) => TurnOutcome::Completed,
-            Some(Ok(Err(app_err))) => TurnOutcome::Failed(format!("{app_err}")),
+            Some(Ok(Err(app_err))) => app_err
+                .downcast_ref::<archon_core::agent::AgentLoopError>()
+                .and_then(|error| match error {
+                    archon_core::agent::AgentLoopError::FinalizationBlocked(message) => {
+                        Some(TurnOutcome::FinalizationBlocked(message.clone()))
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| TurnOutcome::Failed(format!("{app_err}"))),
             Some(Err(join_err)) if join_err.is_cancelled() => TurnOutcome::Cancelled,
             Some(Err(join_err)) if join_err.is_panic() => {
                 let payload = join_err.into_panic();
@@ -308,7 +306,7 @@ impl AgentDispatcher {
 
     /// Switch the active agent via the router.
     /// Spec: 02-technical-spec.md:51
-    /// (`TuiEvent::SlashAgent → router.switch(agent_id) (non-blocking)`).
+    /// (`session_loop` routes `/agent` to `router.switch(agent_id)` without blocking).
     ///
     /// ## Thin delegation model
     ///
@@ -339,8 +337,7 @@ impl AgentDispatcher {
     /// ## Non-blocking contract
     ///
     /// Zero `.await` calls. `AgentRouter::switch` is a synchronous trait
-    /// method by design so this whole path stays sync-callable from the
-    /// event loop (TASK-TUI-106).
+    /// method by design so `session_loop` can route the command synchronously.
     pub fn switch_agent(&mut self, agent_id: &str) -> anyhow::Result<()> {
         self.router.switch(agent_id)
     }
@@ -348,9 +345,8 @@ impl AgentDispatcher {
     /// Read-only accessor: `true` iff a current turn is tracked and its
     /// [`tokio::task::JoinHandle`] has not yet finished.
     ///
-    /// Used by TASK-TUI-106's event-loop dispatch and by TASK-TUI-104 tests
-    /// that need to assert an in-flight turn survived a `switch_agent` call
-    /// without the dispatcher taking the handle.
+    /// Used by the production `session_loop` and by tests that assert an
+    /// in-flight turn survives `switch_agent` without taking the handle.
     pub fn current_handle_is_inflight(&self) -> bool {
         self.current_query
             .as_ref()

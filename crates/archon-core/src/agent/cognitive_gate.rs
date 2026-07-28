@@ -23,23 +23,16 @@ impl Agent {
         self.current_situation = Some(situation);
     }
 
-    pub(super) async fn try_complete_trivial_cognitive_turn(&mut self, user_input: &str) -> bool {
+    pub(super) async fn try_complete_trivial_cognitive_turn(&mut self) -> Option<String> {
         let Some(situation) = self.current_situation.as_ref() else {
-            return false;
+            return None;
         };
-        let Some(response) = direct_response_for(situation.kind) else {
-            return false;
-        };
-        self.send_event(AgentEvent::TextDelta(response.to_owned()))
-            .await;
-        self.state.add_assistant_message(vec![serde_json::json!({
-            "type": "text",
-            "text": response,
-        })]);
-        let active_model = self.active_model().await;
-        self.complete_turn_without_tools(user_input, 0, 0, 0, 0, &active_model)
-            .await;
-        true
+        let response = direct_response_for(situation.kind)?;
+        if !self.buffers_finalization_text() {
+            self.send_event(AgentEvent::TextDelta(response.to_owned()))
+                .await;
+        }
+        Some(response.to_owned())
     }
 
     pub(super) async fn cognitive_gate_allows_tool(
@@ -89,6 +82,7 @@ impl Agent {
             name: tool.name.clone(),
             id: tool.id.clone(),
             result: result.clone(),
+            transcript_summary: None,
         })
         .await;
         self.state

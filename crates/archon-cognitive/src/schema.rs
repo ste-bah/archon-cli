@@ -1,5 +1,3 @@
-use std::panic::{AssertUnwindSafe, catch_unwind};
-
 use cozo::{DbInstance, ScriptMutability};
 
 use crate::types::CognitiveError;
@@ -205,31 +203,21 @@ fn is_schema_version_relation_error(error: &CognitiveError) -> bool {
 }
 
 fn run_idempotent(db: &DbInstance, script: &str) -> Result<(), CognitiveError> {
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        db.run_script(script, Default::default(), ScriptMutability::Mutable)
-    }));
-    match result {
-        Ok(Ok(_)) => Ok(()),
-        Ok(Err(err)) => {
-            let msg = err.to_string();
-            if msg.contains("already exists") || msg.contains("conflicts") {
+    match crate::cozo_guard::run_script_guarded(
+        db,
+        script,
+        Default::default(),
+        ScriptMutability::Mutable,
+        "initialize cognitive schema",
+    ) {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            let message = error.to_string();
+            if message.contains("already exists") || message.contains("conflicts") {
                 Ok(())
             } else {
-                Err(CognitiveError::Schema(msg))
+                Err(CognitiveError::Schema(message))
             }
         }
-        Err(payload) => Err(CognitiveError::Schema(panic_payload_message(
-            payload.as_ref(),
-        ))),
-    }
-}
-
-fn panic_payload_message(payload: &(dyn std::any::Any + Send)) -> String {
-    if let Some(message) = payload.downcast_ref::<String>() {
-        message.clone()
-    } else if let Some(message) = payload.downcast_ref::<&'static str>() {
-        (*message).to_string()
-    } else {
-        "unknown panic payload".to_string()
     }
 }

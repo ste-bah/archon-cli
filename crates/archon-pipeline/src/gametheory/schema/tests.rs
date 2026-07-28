@@ -1,8 +1,34 @@
 use super::*;
 
-fn test_db() -> DbInstance {
+fn test_db() -> std::sync::Arc<DbInstance> {
     let path = format!("/tmp/test-gt-schema-{}.db", uuid::Uuid::new_v4());
+    archon_cozo::open_sqlite_guarded_instance(
+        &path,
+        "open game-theory schema test db",
+        archon_cozo::CozoGuardConfig::for_db_path(&path),
+    )
+    .unwrap()
+    .db_arc()
+}
+
+fn unregistered_test_db() -> DbInstance {
+    let path = format!("/tmp/test-gt-schema-raw-{}.db", uuid::Uuid::new_v4());
     DbInstance::new("sqlite", &path, "").unwrap()
+}
+
+#[test]
+fn persistent_schema_requires_bound_guard_config() {
+    let db = unregistered_test_db();
+
+    let error = ensure_gametheory_schema(&db)
+        .expect_err("unregistered persistent database must reject schema writes");
+
+    assert!(
+        error
+            .to_string()
+            .contains("database has no bound Cozo guard config"),
+        "unexpected schema guard failure: {error}"
+    );
 }
 
 #[test]

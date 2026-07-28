@@ -19,12 +19,13 @@ pub(super) async fn handle_resume_session(
         Ok(raw_messages) => {
             let messages = parse_raw_messages(&raw_messages);
             let count = messages.len();
-            agent.lock().await.clear_conversation_detached().await;
-            let _ = input_tui_tx.send(TuiEvent::TextDelta(format!(
-                "\n━━━ Resumed session {session_id} ({count} messages) ━━━\n\n"
-            )));
-            display_history(input_tui_tx, &messages);
-            agent.lock().await.restore_conversation(messages);
+            let banner = format!("\n━━━ Resumed session {session_id} ({count} messages) ━━━\n\n");
+            if send_history(input_tui_tx, &banner, &messages).is_ok() {
+                agent.lock().await.clear_conversation_detached().await;
+                agent.lock().await.restore_conversation(messages);
+            } else {
+                tracing::error!("failed to replay resumed session history");
+            }
         }
         Err(e) => {
             let _ = input_tui_tx.send(TuiEvent::Error(format!("Failed to load session: {e}")));
@@ -61,12 +62,13 @@ pub(super) async fn handle_truncate_session(
         Ok(raw_messages) => {
             let messages = parse_raw_messages(&raw_messages);
             let count = messages.len();
-            agent.lock().await.clear_conversation_detached().await;
-            let _ = input_tui_tx.send(TuiEvent::TextDelta(format!(
-                "\n━━━ Rewound to message {idx} ({count} messages kept) ━━━\n\n"
-            )));
-            display_history(input_tui_tx, &messages);
-            agent.lock().await.restore_conversation(messages);
+            let banner = format!("\n━━━ Rewound to message {idx} ({count} messages kept) ━━━\n\n");
+            if send_history(input_tui_tx, &banner, &messages).is_ok() {
+                agent.lock().await.clear_conversation_detached().await;
+                agent.lock().await.restore_conversation(messages);
+            } else {
+                tracing::error!("failed to replay rewound session history");
+            }
         }
         Err(e) => {
             let _ = input_tui_tx.send(TuiEvent::Error(format!(
@@ -84,25 +86,31 @@ fn parse_raw_messages(raw_messages: &[String]) -> Vec<serde_json::Value> {
         .collect()
 }
 
-fn display_history(
-    input_tui_tx: &archon_tui::event_channel::TuiEventSender,
-    messages: &[serde_json::Value],
-) {
+pub(crate) fn history_text(messages: &[serde_json::Value]) -> String {
+    let mut history = String::new();
     for msg in messages {
         let content = message_text_content(msg);
         if content.is_empty() {
             continue;
         }
-        let label = match msg["role"].as_str().unwrap_or("unknown") {
-            "user" => "> ",
-            "assistant" => "",
-            _ => "",
-        };
-        let _ = input_tui_tx.send(TuiEvent::TextDelta(format!("{label}{content}\n\n")));
+        if msg["role"].as_str() == Some("user") {
+            history.push_str("> ");
+        }
+        history.push_str(&content);
+        history.push_str("\n\n");
     }
-    let _ = input_tui_tx.send(TuiEvent::TextDelta(
-        "━━━ End of history — continue conversation ━━━\n\n".to_string(),
-    ));
+    history.push_str("━━━ End of history — continue conversation ━━━\n\n");
+    history
+}
+
+pub(crate) fn send_history(
+    input_tui_tx: &archon_tui::event_channel::TuiEventSender,
+    banner: &str,
+    messages: &[serde_json::Value],
+) -> Result<(), tokio::sync::mpsc::error::SendError<TuiEvent>> {
+    let mut text = banner.to_string();
+    text.push_str(&history_text(messages));
+    input_tui_tx.send(TuiEvent::TextDelta(text))
 }
 
 fn message_text_content(msg: &serde_json::Value) -> String {
@@ -114,5 +122,22 @@ fn message_text_content(msg: &serde_json::Value) -> String {
             .collect::<Vec<_>>()
             .join("\n"),
         _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn display_history_rejects_atomically_when_capacity_is_insufficient() {
+        let (tx, mut rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(1);
+        let messages = vec![serde_json::json!({
+            "role": "assistant",
+            "content": "x".repeat(archon_tui::event_channel::MAX_COALESCED_CONTENT_BYTES + 1)
+        })];
+
+        let result = super::send_history(&tx, "", &messages);
+
+        assert!(result.is_err());
+        assert!(rx.try_recv().is_err(), "partial history must not be queued");
     }
 }

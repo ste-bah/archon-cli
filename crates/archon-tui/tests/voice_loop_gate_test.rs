@@ -20,7 +20,7 @@ use tokio::sync::mpsc;
 #[tokio::test]
 async fn voice_loop_toggle_emits_voice_text_event() {
     let (trig_tx, trig_rx) = mpsc::channel::<VoiceTrigger>(4);
-    let (evt_tx, mut evt_rx) = mpsc::unbounded_channel::<TuiEvent>();
+    let (evt_tx, mut evt_rx) = mpsc::channel::<TuiEvent>(1);
 
     let audio: Arc<dyn AudioSource> = Arc::new(MockAudioSource::with_samples(vec![0.1_f32; 16000])); // 1 sec
     let stt: Arc<dyn SttProvider> = Arc::new(MockStt {
@@ -57,7 +57,7 @@ async fn voice_loop_toggle_emits_voice_text_event() {
 #[tokio::test]
 async fn voice_loop_second_toggle_starts_new_session() {
     let (trig_tx, trig_rx) = mpsc::channel::<VoiceTrigger>(4);
-    let (evt_tx, mut evt_rx) = mpsc::unbounded_channel::<TuiEvent>();
+    let (evt_tx, mut evt_rx) = mpsc::channel::<TuiEvent>(1);
 
     let audio: Arc<dyn AudioSource> = Arc::new(MockAudioSource::with_samples(vec![0.2_f32; 8000]));
     let stt: Arc<dyn SttProvider> = Arc::new(MockStt {
@@ -94,9 +94,49 @@ async fn voice_loop_second_toggle_starts_new_session() {
 }
 
 #[tokio::test]
+async fn voice_loop_waits_for_event_capacity_without_losing_transcript() {
+    let (trig_tx, trig_rx) = mpsc::channel::<VoiceTrigger>(4);
+    let (evt_tx, mut evt_rx) = mpsc::channel::<TuiEvent>(1);
+    evt_tx
+        .send(TuiEvent::GenerationStarted)
+        .await
+        .expect("fill event channel");
+    let audio: Arc<dyn AudioSource> = Arc::new(MockAudioSource::with_samples(vec![0.1_f32; 16000]));
+    let stt: Arc<dyn SttProvider> = Arc::new(MockStt {
+        response: "exact voice transcript".to_string(),
+    });
+    let pipeline = VoicePipeline::new(audio, stt, 0.0);
+    let handle = tokio::spawn(voice_loop(trig_rx, evt_tx, pipeline));
+
+    trig_tx.send(VoiceTrigger::Toggle).await.unwrap();
+    tokio::task::yield_now().await;
+    trig_tx.send(VoiceTrigger::Toggle).await.unwrap();
+    tokio::task::yield_now().await;
+    assert!(
+        !handle.is_finished(),
+        "full event channel must backpressure voice production"
+    );
+
+    assert!(matches!(
+        evt_rx.recv().await,
+        Some(TuiEvent::GenerationStarted)
+    ));
+    assert!(matches!(
+        evt_rx.recv().await,
+        Some(TuiEvent::VoiceText(text)) if text == "exact voice transcript"
+    ));
+
+    drop(trig_tx);
+    tokio::time::timeout(Duration::from_secs(2), handle)
+        .await
+        .expect("voice loop should exit")
+        .expect("voice loop task");
+}
+
+#[tokio::test]
 async fn voice_loop_vad_rejects_silent_audio() {
     let (trig_tx, trig_rx) = mpsc::channel::<VoiceTrigger>(4);
-    let (evt_tx, mut evt_rx) = mpsc::unbounded_channel::<TuiEvent>();
+    let (evt_tx, mut evt_rx) = mpsc::channel::<TuiEvent>(1);
 
     // Silent samples (below VAD threshold)
     let audio: Arc<dyn AudioSource> =

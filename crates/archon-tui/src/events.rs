@@ -334,15 +334,23 @@ pub struct McpServerEntry {
 pub enum TuiEvent {
     TextDelta(String),
     ThinkingDelta(String),
+    TransientThinkingDelta(String),
+    CommitThinkingPreview,
+    DiscardThinkingPreview,
     ToolStart {
         name: String,
         id: String,
+    },
+    ToolOutputChunk {
+        id: String,
+        chunk: String,
     },
     ToolComplete {
         name: String,
         id: String,
         success: bool,
         output: String,
+        transcript_summary: Option<String>,
     },
     TurnComplete {
         input_tokens: u64,
@@ -356,6 +364,8 @@ pub enum TuiEvent {
     /// Emitted by main.rs after a slash command completes.
     SlashCommandComplete,
     ThinkingToggle(bool),
+    /// Open the completed thinking archive overlay.
+    OpenThinkingArchive,
     ModelChanged(String),
     BtwResponse(String),
     PermissionPrompt {
@@ -423,9 +433,6 @@ pub enum TuiEvent {
         cols: u16,
         rows: u16,
     },
-    UserInput(String),
-    SlashCancel,
-    SlashAgent(String),
     Done,
     /// Notification overlay with a duration in milliseconds (TUI-330).
     NotificationTimeout(u64),
@@ -436,13 +443,18 @@ impl TuiEvent {
         match self {
             Self::TextDelta(_) => "TextDelta",
             Self::ThinkingDelta(_) => "ThinkingDelta",
+            Self::TransientThinkingDelta(_) => "TransientThinkingDelta",
+            Self::CommitThinkingPreview => "CommitThinkingPreview",
+            Self::DiscardThinkingPreview => "DiscardThinkingPreview",
             Self::ToolStart { .. } => "ToolStart",
+            Self::ToolOutputChunk { .. } => "ToolOutputChunk",
             Self::ToolComplete { .. } => "ToolComplete",
             Self::TurnComplete { .. } => "TurnComplete",
             Self::Error(_) => "Error",
             Self::GenerationStarted => "GenerationStarted",
             Self::SlashCommandComplete => "SlashCommandComplete",
             Self::ThinkingToggle(_) => "ThinkingToggle",
+            Self::OpenThinkingArchive => "OpenThinkingArchive",
             Self::ModelChanged(_) => "ModelChanged",
             Self::BtwResponse(_) => "BtwResponse",
             Self::PermissionPrompt { .. } => "PermissionPrompt",
@@ -469,9 +481,6 @@ impl TuiEvent {
             Self::VoiceText(_) => "VoiceText",
             Self::SetAgentInfo { .. } => "SetAgentInfo",
             Self::Resize { .. } => "Resize",
-            Self::UserInput(_) => "UserInput",
-            Self::SlashCancel => "SlashCancel",
-            Self::SlashAgent(_) => "SlashAgent",
             Self::Done => "Done",
             Self::NotificationTimeout(_) => "NotificationTimeout",
         }

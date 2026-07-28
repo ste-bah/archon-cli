@@ -1,16 +1,22 @@
 //! Knowledge base — ingest, organize, and query external documents.
 
+mod answer_storage;
 pub mod compile;
 pub mod ingest;
+mod ingest_storage;
 pub mod lint;
+mod provenance_storage;
 pub mod query;
+mod query_search;
 pub mod schema;
 
 pub use schema::{KbEdge, KbEdgeType, KbNode, KbNodeType};
 
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::Result;
+use archon_docs::embed::LocalEmbeddingProvider;
 use serde::{Deserialize, Serialize};
 
 // --- Supporting types ---
@@ -86,14 +92,42 @@ pub struct KbStats {
 pub struct KnowledgeBase {
     db: cozo::DbInstance,
     ingester: ingest::Ingester,
+    embedder: Option<Arc<dyn LocalEmbeddingProvider>>,
 }
 
 impl KnowledgeBase {
     /// Create a new knowledge base, ensuring the schema exists.
     pub fn new(db: cozo::DbInstance) -> Result<Self> {
+        if let Some(embedder) = archon_docs::embed::get_provider() {
+            return Self::from_shared_embedder(db, embedder);
+        }
         schema::ensure_kb_schema(&db)?;
         let ingester = ingest::Ingester::new(db.clone())?;
-        Ok(Self { db, ingester })
+        Ok(Self {
+            db,
+            ingester,
+            embedder: None,
+        })
+    }
+
+    pub fn with_embedder(
+        db: cozo::DbInstance,
+        embedder: Box<dyn LocalEmbeddingProvider>,
+    ) -> Result<Self> {
+        Self::from_shared_embedder(db, Arc::from(embedder))
+    }
+
+    fn from_shared_embedder(
+        db: cozo::DbInstance,
+        embedder: Arc<dyn LocalEmbeddingProvider>,
+    ) -> Result<Self> {
+        schema::ensure_kb_schema(&db)?;
+        let ingester = ingest::Ingester::with_embedder(db.clone(), Arc::clone(&embedder))?;
+        Ok(Self {
+            db,
+            ingester,
+            embedder: Some(embedder),
+        })
     }
 
     /// Ingest content from the given source into the knowledge base.
@@ -126,7 +160,10 @@ impl KnowledgeBase {
     /// Delegates to [`query::QueryEngine`] for search, context gathering,
     /// and synthesis, then converts the result into the public [`QueryResult`].
     pub async fn query(&self, question: &str, opts: &QueryOptions) -> Result<QueryResult> {
-        let engine = query::QueryEngine::new(self.db.clone());
+        let mut engine = query::QueryEngine::new(self.db.clone());
+        if let Some(embedder) = &self.embedder {
+            engine = engine.with_embedder(Arc::clone(embedder));
+        }
         let qa_opts = query::QaQueryOptions {
             top_k: opts.max_results,
             file_answer: false,
@@ -240,7 +277,8 @@ impl KnowledgeBase {
     /// Search for nodes matching the given query string (simple text search).
     ///
     /// This is the non-LLM search: filters nodes by title/content containing
-    /// the query substring. For semantic HNSW search, use `query()` instead.
+    /// the query substring. Use `query()` for text retrieval with graph context
+    /// and optional answer synthesis.
     pub async fn search(&self, query: &str, limit: usize) -> Result<Vec<KbNode>> {
         let mut params = std::collections::BTreeMap::new();
         params.insert("q".to_string(), cozo::DataValue::from(query));
@@ -265,7 +303,7 @@ impl KnowledgeBase {
     /// 1. Find all nodes that have a DerivedFrom edge pointing to this node
     /// 2. Delete those derived nodes (recursively)
     /// 3. Delete all edges where this node is source or target
-    /// 4. Delete the node itself
+    /// 4. Atomically remove the node and its owned content-hash reservation
     pub async fn delete(&self, node_id: &str) -> Result<()> {
         let mut params = std::collections::BTreeMap::new();
         params.insert("nid".to_string(), cozo::DataValue::from(node_id));
@@ -301,15 +339,62 @@ impl KnowledgeBase {
             )
             .map_err(|e| anyhow::anyhow!("delete edges failed: {}", e))?;
 
-        // 4. Delete the node itself
-        self.db.run_script(
+        // 4. Remove the node and its hash mapping in one transaction. The
+        // mapping is conditional so deleting a legacy duplicate never removes
+        // another node's keyed ownership reservation.
+        let _embedding_guard = schema::lock_embedding_state()?;
+        let has_embedding_storage = schema::kb_embedding_storage_exists(&self.db)?;
+        let transaction = self.db.multi_transaction(true);
+        let content_hash = transaction
+            .run_script(
+                "?[content_hash] := *kb_nodes{node_id, content_hash}, node_id = $nid",
+                params.clone(),
+            )
+            .map_err(|error| anyhow::anyhow!("read node before deletion failed: {error}"))?
+            .rows
+            .first()
+            .and_then(|row| row[0].get_str())
+            .map(str::to_owned);
+        if has_embedding_storage
+            && let Err(error) = transaction.run_script(
+                "?[node_id, embedding] := *kb_embeddings{node_id, embedding}, node_id = $nid\n                 :rm kb_embeddings { node_id => embedding }",
+                params.clone(),
+            )
+        {
+            let _ = transaction.abort();
+            return Err(anyhow::anyhow!("delete node embedding failed: {error}"));
+        }
+        if let Err(error) = transaction.run_script(
             "?[node_id, node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at] := \
              *kb_nodes{node_id, node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at}, \
              node_id = $nid \
              :rm kb_nodes { node_id => node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at }",
-            params,
-            cozo::ScriptMutability::Mutable,
-        ).map_err(|e| anyhow::anyhow!("delete node failed: {}", e))?;
+            params.clone(),
+        ) {
+            let _ = transaction.abort();
+            return Err(anyhow::anyhow!("delete node failed: {error}"));
+        }
+        if let Some(content_hash) = content_hash
+            && !content_hash.is_empty()
+        {
+            let mut hash_params = std::collections::BTreeMap::new();
+            hash_params.insert("chash".to_string(), cozo::DataValue::from(content_hash));
+            hash_params.insert("nid".to_string(), cozo::DataValue::from(node_id));
+            if let Err(error) = transaction.run_script(
+                "?[content_hash, node_id] := *kb_content_hashes{content_hash, node_id}, \
+                 content_hash = $chash, node_id = $nid \
+                 :rm kb_content_hashes { content_hash => node_id }",
+                hash_params,
+            ) {
+                let _ = transaction.abort();
+                return Err(anyhow::anyhow!(
+                    "delete content-hash mapping failed: {error}"
+                ));
+            }
+        }
+        transaction
+            .commit()
+            .map_err(|error| anyhow::anyhow!("commit node deletion failed: {error}"))?;
 
         Ok(())
     }

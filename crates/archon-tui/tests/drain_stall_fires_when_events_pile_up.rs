@@ -21,7 +21,11 @@ fn drain_stall_fires_when_events_pile_up() {
         Ordering::Relaxed,
     );
 
-    assert_eq!(tui_event_pending_count(), 5);
+    assert_eq!(
+        tui_event_pending_count(),
+        1,
+        "content-bearing deltas coalesce without losing pending work"
+    );
     assert!(warn_if_drain_stalled(DEFAULT_DRAIN_STALL_THRESHOLD_MS));
 }
 

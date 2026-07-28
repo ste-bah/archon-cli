@@ -147,8 +147,14 @@ pub fn insert_agent_evolution_proposal(
         DataValue::from(proposal.created_at.as_str()),
     );
 
-    db.run_script(proposal_put_script(), params, ScriptMutability::Mutable)
-        .map_err(|e| anyhow::anyhow!("insert agent_evolution_proposals failed: {e}"))?;
+    crate::cozo_guard::run_script_guarded(
+        db,
+        proposal_put_script(),
+        params,
+        ScriptMutability::Mutable,
+        "insert agent_evolution_proposals failed",
+    )
+    .map_err(|e| anyhow::anyhow!("insert agent_evolution_proposals failed: {e}"))?;
     Ok(())
 }
 
@@ -283,14 +289,8 @@ fn str_col(row: &[DataValue], index: usize) -> &str {
 mod tests {
     use super::*;
 
-    fn test_db() -> DbInstance {
-        let path = format!(
-            "/tmp/test-agent-evolution-proposals-{}.db",
-            uuid::Uuid::new_v4()
-        );
-        let db = DbInstance::new("sqlite", &path, "").unwrap();
-        crate::schema::ensure_learning_schema(&db).unwrap();
-        db
+    fn test_db() -> std::sync::Arc<DbInstance> {
+        crate::cozo_guard::test_sqlite_db("test-agent-evolution-proposals")
     }
 
     #[test]

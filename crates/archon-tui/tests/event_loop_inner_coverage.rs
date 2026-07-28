@@ -20,7 +20,10 @@
 
 use std::time::Duration;
 
-use archon_tui::app::{AppConfig, McpServerEntry, SessionPickerEntry, TuiEvent, run_with_backend};
+use archon_tui::app::{
+    AppConfig, McpServerEntry, SessionPickerEntry, TuiEvent,
+    run_with_backend_without_terminal_events,
+};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use tokio::sync::mpsc;
@@ -39,9 +42,9 @@ fn buffer_nonempty(terminal: &Terminal<TestBackend>) -> bool {
     false
 }
 
-/// Drive `run_with_backend` through a wide event surface and verify the
-/// loop exits cleanly on `TuiEvent::Done`. Each `send` below hits a
-/// distinct arm of the event dispatch match inside `run_inner`.
+/// Drive the explicitly headless backend seam through a wide event surface and verify the
+/// loop exits cleanly on `TuiEvent::Done`. Each `send` below hits a distinct arm of the
+/// event dispatch match inside `run_inner`.
 ///
 /// TASK-200: `#[serial]` because this test dispatches `TuiEvent::Resize
 /// { cols: 100, rows: 30 }` which writes to the process-global
@@ -50,7 +53,7 @@ fn buffer_nonempty(terminal: &Terminal<TestBackend>) -> bool {
 /// `#[serial]` tests elsewhere in the crate's test graph.
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn run_with_backend_walks_wide_event_surface() {
+async fn headless_backend_walks_wide_event_surface() {
     let (event_tx, event_rx) = archon_tui::event_channel::bounded_tui_event_channel();
     let (input_tx, _input_rx) = mpsc::channel::<String>(16);
 
@@ -94,6 +97,7 @@ async fn run_with_backend_walks_wide_event_surface() {
             id: "tool-1".into(),
             success: true,
             output: "ok".into(),
+            transcript_summary: None,
         });
         let _ = event_tx.send(TuiEvent::ToolStart {
             name: "Edit".into(),
@@ -104,6 +108,7 @@ async fn run_with_backend_walks_wide_event_surface() {
             id: "tool-2".into(),
             success: false,
             output: "permission denied".into(),
+            transcript_summary: None,
         });
         // Turn complete — triggers pending_input drain path.
         let _ = event_tx.send(TuiEvent::TurnComplete {
@@ -158,11 +163,6 @@ async fn run_with_backend_walks_wide_event_surface() {
             cols: 100,
             rows: 30,
         });
-        // TUI-106 no-op arms (run_tui path just drops these) — still needs
-        // to hit the match arms.
-        let _ = event_tx.send(TuiEvent::UserInput("ignored in this loop".into()));
-        let _ = event_tx.send(TuiEvent::SlashCancel);
-        let _ = event_tx.send(TuiEvent::SlashAgent("reviewer".into()));
         // Let the TUI settle, then terminate.
         tokio::time::sleep(Duration::from_millis(500)).await;
         let _ = event_tx.send(TuiEvent::Done);
@@ -170,7 +170,7 @@ async fn run_with_backend_walks_wide_event_surface() {
 
     let result = tokio::time::timeout(
         Duration::from_secs(10),
-        run_with_backend(config, &mut terminal),
+        run_with_backend_without_terminal_events(config, &mut terminal),
     )
     .await;
 
@@ -179,7 +179,7 @@ async fn run_with_backend_walks_wide_event_surface() {
     let run_result = result.expect("run_with_backend timed out");
     assert!(
         run_result.is_ok(),
-        "run_with_backend returned error: {:?}",
+        "headless backend returned error: {:?}",
         run_result.err()
     );
     assert!(

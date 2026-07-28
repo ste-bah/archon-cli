@@ -38,7 +38,8 @@ impl CodexAutoProvider {
             return Ok(Arc::clone(&self.app_server));
         }
         let provider = self.direct_provider().await?;
-        self.record_tool_fallback_selected(request.tools.len());
+        self.record_tool_fallback_selected(request.tools.len())
+            .await;
         Ok(provider)
     }
 
@@ -48,17 +49,23 @@ impl CodexAutoProvider {
             return Ok(Arc::clone(provider));
         }
         let provider =
-            super::codex_provider::build_direct_codex_provider(&self.config, &self.surface)
+            match super::codex_provider::build_direct_codex_provider(&self.config, &self.surface)
                 .await
-                .map_err(|error| {
-                    self.record_tool_fallback_denied("codex_direct_fallback_provider_unavailable");
-                    LlmError::Auth(format!("direct Codex fallback unavailable: {error:#}"))
-                })?;
+            {
+                Ok(provider) => provider,
+                Err(error) => {
+                    self.record_tool_fallback_denied("codex_direct_fallback_provider_unavailable")
+                        .await;
+                    return Err(LlmError::Auth(format!(
+                        "direct Codex fallback unavailable: {error:#}"
+                    )));
+                }
+            };
         *direct = Some(Arc::clone(&provider));
         Ok(provider)
     }
 
-    fn record_tool_fallback_selected(&self, tool_count: usize) {
+    async fn record_tool_fallback_selected(&self, tool_count: usize) {
         if !self.emit_events {
             return;
         }
@@ -68,10 +75,11 @@ impl CodexAutoProvider {
             "direct",
             "codex_tool_use_requires_archon_direct_runtime",
             fallback_metadata(&self.surface, tool_count),
-        );
+        )
+        .await;
     }
 
-    fn record_tool_fallback_denied(&self, reason_code: &'static str) {
+    async fn record_tool_fallback_denied(&self, reason_code: &'static str) {
         if !self.emit_events {
             return;
         }
@@ -81,7 +89,8 @@ impl CodexAutoProvider {
             "direct",
             reason_code,
             fallback_metadata(&self.surface, 0),
-        );
+        )
+        .await;
     }
 
     #[cfg(test)]

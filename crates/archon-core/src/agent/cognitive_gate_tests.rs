@@ -35,7 +35,7 @@ impl LlmProvider for QuietLlmProvider {
 }
 
 fn agent_with_cognitive_store(root: &std::path::Path) -> Agent {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     let mut config = AgentConfig {
         working_dir: root.to_path_buf(),
         ..AgentConfig::default()

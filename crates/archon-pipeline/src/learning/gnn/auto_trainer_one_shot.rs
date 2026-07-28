@@ -59,7 +59,7 @@ pub fn run_auto_trainer_once(
             let rolled_back = outcome.final_loss > outcome.initial_loss * 1.1
                 || outcome.final_loss.is_nan()
                 || outcome.cancelled;
-            let _ = insert_training_run(
+            if let Err(error) = insert_training_run(
                 &db,
                 TrainingRunRecord {
                     run_id: &run_id,
@@ -72,7 +72,16 @@ pub fn run_auto_trainer_once(
                     rolled_back,
                     error: None,
                 },
-            );
+            ) {
+                return OneShotTrainerReport {
+                    decision: decision.reason,
+                    trained: false,
+                    failed: true,
+                    no_data_reason: no_data,
+                    run_id: Some(run_id),
+                    summary: format!("failed to persist GNN training run: {error}"),
+                };
+            }
             let summary = if let Some(reason) = &no_data {
                 format!("no training data: {reason}")
             } else {
@@ -94,14 +103,20 @@ pub fn run_auto_trainer_once(
             }
         }
         Err(error) => {
-            let _ = insert_error_run(&db, &run_id, started_ms, &decision.reason, &error);
+            let summary = match insert_error_run(&db, &run_id, started_ms, &decision.reason, &error)
+            {
+                Ok(()) => format!("training failed: {error}"),
+                Err(persistence_error) => format!(
+                    "training failed: {error}; failed to persist GNN training run: {persistence_error}"
+                ),
+            };
             OneShotTrainerReport {
                 decision: decision.reason,
                 trained: false,
                 failed: true,
                 no_data_reason: None,
                 run_id: Some(run_id),
-                summary: format!("training failed: {error}"),
+                summary,
             }
         }
     }
@@ -291,8 +306,14 @@ fn insert_training_run(db: &DbInstance, record: TrainingRunRecord<'_>) -> Result
             .map(cozo::DataValue::from)
             .unwrap_or(cozo::DataValue::Null),
     );
-    db.run_script(TRAINING_RUN_INSERT, params, ScriptMutability::Mutable)
-        .map_err(|error| format!("insert gnn training run: {error}"))?;
+    crate::learning::run_script_guarded(
+        db,
+        TRAINING_RUN_INSERT,
+        params,
+        ScriptMutability::Mutable,
+        "insert GNN training run",
+    )
+    .map_err(|error| format!("insert gnn training run: {error}"))?;
     Ok(())
 }
 
@@ -358,6 +379,66 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn enabled_test_params() -> AutoTrainerBuildParams {
+        AutoTrainerBuildParams {
+            at_config: AutoTrainerConfig {
+                enabled: true,
+                first_run_threshold: 0,
+                ..Default::default()
+            },
+            initial_total_memories: 0,
+            initial_total_corrections: 0,
+            training_config: Default::default(),
+            gnn_input_dim: 8,
+            gnn_output_dim: 8,
+            gnn_num_layers: 1,
+            gnn_attention_heads: 1,
+            gnn_max_nodes: 8,
+            gnn_use_residual: false,
+            gnn_use_layer_norm: false,
+            gnn_activation: "relu".into(),
+            gnn_weight_seed: 42,
+        }
+    }
+
+    #[test]
+    fn training_error_reports_error_run_persistence_failure() {
+        let db = Arc::new(DbInstance::new("mem", "", "").unwrap());
+
+        let report =
+            run_auto_trainer_once(enabled_test_params(), db, DurableTrainerSnapshot::default());
+
+        assert!(report.failed);
+        assert!(
+            report
+                .summary
+                .contains("failed to persist GNN training run")
+        );
+    }
+
+    #[test]
+    fn successful_training_reports_run_persistence_failure() {
+        let db = Arc::new(DbInstance::new("mem", "", "").unwrap());
+        crate::learning::schema::initialize_learning_schemas(&db).unwrap();
+        db.run_script(
+            "{::remove gnn_training_runs}",
+            Default::default(),
+            ScriptMutability::Mutable,
+        )
+        .unwrap();
+
+        let report =
+            run_auto_trainer_once(enabled_test_params(), db, DurableTrainerSnapshot::default());
+
+        assert!(report.failed);
+        assert!(!report.trained);
+        assert!(
+            report
+                .summary
+                .contains("failed to persist GNN training run")
+        );
+    }
 
     #[test]
     fn first_run_opens_when_memory_gate_is_met() {

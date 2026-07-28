@@ -4,8 +4,8 @@ use std::time::Duration;
 use serde_json::json;
 
 use super::*;
-use crate::provider_env::ProviderEnvPolicy;
-use crate::tool::ToolContext;
+use crate::provider_env::{ProviderEnvPolicy, ProviderEnvSource};
+use crate::tool::{PermissionLevel, ToolContext};
 
 fn ctx() -> ToolContext {
     ToolContext {
@@ -19,7 +19,7 @@ async fn printf_format_starting_with_dash_succeeds() {
     let tool = BashTool {
         timeout_secs: 1,
         max_output_bytes: 1024,
-        provider_env: None,
+        ..Default::default()
     };
 
     let result = tool
@@ -35,7 +35,7 @@ async fn printf_wrapper_preserves_dash_dash_and_v() {
     let tool = BashTool {
         timeout_secs: 1,
         max_output_bytes: 1024,
-        provider_env: None,
+        ..Default::default()
     };
 
     let result = tool
@@ -57,7 +57,7 @@ async fn timeout_kills_background_process_group() {
     let tool = BashTool {
         timeout_secs: 1,
         max_output_bytes: 1024,
-        provider_env: None,
+        ..Default::default()
     };
     let result = tool
         .execute(
@@ -91,6 +91,37 @@ async fn timeout_kills_background_process_group() {
         .arg(&pid)
         .status();
     panic!("background sleep process survived Bash timeout: pid={pid}");
+}
+
+#[test]
+fn provider_env_source_preserves_bash_configuration() {
+    let tool = BashTool {
+        timeout_secs: 17,
+        max_output_bytes: 23,
+        safe_commands: vec!["echo safe".to_string()],
+        risky_commands: vec!["echo risky".to_string()],
+        dangerous_commands: vec!["echo dangerous".to_string()],
+        provider_env: None,
+    }
+    .with_provider_env_source(ProviderEnvSource::Policy(ProviderEnvPolicy::new(vec![
+        "ARCHON_TEST_PROVIDER_KEY".to_string(),
+    ])));
+
+    assert_eq!(tool.timeout_secs, 17);
+    assert_eq!(tool.max_output_bytes, 23);
+    assert_eq!(
+        tool.permission_level(&json!({"command": "echo safe value"})),
+        PermissionLevel::Safe
+    );
+    assert_eq!(
+        tool.permission_level(&json!({"command": "echo risky value"})),
+        PermissionLevel::Risky
+    );
+    assert_eq!(
+        tool.permission_level(&json!({"command": "echo dangerous value"})),
+        PermissionLevel::Dangerous
+    );
+    assert!(tool.provider_env.is_some());
 }
 
 #[tokio::test]
@@ -213,7 +244,7 @@ async fn fresh_worktree_cargo_build_generates_tree_sitter_outputs() {
     let tool = BashTool {
         timeout_secs: 1_200,
         max_output_bytes: 1_048_576,
-        provider_env: None,
+        ..Default::default()
     };
     let result = tool
         .execute(
@@ -241,6 +272,72 @@ async fn fresh_worktree_cargo_build_generates_tree_sitter_outputs() {
         "tree-sitter build output was not generated: {}",
         result.content
     );
+}
+
+#[test]
+fn bash_program_selection_prefers_path_discovery() {
+    let bash = PathBuf::from("/usr/local/bin/bash");
+    let bash_exe = PathBuf::from(r"C:\Program Files\Git\bin\bash.exe");
+    assert_eq!(
+        select_bash_program(Some(bash.clone()), Some(bash_exe.clone())),
+        bash
+    );
+    assert_eq!(select_bash_program(None, Some(bash_exe.clone())), bash_exe);
+    assert_eq!(select_bash_program(None, None), PathBuf::from("bash"));
+}
+
+#[tokio::test]
+async fn pipe_reader_caps_storage_and_drains_remaining_bytes() {
+    let (mut writer, reader) = tokio::io::duplex(64);
+    let byte_count = Arc::new(AtomicUsize::new(0));
+    let task = spawn_pipe_reader(
+        Some(reader),
+        Arc::new(AtomicUsize::new(5)),
+        Arc::clone(&byte_count),
+    );
+    tokio::spawn(async move {
+        use tokio::io::AsyncWriteExt;
+        writer.write_all(b"abcdefghij").await.unwrap();
+    })
+    .await
+    .unwrap();
+
+    let captured = task.await.unwrap();
+    assert_eq!(captured.bytes, b"abcde");
+    assert!(captured.truncated);
+    assert_eq!(byte_count.load(Ordering::Relaxed), 10);
+}
+
+#[tokio::test]
+async fn pipe_readers_share_one_total_capture_budget() {
+    let remaining = Arc::new(AtomicUsize::new(6));
+    let (mut stdout_writer, stdout_reader) = tokio::io::duplex(64);
+    let (mut stderr_writer, stderr_reader) = tokio::io::duplex(64);
+    let stdout_task = spawn_pipe_reader(
+        Some(stdout_reader),
+        Arc::clone(&remaining),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let stderr_task = spawn_pipe_reader(
+        Some(stderr_reader),
+        remaining,
+        Arc::new(AtomicUsize::new(0)),
+    );
+
+    let stdout_write = tokio::spawn(async move {
+        use tokio::io::AsyncWriteExt;
+        stdout_writer.write_all(b"stdout").await.unwrap();
+    });
+    let stderr_write = tokio::spawn(async move {
+        use tokio::io::AsyncWriteExt;
+        stderr_writer.write_all(b"stderr").await.unwrap();
+    });
+    stdout_write.await.unwrap();
+    stderr_write.await.unwrap();
+
+    let (stdout, stderr) = join_output(stdout_task, stderr_task).await;
+    assert_eq!(stdout.bytes.len() + stderr.bytes.len(), 6);
+    assert!(stdout.truncated || stderr.truncated);
 }
 
 #[cfg(unix)]

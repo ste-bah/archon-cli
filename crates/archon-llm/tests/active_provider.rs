@@ -14,11 +14,62 @@ use std::sync::Arc;
 
 use archon_llm::active::ActiveProvider;
 use archon_llm::config::LlmConfig;
-use archon_llm::provider::LlmProvider;
-use archon_llm::providers::ProviderError;
+use archon_llm::provider::{
+    LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature,
+};
+use archon_llm::providers::{NATIVE_REGISTRY, ProviderError};
+use archon_llm::retry::RetryPolicy;
+use archon_llm::streaming::StreamEvent;
 
 fn http() -> Arc<reqwest::Client> {
     Arc::new(reqwest::Client::new())
+}
+
+struct AnthropicCacheProvider;
+
+#[async_trait::async_trait]
+impl LlmProvider for AnthropicCacheProvider {
+    fn name(&self) -> &str {
+        "anthropic"
+    }
+
+    fn models(&self) -> Vec<ModelInfo> {
+        Vec::new()
+    }
+
+    fn supports_feature(&self, _: ProviderFeature) -> bool {
+        false
+    }
+
+    fn supports_anthropic_message_caching(&self) -> bool {
+        true
+    }
+
+    async fn complete(&self, _: LlmRequest) -> Result<LlmResponse, LlmError> {
+        unreachable!()
+    }
+
+    async fn stream(
+        &self,
+        _: LlmRequest,
+    ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
+        unreachable!()
+    }
+}
+
+#[test]
+fn active_provider_preserves_current_anthropic_message_cache_capability() {
+    let descriptor = NATIVE_REGISTRY
+        .get("anthropic")
+        .expect("Anthropic descriptor exists");
+    let active = ActiveProvider::from_parts(
+        Arc::new(AnthropicCacheProvider),
+        descriptor,
+        http(),
+        RetryPolicy::default(),
+    );
+
+    assert!(active.supports_anthropic_message_caching());
 }
 
 /// Set a unique env var for the duration of a closure. Safe under

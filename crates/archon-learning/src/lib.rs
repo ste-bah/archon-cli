@@ -7,6 +7,9 @@ pub mod apply;
 pub mod cozo_guard;
 pub mod errors;
 pub mod events;
+pub mod llm_call_usage;
+#[cfg(test)]
+mod llm_call_usage_tests;
 pub mod manifest;
 pub mod memory_promotion_candidates;
 pub mod models;

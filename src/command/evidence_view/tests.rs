@@ -3,9 +3,7 @@ use crate::command::registry::default_registry;
 use crate::command::test_support::{CtxBuilder, drain_tui_events};
 use archon_docs::models::{ChunkArtifact, DocumentStatus, SourceDocument};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-
-static ENV_LOCK: Mutex<()> = Mutex::new(());
+use std::sync::Arc;
 
 #[test]
 fn default_registry_registers_evidence_view_primaries() {
@@ -36,7 +34,7 @@ fn docs_view_handler_reads_fresh_docs_db_not_ctx_cozo() {
         let db = test_docs_db_at(path);
         seed_doc(&db);
         drop(db);
-        let stale_ctx_db = Arc::new(test_docs_db());
+        let stale_ctx_db = test_docs_db();
         let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(stale_ctx_db).build();
 
         DocsViewHandler.execute(&mut ctx, &[]).unwrap();
@@ -57,7 +55,7 @@ fn learning_view_handler_reads_configured_learning_db_not_ctx_cozo() {
         let db = test_learning_db_at(path);
         seed_learning_proposal(&db);
         drop(db);
-        let stale_ctx_db = Arc::new(test_learning_db());
+        let stale_ctx_db = test_learning_db();
         let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(stale_ctx_db).build();
 
         LearningViewHandler.execute(&mut ctx, &[]).unwrap();
@@ -78,7 +76,7 @@ fn docs_status_reads_fresh_docs_db_not_ctx_cozo() {
         let db = test_docs_db_at(path);
         seed_doc(&db);
         drop(db);
-        let stale_ctx_db = Arc::new(test_docs_db());
+        let stale_ctx_db = test_docs_db();
         let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(stale_ctx_db).build();
 
         DocsViewHandler
@@ -101,7 +99,7 @@ fn docs_chunks_reads_fresh_docs_db_not_ctx_cozo() {
         let db = test_docs_db_at(path);
         seed_doc(&db);
         drop(db);
-        let stale_ctx_db = Arc::new(test_docs_db());
+        let stale_ctx_db = test_docs_db();
         let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(stale_ctx_db).build();
 
         DocsViewHandler
@@ -124,7 +122,15 @@ fn with_temp_env_db<F>(key: &'static str, f: F)
 where
     F: FnOnce(&Path),
 {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _learning_db_env_guard = if key == "ARCHON_LEARNING_DB_PATH" {
+        Some(
+            crate::command::store_paths::LEARNING_DB_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()),
+        )
+    } else {
+        None
+    };
     let previous = std::env::var_os(key);
     let path = PathBuf::from(format!(
         "/tmp/evidence-view-{key}-{}.db",
@@ -144,24 +150,35 @@ where
     }
 }
 
-fn test_docs_db() -> DbInstance {
+fn test_docs_db() -> Arc<DbInstance> {
     let path = format!("/tmp/test-docs-slash-{}.db", uuid::Uuid::new_v4());
     test_docs_db_at(Path::new(&path))
 }
 
-fn test_docs_db_at(path: &Path) -> DbInstance {
-    let db = DbInstance::new("sqlite", path.to_str().unwrap_or(""), "").unwrap();
+fn test_docs_db_at(path: &Path) -> Arc<DbInstance> {
+    let config = archon_cozo::CozoGuardConfig::for_db_path(path);
+    let db = archon_cozo::open_sqlite_guarded_instance(
+        path.to_str().unwrap_or(""),
+        "open evidence-view document test db",
+        config,
+    )
+    .unwrap()
+    .db_arc();
     archon_docs::schema::ensure_doc_schema(&db).unwrap();
     db
 }
 
-fn test_learning_db() -> DbInstance {
+fn test_learning_db() -> Arc<DbInstance> {
     let path = format!("/tmp/test-learning-slash-{}.db", uuid::Uuid::new_v4());
     test_learning_db_at(Path::new(&path))
 }
 
-fn test_learning_db_at(path: &Path) -> DbInstance {
-    let db = DbInstance::new("sqlite", path.to_str().unwrap_or(""), "").unwrap();
+fn test_learning_db_at(path: &Path) -> Arc<DbInstance> {
+    let db = archon_learning::cozo_guard::open_sqlite_guarded(
+        path.to_str().unwrap_or(""),
+        "open evidence-view learning test db",
+    )
+    .unwrap();
     archon_learning::schema::ensure_learning_schema(&db).unwrap();
     db
 }
