@@ -85,11 +85,21 @@ pub enum PatchError {
     // The remedy rides with the rejection: an agent that only learns "too many
     // lines" grows the file again on the next attempt (observed 514 -> 572 ->
     // 900 across three remediations). It owns the declared target's module
-    // directory, so splitting is in scope — say so here.
+    // directory, so relocating is in scope — say so, and say WHERE.
+    //
+    // Both counts are stated because `lines` is the hypothetical post-patch
+    // size, not the file's. Reporting it alone read as a fact about the file
+    // and produced repeated misdiagnosis: a 483-line file described as 690.
     #[error(
-        "source file '{path}' is {lines} lines, exceeds max {max}; the ENTIRE patch is rejected. Split '{path}' into its module directory (which you already own) and re-export from the original — do not grow it further"
+        "your patch would make source file '{path}' {lines} lines (currently {baseline}, cap {max}); the ENTIRE patch is rejected. Put the new code in a new file under '{module_dir}' (which you already own) and re-export it from '{path}' — do not grow '{path}' further"
     )]
-    FileTooManyLines { path: String, lines: u32, max: u32 },
+    FileTooManyLines {
+        path: String,
+        lines: u32,
+        baseline: u32,
+        max: u32,
+        module_dir: String,
+    },
     #[error("function '{function}' in '{path}' has complexity {complexity}, exceeds max {max}")]
     FunctionTooComplex {
         path: String,

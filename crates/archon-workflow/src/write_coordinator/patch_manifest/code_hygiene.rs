@@ -35,7 +35,8 @@ fn validate_line_count(
     if lines <= max {
         return Ok(());
     }
-    if let Some(baseline_lines) = baseline_line_count(baseline)
+    let baseline_lines = baseline_line_count(baseline);
+    if let Some(baseline_lines) = baseline_lines
         && lines <= baseline_lines
     {
         return Ok(());
@@ -43,8 +44,29 @@ fn validate_line_count(
     Err(PatchError::FileTooManyLines {
         path: path.to_string(),
         lines,
+        // The CURRENT size, so the message cannot be read as a statement about
+        // the file. `lines` is the hypothetical post-patch count, and reporting
+        // it alone made a 483-line file look like a 690-line one — a
+        // misdiagnosis that cost two agent rounds and misled two humans with
+        // full repo access on three separate occasions in one day.
+        baseline: baseline_lines.unwrap_or(0),
         max,
+        module_dir: module_directory_for(path),
     })
+}
+
+/// The module directory a declared target owns: `a/b.rs` owns `a/b/`.
+///
+/// Named in the rejection because "split this file" is a refactor an agent
+/// cannot land inside one remediation round, while "put the new code in
+/// `a/b/`" is a single-round action. Observed live: agents trimmed an
+/// oversized addition twice rather than relocating it, because the message
+/// asked for a split and never said where new code could go.
+fn module_directory_for(path: &str) -> String {
+    match path.rsplit_once('.') {
+        Some((stem, _)) => format!("{stem}/"),
+        None => format!("{path}/"),
+    }
 }
 
 fn baseline_line_count(text: Option<&str>) -> Option<u32> {

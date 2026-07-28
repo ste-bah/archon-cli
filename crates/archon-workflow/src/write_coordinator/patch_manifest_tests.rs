@@ -251,10 +251,21 @@ fn source_file_too_many_lines_rejected() {
     std::fs::write(plan.isolated_root.join("src/lib.rs"), body).expect("large source");
     let captured = manual_capture(b"+small patch\n", &["src/lib.rs"]);
     match validate_patch(&captured, &plan, &cfg(), "ok") {
-        Err(PatchError::FileTooManyLines { path, lines, max }) => {
+        Err(PatchError::FileTooManyLines {
+            path,
+            lines,
+            baseline,
+            max,
+            module_dir,
+        }) => {
             assert_eq!(path, "src/lib.rs");
             assert_eq!(lines, 501);
+            // The canonical file is ONE line; only the patch would make it 501.
+            // The old message said "is 501 lines" about a 1-line file, which is
+            // the misreading this fixture now pins.
+            assert_eq!(baseline, 1);
             assert_eq!(max, 500);
+            assert_eq!(module_dir, "src/lib/");
         }
         other => panic!("expected FileTooManyLines, got {other:?}"),
     }

@@ -72,10 +72,20 @@ fn existing_over_limit_file_growth_is_rejected() {
         &WriteCoordinatorConfig::default(),
         "ok",
     ) {
-        Err(PatchError::FileTooManyLines { path, lines, max }) => {
+        Err(PatchError::FileTooManyLines {
+            path,
+            lines,
+            baseline,
+            max,
+            module_dir,
+        }) => {
             assert_eq!(path, "src/lib.rs");
             assert_eq!(lines, 601);
+            // The file is 600; only the patch would make it 601. Stating both
+            // is what stops the rejection reading as a fact about the file.
+            assert_eq!(baseline, 600);
             assert_eq!(max, 500);
+            assert_eq!(module_dir, "src/lib/");
         }
         other => panic!("expected FileTooManyLines, got {other:?}"),
     }
@@ -94,11 +104,44 @@ fn new_over_limit_file_is_rejected() {
         &WriteCoordinatorConfig::default(),
         "ok",
     ) {
-        Err(PatchError::FileTooManyLines { path, lines, max }) => {
+        Err(PatchError::FileTooManyLines {
+            path,
+            lines,
+            baseline,
+            max,
+            module_dir,
+        }) => {
             assert_eq!(path, "src/new.rs");
             assert_eq!(lines, 501);
+            // A new file has no baseline: 0 rather than a misleading number.
+            assert_eq!(baseline, 0);
             assert_eq!(max, 500);
+            assert_eq!(module_dir, "src/new/");
         }
         other => panic!("expected FileTooManyLines, got {other:?}"),
     }
+}
+
+/// The rendered message must state BOTH counts and name a destination.
+///
+/// Stating only the post-patch size read as a fact about the file: a 483-line
+/// file was repeatedly described as 690, which misled two humans with full
+/// repo access three times in one day and cost two agent remediation rounds.
+/// And "split this file" is a refactor an agent cannot land inside one round,
+/// whereas "put it under src/lib/" is a single action.
+#[test]
+fn the_rejection_states_both_sizes_and_where_new_code_goes() {
+    let error = PatchError::FileTooManyLines {
+        path: "src/lib.rs".to_string(),
+        lines: 690,
+        baseline: 483,
+        max: 500,
+        module_dir: "src/lib/".to_string(),
+    };
+    let rendered = error.to_string();
+    assert!(rendered.contains("would make"), "{rendered}");
+    assert!(rendered.contains("690"), "{rendered}");
+    assert!(rendered.contains("currently 483"), "{rendered}");
+    assert!(rendered.contains("cap 500"), "{rendered}");
+    assert!(rendered.contains("src/lib/"), "{rendered}");
 }
