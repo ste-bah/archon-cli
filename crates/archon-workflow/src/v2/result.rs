@@ -9,7 +9,12 @@ pub enum WorkflowV2Status {
         alias = "complete",
         alias = "completed",
         alias = "done",
-        alias = "success"
+        alias = "success",
+        // The prompt teaches "succeeded" for commands_run[].status, so agents
+        // reach for it here too. branch_evidence already treats the two as
+        // synonyms; only this deserializer disagreed, and the mismatch burned
+        // attempts on schema repair that never reached a verdict on the code.
+        alias = "succeeded"
     )]
     Accepted,
     Noop,
@@ -210,7 +215,12 @@ pub enum WorkflowV2TaskCoverageStatus {
         alias = "complete",
         alias = "completed",
         alias = "done",
-        alias = "success"
+        alias = "success",
+        // The prompt teaches "succeeded" for commands_run[].status, so agents
+        // reach for it here too. branch_evidence already treats the two as
+        // synonyms; only this deserializer disagreed, and the mismatch burned
+        // attempts on schema repair that never reached a verdict on the code.
+        alias = "succeeded"
     )]
     Accepted,
     Noop,
@@ -233,4 +243,43 @@ pub struct WorkflowV2ResidualGap {
     pub description: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub severity: Option<String>,
+}
+
+#[cfg(test)]
+mod status_alias_tests {
+    use super::*;
+
+    /// The prompt teaches agents "succeeded" for `commands_run[].status`, so they
+    /// reach for the same word in the result and task-coverage status fields.
+    /// Two of TDL-020's three attempts died in schema repair on exactly this,
+    /// consuming the attempt without ever producing a verdict on the code.
+    #[test]
+    fn succeeded_deserializes_as_accepted_in_both_status_enums() {
+        let status: WorkflowV2Status = serde_json::from_str("\"succeeded\"")
+            .expect("result status must accept the word the prompt teaches");
+        assert_eq!(status, WorkflowV2Status::Accepted);
+
+        let coverage: WorkflowV2TaskCoverageStatus = serde_json::from_str("\"succeeded\"")
+            .expect("task_coverage status must accept it too — same trap, one field over");
+        assert_eq!(coverage, WorkflowV2TaskCoverageStatus::Accepted);
+    }
+
+    /// Guards the fix against a future alias cleanup: `success` and `succeeded`
+    /// must stay synonyms, matching `branch_evidence`, which already treats them
+    /// as one.
+    #[test]
+    fn success_and_succeeded_agree() {
+        let a: WorkflowV2Status = serde_json::from_str("\"success\"").unwrap();
+        let b: WorkflowV2Status = serde_json::from_str("\"succeeded\"").unwrap();
+        assert_eq!(a, b);
+    }
+
+    /// The other TDL-020 failure was NOT a vocabulary collision — the agent
+    /// invented a value no path accepts. That must still fail loudly rather than
+    /// be normalised into a false pass.
+    #[test]
+    fn invented_status_values_still_rejected() {
+        assert!(serde_json::from_str::<WorkflowV2Status>("\"invalid_evidence\"").is_err());
+        assert!(serde_json::from_str::<WorkflowV2CommandStatus>("\"invalid_evidence\"").is_err());
+    }
 }
