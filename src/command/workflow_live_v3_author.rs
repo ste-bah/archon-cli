@@ -67,7 +67,10 @@ Shape — top-level script, exactly like this (no wrapper function):
   // pass over the findings that name a task and returns what is still open —
   // report review_remediation in the accounting so unresolved findings and
   // findings naming no task stay visible instead of being quietly dropped.
-  const review_remediation = await remediateFindings([...adversarial_findings, ...uncovered_requirements], { taskFileFor: (id) => (tasks.find((t) => t.id === id) || {}).file, targetFilesFor: (id) => (tasks.find((t) => t.id === id) || {}).targetFiles })
+  // Pass blockedTasks too: the reviews only inspect ACCEPTED tasks, so a task
+  // that exhausted its own budget can never appear in their findings and would
+  // otherwise be reported and abandoned. It gets one more bounded attempt here.
+  const review_remediation = await remediateFindings([...adversarial_findings, ...uncovered_requirements], { blockedTasks, taskFileFor: (id) => (tasks.find((t) => t.id === id) || {}).file, targetFilesFor: (id) => (tasks.find((t) => t.id === id) || {}).targetFiles })
 
   return {
     accepted: acceptedTaskIds,

@@ -303,7 +303,39 @@ function __archonPrimitives(w) {
     };
     const summarizeEnvelope = (env) =>
       String((env && (env.summary || (env.result && env.result.summary))) || "no summary").slice(0, 300);
-    const { grouped, unassigned } = findingsByTask(findings);
+    // A call the PROVIDER failed says nothing about the work. Spending a round
+    // on it costs the task an attempt it never had, and when the failure lands
+    // on the verifier it also strands an already-accepted fix as unverified —
+    // a correct patch recorded as unresolved because its checker died. Both
+    // were observed live: a 520 on a fix, a 1200s timeout on a check.
+    //
+    // The host already draws this line — is_write_branch_validation_error
+    // excludes "agent transport failed" so it is not classified as a contract
+    // violation. This applies the same distinction to remediation rounds.
+    const transportFailure = (env) => {
+      if (!env) return false;
+      let blob = "";
+      try { blob = JSON.stringify(env); } catch (_) { return false; }
+      return blob.indexOf("agent transport failed") >= 0
+        || blob.indexOf("timed out after") >= 0
+        || blob.indexOf("subagent failed") >= 0;
+    };
+    // Tasks that exhausted their own remediation budget are ALSO unfinished work.
+    // The reviews only inspect ACCEPTED tasks — they hunt false acceptance — so a
+    // blocked task can never appear in their findings and would otherwise be
+    // reported and abandoned. Fold each blocked task in as a finding naming
+    // itself, so the same bounded pass gets one more attempt at it with
+    // everything the run has learned since. Fixing false acceptance and finishing
+    // acknowledged failure are the two halves of "no work silently abandoned".
+    const blocked = Array.isArray(opts.blockedTasks) ? opts.blockedTasks : [];
+    const blockedAsFindings = blocked
+      .filter((entry) => entry && entry.taskId)
+      .map((entry) => ({
+        canonical_task_ids: [entry.taskId],
+        id: `blocked-task-${slug(entry.taskId)}`,
+        description: `This task exhausted its remediation budget without passing verification. Last verifier summary: ${String(entry.reason || "no summary")}`,
+      }));
+    const { grouped, unassigned } = findingsByTask([...(Array.isArray(findings) ? findings : []), ...blockedAsFindings]);
     const taskIds = Object.keys(grouped);
     const maxRounds = Math.max(1, Number(opts.maxRounds) || 2);
     // The reduces whose findings this pass acts on. Naming them is what lets the
@@ -330,7 +362,11 @@ function __archonPrimitives(w) {
       const targetFiles = typeof opts.targetFilesFor === "function" ? opts.targetFilesFor(taskId) : undefined;
       let fix = null;
       let check = null;
-      for (let round = 1; round <= maxRounds; round += 1) {
+      // Transport retries have their own small budget so a sustained provider
+      // outage cannot spin: they do not consume a round, but they are not free.
+      let transportRetries = 0;
+      const maxTransportRetries = 2;
+      for (let round = 1; round <= maxRounds; ) {
         fix = await agent(
           `Post-review remediation for ${taskId}${context ? ` per ${context}` : ""}. A read-only review of ALREADY-ACCEPTED work raised the findings below. Fix exactly what they name; do not re-argue them. If a finding is factually wrong, say so with the evidence that disproves it rather than editing around it. Findings (verbatim):\n${verbatim}\nProve every fix with tests you run yourself.`,
           {
@@ -350,7 +386,29 @@ function __archonPrimitives(w) {
             remediationContract: contractFor("verify", taskId, round),
           },
         );
+        // A provider failure on either half retries without spending the
+        // round. Retrying the fix would re-apply work that may already be on
+        // disk, so when only the CHECK failed, re-run the check alone.
+        if (transportFailure(fix) && transportRetries < maxTransportRetries) {
+          transportRetries += 1;
+          log(`transport failure on ${taskId} remediation; retrying without consuming round ${round}`);
+          continue;
+        }
+        if (transportFailure(check) && transportRetries < maxTransportRetries) {
+          transportRetries += 1;
+          log(`transport failure verifying ${taskId}; re-running the check without consuming round ${round}`);
+          check = await agent(
+            `You did NOT do this remediation — be suspicious of its self-report. These review findings were raised against ${taskId}:\n${verbatim}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid).`,
+            {
+              label: `review-verify-${slug(taskId)}-${round}r${transportRetries}`,
+              verify: true,
+              taskIds: [taskId],
+              remediationContract: contractFor("verify", taskId, round),
+            },
+          );
+        }
         if (acceptedEnvelope(fix) && acceptedEnvelope(check)) break;
+        round += 1;
       }
       if (acceptedEnvelope(fix) && acceptedEnvelope(check)) {
         resolved.push({ taskId, findingCount: own.length });
@@ -528,6 +586,49 @@ mod primitive_binding_tests {
         assert!(
             missing.is_empty(),
             "prelude exports {missing:?} but the globals block never binds them — an authored script calling these gets 'not defined' at dry-run pre-flight. Add `globalThis.<name> = api.<name>;` in workflow_live_v2_script_helpers.rs"
+        );
+    }
+}
+
+#[cfg(test)]
+mod transport_retry_tests {
+    /// A provider failure says nothing about the work, so it must not spend a
+    /// remediation round.
+    ///
+    /// Observed live in one run: a 520 on a fix cost TDL-020 half its budget
+    /// without a single real attempt, and a 1200s timeout on a verifier left
+    /// TDL-070's ACCEPTED patch recorded as unresolved because its checker
+    /// died. The second is the worse failure — correct work discarded.
+    ///
+    /// The host already draws this line: is_write_branch_validation_error
+    /// excludes "agent transport failed" so it is not a contract violation.
+    /// Asserted against the JS source because the loop is prelude text.
+    #[test]
+    fn transport_failures_do_not_consume_a_remediation_round() {
+        let prelude = super::V3_PRIMITIVES_JS;
+        let start = prelude
+            .find("const transportFailure =")
+            .expect("transportFailure must exist");
+        let body = &prelude[start..start + 400.min(prelude.len() - start)];
+        assert!(body.contains("agent transport failed"), "{body}");
+        assert!(body.contains("timed out after"), "{body}");
+
+        let loop_start = prelude
+            .find("for (let round = 1; round <= maxRounds;")
+            .expect("remediation loop must exist");
+        // Wide enough to reach past both agent prompts to the round counter;
+        // a short window made this test fail on correct code.
+        let loop_body = &prelude[loop_start..loop_start + 4000.min(prelude.len() - loop_start)];
+        // The round counter must advance in the BODY, not the for-header, or a
+        // transport `continue` would still spend the round.
+        assert!(
+            !loop_body.contains("maxRounds; round += 1"),
+            "round must not auto-increment: a transport retry would consume it"
+        );
+        assert!(loop_body.contains("round += 1"), "round must still advance");
+        assert!(
+            loop_body.contains("transportRetries < maxTransportRetries"),
+            "transport retries must be bounded so an outage cannot spin: {loop_body}"
         );
     }
 }
