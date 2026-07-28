@@ -153,6 +153,59 @@ fn yfinance_fallback_artifacts_are_degraded_and_never_production_eligible() {
 }
 
 #[test]
+fn yfinance_diagnostic_override_marks_report_and_lists_overridden_issues() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let mut request = request();
+    request.metadata.dataset_id = "yfinance-BTCUSD-1D-raw".into();
+    request.metadata.provider = "yfinance".into();
+    request.metadata.provider_symbol = "BTC-USD".into();
+    request.metadata.production_eligible = true;
+    lake.store_ohlcv(request).unwrap();
+
+    let report = lake
+        .backtest_data_gate("yfinance-BTCUSD-1D-raw", "20260101-fixture", true)
+        .unwrap();
+
+    assert!(report.diagnostic);
+    assert!(!report.promotion_eligible);
+    assert_eq!(report.overridden_issues, report.issues);
+    assert!(
+        report
+            .overridden_issues
+            .iter()
+            .any(|issue| issue.contains("yfinance degraded fallback"))
+    );
+    let stored = lake
+        .load_registry()
+        .unwrap()
+        .datasets
+        .get(&registry_key("yfinance-BTCUSD-1D-raw", "20260101-fixture"))
+        .unwrap()
+        .clone();
+    assert_eq!(stored.status, DatasetStatus::Degraded);
+    assert!(!stored.production_eligible);
+}
+
+#[test]
+fn interrupted_ingest_partial_artifacts_do_not_leave_healthy_registry_entry() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let record = lake.store_ohlcv(request()).unwrap();
+    let mut registry = lake.load_registry().unwrap();
+    let stored = registry
+        .datasets
+        .get_mut(&registry_key(&record.dataset_id, &record.version))
+        .unwrap();
+    std::fs::remove_file(temp.path().join(&stored.normalized_path)).unwrap();
+    stored.status = DatasetStatus::Healthy;
+    stored.production_eligible = true;
+    write_json(&lake.registry_path(), &registry).unwrap();
+
+    assert!(lake.load_registry().is_err());
+}
+
+#[test]
 fn yfinance_fallback_verify_artifact_passes_and_registry_links_artifacts() {
     let temp = tempfile::tempdir().unwrap();
     let lake = TradingDataLake::new(temp.path());

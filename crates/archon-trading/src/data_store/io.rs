@@ -69,10 +69,11 @@ pub(super) fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, 
 fn strip_legacy_duplicate_schema_version(text: &str) -> Result<String, DataStoreError> {
     let mut value: serde_json::Value =
         serde_json::from_str(text).map_err(|err| DataStoreError::Json(err.to_string()))?;
-    if let Some(object) = value.as_object_mut() {
-        if object.contains_key("schema") && object.contains_key("schema_version") {
-            object.remove("schema_version");
-        }
+    if let Some(object) = value.as_object_mut()
+        && object.contains_key("schema")
+        && object.contains_key("schema_version")
+    {
+        object.remove("schema_version");
     }
     if let Some(datasets) = value
         .get_mut("datasets")

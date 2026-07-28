@@ -29,7 +29,15 @@ pub(super) fn dataset_id_matches_metadata(metadata: &DatasetMetadata) -> bool {
     let expected_prefix = format!("{instrument}-{timeframe}-");
     rest.strip_prefix(&expected_prefix).is_some_and(|suffix| {
         dataset_suffix_matches_price_basis(suffix, metadata.price_basis.trim())
+            || yfinance_diagnostic_suffix_is_allowed(metadata, suffix)
     })
+}
+
+fn yfinance_diagnostic_suffix_is_allowed(metadata: &DatasetMetadata, suffix: &str) -> bool {
+    metadata.provider.eq_ignore_ascii_case("yfinance")
+        && !metadata.production_eligible
+        && metadata.quality_status.eq_ignore_ascii_case("degraded")
+        && !suffix.trim().is_empty()
 }
 
 fn dataset_suffix_matches_price_basis(suffix: &str, price_basis: &str) -> bool {

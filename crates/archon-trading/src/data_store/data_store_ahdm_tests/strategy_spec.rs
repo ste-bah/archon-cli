@@ -1,4 +1,5 @@
 use super::*;
+use crate::data_store::ahdm_test_support::store_complete_trading_core_coverage;
 
 #[test]
 fn ahdm_strategy_spec_contains_required_model_contract() {
@@ -53,6 +54,70 @@ fn ahdm_strategy_spec_contains_required_model_contract() {
         rule["status"] == "cited" && rule["citation"].is_object()
             || rule["status"] == "hypothesis" && rule["promotion_allowed"] == false
     }));
+}
+
+#[test]
+fn ahdm_strategy_spec_mirrors_degraded_registry_refs_and_fails_closed() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let mut degraded_ref = request();
+    degraded_ref.metadata.provider = "tradingview".into();
+    degraded_ref.metadata.canonical_instrument = "ES".into();
+    degraded_ref.metadata.provider_symbol = "ES1!".into();
+    degraded_ref.metadata.symbol_map = BTreeMap::from([("ES".into(), "ES1!".into())]);
+    degraded_ref.metadata.dataset_id = "tradingview-ES-1W-raw-tdl080".into();
+    degraded_ref.metadata.version = "20260721-tdl080-required-universe".into();
+    degraded_ref.metadata.timeframe = "1W".into();
+    degraded_ref.metadata.production_eligible = false;
+    lake.store_ohlcv(degraded_ref).unwrap();
+
+    let path = lake
+        .write_ahdm_strategy_spec("2026-06-10T00:00:00Z")
+        .unwrap();
+    let spec: serde_json::Value = read_json(&path).unwrap();
+    let first_ref = &spec["required_datasets"][0];
+
+    assert_eq!(first_ref["dataset_id"], "tradingview-ES-1W-raw-tdl080");
+    assert_eq!(first_ref["version"], "20260721-tdl080-required-universe");
+    assert_eq!(first_ref["native_interval"], true);
+    assert_eq!(first_ref["production_eligible"], false);
+    assert_eq!(first_ref["status"], "Degraded");
+    assert_eq!(spec["coverage_universe"]["available_cells"], 0);
+    assert_eq!(spec["coverage_universe"]["required_cells"], 30);
+    assert_eq!(spec["coverage_universe"]["promotion_eligible"], false);
+    assert_eq!(spec["dataset_coverage_gate"]["promotion_eligible"], false);
+    assert_eq!(
+        spec["dataset_coverage_gate"]["unavailable_refs"][0]["registry_ref"],
+        "tradingview-ES-1W-raw-tdl080:20260721-tdl080-required-universe"
+    );
+    assert!(spec["residual_gaps"].as_array().unwrap().iter().any(|gap| {
+        gap["id"] == "GAP-AHDM-DATA-COVERAGE-001"
+            && gap["fail_closed_behavior"]
+                .as_str()
+                .unwrap()
+                .contains("Strategy validation and promotion remain blocked")
+    }));
+}
+
+#[test]
+fn ahdm_strategy_spec_counts_only_promotable_required_cells() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    store_complete_trading_core_coverage(&lake);
+
+    let path = lake
+        .write_ahdm_strategy_spec("2026-06-10T00:00:00Z")
+        .unwrap();
+    let spec: serde_json::Value = read_json(&path).unwrap();
+
+    assert_eq!(spec["coverage_universe"]["available_cells"], 30);
+    assert_eq!(spec["coverage_universe"]["promotion_eligible"], true);
+    assert!(
+        spec["dataset_coverage_gate"]["unavailable_refs"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 fn assert_entry_model_contract(spec: &serde_json::Value) {

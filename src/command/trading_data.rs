@@ -17,6 +17,7 @@ mod provider;
 mod snapshot;
 #[path = "trading_data_env.rs"]
 mod trading_data_env;
+mod yfinance;
 
 pub(crate) fn render_data(action: &TradingCliDataAction) -> Result<String> {
     match action {
@@ -97,6 +98,23 @@ pub(crate) fn render_data(action: &TradingCliDataAction) -> Result<String> {
             timeframe,
             json: _,
         } => provider::capability(target.as_ref(), provider, symbol, timeframe),
+        TradingCliDataAction::FetchNative {
+            target,
+            provider,
+            symbol,
+            timeframe,
+            start,
+            end,
+            dataset_id,
+        } if provider.trim().eq_ignore_ascii_case("yfinance") => yfinance::fetch_native(
+            target.as_ref(),
+            provider,
+            symbol,
+            timeframe,
+            start,
+            end,
+            dataset_id,
+        ),
         TradingCliDataAction::FetchNative {
             target,
             provider,

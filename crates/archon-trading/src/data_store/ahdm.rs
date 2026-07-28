@@ -186,7 +186,7 @@ pub(super) fn ahdm_strategy_spec(
             "missing_refs_behavior": "no_trade_fail_closed",
             "promotion_eligible": promotion_eligible,
             "dataset_refs": required_datasets.clone(),
-            "unavailable_refs": []
+            "unavailable_refs": ahdm_unavailable_dataset_refs(&required_datasets)
         },
         "risk": {"position_sizing": {"risk_fraction": 0.005, "max_fraction": 0.01, "formula": "min(account_equity*risk_fraction/abs(entry-stop), account_equity*max_fraction/entry)", "promotion_claim": false}, "missing_or_invalid_inputs": "no_trade_fail_closed", "live_trading": "out_of_scope"},
         "instrument_universe": ["ES", "NQ", "SPY", "QQQ", "BTCUSDT", "ETHUSDT"],
@@ -208,24 +208,29 @@ pub(super) fn ahdm_strategy_spec(
         "promotion_gates": {"paper": ["confidence >= 0.70", "backtest gates passed", "no hypothesis rules used for promotion"], "live": "out_of_scope"},
         "paper_trading_readiness_gates": ["confidence >= 0.70", "backtest gates passed", "native backtest replayable", "Pine exploratory only", "adversarial review accepted"],
         "source_citations": "evidence/citations.json",
-        "residual_gaps": [residual_gap("GAP-AHDM-SPEC-001", "strategy", "Uncited hypothesis rules are retained for research only", "Hypothesis rules cannot satisfy promotion gates", generated_at)],
+        "residual_gaps": ahdm_strategy_residual_gaps(generated_at, promotion_eligible),
         "shared_rule_manifest": manifest.clone(),
         "rule_manifest": manifest
     })
 }
 
 fn ahdm_dataset_refs(registry: &PersistentDatasetRegistry) -> Vec<serde_json::Value> {
-    let records = registry
-        .datasets
-        .values()
-        .filter(|record| record.native_interval && record.production_eligible)
+    let records = registry.datasets.values().collect::<Vec<_>>();
+    let ahdm_records = records
+        .iter()
+        .copied()
+        .filter(|record| ahdm_cell(record))
         .collect::<Vec<_>>();
-    let ahdm_count = records.iter().filter(|record| ahdm_cell(record)).count();
-    records
+    let selected = if ahdm_records.is_empty() {
+        records
+            .into_iter()
+            .filter(|record| record.native_interval && record.production_eligible)
+            .collect::<Vec<_>>()
+    } else {
+        ahdm_records
+    };
+    selected
         .into_iter()
-        .filter(|record| {
-            ahdm_count != AHDM_UNIVERSE.len() * AHDM_TIMEFRAMES.len() || ahdm_cell(record)
-        })
         .map(|record| {
             serde_json::json!({
                 "dataset_id": record.dataset_id,
@@ -257,6 +262,7 @@ fn ahdm_cell(record: &StoredDatasetRecord) -> bool {
 fn ahdm_covered_cell_count(dataset_refs: &[serde_json::Value]) -> usize {
     dataset_refs
         .iter()
+        .filter(|dataset_ref| ahdm_dataset_ref_promotes(dataset_ref))
         .filter_map(|dataset_ref| {
             Some((
                 dataset_ref.get("canonical_instrument")?.as_str()?,
@@ -265,6 +271,37 @@ fn ahdm_covered_cell_count(dataset_refs: &[serde_json::Value]) -> usize {
         })
         .collect::<std::collections::BTreeSet<_>>()
         .len()
+}
+
+fn ahdm_unavailable_dataset_refs(dataset_refs: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    dataset_refs
+        .iter()
+        .filter(|dataset_ref| !ahdm_dataset_ref_promotes(dataset_ref))
+        .cloned()
+        .collect()
+}
+
+fn ahdm_strategy_residual_gaps(
+    generated_at: &str,
+    promotion_eligible: bool,
+) -> Vec<serde_json::Value> {
+    let mut gaps = vec![residual_gap(
+        "GAP-AHDM-SPEC-001",
+        "strategy",
+        "Uncited hypothesis rules are retained for research only",
+        "Hypothesis rules cannot satisfy promotion gates",
+        generated_at,
+    )];
+    if !promotion_eligible {
+        gaps.push(residual_gap(
+            "GAP-AHDM-DATA-COVERAGE-001",
+            "data_coverage",
+            "Required AHDM coverage cells are missing or backed only by degraded/non-production registry datasets",
+            "Strategy validation and promotion remain blocked until every required registered dataset is native, healthy, production-eligible, and coverage-complete",
+            generated_at,
+        ));
+    }
+    gaps
 }
 
 fn ahdm_dataset_ref_promotes(dataset_ref: &serde_json::Value) -> bool {

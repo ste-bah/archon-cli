@@ -280,6 +280,28 @@ fn capability_maps_timeframes_and_unavailable_reasons_fail_closed() {
 }
 
 #[test]
+fn yfinance_interval_limitation_mapping_is_degraded_and_fail_closed() {
+    let daily = can_fetch_symbol_timeframe("yfinance", "SPY", "1D", "now");
+    assert!(daily.historical_supported);
+    assert!(!daily.native_interval);
+    assert!(!daily.production_eligible);
+    assert!(!daily.can_fetch);
+    assert_eq!(
+        daily.unavailable_reason.as_deref(),
+        Some("yfinance fallback is degraded and ineligible for promotion")
+    );
+
+    let unsupported = can_fetch_symbol_timeframe("yfinance", "SPY", "1M", "now");
+    assert!(!unsupported.historical_supported);
+    assert!(!unsupported.native_interval);
+    assert!(!unsupported.production_eligible);
+    assert_eq!(
+        unsupported.unavailable_reason.as_deref(),
+        Some("exact native interval is unsupported")
+    );
+}
+
+#[test]
 fn provider_identity_cannot_be_mislabelled_for_known_providers() {
     let mut metadata = metadata(DataType::Ohlcv);
     metadata.provider = "polygon".into();

@@ -456,7 +456,7 @@ fn core_coverage_request(instrument: &str, timeframe: &str) -> StoreOhlcvRequest
     request
 }
 
-fn store_complete_trading_core_coverage(lake: &TradingDataLake) {
+pub(super) fn store_complete_trading_core_coverage(lake: &TradingDataLake) {
     for instrument in trading_core_instruments() {
         for timeframe in trading_core_timeframes() {
             lake.store_ohlcv(core_coverage_request(&instrument, &timeframe))
