@@ -134,6 +134,7 @@ fn watcher_ignores_file_access() {
     .expect("write initial config");
     let watcher = ConfigWatcher::start(std::slice::from_ref(&config_path)).expect("start watcher");
     thread::sleep(Duration::from_millis(200));
+    watcher.poll_changes();
 
     fs::read_to_string(&config_path).expect("read watched config");
     thread::sleep(Duration::from_millis(200));
