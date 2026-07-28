@@ -138,7 +138,7 @@ fn exact_results_for_chunks(
     chunks
         .iter()
         .filter_map(|chunk| {
-            let score = exact_score(&query_terms, &chunk.content);
+            let score = exact_score(query_terms, &chunk.content);
             (score > 0.0).then(|| KnowledgeSearchResult {
                 artifact_id: chunk.chunk_id.clone(),
                 document_id: chunk.document_id.clone(),

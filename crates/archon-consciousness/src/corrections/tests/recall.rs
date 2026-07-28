@@ -5,7 +5,7 @@ fn derived_rule_collision_with_wrong_content_rejects_before_correction_mutation(
     let rule_id = APPROACH_RULE.0;
     graph
         .store_memory_with_id(
-            &rule_id,
+            rule_id,
             "wrong generic rule text",
             "",
             MemoryType::Rule,
@@ -40,8 +40,8 @@ fn derived_rule_collision_with_user_source_rejects_before_correction_mutation() 
     let rule_text = APPROACH_RULE.1;
     graph
         .store_memory_with_id(
-            &rule_id,
-            &rule_text,
+            rule_id,
+            rule_text,
             "",
             MemoryType::Rule,
             50.0,
@@ -67,7 +67,7 @@ fn derived_rule_collision_with_user_source_rejects_before_correction_mutation() 
         result.is_err(),
         "wrong-source deterministic rule must reject"
     );
-    let stored_rule = graph.get_memory(&rule_id).expect("read colliding rule");
+    let stored_rule = graph.get_memory(rule_id).expect("read colliding rule");
     assert_eq!(
         stored_rule.importance, 50.0,
         "collision must not boost rule"
@@ -79,7 +79,7 @@ fn derived_rule_collision_with_user_source_rejects_before_correction_mutation() 
     );
     assert!(
         graph
-            .get_related_memories(&rule_id, 1)
+            .get_related_memories(rule_id, 1)
             .expect("read relationships")
             .is_empty(),
         "collision must not create a relationship"

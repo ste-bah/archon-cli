@@ -11,7 +11,7 @@ use archon_tui::event_channel::TuiEventSender;
 fn display_initial_resume_history(
     tui_event_tx: &TuiEventSender,
     messages: &[serde_json::Value],
-) -> Result<(), tokio::sync::mpsc::error::SendError<TuiEvent>> {
+) -> Result<(), crate::session_loop::session_history::HistorySendError> {
     let banner = format!(
         "\n━━━ Resumed session history ({} messages) ━━━\n\n",
         messages.len()

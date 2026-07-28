@@ -24,9 +24,7 @@ impl Agent {
     }
 
     pub(super) async fn try_complete_trivial_cognitive_turn(&mut self) -> Option<String> {
-        let Some(situation) = self.current_situation.as_ref() else {
-            return None;
-        };
+        let situation = self.current_situation.as_ref()?;
         let response = direct_response_for(situation.kind)?;
         if !self.buffers_finalization_text() {
             self.send_event(AgentEvent::TextDelta(response.to_owned()))

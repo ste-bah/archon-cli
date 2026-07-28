@@ -131,18 +131,6 @@ async fn handle_exit(ctx: &SlashDispatchContext<'_>) {
     let _ = ctx.input_tui_tx.send(TuiEvent::Done);
 }
 
-#[cfg(test)]
-mod tests {
-    use super::SlashDispatchResult;
-
-    #[test]
-    fn exit_result_is_handled_and_terminating() {
-        assert!(SlashDispatchResult::Exit.is_handled());
-        assert!(SlashDispatchResult::Exit.should_exit());
-        assert!(!SlashDispatchResult::Handled.should_exit());
-    }
-}
-
 async fn handle_compact(trimmed: &str, ctx: &SlashDispatchContext<'_>) {
     let subcommand = trimmed.strip_prefix("/compact").unwrap().trim();
     let subcommand = if subcommand.is_empty() {
@@ -253,5 +241,17 @@ async fn emit_skill_output(cmd_name: String, output: SkillOutput, ctx: SlashDisp
                 .send(TuiEvent::TextDelta(format!("\nError: {error}\n")));
             let _ = ctx.input_tui_tx.send(TuiEvent::SlashCommandComplete);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SlashDispatchResult;
+
+    #[test]
+    fn exit_result_is_handled_and_terminating() {
+        assert!(SlashDispatchResult::Exit.is_handled());
+        assert!(SlashDispatchResult::Exit.should_exit());
+        assert!(!SlashDispatchResult::Handled.should_exit());
     }
 }

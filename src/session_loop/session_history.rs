@@ -3,6 +3,17 @@ use std::sync::Arc;
 use archon_core::agent::Agent;
 use archon_tui::app::TuiEvent;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct HistorySendError;
+
+impl std::fmt::Display for HistorySendError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("TUI event could not be queued")
+    }
+}
+
+impl std::error::Error for HistorySendError {}
+
 pub(super) async fn handle_resume_session(
     agent: &Arc<tokio::sync::Mutex<Agent>>,
     input_tui_tx: &archon_tui::event_channel::TuiEventSender,
@@ -107,10 +118,12 @@ pub(crate) fn send_history(
     input_tui_tx: &archon_tui::event_channel::TuiEventSender,
     banner: &str,
     messages: &[serde_json::Value],
-) -> Result<(), tokio::sync::mpsc::error::SendError<TuiEvent>> {
+) -> Result<(), HistorySendError> {
     let mut text = banner.to_string();
     text.push_str(&history_text(messages));
-    input_tui_tx.send(TuiEvent::TextDelta(text))
+    input_tui_tx
+        .send(TuiEvent::TextDelta(text))
+        .map_err(|_| HistorySendError)
 }
 
 fn message_text_content(msg: &serde_json::Value) -> String {
@@ -137,7 +150,8 @@ mod tests {
 
         let result = super::send_history(&tx, "", &messages);
 
-        assert!(result.is_err());
+        let error = result.expect_err("oversized history must be rejected");
+        assert_eq!(error.to_string(), "TUI event could not be queued");
         assert!(rx.try_recv().is_err(), "partial history must not be queued");
     }
 }

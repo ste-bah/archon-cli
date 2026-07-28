@@ -16,6 +16,7 @@ const CHILD_DESCENDANT_MARKER_ENV: &str = "ARCHON_COMPILATION_GATE_CHILD_DESCEND
 const CHILD_STDIN_OUTCOME_ENV: &str = "ARCHON_COMPILATION_GATE_CHILD_STDIN_OUTCOME";
 
 #[test]
+#[allow(clippy::zombie_processes)] // Fixture intentionally lets descendant outlive direct child.
 fn controlled_child() {
     let Ok(marker) = std::env::var(CHILD_MARKER_ENV) else {
         return;

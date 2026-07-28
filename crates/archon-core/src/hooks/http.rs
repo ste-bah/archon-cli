@@ -122,16 +122,6 @@ pub(crate) async fn execute_http_hook_for_event(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::shared_client;
-
-    #[test]
-    fn shared_http_client_reuses_one_instance() {
-        assert!(std::ptr::eq(shared_client(), shared_client()));
-    }
-}
-
 /// Check if a URL points to localhost (127.0.0.1, [::1], or "localhost").
 pub fn is_localhost(url: &str) -> bool {
     // Parse past the scheme (http:// or https://)
@@ -162,4 +152,14 @@ pub fn interpolate_env_vars(template: &str, allowed: &[String]) -> String {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shared_client;
+
+    #[test]
+    fn shared_http_client_reuses_one_instance() {
+        assert!(std::ptr::eq(shared_client(), shared_client()));
+    }
 }

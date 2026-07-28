@@ -1,7 +1,7 @@
 //! PRESERVE-D5 ANCHOR GATE — TUI-side dead-man's switch for upstream AGT-025 guard.
 //!
 //! TASK-TUI-904 closure rationale: Post-TASK-AGS-105 the AGT-025 race moved from
-//! archon-core/src/agent.rs to archon-tools/src/agent_tool.rs::run_subagent.
+//! archon-core/src/agent.rs to archon-tools/src/agent_tool/run.rs::run_subagent.
 //! archon-core/tests/preserve_d5_agt025.rs was updated to scan the new location
 //! and provides complete REQ-FOR-PRESERVE-D5 coverage (4 invariants). It runs
 //! as part of `cargo test --workspace` which CI invokes at ci.yml:69.
@@ -49,12 +49,12 @@ fn test_upstream_d5_guard_has_all_four_invariants() {
 
 #[test]
 fn test_upstream_d5_guard_scans_post_ags_105_location() {
-    // Post-TASK-AGS-105, the AGT-025 race lives in archon-tools/src/agent_tool.rs
+    // Post-TASK-AGS-105, the AGT-025 race lives in archon-tools/src/agent_tool/run.rs
     // (not archon-core/src/agent.rs). The upstream guard MUST scan the new location.
     assert!(
-        UPSTREAM_GUARD_SOURCE.contains("archon-tools/src/agent_tool.rs"),
+        UPSTREAM_GUARD_SOURCE.contains("archon-tools/src/agent_tool/run.rs"),
         "REQ-FOR-PRESERVE-D5 anchor gate violated: upstream guard no longer scans \
-         the post-AGS-105 AGT-025 location (archon-tools/src/agent_tool.rs::run_subagent). \
+         the post-AGS-105 AGT-025 location (archon-tools/src/agent_tool/run.rs::run_subagent). \
          If the guard reverted to the pre-AGS-105 path (archon-core/src/agent.rs) it is \
          scanning a dead code path and D5 is silently unguarded."
     );

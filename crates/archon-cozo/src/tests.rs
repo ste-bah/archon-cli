@@ -27,8 +27,17 @@ fn deriving_write_lock_path_does_not_create_database_parent() {
 
     let lock_path = write_lock_path_for_db(&db_path);
 
+    let expected_parent = temp
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("missing")
+        .join("nested");
     assert!(!parent.exists(), "lock-path derivation created directories");
-    assert_eq!(lock_path, parent.join("learning.db.archon-cozo-write.lock"));
+    assert_eq!(
+        lock_path,
+        expected_parent.join("learning.db.archon-cozo-write.lock")
+    );
 }
 
 #[test]
