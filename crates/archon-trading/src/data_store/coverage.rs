@@ -420,6 +420,17 @@ mod tests {
     }
 
     #[test]
+    fn tdl080_provider_order_prefers_tradingview_then_openbb_then_polygon_then_stooq_then_yfinance()
+    {
+        assert_eq!(
+            provider_order(),
+            ["tradingview", "openbb", "polygon", "stooq", "yfinance"]
+        );
+        assert_eq!(provider_symbol("ES", "tradingview"), "CME_MINI:ES1!");
+        assert_eq!(provider_symbol("SPY", "stooq"), "SPY.US");
+    }
+
+    #[test]
     fn d47_production_eligible_coverage_requires_symbol_interval_and_volume() {
         assert!(validate_coverage_matrix_complete(&matrix(eligible_cell("", "1D"))).is_err());
         assert!(validate_coverage_matrix_complete(&matrix(eligible_cell("ES1!", ""))).is_err());

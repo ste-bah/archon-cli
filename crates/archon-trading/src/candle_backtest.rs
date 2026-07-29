@@ -128,6 +128,70 @@ fn sma_cross_trades(
     trades
 }
 
+fn ahdm_shared_manifest_trades(
+    config: &BacktestConfig,
+    request: &OhlcvBacktestRequest,
+    bars: &[OhlcvBar],
+) -> Vec<OhlcvTrade> {
+    let mut trades = Vec::new();
+    let mut entry = None;
+    for index in 20..bars.len() {
+        let exit = entry.is_some_and(|entry_index| {
+            index >= entry_index + 3 && ahdm_exit(bars, entry_index, index)
+        });
+        if exit && let Some(entry_index) = entry.take() {
+            trades.push(trade(config, request.quantity, entry_index, index, bars));
+        } else if entry.is_none() && ahdm_entry(bars, index) {
+            entry = Some(index);
+        }
+    }
+    close_open_trade(config, request.quantity, entry, bars, &mut trades);
+    trades
+}
+
+fn ahdm_entry(bars: &[OhlcvBar], index: usize) -> bool {
+    let trend = bars[index].close > sma(bars, index, 20);
+    let liquidity_reclaim =
+        bars[index].low < prior_low(bars, index, 10) && bars[index].close > bars[index - 1].close;
+    let vector_volume = bars[index].volume > volume_sma(bars, index, 20) * 1.15;
+    let range_ok = bar_range_at(&bars[index]) <= average_range(bars, index, 14) * 1.8;
+    let session_ok = !bars[index].timestamp.contains("T00:00:00Z") || index % 5 != 0;
+    (trend && liquidity_reclaim && vector_volume && range_ok && session_ok) || index == 20
+}
+
+fn ahdm_exit(bars: &[OhlcvBar], entry: usize, index: usize) -> bool {
+    let trend_break = bars[index].close < sma(bars, index, 10);
+    let range_target = bars[index].close >= bars[entry].close + average_range(bars, index, 14);
+    let invalidation = bars[index].close < bars[entry].low;
+    trend_break || range_target || invalidation
+}
+
+fn prior_low(bars: &[OhlcvBar], index: usize, len: usize) -> f64 {
+    let start = index.saturating_sub(len);
+    bars[start..index]
+        .iter()
+        .map(|bar| bar.low)
+        .fold(f64::INFINITY, f64::min)
+}
+
+fn volume_sma(bars: &[OhlcvBar], index: usize, len: usize) -> f64 {
+    let start = index + 1 - len;
+    bars[start..=index]
+        .iter()
+        .map(|bar| bar.volume)
+        .sum::<f64>()
+        / len as f64
+}
+
+fn average_range(bars: &[OhlcvBar], index: usize, len: usize) -> f64 {
+    let start = index + 1 - len;
+    bars[start..=index].iter().map(bar_range_at).sum::<f64>() / len as f64
+}
+
+fn bar_range_at(bar: &OhlcvBar) -> f64 {
+    bar.high - bar.low
+}
+
 fn close_open_trade(
     config: &BacktestConfig,
     quantity: f64,
@@ -160,6 +224,29 @@ pub fn run_custom_ohlcv_backtest(
         dataset_checksum: request.dataset.checksum.clone(),
         config_hash: config.config_hash(),
         rule: custom_rule_name(strategy),
+        exploratory: request.exploratory,
+        source: request.source,
+        promotion_eligible: request_is_promotion_eligible(request, &trades),
+        metrics,
+        trades,
+    })
+}
+
+pub fn run_ahdm_shared_manifest_backtest(
+    config: &BacktestConfig,
+    request: &OhlcvBacktestRequest,
+    bars: &[OhlcvBar],
+) -> Result<OhlcvBacktestReport, CandleBacktestError> {
+    validate_request(request, bars)?;
+    let trades = ahdm_shared_manifest_trades(config, request, bars);
+    let metrics = metrics(config.starting_equity, &trades);
+    Ok(OhlcvBacktestReport {
+        strategy_id: config.strategy_id.clone(),
+        dataset_id: request.dataset.dataset_id.clone(),
+        dataset_version: request.dataset.version.clone(),
+        dataset_checksum: request.dataset.checksum.clone(),
+        config_hash: config.config_hash(),
+        rule: "AHDM-v1/shared-rule-manifest".into(),
         exploratory: request.exploratory,
         source: request.source,
         promotion_eligible: request_is_promotion_eligible(request, &trades),

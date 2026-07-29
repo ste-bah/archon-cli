@@ -1,5 +1,8 @@
 use crate::backtest::{BacktestConfig, EvidenceSource};
-use crate::candle_backtest::{OhlcvBacktestReport, run_ohlcv_backtest};
+use crate::candle_backtest::{OhlcvBacktestReport, run_ahdm_shared_manifest_backtest};
+use crate::custom_strategy::{
+    ComparisonOp, CustomOhlcvStrategy, OhlcvCondition, OhlcvIndicator, OhlcvOperand,
+};
 use crate::data_lake::{
     BacktestDataGateReport, CoverageCell, CoverageGap, CoverageMatrix, DatasetArtifactPaths,
     DatasetChecksums, DatasetMetadata, DatasetSourceMetadata, DatasetStatus,

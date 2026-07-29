@@ -14,6 +14,7 @@ fn coverage_run_id(run_prefix: &str, cell: &CoverageCell) -> String {
         safe_path(&cell.timeframe)
     )
 }
+
 fn ahdm_backtest_request(record: &StoredDatasetRecord, quantity: f64) -> OhlcvBacktestRequest {
     OhlcvBacktestRequest {
         dataset: OhlcvDatasetRef {
@@ -37,7 +38,37 @@ fn ahdm_backtest_config(
     gate: &BacktestDataGateReport,
     dataset_ref: &serde_json::Value,
 ) -> serde_json::Value {
-    serde_json::json!({"schema_version": "archon-ahdm-backtest-config-v1", "config": config, "dataset": dataset_ref, "shared_rule_manifest": manifest, "data_gate": gate, "config_hash": config.config_hash(), "manifest_hash": sha256_hex(manifest.to_string().as_bytes())})
+    let native_strategy = ahdm_native_strategy();
+    serde_json::json!({"schema_version": "archon-ahdm-backtest-config-v1", "config": config, "dataset": dataset_ref, "shared_rule_manifest": manifest, "native_strategy": native_strategy, "data_gate": gate, "config_hash": config.config_hash(), "manifest_hash": sha256_hex(manifest.to_string().as_bytes())})
+}
+
+fn ahdm_native_strategy() -> CustomOhlcvStrategy {
+    CustomOhlcvStrategy {
+        name: Some("AHDM-v1/shared-rule-manifest".into()),
+        entry: vec![condition(
+            indicator(OhlcvIndicator::ChangePct, None),
+            ComparisonOp::Gte,
+            constant(0.70),
+        )],
+        exit: vec![condition(
+            indicator(OhlcvIndicator::ChangePct, None),
+            ComparisonOp::Lte,
+            constant(-0.55),
+        )],
+        min_hold_bars: 3,
+    }
+}
+
+fn condition(left: OhlcvOperand, op: ComparisonOp, right: OhlcvOperand) -> OhlcvCondition {
+    OhlcvCondition { left, op, right }
+}
+
+fn indicator(indicator: OhlcvIndicator, len: Option<usize>) -> OhlcvOperand {
+    OhlcvOperand::Indicator { indicator, len }
+}
+
+fn constant(value: f64) -> OhlcvOperand {
+    OhlcvOperand::Constant { value }
 }
 
 fn ahdm_backtest_report(
@@ -261,9 +292,10 @@ impl TradingDataLake {
         let gate = self.backtest_data_gate(dataset_id, version, false)?;
         let dataset = self.load_ohlcv(dataset_id, version)?;
         let request = ahdm_backtest_request(&dataset.record, quantity);
-        let report = run_ohlcv_backtest(&config, &request, &dataset.bars).map_err(|err| {
-            DataStoreError::InvalidMetadata(format!("AHDM backtest failed: {err:?}"))
-        })?;
+        let report =
+            run_ahdm_shared_manifest_backtest(&config, &request, &dataset.bars).map_err(|err| {
+                DataStoreError::InvalidMetadata(format!("AHDM backtest failed: {err:?}"))
+            })?;
         let dir = self
             .ahdm_strategy_root()
             .join("backtests")

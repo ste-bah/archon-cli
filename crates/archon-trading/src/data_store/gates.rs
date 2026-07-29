@@ -59,6 +59,7 @@ pub(super) fn append_dataset_gate_issues(
         issues.push("manual datasets cannot satisfy provider-native production gates".into());
     }
     append_backtest_history_issues(record, dataset, issues);
+    append_live_fetch_provenance_issues(root, record, dataset, issues);
     if !dataset.metadata.production_eligible {
         issues.push("dataset is not production eligible".into());
     }
@@ -100,25 +101,100 @@ fn append_backtest_history_issues(
     dataset: &StoredOhlcvDataset,
     issues: &mut Vec<String>,
 ) {
-    if record.bars < COVERAGE_MINIMUM_ROWS {
+    let required = AHDM_BACKTEST_MINIMUM_ROWS;
+    if record.bars < required {
         issues.push(format!(
             "registry bars {} below required production backtest minimum {}",
-            record.bars, COVERAGE_MINIMUM_ROWS
+            record.bars, required
         ));
     }
-    if dataset.bars.len() < COVERAGE_MINIMUM_ROWS {
+    if dataset.bars.len() < required {
         issues.push(format!(
             "normalized payload rows {} below required production backtest minimum {}",
             dataset.bars.len(),
-            COVERAGE_MINIMUM_ROWS
+            required
         ));
     }
-    if dataset.metadata.coverage.observed_bars < COVERAGE_MINIMUM_ROWS as u64 {
+    if dataset.metadata.coverage.observed_bars < required as u64 {
         issues.push(format!(
             "metadata observed bars {} below required production backtest minimum {}",
-            dataset.metadata.coverage.observed_bars, COVERAGE_MINIMUM_ROWS
+            dataset.metadata.coverage.observed_bars, required
         ));
     }
+}
+
+const AHDM_BACKTEST_MINIMUM_ROWS: usize = COVERAGE_MINIMUM_ROWS * 2;
+
+fn append_live_fetch_provenance_issues(
+    root: &Path,
+    record: &StoredDatasetRecord,
+    dataset: &StoredOhlcvDataset,
+    issues: &mut Vec<String>,
+) {
+    if dataset
+        .metadata
+        .provider
+        .trim()
+        .eq_ignore_ascii_case("manual")
+    {
+        return;
+    }
+    append_live_text_issues(root, &record.raw_request_path, "raw request", issues);
+    append_live_text_issues(root, &record.raw_response_path, "raw response", issues);
+    append_live_text_issues(root, &record.provider_notes_path, "provider notes", issues);
+    if dataset.metadata.source.retrieved_at.trim().is_empty() {
+        issues.push("dataset source retrieved_at is missing live-fetch provenance".into());
+    }
+    if bars_have_linear_shape(&dataset.bars) {
+        issues.push("normalized bars have deterministic linear OHLCV shape; production AHDM backtest requires real live-fetch history".into());
+    }
+}
+
+fn append_live_text_issues(root: &Path, path: &str, label: &str, issues: &mut Vec<String>) {
+    let text = match std::fs::read_to_string(root.join(path)) {
+        Ok(text) => text,
+        Err(_) => {
+            issues.push(format!("{label} live-fetch provenance unreadable: {path}"));
+            return;
+        }
+    };
+    if !contains_live_fetch_marker(&text) {
+        issues.push(format!(
+            "{label} does not record captured live-fetch provider provenance: {path}"
+        ));
+    }
+    if contains_non_live_provenance_marker(&text) {
+        issues.push(format!(
+            "{label} provenance indicates fixture/mock/synthetic/placeholder source: {path}"
+        ));
+    }
+}
+
+fn contains_live_fetch_marker(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    ["live", "fetch", "provider"]
+        .iter()
+        .all(|marker| lower.contains(marker))
+}
+
+fn contains_non_live_provenance_marker(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    ["fixture", "mock", "synthetic", "placeholder"]
+        .iter()
+        .any(|marker| lower.contains(marker))
+}
+
+fn bars_have_linear_shape(bars: &[OhlcvBar]) -> bool {
+    bars.len() >= COVERAGE_MINIMUM_ROWS && field_is_linear(bars, |bar| bar.close)
+}
+
+fn field_is_linear(bars: &[OhlcvBar], value: fn(&OhlcvBar) -> f64) -> bool {
+    let first_delta = value(&bars[1]) - value(&bars[0]);
+    first_delta.abs() > f64::EPSILON
+        && bars.windows(2).all(|pair| {
+            ((value(&pair[1]) - value(&pair[0])) - first_delta).abs()
+                <= f64::EPSILON * first_delta.abs().max(1.0)
+        })
 }
 
 fn validation_report_allows_production(report: &ValidationReport) -> bool {

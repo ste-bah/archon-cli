@@ -127,8 +127,8 @@ fn short_production_history_request() -> StoreOhlcvRequest {
     request.metadata.provider_symbol = provider_symbol("BTCUSD", "tradingview");
     request.metadata.dataset_id = "tradingview-BTCUSD-1D-raw".into();
     request.metadata.version = "20260101-short-history".into();
-    request.metadata.coverage.expected_bars = COVERAGE_MINIMUM_ROWS as u64;
-    request.metadata.gaps.expected_bars = COVERAGE_MINIMUM_ROWS as u64;
+    request.metadata.coverage.expected_bars = (COVERAGE_MINIMUM_ROWS * 2) as u64;
+    request.metadata.gaps.expected_bars = (COVERAGE_MINIMUM_ROWS * 2) as u64;
     request.bars.truncate(COVERAGE_MINIMUM_ROWS / 2);
     request.raw_request = serde_json::json!({"source":"live provider fetch test capture"});
     request.provider_notes = "captured live provider response".into();

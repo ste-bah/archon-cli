@@ -66,11 +66,13 @@ pub(super) fn enrich_metadata_artifacts(
         validation: relative(root, validation_path)?,
         manifest: relative(root, manifest_path)?,
     };
+    let source = metadata.source.clone();
     metadata.source = DatasetSourceMetadata {
-        license_notes: metadata.license.clone(),
-        url_or_endpoint: metadata.provider.clone(),
-        retrieved_at: created_at.to_string(),
-        credential_required: false,
+        license_notes: non_empty_or(source.license_notes, metadata.license.clone()),
+        url_or_endpoint: non_empty_or(source.url_or_endpoint, metadata.provider.clone()),
+        retrieved_at: non_empty_or(source.retrieved_at, created_at.to_string()),
+        credential_required: source.credential_required
+            || metadata_license_requires_credentials(metadata),
     };
     metadata.created_at = created_at.to_string();
     metadata.checksums.metadata_sha256 = metadata_sha256(metadata)?;
@@ -108,6 +110,21 @@ pub(super) fn fail_closed_yfinance_fallback_metadata(metadata: &mut DatasetMetad
         metadata.production_eligible = false;
         metadata.quality_status = "degraded".into();
     }
+}
+
+fn non_empty_or(value: String, fallback: String) -> String {
+    if value.trim().is_empty() {
+        fallback
+    } else {
+        value
+    }
+}
+
+fn metadata_license_requires_credentials(metadata: &DatasetMetadata) -> bool {
+    metadata
+        .license
+        .to_ascii_lowercase()
+        .contains("credentials supplied")
 }
 
 fn dataset_raw_artifact_path(

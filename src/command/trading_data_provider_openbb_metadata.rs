@@ -1,7 +1,7 @@
 use anyhow::Result;
 use archon_trading::data_lake::{
-    CoverageWindow, DataType, DatasetMetadata, GapSummary, ProviderCapabilityResult,
-    ProviderHistoryHorizon,
+    CoverageWindow, DataType, DatasetMetadata, DatasetSourceMetadata, GapSummary,
+    ProviderCapabilityResult, ProviderHistoryHorizon,
 };
 use archon_trading::ohlcv::OhlcvBar;
 use chrono::NaiveDate;
@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use crate::command::trading_io::write_or_render;
 
-use super::request::{FetchWindowSelection, OpenBbNativeRequest, is_crypto, is_future};
+use super::request::{is_crypto, is_future, FetchWindowSelection, OpenBbNativeRequest};
 
 pub(super) fn native_metadata_from_bars(
     dataset_id: &str,
@@ -70,11 +70,24 @@ pub(super) fn native_metadata_from_bars(
         checksum: String::new(),
         checksums: Default::default(),
         paths: Default::default(),
-        source: Default::default(),
+        source: DatasetSourceMetadata {
+            license_notes: license_for(&provider_key, &request.openbb_provider),
+            url_or_endpoint: request.endpoint.to_string(),
+            retrieved_at: String::new(),
+            credential_required: request_requires_credentials(&provider_key, request),
+        },
         quality_status: native_quality_status(&provider_key).into(),
         created_at: String::new(),
         optional: false,
     }
+}
+
+fn request_requires_credentials(provider: &str, request: &OpenBbNativeRequest) -> bool {
+    provider != "yfinance"
+        && request
+            .credential_state
+            .values()
+            .any(|available| *available)
 }
 
 pub(super) fn native_production_eligible(

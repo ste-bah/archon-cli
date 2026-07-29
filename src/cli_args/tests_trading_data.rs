@@ -300,5 +300,62 @@ fn trading_data_validation_and_provider_commands_parse() {
     ));
 }
 
+#[test]
+fn trading_data_coverage_parse() {
+    let coverage = Cli::try_parse_from([
+        "archon",
+        "trading",
+        "data",
+        "coverage",
+        "--universe",
+        "trading-core-v1",
+        "--target",
+        "/tmp/project",
+        "--json",
+    ])
+    .expect("data coverage parses");
+    match coverage.command {
+        Some(Commands::Trading {
+            action:
+                TradingCliAction::Data {
+                    action:
+                        TradingCliDataAction::Coverage {
+                            target,
+                            universe,
+                            json,
+                            out,
+                        },
+                },
+        }) => {
+            assert_eq!(
+                target.as_deref(),
+                Some(std::path::Path::new("/tmp/project"))
+            );
+            assert_eq!(universe, "trading-core-v1");
+            assert!(json);
+            assert!(out.is_none());
+        }
+        other => panic!("expected trading data coverage, got {other:?}"),
+    }
+
+    let verify = Cli::try_parse_from([
+        "archon",
+        "trading",
+        "data",
+        "verify-coverage",
+        "/tmp/project/.archon/trading-lab/data/coverage/latest.json",
+        "/tmp/project/.archon/trading-lab/data/registry.json",
+    ])
+    .expect("data verify-coverage parses");
+    assert!(matches!(
+        verify.command,
+        Some(Commands::Trading {
+            action: TradingCliAction::Data {
+                action: TradingCliDataAction::VerifyCoverage { .. }
+            }
+        })
+    ));
+}
+
 #[path = "tests_trading_data/fetch_native.rs"]
 mod fetch_native;

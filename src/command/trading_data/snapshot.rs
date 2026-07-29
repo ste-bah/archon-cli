@@ -1,8 +1,10 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use archon_trading::data_lake::CurrentSnapshot;
 use archon_trading::data_store::TradingDataLake;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+
+const SNAPSHOT_STALE_AFTER_SECONDS: i64 = 300;
 
 use crate::command::trading_io::write_or_render;
 use crate::command::trading_tools::{checked_text, project_root, run_node_script, tv_cli};
@@ -22,8 +24,22 @@ fn tradingview_snapshot(root: &Path, symbol: &str) -> Result<String> {
     let captured_at = chrono::Utc::now().timestamp();
     let payload = match tradingview_snapshot_payload(root, symbol, captured_at) {
         Ok(payload) => payload,
-        Err(reason) => return persist_tradingview_unavailable(root, symbol, &reason.to_string()),
+        Err(reason) => return tradingview_unavailable(symbol, &reason.to_string()),
     };
+    persist_tradingview_snapshot(root, symbol, captured_at, payload)
+}
+
+fn persist_tradingview_snapshot(
+    root: &Path,
+    symbol: &str,
+    captured_at: i64,
+    payload: Value,
+) -> Result<String> {
+    let freshness = payload
+        .get("freshness")
+        .and_then(Value::as_str)
+        .unwrap_or("stale")
+        .to_string();
     let snapshot = CurrentSnapshot {
         provider: "tradingview".into(),
         canonical_instrument: symbol.trim().into(),
@@ -39,9 +55,9 @@ fn tradingview_snapshot(root: &Path, symbol: &str) -> Result<String> {
             "provider": "tradingview", "symbol": symbol, "snapshot_path": path,
             "can_fetch": true, "current_snapshot_supported": true,
             "captured_at_unix_seconds": captured_at,
-            "freshness": "fresh",
-            "stale_after_seconds": 300,
-            "stale_after_5_min": false
+            "freshness": freshness,
+            "stale_after_seconds": SNAPSHOT_STALE_AFTER_SECONDS,
+            "stale_after_5_min": freshness == "stale"
         }),
         None,
     )
@@ -53,49 +69,70 @@ fn tradingview_snapshot_payload(root: &Path, symbol: &str, captured_at: i64) -> 
     }
     let health_check = run_tradingview_json(root, &["status"])?;
     let chart_state = run_tradingview_json(root, &["state"])?;
-    let ohlcv_summary = run_tradingview_json(
-        root,
-        &[
-            "ohlcv",
-            "--symbol",
-            symbol.trim(),
-            "--timeframe",
-            "1D",
-            "--count",
-            "1",
-            "--summary",
-        ],
-    )?;
+    let quote = run_tradingview_json(root, &["quote", "--symbol", symbol.trim()])?;
+    build_tradingview_snapshot_payload(symbol, captured_at, health_check, chart_state, quote)
+}
+
+fn build_tradingview_snapshot_payload(
+    symbol: &str,
+    captured_at: i64,
+    health_check: Value,
+    chart_state: Value,
+    quote: Value,
+) -> Result<Value> {
+    let provider_timestamp = provider_timestamp(&quote)?;
+    let freshness = snapshot_freshness(provider_timestamp, captured_at);
     Ok(json!({
         "provider": "tradingview",
         "provider_symbol": symbol.trim(),
         "captured_at_unix_seconds": captured_at,
+        "provider_timestamp_unix_seconds": provider_timestamp,
         "mcp_state": "provider_state_fetched",
         "chart_equivalent_semantics": true,
-        "required_mcp_tools": ["tv_health_check", "chart_get_state", "data_get_ohlcv"],
-        "freshness": "fresh",
-        "stale_after_seconds": 300,
-        "stale_after_5_min": false,
+        "required_mcp_tools": ["tv_health_check", "chart_get_state", "quote_get"],
+        "freshness": freshness,
+        "stale_after_seconds": SNAPSHOT_STALE_AFTER_SECONDS,
+        "stale_after_5_min": freshness == "stale",
         "mcp_tool_results": {
             "tv_health_check": health_check,
             "chart_get_state": chart_state,
-            "data_get_ohlcv": ohlcv_summary
+            "quote_get": quote
         }
     }))
 }
 
+fn provider_timestamp(quote: &Value) -> Result<i64> {
+    quote
+        .get("time")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| anyhow!("TradingView quote_get response missing provider time"))
+}
+
+fn snapshot_freshness(provider_timestamp: i64, captured_at: i64) -> &'static str {
+    if provider_timestamp <= captured_at
+        && captured_at.saturating_sub(provider_timestamp) <= SNAPSHOT_STALE_AFTER_SECONDS
+    {
+        "fresh"
+    } else {
+        "stale"
+    }
+}
+
 fn fixture_snapshot_payload(path: &str, symbol: &str, captured_at: i64) -> Result<Value> {
-    let mut payload: Value = serde_json::from_str(&std::fs::read_to_string(path)?)?;
-    payload["provider"] = json!("tradingview");
-    payload["provider_symbol"] = json!(symbol.trim());
-    payload["captured_at_unix_seconds"] = json!(captured_at);
-    payload["mcp_state"] = json!("provider_state_fetched");
-    payload["chart_equivalent_semantics"] = json!(true);
-    payload["required_mcp_tools"] = json!(["tv_health_check", "chart_get_state", "data_get_ohlcv"]);
-    payload["freshness"] = json!("fresh");
-    payload["stale_after_seconds"] = json!(300);
-    payload["stale_after_5_min"] = json!(false);
-    Ok(payload)
+    let payload: Value = serde_json::from_str(&std::fs::read_to_string(path)?)?;
+    let health_check = payload
+        .pointer("/mcp_tool_results/tv_health_check")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let chart_state = payload
+        .pointer("/mcp_tool_results/chart_get_state")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let quote = payload
+        .pointer("/mcp_tool_results/quote_get")
+        .cloned()
+        .unwrap_or(Value::Null);
+    build_tradingview_snapshot_payload(symbol, captured_at, health_check, chart_state, quote)
 }
 
 fn run_tradingview_json(root: &Path, args: &[&str]) -> Result<Value> {
@@ -116,32 +153,16 @@ fn run_tradingview_json(root: &Path, args: &[&str]) -> Result<Value> {
         .map_err(|err| anyhow!("TradingView MCP CLI returned invalid JSON: {err}"))
 }
 
-fn persist_tradingview_unavailable(root: &Path, symbol: &str, reason: &str) -> Result<String> {
-    let now = chrono::Utc::now().timestamp();
-    let snapshot = CurrentSnapshot {
-        provider: "tradingview".into(),
-        canonical_instrument: symbol.trim().into(),
-        provider_symbol: symbol.trim().into(),
-        captured_at_unix_seconds: now,
-        payload: json!({
-            "unavailable_reason": reason,
-            "required_mcp_tools": ["tv_health_check", "chart_get_state", "data_get_ohlcv"],
-            "freshness": "unavailable",
-            "stale_after_seconds": 300,
-            "stale_after_5_min": true,
-            "fail_closed_behavior": "TradingView snapshot requires live MCP health, chart state, and OHLCV provider-state reads"
-        }),
-    };
-    let path = TradingDataLake::new(root)
-        .persist_snapshot(snapshot, now)
-        .map_err(data_error)?;
+fn tradingview_unavailable(symbol: &str, reason: &str) -> Result<String> {
     write_or_render(
         &json!({
-            "provider": "tradingview", "symbol": symbol, "snapshot_path": path,
+            "provider": "tradingview", "symbol": symbol,
             "can_fetch": false, "current_snapshot_supported": false,
             "unavailable_reason": reason,
-            "stale_after_seconds": 300,
-            "stale_after_5_min": true
+            "stale_after_seconds": SNAPSHOT_STALE_AFTER_SECONDS,
+            "stale_after_5_min": true,
+            "required_mcp_tools": ["tv_health_check", "chart_get_state", "quote_get"],
+            "fail_closed_behavior": "TradingView snapshot requires live MCP health, chart state, and quote_get provider timestamp; no placeholder snapshot was written"
         }),
         None,
     )

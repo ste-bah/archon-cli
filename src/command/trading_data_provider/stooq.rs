@@ -6,7 +6,7 @@ use archon_trading::data_lake::{
     CoverageWindow, DataType, DatasetChecksums, DatasetMetadata, DatasetSourceMetadata, GapSummary,
 };
 use archon_trading::data_store::{StoreOhlcvRequest, TradingDataLake};
-use archon_trading::ohlcv::{OhlcvBar, OhlcvFormat, parse_ohlcv};
+use archon_trading::ohlcv::{parse_ohlcv, OhlcvBar, OhlcvFormat};
 
 use crate::command::trading_data::data_error;
 use crate::command::trading_data_provider::unavailable_provider_report;
@@ -140,18 +140,17 @@ fn store_stooq_dataset(root: &Path, input: StooqStoreInput<'_>) -> Result<String
             created_at: input.fetched_at,
         })
         .map_err(data_error)?;
-    let production_eligible = input.source_is_live_stooq;
     persist_stooq_capability(
         root,
         input.symbol,
         input.provider_symbol,
-        input.source_is_live_stooq,
+        record.production_eligible,
     )?;
     write_or_render(
         &json!({
             "provider": "stooq", "symbol": input.symbol, "timeframe": "1D", "start": input.start, "end": input.end,
-            "dataset_id": input.dataset_id, "can_fetch": production_eligible, "native_interval": true,
-            "quality_status": "passed", "production_eligible": production_eligible, "stored_ohlcv": record,
+            "dataset_id": input.dataset_id, "can_fetch": record.production_eligible, "native_interval": true,
+            "quality_status": record.status, "production_eligible": record.production_eligible, "stored_ohlcv": record,
             "source_is_live_stooq": input.source_is_live_stooq,
             "fail_closed_behavior": "dataset artifacts are written after CSV validation; ARCHON_STOOQ_CSV_URL override output is explicitly non-production and cannot satisfy production deliverables"
         }),
@@ -170,6 +169,7 @@ fn stooq_unavailable_report(
 ) -> Result<String> {
     let report =
         unavailable_provider_report(root, "stooq", symbol, timeframe, start, end, dataset_id)?;
+    persist_stooq_unavailable_capability(root, symbol, timeframe, reason)?;
     let manifest_path =
         write_stooq_unavailable_manifest(root, symbol, timeframe, start, end, dataset_id, reason)?;
     Ok(stooq_report_with_fetch_error(
@@ -239,6 +239,32 @@ fn persist_stooq_capability(
         "ARCHON_STOOQ_CSV_URL override is test/fixture evidence only; not production eligible"
             .into()
     });
+    TradingDataLake::new(root)
+        .persist_capability_result(capability)
+        .map_err(data_error)?;
+    Ok(())
+}
+
+fn persist_stooq_unavailable_capability(
+    root: &Path,
+    symbol: &str,
+    timeframe: &str,
+    reason: &str,
+) -> Result<()> {
+    let checked_at = chrono::Utc::now().to_rfc3339();
+    let normalized_timeframe = normalize_timeframe(timeframe);
+    let mut capability = archon_trading::data_lake::can_fetch_symbol_timeframe(
+        "stooq",
+        symbol,
+        &normalized_timeframe,
+        &checked_at,
+    );
+    capability.provider_symbol = stooq_provider_symbol(symbol);
+    capability.can_fetch = false;
+    capability.production_eligible = false;
+    capability.unavailable_reason = Some(format!(
+        "provider_blocked_or_unavailable: {reason}; exact native Stooq data was not directly supplied and resampling is refused"
+    ));
     TradingDataLake::new(root)
         .persist_capability_result(capability)
         .map_err(data_error)?;

@@ -1,19 +1,20 @@
+#[path = "tradingview/native_mcp.rs"]
+mod native_mcp;
 #[path = "tradingview/paging.rs"]
 mod paging;
 #[path = "tradingview/span.rs"]
 mod span;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use archon_trading::data_lake::{CoverageWindow, DataType, DatasetMetadata, GapSummary};
 use archon_trading::data_store::{StoreOhlcvRequest, TradingDataLake};
-use archon_trading::ohlcv::{OhlcvBar, OhlcvFormat, parse_ohlcv, validate_bars};
-use serde_json::{Value, json};
+use archon_trading::ohlcv::{parse_ohlcv, validate_bars, OhlcvBar, OhlcvFormat};
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::command::trading_data::data_error;
 use crate::command::trading_io::write_or_render;
-use crate::command::trading_tools::{checked_text, run_node_script, tv_cli};
 use span::TradingViewRequestSpan;
 
 fn asset_class(symbol: &str) -> &'static str {
@@ -55,14 +56,22 @@ pub(super) fn fetch_tradingview_native(
     // page lands anywhere other than where the previous one ended — a wrong
     // assumption fails loudly here instead of registering a series with holes.
     if request_span.requested_bars > request_span.per_call_limit {
-        return match paged_tradingview_fetch(root, symbol, timeframe, start, end, request_span) {
+        return match paged_tradingview_fetch(
+            root,
+            symbol,
+            timeframe,
+            start,
+            end,
+            dataset_id,
+            request_span,
+        ) {
             Ok(outcome) => outcome,
             Err(reason) => {
                 tradingview_unavailable(symbol, timeframe, start, end, dataset_id, &reason)
             }
         };
     }
-    let response = match tradingview_response(root, symbol, timeframe, request_span) {
+    let response = match native_mcp::response(root, symbol, timeframe, request_span) {
         Ok(response) => response,
         Err(reason) => {
             return tradingview_unavailable(symbol, timeframe, start, end, dataset_id, &reason);
@@ -154,117 +163,76 @@ fn paged_tradingview_fetch(
     timeframe: &str,
     start: &str,
     end: &str,
+    dataset_id: &str,
     request_span: span::TradingViewRequestSpan,
 ) -> Result<Result<String>, String> {
     let max_pages = request_span
         .requested_bars
         .div_ceil(request_span.per_call_limit.max(1))
         + 2;
+    let mut raw_pages = Vec::new();
     let series = paging::fetch_paged(
         request_span.requested_bars,
         request_span.per_call_limit,
         max_pages,
         |request| {
             if let Some(scroll_to) = request.scroll_to.as_deref() {
-                run_tradingview_scroll(root, scroll_to)?;
+                native_mcp::scroll(root, scroll_to)?;
             }
-            let body = run_tradingview_cli(root, symbol, timeframe, request_span)?;
+            let body = native_mcp::run_ohlcv(root, symbol, timeframe, request_span)?;
+            raw_pages.push(body.clone());
             bars_from_tradingview_response(&body).map_err(|err| err.to_string())
         },
     )?;
     let interval_secs = span::timeframe_seconds(timeframe).map_err(|err| err.to_string())?;
     paging::assert_contiguous(&series.bars, interval_secs, &[])?;
+    if !matches!(series.boundary, paging::SeriesBoundary::Complete)
+        || series.bars.len() < request_span.requested_bars
+    {
+        return Ok(tradingview_unavailable(
+            symbol,
+            timeframe,
+            start,
+            end,
+            dataset_id,
+            &format!(
+                "TradingView paged row shortfall: requested={} actual={} boundary={:?}",
+                request_span.requested_bars,
+                series.bars.len(),
+                series.boundary
+            ),
+        ));
+    }
+    let raw_body = native_mcp::paged_raw_body(symbol, timeframe, &series.bars, raw_pages)?;
+    let fetched_at = chrono::Utc::now().to_rfc3339();
+    let captured_bars = series.bars.len();
+    let record = TradingDataLake::new(root)
+        .store_ohlcv(StoreOhlcvRequest {
+            metadata: tradingview_metadata(dataset_id, symbol, timeframe, &series.bars),
+            bars: series.bars,
+            raw_body,
+            raw_format: OhlcvFormat::Json,
+            raw_request: tradingview_request(symbol, timeframe, start, end, request_span),
+            redacted_headers: json!({ "mcp_state": "available", "mcp_status": "success",
+                "native_timeframe": timeframe.trim(), "captured_bars": captured_bars,
+                "requested_bars": request_span.requested_bars,
+                "provider_call_bar_limit": request_span.per_call_limit,
+                "pages_fetched": series.pages_fetched }),
+            provider_notes: tradingview_provider_notes(
+                symbol,
+                timeframe,
+                captured_bars,
+                request_span,
+            ),
+            created_at: fetched_at,
+        })
+        .map_err(|err| format!("{err:?}"))?;
     Ok(Ok(format!(
-        "paged TradingView fetch assembled {} bars for {symbol} {timeframe} across {} page(s); boundary={:?}; requested {start}..{end}",
-        series.bars.len(),
+        "paged TradingView fetch stored {} bars for {symbol} {timeframe} across {} page(s); version={}; requested {start}..{end}",
+        record.bars,
         series.pages_fetched,
-        series.boundary
+        record.version
     )))
-}
-
-/// Position the chart before a continuation page. Isolated alongside
-/// paging::page_request_for: both change together when the semantics are
-/// verified against a live chart.
-fn run_tradingview_scroll(root: &Path, scroll_to: &str) -> Result<(), String> {
-    let cli = tv_cli(root);
-    let date = scroll_to.split('T').next().unwrap_or(scroll_to).to_string();
-    let args = vec!["scroll".into(), date];
-    let output = run_node_script(root, &cli, &args).map_err(|error| error.to_string())?;
-    checked_text(output, "TradingView MCP scroll")
-        .map(|_| ())
-        .map_err(|err| err.to_string())
-}
-
-fn tradingview_response(
-    root: &Path,
-    symbol: &str,
-    timeframe: &str,
-    request_span: TradingViewRequestSpan,
-) -> Result<Vec<u8>, String> {
-    if !matches!(timeframe.trim(), "1W" | "1D" | "240" | "60" | "15") {
-        return Err(format!(
-            "TradingView exact native timeframe `{timeframe}` is unsupported"
-        ));
-    }
-    if let Ok(path) = std::env::var("ARCHON_TRADINGVIEW_OHLCV_FIXTURE") {
-        return std::fs::read(path).map_err(|err| format!("TradingView fixture unreadable: {err}"));
-    }
-    run_tradingview_cli(root, symbol, timeframe, request_span)
-}
-
-fn run_tradingview_cli(
-    root: &Path,
-    symbol: &str,
-    timeframe: &str,
-    request_span: TradingViewRequestSpan,
-) -> Result<Vec<u8>, String> {
-    let cli = tv_cli(root);
-    if !cli.is_file() {
-        return Err(format!(
-            "TradingView MCP CLI missing at {}; run scripts/setup-trading-tools.sh --target {}",
-            cli.display(),
-            root.display()
-        ));
-    }
-    run_tradingview_preflight(root, &cli, symbol, timeframe, "status")?;
-    run_tradingview_preflight(root, &cli, symbol, timeframe, "state")?;
-    let args = vec![
-        "ohlcv".into(),
-        "--symbol".into(),
-        symbol.into(),
-        "--timeframe".into(),
-        timeframe.into(),
-        "--count".into(),
-        request_span.per_call_limit.to_string(),
-    ];
-    let output = match run_node_script(root, &cli, &args) {
-        Ok(output) => output,
-        Err(error) => return Err(error.to_string()),
-    };
-    match checked_text(output, "TradingView MCP CLI") {
-        Ok(text) => Ok(text.into_bytes()),
-        Err(err) => Err(err.to_string()),
-    }
-}
-
-fn run_tradingview_preflight(
-    root: &Path,
-    cli: &Path,
-    symbol: &str,
-    timeframe: &str,
-    command: &str,
-) -> Result<(), String> {
-    let args = vec![
-        command.into(),
-        "--symbol".into(),
-        symbol.into(),
-        "--timeframe".into(),
-        timeframe.into(),
-    ];
-    let output = run_node_script(root, cli, &args).map_err(|error| error.to_string())?;
-    checked_text(output, &format!("TradingView MCP {command} preflight"))
-        .map(|_| ())
-        .map_err(|err| err.to_string())
 }
 
 fn bars_from_tradingview_response(body: &[u8]) -> Result<Vec<OhlcvBar>> {

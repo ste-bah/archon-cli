@@ -98,6 +98,11 @@ fn ahdm_native_backtest_writes_replayable_manifest_parity_artifacts() {
     assert_eq!(config["dataset"]["native_interval"], true);
     assert_eq!(report["diagnostic"], false);
     assert_eq!(report["promotion_eligible"], true);
+    assert_eq!(report["report"]["rule"], "AHDM-v1/shared-rule-manifest");
+    assert_eq!(
+        config["native_strategy"]["name"],
+        "AHDM-v1/shared-rule-manifest"
+    );
     assert_eq!(config["manifest_hash"], report["shared_rule_manifest_hash"]);
     assert!(report["report"]["metrics"]["expectancy"].is_number());
 }
@@ -460,21 +465,31 @@ fn request() -> StoreOhlcvRequest {
             created_at: String::new(),
             optional: false,
         },
-        bars: (0..COVERAGE_MINIMUM_ROWS)
+        bars: (0..COVERAGE_MINIMUM_ROWS * 2)
             .map(|index| {
-                let month = (index / 28) + 1;
+                let year = 2026 + (index / 336);
+                let month = ((index / 28) % 12) + 1;
                 let day = (index % 28) + 1;
+                let cycle = index as f64;
                 bar(
-                    &format!("2026-{month:02}-{day:02}T00:00:00Z"),
-                    10.0 + index as f64,
+                    &format!("{year}-{month:02}-{day:02}T00:00:00Z"),
+                    10.0 + (cycle / 7.0).sin() * 3.0 + cycle * 0.03,
                 )
             })
             .collect(),
-        raw_body: b"raw".to_vec(),
-        raw_format: OhlcvFormat::Csv,
-        raw_request: serde_json::json!({"source":"test"}),
+        raw_body: serde_json::to_vec(&serde_json::json!({
+            "source": "captured live provider fetch",
+            "provider": "polygon",
+            "bar_count": COVERAGE_MINIMUM_ROWS * 2,
+        }))
+        .unwrap(),
+        raw_format: OhlcvFormat::Json,
+        raw_request: serde_json::json!({
+            "source":"captured live provider fetch",
+            "provider":"polygon"
+        }),
         redacted_headers: serde_json::json!({}),
-        provider_notes: "test fixture".into(),
+        provider_notes: "captured live provider fetch response".into(),
         created_at: "2026-01-01T00:00:00Z".into(),
     }
 }

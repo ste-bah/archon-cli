@@ -202,6 +202,18 @@ mod tests {
     }
 
     #[test]
+    fn trading_data_coverage_alias_routes_to_cli_equivalent() {
+        let catalog = make_catalog();
+        let results = filter(&catalog, "/trading data coverage");
+        assert!(results
+            .iter()
+            .any(|cmd| cmd.name == "/trading data coverage"));
+        assert!(results
+            .iter()
+            .all(|cmd| cmd.name.starts_with("/trading data coverage")));
+    }
+
+    #[test]
     fn filter_trading_data_aliases() {
         let catalog = make_catalog();
         let results = filter(&catalog, "/trading data");
@@ -222,11 +234,9 @@ mod tests {
         assert!(names.contains(
             &"/trading data export --target /tmp/project --dataset-id btc-1d --version v1 --out bars.json"
         ));
-        assert!(
-            names
-                .iter()
-                .any(|name| name.contains("data export --target") && name.contains("--out"))
-        );
+        assert!(names
+            .iter()
+            .any(|name| name.contains("data export --target") && name.contains("--out")));
         assert!(names.contains(&"/trading data providers --json"));
         assert!(names.contains(
             &"/trading data capability --provider openbb --symbol SPY --timeframe 1D --json"
@@ -235,15 +245,11 @@ mod tests {
         assert!(names.contains(&"/trading data fetch-native --provider polygon"));
         assert!(names.contains(&"/trading data fetch-native --provider yfinance"));
         assert!(names.contains(&"/trading data fetch-native --provider stooq"));
-        assert!(
-            names
-                .iter()
-                .any(|name| name.contains("capability --provider openbb"))
-        );
-        assert!(
-            names
-                .iter()
-                .any(|name| name.contains("snapshot --provider tradingview"))
-        );
+        assert!(names
+            .iter()
+            .any(|name| name.contains("capability --provider openbb")));
+        assert!(names
+            .iter()
+            .any(|name| name.contains("snapshot --provider tradingview")));
     }
 }

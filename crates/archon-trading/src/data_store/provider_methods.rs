@@ -82,10 +82,13 @@ impl TradingDataLake {
         snapshot: crate::data_lake::CurrentSnapshot,
         now_unix_seconds: i64,
     ) -> Result<PathBuf, DataStoreError> {
-        let freshness = crate::data_lake::snapshot_freshness(
-            Some(snapshot.captured_at_unix_seconds),
-            now_unix_seconds,
-        );
+        let provider_timestamp = snapshot
+            .payload
+            .get("provider_timestamp_unix_seconds")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(snapshot.captured_at_unix_seconds);
+        let freshness =
+            crate::data_lake::snapshot_freshness(Some(provider_timestamp), now_unix_seconds);
         let path = self.snapshot_path(&snapshot.provider, &snapshot.canonical_instrument);
         let artifact = serde_json::json!({
             "schema_version": "archon-trading-snapshot-v1",
@@ -109,7 +112,7 @@ impl TradingDataLake {
         instrument: &str,
         artifact: &serde_json::Value,
     ) -> Result<(), DataStoreError> {
-        let mut registry = self.load_registry()?;
+        let mut registry = self.load_registry_migration(false)?.registry;
         registry.snapshots.insert(
             capability_key(provider, instrument, "snapshot"),
             artifact.clone(),

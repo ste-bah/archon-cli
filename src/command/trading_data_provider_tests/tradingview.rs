@@ -12,41 +12,28 @@ fn coverage_refuses_to_publish_incomplete_required_universe() {
         None,
     )
     .expect_err("empty required universe must fail closed");
-    assert!(
-        error
-            .to_string()
-            .contains("coverage matrix incomplete for trading-core-v1")
-    );
-    assert!(
-        !temp
-            .path()
-            .join(".archon/trading-lab/data/coverage/latest.json")
-            .exists()
-    );
-    assert!(
-        !temp
-            .path()
-            .join(".archon/trading-lab/data/coverage/latest.md")
-            .exists()
-    );
+    assert!(error
+        .to_string()
+        .contains("coverage matrix incomplete for trading-core-v1"));
+    assert!(!temp
+        .path()
+        .join(".archon/trading-lab/data/coverage/latest.json")
+        .exists());
+    assert!(!temp
+        .path()
+        .join(".archon/trading-lab/data/coverage/latest.md")
+        .exists());
 }
 
-fn write_tradingview_cli(
+fn write_tradingview_fixture(
     root: &std::path::Path,
     symbol: &str,
     timeframe: &str,
     bar_count: usize,
     degraded_volume: bool,
 ) {
-    let cli = root.join(".archon/tools/tradingview-mcp/src/cli/index.js");
-    std::fs::create_dir_all(cli.parent().unwrap()).unwrap();
-    let preflight = r#"
-const command = process.argv[2];
-if (command === 'status' || command === 'state') {
-  console.log(JSON.stringify({success: true, command}));
-  process.exit(0);
-}
-"#;
+    let fixture = root.join(".archon/test-fixtures/tradingview/ohlcv.json");
+    std::fs::create_dir_all(fixture.parent().unwrap()).unwrap();
     let mut bars = (0..bar_count)
         .map(|index| {
             let open = 100.0 + index as f64;
@@ -60,11 +47,7 @@ if (command === 'status' || command === 'state') {
     }
     let response = json!({"success": true, "symbol": symbol, "timeframe": timeframe,
             "requested_count": bar_count, "bar_count": bar_count, "bars": bars});
-    std::fs::write(
-        &cli,
-        format!("{preflight}\nconsole.log(JSON.stringify({response}));"),
-    )
-    .unwrap();
+    std::fs::write(&fixture, serde_json::to_vec(&response).unwrap()).unwrap();
 }
 
 #[test]
@@ -80,18 +63,17 @@ fn fetch_native_tradingview_unavailable_writes_no_registry_dataset() {
         "tradingview-ES-1D-raw",
     )
     .unwrap();
-    assert!(text.contains("TradingView MCP CLI missing"));
+    assert!(text.contains("declared MCP tool invocation required"));
+    assert!(text.contains("local TradingView CLI/Node shims are not accepted"));
     assert!(text.contains("no dataset registry entry is written"));
-    assert!(
-        !temp
-            .path()
-            .join(".archon/trading-lab/data/registry.json")
-            .exists()
-    );
+    assert!(!temp
+        .path()
+        .join(".archon/trading-lab/data/registry.json")
+        .exists());
 }
 
 #[test]
-fn fetch_native_tradingview_requires_status_and_state_preflight() {
+fn fetch_native_tradingview_ignores_local_cli_shim() {
     let temp = tempfile::tempdir().unwrap();
     let cli = temp
         .path()
@@ -99,34 +81,10 @@ fn fetch_native_tradingview_requires_status_and_state_preflight() {
     std::fs::create_dir_all(cli.parent().unwrap()).unwrap();
     std::fs::write(
         &cli,
-        "const fs=require('fs'); const log=process.env.ARCHON_TV_TEST_LOG; fs.appendFileSync(log, process.argv[2]+'\\n'); if(process.argv[2]==='status'||process.argv[2]==='state'){process.exit(0);} console.log(JSON.stringify({success:true,symbol:'CME_MINI:ES1!',timeframe:'1D',bars:[]}));",
+        "console.log(JSON.stringify({success:true,symbol:'CME_MINI:ES1!',timeframe:'1D',bars:[{ts:1704153600,open:1,high:2,low:1,close:2,volume:1}]}));",
     )
     .unwrap();
-    let log = temp.path().join("tradingview-cli-calls.log");
-    unsafe { std::env::set_var("ARCHON_TV_TEST_LOG", &log) };
-    let _text = fetch_native(
-        Some(&temp.path().to_path_buf()),
-        "tradingview",
-        "CME_MINI:ES1!",
-        "1D",
-        "2024-01-01",
-        "2024-01-05",
-        "tradingview-ES-1D-raw",
-    )
-    .unwrap();
-    unsafe { std::env::remove_var("ARCHON_TV_TEST_LOG") };
 
-    let calls = std::fs::read_to_string(log).unwrap();
-    assert_eq!(
-        calls.lines().collect::<Vec<_>>(),
-        ["status", "state", "ohlcv"]
-    );
-}
-
-#[test]
-fn fetch_native_tradingview_uses_span_derived_count() {
-    let temp = tempfile::tempdir().unwrap();
-    write_tradingview_cli(temp.path(), "CME_MINI:ES1!", "1D", 5, false);
     let text = fetch_native(
         Some(&temp.path().to_path_buf()),
         "tradingview",
@@ -137,14 +95,36 @@ fn fetch_native_tradingview_uses_span_derived_count() {
         "tradingview-ES-1D-raw",
     )
     .unwrap();
-    assert!(text.contains("\"can_fetch\": true"));
+    assert!(text.contains("local TradingView CLI/Node shims are not accepted"));
+    assert!(!temp
+        .path()
+        .join(".archon/trading-lab/data/registry.json")
+        .exists());
+}
+
+#[test]
+fn fetch_native_tradingview_uses_span_derived_count() {
+    let temp = tempfile::tempdir().unwrap();
+    write_tradingview_fixture(temp.path(), "CME_MINI:ES1!", "1D", 5, false);
+    let text = fetch_native(
+        Some(&temp.path().to_path_buf()),
+        "tradingview",
+        "CME_MINI:ES1!",
+        "1D",
+        "2024-01-01",
+        "2024-01-05",
+        "tradingview-ES-1D-raw",
+    )
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(report["can_fetch"], true);
     assert!(text.contains("20240101-tv_native_1D_5"));
 }
 
 #[test]
 fn fetch_native_tradingview_stores_complete_artifact_contract() {
     let temp = tempfile::tempdir().unwrap();
-    write_tradingview_cli(temp.path(), "CME_MINI:ES1!", "1D", 5, false);
+    write_tradingview_fixture(temp.path(), "CME_MINI:ES1!", "1D", 5, false);
     let text = fetch_native(
         Some(&temp.path().to_path_buf()),
         "tradingview",
@@ -158,8 +138,12 @@ fn fetch_native_tradingview_stores_complete_artifact_contract() {
     let dataset_root = temp
         .path()
         .join(".archon/trading-lab/data/datasets/tradingview-ES-1D-raw/20240101-tv_native_1D_5");
-    assert!(text.contains("\"can_fetch\": true"));
-    assert!(text.contains("\"production_eligible\": true"));
+    let report: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        report["can_fetch"], true,
+        "unexpected TradingView response: {text}"
+    );
+    assert_eq!(report["production_eligible"], true);
     assert!(text.contains("20240101-tv_native_1D_5"));
     for artifact in [
         "metadata.json",
@@ -173,50 +157,16 @@ fn fetch_native_tradingview_stores_complete_artifact_contract() {
     ] {
         assert!(dataset_root.join(artifact).exists());
     }
-    assert!(
-        temp.path()
-            .join(".archon/trading-lab/data/registry.json")
-            .exists()
-    );
-}
-
-#[test]
-fn fetch_native_tradingview_cli_failure_does_not_parse_local_cli_source() {
-    let temp = tempfile::tempdir().unwrap();
-    let cli = temp
+    assert!(temp
         .path()
-        .join(".archon/tools/tradingview-mcp/src/cli/index.js");
-    std::fs::create_dir_all(cli.parent().unwrap()).unwrap();
-    std::fs::write(
-        &cli,
-        "console.log(JSON.stringify({symbol:'CME_MINI:ES1!',timeframe:'1D',bars:[{ts:1704153600,open:1,high:2,low:1,close:2,volume:1}]})); process.exit(7);",
-    )
-    .unwrap();
-
-    let text = fetch_native(
-        Some(&temp.path().to_path_buf()),
-        "tradingview",
-        "CME_MINI:ES1!",
-        "1D",
-        "2024-01-01",
-        "2024-01-05",
-        "tradingview-ES-1D-raw",
-    )
-    .unwrap();
-    assert!(text.contains("TradingView MCP status preflight failed with exit 7"));
-    assert!(text.contains("no dataset registry entry is written"));
-    assert!(
-        !temp
-            .path()
-            .join(".archon/trading-lab/data/registry.json")
-            .exists()
-    );
+        .join(".archon/trading-lab/data/registry.json")
+        .exists());
 }
 
 #[test]
 fn fetch_native_tradingview_rejects_mismatched_chart_identity() {
     let temp = tempfile::tempdir().unwrap();
-    write_tradingview_cli(temp.path(), "NASDAQ:WRONG", "1D", 100, false);
+    write_tradingview_fixture(temp.path(), "NASDAQ:WRONG", "1D", 100, false);
     let text = fetch_native(
         Some(&temp.path().to_path_buf()),
         "tradingview",
@@ -228,19 +178,18 @@ fn fetch_native_tradingview_rejects_mismatched_chart_identity() {
     )
     .unwrap();
     assert!(text.contains("response symbol mismatch"));
-    assert!(text.contains("\"production_eligible\": false"));
-    assert!(
-        !temp
-            .path()
-            .join(".archon/trading-lab/data/registry.json")
-            .exists()
-    );
+    let report: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(report["production_eligible"], false);
+    assert!(!temp
+        .path()
+        .join(".archon/trading-lab/data/registry.json")
+        .exists());
 }
 
 #[test]
 fn fetch_native_tradingview_rejects_row_shortfall() {
     let temp = tempfile::tempdir().unwrap();
-    write_tradingview_cli(temp.path(), "CME_MINI:ES1!", "1D", 4, false);
+    write_tradingview_fixture(temp.path(), "CME_MINI:ES1!", "1D", 4, false);
     let text = fetch_native(
         Some(&temp.path().to_path_buf()),
         "tradingview",
@@ -253,18 +202,16 @@ fn fetch_native_tradingview_rejects_row_shortfall() {
     .unwrap();
     assert!(text.contains("row shortfall"));
     assert!(text.contains("requested=5 actual=4"));
-    assert!(
-        !temp
-            .path()
-            .join(".archon/trading-lab/data/registry.json")
-            .exists()
-    );
+    assert!(!temp
+        .path()
+        .join(".archon/trading-lab/data/registry.json")
+        .exists());
 }
 
 #[test]
 fn d44_tradingview_zero_or_missing_volume_stays_degraded() {
     let temp = tempfile::tempdir().unwrap();
-    write_tradingview_cli(temp.path(), "TVC:GOLD", "1D", 5, true);
+    write_tradingview_fixture(temp.path(), "TVC:GOLD", "1D", 5, true);
     let text = fetch_native(
         Some(&temp.path().to_path_buf()),
         "tradingview",
@@ -275,7 +222,8 @@ fn d44_tradingview_zero_or_missing_volume_stays_degraded() {
         "tradingview-GOLD-1D-raw",
     )
     .unwrap();
-    assert!(text.contains("\"production_eligible\": false"));
+    let report: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(report["production_eligible"], false);
     let lake = TradingDataLake::new(temp.path());
     let registry = lake.load_registry().unwrap();
     let record = registry
