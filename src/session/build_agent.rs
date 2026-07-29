@@ -6,9 +6,6 @@ use crate::cli_args::Cli;
 use crate::command::utils::apply_tool_filters;
 use archon_core::agent::{Agent, AgentConfig, TimestampedEvent};
 use archon_core::agents::AgentRegistry;
-use archon_core::agents::permissions_overlay::{
-    PermissionOverlayReason, resolve_permission_overlay,
-};
 use archon_core::dispatch::create_default_registry;
 use archon_core::env_vars::ArchonEnvVars;
 use archon_llm::effort::EffortLevel;
@@ -16,8 +13,14 @@ use archon_observability::ChannelMetricSink;
 
 #[path = "build_agent_catalog.rs"]
 mod agent_catalog;
+#[path = "build_agent_definition.rs"]
+mod agent_definition;
 #[path = "build_agent_provider.rs"]
 mod provider;
+pub(super) use agent_definition::{
+    apply_agent_execution_overrides, apply_agent_tool_filters, register_agent_listing,
+    resolve_agent_definition, validate_required_mcp_servers,
+};
 use provider::{resolve_identity_and_api_client, resolve_session_provider};
 
 pub(super) async fn build_session_agent(
@@ -173,9 +176,9 @@ pub(super) async fn build_session_agent(
         }
     };
     let metrics = Arc::new(archon_tui::observability::ChannelMetrics::default());
-    if let Err(e) = super::spawn_metrics_exporter(cli.metrics_port, Arc::clone(&metrics)) {
+    if let Err(error) = super::spawn_metrics_exporter(cli.metrics_port, Arc::clone(&metrics)) {
         let audit_result = super::drain_startup_sandbox_audit(sandbox_audit_drain).await;
-        let error = super::finish_startup_failure(e, audit_result);
+        let error = super::finish_startup_failure(error, audit_result);
         eprintln!("Metrics exporter failed: {error}");
         return Err(archon_core::print_mode::EXIT_ERROR);
     }
@@ -223,139 +226,4 @@ pub(super) async fn build_session_agent(
         permission_mode: permission_mode_for_built,
         sandbox_audit_drain,
     })
-}
-
-pub(super) fn register_agent_listing(
-    registry: &mut archon_core::dispatch::ToolRegistry,
-    agent_registry: &AgentRegistry,
-) {
-    let agents: Vec<(String, String)> = agent_registry
-        .list()
-        .iter()
-        .map(|a| (a.agent_type.clone(), a.description.clone()))
-        .collect();
-    let common_agents = agent_catalog::common_inline_agents(&agents);
-    registry.register(Box::new(
-        archon_tools::agent_tool::AgentTool::with_agent_listing(&common_agents),
-    ));
-    registry.register(Box::new(archon_tools::agent_tool::AgentCatalogTool::new(
-        agents,
-    )));
-}
-
-pub(super) async fn resolve_agent_definition(
-    config: &archon_core::config::ArchonConfig,
-    resolved_flags: &archon_core::cli_flags::ResolvedFlags,
-    agent_registry: &AgentRegistry,
-) -> Result<Option<archon_core::agents::definition::CustomAgentDefinition>, i32> {
-    let Some(agent_name) = resolved_flags.agent.as_ref() else {
-        return Ok(None);
-    };
-    match agent_registry.resolve(agent_name) {
-        Some(def) => {
-            tracing::info!(agent = agent_name, "resolved custom agent");
-            let mut def = def.clone();
-            if let Err(error) = crate::runtime::agent_profile_overlay::apply_active_profile_overlay_if_enabled_async(
-                config, &mut def,
-            )
-            .await
-            {
-                tracing::warn!(agent = agent_name, %error, "agent profile overlay skipped");
-            }
-            Ok(Some(def))
-        }
-        None => {
-            eprintln!(
-                "Unknown agent '{}'. Available: {}",
-                agent_name,
-                agent_registry.available_agent_names().join(", ")
-            );
-            Err(1)
-        }
-    }
-}
-
-pub(super) fn apply_agent_tool_filters(
-    registry: &mut archon_core::dispatch::ToolRegistry,
-    agent_def: Option<&archon_core::agents::definition::CustomAgentDefinition>,
-) {
-    if let Some(def) = agent_def {
-        if let Some(ref allowed) = def.allowed_tools {
-            let allowed_refs: Vec<&str> = allowed.iter().map(|s| s.as_str()).collect();
-            registry.filter_whitelist(&allowed_refs);
-        }
-        if let Some(ref denied) = def.disallowed_tools {
-            let denied_refs: Vec<&str> = denied.iter().map(|s| s.as_str()).collect();
-            registry.filter_blacklist(&denied_refs);
-        }
-    }
-}
-
-pub(super) fn validate_required_mcp_servers(
-    registry: &archon_core::dispatch::ToolRegistry,
-    agent_def: Option<&archon_core::agents::definition::CustomAgentDefinition>,
-) -> Result<(), i32> {
-    if let Some(def) = agent_def {
-        let available_tools = registry.tool_names();
-        let available_mcp: Vec<String> = available_tools
-            .iter()
-            .filter(|n| n.starts_with("mcp__"))
-            .map(|n| n.to_string())
-            .collect();
-        if !def.has_required_mcp_servers(&available_mcp) {
-            eprintln!(
-                "Agent '{}' requires MCP servers {:?} but they are not available.",
-                def.agent_type, def.required_mcp_servers,
-            );
-            return Err(1);
-        }
-    }
-    Ok(())
-}
-
-pub(super) async fn apply_agent_execution_overrides(
-    agent_config: &mut AgentConfig,
-    agent_def: Option<&archon_core::agents::definition::CustomAgentDefinition>,
-    cli: &Cli,
-) {
-    let Some(def) = agent_def else {
-        return;
-    };
-    if let Some(ref model) = def.model
-        && model != "inherit"
-    {
-        agent_config.model = model.clone();
-        *agent_config.model_override.lock().await = model.clone();
-    }
-    if let Some(ref effort) = def.effort {
-        if let Ok(level) = effort.parse::<archon_llm::effort::EffortLevel>() {
-            *agent_config.effort_level.lock().await = level;
-        } else {
-            tracing::warn!(agent = %def.agent_type, effort = %effort, "invalid effort level in agent definition, using default");
-        }
-    }
-    if let Some(ref pm) = def.permission_mode {
-        let parent_mode = agent_config.permission_mode.lock().await.clone();
-        let decision =
-            resolve_permission_overlay(&parent_mode, Some(pm), cli.dangerously_skip_permissions);
-        match decision.reason {
-            PermissionOverlayReason::Applied => {
-                *agent_config.permission_mode.lock().await =
-                    decision.effective_mode.as_str().to_string();
-            }
-            PermissionOverlayReason::ParentModeLocked => {
-                tracing::debug!(agent = %def.agent_type, parent_mode = %decision.parent_mode, requested_mode = %decision.requested_mode.expect("requested mode exists"), "agent permission_mode skipped because parent mode has priority");
-            }
-            PermissionOverlayReason::BlockedDangerousBypass => {
-                tracing::warn!(agent = %def.agent_type, raw_mode = %pm, "agent requests bypassPermissions but --dangerously-skip-permissions not passed; ignoring");
-            }
-            PermissionOverlayReason::BlockedExpansion => {
-                tracing::warn!(agent = %def.agent_type, parent_mode = %decision.parent_mode, requested_mode = %decision.requested_mode.expect("requested mode exists"), "agent permission_mode would widen parent mode; keeping parent mode");
-            }
-            PermissionOverlayReason::NoRequest => {}
-        }
-    }
-    if def.max_turns.is_some() {
-        agent_config.max_turns = def.max_turns;
-    }
 }

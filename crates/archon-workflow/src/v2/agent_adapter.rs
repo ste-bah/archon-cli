@@ -525,6 +525,9 @@ pub(super) const RESULT_SCHEMA: &str = r#"{
 #[path = "agent_adapter_envelope_tests.rs"]
 mod envelope_tests;
 #[cfg(test)]
+#[path = "agent_adapter_artifact_context_tests.rs"]
+mod artifact_context_tests;
+#[cfg(test)]
 #[path = "agent_adapter_project_artifact_completion_tests.rs"]
 mod project_artifact_completion_tests;
 #[cfg(test)]

@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -113,7 +114,10 @@ impl DaemonPaths {
     pub fn write_state(&self, state: &DaemonState) -> Result<(), CognitiveError> {
         self.ensure_root()?;
         let raw = serde_json::to_string_pretty(state)?;
-        std::fs::write(&self.state_path, raw)?;
+        let mut temp = tempfile::NamedTempFile::new_in(&self.root)?;
+        temp.write_all(raw.as_bytes())?;
+        temp.persist(&self.state_path)
+            .map_err(|error| error.error)?;
         Ok(())
     }
 

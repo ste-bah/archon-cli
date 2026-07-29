@@ -213,6 +213,20 @@ fn test_full_backward_finite_outputs() {
     }
 }
 
+#[test]
+fn test_gradient_clipping() {
+    let mut gradients = vec![3.0, 4.0];
+
+    clip_gradients(&mut gradients, 2.5);
+
+    let norm = gradients
+        .iter()
+        .map(|value| value * value)
+        .sum::<f32>()
+        .sqrt();
+    assert!((norm - 2.5).abs() < 1e-6);
+}
+
 // ---- project_backward ----
 
 #[test]

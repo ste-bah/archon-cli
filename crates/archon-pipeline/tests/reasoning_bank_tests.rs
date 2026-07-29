@@ -1,6 +1,8 @@
 //! Tests for ReasoningBank — 14 modes, ModeSelector, TrajectoryTracker.
 //! Covers REQ-LEARN-005.
 
+use archon_pipeline::learning::gnn::cache::CacheConfig;
+use archon_pipeline::learning::gnn::{GnnConfig, GnnEnhancer};
 use archon_pipeline::learning::patterns::{CreatePatternParams, PatternStore, TaskType};
 use archon_pipeline::learning::reasoning::{
     ModeSelector, ReasoningBank, ReasoningBankConfig, ReasoningBankDeps, ReasoningMode,
@@ -286,6 +288,84 @@ fn test_contextual_mode_works_without_gnn_enhancer() {
     assert_eq!(resp.mode_used, ReasoningMode::Contextual);
     // Provenance should say raw_embeddings, not gnn_enhanced
     assert!(resp.provenance.iter().any(|p| p.source == "raw_embeddings"));
+}
+
+#[test]
+fn test_gnn_enhancer_wired_in_reasoning_bank() {
+    let query_embedding = vec![1.0_f32, 0.0, 0.0];
+    let gnn_config = GnnConfig {
+        input_dim: 3,
+        output_dim: 3,
+        attention_heads: 1,
+        ..GnnConfig::default()
+    };
+    let expected_enhancement =
+        GnnEnhancer::with_in_memory_weights(gnn_config.clone(), CacheConfig::default(), 42)
+            .enhance(&query_embedding, None, None, false)
+            .enhanced;
+    assert!(
+        expected_enhancement
+            .iter()
+            .zip(&query_embedding)
+            .any(|(enhanced, raw)| (enhanced - raw).abs() > 1e-4),
+        "fixed-seed GNN must transform the query for this regression"
+    );
+
+    let make_store = || {
+        let mut store = PatternStore::new();
+        store
+            .create_pattern(CreatePatternParams {
+                task_type: TaskType::Coding,
+                template: "gnn transformed match".to_string(),
+                embedding: expected_enhancement
+                    .iter()
+                    .map(|&value| value as f64)
+                    .collect(),
+                initial_success_rate: 1.0,
+            })
+            .expect("create transformed pattern");
+        store
+    };
+    let request = ReasoningRequest {
+        query: "match the transformed embedding".to_string(),
+        query_embedding: Some(query_embedding.iter().map(|&value| value as f64).collect()),
+        mode: Some(ReasoningMode::Contextual),
+        task_type: None,
+        max_results: Some(10),
+        confidence_threshold: Some(0.0),
+        context: None,
+    };
+
+    let raw_response = make_bank(make_store()).reason(&request);
+    let mut enhanced_bank = ReasoningBank::new(ReasoningBankDeps {
+        pattern_store: make_store(),
+        causal_memory: None,
+        gnn_enhancer: Some(GnnEnhancer::with_in_memory_weights(
+            gnn_config,
+            CacheConfig::default(),
+            42,
+        )),
+        sona_engine: None,
+        config: ReasoningBankConfig::default(),
+    });
+    let enhanced_response = enhanced_bank.reason(&request);
+
+    assert_eq!(enhanced_response.mode_used, ReasoningMode::Contextual);
+    assert_eq!(enhanced_response.patterns.len(), 1);
+    assert_eq!(
+        enhanced_response.patterns[0].template,
+        "gnn transformed match"
+    );
+    assert!(
+        enhanced_response.overall_confidence > raw_response.overall_confidence,
+        "GNN-transformed query must rank its exact transformed match above the raw query"
+    );
+    assert!(
+        enhanced_response
+            .provenance
+            .iter()
+            .any(|provenance| provenance.source == "gnn_enhanced")
+    );
 }
 
 // ---------------------------------------------------------------------------

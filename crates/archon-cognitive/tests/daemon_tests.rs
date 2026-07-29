@@ -4,6 +4,8 @@ use archon_cognitive::{
 };
 use archon_policy::CognitivePolicy;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 fn policy(allow_daemon: bool) -> CognitivePolicy {
@@ -143,6 +145,28 @@ fn daemon_run_forever_consumes_stop_marker_on_shutdown() {
 
     let status = CognitiveDaemon::status(dir.path(), 30_000).unwrap();
     assert!(!status.stop_requested);
+}
+
+#[test]
+fn daemon_state_reads_remain_valid_during_heartbeat_writes() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = DaemonPaths::new(dir.path());
+    let done = Arc::new(AtomicBool::new(false));
+    let writer_done = Arc::clone(&done);
+    let writer_paths = paths.clone();
+    let writer = std::thread::spawn(move || {
+        let mut state = DaemonState::new();
+        for _ in 0..2_000 {
+            state.heartbeat();
+            writer_paths.write_state(&state).unwrap();
+        }
+        writer_done.store(true, Ordering::Release);
+    });
+
+    while !done.load(Ordering::Acquire) {
+        let _ = paths.read_state().expect("state is always valid JSON");
+    }
+    writer.join().unwrap();
 }
 
 #[test]
